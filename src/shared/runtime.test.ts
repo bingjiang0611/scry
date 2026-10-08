@@ -412,6 +412,25 @@ describe('runtime frontdoor mapping', () => {
     })).not.toBeNull()
   })
 
+  it('preserves explicit Pi custom-answer intent without opening other closed-choice contracts', () => {
+    const normalized = normalizeAgentQuestionRequest('run-native', 'select-1', {
+      questions: [{ question: 'Continue?', header: 'Next', options: [{ label: 'Continue', description: 'Continue' }], multiSelect: false }]
+    }, undefined, 'pi_extension_ui:select', true)!
+    const request = { ...normalized, providerId: 'pi' as const }
+    const response = {
+      runId: request.runId, questionId: request.questionId, behavior: 'answered',
+      answers: { 'Continue?': 'Continue' }, nativeCustomAnswer: true
+    }
+    expect(normalizeAgentQuestionResponse(request, response)).toEqual(response)
+    for (const unrelated of [
+      { ...request, providerId: 'claude' as const },
+      { ...request, source: 'pi_extension_ui:confirm' },
+      { ...request, questions: [{ ...request.questions[0], allowCustomAnswer: false }] },
+      { ...request, questions: [...request.questions, { ...request.questions[0], question: 'Second?' }] }
+    ]) expect(normalizeAgentQuestionResponse(unrelated, response)).toBeNull()
+    expect(normalizeAgentQuestionResponse(request, { ...response, nativeCustomAnswer: false })).toBeNull()
+  })
+
   it('accepts only complete answers for the matching run and tool call', () => {
     const request = normalizeAgentQuestionRequest('run-1', 'tool-1', {
       questions: [

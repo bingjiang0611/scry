@@ -5,7 +5,7 @@ import type { TraceEvent } from '../../src/shared/trace'
 
 const questions: AgentQuestionRequest[] = [
   { runId: 'pi-command-ui', questionId: 'select', providerId: 'pi', source: 'pi_extension_ui:select', questions: [
-    { header: 'Menu', question: 'Choose an action', options: [{ label: 'Edit', description: 'Edit objective' }, { label: '2. Type something.', description: '选择此项' }], multiSelect: false, allowCustomAnswer: false }
+    { header: 'Menu', question: 'Choose an action', options: [{ label: 'Edit', description: 'Edit objective' }], multiSelect: false, allowCustomAnswer: true }
   ] },
   { runId: 'pi-command-ui', questionId: 'editor', providerId: 'pi', questions: [
     { header: 'Objective', question: 'Edit objective', options: [], multiSelect: false, inputMode: 'multiline', initialValue: 'Existing objective' }
@@ -17,7 +17,6 @@ const questions: AgentQuestionRequest[] = [
 
 export function PiCommandFixture() {
   const [step, setStep] = useState(0)
-  const [custom, setCustom] = useState(false)
   const [answers, setAnswers] = useState<AgentQuestionResponse[]>([])
   const done = step === questions.length
   const feedback: TraceEvent = {
@@ -26,7 +25,7 @@ export function PiCommandFixture() {
     providerCommand: { name: 'fixture-menu', source: 'extension', modelTurn: 'unobserved' }
   }
   return <section id="pi-command">
-    <button id="pi-command-restart" onClick={() => { setStep(0); setCustom(false); setAnswers([]) }}>Restart menu</button>
+    <button id="pi-command-restart" onClick={() => { setStep(0); setAnswers([]) }}>Restart menu</button>
     <AssistantTurn
       turn={{ runId: 'pi-command-ui', userText: '/fixture-menu', done, items: done ? [
         { ...feedback, id: 'notify', stage: 'runtime:extension_ui', providerCommand: undefined, runtimeMetadata: { method: 'notify' }, text: 'Pi extension notification' },
@@ -35,13 +34,11 @@ export function PiCommandFixture() {
       ] : [] }}
       selectedId={null}
       onSelect={() => {}}
-      pendingQuestions={done ? [] : [custom && step === 1 ? {
-        ...questions[1], questionId: 'custom-input', questions: [{ header: '回答', question: 'Type your answer:', options: [], multiSelect: false, inputMode: 'singleline' }]
-      } : questions[step]]}
+      pendingQuestions={done ? [] : [questions[step]]}
       onAnswerQuestion={async (response) => {
-        if (step === 0 && response.behavior === 'answered') setCustom(response.answers['Choose an action'] === '2. Type something.')
         setAnswers((previous) => [...previous, response])
-        setStep((previous) => response.behavior === 'cancelled' ? questions.length : previous + 1)
+        setStep((previous) => response.behavior === 'cancelled' ? questions.length
+          : previous === 0 && response.nativeCustomAnswer ? 2 : previous + 1)
       }}
     />
     <output id="pi-command-answers">{JSON.stringify(answers)}</output>

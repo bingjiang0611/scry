@@ -44,3 +44,14 @@
 - Evidence：`npm run typecheck`、229 个 focused Vitest、`npm run build` 通过；原型在 1512×799 浏览器实际渲染。真实 Provider pending question 未在本轮新启动的 App 中重放。
 - Acceptance：原型方向已获用户明确选择；生产 UI 待用户目视验收。
 - Revisit：多问题排队、超长自定义答案或后台会话问题关闭后状态残留时复核；不升级为跨项目视觉偏好。
+
+## D-20261009-reversible-custom-answer
+- Scope / status：project:scry / confirmed（交互需求；成品待真实会话验收）。
+- Feedback：2026-10-09 用户截图反馈“选了 typesomething 之后不能选择其他选项”“选择 type 后，可以在下面输入”。
+- Rule / reason：选择自定义入口只展开原选项下方的输入框，不提交、不替换问题；允许切回普通选项，切回自定义时保留草稿。只有提交或取消才结束此次选择。
+- Preserve：沿用 `AskUserQuestionInline` 的 radio / Other / focus / submit；不改样式、多选、权限确认或其他 Provider 的闭合选择合同。
+- Applied：Pi adapter 仅识别末尾 `Type something.`（含编号）的原生协议；提交后先回复 sentinel，再将草稿回复给紧接的 `Type your answer:`。不同输入标题仍交给用户，不自动填入。`nativeCustomAnswer` 明确保留自定义意图，避免文本恰好等于普通选项时被误当作选择。
+- Evidence：339 个 focused unit/contract 测试、typecheck、build、隔离 Electron `--pi-commands-only` 通过；覆盖选项保留、空输入禁提交、切换/草稿/焦点、提交/取消、普通菜单、editor、同名选项文本及无关输入。恢复旧 adapter 后，两条新回归如预期失败。
+- Validation notes：首次两条 unit 断言误把规范化后省略的 `allowCustomAnswer: true` 当作拒绝，按既有“仅 false 表示闭合”合同修正；UI fixture 首次在 editor selection 等待失败，根因是 MutationObserver 不观察 selection/value，改用已有 frame 等待模式（未放宽断言或增加超时）。并行验证中的 unit 达到 120s 命令截止，检查无残留进程后串行 46.71s 通过；超时原因未证实，不以重跑掩盖首轮结果。
+- Acceptance：未在截图中的真实 Provider 会话重放，未安装/发布；不把隔离组件交互等同于完整 App 验收。
+- Next use：原生自定义选择 → 原问题内编辑且保留反向切换 → 检查未提交前响应数为 0，提交时协议仍正确。若 Pi 改变 sentinel / 后续输入协议，先更新 adapter 与协议测试，不恢复点击即提交。

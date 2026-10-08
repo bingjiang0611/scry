@@ -109,33 +109,36 @@ describe('AskUserQuestionInline', () => {
     expect(html.match(/>其他</g)).toHaveLength(1)
   })
 
-  it.each(['Type something.', '3. Type something.'])('returns the native custom-answer sentinel (%s), not arbitrary text', (sentinel) => {
+  it.each(['Type something.', '3. Type something.'])('keeps native choices available while drafting a custom answer (%s)', (sentinel) => {
     const native = questionFromExtension('run-select', {
       id: 'select-1', method: 'select', title: '继续？', options: ['1. 继续', '2. 停下', sentinel]
     })!
     const html = renderToStaticMarkup(<AskUserQuestionInline request={native} queuedCount={1} onRespond={async () => {}} />)
-    expect(html).not.toContain('question-option question-other')
-    expect(html).not.toContain('输入一个不在上述选项中的回答')
+    expect(html).toContain('question-option question-other')
+    expect(native.questions[0].options.map((option) => option.label)).toEqual(['1. 继续', '2. 停下'])
     expect(html.match(/type="radio"/g)).toHaveLength(3)
     expect(html).toContain('输入自定义回答')
-    expect(html).toContain('点击后直接输入文字')
+    expect(html).not.toContain('点击后直接输入文字')
     expect(html).not.toContain('Type something.')
     const drafts = initialQuestionDrafts(native)
-    drafts['继续？'] = { selected: [sentinel], useOther: false, other: '' }
-    expect(buildQuestionAnswers(native, drafts)).toEqual({ '继续？': sentinel })
+    drafts['继续？'] = { selected: ['2. 停下'], useOther: false, other: '' }
+    expect(buildQuestionAnswers(native, drafts)).toEqual({ '继续？': '2. 停下' })
     const normalized = normalizeAgentQuestionRequest(native.runId, native.questionId, native, undefined, native.source, true)!
-    expect(normalized.questions[0].allowCustomAnswer).toBe(false)
+    expect(native.questions[0].allowCustomAnswer).toBe(true)
+    expect(normalized.questions[0].allowCustomAnswer).not.toBe(false)
     expect(normalizeAgentQuestionResponse(normalized, {
-      runId: native.runId, questionId: native.questionId, behavior: 'answered', answers: { '继续？': sentinel }
-    })).toMatchObject({ behavior: 'answered', answers: { '继续？': sentinel } })
+      runId: native.runId, questionId: native.questionId, behavior: 'answered', answers: { '继续？': '2. 停下' }
+    })).toMatchObject({ behavior: 'answered', answers: { '继续？': '2. 停下' } })
     expect(normalizeAgentQuestionResponse(normalized, {
       runId: native.runId, questionId: native.questionId, behavior: 'cancelled'
     })).toMatchObject({ behavior: 'cancelled' })
     drafts['继续？'] = { selected: [], useOther: true, other: '提交所有改动 然后构建并安装' }
-    expect(buildQuestionAnswers(native, drafts)).toBeNull()
-    expect(normalizeAgentQuestionResponse(native, {
+    expect(buildQuestionAnswers(native, drafts)).toEqual({ '继续？': drafts['继续？'].other })
+    expect(normalizeAgentQuestionResponse(normalized, {
       runId: native.runId, questionId: native.questionId, behavior: 'answered', answers: { '继续？': drafts['继续？'].other }
-    })).toBeNull()
+    })).toMatchObject({ behavior: 'answered', answers: { '继续？': drafts['继续？'].other } })
+    drafts['继续？'] = { ...drafts['继续？'], selected: ['1. 继续'], useOther: false }
+    expect(buildQuestionAnswers(native, drafts)).toEqual({ '继续？': '1. 继续' })
   })
 
   it('does not advertise the Pi input transition for unrelated closed-choice prompts', () => {
@@ -143,12 +146,18 @@ describe('AskUserQuestionInline', () => {
       id: 'select-1', method: 'select', title: '继续？', options: ['继续', 'Type something.']
     })!
     for (const unrelated of [
-      { ...native, providerId: 'claude' as const },
-      { ...native, source: 'pi_extension_ui:confirm' }
+      { ...native, providerId: 'claude' as const, questions: [{ ...native.questions[0], options: [{ label: 'Type something.', description: '选择此项' }], allowCustomAnswer: false }] },
+      questionFromExtension('run-select', { id: 'select-2', method: 'select', title: '继续？', options: ['Type something.', '继续'] })!
     ]) {
       const html = renderToStaticMarkup(<AskUserQuestionInline request={unrelated} queuedCount={1} onRespond={async () => {}} />)
       expect(html).not.toContain('点击后直接输入文字')
       expect(html).toContain('Type something.')
+      const drafts = initialQuestionDrafts(unrelated)
+      drafts['继续？'] = { selected: [], useOther: true, other: 'not an option' }
+      expect(buildQuestionAnswers(unrelated, drafts)).toBeNull()
+      expect(normalizeAgentQuestionResponse(unrelated, {
+        runId: unrelated.runId, questionId: unrelated.questionId, behavior: 'answered', answers: { '继续？': 'not an option' }
+      })).toBeNull()
     }
   })
 

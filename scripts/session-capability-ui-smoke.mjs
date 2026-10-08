@@ -278,13 +278,14 @@ async function exercise() {
 }
 
 async function exercisePiCommands(contents) {
-  const wait = (condition) => contents.executeJavaScript(`new Promise((resolve, reject) => {
-    const ready = () => (${condition});
-    if (ready()) return resolve();
-    const observer = new MutationObserver(() => { if (ready()) { clearTimeout(timer); observer.disconnect(); resolve() } });
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Pi command UI condition failed: ' + ${JSON.stringify(condition)} + '; answers=' + document.querySelector('#pi-command-answers').textContent)) }, 5000);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
-  })`)
+  // Selection, focus and input values can change without a DOM mutation.
+  const wait = async (condition) => {
+    const deadline = Date.now() + 5000
+    while (!await contents.executeJavaScript(condition)) {
+      if (Date.now() > deadline) throw new Error(`Pi command UI condition failed: ${condition}; answers=${await contents.executeJavaScript(`document.querySelector('#pi-command-answers').textContent`)}`)
+      await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
   const click = async (selector) => {
     const point = await contents.executeJavaScript(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
@@ -330,24 +331,29 @@ async function exercisePiCommands(contents) {
   for (const cancelInput of [false, true]) {
     await click('#pi-command-restart')
     await wait(`document.querySelectorAll('#pi-command .question-option').length === 2`)
-    if (await contents.executeJavaScript(`document.querySelector('#pi-command .question-other') != null`)) throw new Error('Native select exposed an invalid free-text answer')
-    await click('#pi-command .question-option:nth-child(2)')
-    await wait(`document.querySelector('#pi-command .question-free-text-input') != null`)
-    if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-free-text-input')`)) throw new Error('Native custom-answer input did not receive focus')
+    await click('#pi-command .question-other')
+    await wait(`document.querySelector('#pi-command .question-other-input') != null`)
+    if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-other-input')`)) throw new Error('Native custom-answer input did not receive focus')
+    if (!await contents.executeJavaScript(`document.querySelectorAll('#pi-command .question-option').length === 2 && document.querySelector('#pi-command').textContent.includes('Choose an action') && document.querySelector('#pi-command .question-submit').disabled && JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)) throw new Error('Selecting custom answer replaced or submitted the native question')
+    const customAnswer = cancelInput ? '提交所有改动 保证工作区干净 然后构建并安装' : 'Edit'
+    await contents.insertText(customAnswer)
+    await wait(`document.querySelector('#pi-command .question-other-input').value === ${JSON.stringify(customAnswer)}`)
+    await click('#pi-command .question-option:first-child')
+    await wait(`document.querySelector('#pi-command .question-other-input') == null && document.querySelector('#pi-command .question-option:first-child').classList.contains('selected') && !document.querySelector('#pi-command .question-submit').disabled`)
+    await click('#pi-command .question-other')
+    await wait(`document.querySelector('#pi-command .question-other-input')?.value === ${JSON.stringify(customAnswer)}`)
+    if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-other-input') && JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)) throw new Error('Switching choices lost focus or submitted a draft')
     if (cancelInput) {
       await click('#pi-command .question-cancel')
-      await wait(`JSON.parse(document.querySelector('#pi-command-answers').textContent)[1]?.behavior === 'cancelled'`)
+      await wait(`JSON.parse(document.querySelector('#pi-command-answers').textContent)[0]?.behavior === 'cancelled'`)
       continue
     }
-    const customAnswer = '提交所有改动 保证工作区干净 然后构建并安装'
-    await contents.insertText(customAnswer)
-    await wait(`document.querySelector('#pi-command .question-free-text-input').value === ${JSON.stringify(customAnswer)}`)
     await click('#pi-command .question-submit')
     await wait(`document.querySelector('#pi-command').textContent.includes('Save changes?')`)
     const customAnswers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
-    if (customAnswers[0].answers['Choose an action'] !== '2. Type something.' || customAnswers[1].answers['Type your answer:'] !== customAnswer) throw new Error('Native custom-answer chain lost sentinel or text')
+    if (customAnswers.length !== 1 || customAnswers[0].answers['Choose an action'] !== customAnswer || customAnswers[0].nativeCustomAnswer !== true) throw new Error('Native custom-answer submission lost text')
   }
-  return { piMenuChain: true, piEditorPrefill: true, piNativeInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true }
+  return { piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true }
 }
 
 async function exerciseSessionSelection(contents, scenario) {
