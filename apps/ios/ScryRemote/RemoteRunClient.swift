@@ -181,8 +181,19 @@ struct RemoteRunClient {
   // A currently running Mac conversation can change between pages; restart the
   // bounded read from cursor zero instead of surfacing a stale-snapshot error.
   func history(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
+    try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId).turns
+  }
+
+  func historySnapshot(providerId: String, cwd: String, externalSessionId: String,
+                       cached: RemoteHistorySnapshot? = nil,
+                       progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
     for attempt in 0..<3 {
-      do { return try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
+      do {
+        return try await Self.downloadHistory(cached: cached, fetch: { cursor, snapshot in
+          try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
+                                cursor: cursor, snapshot: snapshot)
+        }, progress: progress)
+      }
       catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
         try await Task.sleep(nanoseconds: UInt64(120 + attempt * 180) * 1_000_000)
       }
@@ -191,34 +202,55 @@ struct RemoteRunClient {
                   userInfo: [NSLocalizedDescriptionKey: "History kept changing while it was read"])
   }
 
-  private func historySnapshot(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
-    var cursor = 0
-    var snapshot: String?
-    var totalBytes: Int?
-    var bytes = Data()
-    repeat {
-      let page = try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot)
-      guard let chunk = Data(base64Encoded: page.dataBase64), page.cursor == cursor + chunk.count else {
-        throw NSError(domain: "ScryRemote.History", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid history page"])
+  // The existing host sends 64 KiB pages, each over a separate authenticated
+  // exchange. Two readers match its warm relay pool; sort before assembly and
+  // retain the complete snapshot/digest fence. Never use the clipped legacy API.
+  static func downloadHistory(cached: RemoteHistorySnapshot?,
+    fetch: @escaping @Sendable (Int, String?) async throws -> G0Transport.RunHistoryPage,
+    progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
+    let pageSize = 64 * 1024
+    let first = try await fetch(0, nil)
+    let total = first.totalBytes
+    let fingerprint = first.snapshot
+    func chunk(_ page: G0Transport.RunHistoryPage, at cursor: Int) throws -> Data {
+      guard total >= 0, total <= 256 * 1024 * 1024,
+            page.snapshot == fingerprint, page.totalBytes == total,
+            let data = Data(base64Encoded: page.dataBase64),
+            data.count == min(pageSize, total - cursor),
+            page.cursor == cursor + data.count, page.hasMore == (page.cursor < total) else {
+        throw NSError(domain: "ScryRemote.History", code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "History snapshot, cursor or size changed"])
       }
-      if snapshot == nil { snapshot = page.snapshot }
-      if totalBytes == nil { totalBytes = page.totalBytes }
-      guard snapshot == page.snapshot,
-            totalBytes == page.totalBytes,
-            page.totalBytes <= 256 * 1024 * 1024,
-            page.cursor <= page.totalBytes,
-            page.hasMore ? page.cursor > cursor && page.cursor < page.totalBytes : page.cursor == page.totalBytes else {
-        throw NSError(domain: "ScryRemote.History", code: 2, userInfo: [NSLocalizedDescriptionKey: "History snapshot or size changed"])
-      }
-      bytes.append(chunk)
-      cursor = page.cursor
-      if !page.hasMore { break }
-    } while true
-    let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-    guard digest == snapshot else {
-      throw NSError(domain: "ScryRemote.History", code: 3, userInfo: [NSLocalizedDescriptionKey: "History snapshot verification failed"])
+      return data
     }
-    return try JSONDecoder().decode([G0Transport.RunHistoryTurn].self, from: bytes)
+    var bytes = try chunk(first, at: 0)
+    if let cached, cached.fingerprint == fingerprint {
+      await progress(total, total)
+      return RemoteHistorySnapshot(turns: cached.turns, fingerprint: fingerprint, fetchedAt: Date())
+    }
+    await progress(bytes.count, total)
+    while bytes.count < total {
+      try Task.checkCancellation()
+      let start = bytes.count
+      let pages = try await withThrowingTaskGroup(of: (Int, G0Transport.RunHistoryPage).self) { group in
+        for cursor in stride(from: start, to: min(total, start + 2 * pageSize), by: pageSize) {
+          group.addTask { (cursor, try await fetch(cursor, fingerprint)) }
+        }
+        var result: [(Int, G0Transport.RunHistoryPage)] = []
+        for try await page in group { result.append(page) }
+        return result.sorted { $0.0 < $1.0 }
+      }
+      for (cursor, page) in pages { bytes.append(try chunk(page, at: cursor)) }
+      await progress(bytes.count, total)
+    }
+    try Task.checkCancellation()
+    let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    guard digest == fingerprint else {
+      throw NSError(domain: "ScryRemote.History", code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "History snapshot verification failed"])
+    }
+    return RemoteHistorySnapshot(turns: try JSONDecoder().decode([G0Transport.RunHistoryTurn].self, from: bytes),
+                                 fingerprint: fingerprint, fetchedAt: Date())
   }
 
   // The assistant's real streamed output content for one run, strictly after

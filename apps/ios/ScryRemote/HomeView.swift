@@ -257,6 +257,7 @@ struct SettingsView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var confirmUnpair = false
+  @State private var cacheNotice: String?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -280,11 +281,20 @@ struct SettingsView: View {
             .font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
             .foregroundStyle(Palette.muted)
           if let error = model.destructiveActionError { Notice(text: error, warning: true) }
+          Text("已读会话缓存到手机（最多 64 MB / 20 个会话），受 iOS 数据保护且不备份。退出登录保留缓存；清除配对会删除缓存。")
+            .font(.caption).foregroundStyle(Palette.muted)
+          Button(run.historyCacheClearing ? "正在清除缓存…" : "清除本机会话缓存") {
+            Task {
+              do { try await run.clearHistoryCache(); cacheNotice = "本地历史缓存已清除，不影响主机会话和未发送草稿。" }
+              catch { cacheNotice = "缓存清除失败：\(error.localizedDescription)" }
+            }
+          }.disabled(run.historyCacheClearing).frame(minHeight: 44)
+          if let cacheNotice { Text(cacheNotice).font(.caption).foregroundStyle(Palette.muted) }
           Button(role: .destructive) { confirmUnpair = true } label: {
             Text("退出并清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
           }
           .buttonStyle(.plain).foregroundStyle(Palette.negative)
-          .disabled(run.hasUnresolvedRun)
+          .disabled(run.hasUnresolvedRun || run.historyCacheClearing)
           if run.hasUnresolvedRun { Text("请先核对当前任务，再清除配对。清除配对不会停止 Mac 上的运行。")
             .font(.caption).foregroundStyle(Palette.muted) }
         }
@@ -293,10 +303,10 @@ struct SettingsView: View {
     }
     .background(Palette.surface)
     .confirmationDialog("清除此 iPhone 的配对？", isPresented: $confirmUnpair, titleVisibility: .visible) {
-      Button("清除配对", role: .destructive) { model.destructiveUnpair(runStore: run) }
+      Button("清除配对", role: .destructive) { Task { await model.destructiveUnpair(runStore: run) } }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("将删除本机凭据和草稿。再次连接需要在 Mac 上重新授权；不会停止 Mac 上正在运行的任务。")
+      Text("将删除本机凭据、草稿和历史缓存。再次连接需要在 Mac 上重新授权；不会停止 Mac 上正在运行的任务。")
     }
   }
 

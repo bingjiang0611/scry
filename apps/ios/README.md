@@ -126,3 +126,17 @@ Gaps: the live pairing UI is not wired into `PairView` yet, and full on-device
 pairing needs a reachable relay + running host (and, for a public wss relay, the
 outer relay CA which the code does not yet carry — an outer-TLS deployment
 follow-up, not new crypto). Keychain is exercised only on a signed build.
+
+## History cache (2026-10-08)
+
+`RemoteHistoryCache.swift` persists complete history in protected, backup-excluded
+Caches storage (64 MiB / 20 entries). Previously downloaded history appears before
+background verification; unchanged fingerprints avoid full re-downloads. Settings
+can clear the cache, and destructive unpair clears it before deleting credentials.
+This is disposable history, not a permanent backup or evidence that the Mac is online.
+
+DEBUG `-historyCacheTest` exercises isolated temporary cache and store fixtures,
+without a relay, real Provider calls or real recovery-checkpoint writes. Run it
+separately from `-selfTest`; both print PASS/FAIL and exit. Device protection-class
+verification cannot be replaced by Simulator results.
+See [verification and limits](../../docs/testing/ios-history-cache-2026-10-08.md).

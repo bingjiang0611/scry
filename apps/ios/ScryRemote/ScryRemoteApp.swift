@@ -7,6 +7,7 @@ struct ScryRemoteApp: App {
   init() {
     #if DEBUG
     RemoteSelfTest.runIfRequested()
+    RemoteSelfTest.runHistoryCacheTestIfRequested()
     RemoteSelfTest.runRelayTLSProbeIfRequested()
     RemoteSelfTest.runRunProbeIfRequested()
     RemoteSelfTest.runLiveProviderProbeIfRequested()

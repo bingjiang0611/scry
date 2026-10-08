@@ -300,12 +300,12 @@ final class AppModel: ObservableObject {
     sessions = []
   }
 
-  // Delete credentials first, then the public descriptor and in-memory run
-  // state. On Keychain failure no state is claimed as cleared, allowing a safe
-  // retry instead of leaving a descriptor/key deadlock.
-  func destructiveUnpair(runStore: RemoteRunStore) {
+  // Clear downloaded private history before removing its grant. If either
+  // storage or Keychain cleanup fails, do not claim a successful unpair.
+  func destructiveUnpair(runStore: RemoteRunStore) async {
     destructiveActionError = nil
     do {
+      try await runStore.clearHistoryCache()
       try RemoteKeychain().clearAll()
       connections.clear()
       runStore.clearAllState()

@@ -1,0 +1,86 @@
+import CryptoKit
+import Foundation
+import RemoteTransport
+
+struct RemoteHistorySnapshot: Codable, Sendable {
+  let turns: [G0Transport.RunHistoryTurn]
+  let fingerprint: String
+  let fetchedAt: Date
+}
+
+// Disposable, complete host snapshots only. iOS Data Protection encrypts these
+// files while locked; they are excluded from backups. We store history, not
+// pairing keys or unsent drafts. A different grant/anchor cannot address old data.
+actor RemoteHistoryCache {
+  private(set) var epoch = 0
+  let directory: URL
+  let byteLimit: Int
+  let entryLimit: Int
+
+  init(directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("ScryHistory", isDirectory: true),
+       byteLimit: Int = 64 * 1024 * 1024, entryLimit: Int = 20) {
+    self.directory = directory
+    self.byteLimit = byteLimit
+    self.entryLimit = entryLimit
+  }
+
+  static func key(connection: RemoteConnection, providerId: String, cwd: String, sessionId: String) -> String {
+    // Length-safe JSON encoding; paths/session ids never become filesystem paths.
+    let fields = [connection.hostId, connection.anchorPEM, connection.deviceId, providerId, cwd, sessionId]
+    let bytes = try! JSONEncoder().encode(fields)
+    return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private struct Entry: Codable {
+    let version: Int
+    let key: String
+    let snapshot: RemoteHistorySnapshot
+  }
+
+  func fileURL(_ key: String) -> URL { directory.appendingPathComponent(key + ".json") }
+
+  func read(_ key: String) throws -> RemoteHistorySnapshot? {
+    let url = fileURL(key)
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard size <= byteLimit else { throw CocoaError(.fileReadTooLarge) }
+    let entry = try JSONDecoder().decode(Entry.self, from: Data(contentsOf: url))
+    guard entry.version == 1, entry.key == key else { throw CocoaError(.fileReadCorruptFile) }
+    return entry.snapshot
+  }
+
+  // Actor-isolated IO never blocks SwiftUI. Clearing advances the epoch so
+  // even a queued write from an earlier download cannot resurrect removed data.
+  @discardableResult
+  func write(_ snapshot: RemoteHistorySnapshot, key: String, epoch expectedEpoch: Int) throws -> Bool {
+    guard expectedEpoch == epoch else { return false }
+    let data = try JSONEncoder().encode(Entry(version: 1, key: key, snapshot: snapshot))
+    guard data.count <= byteLimit else { return false }
+    let fm = FileManager.default
+    try fm.createDirectory(at: directory, withIntermediateDirectories: true,
+      attributes: [.protectionKey: FileProtectionType.complete])
+    var folder = directory
+    var values = URLResourceValues(); values.isExcludedFromBackup = true
+    try folder.setResourceValues(values)
+    try data.write(to: fileURL(key), options: [.atomic, .completeFileProtection])
+    let files = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+      .filter { $0.pathExtension == "json" }
+      .map { url -> (URL, Int, Date) in
+        let info = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        return (url, info.fileSize ?? 0, info.contentModificationDate ?? .distantPast)
+      }.sorted { $0.2 > $1.2 }
+    var bytes = 0
+    for (index, file) in files.enumerated() {
+      bytes += file.1
+      if index >= entryLimit || bytes > byteLimit { try fm.removeItem(at: file.0) }
+    }
+    return true
+  }
+
+  func clear() throws {
+    epoch += 1
+    guard FileManager.default.fileExists(atPath: directory.path) else { return }
+    try FileManager.default.removeItem(at: directory)
+  }
+}

@@ -168,9 +168,18 @@ final class RemoteRunStore: ObservableObject {
     case loading
     case loaded([G0Transport.RunHistoryTurn])
     case empty
+    case baseUnavailable
     case failed(String)
   }
   @Published private(set) var history: HistoryState = .idle
+  @Published private(set) var historyRevision = 0
+  @Published private(set) var historySyncing = false
+  @Published private(set) var historyFromCache = false
+  @Published private(set) var historyFetchedAt: Date?
+  @Published private(set) var historyProgress: String?
+  @Published private(set) var historyRefreshError: String?
+  @Published private(set) var historyStorageNotice: String?
+  @Published private(set) var historyCacheClearing = false
   // Whether the host was actually reached on the LAST attempt. Paired != reachable:
   // a persisted grant only means we MAY reach the host; only a real successful
   // exchange proves it. nil = not tried yet. This is the honest source of the
@@ -209,7 +218,7 @@ final class RemoteRunStore: ObservableObject {
   }
   var isBusy: Bool { hasUnresolvedRun }
 
-  private let connections = RemoteConnectionStore()
+  private let connections: RemoteConnectionStore
   private var pollTask: Task<Void, Never>?
   private var submitTask: Task<Void, Never>?
   private var catalogTask: Task<Void, Never>?
@@ -226,7 +235,9 @@ final class RemoteRunStore: ObservableObject {
   private var providersLoadedAt: Date?
   private var projectsLoadedAt: Date?
   private var commandCache: [String: G0Transport.RunCommandCatalog] = [:]
-  private var historyCache: [SessionIdentity: HistoryState] = [:]
+  private let historyDisk: RemoteHistoryCache
+  private var cachedHistory: (key: String, snapshot: RemoteHistorySnapshot, persisted: Bool)?
+  private var historyRequestGeneration = 0
   private var pendingSubmission: PendingSubmission?
   private var activeRouting: RemoteRunClient.Routing?
   private var seenOutputSequences = Set<Int>()
@@ -245,12 +256,15 @@ final class RemoteRunStore: ObservableObject {
   private static let metadataFreshness: TimeInterval = 5 * 60
   #if DEBUG
   private var mockMode = false
+  private var historyTestOffline = false
   #endif
 
-  init() {
+  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache()) {
+    self.connections = connections
+    self.historyDisk = historyDisk
     #if DEBUG
     let args = ProcessInfo.processInfo.arguments
-    if args.contains("-uiPreview") || args.contains("-selfTest") { return }
+    if args.contains("-uiPreview") || args.contains("-selfTest") || args.contains("-historyCacheTest") { return }
     #endif
     restoreRecoveryCheckpoint()
   }
@@ -309,7 +323,7 @@ final class RemoteRunStore: ObservableObject {
 
   private func clearRecoveryCheckpoint() {
     #if DEBUG
-    if mockMode { return }
+    if mockMode || ProcessInfo.processInfo.arguments.contains("-historyCacheTest") { return }
     #endif
     guard let url = recoveryURL else { return }
     do { try FileManager.default.removeItem(at: url) }
@@ -434,77 +448,168 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  // Load one session's real conversation content. Successful transcripts are
-  // cached per identity for the app lifetime, so switching away and reopening a
-  // conversation does not download and parse the same history again.
+  // Show protected local data before opening the relay. Only an authenticated
+  // host response can mark it current/reachable. The single memory entry keeps
+  // large transcripts bounded; other conversations reopen from disk off-main.
   func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
+    guard !historyCacheClearing else { return }
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    // The legacy history contract has no canonical turn ids. Keep the base of
+    // a locally extended conversation stable rather than deduplicating by text
+    // or double-rendering the same run after an archive refresh.
+    let hasLocalTurns = !(completedLiveTurns[identity] ?? []).isEmpty ||
+      (activeSessionIdentity == identity && prompt != nil)
     if activeSessionIdentity != identity {
       guard resetRun() else { return }
       activeSessionIdentity = identity
-    }
-    if !force, let cached = historyCache[identity] {
-      history = cached
-      return
-    }
-    let cached = historyCache[identity]
-    guard let client = makeClient() else {
-      history = cached ?? .failed("尚未配对")
-      return
-    }
-    historyTask?.cancel()
+      history = .idle
+    } else if historyTask != nil { return }
+    guard let connection = connections.load() else { history = .failed("尚未配对"); return }
+    let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    let client = RemoteRunClient(connection: connection)
+    let disk = historyDisk
+    let memory = cachedHistory?.key == key ? cachedHistory?.snapshot : nil
+    historyRequestGeneration += 1
+    let request = historyRequestGeneration
     let requestGeneration = generation
-    history = cached ?? .loading
+    historyFromCache = false; historyFetchedAt = nil; historyProgress = nil
+    historyRefreshError = nil; historyStorageNotice = nil
+    if let memory { showHistory(memory, key: key, cached: true, persisted: cachedHistory?.persisted == true) }
+    else { history = .loading }
+    historySyncing = true
     historyTask = Task { [weak self] in
+      guard let self else { return }
+      @MainActor func current() -> Bool {
+        !Task.isCancelled && self.historyRequestGeneration == request &&
+          self.isCurrent(requestGeneration, identity: identity) && self.connections.load() == connection
+      }
+      defer {
+        if self.historyRequestGeneration == request {
+          self.historyTask = nil; self.historySyncing = false
+        }
+      }
+      let diskEpoch = await disk.epoch
+      var cached = memory
+      var persisted = self.cachedHistory?.key == key && self.cachedHistory?.persisted == true
+      if cached == nil {
+        do { cached = try await disk.read(key); persisted = cached != nil }
+        catch { if current() { self.historyStorageNotice = "本地缓存不可用，将从主机重新读取" } }
+      }
+      guard current() else { return }
+      if let cached {
+        self.showHistory(cached, key: key, cached: true, persisted: persisted)
+        if !persisted { self.historyStorageNotice = "历史目前仅在内存中，尚未保存到手机缓存。" }
+        if !hasLocalTurns, memory != nil, !force,
+           (0..<30).contains(Date().timeIntervalSince(cached.fetchedAt)) { return }
+      }
+      if hasLocalTurns {
+        if cached == nil { self.history = .baseUnavailable; self.historyRevision += 1 }
+        let notice = cached == nil
+          ? "历史基底未缓存，以下仅为本机运行增量；重启后重新核对完整主机历史。"
+          : "保留历史基底与本机运行增量，避免重复；重启后重新核对完整主机历史。"
+        self.historyStorageNotice = notice + (cached != nil && !persisted ? " 当前基底仅存内存，未写入手机缓存。" : "")
+        return
+      }
+      let started = Date()
       do {
-        let turns = try await client.history(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
-        await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
-          self.historyTask = nil
-          self.reachable = true
-          let state: HistoryState = turns.isEmpty ? .empty : .loaded(turns)
-          self.historyCache[identity] = state
-          self.history = state
+        #if DEBUG
+        if self.historyTestOffline {
+          throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
+        }
+        #endif
+        let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
+          externalSessionId: externalSessionId, cached: cached, progress: { [weak self] received, total in
+            guard let self else { return }
+            await MainActor.run {
+              guard self.historyRequestGeneration == request,
+                    self.isCurrent(requestGeneration, identity: identity) else { return }
+              self.historyProgress = "\(received / 1024) / \(max(1, (total + 1023) / 1024)) KB"
+            }
+          })
+        guard current() else { return }
+        self.reachable = true
+        let alreadySaved = persisted && cached?.fingerprint == snapshot.fingerprint
+        self.showHistory(snapshot, key: key, cached: false, persisted: alreadySaved)
+        self.historySyncing = false
+        #if DEBUG
+        print("HISTORY network complete seconds=\(Date().timeIntervalSince(started)) unchanged=\(cached?.fingerprint == snapshot.fingerprint)")
+        #endif
+        if alreadySaved { return }
+        do {
+          let saved = try await disk.write(snapshot, key: key, epoch: diskEpoch)
+          if current() {
+            self.cachedHistory?.persisted = saved
+            self.historyStorageNotice = saved ? nil : "会话超过 64 MB，仅保留本次内存；未写入手机缓存"
+          }
+        } catch {
+          if current() { self.historyStorageNotice = "本地缓存保存失败：\(Self.describe(error))" }
         }
       } catch {
-        await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
-          self.historyTask = nil
-          self.reachable = false
-          self.history = cached ?? .failed(Self.describe(error))
-        }
+        guard current() else { return }
+        self.reachable = false
+        self.historyRefreshError = Self.describe(error)
+        if cached == nil { self.history = .failed(Self.describe(error)) }
       }
     }
   }
 
-  // Refresh a Mac-originated active conversation. Those runs do not belong to
-  // the phone's remote-run ledger, so the transcript follows their authoritative
-  // in-memory trace through the history endpoint until the catalog marks them done.
+  private func showHistory(_ snapshot: RemoteHistorySnapshot, key: String, cached: Bool, persisted: Bool) {
+    let rendered: Bool
+    switch history { case .loaded, .empty: rendered = true; default: rendered = false }
+    let unchanged = rendered && cachedHistory?.key == key &&
+      cachedHistory?.snapshot.fingerprint == snapshot.fingerprint
+    cachedHistory = (key, snapshot, persisted)
+    // Digest identity avoids an O(transcript) comparison on every validation.
+    if !unchanged {
+      history = snapshot.turns.isEmpty ? .empty : .loaded(snapshot.turns)
+      historyRevision += 1
+    }
+    historyFromCache = cached
+    historyFetchedAt = snapshot.fetchedAt
+  }
+
+  func clearHistoryCache() async throws {
+    historyCacheClearing = true
+    defer { historyCacheClearing = false }
+    historyRequestGeneration += 1
+    historyTask?.cancel()
+    historyTask = nil
+    cachedHistory = nil
+    history = .idle; historySyncing = false; historyFromCache = false
+    historyFetchedAt = nil; historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
+    try await historyDisk.clear()
+  }
+
   func refreshMacSession(providerId: String, cwd: String, externalSessionId: String) async -> Bool {
     #if DEBUG
     if mockMode { return false }
     #endif
-    guard historyTask == nil, let client = makeClient() else { return true }
+    guard historyTask == nil, !historyCacheClearing, let client = makeClient() else { return true }
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let requestGeneration = generation
+    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
     do {
-      async let sessionsRequest = client.sessions()
-      async let historyRequest = client.history(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
-      let (sessions, turns) = try await (sessionsRequest, historyRequest)
-      guard activeSessionIdentity == identity else { return false }
-      reachable = true
-      let state: HistoryState = turns.isEmpty ? .empty : .loaded(turns)
-      historyCache[identity] = state
-      history = state
+      let sessions = try await client.sessions()
+      // Do not let the final archive reload get swallowed by an in-flight
+      // pre-terminal snapshot. The view waits once more before that last read.
+      await historyTask?.value
+      guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return false }
       return sessions.first(where: {
         $0.providerId == providerId && $0.cwd == cwd && $0.externalSessionId == externalSessionId
       })?.isActive == true
-    } catch {
-      reachable = false
-      return true
-    }
+    } catch { return !Task.isCancelled && isCurrent(requestGeneration, identity: identity) }
+  }
+
+  func refreshFinalHistory(providerId: String, cwd: String, externalSessionId: String) async {
+    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let requestGeneration = generation
+    await historyTask?.value
+    guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
+    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
+    await historyTask?.value
   }
 
   // Re-opening the same session does not discard its live observation. If the
@@ -516,7 +621,7 @@ final class RemoteRunStore: ObservableObject {
          observationInterrupted || !isTerminal(generation: generation, identity: identity) {
         resumeObservation(runId: runId)
       }
-      if history == .idle { loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
+      if !hasUnresolvedRun { loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
       return
     }
     loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
@@ -1234,7 +1339,10 @@ final class RemoteRunStore: ObservableObject {
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
     catalog = .idle; history = .idle; reachable = nil
-    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; historyCache = [:]
+    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil
+    historyRequestGeneration += 1
+    historySyncing = false; historyFromCache = false; historyFetchedAt = nil
+    historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
     lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
     runId = nil; submitError = nil; truncated = false; resultSummary = nil
     liveExternalSessionId = nil; activeSessionIdentity = nil
@@ -1336,6 +1444,38 @@ final class RemoteRunStore: ObservableObject {
     shouldContinueDrain(cursor: cursor, next: next, chunkCount: chunkCount) &&
       !shouldContinueDrain(cursor: next, next: next, chunkCount: chunkCount) &&
       !shouldContinueDrain(cursor: cursor, next: next, chunkCount: 0)
+  }
+
+  static func selfTestHistoryStore(directory: URL, snapshot: RemoteHistorySnapshot) async throws -> [(String, Bool)] {
+    let suite = "ScryHistoryFixture.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let connections = RemoteConnectionStore(defaults: defaults)
+    let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "fixture", anchorPEM: "fixture-anchor", deviceId: "fixture-grant")
+    connections.save(connection)
+    let disk = RemoteHistoryCache(directory: directory)
+    let key = RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "session")
+    _ = try await disk.write(snapshot, key: key, epoch: 0)
+    let store = RemoteRunStore(connections: connections, historyDisk: disk)
+    store.historyTestOffline = true
+    store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    await store.historyTask?.value
+    var checks: [(String, Bool)] = [
+      ("store.offlineKeepsDiskHistory", store.history == .loaded(snapshot.turns) && store.historyFromCache && store.reachable == false),
+      ("store.offlineUpdateErrorVisible", store.historyRefreshError != nil)
+    ]
+    let identity = SessionIdentity.opened(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    store.completedLiveTurns[identity] = [.init(id: "fixture-run", runId: "fixture-run", prompt: "local prompt",
+      attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "session")]
+    store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
+    await store.historyTask?.value
+    checks.append(("store.localOverlayKeepsBase", store.history == .loaded(snapshot.turns) && store.completedTurns(for: identity).count == 1 && store.historyRefreshError == nil))
+    try await store.clearHistoryCache()
+    store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
+    await store.historyTask?.value
+    checks.append(("store.missingBaseIsNotEmpty", store.history == .baseUnavailable && store.completedTurns(for: identity).count == 1))
+    return checks
   }
 
   static func selfTestInteractionState() -> [(String, Bool)] {
