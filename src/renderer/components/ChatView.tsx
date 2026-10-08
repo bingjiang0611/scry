@@ -132,6 +132,32 @@ export function formatElapsedMs(ms: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+// Keep wall-clock ticks below ChatView so an idle run does not reprocess its transcript/composer.
+function RunElapsed({ startedAt }: { startedAt: number }) {
+  const [, setNowTick] = useState(0)
+  useEffect(() => {
+    let timer: number | null = null
+    const syncTimer = (): void => {
+      if (timer != null) window.clearInterval(timer)
+      timer = null
+      if (document.visibilityState !== 'visible') return
+      setNowTick((n) => n + 1)
+      timer = window.setInterval(() => setNowTick((n) => n + 1), 1000)
+    }
+    syncTimer()
+    document.addEventListener('visibilitychange', syncTimer)
+    return () => {
+      document.removeEventListener('visibilitychange', syncTimer)
+      if (timer != null) window.clearInterval(timer)
+    }
+  }, [startedAt])
+  return (
+    <span className="run-status-elapsed" title="已用时长按当前 run 首个事件时间戳（TraceEvent.ts）计算">
+      {formatElapsedMs(Date.now() - startedAt)}
+    </span>
+  )
+}
+
 export type ComposerHistoryDirection = 'older' | 'newer'
 
 export interface ComposerHistoryNavigation {
@@ -337,25 +363,6 @@ export function ChatView({
   const backgroundStatus = stopStatus.tone === 'running' && busyTurn && pendingQuestions.length === 0
     ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined
   const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
-  const [, setNowTick] = useState(0)
-  useEffect(() => {
-    if (!busy || Number.isNaN(runStartedAt)) return
-    let timer: number | null = null
-    const syncTimer = (): void => {
-      if (timer != null) window.clearInterval(timer)
-      timer = null
-      if (document.visibilityState !== 'visible') return
-      setNowTick((n) => n + 1)
-      timer = window.setInterval(() => setNowTick((n) => n + 1), 1000)
-    }
-    syncTimer()
-    document.addEventListener('visibilitychange', syncTimer)
-    return () => {
-      document.removeEventListener('visibilitychange', syncTimer)
-      if (timer != null) window.clearInterval(timer)
-    }
-  }, [busy, runStartedAt])
-  const elapsedMs = Number.isNaN(runStartedAt) ? null : Math.max(0, Date.now() - runStartedAt)
 
   useEffect(() => {
     if (!slashOpen) return
@@ -580,11 +587,7 @@ export function ChatView({
                   实时视图已降级 · 缺 {traceHealth.skippedEvents} 条
                 </span>
               )}
-              {elapsedMs != null && (
-                <span className="run-status-elapsed" title="已用时长按当前 run 首个事件时间戳（TraceEvent.ts）计算">
-                  {formatElapsedMs(elapsedMs)}
-                </span>
-              )}
+              {!Number.isNaN(runStartedAt) && <RunElapsed startedAt={runStartedAt} />}
               <button type="button" className="stop run-status-stop" onClick={onStop}>
                 <Icon name="square" /> 停止本轮
               </button>
