@@ -249,6 +249,8 @@ export type AgentQuestionResponse =
       questionId: string
       behavior: 'answered'
       answers: Record<string, string>
+      /** Pi's single select → input answer is text, even when it equals a listed value. */
+      nativeCustomAnswer?: true
     }
   | {
       runId: string
@@ -715,6 +717,10 @@ export function normalizeAgentQuestionResponse(
     return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
   }
   if (response.behavior !== 'answered' || !response.answers || typeof response.answers !== 'object') return null
+  if (response.nativeCustomAnswer !== undefined && (
+    response.nativeCustomAnswer !== true || request.providerId !== 'pi' || request.source !== 'pi_extension_ui:select' ||
+    request.questions.length !== 1 || request.questions[0].allowCustomAnswer === false
+  )) return null
   const rawAnswers = response.answers as Record<string, unknown>
   const answers: Record<string, string> = {}
   for (const question of request.questions) {
@@ -723,5 +729,8 @@ export function normalizeAgentQuestionResponse(
     if (question.allowCustomAnswer === false && !question.options.some((option) => (option.answerValue ?? option.label) === answer)) return null
     answers[question.question] = answer
   }
-  return { runId: request.runId, questionId: request.questionId, behavior: 'answered', answers }
+  return {
+    runId: request.runId, questionId: request.questionId, behavior: 'answered', answers,
+    ...(response.nativeCustomAnswer === true ? { nativeCustomAnswer: true } : {})
+  }
 }

@@ -786,6 +786,12 @@ function runControlCatalog(probe: PiProbe): AgentRunControlCatalog {
   }
 }
 
+function nativeCustomAnswerOption(event: JsonRecord): string | undefined {
+  if (event.method !== 'select' || !Array.isArray(event.options)) return undefined
+  const last = event.options.at(-1)
+  return typeof last === 'string' && /^(?:\d+[.)、]\s*)?Type something\.?$/i.test(last.trim()) ? last : undefined
+}
+
 export function questionFromExtension(runId: string, event: JsonRecord): AgentQuestionRequest | null {
   const id = typeof event.id === 'string' ? event.id : ''
   const method = String(event.method ?? '')
@@ -826,9 +832,11 @@ export function questionFromExtension(runId: string, event: JsonRecord): AgentQu
     : Array.isArray(event.options)
       ? event.options.filter((item): item is string => typeof item === 'string').slice(0, 100)
       : []
+  const customAnswerOption = nativeCustomAnswerOption(event)
   const options = parsedOptions.length >= 2
     ? parsedOptions
-    : labels.map((label) => ({ label, description: method === 'confirm' ? `${label}这次操作` : '选择此项' }))
+    : labels.filter((label) => label !== customAnswerOption)
+      .map((label) => ({ label, description: method === 'confirm' ? `${label}这次操作` : '选择此项' }))
   const placeholder = method === 'input' && typeof event.placeholder === 'string'
     ? event.placeholder.slice(0, 500)
     : ''
@@ -843,9 +851,9 @@ export function questionFromExtension(runId: string, event: JsonRecord): AgentQu
       question: question.slice(0, 2_000),
       multiSelect: parsedOptions.length >= 2 && isMultiSelect,
       options,
-      // select/confirm are closed-choice RPC primitives. Extensions request a separate
-      // input after their custom-answer option; returning free text here means cancel.
-      ...((method === 'select' || method === 'confirm') ? { allowCustomAnswer: false } : {}),
+      // Only the known questionnaire sentinel supports a staged select → input reply.
+      // Other native select/confirm requests remain closed choices.
+      ...((method === 'select' || method === 'confirm') ? { allowCustomAnswer: !!customAnswerOption } : {}),
       ...((method === 'editor' || method === 'input' && options.length === 0)
         ? { inputMode: method === 'editor' ? 'multiline' as const : 'singleline' as const }
         : {}),
@@ -1003,6 +1011,7 @@ async function runPiAgent(
   }
   const modelContextWindows = new Map<string, number>()
   const abortController = new AbortController()
+  let stagedCustomAnswer: string | undefined
   const toolNames = new Map<string, string>()
   const toolStarts = new Map<string, number>()
   let streamedText = false
@@ -1204,6 +1213,18 @@ async function runPiAgent(
     }
     if (event.type !== 'extension_ui_request') return
     const question = questionFromExtension(request.runId, event)
+    if (question && stagedCustomAnswer !== undefined) {
+      const answer = stagedCustomAnswer
+      stagedCustomAnswer = undefined
+      // The generated questionnaire requests this input immediately after its sentinel.
+      // Never forward the draft into an unrelated extension dialog.
+      if (event.method === 'input' && event.title === 'Type your answer:') {
+        rpc.notify(abortController.signal.aborted
+          ? { type: 'extension_ui_response', id: event.id, cancelled: true }
+          : { type: 'extension_ui_response', id: event.id, value: answer })
+        return
+      }
+    }
     if (!question || !request.requestUserInput) {
       if (question) rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true })
       else request.emit(piEvent(request.runId, {
@@ -1217,7 +1238,19 @@ async function runPiAgent(
       return
     }
     void request.requestUserInput(question, abortController.signal)
-      .then((response) => rpc.notify(extensionResponse(event, question, response)))
+      .then((response) => {
+        const customOption = nativeCustomAnswerOption(event)
+        if (customOption && response.behavior === 'answered') {
+          const prompt = question.questions[0]
+          const answer = response.answers[prompt.question]
+          if (response.nativeCustomAnswer || !prompt.options.some((option) => (option.answerValue ?? option.label) === answer)) {
+            stagedCustomAnswer = answer
+            rpc.notify({ type: 'extension_ui_response', id: event.id, value: customOption })
+            return
+          }
+        }
+        rpc.notify(extensionResponse(event, question, response))
+      })
       .catch(() => rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true }))
   })
   const startedAt = Date.now()
