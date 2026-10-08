@@ -7,6 +7,7 @@ struct HomeView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var pinnedExpanded = true
+  @State private var showActiveRun = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -22,12 +23,32 @@ struct HomeView: View {
         .accessibilityLabel("更多选项")
       }
       if !model.link.isConnected { Notice(text: offlineText) }
+      if run.hasUnresolvedRun {
+        Button { model.route = .chat } label: {
+          HStack {
+            Image(systemName: run.observationInterrupted ? "wifi.exclamationmark" : "bubble.left.and.bubble.right")
+            VStack(alignment: .leading, spacing: 3) {
+              Text(run.retryAvailable ? "核对上次提交" : "返回当前任务").font(.system(size: 14, weight: .semibold))
+              Text(run.observationInterrupted ? "观察中断，点击恢复；主机可能仍在运行" : "任务尚未收敛，保留原会话继续查看")
+                .font(.system(size: 12)).foregroundStyle(Palette.muted)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+          }.padding(14).background(Palette.noticeBg, in: RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain).padding(.horizontal, 16).padding(.vertical, 8)
+      }
       content
       dock
     }
     .background(Palette.surface)
     .onAppear {
       if run.hasConnection { run.loadSessions(); run.loadProjects() }
+    }
+    .alert("当前任务尚未结束", isPresented: $showActiveRun) {
+      Button("返回当前任务") { model.route = .chat }
+      Button("留在列表", role: .cancel) {}
+    } message: {
+      Text("先核对当前任务结果，再切换会话。本次提交标识和草稿会保留，不会重复执行。")
     }
   }
 
@@ -61,6 +82,7 @@ struct HomeView: View {
       }
     }
     .scrollIndicators(.hidden)
+    .scrollDismissesKeyboard(.interactively)
   }
 
   private var notPairedEmpty: some View {
@@ -138,6 +160,7 @@ struct HomeView: View {
       Text(projectName(cwd)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
       Spacer()
       Button {
+        guard !run.hasUnresolvedRun else { showActiveRun = true; return }
         if case let .loaded(projects) = run.projects, let project = projects.first(where: { $0.path == cwd }) {
           run.chooseProject(project)
         }
@@ -155,6 +178,10 @@ struct HomeView: View {
     let openable = session.externalSessionId?.isEmpty == false
     Button {
       guard openable, let external = session.externalSessionId else { return }
+      if run.hasUnresolvedRun {
+        let identity = RemoteRunStore.SessionIdentity.opened(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
+        guard identity == run.activeSessionIdentity else { showActiveRun = true; return }
+      }
       model.openedSession = OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
                                           cwd: session.cwd, externalSessionId: external, label: session.label,
                                           isActive: session.isActive == true)
@@ -192,6 +219,7 @@ struct HomeView: View {
       }
       .padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
       CircleButton(symbol: Symbol.plus, label: "新任务", filled: true, disabled: !run.hasConnection) {
+        guard !run.hasUnresolvedRun else { showActiveRun = true; return }
         model.route = .newSession
       }
     }
@@ -228,6 +256,7 @@ struct HomeView: View {
 struct SettingsView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var confirmUnpair = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -251,15 +280,24 @@ struct SettingsView: View {
             .font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
             .foregroundStyle(Palette.muted)
           if let error = model.destructiveActionError { Notice(text: error, warning: true) }
-          Button(role: .destructive) { model.destructiveUnpair(runStore: run) } label: {
+          Button(role: .destructive) { confirmUnpair = true } label: {
             Text("退出并清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
           }
           .buttonStyle(.plain).foregroundStyle(Palette.negative)
+          .disabled(run.hasUnresolvedRun)
+          if run.hasUnresolvedRun { Text("请先核对当前任务，再清除配对。清除配对不会停止 Mac 上的运行。")
+            .font(.caption).foregroundStyle(Palette.muted) }
         }
         .padding(16)
       }
     }
     .background(Palette.surface)
+    .confirmationDialog("清除此 iPhone 的配对？", isPresented: $confirmUnpair, titleVisibility: .visible) {
+      Button("清除配对", role: .destructive) { model.destructiveUnpair(runStore: run) }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("将删除本机凭据和草稿。再次连接需要在 Mac 上重新授权；不会停止 Mac 上正在运行的任务。")
+    }
   }
 
   private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

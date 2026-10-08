@@ -11,8 +11,11 @@ import RemoteTransport
 struct ChatView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
-  @State private var draft = ""
-  @State private var attachments: [DraftAttachment] = []
+  private var composer: Binding<AppModel.ComposerDraft> {
+    model.composerDraft(for: run.activeSessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
+  }
+  private var draft: String { composer.wrappedValue.text }
+  private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
 
   private var paired: Bool { run.hasConnection }
   private var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
@@ -20,7 +23,7 @@ struct ChatView: View {
     return run.completedTurns(for: identity)
   }
   private var hasTurn: Bool { !completedTurns.isEmpty || run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
-  private var runBusy: Bool { run.lifecycle == .submitting || run.lifecycle == .recorded || run.lifecycle == .dispatched || run.lifecycle == .running }
+  private var runBusy: Bool { run.isBusy }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -39,9 +42,7 @@ struct ChatView: View {
           }
         }
       }
-      ScrollViewReader { proxy in
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 18) {
+      ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
             if !hasTurn {
               EmptyState(title: "开始一段新会话",
                          detail: "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。")
@@ -50,39 +51,14 @@ struct ChatView: View {
               if let prompt = run.prompt { userBubble(prompt) }
               if run.prompt != nil { assistantTurn }
             }
-            Color.clear.frame(height: 1).id("bottom")
-          }
-          .padding(.horizontal, 18)
-          .padding(.top, 14)
-          .padding(.bottom, 10)
-        }
-        .scrollIndicators(.hidden)
-        .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
-        .onChange(of: completedTurns.count) { proxy.scrollTo("bottom", anchor: .bottom) }
-        .onChange(of: run.output.count) { proxy.scrollTo("bottom", anchor: .bottom) }
-        .onChange(of: run.lifecycle) { proxy.scrollTo("bottom", anchor: .bottom) }
       }
       footer
     }
     .background(Palette.surface)
-    .sheet(isPresented: Binding(
-      get: { !run.pendingQuestions.isEmpty },
-      set: { _ in }
-    )) {
-      if let request = run.pendingQuestions.first {
-        RemoteQuestionSheet(
-          request: request,
-          submitting: run.questionAnswering,
-          error: run.questionError,
-          onAnswer: { run.answerPendingQuestion(answers: $0) },
-          onCancel: { run.answerPendingQuestion(answers: [:], cancel: true) }
-        )
-        .interactiveDismissDisabled()
-      }
-    }
+    .onAppear { run.loadActiveContext() }
 #if DEBUG
     .onAppear {
-      if draft.isEmpty, ProcessInfo.processInfo.arguments.contains("-uiMockSlash") { draft = "/" }
+      if draft.isEmpty, ProcessInfo.processInfo.arguments.contains("-uiMockSlash") { composer.wrappedValue.text = "/" }
     }
 #endif
   }
@@ -91,7 +67,8 @@ struct ChatView: View {
     RemoteHeader(title: "会话", subtitle: sessionContext, link: model.link,
                  backAction: { model.goBack() }) {
       Menu {
-        Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
+        Button { if run.resetRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
+          .disabled(run.hasUnresolvedRun)
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
         Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
@@ -170,7 +147,7 @@ struct ChatView: View {
 
   private var footer: some View {
     VStack(alignment: .leading, spacing: 6) {
-      MessageComposer(text: $draft, attachments: $attachments,
+      MessageComposer(text: composer.text, attachments: composer.attachments,
                       placeholder: paired ? "继续这段对话…" : "连接后可输入",
                       disabled: !paired,
                       sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -191,16 +168,18 @@ struct ChatView: View {
                       }) {
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
+        let currentDraft = composer
+        let accepted: Bool
         if let resume = run.liveExternalSessionId {
-          run.submitFollowUp(prompt: draft, providerId: providerId, agentProfileId: run.chosenProvider?.agentProfileId,
-                             cwd: project.path, resume: resume, attachments: payload)
+          accepted = run.submitFollowUp(prompt: draft, providerId: providerId, agentProfileId: run.chosenProvider?.agentProfileId,
+                                       cwd: project.path, resume: resume, attachments: payload)
         } else {
-          run.submit(prompt: draft, providerId: providerId, attachments: payload)
+          accepted = run.submit(prompt: draft, providerId: providerId, attachments: payload)
         }
-        draft = ""; attachments = []
+        if accepted { currentDraft.wrappedValue = .init() }
       }
       if runBusy {
-        Text("当前任务结束后才能继续发送。")
+        Text("可先写下一条消息；本轮结果同步完成后再发送。")
           .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
       } else if run.chosen == nil || run.chosenProvider == nil {
         Text("发送前请在“新任务”中选择项目与 Provider。")
@@ -245,7 +224,7 @@ struct ChatView: View {
   }
 }
 
-private struct RemoteQuestionSheet: View {
+struct RemoteQuestionSheet: View {
   let request: G0Transport.RunQuestionRequest
   let submitting: Bool
   let error: String?
@@ -334,7 +313,7 @@ private struct RemoteQuestionSheet: View {
       .navigationTitle("需要你的决定")
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
-          Button("取消运行", action: onCancel).disabled(submitting)
+          Button("取消请求", action: onCancel).disabled(submitting)
         }
         ToolbarItem(placement: .confirmationAction) {
           Button(submitting ? "提交中…" : "提交") { onAnswer(resolvedAnswers) }

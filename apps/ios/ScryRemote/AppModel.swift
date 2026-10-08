@@ -75,6 +75,32 @@ final class AppModel: ObservableObject {
   @Published var pairing: PairingUIState = .idle
   // The session currently opened for read-only transcript replay (nil = none).
   @Published var openedSession: OpenedSession?
+  // Drafts belong to a conversation, not to a disposable route view. They stay
+  // in memory only; attachments are never written to plaintext preferences.
+  enum DraftKey: Hashable {
+    case newTask
+    case conversation(RemoteRunStore.SessionIdentity)
+  }
+  struct ComposerDraft {
+    var text = ""
+    var attachments: [DraftAttachment] = []
+  }
+  @Published private var drafts: [DraftKey: ComposerDraft] = [:]
+  @Published private var draftAliases: [RemoteRunStore.SessionIdentity: RemoteRunStore.SessionIdentity] = [:]
+
+  func bindDraft(externalSessionId: String, to identity: RemoteRunStore.SessionIdentity) {
+    let external = RemoteRunStore.SessionIdentity.opened(providerId: identity.providerId,
+      cwd: identity.cwd, externalSessionId: externalSessionId)
+    draftAliases[external] = draftAliases[identity] ?? identity
+  }
+
+  func composerDraft(for key: DraftKey) -> Binding<ComposerDraft> {
+    let resolved: DraftKey
+    if case let .conversation(identity) = key {
+      resolved = .conversation(draftAliases[identity] ?? identity)
+    } else { resolved = key }
+    return Binding(get: { self.drafts[resolved] ?? ComposerDraft() }, set: { self.drafts[resolved] = $0 })
+  }
   @Published private(set) var destructiveActionError: String?
   private var pairingTask: Task<Void, Never>?
   private let connections = RemoteConnectionStore()
@@ -212,7 +238,12 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func setPairing(_ state: PairingUIState) { pairing = state }
+  private func setPairing(_ state: PairingUIState) {
+    pairing = state
+    if case .failed = state {
+      link = connectionHost.map { .offline(host: $0) } ?? .notPaired
+    }
+  }
   private func setPaired(deviceId: String, host: String, connection: RemoteConnection) {
     connections.save(connection)
     pairing = .paired(deviceId: deviceId)
@@ -246,7 +277,7 @@ final class AppModel: ObservableObject {
     pairingTask?.cancel()
     pairingTask = nil
     pairing = .idle
-    if case .pairing = link { link = .notPaired }
+    if case .pairing = link { link = connectionHost.map { .offline(host: $0) } ?? .notPaired }
   }
 
   var canGoBack: Bool { signedIn && route != .home }
@@ -280,7 +311,7 @@ final class AppModel: ObservableObject {
       runStore.clearAllState()
       pairingTask?.cancel(); pairingTask = nil
       pairing = .idle; auth = .signedOut; link = .notPaired; route = .home
-      query = ""; sessions = []
+      query = ""; sessions = []; drafts = [:]; draftAliases = [:]
     } catch {
       destructiveActionError = "无法清除本机配对凭据：\(error)。未报告为已清除，请重试。"
     }
