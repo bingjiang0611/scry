@@ -7,6 +7,35 @@ import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
 const noop = () => {}
+// Only the clock scenario replaces wall time/timers; React and browser frames stay real.
+const clockScenario = new URLSearchParams(location.search).get('mode') === 'clock'
+const clock = { now: Date.parse('2026-10-08T12:00:00Z'), turnReads: 0 }
+if (clockScenario) {
+  let nextId = 0
+  let visibility: DocumentVisibilityState = 'visible'
+  const timers = new Map<number, () => void>()
+  Date.now = () => clock.now
+  window.setInterval = (handler: TimerHandler) => {
+    if (typeof handler !== 'function') throw new Error('Expected a timer callback')
+    const id = ++nextId
+    timers.set(id, () => handler())
+    return id
+  }
+  window.clearInterval = (id) => { if (id != null) timers.delete(id) }
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+  Object.assign(window, { chatClock: {
+    get turnReads() { return clock.turnReads },
+    get timers() { return timers.size },
+    advance(ms: number) {
+      clock.now += ms
+      for (const callback of [...timers.values()]) callback()
+    },
+    visibility(value: DocumentVisibilityState) {
+      visibility = value
+      document.dispatchEvent(new Event('visibilitychange'))
+    }
+  } })
+}
 const initial: BackgroundWork = {
   providerId: 'qoder', phase: 'waiting', quiet: false, coverage: 'partial', taskStop: 'available', lastEventAt: Date.now(),
   tasks: ['a', 'b'].map((id) => ({ taskId: id, toolUseId: `call-${id}`, tool: 'Bash', description: `obsidian append · synthetic-${id} · ${'很长的任务描述/'.repeat(8)}`, observedAt: Date.now() - 60_000 }))
@@ -15,6 +44,7 @@ function Fixture() {
   const [work, setWork] = useState(initial)
   const [done, setDone] = useState(false)
   const [run, setRun] = useState('fixture-run')
+  const [startedAt, setStartedAt] = useState(() => new Date(Date.now()).toISOString())
   const [stops, setStops] = useState(0)
   const [wholeStops, setWholeStops] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -35,13 +65,14 @@ function Fixture() {
       <button id="terminal-a" onClick={() => setWork((work) => ({ ...work, tasks: work.tasks.filter((task) => task.taskId !== 'a') }))}>terminal a</button>
       <button id="resume" onClick={() => setWork((work) => ({ ...work, phase: 'working', quiet: false }))}>resume</button>
       <button id="done" onClick={() => setDone(true)}>done</button>
-      <button id="new-run" onClick={() => { setDone(false); setRun('fixture-next'); setWork(initial) }}>new run</button>
+      <button id="new-run" onClick={() => { setDone(false); setRun('fixture-next'); setStartedAt(new Date(Date.now()).toISOString()); setWork(initial) }}>new run</button>
+      {clockScenario && <button id="unknown-start" onClick={() => setStartedAt('unknown')}>unknown start</button>}
       <button id="unsupported" onClick={() => setWork((work) => ({ ...work, taskStop: 'unavailable' }))}>unsupported</button>
     </nav>
     <ChatView
-      turns={[{ runId: run, userText: '迁移笔记（隔离测试）', done, items: [
-        { id: 'reply', runId: run, ts: new Date().toISOString(), kind: 'model', stage: 'text', text: '迁入完成，等待后台日志任务。' },
-        { id: 'background', runId: run, ts: new Date().toISOString(), kind: 'harness', stage: 'runtime:background_work', backgroundWork: work }
+      turns={[{ runId: run, get userText() { clock.turnReads++; return '迁移笔记（隔离测试）' }, done, items: [
+        { id: 'reply', runId: run, ts: startedAt, kind: 'model', stage: 'text', text: '迁入完成，等待后台日志任务。' },
+        ...(!clockScenario ? [{ id: 'background', runId: run, ts: startedAt, kind: 'harness' as const, stage: 'runtime:background_work', backgroundWork: work }] : [])
       ] }]}
       selectedId={null} scrollRef={scrollRef} textareaRef={textareaRef}
       cwd="/synthetic/vault" recent={[]} agents={[]} selectedAgentId="qoder"

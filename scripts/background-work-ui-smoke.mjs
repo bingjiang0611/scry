@@ -80,6 +80,50 @@ async function exercise() {
   return { compactDisclosure: true, viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true }
 }
 
+async function exerciseClock() {
+  const check = (ok, message) => { if (!ok) throw new Error(`Chat clock: ${message}`) }
+  const wait = async (predicate) => {
+    const deadline = performance.now() + 5000
+    while (!predicate()) {
+      if (performance.now() > deadline) throw new Error(`Chat clock timed out: ${predicate}`)
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    }
+  }
+  const elapsed = () => document.querySelector('.run-status-elapsed')?.textContent
+  const clock = window.chatClock
+  await wait(() => elapsed() === '00:00' && clock.timers === 1)
+  const input = document.querySelector('textarea')
+  input.focus()
+  input.setSelectionRange(1, 3)
+  const reads = clock.turnReads
+  clock.advance(1000)
+  await wait(() => elapsed() === '00:01')
+  check(clock.turnReads === reads, `timer re-read transcript: ${reads} -> ${clock.turnReads}`)
+  check(document.activeElement === input && input.selectionStart === 1 && input.selectionEnd === 3, 'tick changed composer focus/selection')
+  clock.visibility('hidden')
+  check(clock.timers === 0, 'hidden page kept a clock timer')
+  clock.advance(60_000)
+  check(elapsed() === '00:01', 'hidden clock still refreshed')
+  clock.visibility('visible')
+  await wait(() => elapsed() === '01:01')
+  check(clock.timers === 1 && clock.turnReads === reads, 'visibility recovery restarted transcript work or duplicate timers')
+  document.querySelector('#new-run').click()
+  await wait(() => elapsed() === '00:00' && clock.timers === 1)
+  clock.advance(2000)
+  await wait(() => elapsed() === '00:02')
+  document.querySelector('#unknown-start').click()
+  await wait(() => !elapsed() && clock.timers === 0)
+  check(document.querySelector('.run-status'), 'missing timestamp hid the running status')
+  document.querySelector('#new-run').click()
+  await wait(() => elapsed() === '00:00' && clock.timers === 1)
+  document.querySelector('#done').click()
+  await wait(() => !document.querySelector('.run-status') && clock.timers === 0)
+  clock.visibility('hidden')
+  clock.visibility('visible')
+  check(clock.timers === 0, 'unmounted clock leaked a visibility listener')
+  return { transcriptReadsPerTick: 0, focusPreserved: true, hiddenPaused: true, wallTimeRecovery: true, runSwitch: true, unknownTimestamp: true, terminalCleanup: true }
+}
+
 async function exerciseRecovery(scenario) {
   const check = (ok, message) => { if (!ok) throw new Error(`${scenario}: ${message}`) }
   const tick = () => new Promise((resolve) => requestAnimationFrame(resolve))
@@ -177,7 +221,9 @@ try {
           await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode: 'recovery' } })
           recovery.push(await win.webContents.executeJavaScript('(' + ${JSON.stringify(exerciseRecovery.toString())} + ')(' + JSON.stringify(scenario) + ')'))
         }
-        console.log('SCRY_BACKGROUND_UI_RESULT=' + JSON.stringify({ wide, narrow, recovery }))
+        await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode: 'clock' } })
+        const clock = await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseClock.toString()})()`)})
+        console.log('SCRY_BACKGROUND_UI_RESULT=' + JSON.stringify({ wide, narrow, recovery, clock }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     })
