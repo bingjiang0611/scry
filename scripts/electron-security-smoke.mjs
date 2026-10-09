@@ -28,7 +28,11 @@ async function waitForTarget(port, timeoutMs = 30_000) {
   while (Date.now() < deadline) {
     try {
       const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
-      const page = targets.find((target) => target.type === 'page' && target.webSocketDebuggerUrl)
+      // A file: target is published before Electron finishes creating its sandbox/preload
+      // context. Do not enable Runtime/evaluate in that startup window. The static document
+      // title is parsed after preload initialization; missing/broken preload still fails the
+      // unchanged window.scry assertions below (both initial launch and cold restart).
+      const page = targets.find((target) => target.type === 'page' && target.webSocketDebuggerUrl && target.title === 'Scry')
       if (page) return { page, targets }
     } catch {
       // Electron may still be initializing.
