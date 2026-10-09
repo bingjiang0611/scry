@@ -1,7 +1,12 @@
 import type { AgentStopState } from '@shared/runtime'
+import type { TraceEvent } from '@shared/trace'
+
+export function providerHasEnded(items: readonly TraceEvent[]): boolean {
+  return items.some((event) => event.kind === 'harness' && event.stage === 'runtime:provider_ended')
+}
 
 export interface RunStopStatus {
-  tone: 'running' | 'stopping' | 'unsettled'
+  tone: 'running' | 'stopping' | 'unsettled' | 'finalizing'
   label: string
   hint: string
   /** Provider 已确认终止之前，这一轮不能显示成完成。 */
@@ -19,7 +24,13 @@ const RUNNING: RunStopStatus = {
  * 把 main 的停止阶段翻译成不夸大的 UI 文案：请求过停止不等于已经停下，
  * forceKill 也只是「已发出」；只有 Provider settle 才有终止证据。
  */
-export function runStopStatus(state: AgentStopState | undefined): RunStopStatus {
+export function runStopStatus(state: AgentStopState | undefined, providerEnded = false): RunStopStatus {
+  if (providerEnded) return {
+    tone: 'finalizing',
+    label: '记录收口中',
+    hint: 'Provider 已结束，正在保存文件差异与记录；新消息继续排队',
+    providerSettled: true
+  }
   if (!state) return RUNNING
   switch (state.phase) {
     case 'interrupt_requested':

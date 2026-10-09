@@ -85,6 +85,7 @@ import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopb
 import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
 import { verifyForkArchiveBoundary } from './session-fork'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
+import { LiveTraceIngestion } from './live-trace-ingestion'
 import { createTurnWallTimer } from './turn-wall-timing'
 import { PerformanceTrace } from './performance-timing'
 import { startPerformanceResourceMonitor, type PerformanceResourceMonitor } from './performance-resource-monitor'
@@ -2292,6 +2293,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const agentProfileId = request.agentProfileId
   const startPerf = new PerformanceTrace('agent.start', { provider: providerId })
   const firstTracePerf = new PerformanceTrace('agent.first_provider_trace', { provider: providerId })
+  const firstTextPerf = new PerformanceTrace('agent.first_text', { provider: providerId })
   const adapter = providerRegistry.get(providerId)
   const runtimeProvider = adapter.runtimeProvider
   if (isShuttingDown) {
@@ -2346,6 +2348,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // Wait before freezing trust/MCP environments as well as before spawning the
     // Provider. Otherwise a cold send can retain fallback even after capture succeeds.
     await Promise.all([startupManagedRecovery, shellEnvReady])
+    startPerf.mark('startup_recovery_ready')
     if (isShuttingDown) throw new AgentRuntimeError('Scry 正在退出，已取消待启动轮次', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -2463,6 +2466,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         ...(resume ? { sessionId: resume } : {})
       })
     : { recovered: 0, pending: 0, errors: [] }
+  startPerf.mark('trace_progress_recovery_ready', { recovered: traceProgressRecovery.recovered })
   if (traceProgressRecovery.pending > 0) {
     throw new AgentRuntimeError(`Scry trace 仍有 ${traceProgressRecovery.pending} 轮待恢复`, {
       provider: runtimeProvider,
@@ -2515,6 +2519,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // 否则会把一个待恢复 turn 报成三轮。这里只需要 fail closed。
     const pending = Math.max(progressRecovery.pending, journalRecovery.pending, recorderRecovery.pending)
     recoveredManagedTurns += progressRecovery.recovered + journalRecovery.recovered + recorderRecovery.recovered
+    startPerf.mark('managed_recording_recovery_ready', { recovered: recoveredManagedTurns })
     if (pending > 0) {
       throw new AgentRuntimeError(`Scry 精确记录仍有 ${pending} 轮待恢复`, {
         provider: runtimeProvider,
@@ -2545,6 +2550,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const mcpExecutionSnapshot = providerId === 'pi'
     ? null
     : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
+  startPerf.mark('execution_trust_ready')
   if (isShuttingDown) {
     throw new AgentRuntimeError('Scry 正在退出，已拒绝启动新一轮', {
       provider: runtimeProvider,
@@ -2731,7 +2737,19 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const ingestionEnablement = managedRecorderEnablement?.enabled ? managedRecorderEnablement : undefined
   const ingestionRecorderRoot = managedRecorderEnabled && ingestionEnablement?.config.capture.toolOutput === 'full'
     ? ingestionEnablement.dataRoot : undefined
-  let ingestionTail: Promise<void> = Promise.resolve()
+  const ingestion = new LiveTraceIngestion({
+    provider: providerId,
+    publish: (event) => { if (runs.isViewed(runId)) queueTrace(event) },
+    persist: async (event) => {
+      const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorderRoot)
+      return persisted
+    },
+    onPersisted: (event) => {
+      const index = runState.items.findIndex((item) => item.id === event.id)
+      if (index >= 0) runState.items[index] = event
+    },
+    onError: (error) => console.warn('[scry] trace content persistence failed; retaining raw evidence:', error)
+  })
   // 结构化 write/edit 的 start → tool_result 关联器：预览只跟着「已落盘」的结果走。
   const writeCompletions = new WriteCompletionTracker()
   const emit = (rawEvent: TraceEvent): void => {
@@ -2746,24 +2764,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     }
     const liveEvent = sanitizeToolEvents([ev], LIVE_TOOL_CONTENT_POLICY, 'live_renderer')[0]
     appendCoalescedTrace(runState.items, ev)
-    if (['tool', 'skill', 'agent'].includes(ev.kind)) {
-      ingestionTail = ingestionTail.then(async () => {
-        let projected = liveEvent
-        try {
-          const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [ev], ingestionRecorderRoot)
-          const index = runState.items.findIndex((item) => item.id === ev.id)
-          if (index >= 0) runState.items[index] = persisted
-          projected = persisted
-        } catch (error) {
-          // Observation fails open, but never discard the raw archive evidence on a disk error.
-          console.warn('[scry] trace content persistence failed; retaining raw evidence:', error)
-        }
-        if (runs.isFocused(runId)) queueTrace(projected)
-      })
-    } else {
-      // Preserve Provider event order while earlier tool bodies are being persisted.
-      ingestionTail = ingestionTail.then(() => { if (runs.isFocused(runId)) queueTrace(liveEvent) })
-    }
+    ingestion.enqueue(ev, liveEvent)
     if (ev.backgroundWork && rendererCanReceive()) win?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
@@ -3120,6 +3121,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (interrupted) return { stopped: true }
     observedProviderStartedAt = new Date().toISOString()
     firstTracePerf.mark('provider_launch')
+    firstTextPerf.mark('provider_launch')
     // Re-hash executable bytes at the actual Provider launch boundary, after all
     // attachment/recorder/diff preparation that may have yielded to the event loop.
     const mcpExecution = authorizedMcpExecution(mcpExecutionSnapshot)
@@ -3145,14 +3147,45 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       mcpExecution,
       emit: (event) => {
         firstTracePerf.finish({ bufferedEvents: runState.items.length })
+        if (event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta') &&
+          typeof event.text === 'string' && event.text.length > 0) {
+          // This is the first provider text event, not a renderer paint or a UI display time.
+          firstTextPerf.finish({ bufferedEvents: runState.items.length })
+        }
         emit(event)
       },
       onExternalSessionId: publishSessionId,
       requestUserInput: (question, signal) => userQuestionBroker.request({ ...question, providerId }, signal)
     })
     if (interrupted) h.interrupt()
-    const result = await h.promise
-    await ingestionTail
+    let result: Awaited<typeof h.promise>
+    try {
+      result = await h.promise
+    } catch (error) {
+      emit({
+        id: mainEventId('provider-ended', runId),
+        ts: new Date().toISOString(),
+        runId,
+        kind: 'harness',
+        stage: 'runtime:provider_ended',
+        providerId,
+        runtimeProvider,
+        runtimeMetadata: { status: 'failed' }
+      })
+      await ingestion.idle()
+      throw error
+    }
+    emit({
+      id: mainEventId('provider-ended', runId),
+      ts: new Date().toISOString(),
+      runId,
+      kind: 'harness',
+      stage: 'runtime:provider_ended',
+      providerId,
+      runtimeProvider,
+      runtimeMetadata: { status: result.status ?? (result.stopped ? 'interrupted' : 'completed') }
+    })
+    await ingestion.idle()
     if (result.status === 'failed') {
       const providerMessage = [...runState.items].reverse().find(
         (event) => event.kind === 'harness' && event.stage === 'result' && event.isError
@@ -3210,6 +3243,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     throw error
   }
   startPerf.mark('run_registered')
+  firstTextPerf.mark('run_registered')
   dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
   // `agent:start` can also be invoked through the preload bridge (for example by
   // the regression runner), so publish the authoritative focused snapshot after
@@ -3228,7 +3262,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       needsAttention
     })
   }
-  const runtimePromise = Promise.all([turnDiffCapture, sessionBaselineReady]).then(runProvider)
+  const runtimePromise = Promise.all([turnDiffCapture, sessionBaselineReady]).then(() => {
+    firstTextPerf.mark('git_baseline_ready')
+    return runProvider()
+  })
   runtimePromise
     .then(async (r) => {
       const terminalPerf = new PerformanceTrace('agent.terminal_finalize', { provider: providerId })
@@ -3256,7 +3293,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         observedTiming,
         commitHookEnv: managedCommitHookEnv,
         managedRecorderEnabled,
-        beforePersist: () => ingestionTail
+        beforePersist: () => ingestion.idle()
       }
       if (cwd) {
         try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
@@ -3287,6 +3324,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       void mirrorSessionTranscript(providerId, cwd, nativeSessionId)
       const alreadyDone = runState.done
       runState.done = true
+      await ingestion.liveIdle()
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
       const recordingPolicy = providerRecordingPolicy('completed', r.recordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
@@ -3440,7 +3478,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         observedTiming,
         commitHookEnv: managedCommitHookEnv,
         managedRecorderEnabled,
-        beforePersist: () => ingestionTail,
+        beforePersist: () => ingestion.idle(),
         ...(stopped ? {} : { error: message, errorHint: hint })
       }
       if (cwd) {
@@ -3505,6 +3543,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
       }
       void mirrorSessionTranscript(providerId, cwd, nativeSessionId)
+      await ingestion.liveIdle()
       const recordingPolicy = providerRecordingPolicy(stopped ? 'interrupted' : 'failed', providerRecordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
         const { message: recordingMessage, category } = recordingPolicy.rendererError
@@ -4188,11 +4227,13 @@ app.whenReady().then(() => {
     // Let the first window render before touching historical recovery trees.
     await new Promise((resolve) => setTimeout(resolve, 250))
     await replayDatabaseTurnOutbox()
+    startupPerf.mark('recovery_outbox_replayed')
     cleanupAppStoreAtomicTemps(app.getPath('userData'))
     cleanupUsageAtomicTemps(app.getPath('userData'))
     cleanupManagedTurnTemps(app.getPath('userData'))
     cleanupTraceTurnProgressTemps(app.getPath('userData'))
     await cleanupTraceArchiveTemps(app.getPath('userData'))
+    startupPerf.mark('recovery_temps_cleaned')
     try {
       const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'))
       if (traceProgress.pending > 0) console.warn('[scry] trace turn progress recovery pending:', traceProgress)
@@ -4206,6 +4247,7 @@ app.whenReady().then(() => {
     } catch (error) {
       console.warn('[scry] managed turn startup recovery failed:', error)
     }
+    startupPerf.mark('recovery_trace_and_managed_turns')
     try {
       const recorderCli = packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH
       const redelivery = await redeliverGrantedCommitHooksAtStartup(app.getPath('userData'), {
@@ -4221,6 +4263,7 @@ app.whenReady().then(() => {
     } catch (error) {
       console.warn('[scry] recorder commit hook startup redelivery failed:', error)
     }
+    startupPerf.mark('recovery_commit_hooks_complete')
     startupPerf.mark('recovery_complete')
     startupPerf.finish()
   })()

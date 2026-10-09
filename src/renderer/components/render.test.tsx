@@ -491,6 +491,26 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('停止')
   })
 
+  it('Provider 结束后仍保持 busy 与排队，只展示记录收口而非生成或完成', () => {
+    const closing: Turn = {
+      ...runningTurn,
+      items: [...runningTurn.items, {
+        id: 'provider-ended', runId: runningTurn.runId, ts: '', kind: 'harness', stage: 'runtime:provider_ended'
+      }]
+    }
+    const html = renderWelcome({ turns: [closing], busy: true, input: '下一条' })
+    expect(html).toContain('记录收口中')
+    expect(html).toContain('Provider 已结束，正在保存文件差异与记录；新消息继续排队')
+    expect(html).toContain('加入队列')
+    expect(html).toContain('data-stop-tone="finalizing"')
+    expect(html).toMatch(/class="stop run-status-stop" disabled=""/)
+    expect(html).not.toContain('md streaming')
+    expect(html).not.toContain('class="skeleton"')
+    expect(closing.done).toBe(false)
+    const completed = renderWelcome({ turns: [{ ...closing, done: true }], busy: false })
+    expect(completed).not.toContain('记录收口中')
+  })
+
   it('停止阶段照实描述请求进度，不宣布这一轮已终止', () => {
     const stopping = renderWelcome({
       turns: [runningTurn],

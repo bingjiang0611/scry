@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { composerDraftKey, readComposerDrafts, updateComposerDraft, writeComposerDrafts, type ComposerDraft } from './composer-drafts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { COMPOSER_DRAFT_SAVE_INTERVAL_MS, composerDraftKey, createComposerDraftStore, persistComposerDraftStore, readComposerDrafts, updateComposerDraft, writeComposerDrafts, type ComposerDraft } from './composer-drafts'
+import { migrateSessionComposerDraft, updateSessionComposerDraft } from './App'
+
+afterEach(() => vi.useRealTimers())
 
 class MemoryStorage {
   value: string | null = null
@@ -19,6 +22,48 @@ const attachment = (name: string) => ({
 })
 
 describe('composer drafts', () => {
+  it('publishes synchronous text without changing attachment identity and migrates the latest draft', () => {
+    const attachments = [attachment('kept.png')]
+    const store = createComposerDraftStore(new Map([['new', { input: '', attachments }]]))
+    const listener = vi.fn()
+    const unsubscribe = store.subscribe(listener)
+    store.update((drafts) => updateSessionComposerDraft(drafts, 'new', (draft) => ({ ...draft, input: '最后一个字' })))
+    expect(store.getSnapshot().get('new')).toEqual({ input: '最后一个字', attachments })
+    expect(store.getSnapshot().get('new')?.attachments).toBe(attachments)
+    store.update((drafts) => migrateSessionComposerDraft(drafts, 'new', 'session'))
+    expect(store.getSnapshot().has('new')).toBe(false)
+    expect(store.getSnapshot().get('session')?.input).toBe('最后一个字')
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
+    store.update(() => new Map())
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces saves without postponing them indefinitely and flushes latest state on teardown', () => {
+    vi.useFakeTimers()
+    const store = createComposerDraftStore(new Map())
+    const save = vi.fn()
+    const persistence = persistComposerDraftStore(store, save)
+    for (let index = 0; index < 5; index++) {
+      store.update((drafts) => updateSessionComposerDraft(drafts, 'one', () => ({ input: String(index), attachments: [] })))
+      vi.advanceTimersByTime(COMPOSER_DRAFT_SAVE_INTERVAL_MS / 5)
+    }
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0][0].get('one')?.input).toBe('4')
+    store.update((drafts) => updateSessionComposerDraft(drafts, 'two', () => ({ input: 'another session', attachments: [] })))
+    persistence.flush() // pagehide/visibilitychange uses this same flush
+    expect(save).toHaveBeenCalledTimes(2)
+    store.update((drafts) => updateSessionComposerDraft(drafts, 'one', () => ({ input: 'last', attachments: [] })))
+    persistence.dispose()
+    expect(save).toHaveBeenCalledTimes(3)
+    expect(save.mock.calls[2][0].get('one')?.input).toBe('last')
+    expect(save.mock.calls[2][0].get('two')?.input).toBe('another session')
+    expect(vi.getTimerCount()).toBe(0)
+    store.update(() => new Map())
+    vi.runAllTimers()
+    expect(save).toHaveBeenCalledTimes(3)
+  })
+
   it('keys drafts by provider, profile, workspace and session', () => {
     expect(composerDraftKey({ providerId: 'codex', cwd: '/a', sessionId: 'one' }))
       .not.toBe(composerDraftKey({ providerId: 'codex', cwd: '/a', sessionId: 'two' }))

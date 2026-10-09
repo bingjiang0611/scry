@@ -1283,14 +1283,18 @@ async function runPiAgent(
       await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
     }
     if (request.effort) await rpc.send({ type: 'set_thinking_level', level: request.effort })
-    try {
-      const available = record((await rpc.send({ type: 'get_available_models' })).data).models
+    // Model-window telemetry is optional. Do not put its native catalog latency in front of
+    // entry baseline, recorder identity, or the prompt; the response can enrich context usage
+    // while the turn is already running. The rejection is handled here so a delayed/failed
+    // capability query cannot become an unhandled promise or change the run outcome.
+    void rpc.send({ type: 'get_available_models' }).then((response) => {
+      const available = record(response.data).models
       if (Array.isArray(available)) {
         for (const [key, value] of piModelContextWindows(available.map(record))) modelContextWindows.set(key, value)
       }
-    } catch {
+    }).catch(() => {
       // Model-window telemetry is optional; usage remains available without Context%.
-    }
+    })
     const explicitSkillEvent = await proveExplicitPiSkill(rpc, request)
     extensionCommand = await piExtensionCommand(rpc, request.prompt)
     const entryBaseline = await piEntryBaseline(rpc)

@@ -172,8 +172,11 @@ async function exerciseNativeComposerEnter(contents) {
     }
   }
   await wait(`document.activeElement === document.querySelector('#composer-project textarea')`)
+  const rendersBeforeTyping = await read(`document.querySelector('#composer-project').dataset.renders`)
   await contents.insertText('Native Enter regression')
   await wait(`document.querySelector('#composer-project textarea').value === 'Native Enter regression'`)
+  const rendersAfterTyping = await read(`document.querySelector('#composer-project').dataset.renders`)
+  if (rendersAfterTyping !== rendersBeforeTyping) throw new Error('Typing rerendered the conversation host')
   // Composition is simulated; the following key release and send are native Chromium input.
   await read(`(() => {
     const input = document.querySelector('#composer-project textarea');
@@ -184,7 +187,10 @@ async function exerciseNativeComposerEnter(contents) {
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
   await wait(`document.querySelector('#composer-project textarea').dataset.sends === '3' && document.querySelector('#composer-project textarea').value === ''`)
-  return true
+  if (!await read(`document.querySelector('#composer-project textarea').dataset.submitted === 'Native Enter regression'`)) {
+    throw new Error('Immediate Enter submitted a stale draft')
+  }
+  return { hostRendersWhileTyping: 0, latestDraftSubmitted: true }
 }
 
 try {
