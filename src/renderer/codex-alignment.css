@@ -2407,8 +2407,8 @@ button.pinned-summary-detail-row:hover {
 /* Overview: editorial session verdict, independent KPI tiles and evidence rows. */
 
 .overview-dossier .ov-topbar {
-  min-height: 68px;
-  padding: 14px 16px;
+  min-height: 44px;
+  padding: 0;
 }
 
 .overview-panel-title strong {
@@ -2423,7 +2423,7 @@ button.pinned-summary-detail-row:hover {
 }
 
 .overview-dossier .ov-scroll {
-  padding: 18px 14px 28px;
+  padding: 8px 0 16px;
 }
 
 .overview-session-hero {
@@ -2463,7 +2463,7 @@ button.pinned-summary-detail-row:hover {
 
 .overview-metric-grid {
   gap: 6px;
-  padding: 6px 10px 10px;
+  padding: 0;
   border: 0;
   background: transparent;
 }
@@ -2487,7 +2487,7 @@ button.pinned-summary-detail-row:hover {
 }
 
 .overview-metric > strong {
-  margin-block: 6px 3px;
+  margin-block: 4px 0;
   font-size: 22px;
   font-weight: 610;
   line-height: 1;
@@ -2499,12 +2499,12 @@ button.pinned-summary-detail-row:hover {
   border-top: 1px solid var(--border3);
 }
 
-.overview-data-tabs {
-  margin-top: 18px;
-  padding: 4px;
-  border: 1px solid var(--border3);
+.overview-dossier .overview-data-tabs {
+  margin: 8px 12px 0;
+  padding: 0;
+  border: 0;
   border-radius: 12px;
-  background: var(--surface-faint);
+  background: transparent;
 }
 
 .overview-data-tabs button {
@@ -2522,11 +2522,17 @@ button.pinned-summary-detail-row:hover {
 }
 
 .overview-dossier .panel-section {
-  padding-top: 18px;
+  padding-top: 0;
+}
+
+.overview-dossier .panel-section .filerow {
+  min-height: 28px;
+  padding-block: 4px;
 }
 
 .overview-dossier .panel-section > h4 {
-  margin-bottom: 12px;
+  min-height: 24px;
+  margin-bottom: 4px;
   color: var(--dim2);
   font-size: 10px;
   font-weight: 680;

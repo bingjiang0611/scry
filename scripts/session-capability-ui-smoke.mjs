@@ -12,7 +12,8 @@ const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
 const modelsOnly = process.argv.includes('--models-only')
 const terminalsOnly = process.argv.includes('--terminals-only')
-const fixtures = terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal']
+const overviewOnly = process.argv.includes('--overview-only')
+const fixtures = overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -692,6 +693,61 @@ async function exerciseSessionModels(contents) {
   return { models: actual.map((request) => request.model.id), newDefault: 'model-2', effortIsolated: true, nativeCapture: true, backgroundTerminalCapture: true, queuedContinuation: true, persisted: true, legacyArchiveRestored: true }
 }
 
+async function exerciseOverviewDensity(contents, screenshotPath) {
+  const css = await contents.insertCSS(`
+    body > #root > :not(#overview) { display: none !important; }
+    #overview { position: fixed; inset: 0; width: 380px; }
+    #overview > .overview-dossier { width: 100%; height: 100%; }
+  `)
+  const results = []
+  try {
+    for (const theme of ['dark', 'light']) for (const width of [380, 340, 535]) {
+      await contents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}; document.querySelector('#overview').style.width = '${width}px'`)
+      const geometry = await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const rect = selector => document.querySelector(selector).getBoundingClientRect();
+        const header = rect('.ov-topbar'), context = rect('.ctx-gauge'), metrics = rect('.overview-metric-grid');
+        const session = rect('.overview-scroll-content > .panel-section'), tabs = rect('.overview-data-tabs');
+        const firstTurn = rect('.turn-call-row');
+        resolve({ headerHeight: header.height, contextGap: context.top - header.bottom,
+          sessionGap: session.top - metrics.bottom, tabsGap: tabs.top - session.bottom,
+          firstTurnTop: firstTurn.top, overflow: document.querySelector('.ov-scroll').scrollWidth > ${width},
+          columns: getComputedStyle(document.querySelector('.overview-metric-grid')).gridTemplateColumns.split(' ').length });
+      })))`)
+      if (screenshotPath && theme === 'dark' && width === 380) {
+        const image = await contents.capturePage({ x: 0, y: 0, width, height: 650 })
+        require('node:fs').writeFileSync(screenshotPath, image.toPNG())
+      }
+      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2) {
+        throw new Error('Overview density ' + theme + '/' + width + ': ' + JSON.stringify(geometry))
+      }
+      results.push({ theme, width, ...geometry })
+    }
+    contents.focus()
+    const point = await contents.executeJavaScript(`(() => {
+      const node = document.querySelector('#overview-session-tab'), r = node.getBoundingClientRect();
+      const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Overview tab obscured');
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+    await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    if (!await contents.executeJavaScript(`document.querySelector('#overview-session-tab').getAttribute('aria-selected') === 'true' && !document.querySelector('#overview-session-panel').hidden && document.querySelector('#overview-turns-panel').hidden`)) {
+      throw new Error('Overview native tab click did not select session data')
+    }
+    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab', modifiers: ['shift'] })
+    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] })
+    await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    if (!await contents.executeJavaScript(`document.activeElement.id === 'overview-turns-tab'`)) throw new Error('Overview keyboard focus did not reach turns tab')
+    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+    contents.sendInputEvent({ type: 'char', keyCode: '\r' })
+    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+    await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    if (!await contents.executeJavaScript(`document.activeElement.id === 'overview-turns-tab' && !document.querySelector('#overview-turns-panel').hidden`)) throw new Error('Overview keyboard tab return failed')
+    return results
+  } finally { await contents.removeInsertedCSS(css) }
+}
+
 async function exercisePiPermission(contents, scenario) {
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression) => {
@@ -784,27 +840,32 @@ try {
         let result = {}, piCommands = {}
         if (!${selectionOnly || modelsOnly || terminalsOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
-          if (!${piCommandsOnly}) result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
-          piCommands = await (${exercisePiCommands.toString()})(win.webContents)
+          if (!${piCommandsOnly || overviewOnly}) result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+          if (!${overviewOnly}) piCommands = await (${exercisePiCommands.toString()})(win.webContents)
+          if (!${piCommandsOnly}) {
+            await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
+            win.setSize(1000, 700)
+            result.overviewDensity = await (${exerciseOverviewDensity.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_OVERVIEW_UI_SCREENSHOT ?? '')})
+          }
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
         const piPermissions = []
-        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['fresh', 'saved'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['fresh', 'saved'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pi-permission.html'))}, { query: { scenario } })
           piPermissions.push(await (${exercisePiPermission.toString()})(win.webContents, scenario))
         }
         let sessionModels = null
-        if (${!selectionOnly && !piCommandsOnly && !terminalsOnly}) {
+        if (${!overviewOnly && !selectionOnly && !piCommandsOnly && !terminalsOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-model.html'))})
           sessionModels = await (${exerciseSessionModels.toString()})(win.webContents)
         }
         const sessionTerminals = []
-        for (const scenario of ${JSON.stringify(selectionOnly || piCommandsOnly || modelsOnly ? [] : ['restored', 'pending'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly ? [] : ['restored', 'pending'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
           sessionTerminals.push(await (${exerciseSessionTerminals.toString()})(win.webContents, scenario))
         }

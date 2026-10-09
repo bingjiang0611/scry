@@ -54,3 +54,14 @@ SQLite 与 archive 都不保存 Provider 当前运行态、MCP 认证、配置�
 ## 生产实现边界
 
 该原型没有改动 `src/`，`live-server.mjs` 只用于本机设计验收，不是新的生产数据通道。迁移到产品时应复用现有 preload / IPC 和 Provider adapter，并保持本稿已经验证的语义：SQLite 是账本、archive 是 transcript 补充、unknown 不等于 0、unsupported 不等于 safe、历史调用不等于当前连接。
+
+## D-20261009-scry-overview-density · 总览间距修复
+
+- Scope / status：Scry 总览；用户需求 confirmed，生产改动待用户视觉验收，不升级为全局密度偏好。
+- Feedback：2026-10-09 当前用户截图与“优化下这块ui 空白太多了”；原始路径是总览 → 上下文/指标 → 会话 → 轮次数据。
+- Rule / reason：紧凑侧栏避免标题、滚动区、卡片、分组的 padding/margin 累加；优先消除重复内缩，不缩小字体、不隐藏证据。复用现有 `OverviewPanel`、2×2 指标卡、主题 tokens；未创建新组件或数据通道。
+- Applied：`src/renderer/codex-alignment.css` 的总览样式：标题栏实测 72→44px，滚动区横向内缩归子分组所有，卡片移除重复内边距，分组标题和会话行收紧，数据 tabs 上间距 16→8px。保持 unknown/partial 文案、数值等宽字形与原生按钮焦点路径。依据为本次渲染对比和项目密度合同；不是 Craft 的统一间距规则。
+- Evidence：同一隔离 Electron fixture 的 380px 深色截图，首条轮次卡从约 604px 上移至 442px（截图暂存 `/tmp/scry-overview-before.png`、`/tmp/scry-overview-after.png`，不是永久资产）。深浅主题 × 340/380/535px，无横向溢出；鼠标切换会话数据、Shift+Tab/Enter 返回轮次数据通过。新增 `--overview-only` focused 入口，默认 UI gate 同时覆盖。
+- Regression：修改前新增检查在旧样式上因 72px 标题栏、22px 上下文空隙失败。新增 fixture 首次执行有插值变量错误；键盘模拟随后补齐原生 char 事件。卡片高度随内容变化，验收锚点使用首条卡片顶部而非底部；窄幅换行实测 450.1px，顶部上限 460px 仅适用于该 fixture，不限制真实长文案。
+- Checks：`render.test.tsx` 231 项、typecheck、build、完整 `test:renderer:ui`（含 Credits）通过。未安装/替换运行中的 `/Applications/Scry.app`，未在原截图的真实 Provider 会话重放；组件渲染不等于完整 App 验收。
+- Next use：总览首屏只能看见摘要、轮次掉到屏外 → 检查实际 CSS 加载顺序与复合间距 → 在相同 fixture 上比较卡片起点，保留原字体、未知状态与鼠标/键盘操作。
