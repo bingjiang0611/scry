@@ -155,6 +155,19 @@ These are scoped observations, not full-App latency or memory-leak evidence. No 
 - Retained environment failures: npm 12.2.0 changed `pack --json` from an array to an object, so the existing tarball smoke failed before switching to npm 10. Node 22's full CLI suite twice timed out on the pre-existing 5 s EPIPE fixture under contention; its focused rerun passed in about 2.2 s. This does not establish a passing full Node 22 gate. No timeout, assertion, or production CLI behavior was changed.
 - The new summary fixture initially waited for an anchor, but web references are static spans; its selector/readiness check was corrected. The final regression fails the old summary and passes the sampled summary. Component sampling evidence is separate from packaged full-App smoke and does not claim real-Provider performance acceptance.
 
+### Installed artifact
+
+Parallel main-process edits appeared during packaging, so final delivery was rebuilt from clean detached commit `75b58a9`, with an independent copy of dependencies. That snapshot passed typecheck, the full 2,446-test unit/shell run, renderer UI, and the 563-test CLI release gate on Node 24.18.0 / npm 10.9.4.
+
+The isolated package's first combined command reached Electron smoke but exceeded the harness's 360 s deadline. No owned App process remained afterward. A diagnostic copy adding only CDP progress logging passed, followed by the original unmodified packaged checks/smoke on the same artifact. The first timeout's cause remains unknown; it is not erased by the later passes. Executable and ASAR hashes were unchanged across final checks.
+
+The repository's atomic installer installed this locally development-signed, non-notarized 0.2.161 artifact at `/Applications/Scry.app`, preserving `/Applications/.Scry.app.backup`. Installed bytes matched the verified artifact:
+
+- `Contents/MacOS/Scry`: `fd406b3958346fbe4b0319723241662b2bcaf2896ce7b3f83e4199c083b8de48`
+- `Contents/Resources/app.asar`: `b8a2d0ae07abe8f48a94259789de6c2af85cd2d5091afe16da5a20e07fcf8388`
+
+The pre-existing Scry process was not restarted; the new code takes effect on its next launch. This installation does not establish live multi-Provider performance after restart.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:
