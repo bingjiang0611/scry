@@ -49,7 +49,6 @@ import {
   cleanupAppStoreAtomicTemps,
   createAppSessionStore,
   createProjectStore,
-  createReadOnlyRootsStore,
   createRecentFoldersStore,
   isSessionProviderId,
   mergeProjectMetas,
@@ -379,18 +378,7 @@ async function getTerminalManager(): Promise<TerminalManager> {
 }
 
 const homeDir = homedir()
-const readOnlyRootsStore = () => createReadOnlyRootsStore(app.getPath('userData'))
-const homeFileAccess = new HomeFileAccess(homeDir, readOnlyRootsStore(), async ({ target, suggestedRoot }) => {
-  if (!win || win.isDestroyed()) return null
-  const result = await dialog.showOpenDialog(win, {
-    title: '授权只读目录',
-    message: `选择包含该文件的目录：${target}`,
-    buttonLabel: '授权并打开',
-    defaultPath: suggestedRoot,
-    properties: ['openDirectory']
-  })
-  return result.canceled ? null : result.filePaths[0] ?? null
-})
+const homeFileAccess = new HomeFileAccess(homeDir)
 const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
 const projectStore = () => createProjectStore(app.getPath('userData'))
 const rememberProject = (cwd: string): void => {
