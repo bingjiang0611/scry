@@ -69,3 +69,12 @@
 - 终态邻接：只读安装包 `app.asar` 确认其 loadSession 尚未包含上轮 terminal barrier。本轮为已有 `readSessionHistoryAfterCompletedRuns` 补无 prior archive 的临时目录场景：首次归档尚未发布时不提前读成 null，待 settled 后得到最新轮。未修改 main handler 或并行 archive WIP，不以此声称截图必定来自终态 race。
 - 验证：Node 24 / macOS arm64 当前组合工作区，295 个 focused 测试、完整 renderer UI（10 个 selection 场景及 Credits / preview / background）、typecheck、build、diff-check 通过。首次新增 unit 漏导入 `vi` 导致两条测试失败及 typecheck 报错，补导入后完整受影响检查通过；没有删断言、skip 或增大超时。保存 `/private/tmp/scry-stale-live-before.log`、`/private/tmp/scry-stale-live-ui-full.log`。
 - Acceptance / next use：这是隔离 Electron 的生产 renderer/模拟 bridge 验证，不是已安装 App / 真实 Pi 的端到端证明。未升级、未重启现有任务、未调用真实 Provider。升级后复放 首次选择后台会话 → 尚无 archive 时 live 内容可读；终态归档中保持 loading，不能成功交付假空历史。若仍复现，记录同一身份的实际 registry/归档时间和 selection sequence，再定位，不添加盲目重试。
+
+## 安装交付 · 0.2.155
+
+- 用户明确要求安装；冻结 `afabff7` 加根 App version-only 补丁，隔离 worktree 复制独立 dependencies。包含 `a71084e`（终态归档等待）、`b0ab633`（新会话草稿恢复）、`95eafdd`（首击权威 live 查询）。私有 CLI 仍为 `0.2.47`；构建不混入后续 iOS/remote WIP。
+- 完整 Node 22 gate：2422 tests passed / 3 skipped，shell、typecheck、build / build:cli 通过。CLI release checks 在 Node 20.20.2 / 22.22.2 / 24.18.0 各 563 通过，clean tarball smoke 通过；完整 renderer UI（含 10 个 selection 场景及 Credits）、packaged resource/security smoke 通过，隔离真实 App 的两轮 archive reopen / terminal recording 验证通过，未运行真实 Provider 探针。
+- 首次失败保留：隔离目录先将 SQLite 重建为 Node ABI 127，复制的 `.forge-meta` 仍声明 Electron，自动 rebuild 跳过，导致 Credits 和首次包内 stats smoke 不可用。标准 `electron-rebuild --force --only better-sqlite3 --version 42.10.1 --arch arm64` 重建为 Electron ABI 146，重打包后原检查通过，无源码/断言变化。宿主旧 Node 20.17.0 有 1 条 OpenCode ESM plugin `node --check` fixture 失败（562/563）；按 CI 的当前 Node 20.20.2 重验全套 563/563，不声称旧环境通过。
+- `scripts/install-macos.mjs` 按开发安装流程原子替换 `/Applications/Scry.app`，备份 `/Applications/.Scry.app.backup`。源包与安装后 bundle 的 strict/deep signature 有效（Apple Development，本机开发签名，非 Developer ID 公证发行包）；App `0.2.155`、私有 CLI `0.2.47` 已读回，源/目标 `app.asar` SHA-256 同为 `1d8794e590fe5d5281f783c219ce5b04eaf02a89370437775a8dacb9f7cd9c4b`。
+- 原 App PID 53922（2026-10-08 22:20 启动）仍存活，没有退出、重载或重启用户任务；磁盘安装不等于当前进程已更新。等待任务结束后完全退出再打开，激活一致的 main/preload/renderer；原 Pi 截图操作仍待新版本用户验收。
+- Evidence：`/private/tmp/scry-install-0.2.155-{gates,pack,artifact-final,install}.log`、`/private/tmp/scry-install-0.2.155-cli-node{20,20-current,24}.log`。首次环境失败与最终成功分别保留；仅提交版本与交付记录，不推送。
