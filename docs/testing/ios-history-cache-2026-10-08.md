@@ -158,3 +158,13 @@ WDA 本轮启动成功。无 mock 参数普通启动、进入已有 DEBUG 本地
 - 以上证明编译、隔离 fixture 和可安装产物检查，**不证明真实手机首屏或毫秒级性能**。Mac 已原子覆盖安装 0.2.157，Info/version、签名与 app.asar 对照通过，保留上一版 backup；当前助手依附的运行进程尚未重启，不将磁盘版本当作活动 runtime 证据。手机最初 CoreDevice `unavailable`，用户连接 USB 并解锁后恢复 available (paired)，已覆盖安装 **0.1.4 (5)**；安装回执与应用 inventory 匹配，真机历史 **46 PASS / 0 FAIL / 0 SKIP**、原自测 **36 PASS / 0 FAIL / 0 SKIP**，随后恢复无测试参数的正常启动。没有卸载、清除真实缓存、重新配对或发送 Provider 消息。该结果仍不是首屏性能或真实全文阅读交互验收。
 - 完整旧 archive/index rebuild 仍可能 materialize legacy 正文，单个超大 turn 的序列化也没有恒定耗时保证。若真实只读验收仍慢，按 source/read-mode 与首可读/首全页/完整 SHA 分段定位，再考虑专用 bounded 索引或 worker；不靠重试、隐藏错误或放宽完整性校验掩盖。
 - 版本匹配后由用户验收：首次打开同一会话、暖重开、进程重启、阅读全文、较早内容和相邻会话切换。配对、已有缓存、未决 run 和草稿不得通过卸载/清空绕过。未发送真实 Provider 消息、审批或付费操作。
+
+## 0.1.5 (6)：真实 unknown_op 与旧 Mac runtime
+
+用户再次反馈点击会话慢并显示“暂时无法读取会话”。认证只读 `-sessionReadProbe` 对此前明确指定的 Pi 会话返回 **`RunError.host(code: "unknown_op")`**，不是猜测网络不通；读取成功/首屏耗时未取得。Mac 安装目录虽为 0.2.157，实际进程仍从 2026-10-08 22:20 运行，尚未重启加载新协议。此前仅覆盖安装、未验证活动 runtime 是交付缺口。
+
+手机另有真实错误处理问题：preview 的协议/传输错误被吞掉，随后仍在同一 tunnel 发完整分页请求，第一错误被后续断线覆盖。现改为保留首因并结束 transfer；明确的 `status: unavailable` 仍可继续完整历史读取，缓存/小镜像和 generation/connection fence 不变。`unknown_op` 是已认证主机回复，不当作离线；错误正文直接给出“更新并完全退出后重新打开 Mac”的操作，同时保留原始错误码。没有新增自动重试、协议猜测或权限降级。
+
+新增实际 failure projection 回归三项：镜像保留、协议错误不标离线、可操作提示。旧投影先有后两项 FAIL；修复后通过。Simulator **48 PASS /0 FAIL /1 Protection SKIP**、原自测 **31 PASS /0 FAIL /1 Keychain SKIP**；Swift transport **11 PASS**。签名 iphoneos 构建通过，覆盖安装 **0.1.5 (6)** 后 inventory 确认，真机历史 **49 PASS /0 FAIL /0 SKIP**、原自测 **36 PASS /0 FAIL /0 SKIP**，恢复正常启动。没有清除真实缓存或重新配对。
+
+本次仅改 Swift store/error 展示与 iOS 版本，Node/主机源码及已安装 0.2.157 未改，未重跑前段 Node 全量/pack gate；前段 coverage 失败仍保留。没有可用 mobile-mcp/WDA 控制通路，未证明新错误文本的真机点击/焦点效果，更未证明正常正文恢复或毫秒级。下一步必须让 Mac **真正退出并重新打开**（不是只关窗口），再对同一会话执行认证只读 probe 与实际点击验收。当前助手依附该 Mac 进程，不通过 detached helper 规避生命周期退出。

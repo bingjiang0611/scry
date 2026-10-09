@@ -625,11 +625,7 @@ final class RemoteRunStore: ObservableObject {
       }
       @MainActor func failed(_ error: Error) {
         guard current() else { return }
-        self.reachable = false
-        self.historyRefreshError = Self.describe(error)
-        if cached == nil, case .available = self.historyPreview {
-          self.history = .partial(self.historyPreviewTurns)
-        } else if cached == nil { self.history = .failed(Self.describe(error)) }
+        self.showHistoryFailure(error, cached: cached)
       }
       do {
         #if DEBUG
@@ -658,6 +654,9 @@ final class RemoteRunStore: ObservableObject {
             if current(), case .available = self.historyPreview {} else if current() {
               self.historyPreview = .unavailable(Self.describe(error))
             }
+            // A protocol/transport failure is not an unavailable-evidence reply.
+            // Preserve the first cause; do not issue pages on a failed tunnel.
+            throw error
           }
           guard current() else { return }
           let started = Date()
@@ -693,6 +692,17 @@ final class RemoteRunStore: ObservableObject {
         }
       } catch { failed(error) }
     }
+  }
+
+  private func showHistoryFailure(_ error: Error, cached: RemoteHistorySnapshot?) {
+    if let runError = error as? G0Transport.RunError, case .host(code: "unknown_op") = runError {
+      // An authenticated host replied: this is protocol mismatch, not offline.
+      reachable = true
+    } else { reachable = false }
+    historyRefreshError = Self.describe(error)
+    if cached == nil, case .available = historyPreview {
+      history = .partial(historyPreviewTurns)
+    } else if cached == nil { history = .failed(Self.describe(error)) }
   }
 
   private func applyHistoryPreview(_ turns: [G0Transport.RunHistoryTurn], request: Int,
@@ -1687,6 +1697,10 @@ final class RemoteRunStore: ObservableObject {
     let overwritten = try await disk.writePreview(unavailable, key: previewKey, epoch: await disk.epoch)
     let preservedPreview = try await disk.readPreview(previewKey)
     checks.append(("store.unavailableCannotEraseMirror", !overwritten && preservedPreview == preview))
+    mirrorStore.showHistoryFailure(G0Transport.RunError.host(code: "unknown_op"), cached: nil)
+    checks.append(("store.protocolFailureKeepsMirror", mirrorStore.history == .partial(mirrorStore.historyPreviewTurns) && mirrorStore.historyFromCache))
+    checks.append(("store.protocolFailureNotOffline", mirrorStore.reachable == true))
+    checks.append(("store.protocolFailureActionable", mirrorStore.historyRefreshError?.contains("重新打开") == true))
     let reopened = RemoteRunStore(connections: connections, historyDisk: disk)
     reopened.historyTestOffline = true
     reopened.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "preview-only")
@@ -1950,6 +1964,9 @@ final class RemoteRunStore: ObservableObject {
 
   private static func describe(_ error: Error) -> String {
     if let runError = error as? G0Transport.RunError, case let .host(code) = runError {
+      if code == "unknown_op" {
+        return "Mac 端不支持当前读取协议（unknown_op）。请更新 Scry，并完全退出后重新打开 Mac 端；仅覆盖安装不会更新正在运行的进程。"
+      }
       return code
     }
     return "\(error)"
