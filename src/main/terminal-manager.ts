@@ -180,6 +180,9 @@ export class TerminalManager {
       throw new Error('终端 cwd 无效')
     }
     assertDimensions(request.cols, request.rows)
+    if (request.scopeId !== undefined && (typeof request.scopeId !== 'string' || !request.scopeId || request.scopeId.length > 128)) {
+      throw new Error('终端会话标识无效')
+    }
     const boundCwd = this.getCurrentCwd()
     if ((request.cwd === null) !== !boundCwd) throw new Error('终端工作上下文已变化，请重试')
     const currentCwd = boundCwd
@@ -208,7 +211,8 @@ export class TerminalManager {
       cwd,
       env: { ...this.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
     })
-    const info: TerminalSessionDescriptor = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows }
+    const info: TerminalSessionDescriptor = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows,
+      ...(request.scopeId === undefined ? {} : { scopeId: request.scopeId }) }
     const session: ManagedTerminal = { id, pty, closing: false, destroyed: false, pauseReasons: new Set(), info }
     this.sessions.set(id, session)
     if (this.recordings) {
@@ -234,7 +238,7 @@ export class TerminalManager {
       if (this.sessions.get(id) !== session) dispose(session.dataSubscription)
 
       session.exitSubscription = pty.onExit(({ exitCode, signal }) => {
-        this.finish(session, exitCode ?? null, signal ?? null)
+        this.finish(session, exitCode ?? null, signal || null)
       })
       if (this.sessions.get(id) !== session) dispose(session.exitSubscription)
     } catch (error) {

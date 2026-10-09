@@ -8,6 +8,8 @@ export interface RightSurfacePanelProps {
   openIds: readonly RightSurfaceKind[]
   activeId: RightSurfaceKind | null
   contents: RightSurfaceContents
+  retainTerminal?: boolean
+  workbenchPicker?: ReactNode
   maximized: boolean
   onOpen: (kind: RightSurfaceKind) => void
   onActivate: (kind: RightSurfaceKind) => void
@@ -31,6 +33,8 @@ export function RightSurfacePanel({
   openIds,
   activeId,
   contents,
+  retainTerminal = false,
+  workbenchPicker,
   maximized,
   onOpen,
   onActivate,
@@ -52,6 +56,8 @@ export function RightSurfacePanel({
     targetKind: RightSurfaceKind | null
   } | null>(null)
   const activeKind = activeId && openIds.includes(activeId) ? activeId : openIds[0] ?? null
+  const mountedKinds: readonly RightSurfaceKind[] = retainTerminal && !openIds.includes('terminal')
+    ? [...openIds, 'terminal'] : openIds
 
   const closeMenu = (restoreFocus: boolean): void => {
     setMenuOpen(false)
@@ -157,6 +163,7 @@ export function RightSurfacePanel({
       data-maximized={maximized ? 'true' : 'false'}
     >
       <div className="surface-topbar">
+        {workbenchPicker}
         <div className="surface-tabs" role="tablist" aria-label="已打开的 Surface">
           {openIds.map((kind) => {
             const definition = RIGHT_SURFACE_DEFINITIONS.find((item) => item.kind === kind)!
@@ -297,8 +304,8 @@ export function RightSurfacePanel({
               </div>
             </div>
           </div>
-        ) : (
-          openIds.map((kind) => {
+        ) : null}
+        {mountedKinds.map((kind) => {
             return (
               <section
                 id={`${rootId}-${kind}-panel`}
@@ -306,14 +313,13 @@ export function RightSurfacePanel({
                 role="tabpanel"
                 aria-labelledby={`${rootId}-${kind}-tab`}
                 tabIndex={0}
-                hidden={activeKind !== kind}
+                hidden={activeKind !== kind || !openIds.includes(kind)}
                 key={kind}
               >
                 {activeKind === kind || kind === 'terminal' || kind === 'files' ? contents[kind] : null}
               </section>
             )
-          })
-        )}
+          })}
       </div>
     </aside>
   )

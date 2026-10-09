@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 
-const appPath = resolve(process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
-const executable = join(appPath, 'Contents', 'MacOS', 'Scry')
+const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
+const devApp = devTerminalOnly || process.argv[2] === '--dev'
+const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
+const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
 let stderr = ''
@@ -91,6 +93,7 @@ async function main() {
   }]))
   const launchApp = () => {
     child = spawn(executable, [
+      ...(devApp ? [resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
@@ -157,6 +160,52 @@ async function main() {
     return results.every((result) => result.state === 'unsupported' && result.reason.includes('SCRY_DISABLED_PROVIDERS'))
   }))`)
   assert.deepEqual(disabledCapabilities, [true, true, true, true], 'smoke must not start non-fixture providers')
+  if (devTerminalOnly) {
+    const result = await evaluate(`(async () => {
+      const outputs = new Map(), exited = new Set()
+      const offData = window.scry.onTerminalData(event => {
+        outputs.set(event.id, (outputs.get(event.id) || '') + event.data)
+        void window.scry.terminalAck(event.id, event.ownershipEpoch, new TextEncoder().encode(event.data).byteLength)
+      })
+      const offExit = window.scry.onTerminalExit(event => exited.add(event.id))
+      const waitForOutput = async (id, marker) => {
+        const deadline = Date.now() + 5000
+        while (!(outputs.get(id) || '').includes(marker)) {
+          if (exited.has(id) || Date.now() > deadline) throw new Error('Shell did not survive selection: ' + id)
+          await new Promise(resolve => setTimeout(resolve, 20))
+        }
+      }
+      const sessions = []
+      try {
+        await window.scry.setCwd(null)
+        const first = await window.scry.terminalStart({ cwd: null, scopeId: 'conversation-a', cols: 80, rows: 24 })
+        sessions.push(first)
+        await window.scry.terminalReady(first.id, first.ownershipEpoch)
+        await window.scry.setCwd(${JSON.stringify(workspace)})
+        const second = await window.scry.terminalStart({ cwd: ${JSON.stringify(workspace)}, scopeId: 'conversation-b', cols: 80, rows: 24 })
+        sessions.push(second)
+        await window.scry.terminalReady(second.id, second.ownershipEpoch)
+        // Split the marker in shell syntax so input echo cannot satisfy the assertion.
+        await window.scry.terminalWrite(first.id, first.ownershipEpoch, "printf '__ALIVE_%s__:%s\\\\n' A \\\"$PWD\\\"\\r")
+        await waitForOutput(first.id, '__ALIVE_A__:' + ${JSON.stringify(canonicalHome)})
+        await window.scry.setCwd(null)
+        await window.scry.terminalWrite(second.id, second.ownershipEpoch, "printf '__ALIVE_%s__:%s\\\\n' B \\\"$PWD\\\"\\r")
+        await waitForOutput(second.id, '__ALIVE_B__:' + ${JSON.stringify(canonicalWorkspace)})
+        const active = await window.scry.terminalActive()
+        return { alive: sessions.every(session => active.some(item => item.id === session.id && item.pid === session.pid)),
+          scopes: active.map(item => item.scopeId), exited: [...exited], retainedCwd: true }
+      } finally {
+        for (const session of sessions) await window.scry.terminalClose(session.id, session.ownershipEpoch)
+        offData(); offExit()
+      }
+    })()`)
+    assert.equal(result.alive, true)
+    assert.deepEqual(result.scopes, ['conversation-a', 'conversation-b'])
+    assert.deepEqual(result.exited, [])
+    console.log(JSON.stringify({ realAppTerminalSurvival: result }))
+    cdp.close()
+    return
+  }
   const csp = await evaluate(`new Promise((resolve) => {
     let violated = false
     const onViolation = () => { violated = true }
@@ -169,17 +218,18 @@ async function main() {
   assert.deepEqual(csp, { violated: true, executed: false })
 
   const surfaceSmoke = await evaluate(`(async () => {
+    const current = (selector) => document.querySelector('[data-session-surface-current="true"]')?.querySelector(selector)
     const waitFor = async (selector, timeout = 4_000) => {
       const deadline = Date.now() + timeout
       let node = null
       while (!node && Date.now() < deadline) {
-        node = document.querySelector(selector)
+        node = selector.startsWith('button') ? document.querySelector(selector) : current(selector)
         if (!node) await new Promise((resolve) => setTimeout(resolve, 50))
       }
       return node
     }
     const openSurface = async (label, selector) => {
-      document.querySelector('button[aria-label="添加 Surface"]')?.click()
+      current('button[aria-label="添加 Surface"]')?.click()
       const deadline = Date.now() + 2_000
       let item = null
       while (!item && Date.now() < deadline) {
@@ -209,20 +259,23 @@ async function main() {
     const recent = await waitFor('button.sb-sess')
     recent?.click()
     await new Promise((resolve) => setTimeout(resolve, 100))
-    const panel = await waitFor('.right-surface-panel')
-    const terminal = panel ? await waitFor('.terminal-surface') : null
+    const scopedSelection = !current('.terminal-surface') && unboundTerminal?.getBoundingClientRect().width === 0
+    document.querySelector('button[title="右侧工作区"]')?.click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const panel = current('.right-surface-panel')
+    const terminal = panel ? await openSurface('终端', '.terminal-surface') : null
     const agents = terminal ? await openSurface('Agents', '.agents-surface') : null
-    const activeTab = document.querySelector('[role="tab"][aria-selected="true"]')
-    const terminalPanel = document.querySelector('.surface-content-terminal')
+    const activeTab = current('[role="tab"][aria-selected="true"]')
+    const terminalPanel = current('.surface-content-terminal')
 
-    document.querySelector('button[aria-label="最大化右侧工作区"]')?.click()
+    current('button[aria-label="最大化右侧工作区"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const maximized = document.querySelector('.app')?.classList.contains('right-panel-maximized') === true
-    document.querySelector('button[aria-label="恢复右侧工作区"]')?.click()
+    current('button[aria-label="恢复右侧工作区"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const restored = document.querySelector('.app')?.classList.contains('right-panel-maximized') === false
 
-    document.querySelector('button[aria-label="隐藏右侧工作区"]')?.click()
+    current('button[aria-label="隐藏右侧工作区"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const hidden = document.querySelector('.app')?.classList.contains('right-panel-hidden') === true
     const terminalRetained = !!document.querySelector('.terminal-surface')
@@ -238,6 +291,7 @@ async function main() {
       unboundTerminalRunning: !!unboundTerminalRunning,
       unboundHidden,
       unboundTerminalRetained,
+      scopedSelection,
       panel: !!panel,
       terminal: !!terminal,
       agents: !!agents,
@@ -257,6 +311,7 @@ async function main() {
     unboundTerminalRunning: true,
     unboundHidden: true,
     unboundTerminalRetained: true,
+    scopedSelection: true,
     panel: true,
     terminal: true,
     agents: true,
@@ -367,9 +422,13 @@ async function main() {
     latestPrompt: 'latest second-turn history', bothTurns: true
   })
 
-  const windowChrome = await evaluate(`(() => {
+  const windowChrome = await evaluate(`(async () => {
+    const toggle = document.querySelector('button[title="右侧工作区"]')
+    if (toggle?.getAttribute('aria-pressed') !== 'true') toggle?.click()
+    await new Promise(resolve => requestAnimationFrame(resolve))
     const inspect = (selector) => {
-      const node = document.querySelector(selector)
+      const scoped = selector.startsWith('.surface') || selector === '.right-surface-panel'
+      const node = document.querySelector(scoped ? '[data-session-surface-current="true"] ' + selector : selector)
       if (!node) return null
       const style = getComputedStyle(node)
       const rect = node.getBoundingClientRect()
@@ -386,7 +445,7 @@ async function main() {
       }
     }
     const topbarAction = document.querySelector('.topbar button')
-    const surfaceAction = document.querySelector('.surface-topbar button')
+    const surfaceAction = document.querySelector('[data-session-surface-current="true"] .surface-topbar button')
     const root = document.documentElement
     const previousTheme = root.dataset.theme
     root.dataset.theme = 'light'
@@ -493,12 +552,12 @@ async function main() {
     document.querySelector('button.sb-sess')?.click()
     const chatRestored = await waitFor(() => !!document.querySelector('.topbar'))
 
-    document.querySelector('button[aria-label="最大化右侧工作区"]')?.click()
+    document.querySelector('[data-session-surface-current="true"] button[aria-label="最大化右侧工作区"]')?.click()
     const maximized = await waitFor(() => document.querySelector('.app')?.classList.contains('right-panel-maximized') === true)
     const surfaceLeft = Math.round(document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1)
-    const surfaceActionLeft = Math.round(document.querySelector('.surface-topbar button')?.getBoundingClientRect().left ?? -1)
+    const surfaceActionLeft = Math.round(document.querySelector('[data-session-surface-current="true"] .surface-topbar button')?.getBoundingClientRect().left ?? -1)
 
-    document.querySelector('button[aria-label="恢复右侧工作区"]')?.click()
+    document.querySelector('[data-session-surface-current="true"] button[aria-label="恢复右侧工作区"]')?.click()
     await waitFor(() => document.querySelector('.app')?.classList.contains('right-panel-maximized') === false)
     splitter?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     const restored = await waitFor(() => document.querySelector('.app')?.classList.contains('sidebar-collapsed') === false)
@@ -689,6 +748,8 @@ async function main() {
     const unbound = await probe(null, '__SCRY_TERMINAL_HOME_OK__')
     const unboundExit = waitForExit(unbound.id)
     await window.scry.setCwd(${JSON.stringify(workspace)})
+    const unboundAlive = (await window.scry.terminalActive()).some(session => session.id === unbound.id)
+    await window.scry.terminalWrite(unbound.id, unbound.ownershipEpoch, 'exit' + String.fromCharCode(13))
     const unboundExited = await unboundExit
     const oldWriteRejected = await window.scry.terminalWrite(
       unbound.id, unbound.ownershipEpoch, 'pwd' + String.fromCharCode(13)
@@ -712,11 +773,12 @@ async function main() {
       bound.id, bound.ownershipEpoch, 'stale-owner'
     ) === false
     const adoptedReady = await window.scry.terminalReady(bound.id, adopted.ownershipEpoch)
-    return { unbound, unboundExited, oldWriteRejected, bound, activeBeforeAttach, adopted, adoptedReady, staleWriteRejected, replay }
+    return { unbound, unboundAlive, unboundExited, oldWriteRejected, bound, activeBeforeAttach, adopted, adoptedReady, staleWriteRejected, replay }
   })()`)
   assert.equal(terminalSmoke.unbound.ok, true, `packaged unbound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
   assert.equal(terminalSmoke.unbound.cwd, canonicalHome)
   assert.ok(terminalSmoke.unbound.output.includes(`__SCRY_TERMINAL_HOME_OK__:${canonicalHome}`))
+  assert.equal(terminalSmoke.unboundAlive, true, JSON.stringify(terminalSmoke))
   assert.equal(terminalSmoke.unboundExited, true, JSON.stringify(terminalSmoke))
   assert.equal(terminalSmoke.oldWriteRejected, true)
   assert.equal(terminalSmoke.bound.ok, true, `packaged bound PTY smoke failed: ${JSON.stringify(terminalSmoke)}\n${stderr.slice(-4000)}`)
@@ -769,35 +831,39 @@ async function main() {
   assert.ok(reloadAdoption.replay.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
 
   const recordingSmoke = await evaluate(`(async () => {
+    const root = () => document.querySelector('[data-session-surface-current="true"]')
+    const query = (selector) => selector.startsWith('button.sb-sess') || selector.includes('title="右侧工作区"')
+      ? document.querySelector(selector) : root()?.querySelector(selector)
+    const queryAll = (selector) => root()?.querySelectorAll(selector) ?? []
     const waitFor = async (predicate) => {
       const deadline = Date.now() + 8_000
       while (!await predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 30))
       if (!await predicate()) throw new Error('terminal recording UI condition timed out: ' + JSON.stringify({
-        text: document.querySelector('.terminal-surface')?.textContent?.slice(-1500),
-        host: document.querySelector('.terminal-pane:not([hidden]) .terminal-xterm')?.getBoundingClientRect().toJSON()
+        text: query('.terminal-surface')?.textContent?.slice(-1500),
+        host: query('.terminal-pane:not([hidden]) .terminal-xterm')?.getBoundingClientRect().toJSON()
       }))
     }
-    await waitFor(() => !!document.querySelector('button.sb-sess'))
-    document.querySelector('button.sb-sess')?.click()
+    await waitFor(() => !!query('button.sb-sess'))
+    query('button.sb-sess')?.click()
     await new Promise((resolve) => setTimeout(resolve, 100))
-    await waitFor(() => !!document.querySelector('button[title="右侧工作区"]'))
-    const toggle = document.querySelector('button[title="右侧工作区"]')
+    await waitFor(() => !!query('button[title="右侧工作区"]'))
+    const toggle = query('button[title="右侧工作区"]')
     if (toggle?.getAttribute('aria-pressed') !== 'true') toggle?.click()
-    await waitFor(() => !!document.querySelector('.right-surface-panel'))
-    let terminalTab = [...document.querySelectorAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))
+    await waitFor(() => !!query('.right-surface-panel'))
+    let terminalTab = [...queryAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))
     if (!terminalTab) {
-      document.querySelector('button[aria-label="添加 Surface"]')?.click()
-      await waitFor(() => [...document.querySelectorAll('[role="menuitem"]')].some((node) => node.textContent?.trim().startsWith('终端')))
-      ;[...document.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent?.trim().startsWith('终端'))?.click()
+      query('button[aria-label="添加 Surface"]')?.click()
+      await waitFor(() => [...queryAll('[role="menuitem"]')].some((node) => node.textContent?.trim().startsWith('终端')))
+      ;[...queryAll('[role="menuitem"]')].find((node) => node.textContent?.trim().startsWith('终端'))?.click()
     } else terminalTab.click()
-    const button = (label) => document.querySelector('button[aria-label="' + label + '"]')
-    await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .terminal-xterm')?.clientWidth > 0)
+    const button = (label) => query('button[aria-label="' + label + '"]')
+    await waitFor(() => query('.terminal-pane:not([hidden]) .terminal-xterm')?.clientWidth > 0)
     const priorIds = new Set((await window.scry.terminalRecordingList()).items.map((item) => item.id))
     button('重新启动终端').click()
     let startedId = null
     await waitFor(async () => {
       startedId = (await window.scry.terminalRecordingList()).items.find((item) => item.active && !priorIds.has(item.id))?.id
-      return !!startedId && !!document.querySelector('.terminal-state.running')
+      return !!startedId && !!query('.terminal-state.running')
     })
     const disabledWhileRunning = button('回放终端录制').disabled && button('删除终端录制').disabled
     let offExit = () => {}
@@ -807,7 +873,7 @@ async function main() {
         if (event.id === startedId) { clearTimeout(timer); offExit(); resolve(event) }
       })
     })
-    const textarea = document.querySelector('.terminal-pane:not([hidden]) .xterm-helper-textarea')
+    const textarea = query('.terminal-pane:not([hidden]) .xterm-helper-textarea')
     const clipboardData = new DataTransfer()
     clipboardData.setData('text/plain', "printf '__SCRY_RECORDING_SENTINEL__\\\\n'; exit")
     textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }))
@@ -818,25 +884,25 @@ async function main() {
     if (!page.data.includes('__SCRY_RECORDING_SENTINEL__')) throw new Error('UI Shell recording is missing its marker')
     button('清空终端显示').click()
     button('回放终端录制').click()
-    await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('录制回放完成'))
+    await waitFor(() => query('.terminal-foot')?.textContent.includes('录制回放完成'))
     // The footer is set only after xterm's write callback confirms parsing. DOM painting is renderer-dependent.
     const rendered = page.data
-    document.querySelector('.terminal-tab.active .terminal-tab-close').click()
+    query('.terminal-tab.active .terminal-tab-close').click()
     const beforeHistory = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
     button('终端录制历史').click()
-    await waitFor(() => !!document.querySelector('[data-recording-id="' + ended.id + '"] button'))
-    document.querySelector('[data-recording-id="' + ended.id + '"] button').click()
-    await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('录制回放完成'))
+    await waitFor(() => !!query('[data-recording-id="' + ended.id + '"] button'))
+    query('[data-recording-id="' + ended.id + '"] button').click()
+    await waitFor(() => query('.terminal-foot')?.textContent.includes('录制回放完成'))
     const readonly = button('重新启动终端').disabled
     const afterHistory = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
     const noSpawn = JSON.stringify(beforeHistory) === JSON.stringify(afterHistory)
     button('删除终端录制').click()
-    await waitFor(() => document.querySelector('.terminal-foot')?.textContent.includes('磁盘录制已删除'))
+    await waitFor(() => query('.terminal-foot')?.textContent.includes('磁盘录制已删除'))
     let deleted = false
     try { await window.scry.terminalRecordingRead({ id: ended.id, offset: 0 }) } catch { deleted = true }
-    document.querySelector('.terminal-tab.active .terminal-tab-close').click()
+    query('.terminal-tab.active .terminal-tab-close').click()
     button('新建终端').click()
-    await waitFor(() => !!document.querySelector('.terminal-state.running'))
+    await waitFor(() => !!query('.terminal-state.running'))
     return { disabledWhileRunning, state: page.state, captured: page.data.includes('__SCRY_RECORDING_SENTINEL__'),
       replayed: rendered.includes('__SCRY_RECORDING_SENTINEL__'), readonly, noSpawn, deleted }
   })()`)

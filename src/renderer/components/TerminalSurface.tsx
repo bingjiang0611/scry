@@ -67,8 +67,8 @@ function xtermTheme(): ITheme {
   }
 }
 
-function exitText(event: TerminalExitEvent): string {
-  if (event.signal != null) return `Shell 已退出 · signal ${event.signal}`
+export function exitText(event: TerminalExitEvent): string {
+  if (event.signal != null && event.signal !== 0) return `Shell 已退出 · signal ${event.signal}`
   return event.code == null ? 'Shell 已退出' : `Shell 已退出 · code ${event.code}`
 }
 
@@ -82,6 +82,7 @@ function TerminalPane({
   tabId,
   panelId,
   cwd,
+  scopeId,
   active,
   onControls,
   onStatus,
@@ -93,6 +94,7 @@ function TerminalPane({
   tabId: string
   panelId: string
   cwd: string | null
+  scopeId?: string
   recordingId?: string
   sessionId?: string
   active: boolean
@@ -158,6 +160,7 @@ function TerminalPane({
       // an explicit start/restart reads the latest bound workspace, which main validates.
       const session = await window.scry.terminalStart({
         cwd: cwdRef.current,
+        scopeId,
         cols: Math.max(2, terminal.cols),
         rows: Math.max(1, terminal.rows)
       })
@@ -186,7 +189,7 @@ function TerminalPane({
       terminal.reset()
       terminal.writeln(`\x1b[31m终端启动失败：${message}\x1b[0m`)
     }
-  }, [onStatus, onRecordingMessage, resize, tabKey, recordingId])
+  }, [onStatus, onRecordingMessage, resize, tabKey, recordingId, scopeId])
 
   const adopt = useCallback(async (): Promise<void> => {
     const terminal = terminalRef.current
@@ -400,7 +403,7 @@ function TerminalPane({
   )
 }
 
-export function TerminalSurface({ cwd, active }: { cwd: string | null; active: boolean }) {
+export function TerminalSurface({ cwd, active, scopeId }: { cwd: string | null; active: boolean; scopeId?: string }) {
   const rootId = useId().replaceAll(':', '')
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeKey, setActiveKey] = useState('')
@@ -418,10 +421,13 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
   const [historyOpen, setHistoryOpen] = useState(false)
 
   useEffect(() => {
+    // After reload, hidden workbenches must neither steal focus nor spawn shells
+    // before their workspace has been selected. Mounted shells keep consuming output.
+    if (hydrated || !active) return
     let current = true
     void window.scry.terminalActive().then((sessions) => {
       if (!current) return
-      const restored = terminalTabsForActiveSessions(sessions)
+      const restored = terminalTabsForActiveSessions(sessions.filter((session) => session.scopeId === scopeId))
       const initial = restored.length > 0 ? restored : [nextTerminalTab(1)]
       nextTitleNumber.current = initial.length + 1
       setTabs(initial)
@@ -436,7 +442,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
       setHydrated(true)
     })
     return () => { current = false }
-  }, [])
+  }, [active, hydrated, scopeId])
 
   const openRecording = (item: TerminalRecordingSummary): void => {
     if (item.active) return
@@ -588,6 +594,7 @@ export function TerminalSurface({ cwd, active }: { cwd: string | null; active: b
             tabId={`${rootId}-${tab.key}-tab`}
             panelId={`${rootId}-${tab.key}-panel`}
             cwd={cwd}
+            scopeId={scopeId}
             recordingId={tab.recordingId}
             sessionId={tab.sessionId}
             active={active && activeKey === tab.key}

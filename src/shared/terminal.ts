@@ -2,12 +2,15 @@ export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024
 export const TERMINAL_MAX_DIMENSION = 1_000
 
 export interface TerminalStartRequest {
+  /** Renderer workbench identity; grouping only, never path authorization. */
+  scopeId?: string
   cwd: string | null
   cols: number
   rows: number
 }
 
 export interface TerminalSessionDescriptor {
+  scopeId?: string
   id: string
   pid: number
   recording?: 'available' | 'unavailable'
