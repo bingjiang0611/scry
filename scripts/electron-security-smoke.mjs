@@ -329,6 +329,44 @@ async function main() {
   assert.equal(lifecycleSmoke.statsStatus, 'ready')
   assert.ok(lifecycleSmoke.statsTurns >= 1)
 
+  const historyReloadSmoke = await evaluate(`(async () => {
+    const cwd = ${JSON.stringify(canonicalWorkspace)}
+    const externalSessionId = ${JSON.stringify(lifecycleSmoke.externalSessionId)}
+    let cleanupDone = () => {}
+    let cleanupError = () => {}
+    const terminal = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('second-turn history fixture timed out')), 15_000)
+      cleanupDone = window.scry.onTurnDone((event) => {
+        clearTimeout(timer)
+        cleanupDone()
+        cleanupError()
+        resolve(event)
+      })
+      cleanupError = window.scry.onError((event) => {
+        clearTimeout(timer)
+        cleanupDone()
+        cleanupError()
+        reject(new Error(event.message))
+      })
+    })
+    const started = await window.scry.start({ providerId: 'codex', cwd, expectedSessionId: externalSessionId, prompt: 'latest second-turn history' })
+    const ended = await terminal
+    const context = { providerId: 'codex', cwd, externalSessionId }
+    const first = await window.scry.loadSession(context)
+    const reopened = await window.scry.loadSession(context)
+    return {
+      sameSession: ended.externalSessionId === externalSessionId,
+      firstLatest: first?.turns.at(-1)?.runId === started.runId,
+      reopenedLatest: reopened?.turns.at(-1)?.runId === started.runId,
+      latestPrompt: reopened?.turns.at(-1)?.userText,
+      bothTurns: reopened?.turns.length >= 2
+    }
+  })()`)
+  assert.deepEqual(historyReloadSmoke, {
+    sameSession: true, firstLatest: true, reopenedLatest: true,
+    latestPrompt: 'latest second-turn history', bothTurns: true
+  })
+
   const windowChrome = await evaluate(`(() => {
     const inspect = (selector) => {
       const node = document.querySelector(selector)
@@ -884,6 +922,7 @@ async function main() {
       staleOwnerFenced: reloadAdoption.staleWriteRejected
     },
     recording: recordingSmoke,
+    historyReload: historyReloadSmoke,
     historyRestart: { ...historyRestart, mode: 'owned-app-crash' },
     surfaces: surfaceSmoke,
     modal,
