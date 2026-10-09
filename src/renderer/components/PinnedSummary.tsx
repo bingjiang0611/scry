@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useSampledTurns } from '../hooks/useSampledTurns'
 import type { DiffFile, TraceEvent } from '@shared/trace'
 import { sessionCapabilityCalls } from '../session-capability-calls'
 import { deriveAgentRows, type AgentRowStatus } from '../agent-panel'
@@ -113,7 +114,15 @@ export function webSourcesFromTurns(turns: readonly Turn[]): PinnedWebSource[] {
   return scanWebSourcesFromTurns(turns).sources
 }
 
-export function PinnedSummary({
+export function PinnedSummary(props: PinnedSummaryProps) {
+  // Links and child-agent evidence can arrive in text, not just structural events.
+  // Sample the complete snapshot rather than dropping those updates. The first run
+  // identifies the loaded session; loading an older page also refreshes immediately.
+  const turns = useSampledTurns(props.turns, props.turns[0]?.runId ?? null, props.busy)
+  return <MemoPinnedSummaryBody {...props} turns={turns} />
+}
+
+function PinnedSummaryBody({
   cwd,
   gitDiff,
   turns,
@@ -308,6 +317,8 @@ export interface PinnedSummaryVisibility {
   dismiss: () => void
   toggle: () => void
 }
+
+const MemoPinnedSummaryBody = memo(PinnedSummaryBody)
 
 export function usePinnedSummaryVisibility(active: boolean, panelVisible: boolean): PinnedSummaryVisibility {
   const [persistentOpen, setPersistentOpen] = useState(false)

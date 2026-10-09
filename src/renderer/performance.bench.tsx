@@ -37,6 +37,20 @@ const referenceMarkdown = `${proseMarkdown}\n\n[docs]: https://example.com\n\nSe
 const tableMarkdown = `| value | detail |\n| --- | --- |\n${Array.from({ length: 3_000 }, (_, index) => `| ${index} | ${'cell '.repeat(5)} |`).join('\n')}`
 const codeMarkdown = `\`\`\`text\n${'code line\n'.repeat(8_000)}\`\`\``
 
+describe('trace batch scaling', () => {
+  for (const eventCount of [1_000, 10_000, 50_000]) {
+    const turns: Turn[] = [{
+      ...currentTurn,
+      items: [...Array.from({ length: eventCount }, (_, index) => structuredEvent(index)), deltaEvent(0)]
+    }]
+    const next = [deltaEvent(1)]
+    const cleared = new Set<string>()
+    bench(`append one text delta after ${eventCount} structural events`, () => {
+      applyTraceBatch(turns, next, cleared)
+    })
+  }
+})
+
 describe('renderer streaming pressure', () => {
   bench('apply a 16-event batch to a 10k-event active turn', () => {
     applyTraceBatch([currentTurn], batch, new Set())
