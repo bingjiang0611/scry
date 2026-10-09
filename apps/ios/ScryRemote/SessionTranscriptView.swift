@@ -223,7 +223,7 @@ struct SessionTranscriptView: View {
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
       ForEach(completedTurns) { turn in completedTurnView(turn) }
     case let .failed(reason):
-      EmptyState(title: "暂时无法读取会话", detail: "请确认 Mac 的 Scry 正在运行且网络可用。已输入的草稿会保留。", symbol: "wifi.exclamationmark")
+      EmptyState(title: "暂时无法读取会话", detail: reason + "\n已输入的草稿会保留。", symbol: "exclamationmark.triangle")
       Button("重新读取") {
         if let s = session {
           run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true)
