@@ -37,6 +37,7 @@ function digest(bytes: Uint8Array): string {
 export class InnerMtlsHost {
   #server: Server
   #maxFrame: number
+  #connections = new Set<TLSSocket>()
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
@@ -70,17 +71,39 @@ export class InnerMtlsHost {
     if (!socket.authorized || socket.getProtocol() !== 'TLSv1.3' || socket.isSessionReused()) { socket.destroy(); return }
     const peer = socket.getPeerCertificate()
     const fingerprint = peer && peer.raw ? digest(peer.raw) : ''
+    const certificateExpiresAt = Date.parse(peer.valid_to)
+    if (!Number.isFinite(certificateExpiresAt)) { socket.destroy(); return }
+    this.#connections.add(socket)
+    socket.once('close', () => this.#connections.delete(socket))
+    socket.setTimeout(30_000, () => socket.destroy())
     let buffer = Buffer.alloc(0)
-    let used = false
+    let busy = false
+    let historyOnly = false
     socket.on('data', (bytes: Buffer) => {
-      if (used || buffer.length + bytes.length > this.#maxFrame) { socket.destroy(); return }
+      if (busy || Date.now() >= certificateExpiresAt || buffer.length + bytes.length > this.#maxFrame) { socket.destroy(); return }
       buffer = Buffer.concat([buffer, bytes])
       const end = buffer.indexOf(10)
       if (end < 0) return
-      used = true
+      // One outstanding request, never pipelined commands. Only this explicit
+      // read lane can reuse TLS; every request still checks the device grant.
+      if (end !== buffer.length - 1) { socket.destroy(); return }
       const frame = buffer.subarray(0, end)
+      buffer = Buffer.alloc(0)
+      let keepAlive = false
+      try {
+        const request = JSON.parse(frame.toString('utf8')) as { op?: string; keepAlive?: boolean }
+        keepAlive = request.keepAlive === true && (request.op === 'historyPreview' || request.op === 'historyPage')
+      } catch { /* dispatch reports malformed JSON */ }
+      if (historyOnly && !keepAlive) { socket.end(JSON.stringify({ error: 'history_connection_read_only' }) + '\n'); return }
+      historyOnly ||= keepAlive
+      busy = true
       void this.#dispatch(controller, fingerprint, frame)
-        .then((res) => socket.end(JSON.stringify(res) + '\n'))
+        .then((res) => {
+          busy = false
+          const reply = JSON.stringify(res) + '\n'
+          if (keepAlive) socket.write(reply)
+          else socket.end(reply)
+        })
         .catch(() => socket.destroy())
     })
     socket.on('error', () => { /* peer reset; nothing to report */ })
@@ -212,6 +235,7 @@ export class InnerMtlsHost {
   }
 
   async close(): Promise<void> {
+    for (const socket of this.#connections) socket.destroy()
     await new Promise<void>((resolve) => this.#server.close(() => resolve()))
   }
 }

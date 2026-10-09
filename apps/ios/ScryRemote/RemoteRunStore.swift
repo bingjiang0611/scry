@@ -469,10 +469,9 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  // Warm local first screens for two recent conversations while browsing,
-  // without changing run identity or opening extra relay exchanges. Cold
-  // network prefetch would compete with the first foreground read: cancelling
-  // a Swift task does not close this transport's in-flight NIO exchange.
+  // At most two small previews while browsing; never download full history.
+  // An established readonly tunnel closes on cancellation, so foreground reads
+  // take priority. Before channel establishment, NIO/upgrade deadlines still apply.
   private func prefetchHistory(_ sessions: [G0Transport.RunSessionRef]) {
     guard prefetchTask == nil, historyTask == nil, !historyCacheClearing, !hasUnresolvedRun,
           let connection = connections.load() else { return }
@@ -488,6 +487,12 @@ final class RemoteRunStore: ObservableObject {
     let disk = historyDisk
     prefetchTask = Task { [weak self] in
       guard let self else { return }
+      @MainActor func current() -> Bool {
+        !Task.isCancelled && self.dataGeneration == requestDataGeneration &&
+          self.prefetchGeneration == warmingGeneration && self.historyTask == nil &&
+          self.connections.load() == connection
+      }
+      var missing: [(G0Transport.RunSessionRef, String)] = []
       for session in recent {
         guard !Task.isCancelled, self.dataGeneration == requestDataGeneration,
               self.prefetchGeneration == warmingGeneration,
@@ -498,19 +503,44 @@ final class RemoteRunStore: ObservableObject {
           guard !Task.isCancelled, self.prefetchGeneration == warmingGeneration,
                 self.dataGeneration == requestDataGeneration, self.connections.load() == connection else { break }
           if let cached { self.warmScreen(cached, key: key) }
+          else { missing.append((session, key)) }
         } catch {
           // Prefetch is an optional read, never a connectivity/business receipt.
           // Opening the session owns visible errors and its authoritative read.
           if Task.isCancelled { break }
         }
       }
+      #if DEBUG
+      if self.historyTestOffline {
+        if self.prefetchGeneration == warmingGeneration { self.prefetchTask = nil }
+        return
+      }
+      #endif
+      if current(), !missing.isEmpty {
+        let epoch = await disk.epoch
+        do {
+          try await RemoteRunClient(connection: connection).withHistoryConnection { [missing] reader in
+            for (session, key) in missing {
+              guard current(), let external = session.externalSessionId else { return }
+              let preview = try await reader.preview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
+              guard current() else { return }
+              if preview.available {
+                self.warmScreen(preview, key: key)
+                _ = try await disk.writePreview(preview, key: key, epoch: epoch)
+              }
+            }
+          }
+        } catch { /* Optional warming never claims connectivity or replaces foreground errors. */ }
+      }
       if self.prefetchGeneration == warmingGeneration { self.prefetchTask = nil }
     }
   }
 
   private func warmScreen(_ preview: G0Transport.RunHistoryPreview, key: String) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .withoutEscapingSlashes
     guard preview.available, preview.turns.count <= 2,
-          (try? JSONEncoder().encode(preview).count) ?? Int.max <= 16 * 1024 else { return }
+          (try? encoder.encode(preview).count) ?? Int.max <= 16 * 1024 else { return }
     warmedScreens[key] = preview
   }
 
@@ -585,34 +615,6 @@ final class RemoteRunStore: ObservableObject {
         if !hasLocalTurns, memory != nil, !force,
            (0..<30).contains(Date().timeIntervalSince(cached.fetchedAt)) { return }
       }
-      // The preview request is intentionally separate from the complete snapshot;
-      // it may succeed for indexed archives while full history is still pending.
-      do {
-        #if DEBUG
-        if self.historyTestOffline {
-          throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
-        }
-        #endif
-        let preview = try await client.historyPreview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
-        guard current() else { return }
-        if preview.available {
-          if cached == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
-          self.reachable = true
-          do {
-            let saved = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
-            if current(), !saved { self.historyStorageNotice = "首屏镜像未保存到手机缓存" }
-          } catch {
-            if current() { self.historyStorageNotice = "首屏镜像保存失败：\(Self.describe(error))" }
-          }
-        } else if case .available = self.historyPreview {} else {
-          self.historyPreview = .unavailable(preview.reason ?? "首屏证据不可用")
-        }
-      } catch {
-        if current(), case .available = self.historyPreview {} else if current() {
-          self.historyPreview = .unavailable(Self.describe(error))
-        }
-      }
-      guard current() else { return }
       if hasLocalTurns {
         if cached == nil { self.history = .baseUnavailable; self.historyRevision += 1 }
         let notice = cached == nil
@@ -621,49 +623,75 @@ final class RemoteRunStore: ObservableObject {
         self.historyStorageNotice = notice + (cached != nil && !persisted ? " 当前基底仅存内存，未写入手机缓存。" : "")
         return
       }
-      let started = Date()
+      @MainActor func failed(_ error: Error) {
+        guard current() else { return }
+        self.reachable = false
+        self.historyRefreshError = Self.describe(error)
+        if cached == nil, case .available = self.historyPreview {
+          self.history = .partial(self.historyPreviewTurns)
+        } else if cached == nil { self.history = .failed(Self.describe(error)) }
+      }
       do {
         #if DEBUG
         if self.historyTestOffline {
           throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
         }
         #endif
-        let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
-          externalSessionId: externalSessionId, cached: cached, progress: { [weak self] received, total in
-            guard let self else { return }
-            await MainActor.run {
-              guard self.historyRequestGeneration == request,
-                    self.isCurrent(requestGeneration, identity: identity) else { return }
-              self.historyProgress = "\(received / 1024) / \(max(1, (total + 1023) / 1024)) KB"
+        try await client.withHistoryConnection { [cached, persisted] reader in
+          // Preview and all complete pages share one fresh, readonly mTLS tunnel.
+          do {
+            let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+            guard current() else { return }
+            if preview.available {
+              if cached == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
+              self.reachable = true
+              do {
+                let saved = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
+                if current(), !saved { self.historyStorageNotice = "首屏镜像未保存到手机缓存" }
+              } catch {
+                if current() { self.historyStorageNotice = "首屏镜像保存失败：\(Self.describe(error))" }
+              }
+            } else if case .available = self.historyPreview {} else {
+              self.historyPreview = .unavailable(preview.reason ?? "首屏证据不可用")
             }
-          })
-        guard current() else { return }
-        self.reachable = true
-        let alreadySaved = persisted && cached?.fingerprint == snapshot.fingerprint
-        self.showHistory(snapshot, key: key, cached: false, persisted: alreadySaved)
-        self.historySyncing = false
-        #if DEBUG
-        print("HISTORY network complete seconds=\(Date().timeIntervalSince(started)) unchanged=\(cached?.fingerprint == snapshot.fingerprint)")
-        #endif
-        if alreadySaved { return }
-        do {
-          let saved = try await disk.write(snapshot, key: key, epoch: diskEpoch)
-          if current() {
-            self.cachedHistory?.persisted = saved
-            self.historyStorageNotice = saved ? nil : "会话超过 64 MB，仅保留本次内存；未写入手机缓存"
+          } catch {
+            if current(), case .available = self.historyPreview {} else if current() {
+              self.historyPreview = .unavailable(Self.describe(error))
+            }
           }
-        } catch {
-          if current() { self.historyStorageNotice = "本地缓存保存失败：\(Self.describe(error))" }
+          guard current() else { return }
+          let started = Date()
+          do {
+            let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
+              externalSessionId: externalSessionId, cached: cached, connection: reader, progress: { [weak self] received, total in
+                guard let self else { return }
+                await MainActor.run {
+                  guard self.historyRequestGeneration == request,
+                        self.isCurrent(requestGeneration, identity: identity), self.connections.load() == connection else { return }
+                  self.historyProgress = "\(received / 1024) / \(max(1, (total + 1023) / 1024)) KB"
+                }
+              })
+            guard current() else { return }
+            self.reachable = true
+            let alreadySaved = persisted && cached?.fingerprint == snapshot.fingerprint
+            self.showHistory(snapshot, key: key, cached: false, persisted: alreadySaved)
+            self.historySyncing = false
+            #if DEBUG
+            print("HISTORY network complete seconds=\(Date().timeIntervalSince(started)) unchanged=\(cached?.fingerprint == snapshot.fingerprint)")
+            #endif
+            if alreadySaved { return }
+            do {
+              let saved = try await disk.write(snapshot, key: key, epoch: diskEpoch)
+              if current() {
+                self.cachedHistory?.persisted = saved
+                self.historyStorageNotice = saved ? nil : "会话超过 64 MB，仅保留本次内存；未写入手机缓存"
+              }
+            } catch {
+              if current() { self.historyStorageNotice = "本地缓存保存失败：\(Self.describe(error))" }
+            }
+          } catch { failed(error) }
         }
-      } catch {
-        guard current() else { return }
-        self.reachable = false
-        self.historyRefreshError = Self.describe(error)
-        if cached == nil, !hasLocalTurns, case .available = self.historyPreview {
-          self.history = .partial(self.historyPreviewTurns)
-        } else if cached == nil, hasLocalTurns { self.history = .baseUnavailable }
-        else if cached == nil { self.history = .failed(Self.describe(error)) }
-      }
+      } catch { failed(error) }
     }
   }
 
@@ -1605,7 +1633,7 @@ final class RemoteRunStore: ObservableObject {
     var checks: [(String, Bool)] = [
       ("store.sessionSwitchDropsOldCommands", store.slashCommands.isEmpty),
       ("store.warmingDoesNotSwitchSession", store.activeSessionIdentity == beforeIdentity && store.prompt == nil),
-      ("store.warmingBoundsLargeScreen", store.warmedScreens[key] == nil),
+      ("store.warmingUsesBoundedMirror", store.warmedScreens[key]?.available == true && ((try? JSONEncoder().encode(store.warmedScreens[key]).count) ?? Int.max) <= 16 * 1024),
       ("store.offlineKeepsDiskHistory", store.history == .loaded(snapshot.turns) && store.historyFromCache && store.reachable == false),
       ("store.offlineUpdateErrorVisible", store.historyRefreshError != nil)
     ]

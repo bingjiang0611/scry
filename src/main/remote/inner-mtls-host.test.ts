@@ -79,7 +79,7 @@ async function pairDevice(identity: HostIdentity, controller: HostController) {
   const pair = await controller.authority.begin()
   await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
   const grant = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
-  return { keyPEM, certPEM: grant.certificatePEM }
+  return { keyPEM, certPEM: grant.certificatePEM, deviceId: grant.deviceId }
 }
 
 async function call(addr: { port: number; host: string }, caPEM: string, certPEM: string, keyPEM: string, request: unknown) {
@@ -220,6 +220,57 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(allowed.historyPreview.status).toBe('available')
     expect(Buffer.byteLength(JSON.stringify(allowed.historyPreview), 'utf8')).toBeLessThanOrEqual(16 * 1024)
     expect(readPreview).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+  })
+
+  it('reuses one fresh readonly TLS session, rechecks revocation and forbids writes', async () => {
+    const start = vi.fn(async () => {})
+    const turns = [{ userText: 'x'.repeat(600_000), items: [{ kind: 'output' as const, text: 'real answer' }] }]
+    const read = vi.fn(async () => turns)
+    const preview = vi.fn(async (): Promise<RemoteHistoryPreview> => ({ status: 'unavailable', reason: 'no_fast_evidence' }))
+    const { identity, controller, caPEM, addr } = await harness(start, undefined, read, undefined, preview)
+    const device = await pairDevice(identity, controller)
+    const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
+      minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
+    let handshakes = 0
+    socket.on('secureConnect', () => { handshakes++ })
+    await once(socket, 'secureConnect')
+    const exchange = (request: unknown) => new Promise<Record<string, unknown>>((resolve, reject) => {
+      let bytes = ''
+      const cleanup = () => { socket.off('data', data); socket.off('error', error); socket.off('close', closed) }
+      const error = (cause: Error) => { cleanup(); reject(cause) }
+      const closed = () => error(new Error('closed before reply'))
+      const data = (chunk: Buffer) => {
+        bytes += chunk.toString('utf8')
+        if (!bytes.endsWith('\n')) return
+        cleanup()
+        resolve(JSON.parse(bytes) as Record<string, unknown>)
+      }
+      socket.on('data', data); socket.once('error', error); socket.once('close', closed)
+      socket.write(JSON.stringify({ ...request as object, keepAlive: true }) + '\n')
+    })
+    try {
+      expect((await exchange({ op: 'historyPreview', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse' })).historyPreview).toMatchObject({ status: 'unavailable' })
+      let cursor = 0
+      let snapshot: string | undefined
+      const parts: Buffer[] = []
+      while (true) {
+        const reply = await exchange({ op: 'historyPage', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', cursor, limit: 256 * 1024, snapshot })
+        const page = reply.historyPage as { cursor: number; snapshot: string; dataBase64: string; hasMore: boolean }
+        snapshot ??= page.snapshot
+        expect(page.snapshot).toBe(snapshot)
+        parts.push(Buffer.from(page.dataBase64, 'base64'))
+        cursor = page.cursor
+        if (!page.hasMore) break
+      }
+      expect(JSON.parse(Buffer.concat(parts).toString('utf8'))).toEqual(turns)
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(handshakes).toBe(1)
+      await controller.authority.revoke(device.deviceId)
+      expect((await exchange({ op: 'historyPage', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', snapshot, cursor: 0 })).error).toBe('device_not_authorized')
+      expect((await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })).error).toBe('history_connection_read_only')
+      expect(start).not.toHaveBeenCalled()
+      expect(read).toHaveBeenCalledTimes(1)
+    } finally { socket.destroy() }
   })
 
   it('serves snapshot-fenced history pages over the authorized channel', async () => {

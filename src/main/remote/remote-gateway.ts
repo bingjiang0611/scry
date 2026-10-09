@@ -292,7 +292,8 @@ const MAX_HISTORY_TEXT = 20_000
 // response envelope and JSON framing so every accepted history result remains
 // deliverable instead of repeatedly failing as one oversized all-or-nothing page.
 const MAX_HISTORY_RESPONSE_BYTES = 6 * 1024 * 1024
-const MAX_HISTORY_PAGE_BYTES = 64 * 1024
+const MAX_HISTORY_PAGE_BYTES = 256 * 1024
+const MAX_HISTORY_SNAPSHOT_BYTES = 256 * 1024 * 1024
 const MAX_HISTORY_PREVIEW_BYTES = 16 * 1024
 const MAX_HISTORY_PREVIEW_TURNS = 2
 const MAX_HISTORY_PREVIEW_ITEMS = 2
@@ -324,6 +325,7 @@ export class RemoteGateway {
   #historyPreview?: RemoteHistoryPreviewSource
   #output?: RemoteOutputReader
   #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
+  #historyBuilds = new Map<string, Promise<{ bytes: Buffer; snapshot: string }>>()
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
@@ -689,7 +691,7 @@ export class RemoteGateway {
   async readHistoryPage(peerCertSHA256: string, query: RemoteHistoryPageQuery): Promise<RemoteHistoryPage> {
     this.#authorize(peerCertSHA256)
     const cursor = query?.cursor ?? 0
-    const limit = query?.limit ?? MAX_HISTORY_PAGE_BYTES
+    const limit = query?.limit ?? 64 * 1024
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_history_cursor')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_HISTORY_PAGE_BYTES) throw new RemoteGatewayError('invalid_history_limit')
     if (!query || typeof query.providerId !== 'string' || typeof query.externalSessionId !== 'string') {
@@ -710,20 +712,25 @@ export class RemoteGateway {
     if (cached && cached.expiresAt > now) {
       bytes = cached.bytes
       snapshot = query.snapshot!
+      cached.expiresAt = now + 30_000
+      this.#historySnapshots.delete(cacheKey!)
+      this.#historySnapshots.set(cacheKey!, cached)
     } else {
-      const raw = (await this.#history?.read({ providerId, cwd, externalSessionId })) ?? []
-      const normalized: RemoteHistoryTurn[] = raw.map((turn) => ({
-        userText: typeof turn?.userText === 'string' ? turn.userText : '',
-        items: (turn?.items ?? []).flatMap((item) =>
-          item && typeof item.text === 'string' && ['output', 'reasoning', 'tool', 'tool_result'].includes(item.kind)
-            ? [{ kind: item.kind, text: item.text } as RemoteHistoryTurn['items'][number]]
-            : [])
-      }))
-      bytes = Buffer.from(JSON.stringify(normalized), 'utf8')
-      snapshot = createHash('sha256').update(bytes).digest('hex')
+      let build = this.#historyBuilds.get(scope)
+      if (!build) {
+        build = this.#buildHistory({ providerId, cwd, externalSessionId })
+        this.#historyBuilds.set(scope, build)
+      }
+      try { ({ bytes, snapshot } = await build) }
+      finally { if (this.#historyBuilds.get(scope) === build) this.#historyBuilds.delete(scope) }
       if (query.snapshot !== undefined && query.snapshot !== snapshot) throw new RemoteGatewayError('history_snapshot_changed')
-      this.#historySnapshots.set(`${scope}\0${snapshot}`, { bytes, expiresAt: now + 30_000 })
-      while (this.#historySnapshots.size > 4) this.#historySnapshots.delete(this.#historySnapshots.keys().next().value!)
+      this.#historySnapshots.set(`${scope}\0${snapshot}`, { bytes, expiresAt: Date.now() + 30_000 })
+      let total = [...this.#historySnapshots.values()].reduce((sum, value) => sum + value.bytes.length, 0)
+      while (this.#historySnapshots.size > 4 || total > MAX_HISTORY_SNAPSHOT_BYTES) {
+        const oldest = this.#historySnapshots.keys().next().value!
+        total -= this.#historySnapshots.get(oldest)!.bytes.length
+        this.#historySnapshots.delete(oldest)
+      }
     }
     if (cursor > bytes.length) throw new RemoteGatewayError('invalid_history_cursor')
     const end = Math.min(bytes.length, cursor + limit)
@@ -734,6 +741,31 @@ export class RemoteGateway {
       hasMore: end < bytes.length,
       snapshot
     }
+  }
+
+  // Serialize one turn at a time, yielding between turns so a full backfill
+  // cannot monopolize the main loop or duplicate the whole-history JSON string.
+  async #buildHistory(query: RemoteHistoryQuery): Promise<{ bytes: Buffer; snapshot: string }> {
+    const raw = (await this.#history?.read(query)) ?? []
+    const parts = [Buffer.from('[')]
+    let total = 2
+    for (const [index, turn] of raw.entries()) {
+      const normalized: RemoteHistoryTurn = {
+        userText: typeof turn?.userText === 'string' ? turn.userText : '',
+        items: (turn?.items ?? []).flatMap((item) =>
+          item && typeof item.text === 'string' && ['output', 'reasoning', 'tool', 'tool_result'].includes(item.kind)
+            ? [{ kind: item.kind, text: item.text } as RemoteHistoryTurn['items'][number]] : [])
+      }
+      const bytes = Buffer.from(JSON.stringify(normalized), 'utf8')
+      total += bytes.length + (index > 0 ? 1 : 0)
+      if (total > MAX_HISTORY_SNAPSHOT_BYTES) throw new RemoteGatewayError('history_capacity_exceeded')
+      if (index > 0) parts.push(Buffer.from(','))
+      parts.push(bytes)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+    parts.push(Buffer.from(']'))
+    const bytes = Buffer.concat(parts, total)
+    return { bytes, snapshot: createHash('sha256').update(bytes).digest('hex') }
   }
 
   // The assistant's real streamed output CONTENT for one run, strictly after the

@@ -130,3 +130,31 @@ WDA 本轮启动成功。无 mock 参数普通启动、进入已有 DEBUG 本地
 - 最终 17 KiB 传输限制版本 Debug Simulator 编译通过；最后安装尝试因该 Simulator 已 Shutdown 返回 code 405，未启动这份最终二进制。此前一次安装超时后以安装文件 SHA256 与构建文件一致核验，不以超时假装未安装。
 - `-selfTest` launch 100 秒超时、无结果；未算通过。全量 `npm test` 240 秒超时并见 worker IPC channel closed；检查资源与进程后改为两个 worker 的全量 unit 仍在 240 秒被中止，期间 recorder/Git diff fixture 有断言失败及 5 秒超时；shell 阶段未执行。保留首轮日志，不改无关测试、断言或超时，未声称全量通过。
 - 未更新桌面/手机、未重启 Scry、未发送 Provider 消息。真实首屏、完整校验、暖重开及进程重启耗时仍未验收；手机已有 0.1.3 (4) 不包含这套新协议。下一步需通过部署 gate、安装匹配桌面/手机版本，再进行同一 Pi 会话的认证只读验收。
+
+## 2026-10-09：0.1.4 (5) / 桌面 0.2.157 安装候选
+
+### 实现范围
+
+- 预览和完整历史分页共用一个新鲜 TLS 1.3 mTLS tunnel。显式 opt-in `keepAlive`，仅允许 `historyPreview/historyPage`；每次请求重查 grant，证书到期拒绝后续数据，禁止 pipelining，30 秒空闲关闭，host 关闭时销毁通道。旧客户端仍按单次交换关闭。
+- 新客户端请求 256 KiB 页，旧客户端默认仍为 64 KiB。两个待处理读取在单通道上串行发送，接收有长度/超时限制；断线/取消清理等待 Promise。已建立通道随 Swift cancellation 关闭；建立前仍依赖 NIO/upgrade deadlines，不声称所有阶段立即取消。
+- 同一范围的并发组装共享一个 Promise；完整历史逐 turn 序列化并让出主循环。缓存至多四个快照、合计 256 MiB；只有明确 snapshot 的续页延长 30 秒有效期，无 snapshot 的首请求重新读取当前事实，不因滑动 TTL 永久陈旧。完整内容超限报错，不截断后冒充完整。
+- 手机完整数据拼装、SHA256、JSON decode 使用 `@concurrent`，保留 snapshot/cursor/完整 digest 校验。移除多余尾页读取阶段；不从 prompt 派生 canonical identity。
+- 完整缓存写入同时生成小镜像：最后两轮/每轮两项，每段约 1 KiB JSON 编码预算。完整内容超过磁盘预算也可保存镜像；epoch、grant/anchor/provider/cwd/session namespace、保护属性和 backup exclusion 不变。
+- 浏览列表至多预热两个小预览，不回填完整历史；前台优先，fixture offline guard 在网络前执行。预热不声称在线，不覆盖前台错误或真实执行状态。
+- 首屏保持两轮与每轮 16 项、每项 500 Unicode scalar 摘要；较早项每次增加 20。全文通过原生 TextKit 2 只读 sheet 显示，不在首屏解析整段 Markdown。sheet 持有阅读快照，回填不替换正在阅读的正文；真实手机点击/焦点行为仍待验收。
+
+### 检查与首次失败
+
+- Node 24.18.0：最终定向 **67 PASS**；完整 unit **2424 PASS / 3 SKIP**，shell PASS。三项真实账号/费用探针明确关闭。完整 unit 使用 `--maxWorkers=1`，没有修改 fixture 超时或断言。
+- `npm run typecheck`、`check:cli-release`（**563 PASS**，CLI package smoke）、`pack:artifact`（含 packaged resource/security smoke）、`test:renderer:ui`（含 Credits）通过。桌面为开发签名产物，未公证；不是公开发布。
+- Swift package **11 PASS**：串行发送、单握手、大小限制、断线/取消、握手及页超时、异常额外回复。首轮 EmbeddedChannel 未激活导致 5 次失败，改为 fixture 内 `connect`（无真实 TCP）后通过，未修改传输断言。
+- Node 首轮边界测试仍把 65,537 视为越界，按新的 256 KiB 合同将拒绝边界改为 262,145，保留拒绝断言。
+- 新增 slash-heavy 预览回归：有效约 12 KiB host JSON 在默认 Swift slash escaping 下超过镜像预算，保存/读取两项先 FAIL。镜像编码统一 `withoutEscapingSlashes` 后两项 PASS；不是扩大 17 KiB 上限。
+- 最终 Simulator 历史 **45 PASS / 0 FAIL / 1 SKIP**（Data Protection），原自测 **31 PASS / 0 FAIL / 1 SKIP**（unsigned Keychain）。Debug Simulator 与签名 iphoneos 构建通过；既有 deprecated/onChange 与 unnecessary-try 警告未顺手修改。
+- **覆盖率入口未通过**：并发 2、随后单 worker 两次均只有既有 `runtime.test.ts` 的九张 10 MiB 图片验收在 5 秒超时；两次均 2423 PASS / 1 FAIL / 3 SKIP。随后无 coverage 的该文件 23 PASS、完整 unit 2424 PASS。观察到约 10.6 GiB swap，但未证明因果；没有降低覆盖率范围、跳过断言或增加超时。
+
+### 部署/验收状态
+
+- 以上证明编译、隔离 fixture 和可安装产物检查，**不证明真实手机首屏或毫秒级性能**。安装候选待手机在线；CoreDevice `unavailable` 只说明当前安装通路不可用，不证明手机中继离线。
+- 完整旧 archive/index rebuild 仍可能 materialize legacy 正文，单个超大 turn 的序列化也没有恒定耗时保证。若真实只读验收仍慢，按 source/read-mode 与首可读/首全页/完整 SHA 分段定位，再考虑专用 bounded 索引或 worker；不靠重试、隐藏错误或放宽完整性校验掩盖。
+- 版本匹配后由用户验收：首次打开同一会话、暖重开、进程重启、阅读全文、较早内容和相邻会话切换。配对、已有缓存、未决 run 和草稿不得通过卸载/清空绕过。未发送真实 Provider 消息、审批或付费操作。

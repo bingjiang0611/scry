@@ -331,15 +331,23 @@ public enum G0Transport {
   }
   public struct RunHistoryPreviewItem: Sendable, Equatable, Codable {
     public let kind: String; public let text: String; public let truncated: Bool
+    public init(kind: String, text: String, truncated: Bool) { self.kind = kind; self.text = text; self.truncated = truncated }
   }
   public struct RunHistoryPreviewTurn: Sendable, Equatable, Codable {
     public let userText: String; public let userTextTruncated: Bool
     public let items: [RunHistoryPreviewItem]; public let truncated: Bool
+    public init(userText: String, userTextTruncated: Bool, items: [RunHistoryPreviewItem], truncated: Bool) {
+      self.userText = userText; self.userTextTruncated = userTextTruncated; self.items = items; self.truncated = truncated
+    }
   }
   public struct RunHistoryPreview: Sendable, Equatable, Codable {
     public let status: String; public let reason: String?; public let source: String?
     public let turns: [RunHistoryPreviewTurn]; public let partial: Bool?; public let truncated: Bool?; public let bytes: Int?
     public var available: Bool { status == "available" }
+    public init(source: String, turns: [RunHistoryPreviewTurn], truncated: Bool, bytes: Int) {
+      status = "available"; reason = nil; self.source = source; self.turns = turns
+      partial = true; self.truncated = truncated; self.bytes = bytes
+    }
     private enum CodingKeys: String, CodingKey { case status, reason, source, turns, partial, truncated, bytes }
     public init(from decoder: Decoder) throws {
       let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -385,10 +393,14 @@ public enum G0Transport {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
   }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
-  private struct RunHistoryPreviewRequest: Encodable { let op = "historyPreview"; let providerId: String; let cwd: String; let externalSessionId: String }
+  private struct RunHistoryPreviewRequest: Encodable {
+    let op = "historyPreview"; let providerId: String; let cwd: String; let externalSessionId: String
+    var keepAlive: Bool? = nil
+  }
   struct RunHistoryPageRequest: Encodable {
     let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
     let cursor: Int; let limit: Int?; let snapshot: String?
+    var keepAlive: Bool? = nil
   }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunResponse: Decodable {
@@ -520,6 +532,46 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let page = response.sessionsPage else { throw ProbeError.unexpectedReply }
     return page
+  }
+
+  // A transfer owns one fresh mTLS tunnel. It cannot submit, approve or poll a
+  // run. It closes and settles its queued reads when the scope ends/cancels.
+  public final class HistoryConnection: Sendable {
+    private let channel: Channel
+    private let handler: HistoryReadHandler
+    fileprivate init(channel: Channel, handler: HistoryReadHandler) {
+      self.channel = channel; self.handler = handler
+    }
+    private func response(_ request: Data, limit: Int) async throws -> RunResponse {
+      let bytes = try await channel.eventLoop.flatSubmit { [self] in
+        handler.request(request, limit: limit, on: channel)
+      }.get()
+      return try decodeRun(bytes)
+    }
+    public func preview(providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
+      let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, keepAlive: true))
+      let reply = try await response(request, limit: 17 * 1_024)
+      guard let preview = reply.historyPreview else { throw ProbeError.unexpectedReply }
+      return preview
+    }
+    public func page(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> RunHistoryPage {
+      let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: 256 * 1_024, snapshot: snapshot, keepAlive: true))
+      let reply = try await response(request, limit: 512 * 1_024)
+      guard let page = reply.historyPage else { throw ProbeError.unexpectedReply }
+      return page
+    }
+  }
+
+  public static func withHistoryConnection<T: Sendable>(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
+    body: @Sendable (HistoryConnection) async throws -> T) async throws -> T {
+    try await withRelayChannel(endpoint: endpoint, mode: "run", identity: identity) { channel, innerContext in
+      let handler = HistoryReadHandler()
+      try await channel.eventLoop.submit {
+        try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
+        try channel.pipeline.syncOperations.addHandler(handler)
+      }.get()
+      return try await body(HistoryConnection(channel: channel, handler: handler))
+    }
   }
 
   // Small first-screen evidence. Unavailable is explicit and is not decoded as an empty transcript.
@@ -676,7 +728,23 @@ public enum G0Transport {
   // dials a public relay and routes by hostId+mode instead of a fixed port, and
   // pins the inner server to the host anchor without leaf-hostname verification.
   private static func exchangeRelayOnce(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int?) async throws -> Data {
-    guard (1...65535).contains(endpoint.port), request.count < 1_250_000, ["pair", "run"].contains(mode),
+    guard request.count < 1_250_000 else { throw ProbeError.invalidArguments }
+    return try await withRelayChannel(endpoint: endpoint, mode: mode, identity: identity) { channel, innerContext in
+      let result = channel.eventLoop.makePromise(of: Data.self)
+      do {
+        try await channel.eventLoop.submit {
+          try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
+          let limit = responseLimit ?? (mode == "run" ? 8 * 1_024 * 1_024 : 65_536)
+          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result, maxResponseBytes: limit))
+        }.get()
+      } catch { result.fail(error); throw error }
+      return try await result.futureResult.get()
+    }
+  }
+
+  private static func withRelayChannel<T: Sendable>(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
+    body: @Sendable (Channel, NIOSSLContext) async throws -> T) async throws -> T {
+    guard (1...65535).contains(endpoint.port), ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     do {
@@ -740,34 +808,22 @@ public enum G0Transport {
             let configuration = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead: head, upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
               channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
             })
-            channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
-            return try pipeline.configureUpgradableHTTPClientPipeline(configuration: .init(upgradeConfiguration: configuration))
+            let timeout = channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
+            let upgraded = try pipeline.configureUpgradableHTTPClientPipeline(configuration: .init(upgradeConfiguration: configuration))
+            upgraded.whenComplete { _ in timeout.cancel() }
+            return upgraded
           }
         }
       let channel = try await upgrade.get()
-      // Create the reply promise only after the channel exists so a failed
-      // connect/upgrade above can never leave an unfulfilled promise to leak
-      // (NIO fatalErrors on a leaked promise in debug builds).
-      let result = group.next().makePromise(of: Data.self)
+      // Cancel an established tunnel immediately. Bootstrap retains its
+      // bounded 10-second deadline, rather than leaving a detached connection.
+      let reply: T
       do {
-        try await channel.eventLoop.submit {
-          // Inner server hostname is nil: chain-to-anchor is the only check.
-          try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
-          // Pairing replies remain tiny. Run replies may contain a bounded real
-          // session history; keep an explicit 8 MiB ceiling instead of the old
-          // 64 KiB probe-era cap that rejected legitimate conversations.
-          let maxResponseBytes = responseLimit ?? (mode == "run" ? 8 * 1_024 * 1_024 : 65_536)
-          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result, maxResponseBytes: maxResponseBytes))
-        }.get()
-      } catch {
-        // Handler install failed before ProbeHandler could complete the promise.
-        result.fail(error)
-        throw error
-      }
-      let reply = try await result.futureResult.get()
-      // The relay consumes one warm host leg per exchange. Close our side before
-      // shutting down the event loop so NIOSSL does not report the peer's normal
-      // WebSocket teardown as an unclean TLS shutdown after a valid reply.
+        reply = try await withTaskCancellationHandler {
+          try Task.checkCancellation()
+          return try await body(channel, innerContext)
+        } onCancel: { channel.close(promise: nil) }
+      } catch { try? await channel.close(); throw error }
       try? await channel.close()
       try await group.shutdownGracefully()
       return reply
