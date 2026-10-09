@@ -200,7 +200,6 @@ import {
   configureRendererPermissions,
   isAllowedRendererRequest,
   isSafeExternalUrl,
-  isSensitiveExternalDestination,
   isTrustedRendererUrl,
   resolveRendererEntryUrl,
   rendererContentSecurityPolicy
@@ -1045,27 +1044,6 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
 // 注：原来扫 ~/.claude/projects 列举 transcript 的逻辑（readHeadPreview/readCwd/collectSessions）
 // 已移除——app 只列自己起过的会话（见 app-sessions），不采集 terminal 裸跑的 claude。
 
-async function openExternalUrl(url: string): Promise<void> {
-  if (!isSafeExternalUrl(url)) return
-  if (await isSensitiveExternalDestination(url)) {
-    const options = {
-      type: 'warning' as const,
-      title: '打开本机或私网链接',
-      message: '该链接可能访问已登录的本机或内网服务',
-      detail: url,
-      buttons: ['取消', '仍然在浏览器中打开'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
-    }
-    const result = win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options)
-    if (result.response !== 1) return
-  }
-  await shell.openExternal(url)
-}
-
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -1123,16 +1101,16 @@ function createWindow(): void {
   win.webContents.on('will-navigate', (event, url) => {
     if (isTrustedRendererUrl(url, rendererEntryUrl)) return
     event.preventDefault()
-    if (isSafeExternalUrl(url)) void openExternalUrl(url)
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
   })
   win.webContents.on('will-redirect', (event, url) => {
     if (isTrustedRendererUrl(url, rendererEntryUrl)) return
     event.preventDefault()
-    if (isSafeExternalUrl(url)) void openExternalUrl(url)
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
   })
   win.webContents.on('will-attach-webview', (event) => event.preventDefault())
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isSafeExternalUrl(url)) void openExternalUrl(url)
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   let windowShown = false

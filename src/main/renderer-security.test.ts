@@ -4,7 +4,6 @@ import {
   configureRendererPermissions,
   isAllowedRendererRequest,
   isSafeExternalUrl,
-  isSensitiveExternalUrl,
   isTrustedRendererUrl,
   resolveRendererEntryUrl,
   rendererContentSecurityPolicy
@@ -66,22 +65,28 @@ describe('renderer security boundary', () => {
     expect(isTrustedRendererUrl('http://127.0.0.1:5173/admin', devEntry)).toBe(false)
   })
 
-  it('only opens HTTP(S) links externally', () => {
-    expect(isSafeExternalUrl('https://example.com/docs')).toBe(true)
-    expect(isSafeExternalUrl('http://127.0.0.1:3000/')).toBe(true)
-    expect(isSafeExternalUrl('file:///etc/passwd')).toBe(false)
-    expect(isSafeExternalUrl('javascript:alert(1)')).toBe(false)
+  it.each([
+    'https://example.com/docs',
+    'http://127.0.0.1:4610/',
+    'http://localhost:3000/',
+    'http://[::1]:3000/',
+    'http://[::ffff:7f00:1]:3000/',
+    'http://169.254.169.254/latest/meta-data',
+    'https://10.0.0.1/admin',
+    'https://172.31.0.1/admin',
+    'https://192.168.1.1/admin'
+  ])('allows HTTP(S) links to open externally: %s', (url) => {
+    expect(isSafeExternalUrl(url)).toBe(true)
   })
 
-  it('marks loopback, link-local and private-network links as sensitive', () => {
-    expect(isSensitiveExternalUrl('http://localhost:3000/delete')).toBe(true)
-    expect(isSensitiveExternalUrl('http://127.0.0.1:3000/')).toBe(true)
-    expect(isSensitiveExternalUrl('http://[::ffff:7f00:1]:3000/')).toBe(true)
-    expect(isSensitiveExternalUrl('http://169.254.169.254/latest/meta-data')).toBe(true)
-    expect(isSensitiveExternalUrl('https://10.0.0.1/admin')).toBe(true)
-    expect(isSensitiveExternalUrl('https://172.31.0.1/admin')).toBe(true)
-    expect(isSensitiveExternalUrl('https://192.168.1.1/admin')).toBe(true)
-    expect(isSensitiveExternalUrl('https://example.com/')).toBe(false)
+  it.each([
+    'file:///etc/passwd',
+    'javascript:alert(1)',
+    'data:text/html,hello',
+    'mailto:user@example.com',
+    'not a URL'
+  ])('rejects unsafe external links: %s', (url) => {
+    expect(isSafeExternalUrl(url)).toBe(false)
   })
 
   it('blocks renderer network in production and pins development traffic to one origin', () => {
