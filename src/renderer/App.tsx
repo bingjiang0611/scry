@@ -92,12 +92,14 @@ export interface SessionEvidenceGap {
 }
 
 // 选中一条已存在的会话却读不到任何轮次，不能渲染成“新会话”：那是在说谎。
-// page === null 是 main 连可读证据都没命中（Provider transcript 与 Scry 归档都没有）；
-// page.turns 为空则是归档存在但里面没有轮次。两者必须分开报。
+// 可读 live 快照也是本机证据；尚未归档不等于没有内容。
+// 没有可读 live 时，再区分 main 未命中历史（null）与已命中但没有轮次（空 page）。
 export function sessionEvidenceGapAfterLoad(
   sessionId: string,
-  page: { turns: ParsedTurn[] } | null | undefined
+  page: { turns: ParsedTurn[] } | null | undefined,
+  activeRun?: ActiveRun | null
 ): SessionEvidenceGap | null {
+  if (activeRun && !activeRun.done && (activeRun.userText || activeRun.items.length > 0)) return null
   if (!page) {
     return {
       sessionId,
@@ -530,7 +532,7 @@ export async function restoreActiveSessionSelection(
       parsed: ParsedTurn[],
       options: { activeRun: ActiveRun; page?: SessionHistoryPage | null }
     ) => void
-    onHistoryLoaded?: (page: SessionHistoryPage | null) => void
+    onHistoryLoaded?: (page: SessionHistoryPage | null, activeRun: ActiveRun) => void
     isCurrent?: () => boolean
   }
 ): Promise<boolean> {
@@ -549,7 +551,7 @@ export async function restoreActiveSessionSelection(
     : null
   if (effects.isCurrent && !effects.isCurrent()) return false
   effects.replaceWithParsedSession(args.sessionId, page?.turns ?? [], { activeRun, page })
-  effects.onHistoryLoaded?.(page)
+  effects.onHistoryLoaded?.(page, activeRun)
   return true
 }
 
@@ -1667,8 +1669,7 @@ export function App() {
     providerId: SessionProviderId,
     externalSessionId?: string,
     knownRunId?: string,
-    agentProfileId?: string,
-    knownRunning?: boolean
+    agentProfileId?: string
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
     const cwdChanged = projectCwd !== cwd
@@ -1706,19 +1707,20 @@ export function App() {
     if (cwdChanged) setWorkspaceDirty(false)
     integrations.setSelectedId(agentProfileId ?? providerId)
     try {
-      const activeRunsRequest = knownRunId || knownRunning === false ? null : window.scry.activeRuns()
+      // Sidebar activity is a display cache, not proof that no live run exists.
+      const activeRunsRequest = window.scry.activeRuns()
       const [, activeRuns] = await Promise.all([
         window.scry.setCwd(projectCwd || null),
         activeRunsRequest
       ])
       if (!isCurrent()) return
-      const runId = knownRunId ?? activeRunForSession(
+      const runId = activeRunForSession(
         activeRuns,
         projectCwd,
         sessionId,
         providerId,
         agentProfileId
-      )?.runId
+      )?.runId ?? knownRunId
       if (
         await restoreActiveSessionSelection(
           { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
@@ -1727,8 +1729,8 @@ export function App() {
             adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
             loadSession: (context) => window.scry.loadSession(context),
             replaceWithParsedSession: session.replaceWithParsedSession,
-            onHistoryLoaded: (page) => {
-              if (isCurrent()) setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
+            onHistoryLoaded: (page, activeRun) => {
+              if (isCurrent()) setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page, activeRun))
             },
             isCurrent
           }

@@ -385,6 +385,18 @@ async function exerciseSessionSelection(contents, scenario) {
     await wait(`document.querySelector('.sb-sess.active')?.textContent.includes('Old running conversation')`)
   }
   const baseline = await read(`${state}.activeReads`)
+  if (scenario === 'stale-live' || scenario === 'stale-run') {
+    await click('#start-hidden-pi')
+    const initialListReads = await read(`${state}.activeListReads`)
+    if (await read(`document.querySelector('.sb-sess[data-provider="pi"]').classList.contains('running')`) !== (scenario === 'stale-run')) throw new Error('Fixture sidebar must retain its stale running state')
+    await click('.sb-sess[data-provider="pi"]')
+    await wait(`${state}.historyReads === 1`)
+    await click('#resolve-history')
+    await wait(`document.querySelector('.chat-transcript').textContent.includes('Actual live response before archival') && !document.querySelector('.chat-session-evidence-gap')`)
+    const result = await read(state)
+    if (result.activeListReads !== initialListReads + 1 || result.historyReads !== 1 || result.adoptedRuns.join(',') !== 'hidden-pi-run' || result.activeReads !== baseline || result.starts !== 0) throw new Error(`Stale sidebar selection did not restore a single authoritative read: ${JSON.stringify(result)}`)
+    return { scenario, firstClickLiveContent: true, missingArchiveNotEmpty: true, authoritativeRunLookup: true, noRetryOrStart: true }
+  }
   if (scenario === 'new-draft') {
     const input = 'textarea[aria-label="描述任务"]'
     const newButton = '.sb-new'
@@ -777,7 +789,7 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft'])}) {
+        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }

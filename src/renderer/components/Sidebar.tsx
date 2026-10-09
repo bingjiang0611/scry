@@ -76,7 +76,7 @@ export function Sidebar({
   backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
   version?: string
   onNewChat: () => void
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, running?: boolean) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onRenameSession?: (cwd: string, session: SessionMeta, title: string) => Promise<void>
@@ -507,7 +507,7 @@ function SessionRow({
   waitingForAnswer: boolean
   unread: boolean
   backgroundWork?: BackgroundWork
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, running?: boolean) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
@@ -532,8 +532,7 @@ function SessionRow({
             session.providerId,
             session.externalSessionId,
             running ? session.runId : undefined,
-            session.agentProfileId,
-            running
+            session.agentProfileId
           )
         }}
       >
