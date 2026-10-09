@@ -168,6 +168,25 @@ The repository's atomic installer installed this locally development-signed, non
 
 The pre-existing Scry process was not restarted; the new code takes effect on its next launch. This installation does not establish live multi-Provider performance after restart.
 
+## Conversation pipeline follow-up (not included in the installed `75b58a9` artifact)
+
+- Composer text now uses a synchronous session-scoped external store. Only the composer subscribes to ordinary text edits; App subscribes to attachment identity and slash-command tokens. Send, restoration and native-session migration read the same latest snapshot. The transcript list is memoized separately.
+- Draft serialization (including image data) is coalesced at a fixed 250 ms interval, not postponed indefinitely while typing. Page hide, hidden visibility and unmount flush the latest snapshot. An unclean process crash can lose the last interval of draft edits; this is not a durable-per-keystroke guarantee. Revisit separate text/attachment persistence if measured serialization still exceeds the input budget; do not discard attachment bytes.
+- Pi's optional model-window query no longer blocks prompt admission. Native model/effort changes, entry baseline and managed recorder identity remain ordered. Missing telemetry stays unknown; pending RPCs retain the transport's existing cleanup semantics.
+- Tool events first deliver a bounded, provenance-bearing preview in live FIFO order. Disk persistence remains serial; successful writes enrich the same event id with the durable content reference. Text no longer waits for earlier tool bodies to sync. Recording still drains persistence; disk failures retain raw evidence, and renderer backpressure remains enabled.
+- A main-owned `runtime:provider_ended` event distinguishes Provider completion from recording finalization. The UI says “记录收口中”, keeps follow-ups queued and disables the now-irrelevant Provider stop button. Existing Provider-specific `turnDone`, trust, recovery and Git-before-modification semantics are unchanged.
+- `SCRY_PERF_LOG=1` now includes `agent.first_text` (request-to-first nonempty Provider text, **not renderer paint**), with registration/Git-ready/launch checkpoints; recovery/trust stages are expanded. `agent.trace_content` separates queue wait from persistence. The snapshot checkpoint belongs to `first_text`, since `agent.start` has already finished at run registration.
+
+### Verification and remaining limits
+
+- The native Electron composer regression failed the previous state-owned host and now passes at wide/narrow sizes: typing causes zero conversation-host renders, immediate Enter reads the latest text, and IME/history/focus behavior remains intact. This is a production-component fixture, not real-Provider latency evidence.
+- The Pi regression with an unanswered model query failed the old awaited path (no prompt within 10 s); the asynchronous path passes, as do all 71 Pi tests. This uses an isolated local RPC process, not an account.
+- A blocked-disk test proves tool/text/provider-terminal ordering before persistence completes, durable body readability afterward, and failure drain. Renderer tests prove same-id enrichment does not add a second tool event or mark the turn done.
+- Final full unit/shell run: 195 test files / 2,453 tests passed, three opt-in external probes skipped. Final typecheck and production build passed. Complete renderer UI suite (including Credits, session transitions and terminal fixtures) passed.
+- Retained development failures: the first new ingestion assertion incorrectly bounded the whole result envelope to 12 KiB (the existing contract repeats the 8 KiB preview in text/output aliases); it was replaced with the actual field-budget assertion. Initial typecheck exposed a Node-test import of renderer-only path aliases; the assertion was moved to the renderer suite without changing production tsconfig.
+- The additional full built-App `node scripts/electron-security-smoke.mjs --dev` run **failed** late in cold terminal-history restoration. The restarted Electron renderer logged `binding.startupData` null / `preloadScripts` before the terminal menu timeout. Earlier assertions completed, but the complete run is not passing evidence; no baseline attribution or retry is claimed. Owned App PIDs were gone after cleanup. Log: `/tmp/scry-dialog-app-smoke.log` (ephemeral).
+- No real Provider throughput/first-paint comparison, release packaging or installation was performed for this follow-up. Git/trust/recovery timing remains workload-dependent; this change does not claim to eliminate those necessary waits.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:

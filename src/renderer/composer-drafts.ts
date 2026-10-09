@@ -18,6 +18,59 @@ interface StoredDraft {
 const STORAGE_KEY = 'scry.composer-drafts.v1'
 const MAX_DRAFTS = 32
 
+// Input subscribers update independently of App. Sending/migration always reads the same
+// synchronous snapshot; there is no debounced copy that can lose the last keystroke.
+export function createComposerDraftStore(initial: ReadonlyMap<string, ComposerDraft>) {
+  let drafts = initial
+  const listeners = new Set<() => void>()
+  return {
+    getSnapshot: () => drafts,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    update: (update: (current: ReadonlyMap<string, ComposerDraft>) => ReadonlyMap<string, ComposerDraft>) => {
+      const next = update(drafts)
+      if (next === drafts) return
+      drafts = next
+      for (const listener of listeners) listener()
+    }
+  }
+}
+
+export type ComposerDraftStore = ReturnType<typeof createComposerDraftStore>
+export const COMPOSER_DRAFT_SAVE_INTERVAL_MS = 250
+
+// Coalesce text + base64 serialization, with a bounded interval even during continuous typing.
+// The owner must flush on pagehide/unmount. An unclean process crash can lose this interval.
+export function persistComposerDraftStore(
+  store: ComposerDraftStore,
+  save: (drafts: ReadonlyMap<string, ComposerDraft>) => void
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let dirty = false
+  const flush = (): void => {
+    clearTimeout(timer)
+    timer = undefined
+    if (!dirty) return
+    dirty = false
+    save(store.getSnapshot())
+  }
+  const schedule = (): void => {
+    dirty = true
+    timer ??= setTimeout(flush, COMPOSER_DRAFT_SAVE_INTERVAL_MS)
+  }
+  const unsubscribe = store.subscribe(schedule)
+  schedule()
+  return {
+    flush,
+    dispose: () => {
+      unsubscribe()
+      flush()
+    }
+  }
+}
+
 function validAttachment(value: unknown): value is AgentInputAttachment {
   if (!value || typeof value !== 'object') return false
   const item = value as Partial<AgentInputAttachment>

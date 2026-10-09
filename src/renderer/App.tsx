@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, Dispatch, SetStateAction } from 'react'
 import { flushSync } from 'react-dom'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
@@ -15,7 +15,7 @@ import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/pro
 import { canOpenWorkspaceFileExternally, type WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
-import { ChatView } from './components/ChatView'
+import { SessionChatView } from './components/ChatView'
 import { ViewChrome } from './components/ViewChrome'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
@@ -40,6 +40,8 @@ import { selectedExternalSessionId, sessionMatchesSelection, sessionSelectionCha
 import type { WorkspaceFileTarget } from './workspace-links'
 import type { SessionAttentionSnapshot } from '@shared/session-attention'
 import {
+  createComposerDraftStore,
+  persistComposerDraftStore,
   readComposerDrafts,
   writeComposerDrafts,
   type ComposerDraft,
@@ -61,6 +63,7 @@ const SIDEBAR_MAX = 260
 const PANEL_MIN = 360
 const PANEL_MAX = 960
 const CHAT_BOTTOM_STICKY_PX = 32
+const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 
 export function providerContextCacheKey(context: ProviderContext): string {
   return `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
@@ -785,13 +788,14 @@ export function App() {
     integrations.selectedProviderId,
     projects
   ])
-  const [sessionDrafts, setSessionDrafts] = useState<ReadonlyMap<string, SessionComposerDraft>>(() => {
+  const [draftStore] = useState(() => {
     try {
-      return new Map([...readComposerDrafts(window.localStorage).entries()].slice(-MAX_SESSION_COMPOSER_DRAFTS))
+      return createComposerDraftStore(new Map([...readComposerDrafts(window.localStorage).entries()].slice(-MAX_SESSION_COMPOSER_DRAFTS)))
     } catch {
-      return new Map()
+      return createComposerDraftStore(new Map())
     }
   })
+  const setSessionDrafts = draftStore.update
   const draftKey = useMemo(() => sessionComposerDraftKey({
     providerId: integrations.selectedProviderId,
     agentProfileId: integrations.providerContext.agentProfileId,
@@ -832,9 +836,11 @@ export function App() {
     agentProfileId: integrations.providerContext.agentProfileId,
     cwd
   }
-  const draft = sessionDrafts.get(draftKey)
-  const input = draft?.input ?? ''
-  const draftAttachments = draft?.attachments ?? []
+  const readDraftAttachments = () => {
+    const attachments = draftStore.getSnapshot().get(draftKey)?.attachments
+    return attachments?.length ? attachments : EMPTY_DRAFT_ATTACHMENTS
+  }
+  const draftAttachments = useSyncExternalStore(draftStore.subscribe, readDraftAttachments, readDraftAttachments)
   const [sessionPromptQueues, setSessionPromptQueues] = useState<SessionPromptQueues>(() => new Map())
   const queuedPrompts = sessionPromptQueues.get(draftKey) ?? []
   const setQueuedPrompts: Dispatch<SetStateAction<QueuedPrompt[]>> = useCallback((update) => {
@@ -852,13 +858,13 @@ export function App() {
       ...currentDraft,
       input: typeof update === 'function' ? update(currentDraft.input) : update
     }), releaseDraft))
-  }, [draftKey, releaseDraft])
+  }, [draftKey, releaseDraft, setSessionDrafts])
   const setDraftAttachments: Dispatch<SetStateAction<DraftAttachment[]>> = useCallback((update) => {
     setSessionDrafts((current) => updateSessionComposerDraft(current, draftKey, (currentDraft) => ({
       ...currentDraft,
       attachments: typeof update === 'function' ? update(currentDraft.attachments) : update
     }), releaseDraft))
-  }, [draftKey, releaseDraft])
+  }, [draftKey, releaseDraft, setSessionDrafts])
   const providerSendBlockedReason = !integrations.agentsHydrated
     ? '正在检测本机 Provider，暂不能发送'
     : !integrations.selectedAgent
@@ -978,7 +984,6 @@ export function App() {
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
   integrationContextKeyRef.current = providerContextCacheKey(integrations.providerContext)
-  const sessionDraftsRef = useRef<ReadonlyMap<string, SessionComposerDraft>>(sessionDrafts)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
   const [pendingChatEvent, setPendingChatEvent] = useState<{ eventId: string; runId: string } | null>(null)
@@ -989,7 +994,11 @@ export function App() {
   const [slashRefreshKey, setSlashRefreshKey] = useState(0)
   const [slashSel, setSlashSel] = useState(0)
   const [slashHidden, setSlashHidden] = useState(false) // Esc 临时收起；改输入时复位
-  const slashToken = input.startsWith('/') && !/\s/.test(input) ? input.slice(1) : null
+  const readSlashToken = () => {
+    const input = draftStore.getSnapshot().get(draftKey)?.input ?? ''
+    return input.startsWith('/') && !/\s/.test(input) ? input.slice(1) : null
+  }
+  const slashToken = useSyncExternalStore(draftStore.subscribe, readSlashToken, readSlashToken)
   // 输入命令 token 时总是开菜单：加载中/清单空/无匹配 都摊开显示，不再静默藏掉
   const slashOpen = slashToken != null && !slashHidden
   const retrySlash = (): void => {
@@ -1008,17 +1017,28 @@ export function App() {
   })
 
   useEffect(() => {
-    sessionDraftsRef.current = sessionDrafts
     const storageError = '本地存储不可用，草稿未能保存；当前内容仍在本窗口中'
-    try {
-      const saved = writeComposerDrafts(window.localStorage, sessionDrafts)
-      setComposerError((current) => saved
-        ? (current === storageError ? null : current)
-        : (current ?? storageError))
-    } catch {
-      setComposerError((current) => current ?? storageError)
+    const persistence = persistComposerDraftStore(draftStore, (drafts) => {
+      try {
+        const saved = writeComposerDrafts(window.localStorage, drafts)
+        setComposerError((current) => saved
+          ? (current === storageError ? null : current)
+          : (current ?? storageError))
+      } catch {
+        setComposerError((current) => current ?? storageError)
+      }
+    })
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') persistence.flush()
     }
-  }, [sessionDrafts])
+    window.addEventListener('pagehide', persistence.flush)
+    document.addEventListener('visibilitychange', flushWhenHidden)
+    return () => {
+      window.removeEventListener('pagehide', persistence.flush)
+      document.removeEventListener('visibilitychange', flushWhenHidden)
+      persistence.dispose()
+    }
+  }, [draftStore])
 
   useEffect(() => {
     if (!archiveUndo) return
@@ -1030,7 +1050,7 @@ export function App() {
 
   useEffect(
     () => () => {
-      for (const draft of sessionDraftsRef.current.values()) {
+      for (const draft of draftStore.getSnapshot().values()) {
         for (const attachment of draft.attachments) {
           if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
         }
@@ -1505,6 +1525,9 @@ export function App() {
   }, [setDraftAttachments])
 
   const send = async (): Promise<void> => {
+    const draft = draftStore.getSnapshot().get(draftKey)
+    const input = draft?.input ?? ''
+    const draftAttachments = draft?.attachments ?? EMPTY_DRAFT_ATTACHMENTS
     const text = input.trim()
     const attachments = inputAttachments(draftAttachments)
     if (!text && attachments.length === 0) return
@@ -2092,7 +2115,9 @@ export function App() {
               onTogglePanel={toggleOverviewPanel}
             />
 
-            <ChatView
+            <SessionChatView
+              draftStore={draftStore}
+              draftKey={draftKey}
               turns={session.turns}
               selectedId={session.selected?.id ?? null}
               scrollRef={scrollRef}
@@ -2108,7 +2133,6 @@ export function App() {
               runControlCatalog={integrations.runControlCatalog}
               runControlsLoading={integrations.runControlsLoading}
               runControlsReason={integrations.runControlCapability?.reason}
-              input={input}
               sendBlockedReason={sendBlockedReason}
               composerError={composerError}
               submitting={composerSubmitting}
@@ -2137,8 +2161,8 @@ export function App() {
               onAnswerQuestion={session.answerQuestion}
               onInput={(value) => {
                 setInput(value)
-                setComposerError(null)
-                setSlashHidden(false)
+                if (composerError !== null) setComposerError(null)
+                if (slashHidden) setSlashHidden(false)
               }}
               onChooseFolder={chooseFolder}
               onUnbindProject={unbindProject}

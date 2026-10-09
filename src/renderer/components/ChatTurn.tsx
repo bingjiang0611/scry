@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type Re
 import { createPortal } from 'react-dom'
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
+import { providerHasEnded } from '../run-stop-status'
 import { BackgroundWorkPanel } from './BackgroundWorkPanel'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
@@ -1338,9 +1339,10 @@ function AssistantTurnImpl({
   // 下面这些 O(全部事件) 的投影，纯 token 增量只更新一个字符串。
   const projectionCache = useRef<TurnStreamProjectionCache>()
   if (!projectionCache.current) projectionCache.current = new TurnStreamProjectionCache()
-  const backgroundWork = !turn.done && !turn.error ? latestBackgroundWork(turn.items) : undefined
+  const finalizing = !turn.done && !turn.error && providerHasEnded(turn.items)
+  const backgroundWork = !turn.done && !turn.error && !finalizing ? latestBackgroundWork(turn.items) : undefined
   const backgroundStatus = backgroundWorkStatus(backgroundWork)
-  const terminal = turn.done || !!turn.error || backgroundStatus?.waiting === true
+  const terminal = turn.done || !!turn.error || finalizing || backgroundStatus?.waiting === true
   const projection = projectionCache.current.project(turn.items)
   const structuralItems = projection.structuralItems as TraceEvent[]
   // 把 tool_result 合并进对应 tool_use（加 output），并从流里过滤掉单独的 tool_result 事件
@@ -1636,8 +1638,8 @@ function AssistantTurnImpl({
         <span className="runid">{turn.pendingStart ? '正在发送' : `run · ${turn.runId}`}</span>
         {!turn.done && !turn.error ? (
           <span className="running">
-            {backgroundStatus?.waiting ? <Icon name="clock" /> : <span className="spin" />}
-            {turn.pendingStart ? '正在启动' : backgroundStatus?.label ?? '运行中'}
+            {finalizing || backgroundStatus?.waiting ? <Icon name="clock" /> : <span className="spin" />}
+            {turn.pendingStart ? '正在启动' : finalizing ? '记录收口中' : backgroundStatus?.label ?? '运行中'}
           </span>
         ) : (
           <span className="mini">

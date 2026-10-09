@@ -76,10 +76,14 @@ process.stdin.on('data', (chunk) => {
       }
       response(state)
     }
-    else if (command.type === 'get_available_models') response({ models: [{
-      provider: 'openai-codex', id: 'test-model', name: 'Test Model', contextWindow: 200000,
-      thinkingLevelMap: { off: null, high: 'high' }
-    }] })
+    else if (command.type === 'get_available_models') {
+      const models = () => response({ models: [{
+        provider: 'openai-codex', id: 'test-model', name: 'Test Model', contextWindow: 200000,
+        thinkingLevelMap: { off: null, high: 'high' }
+      }] })
+      // Intentionally never answer optional telemetry. Prompt and process shutdown must not depend on it.
+      if (!require('node:fs').existsSync(process.cwd() + '/hold-model-query')) models()
+    }
     else if (command.type === 'get_available_thinking_levels') response({ levels: ['off', 'high'] })
     else if (command.type === 'get_commands') response({ commands: [
       { name: 'fixture-menu', description: 'Open an extension menu', source: 'extension' },
@@ -113,6 +117,7 @@ process.stdin.on('data', (chunk) => {
     }
     else if (command.type === 'prompt') {
       promptMessage = command.message
+      if (require('node:fs').existsSync(process.cwd() + '/hold-model-query')) require('node:fs').writeFileSync(process.cwd() + '/prompt-received', '')
       if (command.message === '/fixture-menu') {
         acknowledgePrompt = response
         send({ type: 'extension_ui_request', id: 'menu-select', method: 'select', title: 'Menu', options: ['Edit'] })
@@ -524,6 +529,27 @@ describe('Pi RPC Provider', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('does not block prompt dispatch or process convergence on optional model telemetry', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'hold-model-query'), '')
+      const startedAt = Date.now()
+      const envSpy = vi.spyOn(shellEnvironment, 'shellEnv').mockReturnValue({ ...(process.env as Record<string, string>) })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      try {
+        const handle = adapter.run({
+          runId: 'run-delayed-model-query', prompt: 'hello', cwd, agentProfileId: profile.id,
+          attachments: [], permissionMode: 'full_access', emit: vi.fn()
+        })
+        await vi.waitFor(() => expect(existsSync(join(cwd, 'prompt-received'))).toBe(true), { timeout: 10_000 })
+        expect(Date.now() - startedAt).toBeLessThan(10_000)
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+      } finally {
+        await adapter.dispose?.()
+        envSpy.mockRestore()
+      }
+    })
+  }, 15_000)
 
   it('probes native models, permissions, commands and skills without overriding Pi project trust', async () => {
     await withFixture(async (profile, cwd) => {

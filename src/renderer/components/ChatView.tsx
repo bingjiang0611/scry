@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type {
   AgentModelRef,
@@ -17,10 +17,13 @@ import { WorkdirPicker, CliPicker, ModelEffortPicker, RunControlSelect } from '.
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import type { WorkspaceFileTarget } from '../workspace-links'
-import { runStopStatus } from '../run-stop-status'
+import { providerHasEnded, runStopStatus } from '../run-stop-status'
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
+import type { ComposerDraftStore } from '../composer-drafts'
+
+const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 
 interface ChatViewProps {
   turns: Turn[]
@@ -88,6 +91,38 @@ interface ChatViewProps {
   onPermissionMode: (mode: AgentPermissionMode) => void
   onRescan: () => void
 }
+
+// Subscribe at the composer boundary, not App: ordinary typing must not render the sidebar,
+// summaries or transcript host. Programmatic draft edits use this exact same snapshot.
+export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatViewProps, 'input'> & {
+  draftStore: ComposerDraftStore
+  draftKey: string
+}) {
+  const readInput = () => draftStore.getSnapshot().get(draftKey)?.input ?? ''
+  const input = useSyncExternalStore(draftStore.subscribe, readInput, readInput)
+  return <ChatView {...props} input={input} />
+}
+
+const ChatTranscriptTurns = memo(function ChatTranscriptTurns({
+  turns, selectedId, focusedTurnRunId, onTurnRef, onSelect, onOpenDiff, onForkTurn,
+  pendingQuestions, onAnswerQuestion
+}: Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
+  'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'>) {
+  return <>{turns.map((turn) => {
+    const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
+    return <div
+      key={turn.runId}
+      className={`turn transcript-turn ${selectedTurn ? 'is-selected' : ''} ${focusedTurnRunId === turn.runId ? 'turn-jump-target' : ''}`}
+      data-run-id={turn.runId}
+      data-selected={selectedTurn || undefined}
+      ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
+    >
+      <UserMessage text={turn.userText} attachments={turn.attachments} />
+      <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
+        onForkTurn={onForkTurn} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} />
+    </div>
+  })}</>
+})
 
 interface ClipboardDataLike {
   files?: ArrayLike<File>
@@ -243,7 +278,7 @@ export function ChatView({
   slashCmds,
   slashReason = null,
   slashSel,
-  pendingQuestions = [],
+  pendingQuestions = NO_PENDING_QUESTIONS,
   stopStates = {},
   historyWindow = null,
   historyOlderLoading = false,
@@ -299,8 +334,8 @@ export function ChatView({
   const compositionActiveRef = useRef(false)
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
-  const promptHistory = composerPromptHistory(turns, queuedPrompts)
-  const promptHistoryKey = promptHistory.map((value) => `${value.length}:${value}`).join('|')
+  const promptHistory = useMemo(() => composerPromptHistory(turns, queuedPrompts), [turns, queuedPrompts])
+  const promptHistoryKey = useMemo(() => promptHistory.map((value) => `${value.length}:${value}`).join('|'), [promptHistory])
   const promptHistoryRef = useRef<{ key: string; position: number | null }>({ key: promptHistoryKey, position: null })
   const resetPromptHistory = (): void => {
     promptHistoryRef.current = { key: promptHistoryKey, position: null }
@@ -358,7 +393,10 @@ export function ChatView({
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
-  const stopStatus = runStopStatus(inFlightTurn ? stopStates[inFlightTurn.runId] : undefined)
+  const stopStatus = runStopStatus(
+    inFlightTurn ? stopStates[inFlightTurn.runId] : undefined,
+    inFlightTurn != null && providerHasEnded(inFlightTurn.items)
+  )
   const busyTurn = busy ? inFlightTurn : undefined
   const backgroundStatus = stopStatus.tone === 'running' && busyTurn && pendingQuestions.length === 0
     ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined
@@ -445,31 +483,12 @@ export function ChatView({
               </button>
             </div>
           )}
-          {!sessionLoading && turns.map((turn) => {
-            const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
-            return (
-            <div
-              key={turn.runId}
-              className={`turn transcript-turn ${selectedTurn ? 'is-selected' : ''} ${focusedTurnRunId === turn.runId ? 'turn-jump-target' : ''}`}
-              data-run-id={turn.runId}
-              data-selected={selectedTurn || undefined}
-              ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
-            >
-              <UserMessage text={turn.userText} attachments={turn.attachments} />
-              <AssistantTurn
-                turn={turn}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                onOpenDiff={onOpenDiff}
-                onForkTurn={!busy && !sessionLoading && queuedPrompts.length === 0 && pendingQuestions.length === 0
-                  ? onForkTurn
-                  : undefined}
-                pendingQuestions={pendingQuestions}
-                onAnswerQuestion={onAnswerQuestion}
-              />
-            </div>
-            )
-          })}
+          {!sessionLoading && <ChatTranscriptTurns
+            turns={turns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId}
+            onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff}
+            onForkTurn={!busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
+            pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion}
+          />}
           </div>
         </div>
       </WorkspaceFileLinkProvider>
@@ -588,7 +607,7 @@ export function ChatView({
                 </span>
               )}
               {!Number.isNaN(runStartedAt) && <RunElapsed startedAt={runStartedAt} />}
-              <button type="button" className="stop run-status-stop" onClick={onStop}>
+              <button type="button" className="stop run-status-stop" onClick={onStop} disabled={stopStatus.providerSettled}>
                 <Icon name="square" /> 停止本轮
               </button>
             </span>

@@ -1285,6 +1285,23 @@ describe('applyTraceBatch（性能：批量合并，语义不变）', () => {
   const e = (p: Partial<TraceEvent> & { id: string }): TraceEvent =>
     ({ ts: '', runId: 'r1', kind: 'tool', stage: 'tool:X', ...p }) as TraceEvent
 
+  it('工具正文落盘补充引用不重排时间线、不双计调用或结束正在收口的轮次', () => {
+    const preview = e({ id: 'tool', stage: 'tool_result', toolUseId: 'call', text: 'preview' })
+    const initial = applyTraceBatch([], [preview,
+      e({ id: 'answer', kind: 'model', stage: 'text_delta', text: 'answer' }),
+      e({ id: 'ended', kind: 'harness', stage: 'runtime:provider_ended' })
+    ], new Set())
+    const persisted: TraceEvent = { ...preview, outputContent: {
+      content: 'preview', savedBytes: 7, encoding: 'utf8', storage: 'truncated',
+      source: 'scry_app_trace', sourceCompleteness: 'unknown', redaction: 'disabled', reasons: ['field_budget'],
+      contentRef: { storage: 'recorder-content-v1', sha256: 'a'.repeat(64), bytes: 10000, encoding: 'utf8' }
+    } }
+    const [turn] = applyTraceBatch(initial, [persisted], new Set())
+    expect(turn.items.map((event) => event.id)).toEqual(['tool', 'answer', 'ended'])
+    expect(turn.items[0].outputContent?.contentRef).toEqual(persisted.outputContent?.contentRef)
+    expect(turn.done).toBe(false)
+  })
+
   it('一批事件 FIFO 保序追加，新 run 自动建 turn', () => {
     const out = applyTraceBatch([], [e({ id: 'a' }), e({ id: 'b' }), e({ id: 'c' })], new Set())
     expect(out).toHaveLength(1)
