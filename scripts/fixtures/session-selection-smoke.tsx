@@ -30,13 +30,15 @@ let cwd: string | null = '/fixture/old'
 let activeReads = 0
 let historyReads = 0
 let cancelledLoads = 0
+let newSessions = 0
+let starts = 0
 let pendingHistory: { cwd: string; resolve: () => void; reject: (error: Error) => void } | null = null
 const pendingSnapshots: Array<() => void> = []
 const noopSubscribe = () => () => {}
 const status = document.createElement('output')
 status.id = 'selection-state'
 const update = () => {
-  status.textContent = JSON.stringify({ cwd, activeReads, historyReads, cancelledLoads, snapshots: pendingSnapshots.length })
+  status.textContent = JSON.stringify({ cwd, activeReads, historyReads, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
 }
 const bridge = {
   activeRun: () => {
@@ -54,6 +56,8 @@ const bridge = {
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
   usageStats: async () => null, stats: async () => null,
   focusRun: async () => true,
+  newSession: async () => { newSessions += 1; update(); return true },
+  start: async () => { starts += 1; update(); throw new Error('This selection fixture must not start a Provider') },
   adoptActiveRun: async () => oldRun,
   setCwd: async (next: string | null) => {
     if (next !== cwd && pendingHistory) {

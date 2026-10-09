@@ -368,7 +368,7 @@ async function exerciseSessionSelection(contents, scenario) {
   const click = async (selector) => {
     const point = await read(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
-      if (!node) throw new Error('Missing selection control');
+      if (!node) throw new Error('Missing selection control: ' + ${JSON.stringify(selector)});
       node.scrollIntoView({ block: 'center' });
       const rect = node.getBoundingClientRect();
       const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
@@ -385,6 +385,52 @@ async function exerciseSessionSelection(contents, scenario) {
     await wait(`document.querySelector('.sb-sess.active')?.textContent.includes('Old running conversation')`)
   }
   const baseline = await read(`${state}.activeReads`)
+  if (scenario === 'new-draft') {
+    const input = 'textarea[aria-label="描述任务"]'
+    const newButton = '.sb-new'
+    const newDraft = '未发送的新会话草稿\n第二行继续保留'
+    const existingDraft = '已有会话自己的草稿'
+    const projectDraft = '另一个项目的新会话草稿'
+    const type = async (value) => {
+      contents.focus()
+      await click(input)
+      await wait(`document.activeElement === document.querySelector(${JSON.stringify(input)})`)
+      await contents.insertText(value)
+      await wait(`document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(value)}`)
+    }
+    await click(newButton)
+    await wait(`document.querySelector(${JSON.stringify(input)})?.value === '' && ${state}.newSessions === 1`)
+    await type(newDraft)
+    await click('.sb-sess.running')
+    await wait(`${state}.historyReads === 1`)
+    await click('#resolve-history')
+    await wait(`document.querySelector(${JSON.stringify(input)}).value === ''`)
+    await type(existingDraft)
+    await click(newButton)
+    await wait(`document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(newDraft)}`)
+    await click(newButton)
+    await wait(`${state}.newSessions === 3 && document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(newDraft)}`)
+    await click('.sb-sess[data-provider="pi"]')
+    await wait(`${state}.historyReads === 2`)
+    await click('#resolve-history')
+    await wait(`document.querySelector(${JSON.stringify(input)}).value === ''`)
+    await click(newButton)
+    await wait(`${state}.newSessions === 4 && document.querySelector(${JSON.stringify(input)}).value === ''`)
+    await type(projectDraft)
+    await click('.sb-sess.running')
+    await wait(`${state}.historyReads === 3`)
+    await click('#resolve-history')
+    await wait(`document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(existingDraft)}`)
+    await click(newButton)
+    await wait(`${state}.newSessions === 5 && document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(newDraft)}`)
+    await click('.sb-sess[data-provider="pi"]')
+    await wait(`${state}.historyReads === 4`)
+    await click('#resolve-history')
+    await click(newButton)
+    await wait(`${state}.newSessions === 6 && document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(projectDraft)}`)
+    if (await read(`${state}.starts`) !== 0) throw new Error('Restoring a draft started a Provider')
+    return { scenario, newDraftRestored: true, existingDraftPreserved: true, projectDraftIsolated: true, repeatedNewPreserved: true, noImplicitSend: true }
+  }
   if (scenario === 'focused-event') await click('#focus-pi')
   else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
@@ -731,7 +777,7 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event'])}) {
+        for (const scenario of ${JSON.stringify(piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }

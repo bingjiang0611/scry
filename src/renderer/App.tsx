@@ -1603,21 +1603,12 @@ export function App() {
     resetPromptQueueControl()
     shouldStickToBottomRef.current = true
     const pendingDraftKey = sessionComposerDraftKey({ ...draftContextRef.current, sessionId: null })
-    // New conversation is an explicit reset. Drop a stale unsent new-chat draft instead of
-    // letting it reappear and become an apparently spontaneous request. Keep established
-    // sessions' drafts untouched so returning to them still restores their text.
+    // Reopen this workspace's unsent draft without discarding text or attachments.
+    // Queued send intents are still reset below; restoring a draft never sends it.
     flushSync(() => {
       setSessionLoading(true)
       setSessionEvidenceGap(null)
       selectSessionId(null)
-      setSessionDrafts((current) => {
-        const discarded = current.get(pendingDraftKey)
-        if (!discarded) return current
-        releaseDraft(discarded)
-        const next = new Map(current)
-        next.delete(pendingDraftKey)
-        return next
-      })
       setSessionPromptQueues((current) => {
         if (!current.has(pendingDraftKey)) return current
         const next = new Map(current)
