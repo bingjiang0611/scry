@@ -80,7 +80,7 @@ import type { AuthorizedMcpExecution } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
 import { piRpcEnvironment, probePiAgent } from './providers/pi'
-import { createPiAgentProfileStore, piProfileForExecutable, type PiAgentProfile } from './pi-agent-profiles'
+import { createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles, type PiAgentProfile } from './pi-agent-profiles'
 import { composeProviderDetectionResults, createCachedAsyncLoader } from './provider-detection'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
@@ -491,17 +491,8 @@ const storedPiProfiles = (): PiAgentProfile[] => {
     return []
   }
 }
-const storedPiProfilesNotDetected = (detected: Array<{ id: string; path: string }>): PiAgentProfile[] => {
-  const detectedExecutables = new Set(detected.flatMap((agent) => {
-    if (providerIdForAgentId(agent.id) !== 'pi') return []
-    try {
-      return [piProfileForExecutable(agent.path).executable]
-    } catch {
-      return []
-    }
-  }))
-  return storedPiProfiles().filter((profile) => !detectedExecutables.has(profile.executable))
-}
+const storedPiProfilesNotDetected = (detected: Array<{ id: string }>): PiAgentProfile[] =>
+  undetectedPiProfiles(storedPiProfiles(), detected)
 const listPiProfiles = async (): Promise<PiAgentProfile[]> => {
   const detected = await detectedPiProfiles()
   return [...detected, ...storedPiProfilesNotDetected(detected.map((profile) => ({ id: profile.id, path: profile.executable })))]
@@ -1247,10 +1238,9 @@ handleTrusted('agent:detectFast', () => {
         : {})
     }]
   })
-  const found = new Set(detected.map((agent) => agent.id))
   return [
     ...detected,
-    ...storedPiProfilesNotDetected(detected).filter((profile) => !found.has(profile.id)).map((profile) => ({
+    ...storedPiProfilesNotDetected(detected).map((profile) => ({
       id: profile.id,
       name: profile.label,
       bin: basename(profile.executable),

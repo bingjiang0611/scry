@@ -30,6 +30,12 @@ const validProfile = (value: unknown): value is PiAgentProfile => {
     typeof profile.executable === 'string' && profile.executable.startsWith('/') && profile.executable.length <= 4_096
 }
 
+// Session history persists profile IDs, so profiles sharing a launcher remain distinct.
+export function undetectedPiProfiles(profiles: PiAgentProfile[], detected: Array<{ id: string }>): PiAgentProfile[] {
+  const detectedIds = new Set(detected.map((agent) => agent.id))
+  return profiles.filter((profile) => !detectedIds.has(profile.id))
+}
+
 export function piProfileForExecutable(executable: string): PiAgentProfile {
   const canonical = realpathSync(executable)
   const stat = lstatSync(canonical)
