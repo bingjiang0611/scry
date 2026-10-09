@@ -1,13 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { TraceArchive } from './transcript-archive'
+import { readTraceArchiveAsync, upsertTraceArchiveTurn, type TraceArchive } from './transcript-archive'
 import {
   DEFAULT_SESSION_HISTORY_PAGE_SIZE,
   MAX_SESSION_HISTORY_PAGE_SIZE,
   hydrateSessionHistoryPage,
   mergeSessionTurns,
+  readSessionHistoryAfterCompletedRuns,
   sessionHistoryPage,
   type LoadedSessionTurn
 } from './session-history'
@@ -16,6 +17,52 @@ const roots: string[] = []
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe('session history terminal convergence', () => {
+  it('reads the latest archived turn after a UI-complete run finishes persisting', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-history-settlement-'))
+    roots.push(root)
+    const args = { userDataDir: root, cwd: '/repo', sessionId: 'pi-session', providerId: 'pi' as const }
+    const first = { runId: 'first-run', userText: 'first task', items: [], done: true, ts: 1 }
+    expect(upsertTraceArchiveTurn({ ...args, turn: first })).toBe(true)
+    let release!: () => void
+    const settled = new Promise<void>((resolve) => { release = resolve })
+    const read = vi.fn(async () => sessionHistoryPage(mergeSessionTurns([], await readTraceArchiveAsync(args))))
+    const loading = readSessionHistoryAfterCompletedRuns([{ done: true, settled }], new AbortController().signal, read)
+    await Promise.resolve()
+    let page
+    try {
+      expect(read).not.toHaveBeenCalled()
+    } finally {
+      expect(upsertTraceArchiveTurn({ ...args, turn: { ...first, runId: 'latest-run', userText: 'install it', ts: 2 } })).toBe(true)
+      release()
+      page = await loading
+    }
+    expect(read).toHaveBeenCalledOnce()
+    expect(page.turns.map((turn) => turn.runId)).toEqual(['first-run', 'latest-run'])
+    expect(page.turns.at(-1)?.userText).toBe('install it')
+  })
+
+  it('does not wait for an active run to finish before reading its prior history', async () => {
+    const settled = new Promise<void>(() => {})
+    const read = vi.fn(async () => 'prior history')
+    await expect(readSessionHistoryAfterCompletedRuns([{ done: false, settled }], new AbortController().signal, read))
+      .resolves.toBe('prior history')
+    expect(read).toHaveBeenCalledOnce()
+  })
+
+  it('does not read or replace history after switching away during terminal convergence', async () => {
+    let release!: () => void
+    const settled = new Promise<void>((resolve) => { release = resolve })
+    const controller = new AbortController()
+    const read = vi.fn(async () => 'stale history')
+    const loading = readSessionHistoryAfterCompletedRuns([{ done: true, settled }], controller.signal, read)
+    controller.abort(new Error('session selection superseded'))
+    release()
+    await expect(loading).rejects.toThrow('session selection superseded')
+    expect(read).not.toHaveBeenCalled()
+  })
 })
 
 describe('session history merge', () => {

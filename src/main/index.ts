@@ -37,6 +37,7 @@ import {
 import {
   hydrateSessionHistoryPage,
   mergeSessionTurns,
+  readSessionHistoryAfterCompletedRuns,
   restoreTraceArchiveTurn,
   sessionHistoryPage,
   type LoadedSessionTurn,
@@ -1799,11 +1800,20 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   const archivePaged = !fp && payload.providerId !== 'qoder' && payload.providerId !== 'pi'
   let archivePage: Awaited<ReturnType<typeof readTraceArchivePageAsync>> | null
   let archived: TraceArchive | null
+  const matchingRuns = runs.unsettledStates()
+    .filter((run) => sessionLoadMatchesRun(run, {
+      providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
+      externalSessionId: payload.externalSessionId
+    }))
+    .map((run) => ({ done: run.done, settled: runs.get(run.runId)!.control.settled }))
   try {
-    archivePage = archivePaged
-      ? await readTraceArchivePageAsync(archiveArgs, { limit: request?.limit }, signal)
-      : null
-    archived = archivePage?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
+    [archivePage, archived] = await readSessionHistoryAfterCompletedRuns(matchingRuns, signal, async () => {
+      const page = archivePaged
+        ? await readTraceArchivePageAsync(archiveArgs, { limit: request?.limit }, signal)
+        : null
+      const archive = page?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
+      return [page, archive] as const
+    })
   } catch (error) {
     signal.throwIfAborted()
     throw error

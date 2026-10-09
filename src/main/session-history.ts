@@ -3,6 +3,7 @@ import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMim
 import type { ParsedTurn as TranscriptTurn } from './normalize'
 import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
+import { waitForCompletedRuns } from './context-admission'
 import {
   hydrateLegacyAttachmentPath,
   hydrateStoredAttachment,
@@ -20,6 +21,18 @@ export interface LoadedSessionTurn {
   done?: boolean
   error?: string
   errorHint?: string
+}
+
+export async function readSessionHistoryAfterCompletedRuns<T>(
+  runs: readonly { done: boolean; settled: Promise<void> }[],
+  signal: AbortSignal,
+  read: () => Promise<T>
+): Promise<T> {
+  // UI completion can precede the durable archive. Active runs are restored from
+  // live memory, but completed runs must finish publishing before taking a snapshot.
+  await waitForCompletedRuns(runs.filter((run) => run.done))
+  signal.throwIfAborted()
+  return read()
 }
 
 const ATTACHMENT_MARKER = 'Scry pasted image attachments:'

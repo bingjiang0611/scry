@@ -37,3 +37,14 @@
 ## 交付范围
 
 本次只提交新增时序回归和本报告；生产修复来自既有 `91e8b67`。安装包只读检查与隔离 Electron UI fixture，不等于当前完整 App/main/preload 的真实多 run 验收。未重启正在使用的安装 App，未跑完整发布门禁，未打包安装、未推送；旧安装版本仍可能触发原问题，源码修复需进入新安装产物才能生效。
+
+## D-20261009-latest-turn-on-reopen
+
+- Scope / status：project:scry / confirmed（需求；真实 Pi 截图时序待重放）。用户反馈“有时间点击进对话是上一次的会话”，两张截图中相同侧栏会话分别显示安装轮与上一轮修复结果。
+- 定位：`agent:loadSession` 原先立即读取 archive；Provider 已结束但 Git diff / 归档仍收口时，`runState.done=true` 而 registry 的 `control.settled` 尚未完成。非 canonical lifecycle 可以提前发 turnDone，重新打开会得到只有上一轮的成功快照。只读解析目标会话两份 archive 的 runId / userText / ts，确认安装轮最终已持久化；不是整段 transcript 阅读，也未证明截图当时的精确先后关系。
+- Applied：`src/main/index.ts` 按 Provider/profile/cwd/native session 身份筛选 run；`readSessionHistoryAfterCompletedRuns` 复用 `waitForCompletedRuns`，在已结束轮次收口后才读 archive。仍在运行的轮次不阻塞历史读取；等待期间切走则按原 AbortSignal 拒绝，不交付空的成功历史。不改变 Renderer、trust、录制策略或侧栏样式。
+- 回归：临时 userData 的真实 archive 先有 A，B 的持久化被 deferred Promise 控制。未等待的旧读取行为明确触发两条失败：过早读取、切走后返回旧历史；加入 barrier 后三条测试通过，验证 A+B 的最新轮、运行中不阻塞及取消。
+- 验证：Node 24 组合工作区与 Node 22 隔离源码分别通过 338 个 focused 测试；7 个原生输入 selection 场景通过；typecheck、build / build:cli、packaged resource/security checks 通过。包含改动的真实隔离 App 使用已有 Codex smoke adapter，经生产 IPC 连续两轮并重新打开两次，`historyReload.sameSession/firstLatest/reopenedLatest/bothTurns=true`。所有写入仅在临时 workspace/HOME/userData；没有启动真实 Provider。
+- 首轮失败：隔离 Node 22 检查中一个既有 Git 重锚 fixture 返回空文件列表（337/338 通过），本次不改它的断言、超时或实现。确认测试进程已结束，临时诊断显示定向运行 baseline=ready、snapshot=captured；移除诊断后原样完整 focused 重跑 338/338 通过。首次失败原因未证实，不能以重跑抹掉；无生产自动重试。
+- 产物范围：验证用 App 标记为 `0.2.154`，源码为 `ffc511b` 加本次冻结 patch；不是之前已安装的同版本产物。尚未安装此修复、未重启用户 App，未执行真实 Pi 的原始时序或归档失败验收；不把本轮 mock Provider App 验证称作 L3。
+- Next use / revisit：完成后立即切走再打开 → 等待该会话的终态归档收口 → 最新成功发布轮次必须保留。若包含修复的新产物仍复现且最新 archive 在点击前已存在，则继续核对 Renderer 快照覆盖与归档顺序，不添加盲目重试。需求已确认，成品仍待用户验收。
