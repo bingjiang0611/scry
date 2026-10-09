@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createServer as netServer, connect as netConnect, type Socket, type Server } from 'node:net'
 import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { once } from 'node:events'
+import { PassThrough } from 'node:stream'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
@@ -89,6 +90,30 @@ async function deviceCall(devicePort: number, caPEM: string, certPEM: string, ke
 }
 
 describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () => {
+  it('replenishes consumed long-lived legs before close, with a bounded total', async () => {
+    const legs: PassThrough[] = []
+    const transport = new ReverseTunnelTransport({ connect: () => {
+      const leg = new PassThrough(); legs.push(leg); return leg
+    }, poolSize: 2 })
+    await transport.start(() => {})
+    try {
+      expect(legs).toHaveLength(2)
+      legs[0].emit('relaySession')
+      legs[1].emit('relaySession')
+      expect(legs).toHaveLength(4) // two occupied + two immediately replenished
+      legs[0].emit('relaySession')
+      expect(legs).toHaveLength(4) // one consumption per leg
+      for (let i = 2; i < 8; i++) legs[i].emit('relaySession')
+      expect(legs).toHaveLength(8) // bounded even for hostile ciphertext
+      const closed = once(legs[0], 'close')
+      legs[0].destroy(); await closed
+      expect(legs).toHaveLength(9) // one slot freed, not two
+    } finally { await transport.close() }
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(legs.every((leg) => leg.destroyed)).toBe(true)
+    expect(legs).toHaveLength(9) // shutdown cannot replenish
+  })
+
   it('bridges relay-delivered device sessions into the inner-mTLS host end-to-end', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-relay-')); dirs.push(dir)
     const identity = await ensureHostIdentity(join(dir, 'identity'))

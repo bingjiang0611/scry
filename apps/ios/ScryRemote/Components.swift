@@ -248,8 +248,8 @@ private struct ConversationBottom: PreferenceKey {
 
 // MARK: - Conversation content
 
-private struct ConversationMarkdownBlock: Identifiable {
-  enum Kind {
+struct ConversationMarkdownBlock: Identifiable, Sendable {
+  enum Kind: Sendable {
     case paragraph
     case heading(Int)
     case unordered
@@ -268,7 +268,11 @@ private struct ConversationMarkdownBlock: Identifiable {
 /// but flattens most block structure (notably lists and paragraph rhythm). Agent
 /// answers then become one dense wall of text. This small block parser preserves
 /// the Markdown structures that matter in a conversation without using WebKit.
-private enum ConversationMarkdownParser {
+enum ConversationMarkdownParser {
+  @concurrent static func parseForReading(_ source: String) async -> [ConversationMarkdownBlock] {
+    parse(source)
+  }
+
   static func parse(_ source: String) -> [ConversationMarkdownBlock] {
     let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
     var blocks: [ConversationMarkdownBlock] = []
@@ -390,11 +394,12 @@ private struct ConversationMarkdownInline: View {
 struct ConversationMarkdownText: View {
   let source: String
   var muted = false
+  var parsedBlocks: [ConversationMarkdownBlock]? = nil
 
-  private var blocks: [ConversationMarkdownBlock] { ConversationMarkdownParser.parse(source) }
+  private var blocks: [ConversationMarkdownBlock] { parsedBlocks ?? ConversationMarkdownParser.parse(source) }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: muted ? 8 : 11) {
+    LazyVStack(alignment: .leading, spacing: muted ? 8 : 11) {
       ForEach(blocks) { block in
         blockView(block)
       }

@@ -61,6 +61,10 @@ enum RemoteSelfTest {
 
     // 3. Run state: stale generation/session callbacks are rejected, submitting
     //    is distinct from recorded, and output drain is not capped at 600 polls.
+    let markdown = ConversationMarkdownParser.parse("# 标题\n- 项目\n```swift\nlet answer = 42\n```")
+    check("markdown.heading", markdown.contains { if case .heading(1) = $0.kind { return $0.text == "标题" }; return false })
+    check("markdown.list", markdown.contains { if case .unordered = $0.kind { return $0.text == "项目" }; return false })
+    check("markdown.code", markdown.contains { if case .code("swift") = $0.kind { return $0.text == "let answer = 42" }; return false })
     check("run.recoveryCheckpointRoundTrip", RemoteRunStore.selfTestRecoveryCheckpointRoundTrip())
     check("run.generationSessionIsolation", RemoteRunStore.selfTestGenerationIsolation())
     check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())
