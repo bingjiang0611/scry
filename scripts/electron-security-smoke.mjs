@@ -630,8 +630,16 @@ async function main() {
 
   const modal = await evaluate(`(async () => {
     const trigger = document.querySelector('button[title="MCP"]')
-    trigger?.focus()
-    trigger?.click()
+    if (!trigger) throw new Error('MCP modal trigger is missing')
+    trigger.focus()
+    const triggerState = {
+      disabled: trigger.disabled,
+      focused: document.activeElement === trigger,
+      width: trigger.getBoundingClientRect().width,
+      height: trigger.getBoundingClientRect().height,
+      agentMenuOpen: !!document.querySelector('.climenu')
+    }
+    trigger.click()
     let dialog = null
     let focusedInside = false
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -640,6 +648,12 @@ async function main() {
       if (focusedInside) break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
+    if (!dialog) throw new Error('MCP modal did not open: ' + JSON.stringify({
+      triggerState,
+      connected: trigger.isConnected,
+      dialogs: [...document.querySelectorAll('[role="dialog"]')].map((node) => node.outerHTML.slice(0, 300)),
+      activeElement: document.activeElement?.outerHTML.slice(0, 300)
+    }))
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     let closed = false
     let restored = false
