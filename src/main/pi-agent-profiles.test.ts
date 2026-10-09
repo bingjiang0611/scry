@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createPiAgentProfileStore, piProfileForExecutable } from './pi-agent-profiles'
+import { createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles } from './pi-agent-profiles'
 
 describe('Pi Agent Profile store', () => {
   it('uses the canonical executable path as stable identity and persists profiles', () => {
@@ -36,5 +36,13 @@ describe('Pi Agent Profile store', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('Pi profile discovery identity', () => {
+  it('retains a saved historical profile when Rotom is detected under its built-in ID', () => {
+    const saved = { id: 'pi:564f7a994e4e34da', label: 'Pi · Rotom', executable: '/bin/rotom' }
+    expect(undetectedPiProfiles([saved], [{ id: 'pi:rotom' }])).toEqual([saved])
+    expect(undetectedPiProfiles([saved], [{ id: saved.id }])).toEqual([])
   })
 })
