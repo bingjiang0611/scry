@@ -1011,7 +1011,7 @@ async function runPiAgent(
   }
   const modelContextWindows = new Map<string, number>()
   const abortController = new AbortController()
-  let stagedCustomAnswer: string | undefined
+  let stagedCustomAnswer: { value: string; inputTitle: string } | undefined
   const toolNames = new Map<string, string>()
   const toolStarts = new Map<string, number>()
   let streamedText = false
@@ -1216,12 +1216,12 @@ async function runPiAgent(
     if (question && stagedCustomAnswer !== undefined) {
       const answer = stagedCustomAnswer
       stagedCustomAnswer = undefined
-      // The generated questionnaire requests this input immediately after its sentinel.
-      // Never forward the draft into an unrelated extension dialog.
-      if (event.method === 'input' && event.title === 'Type your answer:') {
+      // The questionnaire follows its sentinel with the same question + input label.
+      // Older versions sent only the label; do not accept another question's suffix.
+      if (event.method === 'input' && (event.title === answer.inputTitle || event.title === 'Type your answer:')) {
         rpc.notify(abortController.signal.aborted
           ? { type: 'extension_ui_response', id: event.id, cancelled: true }
-          : { type: 'extension_ui_response', id: event.id, value: answer })
+          : { type: 'extension_ui_response', id: event.id, value: answer.value })
         return
       }
     }
@@ -1244,7 +1244,10 @@ async function runPiAgent(
           const prompt = question.questions[0]
           const answer = response.answers[prompt.question]
           if (response.nativeCustomAnswer || !prompt.options.some((option) => (option.answerValue ?? option.label) === answer)) {
-            stagedCustomAnswer = answer
+            // RPC select titles append previews; the follow-up input omits them.
+            // Use the raw title, not the bounded display copy in question.questions.
+            const title = String(event.title ?? 'Pi Extension').split(/\n\n--- \d+\. [^\n]+ preview ---\n/, 1)[0]
+            stagedCustomAnswer = { value: answer, inputTitle: `${title}\n\nType your answer:` }
             rpc.notify({ type: 'extension_ui_response', id: event.id, value: customOption })
             return
           }

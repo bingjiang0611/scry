@@ -118,9 +118,10 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'extension_ui_request', id: 'menu-select', method: 'select', title: 'Menu', options: ['Edit'] })
         continue
       }
-      if (command.message === '/fixture-menu question' || command.message === '/fixture-menu question-unrelated') {
+      if (command.message.startsWith('/fixture-menu question')) {
         acknowledgePrompt = response
-        send({ type: 'extension_ui_request', id: 'question-select', method: 'select', title: 'Continue?', options: ['1. Continue', '2. Type something.'] })
+        const preview = command.message.endsWith('question-preview') ? '\\n\\n--- 1. Continue preview ---\\n' + 'Preview content'.repeat(200) : ''
+        send({ type: 'extension_ui_request', id: 'question-select', method: 'select', title: '[复现动作] Continue?' + preview, options: ['1. Continue', '2. Type something.'] })
         continue
       }
       if (command.message === '/fixture-menu status') {
@@ -279,7 +280,11 @@ process.stdin.on('data', (chunk) => {
       require('node:fs').appendFileSync(process.cwd() + '/question-responses', JSON.stringify(command) + '\\n')
       if (command.cancelled) acknowledgePrompt()
       else if (command.id === 'question-select' && command.value === '2. Type something.') {
-        send({ type: 'extension_ui_request', id: 'question-input', method: 'input', title: promptMessage.endsWith('question-unrelated') ? 'Unrelated secret' : 'Type your answer:' })
+        const title = promptMessage.endsWith('question-unrelated') ? 'Unrelated secret'
+          : promptMessage.endsWith('question-unrelated-context') ? '[另一问题] Unrelated secret\\n\\nType your answer:'
+          : promptMessage.endsWith('question-legacy') ? 'Type your answer:'
+          : '[复现动作] Continue?\\n\\nType your answer:'
+        send({ type: 'extension_ui_request', id: 'question-input', method: 'input', title, placeholder: '' })
       } else if (command.id === 'question-select' && command.value !== '1. Continue') {
         send({ type: 'extension_error', extensionPath: 'command:fixture-menu', event: 'command', error: 'User declined to answer questions' })
         acknowledgePrompt()
@@ -1172,15 +1177,19 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each(['custom', 'custom-sentinel', 'custom-option', 'option', 'cancel-select', 'unrelated-input'])('round-trips the native questionnaire protocol: %s', async (scenario) => {
+  it.each(['custom', 'custom-sentinel', 'custom-option', 'custom-preview', 'custom-legacy', 'option', 'cancel-select', 'unrelated-input', 'unrelated-context'])('round-trips the native questionnaire protocol: %s', async (scenario) => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const questions: string[] = []
       const events: TraceEvent[] = []
+      const promptSuffix = scenario === 'unrelated-input' ? '-unrelated'
+        : scenario === 'unrelated-context' ? '-unrelated-context'
+        : scenario === 'custom-preview' ? '-preview'
+        : scenario === 'custom-legacy' ? '-legacy' : ''
       const customAnswer = scenario === 'custom-sentinel' ? '2. Type something.'
         : scenario === 'custom-option' ? '1. Continue' : '提交所有改动 保证工作区干净 然后构建并安装'
       const handle = adapter.run({
-        runId: 'question-run', prompt: scenario === 'unrelated-input' ? '/fixture-menu question-unrelated' : '/fixture-menu question', cwd, agentProfileId: profile.id,
+        runId: 'question-run', prompt: `/fixture-menu question${promptSuffix}`, cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event),
         requestUserInput: async (request) => {
           questions.push(request.questionId)
@@ -1200,11 +1209,11 @@ describe('Pi RPC Provider', () => {
       try {
         await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
         expect(events.some((event) => event.isError)).toBe(false)
-        expect(questions).toEqual(scenario === 'unrelated-input' ? ['question-select', 'question-input'] : ['question-select'])
+        expect(questions).toEqual(scenario.startsWith('unrelated') ? ['question-select', 'question-input'] : ['question-select'])
         const responses = readFileSync(join(cwd, 'question-responses'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
         if (scenario.startsWith('custom')) expect(responses.map((response) => response.value)).toEqual(['2. Type something.', customAnswer])
         if (scenario === 'option') expect(responses[0].value).toBe('1. Continue')
-        if (scenario === 'cancel-select' || scenario === 'unrelated-input') expect(responses.at(-1)).toMatchObject({ cancelled: true })
+        if (scenario === 'cancel-select' || scenario.startsWith('unrelated')) expect(responses.at(-1)).toMatchObject({ cancelled: true })
       } finally {
         handle.forceKill()
         await handle.promise.catch(() => {})
