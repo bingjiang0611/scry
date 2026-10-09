@@ -48,3 +48,14 @@
 - 首轮失败：隔离 Node 22 检查中一个既有 Git 重锚 fixture 返回空文件列表（337/338 通过），本次不改它的断言、超时或实现。确认测试进程已结束，临时诊断显示定向运行 baseline=ready、snapshot=captured；移除诊断后原样完整 focused 重跑 338/338 通过。首次失败原因未证实，不能以重跑抹掉；无生产自动重试。
 - 产物范围：验证用 App 标记为 `0.2.154`，源码为 `ffc511b` 加本次冻结 patch；不是之前已安装的同版本产物。尚未安装此修复、未重启用户 App，未执行真实 Pi 的原始时序或归档失败验收；不把本轮 mock Provider App 验证称作 L3。
 - Next use / revisit：完成后立即切走再打开 → 等待该会话的终态归档收口 → 最新成功发布轮次必须保留。若包含修复的新产物仍复现且最新 archive 在点击前已存在，则继续核对 Renderer 快照覆盖与归档顺序，不添加盲目重试。需求已确认，成品仍待用户验收。
+
+## D-20261009-new-conversation-draft
+
+- Scope / status：project:scry / confirmed（需求；已安装 App 验收待执行）。用户反馈“点击新建会话，输入了一些东西，切到其他会话就丢失了”。
+- 根因 / rule：已有 `sessionComposerDraftKey` 将新会话草稿绑定 workspace，切换本身不会删除；再次点击新建时 `newConversation` 主动 delete 该 pending 草稿。新建入口应恢复同项目尚未发送的输入，而不是暗中丢弃；既有会话草稿与其他项目草稿继续隔离。
+- Applied：`src/renderer/App.tsx` 删除 pending draft 的清空/释放操作，直接复用现有草稿 map、LRU、持久化与焦点行为。保留 pending 发送队列清空、Provider session reset 和 selection generation，不因恢复文本自动发送旧任务；不新增草稿列表、合成 session ID 或配置。
+- 边界：仍是每 workspace 一份新会话草稿；既有全局最多 8 份 composer draft / LRU 淘汰规则不变。本轮修的是正常会话切换造成的主动删除，不承诺无限保留；若需要超过该上限，另按明确需求检查内存/存储预算后扩容，不添加隐藏备份状态。
+- 回归：完整生产 `App` + 隔离 bridge，通过 native mouse / insertText 输入两行文本并执行 新建 A → 已有 A → 新建 A → 再次新建 → 项目 B → 新建 B → A/B 来回。旧删除逻辑在第 2 次新建明确丢失草稿（historyReads=1, newSessions=2）；修复后 A/B pending 与已有会话草稿都恢复，`starts=0`。
+- 验证：274 个 focused unit / render 测试、完整 `npm run test:renderer:ui`（包含 8 个 selection 场景、Credits、preview / IME / 附件既有路径、background）、typecheck、build 与 diff-check 通过。Node 24 / macOS arm64；在当前组合工作区验证，仅提交本任务 renderer / fixture / 文档改动，不混入并行 iOS/remote WIP。
+- 测试调试：首次新 fixture 使用了不存在的 aria/class selector，按实际 Sidebar / ChatView 控件修正；随后旧生产逻辑的草稿丢失被准确复现。修改生产逻辑后的一个 immediate focus 检查未等待 native dispatch，改为已有 frame 条件等待并显式 focus fixture contents，未删 focus 断言、未增加超时。无生产重试或固定 sleep。
+- Acceptance / next use：隔离 Electron 证明文本选择路径；尚未安装/重启、未在用户真实 App 或带附件草稿上重放。输入未发送草稿后切走再返回新建 → 同 workspace 文本保持可编辑，历史 session / 其他 workspace 不串稿，恢复不触发 Provider start。需求确认不等于成品已获用户验收。
