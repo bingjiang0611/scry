@@ -187,6 +187,17 @@ The pre-existing Scry process was not restarted; the new code takes effect on it
 - The additional full built-App `node scripts/electron-security-smoke.mjs --dev` run **failed** late in cold terminal-history restoration. The restarted Electron renderer logged `binding.startupData` null / `preloadScripts` before the terminal menu timeout. Earlier assertions completed, but the complete run is not passing evidence; no baseline attribution or retry is claimed. Owned App PIDs were gone after cleanup. Log: `/tmp/scry-dialog-app-smoke.log` (ephemeral).
 - No real Provider throughput/first-paint comparison, release packaging or installation was performed for this follow-up. Git/trust/recovery timing remains workload-dependent; this change does not claim to eliminate those necessary waits.
 
+## 0.2.162 local reinstall
+
+The conversation-pipeline changes from `7f92982` were packaged as App 0.2.162; private recorder CLI remains 0.2.47. Node 24.18.0 with the installed npm 10.9.4 was used (a temporary PATH shim, no global toolchain change).
+
+- Typecheck, all 2,453 unit tests (three opt-in probes skipped), shell tests, all renderer UI checks, CLI release checks (563 tests + tarball smoke), production build and packaged resource checks passed.
+- The first `install:mac:dev` stopped before installation: packaged Electron reported `binding.startupData` null / missing preload. A read-only diagnostic observed CDP publishing the file target with an empty title while the document was still loading. The smoke now waits for the static `Scry` document title before enabling Runtime; all preload/security assertions remain unchanged. This fixes an evidenced readiness gap, but does not prove the native error's full cause.
+- The next smoke exceeded the 180 s harness deadline. Partial synthetic terminal recordings were present; no owned packaged App process remained. Its exact stall remains unknown. A temporary diagnostic copy adding only evaluation progress logs passed; the repository smoke then passed unchanged on the same artifact, including cold terminal-history recovery. First failure/timeout are retained, not replaced by those passes. Ephemeral logs: `/tmp/scry-0.2.162-install.log`, `/tmp/scry-0.2.162-smoke-ready.log`, `/tmp/scry-0.2.162-smoke-diagnostic.log`, `/tmp/scry-0.2.162-smoke-final.log`.
+- After the final packaged resource and smoke checks passed, `node scripts/install-macos.mjs` completed the original install command's remaining atomic-install step. `/Applications/Scry.app` reports 0.2.162; its private CLI reports 0.2.47. Previous bundle retained at `/Applications/.Scry.app.backup`.
+- Installed executable and ASAR compare byte-for-byte with the tested development-signed, non-notarized artifact: executable SHA-256 `3193f3798f0cbacf366c8242b664a67b15e2351df48e0af34aeadd3e2c0f4c9f`; ASAR SHA-256 `0a098bbffba9f90fe63dbd2b14fd0aee2083d5ed8bd8d6d7d3470b7af855b1b6`.
+- The user's already-running Scry process was not stopped. Relaunch is required to use the installed code. No real Provider latency/throughput or signed/notarized release acceptance is claimed.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:
