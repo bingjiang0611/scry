@@ -130,6 +130,31 @@ Source files were compared individually against performance commit `06be0c68a393
 
 Local performance and packaged-fixture acceptance is complete for that commit. This does **not** claim installation, notarized release, real Provider/account verification, or acceptance of unrelated dirty worktree changes. The disabled billing/P0/P1 external probes remain unrun.
 
+## Pinned summary and targeted streaming checks (2026-10-09)
+
+Pinned summary reuses Overview's 200 ms sampling hook. Ingestion is unchanged; terminal snapshots and loaded-session changes render immediately. Text is not discarded because it can contain web references and child-agent evidence.
+
+- `node scripts/session-capability-ui-smoke.mjs --summary-only` exercises real React DOM: bounded updates, immediate terminal/switch, trailing text, and unmount/remount. Included in `test:renderer:ui`.
+- `npm run bench:renderer -- --testNamePattern='trace batch scaling'` measures one text delta after 1k/10k/50k structural events without launching Providers.
+- `node scripts/performance-animation.mjs` opens a temporary GPU-enabled window with eight production-CSS running indicators. It compares animated/static states in ABBA order, reports per-process one-core CPU, then removes temporary data. It does not alter running sessions.
+
+Local measurement: Apple Silicon, 10 logical cores / 32 GiB, Electron 42.10.1, other workloads running.
+
+| Check | Result |
+| --- | --- |
+| 36 summary updates over about 0.63 s | Old implementation: 37 displayed snapshots, regression fails. Sampled: 4; terminal/switch/trailing/remount pass. |
+| One delta after 1k / 10k / 50k events | Mean 0.049 / 0.602 / 4.602 ms; p99 0.163 / 2.105 / 12.532 ms. |
+| Eight animated indicators | GPU 4.97–5.18% one-core CPU; static 0.03–0.06%. Renderer 2.67–2.77% versus 0.01–0.06%. |
+
+These are scoped observations, not full-App latency or memory-leak evidence. No event-index cache or animation behavior change was made. Revisit an append-only trace fast path if profiles show batch application taking a material share of the frame budget (especially around 50k structural events); preserve corrections, supersession, ordering and restore semantics. Summary sampling still scans loaded history roughly five times per second while busy; if that scan itself becomes a measured long task, cache completed-turn inputs without dropping cross-turn Agent or text evidence.
+
+### Local 0.2.161 verification
+
+- Node 24.18.0: full unit suite 194 files / 2,446 tests passed; three opt-in external probes skipped. Shell suite and complete renderer UI suite passed. The first full command was interrupted by the harness's 180 s deadline; after confirming no test process remained, the completed run took about 199 s without changing test timeouts.
+- Typecheck passed on Node 24 and 22.22.1. CLI release check passed on Node 24.18.0 + npm 10.9.4 (563 tests plus installed tarball smoke); build, packaged resource checks and packaged Electron security/interaction smoke passed on the same toolchain. Private recorder CLI remains 0.2.47.
+- Retained environment failures: npm 12.2.0 changed `pack --json` from an array to an object, so the existing tarball smoke failed before switching to npm 10. Node 22's full CLI suite twice timed out on the pre-existing 5 s EPIPE fixture under contention; its focused rerun passed in about 2.2 s. This does not establish a passing full Node 22 gate. No timeout, assertion, or production CLI behavior was changed.
+- The new summary fixture initially waited for an anchor, but web references are static spans; its selector/readiness check was corrected. The final regression fails the old summary and passes the sampled summary. Component sampling evidence is separate from packaged full-App smoke and does not claim real-Provider performance acceptance.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:

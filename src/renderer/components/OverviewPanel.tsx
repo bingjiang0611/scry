@@ -1,5 +1,6 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { memo, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { useSampledTurns } from '../hooks/useSampledTurns'
 import {
   contextCompactionOf,
   contextUsageEvidence,
@@ -672,44 +673,9 @@ export interface OverviewPanelProps {
   onOpenSessionDiff?: (path?: string) => void
 }
 
-function useSampledOverviewTurns(liveTurns: Turn[], sessionId: string | null, busy: boolean): Turn[] {
-  const latestTurns = useRef(liveTurns)
-  latestTurns.current = liveTurns
-  const sampleTimer = useRef<number | null>(null)
-  const turnsUpdatedAt = useRef(0)
-  const [sample, setSample] = useState({ sessionId, turns: liveTurns })
-  const turns = sample.sessionId === sessionId ? sample.turns : liveTurns
-  useEffect(() => {
-    if (sample.sessionId !== sessionId || !busy) {
-      if (sampleTimer.current != null) window.clearTimeout(sampleTimer.current)
-      sampleTimer.current = null
-      turnsUpdatedAt.current = Date.now()
-      setSample({ sessionId, turns: liveTurns })
-      return
-    }
-    const remaining = 200 - (Date.now() - turnsUpdatedAt.current)
-    if (remaining <= 0) {
-      turnsUpdatedAt.current = Date.now()
-      setSample({ sessionId, turns: liveTurns })
-      return
-    }
-    if (sampleTimer.current == null) {
-      sampleTimer.current = window.setTimeout(() => {
-        sampleTimer.current = null
-        turnsUpdatedAt.current = Date.now()
-        setSample({ sessionId, turns: latestTurns.current })
-      }, remaining)
-    }
-  }, [busy, liveTurns, sample.sessionId, sessionId])
-  useEffect(() => () => {
-    if (sampleTimer.current != null) window.clearTimeout(sampleTimer.current)
-  }, [])
-  return turns
-}
-
 export function OverviewPanel(props: OverviewPanelProps) {
   const sessionId = props.sessionId ?? null
-  const turns = useSampledOverviewTurns(props.turns, sessionId, props.busy ?? false)
+  const turns = useSampledTurns(props.turns, sessionId, props.busy ?? false)
   return <MemoOverviewPanelBody {...props} sessionId={sessionId} turns={turns} />
 }
 
