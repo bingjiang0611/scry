@@ -227,13 +227,6 @@ export function createRecentFoldersStore(userDataDir: string) {
   return { load, push, remove }
 }
 
-export function createReadOnlyRootsStore(userDataDir: string) {
-  const file = join(userDataDir, 'read-only-roots.json')
-  const load = (): string[] => readJsonRecoverable<string[]>(file, [], isStringArray).value
-  const add = (root: string): void => writeJsonRecoverable(file, [root, ...load().filter((item) => item !== root)], isStringArray)
-  return { load, add }
-}
-
 function isProjectRecordArray(value: unknown): value is ProjectRecord[] {
   return Array.isArray(value) && value.every((item) => {
     if (!item || typeof item !== 'object') return false

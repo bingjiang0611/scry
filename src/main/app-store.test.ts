@@ -7,7 +7,6 @@ import {
   cleanupAppStoreAtomicTemps,
   createAppSessionStore,
   createProjectStore,
-  createReadOnlyRootsStore,
   createRecentFoldersStore,
   mergeProjectMetas
 } from './app-store'
@@ -54,19 +53,6 @@ describe('app-store', () => {
       store.push('/repo-b')
       expect(store.remove('/repo-a')).toEqual(['/repo-b'])
       expect(store.load()).toEqual(['/repo-b'])
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('只读目录授权持久化并去重', () => {
-    const dir = tempDir()
-    try {
-      const store = createReadOnlyRootsStore(dir)
-      store.add('/Users/example/Papers')
-      store.add('/Users/example/Notes')
-      store.add('/Users/example/Papers')
-      expect(store.load()).toEqual(['/Users/example/Papers', '/Users/example/Notes'])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

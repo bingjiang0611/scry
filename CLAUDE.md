@@ -46,6 +46,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`。Renderer 只能通过 typed `window.scry` preload API 调用经过校验的 main handler。
 
 - 禁止任意命令、任意路径、任意 URL IPC。
+- 用户目录（`~/`）文件预览默认允许，不再逐目录弹窗授权或依赖持久化目录 grant；main 仍重验相对路径、canonical home containment 与文件类型。此策略不授予工作区外写入权限，也不绕过操作系统权限或仓库配置 trust gate。
 - 主进程验证 sender/frame/origin，并对 payload 再做 schema、cwd、path 和 operation authorization。
 - 阻止 webview、任意 navigation/window open 和非 allowlist 网络请求；敏感 localhost/private URL 要求用户确认。
 - 不为恢复 React HMR 或开发便利而放宽 CSP/sandbox。当前 dev 配置刻意牺牲 HMR 以保持生产安全边界一致。
