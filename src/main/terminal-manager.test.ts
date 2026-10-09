@@ -116,6 +116,37 @@ afterEach(() => {
 })
 
 describe('TerminalManager', () => {
+  it('keeps owned shells alive across workspace selection and preserves conversation grouping', () => {
+    const first = workspace()
+    const second = workspace()
+    let current = first
+    const { manager, pty, data, exits } = fixture(first, first, undefined, () => current)
+    const a = manager.start({ cwd: first, scopeId: 'conversation-a', cols: 80, rows: 24 })
+    const b = manager.start({ cwd: first, scopeId: 'conversation-b', cols: 80, rows: 24 })
+    current = second
+    expect(() => manager.start({ cwd: first, scopeId: 'conversation-a', cols: 80, rows: 24 })).toThrow('当前工作区')
+    manager.write({ id: a.id, data: 'still-running' })
+    pty.processes[0].emitData('background-output')
+    expect(manager.activeSessions()).toEqual([a, b])
+    expect(a.scopeId).toBe('conversation-a')
+    expect(b.scopeId).toBe('conversation-b')
+    expect(data).toEqual([{ id: a.id, data: 'background-output' }])
+    expect(pty.processes[0].killCount).toBe(0)
+    expect(pty.processes[0].destroyCount).toBe(0)
+    pty.processes[0].emitExit(1, 0)
+    expect(exits).toEqual([{ id: a.id, code: 1, signal: null }])
+    pty.processes[1].emitExit(0)
+  })
+
+  it('rejects malformed workbench identity before spawning', () => {
+    const cwd = workspace()
+    const { manager, pty } = fixture(cwd)
+    for (const scopeId of ['', 'x'.repeat(129), 42]) {
+      expect(() => manager.start({ cwd, scopeId: scopeId as string, cols: 80, rows: 24 })).toThrow('会话标识')
+    }
+    expect(pty.calls).toEqual([])
+  })
+
   it('rejects a history response if workspace authorization changes while scanning', async () => {
     const cwd = workspace()
     const foreign = workspace()

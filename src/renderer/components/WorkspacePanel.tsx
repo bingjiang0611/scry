@@ -29,6 +29,7 @@ export interface WorkspaceOpenRequest {
 
 interface WorkspacePanelProps {
   cwd: string
+  active?: boolean
   refreshKey?: number
   openRequest?: WorkspaceOpenRequest | null
   onClose: () => void
@@ -41,7 +42,7 @@ type ItemDialog =
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
-export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange }: WorkspacePanelProps) {
+export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange }: WorkspacePanelProps) {
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -55,6 +56,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceEntry | null>(null)
   const [mutating, setMutating] = useState(false)
   const loadSequence = useRef(new Map<string, number>())
+  const initializedCwd = useRef<string | null>(null)
   const handledRefreshKey = useRef(refreshKey)
   const handledOpenRequestId = useRef<number | null>(null)
 
@@ -96,16 +98,18 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
   }, [loadDirectory])
 
   useEffect(() => {
+    if (!active || initializedCwd.current === cwd) return
+    initializedCwd.current = cwd
     setSelected(null)
     setDirty(false)
     refresh()
-  }, [cwd, refresh])
+  }, [active, cwd, refresh])
 
   useEffect(() => {
-    if (refreshKey === handledRefreshKey.current || dirty) return
+    if (!active || refreshKey === handledRefreshKey.current || dirty) return
     handledRefreshKey.current = refreshKey
     refresh()
-  }, [dirty, refresh, refreshKey])
+  }, [active, dirty, refresh, refreshKey])
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
 
@@ -125,7 +129,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
   )
 
   useEffect(() => {
-    if (!openRequest || handledOpenRequestId.current === openRequest.id) return
+    if (!active || !openRequest || handledOpenRequestId.current === openRequest.id) return
     handledOpenRequestId.current = openRequest.id
     if (selected?.path === openRequest.path || !confirmLeave()) return
     setSelected({
@@ -135,7 +139,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
       mtimeMs: 0
     })
     setContext(null)
-  }, [confirmLeave, openRequest, selected?.path])
+  }, [active, confirmLeave, openRequest, selected?.path])
 
   const openFile = (entry: WorkspaceEntry): void => {
     if (entry.kind !== 'file') return
@@ -355,7 +359,7 @@ export function WorkspacePanel({ cwd, refreshKey = 0, openRequest, onClose, onAd
           key={`${cwd}:${selected.path}`}
           cwd={selectedCwd}
           entry={selected}
-          refreshKey={refreshKey}
+          refreshKey={active ? refreshKey : handledRefreshKey.current}
           readOnly={selectedReadOnly}
           onDirtyChange={setDirty}
           onError={setError}

@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { App } from '../../src/renderer/App'
+import { App, sessionComposerDraftKey } from '../../src/renderer/App'
 import type { ProviderContext } from '../../src/shared/provider'
 import type { TerminalDataEvent, TerminalExitEvent, TerminalRecordingRequest, TerminalSessionInfo, TerminalStartRequest } from '../../src/shared/terminal'
 import '../../src/renderer/styles.css'
@@ -7,17 +7,25 @@ import '../../src/renderer/codex-alignment.css'
 
 // Production App/xterm with an isolated bridge. No real Shell, Provider, or user data.
 localStorage.clear()
+sessionStorage.clear()
 const scenario = new URLSearchParams(location.search).get('scenario')
 const sessions = new Map<string, TerminalSessionInfo>()
-if (scenario === 'restored') sessions.set('terminal-original', {
-  id: 'terminal-original', pid: 1, cwd: '/fixture/old', cols: 80, rows: 24, ownershipEpoch: 1
-})
+if (scenario === 'restored') {
+  sessions.set('terminal-original', {
+    id: 'terminal-original', scopeId: 'restored-one', pid: 1, cwd: '/fixture/old', cols: 80, rows: 24, ownershipEpoch: 1
+  })
+  sessionStorage.setItem('scry.session-right-surfaces.v1', JSON.stringify([[
+    sessionComposerDraftKey({ providerId: 'claude', cwd: '/fixture/old', sessionId: 'one' }),
+    { id: 'restored-one', cwd: '/fixture/old', state: { openIds: ['overview'], activeId: 'overview', visible: false, maximized: false } }
+  ]]))
+}
 const starts: TerminalStartRequest[] = []
 const attaches: string[] = []
 const closes: string[] = []
 const writes: string[] = []
 const dataListeners = new Set<(event: TerminalDataEvent) => void>()
 const exitListeners = new Set<(event: TerminalExitEvent) => void>()
+const sessionListeners = new Set<(event: { runId: string; sessionId: string; previousSessionId: string }) => void>()
 let releaseStart: (() => void) | null = null
 let cwd: string | null = null
 const status = document.createElement('output')
@@ -37,6 +45,10 @@ const noopSubscribe = () => () => {}
 Object.defineProperty(window, 'scry', { value: {
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
+  onSession: (listener: (event: { runId: string; sessionId: string; previousSessionId: string }) => void) => {
+    sessionListeners.add(listener)
+    return () => sessionListeners.delete(listener)
+  },
   listProjects: async () => projects, recentFolders: async () => projects.map((project) => project.cwd),
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }), detect: async () => [],
   listSkills: async () => ({ state: 'unavailable', data: null }),
@@ -45,13 +57,18 @@ Object.defineProperty(window, 'scry', { value: {
   setCwd: async (next: string | null) => { cwd = next; update(); return cwd },
   focusRun: async () => true, newSession: async () => true,
   loadSession: async (context: ProviderContext) => ({ turns: [{
-    runId: context.externalSessionId, userText: `History for ${context.externalSessionId}`, items: [], done: true
+    runId: context.externalSessionId, userText: `History for ${context.externalSessionId}`, done: true,
+    items: [{ id: `answer-${context.externalSessionId}`, runId: context.externalSessionId, ts: '2026-10-09T00:00:00Z',
+      kind: 'model', stage: 'text', text: 'Open `/fixture/' + (context.externalSessionId === 'one' ? 'new' : 'old') + '/same.ts`' }]
   }], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' }),
+  workspaceList: async () => ({ entries: [], truncated: false }),
+  workspaceRead: async ({ cwd, path }: { cwd: string; path: string }) => ({ name: path, path, content: `${cwd}/${path}`, size: 30, mtimeMs: 1, revision: '1', language: 'text' }),
+  workspaceReadKnown: async ({ cwd, path }: { cwd: string; path: string }) => ({ name: path, path, content: `${cwd}/${path}`, size: 30, mtimeMs: 1, revision: '1', language: 'text' }),
   terminalActive: async () => [...sessions.values()],
   terminalStart: async (request: TerminalStartRequest) => {
     starts.push(request)
     const session = { id: `terminal-new-${starts.length}`, pid: starts.length + 1,
-      cwd: request.cwd ?? '/fixture/home', cols: request.cols, rows: request.rows, ownershipEpoch: 1 }
+      scopeId: request.scopeId, cwd: request.cwd ?? '/fixture/home', cols: request.cols, rows: request.rows, ownershipEpoch: 1 }
     if (scenario === 'pending' && starts.length === 1) {
       await new Promise<void>((resolve) => { releaseStart = resolve; update() })
       releaseStart = null
@@ -90,10 +107,18 @@ const controls = document.createElement('div')
 controls.style.cssText = 'position:fixed;left:250px;bottom:0;z-index:99999;background:white;color:black'
 for (const [id, action] of Object.entries({
   'resolve-terminal': () => releaseStart?.(),
+  'merge-session': () => {
+    sessionListeners.forEach(listener => listener({ runId: 'native-one', previousSessionId: 'native-one', sessionId: 'two' }))
+  },
+  'promote-session': () => {
+    projects[0].sessions[0].sessionId = 'native-one'
+    projects[0].sessions[0].externalSessionId = 'native-one'
+    sessionListeners.forEach(listener => listener({ runId: 'one', previousSessionId: 'one', sessionId: 'native-one' }))
+  },
   'terminal-exit': () => {
     const session = [...sessions.values()][0]
     sessions.delete(session.id)
-    exitListeners.forEach((listener) => listener({ id: session.id, ownershipEpoch: session.ownershipEpoch, code: 0, signal: null }))
+    exitListeners.forEach((listener) => listener({ id: session.id, ownershipEpoch: session.ownershipEpoch, code: 1, signal: 0 }))
   }
 })) {
   const button = document.createElement('button')

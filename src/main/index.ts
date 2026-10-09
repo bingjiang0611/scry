@@ -378,15 +378,6 @@ async function getTerminalManager(): Promise<TerminalManager> {
   return terminalManagerPromise
 }
 
-function closeAllTerminals(discardOutput = false): void {
-  try {
-    terminalManager?.closeAll()
-  } catch (error) {
-    console.warn('[scry] terminal cleanup failed:', (error as Error)?.message)
-  }
-  if (discardOutput) terminalOutput.close()
-}
-
 const homeDir = homedir()
 const readOnlyRootsStore = () => createReadOnlyRootsStore(app.getPath('userData'))
 const homeFileAccess = new HomeFileAccess(homeDir, readOnlyRootsStore(), async ({ target, suggestedRoot }) => {
@@ -819,10 +810,8 @@ function resetSessionContext(key: string): void {
 }
 
 function setCurrentCwd(dir: string | undefined): void {
-  if (dir !== currentCwd) {
-    // 本机 Shell 不得在切换工作区后继续后台运行；Provider adapters 则各自按 cwd 管理 transport/cache。
-    closeAllTerminals()
-  }
+  // Selection is not process ownership. Existing shells retain their spawn cwd;
+  // only explicit close or app shutdown terminates them. New starts still validate currentCwd.
   currentCwd = dir
 }
 

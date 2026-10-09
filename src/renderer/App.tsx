@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, SetStateAction } from 'react'
 import { flushSync } from 'react-dom'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
@@ -24,11 +24,8 @@ import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } fr
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { AgentsSurface } from './components/AgentsSurface'
 import { PinnedSummaryHost, usePinnedSummaryVisibility } from './components/PinnedSummary'
-import {
-  createRightSurfaceState,
-  reduceRightSurfaceState,
-  type RightSurfaceAction
-} from './right-surface'
+import type { RightSurfaceAction } from './right-surface'
+import { useSessionRightSurfaces } from './hooks/useSessionRightSurfaces'
 import type { ParsedTurn, ProjectMeta, SessionHistoryPage, SessionMeta, SessionRef } from './env'
 import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
 import type { Turn } from './format'
@@ -689,7 +686,7 @@ export function App() {
     setActiveSessionId,
     loadProjects,
     refreshRecent,
-    chooseFolder: chooseFolderRaw,
+    chooseFolder,
     removeRecentFolder,
     catalogHealth
   } = workspace
@@ -697,38 +694,10 @@ export function App() {
     () => [...new Set([cwd, ...projects.map((project) => project.cwd)].filter((root): root is string => !!root))],
     [cwd, projects]
   )
-  const [rightSurface, dispatchRightSurface] = useReducer(
-    reduceRightSurfaceState,
-    createRightSurfaceState({ visible: false })
-  )
-  const hasSurfaceContext = Boolean(cwd || activeSessionId)
-  const terminalOpen = rightSurface.openIds.includes('terminal')
-  const [workspaceDirty, setWorkspaceDirty] = useState(false)
-  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
-  const [workspaceOpenRequest, setWorkspaceOpenRequest] = useState<WorkspaceOpenRequest | null>(null)
-  const workspaceOpenSequenceRef = useRef(0)
-
-  useEffect(() => {
-    setWorkspaceOpenRequest(null)
-  }, [cwd])
-
   useEffect(() => {
     const setWindowTheme = window.scry.setTheme
     if (typeof setWindowTheme === 'function') void setWindowTheme(theme).catch(() => {})
   }, [theme])
-  const confirmWorkspaceTransition = useCallback(
-    (): boolean => !workspaceDirty || window.confirm('当前文件有未保存修改。放弃修改并继续吗？'),
-    [workspaceDirty]
-  )
-  const chooseFolder = useCallback(async (): Promise<string | null> => {
-    if (!confirmWorkspaceTransition()) return null
-    const dir = await chooseFolderRaw()
-    if (dir) {
-      dispatchRightSurface({ type: 'close', kind: 'files' })
-      setWorkspaceDirty(false)
-    }
-    return dir
-  }, [chooseFolderRaw, confirmWorkspaceTransition])
   const backgroundWorkByRun = useBackgroundWork()
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const [waitingQuestionRunIds, setWaitingQuestionRunIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -835,6 +804,24 @@ export function App() {
     integrations.selectedProviderId,
     selectedProviderSessionId
   ])
+  const rightSurfaces = useSessionRightSurfaces(draftKey, cwd)
+  const { current: currentSurface, dispatch: dispatchRightSurface, migrate: migrateRightSurface } = rightSurfaces
+  const rightSurface = currentSurface.state
+  const hasSurfaceContext = Boolean(cwd || activeSessionId)
+  const terminalOpen = rightSurface.openIds.includes('terminal')
+  const [workspaceDirtyScopes, setWorkspaceDirtyScopes] = useState<Record<string, boolean>>({})
+  const workspaceDirty = workspaceDirtyScopes[currentSurface.id] ?? false
+  const setScopeDirty = useCallback((id: string, dirty: boolean): void => {
+    setWorkspaceDirtyScopes((previous) => previous[id] === dirty ? previous : { ...previous, [id]: dirty })
+  }, [])
+  const setWorkspaceDirty = useCallback((dirty: boolean): void => setScopeDirty(currentSurface.id, dirty), [currentSurface.id, setScopeDirty])
+  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+  const [workspaceOpenRequests, setWorkspaceOpenRequests] = useState<ReadonlyMap<string, WorkspaceOpenRequest>>(() => new Map())
+  const workspaceOpenSequenceRef = useRef(0)
+  const confirmWorkspaceTransition = useCallback(
+    (): boolean => !workspaceDirty || window.confirm('当前文件有未保存修改。放弃修改并继续吗？'),
+    [workspaceDirty]
+  )
   const draftContextRef = useRef({
     providerId: integrations.selectedProviderId,
     agentProfileId: integrations.providerContext.agentProfileId,
@@ -893,6 +880,7 @@ export function App() {
       // drafts (and queued follow-ups) even if the user switched away before then.
       if (event.sessionId && draftOwner) {
         const capturedKey = sessionComposerDraftKey({ ...draftOwner, sessionId: event.sessionId })
+        migrateRightSurface(draftOwner.key, capturedKey)
         integrations.migrateSessionModel(draftOwner.key, capturedKey)
         setSessionDrafts((current) => migrateSessionComposerDraft(current, draftOwner.key, capturedKey))
         setSessionPromptQueues((current) => migrateSessionPromptQueue(current, draftOwner.key, capturedKey))
@@ -936,7 +924,16 @@ export function App() {
     max: PANEL_MAX,
     side: 'right'
   })
-  const [turnDiffSelection, setTurnDiffSelection] = useState<{ runId?: string; initialPath?: string; session?: boolean } | null>(null)
+  const [turnDiffSelections, setTurnDiffSelections] = useState<ReadonlyMap<string, { runId?: string; initialPath?: string; session?: boolean }>>(() => new Map())
+  const turnDiffSelection = turnDiffSelections.get(currentSurface.id) ?? null
+  const setTurnDiffSelection = useCallback((selection: { runId?: string; initialPath?: string; session?: boolean } | null): void => {
+    setTurnDiffSelections((previous) => {
+      const next = new Map(previous)
+      if (selection) next.set(currentSurface.id, selection)
+      else next.delete(currentSurface.id)
+      return next
+    })
+  }, [currentSurface.id])
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -1103,6 +1100,7 @@ export function App() {
               const context = draftOwner ?? draftContextRef.current
               const previousKey = draftOwner?.key ?? sessionComposerDraftKey({ ...context, sessionId: previousSessionId })
               const capturedKey = sessionComposerDraftKey({ ...context, sessionId: capturedSessionId })
+              migrateRightSurface(previousKey, capturedKey)
               integrations.migrateSessionModel(previousKey, capturedKey)
               setSessionDrafts((current) => migrateSessionComposerDraft(current, previousKey, capturedKey))
               setSessionPromptQueues((current) => migrateSessionPromptQueue(current, previousKey, capturedKey))
@@ -1390,6 +1388,7 @@ export function App() {
         agentProfileId: request.agentProfileId,
         cwd: request.cwd ?? null
       }
+      migrateRightSurface(sourceDraftKey, draftOwner.key)
       integrations.rememberSessionModel(draftOwner.key, request)
       localDraftOwnersRef.current.set(runId, draftOwner)
       localRunIdsRef.current.add(runId)
@@ -1408,7 +1407,7 @@ export function App() {
         }
       }
     },
-    [currentRunRequest, draftKey, integrations.rememberSessionModel, selectSessionId, session.send]
+    [currentRunRequest, draftKey, integrations.rememberSessionModel, migrateRightSurface, selectSessionId, session.send]
   )
 
   useEffect(() => {
@@ -1563,8 +1562,6 @@ export function App() {
   const pickRecent = async (dir: string): Promise<void> => {
     if (dir === cwd) return
     setSessionLoading(false)
-    const cwdChanged = dir !== cwd
-    if (cwdChanged && !confirmWorkspaceTransition()) return
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     await window.scry.focusRun(null)
@@ -1572,7 +1569,6 @@ export function App() {
     await window.scry.setCwd(dir)
     if (!isCurrent()) return
     setCwd(dir)
-    if (cwdChanged) setWorkspaceDirty(false)
     session.clearTurns()
     resetPromptQueueControl()
     shouldStickToBottomRef.current = true
@@ -1580,8 +1576,8 @@ export function App() {
     setView('chat')
   }
 
-  const unbindProject = async (skipConfirmation = false): Promise<void> => {
-    if (!cwd || (!skipConfirmation && !confirmWorkspaceTransition())) return
+  const unbindProject = async (): Promise<void> => {
+    if (!cwd) return
     setSessionLoading(false)
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
@@ -1590,7 +1586,6 @@ export function App() {
     await window.scry.setCwd(null)
     if (!isCurrent()) return
     setCwd(null)
-    setWorkspaceDirty(false)
     session.clearTurns()
     resetPromptQueueControl()
     shouldStickToBottomRef.current = true
@@ -1658,7 +1653,7 @@ export function App() {
   const removeProject = async (project: ProjectMeta): Promise<void> => {
     if (project.cwd === cwd && !confirmWorkspaceTransition()) return
     await window.scry.removeProject(project.cwd)
-    if (project.cwd === cwd) await unbindProject(true)
+    if (project.cwd === cwd) await unbindProject()
     refreshRecent()
     loadProjects()
   }
@@ -1672,8 +1667,6 @@ export function App() {
     agentProfileId?: string
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
-    const cwdChanged = projectCwd !== cwd
-    if (cwdChanged && !confirmWorkspaceTransition()) return
     const switchingSession = sessionSelectionChanged(
       {
         cwd: cwdRef.current,
@@ -1704,7 +1697,6 @@ export function App() {
     selectSessionId(sessionId)
     setView('chat')
     setCwd(projectCwd || null)
-    if (cwdChanged) setWorkspaceDirty(false)
     integrations.setSelectedId(agentProfileId ?? providerId)
     try {
       // Sidebar activity is a display cache, not proof that no live run exists.
@@ -1864,7 +1856,9 @@ export function App() {
     '--sidebar-w': `${sidebarPane.visibleWidth}px`,
     '--overview-panel-w': `${surfacePane.visibleWidth}px`
   }
-  const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen
+  const mountedSurfaces = rightSurfaces.surfaces.some((surface) => surface.id === currentSurface.id)
+    ? rightSurfaces.surfaces : [...rightSurfaces.surfaces, currentSurface]
+  const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen || rightSurfaces.surfaces.length > 0
   const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
   const pinnedSummary = usePinnedSummaryVisibility(view === 'chat', panelVisible)
   const summaryPersistent = pinnedSummary.persistent
@@ -1902,7 +1896,7 @@ export function App() {
       setTurnDiffSelection({ runId: turn.runId, ...(initialPath ? { initialPath } : {}) })
       dispatchRightSurface({ type: 'open', kind: 'diff' })
     },
-    [surfacePane.restore]
+    [surfacePane.restore, dispatchRightSurface, setTurnDiffSelection]
   )
   const sessionTurnsRef = useRef(session.turns)
   sessionTurnsRef.current = session.turns
@@ -1933,11 +1927,8 @@ export function App() {
       setTurnDiffSelection({ session: true, ...(path ? { initialPath: path } : {}) })
       dispatchRightSurface({ type: 'open', kind: 'diff' })
     },
-    [surfacePane.restore]
+    [surfacePane.restore, dispatchRightSurface, setTurnDiffSelection]
   )
-  useEffect(() => {
-    setTurnDiffSelection(null)
-  }, [activeSessionId, cwd])
   const handleRightSurfaceAction = useCallback((action: RightSurfaceAction): void => {
     if (action.type === 'close' && action.kind === 'files') {
       if (!confirmWorkspaceTransition()) return
@@ -1945,7 +1936,7 @@ export function App() {
     }
     if (action.type === 'close' && action.kind === 'diff') setTurnDiffSelection(null)
     dispatchRightSurface(action)
-  }, [confirmWorkspaceTransition])
+  }, [confirmWorkspaceTransition, dispatchRightSurface, setWorkspaceDirty, setTurnDiffSelection])
   useEffect(() => {
     if (!diffReview || rightSurface.activeId !== 'diff' || !panelVisible) return
     const closeOnEscape = (event: KeyboardEvent): void => {
@@ -1987,9 +1978,10 @@ export function App() {
       return
     }
     surfacePane.restore()
-    setWorkspaceOpenRequest({ id: ++workspaceOpenSequenceRef.current, ...target })
+    const request = { id: ++workspaceOpenSequenceRef.current, ...target }
+    setWorkspaceOpenRequests((previous) => new Map(previous).set(currentSurface.id, request))
     dispatchRightSurface({ type: 'open', kind: 'files' })
-  }, [cwd, surfacePane.restore])
+  }, [cwd, surfacePane.restore, currentSurface.id, dispatchRightSurface])
   const addWorkspaceReference = useCallback((entry: WorkspaceEntry): void => {
     setInput((current) => appendWorkspaceReference(current, workspaceReferenceToken(entry)))
     window.setTimeout(() => taRef.current?.focus(), 0)
@@ -2213,10 +2205,20 @@ export function App() {
             />
           )}
           <div className="right-panel-slot" id="right-surface-pane">
+            {mountedSurfaces.map((surface) => (
+            <div key={surface.id} data-session-surface-current={surface.id === currentSurface.id} style={{ display: surface.id === currentSurface.id ? 'contents' : 'none' }}>
             <RightSurfacePanel
-            openIds={rightSurface.openIds}
-            activeId={rightSurface.activeId}
-            maximized={rightSurface.maximized}
+            openIds={surface.state.openIds}
+            activeId={surface.state.activeId}
+            retainTerminal={surface.terminalMounted}
+            workbenchPicker={surface.id === currentSurface.id && rightSurfaces.choices.length > 1 ? (
+              <button type="button" className="surface-tab-activate" aria-label="切换此会话的保留工作区"
+                title="会话身份合并后保留了多个工作区；点击切换，不会关闭终端"
+                onClick={rightSurfaces.selectNext}>
+                工作区 {rightSurfaces.selectedIndex + 1}/{rightSurfaces.choices.length}
+              </button>
+            ) : null}
+            maximized={surface.state.maximized}
             onOpen={(kind) => {
               surfacePane.restore()
               handleRightSurfaceAction({ type: 'open', kind })
@@ -2226,7 +2228,7 @@ export function App() {
             onHide={() => handleRightSurfaceAction({ type: 'hide' })}
             onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
             contents={{
-              overview: showSessionOverview ? (
+              overview: surface.id !== currentSurface.id ? null : showSessionOverview ? (
                 <OverviewPanel
                   turns={session.turns}
                   sessionId={selectedProviderSessionId}
@@ -2243,19 +2245,20 @@ export function App() {
               ) : (
                 <EmptySessionOverview />
               ),
-              files: cwd ? (
+              files: surface.cwd ? (
                 <WorkspacePanel
-                  cwd={cwd}
+                  cwd={surface.cwd}
+                  active={surface.id === currentSurface.id}
                   refreshKey={workspaceRefreshKey}
-                  openRequest={workspaceOpenRequest}
-                  onDirtyChange={setWorkspaceDirty}
+                  openRequest={workspaceOpenRequests.get(surface.id)}
+                  onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)}
                   onAddReference={addWorkspaceReference}
                   onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })}
                 />
               ) : (
                 <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>
               ),
-              diff: diffReview ? (
+              diff: surface.id !== currentSurface.id ? null : diffReview ? (
                 <TurnDiffReviewPanel
                   review={diffReview}
                   onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'diff' })}
@@ -2268,12 +2271,14 @@ export function App() {
               ),
               terminal: (
                 <Suspense fallback={<div className="surface-unavailable"><span>正在加载终端…</span></div>}>
-                  <TerminalSurface cwd={cwd} active={panelVisible && rightSurface.activeId === 'terminal'} />
+                  <TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={surface.id === currentSurface.id && panelVisible && surface.state.activeId === 'terminal'} />
                 </Suspense>
               ),
-              agents: <AgentsSurface turns={session.turns} busy={session.busy} />
+              agents: surface.id === currentSurface.id ? <AgentsSurface turns={session.turns} busy={session.busy} /> : null
             }}
             />
+            </div>
+            ))}
           </div>
         </>
       )}
