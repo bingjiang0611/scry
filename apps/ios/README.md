@@ -9,7 +9,9 @@ The remote implementation and evidence boundaries are documented in [the impleme
 
 ## ScryRemote product UI (design v5)
 
-The selected direction and interaction decisions live in `designs/scry-ios-remote/brief-v5.md` and `design-notes-v5.md`; the three-way comparison is `Scry iOS Remote v5 Directions.html`.
+The base structure and interaction decisions live in `designs/scry-ios-remote/brief-v5.md` and `design-notes-v5.md`; the three-way comparison is `Scry iOS Remote v5 Directions.html`.
+
+The current native UI uses the reference-led dark workbench styling: compact tool/reasoning disclosure rows and a flat, two-level composer. See [the design delta and verification limits](../../designs/scry-ios-remote/reference-workbench-2026-10-09.md). `ScryRemote` now includes a native XCTest UI target; run `xcodebuild test` with the scheme and an isolated Simulator destination below. UI test compilation is verified; the first runtime attempts were blocked by Xcode device-service startup, not a passing interaction suite.
 
 Honesty invariants (enforced by the model and host, not decoration):
 

@@ -46,9 +46,8 @@ struct CircleButton: View {
       Image(systemName: symbol)
         .font(.system(size: filled ? 18 : 17, weight: .medium))
         .frame(width: filled ? 46 : 44, height: filled ? 46 : 44)
-        .foregroundStyle(filled ? Color.white : Palette.ink)
+        .foregroundStyle(filled ? Palette.surface : Palette.ink)
         .background(filled ? AnyShapeStyle(Palette.blue) : AnyShapeStyle(Color.clear), in: Circle())
-        .shadow(color: filled ? Palette.blue.opacity(0.22) : .clear, radius: 9, y: 5)
         .contentShape(Circle())
     }
     .buttonStyle(.plain)
@@ -130,7 +129,8 @@ struct EvidenceChip: View {
       if let symbol { Image(systemName: symbol).font(.system(size: 12)) }
       Text(text).font(.system(size: 12))
     }
-    .foregroundStyle(Color(hex: 0x67676A))
+    .foregroundStyle(Palette.muted)
+    .monospacedDigit()
     .padding(.vertical, 6).padding(.horizontal, 11)
     .background(Palette.canvas, in: Capsule())
   }
@@ -150,8 +150,8 @@ struct RemoteHeader<Right: View>: View {
                    label: backAction == nil ? "打开菜单" : "返回") {
         if let backAction { backAction() } else { menuAction?() }
       }
-      VStack(spacing: 2) {
-        Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.84)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
         if let subtitle {
           HStack(spacing: 5) {
             if let link { StatusDot(link: link) }
@@ -160,12 +160,12 @@ struct RemoteHeader<Right: View>: View {
           .font(.system(size: 11.5)).foregroundStyle(Palette.muted)
         }
       }
-      .frame(maxWidth: .infinity)
+      .frame(maxWidth: .infinity, alignment: .leading)
       right()
         .frame(minWidth: 44, minHeight: 44)
     }
-    .padding(.horizontal, 14).padding(.vertical, 6)
-    .frame(minHeight: 62)
+    .padding(.horizontal, 10).padding(.vertical, 4)
+    .frame(minHeight: 56)
     .background(Palette.surface)
     .overlay(alignment: .bottom) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
     .zIndex(2)
@@ -437,14 +437,14 @@ struct ConversationMarkdownText: View {
         ScrollView(.horizontal, showsIndicators: false) {
           Text(verbatim: block.text)
             .font(.system(size: 12.5, design: .monospaced))
-            .foregroundStyle(Color(hex: 0x333438))
+            .foregroundStyle(Palette.ink)
             .textSelection(.enabled)
             .padding(.horizontal, 12).padding(.vertical, language == nil ? 11 : 7)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color(hex: 0xF3F4F6), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-      .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Palette.line.opacity(0.8)))
+      .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Palette.line.opacity(0.8)))
     case .divider:
       Rectangle().fill(Palette.line).frame(height: 0.5).padding(.vertical, 3)
     }
@@ -469,90 +469,54 @@ struct ConversationChunk: View {
   @State private var expanded = false
 
   private var lineCount: Int { max(1, text.split(separator: "\n", omittingEmptySubsequences: false).count) }
-  private var longToolResult: Bool { text.count > 220 || lineCount > 4 }
-  private var toolResultDetail: String {
-    longToolResult ? "\(lineCount) 行 · 点按展开" : "\(lineCount) 行"
-  }
 
   @ViewBuilder var body: some View {
     switch kind {
-    case "reasoning": reasoning
-    case "tool": toolCall
-    case "tool_result": toolResult
+    case "reasoning", "tool", "tool_result": evidenceDetail
     case "truncated": truncated
     default: ConversationMarkdownText(source: text)
     }
   }
 
-  private var reasoning: some View {
-    DisclosureGroup(isExpanded: $expanded) {
-      ConversationMarkdownText(source: text, muted: true)
-        .padding(.top, 9)
-    } label: {
-      Label("思考过程", systemImage: "brain")
-        .font(.system(size: 12.5, weight: .medium))
+  private var detailLabel: String {
+    switch kind {
+    case "reasoning": return "思考过程"
+    case "tool_result": return "工具结果 · \(lineCount) 行"
+    default: return text
+    }
+  }
+
+  // A tool payload alone cannot prove success; only the run lifecycle carries
+  // a status indicator. Expanding always exposes the supplied evidence.
+  private var evidenceDetail: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Button { expanded.toggle() } label: {
+        HStack(spacing: 10) {
+          Image(systemName: kind == "reasoning" ? "sparkle" : "terminal").frame(width: 18)
+          Text(detailLabel)
+            .font(kind == "tool" ? .system(size: 13, design: .monospaced) : .system(size: 13))
+            .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+          Image(systemName: expanded ? "chevron.down" : Symbol.chevron)
+            .font(.system(size: 11, weight: .medium))
+        }
         .foregroundStyle(Palette.muted)
-    }
-    .tint(Palette.muted)
-    .padding(.vertical, 8).padding(.horizontal, 11)
-    .background(Palette.canvas.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private var toolCall: some View {
-    HStack(alignment: .top, spacing: 9) {
-      Image(systemName: "hammer")
-        .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(Palette.blue)
-        .frame(width: 25, height: 25)
-        .background(Palette.blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-      Text(text)
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(Color(hex: 0x55565A))
-        .lineLimit(2)
-        .multilineTextAlignment(.leading)
-      Spacer(minLength: 0)
-    }
-    .padding(.vertical, 8).padding(.horizontal, 10)
-    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Palette.line))
-  }
-
-  @ViewBuilder private var toolResult: some View {
-    if longToolResult {
-      DisclosureGroup(isExpanded: $expanded) {
-        toolResultText.padding(.top, 9)
-      } label: {
-        resultHeader
+        .frame(minHeight: 44).contentShape(Rectangle())
       }
-      .tint(Palette.muted)
-      .padding(.vertical, 9).padding(.horizontal, 11)
-      .background(Palette.canvas.opacity(0.82), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-    } else {
-      VStack(alignment: .leading, spacing: 7) {
-        resultHeader
-        toolResultText
+      .buttonStyle(.plain)
+      .accessibilityIdentifier(kind == "reasoning" ? "reasoning-toggle" : "tool-detail-toggle")
+      .accessibilityLabel(kind == "tool" ? "工具调用：\(text)" : detailLabel)
+      .accessibilityValue(expanded ? "已展开" : "已折叠")
+      if expanded {
+        if kind == "reasoning" {
+          ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10)
+        } else {
+          Text(text).font(.system(size: 13, design: .monospaced))
+            .foregroundStyle(Palette.ink).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 6))
+        }
       }
-      .padding(.vertical, 9).padding(.horizontal, 11)
-      .background(Palette.canvas.opacity(0.82), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
-  }
-
-  private var resultHeader: some View {
-    HStack(spacing: 7) {
-      Image(systemName: "terminal")
-      Text("工具结果").fontWeight(.semibold)
-      Text(toolResultDetail).foregroundStyle(Palette.faint)
-    }
-    .font(.system(size: 11.5))
-    .foregroundStyle(Palette.muted)
-  }
-
-  private var toolResultText: some View {
-    Text(text)
-      .font(.system(size: 12, design: .monospaced))
-      .foregroundStyle(Color(hex: 0x424244))
-      .textSelection(.enabled)
-      .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var truncated: some View {
@@ -635,43 +599,41 @@ struct MessageComposer: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      if slashToken != nil && !disabled { slashMenu }
+    VStack(alignment: .leading, spacing: 0) {
+      if slashToken != nil && !disabled { slashMenu.padding(.bottom, 8) }
       if !attachments.isEmpty {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 7) { ForEach(attachments) { attachmentChip($0) } }
         }
       }
       TextField(placeholder, text: $text, axis: .vertical)
-        .font(.system(size: 15.5)).lineLimit(1...6).disabled(disabled)
+        .font(.body).lineLimit(1...6).disabled(disabled)
         .focused($inputFocused)
         .accessibilityIdentifier("message-input")
-        .padding(.horizontal, 3).padding(.top, 1)
+        .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 4)
       HStack(spacing: 6) {
         attachmentPermissionMenu
+        Spacer(minLength: 0)
+        if inputFocused {
+          PlainIcon(symbol: "keyboard.chevron.compact.down", label: "收起键盘") { inputFocused = false }
+        }
+        PlainIcon(symbol: Symbol.send, label: "发送", disabled: disabled || sendDisabled, action: onSend)
+      }
+      if contextLabel != nil || !modelOptions.isEmpty || !effortOptions.isEmpty {
+        Rectangle().fill(Palette.line).frame(height: 0.5)
         ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 6) {
+          HStack(spacing: 12) {
             if let contextLabel { contextControl(contextLabel) }
             if !modelOptions.isEmpty || !effortOptions.isEmpty { modelEffortControl }
           }
         }
-        if inputFocused {
-          PlainIcon(symbol: "keyboard.chevron.compact.down", label: "收起键盘") { inputFocused = false }
-        }
-        CircleButton(symbol: Symbol.send, label: "发送", filled: true,
-                     disabled: disabled || sendDisabled, action: onSend)
       }
       if let attachmentError {
         Text(attachmentError).font(.system(size: 11)).foregroundStyle(Palette.negative)
       }
     }
-    .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 5)
-    .background(Palette.glass, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .strokeBorder(text.isEmpty ? Color(hex: 0xDEDFE3) : Palette.blue.opacity(0.32), lineWidth: 1)
-    )
-    .shadow(color: Color.black.opacity(0.055), radius: 12, y: 4)
+    .padding(.horizontal, 4)
+    .background(Palette.surface)
     .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: maxCount, matching: .images)
     .fileImporter(isPresented: $showFiles,
                   allowedContentTypes: [.image, .text, .sourceCode, .json, .xml],
@@ -809,17 +771,17 @@ struct MessageComposer: View {
         if !effortOptions.isEmpty { Text(effortLabel).foregroundStyle(Palette.faint) }
         Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
       }
-      .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.muted)
-      .padding(.horizontal, 8).frame(height: 28).background(Palette.canvas, in: Capsule())
+      .font(.system(size: 12)).foregroundStyle(Palette.muted)
+      .frame(minHeight: 44).contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(disabled)
     .accessibilityLabel("模型 \(modelLabel)，推理强度 \(effortLabel)")
   }
 
   private func controlCapsule(_ label: String, symbol: String) -> some View {
-    Label(label, systemImage: symbol).font(.system(size: 11, weight: .medium))
+    Label(label, systemImage: symbol).font(.system(size: 12))
       .foregroundStyle(Palette.muted).lineLimit(1)
-      .padding(.horizontal, 8).frame(height: 28).background(Palette.canvas, in: Capsule())
+      .frame(minHeight: 44)
   }
 
   private var permissionLabel: String {

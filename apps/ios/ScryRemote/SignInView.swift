@@ -13,7 +13,7 @@ struct SignInView: View {
         ZStack {
           RoundedRectangle(cornerRadius: 25, style: .continuous).fill(Palette.ink)
             .frame(width: 82, height: 82)
-          Image(systemName: "sparkles").font(.system(size: 31, weight: .medium)).foregroundStyle(.white)
+          Image(systemName: "sparkles").font(.system(size: 31, weight: .medium)).foregroundStyle(Palette.surface)
         }
         Text("Scry").font(.system(size: 32, weight: .bold)).tracking(-1)
         Text("从 iPhone 继续你 Mac 上的\nAI 编码会话")
@@ -39,7 +39,7 @@ struct SignInView: View {
           model.auth = .failed("登录未完成：\(error.localizedDescription)。Sign in with Apple 需要有效 entitlement。")
         }
       }
-      .signInWithAppleButtonStyle(.black).frame(height: 50)
+      .signInWithAppleButtonStyle(.white).frame(height: 50)
       .padding(.horizontal, 22).onTapGesture { model.auth = .signingIn }
 
       HStack(alignment: .top, spacing: 7) {

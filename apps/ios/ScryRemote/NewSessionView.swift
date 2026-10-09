@@ -76,8 +76,9 @@ struct NewSessionView: View {
           model.route = .chat
         }
       }
-      .padding(.horizontal, 13).padding(.top, 8).padding(.bottom, 12)
+      .padding(.horizontal, 14).padding(.bottom, 4)
       .background(Palette.surface)
+      .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 0.5) }
     }
     .background(Palette.surface)
     .onAppear { if paired { run.loadProjects(); run.loadProviders() } }
@@ -135,10 +136,16 @@ struct NewSessionView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text(current.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.ink)
               Text(current.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
-              Button("选择此文件夹") {
+              Button {
                 run.chooseProject(current); showProjects = false
+              } label: {
+                Text("选择此文件夹").font(.system(size: 15, weight: .medium))
+                  .foregroundStyle(Palette.ink).frame(maxWidth: .infinity, minHeight: 44)
+                  .background(Palette.surface, in: RoundedRectangle(cornerRadius: 6))
+                  .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
+                  .contentShape(Rectangle())
               }
-              .buttonStyle(.borderedProminent).tint(Palette.blue).padding(.top, 8)
+              .buttonStyle(.plain).padding(.top, 8)
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
 

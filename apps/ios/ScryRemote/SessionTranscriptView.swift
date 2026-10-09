@@ -46,7 +46,7 @@ private struct HistoryTurnView: View {
           }
           .foregroundStyle(Palette.ink).padding(.vertical, 10).padding(.horizontal, 14)
           .frame(maxWidth: 320, alignment: .leading)
-          .background(Color(hex: 0xF0F1F3), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+          .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
       }
       if turn.items.count > 16 && !expanded {
@@ -356,7 +356,7 @@ struct SessionTranscriptView: View {
         }.font(.system(size: 12)).padding(.horizontal, 5)
       }
     }
-    .padding(.horizontal, 14).padding(.top, 7).padding(.bottom, 8)
+    .padding(.horizontal, 14).padding(.bottom, 4)
     .background(Palette.surface)
     .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
   }
@@ -374,7 +374,7 @@ struct SessionTranscriptView: View {
       .foregroundStyle(Palette.ink)
       .padding(.vertical, 10).padding(.horizontal, 14)
       .frame(maxWidth: 320, alignment: .leading)
-      .background(Color(hex: 0xF0F1F3), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+      .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
   }
 
@@ -404,7 +404,7 @@ struct SessionTranscriptView: View {
     switch run.lifecycle {
     case .settled: return Palette.green
     case .running: return Palette.blue
-    case .failed: return Color(hex: 0xB95D60)
+    case .failed: return Palette.negative
     case .cancelled, .submitting, .recorded, .dispatched: return Palette.amber
     case .unknown: return Palette.muted
     }
