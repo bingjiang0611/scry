@@ -41,4 +41,15 @@
 - 增补未保存文件场景时，fixture 曾返回不可克隆的函数、在标签切换完成前抓取 DOM，并被真实 `beforeunload` 保护阻止加载下一场景。分别改为返回标量、等待目标可见、证明文本保留后显式确认重新载入以收敛 fixture；没有关闭生产中的离开保护。
 - 完整 smoke 最初仍测量/点击全局第一个（已隐藏）面板，且假定 cwd 切换后必有退出事件。已改为显式打开/查询当前会话面板、先验证旧 Shell 存活，再发送 `exit` 等待自然退出。显式 terminalClose 会撤销输出所有权，不以缺少 renderer exit 通知推断进程未关闭。
 
-这些调整来自本次明确的导航生命周期合同，不增加超时、不跳过断言。未执行安装包构建/签名/安装，不将 `--dev` 当作已验证分发产物；未替换 `/Applications/Scry.app`，未 push。
+这些调整来自本次明确的导航生命周期合同，不增加超时、不跳过断言。修复提交阶段未执行安装包构建/签名/安装，不将 `--dev` 当作已验证分发产物。
+
+## 用户随后授权重新安装：0.2.159
+
+- 从修复提交 `b8304e7` 冻结源码，仅提升 App 至 0.2.159，私有 CLI 保持 0.2.47。
+- 首轮 Node 24.18.0/npm 12.2.0 的 `check:cli-release`：563 tests 通过，但 package smoke 因 npm 12 的 pack JSON 不再是数组失败。没有修改断言或跳过检查；改用项目约定的 Node 22.22.1/npm 10.9.4 完整重跑。
+- Node 22 下 `check:cli-release`（563 tests + CLI tarball 安装 smoke）、`test:renderer:ui`、`install:mac:dev` 均通过。安装链包括 typecheck、2435 unit tests、shell tests、App/CLI build、资源 allowlist/体积检查、packaged Electron smoke。3 个真实外部探针（P0/P1/billing admin）按默认合同跳过。
+- 安装器原子替换 `/Applications/Scry.app`，旧包保留在 `/Applications/.Scry.app.backup`。开发签名，未做公证，不当作正式 Developer ID 发布。
+- 安装后读取 bundle id `com.scry.app`、App 版本 0.2.159、私有 CLI 0.2.47；源/目标 app.asar SHA-256 均为 `681c919a31e021412f0816de44812355994c0911c4a4cbf8595400e179f4faaf`。
+- 对已安装路径再次运行 `check-packaged-app.mjs /Applications/Scry.app` 和 `electron-security-smoke.mjs /Applications/Scry.app`，均通过。smoke 仍使用隔离临时数据/fixture Provider，不动真实会话。
+- 发现正常运行的 Scry 下仍有 Pi/Codex/OpenCode 进程（含执行本任务的 Pi）；未关闭/重启该实例。用户需在当前任务收敛后手动退出并重新打开才切换到新版。未 push。
+- 本地日志：`/tmp/scry-install-0.2.159.aGnin7/`（临时文件，不作为长期制品存储）。
