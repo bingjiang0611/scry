@@ -63,5 +63,13 @@ SQLite 与 archive 都不保存 Provider 当前运行态、MCP 认证、配置�
 - Applied：`src/renderer/codex-alignment.css` 的总览样式：标题栏实测 72→44px，滚动区横向内缩归子分组所有，卡片移除重复内边距，分组标题和会话行收紧，数据 tabs 上间距 16→8px。保持 unknown/partial 文案、数值等宽字形与原生按钮焦点路径。依据为本次渲染对比和项目密度合同；不是 Craft 的统一间距规则。
 - Evidence：同一隔离 Electron fixture 的 380px 深色截图，首条轮次卡从约 604px 上移至 442px（截图暂存 `/tmp/scry-overview-before.png`、`/tmp/scry-overview-after.png`，不是永久资产）。深浅主题 × 340/380/535px，无横向溢出；鼠标切换会话数据、Shift+Tab/Enter 返回轮次数据通过。新增 `--overview-only` focused 入口，默认 UI gate 同时覆盖。
 - Regression：修改前新增检查在旧样式上因 72px 标题栏、22px 上下文空隙失败。新增 fixture 首次执行有插值变量错误；键盘模拟随后补齐原生 char 事件。卡片高度随内容变化，验收锚点使用首条卡片顶部而非底部；窄幅换行实测 450.1px，顶部上限 460px 仅适用于该 fixture，不限制真实长文案。
-- Checks：`render.test.tsx` 231 项、typecheck、build、完整 `test:renderer:ui`（含 Credits）通过。未安装/替换运行中的 `/Applications/Scry.app`，未在原截图的真实 Provider 会话重放；组件渲染不等于完整 App 验收。
+- Checks：`render.test.tsx` 231 项、typecheck、build、完整 `test:renderer:ui`（含 Credits）通过。源码修复时未安装/替换运行中的 `/Applications/Scry.app`，未在原截图的真实 Provider 会话重放；组件渲染不等于完整 App 验收。
 - Next use：总览首屏只能看见摘要、轮次掉到屏外 → 检查实际 CSS 加载顺序与复合间距 → 在相同 fixture 上比较卡片起点，保留原字体、未知状态与鼠标/键盘操作。
+
+### 安装交付 · 0.2.156（2026-10-09）
+
+- 用户要求“重新安装吧”。冻结 `886e498`（包含 UI 修复 `f9ecfa7`），独立 worktree / dependencies 加 version-only 补丁；构建源码固定在 `delivery/scry-ui-0.2.156` / `c028002`。主工作区并行已有 0.2.157 版本与 iOS/remote WIP，不覆盖、不纳入本安装，也不把 version-only 提交强行合并过去。
+- Node 22.22.1 / macOS arm64：完整 unit 2422 passed / 3 明确关闭的真实探针 skipped，shell、typecheck、build / build:cli、CLI release 563 tests 与 tarball smoke、完整 renderer UI（含密度与 Credits）、packaged allowlist / isolated App security smoke 均通过。独立目录用标准 force rebuild 校准 Electron SQLite ABI，未改变宿主依赖。日志 `/private/tmp/scry-ui-install-0.2.156-{native,cli,ui,install}.log`，本次门禁无失败。
+- `npm run install:mac:dev` 原子替换 `/Applications/Scry.app`，旧包备份 `/Applications/.Scry.app.backup`。安装后 App 0.2.156、私有 CLI 0.2.47，strict/deep signature 有效；Apple Development 本机开发签名，非 Developer ID 公证发行包。
+- 源/安装 `app.asar` SHA-256：`7a431140a6b159a2f14dfc5f5ac9727bc7472e2670156f459f286f7497ac57b7`；安装包 CSS 定向读取证实标题栏 `min-height: 44px; padding: 0` 与滚动区 `padding: 8px 0 16px`。
+- 原进程 PID 53922 仍运行，未退出/重载/中断用户任务。磁盘安装已验证；完全退出再打开才激活新版本，原截图真实会话的视觉验收仍待用户重放。未 push。
