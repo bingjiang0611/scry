@@ -190,6 +190,22 @@ enum RemoteSelfTest {
         let cachedPreview = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: Data("{\"status\":\"available\",\"source\":\"indexed_archive\",\"turns\":[],\"partial\":true,\"truncated\":false,\"bytes\":32}".utf8))
         check("previewMirrorSave", try await cache.writePreview(cachedPreview, key: key, epoch: epoch))
         check("previewMirrorRead", try await cache.readPreview(key) == cachedPreview)
+        let slashes = String(repeating: "/", count: 2_048)
+        let slashTurns = Array(repeating: G0Transport.RunHistoryPreviewTurn(userText: slashes, userTextTruncated: false,
+          items: Array(repeating: .init(kind: "output", text: slashes, truncated: false), count: 2), truncated: false), count: 2)
+        let wireEncoder = JSONEncoder()
+        wireEncoder.outputFormatting = .withoutEscapingSlashes
+        var slashBytes = 0
+        var slashPreview = G0Transport.RunHistoryPreview(source: "indexed_archive", turns: slashTurns, truncated: false, bytes: slashBytes)
+        while true {
+          let size = try wireEncoder.encode(slashPreview).count
+          if size == slashBytes { break }
+          slashBytes = size
+          slashPreview = .init(source: "indexed_archive", turns: slashTurns, truncated: false, bytes: slashBytes)
+        }
+        check("slashPreviewFitsWireBudget", slashBytes <= 16 * 1024)
+        check("slashPreviewPersists", try await cache.writePreview(slashPreview, key: key, epoch: epoch))
+        check("slashPreviewReadsWithoutLoss", try await cache.readPreview(key) == slashPreview)
         let restarted = RemoteHistoryCache(directory: root, byteLimit: 1_000_000, entryLimit: 2)
         let readStarted = Date()
         let saved = try await restarted.read(key)
@@ -353,17 +369,16 @@ enum RemoteSelfTest {
           exit(0)
         }
         let previewStarted = Date()
-        let preview = try await client.historyPreview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
-        let previewMs = Date().timeIntervalSince(previewStarted) * 1000
-        let fullStarted = Date()
-        var firstPageMs: Double?
-        let snapshot = try await client.historySnapshot(providerId: session.providerId, cwd: session.cwd,
-          externalSessionId: external, progress: { _, _ in
-            if firstPageMs == nil { firstPageMs = Date().timeIntervalSince(fullStarted) * 1000 }
-          })
-        let verifyMs = Date().timeIntervalSince(fullStarted) * 1000
-        let bytes = (try? JSONEncoder().encode(snapshot.turns).count) ?? 0
-        print("SESSIONPROBE target provider=\(provider) cwd=\(cwd) session=\(external) previewMs=\(String(format: "%.1f", previewMs)) previewBytes=\(preview.bytes ?? 0) firstFullPageMs=\(String(format: "%.1f", firstPageMs ?? verifyMs)) fullVerificationMs=\(String(format: "%.1f", verifyMs)) fullBytes=\(bytes) turns=\(snapshot.turns.count) status=\(preview.status)")
+        let (preview, previewMs, snapshot, firstPageMs, fullBytes, verifyMs) = try await client.withHistoryConnection { reader in
+          let preview = try await reader.preview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
+          let previewMs = Date().timeIntervalSince(previewStarted) * 1000
+          let fullStarted = Date()
+          let timing = SessionPageTiming(started: fullStarted)
+          let snapshot = try await client.historySnapshot(providerId: session.providerId, cwd: session.cwd,
+            externalSessionId: external, connection: reader, progress: { _, total in await timing.received(total: total) })
+          return (preview, previewMs, snapshot, await timing.firstPageMs, await timing.totalBytes, Date().timeIntervalSince(fullStarted) * 1000)
+        }
+        print("SESSIONPROBE target provider=\(provider) cwd=\(cwd) session=\(external) previewMs=\(String(format: "%.1f", previewMs)) previewBytes=\(preview.bytes ?? 0) firstFullPageMs=\(String(format: "%.1f", firstPageMs ?? verifyMs)) fullVerificationMs=\(String(format: "%.1f", verifyMs)) fullBytes=\(fullBytes.map(String.init) ?? "unavailable") turns=\(snapshot.turns.count) status=\(preview.status)")
         print("SESSIONPROBE DONE failures=0")
         exit(0)
       } catch {
@@ -371,6 +386,17 @@ enum RemoteSelfTest {
         print("SESSIONPROBE DONE failures=1")
         exit(1)
       }
+    }
+  }
+
+  private actor SessionPageTiming {
+    let started: Date
+    var firstPageMs: Double?
+    var totalBytes: Int?
+    init(started: Date) { self.started = started }
+    func received(total: Int) {
+      totalBytes = total
+      if firstPageMs == nil { firstPageMs = Date().timeIntervalSince(started) * 1000 }
     }
   }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import RemoteTransport
 
 // A session opened from the list: read-only replay of its past turns PLUS a live
@@ -10,38 +11,68 @@ import RemoteTransport
 // fabricated. File diffs still live on the Mac.
 // Large archived payloads must not parse every Markdown block during first
 // layout. Disclosure preserves the complete text; it never modifies the cache.
+// Presentation identity only, never a canonical turn ID or prompt dedup key.
+private struct HistoryTextPresentation: Identifiable {
+  let id = UUID()
+  let title: String
+  let text: String
+}
+
+private struct HistoryTextReader: UIViewRepresentable {
+  let text: String
+  func makeUIView(context: Context) -> UITextView {
+    let view = UITextView(usingTextLayoutManager: true)
+    view.isEditable = false
+    view.isSelectable = true
+    view.alwaysBounceVertical = true
+    view.backgroundColor = .clear
+    view.textColor = UIColor(Palette.ink)
+    view.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 14, weight: .regular))
+    view.adjustsFontForContentSizeCategory = true
+    view.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 24, right: 16)
+    view.text = text
+    return view
+  }
+  // The sheet holds an immutable reading snapshot; backfill cannot replace it.
+  func updateUIView(_ view: UITextView, context: Context) {}
+}
+
+private func historyExcerpt(_ text: String) -> String {
+  String(String.UnicodeScalarView(text.unicodeScalars.prefix(500)))
+}
+
 private struct HistoryChunkView: View {
   let kind: String
   let text: String
-  @State private var expanded = false
-  private var excerpt: String { String(text.prefix(500)) }
+  let onRead: (String, String) -> Void
+  private var excerpt: String { historyExcerpt(text) }
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      ConversationChunk(kind: kind, text: expanded ? text : excerpt)
-      if excerpt != text && !expanded {
-        Button("展开完整内容") { expanded = true }
+      ConversationChunk(kind: kind, text: excerpt)
+      if excerpt != text {
+        Button("阅读全文") { onRead("内容", text) }
           .font(.system(size: 13)).frame(minHeight: 44)
       }
     }
-    .onChange(of: text) { expanded = false }
   }
 }
 
 private struct HistoryTurnView: View {
   let turn: G0Transport.RunHistoryTurn
-  @State private var expanded = false
-  @State private var promptExpanded = false
-  private var promptExcerpt: String { String(turn.userText.prefix(500)) }
+  let revision: Int
+  let onRead: (String, String) -> Void
+  @State private var visibleItems = 16
+  private var promptExcerpt: String { historyExcerpt(turn.userText) }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if !turn.userText.isEmpty {
         HStack {
           Spacer(minLength: 40)
           VStack(alignment: .leading, spacing: 6) {
-            Text(promptExpanded ? turn.userText : promptExcerpt)
+            Text(promptExcerpt)
               .font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
-            if promptExcerpt != turn.userText && !promptExpanded {
-              Button("展开完整消息") { promptExpanded = true }.font(.system(size: 13)).frame(minHeight: 44)
+            if promptExcerpt != turn.userText {
+              Button("阅读全文") { onRead("消息", turn.userText) }.font(.system(size: 13)).frame(minHeight: 44)
             }
           }
           .foregroundStyle(Palette.ink).padding(.vertical, 10).padding(.horizontal, 14)
@@ -49,14 +80,14 @@ private struct HistoryTurnView: View {
           .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
       }
-      if turn.items.count > 16 && !expanded {
-        Button("展开本轮较早内容") { expanded = true }.font(.system(size: 13)).frame(minHeight: 44)
+      if turn.items.count > visibleItems {
+        Button("显示本轮较早内容") { visibleItems += 20 }.font(.system(size: 13)).frame(minHeight: 44)
       }
-      ForEach(Array(turn.items.indices.suffix(expanded ? turn.items.count : 16)), id: \.self) { index in
-        HistoryChunkView(kind: turn.items[index].kind, text: turn.items[index].text)
+      ForEach(Array(turn.items.indices.suffix(visibleItems)), id: \.self) { index in
+        HistoryChunkView(kind: turn.items[index].kind, text: turn.items[index].text, onRead: onRead)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
-      .onChange(of: turn) { expanded = false; promptExpanded = false }
+      .onChange(of: revision) { visibleItems = 16 }
   }
 }
 
@@ -65,6 +96,7 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var run: RemoteRunStore
   @State private var visibleTurnCount = 2
   @State private var readingAnchor: String?
+  @State private var historyText: HistoryTextPresentation?
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -125,7 +157,14 @@ struct SessionTranscriptView: View {
       footer
     }
     .background(Palette.surface)
-    .onChange(of: sessionIdentity) { visibleTurnCount = 2; readingAnchor = nil }
+    .onChange(of: sessionIdentity) { visibleTurnCount = 2; readingAnchor = nil; historyText = nil }
+    .sheet(item: $historyText) { item in
+      NavigationStack {
+        HistoryTextReader(text: item.text).background(Palette.surface)
+          .navigationTitle(item.title).navigationBarTitleDisplayMode(.inline)
+          .toolbar { ToolbarItem(placement: .confirmationAction) { Button("关闭") { historyText = nil } } }
+      }
+    }
     .onAppear {
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
@@ -284,7 +323,9 @@ struct SessionTranscriptView: View {
   }
 
   private func turnView(_ turn: G0Transport.RunHistoryTurn) -> some View {
-    HistoryTurnView(turn: turn)
+    HistoryTurnView(turn: turn, revision: run.historyRevision) { title, text in
+      historyText = HistoryTextPresentation(title: title, text: text)
+    }
   }
 
   // The in-progress follow-up: user bubble + honest lifecycle + streamed output.

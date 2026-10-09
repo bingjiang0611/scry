@@ -73,9 +73,45 @@ actor RemoteHistoryCache {
   func write(_ snapshot: RemoteHistorySnapshot, key: String, epoch expectedEpoch: Int) throws -> Bool {
     guard expectedEpoch == epoch else { return false }
     let data = try JSONEncoder().encode(Entry(version: 1, key: key, snapshot: snapshot))
-    guard data.count <= byteLimit else { return false }
-    try persist(data, to: fileURL(key))
-    return true
+    let saved = data.count <= byteLimit
+    if saved { try persist(data, to: fileURL(key)) }
+    // A tiny recent mirror remains useful even when the complete snapshot is
+    // too large. Write it last so eviction prioritizes first-readable content.
+    _ = try writePreview(Self.mirror(snapshot), key: key, epoch: expectedEpoch)
+    return saved && FileManager.default.fileExists(atPath: fileURL(key).path)
+  }
+
+  private static func mirror(_ snapshot: RemoteHistorySnapshot) throws -> G0Transport.RunHistoryPreview {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .withoutEscapingSlashes
+    func clip(_ value: String) throws -> (text: String, truncated: Bool) {
+      var text = ""
+      var bytes = 0
+      for scalar in value.unicodeScalars {
+        let character = String(scalar)
+        let count = try encoder.encode(character).count - 2
+        if bytes + count > 1_024 { return (text, true) }
+        bytes += count; text += character
+      }
+      return (text, false)
+    }
+    let turns = try snapshot.turns.suffix(2).map { turn in
+      let prompt = try clip(turn.userText)
+      let items = try turn.items.suffix(2).map { item in
+        let text = try clip(item.text)
+        return G0Transport.RunHistoryPreviewItem(kind: item.kind, text: text.text, truncated: text.truncated)
+      }
+      return G0Transport.RunHistoryPreviewTurn(userText: prompt.text, userTextTruncated: prompt.truncated,
+        items: items, truncated: prompt.truncated || turn.items.count > 2 || items.contains { $0.truncated })
+    }
+    let truncated = snapshot.turns.count > 2 || turns.contains { $0.truncated }
+    var bytes = 0
+    while true {
+      let preview = G0Transport.RunHistoryPreview(source: "snapshot_cache", turns: turns, truncated: truncated, bytes: bytes)
+      let encoded = try encoder.encode(preview).count
+      if encoded == bytes { return preview }
+      bytes = encoded
+    }
   }
 
   private func persist(_ data: Data, to url: URL) throws {
@@ -102,7 +138,11 @@ actor RemoteHistoryCache {
   @discardableResult
   func writePreview(_ preview: G0Transport.RunHistoryPreview, key: String, epoch expectedEpoch: Int) throws -> Bool {
     guard expectedEpoch == epoch, preview.available else { return false }
-    let data = try JSONEncoder().encode(PreviewEntry(version: 1, key: key, preview: preview))
+    // Match the host JSON budget: slash escaping can otherwise double a valid
+    // preview beyond the protected mirror's 17 KiB wrapper limit.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .withoutEscapingSlashes
+    let data = try encoder.encode(PreviewEntry(version: 1, key: key, preview: preview))
     guard data.count <= min(byteLimit, Self.previewByteLimit) else { return false }
     try persist(data, to: previewFileURL(key))
     return true

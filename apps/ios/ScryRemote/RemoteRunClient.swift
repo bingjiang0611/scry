@@ -170,6 +170,13 @@ struct RemoteRunClient {
     return sessions
   }
 
+  @MainActor
+  func withHistoryConnection<T: Sendable>(_ body: @escaping @MainActor @Sendable (G0Transport.HistoryConnection) async throws -> T) async throws -> T {
+    try await G0Transport.withHistoryConnection(endpoint: endpoint(), identity: identity()) { reader in
+      try await body(reader)
+    }
+  }
+
   func historyPreview(providerId: String, cwd: String, externalSessionId: String) async throws -> G0Transport.RunHistoryPreview {
     try await G0Transport.relayRunHistoryPreview(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
   }
@@ -190,12 +197,16 @@ struct RemoteRunClient {
 
   func historySnapshot(providerId: String, cwd: String, externalSessionId: String,
                        cached: RemoteHistorySnapshot? = nil,
+                       connection: G0Transport.HistoryConnection? = nil,
                        progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
     for attempt in 0..<3 {
       do {
-        return try await Self.downloadHistory(cached: cached, fetch: { cursor, snapshot in
-          try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
-                                cursor: cursor, snapshot: snapshot)
+        return try await Self.downloadHistory(cached: cached, pageSize: connection == nil ? 64 * 1024 : 256 * 1024, fetch: { cursor, snapshot in
+          if let connection {
+            return try await connection.page(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot)
+          }
+          return try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
+                                      cursor: cursor, snapshot: snapshot)
         }, progress: progress)
       }
       catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
@@ -206,13 +217,11 @@ struct RemoteRunClient {
                   userInfo: [NSLocalizedDescriptionKey: "History kept changing while it was read"])
   }
 
-  // The existing host sends 64 KiB pages, each over a separate authenticated
-  // exchange. Two readers match its warm relay pool; sort before assembly and
-  // retain the complete snapshot/digest fence. Never use the clipped legacy API.
-  static func downloadHistory(cached: RemoteHistorySnapshot?,
+  // Larger pages share the transfer's tunnel; keep assembly/digest/JSON work
+  // off the UI actor. Legacy isolated fixtures retain their 64 KiB page contract.
+  @concurrent static func downloadHistory(cached: RemoteHistorySnapshot?, pageSize: Int = 64 * 1024,
     fetch: @escaping @Sendable (Int, String?) async throws -> G0Transport.RunHistoryPage,
     progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
-    let pageSize = 64 * 1024
     try Task.checkCancellation()
     let first = try await fetch(0, nil)
     try Task.checkCancellation()
@@ -234,6 +243,7 @@ struct RemoteRunClient {
       await progress(total, total)
       return RemoteHistorySnapshot(turns: cached.turns, fingerprint: fingerprint, fetchedAt: Date())
     }
+    bytes.reserveCapacity(total)
     await progress(bytes.count, total)
     while bytes.count < total {
       try Task.checkCancellation()

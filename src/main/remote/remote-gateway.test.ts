@@ -425,6 +425,34 @@ describe('RemoteGateway', () => {
     expect(Buffer.byteLength(JSON.stringify(turns), 'utf8')).toBeLessThanOrEqual(6 * 1024 * 1024)
   })
 
+  it('shares concurrent assembly and extends an actively read frozen snapshot', async () => {
+    const { authority } = await grantedAuthority()
+    const turns = [{ userText: '问🙂\\\n', items: [{ kind: 'output' as const, text: 'x'.repeat(600_000) }] }]
+    const read = vi.fn(async () => turns)
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), history: { read } })
+    const query = { providerId: 'pi', cwd: '/w', externalSessionId: 'shared' }
+    let now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      const [small, large] = await Promise.all([
+        gw.readHistoryPage(CERT, { ...query, limit: 64 * 1024 }),
+        gw.readHistoryPage(CERT, { ...query, limit: 256 * 1024 })
+      ])
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(large.snapshot).toBe(small.snapshot)
+      expect(Buffer.from(large.dataBase64, 'base64')).toHaveLength(256 * 1024)
+      read.mockResolvedValue([{ userText: 'new turn', items: [] }])
+      for (let index = 0; index < 3; index++) {
+        now += 20_000
+        expect((await gw.readHistoryPage(CERT, { ...query, snapshot: large.snapshot, cursor: 0 })).snapshot).toBe(large.snapshot)
+      }
+      expect(read).toHaveBeenCalledTimes(1)
+      now += 30_001
+      await expect(gw.readHistoryPage(CERT, { ...query, snapshot: large.snapshot })).rejects.toThrow('history_snapshot_changed')
+      expect(read).toHaveBeenCalledTimes(2)
+    } finally { clock.mockRestore() }
+  })
+
   it('pages complete history bytes with a restart-stable snapshot fence', async () => {
     const { authority } = await grantedAuthority()
     const expected = [{ userText: '问🙂'.repeat(30_000), items: [
@@ -449,7 +477,7 @@ describe('RemoteGateway', () => {
     } while (true)
     expect(JSON.parse(Buffer.concat(chunks).toString('utf8'))).toEqual(expected)
     await expect(gw.readHistoryPage(CERT, {
-      providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, limit: 65_537
+      providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, limit: 262_145
     })).rejects.toThrow('invalid_history_limit')
     await expect(gw.readHistoryPage(CERT, {
       providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: cursor + 1, snapshot

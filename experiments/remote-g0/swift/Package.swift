@@ -30,7 +30,8 @@ let package = Package(
     ]),
     .testTarget(name: "RemoteProbeTests", dependencies: [
       "RemoteTransport", .product(name: "X509", package: "swift-certificates"),
-      .product(name: "NIOSSL", package: "swift-nio-ssl")
+      .product(name: "NIOSSL", package: "swift-nio-ssl"),
+      .product(name: "NIOEmbedded", package: "swift-nio")
     ])
   ]
 )
