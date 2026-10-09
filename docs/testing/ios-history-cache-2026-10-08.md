@@ -168,3 +168,16 @@ WDA 本轮启动成功。无 mock 参数普通启动、进入已有 DEBUG 本地
 新增实际 failure projection 回归三项：镜像保留、协议错误不标离线、可操作提示。旧投影先有后两项 FAIL；修复后通过。Simulator **48 PASS /0 FAIL /1 Protection SKIP**、原自测 **31 PASS /0 FAIL /1 Keychain SKIP**；Swift transport **11 PASS**。签名 iphoneos 构建通过，覆盖安装 **0.1.5 (6)** 后 inventory 确认，真机历史 **49 PASS /0 FAIL /0 SKIP**、原自测 **36 PASS /0 FAIL /0 SKIP**，恢复正常启动。没有清除真实缓存或重新配对。
 
 本次仅改 Swift store/error 展示与 iOS 版本，Node/主机源码及已安装 0.2.157 未改，未重跑前段 Node 全量/pack gate；前段 coverage 失败仍保留。没有可用 mobile-mcp/WDA 控制通路，未证明新错误文本的真机点击/焦点效果，更未证明正常正文恢复或毫秒级。下一步必须让 Mac **真正退出并重新打开**（不是只关窗口），再对同一会话执行认证只读 probe 与实际点击验收。当前助手依附该 Mac 进程，不通过 detached helper 规避生命周期退出。
+
+## 0.1.6 (7) / Mac 0.2.158：空闲中继池与 Markdown 全文
+
+用户反馈重启后仍有高失败率、Markdown 不支持。重查 Mac 已是新进程；同一显式 Pi 会话的真实认证只读 probe **成功一次**：preview 2036.8 ms /604 bytes，首全页 2371.1 ms，完整校验 25177.9 ms /5,229,142 bytes /19 turns。不是毫秒级首屏证明，也没有据此推算失败率；本次没有捕获到该真实请求失败的 wire 错误。
+
+确认另一可复现的容量缺陷：`ReverseTunnelTransport` 默认两条腿，但只在 close 后补充。长历史 tunnel 加预热/控件请求可占完可用腿，Worker 明确返回 `no_host_leg`。修复 WSS 收到首次设备密文时发出一次消费通知，将等待池与活动连接分开补充；默认保留两条等待腿，至多八条总连接。达到上限仍可能 busy；扩容必须基于实际并发证据，不通过无限建连或增加客户端重试兜底。消费通知不是授权，mTLS/grant/expiry 和完整历史校验不变。不能把这个局部缺陷直接当作用户所有失败的已证实原因。
+
+- 回归旧实现先 FAIL（两个消费后仍仅两条、预期四条）；修复后通过。另用真实 localhost WebSocket upgrade/frame 验证首次入站字节只通知一次且正文不变。四个 remote 文件 **41 PASS**。
+- 手机全文恢复复用现有 Markdown 块渲染，`@concurrent` 解析一次后 lazy 布局；标题、列表、引用、链接、代码块支持沿用现有边界，不声称全部 CommonMark/GFM。摘要限制不变，完整内容未删。Simulator native AX 已实际打开/观察标题列表代码块/关闭/重开；截图私有留存。
+- 新增 XCTest 点击用例，但 Simulator 两次启动分别 240s/180s 超时，第二次有 `DTServiceHubClient failed to bless service hub`，测试没有执行。停止本次 runner 并重启同一 owned Simulator 后仍失败，没有放大断言超时。物理设备 UI runner 构建因 `No Accounts`/缺少 `com.scry.remote.uitests.xctrunner` profile 失败；普通 App 签名构建成功。Native AX fixture 验证与 XCTest 失败分开记载。
+- Simulator 历史 **48 PASS /1 Protection SKIP**、原自测加 Markdown 三项 **34 PASS /1 Keychain SKIP**；真机覆盖安装 **0.1.6 (7)**、inventory 确认，历史 **49 PASS**、自测 **39 PASS**，均 0 FAIL，恢复正常启动。没有卸载、清真实缓存、重新配对或 Provider 消息。
+- 并行终端/renderer WIP 未纳入本次安装：用 `adfc6e1` + 本次明确路径 diff 的临时源码快照（非替换历史 subagent）验证/打包，依赖 APFS clone 隔离。Node24 完整 unit **2430 PASS /3 SKIP**、shell/typecheck 通过；CLI 验证 563 PASS，但 npm12 的 pack JSON 已变为按包名对象，既有 smoke 的数组断言失败。未改 smoke；按项目 Node22.22.1/npm10.9.4 环境重跑 CLI package smoke 通过，随后 pack/resource/security smoke 与 renderer UI（含 Credits）通过。前段 coverage 失败仍保留，没有补造覆盖率。
+- 真实高失败率改善、两端新版本运行后的 UI 首可读/暖重开仍待验收。安装目录和运行进程版本须分开核实，不能再把覆盖安装写成协议已生效。

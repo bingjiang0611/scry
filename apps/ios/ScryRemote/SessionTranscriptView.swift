@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import RemoteTransport
 
 // A session opened from the list: read-only replay of its past turns PLUS a live
@@ -18,23 +17,25 @@ private struct HistoryTextPresentation: Identifiable {
   let text: String
 }
 
-private struct HistoryTextReader: UIViewRepresentable {
+private struct HistoryTextReader: View {
   let text: String
-  func makeUIView(context: Context) -> UITextView {
-    let view = UITextView(usingTextLayoutManager: true)
-    view.isEditable = false
-    view.isSelectable = true
-    view.alwaysBounceVertical = true
-    view.backgroundColor = .clear
-    view.textColor = UIColor(Palette.ink)
-    view.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 14, weight: .regular))
-    view.adjustsFontForContentSizeCategory = true
-    view.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 24, right: 16)
-    view.text = text
-    return view
+  @State private var blocks: [ConversationMarkdownBlock]?
+
+  var body: some View {
+    ScrollView {
+      if let blocks {
+        ConversationMarkdownText(source: "", parsedBlocks: blocks).padding(16)
+      } else { ProgressView().padding(24) }
+    }
+    .accessibilityIdentifier("history-markdown-reader")
+    .task(id: text) {
+      // Parse the immutable reading snapshot once, off the UI actor. Lazy blocks
+      // preserve headings/lists/code without parsing the full answer on first tap.
+      let parsed = await ConversationMarkdownParser.parseForReading(text)
+      guard !Task.isCancelled else { return }
+      blocks = parsed
+    }
   }
-  // The sheet holds an immutable reading snapshot; backfill cannot replace it.
-  func updateUIView(_ view: UITextView, context: Context) {}
 }
 
 private func historyExcerpt(_ text: String) -> String {

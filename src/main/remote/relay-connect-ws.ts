@@ -60,7 +60,11 @@ function wsLeg(opts: RelayWSOptions): OutboundLeg {
     ws.send(JSON.stringify({ token: opts.token, ...(opts.enroll ? { enroll: true } : {}) }))
     duplex.emit('connect')
   })
+  let consumed = false
   ws.addEventListener('message', (event) => {
+    // This leg is no longer available at the relay once device TLS bytes arrive.
+    // Notify before delivering bytes; authorization remains entirely in mTLS.
+    if (!consumed) { consumed = true; duplex.emit('relaySession') }
     const data = event.data
     const buf = typeof data === 'string' ? Buffer.from(data) : Buffer.from(data as ArrayBuffer)
     duplex.push(buf)

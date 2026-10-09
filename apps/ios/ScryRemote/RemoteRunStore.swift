@@ -1875,7 +1875,7 @@ final class RemoteRunStore: ObservableObject {
     if ProcessInfo.processInfo.arguments.contains("-uiMockFirstScreen") {
       let turns = (1...40).map { index in
         G0Transport.RunHistoryTurn(userText: "模拟历史消息 \(index)", items: [
-          .init(kind: "output", text: index == 40 ? String(repeating: "长消息保留完整内容，可按需展开。", count: 600) : "模拟回复 \(index)")])
+          .init(kind: "output", text: index == 40 ? "# 历史 Markdown 标题\n\n- 列表项目\n\n```swift\nlet answer = 42\n```\n\n" + String(repeating: "长消息保留完整内容，可按需展开。\n\n", count: 600) + "## 完整内容末尾" : "模拟回复 \(index)")])
       }
       history = ProcessInfo.processInfo.arguments.contains("-uiMockPartialHistory") ? .partial(Array(turns.suffix(2))) : .loaded(turns)
       historyFromCache = true; historyFetchedAt = Date()

@@ -76,6 +76,21 @@ final class ConversationUITests: XCTestCase {
     capture("offline-chat")
   }
 
+  func testHistoryFullReaderRendersMarkdown() {
+    launch("transcript", extra: ["-uiMockFirstScreen"])
+    let read = app.buttons["阅读全文"].firstMatch
+    XCTAssertTrue(read.waitForExistence(timeout: 5))
+    read.tap()
+    XCTAssertTrue(app.scrollViews["history-markdown-reader"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["历史 Markdown 标题"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["列表项目"].exists)
+    XCTAssertTrue(app.staticTexts["let answer = 42"].exists)
+    XCTAssertFalse(app.staticTexts["# 历史 Markdown 标题"].exists)
+    capture("history-full-markdown")
+    app.buttons["关闭"].tap()
+    XCTAssertTrue(read.waitForExistence(timeout: 5))
+  }
+
   func testSlashCommandInsertion() {
     launch("chat", extra: ["-uiMockSlash"])
     let command = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "/review")).firstMatch
