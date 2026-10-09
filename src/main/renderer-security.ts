@@ -1,6 +1,4 @@
 import type { Session } from 'electron'
-import { lookup } from 'node:dns/promises'
-import { isIP } from 'node:net'
 
 export function configureRendererPermissions(
   rendererSession: Pick<Session, 'setPermissionCheckHandler' | 'setPermissionRequestHandler'>,
@@ -47,54 +45,6 @@ export function isSafeExternalUrl(value: string): boolean {
     const protocol = new URL(value).protocol
     return protocol === 'https:' || protocol === 'http:'
   } catch {
-    return false
-  }
-}
-
-function privateIpv4(hostname: string): boolean {
-  const parts = hostname.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
-  return parts[0] === 0 || parts[0] === 10 || parts[0] === 127 ||
-    (parts[0] === 169 && parts[1] === 254) ||
-    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-    (parts[0] === 192 && parts[1] === 168)
-}
-
-function mappedIpv4(hostname: string): string | undefined {
-  const mapped = hostname.match(/^::ffff:(.+)$/i)?.[1]
-  if (!mapped) return undefined
-  if (mapped.includes('.')) return mapped
-  const words = mapped.split(':').map((word) => Number.parseInt(word, 16))
-  if (words.length !== 2 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff)) return undefined
-  return `${words[0] >> 8}.${words[0] & 0xff}.${words[1] >> 8}.${words[1] & 0xff}`
-}
-
-export function isSensitiveExternalUrl(value: string): boolean {
-  try {
-    const hostname = new URL(value).hostname.replace(/^\[|\]$/g, '').toLowerCase()
-    if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '::' || hostname === '::1') return true
-    const mapped = mappedIpv4(hostname)
-    if (mapped) return privateIpv4(mapped)
-    if (/^(?:fc|fd)[0-9a-f]{2}:/i.test(hostname) || /^fe[89ab][0-9a-f]:/i.test(hostname)) return true
-    return privateIpv4(hostname)
-  } catch {
-    return false
-  }
-}
-
-export async function isSensitiveExternalDestination(value: string): Promise<boolean> {
-  if (isSensitiveExternalUrl(value)) return true
-  let hostname: string
-  try { hostname = new URL(value).hostname.replace(/^\[|\]$/g, '') } catch { return false }
-  if (isIP(hostname)) return false
-  try {
-    const addresses = await Promise.race([
-      lookup(hostname, { all: true, verbatim: true }),
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('DNS lookup timeout')), 2_000))
-    ])
-    return addresses.some(({ address }) => isSensitiveExternalUrl(`http://${isIP(address) === 6 ? `[${address}]` : address}/`))
-  } catch {
-    // Resolution failure is handled by the browser; do not silently classify it as private.
     return false
   }
 }
