@@ -180,4 +180,5 @@ WDA 本轮启动成功。无 mock 参数普通启动、进入已有 DEBUG 本地
 - 新增 XCTest 点击用例，但 Simulator 两次启动分别 240s/180s 超时，第二次有 `DTServiceHubClient failed to bless service hub`，测试没有执行。停止本次 runner 并重启同一 owned Simulator 后仍失败，没有放大断言超时。物理设备 UI runner 构建因 `No Accounts`/缺少 `com.scry.remote.uitests.xctrunner` profile 失败；普通 App 签名构建成功。Native AX fixture 验证与 XCTest 失败分开记载。
 - Simulator 历史 **48 PASS /1 Protection SKIP**、原自测加 Markdown 三项 **34 PASS /1 Keychain SKIP**；真机覆盖安装 **0.1.6 (7)**、inventory 确认，历史 **49 PASS**、自测 **39 PASS**，均 0 FAIL，恢复正常启动。没有卸载、清真实缓存、重新配对或 Provider 消息。
 - 并行终端/renderer WIP 未纳入本次安装：用 `adfc6e1` + 本次明确路径 diff 的临时源码快照（非替换历史 subagent）验证/打包，依赖 APFS clone 隔离。Node24 完整 unit **2430 PASS /3 SKIP**、shell/typecheck 通过；CLI 验证 563 PASS，但 npm12 的 pack JSON 已变为按包名对象，既有 smoke 的数组断言失败。未改 smoke；按项目 Node22.22.1/npm10.9.4 环境重跑 CLI package smoke 通过，随后 pack/resource/security smoke 与 renderer UI（含 Credits）通过。前段 coverage 失败仍保留，没有补造覆盖率。
-- 真实高失败率改善、两端新版本运行后的 UI 首可读/暖重开仍待验收。安装目录和运行进程版本须分开核实，不能再把覆盖安装写成协议已生效。
+- Mac 已从上述隔离快照原子安装 **0.2.158**，Info、codesign、app.asar 对照通过；快照与提交 `c7cdbad` 全部 tracked blob 对照只差两份后补文档。当前活动进程尚未重启，空闲池修复未在该进程生效。真实高失败率改善、两端新版本运行后的 UI 首可读/暖重开仍待验收，不能把覆盖安装写成协议已生效。
+- 设计库更新原记录 `D-20261009-scry-history-markdown`，build/search 可定位；check 仍有既有无关 `P-PI-MODEL-SELECTOR` 源路径缺失，未修改该项目。
