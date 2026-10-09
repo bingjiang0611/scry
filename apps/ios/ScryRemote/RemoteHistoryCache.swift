@@ -8,10 +8,11 @@ struct RemoteHistorySnapshot: Codable, Sendable {
   let fetchedAt: Date
 }
 
-// Disposable, complete host snapshots only. iOS Data Protection encrypts these
+// Disposable verified snapshots and separate partial mirrors. iOS Data Protection encrypts these
 // files while locked; they are excluded from backups. We store history, not
 // pairing keys or unsent drafts. A different grant/anchor cannot address old data.
 actor RemoteHistoryCache {
+  static let previewByteLimit = 17 * 1024 // 16 KiB payload plus local wrapper
   private(set) var epoch = 0
   let directory: URL
   let byteLimit: Int
@@ -37,8 +38,14 @@ actor RemoteHistoryCache {
     let key: String
     let snapshot: RemoteHistorySnapshot
   }
+  private struct PreviewEntry: Codable {
+    let version: Int
+    let key: String
+    let preview: G0Transport.RunHistoryPreview
+  }
 
   func fileURL(_ key: String) -> URL { directory.appendingPathComponent(key + ".json") }
+  private func previewFileURL(_ key: String) -> URL { directory.appendingPathComponent("preview-" + key + ".json") }
 
   func read(_ key: String) throws -> RemoteHistorySnapshot? {
     let url = fileURL(key)
@@ -50,6 +57,16 @@ actor RemoteHistoryCache {
     return entry.snapshot
   }
 
+  func readPreview(_ key: String) throws -> G0Transport.RunHistoryPreview? {
+    let url = previewFileURL(key)
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard size <= Self.previewByteLimit else { throw CocoaError(.fileReadTooLarge) }
+    let entry = try JSONDecoder().decode(PreviewEntry.self, from: Data(contentsOf: url))
+    guard entry.version == 1, entry.key == key else { throw CocoaError(.fileReadCorruptFile) }
+    return entry.preview.available ? entry.preview : nil
+  }
+
   // Actor-isolated IO never blocks SwiftUI. Clearing advances the epoch so
   // even a queued write from an earlier download cannot resurrect removed data.
   @discardableResult
@@ -57,13 +74,18 @@ actor RemoteHistoryCache {
     guard expectedEpoch == epoch else { return false }
     let data = try JSONEncoder().encode(Entry(version: 1, key: key, snapshot: snapshot))
     guard data.count <= byteLimit else { return false }
+    try persist(data, to: fileURL(key))
+    return true
+  }
+
+  private func persist(_ data: Data, to url: URL) throws {
     let fm = FileManager.default
     try fm.createDirectory(at: directory, withIntermediateDirectories: true,
       attributes: [.protectionKey: FileProtectionType.complete])
     var folder = directory
     var values = URLResourceValues(); values.isExcludedFromBackup = true
     try folder.setResourceValues(values)
-    try data.write(to: fileURL(key), options: [.atomic, .completeFileProtection])
+    try data.write(to: url, options: [.atomic, .completeFileProtection])
     let files = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
       .filter { $0.pathExtension == "json" }
       .map { url -> (URL, Int, Date) in
@@ -75,6 +97,14 @@ actor RemoteHistoryCache {
       bytes += file.1
       if index >= entryLimit || bytes > byteLimit { try fm.removeItem(at: file.0) }
     }
+  }
+
+  @discardableResult
+  func writePreview(_ preview: G0Transport.RunHistoryPreview, key: String, epoch expectedEpoch: Int) throws -> Bool {
+    guard expectedEpoch == epoch, preview.available else { return false }
+    let data = try JSONEncoder().encode(PreviewEntry(version: 1, key: key, preview: preview))
+    guard data.count <= min(byteLimit, Self.previewByteLimit) else { return false }
+    try persist(data, to: previewFileURL(key))
     return true
   }
 

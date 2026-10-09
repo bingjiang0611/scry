@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
-import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
+import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
@@ -47,6 +47,7 @@ export interface RemoteHostServiceDependencies {
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   listSessions?(): RemoteSessionRef[]
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
+  readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
@@ -111,7 +112,8 @@ export class RemoteHostService {
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
       ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
-      ...(deps.readHistory ? { readHistory: deps.readHistory } : {})
+      ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
+      ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {})
     })
     let host: InnerMtlsHost
     let pairing: PairingTransport

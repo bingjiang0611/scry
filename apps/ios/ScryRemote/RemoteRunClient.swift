@@ -170,6 +170,10 @@ struct RemoteRunClient {
     return sessions
   }
 
+  func historyPreview(providerId: String, cwd: String, externalSessionId: String) async throws -> G0Transport.RunHistoryPreview {
+    try await G0Transport.relayRunHistoryPreview(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  }
+
   func historyPage(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> G0Transport.RunHistoryPage {
     try await G0Transport.relayRunHistoryPage(
       endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd,
@@ -186,15 +190,13 @@ struct RemoteRunClient {
 
   func historySnapshot(providerId: String, cwd: String, externalSessionId: String,
                        cached: RemoteHistorySnapshot? = nil,
-                       progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in },
-                       firstScreen: @escaping @Sendable ([G0Transport.RunHistoryTurn]) async -> Void = { _ in }) async throws -> RemoteHistorySnapshot {
+                       progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
     for attempt in 0..<3 {
-      if attempt > 0 { await firstScreen([]) }
       do {
         return try await Self.downloadHistory(cached: cached, fetch: { cursor, snapshot in
           try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
                                 cursor: cursor, snapshot: snapshot)
-        }, progress: progress, firstScreen: firstScreen)
+        }, progress: progress)
       }
       catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
         try await Task.sleep(nanoseconds: UInt64(120 + attempt * 180) * 1_000_000)
@@ -209,8 +211,7 @@ struct RemoteRunClient {
   // retain the complete snapshot/digest fence. Never use the clipped legacy API.
   static func downloadHistory(cached: RemoteHistorySnapshot?,
     fetch: @escaping @Sendable (Int, String?) async throws -> G0Transport.RunHistoryPage,
-    progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in },
-    firstScreen: @escaping @Sendable ([G0Transport.RunHistoryTurn]) async -> Void = { _ in }) async throws -> RemoteHistorySnapshot {
+    progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
     let pageSize = 64 * 1024
     try Task.checkCancellation()
     let first = try await fetch(0, nil)
@@ -234,41 +235,19 @@ struct RemoteRunClient {
       return RemoteHistorySnapshot(turns: cached.turns, fingerprint: fingerprint, fetchedAt: Date())
     }
     await progress(bytes.count, total)
-    // Read recent pages before older history. Authenticated partial content is
-    // not a verified/persistable snapshot until the complete digest passes.
-    var tailPages: [Int: Data] = [:]
-    if total > pageSize {
-      let last = ((total - 1) / pageSize) * pageSize
-      let starts = Array(stride(from: max(pageSize, last - pageSize), through: last, by: pageSize))
-      let pages = try await withThrowingTaskGroup(of: (Int, G0Transport.RunHistoryPage).self) { group in
-        for cursor in starts { group.addTask { (cursor, try await fetch(cursor, fingerprint)) } }
-        var result: [(Int, G0Transport.RunHistoryPage)] = []
-        for try await page in group { result.append(page) }
-        return result.sorted { $0.0 < $1.0 }
-      }
-      var suffix = Data()
-      for (cursor, page) in pages {
-        let data = try chunk(page, at: cursor)
-        tailPages[cursor] = data; suffix.append(data)
-      }
-      let recent = try completeHistorySuffix(suffix)
-      if !recent.isEmpty { await firstScreen(recent) }
-      await progress(bytes.count + suffix.count, total)
-    }
     while bytes.count < total {
       try Task.checkCancellation()
       let start = bytes.count
-      if let tail = tailPages[start] { bytes.append(tail); continue }
       let pages = try await withThrowingTaskGroup(of: (Int, G0Transport.RunHistoryPage).self) { group in
         for cursor in stride(from: start, to: min(total, start + 2 * pageSize), by: pageSize) {
-          if tailPages[cursor] == nil { group.addTask { (cursor, try await fetch(cursor, fingerprint)) } }
+          group.addTask { (cursor, try await fetch(cursor, fingerprint)) }
         }
         var result: [(Int, G0Transport.RunHistoryPage)] = []
         for try await page in group { result.append(page) }
         return result.sorted { $0.0 < $1.0 }
       }
       for (cursor, page) in pages { bytes.append(try chunk(page, at: cursor)) }
-      await progress(bytes.count + tailPages.filter { $0.key >= bytes.count }.values.reduce(0) { $0 + $1.count }, total)
+      await progress(bytes.count, total)
     }
     try Task.checkCancellation()
     await progress(total, total)
@@ -279,38 +258,6 @@ struct RemoteRunClient {
     }
     return RemoteHistorySnapshot(turns: try JSONDecoder().decode([G0Transport.RunHistoryTurn].self, from: bytes),
                                  fingerprint: fingerprint, fetchedAt: Date())
-  }
-
-  // UTF-8 structural bytes can be scanned backwards without decoding a split
-  // string. Escaped quotes/braces stay content. Only complete turn objects are
-  // decoded; a turn larger than this bounded suffix waits for the full download.
-  static func completeHistorySuffix(_ data: Data) throws -> [G0Transport.RunHistoryTurn] {
-    let bytes = Array(data)
-    guard let last = bytes.lastIndex(where: { ![9, 10, 13, 32].contains($0) }), bytes[last] == 93 else { return [] }
-    var depth = 0
-    var quoted = false
-    var end: Int?
-    var turns: [G0Transport.RunHistoryTurn] = []
-    for i in (0..<last).reversed() {
-      let byte = bytes[i]
-      if byte == 34 {
-        var slash = i - 1
-        while slash >= 0 && bytes[slash] == 92 { slash -= 1 }
-        if (i - slash - 1).isMultiple(of: 2) { quoted.toggle() }
-      }
-      if quoted { continue }
-      if byte == 125 {
-        if depth == 0 { end = i + 1 }
-        depth += 1
-      } else if byte == 123 {
-        depth -= 1
-        if depth == 0, let end {
-          turns.append(try JSONDecoder().decode(G0Transport.RunHistoryTurn.self, from: Data(bytes[i..<end])))
-          if turns.count == 2 { break }
-        }
-      }
-    }
-    return turns.reversed()
   }
 
   // The assistant's real streamed output content for one run, strictly after

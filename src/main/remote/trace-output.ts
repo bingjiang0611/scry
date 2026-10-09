@@ -36,6 +36,41 @@ export function traceEventToOutputChunk(ev: TraceEvent): RemoteOutputChunk | nul
   return null
 }
 
+// Recent partial evidence only: cap projection work before merging token deltas.
+// This does not hydrate external tool content or invent a tool result.
+export function previewTraceItems(items: readonly TraceEvent[]): { items: (RemoteOutputChunk & { truncated: boolean })[]; truncated: boolean } {
+  let truncated = items.length > 256
+  const out: (RemoteOutputChunk & { truncated: boolean })[] = []
+  const tail = (text: string): { text: string; truncated: boolean } => {
+    if (text.length <= 2_048) return { text, truncated: false }
+    let start = text.length - 2_048
+    const code = text.charCodeAt(start)
+    if (code >= 0xdc00 && code <= 0xdfff) start++
+    return { text: text.slice(start), truncated: true }
+  }
+  visitTraceChunks(items.slice(-256), (chunk, event) => {
+    const bounded = tail(chunk.text)
+    const content = chunk.kind === 'tool_result' ? event.outputContent :
+      chunk.kind === 'output' || chunk.kind === 'reasoning' ? event.modelContent : undefined
+    bounded.truncated ||= content?.storage === 'truncated' || content?.storage === 'omitted' || content?.sourceCompleteness === 'partial' || content?.contentRef !== undefined
+    const previous = out[out.length - 1]
+    if (previous && previous.kind === chunk.kind && (chunk.kind === 'output' || chunk.kind === 'reasoning')) {
+      const merged = tail(previous.text + bounded.text)
+      previous.text = merged.text
+      previous.truncated ||= bounded.truncated || merged.truncated
+      truncated ||= previous.truncated
+    } else {
+      out.push({ kind: chunk.kind, ...bounded })
+      truncated ||= bounded.truncated
+      if (out.length > 2) {
+        out.shift()
+        truncated = true
+      }
+    }
+  })
+  return { items: out, truncated }
+}
+
 // Flatten one turn's trace events into the ordered content chunks the phone
 // renders. Applies the SAME result-text fallback the live binding uses: some
 // Providers only deliver the final answer on the terminal result event (never as
@@ -55,18 +90,22 @@ export function flattenTraceItems(items: readonly TraceEvent[]): RemoteOutputChu
       out.push(chunk)
     }
   }
+  visitTraceChunks(items, append)
+  return out
+}
+
+function visitTraceChunks(items: readonly TraceEvent[], append: (chunk: RemoteOutputChunk, event: TraceEvent) => void): void {
   let sawText = false
   for (const ev of items) {
     const chunk = traceEventToOutputChunk(ev)
     if (chunk) {
       if (chunk.kind === 'output') sawText = true
-      append(chunk)
+      append(chunk, ev)
       continue
     }
     if (ev.kind === 'harness' && ev.stage === 'result' && !ev.isError && !sawText && typeof ev.text === 'string' && ev.text.length > 0) {
       sawText = true
-      append({ kind: 'output', text: ev.text })
+      append({ kind: 'output', text: ev.text }, ev)
     }
   }
-  return out
 }

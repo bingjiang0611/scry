@@ -143,34 +143,20 @@ enum RemoteSelfTest {
         check("completeOrderedDownload", snapshot.turns == turns)
         let order = await fixture.completed
         check("outOfOrderPages", order == [0, 131072, 65536])
-        let recent = [G0Transport.RunHistoryTurn(userText: "中🙂 { } [ ] \\\"", items: [
-          .init(kind: "output", text: "quoted \\\" } \\\\ tail🙂")]),
-          G0Transport.RunHistoryTurn(userText: "latest", items: [.init(kind: "output", text: "answer")])]
-        let a = try JSONEncoder().encode(recent[0])
-        let b = try JSONEncoder().encode(recent[1])
-        var suffixFixture = Data("[".utf8); suffixFixture.append(a); suffixFixture.append(Data(",".utf8)); suffixFixture.append(b); suffixFixture.append(Data("]".utf8))
-        var boundariesOK = true
-        for start in 0..<suffixFixture.count {
-          let expected = start <= 1 ? recent : start <= a.count + 2 ? [recent[1]] : []
-          let decoded = try RemoteRunClient.completeHistorySuffix(Data(suffixFixture.dropFirst(start)))
-          if decoded != expected { boundariesOK = false; break }
-        }
-        check("suffixQuotesUnicodeEveryBoundary", boundariesOK)
-        check("suffixLargeIncompleteTurnNotInvented", try RemoteRunClient.completeHistorySuffix(Data(bytes.suffix(128 * 1024))).isEmpty)
+        let previewJSON = Data("{\"status\":\"available\",\"source\":\"indexed_archive\",\"turns\":[{\"userText\":\"中🙂\",\"userTextTruncated\":true,\"items\":[{\"kind\":\"output\",\"text\":\"answer\",\"truncated\":true}],\"truncated\":true}],\"partial\":true,\"truncated\":true,\"bytes\":256}".utf8)
+        let preview = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: previewJSON)
+        check("structuredPreviewIsPartial", preview.available && preview.partial == true && preview.turns.count == 1)
+        check("structuredPreviewRetainsUnicode", preview.turns[0].userText == "中🙂" && preview.turns[0].items[0].truncated)
         let older = [G0Transport.RunHistoryTurn(userText: "older", items: [.init(kind: "output", text: String(repeating: "o", count: 800_000))])]
+        let recent = [G0Transport.RunHistoryTurn(userText: "latest", items: [.init(kind: "output", text: "answer")])]
         let tailBytes = try JSONEncoder().encode(older + recent)
         let tailFixture = HistoryPages(bytes: tailBytes)
-        let preview = HistoryPreviewReceipt()
         let full = try await RemoteRunClient.downloadHistory(cached: nil, fetch: { cursor, hash in
           try await tailFixture.page(cursor, hash: hash)
-        }, firstScreen: { visible in
-          await preview.record(visible)
-          await preview.recordPageCount(tailFixture.completed.count)
         })
-        check("latestBeforeFullVerification", await preview.turns == recent && full.turns == older + recent)
-        check("firstScreenAfterThreePages", await preview.pageCount == 3)
+        check("fullVerificationRemainsCanonical", full.turns == older + recent)
         let tailOrder = await tailFixture.completed
-        check("tailPagesNotDownloadedTwice", Set(tailOrder).count == tailOrder.count)
+        check("fullPagesNotDownloadedTwice", Set(tailOrder).count == tailOrder.count)
         let unchanged = HistoryPages(bytes: bytes)
         let same = try await RemoteRunClient.downloadHistory(cached: snapshot, fetch: { cursor, hash in
           try await unchanged.page(cursor, hash: hash)
@@ -201,6 +187,9 @@ enum RemoteSelfTest {
         let cache = RemoteHistoryCache(directory: root, byteLimit: 1_000_000, entryLimit: 2)
         let epoch = await cache.epoch
         check("save", try await cache.write(snapshot, key: key, epoch: epoch))
+        let cachedPreview = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: Data("{\"status\":\"available\",\"source\":\"indexed_archive\",\"turns\":[],\"partial\":true,\"truncated\":false,\"bytes\":32}".utf8))
+        check("previewMirrorSave", try await cache.writePreview(cachedPreview, key: key, epoch: epoch))
+        check("previewMirrorRead", try await cache.readPreview(key) == cachedPreview)
         let restarted = RemoteHistoryCache(directory: root, byteLimit: 1_000_000, entryLimit: 2)
         let readStarted = Date()
         let saved = try await restarted.read(key)
@@ -236,13 +225,6 @@ enum RemoteSelfTest {
       print("HISTORYTEST DONE failures=\(failures)")
       exit(failures == 0 ? 0 : 1)
     }
-  }
-
-  private actor HistoryPreviewReceipt {
-    var turns: [G0Transport.RunHistoryTurn] = []
-    var pageCount = 0
-    func record(_ value: [G0Transport.RunHistoryTurn]) { turns = value }
-    func recordPageCount(_ value: Int) { pageCount = value }
   }
 
   private actor HistoryPages {
@@ -352,6 +334,10 @@ enum RemoteSelfTest {
   // read host session metadata and one authentic archived conversation.
   static func runSessionReadProbeIfRequested() {
     guard ProcessInfo.processInfo.arguments.contains("-sessionReadProbe") else { return }
+    func argumentValue(_ name: String) -> String? {
+      guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(name + "=") }) else { return nil }
+      return String(argument.dropFirst(name.count + 1))
+    }
     Task {
       guard let connection = RemoteConnectionStore().load() else {
         print("SESSIONPROBE FAIL reason=no-persisted-connection")
@@ -360,17 +346,24 @@ enum RemoteSelfTest {
       let client = RemoteRunClient(connection: connection)
       do {
         let sessions = try await client.sessions()
-        print("SESSIONPROBE catalog PASS count=\(sessions.count)")
-        guard let session = sessions.first(where: { $0.externalSessionId != nil }),
-              let externalSessionId = session.externalSessionId else {
-          print("SESSIONPROBE DONE failures=0 reason=no-readable-session")
+        guard let provider = argumentValue("-sessionReadProbeProvider"), let cwd = argumentValue("-sessionReadProbeCwd"),
+              let external = argumentValue("-sessionReadProbeSession"),
+              let session = sessions.first(where: { $0.providerId == provider && $0.cwd == cwd && $0.externalSessionId == external }) else {
+          print("SESSIONPROBE DONE failures=0 reason=explicit-target-not-in-authenticated-catalog")
           exit(0)
         }
-        let history = try await client.history(providerId: session.providerId, cwd: session.cwd, externalSessionId: externalSessionId)
-        let bytes = history.reduce(0) { total, turn in
-          total + turn.userText.utf8.count + turn.items.reduce(0) { $0 + $1.text.utf8.count }
-        }
-        print("SESSIONPROBE history PASS session=\(externalSessionId) provider=\(session.providerId) turns=\(history.count) textBytes=\(bytes)")
+        let previewStarted = Date()
+        let preview = try await client.historyPreview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
+        let previewMs = Date().timeIntervalSince(previewStarted) * 1000
+        let fullStarted = Date()
+        var firstPageMs: Double?
+        let snapshot = try await client.historySnapshot(providerId: session.providerId, cwd: session.cwd,
+          externalSessionId: external, progress: { _, _ in
+            if firstPageMs == nil { firstPageMs = Date().timeIntervalSince(fullStarted) * 1000 }
+          })
+        let verifyMs = Date().timeIntervalSince(fullStarted) * 1000
+        let bytes = (try? JSONEncoder().encode(snapshot.turns).count) ?? 0
+        print("SESSIONPROBE target provider=\(provider) cwd=\(cwd) session=\(external) previewMs=\(String(format: "%.1f", previewMs)) previewBytes=\(preview.bytes ?? 0) firstFullPageMs=\(String(format: "%.1f", firstPageMs ?? verifyMs)) fullVerificationMs=\(String(format: "%.1f", verifyMs)) fullBytes=\(bytes) turns=\(snapshot.turns.count) status=\(preview.status)")
         print("SESSIONPROBE DONE failures=0")
         exit(0)
       } catch {

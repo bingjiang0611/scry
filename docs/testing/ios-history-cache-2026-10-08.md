@@ -101,3 +101,32 @@ WDA 本轮启动成功。无 mock 参数普通启动、进入已有 DEBUG 本地
 - 主机目录标记多条会话运行中；未重启/更新 Mac App，也未停止 Agent。已恢复 iPhone 普通首页，本次 WDA、端口转发、录像进程全部退出；设备进程清单无 WDA Runner，仅保留正常 Scry App。
 
 本轮忽略目录 `.local/ios-firstscreen-2026-10-08/` 保存源码/应用 hashes、构建/测试、变异失败、最终源代码合成截图。设计反馈更新已登记的 `D-20261008-scry-ios-continuity` 来源，索引 build 与“首屏” search 可命中；全库 check 因其他仓库既有 `P-PI-MODEL-SELECTOR` 路径缺失退出 1，未擅自修改该记录。
+
+## 受限 SAFE LOCAL CODE lane：structured historyPreview（未部署）
+
+本轮仅修改源码和隔离 fixture，未重启/安装 Mac App、未调用真实 Provider/API、未写真实 userData/DB/transcript，也未覆盖 `.local/ios-firstscreen-2026-10-08` 或 `.local/ios-history-cache-2026-10-08`。新验证日志写入 `/tmp/scry-ios-preview-next/`。
+
+- 主机新增 `historyPreview`：沿用已认证 peer certificate、workspace/cwd 与现有 remote controller/gateway 路径；`status: unavailable` 与真实空历史分离。活跃内存 run 优先；否则仅调用 `readTraceArchivePageAsync({ limit: 2 })`，不调用完整 transcript/history。Claude 无快速 archive 证据明确 unavailable。
+- preview 最多两轮、每轮两个最近 item、每项 UTF-8 安全短摘录，gateway 对 JSON 保留约 16 KiB 上限，并保留 `source`、`partial`、`truncated`。`readMode` 区分 indexed、index rebuild、legacy monolithic，未把 legacy 全量读取伪装成常数时间。
+- Swift transport/RunClient 先取一次 typed preview，再执行既有完整分页与 SHA256 校验；已删除 byte-suffix JSON parser。iOS 在同一 `RemoteHistoryCache` actor 内以 `preview-` mirror 分开保存，沿用保护、备份排除、host/anchor/grant/provider/cwd/session key、entry/byte limit、clear epoch；完整缓存合同不变。
+- 目录 preload 只读最多两个已有 preview mirror，不发起冷网络预取；前台 request generation、connection、clear epoch 仍拒绝陈旧展示/写入。preview 仍是 partial，不是完整 digest receipt。
+
+### 本轮验证与缺口
+
+- `npm run typecheck`：通过。
+- `npx vitest run src/main/remote/remote-gateway.test.ts src/main/remote/inner-mtls-host.test.ts src/main/transcript-archive.test.ts`：59 tests passed；覆盖 authorized/denied preview、malformed query、unavailable 与空历史区分、Unicode/16 KiB bound、archive page 既有 index 行为。
+- `cd experiments/remote-g0/swift && swift build`：通过。
+- 首次 iOS Debug Simulator build 因 self-test 局部变量重名失败；修复后 `xcodebuild ... -derivedDataPath /tmp/scry-ios-preview-next/DerivedData CODE_SIGNING_ALLOWED=NO build` 通过。仅构建，未安装/启动 App。
+- 上述为第一版 WIP 的检查，不代表以下修复版或真机验收。
+
+## 2026-10-09：首屏预览回归修复（源码，未部署）
+
+- JSON 转义字节预算不再丢弃整个真实轮次；保留来源截断标记，`bytes` 等于实际编码长度。活动/归档正文投影只遍历最近 256 个事件，每字段至多 2,048 UTF-16 单元，再交由 Gateway 限制为两轮、两条目与 16 KiB。不展开外置工具结果，也不假造结果。
+- 归档支持 Claude，并分别报告 `indexed_archive`、`index_rebuild`、`monolithic`；后两种仍可能读完整旧归档，不能承诺冷启动常数耗时或毫秒级。
+- 手机先读小镜像、再读完整磁盘快照；镜像实际进入 partial 正文、更新渲染 revision。失败/unavailable 不覆盖好镜像，跨会话不复用；预览传输及镜像含封装上限均为 17 KiB，完整历史仍必须通过 SHA256。
+- 删除完整下载的额外尾页阶段与重复预览绘制；不显示首次同步成功提示。保护文件、备份排除、授权命名空间、clear epoch 与本地运行增量语义保留。
+- Gateway 控制字符回归先失败、修复后通过；四个受影响 Node 测试文件共 65 PASS。`npm run typecheck`、`npm run build` 通过。
+- Simulator 历史检查首次新增 unavailable 场景失败：Swift 原合成解码器错误要求 unavailable 也含 turns。修复为按 status 解码后 42 PASS / 0 FAIL，保护属性 SKIP。新增镜像失败保留、重启读取、跨会话隔离、unavailable 不擦除、clear 后晚写拒绝五项。
+- 最终 17 KiB 传输限制版本 Debug Simulator 编译通过；最后安装尝试因该 Simulator 已 Shutdown 返回 code 405，未启动这份最终二进制。此前一次安装超时后以安装文件 SHA256 与构建文件一致核验，不以超时假装未安装。
+- `-selfTest` launch 100 秒超时、无结果；未算通过。全量 `npm test` 240 秒超时并见 worker IPC channel closed；检查资源与进程后改为两个 worker 的全量 unit 仍在 240 秒被中止，期间 recorder/Git diff fixture 有断言失败及 5 秒超时；shell 阶段未执行。保留首轮日志，不改无关测试、断言或超时，未声称全量通过。
+- 未更新桌面/手机、未重启 Scry、未发送 Provider 消息。真实首屏、完整校验、暖重开及进程重启耗时仍未验收；手机已有 0.1.3 (4) 不包含这套新协议。下一步需通过部署 gate、安装匹配桌面/手机版本，再进行同一 Pi 会话的认证只读验收。

@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery } from './host-controller'
+import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
 import { RunOutputWorkerStore } from './run-output-worker'
@@ -65,6 +65,7 @@ export interface HostControllerFactoryDependencies {
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   listSessions?(): RemoteSessionRef[]
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
+  readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
 }
 
 // The file stores require a pre-existing private (0700) directory; create it
@@ -150,7 +151,8 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
     ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
-    ...(deps.readHistory ? { readHistory: deps.readHistory } : {})
+    ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
+    ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {})
   }
 
   let controller: HostController

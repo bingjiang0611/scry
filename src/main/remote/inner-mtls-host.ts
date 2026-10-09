@@ -165,6 +165,10 @@ export class InnerMtlsHost {
           ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
         }) }
       }
+      if (request.op === 'historyPreview') {
+        if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
+        return { historyPreview: await controller.readHistoryPreview(fingerprint, { providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
+      }
       if (request.op === 'history') {
         // Legacy bounded response retained for older clients.
         if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }

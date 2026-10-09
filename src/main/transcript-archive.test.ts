@@ -444,6 +444,7 @@ describe('transcript archive mirror', () => {
       totalTurns: 5,
       hasOlder: true,
       turnFilesRead: 5,
+      readMode: 'index_rebuild',
       archive: { turns: [{ runId: 'run-3' }, { runId: 'run-4' }] }
     })
     expect(existsSync(indexPath)).toBe(true)
@@ -455,6 +456,7 @@ describe('transcript archive mirror', () => {
       totalTurns: 5,
       hasOlder: true,
       turnFilesRead: 2,
+      readMode: 'indexed',
       archive: { turns: [{ runId: 'run-1' }, { runId: 'run-2' }] }
     })
 
