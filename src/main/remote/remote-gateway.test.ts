@@ -336,6 +336,56 @@ describe('RemoteGateway', () => {
     expect(gw.listSessions(CERT)).toEqual([])
   })
 
+  it('serves a bounded structured preview without turning unavailable into empty history', async () => {
+    const { authority } = await grantedAuthority()
+    const readPreview = vi.fn(async ({ providerId }: { providerId: string }) => (providerId === 'claude'
+      ? { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
+      : { status: 'available' as const, source: 'indexed_archive' as const, partial: true as const, truncated: false, bytes: 0, turns: [{
+      userText: '问🙂'.repeat(2_000), userTextTruncated: false, truncated: false,
+      items: [{ kind: 'output' as const, text: '答🙂'.repeat(2_000), truncated: false }, { kind: 'tool' as const, text: 'second', truncated: false }, { kind: 'output' as const, text: 'dropped', truncated: false }]
+    }] }))
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const gw = new RemoteGateway({ authority, ledger, historyPreview: { read: readPreview } })
+    const preview = await gw.readHistoryPreview(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'ext1' })
+    expect(preview.status).toBe('available')
+    if (preview.status === 'available') {
+      expect(preview.turns).toHaveLength(1)
+      expect(preview.turns[0].items).toHaveLength(2)
+      expect(preview.truncated).toBe(true)
+      expect(Buffer.byteLength(JSON.stringify(preview), 'utf8')).toBeLessThanOrEqual(16 * 1024)
+      expect(preview.turns[0].userText.endsWith('🙂')).toBe(true)
+    }
+    await expect(gw.readHistoryPreview(CERT, { providerId: 'claude', cwd: '/w', externalSessionId: 'missing' })).resolves.toEqual({ status: 'unavailable', reason: 'no_fast_evidence' })
+    expect(readPreview).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps genuine escaped preview content and reports exact encoded bytes', async () => {
+    const { authority } = await grantedAuthority()
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const gw = new RemoteGateway({ authority, ledger, historyPreview: { read: async () => ({
+      status: 'available', source: 'indexed_archive', partial: true, truncated: false, bytes: 0,
+      turns: [0, 1].map(() => ({ userText: '\u0000'.repeat(1_024), userTextTruncated: true, truncated: false,
+        items: [0, 1, 2].map(() => ({ kind: 'output' as const, text: '\u0000'.repeat(1_024), truncated: false })) }))
+    }) } })
+    const preview = await gw.readHistoryPreview(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'escaped' })
+    expect(preview.status).toBe('available')
+    if (preview.status !== 'available') throw new Error('preview unavailable')
+    expect(preview.turns).toHaveLength(2)
+    expect(preview.turns.every((turn) => turn.userText.length > 0 && turn.items.length === 2 && turn.truncated && turn.userTextTruncated)).toBe(true)
+    expect(preview.bytes).toBe(Buffer.byteLength(JSON.stringify(preview), 'utf8'))
+    expect(preview.bytes).toBeLessThanOrEqual(16 * 1_024)
+    expect(preview.truncated).toBe(true)
+  })
+
+  it('refuses preview source access for an unauthorized device', async () => {
+    const { authority } = await grantedAuthority()
+    const readPreview = vi.fn(async () => ({ status: 'available' as const, source: 'indexed_archive' as const, partial: true as const, truncated: false, bytes: 0, turns: [] }))
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const gw = new RemoteGateway({ authority, ledger, historyPreview: { read: readPreview } })
+    await expect(gw.readHistoryPreview('f'.repeat(64), { providerId: 'pi', cwd: '/w', externalSessionId: 'x' })).rejects.toThrow('device_not_authorized')
+    expect(readPreview).not.toHaveBeenCalled()
+  })
+
   it('reads one session\'s content for an authorized device, bounded and kind-filtered', async () => {
     const { authority } = await grantedAuthority()
     const read = vi.fn(async () => [

@@ -183,6 +183,27 @@ export interface RemoteHistoryQuery {
   externalSessionId: string
 }
 
+export interface RemoteHistoryPreviewItem {
+  kind: 'output' | 'reasoning' | 'tool' | 'tool_result'
+  text: string
+  truncated: boolean
+}
+
+export interface RemoteHistoryPreviewTurn {
+  userText: string
+  userTextTruncated: boolean
+  items: RemoteHistoryPreviewItem[]
+  truncated: boolean
+}
+
+export type RemoteHistoryPreview =
+  | { status: 'available'; source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic'; turns: RemoteHistoryPreviewTurn[]; partial: true; truncated: boolean; bytes: number }
+  | { status: 'unavailable'; reason: 'no_fast_evidence' | 'session_not_found' | 'provider_unsupported' }
+
+export interface RemoteHistoryPreviewSource {
+  read(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
+}
+
 export interface RemoteHistoryPageQuery extends RemoteHistoryQuery {
   cursor?: number
   limit?: number
@@ -224,6 +245,8 @@ export interface RemoteGatewayDependencies {
   sessions?: RemoteSessionSource
   // Absent => opening any session yields an empty (honest) transcript.
   history?: RemoteHistorySource
+  // Absent => a first-screen preview is explicitly unavailable; it is not an empty transcript.
+  historyPreview?: RemoteHistoryPreviewSource
   // Absent => the device sees an empty (honest) output page.
   output?: RemoteOutputReader
 }
@@ -270,6 +293,24 @@ const MAX_HISTORY_TEXT = 20_000
 // deliverable instead of repeatedly failing as one oversized all-or-nothing page.
 const MAX_HISTORY_RESPONSE_BYTES = 6 * 1024 * 1024
 const MAX_HISTORY_PAGE_BYTES = 64 * 1024
+const MAX_HISTORY_PREVIEW_BYTES = 16 * 1024
+const MAX_HISTORY_PREVIEW_TURNS = 2
+const MAX_HISTORY_PREVIEW_ITEMS = 2
+const MAX_HISTORY_PREVIEW_TEXT_BYTES = 1_024
+
+function clipPreviewText(value: string, maxBytes = MAX_HISTORY_PREVIEW_TEXT_BYTES): { text: string; truncated: boolean } {
+  let text = ''
+  let bytes = 0
+  // Budget the encoded string, not raw UTF-8: control characters can expand
+  // sixfold in JSON. Iterate lazily so a giant source is never copied first.
+  for (const char of value) {
+    const charBytes = Buffer.byteLength(JSON.stringify(char), 'utf8') - 2
+    if (bytes + charBytes > maxBytes) return { text, truncated: true }
+    text += char
+    bytes += charBytes
+  }
+  return { text, truncated: false }
+}
 
 export class RemoteGateway {
   #authority: DeviceAuthorizer
@@ -280,6 +321,7 @@ export class RemoteGateway {
   #commands?: RemoteCommandSource
   #sessions?: RemoteSessionSource
   #history?: RemoteHistorySource
+  #historyPreview?: RemoteHistoryPreviewSource
   #output?: RemoteOutputReader
   #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
 
@@ -292,6 +334,7 @@ export class RemoteGateway {
     this.#commands = deps.commands
     this.#sessions = deps.sessions
     this.#history = deps.history
+    this.#historyPreview = deps.historyPreview
     this.#output = deps.output
   }
 
@@ -554,6 +597,45 @@ export class RemoteGateway {
       hasMore: end < sessions.length,
       snapshot
     }
+  }
+
+  // Small structured first-screen evidence. This deliberately does not call the
+  // complete history source: a slow/unsupported provider remains unavailable.
+  async readHistoryPreview(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryPreview> {
+    this.#authorize(peerCertSHA256)
+    if (!query || typeof query.providerId !== 'string' || typeof query.cwd !== 'string' || typeof query.externalSessionId !== 'string') {
+      throw new RemoteGatewayError('invalid_history_preview_query')
+    }
+    const raw = (await this.#historyPreview?.read({
+      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH), externalSessionId: query.externalSessionId.slice(0, 128)
+    })) ?? { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
+    if (raw.status === 'unavailable') return raw
+    const turns: RemoteHistoryPreviewTurn[] = []
+    let truncated = raw.truncated || raw.turns.length > MAX_HISTORY_PREVIEW_TURNS
+    for (const turn of raw.turns.slice(-MAX_HISTORY_PREVIEW_TURNS)) {
+      const prompt = clipPreviewText(typeof turn.userText === 'string' ? turn.userText : '')
+      const items: RemoteHistoryPreviewItem[] = []
+      let turnTruncated = Boolean(turn.truncated || turn.userTextTruncated || prompt.truncated || turn.items.length > MAX_HISTORY_PREVIEW_ITEMS)
+      for (const item of (turn.items ?? []).slice(-MAX_HISTORY_PREVIEW_ITEMS)) {
+        if (!item || !['output', 'reasoning', 'tool', 'tool_result'].includes(item.kind) || typeof item.text !== 'string') continue
+        const clipped = clipPreviewText(item.text)
+        items.push({ kind: item.kind, text: clipped.text, truncated: Boolean(item.truncated || clipped.truncated) })
+        turnTruncated ||= items[items.length - 1].truncated
+      }
+      turns.push({ userText: prompt.text, userTextTruncated: Boolean(turn.userTextTruncated || prompt.truncated), items, truncated: turnTruncated })
+      truncated ||= turnTruncated
+    }
+    const result: RemoteHistoryPreview = { status: 'available', source: raw.source, turns, partial: true, truncated, bytes: 0 }
+    // Six individually JSON-bounded strings plus framing fit within 16 KiB.
+    // Count the bytes field itself; dropping a whole turn would fabricate empty
+    // evidence for a genuine oversized response.
+    let bytes = Buffer.byteLength(JSON.stringify(result), 'utf8')
+    while (result.bytes !== bytes) {
+      result.bytes = bytes
+      bytes = Buffer.byteLength(JSON.stringify(result), 'utf8')
+    }
+    if (bytes > MAX_HISTORY_PREVIEW_BYTES) throw new RemoteGatewayError('history_preview_capacity_exceeded')
+    return result
   }
 
   // The REAL conversation content of one session so the device can OPEN it,

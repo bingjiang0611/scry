@@ -9,7 +9,7 @@ import { once } from 'node:events'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
-import { HostController, type RemoteIntentRouting } from './host-controller'
+import { HostController, type RemoteIntentRouting, type RemoteHistoryPreview } from './host-controller'
 import { createHostController } from './host-controller-factory'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
@@ -48,7 +48,8 @@ async function harness(
   lists?: {
     directories(path?: string): { current?: { path: string; label: string }; directories: { path: string; label: string }[] }
     sessions(): { sessionId: string; providerId: string; cwd: string; label: string; ts: number }[]
-  }
+  },
+  readHistoryPreview?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<RemoteHistoryPreview>
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
@@ -60,6 +61,7 @@ async function harness(
     createOutputStore: (directory) => new RunOutputFileStore(directory),
     ...(listCommands ? { listCommands } : {}),
     ...(readHistory ? { readHistory } : {}),
+    ...(readHistoryPreview ? { readHistoryPreview } : {}),
     ...(lists ? { listDirectories: lists.directories, listSessions: lists.sessions } : {})
   })
   cleanups.push(() => binding.close())
@@ -205,6 +207,19 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       { op: 'commands', providerId: 'codex', cwd: AUTHORIZED })
     expect(reply.commands.commands).toEqual([{ name: 'review', description: 'Review changes' }])
     expect(listCommands).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED })
+  })
+
+  it('serves bounded previews and rejects malformed preview queries before source access', async () => {
+    const readPreview = vi.fn(async () => ({ status: 'available' as const, source: 'indexed_archive' as const, partial: true as const, truncated: true, bytes: 0, turns: [{ userText: 'prompt🙂'.repeat(2_000), userTextTruncated: true, truncated: true, items: [{ kind: 'output' as const, text: 'answer🙂'.repeat(2_000), truncated: true }] }] }))
+    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, readPreview)
+    const device = await pairDevice(identity, controller)
+    const malformed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', providerId: 'codex', cwd: AUTHORIZED })
+    expect(malformed.error).toBe('invalid_request')
+    expect(readPreview).not.toHaveBeenCalled()
+    const allowed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+    expect(allowed.historyPreview.status).toBe('available')
+    expect(Buffer.byteLength(JSON.stringify(allowed.historyPreview), 'utf8')).toBeLessThanOrEqual(16 * 1024)
+    expect(readPreview).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
   })
 
   it('serves snapshot-fenced history pages over the authorized channel', async () => {

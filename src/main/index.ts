@@ -155,7 +155,7 @@ import { createTerminalManager, type TerminalManager } from './terminal-manager'
 import { TerminalRecordingWorkerClient } from './terminal-recording-backend'
 import { TerminalOutputBridge } from './terminal-output'
 import { TraceOutputBridge, type TraceBatchReceipt } from './trace-output'
-import { flattenTraceItems } from './remote/trace-output'
+import { flattenTraceItems, previewTraceItems } from './remote/trace-output'
 import {
   authorizedWorkspaceRequest,
   canonicalExistingDirectory,
@@ -4110,6 +4110,39 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         }
         out.sort((a, b) => b.ts - a.ts)
         return out
+      },
+      // First-screen evidence avoids the complete-history reader. Indexed
+      // archives read only two turns; legacy/index-rebuild paths can still
+      // materialize older data, and their provenance stays explicit.
+      readHistoryPreview: async ({ providerId, cwd, externalSessionId }) => {
+        if (!providerId || !externalSessionId) return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
+        let canonical: string
+        try { canonical = cwd ? resolveRemoteProjectDirectory(cwd) : '' } catch { return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const } }
+        const activeRun = runs.activeStates().find((run) =>
+          run.providerId === providerId && run.cwd === canonical &&
+          (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId))
+        if (activeRun) {
+          const projection = previewTraceItems(activeRun.items)
+          return { status: 'available' as const, source: 'active_memory' as const, turns: [{
+            userText: activeRun.userText,
+            userTextTruncated: false,
+            items: projection.items,
+            truncated: projection.truncated
+          }], partial: true as const, truncated: projection.truncated, bytes: 0 }
+        }
+        if (!canonical) return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
+        try {
+          const page = await readTraceArchivePageAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir: app.getPath('userData') }, { limit: 2 })
+          if (!page.archive || page.archive.turns.length === 0) return { status: 'unavailable' as const, reason: 'session_not_found' as const }
+          const source = page.readMode === 'indexed' ? 'indexed_archive' as const : page.readMode
+          const turns = page.archive.turns.map((turn) => {
+            const projection = previewTraceItems(turn.items)
+            return { userText: turn.userText, userTextTruncated: false, items: projection.items, truncated: projection.truncated }
+          })
+          return { status: 'available' as const, source, turns, partial: true as const, truncated: page.hasOlder || turns.some((turn) => turn.truncated), bytes: 0 }
+        } catch {
+          return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
+        }
       },
       // Read one session's REAL conversation content so the phone can OPEN it,
       // not just list it. Side-effect-free (no dock badge / cwd / baseline like

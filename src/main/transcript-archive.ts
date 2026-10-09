@@ -1172,6 +1172,8 @@ export interface TraceArchivePage {
   hasOlder: boolean
   /** Canonical turn bodies parsed for this request; excludes the tiny index file. */
   turnFilesRead: number
+  /** Honest source cost: legacy monolithic archives are not constant-time. */
+  readMode: 'monolithic' | 'indexed' | 'index_rebuild'
 }
 
 export interface TraceArchivePageRequest {
@@ -1221,7 +1223,8 @@ export async function readTraceArchivePageAsync(
       offset,
       totalTurns,
       hasOlder: offset > 0,
-      turnFilesRead: totalTurns
+      turnFilesRead: totalTurns,
+      readMode: 'monolithic'
     }
   }
 
@@ -1251,7 +1254,8 @@ export async function readTraceArchivePageAsync(
       offset,
       totalTurns,
       hasOlder: offset > 0,
-      turnFilesRead: inspected.valid.length
+      turnFilesRead: inspected.valid.length,
+      readMode: 'index_rebuild'
     }
   }
 
@@ -1277,7 +1281,8 @@ export async function readTraceArchivePageAsync(
       offset: rebuiltOffset,
       totalTurns: rebuiltTotal,
       hasOlder: rebuiltOffset > 0,
-      turnFilesRead: rebuilt.valid.length
+      turnFilesRead: rebuilt.valid.length,
+      readMode: 'index_rebuild'
     }
   }
   return {
@@ -1285,7 +1290,8 @@ export async function readTraceArchivePageAsync(
     offset,
     totalTurns,
     hasOlder: offset > 0,
-    turnFilesRead: selected.length
+    turnFilesRead: selected.length,
+    readMode: 'indexed'
   }
 }
 

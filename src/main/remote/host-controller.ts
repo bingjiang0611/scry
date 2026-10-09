@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
-export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery } from './remote-gateway'
+export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -86,6 +86,8 @@ export interface HostControllerDependencies {
   listSessions?(): RemoteSessionRef[]
   // Read one session's real conversation content. Absent => empty transcript.
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
+  // Small recent evidence only; unlike full history, unavailable is explicit.
+  readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
@@ -190,7 +192,8 @@ export class HostController {
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
       ...(deps.listCommands ? { commands: { list: deps.listCommands } as RemoteCommandSource } : {}),
       ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {}),
-      ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {})
+      ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {}),
+      ...(deps.readHistoryPreview ? { historyPreview: { read: deps.readHistoryPreview } as RemoteHistoryPreviewSource } : {})
     })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
@@ -296,6 +299,10 @@ export class HostController {
 
   // Device-facing: one session's real conversation content, authorized by the
   // same verified peer certificate. Async (reads the trace archive/transcript).
+  readHistoryPreview(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryPreview> {
+    return this.#gateway.readHistoryPreview(peerCertSHA256, query)
+  }
+
   readHistory(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]> {
     return this.#gateway.readHistory(peerCertSHA256, query)
   }

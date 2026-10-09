@@ -162,6 +162,13 @@ final class RemoteRunStore: ObservableObject {
   }
   @Published private(set) var catalog: CatalogState = .idle
 
+  enum HistoryPreviewState: Equatable {
+    case idle
+    case loading
+    case available(G0Transport.RunHistoryPreview)
+    case unavailable(String)
+  }
+
   // The REAL conversation content of the opened session (read-only replay).
   enum HistoryState: Equatable {
     case idle
@@ -173,6 +180,7 @@ final class RemoteRunStore: ObservableObject {
     case failed(String)
   }
   @Published private(set) var history: HistoryState = .idle
+  @Published private(set) var historyPreview: HistoryPreviewState = .idle
   @Published private(set) var historyRevision = 0
   @Published private(set) var historySyncing = false
   @Published private(set) var historyFromCache = false
@@ -218,6 +226,13 @@ final class RemoteRunStore: ObservableObject {
                          drained: terminalDrainCompleted, interrupted: observationInterrupted)
   }
   var isBusy: Bool { hasUnresolvedRun }
+  var historyPreviewTurns: [G0Transport.RunHistoryTurn] {
+    guard case let .available(preview) = historyPreview else { return [] }
+    return preview.turns.map { turn in
+      G0Transport.RunHistoryTurn(userText: turn.userText,
+        items: turn.items.map { G0Transport.RunHistoryChunk(kind: $0.kind, text: $0.text) })
+    }
+  }
 
   private let connections: RemoteConnectionStore
   private var pollTask: Task<Void, Never>?
@@ -239,9 +254,10 @@ final class RemoteRunStore: ObservableObject {
   private let historyDisk: RemoteHistoryCache
   private var prefetchTask: Task<Void, Never>?
   private var prefetchGeneration = 0
-  private var warmedScreens: [String: [G0Transport.RunHistoryTurn]] = [:]
+  private var warmedScreens: [String: G0Transport.RunHistoryPreview] = [:]
   private var cachedHistory: (key: String, snapshot: RemoteHistorySnapshot, persisted: Bool)?
   private var historyRequestGeneration = 0
+  private var historyPreviewKey: String?
   private var pendingSubmission: PendingSubmission?
   private var activeRouting: RemoteRunClient.Routing?
   private var seenOutputSequences = Set<Int>()
@@ -478,10 +494,10 @@ final class RemoteRunStore: ObservableObject {
               self.connections.load() == connection, let external = session.externalSessionId else { break }
         let key = RemoteHistoryCache.key(connection: connection, providerId: session.providerId, cwd: session.cwd, sessionId: external)
         do {
-          let cached = try await disk.read(key)
+          let cached = try await disk.readPreview(key)
           guard !Task.isCancelled, self.prefetchGeneration == warmingGeneration,
                 self.dataGeneration == requestDataGeneration, self.connections.load() == connection else { break }
-          if let cached { self.warmScreen(cached.turns, key: key) }
+          if let cached { self.warmScreen(cached, key: key) }
         } catch {
           // Prefetch is an optional read, never a connectivity/business receipt.
           // Opening the session owns visible errors and its authoritative read.
@@ -492,11 +508,10 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  private func warmScreen(_ turns: [G0Transport.RunHistoryTurn], key: String) {
-    let recent = Array(turns.suffix(2))
-    // Bound retained first-screen text as well as the number of conversations.
-    guard recent.reduce(0, { $0 + $1.userText.utf8.count + $1.items.reduce(0) { $0 + $1.text.utf8.count } }) <= 128 * 1024 else { return }
-    warmedScreens[key] = recent
+  private func warmScreen(_ preview: G0Transport.RunHistoryPreview, key: String) {
+    guard preview.available, preview.turns.count <= 2,
+          (try? JSONEncoder().encode(preview).count) ?? Int.max <= 16 * 1024 else { return }
+    warmedScreens[key] = preview
   }
 
   // Show protected local data before opening the relay. Only an authenticated
@@ -531,9 +546,13 @@ final class RemoteRunStore: ObservableObject {
     let requestGeneration = generation
     historyFromCache = false; historyFetchedAt = nil; historyProgress = nil
     historyRefreshError = nil; historyStorageNotice = nil
+    if historyPreviewKey != key { historyPreview = .idle; historyPreviewKey = nil }
+    if case .available = historyPreview {} else { historyPreview = .loading }
     if let memory { showHistory(memory, key: key, cached: true, persisted: cachedHistory?.persisted == true) }
     else if let screen = warmedScreens[key], !hasLocalTurns {
-      history = .partial(screen); historyRevision += 1; historyFromCache = true
+      showPreview(screen, key: key, cached: true)
+    } else if case .available = historyPreview, !hasLocalTurns {
+      history = .partial(historyPreviewTurns)
     } else { history = .loading }
     historySyncing = true
     historyTask = Task { [weak self] in
@@ -550,6 +569,11 @@ final class RemoteRunStore: ObservableObject {
       let diskEpoch = await disk.epoch
       var cached = memory
       var persisted = self.cachedHistory?.key == key && self.cachedHistory?.persisted == true
+      var cachedPreview: G0Transport.RunHistoryPreview?
+      do { cachedPreview = try await disk.readPreview(key) }
+      catch { if current() { self.historyStorageNotice = "本地首屏镜像不可用，将从主机重新读取" } }
+      guard current() else { return }
+      if let cachedPreview, cached == nil, !hasLocalTurns { self.showPreview(cachedPreview, key: key, cached: true) }
       if cached == nil {
         do { cached = try await disk.read(key); persisted = cached != nil }
         catch { if current() { self.historyStorageNotice = "本地缓存不可用，将从主机重新读取" } }
@@ -561,6 +585,34 @@ final class RemoteRunStore: ObservableObject {
         if !hasLocalTurns, memory != nil, !force,
            (0..<30).contains(Date().timeIntervalSince(cached.fetchedAt)) { return }
       }
+      // The preview request is intentionally separate from the complete snapshot;
+      // it may succeed for indexed archives while full history is still pending.
+      do {
+        #if DEBUG
+        if self.historyTestOffline {
+          throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
+        }
+        #endif
+        let preview = try await client.historyPreview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+        guard current() else { return }
+        if preview.available {
+          if cached == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
+          self.reachable = true
+          do {
+            let saved = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
+            if current(), !saved { self.historyStorageNotice = "首屏镜像未保存到手机缓存" }
+          } catch {
+            if current() { self.historyStorageNotice = "首屏镜像保存失败：\(Self.describe(error))" }
+          }
+        } else if case .available = self.historyPreview {} else {
+          self.historyPreview = .unavailable(preview.reason ?? "首屏证据不可用")
+        }
+      } catch {
+        if current(), case .available = self.historyPreview {} else if current() {
+          self.historyPreview = .unavailable(Self.describe(error))
+        }
+      }
+      guard current() else { return }
       if hasLocalTurns {
         if cached == nil { self.history = .baseUnavailable; self.historyRevision += 1 }
         let notice = cached == nil
@@ -576,7 +628,6 @@ final class RemoteRunStore: ObservableObject {
           throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
         }
         #endif
-        let hasCachedSnapshot = cached != nil
         let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
           externalSessionId: externalSessionId, cached: cached, progress: { [weak self] received, total in
             guard let self else { return }
@@ -584,12 +635,6 @@ final class RemoteRunStore: ObservableObject {
               guard self.historyRequestGeneration == request,
                     self.isCurrent(requestGeneration, identity: identity) else { return }
               self.historyProgress = "\(received / 1024) / \(max(1, (total + 1023) / 1024)) KB"
-            }
-          }, firstScreen: { [weak self] turns in
-            guard !hasCachedSnapshot, let self else { return }
-            await MainActor.run {
-              self.applyHistoryPreview(turns, request: request, generation: requestGeneration,
-                                       identity: identity, connection: connection)
             }
           })
         guard current() else { return }
@@ -614,7 +659,10 @@ final class RemoteRunStore: ObservableObject {
         guard current() else { return }
         self.reachable = false
         self.historyRefreshError = Self.describe(error)
-        if cached == nil { self.history = .failed(Self.describe(error)) }
+        if cached == nil, !hasLocalTurns, case .available = self.historyPreview {
+          self.history = .partial(self.historyPreviewTurns)
+        } else if cached == nil, hasLocalTurns { self.history = .baseUnavailable }
+        else if cached == nil { self.history = .failed(Self.describe(error)) }
       }
     }
   }
@@ -628,6 +676,14 @@ final class RemoteRunStore: ObservableObject {
     if turns.isEmpty && historyFromCache { return }
     history = turns.isEmpty ? .loading : .partial(turns)
     historyFromCache = false; historyFetchedAt = nil
+    historyRevision += 1
+  }
+
+  private func showPreview(_ preview: G0Transport.RunHistoryPreview, key: String, cached: Bool) {
+    guard preview.available else { return }
+    historyPreview = .available(preview); historyPreviewKey = key
+    history = .partial(historyPreviewTurns)
+    historyFromCache = cached; historyFetchedAt = nil
     historyRevision += 1
   }
 
@@ -656,7 +712,7 @@ final class RemoteRunStore: ObservableObject {
     historyTask?.cancel()
     historyTask = nil
     cachedHistory = nil
-    history = .idle; historySyncing = false; historyFromCache = false
+    history = .idle; historyPreview = .idle; historyPreviewKey = nil; historySyncing = false; historyFromCache = false
     historyFetchedAt = nil; historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
     try await historyDisk.clear()
   }
@@ -1419,7 +1475,7 @@ final class RemoteRunStore: ObservableObject {
     clearRecoveryCheckpoint()
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
-    catalog = .idle; history = .idle; reachable = nil
+    catalog = .idle; history = .idle; historyPreview = .idle; historyPreviewKey = nil; reachable = nil
     catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil
     historyRequestGeneration += 1
     historySyncing = false; historyFromCache = false; historyFetchedAt = nil
@@ -1586,6 +1642,35 @@ final class RemoteRunStore: ObservableObject {
     store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
     await store.historyTask?.value
     checks.append(("store.missingBaseIsNotEmpty", store.history == .baseUnavailable && store.completedTurns(for: identity).count == 1))
+    // Exercise the actual new mirror path, not the retired byte-suffix setter.
+    let preview = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: Data("""
+      {"status":"available","source":"indexed_archive","partial":true,"truncated":true,"bytes":0,
+       "turns":[{"userText":"same prompt","userTextTruncated":false,"truncated":false,"items":[{"kind":"output","text":"first answer","truncated":false}]},
+                {"userText":"same prompt","userTextTruncated":false,"truncated":false,"items":[{"kind":"output","text":"latest answer","truncated":false}]}]}
+      """.utf8))
+    let previewKey = RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "preview-only")
+    _ = try await disk.writePreview(preview, key: previewKey, epoch: await disk.epoch)
+    let mirrorStore = RemoteRunStore(connections: connections, historyDisk: disk)
+    mirrorStore.historyTestOffline = true
+    mirrorStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "preview-only")
+    await mirrorStore.historyTask?.value
+    checks.append(("store.mirrorSurvivesFullFailure", mirrorStore.history == .partial(mirrorStore.historyPreviewTurns) && mirrorStore.historyPreviewTurns.count == 2 && mirrorStore.historyFromCache && mirrorStore.historyRefreshError != nil))
+    let unavailable = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: Data("{\"status\":\"unavailable\",\"reason\":\"no_fast_evidence\"}".utf8))
+    let overwritten = try await disk.writePreview(unavailable, key: previewKey, epoch: await disk.epoch)
+    let preservedPreview = try await disk.readPreview(previewKey)
+    checks.append(("store.unavailableCannotEraseMirror", !overwritten && preservedPreview == preview))
+    let reopened = RemoteRunStore(connections: connections, historyDisk: disk)
+    reopened.historyTestOffline = true
+    reopened.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "preview-only")
+    await reopened.historyTask?.value
+    checks.append(("store.restartReadsSmallMirror", reopened.historyPreviewTurns == mirrorStore.historyPreviewTurns && reopened.historyFromCache))
+    reopened.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "different-session", force: true)
+    await reopened.historyTask?.value
+    checks.append(("store.mirrorDoesNotCrossSessions", reopened.historyPreviewTurns.isEmpty))
+    let oldEpoch = await disk.epoch
+    try await mirrorStore.clearHistoryCache()
+    let resurrected = try await disk.writePreview(preview, key: previewKey, epoch: oldEpoch)
+    checks.append(("store.clearRejectsLateMirror", !resurrected && mirrorStore.historyPreviewTurns.isEmpty))
     let pendingWarm = Task<Void, Never> {}
     store.prefetchTask = pendingWarm
     _ = store.resetRun()

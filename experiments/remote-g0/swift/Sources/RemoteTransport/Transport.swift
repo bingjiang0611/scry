@@ -329,6 +329,42 @@ public enum G0Transport {
     public let dataBase64: String; public let cursor: Int; public let totalBytes: Int
     public let hasMore: Bool; public let snapshot: String
   }
+  public struct RunHistoryPreviewItem: Sendable, Equatable, Codable {
+    public let kind: String; public let text: String; public let truncated: Bool
+  }
+  public struct RunHistoryPreviewTurn: Sendable, Equatable, Codable {
+    public let userText: String; public let userTextTruncated: Bool
+    public let items: [RunHistoryPreviewItem]; public let truncated: Bool
+  }
+  public struct RunHistoryPreview: Sendable, Equatable, Codable {
+    public let status: String; public let reason: String?; public let source: String?
+    public let turns: [RunHistoryPreviewTurn]; public let partial: Bool?; public let truncated: Bool?; public let bytes: Int?
+    public var available: Bool { status == "available" }
+    private enum CodingKeys: String, CodingKey { case status, reason, source, turns, partial, truncated, bytes }
+    public init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      status = try container.decode(String.self, forKey: .status)
+      reason = try container.decodeIfPresent(String.self, forKey: .reason)
+      source = try container.decodeIfPresent(String.self, forKey: .source)
+      partial = try container.decodeIfPresent(Bool.self, forKey: .partial)
+      truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated)
+      bytes = try container.decodeIfPresent(Int.self, forKey: .bytes)
+      switch status {
+      case "available":
+        turns = try container.decode([RunHistoryPreviewTurn].self, forKey: .turns)
+        guard partial == true, source != nil, bytes != nil, truncated != nil else {
+          throw DecodingError.dataCorruptedError(forKey: .status, in: container, debugDescription: "Incomplete available preview")
+        }
+      case "unavailable":
+        guard reason != nil else {
+          throw DecodingError.dataCorruptedError(forKey: .reason, in: container, debugDescription: "Unavailable preview requires reason")
+        }
+        turns = []
+      default:
+        throw DecodingError.dataCorruptedError(forKey: .status, in: container, debugDescription: "Unknown preview status")
+      }
+    }
+  }
 
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
@@ -349,6 +385,7 @@ public enum G0Transport {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
   }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
+  private struct RunHistoryPreviewRequest: Encodable { let op = "historyPreview"; let providerId: String; let cwd: String; let externalSessionId: String }
   struct RunHistoryPageRequest: Encodable {
     let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
     let cursor: Int; let limit: Int?; let snapshot: String?
@@ -369,6 +406,7 @@ public enum G0Transport {
     let sessions: [RunSessionRef]?
     let sessionsPage: RunSessionPage?
     let history: [RunHistoryTurn]?
+    let historyPreview: RunHistoryPreview?
     let historyPage: RunHistoryPage?
     let output: RunOutputBody?
     let error: String?
@@ -482,6 +520,14 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
     guard let page = response.sessionsPage else { throw ProbeError.unexpectedReply }
     return page
+  }
+
+  // Small first-screen evidence. Unavailable is explicit and is not decoded as an empty transcript.
+  public static func relayRunHistoryPreview(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
+    let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024))
+    guard let preview = response.historyPreview else { throw ProbeError.unexpectedReply }
+    return preview
   }
 
   // The REAL conversation content of one session so the device can OPEN it.
@@ -610,10 +656,10 @@ public enum G0Transport {
   // the host's replacement warm leg may not yet be registered and the relay
   // closes the new socket. Retry only this pre-response transport condition;
   // submit requests retain the same intent id and are idempotent host-side.
-  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
+  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int? = nil) async throws -> Data {
     var lastError: Error = ProbeError.disconnected
     for attempt in 0..<3 {
-      do { return try await exchangeRelayOnce(endpoint: endpoint, mode: mode, identity: identity, request: request) }
+      do { return try await exchangeRelayOnce(endpoint: endpoint, mode: mode, identity: identity, request: request, responseLimit: responseLimit) }
       catch {
         lastError = error
         let description = String(describing: error).lowercased()
@@ -629,7 +675,7 @@ public enum G0Transport {
   // Relay variant of `exchange`. Mirrors the loopback security decisions but
   // dials a public relay and routes by hostId+mode instead of a fixed port, and
   // pins the inner server to the host anchor without leaf-hostname verification.
-  private static func exchangeRelayOnce(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data) async throws -> Data {
+  private static func exchangeRelayOnce(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int?) async throws -> Data {
     guard (1...65535).contains(endpoint.port), request.count < 1_250_000, ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -710,7 +756,7 @@ public enum G0Transport {
           // Pairing replies remain tiny. Run replies may contain a bounded real
           // session history; keep an explicit 8 MiB ceiling instead of the old
           // 64 KiB probe-era cap that rejected legitimate conversations.
-          let maxResponseBytes = mode == "run" ? 8 * 1_024 * 1_024 : 65_536
+          let maxResponseBytes = responseLimit ?? (mode == "run" ? 8 * 1_024 * 1_024 : 65_536)
           try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result, maxResponseBytes: maxResponseBytes))
         }.get()
       } catch {
