@@ -47,7 +47,7 @@ struct PairView: View {
         Button { model.pairing = .scanning } label: {
           Label("扫描配对码", systemImage: "qrcode.viewfinder")
             .font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 48)
-            .foregroundStyle(.white).background(Palette.blue, in: Capsule())
+            .foregroundStyle(Palette.surface).background(Palette.blue, in: Capsule())
         }
         .buttonStyle(.plain)
         Button("粘贴配对码") { showCodeEntry = true }
@@ -59,7 +59,7 @@ struct PairView: View {
       }
       .padding(.horizontal, 20).padding(.bottom, 18)
     }
-    .background(Color(hex: 0xFAFAF9))
+    .background(Palette.surface)
     .fullScreenCover(isPresented: scanning) {
       ZStack(alignment: .topTrailing) {
         QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code) },
@@ -99,10 +99,10 @@ struct PairView: View {
   private var pairMark: some View {
     ZStack(alignment: .bottomTrailing) {
       Image(systemName: Symbol.laptop).font(.system(size: 35, weight: .light)).foregroundStyle(Palette.ink)
-        .frame(width: 88, height: 88).background(.white, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
+        .frame(width: 88, height: 88).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(Palette.line))
         .shadow(color: .black.opacity(0.07), radius: 18, y: 10)
-      Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundStyle(.white)
+      Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundStyle(Palette.surface)
         .frame(width: 40, height: 40).background(Palette.blue, in: Circle()).offset(x: 8, y: 8)
     }
   }

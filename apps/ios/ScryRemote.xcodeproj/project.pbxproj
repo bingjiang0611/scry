@@ -26,9 +26,26 @@
     10000000000000000000001A = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHistoryCache.swift; sourceTree = "<group>"; };
     100000000000000000000019 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
     10000000000000000000000B = { isa = PBXFileReference; explicitFileType = wrapper.application; path = ScryRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
-    200000000000000000000001 = { isa = PBXGroup; children = (200000000000000000000002, 200000000000000000000004); sourceTree = "<group>"; };
+    200000000000000000000001 = { isa = PBXGroup; children = (200000000000000000000002, 200000000000000000000004, 200000000000000000000005); sourceTree = "<group>"; };
+    200000000000000000000005 = { isa = PBXGroup; children = (100000000000000000000021); path = ScryRemoteUITests; sourceTree = "<group>"; };
+    100000000000000000000021 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUITests.swift; sourceTree = "<group>"; };
+    100000000000000000000022 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ScryRemoteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+    300000000000000000000021 = { isa = PBXBuildFile; fileRef = 100000000000000000000021; };
+    400000000000000000000002 = {
+      isa = PBXNativeTarget; buildConfigurationList = 700000000000000000000003;
+      buildPhases = (500000000000000000000004, 500000000000000000000005);
+      buildRules = (); dependencies = (900000000000000000000002); name = ScryRemoteUITests; productName = ScryRemoteUITests;
+      productReference = 100000000000000000000022; productType = "com.apple.product-type.bundle.ui-testing";
+    };
+    500000000000000000000004 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000021); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000005 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+    600000000000000000000005 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.uitests; GENERATE_INFOPLIST_FILE = YES; TEST_TARGET_NAME = ScryRemote; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; }; };
+    600000000000000000000006 = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.uitests; GENERATE_INFOPLIST_FILE = YES; TEST_TARGET_NAME = ScryRemote; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; }; };
+    700000000000000000000003 = { isa = XCConfigurationList; buildConfigurations = (600000000000000000000005, 600000000000000000000006); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+    900000000000000000000001 = { isa = PBXContainerItemProxy; containerPortal = A00000000000000000000001; proxyType = 1; remoteGlobalIDString = 400000000000000000000001; remoteInfo = ScryRemote; };
+    900000000000000000000002 = { isa = PBXTargetDependency; target = 400000000000000000000001; targetProxy = 900000000000000000000001; };
     200000000000000000000002 = { isa = PBXGroup; children = (100000000000000000000001, 100000000000000000000002, 100000000000000000000003, 100000000000000000000004, 100000000000000000000005, 100000000000000000000006, 100000000000000000000007, 100000000000000000000008, 100000000000000000000009, 100000000000000000000010, 100000000000000000000011, 100000000000000000000012, 100000000000000000000013, 10000000000000000000000A, 100000000000000000000014, 100000000000000000000015, 100000000000000000000016, 100000000000000000000017, 100000000000000000000018, 100000000000000000000019, 10000000000000000000001A); path = ScryRemote; sourceTree = "<group>"; };
-    200000000000000000000004 = { isa = PBXGroup; children = (10000000000000000000000B); name = Products; sourceTree = "<group>"; };
+    200000000000000000000004 = { isa = PBXGroup; children = (10000000000000000000000B, 100000000000000000000022); name = Products; sourceTree = "<group>"; };
     300000000000000000000001 = { isa = PBXBuildFile; fileRef = 100000000000000000000001; };
     300000000000000000000002 = { isa = PBXBuildFile; fileRef = 100000000000000000000002; };
     300000000000000000000003 = { isa = PBXBuildFile; fileRef = 100000000000000000000003; };
@@ -88,7 +105,7 @@
       mainGroup = 200000000000000000000001; productRefGroup = 200000000000000000000004;
       packageReferences = (800000000000000000000001);
       projectDirPath = ""; projectRoot = "";
-      targets = (400000000000000000000001);
+      targets = (400000000000000000000001, 400000000000000000000002);
     };
   };
   rootObject = A00000000000000000000001;

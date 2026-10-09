@@ -89,7 +89,7 @@ struct HomeView: View {
     VStack(spacing: 0) {
       EmptyState(title: "还没有连接 Mac", detail: "在 Mac 的 Scry 中打开“连接 iPhone”，然后扫描配对码。", symbol: Symbol.laptop)
       Button { model.route = .pair } label: {
-        Text("连接 Mac").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+        Text("连接 Mac").font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.surface)
           .padding(.horizontal, 22).frame(minHeight: 46)
           .background(Palette.ink, in: Capsule())
       }

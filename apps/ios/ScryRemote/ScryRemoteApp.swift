@@ -44,6 +44,8 @@ struct RootView: View {
         }
       }
     }
+    .foregroundStyle(Palette.ink)
+    .background(Palette.surface.ignoresSafeArea())
     .tint(Palette.blue)
     .safeAreaInset(edge: .top, spacing: 0) {
       if model.signedIn, !run.pendingQuestions.isEmpty, !showQuestion {
@@ -87,14 +89,23 @@ struct RootView: View {
     }
     .onChange(of: model.signedIn) { signedIn in
       showQuestion = signedIn && !run.pendingQuestions.isEmpty
-      if signedIn, run.hasRecoverableRun { model.route = .chat }
+      if signedIn { resumeRecoveredRun() }
     }
     .onAppear {
       #if DEBUG
       model.applyUIPreviewArguments()
       run.applyUIPreviewArguments()
       #endif
-      if model.signedIn, run.hasRecoverableRun { model.route = .chat }
+      resumeRecoveredRun()
     }
+  }
+
+  private func resumeRecoveredRun() {
+    #if DEBUG
+    // A visual fixture is not a recoverable run. Keep the requested route so
+    // transcript/new-task checks do not silently exercise ChatView instead.
+    guard !ProcessInfo.processInfo.arguments.contains("-uiPreview") else { return }
+    #endif
+    if model.signedIn, run.hasRecoverableRun { model.route = .chat }
   }
 }
