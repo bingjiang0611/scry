@@ -59,3 +59,13 @@
 - 验证：274 个 focused unit / render 测试、完整 `npm run test:renderer:ui`（包含 8 个 selection 场景、Credits、preview / IME / 附件既有路径、background）、typecheck、build 与 diff-check 通过。Node 24 / macOS arm64；在当前组合工作区验证，仅提交本任务 renderer / fixture / 文档改动，不混入并行 iOS/remote WIP。
 - 测试调试：首次新 fixture 使用了不存在的 aria/class selector，按实际 Sidebar / ChatView 控件修正；随后旧生产逻辑的草稿丢失被准确复现。修改生产逻辑后的一个 immediate focus 检查未等待 native dispatch，改为已有 frame 条件等待并显式 focus fixture contents，未删 focus 断言、未增加超时。无生产重试或固定 sleep。
 - Acceptance / next use：隔离 Electron 证明文本选择路径；尚未安装/重启、未在用户真实 App 或带附件草稿上重放。输入未发送草稿后切走再返回新建 → 同 workspace 文本保持可编辑，历史 session / 其他 workspace 不串稿，恢复不触发 Provider start。需求确认不等于成品已获用户验收。
+
+## D-20261009-first-click-live-evidence
+
+- Scope / status：project:scry / confirmed（需求；原截图具体时序未证实）。用户截图选中 Pi 会话“优化scry ios的ui和…”却显示“这条会话没有可读的本机证据”，再次点击才出现内容。只读核对该 catalog 身份；没有把 catalog 元数据当作完整 transcript 或截图时序证据。
+- 根因路径 / rule：`pickSession` 将 Sidebar 缓存的 `running=false` 当成权威结果跳过 `activeRuns`，或直接优先使用旧 `knownRunId`。因此真实实时内容可能被漏读，未完成归档的会话被报 unavailable。缓存活动标志只供展示；实际选择必须查询 main registry，并优先匹配当前 Provider/profile/cwd/session 的 run。
+- Applied：`src/renderer/App.tsx` 复用 `activeRunForSession` 做一次权威查找，旧 runId 仅保留身份 hint；`Sidebar.tsx` 不再把 cached running 标志传入读取控制。`onHistoryLoaded` 携带已采用的 live 快照，有非空输入/事件时不将未归档标为无本机证据；空 live 占位仍保留缺失状态。selection generation、in-flight 重选保护、失败/取消拒绝及权限语义不变，无自动重试或 Provider start。
+- 关键回归：完整生产 App + 隔离 bridge，bootstrap 后在 fake registry 增加 Pi run，但不广播 start/focus。侧栏仍显示未运行，archive 返回 null。旧逻辑第一次点击准确复现截图的 unavailable 页面，historyReads=1、adoptedRuns=[]；修复后一次点击显示实际 live 回复。相邻场景让 Sidebar 仍标记旧 run 为运行中且旧 archive 只有历史，验证优先采用当前 run 而非旧 hint。两场景都限定一次 registry 查找/历史读取、仅采用当前 run、无重新 bootstrap、starts=0。
+- 终态邻接：只读安装包 `app.asar` 确认其 loadSession 尚未包含上轮 terminal barrier。本轮为已有 `readSessionHistoryAfterCompletedRuns` 补无 prior archive 的临时目录场景：首次归档尚未发布时不提前读成 null，待 settled 后得到最新轮。未修改 main handler 或并行 archive WIP，不以此声称截图必定来自终态 race。
+- 验证：Node 24 / macOS arm64 当前组合工作区，295 个 focused 测试、完整 renderer UI（10 个 selection 场景及 Credits / preview / background）、typecheck、build、diff-check 通过。首次新增 unit 漏导入 `vi` 导致两条测试失败及 typecheck 报错，补导入后完整受影响检查通过；没有删断言、skip 或增大超时。保存 `/private/tmp/scry-stale-live-before.log`、`/private/tmp/scry-stale-live-ui-full.log`。
+- Acceptance / next use：这是隔离 Electron 的生产 renderer/模拟 bridge 验证，不是已安装 App / 真实 Pi 的端到端证明。未升级、未重启现有任务、未调用真实 Provider。升级后复放 首次选择后台会话 → 尚无 archive 时 live 内容可读；终态归档中保持 loading，不能成功交付假空历史。若仍复现，记录同一身份的实际 registry/归档时间和 selection sequence，再定位，不添加盲目重试。

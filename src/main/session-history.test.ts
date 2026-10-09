@@ -20,15 +20,19 @@ afterEach(() => {
 })
 
 describe('session history terminal convergence', () => {
-  it('reads the latest archived turn after a UI-complete run finishes persisting', async () => {
+  it.each([true, false])('reads the latest archived turn after terminal persistence (prior archive: %s)', async (hasPriorArchive) => {
     const root = mkdtempSync(join(tmpdir(), 'scry-history-settlement-'))
     roots.push(root)
     const args = { userDataDir: root, cwd: '/repo', sessionId: 'pi-session', providerId: 'pi' as const }
     const first = { runId: 'first-run', userText: 'first task', items: [], done: true, ts: 1 }
-    expect(upsertTraceArchiveTurn({ ...args, turn: first })).toBe(true)
+    if (hasPriorArchive) expect(upsertTraceArchiveTurn({ ...args, turn: first })).toBe(true)
+    else expect(await readTraceArchiveAsync(args)).toBeNull()
     let release!: () => void
     const settled = new Promise<void>((resolve) => { release = resolve })
-    const read = vi.fn(async () => sessionHistoryPage(mergeSessionTurns([], await readTraceArchiveAsync(args))))
+    const read = vi.fn(async () => {
+      const archive = await readTraceArchiveAsync(args)
+      return archive ? sessionHistoryPage(mergeSessionTurns([], archive)) : null
+    })
     const loading = readSessionHistoryAfterCompletedRuns([{ done: true, settled }], new AbortController().signal, read)
     await Promise.resolve()
     let page
@@ -40,8 +44,8 @@ describe('session history terminal convergence', () => {
       page = await loading
     }
     expect(read).toHaveBeenCalledOnce()
-    expect(page.turns.map((turn) => turn.runId)).toEqual(['first-run', 'latest-run'])
-    expect(page.turns.at(-1)?.userText).toBe('install it')
+    expect(page?.turns.map((turn) => turn.runId)).toEqual(hasPriorArchive ? ['first-run', 'latest-run'] : ['latest-run'])
+    expect(page?.turns.at(-1)?.userText).toBe('install it')
   })
 
   it('does not wait for an active run to finish before reading its prior history', async () => {

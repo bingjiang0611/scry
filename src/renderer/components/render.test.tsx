@@ -1,7 +1,7 @@
 // 渲染侧运行证据 + D1 拆分回归：用真实 TraceEvent 数据渲染拆出来的组件，
 // 断言核心流程的三样 UI 都出来——trace 树（工具节点）/ footer（token）/ 文件足迹。
 // renderToStaticMarkup 不需 DOM，纯 node 跑，确定性、零成本，可常驻套件。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRef, type ComponentProps } from 'react'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
@@ -1047,11 +1047,31 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
         adoptActiveRun: async () => activeRun,
         loadSession: async () => null,
         replaceWithParsedSession: () => {},
-        onHistoryLoaded: (page) => { gap = sessionEvidenceGapAfterLoad('session-1', page) }
+        onHistoryLoaded: (page, live) => { gap = sessionEvidenceGapAfterLoad('session-1', page, live) }
       }
     )
 
     expect(gap).toMatchObject({ sessionId: 'session-1', status: 'unavailable' })
+  })
+
+  it.each([null, { turns: [], offset: 0, totalTurns: 0, hasOlder: false, completeness: 'complete' as const }])('有可读 live 内容时不把未归档误报成没有本机证据（%j）', async (page) => {
+    const activeRun: ActiveRun = {
+      runId: 'live-run', providerId: 'pi', cwd: '/repo', externalSessionId: 'live-session',
+      userText: '已经提交的任务', items: [], done: false
+    }
+    let gap: SessionEvidenceGap | null | undefined
+    const replace = vi.fn()
+    await expect(restoreActiveSessionSelection({
+      runId: activeRun.runId, sessionId: 'live-session', externalSessionId: 'live-session', cwd: '/repo', providerId: 'pi'
+    }, {
+      prepareRunFocus: () => {}, adoptActiveRun: async () => activeRun,
+      loadSession: async () => page, replaceWithParsedSession: replace,
+      onHistoryLoaded: (loaded, live) => { gap = sessionEvidenceGapAfterLoad('live-session', loaded, live) }
+    })).resolves.toBe(true)
+    expect(replace).toHaveBeenCalledWith('live-session', [], { activeRun, page })
+    expect(gap).toBeNull()
+    expect(sessionEvidenceGapAfterLoad('live-session', page, { ...activeRun, done: true })).not.toBeNull()
+    expect(sessionEvidenceGapAfterLoad('live-session', page, { ...activeRun, userText: '' })).not.toBeNull()
   })
 
   it('preload 直接启动的新 focused run 会先绑定焦点，再恢复历史和待回答问题', async () => {

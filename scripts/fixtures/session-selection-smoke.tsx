@@ -7,7 +7,8 @@ import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Full production App with an isolated bridge: no Provider, filesystem or user data access.
-const sameProvider = new URLSearchParams(location.search).get('scenario') === 'same-provider'
+const scenario = new URLSearchParams(location.search).get('scenario')
+const sameProvider = scenario === 'same-provider'
 const oldIdentity = sameProvider
   ? { providerId: 'pi' as const, agentProfileId: 'pi:rotom' }
   : { providerId: 'claude' as const }
@@ -22,9 +23,20 @@ const projects: ProjectMeta[] = [
   }] },
   { cwd: '/fixture/new', name: 'New project', mtime: 2, sessions: [{
     sessionId: 'new-session', externalSessionId: 'new-session', providerId: 'pi', agentProfileId: 'pi:rotom',
+    runId: scenario === 'stale-run' ? 'previous-pi-run' : undefined,
     mtime: 2, preview: 'Target Pi conversation', count: 1
   }] }
 ]
+const hiddenRun: ActiveRun = {
+  runId: 'hidden-pi-run', providerId: 'pi', agentProfileId: 'pi:rotom',
+  cwd: '/fixture/new', externalSessionId: 'new-session',
+  userText: 'Live target Pi conversation', done: false,
+  items: [{ id: 'live-answer', runId: 'hidden-pi-run', ts: '2026-10-09T00:00:00Z', kind: 'model', stage: 'text', text: 'Actual live response before archival' }]
+}
+const previousHiddenRun: ActiveRun = { ...hiddenRun, runId: 'previous-pi-run', userText: 'Previous target task', items: [] }
+let hiddenRunAvailable = false
+let activeListReads = 0
+const adoptedRuns: string[] = []
 const listeners = new Set<(run: ActiveRun) => void>()
 let cwd: string | null = '/fixture/old'
 let activeReads = 0
@@ -38,7 +50,7 @@ const noopSubscribe = () => () => {}
 const status = document.createElement('output')
 status.id = 'selection-state'
 const update = () => {
-  status.textContent = JSON.stringify({ cwd, activeReads, historyReads, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
+  status.textContent = JSON.stringify({ cwd, activeReads, activeListReads, adoptedRuns, historyReads, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
 }
 const bridge = {
   activeRun: () => {
@@ -46,7 +58,11 @@ const bridge = {
     update()
     return new Promise<ActiveRun>((resolve) => { pendingSnapshots.push(() => resolve(oldRun)); update() })
   },
-  activeRuns: async () => [oldRun],
+  activeRuns: async () => {
+    activeListReads += 1
+    update()
+    return [oldRun, ...(hiddenRunAvailable ? [hiddenRun] : scenario === 'stale-run' ? [previousHiddenRun] : [])]
+  },
   onFocusedRun: (callback: (run: ActiveRun) => void) => { listeners.add(callback); return () => listeners.delete(callback) },
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   listProjects: async () => projects, recentFolders: async () => projects.map((project) => project.cwd),
@@ -58,7 +74,12 @@ const bridge = {
   focusRun: async () => true,
   newSession: async () => { newSessions += 1; update(); return true },
   start: async () => { starts += 1; update(); throw new Error('This selection fixture must not start a Provider') },
-  adoptActiveRun: async () => oldRun,
+  adoptActiveRun: async (runId: string) => {
+    adoptedRuns.push(runId)
+    update()
+    if (runId === previousHiddenRun.runId) return null
+    return runId === hiddenRun.runId ? hiddenRun : oldRun
+  },
   setCwd: async (next: string | null) => {
     if (next !== cwd && pendingHistory) {
       cancelledLoads += 1
@@ -75,7 +96,9 @@ const bridge = {
     return new Promise((resolve, reject) => {
       pendingHistory = { cwd: context.cwd ?? '', reject, resolve: () => {
         cwd = context.cwd ?? null
-        resolve({ turns: [{ runId: `${context.externalSessionId}-history`, userText: `History for ${context.externalSessionId}`, items: [], done: true }], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' })
+        resolve(scenario === 'stale-live' && context.externalSessionId === 'new-session' ? null : {
+          turns: [{ runId: `${context.externalSessionId}-history`, userText: `History for ${context.externalSessionId}`, items: [], done: true }], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete'
+        })
         pendingHistory = null
         update()
       } }
@@ -91,6 +114,7 @@ controls.style.cssText = 'position:fixed;right:0;top:0;z-index:99999;background:
 for (const [id, action] of Object.entries({
   'resolve-snapshots': () => { pendingSnapshots.splice(0).forEach((resolve) => resolve()); update() },
   'resolve-history': () => pendingHistory?.resolve(),
+  'start-hidden-pi': () => { hiddenRunAvailable = true; update() },
   'focus-pi': () => listeners.forEach((listener) => listener({ ...oldRun, runId: 'pi-run', providerId: 'pi', agentProfileId: 'pi:rotom', cwd: '/fixture/new', externalSessionId: 'new-session' }))
 })) {
   const button = document.createElement('button')
