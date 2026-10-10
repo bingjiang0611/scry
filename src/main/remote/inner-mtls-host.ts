@@ -122,7 +122,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown; revision?: string; history?: unknown }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -139,6 +139,17 @@ export class InnerMtlsHost {
             !Number.isSafeInteger(request.waitMs)) return { error: 'invalid_request' }
         return { watch: await controller.watchRun(fingerprint, {
           runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number
+        }) }
+      }
+      if (request.op === 'liveRuns') {
+        if (!Number.isSafeInteger(request.waitMs) || (request.revision !== undefined &&
+            (typeof request.revision !== 'string' || request.revision.length > 64))) return { error: 'invalid_request' }
+        const history = parseLiveRunsHistory(request.history)
+        if (history === false) return { error: 'invalid_request' }
+        return { liveRuns: await controller.liveRuns(fingerprint, {
+          waitMs: request.waitMs as number,
+          ...(request.revision !== undefined ? { revision: request.revision } : {}),
+          ...(history ? { history } : {})
         }) }
       }
       if (request.op === 'stop') {
@@ -280,4 +291,16 @@ export class InnerMtlsHost {
     for (const socket of this.#connections) socket.destroy()
     await new Promise<void>((resolve) => this.#server.close(() => resolve()))
   }
+}
+
+// `history` joins one opened session's version to the liveRuns long-poll.
+// Returns undefined when absent and false when malformed.
+function parseLiveRunsHistory(value: unknown): { query: { providerId: string; cwd: string; externalSessionId: string }; known?: string } | undefined | false {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const h = value as Record<string, unknown>
+  const text = (field: unknown, max: number): field is string => typeof field === 'string' && field.length > 0 && field.length <= max
+  if (!text(h.providerId, 128) || !text(h.cwd, 4096) || !text(h.externalSessionId, 256)) return false
+  if (h.known !== undefined && !text(h.known, 512)) return false
+  return { query: { providerId: h.providerId, cwd: h.cwd, externalSessionId: h.externalSessionId }, ...(h.known !== undefined ? { known: h.known as string } : {}) }
 }

@@ -219,9 +219,10 @@ try {
   const stopDetail = join(deviceDir, 'live-stop.json')
   writeFileSync(stopDetail, JSON.stringify({ cwd: authorizedCwd, providerId: 'claude', prompt: 'live-stop' }))
   const stopLines = (await runProbe(runArgs('live', stopDetail).concat('stop'))).trim().split('\n')
+  assert.ok(stopLines.includes('live-run remote running self live-stop'), stopLines.join('|'))
   assert.ok(stopLines.some(l => l.startsWith('stop requested ')), stopLines.join('|'))
   assert.ok(stopLines.some(l => /^watch state=(failed|cancelled)/.test(l)), stopLines.join('|'))
-  cases.push({ name: 'Swift RelaySession: stop reaches the running executor and the run reaches a real terminal state', passed: true, lines: stopLines })
+  cases.push({ name: 'Swift RelaySession: liveRuns lists the running run on its own lane; stop reaches the executor and the run reaches a real terminal state', passed: true, lines: stopLines })
 
   console.log(JSON.stringify({ scope: 'REAL Swift iOS run client against production relay + InnerMtlsHost + HostController; synthetic confirmation, stub executor, no iPhone/human/Provider', cases }, null, 2))
 } finally {

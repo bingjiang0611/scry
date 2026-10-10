@@ -27,7 +27,9 @@ import NIOTLS
 //   - Older hosts close after each reply. Only a reply starting with
 //     `{"keepAlive":true,` proves the host keeps the tunnel open.
 public final class RelaySession: Sendable {
-  public enum Lane: Sendable, CaseIterable { case control, watch, bulk }
+  // `status` carries the live-run/history long-poll so it never queues behind
+  // the focused run's watch or a large history page.
+  public enum Lane: Sendable, CaseIterable { case control, watch, status, bulk }
 
   private let lanes: [Lane: RelayLane]
 
@@ -39,7 +41,7 @@ public final class RelaySession: Sendable {
     var lanes: [Lane: RelayLane] = [:]
     for lane in Lane.allCases {
       lanes[lane] = RelayLane(endpoint: base, identity: identity, abortOnCancel: lane != .control,
-                              responseTimeout: lane == .watch ? .seconds(40) : .seconds(30))
+                              responseTimeout: lane == .watch || lane == .status ? .seconds(40) : .seconds(30))
     }
     self.lanes = lanes
   }

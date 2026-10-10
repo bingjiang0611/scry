@@ -90,6 +90,14 @@ struct RemoteRunClient {
                                         cursor: cursor, outputCursor: outputCursor, waitMs: waitMs)
   }
 
+  // Long-poll the host's live runs, optionally joined with one session's
+  // history version. A read on its own lane; never blocks a run's watch.
+  func liveRuns(revision: String?, waitMs: Int = 15_000,
+                history: (providerId: String, cwd: String, externalSessionId: String, known: String?)?) async throws -> G0Transport.LiveRunsOutcome {
+    try await G0Transport.relayLiveRuns(endpoint: endpoint(), identity: try identity(), revision: revision,
+                                        waitMs: waitMs, history: history)
+  }
+
   // Ask the host to interrupt this run's Provider. A receipt, not a lifecycle.
   func stop(runId: String) async throws -> String {
     try await G0Transport.relayRunStop(endpoint: endpoint(), identity: try identity(), runId: runId)

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
 import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
@@ -54,6 +55,50 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   resume?: string
 }
 
+// A run the owner started in the Mac UI (RunRegistry), as the host proves it
+// right now. Only not-yet-done runs are listed; absence is "not observed", never
+// "completed".
+export interface MacRunView {
+  runId: string
+  providerId: string
+  agentProfileId?: string
+  cwd: string
+  externalSessionId?: string
+  prompt: string
+  questions: AgentQuestionRequest[]
+  stopping: boolean
+}
+
+export interface MacRunSource {
+  list(): MacRunView[]
+  // Same bounded stop lifecycle as the Mac stop button; true = requested.
+  stop(runId: string): boolean
+  // Same broker as the Mac question dialog; false = no such pending question.
+  answer(response: AgentQuestionResponse): boolean
+}
+
+// One live run visible to the device. `remote` runs were submitted by a paired
+// device and are observed through watch; `mac` runs belong to the Mac UI.
+export interface LiveRunRef {
+  origin: 'remote' | 'mac'
+  runId: string
+  providerId: string
+  agentProfileId?: string
+  cwd: string
+  externalSessionId?: string
+  prompt: string
+  state: 'running' | 'waiting' | 'stopping'
+  // Open questions, so a device can answer a run it is not watching (answers
+  // still go through answerQuestion and its per-origin broker).
+  questions: AgentQuestionRequest[]
+}
+
+const LIVE_RUNS_MAX_WAIT_MS = 20_000
+// Mac runs are in-memory state without a change signal into this controller;
+// a long-poll re-checks them on this bounded tick.
+const LIVE_RUNS_TICK_MS = 1_000
+const LIVE_RUN_PROMPT_CHARS = 200
+
 export interface HostControllerDependencies {
   // Pairing adapters (CSR verification + certificate issuance + persistence).
   pairing: PairingDependencies
@@ -64,6 +109,8 @@ export interface HostControllerDependencies {
   // Resolves and authorizes a workspace against the known-project authority.
   workspace: WorkspaceAuthorizer
   readSessionStatus?(query: RemoteSessionStatusQuery): RemoteSessionStatus
+  // Mac UI runs the device may see and control. Absent => only remote runs.
+  macRuns?: MacRunSource
   // The only injected leaf: performs the real Provider run for a routed intent.
   // `output` streams the assistant's real trace CONTENT (masked, bounded) to the
   // device; distinct from the opaque lifecycle `progress` markers.
@@ -104,6 +151,8 @@ export interface HostControllerDependencies {
 }
 
 const REMOTE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+// Mac UI run ids (`run-<base36 time>-<seq>`); never ledger-backed.
+const MAC_RUN_ID = /^run-[0-9a-z]{1,16}-[0-9]{1,12}$/
 // Below the inner host's 30-second idle timer and the device's response deadline.
 const WATCH_MAX_WAIT_MS = 20_000
 const MAX_REMOTE_DETAIL_CHARS = 1_200_000
@@ -188,6 +237,11 @@ export class HostController {
   #output: RunOutputLog
   #interactions: RemoteInteractionBroker
   #stops = new Map<string, AbortController>()
+  // Remote runs whose executor is in flight. In-memory on purpose: after a host
+  // restart no executor exists, and the ledger already reports the run as ended.
+  #live = new Map<string, { routing: RemoteIntentRouting; externalSessionId?: string }>()
+  #workspace: WorkspaceAuthorizer
+  #macRuns?: MacRunSource
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
   #changeSeq = 0
@@ -195,6 +249,8 @@ export class HostController {
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
+    this.#workspace = deps.workspace
+    this.#macRuns = deps.macRuns
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#output = new RunOutputLog({ store: deps.outputStore })
     this.#interactions = new RemoteInteractionBroker((runId, detail) => {
@@ -220,19 +276,28 @@ export class HostController {
     const base: RemoteExecutor = {
       execute: async (input: RemoteExecutorInput) => {
         const stop = new AbortController()
+        const routing = parseRouting(input.detail)
+        const live: { routing: RemoteIntentRouting; externalSessionId?: string } = { routing }
         this.#stops.set(input.runId, stop)
+        this.#live.set(input.runId, live)
         try {
           await deps.runProvider({
             runId: input.runId,
-            routing: parseRouting(input.detail),
-            progress: input.progress,
+            routing,
+            progress: (detail) => {
+              const sessionId = sessionMarkerId(detail)
+              if (sessionId) live.externalSessionId = sessionId
+              input.progress(detail)
+            },
             output: input.output,
             requestUserInput: (request, signal) => this.#interactions.request(input.runId, request, signal),
             stopSignal: stop.signal
           })
         } finally {
           this.#stops.delete(input.runId)
+          this.#live.delete(input.runId)
           this.#interactions.cancelRun(input.runId)
+          this.#notifyChange()
         }
       }
     }
@@ -282,7 +347,18 @@ export class HostController {
     response: AgentQuestionResponse
   }): RemoteQuestionAnswerReceipt {
     this.authorizeDevice(peerCertSHA256)
-    if (!REMOTE_RUN_ID.test(input.runId) || !this.#ledger.runState(input.runId)) throw new RemoteInteractionError('unknown_run')
+    if (!this.#isRemoteRun(input.runId)) {
+      const run = this.#macRun(input.runId)
+      const response = input.response as { runId?: unknown; questionId?: unknown } | null
+      if (!response || response.runId !== input.runId ||
+          !run.questions.some((question) => question.questionId === response.questionId)) {
+        throw new RemoteInteractionError('question_not_pending')
+      }
+      // The Mac broker settles a question once. A false return means it was
+      // already answered (here or on the Mac) or closed; never report success.
+      if (!this.#macRuns!.answer(input.response)) throw new RemoteInteractionError('question_not_pending')
+      return { status: 'answered' }
+    }
     return this.#interactions.answer(input.runId, { answerId: input.answerId, response: input.response })
   }
 
@@ -366,7 +442,11 @@ export class HostController {
   // settles only when the Provider adapter reports its real result.
   stopRun(peerCertSHA256: string, input: { runId: string }): { status: 'requested' | 'already_requested' | 'not_running' } {
     this.authorizeDevice(peerCertSHA256)
-    if (!REMOTE_RUN_ID.test(input.runId) || !this.#ledger.runState(input.runId)) throw new RemoteInteractionError('unknown_run')
+    if (!this.#isRemoteRun(input.runId)) {
+      const run = this.#macRun(input.runId)
+      if (run.stopping) return { status: 'already_requested' }
+      return { status: this.#macRuns!.stop(input.runId) ? 'requested' : 'not_running' }
+    }
     const stop = this.#stops.get(input.runId)
     if (!stop) return { status: 'not_running' }
     if (stop.signal.aborted) return { status: 'already_requested' }
@@ -403,6 +483,77 @@ export class HostController {
     }
   }
 
+  // Device-facing long-poll over every live run the device may see, optionally
+  // joined with one opened session's history version. Returns when either
+  // differs from what the device holds, or after at most LIVE_RUNS_MAX_WAIT_MS.
+  // Authorization and workspace containment are re-checked on every pass; Mac
+  // runs and transcripts have no change signal here, so passes also tick.
+  async liveRuns(peerCertSHA256: string, input: {
+    revision?: string
+    waitMs: number
+    history?: { query: RemoteHistoryQuery; known?: string }
+  }): Promise<{ revision: string; runs: LiveRunRef[]; historyVersion?: RemoteHistoryVersion }> {
+    const deadline = Date.now() + Math.min(Math.max(0, input.waitMs), LIVE_RUNS_MAX_WAIT_MS)
+    while (true) {
+      this.authorizeDevice(peerCertSHA256)
+      const runs = this.#listLiveRuns()
+      const revision = createHash('sha256').update(JSON.stringify(runs)).digest('hex').slice(0, 32)
+      const historyVersion = input.history ? await this.#gateway.readHistoryVersion(peerCertSHA256, input.history.query) : undefined
+      const remaining = deadline - Date.now()
+      if (revision !== input.revision || (historyVersion && historyVersion.version !== input.history?.known) || remaining <= 0) {
+        return { revision, runs, ...(historyVersion ? { historyVersion } : {}) }
+      }
+      await this.#waitForChange(Math.min(remaining, LIVE_RUNS_TICK_MS))
+    }
+  }
+
+  #listLiveRuns(): LiveRunRef[] {
+    const runs: LiveRunRef[] = []
+    for (const [runId, live] of this.#live) {
+      const cwd = this.#authorizedCwd(live.routing.cwd)
+      if (!cwd) continue
+      const questions = this.#interactions.list(runId)
+      runs.push({
+        origin: 'remote', runId, providerId: live.routing.providerId,
+        ...(live.routing.agentProfileId ? { agentProfileId: live.routing.agentProfileId } : {}),
+        cwd,
+        ...(live.externalSessionId ? { externalSessionId: live.externalSessionId } : {}),
+        prompt: (live.routing.prompt ?? '').slice(0, LIVE_RUN_PROMPT_CHARS),
+        state: this.#stops.get(runId)?.signal.aborted ? 'stopping' : questions.length > 0 ? 'waiting' : 'running',
+        questions
+      })
+    }
+    for (const run of this.#macRuns?.list() ?? []) {
+      const cwd = this.#authorizedCwd(run.cwd)
+      if (!cwd || !MAC_RUN_ID.test(run.runId)) continue
+      runs.push({
+        origin: 'mac', runId: run.runId, providerId: run.providerId,
+        ...(run.agentProfileId ? { agentProfileId: run.agentProfileId } : {}),
+        cwd,
+        ...(run.externalSessionId ? { externalSessionId: run.externalSessionId } : {}),
+        prompt: run.prompt.slice(0, LIVE_RUN_PROMPT_CHARS),
+        state: run.stopping ? 'stopping' : run.questions.length > 0 ? 'waiting' : 'running',
+        questions: run.questions
+      })
+    }
+    return runs.sort((a, b) => a.runId.localeCompare(b.runId))
+  }
+
+  #authorizedCwd(cwd: string): string | undefined {
+    try { return this.#workspace.authorize(cwd) } catch { return undefined }
+  }
+
+  #isRemoteRun(runId: string): boolean {
+    return REMOTE_RUN_ID.test(runId) && this.#ledger.runState(runId) !== undefined
+  }
+
+  // A Mac run the device may control: listed now and inside an authorized project.
+  #macRun(runId: string): MacRunView {
+    const run = MAC_RUN_ID.test(runId) ? this.#macRuns?.list().find((item) => item.runId === runId) : undefined
+    if (!run || !this.#authorizedCwd(run.cwd)) throw new RemoteInteractionError('unknown_run')
+    return run
+  }
+
   #notifyChange(): void {
     this.#changeSeq++
     const waiters = [...this.#changeWaiters]
@@ -422,4 +573,13 @@ export class HostController {
   async idle(): Promise<void> {
     await this.#dispatcher.idle()
   }
+}
+
+function sessionMarkerId(detail: string | undefined): string | undefined {
+  if (!detail) return undefined
+  try {
+    const marker = JSON.parse(detail) as { event?: unknown; externalSessionId?: unknown }
+    return marker.event === 'session' && typeof marker.externalSessionId === 'string' && marker.externalSessionId.length <= 256
+      ? marker.externalSessionId : undefined
+  } catch { return undefined }
 }

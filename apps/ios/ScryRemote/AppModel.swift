@@ -68,6 +68,17 @@ final class AppModel: ObservableObject {
   // The session currently opened for read-only transcript replay (nil = none).
   @Published var openedSession: OpenedSession?
   @Published var readOnlyTranscript = false
+
+  // Opening another session leaves a run with a host receipt running on the
+  // Mac (its status, questions and stop stay reachable via the live-run list).
+  // Only an unacknowledged submission keeps the read-only browse fallback.
+  func open(_ session: OpenedSession, run: RemoteRunStore) {
+    let identity = RemoteRunStore.SessionIdentity.opened(providerId: session.providerId, cwd: session.cwd,
+                                                         externalSessionId: session.externalSessionId)
+    readOnlyTranscript = run.hasUnresolvedRun && identity != run.activeSessionIdentity && !run.detachFocusedRun()
+    openedSession = session
+    route = .transcript
+  }
   // Drafts belong to a conversation, not to a disposable route view. They stay
   // in memory only; attachments are never written to plaintext preferences.
   enum DraftKey: Hashable {

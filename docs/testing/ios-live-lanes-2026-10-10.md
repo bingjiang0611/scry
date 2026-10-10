@@ -63,3 +63,11 @@
 - 会话页对本设备运行显示"未检测到运行" → 显示本机观察到的生命周期。
 - 发送按钮在深色背景上对比度不足 → 实心圆形按钮，禁用时变灰。
 - 单选问题用折叠菜单，需要两次点击且看不到选项说明 → 所有选项直接列为可点击行，显示说明，选中状态带描边和 `isSelected` 特征；与问题文本重复的 header 不再重复显示。
+
+## 多任务与 Mac 运行 · 2026-10-11
+
+- 合同：新增只读 op `liveRuns`（`status` 通道，长轮询 ≤20 s）。主机列出本机所有远程运行和 Mac 界面发起的运行，只含已授权 cwd，按 runId 排序，revision 是列表的 sha256。可选 `history` 把一个会话的 historyVersion 合并进同一长轮询，替代 iOS 每 3 s 一次的 `historyVersion` 轮询。
+- Mac 运行：runId 形如 `run-<base36>-<seq>`。`stop` 走与 Mac 停止按钮相同的 `requestRunStop`；`answerQuestion` 走同一个 `userQuestionBroker`，并校验 runId/questionId 是否仍待回答，否则返回 `question_not_pending`。未授权 cwd 的运行不可见，也不可控制。限制：ledger 只记录“answered”，不记录由哪台设备回答。
+- iOS：聚焦运行保持原有 watch。切换会话或新建任务时，已有主机回执的运行会脱离聚焦，继续在 Mac 上运行，并通过 `liveRuns` 显示状态、停止和问题。只有无回执的提交仍需先核对。脱离的运行不归档为“完成”，内容以 Mac 记录的历史为准。首页支持下拉刷新、“进行中”分组和逐行状态（`Mac ·` 前缀表示 Mac 发起）。
+- 修复：原始 TCP 中继腿（`createRelayConnect`，用于 `SCRY_REMOTE_RELAY` 和 smoke）从不发出 `relaySession`。持久通道占住的腿仍被计为空闲，连接池不再补充，导致第 `poolSize+1` 条通道收到 `no_host_leg`。现在包装成 JS Duplex，在收到第一个字节时发出该事件。生产 WSS 腿本来就会发出。
+- 检查：`src/main/remote` 28 个文件 230 个测试通过（含新的 `relay-connect.test.ts`，旧实现下 2/2 失败）；`typecheck` 通过；Swift 包 27 个测试通过；`smoke:relay-run` 6/6 通过，真实 Swift 客户端在 `status` 通道解码 `liveRuns`；iOS 真机构建通过。`smoke:relay` / `smoke:relay-pair` 在旧代码上同样以 `relay-e2e.mjs:67 .authority` 失败，属于既有问题。

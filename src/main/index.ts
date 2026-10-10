@@ -3836,7 +3836,10 @@ handleTrusted('agent:traceResynchronized', () => {
 
 handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
 
-handleTrusted('agent:stop', (_event, runId: string) => {
+handleTrusted('agent:stop', (_event, runId: string) => requestRunStop(runId))
+
+// Shared by the Mac stop button and a paired device stopping a Mac run.
+function requestRunStop(runId: string): boolean {
   const entry = runs.get(runId)
   if (!entry || entry.state.done) return false
   const stopping = entry.control
@@ -3853,7 +3856,7 @@ handleTrusted('agent:stop', (_event, runId: string) => {
   })
   userQuestionBroker.cancelRun(stopping.runId)
   return true
-})
+}
 
 // B2-lite：累计用量统计（读 usage.jsonl 聚合）
 handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
@@ -3876,9 +3879,9 @@ function createRemoteWssResolution(endpoint: URL, token: string, enroll: boolean
   const url = endpoint.origin
   const createTransport: RemoteHostServiceDependencies['createTransport'] = (ctx) => {
     const { connect, readyEvent } = createRelayConnectWS({ url, hostId: ctx.hostId, token, enroll, mode: ctx.mode })
-    // A paired phone keeps up to three persistent run lanes (control, live watch,
-    // bulk history), so keep three warm run legs; recycle idle legs every 55 s.
-    return new ReverseTunnelTransport({ connect, readyEvent, poolSize: ctx.mode === 'run' ? 3 : 2, idleLegMs: 55_000 })
+    // A paired phone keeps up to four persistent run lanes (control, live watch,
+    // live-run status, bulk history), so keep four warm run legs; recycle idle legs every 55 s.
+    return new ReverseTunnelTransport({ connect, readyEvent, poolSize: ctx.mode === 'run' ? 4 : 2, idleLegMs: 55_000 })
   }
   return {
     createTransport,
@@ -4171,6 +4174,23 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         return out
       },
       readSessionStatus: (query) => observeSessionStatus(query, runs.activeStates()),
+      // Mac UI runs, re-authorized by cwd inside the controller. A device answer
+      // goes through the same broker as the Mac dialog, so whichever side answers
+      // first settles the question exactly once.
+      macRuns: {
+        list: () => runs.activeStates().flatMap((run) => run.providerId && run.cwd ? [{
+          runId: run.runId,
+          providerId: run.providerId,
+          ...(run.agentProfileId ? { agentProfileId: run.agentProfileId } : {}),
+          cwd: run.cwd,
+          ...(run.externalSessionId ? { externalSessionId: run.externalSessionId } : {}),
+          prompt: run.userText,
+          questions: run.pendingQuestions ?? [],
+          stopping: Boolean(run.stopState)
+        }] : []),
+        stop: (runId) => requestRunStop(runId),
+        answer: (response) => userQuestionBroker.answer(response)
+      },
       // First-screen evidence avoids the complete-history reader. Indexed
       // archives read only two turns; legacy/index-rebuild paths can still
       // materialize older data, and their provenance stays explicit.

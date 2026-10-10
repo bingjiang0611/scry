@@ -239,6 +239,20 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var questionAnswering = false
   @Published private(set) var questionError: String?
 
+  // Multi-task: every run the host proves live right now (any paired device's
+  // runs plus Mac UI runs in authorized projects). Absence is "not observed".
+  enum LiveRunsStatus: Equatable { case unknown, observed, unsupported, failed(String) }
+  @Published private(set) var liveRuns: [G0Transport.LiveRun] = []
+  @Published private(set) var liveRunsStatus: LiveRunsStatus = .unknown
+  @Published private(set) var liveActionRunId: String?
+  @Published private(set) var liveActionError: String?
+  // Questions the host acknowledged as answered; hidden until the list catches up.
+  @Published private(set) var liveAnsweredQuestions: Set<String> = []
+  private var liveRunsTask: Task<Void, Never>?
+  private var liveRunsRevision: String?
+  private var liveHistoryTarget: SessionIdentity?
+  private var liveAnswerIds: [String: String] = [:]
+
   // A run remains unresolved until its durable intent is acknowledged and a
   // terminal run has had its output drained. This derived gate is the small
   // parent-facing contract for navigation and composer admission.
@@ -1635,6 +1649,7 @@ final class RemoteRunStore: ObservableObject {
   func foregrounded() {
     guard !historyOnly, let client = makeClient() else { return }
     Task { try? await client.prewarm() }
+    startLiveRuns()
     if observationInterrupted, pollTask == nil, !terminalDrainCompleted, runId != nil { retryObservation() }
   }
 
@@ -1786,6 +1801,25 @@ final class RemoteRunStore: ObservableObject {
       return false
     }
     archiveActiveTurnIfNeeded()
+    clearRunState()
+    return true
+  }
+
+  // Leave the focused run running on the Mac and stop watching it here, so the
+  // user can open another session or start a new task. Only a run with a host
+  // receipt can be left: an unacknowledged submission keeps its recovery path.
+  // Its partial live turn is not archived as "completed"; the host live-run
+  // list keeps showing the run, its questions and stop, and history shows its
+  // content once the Provider writes it.
+  func detachFocusedRun() -> Bool {
+    guard !historyOnly else { return false }
+    if !hasUnresolvedRun { return resetRun() }
+    guard pendingSubmission == nil, runId != nil else { return false }
+    clearRunState()
+    return true
+  }
+
+  private func clearRunState() {
     prefetchTask?.cancel()
     generation += 1
     pollTask?.cancel(); pollTask = nil
@@ -1818,7 +1852,6 @@ final class RemoteRunStore: ObservableObject {
     archivedActiveTurn = false
     restoredControlErrors = [:]
     contextNeedsRestore = false
-    return true
   }
 
   private func archiveActiveTurnIfNeeded() {
@@ -1836,6 +1869,9 @@ final class RemoteRunStore: ObservableObject {
   func clearAllState() {
     generation += 1
     dataGeneration += 1
+    stopLiveRuns()
+    liveRuns = []; liveRunsRevision = nil; liveRunsStatus = .unknown; liveHistoryTarget = nil
+    liveActionRunId = nil; liveActionError = nil; liveAnsweredQuestions = []; liveAnswerIds = [:]
     pollTask?.cancel(); pollTask = nil
     submitTask?.cancel(); submitTask = nil
     catalogTask?.cancel(); catalogTask = nil
@@ -2436,5 +2472,153 @@ final class RemoteRunStore: ObservableObject {
       return code
     }
     return "\(error)"
+  }
+}
+
+// MARK: - Live runs (multi-task, Mac runs)
+
+extension RemoteRunStore {
+  // Pull-to-refresh: reload the catalog and wait for that request to finish.
+  func refreshSessions() async {
+    loadSessions(force: true)
+    await catalogTask?.value
+  }
+
+  func startLiveRuns() {
+    #if DEBUG
+    if mockMode { return }
+    #endif
+    guard !historyOnly, liveRunsTask == nil, liveRunsStatus != .unsupported, hasConnection else { return }
+    liveRunsTask = Task { [weak self] in await self?.runLiveRunsLoop() }
+  }
+
+  func stopLiveRuns() {
+    liveRunsTask?.cancel()
+    liveRunsTask = nil
+  }
+
+  // The open transcript joins its history version to the live-run long-poll.
+  // A new target restarts the poll instead of waiting up to 15 s for the old one.
+  func watchHistory(_ identity: SessionIdentity?) {
+    guard liveHistoryTarget != identity else { return }
+    liveHistoryTarget = identity
+    if identity != nil, liveRunsTask != nil { stopLiveRuns(); startLiveRuns() }
+  }
+
+  // True when the long-poll is delivering this session's history changes, so
+  // the transcript's fallback polling can stay idle.
+  func historyIsWatched(_ identity: SessionIdentity?) -> Bool {
+    liveRunsStatus == .observed && identity != nil && liveHistoryTarget == identity
+  }
+
+  private func runLiveRunsLoop() async {
+    var failures = 0
+    var seen: (target: SessionIdentity, version: String)?
+    while !Task.isCancelled {
+      guard let client = makeClient() else { break }
+      let target = liveHistoryTarget
+      let known = target.flatMap { current in seen?.target == current ? seen?.version : nil }
+      let history = target.flatMap { current in
+        current.externalSessionId.map { (providerId: current.providerId, cwd: current.cwd, externalSessionId: $0, known: known) }
+      }
+      do {
+        let outcome = try await client.liveRuns(revision: liveRunsRevision, history: history)
+        if Task.isCancelled { return }
+        failures = 0
+        recordSuccess()
+        liveRunsRevision = outcome.revision
+        if liveRuns != outcome.runs {
+          liveRuns = outcome.runs
+          let open = Set(outcome.runs.flatMap { run in run.questions.map { "\(run.runId)\u{0}\($0.questionId)" } })
+          liveAnsweredQuestions.formIntersection(open)
+        }
+        liveRunsStatus = .observed
+        if let target, let externalSessionId = target.externalSessionId,
+           let version = outcome.historyVersion?.version, version != known {
+          seen = (target, version)
+          // refreshHistory re-checks the version and skips an unchanged source.
+          await refreshHistory(providerId: target.providerId, cwd: target.cwd, externalSessionId: externalSessionId)
+        }
+      } catch is CancellationError {
+        return
+      } catch G0Transport.RunError.host(code: "unknown_op") {
+        liveRunsStatus = .unsupported
+        break
+      } catch {
+        if Task.isCancelled { return }
+        failures += 1
+        liveRunsStatus = .failed(Self.describe(error))
+        try? await Task.sleep(for: .seconds(min(8, 1 << min(failures, 3))))
+      }
+    }
+    liveRunsTask = nil
+  }
+
+  // Any live run in this session, including the one this store is watching.
+  func liveRun(providerId: String, cwd: String, externalSessionId: String?) -> G0Transport.LiveRun? {
+    guard let externalSessionId else { return nil }
+    return liveRuns.first { $0.providerId == providerId && $0.cwd == cwd && $0.externalSessionId == externalSessionId }
+  }
+
+  // A live run in this session that this store is not already watching.
+  func otherLiveRun(for identity: SessionIdentity?) -> G0Transport.LiveRun? {
+    guard let identity, let run = liveRun(providerId: identity.providerId, cwd: identity.cwd,
+                                          externalSessionId: identity.externalSessionId),
+          run.runId != runId else { return nil }
+    return run
+  }
+
+  // Runs other than the watched one that wait for a decision.
+  var waitingLiveRuns: [G0Transport.LiveRun] {
+    liveRuns.filter { $0.runId != runId && openLiveQuestion($0) != nil }
+  }
+
+  func openLiveQuestion(_ run: G0Transport.LiveRun) -> G0Transport.RunQuestionRequest? {
+    run.questions.first { !liveAnsweredQuestions.contains("\(run.runId)\u{0}\($0.questionId)") }
+  }
+
+  func stopLiveRun(_ run: G0Transport.LiveRun) {
+    guard liveActionRunId == nil, let client = makeClient() else { return }
+    liveActionRunId = run.runId
+    liveActionError = nil
+    Task { [weak self] in
+      do {
+        _ = try await client.stop(runId: run.runId)
+        self?.liveActionRunId = nil
+      } catch {
+        self?.liveActionRunId = nil
+        self?.liveActionError = "停止请求结果未知：\(Self.describe(error))。可再次点击停止。"
+      }
+    }
+  }
+
+  func answerLiveQuestion(_ run: G0Transport.LiveRun, request: G0Transport.RunQuestionRequest,
+                          answers: [String: String], cancel: Bool = false) {
+    guard liveActionRunId == nil, let client = makeClient() else { return }
+    let key = "\(run.runId)\u{0}\(request.questionId)"
+    // A retry after an unknown outcome reuses the answer id (remote runs dedupe by it).
+    let answerId = liveAnswerIds[key] ?? UUID().uuidString.lowercased()
+    liveAnswerIds[key] = answerId
+    liveActionRunId = run.runId
+    liveActionError = nil
+    let response = G0Transport.RunQuestionResponse(runId: run.runId, questionId: request.questionId,
+                                                   behavior: cancel ? "cancelled" : "answered",
+                                                   answers: cancel ? nil : answers)
+    Task { [weak self] in
+      do {
+        _ = try await client.answerQuestion(runId: run.runId, answerId: answerId, response: response)
+        self?.liveAnswerIds[key] = nil
+        self?.liveAnsweredQuestions.insert(key)
+        self?.liveActionRunId = nil
+      } catch G0Transport.RunError.host(code: "question_not_pending") {
+        self?.liveAnswerIds[key] = nil
+        self?.liveAnsweredQuestions.insert(key)
+        self?.liveActionRunId = nil
+        self?.liveActionError = "该问题已不再等待（可能已在 Mac 或其他设备上回答或关闭）。"
+      } catch {
+        self?.liveActionRunId = nil
+        self?.liveActionError = "回答结果未知：\(Self.describe(error))。再次提交会复用同一回答标识。"
+      }
+    }
   }
 }

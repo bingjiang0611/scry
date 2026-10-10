@@ -7,8 +7,8 @@
   <key>CFBundleName</key><string>Scry</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSCameraUsageDescription</key><string>扫描 Mac 上显示的配对二维码以连接你的 Mac。</string>
-  <key>CFBundleShortVersionString</key><string>0.1.11</string>
-  <key>CFBundleVersion</key><string>13</string>
+  <key>CFBundleShortVersionString</key><string>0.1.12</string>
+  <key>CFBundleVersion</key><string>14</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>UIUserInterfaceStyle</key><string>Dark</string>
   <key>UILaunchScreen</key><dict/>

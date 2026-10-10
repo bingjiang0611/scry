@@ -48,6 +48,7 @@ export interface RemoteHostServiceDependencies {
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
+  macRuns?: HostControllerFactoryDependencies['macRuns']
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
   readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>
@@ -118,6 +119,7 @@ export class RemoteHostService {
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
       ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
       ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
+      ...(deps.macRuns ? { macRuns: deps.macRuns } : {}),
       ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
       ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
       ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
