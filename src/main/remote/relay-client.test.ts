@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -112,6 +112,27 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(legs.every((leg) => leg.destroyed)).toBe(true)
     expect(legs).toHaveLength(9) // shutdown cannot replenish
+  })
+
+  it('recycles a waiting leg that stays idle but never a leg carrying a device session', async () => {
+    vi.useFakeTimers()
+    const legs: PassThrough[] = []
+    const transport = new ReverseTunnelTransport({ connect: () => {
+      const leg = new PassThrough(); legs.push(leg); return leg
+    }, poolSize: 2, idleLegMs: 1_000 })
+    await transport.start(() => {})
+    try {
+      legs[0].emit('relaySession')
+      expect(legs).toHaveLength(3)
+      await vi.advanceTimersByTimeAsync(1_001)
+      expect(legs[0].destroyed).toBe(false) // busy device session is kept
+      expect(legs[1].destroyed).toBe(true)
+      expect(legs[2].destroyed).toBe(true)
+      expect(legs.filter((leg) => !leg.destroyed)).toHaveLength(3) // two fresh waiting + one busy
+    } finally {
+      await transport.close()
+      vi.useRealTimers()
+    }
   })
 
   it('bridges relay-delivered device sessions into the inner-mTLS host end-to-end', async () => {

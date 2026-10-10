@@ -179,3 +179,63 @@ describe('HostController (composition root)', () => {
     expect(runProvider).not.toHaveBeenCalled()
   })
 })
+
+describe('HostController live watch and stop', () => {
+  type LiveInput = { runId: string; progress(d?: string): void; output(chunk: { kind: 'output'; text: string }): void; stopSignal: AbortSignal }
+
+  it('long-polls until new output arrives instead of returning an empty page', async () => {
+    let emit: ((text: string) => void) | undefined
+    let finish: (() => void) | undefined
+    const runProvider = vi.fn(async (input: LiveInput) => {
+      emit = (text) => input.output({ kind: 'output', text })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
+    await vi.waitFor(() => expect(emit).toBeDefined())
+    const first = await controller.watchRun(CERT, { runId, cursor: 0, outputCursor: 0, waitMs: 0 })
+    expect(first.state).toBe('dispatched')
+
+    const started = Date.now()
+    const waiting = controller.watchRun(CERT, { runId, cursor: first.poll.cursor, outputCursor: first.output.cursor, waitMs: 5_000 })
+    setTimeout(() => emit!('hello'), 50)
+    const woke = await waiting
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(woke.output.chunks.map((chunk) => chunk.text)).toEqual(['hello'])
+    expect(woke.poll.events).toEqual([])
+
+    const idle = await controller.watchRun(CERT, { runId, cursor: woke.poll.cursor, outputCursor: woke.output.cursor, waitMs: 30 })
+    expect(idle.output.chunks).toEqual([])
+    finish!()
+    await controller.idle()
+    const done = await controller.watchRun(CERT, { runId, cursor: idle.poll.cursor, outputCursor: idle.output.cursor, waitMs: 5_000 })
+    expect(done.state).toBe('settled')
+  })
+
+  it('rejects watch and stop for a revoked device', async () => {
+    const { controller, deviceId } = await grantedController(async () => {})
+    const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
+    await controller.idle()
+    await controller.authority.revoke(deviceId)
+    await expect(controller.watchRun(CERT, { runId, cursor: 0, outputCursor: 0, waitMs: 0 })).rejects.toThrow()
+    expect(() => controller.stopRun(CERT, { runId })).toThrow('device_not_authorized')
+  })
+
+  it('forwards a device stop to the running Provider and records the request, not a result', async () => {
+    let stopped = false
+    const runProvider = vi.fn(async (input: LiveInput) => {
+      await new Promise<void>((resolve) => input.stopSignal.addEventListener('abort', () => { stopped = true; resolve() }))
+    })
+    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
+    await vi.waitFor(() => expect(runProvider).toHaveBeenCalled())
+    expect(controller.stopRun(CERT, { runId })).toEqual({ status: 'requested' })
+    expect(controller.stopRun(CERT, { runId })).toEqual({ status: 'already_requested' })
+    await controller.idle()
+    expect(stopped).toBe(true)
+    const kinds = controller.poll(CERT, { cursor: 0 }).events.map((event) => [event.kind, event.detail])
+    expect(kinds).toContainEqual(['run_progress', JSON.stringify({ event: 'stop_requested' })])
+    expect(controller.runState(CERT, { runId })).toBe('settled')
+    expect(controller.stopRun(CERT, { runId })).toEqual({ status: 'not_running' })
+  })
+})

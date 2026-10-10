@@ -141,6 +141,38 @@ struct RemoteProbe {
       let page = try await G0Transport.relayRunOutput(endpoint: endpoint, identity: identity, runId: args[7], cursor: cursor)
       for c in page.chunks { print("output \(c.kind) \(c.text)") }
       print("output-cursor \(page.cursor)")
+    case "live":
+      // <arg> = routing-detail JSON; args[8] = "watch" | "stop". One persistent
+      // RelaySession carries submit, every watch long-poll and (optionally) stop.
+      guard args.count == 9 else { throw CLIError.invalidArguments }
+      setvbuf(stdout, nil, _IOLBF, 0)
+      let detail = try String(contentsOf: URL(fileURLWithPath: args[7]), encoding: .utf8)
+      let session = RelaySession(endpoint: endpoint) { identity }
+      let live = G0Transport.RelayEndpoint(host: endpoint.host, port: endpoint.port, hostId: endpoint.hostId, session: session)
+      let clock = ContinuousClock()
+      let begin = clock.now
+      let millis = { (d: Duration) in Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }
+      let submitted = try await G0Transport.relayRunSubmit(endpoint: live, identity: identity, intentId: UUID().uuidString.lowercased(), detail: detail)
+      print("submit \(submitted.runId) \(submitted.status) ms=\(millis(clock.now - begin))")
+      var cursor = 0, outputCursor = 0
+      var stopSent = false
+      while true {
+        let started = clock.now
+        let watch = try await G0Transport.relayRunWatch(endpoint: live, identity: identity, runId: submitted.runId,
+                                                        cursor: cursor, outputCursor: outputCursor, waitMs: 5_000)
+        cursor = watch.poll.cursor; outputCursor = watch.output.cursor
+        for e in watch.poll.events where e.runId == submitted.runId { print("event \(e.kind)") }
+        for c in watch.output.chunks { print("output \(c.kind) \(c.text)") }
+        print("watch state=\(watch.state ?? "none") ms=\(millis(clock.now - started))")
+        if ["settled", "failed", "cancelled"].contains(watch.state ?? "") { break }
+        if args[8] == "stop", !stopSent, ["dispatched", "running"].contains(watch.state ?? "") {
+          let stopStarted = clock.now
+          print("stop \(try await G0Transport.relayRunStop(endpoint: live, identity: identity, runId: submitted.runId)) ms=\(millis(clock.now - stopStarted))")
+          stopSent = true
+        }
+      }
+      print("total ms=\(millis(clock.now - begin))")
+      await session.reset()
     default: throw CLIError.invalidArguments
     }
   }

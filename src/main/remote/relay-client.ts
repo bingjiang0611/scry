@@ -74,6 +74,7 @@ export class ReverseTunnelTransport implements RelayTransport {
   #connect: () => OutboundLeg
   #poolSize: number
   #readyEvent: string
+  #idleLegMs?: number
   #closed = false
   #legs = new Set<OutboundLeg>()
   #waiting = new Set<OutboundLeg>()
@@ -82,10 +83,17 @@ export class ReverseTunnelTransport implements RelayTransport {
   // readyEvent is the event that signals the outer leg is up and safe to serve
   // inner mTLS over: 'connect' for a plain TCP leg, 'secureConnect' for an outer
   // TLS leg (TLS-in-TLS: inner mTLS runs inside the host<->relay outer TLS).
-  constructor(deps: { connect: () => OutboundLeg; poolSize?: number; readyEvent?: string }) {
+  // idleLegMs replaces a waiting leg that stayed unused that long. A silently
+  // dead outer connection (NAT/proxy idle drop, sleep, network change) can still
+  // look open at the relay, which then glues a device to it and the device's
+  // inner handshake times out. Recycling bounds how stale a waiting leg can be;
+  // a device that races a recycle sees a close before any inner byte and may
+  // safely reconnect.
+  constructor(deps: { connect: () => OutboundLeg; poolSize?: number; readyEvent?: string; idleLegMs?: number }) {
     this.#connect = deps.connect
     this.#poolSize = Math.max(1, deps.poolSize ?? 2)
     this.#readyEvent = deps.readyEvent ?? 'connect'
+    this.#idleLegMs = deps.idleLegMs
   }
 
   async start(onSession: (stream: Duplex) => void): Promise<void> {
@@ -111,6 +119,12 @@ export class ReverseTunnelTransport implements RelayTransport {
       this.#fillPool()
     })
     leg.on('error', () => { /* the bridge/host handles teardown */ })
+    if (this.#idleLegMs !== undefined) {
+      const recycle = setTimeout(() => { if (this.#waiting.has(leg)) leg.destroy() }, this.#idleLegMs)
+      recycle.unref?.()
+      leg.once('relaySession', () => clearTimeout(recycle))
+      leg.once('close', () => clearTimeout(recycle))
+    }
     // Hand the leg to the host once the outer connection is up. The inner TLS
     // server buffers until the device's client hello arrives through the relay.
     leg.once(this.#readyEvent, () => { this.#onSession?.(leg) })

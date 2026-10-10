@@ -73,7 +73,7 @@ extension G0Transport {
                                     query: WorkspaceQuery) async throws -> WorkspaceResult {
     let request = try JSONEncoder().encode(WorkspaceRequest(query: query))
     let bytes = try await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity,
-      request: request, responseLimit: 513 * 1024)
+      request: request, responseLimit: 513 * 1024, lane: .bulk)
     let response = try JSONDecoder().decode(WorkspaceResponse.self, from: bytes)
     if let error = response.error { throw RunError.host(code: error) }
     guard let workspace = response.workspace else { throw ProbeError.unexpectedReply }

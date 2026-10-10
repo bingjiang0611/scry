@@ -211,12 +211,17 @@ public enum G0Transport {
     public let hostId: String
     public let relayServerName: String?
     public let outerTLS: OuterTLS
-    public init(host: String, port: Int, hostId: String, relayServerName: String? = nil, outerTLS: OuterTLS = .plaintext) {
+    // When present, run-mode exchanges reuse this session's persistent lanes
+    // instead of dialing one tunnel per request. Pairing never uses it.
+    public let session: RelaySession?
+    public init(host: String, port: Int, hostId: String, relayServerName: String? = nil, outerTLS: OuterTLS = .plaintext,
+                session: RelaySession? = nil) {
       self.host = host
       self.port = port
       self.hostId = hostId
       self.relayServerName = relayServerName
       self.outerTLS = outerTLS
+      self.session = session
     }
   }
 
@@ -471,6 +476,8 @@ public enum G0Transport {
     var keepAlive: Bool? = nil
   }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
+  private struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
+  private struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
   private struct RunResponse: Decodable {
     let runId: String?
     let status: String?
@@ -491,8 +498,14 @@ public enum G0Transport {
     let historyPage: RunHistoryPage?
     let historyTurnsPage: RunHistoryTurnsPage?
     let output: RunOutputBody?
+    let watch: RunWatchBody?
+    let stop: RunStopBody?
     let error: String?
   }
+  private struct RunWatchBody: Decodable {
+    let poll: RunPollBody; let questions: [RunQuestionRequest]; let output: RunOutputBody; let state: String?
+  }
+  private struct RunStopBody: Decodable { let status: String }
   private struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
   private struct RunOutputBody: Decodable { let chunks: [RunOutputChunk]; let cursor: Int }
 
@@ -509,7 +522,7 @@ public enum G0Transport {
   // runId; the device polls the ledger for the real lifecycle.
   public static func relayRunSubmit(endpoint: RelayEndpoint, identity: G0ProbeIdentity, intentId: String, detail: String) async throws -> RunSubmitOutcome {
     let request = try JSONEncoder().encode(RunSubmitRequest(intentId: intentId, detail: detail))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
     guard let runId = response.runId, let status = response.status else { throw ProbeError.unexpectedReply }
     return RunSubmitOutcome(runId: runId, status: status)
   }
@@ -540,7 +553,7 @@ public enum G0Transport {
   public static func relayRunAnswerQuestion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,
                                             answerId: String, response answer: RunQuestionResponse) async throws -> RunQuestionAnswerOutcome {
     let request = try JSONEncoder().encode(RunAnswerQuestionRequest(runId: runId, answerId: answerId, response: answer))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
     guard let outcome = response.answer else { throw ProbeError.unexpectedReply }
     return outcome
   }
@@ -592,14 +605,14 @@ public enum G0Transport {
   // every run op; a revoked device gets device_not_authorized.
   public static func relayRunSessions(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunSessionRef] {
     let request = try JSONEncoder().encode(RunSessionsRequest())
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
     guard let sessions = response.sessions else { throw ProbeError.unexpectedReply }
     return sessions
   }
 
   public static func relayRunSessionsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int, limit: Int = 100, snapshot: String? = nil) async throws -> RunSessionPage {
     let request = try JSONEncoder().encode(RunSessionsPageRequest(cursor: cursor, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
     guard let page = response.sessionsPage else { throw ProbeError.unexpectedReply }
     return page
   }
@@ -607,16 +620,10 @@ public enum G0Transport {
   // A transfer owns one fresh mTLS tunnel. It cannot submit, approve or poll a
   // run. It closes and settles its queued reads when the scope ends/cancels.
   public final class HistoryConnection: Sendable {
-    private let channel: Channel
-    private let handler: HistoryReadHandler
-    fileprivate init(channel: Channel, handler: HistoryReadHandler) {
-      self.channel = channel; self.handler = handler
-    }
+    private let send: @Sendable (Data, Int) async throws -> Data
+    fileprivate init(send: @escaping @Sendable (Data, Int) async throws -> Data) { self.send = send }
     private func response(_ request: Data, limit: Int) async throws -> RunResponse {
-      let bytes = try await channel.eventLoop.flatSubmit { [self] in
-        handler.request(request, limit: limit, on: channel)
-      }.get()
-      return try decodeRun(bytes)
+      try decodeRun(await send(request, limit))
     }
     public func preview(providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
       let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, keepAlive: true))
@@ -646,27 +653,34 @@ public enum G0Transport {
 
   public static func withHistoryConnection<T: Sendable>(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
     body: @Sendable (HistoryConnection) async throws -> T) async throws -> T {
-    try await withRelayChannel(endpoint: endpoint, mode: "run", identity: identity) { channel, innerContext in
+    if let session = endpoint.session {
+      return try await body(HistoryConnection { request, limit in
+        try await session.exchange(request, lane: .bulk, limit: limit, replayable: true)
+      })
+    }
+    return try await withRelayChannel(endpoint: endpoint, mode: "run", identity: identity) { channel, innerContext in
       let handler = HistoryReadHandler()
       try await channel.eventLoop.submit {
         try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
         try channel.pipeline.syncOperations.addHandler(handler)
       }.get()
-      return try await body(HistoryConnection(channel: channel, handler: handler))
+      return try await body(HistoryConnection { request, limit in
+        try await channel.eventLoop.flatSubmit { handler.request(request, limit: limit, on: channel) }.get()
+      })
     }
   }
 
   // Small first-screen evidence. Unavailable is explicit and is not decoded as an empty transcript.
   public static func relayRunHistoryVersion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryVersion {
     let request = try JSONEncoder().encode(RunHistoryVersionRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
     guard let version = response.historyVersion else { throw ProbeError.unexpectedReply }
     return version
   }
 
   public static func relayRunHistoryPreview(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
     let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024, lane: .bulk))
     guard let preview = response.historyPreview else { throw ProbeError.unexpectedReply }
     return preview
   }
@@ -675,7 +689,7 @@ public enum G0Transport {
   // Same owner-device authorization; an unknown/unauthorized session returns [].
   public static func relayRunHistory(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> [RunHistoryTurn] {
     let request = try JSONEncoder().encode(RunHistoryRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
     guard let history = response.history else { throw ProbeError.unexpectedReply }
     return history
   }
@@ -686,16 +700,45 @@ public enum G0Transport {
   // Omit the limit by default: the host owns the frame budget and page size.
   public static func relayRunHistoryTurnsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, before: Int? = nil, limit: Int = 3, snapshot: String? = nil) async throws -> RunHistoryTurnsPage {
     let request = try JSONEncoder().encode(RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
     guard let page = response.historyTurnsPage else { throw ProbeError.unexpectedReply }
     return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
   }
 
   public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int? = nil, snapshot: String? = nil) async throws -> RunHistoryPage {
     let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
     guard let page = response.historyPage else { throw ProbeError.unexpectedReply }
     return page
+  }
+
+  // Long-poll: the host answers as soon as ledger events, output or a terminal
+  // lifecycle exist after the cursors, or after `waitMs` (host-capped at 20 s).
+  // It is a read; `state` nil means the host has no such run for this device.
+  public struct RunWatchOutcome: Sendable, Equatable {
+    public let poll: RunPollOutcome
+    public let questions: [RunQuestionRequest]
+    public let output: RunOutputPage
+    public let state: String?
+  }
+  public static func relayRunWatch(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,
+                                   cursor: Int, outputCursor: Int, waitMs: Int) async throws -> RunWatchOutcome {
+    let request = try JSONEncoder().encode(RunWatchRequest(runId: runId, cursor: cursor, outputCursor: outputCursor, waitMs: waitMs))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .watch))
+    guard let watch = response.watch else { throw ProbeError.unexpectedReply }
+    return RunWatchOutcome(poll: RunPollOutcome(events: watch.poll.events, cursor: watch.poll.cursor),
+                           questions: watch.questions,
+                           output: RunOutputPage(chunks: watch.output.chunks, cursor: watch.output.cursor),
+                           state: watch.state)
+  }
+
+  // Asks the host to interrupt the Provider for this run. "requested" is only a
+  // request receipt; the lifecycle still settles from the real Provider result.
+  public static func relayRunStop(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> String {
+    let request = try JSONEncoder().encode(RunStopRequest(runId: runId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
+    guard let stop = response.stop else { throw ProbeError.unexpectedReply }
+    return stop.status
   }
 
   // The assistant's real streamed output content for one run, strictly after
@@ -805,8 +848,12 @@ public enum G0Transport {
   // pins the inner server to the host anchor without leaf-hostname verification.
   // Do not replay exchanges by matching error strings. A lost response is not
   // evidence that a request did not run; explicit UI reconciliation owns retry.
-  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int? = nil) async throws -> Data {
+  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int? = nil,
+                            lane: RelaySession.Lane = .control, replayable: Bool = true) async throws -> Data {
     guard request.count < 1_250_000 else { throw ProbeError.invalidArguments }
+    if mode == "run", let session = endpoint.session {
+      return try await session.exchange(request, lane: lane, limit: responseLimit ?? 8 * 1_024 * 1_024, replayable: replayable)
+    }
     return try await withRelayChannel(endpoint: endpoint, mode: mode, identity: identity) { channel, innerContext in
       let result = channel.eventLoop.makePromise(of: Data.self)
       do {
@@ -822,9 +869,34 @@ public enum G0Transport {
 
   private static func withRelayChannel<T: Sendable>(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
     body: @Sendable (Channel, NIOSSLContext) async throws -> T) async throws -> T {
+    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    do {
+      let (channel, innerContext) = try await connectRelayChannel(endpoint: endpoint, mode: mode, identity: identity, group: group)
+      // Cancel an established tunnel immediately. Bootstrap retains its
+      // bounded 10-second deadline, rather than leaving a detached connection.
+      let reply: T
+      do {
+        reply = try await withTaskCancellationHandler {
+          try Task.checkCancellation()
+          return try await body(channel, innerContext)
+        } onCancel: { channel.close(promise: nil) }
+      } catch { try? await channel.close(); throw error }
+      try? await channel.close()
+      try await group.shutdownGracefully()
+      return reply
+    } catch {
+      try? await group.shutdownGracefully()
+      throw error
+    }
+  }
+
+  // Dials the relay and completes the outer WebSocket upgrade. Returns the
+  // channel (TunnelCodec installed, no inner TLS yet) and the inner mTLS context
+  // pinned to the host anchor. The caller owns the channel and the group.
+  static func connectRelayChannel(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
+                                  group: EventLoopGroup) async throws -> (Channel, NIOSSLContext) {
     guard (1...65535).contains(endpoint.port), ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
-    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     do {
       // Outer TLS mode is decided by the endpoint (from the pairing code), not by
       // whether a CA happens to be present. `.system` trusts the platform's
@@ -893,21 +965,7 @@ public enum G0Transport {
           }
         }
       let channel = try await upgrade.get()
-      // Cancel an established tunnel immediately. Bootstrap retains its
-      // bounded 10-second deadline, rather than leaving a detached connection.
-      let reply: T
-      do {
-        reply = try await withTaskCancellationHandler {
-          try Task.checkCancellation()
-          return try await body(channel, innerContext)
-        } onCancel: { channel.close(promise: nil) }
-      } catch { try? await channel.close(); throw error }
-      try? await channel.close()
-      try await group.shutdownGracefully()
-      return reply
-    } catch {
-      try? await group.shutdownGracefully()
-      throw error
+      return (channel, innerContext)
     }
   }
 

@@ -240,7 +240,7 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(readPreview).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
   })
 
-  it('reuses one fresh readonly TLS session, rechecks revocation and forbids writes', async () => {
+  it('reuses one TLS session for reads and writes, marks each reply and rechecks revocation', async () => {
     const start = vi.fn(async () => {})
     const turns = [{ userText: 'x'.repeat(600_000), items: [{ kind: 'output' as const, text: 'real answer' }] }]
     const read = vi.fn(async () => turns)
@@ -261,6 +261,8 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
         bytes += chunk.toString('utf8')
         if (!bytes.endsWith('\n')) return
         cleanup()
+        // Clients detect a reusable lane by this exact prefix.
+        expect(bytes.startsWith('{"keepAlive":true,')).toBe(true)
         resolve(JSON.parse(bytes) as Record<string, unknown>)
       }
       socket.on('data', data); socket.once('error', error); socket.once('close', closed)
@@ -282,13 +284,49 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       }
       expect(JSON.parse(Buffer.concat(parts).toString('utf8'))).toEqual(turns)
       expect(read).toHaveBeenCalledTimes(1)
+      const submitted = await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })
+      expect(submitted.status).toBe('recorded')
+      const runId = submitted.runId as string
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1))
+      const watched = await exchange({ op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 0 })
+      expect((watched.watch as { poll: { events: unknown[] } }).poll.events.length).toBeGreaterThan(0)
       expect(handshakes).toBe(1)
       await controller.authority.revoke(device.deviceId)
       expect((await exchange({ op: 'historyPage', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', snapshot, cursor: 0 })).error).toBe('device_not_authorized')
-      expect((await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })).error).toBe('history_connection_read_only')
-      expect(start).not.toHaveBeenCalled()
+      expect((await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })).error).toBe('device_not_authorized')
+      expect(start).toHaveBeenCalledTimes(1)
       expect(read).toHaveBeenCalledTimes(1)
     } finally { socket.destroy() }
+  })
+
+  it('keeps one-shot replies unmarked and refuses a one-shot request on a kept lane', async () => {
+    const { identity, controller, caPEM, addr } = await harness(async () => {})
+    const device = await pairDevice(identity, controller)
+    const raw = async (requests: unknown[]) => {
+      const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
+        minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
+      await once(socket, 'secureConnect')
+      const lines: string[] = []
+      let buffer = ''
+      socket.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf8')
+        while (buffer.includes('\n')) {
+          const end = buffer.indexOf('\n')
+          lines.push(buffer.slice(0, end)); buffer = buffer.slice(end + 1)
+          const next = requests[lines.length]
+          if (next) socket.write(JSON.stringify(next) + '\n')
+        }
+      })
+      socket.write(JSON.stringify(requests[0]) + '\n')
+      await once(socket, 'close')
+      return lines
+    }
+    const oneShot = await raw([{ op: 'poll', cursor: 0 }])
+    expect(oneShot).toHaveLength(1)
+    expect(oneShot[0].startsWith('{"poll"')).toBe(true)
+    const mixed = await raw([{ op: 'poll', cursor: 0, keepAlive: true }, { op: 'poll', cursor: 0 }])
+    expect(mixed[0].startsWith('{"keepAlive":true,"poll"')).toBe(true)
+    expect(JSON.parse(mixed[1])).toEqual({ error: 'keep_alive_required' })
   })
 
   it('serves snapshot-fenced history pages over the authorized channel', async () => {

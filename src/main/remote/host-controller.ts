@@ -73,6 +73,10 @@ export interface HostControllerDependencies {
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
     requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
+    // Aborted only when the paired device explicitly asks to stop this run. The
+    // binding forwards it to the Provider's own interrupt; the ledger lifecycle
+    // still settles from the real Provider result, never from the request.
+    stopSignal: AbortSignal
   }): Promise<void>
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
@@ -100,6 +104,8 @@ export interface HostControllerDependencies {
 }
 
 const REMOTE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+// Below the inner host's 30-second idle timer and the device's response deadline.
+const WATCH_MAX_WAIT_MS = 20_000
 const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 const MAX_REMOTE_PROMPT_CHARS = 128_000
 const MAX_REMOTE_ATTACHMENTS = 4
@@ -181,10 +187,15 @@ export class HostController {
   #dispatcher: RemoteDispatcher
   #output: RunOutputLog
   #interactions: RemoteInteractionBroker
+  #stops = new Map<string, AbortController>()
+  // Wake-up signal for long-poll watchers. Ledger events and output appends bump
+  // it; a watcher always re-reads through the normal authorized readers.
+  #changeSeq = 0
+  #changeWaiters = new Set<() => void>()
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
-    this.#ledger = new SessionLedger({ store: deps.ledgerStore })
+    this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#output = new RunOutputLog({ store: deps.outputStore })
     this.#interactions = new RemoteInteractionBroker((runId, detail) => {
       this.#ledger.markProgress(runId, detail)
@@ -208,21 +219,33 @@ export class HostController {
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
     const base: RemoteExecutor = {
       execute: async (input: RemoteExecutorInput) => {
+        const stop = new AbortController()
+        this.#stops.set(input.runId, stop)
         try {
           await deps.runProvider({
             runId: input.runId,
             routing: parseRouting(input.detail),
             progress: input.progress,
             output: input.output,
-            requestUserInput: (request, signal) => this.#interactions.request(input.runId, request, signal)
+            requestUserInput: (request, signal) => this.#interactions.request(input.runId, request, signal),
+            stopSignal: stop.signal
           })
         } finally {
+          this.#stops.delete(input.runId)
           this.#interactions.cancelRun(input.runId)
         }
       }
     }
     const gated = new GatedExecutor({ policy, resolveTarget: (input) => parseRouting(input.detail), base })
-    this.#dispatcher = new RemoteDispatcher({ ledger: this.#ledger, executor: gated, outputSink: this.#output })
+    const output = this.#output
+    this.#dispatcher = new RemoteDispatcher({
+      ledger: this.#ledger,
+      executor: gated,
+      outputSink: {
+        append: (runId, chunk) => { output.append(runId, chunk); this.#notifyChange() },
+        flush: (runId) => output.flush(runId)
+      }
+    })
   }
 
   // On startup, dispatch any intent that was durably recorded but never
@@ -336,6 +359,63 @@ export class HostController {
   // strictly after the caller's cursor, authorized by the verified peer cert.
   runOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<RunOutputPage> {
     return this.#gateway.pollOutput(peerCertSHA256, input)
+  }
+
+  // Device-facing: ask the Provider running this remote intent to stop. This is
+  // a request, not a lifecycle: the ledger records `stop_requested` and the run
+  // settles only when the Provider adapter reports its real result.
+  stopRun(peerCertSHA256: string, input: { runId: string }): { status: 'requested' | 'already_requested' | 'not_running' } {
+    this.authorizeDevice(peerCertSHA256)
+    if (!REMOTE_RUN_ID.test(input.runId) || !this.#ledger.runState(input.runId)) throw new RemoteInteractionError('unknown_run')
+    const stop = this.#stops.get(input.runId)
+    if (!stop) return { status: 'not_running' }
+    if (stop.signal.aborted) return { status: 'already_requested' }
+    this.#ledger.markProgress(input.runId, JSON.stringify({ event: 'stop_requested' }))
+    stop.abort()
+    return { status: 'requested' }
+  }
+
+  // Device-facing long-poll: one authorized read of ledger events, pending
+  // questions, output and lifecycle for a run. It returns as soon as anything
+  // new exists (or the run is terminal), otherwise after at most WATCH_MAX_WAIT_MS.
+  // Every loop re-runs the same authorized readers, so a revoked grant fails the
+  // next wake-up instead of being remembered for the whole wait.
+  async watchRun(peerCertSHA256: string, input: { runId: string; cursor: number; outputCursor: number; waitMs: number }): Promise<{
+    poll: ReturnType<SessionLedger['since']>
+    questions: AgentQuestionRequest[]
+    output: RunOutputPage
+    state: RunLifecycle | null
+  }> {
+    const waitMs = Math.min(Math.max(0, input.waitMs), WATCH_MAX_WAIT_MS)
+    const deadline = Date.now() + waitMs
+    while (true) {
+      const seen = this.#changeSeq
+      const poll = this.poll(peerCertSHA256, { cursor: input.cursor })
+      const questions = this.pendingQuestions(peerCertSHA256, { runId: input.runId })
+      const output = await this.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor })
+      const state = this.#ledger.runState(input.runId) ?? null
+      const terminal = state === 'settled' || state === 'failed' || state === 'cancelled'
+      const remaining = deadline - Date.now()
+      if (poll.events.length > 0 || poll.reset || output.chunks.length > 0 || terminal || remaining <= 0) {
+        return { poll, questions, output, state }
+      }
+      if (seen === this.#changeSeq) await this.#waitForChange(remaining)
+    }
+  }
+
+  #notifyChange(): void {
+    this.#changeSeq++
+    const waiters = [...this.#changeWaiters]
+    this.#changeWaiters.clear()
+    for (const wake of waiters) wake()
+  }
+
+  #waitForChange(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = (): void => { clearTimeout(timer); this.#changeWaiters.delete(wake); resolve() }
+      const timer = setTimeout(wake, timeoutMs)
+      this.#changeWaiters.add(wake)
+    })
   }
 
   // Test/shutdown aid: wait for in-flight executor work to settle.

@@ -3876,7 +3876,9 @@ function createRemoteWssResolution(endpoint: URL, token: string, enroll: boolean
   const url = endpoint.origin
   const createTransport: RemoteHostServiceDependencies['createTransport'] = (ctx) => {
     const { connect, readyEvent } = createRelayConnectWS({ url, hostId: ctx.hostId, token, enroll, mode: ctx.mode })
-    return new ReverseTunnelTransport({ connect, readyEvent })
+    // A paired phone keeps up to three persistent run lanes (control, live watch,
+    // bulk history), so keep three warm run legs; recycle idle legs every 55 s.
+    return new ReverseTunnelTransport({ connect, readyEvent, poolSize: ctx.mode === 'run' ? 3 : 2, idleLegMs: 55_000 })
   }
   return {
     createTransport,

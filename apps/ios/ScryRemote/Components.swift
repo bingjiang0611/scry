@@ -482,12 +482,39 @@ struct ConversationMarkdownText: View {
 /// A compact, progressive-disclosure renderer shared by live and archived turns.
 /// Long tool payloads and chain-of-thought-like reasoning stay available without
 /// overwhelming the answer; assistant Markdown is rendered instead of exposing syntax.
+// One rendered output row. A tool call absorbs the tool_result that directly
+// follows it, like the Mac timeline. Content and order are unchanged; a result
+// without an observed call stays its own row.
+struct ConversationEntry: Identifiable, Equatable {
+  let id: Int
+  let kind: String
+  let text: String
+  var result: String?
+
+  static func group<T>(_ items: [T], id: (Int, T) -> Int, kind: (T) -> String, text: (T) -> String) -> [ConversationEntry] {
+    var entries: [ConversationEntry] = []
+    for (index, item) in items.enumerated() {
+      let itemKind = kind(item)
+      if itemKind == "tool_result", let last = entries.last, last.kind == "tool", last.result == nil {
+        entries[entries.count - 1].result = text(item)
+        continue
+      }
+      entries.append(ConversationEntry(id: id(index, item), kind: itemKind, text: text(item)))
+    }
+    return entries
+  }
+}
+
 struct ConversationChunk: View {
   let kind: String
   let text: String
+  var result: String?
   @State private var expanded = false
 
-  private var lineCount: Int { max(1, text.split(separator: "\n", omittingEmptySubsequences: false).count) }
+  private var lineCount: Int { Self.lines(text) }
+  private static func lines(_ value: String) -> Int {
+    max(1, value.split(separator: "\n", omittingEmptySubsequences: false).count)
+  }
 
   @ViewBuilder var body: some View {
     switch kind {
@@ -515,6 +542,9 @@ struct ConversationChunk: View {
           Text(detailLabel)
             .font(kind == "tool" ? .system(size: 13, design: .monospaced) : .system(size: 13))
             .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+          if let result {
+            Text("\(Self.lines(result)) 行").font(.system(size: 11)).monospacedDigit()
+          }
           Image(systemName: expanded ? "chevron.down" : Symbol.chevron)
             .font(.system(size: 11, weight: .medium))
         }
@@ -529,10 +559,18 @@ struct ConversationChunk: View {
         if kind == "reasoning" {
           ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10)
         } else {
-          Text(text).font(.system(size: 13, design: .monospaced))
-            .foregroundStyle(Palette.ink).textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 6))
+          VStack(alignment: .leading, spacing: 8) {
+            Text(text).font(.system(size: 13, design: .monospaced))
+              .foregroundStyle(Palette.ink).textSelection(.enabled)
+            if let result {
+              Rectangle().fill(Palette.line).frame(height: 0.5)
+              Text("结果").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted)
+              Text(result).font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Palette.ink).textSelection(.enabled)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(12).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 6))
         }
       }
     }
@@ -590,6 +628,9 @@ struct MessageComposer: View {
   var slashCommandsLoading = false
   var slashCommandsReason: String?
   var onRefreshSlashCommands: (() -> Void)?
+  // When set, the current run can be interrupted; the send slot becomes Stop.
+  var onStop: (() -> Void)?
+  var stopping = false
   let onSend: () -> Void
 
   @State private var showPhotos = false
@@ -636,7 +677,27 @@ struct MessageComposer: View {
         if inputFocused {
           PlainIcon(symbol: "keyboard.chevron.compact.down", label: "收起键盘") { inputFocused = false }
         }
-        PlainIcon(symbol: Symbol.send, label: "发送", disabled: disabled || sendDisabled, action: onSend)
+        if let onStop {
+          Button(action: onStop) {
+            Image(systemName: stopping ? "hourglass" : "stop.fill")
+              .font(.system(size: 13, weight: .bold)).foregroundStyle(Palette.surface)
+              .frame(width: 32, height: 32).background(Palette.ink, in: Circle())
+              .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain).disabled(disabled || stopping)
+          .accessibilityLabel(stopping ? "正在请求停止" : "停止运行").accessibilityIdentifier("stop-run")
+        } else {
+          Button(action: onSend) {
+            Image(systemName: Symbol.send)
+              .font(.system(size: 15, weight: .bold))
+              .foregroundStyle(disabled || sendDisabled ? Palette.muted : Palette.surface)
+              .frame(width: 32, height: 32)
+              .background(disabled || sendDisabled ? Palette.muted.opacity(0.35) : Palette.ink, in: Circle())
+              .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain).disabled(disabled || sendDisabled)
+          .accessibilityLabel("发送")
+        }
       }
       if contextLabel != nil || !modelOptions.isEmpty || !effortOptions.isEmpty {
         Rectangle().fill(Palette.line).frame(height: 0.5)

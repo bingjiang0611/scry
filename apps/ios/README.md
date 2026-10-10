@@ -22,6 +22,7 @@ Honesty invariants (enforced by the model and host, not decoration):
 - QR pairing is the only onboarding path; no Apple account or manual-code entry is required/offered. Existing Keychain grants and cached history survive an app update. DEBUG visual fixtures never create a host grant.
 - Session headers show current observed run state (including unavailable/unknown); historical-session checks are scoped by provider, profile, canonical cwd and external session ID. “No observed run” is not “completed”.
 - The header folder button opens read-only project files and current-worktree vs HEAD diff, including untracked files. File pages are 64 KiB with snapshot-fenced continuation; diff previews are capped at 64 KiB and explicitly marked when incomplete. Device grants and canonical project/path containment are rechecked for every request. See [verification and limits](../../docs/testing/ios-workspace-2026-10-10.md).
+- Live runs use persistent control/watch/bulk inner-mTLS lanes, host long-poll `watch`, explicit `stop` receipts and automatic read-only reconnect. Writes (submit/answer/stop) are never replayed after their bytes were sent; outcomes stay unknown until reconciled. See [contract, checks and device E2E](../../docs/testing/ios-live-lanes-2026-10-10.md).
 - Pairing scans a real short-lived code, proves device-key possession over inner TLS 1.3/mTLS, waits for Mac confirmation, and only then stores the public connection descriptor.
 
 Build (Simulator, unsigned) and signed device build:
