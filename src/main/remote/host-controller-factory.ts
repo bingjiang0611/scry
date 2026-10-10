@@ -53,6 +53,7 @@ export interface HostControllerFactoryDependencies {
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
     requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
+    stopSignal: AbortSignal
   }): Promise<void>
   gate: ProviderOperationGate
   // Tests and embedded hosts may inject an equivalent store. Production omits this
@@ -93,6 +94,7 @@ export async function createHostControllerFromDisk(deps: {
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
     requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
+    stopSignal: AbortSignal
   }): Promise<void>
   gate: ProviderOperationGate
 }): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {

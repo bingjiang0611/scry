@@ -225,6 +225,14 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var liveExternalSessionId: String?
   @Published private(set) var activeSessionIdentity: SessionIdentity?
   @Published private(set) var observationInterrupted = false
+  // Transport dropped mid-observation and is being re-established
+  // automatically. Not a lifecycle: the run may still be progressing on the Mac.
+  @Published private(set) var observationReconnecting = false
+  @Published private(set) var stopRequesting = false
+  @Published private(set) var stopRequested = false
+  @Published private(set) var stopError: String?
+  // ~2 minutes of capped backoff before asking the user to retry by hand.
+  nonisolated static let observationRetryLimit = 20
   @Published private(set) var retryAvailable = false
   @Published private(set) var completedLiveTurns: [SessionIdentity: [CompletedLiveTurn]] = [:]
   @Published private(set) var pendingQuestions: [G0Transport.RunQuestionRequest] = []
@@ -239,6 +247,11 @@ final class RemoteRunStore: ObservableObject {
                          drained: terminalDrainCompleted, interrupted: observationInterrupted)
   }
   var isBusy: Bool { hasUnresolvedRun }
+  // A host run exists and has not reported a terminal lifecycle. Stop is a
+  // request; it is offered even while reconnecting because the host may still run.
+  var canStop: Bool {
+    runId != nil && [.recorded, .dispatched, .running].contains(lifecycle)
+  }
   var historyPreviewTurns: [G0Transport.RunHistoryTurn] {
     guard case let .available(preview) = historyPreview else { return [] }
     return preview.turns.map { turn in
@@ -1440,6 +1453,8 @@ final class RemoteRunStore: ObservableObject {
       guard let self else { return }
       var ledgerCursor = 0
       var outputCursor = 0
+      var useWatch = true
+      var failures = 0
       // Compacted ledgers may no longer retain the event that established an
       // older recovered run's current lifecycle. Reconcile the authoritative
       // run projection once, then continue from the server's resettable tail.
@@ -1448,60 +1463,113 @@ final class RemoteRunStore: ObservableObject {
       }
       while !Task.isCancelled {
         let requestConnectionRevision = self.connectionSuccessRevision
-        var operation = "事件读取"
+        var operation = "实时观察"
         do {
-          let page = try await client.poll(cursor: ledgerCursor)
+          let page: G0Transport.RunPollOutcome
+          let questions: [G0Transport.RunQuestionRequest]
+          let out: G0Transport.RunOutputPage
+          var state: String?
+          if useWatch {
+            do {
+              // One long-poll returns as soon as anything changes on the host,
+              // instead of four sequential reads plus a fixed sleep.
+              let watch = try await client.watch(runId: runId, cursor: ledgerCursor, outputCursor: outputCursor)
+              page = watch.poll; questions = watch.questions; out = watch.output; state = watch.state
+            } catch G0Transport.RunError.host(code: "unknown_op") {
+              // Older Mac host: keep the legacy read sequence, still honest.
+              useWatch = false
+              continue
+            }
+          } else {
+            operation = "事件读取"
+            page = try await client.poll(cursor: ledgerCursor)
+            operation = "问题读取"
+            questions = try await client.questions(runId: runId)
+            operation = "输出读取"
+            out = try await client.output(runId: runId, cursor: outputCursor)
+          }
+          guard self.isCurrent(generation, identity: identity) else { return }
           ledgerCursor = page.cursor
           for ev in page.events where ev.runId == runId {
             self.apply(event: ev, generation: generation, identity: identity)
           }
-          operation = "问题读取"
-          let questions = try await client.questions(runId: runId)
-          guard self.isCurrent(generation, identity: identity) else { return }
+          if let state { self.apply(runState: state, generation: generation, identity: identity) }
           if self.pendingQuestions.first?.questionId != questions.first?.questionId {
             self.pendingQuestionAnswerId = nil
             self.questionAnswering = false
             self.questionError = nil
           }
           self.pendingQuestions = questions
-          operation = "输出读取"
-          let out = try await client.output(runId: runId, cursor: outputCursor)
           outputCursor = out.cursor
           for chunk in out.chunks {
             self.append(chunk: chunk, generation: generation, identity: identity)
           }
-          await MainActor.run { [weak self] in
-            guard let self, self.isCurrent(generation, identity: identity) else { return }
-            self.recordSuccess()
-            self.observationInterrupted = false
+          self.recordSuccess()
+          if failures > 0 || self.observationReconnecting {
+            failures = 0
+            self.observationReconnecting = false
+            if self.submitError?.hasPrefix("连接中断") == true { self.submitError = nil }
           }
+          self.observationInterrupted = false
         } catch {
-          // An observation failure is not a Provider terminal state. Stop here
-          // and say exactly that, so a stale/unknown result cannot look settled.
-          await MainActor.run {
-            guard self.isCurrent(generation, identity: identity) else { return }
-            self.recordFailure(error, since: requestConnectionRevision)
+          guard self.isCurrent(generation, identity: identity), !Task.isCancelled else { return }
+          self.recordFailure(error, since: requestConnectionRevision)
+          failures += 1
+          // Host-rejected reads (revoked device, unknown run) cannot heal by
+          // retrying. Transport loss can: keep observing with capped backoff and
+          // say so; the Provider may still be running and nothing is assumed.
+          if error is G0Transport.RunError || failures >= Self.observationRetryLimit {
+            self.observationReconnecting = false
             self.observationInterrupted = true
             self.submitError = Self.observationFailure(error, lifecycle: self.lifecycle, operation: operation)
             self.pollTask = nil
+            return
           }
-          return
+          self.observationReconnecting = true
+          self.submitError = "连接中断，正在重连（第 \(failures) 次）…运行状态以 Mac 为准。"
+          let delay = min(8.0, 0.5 * pow(2.0, Double(failures - 1)))
+          try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+          continue
         }
         if self.isTerminal(generation: generation, identity: identity) {
           let drained = await self.drainOutput(client: client, runId: runId, cursor: outputCursor,
                                                generation: generation, identity: identity)
-          await MainActor.run {
-            guard self.isCurrent(generation, identity: identity) else { return }
-            if drained {
-              self.archiveActiveTurnIfNeeded()
-              self.clearRecoveryCheckpoint()
-              self.terminalDrainCompleted = true
-            }
-            self.pollTask = nil
+          guard self.isCurrent(generation, identity: identity) else { return }
+          if drained {
+            self.archiveActiveTurnIfNeeded()
+            self.clearRecoveryCheckpoint()
+            self.terminalDrainCompleted = true
           }
+          self.pollTask = nil
           return
         }
-        try? await Task.sleep(nanoseconds: 800_000_000)
+        if !useWatch { try? await Task.sleep(nanoseconds: 800_000_000) }
+      }
+    }
+  }
+
+  // Interrupt the current run's Provider on the Mac. The receipt only says the
+  // request was accepted; the lifecycle still comes from the real result.
+  func stopRun() {
+    guard let runId, !stopRequesting, let client = makeClient(),
+          let identity = activeSessionIdentity else { return }
+    stopRequesting = true
+    stopError = nil
+    let requestGeneration = generation
+    Task { [weak self] in
+      do {
+        let status = try await client.stop(runId: runId)
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
+          self.stopRequesting = false
+          self.stopRequested = status != "not_running"
+        }
+      } catch {
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: identity) else { return }
+          self.stopRequesting = false
+          self.stopError = "停止请求结果未知：\(Self.describe(error))。可再次点击停止。"
+        }
       }
     }
   }
@@ -1559,6 +1627,15 @@ final class RemoteRunStore: ObservableObject {
   func retryObservation() {
     guard observationInterrupted, let runId else { return }
     resumeObservation(runId: runId)
+  }
+
+  // App returned to the foreground: open the interactive tunnel early and, if a
+  // transport loss had stopped observation of an unfinished run, resume it.
+  // Resuming is a read; it never re-sends a prompt or answer.
+  func foregrounded() {
+    guard !historyOnly, let client = makeClient() else { return }
+    Task { try? await client.prewarm() }
+    if observationInterrupted, pollTask == nil, !terminalDrainCompleted, runId != nil { retryObservation() }
   }
 
   // Resume a known host run after a view rebuild. The caller supplies the
@@ -1645,7 +1722,9 @@ final class RemoteRunStore: ObservableObject {
     switch state {
     case "recorded": if lifecycle == .unknown || lifecycle == .submitting { lifecycle = .recorded }
     case "dispatched": if lifecycle != .running { lifecycle = .dispatched }
-    case "settled": lifecycle = .settled
+    // The host projects an interrupted Provider result as `settled`; keep the
+    // more specific cancelled lifecycle already read from the settled marker.
+    case "settled": if lifecycle != .cancelled { lifecycle = .settled }
     case "failed": lifecycle = .failed
     case "cancelled": lifecycle = .cancelled
     default: break
@@ -1661,7 +1740,9 @@ final class RemoteRunStore: ObservableObject {
       // Honest lifecycle markers only. 'started' promotes to running; 'result'
       // carries Provider-canonical usage we surface verbatim (never synthesized).
       if let detail = ev.detail, let marker = Self.marker(detail) {
-        if marker["event"] == "started", lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
+        // The Provider reporting its own session id is evidence it is executing.
+        if marker["event"] == "started" || marker["event"] == "session",
+           lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
         if marker["event"] == "result" { resultSummary = Self.resultLine(marker) }
         if marker["event"] == "settled", let status = marker["status"],
            status == "cancelled" || status == "interrupted" || status == "stopped" {
@@ -1686,6 +1767,8 @@ final class RemoteRunStore: ObservableObject {
     // observation recovery starts from cursor 0 and must not append old deltas
     // a second time before reaching the live tail.
     guard seenOutputSequences.insert(chunk.seq).inserted else { return }
+    // Real streamed Provider output proves execution has started.
+    if lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
     // Providers stream text/reasoning in small deltas. Keep those deltas as one
     // readable block instead of rendering one SwiftUI Text row per token.
     if let last = output.last, last.kind == chunk.kind,
@@ -1722,6 +1805,10 @@ final class RemoteRunStore: ObservableObject {
     submitError = nil
     liveExternalSessionId = nil
     observationInterrupted = false
+    observationReconnecting = false
+    stopRequesting = false
+    stopRequested = false
+    stopError = nil
     terminalDrainCompleted = false
     retryAvailable = false
     pendingQuestions = []
@@ -1772,7 +1859,7 @@ final class RemoteRunStore: ObservableObject {
     lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
     runId = nil; submitError = nil; truncated = false; resultSummary = nil
     liveExternalSessionId = nil; activeSessionIdentity = nil
-    observationInterrupted = false; terminalDrainCompleted = false; retryAvailable = false
+    observationInterrupted = false; observationReconnecting = false; stopRequesting = false; stopRequested = false; stopError = nil; terminalDrainCompleted = false; retryAvailable = false
     pendingQuestions = []; pendingQuestionAnswerId = nil; questionAnswering = false; questionError = nil
     completedLiveTurns = [:]
     archivedActiveTurn = false
@@ -2316,8 +2403,17 @@ final class RemoteRunStore: ObservableObject {
     var parts: [String] = []
     if let ti = marker["tokensIn"] { parts.append("输入 \(ti)") }
     if let to = marker["tokensOut"] { parts.append("输出 \(to)") }
-    if let cost = marker["costUsd"] { parts.append("$\(cost)") }
+    if let cost = marker["costUsd"] { parts.append(Self.costLabel(cost)) }
     return parts.isEmpty ? "主机报告完成（未提供用量）" : parts.joined(separator: " · ")
+  }
+
+  // Provider cost is a binary float (e.g. 0.014948799999999998). Show four
+  // significant digits; an unparseable value is shown verbatim, not as 0.
+  static func costLabel(_ raw: String) -> String {
+    guard let value = Double(raw), value.isFinite, value >= 0 else { return "$\(raw)" }
+    if value == 0 { return "$0" }
+    if value >= 1 { return String(format: "$%.2f", value) }
+    return "$" + String(format: "%.4g", value)
   }
 
   var terminalLifecycleKnown: Bool {

@@ -65,6 +65,10 @@ export interface SessionLedgerDependencies {
   maxRuns?: number
   maxEvents?: number
   pageSize?: number
+  // Called after an event is durably appended and applied. Live observers use it
+  // only as a wake-up signal and still read through since(); it never carries
+  // lifecycle authority of its own.
+  onEvent?: (event: LedgerEvent) => void
 }
 
 export interface RecordIntentInput {
@@ -122,6 +126,7 @@ export class SessionLedger {
   #maxRuns: number
   #maxEvents: number
   #pageSize: number
+  #onEvent?: (event: LedgerEvent) => void
   #runs = new Map<string, RunEntry>()
   #byIntent = new Map<string, string>()
   #events: LedgerEvent[] = []
@@ -135,6 +140,7 @@ export class SessionLedger {
     this.#maxRuns = deps.maxRuns ?? DEFAULT_MAX_RUNS
     this.#maxEvents = deps.maxEvents ?? DEFAULT_MAX_EVENTS
     this.#pageSize = deps.pageSize ?? DEFAULT_PAGE
+    this.#onEvent = deps.onEvent
     this.#recover()
   }
 
@@ -275,6 +281,7 @@ export class SessionLedger {
     this.#lastSeq = full.seq
     this.#events.push(full)
     this.#refreshMinCursor()
+    this.#onEvent?.(full)
     return full
   }
 

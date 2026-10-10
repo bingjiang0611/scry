@@ -10,9 +10,13 @@ import type { HostController } from './host-controller'
 // (socket.getPeerCertificate().raw), never from anything in the request body -
 // the same invariant proven by experiments/remote-g0/g1-smoke, now in src/main.
 //
-// One line-delimited JSON request/response per connection. This module does no
-// authorization itself; it extracts the verified fingerprint and delegates to
-// HostController, which fails closed for any non-authorized device.
+// Line-delimited JSON, one outstanding request at a time. A request without
+// `keepAlive: true` is a one-shot exchange and the connection ends after its
+// reply. A device may opt a connection into reuse: every following request must
+// also opt in, and every reply then starts with `{"keepAlive":true,` so a client
+// can tell a reusable lane from an older one-shot host without guessing. Reuse
+// changes no authorization: each request re-derives nothing from the body and is
+// re-authorized by HostController against the verified peer fingerprint.
 
 export interface InnerMtlsHostOptions {
   controller: HostController
@@ -83,37 +87,34 @@ export class InnerMtlsHost {
     armIdleTimeout()
     let buffer = Buffer.alloc(0)
     let busy = false
-    let historyOnly = false
+    let kept = false
     socket.on('data', (bytes: Buffer) => {
       if (busy || Date.now() >= certificateExpiresAt || buffer.length + bytes.length > this.#maxFrame) { socket.destroy(); return }
       buffer = Buffer.concat([buffer, bytes])
       const end = buffer.indexOf(10)
       if (end < 0) return
-      // One outstanding request, never pipelined commands. Only this explicit
-      // read lane can reuse TLS; every request still checks the device grant.
+      // One outstanding request, never pipelined commands; every request still
+      // checks the device grant inside HostController.
       if (end !== buffer.length - 1) { socket.destroy(); return }
       const frame = buffer.subarray(0, end)
       buffer = Buffer.alloc(0)
       let keepAlive = false
       try {
-        const request = JSON.parse(frame.toString('utf8')) as { op?: string; keepAlive?: boolean }
-        keepAlive = request.keepAlive === true && [
-          'historyPreview', 'historyPage', 'historyVersion', 'historyTurnsPage', 'sessionsPage', 'directoriesPage',
-          'projects', 'providers', 'commands'
-        ].includes(request.op ?? '')
+        keepAlive = (JSON.parse(frame.toString('utf8')) as { keepAlive?: unknown }).keepAlive === true
       } catch { /* dispatch reports malformed JSON */ }
-      if (historyOnly && !keepAlive) { socket.end(JSON.stringify({ error: 'history_connection_read_only' }) + '\n'); return }
-      historyOnly ||= keepAlive
+      if (kept && !keepAlive) { socket.end(JSON.stringify({ error: 'keep_alive_required' }) + '\n'); return }
+      kept ||= keepAlive
       busy = true
       socket.setTimeout(0)
       void this.#dispatch(controller, fingerprint, frame)
         .then((res) => {
           busy = false
-          const reply = JSON.stringify(res) + '\n'
           if (keepAlive) {
+            // keepAlive must be the first key: clients check this exact prefix.
+            const reply = JSON.stringify({ keepAlive: true, ...(res as object) }) + '\n'
             socket.write(reply)
             armIdleTimeout()
-          } else socket.end(reply)
+          } else socket.end(JSON.stringify(res) + '\n')
         })
         .catch(() => socket.destroy())
     })
@@ -121,7 +122,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -132,6 +133,17 @@ export class InnerMtlsHost {
       if (request.op === 'poll') {
         if (!Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }
         return { poll: controller.poll(fingerprint, { cursor: request.cursor as number }) }
+      }
+      if (request.op === 'watch') {
+        if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor) || !Number.isSafeInteger(request.outputCursor) ||
+            !Number.isSafeInteger(request.waitMs)) return { error: 'invalid_request' }
+        return { watch: await controller.watchRun(fingerprint, {
+          runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number
+        }) }
+      }
+      if (request.op === 'stop') {
+        if (typeof request.runId !== 'string') return { error: 'invalid_request' }
+        return { stop: controller.stopRun(fingerprint, { runId: request.runId }) }
       }
       if (request.op === 'runState') {
         if (typeof request.runId !== 'string') return { error: 'invalid_request' }

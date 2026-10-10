@@ -182,6 +182,27 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       .rejects.toThrow('provider_run_failed: boom detail')
   })
 
+  it('forwards a device stop to the Provider interrupt and settles from the real result', async () => {
+    let interrupted = 0
+    let finish: ((value: { status: 'interrupted' }) => void) | undefined
+    const run = (_providerId: string, _request: ProviderRunRequest): ProviderRunHandle => ({
+      promise: new Promise((resolve) => { finish = resolve }),
+      interrupt: () => { interrupted++; finish?.({ status: 'interrupted' }) },
+      forceKill: () => {}, forceKillScope: 'run_scoped', getExternalSessionId: () => undefined
+    })
+    const progress: string[] = []
+    const stop = new AbortController()
+    const pending = createRemoteRunBinding({ run })({
+      runId: 'ledger-run', routing: { cwd: '/p', providerId: 'claude', prompt: 'go' },
+      progress: (detail) => { if (detail) progress.push(detail) }, output: () => {}, stopSignal: stop.signal
+    })
+    expect(interrupted).toBe(0)
+    stop.abort()
+    await pending
+    expect(interrupted).toBe(1)
+    expect(JSON.parse(progress.at(-1)!)).toEqual({ event: 'settled', status: 'interrupted' })
+  })
+
   it('fails closed on an empty prompt without ever invoking the provider', async () => {
     const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
     const start = createRemoteRunBinding({ run })

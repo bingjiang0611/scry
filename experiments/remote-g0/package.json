@@ -13,7 +13,7 @@
     "smoke:g1": "node --import ./ts-relative-resolve.mjs g1-smoke.mjs",
     "smoke:relay": "node --import ./ts-relative-resolve.mjs relay-e2e.mjs",
     "smoke:relay-pair": "node --import ./ts-relative-resolve.mjs relay-pair-smoke.mjs",
-    "smoke:relay-run": "node --import ./ts-relative-resolve.mjs relay-run-smoke.mjs",
+    "smoke:relay-run": "swift build --package-path swift && node --experimental-transform-types --import ./ts-relative-resolve.mjs relay-run-smoke.mjs",
     "smoke:cf": "node cf-relay-smoke.mjs",
     "smoke:cf-host": "node --import ./ts-relative-resolve.mjs cf-relay-host-smoke.mjs",
     "smoke:cf-pair": "node --import ./ts-relative-resolve.mjs cf-relay-pair-smoke.mjs"

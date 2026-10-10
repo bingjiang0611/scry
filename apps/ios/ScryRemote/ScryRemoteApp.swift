@@ -27,6 +27,7 @@ struct ScryRemoteApp: App {
 struct RootView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @Environment(\.scenePhase) private var scenePhase
   @State private var showQuestion = false
 
   var body: some View {
@@ -92,6 +93,15 @@ struct RootView: View {
     .onChange(of: run.liveExternalSessionId) {
       if let external = run.liveExternalSessionId, let identity = run.activeSessionIdentity {
         model.bindDraft(externalSessionId: external, to: identity)
+      }
+    }
+    // iOS suspends sockets in the background; drop tunnels explicitly so the
+    // next request opens a fresh one instead of waiting on a dead connection.
+    .onChange(of: scenePhase) { _, phase in
+      switch phase {
+      case .background: Task { await RemoteSessionRegistry.shared.resetAll() }
+      case .active: if model.canShowWorkspace { run.foregrounded() }
+      default: break
       }
     }
     .onChange(of: model.canShowWorkspace) { paired in

@@ -165,6 +165,8 @@ struct HomeView: View {
       Spacer()
       Button {
         guard !run.hasUnresolvedRun else { showActiveRun = true; return }
+        // A finished run's state (including its error) belongs to that session.
+        _ = run.resetRun()
         if case let .loaded(projects) = run.projects, let project = projects.first(where: { $0.path == cwd }) {
           run.chooseProject(project)
         }
@@ -203,7 +205,9 @@ struct HomeView: View {
         if session.isActive == true {
           Text("运行中").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.blue)
         } else if !openable {
-          Text("准备中").font(.system(size: 10)).foregroundStyle(Palette.amber)
+          // No Provider session id and not running on the Mac: nothing to open.
+          // It may have failed before starting; "preparing" would be a guess.
+          Text("未建立会话").font(.system(size: 10)).foregroundStyle(Palette.muted)
         }
       }
       .padding(.leading, indent).padding(.vertical, showsMetadata ? 12 : 13)
@@ -222,6 +226,7 @@ struct HomeView: View {
       .padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
       CircleButton(symbol: Symbol.plus, label: "新任务", filled: true, disabled: !run.hasConnection) {
         guard !run.hasUnresolvedRun else { showActiveRun = true; return }
+        _ = run.resetRun()
         model.route = .newSession
       }
     }

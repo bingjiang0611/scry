@@ -13,13 +13,14 @@ import RemoteTransport
 private struct HistoryChunkView: View {
   let kind: String
   let text: String
+  var result: String?
   @State private var blocks: [ConversationMarkdownBlock]?
   @State private var parsedSource: String?
 
   @ViewBuilder var body: some View {
     switch kind {
     case "reasoning", "tool", "tool_result", "truncated":
-      ConversationChunk(kind: kind, text: text)
+      ConversationChunk(kind: kind, text: text, result: result)
     default:
       Group {
         if let blocks, parsedSource == text {
@@ -52,8 +53,8 @@ private struct HistoryTurnView: View {
             .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
       }
-      ForEach(turn.items.indices, id: \.self) { index in
-        HistoryChunkView(kind: turn.items[index].kind, text: turn.items[index].text)
+      ForEach(ConversationEntry.group(turn.items, id: { index, _ in index }, kind: \.kind, text: \.text)) { entry in
+        HistoryChunkView(kind: entry.kind, text: entry.text, result: entry.result)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -120,7 +121,22 @@ struct SessionTranscriptView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      if let session { SessionRunStatusView(session: session) }
+      if let session {
+        if run.activeSessionIdentity == sessionIdentity, run.canStop {
+          // This device's own live run. Remote runs are not in the Mac
+          // RunRegistry, so the host status read would say "not observed".
+          Label(run.observationReconnecting ? "连接中断，正在重连 · 运行状态以 Mac 为准"
+                  : !run.pendingQuestions.isEmpty ? "等待你的决定"
+                  : run.lifecycle == .running ? "运行中" : "主机已派发",
+                systemImage: run.observationReconnecting ? "wifi.exclamationmark" : "play.circle.fill")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(run.observationReconnecting ? Palette.muted : Palette.blue)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 20)
+            .accessibilityIdentifier("session-runtime-status")
+        } else {
+          SessionRunStatusView(session: session)
+        }
+      }
       if readOnly {
         Notice(text: "只读历史浏览，不改变旧任务与草稿；请返回恢复任务核对结果后再续聊。", warning: true)
         Button("返回恢复任务") { model.route = .chat }
@@ -328,7 +344,9 @@ struct SessionTranscriptView: View {
         Text(turn.lifecycle == .settled ? "已完成" : "运行结束：\(turn.lifecycle.rawValue)")
           .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
       }
-      ForEach(turn.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
+      ForEach(ConversationEntry.group(turn.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+      }
       if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -345,7 +363,9 @@ struct SessionTranscriptView: View {
       if run.output.isEmpty {
         Text(placeholderForState).font(.system(size: 15)).foregroundStyle(Palette.muted)
       } else {
-        ForEach(run.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
+        ForEach(ConversationEntry.group(run.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+      }
       }
       if let result = run.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
     }
@@ -372,14 +392,21 @@ struct SessionTranscriptView: View {
                           run.loadCommands(providerId: s.providerId, cwd: s.cwd,
                                            agentProfileId: s.agentProfileId, force: true)
                         }
-                      }) {
+                      },
+                      onStop: run.canStop ? { run.stopRun() } : nil,
+                      stopping: run.stopRequesting) {
         guard let s = session else { return }
         if run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
                              cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue)) {
           composer.wrappedValue = .init()
         }
       }
-      if runBusy {
+      if let stopError = run.stopError {
+        Text(stopError).font(.system(size: 11)).foregroundStyle(Palette.negative).padding(.horizontal, 5)
+      } else if run.stopRequested && run.canStop {
+        Text("已请求停止，等待 Mac 上的 Agent 实际结束…")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
+      } else if runBusy {
         Text("可先写下一条消息；本轮结果同步完成后再发送。")
           .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
       } else if !controlsMatch {

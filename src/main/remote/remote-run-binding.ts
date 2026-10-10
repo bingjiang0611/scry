@@ -65,6 +65,9 @@ export interface RemoteRunInput {
   // is what lets the device render the actual output, not just the lifecycle.
   output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
   requestUserInput?(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
+  // Device stop request. Forwarded to the Provider handle's own interrupt; the
+  // run still settles from the Provider result (e.g. status `interrupted`).
+  stopSignal?: AbortSignal
 }
 
 const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
@@ -72,7 +75,7 @@ const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (input: RemoteRunInput) => Promise<void> {
   let seq = 0
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
-  return async function startRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput }: RemoteRunInput): Promise<void> {
+  return async function startRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal }: RemoteRunInput): Promise<void> {
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
     // A run with no prompt is not a Provider run; fail closed and truthfully
     // rather than launch an empty turn.
@@ -202,7 +205,10 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         return response
       }
     })
-    const result = await handle.promise
+    const interrupt = (): void => { handle.interrupt() }
+    if (stopSignal?.aborted) interrupt()
+    else stopSignal?.addEventListener('abort', interrupt, { once: true })
+    const result = await handle.promise.finally(() => stopSignal?.removeEventListener('abort', interrupt))
     const status = result.status ?? 'completed'
     // Write the durable trace archive from the REAL events so the Mac can open
     // the transcript. Only when the Provider gave us its session id (the archive

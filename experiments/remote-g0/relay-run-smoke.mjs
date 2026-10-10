@@ -10,6 +10,7 @@ import { webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity.ts'
 import { createHostController } from '../../src/main/remote/host-controller-factory.ts'
+import { RunOutputFileStore } from '../../src/main/remote/run-output-file.ts'
 import { PairingTransport } from '../../src/main/remote/pairing-transport.ts'
 import { InnerMtlsHost } from '../../src/main/remote/inner-mtls-host.ts'
 import { RelayClient, ReverseTunnelTransport } from '../../src/main/remote/relay-client.ts'
@@ -54,15 +55,30 @@ try {
   // resolves (=> settled); the workspace authorizer fails closed for anything
   // else (=> failed) BEFORE this is reached. Zero token cost either way.
   const started = []
-  const binding = createHostController({
+  const binding = await createHostController({
     stateDirectory: hostDir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => {
       if (cwd === authorizedCwd) return cwd
       const error = new Error('invalid_target'); error.code = 'invalid_target'; throw error
     },
-    startRun: async ({ runId, routing, progress, output }) => {
+    startRun: async ({ runId, routing, progress, output, stopSignal }) => {
       started.push({ runId, cwd: routing.cwd })
+      if (routing.prompt === 'live-stop') {
+        // Hold a running stub until the device's stop request aborts it.
+        progress('smoke:ack')
+        output({ kind: 'output', text: 'waiting for stop' })
+        await new Promise((resolve) => stopSignal.addEventListener('abort', resolve, { once: true }))
+        throw Object.assign(new Error('interrupted'), { code: 'interrupted' })
+      }
+      if (routing.prompt === 'live-watch') {
+        // Real asynchronous progress: watch must wake per chunk, not on a timer.
+        for (const text of ['one', 'two', 'three']) {
+          await new Promise((resolve) => setTimeout(resolve, 300))
+          output({ kind: 'output', text })
+        }
+        return
+      }
       progress('smoke:ack')
       // Stream real output CONTENT on the separate channel (a Provider would
       // emit trace events here). Distinct from the opaque lifecycle marker above.
@@ -70,6 +86,7 @@ try {
       output({ kind: 'tool', text: 'Edit /w/file.ts' })
     },
     gate: new ProviderOperationGate(),
+    createOutputStore: (directory) => new RunOutputFileStore(directory),
     // Host-authorized project directories the device may target. In production
     // this is knownProjectDirectories(); here a fixed pair proves the wire.
     listProjects: () => [
@@ -183,6 +200,28 @@ try {
   const outputLines2 = (await runProbe(outputArgs2)).trim().split('\n')
   assert.ok(!outputLines2.some(l => l.startsWith('output output') || l.startsWith('output tool')), outputLines2.join('|'))
   cases.push({ name: 'Swift run client -> real streamed output content over granted-cert inner mTLS (cursor-based)', passed: true })
+
+  // 5. Persistent lanes: ONE RelaySession carries submit and every watch
+  //    long-poll. Watch wakes on each real output chunk (300 ms apart), so the
+  //    stream is not quantized to a poll interval, and the run settles.
+  const liveDetail = join(deviceDir, 'live-watch.json')
+  writeFileSync(liveDetail, JSON.stringify({ cwd: authorizedCwd, providerId: 'claude', prompt: 'live-watch' }))
+  const liveLines = (await runProbe(runArgs('live', liveDetail).concat('watch'))).trim().split('\n')
+  const liveText = liveLines.filter(l => l.startsWith('output output ')).map(l => l.slice('output output '.length))
+  assert.deepEqual(liveText, ['one', 'two', 'three'], liveLines.join('|'))
+  assert.ok(liveLines.some(l => l.startsWith('watch state=settled')), liveLines.join('|'))
+  const liveTotal = Number(liveLines.find(l => l.startsWith('total ms=')).slice('total ms='.length))
+  assert.ok(liveTotal < 5_000, `watch must wake on change, total=${liveTotal}`)
+  cases.push({ name: 'Swift RelaySession: submit + watch long-poll on persistent lanes stream each chunk and settle', passed: true, liveTotal, lines: liveLines })
+
+  // 6. Stop: the device's stop request reaches the running executor's abort
+  //    signal; the lifecycle settles from the executor's own result.
+  const stopDetail = join(deviceDir, 'live-stop.json')
+  writeFileSync(stopDetail, JSON.stringify({ cwd: authorizedCwd, providerId: 'claude', prompt: 'live-stop' }))
+  const stopLines = (await runProbe(runArgs('live', stopDetail).concat('stop'))).trim().split('\n')
+  assert.ok(stopLines.some(l => l.startsWith('stop requested ')), stopLines.join('|'))
+  assert.ok(stopLines.some(l => /^watch state=(failed|cancelled)/.test(l)), stopLines.join('|'))
+  cases.push({ name: 'Swift RelaySession: stop reaches the running executor and the run reaches a real terminal state', passed: true, lines: stopLines })
 
   console.log(JSON.stringify({ scope: 'REAL Swift iOS run client against production relay + InnerMtlsHost + HostController; synthetic confirmation, stub executor, no iPhone/human/Provider', cases }, null, 2))
 } finally {

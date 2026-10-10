@@ -30,7 +30,9 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Label(run.observationInterrupted ? (run.terminalLifecycleKnown ? "任务已结束 · 输出同步已中断" : "状态未知 · 同步已中断") : !run.pendingQuestions.isEmpty ? "等待你的决定" : stateLabel,
+      Label(run.observationInterrupted ? (run.terminalLifecycleKnown ? "任务已结束 · 输出同步已中断" : "状态未知 · 同步已中断")
+              : run.observationReconnecting ? "连接中断，正在重连 · 运行状态以 Mac 为准"
+              : !run.pendingQuestions.isEmpty ? "等待你的决定" : stateLabel,
             systemImage: run.lifecycle == .running && !run.observationInterrupted ? "play.circle.fill" : "info.circle")
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(run.observationInterrupted ? Palette.muted : stateColor)
@@ -122,7 +124,9 @@ struct ChatView: View {
         Text(turn.lifecycle == .settled ? "已完成" : "运行结束：\(turn.lifecycle.rawValue)")
           .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
       }
-      ForEach(turn.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
+      ForEach(ConversationEntry.group(turn.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+      }
       if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -144,7 +148,9 @@ struct ChatView: View {
         Text(placeholderForState)
           .font(.system(size: 15)).foregroundStyle(Palette.muted)
       } else {
-        ForEach(run.output) { line in ConversationChunk(kind: line.kind, text: line.text) }
+        ForEach(ConversationEntry.group(run.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+      }
       }
 
       if let result = run.resultSummary {
@@ -179,7 +185,9 @@ struct ChatView: View {
                           run.loadCommands(providerId: providerId, cwd: cwd,
                                            agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
-                      }) {
+                      },
+                      onStop: run.canStop ? { run.stopRun() } : nil,
+                      stopping: run.stopRequesting) {
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
         let currentDraft = composer
@@ -192,7 +200,12 @@ struct ChatView: View {
         }
         if accepted { currentDraft.wrappedValue = .init() }
       }
-      if runBusy {
+      if let stopError = run.stopError {
+        Text(stopError).font(.system(size: 11)).foregroundStyle(Palette.negative).padding(.horizontal, 5)
+      } else if run.stopRequested && run.canStop {
+        Text("已请求停止，等待 Mac 上的 Agent 实际结束…")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
+      } else if runBusy {
         Text("可先写下一条消息；本轮结果同步完成后再发送。")
           .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
       } else if run.chosen == nil || run.chosenProvider == nil {
@@ -283,7 +296,9 @@ struct RemoteQuestionSheet: View {
             .font(.headline)
           ForEach(Array(request.questions.enumerated()), id: \.offset) { _, question in
             VStack(alignment: .leading, spacing: 10) {
-              Text(question.header).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted)
+              if !question.header.isEmpty && !question.question.contains(question.header) {
+                Text(question.header).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted)
+              }
               Text(question.question).font(.body.weight(.medium))
               if question.inputMode != nil {
                 if question.inputMode == "multiline" {
@@ -301,27 +316,27 @@ struct RemoteQuestionSheet: View {
                     if selected.contains(option.label) { selected.remove(option.label) } else { selected.insert(option.label) }
                     selections[question.question] = selected
                   } label: {
-                    HStack(alignment: .top) {
-                      Image(systemName: (selections[question.question] ?? []).contains(option.label) ? "checkmark.square.fill" : "square")
-                      optionLabel(option)
-                    }
+                    optionRow(option, selected: (selections[question.question] ?? []).contains(option.label),
+                              symbol: (selections[question.question] ?? []).contains(option.label) ? "checkmark.square.fill" : "square")
                   }
                   .buttonStyle(.plain)
                 }
               } else {
-                Picker("请选择", selection: textBinding(question.question)) {
-                  Text("请选择").tag("")
-                  ForEach(question.options, id: \.label) { option in Text(option.label).tag(option.label) }
-                }
-                .pickerStyle(.menu)
-                if let selected = question.options.first(where: { $0.label == answers[question.question] }) {
-                  optionDetail(selected)
+                // Every option visible at once, one tap to choose (as on the Mac).
+                ForEach(question.options, id: \.label) { option in
+                  Button { answers[question.question] = option.label } label: {
+                    optionRow(option, selected: answers[question.question] == option.label,
+                              symbol: answers[question.question] == option.label ? "largecircle.fill.circle" : "circle")
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityAddTraits(answers[question.question] == option.label ? .isSelected : [])
                 }
               }
             }
           }
           if let error { Text(error).font(.caption).foregroundStyle(Palette.negative) }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
       }
       .navigationTitle("需要你的决定")
@@ -344,13 +359,25 @@ struct RemoteQuestionSheet: View {
   private func optionLabel(_ option: G0Transport.RunQuestionOption) -> some View {
     VStack(alignment: .leading, spacing: 3) {
       Text(option.label).foregroundStyle(Palette.ink)
-      Text(option.description).font(.caption).foregroundStyle(Palette.muted)
+      if !option.description.isEmpty {
+        Text(option.description).font(.caption).foregroundStyle(Palette.muted)
+      }
       if let preview = option.preview { Text(preview).font(.caption.monospaced()).foregroundStyle(Palette.muted) }
     }
   }
 
-  @ViewBuilder private func optionDetail(_ option: G0Transport.RunQuestionOption) -> some View {
-    Text(option.description).font(.caption).foregroundStyle(Palette.muted)
-    if let preview = option.preview { Text(preview).font(.caption.monospaced()).foregroundStyle(Palette.muted) }
+  private func optionRow(_ option: G0Transport.RunQuestionOption, selected: Bool, symbol: String) -> some View {
+    HStack(alignment: .top, spacing: 12) {
+      Image(systemName: symbol).font(.system(size: 18))
+        .foregroundStyle(selected ? Palette.blue : Palette.muted).padding(.top, 1)
+      optionLabel(option)
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 14).padding(.vertical, 12)
+    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+      .stroke(selected ? Palette.blue : Palette.line, lineWidth: selected ? 1.5 : 0.5))
+    .contentShape(Rectangle())
   }
 }

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Network
 import RemoteTransport
 
 // Device-side RUN client over the POST-PAIRING channel: strict inner TLS 1.3
@@ -69,7 +70,29 @@ struct RemoteRunClient {
 
   private func endpoint() -> G0Transport.RelayEndpoint {
     let outerTLS: G0Transport.RelayEndpoint.OuterTLS = connection.relayTLS == "system" ? .system : .plaintext
-    return G0Transport.RelayEndpoint(host: connection.relayHost, port: connection.relayPort, hostId: connection.hostId, outerTLS: outerTLS)
+    let base = G0Transport.RelayEndpoint(host: connection.relayHost, port: connection.relayPort, hostId: connection.hostId, outerTLS: outerTLS)
+    let session = RemoteSessionRegistry.shared.session(for: connection, keychainService: keychain.service) { [self] in
+      try identity()
+    } endpoint: { base }
+    return G0Transport.RelayEndpoint(host: base.host, port: base.port, hostId: base.hostId, outerTLS: outerTLS, session: session)
+  }
+
+  // Opens the interactive lane before the user acts (app foreground). Failure
+  // is returned, not shown as offline: only a real exchange proves reachability.
+  func prewarm() async throws {
+    try await endpoint().session?.prewarm()
+  }
+
+  // Long-poll one run: returns as soon as the host has new ledger events,
+  // output or a terminal lifecycle after the cursors, or after `waitMs`.
+  func watch(runId: String, cursor: Int, outputCursor: Int, waitMs: Int = 15_000) async throws -> G0Transport.RunWatchOutcome {
+    try await G0Transport.relayRunWatch(endpoint: endpoint(), identity: try identity(), runId: runId,
+                                        cursor: cursor, outputCursor: outputCursor, waitMs: waitMs)
+  }
+
+  // Ask the host to interrupt this run's Provider. A receipt, not a lifecycle.
+  func stop(runId: String) async throws -> String {
+    try await G0Transport.relayRunStop(endpoint: endpoint(), identity: try identity(), runId: runId)
   }
 
   // Submit a durable run intent. Returns the host-assigned runId + whether it was
@@ -289,5 +312,54 @@ struct RemoteRunClient {
   // cost still come only from the ledger `result` event, never from here.
   func output(runId: String, cursor: Int) async throws -> G0Transport.RunOutputPage {
     try await G0Transport.relayRunOutput(endpoint: endpoint(), identity: try identity(), runId: runId, cursor: cursor)
+  }
+}
+
+// One persistent RelaySession per paired connection + credential store, shared
+// by every RemoteRunClient value. A different descriptor (re-pair, clear) gets a
+// fresh session; the old one's tunnels are closed.
+final class RemoteSessionRegistry: @unchecked Sendable {
+  static let shared = RemoteSessionRegistry()
+  private let lock = NSLock()
+  private var key: String?
+  private var current: RelaySession?
+  private let pathMonitor = NWPathMonitor()
+  private var lastPath: String?
+
+  private init() {
+    // Wi-Fi <-> cellular leaves old sockets silently dead; a lane would wait for
+    // its response deadline. Reset on a real interface change instead.
+    pathMonitor.pathUpdateHandler = { [weak self] path in
+      guard let self else { return }
+      let signature = "\(path.status)|" + path.availableInterfaces.map { "\($0.type)\($0.name)" }.joined(separator: ",")
+      let changed = self.lock.withLock {
+        defer { self.lastPath = signature }
+        return self.lastPath != nil && self.lastPath != signature
+      }
+      if changed { Task { await self.resetAll() } }
+    }
+    pathMonitor.start(queue: DispatchQueue(label: "com.scry.remote.path"))
+  }
+
+  func session(for connection: RemoteConnection, keychainService: String,
+               identity: @escaping @Sendable () throws -> G0ProbeIdentity,
+               endpoint: () -> G0Transport.RelayEndpoint) -> RelaySession {
+    let wanted = [connection.relayHost, String(connection.relayPort), connection.relayTLS, connection.hostId,
+                  connection.deviceId, keychainService, connection.anchorPEM].joined(separator: "\u{1f}")
+    return lock.withLock {
+      if key == wanted, let current { return current }
+      let replaced = current
+      let session = RelaySession(endpoint: endpoint(), identity: identity)
+      key = wanted
+      current = session
+      if let replaced { Task { await replaced.reset() } }
+      return session
+    }
+  }
+
+  // Background / network path change: drop tunnels; the next request reopens.
+  func resetAll() async {
+    let session = lock.withLock { current }
+    await session?.reset()
   }
 }
