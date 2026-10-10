@@ -27,6 +27,7 @@ node scripts/performance-animation.mjs
 动画测量使用 GPU-enabled 可见隔离窗口，按 ABBA 顺序比较旧的 8 个连续动画与新的 1 个分步动画。每段 3 秒；本机 Electron 42.10.1 的一次测量 GPU 单核 CPU 均值约 5.7% → 2.3%，renderer 约 3.4% → 1.5%。这些是小场景测量，不代表完整 Scry 的 CPU 降幅，也不证明无内存泄漏。
 
 新增索引回归在旧实现上因重复扫描失败；新增动画回归在旧 CSS 上因 8 个后台动画仍运行失败。UI 开发检查还发现并修复了可变高度锚点和 focusability 的回归。早期组合 focused 检查曾超时，未得到完整结果；随后使用保存完整日志的单 worker 分组验证。隔离 fixture 必须实际获得焦点，隐藏窗口不能单独证明原生 blur/焦点路径。
+安装门禁另捕获 focus/blur 在 DOM commit 前到达的竞态；回归在旧实现上失败，修复后通过。释放空 shell 时仍取消排队的 materialization，不因尚未更新的 DOM 标记漏掉 blur，也不额外扫描空 shell 正文。
 
 旧 renderer gate 的模型 fixture 曾依赖直接共享并原地修改 catalog，且 start 不发布生产已有的 provisional session 事件；memo 后暴露了这个问题。fixture 现在使用平台 `structuredClone` 模拟 IPC snapshot，并发布真实 start 的 session lifecycle；原有模型/会话断言和超时均保留。分页提示断言改为“时间线已加载”范围，同时保留总数、未丢弃声明与旧页入口，避免把数据范围误称为动态 DOM 挂载量。
 

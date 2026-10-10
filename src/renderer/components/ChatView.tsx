@@ -167,7 +167,13 @@ const TranscriptTurn = memo(function TranscriptTurn({
     const element = shell.current!
     let intersecting = initiallyVisible
     const release = (focusTarget: Node | null) => {
-      if (intersecting || element.dataset.virtualized === 'true') return
+      if (intersecting) return
+      if (element.dataset.virtualized === 'true') {
+        // Focus can queue materialization before DOM commit; blur must cancel it.
+        // Keep the fast path: an empty shell has no expanded content to inspect.
+        setVisible(element.contains(focusTarget))
+        return
+      }
       // A collapsed caret is not a retained text selection. Recheck on blur and
       // selection release, otherwise previously focused rows accumulate forever.
       const selection = window.getSelection()

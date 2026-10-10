@@ -98,6 +98,15 @@ async function exercise(webContents) {
   await wait(`document.querySelector('[data-run-id="turn-10"]').dataset.virtualized === 'true'`)
   const retainedHeight = await read(`document.querySelector('[data-run-id="turn-10"]').getBoundingClientRect().height`)
   if (Math.abs(retainedHeight - measuredHeight) > 1) throw new Error(`Eviction changed shell height: ${measuredHeight} -> ${retainedHeight}`)
+  // A focus/blur pair can arrive before React commits materialization. The DOM
+  // marker must not let a queued focus update strand offscreen content.
+  await wait(`document.querySelector('[data-run-id="turn-0"]').dataset.virtualized === 'true'`)
+  await read(`(async () => {
+    document.querySelector('[data-run-id="turn-0"]').focus({ preventScroll: true });
+    document.querySelector('#stream').focus({ preventScroll: true });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  })()`)
+  await wait(`document.querySelector('[data-run-id="turn-0"]').dataset.virtualized === 'true'`)
   // Keyboard focus on a retained shell makes its full interactive content available.
   await read(`document.querySelector('[data-run-id="turn-0"]').focus()`)
   await wait(`document.querySelector('[data-run-id="turn-0"]:not([data-virtualized]) .turn-assistant') != null`)
@@ -133,7 +142,7 @@ async function exercise(webContents) {
     latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners,
     viewport, historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
     viewportAnchorPreserved: true, selectedEvidenceRetained: true, shellHeightPreserved: true,
-    keyboardFocusRestoresContent: true, blurredContentReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }
+    keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }
 }
 
 try {
