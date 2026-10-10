@@ -55,6 +55,7 @@ export const Sidebar = memo(function Sidebar({
   onUndoArchive,
   onAnalytics,
   analyticsActive = false,
+  onLlmPerformance,
   onSkills,
   onMcp,
   catalogHealth,
@@ -85,6 +86,7 @@ export const Sidebar = memo(function Sidebar({
   onUndoArchive?: () => void
   onAnalytics?: () => void
   analyticsActive?: boolean
+  onLlmPerformance?: () => void
   onSkills?: () => void
   onMcp?: () => void
   catalogHealth?: CatalogHealth
@@ -175,7 +177,7 @@ export const Sidebar = memo(function Sidebar({
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onAnalytics || onSkills || onMcp) && (
+      {(onAnalytics || onLlmPerformance || onSkills || onMcp) && (
         <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
             <button
@@ -185,6 +187,11 @@ export const Sidebar = memo(function Sidebar({
               onClick={onAnalytics}
             >
               <Icon name="chart" /> 分析
+            </button>
+          )}
+          {onLlmPerformance && (
+            <button type="button" className="sb-navitem" onClick={onLlmPerformance} title="LLM 性能" aria-haspopup="dialog">
+              <Icon name="chart" /> LLM 性能
             </button>
           )}
           {onSkills && (

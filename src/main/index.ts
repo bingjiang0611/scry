@@ -60,7 +60,9 @@ import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendLlmPerformance, appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { LlmPerformanceObserver } from './llm-performance'
 import { readLlmPerformanceHistory } from './llm-performance-history'
-import { LlmPerformanceSampler } from '../shared/llm-performance'
+import { LlmPerformanceSampling } from './llm-performance-sampling'
+import { LlmNetworkConfigurationCache } from './llm-network-configuration'
+import type { LlmNetworkConfiguration } from '../shared/llm-performance'
 import { stopObservedBackgroundTask } from './background-task-control'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isRendererPerformanceSample } from '../shared/performance'
@@ -2217,7 +2219,9 @@ interface RunControl {
 
 // 每个 run 独立持有 Provider handle、问题与 diff 生命周期；focused 只表示当前 UI 正在看谁。
 const runs = new RunRegistry<ActiveRun, RunControl>()
-const llmPerformanceSampler = new LlmPerformanceSampler()
+const llmPerformanceSampler = new LlmPerformanceSampling(() => runs.activeStates())
+const llmNetworkConfiguration = new LlmNetworkConfigurationCache()
+let latestLlmNetworkConfiguration: LlmNetworkConfiguration | undefined
 // 停止是一个生命周期而不是一次调用：它把真实进度（已请求/已强杀/未确认终止）发给 renderer，
 // 并把同一份快照挂在 ActiveRun 上，让重挂的 renderer 也能拿到诚实状态。
 const runStopLifecycle = new RunStopLifecycle({
@@ -2707,6 +2711,13 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const runId = `run-${Date.now().toString(36)}-${runSeq++}`
   const finishTurnWallTiming = createTurnWallTimer(runId)
   const llmPerformance = new LlmPerformanceObserver(request.networkLabel)
+  // Start collection without delaying Provider startup. Freeze this run's configuration evidence.
+  let runNetworkConfiguration: LlmNetworkConfiguration | undefined
+  const networkConfiguration = llmNetworkConfiguration.read().then(config => {
+    runNetworkConfiguration = config
+    latestLlmNetworkConfiguration = config
+    return config
+  })
   const hookConfig =
     providerId === 'claude' && cwd
       ? loadClaudeHookConfig(cwd, homeDir)
@@ -2778,9 +2789,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const emit = (rawEvent: TraceEvent): void => {
     const decorated = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
     const ev = !decorated.agentId && !decorated.parentToolUseId
-      ? { ...decorated, llmPerformance: llmPerformance.observe(decorated, runState.items) }
+      ? { ...decorated, llmPerformance: { ...llmPerformance.observe(decorated, runState.items), networkConfiguration: runNetworkConfiguration } }
       : decorated
     turnChangeJournal?.record(ev)
+    if (ev.llmPerformance) runState.llmPerformance = ev.llmPerformance
     if (ev.kind === 'harness' && ev.stage === 'result') {
       appendUsage(
         app.getPath('userData'),
@@ -2797,7 +2809,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     if (writeCompletions.observe(ev)) notifyDiffChange()
   }
   let performanceRecorded = false
-  const persistLlmPerformance = (failed: boolean, externalSessionId: string): void => {
+  const persistLlmPerformance = async (failed: boolean, externalSessionId: string): Promise<void> => {
     if (performanceRecorded) return
     performanceRecorded = true
     const performance = [...runState.items].reverse().find(event => event.stage === 'runtime:turn_wall')?.llmPerformance
@@ -2812,7 +2824,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         model,
         upstreamProvider: result?.modelUsage?.length === 1 ? result.modelUsage[0].upstreamProvider : result?.upstreamProvider,
         networkLabel: request.networkLabel ?? '', failed: failed || result?.isError === true,
-        performance
+        performance: { ...performance, networkConfiguration: await networkConfiguration }
       })
     } catch (error) {
       console.warn('[scry] LLM performance history write failed:', error)
@@ -3286,6 +3298,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   try {
     runs.register(runState, control)
+    llmPerformanceSampler.registryChanged()
   } catch (error) {
     try { cleanupProvisional() } catch { /* preserve the original registration error */ }
     deleteRunAttachments(app.getPath('userData'), runId)
@@ -3326,7 +3339,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const nativeSessionId = r.externalSessionId ?? observedSessionId ?? resume
       const storageSessionId = nativeSessionId ?? runId
       const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
-      persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
+      await persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
       const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
       const completionArchiveArgs: ArchiveTraceTurnArgs = {
         providerId,
@@ -3375,6 +3388,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       void mirrorSessionTranscript(providerId, cwd, nativeSessionId)
       const alreadyDone = runState.done
       runState.done = true
+      llmPerformanceSampler.registryChanged()
       await ingestion.liveIdle()
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
       const recordingPolicy = providerRecordingPolicy('completed', r.recordingFailure)
@@ -3484,7 +3498,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         console.warn('[scry] Provider session getter failed at terminal boundary:', runId, error)
       }
       const storageSessionId = nativeSessionId ?? runId
-      persistLlmPerformance(true, storageSessionId)
+      await persistLlmPerformance(true, storageSessionId)
       const runtimeErr = err instanceof AgentRuntimeError ? err : null
       const message = String(err?.message ?? err)
       const terminalReason = [...runState.items].reverse().find(
@@ -3571,6 +3585,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           }
         }
         runState.done = true
+        llmPerformanceSampler.registryChanged()
         if (!stopped) {
           runState.error = message
           runState.errorHint = hint
@@ -3723,6 +3738,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       runStopLifecycle.settle(runId)
       userQuestionBroker.cancelRun(runId)
       runs.remove(runId)
+      llmPerformanceSampler.registryChanged()
       resolveSettled?.()
     })
       startPerf.finish({ attachments: attachments.length })
@@ -3770,7 +3786,7 @@ handleTrusted('agent:answerQuestion', (event, response: unknown) => {
 // B2：sqlite 跨会话分析（工具频率 / 按目录花费），纯文件做不到的结构化查询
 handleTrusted('agent:stats', () => statsQuery())
 handleTrusted('agent:llmPerformanceHistory', () => readLlmPerformanceHistory(app.getPath('userData')))
-handleTrusted('agent:llmPerformanceSummary', () => llmPerformanceSampler.sample(runs.activeStates()))
+handleTrusted('agent:llmPerformanceSummary', () => ({ ...llmPerformanceSampler.read(), networkConfiguration: latestLlmNetworkConfiguration }))
 
 handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => {
   if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
@@ -4277,6 +4293,7 @@ let performanceResourceMonitor: PerformanceResourceMonitor | null = null
 
 app.whenReady().then(() => {
   if (!primaryInstance) return
+  void llmNetworkConfiguration.read().then(config => { latestLlmNetworkConfiguration = config })
   const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform })
   void warmShellEnv()
   // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，
@@ -4365,6 +4382,7 @@ app.on('before-quit', (event) => {
   }) ?? Promise.resolve()
   runStopLifecycle.close()
   traceOutput.close()
+  llmPerformanceSampler.stop()
   performanceResourceMonitor?.stop()
   performanceResourceMonitor = null
   sessionDiffBaselines.disposeAll()

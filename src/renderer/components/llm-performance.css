@@ -1,62 +1,42 @@
-/* Keep the existing chat flex row between the new strip and the composer. */
-.main-area:has(> .llm-performance) {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+.llm-performance-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: hidden;
 }
-.main-area:has(> .llm-performance) > .chat-body { grid-row: 3; }
-.main-area:has(> .llm-performance) > .runtime-composer { grid-row: 4; }
-
-.llm-performance {
-  grid-row: 2;
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
-  color: var(--fg);
+.llm-performance-modal .modal-head { min-height: 72px; padding: 14px 20px; }
+.llm-performance-modal .modal-x { margin-left: auto; }
+.llm-performance-eyebrow { display: block; color: var(--dim); font-size: 11px; margin-bottom: 2px; }
+.llm-performance-modal h2 { margin: 0; font-size: 19px; }
+.llm-performance-body { overflow: auto; padding: 20px; }
+.llm-performance-source { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+.llm-performance-source span, .llm-performance-chart-heading small, .llm-performance-history-head span { color: var(--dim); font-size: 12px; }
+.llm-performance-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.llm-performance-metric { min-width: 0; margin: 0; padding: 13px 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel2); }
+.llm-performance-metric dt { color: var(--dim); font-size: 12px; }
+.llm-performance-metric dd { margin: 8px 0 4px; font-size: 21px; font-variant-numeric: tabular-nums; }
+.llm-performance-metric small, .llm-performance-history-row small { color: var(--dim); font-size: 11px; }
+.llm-performance-chart-heading, .llm-performance-history-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin: 22px 0 8px; }
+.llm-performance-chart-wrap { position: relative; min-height: 145px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel2); }
+.llm-performance-chart { display: block; width: 100%; height: 145px; }
+.llm-performance-grid { stroke: var(--border); stroke-width: 1; }
+.llm-performance-line { fill: none; stroke: var(--accent); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; }
+.llm-performance-chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 12px; }
+.llm-performance-unavailable, .llm-performance-history-note { margin: 10px 0; color: var(--dim); font-size: 12px; line-height: 1.5; }
+.llm-performance-history-list { display: grid; gap: 8px; max-height: 280px; overflow: auto; }
+.llm-performance-history-row { display: grid; grid-template-columns: minmax(180px, 1.8fr) repeat(3, minmax(90px, 1fr)); gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px; }
+.llm-performance-history-row > div:not(:first-child) { text-align: right; }
+.llm-performance-history-row span, .llm-performance-history-row small { display: block; }
+.llm-performance-history-row span { color: var(--dim); }
+.llm-performance-history-row b { display: block; margin: 3px 0; font-variant-numeric: tabular-nums; font-weight: 500; }
+.llm-performance-definition { margin-top: 18px; color: var(--dim); font-size: 12px; line-height: 1.6; }
+.llm-performance-definition summary { cursor: pointer; color: var(--fg); }
+.llm-performance-definition p { margin: 8px 0 0; }
+@media (max-width: 640px) {
+  .llm-performance-metrics { grid-template-columns: 1fr; }
+  .llm-performance-history-row { grid-template-columns: 1fr 1fr; }
+  .llm-performance-history-row > div:first-child { grid-column: 1 / -1; }
 }
 
-.llm-performance-toggle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  width: 100%;
-  padding: 10px 20px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
-.llm-performance-toggle:hover { background: var(--surface-hover); }
-.llm-performance-heading { font-weight: 600; }
-.llm-performance-status { color: var(--dim); }
-.llm-performance-readout { color: var(--dim); font-variant-numeric: tabular-nums; }
-.llm-performance-readout b { display: inline-block; min-width: 66px; color: var(--fg); font-weight: 500; }
-.llm-performance-action { display: flex; align-items: center; gap: 4px; margin-left: auto; color: var(--dim); }
-
-.llm-performance-details { max-height: 42vh; overflow: auto; padding: 16px 20px; background: var(--panel); }
-.llm-performance-controls, .llm-performance-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.llm-performance-controls label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.llm-performance-controls input, .llm-performance-filters select {
-  max-width: 240px;
-  padding: 6px 8px;
-  border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
-  background: var(--panel2);
-  color: var(--fg);
-  font: inherit;
-}
-.llm-performance-current { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-top: 14px; font-variant-numeric: tabular-nums; }
-.llm-performance-current b { font-weight: 500; overflow-wrap: anywhere; }
-.llm-performance-note { color: var(--dim); font-size: var(--text-supporting-size); line-height: 1.6; margin: 12px 0; }
-.llm-performance-filters { padding-top: 6px; }
-.llm-performance-filters > span { margin-left: auto; color: var(--dim); font-size: 12px; }
-.llm-performance-table-wrap { overflow-x: auto; margin-top: 12px; }
-.llm-performance-table { width: 100%; min-width: 740px; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
-.llm-performance-table th, .llm-performance-table td { padding: 10px 12px; text-align: right; vertical-align: top; border-bottom: 1px solid var(--border); }
-.llm-performance-table th { color: var(--dim); font-weight: 500; }
-.llm-performance-table th:first-child, .llm-performance-table td:first-child,
-.llm-performance-table th:nth-child(2), .llm-performance-table td:nth-child(2) { text-align: left; max-width: 200px; overflow-wrap: anywhere; }
-.llm-performance-table small { display: block; color: var(--dim); margin-top: 4px; font-size: 11px; }
-.llm-performance button:focus-visible, .llm-performance input:focus-visible, .llm-performance select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.llm-performance-rounds { padding: 8px 12px; color: var(--dim); font-size: 12px; }
+.llm-performance-rounds summary { cursor: pointer; }
+.llm-performance-round { display: grid; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }

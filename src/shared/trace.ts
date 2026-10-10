@@ -64,6 +64,8 @@ export interface ActiveRun {
   attachments?: AgentInputAttachment[]
   pendingQuestions?: AgentQuestionRequest[]
   items: TraceEvent[]
+  /** Latest bounded legacy observation; global summaries must not rescan the trace. */
+  llmPerformance?: import('./llm-performance.js').LlmPerformance
   done: boolean
   providerSettled?: boolean
   /** 已请求停止时的真实停止进度；缺失表示没有人请求过停止，不表示已终止。 */
