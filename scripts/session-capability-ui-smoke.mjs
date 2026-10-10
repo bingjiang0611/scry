@@ -14,7 +14,8 @@ const modelsOnly = process.argv.includes('--models-only')
 const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
 const summaryOnly = process.argv.includes('--summary-only')
-const fixtures = summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance']
+const performanceOnly = process.argv.includes('--performance-only')
+const fixtures = performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -661,7 +662,9 @@ async function exerciseSessionTerminals(contents, scenario) {
   if (!await read(`globalThis.foreignEditor.isConnected && globalThis.foreignEditor.readOnly && globalThis.foreignEditor.value === '/fixture/new/same.ts'`)) throw new Error('Opening another conversation file changed the retained editor root')
   await click('[data-session-surface-current="true"] .workspace-textarea')
   contents.focus()
+  await wait(`document.activeElement === document.querySelector('[data-session-surface-current="true"] .workspace-textarea')`)
   await contents.insertText('unsaved-marker')
+  await wait(`document.querySelector('[data-session-surface-current="true"] .workspace-textarea').value.includes('unsaved-marker')`)
   await read(`globalThis.localEditor = document.querySelector('[data-session-surface-current="true"] .workspace-textarea'); globalThis.discardPrompts = 0; globalThis.originalConfirm = window.confirm; window.confirm = () => { globalThis.discardPrompts++; return false }; true`)
   await select(session('new', 1), 'three')
   if (!await read(`globalThis.discardPrompts === 0 && globalThis.localEditor.isConnected && globalThis.localEditor.value.includes('unsaved-marker')`)) throw new Error('Workspace navigation discarded or asked to discard a retained editor')
@@ -966,6 +969,77 @@ async function exercisePiPermission(contents, scenario) {
   return { scenario, loadingBlocked: true, explicitPermission: request.permissionMode }
 }
 
+async function exerciseLlmPerformance(contents, win, screenshot) {
+  const read = expression => contents.executeJavaScript(expression)
+  const wait = async expression => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() > deadline) throw new Error('LLM performance timed out: ' + expression + '; ' + await read('document.body.innerText'))
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
+  const click = async selector => {
+    const point = await read(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)});
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)} + ' by ' + document.elementFromPoint(x, y)?.outerHTML.slice(0, 300));
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  }
+  const input = async (selector, text) => {
+    await click(selector)
+    await wait(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`)
+    contents.selectAll()
+    await contents.insertText(text)
+    await wait(`document.querySelector(${JSON.stringify(selector)}).value === ${JSON.stringify(text)}`)
+  }
+  const panel = `document.querySelector('.llm-performance')`
+  const state = `JSON.parse(document.querySelector('#performance-fixture-state').textContent)`
+  contents.focus()
+  await wait(panel)
+  if (!await read(`${panel}.getBoundingClientRect().height <= 80`)) throw new Error('Collapsed performance strip consumed the chat row')
+  await click('.llm-performance-toggle')
+  await wait(`${panel}.textContent.includes('暂无匹配')`)
+  if (!await read(`(() => { const performance = ${panel}.getBoundingClientRect(), chat = document.querySelector('.chat-body').getBoundingClientRect(), composer = document.querySelector('.runtime-composer').getBoundingClientRect(); return performance.bottom <= chat.top + 1 && chat.bottom <= composer.top + 1; })()`)) throw new Error('Performance, transcript and composer rows overlap')
+  await input('input[aria-label="下次运行的网络标签"]', 'VPN A')
+  await input('textarea[aria-label="描述任务"]', 'Observe real stream evidence')
+  await wait(`!document.querySelector('.send').disabled`)
+  await click('.send')
+  await wait(`${state}.requests.length === 1`)
+  if (!await read(`${state}.requests[0].networkLabel === 'VPN A'`)) throw new Error('Production App lost network label at send')
+  await click('#performance-stream')
+  await wait(`${panel}.textContent.includes('2.0 字符/s') && ${panel}.textContent.includes('1.0 s')`)
+  await input('input[aria-label="下次运行的网络标签"]', 'VPN B')
+  await click('#performance-complete')
+  await wait(`${panel}.textContent.includes('本轮统计') && ${panel}.textContent.includes('6.0 字符/s') && ${panel}.textContent.includes('20.0 tok/s')`)
+  await wait(`document.querySelector('.llm-performance-table tbody tr')`)
+  if (!await read(`document.querySelector('.llm-performance-table tbody').textContent.includes('VPN A') && !document.querySelector('.llm-performance-table tbody').textContent.includes('VPN B')`)) throw new Error('Next label rewrote the measured run')
+  for (const theme of ['dark', 'light']) {
+    win.setSize(1000, 800)
+    await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    const bounds = await read(`(() => { const node = ${panel}, r = node.getBoundingClientRect(); if (node.scrollWidth > node.clientWidth) throw new Error('Performance panel overflows'); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
+    if (screenshot) require('node:fs').writeFileSync(screenshot + '-' + theme + '.png', (await contents.capturePage(bounds)).toPNG())
+  }
+  win.setSize(700, 700)
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  if (!await read(`document.querySelector('.llm-performance-toggle').scrollWidth <= document.querySelector('.llm-performance-toggle').clientWidth`)) throw new Error('Narrow performance strip overflows')
+  await click('#performance-history-error')
+  await click('.llm-performance-controls .btn')
+  await wait(`${panel}.querySelector('[role="alert"]')?.textContent.includes('fixture history unavailable')`)
+  if (await read(`${panel}.querySelector('table') != null`)) throw new Error('History error retained an apparently successful comparison')
+  await click('.llm-performance-toggle')
+  await wait(`document.querySelector('.llm-performance-toggle').getAttribute('aria-expanded') === 'false'`)
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+  contents.sendInputEvent({ type: 'char', keyCode: '\r' })
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+  await wait(`document.querySelector('.llm-performance-toggle').getAttribute('aria-expanded') === 'true'`)
+  return { productionAppLabelCaptured: true, streamAndTerminalRates: true, frozenRunLabel: true, historyErrorHonest: true, nativeKeyboard: true, themes: ['dark', 'light'], narrowWidth: 700 }
+}
+
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
   for (const fixture of fixtures) await build({
@@ -998,6 +1072,16 @@ try {
       win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       try {
         let result = {}, piCommands = {}
+        if (${fixtures.includes('llm-performance')}) {
+          win.setSize(1000, 800)
+          await win.loadFile(${JSON.stringify(join(temp, 'llm-performance.html'))})
+          result.llmPerformance = await (${exerciseLlmPerformance.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LLM_UI_SCREENSHOT ?? '')})
+          if (${performanceOnly}) {
+            console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
+            app.exit(0)
+            return
+          }
+        }
         if (${fixtures.includes('pinned-summary-performance')}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pinned-summary-performance.html'))})
           result.summarySampling = await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseSummarySampling.toString()})()`)})

@@ -1112,13 +1112,17 @@ async function runPiAgent(
         const content = Array.isArray(message.content) ? message.content.map(record) : []
         for (const block of content) {
           if (!streamedText && block.type === 'text' && typeof block.text === 'string') {
-            request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: block.text, messageId }))
+            request.emit(piEvent(request.runId, {
+              kind: 'model', stage: 'text_delta', text: block.text, messageId,
+              runtimeMetadata: { bufferedOutput: true }
+            }))
           }
           if (!streamedThinking && block.type === 'thinking' && typeof block.thinking === 'string') {
             request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: block.thinking, messageId }))
           }
         }
       }
+      request.emit(piEvent(request.runId, { kind: 'harness', stage: 'runtime:llm_stream_end', messageId }))
       assistantMessageId = undefined
       return
     }

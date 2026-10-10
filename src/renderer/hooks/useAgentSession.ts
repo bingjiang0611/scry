@@ -50,7 +50,10 @@ function mergeProgressiveTrace(snapshot: TraceEvent, local: TraceEvent): TraceEv
     ...local,
     ...snapshot,
     text: longerPrefix(snapshot.text, local.text),
-    thinking: longerPrefix(snapshot.thinking, local.thinking)
+    thinking: longerPrefix(snapshot.thinking, local.thinking),
+    llmPerformance: local.llmPerformance && (!snapshot.llmPerformance ||
+      Date.parse(local.llmPerformance.observedAt) > Date.parse(snapshot.llmPerformance.observedAt))
+      ? local.llmPerformance : snapshot.llmPerformance
   }
 }
 

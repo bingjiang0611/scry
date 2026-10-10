@@ -475,6 +475,7 @@ export interface TraceEvent {
   messageId?: string // SDK assistant message.id = llm_request 级（一个 run 内多条）；result 事件无
   durationMs?: number
   durationApiMs?: number // 仅 result：SDK 权威 API 耗时
+  llmPerformance?: import('./llm-performance.js').LlmPerformance
   costUsd?: number
   costSource?: CostSource
   costConfidence?: CostConfidence

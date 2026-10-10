@@ -1,6 +1,7 @@
 import { appendFileSync, chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import type { LlmPerformanceHistoryRow } from '../shared/llm-performance'
 import type { ProviderId, SessionProviderId } from '../shared/provider'
 import type { RuntimeProvider } from '../shared/runtime'
 import type { UsageStats } from '../shared/trace'
@@ -84,7 +85,8 @@ function scanUsage(file: string): { aggregates: Map<string, UsageAggregate>; inv
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.trim()) continue
     try {
-      const parsed = JSON.parse(line) as Omit<ParsedUsageRow, 'providerId'> & { providerId?: SessionProviderId }
+      const parsed = JSON.parse(line) as Omit<ParsedUsageRow, 'providerId'> & { providerId?: SessionProviderId; kind?: string }
+      if (parsed.kind === 'llm_performance') continue
       addAggregate(aggregates, { ...parsed, providerId: parsed.providerId ?? 'legacy_unknown' })
     } catch {
       invalidLines++
@@ -176,6 +178,22 @@ export function appendUsage(
   } catch {
     /* usage.jsonl is best-effort; sqlite remains the structured source */
   }
+}
+
+/** Telemetry shares usage ownership/deletion, but must never count as a billing turn. */
+export function appendLlmPerformance(
+  userDataDir: string,
+  context: { cwd: string; externalSessionId?: string },
+  sample: LlmPerformanceHistoryRow
+): void {
+  const file = usageJsonlPath(userDataDir)
+  appendFileSync(file, `${JSON.stringify({
+    kind: 'llm_performance', providerId: sample.providerId, agentProfileId: sample.agentProfileId ?? null,
+    cwd: context.cwd, externalSessionId: context.externalSessionId ?? null, runId: sample.runId,
+    ts: sample.ts, performanceSample: sample
+  })}\n`, { mode: 0o600 })
+  chmodSync(file, 0o600)
+  invalidateUsageScan(file)
 }
 
 export function readUsageStats(

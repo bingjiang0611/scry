@@ -194,6 +194,8 @@ export interface AgentForkSessionResult {
 export interface AgentStartRequest {
   prompt: string
   cwd?: string
+  /** Manual comparison label; never changes network configuration. */
+  networkLabel?: string
   expectedExternalSessionId?: string | null
   forkLastTurn?: AgentForkLastTurn
   restartLastTurn?: AgentRestartLastTurn
@@ -272,6 +274,7 @@ export interface AgentIntervention {
 export interface NormalizedAgentStartRequest {
   prompt: string
   cwd?: string
+  networkLabel?: string
   expectedExternalSessionId?: string | null
   forkLastTurn?: AgentForkLastTurn
   restartLastTurn?: AgentRestartLastTurn
@@ -405,6 +408,10 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   const modelId = boundedControlValue(payload.model?.id)
   const modelProviderId = boundedControlValue(payload.model?.providerId)
   const effort = boundedControlValue(payload.effort)
+  if (payload.networkLabel !== undefined && (typeof payload.networkLabel !== 'string' || payload.networkLabel.trim().length > 80)) {
+    throw new Error('网络标签必须是最多 80 个字符的文本')
+  }
+  const networkLabel = payload.networkLabel?.trim()
   const permissionMode = payload.permissionMode ?? 'default'
   if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
     throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
@@ -426,6 +433,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   }
   return {
     prompt: payload.prompt,
+    ...(networkLabel ? { networkLabel } : {}),
     ...(typeof payload.cwd === 'string' && payload.cwd.trim() ? { cwd: payload.cwd } : {}),
     ...(payload.expectedExternalSessionId === null
       ? { expectedExternalSessionId: null }

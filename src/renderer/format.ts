@@ -1661,9 +1661,9 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
       ev.messageId === last.messageId && ev.agentId === last.agentId &&
       ev.parentToolUseId === last.parentToolUseId
     if (ev.stage === 'text_delta' && last?.stage === 'text_delta' && sameModelStream) {
-      state.items[lastIndex] = { ...last, text: (last.text ?? '') + (ev.text ?? '') }
+      state.items[lastIndex] = { ...last, text: (last.text ?? '') + (ev.text ?? ''), llmPerformance: ev.llmPerformance ?? last.llmPerformance }
     } else if (ev.stage === 'thinking' && last?.stage === 'thinking' && sameModelStream) {
-      state.items[lastIndex] = { ...last, thinking: (last.thinking ?? '') + (ev.thinking ?? '') }
+      state.items[lastIndex] = { ...last, thinking: (last.thinking ?? '') + (ev.thinking ?? ''), llmPerformance: ev.llmPerformance ?? last.llmPerformance }
     } else {
       state.indices.set(ev.id, state.items.length)
       state.items.push(ev)

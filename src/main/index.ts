@@ -56,7 +56,9 @@ import {
   type ProjectMeta
 } from './app-store'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
-import { appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
+import { appendLlmPerformance, appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
+import { LlmPerformanceObserver } from './llm-performance'
+import { readLlmPerformanceHistory } from './llm-performance-history'
 import { stopObservedBackgroundTask } from './background-task-control'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isRendererPerformanceSample } from '../shared/performance'
@@ -2690,6 +2692,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   const runId = `run-${Date.now().toString(36)}-${runSeq++}`
   const finishTurnWallTiming = createTurnWallTimer(runId)
+  const llmPerformance = new LlmPerformanceObserver(request.networkLabel)
   const hookConfig =
     providerId === 'claude' && cwd
       ? loadClaudeHookConfig(cwd, homeDir)
@@ -2759,7 +2762,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   // 结构化 write/edit 的 start → tool_result 关联器：预览只跟着「已落盘」的结果走。
   const writeCompletions = new WriteCompletionTracker()
   const emit = (rawEvent: TraceEvent): void => {
-    const ev = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
+    const decorated = hookConfig ? attachConfiguredHookCommands(rawEvent, hookConfig) : rawEvent
+    const ev = !decorated.agentId && !decorated.parentToolUseId
+      ? { ...decorated, llmPerformance: llmPerformance.observe(decorated, runState.items) }
+      : decorated
     turnChangeJournal?.record(ev)
     if (ev.kind === 'harness' && ev.stage === 'result') {
       appendUsage(
@@ -2775,6 +2781,28 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChange()
+  }
+  let performanceRecorded = false
+  const persistLlmPerformance = (failed: boolean, externalSessionId: string): void => {
+    if (performanceRecorded) return
+    performanceRecorded = true
+    const performance = [...runState.items].reverse().find(event => event.stage === 'runtime:turn_wall')?.llmPerformance
+    const result = [...runState.items].reverse().find(event => event.kind === 'harness' && event.stage === 'result')
+    if (!performance) return
+    const model = result?.modelUsage?.length === 1 ? result.modelUsage[0].model
+      : result?.modelUsage?.length ? '多模型'
+        : result?.contextModel ?? (request.model ? `所选：${request.model.id}` : '未知模型')
+    try {
+      appendLlmPerformance(app.getPath('userData'), { cwd: catalogCwd, externalSessionId }, {
+        runId, ts: performance.observedAt, providerId, agentProfileId,
+        model,
+        upstreamProvider: result?.modelUsage?.length === 1 ? result.modelUsage[0].upstreamProvider : result?.upstreamProvider,
+        networkLabel: request.networkLabel ?? '', failed: failed || result?.isError === true,
+        performance
+      })
+    } catch (error) {
+      console.warn('[scry] LLM performance history write failed:', error)
+    }
   }
   emit({
     id: mainEventId('controls', runId),
@@ -3284,6 +3312,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       const nativeSessionId = r.externalSessionId ?? observedSessionId ?? resume
       const storageSessionId = nativeSessionId ?? runId
       const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
+      persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
       const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
       const completionArchiveArgs: ArchiveTraceTurnArgs = {
         providerId,
@@ -3441,6 +3470,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         console.warn('[scry] Provider session getter failed at terminal boundary:', runId, error)
       }
       const storageSessionId = nativeSessionId ?? runId
+      persistLlmPerformance(true, storageSessionId)
       const runtimeErr = err instanceof AgentRuntimeError ? err : null
       const message = String(err?.message ?? err)
       const terminalReason = [...runState.items].reverse().find(
@@ -3725,6 +3755,8 @@ handleTrusted('agent:answerQuestion', (event, response: unknown) => {
 
 // B2：sqlite 跨会话分析（工具频率 / 按目录花费），纯文件做不到的结构化查询
 handleTrusted('agent:stats', () => statsQuery())
+handleTrusted('agent:llmPerformanceHistory', () => readLlmPerformanceHistory(app.getPath('userData')))
+
 handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => {
   if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
   return usageAnalyticsWithCreditsQuery(rangeDays as UsageAnalyticsRangeDays)

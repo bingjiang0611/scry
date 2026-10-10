@@ -866,7 +866,7 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
           stage: 'text',
           text,
           messageId,
-          runtimeMetadata: { source: 'opencode_retry_text', replacesStreamedText: true }
+          runtimeMetadata: { source: 'opencode_retry_text', replacesStreamedText: true, genuineStreamDelta: String(payload.delta ?? '') }
         }))
         return
       }

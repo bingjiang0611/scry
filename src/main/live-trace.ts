@@ -57,4 +57,5 @@ export function appendCoalescedTrace(items: TraceEvent[], event: TraceEvent): vo
   if (mergeText) previous.text = `${previous.text ?? ''}${event.text ?? ''}`
   else if (mergeThinking) previous.thinking = `${previous.thinking ?? ''}${event.thinking ?? ''}`
   else items.push({ ...event })
+  if ((mergeText || mergeThinking) && event.llmPerformance) previous.llmPerformance = event.llmPerformance
 }
