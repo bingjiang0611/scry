@@ -1,0 +1,366 @@
+/* Performance prototype: skill-like modal, no sidebar telemetry. */
+button.navitem {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--r-md);
+}
+button.navitem:hover {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+.inspector {
+  width: min(900px, calc(100vw - 48px));
+  max-width: none;
+  max-height: calc(100dvh - 64px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.inspector::backdrop {
+  background: var(--modal-overlay);
+}
+.sheet-header {
+  height: 60px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.close {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dim2);
+}
+.close:hover {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+.sheet-body {
+  padding: 20px 24px 16px;
+  max-height: calc(100dvh - 124px);
+  overflow: auto;
+}
+.session-source {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 12px;
+}
+.session-source strong {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.source-model {
+  color: var(--dim2);
+  font-size: 11px;
+}
+.state-label {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.state-dot {
+  height: 5px;
+  width: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 20px 0 16px;
+}
+.metric {
+  margin: 0;
+  min-width: 0;
+}
+.metric dt {
+  color: var(--dim2);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.metric dd {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 550;
+  line-height: 1.2;
+  letter-spacing: -1.1px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.metric dd span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dim2);
+  letter-spacing: 0;
+  margin-left: 5px;
+}
+.metric.primary dd {
+  color: var(--accent);
+}
+.chart-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--dim2);
+}
+.chart-heading .right {
+  margin-left: auto;
+}
+.legend-dot {
+  height: 5px;
+  width: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.curve-wrap {
+  position: relative;
+  height: 165px;
+  margin: 4px 0 18px;
+}
+.curve {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.curve text {
+  fill: var(--dim2);
+  font: 10px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.curve .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.curve .line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.curve .area {
+  fill: var(--accent-soft);
+}
+.curve .last-point {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.curve .pause {
+  fill: var(--surface-strong);
+}
+.curve .pause-label {
+  fill: var(--dim2);
+  font-size: 9px;
+}
+.chart-empty {
+  position: absolute;
+  inset: 26px 0 28px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--dim2);
+}
+.comparison {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.comparison-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  gap: 10px;
+}
+.comparison-head strong {
+  font-weight: 550;
+}
+.comparison-head span {
+  color: var(--dim2);
+  font-size: 10px;
+}
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin: 12px 0 11px;
+}
+.mini-title {
+  font-size: 10px;
+  color: var(--dim2);
+  margin-bottom: 8px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 10px;
+}
+.bar-row .label {
+  color: var(--dim);
+  width: 38px;
+  flex: none;
+}
+.track {
+  min-width: 0;
+  flex: 1;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--surface-strong);
+}
+.bar {
+  height: 100%;
+  border-radius: inherit;
+  width: var(--value);
+  background: var(--accent);
+}
+.bar.secondary {
+  background: var(--dim2);
+}
+.bar-value {
+  flex: none;
+  width: 66px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.comparison-legend {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  color: var(--dim2);
+  font-size: 10px;
+}
+.comparison-legend .legend-dot {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.comparison-legend .secondary {
+  background: var(--dim2);
+}
+.legend-note {
+  margin-left: auto;
+}
+.footer-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  color: var(--dim2);
+  font-size: 10px;
+}
+.info {
+  max-width: 590px;
+}
+.info summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--dim);
+}
+.info ul {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.sample-tag {
+  white-space: nowrap;
+  color: var(--dim3);
+}
+.history-empty {
+  padding: 18px 0;
+  color: var(--dim2);
+  font-size: 12px;
+}
+.hidden {
+  display: none !important;
+}
+@media (max-width: 850px) {
+  .sidebar {
+    width: 214px;
+  }
+  .conversation {
+    padding: 30px 24px;
+  }
+  .user {
+    margin-left: 15px;
+  }
+  .main-header {
+    padding: 0 20px;
+  }
+  .metric dd {
+    font-size: 34px;
+  }
+  .comparison-grid {
+    gap: 15px;
+  }
+}
+@media (max-width: 620px) {
+  .main-header .right,
+  .quiet-line {
+    display: none;
+  }
+  .conversation {
+    padding: 20px 16px;
+  }
+  .response {
+    padding: 0;
+  }
+  .composer-area {
+    padding: 10px;
+  }
+  .inspector {
+    width: calc(100vw - 24px);
+  }
+  .sheet-body {
+    padding: 16px;
+  }
+  .comparison-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .metric-grid {
+    gap: 9px;
+  }
+  .metric dd {
+    font-size: 26px;
+  }
+  .metric dd span {
+    font-size: 10px;
+  }
+  .preview .right-note {
+    display: none;
+  }
+}

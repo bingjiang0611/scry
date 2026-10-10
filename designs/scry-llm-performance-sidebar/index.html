@@ -3,12 +3,14 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light"><link rel="icon" href="data:,">
-<title>Scry · LLM 性能只读侧栏 v2</title>
+<title>Scry · LLM 性能图表弹窗 v3</title>
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="prototype.css">
+<link rel="stylesheet" href="modal.css">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
 <symbol id="chart" viewBox="0 0 24 24"><path d="M3 3v18h18m-14-7 4-4 4 4 6-6"/></symbol>
 <symbol id="folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
 <symbol id="box" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></symbol>
@@ -16,20 +18,15 @@
 <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
 <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
 <symbol id="chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-<symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></symbol>
 </defs></svg>
-<div class="preview"><span><b>设计稿 v2</b> · 只读侧栏 · 示例数据，未接真实采集</span><span class="right-note">仅预览，不修改已安装 App</span></div>
+<div class="preview"><span><b>设计稿 v3</b> · 技能式弹窗 · 示例数据，尚未接入实时会话</span><span class="right-note">仅预览，不修改已安装 App</span></div>
 <div class="app">
 <aside class="sidebar" aria-label="会话导航">
 <div class="brand"><b>Scry</b><small>设计预览</small></div>
 <div class="new"><svg class="i"><use href="#plus"/></svg>新建会话</div>
 <div class="search"><svg class="i"><use href="#search"/></svg>搜索会话 / 项目…</div>
 <div class="navitem"><svg class="i"><use href="#chart"/></svg>分析</div>
-<button type="button" id="perf-entry" class="perf-entry" aria-label="LLM 性能，查看本轮与历史" aria-haspopup="dialog" aria-controls="perf-dialog">
-<div class="perf-head"><svg class="i"><use href="#chart"/></svg>LLM 性能 <span class="perf-state"><i class="dot" id="signal"></i><span id="side-state">输出中</span></span></div>
-<div class="perf-values"><span class="perf-rate numeric" id="side-rate">84</span><span class="perf-unit" id="side-unit">字/s</span><svg class="spark" id="spark" aria-hidden="true" viewBox="0 0 56 23"><path d="M1 18 4 17 7 18 10 13 13 15 16 11 19 12 22 7 25 9 28 8 31 12 34 7 37 9 40 5 43 7 46 4 49 6 52 5 55 7"/></svg></div>
-<div class="perf-foot"><span id="side-wait" class="numeric">首次输出 <span class="numeric">1.4 s</span></span><svg class="i"><use href="#chevron"/></svg></div>
-</button>
+<button type="button" id="perf-entry" class="navitem" aria-label="LLM 性能" aria-haspopup="dialog" aria-controls="perf-dialog"><svg class="i"><use href="#chart"/></svg>LLM 性能</button>
 <div class="navitem" id="skills"><svg class="i"><use href="#box"/></svg>技能</div>
 <div class="navitem"><svg class="i"><use href="#box"/></svg>MCP</div>
 <div class="nav-divider"></div>
@@ -39,89 +36,164 @@
 <main class="main">
 <header class="main-header"><svg class="i"><use href="#folder"/></svg><strong>scry</strong><div class="right"><span>本机会话</span><svg class="i"><use href="#box"/></svg></div></header>
 <section class="conversation" aria-label="静态示例会话">
-<div class="user">把性能信息放到左侧，自动记录即可。<br>我只需要随时看一下，不要打断对话。</div>
+<div class="user">侧栏只保留「LLM 性能」。<br>点开直接看当前会话的数据，别放一堆说明。</div>
 <div class="assistant-label"><span class="mark">✳</span>Claude · Sonnet 4.6</div>
-<div class="response"><p>让性能信息退到侧栏，主区域继续专注当前任务。</p><ul><li>扫一眼接收速度和首次输出等待。</li><li>需要对比时，打开只读的近期记录。</li><li>有测量证据才展示；缺失数据保持明确。</li></ul><div class="tool"><svg class="i"><use href="#chevron"/></svg><span>Read</span><code>src/renderer/components/Sidebar.tsx</code><span>· 设计示例</span></div><p>网络信息不再要求手动标注。系统能确认的线索会自动留存，无法确认的状态不会被当作“直连”。</p><div class="quiet-line"><span style="color:var(--accent)">•</span>示例会话 · 此设计稿不会发送模型请求</div></div>
+<div class="response"><p>让性能信息退到侧栏，主区域继续专注当前任务。</p><ul><li>点开即见当前会话的实时速度与曲线。</li><li>近期对照用图表表达，不再铺开长表格。</li><li>有测量证据才展示；缺失数据保持明确。</li></ul><div class="tool"><svg class="i"><use href="#chevron"/></svg><span>Read</span><code>src/renderer/components/Sidebar.tsx</code><span>· 设计示例</span></div><p>网络信息不再要求手动标注。系统能确认的线索会自动留存，无法确认的状态不会被当作“直连”。</p><div class="quiet-line"><span style="color:var(--accent)">•</span>示例会话 · 此设计稿不会发送模型请求</div></div>
 </section>
 <div class="composer-area"><div class="composer">继续当前任务…<div class="bottom"><span>Sonnet 4.6 · 默认权限</span><span class="send">↑</span></div></div><div class="composer-note">对话与输入区仅作布局上下文，不接真实会话</div></div>
 </main>
 </div>
 <dialog class="inspector" id="perf-dialog" aria-labelledby="perf-title">
-<div class="sheet-header"><div><h1 id="perf-title">LLM 性能</h1><small>自动记录，按需查看</small></div><button type="button" class="close" id="close" aria-label="关闭性能详情"><svg class="i"><use href="#x"/></svg></button></div>
+<header class="sheet-header"><h1 id="perf-title">LLM 性能</h1><button type="button" class="close" id="close" aria-label="关闭性能详情"><svg class="i"><use href="#x"/></svg></button></header>
 <div class="sheet-body">
-<div class="current-model"><div><strong id="current-model">Sonnet 4.6</strong><div class="model-meta" id="model-meta">Claude · 默认 Profile · Anthropic（示例）</div></div><span class="state-label" id="detail-state">本轮 · 输出中</span></div>
-<div class="metric-grid"><dl class="metric"><dt id="rate-label">接收速度</dt><dd class="numeric" id="detail-rate">84<span>字/s</span></dd><small id="rate-caption">最近 3 秒</small></dl><dl class="metric"><dt>首次输出等待</dt><dd class="numeric" id="detail-wait">1.4<span>s</span></dd><small>从本轮执行接受计时</small></dl><dl class="metric"><dt>本轮 API 吞吐</dt><dd class="numeric" id="detail-api">—</dd><small id="api-caption">等待完整终态证据</small></dl></div>
-<div class="network"><svg class="i"><use href="#clock"/></svg><span id="network-value">环境 01 · 系统代理开启</span><span style="margin-left:auto;font-size:10px">自动观测线索</span></div>
-<p class="state-reason hidden" id="state-reason"></p>
-<div class="separator"></div>
-<div class="history-head"><h2>近期记录</h2><small>近 30 天 · 示例</small></div>
-<p class="sample-note" style="font-size:11px;line-height:1.7">仅按配置线索分组，不代表实际请求路径或网络快慢。</p>
-<div id="history-content">
-<section class="group"><div class="group-head">Sonnet 4.6</div><div class="group-sub">Claude · 默认 Profile · Anthropic</div><table class="history-table"><thead><tr><th>网络线索</th><th>首次输出</th><th>接收均速</th><th>样本</th></tr></thead><tbody><tr><td>环境 01<small>系统代理开启</small></td><td>1.6 s</td><td>77 字/s</td><td>18</td></tr><tr><td>环境 02<small>系统代理关闭</small></td><td>2.2 s</td><td>66 字/s</td><td>7</td></tr></tbody></table><div class="sample-note">成功样本中位数 · 2 轮失败/停止仍保留在记录中</div></section>
-<section class="group"><div class="group-head">GPT-5.4</div><div class="group-sub">Codex · 默认 Profile · OpenAI</div><table class="history-table"><thead><tr><th>网络线索</th><th>首次输出</th><th>接收均速</th><th>样本</th></tr></thead><tbody><tr><td>环境 01<small>系统代理开启</small></td><td>1.9 s</td><td>91 字/s</td><td>12</td></tr></tbody></table></section>
-<div class="sample-note">4 轮缺少网络证据，仅保留模型记录，不归为同一种网络。</div>
-<details class="info" style="margin:17px 0"><summary>查看最近轮次</summary><table class="history-table"><thead><tr><th>时间 / 模型</th><th>状态</th><th>接收均速</th><th>环境</th></tr></thead><tbody><tr><td>14:32 · Sonnet 4.6</td><td>完成</td><td>78 字/s</td><td>01</td></tr><tr><td>14:18 · Sonnet 4.6</td><td>失败</td><td>—</td><td>01</td></tr><tr><td>14:02 · GPT-5.4</td><td>已停止</td><td>—</td><td>01</td></tr><tr><td>13:49 · Sonnet 4.6</td><td>完成</td><td>66 字/s</td><td>02</td></tr></tbody></table><p>失败与停止轮次可查看，但不计入上方成功样本中位数。</p></details>
+<div class="session-source"><svg class="i"><use href="#message"/></svg><strong id="session-name">当前会话 · LLM 性能观测</strong><span class="source-model" id="source-model">Sonnet 4.6 · Claude</span><span class="state-label"><i class="state-dot" id="state-dot"></i><span id="run-state">输出中</span></span></div>
+<div class="metric-grid">
+<dl class="metric primary"><dt>当前接收速度</dt><dd id="current-rate">84<span>字/s</span></dd></dl>
+<dl class="metric"><dt title="本轮接受执行到首个主会话文本，含启动与排队，不是请求 TTFT">首次输出等待</dt><dd id="first-wait">1.4<span>s</span></dd></dl>
+<dl class="metric"><dt>本轮接收均速</dt><dd id="run-average">78<span>字/s</span></dd></dl>
 </div>
-<details class="info"><summary>测量口径与来源</summary><ul><li>字符/s 是客户端文本接收速度，不是 token/s 或网速。工具、审批等待不计入可测文本片段。</li><li>首次输出等待包含启动、排队和本地开销，不是单次请求 TTFT。</li><li>API 吞吐仅在权威输出 token 与 API 时间完整覆盖时可用，不与字符速度混算。</li><li>网络只来自可确认的本机配置线索。系统代理开启不证明请求走代理；代理关闭不等于直连。隧道接口不足以识别 VPN 品牌、节点或真实流量路径。</li><li>模型、Profile、厂商来源不同的记录分开展示。提示词、缓存、上下文和服务端排队仍影响结果，不作网络快慢的因果结论。</li><li>失败/停止不进入成功样本中位数。历史保留最近 30 天、最多 1000 轮；缺失不显示成零。</li></ul></details>
-<p class="design-note">设计示例。自动网络线索采集尚未接入生产。</p>
+<div class="chart-heading"><span class="legend-dot"></span><span>主会话文本</span><span class="right" id="curve-caption">近 30 秒 · 字/s</span></div>
+<div class="curve-wrap"><svg class="curve" id="curve" role="img" aria-label="当前运行的文本接收速度曲线，工具等待区间断开" viewBox="0 0 800 164"></svg><div id="chart-empty" class="chart-empty hidden"></div></div>
+<section class="comparison"><div class="comparison-head"><strong>近期对照</strong><span id="history-context">同模型 / Provider / Profile / 上游 · 30 天</span></div>
+<div class="comparison-grid" id="comparison-grid"></div>
+<div class="comparison-legend" id="comparison-legend"><span><i class="legend-dot"></i>环境 01 · 代理开 · n=18</span><span><i class="legend-dot secondary"></i>环境 02 · 代理关 · n=7</span><span class="legend-note">配置线索 ≠ 实际路径</span></div>
+</section>
+<div class="footer-line"><details class="info"><summary>数据口径</summary><ul><li>实时数据只绑定当前打开且正在运行的本地会话。切换会话或 run 后清空旧曲线；不借用最近历史或其他后台会话。</li><li>字符/s 是客户端文本接收速度，不是 token/s 或网速。工具/审批等待断开曲线，不填成 0；只有可计时文本片段参与均速。</li><li>首次输出等待含本地启动与排队，不是单次请求 TTFT。API 吞吐是有权威输出 token 与 API 时间的已完成样本推导，不当实时速度，单位独立为 tok/s。</li><li>历史图展示成功样本中位数，失败/停止不计入；API 可用样本为环境 01 的 14 轮、环境 02 的 5 轮（示例）。缺少网络证据的记录不归为同一种网络。</li><li>系统代理开关不证明实际请求路径或 VPN 节点。上下文、缓存和排队仍影响结果，不作网络快慢的因果结论。</li></ul></details><span class="sample-tag">设计示例 · 尚未接入实时会话</span></div>
 </div>
 </dialog>
 <script>
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'light') document.documentElement.dataset.theme = 'light'
-const states = {
-  stream: {status:'输出中', rate:'84', wait:'1.4', caption:'最近 3 秒'},
-  tool: {status:'工具等待', rate:'—', wait:'1.4', caption:'工具等待不计入生成', reason:'模型已转入工具执行。暂停实时速度展示，继续保留本轮可测片段。'},
-  waiting: {status:'等待输出', rate:'—', wait:'—', caption:'尚无文本输出', reason:'本轮已接受执行，正在等待首个文本输出；不把等待显示成零速度。'},
-  empty: {status:'暂无记录', rate:'—', wait:'—', caption:'尚无测量证据', reason:'正常运行会话后，测量记录将自动出现。不需要先选择网络或填写标签。'},
-  unavailable: {status:'不可测', rate:'—', wait:'—', caption:'缺少实时流证据', reason:'此示例 Provider 仅整段返回文本，无法可靠测量实时接收速度。可靠终态数据仍可保留。'},
-  complete: {status:'最近一轮', rate:'78', wait:'1.4', api:'31.6', caption:'可测片段接收均速'},
-  long: {status:'输出中', rate:'12,804', wait:'128.6', caption:'长数字压力样本'}
+const scenarios = {
+  stream: {live:true, status:'输出中', current:84, wait:1.4, average:78},
+  tool: {live:true, status:'工具等待', current:null, wait:1.4, average:78},
+  waiting: {live:true, status:'等待输出', current:null, wait:null, average:null, empty:'等待首个主会话文本'},
+  empty: {live:false, status:'暂无运行', current:null, wait:null, average:null, empty:'没有正在进行的会话'},
+  unavailable: {live:true, status:'不可测', current:null, wait:null, average:null, empty:'Provider 未提供实时文本流'},
+  complete: {live:false, status:'已结束', current:null, wait:null, average:null, empty:'会话已结束，实时数据不再展示'},
+  long: {live:true, status:'输出中', current:12804, wait:128.6, average:9800}
 }
-const state = states[params.get('state')] || states.stream
+const scenario = scenarios[params.get('state')] || scenarios.stream
 const text = (id, value) => {document.getElementById(id).textContent = value}
-text('side-state', state.status)
-text('side-rate', state.rate)
-text('side-wait', state.wait === '—' ? '首次输出 —' : `首次输出 ${state.wait} s`)
-text('detail-state', `${state.status === '最近一轮' ? '已完成' : '本轮'} · ${state.status}`)
-text('rate-caption', state.caption)
-if (state.status === '最近一轮') text('rate-label', '接收均速')
 const metric = (id, value, unit) => {
   const node = document.getElementById(id)
-  node.textContent = value
-  if (value !== '—') {const suffix = document.createElement('span'); suffix.textContent = unit; node.append(suffix)}
+  node.textContent = value === null ? '—' : value.toLocaleString('en-US')
+  if (value !== null) {
+    const suffix = document.createElement('span')
+    suffix.textContent = unit
+    node.append(suffix)
+  }
 }
-metric('detail-rate', state.rate, '字/s')
-metric('detail-wait', state.wait, 's')
-if (state.api) {metric('detail-api', state.api, 'tok/s'); text('api-caption', '权威 token / API 时间')}
-if (state.rate === '—') {
-  document.getElementById('spark').classList.add('hidden')
-  text('side-unit', '')
-  document.getElementById('signal').classList.add('hidden')
+metric('current-rate', scenario.current, '字/s')
+metric('first-wait', scenario.wait, 's')
+metric('run-average', scenario.average, '字/s')
+if (scenario.current === null) document.getElementById('current-rate').parentElement.classList.remove('primary')
+text('run-state', scenario.status)
+if (!scenario.live) {
+  text('session-name', '当前会话 · 非运行中')
+  document.getElementById('state-dot').classList.add('hidden')
 }
-if (state.reason) {text('state-reason', state.reason); document.getElementById('state-reason').classList.remove('hidden')}
 if (params.get('state') === 'empty') {
-  text('current-model', '暂无运行会话')
-  text('model-meta', '没有测量记录，不推断模型或厂商')
-  text('detail-state', '暂无记录')
-  text('api-caption', '尚无测量证据')
-  text('network-value', '尚无网络观测')
-  const content = document.getElementById('history-content')
-  content.className = 'empty'
-  content.innerHTML = '<p>还没有性能记录。</p><small>正常发送消息即可自动记录，稍后在这里查看。</small>'
+  text('source-model', '')
+  text('history-context', '暂无测量记录')
 }
-if (params.get('history') === 'error') {
-  const content = document.getElementById('history-content')
-  content.className = 'error'
-  content.setAttribute('role', 'alert')
-  content.textContent = '历史读取失败。当前会话观测不受影响；下次打开详情时重新读取。'
+const svg = document.getElementById('curve')
+if (scenario.empty) svg.setAttribute('aria-label', scenario.empty)
+const scale = params.get('state') === 'long' ? 100 : 1
+const ceiling = 140 * scale
+const x = index => 44 + (index + 1) / 30 * 736
+const y = value => 139 - value / ceiling * 119
+const svgNS = 'http://www.w3.org/2000/svg'
+const element = (name, attrs, content) => {
+  const node = document.createElementNS(svgNS, name)
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value))
+  if (content) node.textContent = content
+  svg.append(node)
+  return node
 }
-const dialog = document.getElementById('perf-dialog')
-const entry = document.getElementById('perf-entry')
-entry.addEventListener('click', () => dialog.showModal())
-document.getElementById('close').addEventListener('click', () => dialog.close())
-dialog.addEventListener('close', () => entry.focus())
-if (params.get('view') === 'details') dialog.showModal()
+for (const tick of [0,40,80,120]) {
+  element('line', {class:'grid', x1:44, x2:780, y1:y(tick * scale), y2:y(tick * scale)})
+  element('text', {x:32, y:y(tick * scale)+3, 'text-anchor':'end'}, String(tick * scale))
+}
+for (const [seconds, label] of [[0,'−30s'],[10,'−20s'],[20,'−10s'],[30,'现在']]) {
+  element('text', {x:44+seconds/30*736, y:159, 'text-anchor':seconds===30?'end':'middle'}, label)
+}
+if (scenario.empty) {
+  text('chart-empty', scenario.empty)
+  document.getElementById('chart-empty').classList.remove('hidden')
+} else {
+  const series = [28,34,43,58,52,49,65,77,64,82,88,80,null,null,null,62,71,95,103,89,87,118,102,91,93,86,95,88,81,84].map(value => value === null ? null : value * scale)
+  if (params.get('state') === 'tool') for(let i=25;i<series.length;i++) series[i]=null
+  if (params.get('state') === 'long') series[29]=12804
+  element('rect', {class:'pause', x:x(11)+6, y:20, width:x(14)-x(11), height:119})
+  element('text', {class:'pause-label', x:x(13), y:31, 'text-anchor':'middle'}, '工具')
+  if (params.get('state') === 'tool') {
+    element('rect', {class:'pause', x:x(24)+6, y:20, width:x(29)-x(24)-6, height:119})
+    element('text', {class:'pause-label', x:x(27), y:31, 'text-anchor':'middle'}, '工具')
+  }
+  let segment=[]
+  const draw = () => {
+    if (!segment.length) return
+    const path = segment.map(([px,py],index) => (index?'L':'M')+px.toFixed(1)+' '+py.toFixed(1)).join(' ')
+    element('path', {class:'area', d:path+' L'+segment.at(-1)[0]+' 139 L'+segment[0][0]+' 139 Z'})
+    element('path', {class:'line', d:path})
+    segment=[]
+  }
+  series.forEach((value,index) => {
+    if (value === null) draw()
+    else segment.push([x(index),y(value)])
+  })
+  draw()
+  if (scenario.current !== null) element('circle', {class:'last-point', cx:x(29), cy:y(scenario.current), r:4})
+}
+const comparisons = [
+  {title:'接收均速 · 字/s', values:[77,66], units:'字/s', maximum:100},
+  {title:'首次输出 · s', values:[1.6,2.2], units:'s', maximum:3},
+  {title:'API 推导 · tok/s · n=14/5', values:[31.6,29.1], units:'tok/s', maximum:40}
+]
+const grid=document.getElementById('comparison-grid')
+for (const comparison of comparisons) {
+  const pane=document.createElement('div')
+  const title=document.createElement('div')
+  title.className='mini-title'
+  title.textContent=comparison.title
+  pane.append(title)
+  comparison.values.forEach((value,index) => {
+    const row=document.createElement('div')
+    row.className='bar-row'
+    const label=document.createElement('span')
+    label.className='label'
+    label.textContent='环境 0'+(index+1)
+    const track=document.createElement('div')
+    track.className='track'
+    const bar=document.createElement('div')
+    bar.className='bar'+(index?' secondary':'')
+    bar.style.setProperty('--value',(value/comparison.maximum*100)+'%')
+    track.append(bar)
+    const output=document.createElement('span')
+    output.className='bar-value'
+    output.textContent=value+' '+comparison.units
+    row.append(label,track,output)
+    pane.append(row)
+  })
+  grid.append(pane)
+}
+if (params.get('state')==='empty' || params.get('history')==='error') {
+  grid.className='history-empty'
+  grid.textContent=params.get('history')==='error'?'历史读取失败，实时观测仍保留。':'正常运行会话后自动记录。'
+  if(params.get('history')==='error')grid.setAttribute('role','alert')
+  document.getElementById('comparison-legend').classList.add('hidden')
+}
+const dialog=document.getElementById('perf-dialog')
+const entry=document.getElementById('perf-entry')
+entry.addEventListener('click',()=>dialog.showModal())
+document.getElementById('close').addEventListener('click',()=>dialog.close())
+dialog.addEventListener('close',()=>entry.focus())
+dialog.addEventListener('click',event=>{
+  const bounds=dialog.getBoundingClientRect()
+  if(event.target===dialog&&(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom))dialog.close()
+})
+if(params.get('view')==='details')dialog.showModal()
 </script>
 </body>
 </html>

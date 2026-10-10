@@ -1,1 +1,18 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Scry 性能侧栏 · 状态检查</title><style>html{background:#151515;color:#ddd;font:13px system-ui}body{margin:24px auto;max-width:980px;padding:0 20px}h1{font-size:18px}h2{font-size:13px;font-weight:500;margin-top:26px}p{color:#999;font-size:12px}iframe{display:block;width:760px;max-width:100%;height:700px;border:1px solid #383838;border-radius:8px;background:#151515}</style><h1>状态与尺寸检查 · 非产品界面</h1><p>以下均为示例数据。嵌入窗口为 760px 宽，用于真实 CSS 视口检查，不是第二个产品方案。</p><h2>浅色 · 长数字 · 760px 详情</h2><iframe title="浅色长数字详情" src="index.html?theme=light&state=long&view=details"></iframe><h2>工具等待 · 不以零速度替代</h2><iframe title="工具等待详情" src="index.html?state=tool&view=details" loading="lazy"></iframe><h2>首次使用 · 无配置也可自动产生记录</h2><iframe title="空记录详情" src="index.html?state=empty&view=details" loading="lazy"></iframe><h2>历史读取失败 · 当前观测保留</h2><iframe title="历史错误详情" src="index.html?history=error&view=details" loading="lazy"></iframe></html>
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Scry 性能弹窗 v3 · 状态检查</title>
+<style>html{background:#151515;color:#ddd;font:13px system-ui}body{margin:24px auto;max-width:980px;padding:0 20px}h1{font-size:18px}h2{font-size:13px;font-weight:500;margin-top:26px}p{color:#999;font-size:12px}iframe{display:block;width:760px;max-width:100%;height:700px;border:1px solid #383838;border-radius:8px;background:#151515}</style>
+<h1>状态与尺寸检查 · 非产品界面</h1>
+<p>示例数据。嵌入窗口为 760px 宽；同一方案的状态检查，不是方案选择。</p>
+<h2>浅色 · 长数字 · 760px 图表弹窗</h2>
+<iframe title="浅色长数字弹窗" src="index.html?theme=light&state=long&view=details&v=3"></iframe>
+<h2>工具等待 · 当前速度不可用，曲线区间断开</h2>
+<iframe title="工具等待弹窗" src="index.html?state=tool&view=details&v=3" loading="lazy"></iframe>
+<h2>无运行会话 · 不借用历史作为实时数据</h2>
+<iframe title="无运行会话弹窗" src="index.html?state=empty&view=details&v=3" loading="lazy"></iframe>
+<h2>运行结束 · 清除实时数值和曲线，近期对照保留</h2>
+<iframe title="结束会话弹窗" src="index.html?state=complete&view=details&v=3" loading="lazy"></iframe>
+<h2>历史读取失败 · 当前会话图表保留</h2>
+<iframe title="历史错误弹窗" src="index.html?history=error&view=details&v=3" loading="lazy"></iframe>
+</html>

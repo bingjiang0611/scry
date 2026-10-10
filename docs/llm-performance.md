@@ -49,4 +49,6 @@ npm run build
 
 用户明确要求：移到左侧栏技能上方，移除选择和设置，直接自动采集，用户只查看，并注意性能。需求 confirmed，设计稿未获视觉验收；旧顶部展开条在该场景的设计 superseded，以上证据口径与现有实现事实保留。
 
-唯一新方向的约束、采集预算、网络证据限制与原型入口见 [只读侧栏设计 brief](../designs/scry-llm-performance-sidebar/brief.md)，设计稿为 [index.html](../designs/scry-llm-performance-sidebar/index.html)。本轮没有修改生产界面或真实采集，也没有重装 App。该反馈仅适用于 Scry，不升级为全局审美规则。
+本轮追加反馈：侧栏只展示「LLM 性能」单行入口，点击像技能一样打开弹窗；数字和图表优先，默认不展开文字说明。实时区按当前打开且正在运行的本地会话绑定，不使用历史或其他后台会话回填。
+
+当前 v3 方向的约束、采集预算、网络证据限制与原型入口见 [技能式图表弹窗设计 brief](../designs/scry-llm-performance-sidebar/brief.md)，设计稿为 [index.html](../designs/scry-llm-performance-sidebar/index.html)。本轮没有修改生产界面或真实采集，也没有重装 App。该反馈仅适用于 Scry，不升级为全局审美规则。
