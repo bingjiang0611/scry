@@ -51,4 +51,6 @@ npm run build
 
 本轮追加反馈：侧栏只展示「LLM 性能」单行入口，点击像技能一样打开弹窗；数字和图表优先，默认不展开文字说明。此前按当前打开会话绑定是助手误解，用户已明确纠正：实时区按所有当前运行会话等权平均，不随查看的会话变化；不求和、不混入已结束运行。不可测指标不补零，显示各自的可测数量。
 
-当前 v4 全局平均方向的约束、采集预算、网络证据限制与原型入口见 [全局运行平均弹窗设计 brief](../designs/scry-llm-performance-sidebar/brief.md)，设计稿为 [index.html](../designs/scry-llm-performance-sidebar/index.html)。本轮没有修改生产界面或真实采集，也没有重装 App。该反馈仅适用于 Scry，不升级为全局审美规则。
+本轮单位纠正：用户要求只用 token，不用字。v5 设计的所有输出速度使用 token/s；缺少可靠实时主输出 token 计数与对应时间窗时显示不可测，不从文本长度换算，不用终态 usage 回填实时曲线。已实现 v1 的字符测量事实仍按上文保留，不能把设计改单位当能力已发布。
+
+当前 v5 token 全局平均方向的约束、采集预算、网络证据限制与原型入口见 [全局运行平均弹窗设计 brief](../designs/scry-llm-performance-sidebar/brief.md)，设计稿为 [index.html](../designs/scry-llm-performance-sidebar/index.html)。本轮没有修改生产界面或真实采集，也没有重装 App。该反馈仅适用于 Scry，不升级为全局审美规则。
