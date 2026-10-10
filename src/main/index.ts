@@ -2222,6 +2222,12 @@ const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) =
         ...(run.pendingQuestions ?? []).filter((item) => item.questionId !== change.request.questionId),
         change.request
       ]
+      const sessionKey = activeRunSessionKey(run)
+      if (sessionKey) dockBadge.markAttention(sessionKey, {
+        windowFocused: Boolean(win?.isFocused()),
+        sessionViewed: runs.isViewed(run.runId),
+        needsAttention: true
+      })
     }
     win?.webContents.send('agent:questionAttention', {
       runId: change.request.runId,
@@ -3052,8 +3058,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       // 首轮建基线时还拿不到原生 session id；现在补上，之后别的会话认不走这份基线。
       sessionDiffBaselines.bind(contextKey, contextRevision, sessionId)
     }
+    const previousSessionKey = scopedSessionKey(runState.externalSessionId ?? runState.sessionId ?? runId)
     runState.sessionId = sessionId
     runState.externalSessionId = sessionId
+    dockBadge.rekey(previousSessionKey, scopedSessionKey(sessionId))
     if (cwd) {
       try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId }) } catch (error) {
         console.warn('[scry] attachment ownership update deferred:', runId, error)
@@ -3256,7 +3264,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   let terminalArchiveArgs: ArchiveTraceTurnArgs | undefined
   let terminalArchiveCommitted = false
   const markTerminalAttention = (sessionId: string, needsAttention: boolean): void => {
-    dockBadge.markTerminal(scopedSessionKey(sessionId), {
+    dockBadge.markAttention(scopedSessionKey(sessionId), {
       windowFocused: Boolean(win?.isFocused()),
       sessionViewed: runs.isViewed(runId),
       needsAttention
