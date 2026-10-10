@@ -23,6 +23,10 @@ struct HomeView: View {
         .accessibilityLabel("更多选项")
       }
       if !model.link.isConnected { Notice(text: offlineText) }
+      if let connectionNotice = model.connectionNotice { Notice(text: connectionNotice, warning: true) }
+      if let catalogError = run.catalogRefreshError {
+        Notice(text: "会话列表提示：\(catalogError)", warning: true)
+      }
       if run.hasUnresolvedRun {
         Button { model.route = .chat } label: {
           HStack {
@@ -227,19 +231,18 @@ struct HomeView: View {
     .background(Palette.surface)
   }
 
-  private var hostCaption: String {
-    switch model.link {
-    case .notPaired: return "未连接"
-    case .pairing: return "正在配对"
-    case .offline: return "已配对 · 尚未验证可达"
-    case .connected: return "Mac 已连接"
-    }
-  }
+  private var hostCaption: String { model.statusText() }
   private var offlineText: String {
     switch model.link {
     case .notPaired: return "尚未连接 Mac；浏览可用，但发送和审批已停用。"
     case .pairing: return "正在等待 Mac 确认，尚未授予权限。"
-    case .offline: return "已配对，但尚未验证主机可达；刷新或发送时会尝试连接。"
+    case .offline:
+      switch model.connectionObservation {
+      case let .hostReply(code): return "已配对；Mac 已响应，但本次操作不可用（\(code)）。"
+      case let .protocolFailure(code): return "已配对；协议不匹配（\(code)），请更新并完全重启 Mac Scry。"
+      case .transportFailure: return "已配对，但未收到主机响应；刷新或发送时会尝试连接。"
+      default: return "已配对，但尚未验证主机可达；刷新或发送时会尝试连接。"
+      }
     case .connected: return ""
     }
   }

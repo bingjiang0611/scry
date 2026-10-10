@@ -50,7 +50,7 @@ function gateway(
   projects?: { list(): { path: string; label: string }[] },
   output?: RunOutputLog,
   providers?: { list(): RemoteProviderRef[] },
-  sessions?: { list(): { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number; pinnedAt?: number }[] },
+  sessions?: { list(): { sessionId: string; externalSessionId?: string; providerId: string; cwd: string; label: string; ts: number; pinnedAt?: number }[]; revision?: () => string },
   directories?: { list(path?: string): RemoteDirectoryListing },
   commands?: { list(query: { providerId: string; cwd: string; agentProfileId?: string }): Promise<{ commands: { name: string; description: string; argumentHint?: string; source?: 'builtin' | 'skill' | 'mcp' | 'custom' }[]; reason?: string }> }
 ) {
@@ -346,6 +346,38 @@ describe('RemoteGateway', () => {
     expectCode(() => gw.listSessionsPage(CERT, { cursor: 0, snapshot }), 'session_snapshot_changed')
   })
 
+  it('freezes a production revision-backed session catalog across pages', async () => {
+    const { authority } = await grantedAuthority()
+    let suffix = ''
+    const list = vi.fn(() => Array.from({ length: 245 }, (_, index) => ({
+      sessionId: `session-${index}${suffix}`, externalSessionId: `external-${index}`, providerId: 'pi', cwd: '/repo', label: `s${index}`, ts: index
+    })))
+    const revision = vi.fn(() => suffix || 'revision-1')
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list, revision })
+    const first = gw.listSessionsPage(CERT, { cursor: 0, limit: 100 })
+    const second = gw.listSessionsPage(CERT, { cursor: first.cursor, limit: 100, snapshot: first.snapshot })
+    expect(first.sessions.length + second.sessions.length).toBe(200)
+    expect(list).toHaveBeenCalledTimes(1)
+    suffix = '-changed'
+    revision.mockReturnValue('revision-2')
+    expect(() => gw.listSessionsPage(CERT, { cursor: second.cursor, limit: 100, snapshot: first.snapshot })).toThrow('session_snapshot_changed')
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a frozen walk stable across metadata mutation but refreshes cursor zero', async () => {
+    const { authority } = await grantedAuthority()
+    let label = 'before'
+    const list = vi.fn(() => [{ sessionId: 's', providerId: 'pi', cwd: '/repo', label, ts: 1 }])
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list, revision: () => 'roots-v1' })
+    const first = gw.listSessionsPage(CERT, { cursor: 0, limit: 1 })
+    label = 'after'
+    const continued = gw.listSessionsPage(CERT, { cursor: 0, limit: 1, snapshot: first.snapshot })
+    expect(continued.sessions[0].label).toBe('before')
+    const fresh = gw.listSessionsPage(CERT, { cursor: 0, limit: 1 })
+    expect(fresh.sessions[0].label).toBe('after')
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
   it('returns an honest empty session catalog when no source is configured', async () => {
     const { authority } = await grantedAuthority()
     const { gw } = gateway(authority)
@@ -509,6 +541,52 @@ describe('RemoteGateway', () => {
     await expect(gw.readHistoryPage(CERT, {
       providerId: 'qoder', cwd: '/w', externalSessionId: 'complete', cursor: 0, snapshot: '0'.repeat(64)
     })).rejects.toThrow('history_snapshot_changed')
+  })
+
+  it('pages complete recent and older structured turns with an exact snapshot fence', async () => {
+    const { authority } = await grantedAuthority()
+    let version = 'v1'
+    const read = vi.fn(async ({ before, snapshot }: { before?: number; snapshot?: string }) => {
+      const all = ['old-0', 'old-1', 'recent-0', 'recent-1']
+      const current = `snapshot-${version}`
+      if (snapshot && snapshot !== current) throw new Error('history_snapshot_changed')
+      const end = before ?? all.length
+      const start = Math.max(0, end - 2)
+      return { turns: all.slice(start, end).map(userText => ({ userText, items: [{ kind: 'output' as const, text: userText }] })), offset: start, totalTurns: all.length, hasOlder: start > 0, snapshot: current, source: 'indexed_archive' as const, completeness: start === 0 && end === all.length ? 'complete' as const : 'partial' as const }
+    })
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), historyTurnsPage: { read } })
+    const recent = await gw.readHistoryTurnsPage(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'x', limit: 2 })
+    expect(recent.turns.map(turn => turn.userText)).toEqual(['recent-0', 'recent-1'])
+    const older = await gw.readHistoryTurnsPage(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'x', before: recent.offset, snapshot: recent.snapshot, limit: 2 })
+    expect(older.turns.map(turn => turn.userText)).toEqual(['old-0', 'old-1'])
+    // Reaching offset zero does not make this older-only response the whole history.
+    expect(older.completeness).toBe('partial')
+    version = 'v2'
+    await expect(gw.readHistoryTurnsPage(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'x', before: recent.offset, snapshot: recent.snapshot })).rejects.toThrow('history_snapshot_changed')
+  })
+
+  it('fits a large window by leaving whole older turns behind a cursor, not clipping their bodies', async () => {
+    const { authority } = await grantedAuthority()
+    const text = 'x'.repeat(4 * 1024 * 1024)
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), historyTurnsPage: { read: async ({ before }) => ({
+      turns: (before === 1 ? ['older'] : ['older', 'recent']).map(userText => ({ userText, items: [{ kind: 'output' as const, text }] })),
+      offset: 0, totalTurns: 2, hasOlder: false, snapshot: 'large-window', source: 'indexed_archive' as const,
+      completeness: before === 1 ? 'partial' as const : 'complete' as const
+    }) } })
+    const recent = await gw.readHistoryTurnsPage(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'x', limit: 3 })
+    expect(recent).toMatchObject({ offset: 1, totalTurns: 2, hasOlder: true, completeness: 'partial' })
+    expect(recent.turns).toEqual([{ userText: 'recent', items: [{ kind: 'output', text }] }])
+    const older = await gw.readHistoryTurnsPage(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'x', before: recent.offset, snapshot: recent.snapshot, limit: 3 })
+    expect(older.turns).toEqual([{ userText: 'older', items: [{ kind: 'output', text }] }])
+  })
+
+  it('reports structured capacity instead of clipping a large turn', async () => {
+    const { authority } = await grantedAuthority()
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), historyTurnsPage: { read: async () => ({
+      turns: [{ userText: 'large', items: [{ kind: 'output' as const, text: 'x'.repeat(7 * 1024 * 1024) }] }], offset: 0, totalTurns: 1, hasOlder: false,
+      snapshot: 'large', source: 'monolithic' as const, completeness: 'complete' as const
+    }) } })
+    await expect(gw.readHistoryTurnsPage(CERT, { providerId: 'pi', cwd: '/w', externalSessionId: 'x' })).rejects.toThrow('history_capacity_exceeded')
   })
 
   it('returns an honest empty transcript when no history source is configured', async () => {

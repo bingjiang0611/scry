@@ -53,6 +53,11 @@ final class HistoryReadHandler: ChannelInboundHandler, @unchecked Sendable {
     var bytes = active!.request
     bytes.append(10)
     context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
+    armResponseDeadline(context: context)
+  }
+
+  private func armResponseDeadline(context: ChannelHandlerContext) {
+    deadline?.cancel()
     deadline = context.eventLoop.scheduleTask(in: .seconds(30)) { [self, channel = context.channel] in
       fail(RelayTransportError.timedOut(stage: "history-response"))
       channel.close(promise: nil)
@@ -67,6 +72,9 @@ final class HistoryReadHandler: ChannelInboundHandler, @unchecked Sendable {
       return
     }
     received.append(contentsOf: bytes.readableBytesView)
+    // This is an inactivity deadline, not a 30-second cap on a progressing
+    // bounded frame. Cancellation and the byte limit still settle the reader.
+    if bytes.readableBytes > 0 { armResponseDeadline(context: context) }
     guard let newline = received.firstIndex(of: 10) else { return }
     guard newline == received.count - 1 else {
       fail(ProbeError.unexpectedReply)

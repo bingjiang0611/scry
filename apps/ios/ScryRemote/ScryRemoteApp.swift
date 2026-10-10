@@ -82,6 +82,7 @@ struct RootView: View {
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
     .onChange(of: run.reachable) { if let ok = run.reachable { model.markReachable(ok) } }
+    .onChange(of: run.connectionObservation) { _, observation in model.markObservation(observation) }
     .onChange(of: run.liveExternalSessionId) {
       if let external = run.liveExternalSessionId, let identity = run.activeSessionIdentity {
         model.bindDraft(externalSessionId: external, to: identity)

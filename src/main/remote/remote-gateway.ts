@@ -153,6 +153,9 @@ export interface RemoteSessionSource {
   // authorized projects host-side). Called per request so a new/removed session
   // is reflected immediately.
   list(): RemoteSessionRef[]
+  // Cheap source revision for retaining a frozen page walk. Without it, use
+  // the compatibility path and rebuild on each page to preserve invalidation.
+  revision?(): string
 }
 
 export interface RemoteSessionPageQuery {
@@ -205,6 +208,15 @@ export interface RemoteHistoryPreviewSource {
   read(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
 }
 
+export interface RemoteHistoryVersion {
+  version: string
+  readMode: 'monolithic' | 'indexed' | 'index_rebuild'
+}
+
+export interface RemoteHistoryVersionSource {
+  read(query: RemoteHistoryQuery): Promise<RemoteHistoryVersion>
+}
+
 export interface RemoteHistoryPageQuery extends RemoteHistoryQuery {
   cursor?: number
   limit?: number
@@ -217,6 +229,26 @@ export interface RemoteHistoryPage {
   totalBytes: number
   hasMore: boolean
   snapshot: string
+}
+
+export interface RemoteHistoryTurnsPageQuery extends RemoteHistoryQuery {
+  before?: number
+  limit?: number
+  snapshot?: string
+}
+
+export interface RemoteHistoryTurnsPage {
+  turns: RemoteHistoryTurn[]
+  offset: number
+  totalTurns: number
+  hasOlder: boolean
+  snapshot: string
+  source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic' | 'claude_transcript'
+  completeness: 'partial' | 'complete'
+}
+
+export interface RemoteHistoryTurnsPageSource {
+  read(query: RemoteHistoryTurnsPageQuery): Promise<RemoteHistoryTurnsPage>
 }
 
 export interface RemoteHistorySource {
@@ -249,6 +281,8 @@ export interface RemoteGatewayDependencies {
   history?: RemoteHistorySource
   // Absent => a first-screen preview is explicitly unavailable; it is not an empty transcript.
   historyPreview?: RemoteHistoryPreviewSource
+  historyVersion?: RemoteHistoryVersionSource
+  historyTurnsPage?: RemoteHistoryTurnsPageSource
   // Absent => the device sees an empty (honest) output page.
   output?: RemoteOutputReader
 }
@@ -325,10 +359,16 @@ export class RemoteGateway {
   #sessions?: RemoteSessionSource
   #history?: RemoteHistorySource
   #historyPreview?: RemoteHistoryPreviewSource
+  #historyVersion?: RemoteHistoryVersionSource
+  #historyTurnsPage?: RemoteHistoryTurnsPageSource
   #output?: RemoteOutputReader
   #workspace?: RemoteGatewayDependencies['workspace']
   #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
   #historyBuilds = new Map<string, Promise<{ bytes: Buffer; snapshot: string }>>()
+  // A catalog page is a frozen view. Keep the materialized source only for the
+  // short lifetime of a page walk; authorization is still checked on every
+  // request, so revocation never relies on this cache.
+  #sessionCatalogs = new Map<string, { sessions: RemoteSessionRef[]; snapshot: string; revision: string; expiresAt: number }>()
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
@@ -340,6 +380,8 @@ export class RemoteGateway {
     this.#sessions = deps.sessions
     this.#history = deps.history
     this.#historyPreview = deps.historyPreview
+    this.#historyVersion = deps.historyVersion
+    this.#historyTurnsPage = deps.historyTurnsPage
     this.#output = deps.output
     this.#workspace = deps.workspace
   }
@@ -597,18 +639,29 @@ export class RemoteGateway {
     const limit = input?.limit ?? MAX_CATALOG_PAGE
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
-    const sessions = this.sessionRefs(this.#sessions?.list() ?? [], MAX_CATALOG_ITEMS + 1)
-    if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
-    const snapshot = createHash('sha256').update(JSON.stringify(sessions)).digest('hex')
-    if (input.snapshot !== undefined && input.snapshot !== snapshot) throw new RemoteGatewayError('session_snapshot_changed')
-    if (cursor > sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
-    const end = Math.min(sessions.length, cursor + limit)
+    const key = peerCertSHA256
+    const now = Date.now()
+    if (!this.#sessions?.revision) this.#sessionCatalogs.delete(key)
+    const revision = this.#sessions?.revision?.() ?? ''
+    const fresh = cursor === 0 && input.snapshot === undefined
+    let cached = this.#sessionCatalogs.get(key)
+    if (fresh || !cached || cached.expiresAt <= now || cached.revision !== revision) {
+      const sessions = this.sessionRefs(this.#sessions?.list() ?? [], MAX_CATALOG_ITEMS + 1)
+      if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
+      const snapshot = createHash('sha256').update(JSON.stringify(sessions)).digest('hex')
+      cached = { sessions, snapshot, revision, expiresAt: now + 30_000 }
+      this.#sessionCatalogs.set(key, cached)
+    }
+    if (input.snapshot !== undefined && input.snapshot !== cached.snapshot) throw new RemoteGatewayError('session_snapshot_changed')
+    if (input.snapshot !== undefined) cached.expiresAt = now + 30_000
+    if (cursor > cached.sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
+    const end = Math.min(cached.sessions.length, cursor + limit)
     return {
-      sessions: sessions.slice(cursor, end),
+      sessions: cached.sessions.slice(cursor, end),
       cursor: end,
-      total: sessions.length,
-      hasMore: end < sessions.length,
-      snapshot
+      total: cached.sessions.length,
+      hasMore: end < cached.sessions.length,
+      snapshot: cached.snapshot
     }
   }
 
@@ -648,6 +701,52 @@ export class RemoteGateway {
       bytes = Buffer.byteLength(JSON.stringify(result), 'utf8')
     }
     if (bytes > MAX_HISTORY_PREVIEW_BYTES) throw new RemoteGatewayError('history_preview_capacity_exceeded')
+    return result
+  }
+
+  async readHistoryVersion(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryVersion> {
+    this.#authorize(peerCertSHA256)
+    if (!query || typeof query.providerId !== 'string' || typeof query.cwd !== 'string' || typeof query.externalSessionId !== 'string') {
+      throw new RemoteGatewayError('invalid_history_version_query')
+    }
+    if (!this.#historyVersion) throw new RemoteGatewayError('history_unavailable')
+    return this.#historyVersion.read({
+      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH), externalSessionId: query.externalSessionId.slice(0, 128)
+    })
+  }
+
+  async readHistoryTurnsPage(peerCertSHA256: string, query: RemoteHistoryTurnsPageQuery): Promise<RemoteHistoryTurnsPage> {
+    this.#authorize(peerCertSHA256)
+    if (!query || typeof query.providerId !== 'string' || typeof query.cwd !== 'string' || typeof query.externalSessionId !== 'string') {
+      throw new RemoteGatewayError('invalid_history_turns_query')
+    }
+    const before = query.before
+    const limit = query.limit ?? 3
+    if (before !== undefined && (!Number.isSafeInteger(before) || before < 0)) throw new RemoteGatewayError('invalid_history_turns_cursor')
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RemoteGatewayError('invalid_history_turns_limit')
+    if (!this.#historyTurnsPage) throw new RemoteGatewayError('history_unavailable')
+    let result = await this.#historyTurnsPage.read({
+      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH),
+      externalSessionId: query.externalSessionId.slice(0, 128), before, limit, snapshot: query.snapshot
+    })
+    if (!Array.isArray(result.turns) || !Number.isSafeInteger(result.offset) || !Number.isSafeInteger(result.totalTurns) ||
+        result.offset < 0 || result.totalTurns < 0 || result.turns.length > limit ||
+        result.offset + result.turns.length !== (before ?? result.totalTurns) ||
+        (before !== undefined && before > result.totalTurns)) {
+      throw new RemoteGatewayError('invalid_history_turns_reply')
+    }
+    if (query.snapshot !== undefined && result.snapshot !== query.snapshot) throw new RemoteGatewayError('history_snapshot_changed')
+    if (result.hasOlder !== (result.offset > 0) ||
+        !['partial', 'complete'].includes(result.completeness) ||
+        (result.completeness === 'complete' && (result.hasOlder || before !== undefined && before < result.totalTurns || result.source === 'active_memory'))) {
+      throw new RemoteGatewayError('invalid_history_turns_reply')
+    }
+    // limit is an upper bound. Reduce only whole older turns, never text or
+    // tool evidence; the shifted cursor keeps every omitted turn retrievable.
+    while (result.turns.length > 1 && Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_HISTORY_RESPONSE_BYTES) {
+      result = { ...result, turns: result.turns.slice(1), offset: result.offset + 1, hasOlder: true, completeness: 'partial' }
+    }
+    if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_HISTORY_RESPONSE_BYTES) throw new RemoteGatewayError('history_capacity_exceeded')
     return result
   }
 

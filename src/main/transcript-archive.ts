@@ -1165,6 +1165,42 @@ export async function readTraceArchiveAsync(args: {
   return mergeArchives((current.status === 'valid' ? [current.archive] : []).concat(segmented.valid))
 }
 
+export interface TraceArchiveVersion {
+  version: string
+  readMode: 'monolithic' | 'indexed' | 'index_rebuild'
+}
+
+/**
+ * Return a cheap source stamp for refresh/reconciliation. This intentionally
+ * reads metadata only; callers must still use a complete page read when the
+ * stamp changes. Legacy monolithic archives are marked honestly because their
+ * next page read may materialize the whole file.
+ */
+export async function readTraceArchiveVersionAsync(
+  args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId }
+): Promise<TraceArchiveVersion> {
+  const paths = [
+    traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
+    traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId),
+    `${traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)}${TRACE_ARCHIVE_INDEX_SUFFIX}`
+  ]
+  const stats: string[] = []
+  for (const path of paths) {
+    try {
+      const value = await lstat(path)
+      stats.push(`${path}:${value.isDirectory() ? 'd' : 'f'}:${value.size}:${value.mtimeMs}:${value.ctimeMs}`)
+    } catch { stats.push(`${path}:missing`) }
+  }
+  const hasMonolithic = stats[0]?.endsWith(':missing') === false
+  const hasIndex = stats[2]?.endsWith(':missing') === false
+  return {
+    // The index is a rebuildable cache, not source evidence. Building it during
+    // the first page read must not invalidate the unchanged archive snapshot.
+    version: createHash('sha256').update(stats.slice(0, 2).join('\0')).digest('hex'),
+    readMode: hasMonolithic ? 'monolithic' : hasIndex ? 'indexed' : 'index_rebuild'
+  }
+}
+
 export interface TraceArchivePage {
   archive: TraceArchive | null
   offset: number

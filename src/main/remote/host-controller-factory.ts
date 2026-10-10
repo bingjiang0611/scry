@@ -64,9 +64,12 @@ export interface HostControllerFactoryDependencies {
   listProviders?(): RemoteProviderRef[]
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   listSessions?(): RemoteSessionRef[]
+  sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerDependencies['readSessionStatus']
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
+  readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>
+  readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
 }
 
 // The file stores require a pre-existing private (0700) directory; create it
@@ -152,10 +155,12 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
     ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
+    ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
     ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
     ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
-    ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {})
-  }
+    ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
+    ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
+    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})  }
 
   let controller: HostController
   try {

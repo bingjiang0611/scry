@@ -151,27 +151,29 @@ struct RemoteRunClient {
 
   // The host session catalog (the SAME conversations the Mac lists) this device
   // may browse. Display metadata only; the host re-authorizes any content read.
-  func sessions() async throws -> [G0Transport.RunSessionRef] {
-    var cursor = 0
-    var snapshot: String?
-    var total: Int?
-    var sessions: [G0Transport.RunSessionRef] = []
-    repeat {
-      let page = try await G0Transport.relayRunSessionsPage(
-        endpoint: endpoint(), identity: try identity(), cursor: cursor, snapshot: snapshot)
-      let previous = cursor
-      if snapshot == nil { snapshot = page.snapshot; total = page.total }
-      guard snapshot == page.snapshot, total == page.total, page.total <= 100_000,
-            page.cursor == previous + page.sessions.count, page.cursor <= page.total,
-            page.hasMore ? page.cursor > previous && page.cursor < page.total : page.cursor == page.total else {
-        throw NSError(domain: "ScryRemote.Sessions", code: 1,
-                      userInfo: [NSLocalizedDescriptionKey: "Session snapshot or cursor changed"])
-      }
-      sessions.append(contentsOf: page.sessions)
-      cursor = page.cursor
-      if !page.hasMore { break }
-    } while true
-    return sessions
+  func sessions(progress: @escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void = { _ in }) async throws -> [G0Transport.RunSessionRef] {
+    try await withHistoryConnection { reader in
+      var cursor = 0
+      var snapshot: String?
+      var total: Int?
+      var sessions: [G0Transport.RunSessionRef] = []
+      repeat {
+        let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot)
+        let previous = cursor
+        if snapshot == nil { snapshot = page.snapshot; total = page.total }
+        guard snapshot == page.snapshot, total == page.total, page.total <= 100_000,
+              page.cursor == previous + page.sessions.count, page.cursor <= page.total,
+              page.hasMore ? page.cursor > previous && page.cursor < page.total : page.cursor == page.total else {
+          throw NSError(domain: "ScryRemote.Sessions", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Session snapshot or cursor changed"])
+        }
+        sessions.append(contentsOf: page.sessions)
+        await progress(sessions)
+        cursor = page.cursor
+        if !page.hasMore { break }
+      } while true
+      return sessions
+    }
   }
 
   @MainActor
@@ -181,8 +183,16 @@ struct RemoteRunClient {
     }
   }
 
+  func historyVersion(providerId: String, cwd: String, externalSessionId: String) async throws -> G0Transport.RunHistoryVersion {
+    try await G0Transport.relayRunHistoryVersion(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  }
+
   func historyPreview(providerId: String, cwd: String, externalSessionId: String) async throws -> G0Transport.RunHistoryPreview {
     try await G0Transport.relayRunHistoryPreview(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  }
+
+  func historyTurnsPage(providerId: String, cwd: String, externalSessionId: String, before: Int?, limit: Int = 3, snapshot: String?) async throws -> G0Transport.RunHistoryTurnsPage {
+    try await G0Transport.relayRunHistoryTurnsPage(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot)
   }
 
   func historyPage(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> G0Transport.RunHistoryPage {

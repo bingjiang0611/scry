@@ -20,8 +20,16 @@ export function canonicalRemoteProjectRoots(candidates: Iterable<string>): strin
   return [...roots].sort((a, b) => a.length - b.length || a.localeCompare(b))
 }
 
+export function resolveCanonicalRemoteProjectDirectory(cwd: string, roots: readonly string[]): string {
+  const target = canonicalExistingDirectory(cwd)
+  if (!roots.some((root) => isAtOrBelow(root, target))) {
+    throw Object.assign(new Error('工作目录不在 Scry 已授权项目内'), { code: 'workspace_not_authorized' })
+  }
+  return target
+}
+
 export function resolveRemoteProjectDirectory(cwd: string, candidates: Iterable<string>): string {
-  return knownProjectDescendantDirectory(cwd, canonicalRemoteProjectRoots(candidates))
+  return resolveCanonicalRemoteProjectDirectory(cwd, canonicalRemoteProjectRoots(candidates))
 }
 
 // List one level only. The caller supplies the Mac's current project grants on

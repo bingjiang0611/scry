@@ -46,9 +46,12 @@ export interface RemoteHostServiceDependencies {
   listProviders?(): RemoteProviderRef[]
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   listSessions?(): RemoteSessionRef[]
+  sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
+  readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>
+  readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
@@ -113,10 +116,12 @@ export class RemoteHostService {
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
       ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
+      ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
       ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
       ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
-      ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {})
-    })
+      ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
+      ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
+      ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})    })
     let host: InnerMtlsHost
     let pairing: PairingTransport
     try {
