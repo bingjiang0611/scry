@@ -271,6 +271,7 @@ final class RemoteRunStore: ObservableObject {
   private var cachedHistory: (key: String, snapshot: RemoteHistorySnapshot, persisted: Bool)?
   private var historyVersions: [String: String] = [:]
   private var historyWindow: G0Transport.RunHistoryTurnsPage?
+  private var historyWindowKey: String?
   var historyOlderBefore: Int? { historyWindow.flatMap { $0.hasOlder ? $0.offset : nil } }
   var historyPageSnapshot: String? { historyWindow?.snapshot }
   var historyPageSource: String? { historyWindow?.source }
@@ -663,21 +664,29 @@ final class RemoteRunStore: ObservableObject {
     let client = RemoteRunClient(connection: connection)
     let disk = historyDisk
     let requestConnectionRevision = connectionSuccessRevision
-    let memory = cachedHistory?.key == key ? cachedHistory?.snapshot : nil
+    let retainedWindow: RemoteHistoryCache.StructuredWindow? = historyWindowKey == key ? historyWindow.flatMap { page in
+      historyFetchedAt.map { RemoteHistoryCache.StructuredWindow(page: page, fetchedAt: $0) }
+    } : nil
+    let memory = retainedWindow == nil && cachedHistory?.key == key ? cachedHistory?.snapshot : nil
     historyRequestGeneration += 1
     let request = historyRequestGeneration
     let requestGeneration = generation
-    historyFromCache = false; historyFetchedAt = nil; historyProgress = nil
+    historyProgress = nil
     historyRefreshError = nil; historyStorageNotice = nil; historyCapacityLimit = false
-    historyWindow = nil
     if historyPreviewKey != key { historyPreview = .idle; historyPreviewKey = nil }
     if case .available = historyPreview {} else { historyPreview = .loading }
-    if let memory { showHistory(memory, key: key, cached: true, persisted: cachedHistory?.persisted == true) }
-    else if let screen = warmedScreens[key], !hasLocalTurns {
-      showPreview(screen, key: key, cached: true)
-    } else if case .available = historyPreview, !hasLocalTurns {
-      history = .partial(historyPreviewTurns)
-    } else { history = .loading }
+    // Keep the current window until a new response actually replaces it. A
+    // pending/failed refresh must not resurrect a retired full-cache base.
+    if retainedWindow == nil {
+      historyWindow = nil; historyWindowKey = nil
+      historyFromCache = false; historyFetchedAt = nil
+      if let memory { showHistory(memory, key: key, cached: true, persisted: cachedHistory?.persisted == true) }
+      else if let screen = warmedScreens[key], !hasLocalTurns {
+        showPreview(screen, key: key, cached: true)
+      } else if case .available = historyPreview, !hasLocalTurns {
+        history = .partial(historyPreviewTurns)
+      } else { history = .loading }
+    }
     historySyncing = true
     historyTask = Task { [weak self] in
       guard let self else { return }
@@ -694,20 +703,23 @@ final class RemoteRunStore: ObservableObject {
       var cached = memory
       var persisted = self.cachedHistory?.key == key && self.cachedHistory?.persisted == true
       var cachedPreview: G0Transport.RunHistoryPreview?
-      var cachedWindow: RemoteHistoryCache.StructuredWindow?
-      do { cachedPreview = try await disk.readPreview(key); cachedWindow = try await disk.readWindow(key) }
+      var cachedWindow = retainedWindow
+      do {
+        cachedPreview = try await disk.readPreview(key)
+        if cachedWindow == nil { cachedWindow = try await disk.readWindow(key) }
+      }
       catch { if current() { self.historyStorageNotice = "本地首屏镜像不可用，将从主机重新读取" } }
       guard current() else { return }
-      if let cachedPreview, cached == nil, !hasLocalTurns { self.showPreview(cachedPreview, key: key, cached: true) }
-      if let cachedWindow, cached == nil {
-        self.showHistoryWindow(cachedWindow.page, cached: true, fetchedAt: cachedWindow.fetchedAt)
+      if let cachedPreview, cached == nil, cachedWindow == nil, !hasLocalTurns { self.showPreview(cachedPreview, key: key, cached: true) }
+      if let cachedWindow, cached == nil, retainedWindow == nil {
+        self.showHistoryWindow(cachedWindow.page, key: key, cached: true, fetchedAt: cachedWindow.fetchedAt)
       }
-      if cached == nil, cachedWindow == nil || legacyFull || hasLocalTurns {
+      if cached == nil, cachedWindow == nil || legacyFull {
         do { cached = try await disk.read(key); persisted = cached != nil }
         catch { if current() { self.historyStorageNotice = "本地缓存不可用，将从主机重新读取" } }
       }
       guard current() else { return }
-      if let cached {
+      if let cached, cachedWindow == nil {
         self.showHistory(cached, key: key, cached: true, persisted: persisted)
         if !persisted { self.historyStorageNotice = "历史目前仅在内存中，尚未保存到手机缓存。" }
         if !hasLocalTurns, memory != nil, !force,
@@ -747,7 +759,7 @@ final class RemoteRunStore: ObservableObject {
             do {
               let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil)
               guard current() else { return }
-              self.showHistoryWindow(recent, cached: false, fetchedAt: Date())
+              self.showHistoryWindow(recent, key: key, cached: false, fetchedAt: Date())
               self.recordSuccess()
               do {
                 let saved = try await disk.writeWindow(recent, key: key, epoch: diskEpoch)
@@ -770,7 +782,7 @@ final class RemoteRunStore: ObservableObject {
             let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
             guard current() else { return }
             if preview.available {
-              if cached == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
+              if cached == nil, cachedWindow == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
               self.recordSuccess()
               do {
                 let saved = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
@@ -858,8 +870,9 @@ final class RemoteRunStore: ObservableObject {
     historyRevision += 1
   }
 
-  private func showHistoryWindow(_ page: G0Transport.RunHistoryTurnsPage, cached: Bool, fetchedAt: Date) {
+  private func showHistoryWindow(_ page: G0Transport.RunHistoryTurnsPage, key: String, cached: Bool, fetchedAt: Date) {
     historyWindow = page
+    historyWindowKey = key
     if page.totalTurns == 0 { history = .empty }
     else if page.completeness == "complete" { history = .loaded(page.turns) }
     else { history = .partial(page.turns) }
@@ -871,9 +884,10 @@ final class RemoteRunStore: ObservableObject {
   private func showHistory(_ snapshot: RemoteHistorySnapshot, key: String, cached: Bool, persisted: Bool) {
     let rendered: Bool
     switch history { case .loaded, .empty: rendered = true; default: rendered = false }
-    let unchanged = rendered && cachedHistory?.key == key &&
+    let unchanged = historyWindow == nil && rendered && cachedHistory?.key == key &&
       cachedHistory?.snapshot.fingerprint == snapshot.fingerprint
     cachedHistory = (key, snapshot, persisted)
+    historyWindow = nil; historyWindowKey = nil
     // Digest identity avoids an O(transcript) comparison on every validation.
     if !unchanged {
       history = snapshot.turns.isEmpty ? .empty : .loaded(snapshot.turns)
@@ -892,6 +906,7 @@ final class RemoteRunStore: ObservableObject {
     historyRequestGeneration += 1
     let request = historyRequestGeneration
     let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    guard historyWindowKey == key else { return }
     historySyncing = true
     historyTask = Task { [weak self] in
       guard let self else { return }
@@ -916,7 +931,7 @@ final class RemoteRunStore: ObservableObject {
         let combined = G0Transport.RunHistoryTurnsPage(turns: turns, offset: page.offset,
           totalTurns: window.totalTurns, hasOlder: page.hasOlder, snapshot: window.snapshot,
           source: window.source, completeness: complete ? "complete" : "partial")
-        self.showHistoryWindow(combined, cached: false, fetchedAt: Date())
+        self.showHistoryWindow(combined, key: key, cached: false, fetchedAt: Date())
         do {
           let saved = try await self.historyDisk.writeWindow(combined, key: key, epoch: epoch)
           if self.historyRequestGeneration == request, !saved { self.historyStorageNotice = "已读取历史超过手机缓存容量，本次仅保留在内存中。" }
@@ -942,7 +957,7 @@ final class RemoteRunStore: ObservableObject {
     historyTask?.cancel()
     historyTask = nil
     cachedHistory = nil
-    historyWindow = nil
+    historyWindow = nil; historyWindowKey = nil
     history = .idle; historyPreview = .idle; historyPreviewKey = nil; historySyncing = false; historyFromCache = false
     historyFetchedAt = nil; historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
     try await historyDisk.clear()
@@ -967,6 +982,11 @@ final class RemoteRunStore: ObservableObject {
     guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity),
           let client = makeClient() else { return }
     let key = RemoteHistoryCache.key(connection: client.connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    if let windowKey = historyWindowKey, windowKey != key {
+      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
+      await historyTask?.value
+      return
+    }
     let requestConnectionRevision = connectionSuccessRevision
     do {
       let version = try await client.historyVersion(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
@@ -1744,7 +1764,7 @@ final class RemoteRunStore: ObservableObject {
     clearRecoveryCheckpoint()
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
-    catalog = .idle; catalogRefreshError = nil; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
+    catalog = .idle; catalogRefreshError = nil; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyWindowKey = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
     catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil; historyVersions = [:]
     historyRequestGeneration += 1
     historySyncing = false; historyFromCache = false; historyFetchedAt = nil
@@ -1987,6 +2007,31 @@ final class RemoteRunStore: ObservableObject {
       _ = try await disk.writeWindow(olderOnly, key: windowKey, epoch: await disk.epoch)
       checks.append(("store.rejectOlderOnlyAsTailCache", false))
     } catch { checks.append(("store.rejectOlderOnlyAsTailCache", true)) }
+    // A retired full snapshot must not outrank a newer readable window while
+    // another refresh is pending or fails, including its provenance/cursor.
+    let refreshStore = RemoteRunStore(connections: connections, historyDisk: disk)
+    refreshStore.historyTestOffline = true
+    refreshStore.activeSessionIdentity = windowIdentity
+    refreshStore.cachedHistory = (windowKey, snapshot, true)
+    let currentWindow = G0Transport.RunHistoryTurnsPage(turns: [snapshot.turns.last!], offset: 2,
+      totalTurns: 3, hasOlder: true, snapshot: "current-window", source: "active_memory", completeness: "partial")
+    let currentFetchedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    refreshStore.showHistoryWindow(currentWindow, key: windowKey, cached: false, fetchedAt: currentFetchedAt)
+    refreshStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true)
+    checks.append(("store.refreshImmediatelyKeepsNewerWindow", refreshStore.history == .partial(currentWindow.turns) && refreshStore.historyPageSnapshot == "current-window"))
+    await refreshStore.historyTask?.value
+    checks.append(("store.failedRefreshKeepsNewerWindow", refreshStore.history == .partial(currentWindow.turns) && refreshStore.historyPageSnapshot == "current-window" && refreshStore.historyOlderBefore == 2 && refreshStore.historyPageSource == "active_memory" && refreshStore.historyFetchedAt == currentFetchedAt && refreshStore.historyRefreshError != nil))
+    connections.save(foreignConnection)
+    refreshStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true)
+    await refreshStore.historyTask?.value
+    checks.append(("store.retainedWindowCannotCrossConnection", refreshStore.historyPageSnapshot == nil && refreshStore.history != .partial(currentWindow.turns)))
+    connections.save(connection)
+    refreshStore.cachedHistory = (windowKey, snapshot, true)
+    let completeWindow = G0Transport.RunHistoryTurnsPage(turns: [snapshot.turns.last!], offset: 0,
+      totalTurns: 1, hasOlder: false, snapshot: "complete-window", source: "indexed_archive", completeness: "complete")
+    refreshStore.showHistoryWindow(completeWindow, key: windowKey, cached: false, fetchedAt: currentFetchedAt)
+    refreshStore.showHistory(snapshot, key: windowKey, cached: false, persisted: true)
+    checks.append(("store.fullSnapshotReplacesDifferentWindowBase", refreshStore.history == .loaded(snapshot.turns) && refreshStore.historyPageSnapshot == nil))
     // A history browser cannot own, restore, delete, or submit the recovery run.
     mirrorStore.runId = "unresolved-recovery"
     mirrorStore.lifecycle = .failed
