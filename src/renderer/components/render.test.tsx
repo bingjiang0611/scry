@@ -1273,11 +1273,8 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
 })
 
 describe('Sidebar 项目分组', () => {
-  it('Skill 和 MCP 与分析同组展示，并保留 MCP 真实连接状态', () => {
-    const renderIntegrations = (
-      mcps: ComponentProps<typeof Sidebar>['mcps'],
-      mcpLive: ComponentProps<typeof Sidebar>['mcpLive']
-    ) => renderToStaticMarkup(
+  it('Skill 和 MCP 与分析同组展示，入口不读取数量或连接状态', () => {
+    const html = renderToStaticMarkup(
       <Sidebar
         projects={[]}
         activeCwd={null}
@@ -1287,47 +1284,23 @@ describe('Sidebar 项目分组', () => {
         onArchive={() => {}}
         onAnalytics={() => {}}
         onSkills={() => {}}
-        skillCount={3}
         onMcp={() => {}}
-        mcps={mcps}
-        mcpLive={mcpLive}
         onSettings={() => {}}
       />
     )
-
-    const disabledHtml = renderIntegrations([
-      { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
-      { name: 'disabled', scope: 'user', transport: 'stdio', detail: 'disabled', enabled: false }
-    ], [
-      { name: 'connected', status: 'connected' },
-      { name: 'disabled', status: 'disabled' }
-    ])
-    expect(disabledHtml).toContain('<nav class="sb-nav" aria-label="主要视图">')
-    expect(disabledHtml).toContain('title="Skills"')
-    expect(disabledHtml).toContain('title="MCP"')
-    expect(disabledHtml).toContain('<span class="sb-navmeta">3</span>')
-    expect(disabledHtml).toContain('aria-label="MCP · 1/1 已连接"')
-    expect(disabledHtml).toContain('class="sb-navdot online"')
-    expect(disabledHtml).toContain('class="sb-navitem sb-settings"')
-    expect(disabledHtml).not.toContain('class="kbd"')
-    expect(disabledHtml).not.toContain('深色')
-    expect(disabledHtml).not.toContain('浅色')
-    expect(disabledHtml).not.toContain('诊断')
-    expect(disabledHtml.indexOf('分析')).toBeLessThan(disabledHtml.indexOf('title="Skills"'))
-
-    const partialHtml = renderIntegrations([
-      { name: 'connected', scope: 'user', transport: 'stdio', detail: 'connected', enabled: true },
-      { name: 'failed', scope: 'user', transport: 'stdio', detail: 'failed', enabled: true }
-    ], [
-      { name: 'connected', status: 'connected' },
-      { name: 'failed', status: 'failed' }
-    ])
-    expect(partialHtml).toContain('aria-label="MCP · 1/2 已连接"')
-    expect(partialHtml).toContain('class="sb-navdot partial"')
-
-    const runtimeOnlyHtml = renderIntegrations([], [{ name: 'runtime-only', status: 'connected' }])
-    expect(runtimeOnlyHtml).toContain('aria-label="MCP · 1/1 已连接"')
-    expect(runtimeOnlyHtml).toContain('class="sb-navdot online"')
+    expect(html).toContain('<nav class="sb-nav" aria-label="主要视图">')
+    expect(html).toContain('title="Skills"')
+    expect(html).toContain('title="MCP"')
+    expect(html).toContain('aria-label="MCP"')
+    expect(html).not.toContain('sb-navmeta')
+    expect(html).not.toContain('sb-navdot')
+    expect(html).not.toContain('已连接')
+    expect(html).toContain('class="sb-navitem sb-settings"')
+    expect(html).not.toContain('class="kbd"')
+    expect(html).not.toContain('深色')
+    expect(html).not.toContain('浅色')
+    expect(html).not.toContain('诊断')
+    expect(html.indexOf('分析')).toBeLessThan(html.indexOf('title="Skills"'))
   })
 
   it('同名项目保留路径标识但 hover 不显示具体路径', () => {

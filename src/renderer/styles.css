@@ -6293,31 +6293,6 @@ textarea:focus-visible,
   color: var(--accent);
 }
 
-.sb-navmeta {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--dim2);
-  font: 10.5px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.sb-navdot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--dim3);
-}
-
-.sb-navdot.online {
-  background: var(--ok);
-}
-
-.sb-navdot.partial {
-  background: var(--warn);
-}
-
 .sb-section {
   padding: 12px 11px 5px;
   color: var(--dim3);

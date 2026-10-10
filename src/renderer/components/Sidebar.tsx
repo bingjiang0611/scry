@@ -8,9 +8,8 @@ import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
 import { ModalFrame } from './Modals'
 import type { ProjectMeta, SessionMeta } from '../env'
-import type { McpMeta, SessionProviderId } from '@shared/provider'
+import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
-import type { McpLiveStatus } from '@shared/trace'
 import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
@@ -57,10 +56,7 @@ export function Sidebar({
   onAnalytics,
   analyticsActive = false,
   onSkills,
-  skillCount,
   onMcp,
-  mcps = [],
-  mcpLive = [],
   catalogHealth,
   onSettings
 }: {
@@ -90,10 +86,7 @@ export function Sidebar({
   onAnalytics?: () => void
   analyticsActive?: boolean
   onSkills?: () => void
-  skillCount?: number
   onMcp?: () => void
-  mcps?: McpMeta[]
-  mcpLive?: McpLiveStatus[]
   catalogHealth?: CatalogHealth
   onSettings?: () => void
 }) {
@@ -151,7 +144,6 @@ export function Sidebar({
       sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
     }))
     .filter((project) => project.projectMatch || project.sessions.length > 0)
-  const mcpSummary = summarizeMcpNav(mcps, mcpLive)
   const isActive = (cwd: string, session: SessionMeta): boolean => sessionMatchesSelection(cwd, session, {
     cwd: activeCwd,
     sessionId: activeSessionId,
@@ -195,7 +187,6 @@ export function Sidebar({
           {onSkills && (
             <button type="button" className="sb-navitem" onClick={onSkills} title="Skills" aria-haspopup="dialog">
               <Icon name="box" /> 技能
-              {skillCount != null && skillCount > 0 && <span className="sb-navmeta">{skillCount}</span>}
             </button>
           )}
           {onMcp && (
@@ -205,13 +196,9 @@ export function Sidebar({
               onClick={onMcp}
               title="MCP"
               aria-haspopup="dialog"
-              aria-label={`MCP · ${mcpSummary.label}`}
+              aria-label="MCP"
             >
               <Icon name="cube" /> MCP
-              <span className="sb-navmeta" aria-hidden="true">
-                <span className={`sb-navdot ${mcpSummary.tone}`} />
-                {mcpSummary.total > 0 && <span>{mcpSummary.connected}/{mcpSummary.total}</span>}
-              </span>
             </button>
           )}
         </nav>
@@ -587,37 +574,4 @@ function SessionRow({
       </span>
     </div>
   )
-}
-
-function summarizeMcpNav(mcps: McpMeta[], live: McpLiveStatus[]): {
-  connected: number
-  total: number
-  tone: 'online' | 'partial' | 'off'
-  label: string
-} {
-  const configuredByName = new Map(mcps.map((mcp) => [mcp.name, mcp]))
-  const liveByName = new Map(live.map((status) => [status.name, status]))
-  const names = new Set([...configuredByName.keys(), ...liveByName.keys()])
-  let connected = 0
-  let total = 0
-
-  for (const name of names) {
-    const configured = configuredByName.get(name)
-    const runtime = liveByName.get(name)
-    if (runtime?.status === 'disabled' || (!runtime && configured?.enabled === false)) continue
-    total += 1
-    if (runtime?.status === 'connected') connected += 1
-  }
-
-  if (total === 0) {
-    return {
-      connected: 0,
-      total: 0,
-      tone: 'off',
-      label: names.size > 0 ? '没有启用的 MCP' : '尚未发现配置'
-    }
-  }
-
-  const tone = connected === total ? 'online' : 'partial'
-  return { connected, total, tone, label: `${connected}/${total} 已连接` }
 }

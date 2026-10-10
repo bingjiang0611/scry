@@ -468,7 +468,12 @@ export function parseSessionModels(raw: string | null): Map<string, SessionModel
   }
 }
 
-export function useIntegrations(cwd: string | null, sessionId: string | null, projects: ProjectMeta[]) {
+export function useIntegrations(
+  cwd: string | null,
+  sessionId: string | null,
+  projects: ProjectMeta[],
+  capabilityView: 'skills' | 'mcp' | null
+) {
   const [sessionModels, setSessionModels] = useState(() => {
     try {
       return parseSessionModels(window.localStorage.getItem(SESSION_MODELS_KEY))
@@ -545,7 +550,6 @@ export function useIntegrations(cwd: string | null, sessionId: string | null, pr
   const [gitDiff, setGitDiff] = useState<DiffFile[]>([])
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
-  const integrationRequestSeq = useRef(0)
   const usageRequestSeq = useRef(0)
   const analyticsRequestSeq = useRef(0)
   const analyticsRangeRef = useRef<UsageAnalyticsRangeDays>(30)
@@ -1030,10 +1034,9 @@ export function useIntegrations(cwd: string | null, sessionId: string | null, pr
   useEffect(() => {
     cwdRef.current = cwd
     providerContextRef.current = providerContext
-    const seq = ++integrationRequestSeq.current
     ++usageRequestSeq.current
     setUsage(null)
-    const skillSeq = ++skillRefreshRequestSeq.current
+    ++skillRefreshRequestSeq.current
     ++mcpConfigRequestSeq.current
     ++mcpLiveRequestSeq.current
     mcpTestRequests.current.clear()
@@ -1044,26 +1047,20 @@ export function useIntegrations(cwd: string | null, sessionId: string | null, pr
     setMcpStatus({})
     setMcpLive([])
     setSkillCapability(null)
-    setSkillsRefreshing(true)
+    setSkillsRefreshing(false)
     setMcpCapability(null)
     setMcpConfigRefreshing(false)
     setMcpRefreshing(false)
     loadGitDiff(cwd)
-    void window.scry.listSkills(providerContext)
-      .then((skillResult) => {
-        if (seq !== integrationRequestSeq.current || contextKey(providerContext) !== contextKey(providerContextRef.current)) return
-        setSkillCapability(skillResult)
-        setSkills(capabilityRows(skillResult))
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (seq === integrationRequestSeq.current && skillSeq === skillRefreshRequestSeq.current) {
-          setSkillsRefreshing(false)
-        }
-      })
-    void refreshMcp().catch(() => {})
     if (cwd) loadUsage()
-  }, [cwd, loadGitDiff, loadUsage, providerContext, refreshMcp])
+  }, [cwd, loadGitDiff, loadUsage, providerContext])
+
+  useEffect(() => {
+    // Inventory is read for the visible page, not to decorate navigation.
+    // Context changes still clear old evidence before loading the active view.
+    if (capabilityView === 'skills') void refreshSkills()
+    if (capabilityView === 'mcp') void refreshMcp().catch(() => {})
+  }, [capabilityView, providerContext, refreshMcp, refreshSkills])
 
   useEffect(() => {
     const seq = ++runControlRequestSeq.current

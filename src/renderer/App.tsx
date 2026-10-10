@@ -598,7 +598,7 @@ export async function restoreFocusedRunSelection(
 
 interface ProviderCatalogRefreshEffects {
   invalidateProviderContext?: () => Promise<unknown> | unknown
-  refreshSkills: () => Promise<unknown> | unknown
+  refreshSkills?: () => Promise<unknown> | unknown
   retrySlash: () => void
 }
 
@@ -609,7 +609,7 @@ export async function applyProviderCatalogRefresh(effects: ProviderCatalogRefres
     } catch {
       // A failed main-process invalidation must not strand the renderer on old commands.
     }
-    await effects.refreshSkills()
+    await effects.refreshSkills?.()
   } catch {
     // refreshSkills normally projects failure into capability state; older preload implementations may reject.
   } finally {
@@ -768,7 +768,9 @@ export function App() {
     },
     [setActiveSessionId]
   )
-  const integrations = useIntegrations(cwd, activeSessionId, projects)
+  const [showSkills, setShowSkills] = useState(false)
+  const [showMcp, setShowMcp] = useState(false)
+  const integrations = useIntegrations(cwd, activeSessionId, projects, showMcp ? 'mcp' : showSkills ? 'skills' : null)
   useEffect(() => {
     const subscribe = window.scry.onDataUpdated
     if (typeof subscribe !== 'function') return
@@ -940,8 +942,6 @@ export function App() {
       return next
     })
   }, [currentSurface.id])
-  const [showSkills, setShowSkills] = useState(false)
-  const [showMcp, setShowMcp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const [view, setView] = useState<AppView>('chat') // 对话/诊断/分析
@@ -1012,7 +1012,7 @@ export function App() {
     invalidateProviderContext: typeof window.scry.invalidateProviderContext === 'function'
       ? () => window.scry.invalidateProviderContext(integrations.providerContext)
       : undefined,
-    refreshSkills: integrations.refreshSkills,
+    refreshSkills: showSkills ? integrations.refreshSkills : undefined,
     retrySlash
   })
 
@@ -2071,10 +2071,7 @@ export function App() {
           onAnalytics={() => changeView('analytics')}
           analyticsActive={view === 'analytics'}
           onSkills={openSkills}
-          skillCount={integrations.skills.length}
           onMcp={openMcp}
-          mcps={integrations.mcps}
-          mcpLive={integrations.mcpLive}
           catalogHealth={catalogHealth}
           onSettings={() => setShowSettings(true)}
       />
