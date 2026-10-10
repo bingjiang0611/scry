@@ -14,9 +14,9 @@ try {
   await writeFile(join(temp, 'index.html'), `<!doctype html><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'">
     <link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="codex-alignment.css">
-    <style>body{margin:0;padding:24px}.sb-sess{height:36px}body.paused .sb-running{animation:none}</style>
+    <style>body{margin:0;padding:24px}.sb-sess{height:36px}body.legacy .sb-sess .sb-running{animation-play-state:running;animation-duration:.75s;animation-timing-function:linear}</style>
     <h3>Scry · isolated animation measurement</h3><p>Eight synthetic running sessions. Closes automatically.</p>
-    <aside class="sidebar">${Array.from({ length: 8 }, (_, i) => `<div class="sb-sess"><span class="sb-running" role="status" aria-label="正在运行"></span><span class="sb-sesstext">Synthetic session ${i + 1}</span></div>`).join('')}</aside>`)
+    <aside class="sidebar">${Array.from({ length: 8 }, (_, i) => `<div class="sb-sess ${i === 0 ? 'active' : ''}"><span class="sb-running" role="status" aria-label="正在运行"></span><span class="sb-sesstext">Synthetic session ${i + 1}</span></div>`).join('')}</aside>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     const { performance } = require('node:perf_hooks')
@@ -34,11 +34,11 @@ try {
         win.showInactive()
         const samples = []
         // ABBA reduces one-way warmup/drift bias. CPU is one-core %, not machine %.
-        for (const animated of [true, false, false, true]) {
+        for (const legacy of [true, false, false, true]) {
           const style = await win.webContents.executeJavaScript(
-            'document.body.classList.toggle("paused", ' + !animated + '); ({name:getComputedStyle(document.querySelector(".sb-running")).animationName, count:document.querySelectorAll(".sb-running").length})'
+            'document.body.classList.toggle("legacy", ' + legacy + '); ({ count:document.querySelectorAll(".sb-running").length, animated:document.getAnimations().filter(a => a.playState === "running" && a.effect.target.matches(".sb-running")).length })'
           )
-          if (style.count !== 8 || (animated ? style.name !== 'sb-running-spin' : style.name !== 'none')) throw new Error('Animation condition did not apply: ' + JSON.stringify(style))
+          if (style.count !== 8 || style.animated !== (legacy ? 8 : 1)) throw new Error('Animation condition did not apply: ' + JSON.stringify(style))
           await wait(700)
           const before = snapshot(), started = performance.now()
           await wait(3000)
@@ -50,7 +50,7 @@ try {
             return { type: p.type, oneCoreCpuPercent: Number(((p.cpuSeconds - previous.cpuSeconds) / (elapsedMs / 1000) * 100).toFixed(2)) }
           })
           if (!processes.some(p => p.type === 'GPU')) throw new Error('No GPU process evidence')
-          samples.push({ animated, elapsedMs: Math.round(elapsedMs), processes })
+          samples.push({ legacy, animatedSpinners: style.animated, elapsedMs: Math.round(elapsedMs), processes })
         }
         console.log('SCRY_ANIMATION_PERF=' + JSON.stringify({ electron: process.versions.electron, samples }))
         win.destroy()

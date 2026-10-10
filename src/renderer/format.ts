@@ -1572,15 +1572,31 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
 // 性能：把一批 onTrace 事件一次性合并进 turns（替代每事件一次 setState）。FIFO 保序、按 id 去重、
 // 连续 text_delta / thinking 流片段合并进上一条——语义与逐事件版完全一致，只是批量。
 // clone-on-write 只复制变动的 turn。
+// Renderer snapshots are immutable. Weak keys let old histories be collected;
+// copy indices only when identities change, not on each text/thinking fragment.
+const traceTurnIndices = new WeakMap<Turn[], Map<string, number>>()
+const traceEventIndices = new WeakMap<TraceEvent[], Map<string, number>>()
+
 export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set<string>): Turn[] {
+  if (events.length === 0) return prev
   let next = prev
-  const turnIndices = new Map(prev.map((turn, index) => [turn.runId, index]))
-  const states = new Map<number, { items: TraceEvent[]; indices: Map<string, number>; mutable: boolean }>()
+  let turnIndices = traceTurnIndices.get(prev)
+  if (!turnIndices) {
+    turnIndices = new Map(prev.map((turn, index) => [turn.runId, index]))
+    traceTurnIndices.set(prev, turnIndices)
+  }
+  let turnIndicesMutable = false
+  const states = new Map<number, { items: TraceEvent[]; indices: Map<string, number>; mutable: boolean; indicesMutable: boolean }>()
   const stateFor = (index: number) => {
     let state = states.get(index)
     if (!state) {
       const items = next[index].items
-      state = { items, indices: new Map(items.map((event, itemIndex) => [event.id, itemIndex])), mutable: false }
+      let indices = traceEventIndices.get(items)
+      if (!indices) {
+        indices = new Map(items.map((event, itemIndex) => [event.id, itemIndex]))
+        traceEventIndices.set(items, indices)
+      }
+      state = { items, indices, mutable: false, indicesMutable: false }
       states.set(index, state)
     }
     return state
@@ -1594,8 +1610,9 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
     next[index] = { ...next[index], items: state.items }
     return state
   }
-  const rebuildIndices = (state: { items: TraceEvent[]; indices: Map<string, number> }) => {
+  const rebuildIndices = (state: ReturnType<typeof stateFor>) => {
     state.indices = new Map(state.items.map((event, itemIndex) => [event.id, itemIndex]))
+    state.indicesMutable = true
   }
 
   for (const ev of events) {
@@ -1606,8 +1623,12 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
       index = next.length
       const items = [ev]
       next.push({ runId: ev.runId, userText: '', items, done: false })
+      if (!turnIndicesMutable) {
+        turnIndices = new Map(turnIndices)
+        turnIndicesMutable = true
+      }
       turnIndices.set(ev.runId, index)
-      states.set(index, { items, indices: new Map([[ev.id, 0]]), mutable: true })
+      states.set(index, { items, indices: new Map([[ev.id, 0]]), mutable: true, indicesMutable: true })
       continue
     }
 
@@ -1665,9 +1686,17 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
     } else if (ev.stage === 'thinking' && last?.stage === 'thinking' && sameModelStream) {
       state.items[lastIndex] = { ...last, thinking: (last.thinking ?? '') + (ev.thinking ?? ''), llmPerformance: ev.llmPerformance ?? last.llmPerformance }
     } else {
+      if (!state.indicesMutable) {
+        state.indices = new Map(state.indices)
+        state.indicesMutable = true
+      }
       state.indices.set(ev.id, state.items.length)
       state.items.push(ev)
     }
+  }
+  traceTurnIndices.set(next, turnIndices)
+  for (const state of states.values()) {
+    if (state.mutable) traceEventIndices.set(state.items, state.indices)
   }
   return next
 }

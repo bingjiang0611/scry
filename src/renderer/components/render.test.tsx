@@ -591,9 +591,9 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).not.toContain('停止')
   })
 
-  // 分页只收窄 IPC 载荷与 renderer 挂载量；main 侧仍全量解析并缓存整个会话，
-  // 所以文案只能声称「挂载」范围，不能声称降低了 main 的加载/内存。
-  it('分页历史显式说明只挂载最近轮次，并提供取回更早轮次的入口', () => {
+  // 时间线保留已加载的数据，但长历史正文按视口挂载。这里描述 renderer
+  // 的数据范围，不冒称所有 Provider 的 main 读取都已经分页。
+  it('分页历史说明时间线已加载范围，并保留取回更早轮次的入口', () => {
     const html = renderWelcome({
       turns: [runningTurn],
       busy: false,
@@ -601,7 +601,8 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
       onLoadOlderTurns: () => {}
     })
     expect(html).toContain('history-window-note')
-    expect(html).toContain('仅挂载最近')
+    expect(html).toContain('时间线已加载最近')
+    expect(html).not.toContain('仅挂载最近')
     expect(html).toContain('<b>40</b> / 500 轮')
     expect(html).toContain('更早轮次仍在本机归档中，未丢弃')
     expect(html).toContain('加载更早轮次')

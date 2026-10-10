@@ -471,6 +471,12 @@ body.pane-resizing * {
 }
 .sb-sess.active .sb-running {
   color: var(--accent);
+  animation-duration: 1.5s;
+  animation-timing-function: steps(12);
+}
+/* Background state stays visible, but only the selected run needs continuous motion. */
+.sb-sess:not(.active) .sb-running {
+  animation-play-state: paused;
 }
 @keyframes sb-running-spin {
   to {

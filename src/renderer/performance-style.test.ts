@@ -32,6 +32,12 @@ describe('idle renderer paint budget', () => {
     expect(declaration(styles, '@keyframes skeleton-shimmer')).toContain('transform: translateX')
   })
 
+  it('keeps background run status visible without frame-rate motion', () => {
+    expect(declaration(styles, '.sb-sess:not(.active) .sb-running')).toContain('animation-play-state: paused')
+    expect(declaration(styles, '.sb-sess.active .sb-running')).toContain('animation-timing-function: steps(12)')
+    expect(declaration(styles, '.sb-sess.active .sb-running')).toContain('animation-duration: 1.5s')
+  })
+
   it('pauses incidental animations when the Electron page is hidden', () => {
     expect(styles).toContain(":root[data-page-visibility='hidden'] *")
     expect(styles).toContain('animation-play-state: paused !important')

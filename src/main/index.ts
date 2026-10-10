@@ -40,6 +40,7 @@ import {
   readSessionHistoryAfterCompletedRuns,
   restoreTraceArchiveTurn,
   sessionHistoryPage,
+  sessionArchiveIsPageable,
   type LoadedSessionTurn,
   type SessionHistoryPage,
   type SessionHistoryPageRequest
@@ -1744,9 +1745,9 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     payload.providerId === 'claude' && cwd
       ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
       : null
-  // Qoder/Pi add Provider-owned evidence during full-history enrichment. Other archive-only sessions
-  // can read exactly the requested per-turn files through the rebuildable archive index.
-  const archivePaged = !fp && payload.providerId !== 'qoder' && payload.providerId !== 'pi'
+  // Pi's model-context enrichment is turn-local, so apply it to each archive page.
+  // Qoder's Provider-owned history reconciliation still requires the full source.
+  const archivePaged = sessionArchiveIsPageable(payload.providerId, fp)
   let archivePage: Awaited<ReturnType<typeof readTraceArchivePageAsync>> | null
   let archived: TraceArchive | null
   const matchingRuns = runs.unsettledStates()
@@ -1908,7 +1909,11 @@ handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, req
       }
       if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
     }
-    const turns = mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+    const turns = await providerRegistry.enrichSession(
+      { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+      mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+    )
+    if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
     const page = hydrateSessionHistoryPage({
       turns,
       offset: sourcePage.offset,

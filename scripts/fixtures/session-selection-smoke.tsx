@@ -65,7 +65,8 @@ const bridge = {
   },
   onFocusedRun: (callback: (run: ActiveRun) => void) => { listeners.add(callback); return () => listeners.delete(callback) },
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
-  listProjects: async () => projects, recentFolders: async () => projects.map((project) => project.cwd),
+  // Match IPC snapshot identity; never share the mutable fixture catalog with React.
+  listProjects: async () => structuredClone(projects), recentFolders: async () => projects.map((project) => project.cwd),
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
   detect: async () => [],
   listSkills: async () => ({ state: 'unavailable', data: null }),
