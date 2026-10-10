@@ -298,9 +298,17 @@ final class RemoteRunStore: ObservableObject {
   private var historyTestOffline = false
   #endif
 
-  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache()) {
+  let historyOnly: Bool
+
+  convenience init(historyFor owner: RemoteRunStore) {
+    self.init(connections: owner.connections, historyDisk: owner.historyDisk, historyOnly: true)
+  }
+
+  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache(), historyOnly: Bool = false) {
     self.connections = connections
     self.historyDisk = historyDisk
+    self.historyOnly = historyOnly
+    if historyOnly { return }
     #if DEBUG
     let args = ProcessInfo.processInfo.arguments
     if args.contains("-uiPreview") || args.contains("-selfTest") || args.contains("-historyCacheTest") { return }
@@ -333,7 +341,8 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private var recoveryURL: URL? {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+    if historyOnly { return nil }
+    return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
       .appendingPathComponent("ScryRemote", isDirectory: true)
       .appendingPathComponent("active-run.json", isDirectory: false)
   }
@@ -1321,6 +1330,7 @@ final class RemoteRunStore: ObservableObject {
   // for a user retry, rather than creating a second host run.
   @discardableResult
   func submit(prompt: String, providerId: String, attachments: [RemoteRunClient.Attachment] = []) -> Bool {
+    guard !historyOnly else { return false }
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
     guard !hasUnresolvedRun else {
@@ -1418,12 +1428,14 @@ final class RemoteRunStore: ObservableObject {
       }
       while !Task.isCancelled {
         let requestConnectionRevision = self.connectionSuccessRevision
+        var operation = "事件读取"
         do {
           let page = try await client.poll(cursor: ledgerCursor)
           ledgerCursor = page.cursor
           for ev in page.events where ev.runId == runId {
             self.apply(event: ev, generation: generation, identity: identity)
           }
+          operation = "问题读取"
           let questions = try await client.questions(runId: runId)
           guard self.isCurrent(generation, identity: identity) else { return }
           if self.pendingQuestions.first?.questionId != questions.first?.questionId {
@@ -1432,6 +1444,7 @@ final class RemoteRunStore: ObservableObject {
             self.questionError = nil
           }
           self.pendingQuestions = questions
+          operation = "输出读取"
           let out = try await client.output(runId: runId, cursor: outputCursor)
           outputCursor = out.cursor
           for chunk in out.chunks {
@@ -1449,7 +1462,7 @@ final class RemoteRunStore: ObservableObject {
             guard self.isCurrent(generation, identity: identity) else { return }
             self.recordFailure(error, since: requestConnectionRevision)
             self.observationInterrupted = true
-            self.submitError = "观察中断：\(Self.describe(error))。运行结果未知。"
+            self.submitError = Self.observationFailure(error, lifecycle: self.lifecycle, operation: operation)
             self.pollTask = nil
           }
           return
@@ -1474,6 +1487,7 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private func resumeObservation(runId: String) {
+    guard !historyOnly else { return }
     guard let identity = activeSessionIdentity, let client = makeClient() else { return }
     observationInterrupted = false
     terminalDrainCompleted = false
@@ -1531,6 +1545,7 @@ final class RemoteRunStore: ObservableObject {
   // session identity obtained from the host catalog, so a run id from another
   // session cannot attach to the current transcript.
   func resumeObservation(runId: String, providerId: String, cwd: String, externalSessionId: String) {
+    guard !historyOnly else { return }
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     if activeSessionIdentity != identity {
       guard resetRun() else { return }
@@ -1547,11 +1562,14 @@ final class RemoteRunStore: ObservableObject {
                           generation: Int, identity: SessionIdentity) async -> Bool {
     var cursor = cursor
     while !Task.isCancelled {
-      guard let page = try? await client.output(runId: runId, cursor: cursor) else {
+      let page: G0Transport.RunOutputPage
+      do {
+        page = try await client.output(runId: runId, cursor: cursor)
+      } catch {
         await MainActor.run {
           guard self.isCurrent(generation, identity: identity) else { return }
           self.observationInterrupted = true
-          self.submitError = "观察中断：无法读取运行的最后输出，运行结果未知。"
+          self.submitError = Self.observationFailure(error, lifecycle: self.lifecycle, operation: "最后输出读取")
         }
         return false
       }
@@ -1751,6 +1769,7 @@ final class RemoteRunStore: ObservableObject {
   // Chained follow-ups resume the LATEST reported session id when available.
   @discardableResult
   func submitFollowUp(prompt: String, providerId: String, agentProfileId: String? = nil, cwd: String, resume: String, attachments: [RemoteRunClient.Attachment] = []) -> Bool {
+    guard !historyOnly else { return false }
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
     guard !hasUnresolvedRun else {
@@ -1968,6 +1987,27 @@ final class RemoteRunStore: ObservableObject {
       _ = try await disk.writeWindow(olderOnly, key: windowKey, epoch: await disk.epoch)
       checks.append(("store.rejectOlderOnlyAsTailCache", false))
     } catch { checks.append(("store.rejectOlderOnlyAsTailCache", true)) }
+    // A history browser cannot own, restore, delete, or submit the recovery run.
+    mirrorStore.runId = "unresolved-recovery"
+    mirrorStore.lifecycle = .failed
+    mirrorStore.observationInterrupted = true
+    let recoveryIdentity = mirrorStore.activeSessionIdentity
+    let recoveryOutput = mirrorStore.output
+    let browser = RemoteRunStore(historyFor: mirrorStore)
+    browser.historyTestOffline = true
+    browser.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only")
+    await browser.historyTask?.value
+    checks.append(("store.browsingDisplaysCachedHistory", browser.history == .partial(snapshot.turns) && browser.historyOlderBefore == 3 && browser.historyFromCache))
+    checks.append(("store.browsingDoesNotOwnCheckpoint", browser.recoveryURL == nil))
+    checks.append(("store.browsingSharesProtectedCache", browser.historyDisk === mirrorStore.historyDisk))
+    checks.append(("store.browsingKeepsRecovery", mirrorStore.runId == "unresolved-recovery" && mirrorStore.activeSessionIdentity == recoveryIdentity && mirrorStore.output == recoveryOutput && mirrorStore.hasUnresolvedRun))
+    checks.append(("store.browsingDoesNotRestoreRun", browser.runId == nil && browser.pollTask == nil && browser.pendingSubmission == nil))
+    checks.append(("store.browsingCannotSubmit", !browser.submit(prompt: "must not execute", providerId: "pi") && !browser.submitFollowUp(prompt: "must not execute", providerId: "pi", cwd: "/fixture", resume: "session")))
+    browser.resumeObservation(runId: "must not observe", providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    checks.append(("store.browsingCannotPollRecovery", browser.runId == nil && browser.pollTask == nil))
+    checks.append(("store.recoveryStillBlocksNewSubmission", !mirrorStore.submit(prompt: "must not execute", providerId: "pi") && !mirrorStore.submitFollowUp(prompt: "must not execute", providerId: "pi", cwd: "/fixture", resume: "session") && mirrorStore.runId == "unresolved-recovery"))
+    checks.append(("store.terminalOutputErrorKeepsKnownLifecycle", !Self.observationFailure(NSError(domain: "fixture", code: 1), lifecycle: .failed).contains("运行结果未知")))
+    checks.append(("store.unknownOutputErrorRemainsUnknown", Self.observationFailure(NSError(domain: "fixture", code: 1), lifecycle: .unknown).contains("运行结果未知")))
     let oldEpoch = await disk.epoch
     try await mirrorStore.clearHistoryCache()
     let resurrected = try await disk.writePreview(preview, key: previewKey, epoch: oldEpoch)
@@ -2233,6 +2273,18 @@ final class RemoteRunStore: ObservableObject {
     if let to = marker["tokensOut"] { parts.append("输出 \(to)") }
     if let cost = marker["costUsd"] { parts.append("$\(cost)") }
     return parts.isEmpty ? "主机报告完成（未提供用量）" : parts.joined(separator: " · ")
+  }
+
+  var terminalLifecycleKnown: Bool {
+    [.settled, .failed, .cancelled].contains(lifecycle)
+  }
+
+  private static func observationFailure(_ error: Error, lifecycle: Lifecycle, operation: String = "输出读取") -> String {
+    let detail = "\(operation)：\(describe(error))"
+    if [.settled, .failed, .cancelled].contains(lifecycle) {
+      return "输出同步中断：\(detail)。主机已报告任务结束，输出尚未完整核对。"
+    }
+    return "观察中断：\(detail)。运行结果未知。"
   }
 
   private static func describe(_ error: Error) -> String {

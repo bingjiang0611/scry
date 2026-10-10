@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
   @Published var pairing: PairingUIState = .idle
   // The session currently opened for read-only transcript replay (nil = none).
   @Published var openedSession: OpenedSession?
+  @Published var readOnlyTranscript = false
   // Drafts belong to a conversation, not to a disposable route view. They stay
   // in memory only; attachments are never written to plaintext preferences.
   enum DraftKey: Hashable {

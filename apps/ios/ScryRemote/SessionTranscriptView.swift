@@ -57,7 +57,26 @@ private struct HistoryTurnView: View {
   }
 }
 
+// Browsing another session must not reset an unresolved recovery task. Reuse
+// the history implementation and protected cache, but never restore its run.
+struct ReadOnlySessionTranscriptView: View {
+  @EnvironmentObject var model: AppModel
+  @StateObject private var history: RemoteRunStore
+
+  init(owner: RemoteRunStore) {
+    _history = StateObject(wrappedValue: RemoteRunStore(historyFor: owner))
+  }
+
+  var body: some View {
+    SessionTranscriptView(readOnly: true)
+      .environmentObject(history)
+      .onChange(of: history.reachable) { if let ok = history.reachable { model.markReachable(ok) } }
+      .onChange(of: history.connectionObservation) { _, observation in model.markObservation(observation) }
+  }
+}
+
 struct SessionTranscriptView: View {
+  var readOnly = false
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
@@ -100,6 +119,11 @@ struct SessionTranscriptView: View {
     VStack(spacing: 0) {
       header
       if let session { SessionRunStatusView(session: session) }
+      if readOnly {
+        Notice(text: "只读历史浏览，不改变旧任务与草稿；请返回恢复任务核对结果后再续聊。", warning: true)
+        Button("返回恢复任务") { model.route = .chat }
+          .font(.system(size: 13, weight: .semibold)).padding(.vertical, 6)
+      }
       if historyReadyForDisplay, run.historyRefreshError != nil {
         Notice(text: "历史更新失败，当前显示已读取内容。详情见右上角菜单。", warning: true)
       }
@@ -120,7 +144,7 @@ struct SessionTranscriptView: View {
         historyBody
         if hasLiveTurn { liveTurn }
       }
-      footer
+      if !readOnly { footer }
     }
     .background(Palette.surface)
     .sheet(isPresented: $showFiles) {
@@ -131,10 +155,10 @@ struct SessionTranscriptView: View {
       // Keep a live run when leaving and re-opening this same session. A
       // different session identity invalidates old history/poll callbacks.
       run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
-      if historyAllowsControls { loadSessionControls() }
+      if !readOnly && historyAllowsControls { loadSessionControls() }
     }
     .onChange(of: historyAllowsControls) {
-      if historyAllowsControls { loadSessionControls() }
+      if !readOnly && historyAllowsControls { loadSessionControls() }
     }
     .task(id: sessionIdentity) {
       guard let s = session else { return }
@@ -256,7 +280,9 @@ struct SessionTranscriptView: View {
             Label("刷新会话", systemImage: "arrow.clockwise")
           }
         }
-        Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
+        if !readOnly {
+          Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
+        }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
         Image(systemName: historyIsPartial ? "clock" : Symbol.more)
@@ -388,7 +414,7 @@ struct SessionTranscriptView: View {
     case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
     case .dispatched: return "主机已派发，准备执行…"
     case .running: return "运行中 · 尚无输出内容"
-    case .failed, .cancelled: return "主机未缓存此运行的输出内容"
+    case .failed, .cancelled: return "尚未读取到此运行的输出"
     default: return "等待主机…"
     }
   }
