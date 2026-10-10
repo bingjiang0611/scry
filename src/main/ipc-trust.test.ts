@@ -5,7 +5,7 @@ import { registerTrustedIpcHandler } from './ipc-trust'
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 
 describe('trusted main IPC registration', () => {
-  it('rejects wrong sender, subframe, and origin before the privileged listener runs', async () => {
+  it.each(['workspace:list', 'workspace:resolveFile'])('rejects wrong sender, subframe, and origin before %s runs', async (channel) => {
     let registered: Handler | undefined
     const ipcMain = {
       handle: (_channel: string, listener: Handler) => { registered = listener }
@@ -24,7 +24,7 @@ describe('trusted main IPC registration', () => {
 
     registerTrustedIpcHandler(
       ipcMain,
-      'workspace:list',
+      channel,
       () => trustedWindow as unknown as BrowserWindow,
       trustedOrigin,
       listener

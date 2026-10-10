@@ -143,6 +143,18 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('<code>~/Papers/reading/report.md</code>')
   })
 
+  it('opens explicit file links of any extension while rejecting executable URL schemes', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'[binary](assets/custom.format) [license](LICENSE) [parent](../report.docx) [absolute](file:///Users/example/Notes/report.md) [unsafe](javascript:alert) [anchor](#section)'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html.match(/class="md-file-ref"/g)).toHaveLength(4)
+    expect(html).toContain('assets/custom.format · 打开文件')
+    expect(html).toContain('href="#section"')
+    expect(html).not.toContain('href="javascript:')
+  })
+
   it('keeps explicitly linked code as one HTTP link instead of nesting a file button', () => {
     const html = renderToStaticMarkup(
       <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>

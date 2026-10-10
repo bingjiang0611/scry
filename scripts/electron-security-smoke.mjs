@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -8,8 +8,11 @@ import { stopOwnedApp } from './owned-app-processes.mjs'
 
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
 const devQuestionOnly = process.argv[2] === '--dev-question-only'
-const devApp = devTerminalOnly || devQuestionOnly || process.argv[2] === '--dev'
-const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
+const devFilesOnly = process.argv[2] === '--dev-files-only'
+const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
+const devApp = devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev'
+const packagedAppArgument = process.argv[2] === '--files-only' ? undefined : process.argv[2]
+const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
@@ -81,7 +84,7 @@ async function main() {
   const port = await freePort()
   const userDataDir = join(temp, 'userData')
   const home = join(temp, 'home')
-  const workspace = join(temp, 'workspace')
+  const workspace = filesOnly ? join(home, 'projects', 'dev-agent') : join(temp, 'workspace')
   mkdirSync(userDataDir, { recursive: true })
   mkdirSync(home, { recursive: true })
   mkdirSync(workspace, { recursive: true })
@@ -165,6 +168,86 @@ async function main() {
     return results.every((result) => result.state === 'unsupported' && result.reason.includes('SCRY_DISABLED_PROVIDERS'))
   }))`)
   assert.deepEqual(disabledCapabilities, [true, true, true, true], 'smoke must not start non-fixture providers')
+  if (filesOnly) {
+    const cwd = join(canonicalHome, 'projects', 'dev-agent')
+    const docs = join(canonicalHome, 'projects', 'rotom-team', 'docs')
+    mkdirSync(docs, { recursive: true })
+    writeFileSync(join(docs, 'NATIVE-DELIVERY.md'), '# Actual sibling delivery\n')
+    writeFileSync(join(canonicalHome, 'projects', 'LICENSE'), 'Actual license without an extension')
+    writeFileSync(join(canonicalHome, 'projects', 'asset.custom'), Buffer.from([0, 1, 2, 3]))
+    writeFileSync(join(canonicalHome, 'projects', 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
+    writeFileSync(join(cwd, 'run.command'), '#!/bin/sh\necho never-run')
+    writeFileSync(join(temp, 'outside.md'), 'Must not read outside home')
+    symlinkSync(join(temp, 'outside.md'), join(cwd, 'escaped.md'))
+    const resolved = await evaluate(`(async () => {
+      const cwd = ${JSON.stringify(cwd)};
+      await window.scry.setCwd(cwd);
+      const text = await window.scry.workspaceResolveFile({ cwd, path: 'rotom-team/docs/NATIVE-DELIVERY.md' });
+      const snapshot = await window.scry.workspaceReadKnown(text);
+      const binary = await window.scry.workspaceResolveFile({ cwd, path: '../asset.custom' });
+      const office = await window.scry.workspaceResolveFile({ cwd, path: '../report.docx' });
+      const denied = [];
+      for (const request of [
+        { cwd, path: 'escaped.md' }, { cwd, path: ${JSON.stringify(join(temp, 'outside.md'))} },
+        { cwd: ${JSON.stringify(temp)}, path: 'outside.md' }
+      ]) {
+        try { await window.scry.workspaceResolveFile(request); denied.push(false); }
+        catch { denied.push(true); }
+      }
+      let executableDenied = false;
+      try { await window.scry.workspaceOpenExternal({ cwd, path: 'run.command' }); }
+      catch (error) { executableDenied = String(error).includes('可执行'); }
+      return { text, content: snapshot.content, binary: binary.mode, office: office.mode, denied, executableDenied };
+    })()`)
+    assert.deepEqual(resolved.text, { cwd: '~', path: 'projects/rotom-team/docs/NATIVE-DELIVERY.md', mode: 'text' })
+    assert.equal(resolved.content, '# Actual sibling delivery\n')
+    assert.equal(resolved.binary, 'external')
+    assert.equal(resolved.office, 'external')
+    assert.deepEqual(resolved.denied, [true, true, true])
+    assert.equal(resolved.executableDenied, true)
+    await evaluate(`(async () => {
+      let offDone, offError;
+      const terminal = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('file-link fixture timed out')), 10000);
+        const cleanup = () => { clearTimeout(timer); offDone(); offError(); };
+        offDone = window.scry.onTurnDone(() => { cleanup(); resolve(); });
+        offError = window.scry.onError(event => { cleanup(); reject(new Error(event.message)); });
+      });
+      await window.scry.start({ providerId: 'codex', cwd: ${JSON.stringify(cwd)}, prompt: 'file links smoke' });
+      await terminal;
+    })()`)
+    const wait = expression => evaluate(`(async () => {
+      const deadline = performance.now() + 8000;
+      while (!(${expression})) {
+        if (performance.now() > deadline) throw new Error('File-link condition timed out: ' + ${JSON.stringify(expression)});
+        await new Promise(requestAnimationFrame);
+      }
+    })()`)
+    const clickFile = async title => {
+      await wait(`Array.from(document.querySelectorAll('.md-file-ref')).some(button => button.title === ${JSON.stringify(title)})`)
+      const point = await evaluate(`(() => {
+        const button = Array.from(document.querySelectorAll('.md-file-ref')).find(button => button.title === ${JSON.stringify(title)});
+        button.scrollIntoView({ block: 'center' });
+        const box = button.getBoundingClientRect();
+        const x = box.left + box.width / 2, y = box.top + box.height / 2;
+        if (!button.contains(document.elementFromPoint(x, y))) throw new Error('File link obscured');
+        return { x, y };
+      })()`)
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+    }
+    await clickFile('rotom-team/docs/NATIVE-DELIVERY.md · 在右侧文件面板打开')
+    await wait(`document.querySelector('textarea[aria-label="编辑 NATIVE-DELIVERY.md"]')?.value === '# Actual sibling delivery\\n'`)
+    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="编辑 NATIVE-DELIVERY.md"]').readOnly`), true)
+    await clickFile('../LICENSE · 打开文件')
+    await wait(`document.querySelector('textarea[aria-label="编辑 LICENSE"]')?.value === 'Actual license without an extension'`)
+    await clickFile('missing.md · 在右侧文件面板打开')
+    await wait(`document.body.textContent.includes('文件不存在：missing.md')`)
+    console.log(JSON.stringify({ fileLinks: { siblingProject: true, actualContent: true, readOnlyOutsideWorkspace: true,
+      extensionlessLink: true, officeAndUnknownBinary: true, missingFileReported: true, canonicalContainment: true, executableDenied: true } }))
+    cdp.close()
+    return
+  }
   if (devQuestionOnly) {
     const result = await evaluate(`(async () => {
       const waitFor = async (read, label) => {

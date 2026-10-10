@@ -74,6 +74,46 @@ describe('HomeFileAccess', () => {
     await expect(access.authorize({ cwd: '~', path: 'linked.md' })).rejects.toThrow('不能越过')
   })
 
+  it('resolves sibling-project links against the nearest existing ancestor without a recursive search', async () => {
+    const cwd = join(home, 'projects', 'dev-agent')
+    const docs = join(home, 'projects', 'rotom-team', 'docs')
+    await mkdir(cwd, { recursive: true })
+    await mkdir(docs, { recursive: true })
+    await writeFile(join(docs, 'NATIVE-DELIVERY.md'), '# actual delivery')
+    const request = await access.resolveFile({ cwd, path: 'rotom-team/docs/NATIVE-DELIVERY.md' })
+    expect(request).toEqual({ cwd: '~', path: 'projects/rotom-team/docs/NATIVE-DELIVERY.md' })
+    expect((await readWorkspaceFile(await access.authorize(request))).content).toBe('# actual delivery')
+
+    await mkdir(join(cwd, 'rotom-team', 'docs'), { recursive: true })
+    await writeFile(join(cwd, 'rotom-team', 'docs', 'NATIVE-DELIVERY.md'), '# local delivery')
+    expect(await access.resolveFile({ cwd, path: 'rotom-team/docs/NATIVE-DELIVERY.md' })).toEqual({
+      cwd: await realpath(cwd), path: 'rotom-team/docs/NATIVE-DELIVERY.md'
+    })
+  })
+
+  it('resolves absolute, home, parent and extensionless files without granting outside-workspace writes', async () => {
+    const cwd = join(home, 'project')
+    await mkdir(cwd)
+    await writeFile(join(home, 'LICENSE'), 'license')
+    for (const path of [join(home, 'LICENSE'), '~/LICENSE', '../LICENSE']) {
+      expect(await access.resolveFile({ cwd, path })).toEqual({ cwd: '~', path: 'LICENSE' })
+    }
+    expect(await access.resolveFile({ cwd: '~', path: 'LICENSE' })).toEqual({ cwd: '~', path: 'LICENSE' })
+  })
+
+  it('does not resolve files outside the canonical home or follow escaping symlinks', async () => {
+    const cwd = join(home, 'project')
+    await mkdir(cwd)
+    await writeFile(join(parent, 'outside.md'), 'outside')
+    await symlink(join(parent, 'outside.md'), join(cwd, 'escaped.md'))
+    for (const path of [join(parent, 'outside.md'), '../../outside.md', 'escaped.md']) {
+      await expect(access.resolveFile({ cwd, path })).rejects.toThrow('授权')
+    }
+    await expect(access.resolveFile({ cwd, path: 'missing.md' })).rejects.toThrow('不存在')
+    await expect(access.resolveFile({ cwd, path: 'bad\0.md' })).rejects.toThrow('无效')
+    await expect(access.resolveFile({ cwd, path: '.' })).rejects.toThrow('目标不是文件')
+  })
+
   it('rejects absolute paths, invalid requests and missing files', async () => {
     await expect(access.authorize({ cwd: home, path: 'file.md' })).rejects.toThrow('无效的用户目录文件请求')
     await expect(access.authorize({ cwd: '~', path: join(parent, 'outside.md') })).rejects.toThrow('必须是相对路径')

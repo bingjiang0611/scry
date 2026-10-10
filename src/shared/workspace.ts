@@ -1,7 +1,10 @@
 export type WorkspaceEntryKind = 'file' | 'directory'
 
 const EXTERNALLY_VIEWABLE_WORKSPACE_EXTENSIONS = new Set([
-  'avif', 'bmp', 'gif', 'htm', 'html', 'jpeg', 'jpg', 'pdf', 'png', 'svg', 'webp'
+  'avif', 'bmp', 'gif', 'htm', 'html', 'jpeg', 'jpg', 'pdf', 'png', 'svg', 'webp',
+  'heic', 'heif', 'ico', 'tif', 'tiff', 'xhtml',
+  'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'pages', 'numbers', 'key',
+  'mp3', 'mp4', 'm4a', 'mov', 'wav', 'flac', 'ogg', 'webm', 'mkv', 'avi', 'zip', 'gz', 'tar', '7z', 'rar'
 ])
 
 /** Files rendered by a browser/default viewer instead of the UTF-8 editor. */
@@ -25,6 +28,12 @@ export interface WorkspaceListResult {
   truncated: boolean
   nextCursor?: string
 }
+
+export interface WorkspaceFileOpenTarget extends WorkspacePathRequest {
+  mode: 'text' | 'external'
+}
+
+export const WORKSPACE_FILE_PREVIEW_UNSUPPORTED = 'SCRY_FILE_PREVIEW_UNSUPPORTED'
 
 export interface WorkspaceFileSnapshot {
   name: string

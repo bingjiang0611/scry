@@ -141,6 +141,7 @@ import {
   openWorkspaceFileExternally,
   readWorkspaceFile,
   readWorkspaceFilePage,
+  resolveWorkspaceFileOpenTarget,
   renameWorkspaceEntry,
   trashWorkspaceEntry,
   writeWorkspaceFile
@@ -1307,6 +1308,10 @@ handleTrusted('agent:clipboardImage', () => {
 
 handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
   listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
+handleTrusted('workspace:resolveFile', async (_event, request: WorkspacePathRequest) =>
+  resolveWorkspaceFileOpenTarget(request.cwd === '~'
+    ? request
+    : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }, homeFileAccess))
 handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
   readWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:readPage', (_event, request: WorkspaceFilePageRequest) =>

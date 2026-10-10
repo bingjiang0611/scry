@@ -18,7 +18,7 @@ function fileUrlPath(reference: string): string | null {
 function normalizeRelativePath(path: string): string | null {
   const normalized = path.replaceAll('\\', '/').replace(/^\.\//, '')
   const parts = normalized.split('/').filter((part) => part && part !== '.')
-  if (parts.length === 0 || parts.some((part) => part === '..')) return null
+  if (parts.length === 0) return null
   return parts.join('/')
 }
 
@@ -26,15 +26,16 @@ const LIKELY_WORKSPACE_FILE_EXTENSIONS = new Set([
   'avif', 'bash', 'bmp', 'c', 'cc', 'cjs', 'cpp', 'css', 'csv', 'env', 'fish', 'gif', 'go', 'gql',
   'graphql', 'h', 'hpp', 'htm', 'html', 'ini', 'java', 'jpeg', 'jpg', 'js', 'json', 'jsonc', 'jsx',
   'kt', 'kts', 'less', 'md', 'mdx', 'mjs', 'pdf', 'png', 'py', 'rb', 'rs', 'scss', 'sh', 'sql', 'svg',
-  'swift', 'toml', 'ts', 'tsx', 'txt', 'webp', 'xml', 'yaml', 'yml', 'zsh'
+  'swift', 'toml', 'ts', 'tsx', 'txt', 'webp', 'xml', 'yaml', 'yml', 'zsh',
+  'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'zip', 'mp3', 'mp4'
 ])
 
 function looksLikeRelativeFile(reference: string): boolean {
   if (reference.startsWith('./') || reference.startsWith('.\\')) return true
   const name = reference.split(/[\\/]/).at(-1) ?? ''
   const dot = name.lastIndexOf('.')
-  if (dot <= 0 || dot === name.length - 1) return false
-  return LIKELY_WORKSPACE_FILE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
+  return (dot > 0 && LIKELY_WORKSPACE_FILE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())) ||
+    ['LICENSE', 'NOTICE', 'README', 'Makefile', 'Dockerfile'].includes(name)
 }
 
 export interface WorkspaceFileTarget {
@@ -43,8 +44,8 @@ export interface WorkspaceFileTarget {
 }
 
 /**
- * Converts model-authored paths into a known workspace root plus the relative
- * path accepted by the narrow workspace IPC boundary.
+ * Parses model-authored link text. Main resolves it against an authorized
+ * workspace/home and returns the canonical read target before anything opens.
  */
 export function resolveWorkspaceFileTarget(
   workspaces: readonly string[],
@@ -62,10 +63,11 @@ export function resolveWorkspaceFileTarget(
   const fromFileUrl = fileUrl ? fileUrlPath(token) : null
   if (fileUrl && !fromFileUrl) return null
   const candidate = fromFileUrl ?? token
+  if (candidate.startsWith('#') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) return null
   const normalizedCandidate = candidate.replaceAll('\\', '/')
 
   if (normalizedCandidate.startsWith('~/')) {
-    if (!reference.trim().startsWith('@') && !looksLikeRelativeFile(normalizedCandidate)) return null
+    if (normalizedCandidate.endsWith('/')) return null
     const path = normalizeRelativePath(normalizedCandidate.slice(2))
     return path ? { cwd: '~', path } : null
   }
@@ -73,7 +75,7 @@ export function resolveWorkspaceFileTarget(
 
   if (normalizedCandidate.startsWith('/')) {
     const root = rootsBySpecificity.find(({ normalized }) => normalizedCandidate.startsWith(`${normalized}/`))
-    if (!root) return null
+    if (!root) return { cwd: primaryRoot.cwd, path: normalizedCandidate }
     const path = normalizeRelativePath(normalizedCandidate.slice(root.normalized.length + 1))
     return path ? { cwd: root.cwd, path } : null
   }

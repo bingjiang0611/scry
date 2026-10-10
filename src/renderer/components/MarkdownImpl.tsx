@@ -101,14 +101,6 @@ export function WorkspaceFileLinkProvider({
 }
 
 const baseComponents: Components = {
-  a: ({ node, href, children, ...props }) => {
-    const safe = safeExternalHref(href)
-    const codeText = linkedCodeText(node)
-    const content = codeText == null ? children : <code>{codeText}</code>
-    if (!safe) return <span>{content}</span>
-    const external = safe.startsWith('http://') || safe.startsWith('https://')
-    return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{content}</a>
-  },
   img: ({ src, alt }) => {
     // 只放行内联 data:/blob: 图片（远程图片仍然阻断）；懒加载 + 异步解码避免长会话里
     // 一次性解码所有历史图片阻塞主线程。
@@ -232,7 +224,7 @@ const MarkdownChunk = memo(function MarkdownChunk({
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
       components={components}
-      urlTransform={(url, key) => key === 'src' ? (safeImageSrc(url) ?? '') : (safeExternalHref(url) ?? '')}
+      urlTransform={(url, key) => key === 'src' ? (safeImageSrc(url) ?? '') : url}
     >
       {source}
     </ReactMarkdown>
@@ -273,6 +265,23 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
   const workspaceFileLink = useContext(WorkspaceFileLinkContext)
   const components = useMemo<Components>(() => ({
     ...baseComponents,
+    a: ({ node, href, children: linkChildren, ...props }) => {
+      const safe = safeExternalHref(href)
+      const codeText = linkedCodeText(node)
+      const content = codeText == null ? linkChildren : <code>{codeText}</code>
+      if (safe) {
+        const external = /^https?:/.test(safe)
+        return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{content}</a>
+      }
+      const target = workspaceFileLink && href
+        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, `@${href}`)
+        : null
+      if (!target) return <span>{content}</span>
+      return <button type="button" className="md-file-ref" title={`${target.path} · 打开文件`}
+        onClick={() => workspaceFileLink?.onOpen(target)}>
+        <Icon name="file" className="md-file-ref-icon" />{content}
+      </button>
+    },
     code: ({ node: _node, children: codeChildren, className, ...props }) => {
       const reference = String(codeChildren)
       const externalHref = safeExternalHref(reference)
