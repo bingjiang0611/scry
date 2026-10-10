@@ -1,56 +1,59 @@
-# LLM 会话性能
+# LLM 性能
 
-以下为已实现 v1 的用法与证据合同。2026-10-10 用户要求重出只读侧栏设计稿；新方向及待实现范围见文末，不能将设计稿当作已安装能力。
+左侧「LLM 性能」位于技能上方。点击打开居中弹窗；侧栏没有实时数字或网络设置。弹窗展示数字、近 30 秒趋势和历史同类对照，数据口径默认折叠。关闭、Escape 和焦点返回沿用 ModalFrame。
 
-在会话顶部点击 **LLM 性能 → 对比**。发送前设置“下次运行的网络标签”，如“直连”“VPN A”。标签是用户备注，不检测或改变 VPN。已发送轮次的标签不会因后续编辑而变化。
+## 实时证据
 
-只观察正常的本机 App 会话；不额外调用 LLM、不发送付费探针。远程运行与旧历史若没有测量证据，不补造数值。
+范围是本 Scry 实例登记的全部当前运行会话，跨项目、Provider 和模型。复用 run registry 和每个主 run 的最新 observer 小摘要，不扫描 trace，也不随当前查看会话改变。一个会话只取当前主 run。各指标独立按可测会话等权平均，分别显示「可测数 / 运行数」；缺失不补零。
 
-## 指标口径
+- 输出速度、会话均速只用 token/s。没有权威且区间对齐的主输出 token 计数时显示未知，不从字符、消息块、分词器或经验比例换算。
+- 首次输出等待用秒，计时从本地执行接受到首个主文本输出，包含启动和排队。尚未首输出的运行只计入运行数，不拿已经等待的时长当最终等待值。
+- 终态 canonical usage 不回填实时速度或曲线。全部不可测时只显示未知和空图提示。
+- 主进程运行期间独立每秒采样最多一次，保存最近 30 秒最多 30 点；空闲时停止采样并清空实时值。成员变化最多在下一次采样生效。IPC 只读取缓存；弹窗自身刷新，不使 Sidebar/App 每秒重渲染。隐藏或关闭弹窗停止视图刷新，异步返回不会更新已关闭视图。
+- 实时读取失败清空旧摘要并显示错误，不继续显示上一次的数字。
 
-| 指标 | 来源与范围 | 不代表什么 |
+## 当前五类 Provider 接线
+
+| Provider | 当前生产来源 | 实时 token 速度 |
 | --- | --- | --- |
-| 实时字符/s | 主会话真实文本 delta，最近 3 秒接收量 / 3 秒；无后续输出时衰减到 0 | token/s、网络带宽或服务端解码速度 |
-| 首次输出等待 | 本轮本地执行接受 → 首个主会话文本输出；单调时钟计时 | 单次 HTTP 请求的 TTFT；其中包含启动、排队、本地检查等开销 |
-| 接收均速 | 主会话收到的流式文本字符 / 各可计时文本片段首末 delta 间隔之和 | 纯模型生成吞吐；片段内部的停顿、推理也影响结果 |
-| 本轮 API 吞吐 | canonical 本轮输出 token / Provider 报告的累计 API 时间 | 实时 token 速度；包含 prefill/推理，可包含 Provider 计入的子代理用量 |
+| Claude | normalize 的主文本 delta；result 的 canonical usage/API 时间 | 未接入区间对齐的主输出 token 计数，不可测 |
+| Codex | agentMessage delta；thread/tokenUsage 用于 canonical turn usage | usage 通知未形成主输出时间窗证据，不可测 |
+| Qoder | SDK 消息经 normalizeQoderMessage/qoderTrace；result usage | 无主输出 token 时间窗证据，不可测 |
+| OpenCode | text delta / retry genuineStreamDelta；assistant 消息终态 usage 聚合 | 无主输出 token 时间窗证据，不可测 |
+| Pi | message_update 文本；message_end usage 与最终 turn result | 无主输出 token 时间窗证据，不可测 |
 
-- 文本字符按 delta 中的 Unicode code point 计数，不把一条消息块算作一个 token，不从字符数估算 token。
-- 工具执行、已观测的请求结束、主会话 message identity 切换和审批返回会切断文本计时片段。没有边界的内部等待无法单独分离。
-- 子代理文本不参与主会话文本速度。完整 assistant snapshot 不重复计数。Pi 的非流式 completion fallback 显式标记为 buffered；OpenCode retry replacement 仅计新收到的真实 delta。
-- 单个 delta 或零间隔片段无法证明均速。包含这种片段的轮次不提供接收均速，不用 Infinity 或 0 代替未知。
-- API 口径复用 canonical usage selection：Claude continuation 是累计快照，只取最新值；其他 Provider 的增量结果累加。每条结果必须都有对应 API 时间与输出量，才提供 API 吞吐。不使用“墙钟减去工具时间”推算生成速度。
-- 模型优先使用 Provider 用量证据。没有实际身份时可显示“所选：…”（请求配置，不保证实际模型），否则明确显示未知；多模型轮次不猜一个模型。upstream 厂商只使用明确证据，不把 CLI Provider 当成厂商。
+以上描述的是当前 Scry 接线，不宣称上游永远不支持。后续只有实际 adapter 提供权威主输出 token 计数、身份和对应时间窗，并补 Provider wire 回归后，才增加实时测量能力。现在没有新增虚构的 Provider capability 字段。
 
-## 历史与对比
+首次输出等待仍可使用。历史 API 推导仅在完整 canonical 输出 token 和 Provider API 时间都存在且可配对时计算。Claude continuation 取最新累计快照，其他 Provider 的增量结果累加；不以墙钟、工具残差或活动时间代替 API 时间。API 推导可能包含 prefill、思考或 Provider 计入的子代理用量，不是主文本解码速度。
 
-测量在 Provider promise 收口后记录，失败、停止轮次保留但不参与成功样本中位数。轮次没有结果或 token 时仍能保存本地测量，API 速度保持未知。进程崩溃、未收口的执行不保证有终态测速记录。
+## 自动网络配置线索
 
-- 复用 `userData/usage.jsonl` 的 ownership 与 session 删除路径；`kind: llm_performance` 行不会计入计费统计或 turn 计数。没有建立第二个 DB 或 recorder 事实源。
-- Trace event 携带本地观测快照；经过 coalescing、恢复和 archive roundtrip 后保留测速数据与冻结标签。该快照不是 Provider canonical token 证据。
-- 历史视图读取最近 30 天最多 1000 个轮次，按网络标签、Provider、Profile、upstream 厂商和模型分组；显示样本数与各指标可用轮数，缺失为 `—`。有损坏行或截断时明确提示部分证据。
-- 扫描 JSONL 是流式的；IPC 返回量有界。若实测扫描延迟不可接受或需要更长历史，升级到现有 SQLite 投影并保留相同口径与删除归属，而不是继续扩大 IPC 上限。
-- 网络标签输入只在当前 App 进程中记忆；历史中的已发送标签持久保存。
+启动和运行边界异步采集本机配置，不阻塞 Provider 启动。macOS 使用固定的 `scutil --proxy`，只保留 HTTP/HTTPS/SOCKS/PAC/自动发现开关；其他平台系统配置未知。App 环境只保留 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY、NO_PROXY 是否配置，不保存任何值、代理地址或凭据。
 
-正常会话的比较是观察性结果。固定提示词、上下文、缓存与推理设置，再重复采样。中位数与手动标签不能证明 VPN 是差异的原因；不同输出语言的字符速度也不能直接当作模型能力排行。
+所有运行共享至少 30 秒的缓存及同一次在途采集。记录采集时间与来源；系统读取失败保存未知。没有 LLM、公网 IP 或测速请求，不切 VPN，不读取 SSID。配置快照不证明实际请求使用了代理或直连，也不证明 Provider 生效环境与 App 环境相同。快照不会因运行持续而变成新的事实；下次运行边界重新采集到期缓存。
 
-## 检查入口
+## 历史与归属
+
+- 沿用 `userData/usage.jsonl` 的 `kind: llm_performance`，不增加 DB 或 recorder 事实源。这些行不计入 billing 或 turn 数，沿用原 session 删除归属。
+- 最近 30 天最多 1000 轮，按 Provider/Profile/模型/上游及配置线索分组。配置未知的自动记录不池化为相同网络。旧手动标签明确显示为「历史备注」，不冒充自动检测。
+- 每组可展开逐轮时间、run ID、失败/停止、首次输出等待、canonical 输出 token、API 时间及 API 推导。失败/停止保留，但不计入成功中位数。实时输出 token 历史目前同样不可测。
+- 损坏行和截断保留部分证据提示。历史按需读取，共享一次扫描；文件身份、大小、修改时间和变更时间使追加与原子删除失效，30 天期限也会使缓存失效。缓存只保留一个 userData 文件，返回量有界。
+- Trace 保留本地测速快照与当时已经采集到的配置线索；过早终态的 history 会等待有上限的本机采集完成。进程崩溃或未收口执行不保证有终态测速记录。
+
+扫描预算仍为流式 JSONL、30 天/1000 轮。如果实际文件扫描延迟不可接受或需要更长历史，升级到既有 SQLite 投影，保留相同证据与删除合同；不扩大 IPC 上限。
+
+## 验证入口
 
 ```sh
-npm run test:unit -- src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts
+npm run test:unit -- src/shared/llm-performance.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/llm-performance-sampling.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/shared/trace.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
 node scripts/session-capability-ui-smoke.mjs --performance-only
 npm run typecheck
 npm run build
+node scripts/electron-security-smoke.mjs --dev-performance-only
 ```
 
-隔离 Electron fixture 使用生产 App 与 observer，验证真实鼠标/键盘输入、发送参数的标签捕获、实时/终态数值、历史错误以及深浅主题；不启动真实 Provider。临时文件测试验证 archive roundtrip、历史读取、session 删除及计费不双计。真实厂商/VPN 对比需要用户正常运行或另行授权真实探针，不能用 fixture 替代。
+UI fixture 使用生产 App、registry、sampler 和 observer；跨项目/Provider 的数据由真实观测事件产生，不硬编码摘要。它验证等待/部分可测、成员结束/停止/空闲、焦点独立、逐轮历史、错误清空、隐藏/关闭停止刷新和两种主题。生产 IPC smoke 使用当前构建的 main/preload/renderer、临时 HOME/userData 和显式 smoke adapter，验证登记、采样时钟、冻结配置、失败历史、真实鼠标/键盘与焦点返回。两者都不启动真实付费 Provider。
 
-## D-20261010-scry-llm-sidebar · 设计反馈（待实现）
+本次首轮 unit/typecheck/build 通过。UI 首次失败源于 fixture 订阅计数未同步、且把 App 常驻订阅误当作面板残留；第二次失败源于同时出现两个 alert 时只检查第一个。修正计数与选择器后保留原行为断言，没有 skip 或延长超时。生产 IPC smoke 首次因新增临时项目没有登记目录授权被拒绝；修正隔离 fixture 的 recent-folders 登记，未绕过生产授权。旧子任务的组合验证仍缺结束事件，不能算本次通过证据。
 
-用户明确要求：移到左侧栏技能上方，移除选择和设置，直接自动采集，用户只查看，并注意性能。需求 confirmed，设计稿未获视觉验收；旧顶部展开条在该场景的设计 superseded，以上证据口径与现有实现事实保留。
-
-本轮追加反馈：侧栏只展示「LLM 性能」单行入口，点击像技能一样打开弹窗；数字和图表优先，默认不展开文字说明。此前按当前打开会话绑定是助手误解，用户已明确纠正：实时区按所有当前运行会话等权平均，不随查看的会话变化；不求和、不混入已结束运行。不可测指标不补零，显示各自的可测数量。
-
-本轮单位纠正：用户要求只用 token，不用字。v5 设计的所有输出速度使用 token/s；缺少可靠实时主输出 token 计数与对应时间窗时显示不可测，不从文本长度换算，不用终态 usage 回填实时曲线。已实现 v1 的字符测量事实仍按上文保留，不能把设计改单位当能力已发布。
-
-当前 v5 token 全局平均方向的约束、采集预算、网络证据限制与原型入口见 [全局运行平均弹窗设计 brief](../designs/scry-llm-performance-sidebar/brief.md)，设计稿为 [index.html](../designs/scry-llm-performance-sidebar/index.html)。本轮没有修改生产界面或真实采集，也没有重装 App。该反馈仅适用于 Scry，不升级为全局审美规则。
+设计合同与参考见 [brief](../designs/scry-llm-performance-sidebar/brief.md)。原型样例不代表 Provider 已有实时 token 能力；本次没有付费探针、真实厂商/VPN 对比或安装验收。

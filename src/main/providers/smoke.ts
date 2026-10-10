@@ -22,6 +22,14 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
       const questionAbort = new AbortController()
       const promise = Promise.resolve().then(async () => {
         request.onExternalSessionId?.(sessionId)
+        if (request.prompt === 'llm performance smoke') {
+          request.emit({ id: `${request.runId}:performance-text`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'model', stage: 'text_delta', text: 'main observer performance fixture' })
+          if (!request.requestUserInput) throw new Error('Performance smoke requires requestUserInput')
+          await request.requestUserInput({ runId: request.runId, questionId: `${request.runId}:performance`, providerId: 'codex',
+            questions: [{ header: 'Performance fixture', question: 'Keep this isolated run open?', options: [], multiSelect: false }]
+          }, questionAbort.signal)
+        }
         if (request.prompt === 'dock badge question smoke') {
           if (!request.requestUserInput) throw new Error('Question smoke requires requestUserInput')
           for (const step of [1, 2]) {

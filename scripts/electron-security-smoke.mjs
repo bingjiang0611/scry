@@ -6,12 +6,13 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 
+const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
 const devQuestionOnly = process.argv[2] === '--dev-question-only'
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev'
-const packagedAppArgument = process.argv[2] === '--files-only' ? undefined : process.argv[2]
+const devApp = devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const packagedAppArgument = ['--files-only', '--performance-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
@@ -90,6 +91,11 @@ async function main() {
   mkdirSync(workspace, { recursive: true })
   const canonicalHome = realpathSync(home)
   const canonicalWorkspace = realpathSync(workspace)
+  const secondWorkspace = join(home, 'performance-second-project')
+  if (performanceOnly) {
+    mkdirSync(secondWorkspace, { recursive: true })
+    writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([canonicalWorkspace, realpathSync(secondWorkspace)]))
+  }
   writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
     sessionId: 'smoke-run',
     runId: 'smoke-run',
@@ -155,10 +161,87 @@ async function main() {
     `packaged preload did not expose window.scry\n${stderr.slice(-4000)}`
   )
   for (const key of [
-    'start', 'stop', 'activeRuns', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills', 'onFocusedRun', 'onDataUpdated',
+    'start', 'stop', 'activeRuns', 'llmPerformanceSummary', 'llmPerformanceHistory', 'usageStats', 'stats', 'listSessions', 'listProjects', 'mcpSnapshot', 'listSkills', 'onFocusedRun', 'onDataUpdated',
     'terminalStart', 'terminalActive', 'terminalAttach', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'onTerminalData', 'onTerminalExit'
   ]) {
     assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
+  }
+  if (performanceOnly) {
+    const measurement = await evaluate(`(async () => {
+      const waitFor = async (read, label) => {
+        const deadline = Date.now() + 10_000
+        while (Date.now() < deadline) {
+          const result = await read()
+          if (result) return result
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        throw new Error('Performance IPC timed out: ' + label)
+      }
+      const initial = await window.scry.llmPerformanceSummary()
+      if (initial.running !== 0 || initial.firstOutputWaitMs !== null) throw new Error('Fresh instance invented running measurements')
+      const first = await window.scry.start({ providerId: 'codex', cwd: ${JSON.stringify(workspace)}, prompt: 'llm performance smoke' })
+      const second = await window.scry.start({ providerId: 'codex', cwd: ${JSON.stringify(secondWorkspace)}, prompt: 'llm performance smoke' })
+      const active = await waitFor(async () => {
+        const runs = await window.scry.activeRuns()
+        return runs.length === 2 && runs.every(run => run.llmPerformance?.firstOutputWaitMs != null) ? runs : null
+      }, 'main observer snapshots')
+      // No performance IPC while the independent instance clock collects its next point.
+      await new Promise(resolve => setTimeout(resolve, 1200))
+      const sampled = await window.scry.llmPerformanceSummary()
+      const expectedWait = active.reduce((sum, run) => sum + run.llmPerformance.firstOutputWaitMs, 0) / 2
+      if (sampled.running !== 2 || sampled.firstOutputWaitMeasured !== 2 || sampled.firstOutputWaitMs !== expectedWait || sampled.trend.length < 2)
+        throw new Error('Main registry/observer/clock aggregation mismatch: ' + JSON.stringify(sampled))
+      await window.scry.focusRun(null)
+      if ((await window.scry.llmPerformanceSummary()).running !== 2) throw new Error('Focus removed background runs')
+      if (sampled.liveOutputRate !== null || sampled.sessionAverageRate !== null || sampled.trend.some(point => point.value !== null))
+        throw new Error('Main synthesized realtime tokens')
+      return { runIds: [first.runId, second.runId], running: sampled.running, measured: sampled.firstOutputWaitMeasured,
+        firstOutputWaitMs: sampled.firstOutputWaitMs, trendPoints: sampled.trend.length }
+    })()`)
+    const point = await evaluate(`(() => {
+      const node = document.querySelector('.sb-navitem[title="LLM 性能"]')
+      if (!node) throw new Error('Production performance entry missing')
+      node.focus()
+      const box = node.getBoundingClientRect()
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    })()`)
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+    const modal = await evaluate(`(async () => {
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        const dialog = document.querySelector('.llm-performance-modal[role="dialog"]')
+        if (dialog?.contains(document.activeElement) && dialog.textContent.includes('全部运行会话 · 2 个') && dialog.textContent.includes('2 / 2 已测得') && dialog.textContent.includes(${JSON.stringify((measurement.firstOutputWaitMs / 1000).toFixed(1) + ' s')}))
+          return { focused: true, labelled: !!dialog.getAttribute('aria-labelledby'), definitionCollapsed: !dialog.querySelector('.llm-performance-definition').open }
+        await new Promise(requestAnimationFrame)
+      }
+      throw new Error('Production modal did not load real IPC history or focus')
+    })()`)
+    assert.deepEqual(modal, { focused: true, labelled: true, definitionCollapsed: true })
+    const terminal = await evaluate(`(async () => {
+      for (const runId of ${JSON.stringify(measurement.runIds)}) await window.scry.stop(runId)
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline) {
+        const summary = await window.scry.llmPerformanceSummary()
+        const history = await window.scry.llmPerformanceHistory()
+        const dialog = document.querySelector('.llm-performance-modal')
+        if (summary.running === 0 && history.rows.length === 2 && dialog?.textContent.includes('全部运行会话 · 0 个') &&
+            dialog.querySelectorAll('.llm-performance-history-row').length > 0) {
+          if (!history.rows.every(row => row.failed && row.performance.firstOutputWaitMs != null && row.performance.networkConfiguration && row.performance.apiTokensPerSecond == null))
+            throw new Error('Failed rounds lost evidence or fabricated API timing')
+          return { historyRounds: history.rows.length, networkSources: history.rows.map(row => row.performance.networkConfiguration.source) }
+        }
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      throw new Error('Live production modal did not clear stopped runs or refresh owned history')
+    })()`)
+
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(!document.querySelector('.llm-performance-modal') && document.activeElement?.title === 'LLM 性能'))))`), true)
+    console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal }))
+    cdp.close()
+    return
   }
   const discovered = await evaluate(`Promise.all([window.scry.detectFast(), window.scry.detect(), window.scry.providerDescriptors()]).then((groups) => groups.map((group) => group.map((item) => item.id)))`)
   assert.deepEqual(discovered, [['codex'], ['codex'], ['codex']], 'smoke discovery must use only the fixture adapter')

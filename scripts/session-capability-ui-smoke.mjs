@@ -984,63 +984,76 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   const click = async selector => {
     const point = await read(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
+      if (!node) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
       node.scrollIntoView({ block: 'center' });
       const rect = node.getBoundingClientRect();
       const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
-      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)} + ' by ' + document.elementFromPoint(x, y)?.outerHTML.slice(0, 300));
+      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)});
       return { x, y };
     })()`)
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
-  const input = async (selector, text) => {
-    await click(selector)
-    await wait(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`)
-    contents.selectAll()
-    await contents.insertText(text)
-    await wait(`document.querySelector(${JSON.stringify(selector)}).value === ${JSON.stringify(text)}`)
-  }
-  const panel = `document.querySelector('.llm-performance')`
-  const state = `JSON.parse(document.querySelector('#performance-fixture-state').textContent)`
+  win.showInactive()
   contents.focus()
-  await wait(panel)
-  if (!await read(`${panel}.getBoundingClientRect().height <= 80`)) throw new Error('Collapsed performance strip consumed the chat row')
-  await click('.llm-performance-toggle')
-  await wait(`${panel}.textContent.includes('暂无匹配')`)
-  if (!await read(`(() => { const performance = ${panel}.getBoundingClientRect(), chat = document.querySelector('.chat-body').getBoundingClientRect(), composer = document.querySelector('.runtime-composer').getBoundingClientRect(); return performance.bottom <= chat.top + 1 && chat.bottom <= composer.top + 1; })()`)) throw new Error('Performance, transcript and composer rows overlap')
-  await input('input[aria-label="下次运行的网络标签"]', 'VPN A')
-  await input('textarea[aria-label="描述任务"]', 'Observe real stream evidence')
-  await wait(`!document.querySelector('.send').disabled`)
-  await click('.send')
-  await wait(`${state}.requests.length === 1`)
-  if (!await read(`${state}.requests[0].networkLabel === 'VPN A'`)) throw new Error('Production App lost network label at send')
+  await wait(`document.querySelector('.sb-navitem[title="LLM 性能"]') != null`)
+  const nav = await read(`Array.from(document.querySelectorAll('.sb-navitem')).map(node => node.textContent.trim())`)
+  if (nav.indexOf('LLM 性能') !== 1 || nav.indexOf('技能') !== 2) throw new Error('LLM 性能 entry is not directly above Skills')
+  const baselineListeners = await read(`JSON.parse(document.querySelector('#performance-fixture-state').textContent).dataListeners`)
+  await click('.sb-navitem[title="LLM 性能"]')
+  await wait(`document.querySelector('.llm-performance-modal') != null`)
+  const modal = `document.querySelector('.llm-performance-modal')`
+  await wait(`${modal}.textContent.includes('全部运行会话 · 3 个') && ${modal}.textContent.includes('0 / 3 可测')`)
+  if (await read(`${modal}.textContent.includes('字符/s') || ${modal}.textContent.includes('刷新') || ${modal}.querySelector('input,select') != null`)) throw new Error('Legacy character/manual controls leaked into v5 modal')
+  if (!await read(`${modal}.textContent.includes('0 / 3 已测得') && ${modal}.textContent.includes('token/s')`)) throw new Error('Waiting sessions fabricated a first-output measurement')
   await click('#performance-stream')
-  await wait(`${panel}.textContent.includes('2.0 字符/s') && ${panel}.textContent.includes('1.0 s')`)
-  await input('input[aria-label="下次运行的网络标签"]', 'VPN B')
+  await wait(`${modal}.textContent.includes('2 个输出') && ${modal}.textContent.includes('2.0 s') && ${modal}.textContent.includes('2 / 3 已测得')`)
+  await click('#performance-focus')
+  await read('new Promise(resolve => setTimeout(resolve, 1100))')
+  if (!await read(`${modal}.textContent.includes('2.0 s') && ${modal}.textContent.includes('全部运行会话 · 3 个')`)) throw new Error('Focus changed the global source')
   await click('#performance-complete')
-  await wait(`${panel}.textContent.includes('本轮统计') && ${panel}.textContent.includes('6.0 字符/s') && ${panel}.textContent.includes('20.0 tok/s')`)
-  await wait(`document.querySelector('.llm-performance-table tbody tr')`)
-  if (!await read(`document.querySelector('.llm-performance-table tbody').textContent.includes('VPN A') && !document.querySelector('.llm-performance-table tbody').textContent.includes('VPN B')`)) throw new Error('Next label rewrote the measured run')
+  await wait(`${modal}.textContent.includes('全部运行会话 · 2 个')`)
+  await wait(`${modal}.textContent.includes('3.0 s') && ${modal}.textContent.includes('1 / 2 已测得')`)
+  if (await read(`${modal}.querySelector('.llm-performance-metrics').textContent.includes('20.0 token/s') || ${modal}.querySelector('.llm-performance-line') != null`)) throw new Error('Final-only usage rendered as live rate or curve')
+  await wait(`${modal}.querySelector('.llm-performance-history-row')?.textContent.includes('20.0 token/s')`)
+  await click('.llm-performance-rounds summary')
+  if (!await read(`${modal}.textContent.includes('输出 100 token') && ${modal}.textContent.includes('API 时间 5.0 s')`)) throw new Error('Canonical per-round history missing')
+  await click('#performance-stop')
+  await wait(`${modal}.textContent.includes('全部运行会话 · 1 个') && ${modal}.textContent.includes('0 / 1 已测得') && ${modal}.textContent.includes('失败或停止') && ${modal}.textContent.includes('历史备注：old manual note')`)
+  const fixtureState = `JSON.parse(document.querySelector('#performance-fixture-state').textContent)`
+  win.hide()
+  await wait(`document.hidden`)
+  const hiddenReads = await read(`${fixtureState}.summaryReads`)
+  await read('new Promise(resolve => setTimeout(resolve, 1300))')
+  if (await read(`${fixtureState}.summaryReads`) !== hiddenReads) throw new Error('Hidden modal kept refreshing')
+  win.showInactive()
+  await wait(`!document.hidden && ${fixtureState}.summaryReads > ${hiddenReads}`)
+  await click('#performance-empty')
+  await wait(`${modal}.textContent.includes('全部运行会话 · 0 个') && ${modal}.textContent.includes('0 / 0 已测得')`)
+  await click('#performance-summary-error')
+  await wait(`${modal}.textContent.includes('实时读取失败：fixture summary unavailable')`)
+  if (await read(`${modal}.textContent.includes('全部运行会话 · 0 个')`)) throw new Error('Summary error retained stale headline')
   for (const theme of ['dark', 'light']) {
     win.setSize(1000, 800)
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-    const bounds = await read(`(() => { const node = ${panel}, r = node.getBoundingClientRect(); if (node.scrollWidth > node.clientWidth) throw new Error('Performance panel overflows'); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
+    const bounds = await read(`(() => { const node = ${modal}, r = node.getBoundingClientRect(); if (node.scrollWidth > node.clientWidth) throw new Error('Performance modal overflows'); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
     if (screenshot) require('node:fs').writeFileSync(screenshot + '-' + theme + '.png', (await contents.capturePage(bounds)).toPNG())
   }
   win.setSize(700, 700)
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-  if (!await read(`document.querySelector('.llm-performance-toggle').scrollWidth <= document.querySelector('.llm-performance-toggle').clientWidth`)) throw new Error('Narrow performance strip overflows')
+  if (!await read(`${modal}.scrollWidth <= ${modal}.clientWidth`)) throw new Error('Narrow performance modal overflows')
+  await click('.modal-x')
+  await wait(`document.querySelector('.llm-performance-modal') == null`)
+  const closedReads = await read(`${fixtureState}.summaryReads`)
+  await read('new Promise(resolve => setTimeout(resolve, 1300))')
+  if (await read(`${fixtureState}.summaryReads`) !== closedReads || await read(`${fixtureState}.dataListeners`) !== baselineListeners) throw new Error('Closed modal retained timer or subscription')
   await click('#performance-history-error')
-  await click('.llm-performance-controls .btn')
-  await wait(`${panel}.querySelector('[role="alert"]')?.textContent.includes('fixture history unavailable')`)
-  if (await read(`${panel}.querySelector('table') != null`)) throw new Error('History error retained an apparently successful comparison')
-  await click('.llm-performance-toggle')
-  await wait(`document.querySelector('.llm-performance-toggle').getAttribute('aria-expanded') === 'false'`)
-  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
-  contents.sendInputEvent({ type: 'char', keyCode: '\r' })
-  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
-  await wait(`document.querySelector('.llm-performance-toggle').getAttribute('aria-expanded') === 'true'`)
-  return { productionAppLabelCaptured: true, streamAndTerminalRates: true, frozenRunLabel: true, historyErrorHonest: true, nativeKeyboard: true, themes: ['dark', 'light'], narrowWidth: 700 }
+  await click('.sb-navitem[title="LLM 性能"]')
+  await wait(`document.querySelector('.llm-performance-modal') != null`)
+  await wait(`Array.from(document.querySelectorAll('.llm-performance-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
+  if (await read(`document.querySelector('.llm-performance-modal .llm-performance-history-row') != null`)) throw new Error('History error retained an apparently successful comparison')
+  await click('.modal-x')
+  return { assertions: ['registry aggregation across projects/providers', 'equal-session wait and independent coverage', 'focus independent', 'done/stopped/idle excluded', 'no token curve from final usage', 'per-round canonical history', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
 }
 
 try {

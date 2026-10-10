@@ -32,10 +32,28 @@ describe('performance history shares usage deletion but not billing totals', () 
       const before = readUsageStats(dir)
       appendLlmPerformance(dir, { cwd: '/repo', externalSessionId: 'session' }, sample())
       expect(readUsageStats(dir)).toMatchObject({ turns: before.turns, tout: 20, tin: null, cost: null })
-      expect(await readLlmPerformanceHistory(dir, now)).toEqual({ rows: [sample()], truncated: false, invalidLines: 0 })
+      const cached = await readLlmPerformanceHistory(dir, now)
+      expect(cached).toEqual({ rows: [sample()], truncated: false, invalidLines: 0 })
+      expect(await readLlmPerformanceHistory(dir, now)).toBe(cached)
+      appendLlmPerformance(dir, { cwd: '/repo', externalSessionId: 'session' }, sample('second'))
+      expect((await readLlmPerformanceHistory(dir, now)).rows).toHaveLength(2)
       deleteUsageSessionRows({ userDataDir: dir, providerId: 'claude', cwd: '/repo', externalSessionId: 'session', runIds: new Set(['run']) })
       expect((await readLlmPerformanceHistory(dir, now)).rows).toEqual([])
       expect(readUsageStats(dir).turns).toBe(0)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('expires cached records at the 30 day boundary and rejects unsanitized network evidence', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-llm-history-expiry-'))
+    try {
+      appendLlmPerformance(dir, { cwd: '/repo' }, sample())
+      expect((await readLlmPerformanceHistory(dir, now)).rows).toHaveLength(1)
+      expect((await readLlmPerformanceHistory(dir, now + 30 * 86400_000 + 1)).rows).toEqual([])
+      appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...sample('unsafe'), performance: {
+        ...sample().performance, networkConfiguration: { observedAt: sample().ts, source: 'app-environment', systemProxy: null,
+          environmentProxy: { http: false, https: true, all: false, bypass: false, url: 'secret' } }
+      } } }) + '\n')
+      expect((await readLlmPerformanceHistory(dir, now)).invalidLines).toBe(1)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

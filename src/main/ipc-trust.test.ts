@@ -5,7 +5,7 @@ import { registerTrustedIpcHandler } from './ipc-trust'
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 
 describe('trusted main IPC registration', () => {
-  it.each(['workspace:list', 'workspace:resolveFile'])('rejects wrong sender, subframe, and origin before %s runs', async (channel) => {
+  it.each(['workspace:list', 'workspace:resolveFile', 'agent:llmPerformanceSummary', 'agent:llmPerformanceHistory'])('rejects wrong sender, subframe, and origin before %s runs', async (channel) => {
     let registered: Handler | undefined
     const ipcMain = {
       handle: (_channel: string, listener: Handler) => { registered = listener }

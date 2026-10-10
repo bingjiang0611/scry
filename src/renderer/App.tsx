@@ -703,7 +703,6 @@ export function App() {
     const setWindowTheme = window.scry.setTheme
     if (typeof setWindowTheme === 'function') void setWindowTheme(theme).catch(() => {})
   }, [theme])
-  const [networkLabel, setNetworkLabel] = useState('')
   const backgroundWorkByRun = useBackgroundWork()
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const [waitingQuestionRunIds, setWaitingQuestionRunIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -773,6 +772,7 @@ export function App() {
   )
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
+  const [showLlmPerformance, setShowLlmPerformance] = useState(false)
   const integrations = useIntegrations(cwd, activeSessionId, projects, showMcp ? 'mcp' : showSkills ? 'skills' : null)
   useEffect(() => {
     const subscribe = window.scry.onDataUpdated
@@ -1362,7 +1362,6 @@ export function App() {
   const currentRunRequest = useCallback(
     (): Omit<AgentStartRequest, 'prompt' | 'attachments'> => ({
       cwd: cwdRef.current ?? undefined,
-      networkLabel,
       expectedExternalSessionId: activeSessionIdRef.current,
       providerId: integrations.selectedProviderId,
       agentId: integrations.selectedId,
@@ -1373,7 +1372,6 @@ export function App() {
       permissionMode: integrations.runControls.permissionMode
     }),
     [
-      networkLabel,
       integrations.runControls.effort,
       integrations.runControls.model,
       integrations.runControls.permissionMode,
@@ -1864,12 +1862,19 @@ export function App() {
     workspace.loadProjects()
   }
 
+  const openLlmPerformance = (): void => {
+    setShowSkills(false)
+    setShowMcp(false)
+    setShowLlmPerformance(true)
+  }
   const openSkills = (): void => {
+    setShowLlmPerformance(false)
     setShowMcp(false)
     setShowSkills(true)
     void refreshProviderCatalogs()
   }
   const openMcp = (): void => {
+    setShowLlmPerformance(false)
     setShowSkills(false)
     setShowMcp(true)
     if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => {})
@@ -2061,6 +2066,7 @@ export function App() {
     onRevealProject: useEventCallback((project: ProjectMeta) => window.scry.revealProject(project.cwd)),
     onUndoArchive: useEventCallback(undoArchive),
     onAnalytics: useEventCallback(() => changeView('analytics')),
+    onLlmPerformance: useEventCallback(openLlmPerformance),
     onSkills: useEventCallback(openSkills),
     onMcp: useEventCallback(openMcp),
     onSettings: useEventCallback(() => setShowSettings(true))
@@ -2125,7 +2131,6 @@ export function App() {
               onTogglePanel={toggleOverviewPanel}
             />
 
-            <LlmPerformancePanel turns={session.turns} busy={session.busy} networkLabel={networkLabel} onNetworkLabel={setNetworkLabel} />
             <SessionChatView
               draftStore={draftStore}
               draftKey={draftKey}
@@ -2318,6 +2323,9 @@ export function App() {
         </>
       )}
       <>
+          {showLlmPerformance && (
+            <LlmPerformancePanel open onClose={() => setShowLlmPerformance(false)} />
+          )}
           {(showSkills || showMcp) && (
             <CapabilitiesModal
               key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
@@ -2341,6 +2349,7 @@ export function App() {
               onClose={() => {
                 setShowSkills(false)
                 setShowMcp(false)
+                setShowLlmPerformance(false)
               }}
             />
           )}
