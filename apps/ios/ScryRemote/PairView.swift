@@ -5,12 +5,10 @@ import SwiftUI
 // Mac issues a real grant.
 struct PairView: View {
   @EnvironmentObject var model: AppModel
-  @State private var showCodeEntry = false
-  @State private var code = ""
 
   var body: some View {
     VStack(spacing: 0) {
-      RemoteHeader(title: "连接 Mac", backAction: { model.goBack() }) {
+      RemoteHeader(title: "连接 Mac", backAction: model.canGoBack ? { model.goBack() } : nil) {
         Color.clear.frame(width: 44, height: 44)
       }
       ScrollView {
@@ -50,12 +48,10 @@ struct PairView: View {
             .foregroundStyle(Palette.surface).background(Palette.blue, in: Capsule())
         }
         .buttonStyle(.plain)
-        Button("粘贴配对码") { showCodeEntry = true }
-          .font(.system(size: 14, weight: .medium)).frame(minHeight: 44)
-        Button { model.goBack() } label: {
-          Text("稍后连接").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+        if model.canGoBack {
+          Button("返回") { model.goBack() }.frame(minHeight: 44)
+            .buttonStyle(.plain).foregroundStyle(Palette.muted)
         }
-        .buttonStyle(.plain).foregroundStyle(Palette.muted)
       }
       .padding(.horizontal, 20).padding(.bottom, 18)
     }
@@ -66,32 +62,6 @@ struct PairView: View {
                   onFailure: { message in model.pairing = .failed(message) }).ignoresSafeArea()
         Button("取消") { model.pairing = .idle }
           .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)
-      }
-    }
-    .sheet(isPresented: $showCodeEntry) {
-      NavigationStack {
-        VStack(alignment: .leading, spacing: 16) {
-          Text("在 Mac 的“连接 iPhone”中复制配对码，然后粘贴到这里。仍需在 Mac 上确认授权。")
-            .font(.subheadline).foregroundStyle(Palette.muted)
-          TextEditor(text: $code).frame(minHeight: 120, maxHeight: 220)
-            .font(.system(.body, design: .monospaced)).autocorrectionDisabled()
-            .textInputAutocapitalization(.never)
-            .accessibilityLabel("配对码")
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.line))
-          PasteButton(payloadType: String.self) { values in code = values.first ?? "" }
-          Spacer()
-        }
-        .padding(20).navigationTitle("输入配对码").navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .cancellationAction) { Button("取消") { code = ""; showCodeEntry = false } }
-          ToolbarItem(placement: .confirmationAction) {
-            Button("连接") {
-              let scanned = code.trimmingCharacters(in: .whitespacesAndNewlines)
-              code = ""; showCodeEntry = false
-              model.beginPair(scanned: scanned)
-            }.disabled(code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-          }
-        }
       }
     }
   }

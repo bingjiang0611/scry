@@ -110,7 +110,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -187,6 +187,9 @@ export class InnerMtlsHost {
           ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
           ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
         }) }
+      }
+      if (request.op === 'workspace') {
+        return { workspace: await controller.readWorkspace(fingerprint, request.query) }
       }
       if (request.op === 'historyPreview') {
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }

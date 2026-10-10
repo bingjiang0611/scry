@@ -67,6 +67,22 @@ const expectCode = (fn: () => unknown, code: string) => {
 }
 
 describe('RemoteGateway', () => {
+  it('authenticates workspace reads before parsing/access and rechecks revocation', async () => {
+    const { authority, deviceId } = await grantedAuthority()
+    const read = vi.fn(async () => ({ action: 'list' as const, listing: { entries: [], truncated: false } }))
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), workspace: { read } })
+    await expect(gw.readWorkspace('f'.repeat(64), null)).rejects.toMatchObject({ code: 'device_not_authorized' })
+    expect(read).not.toHaveBeenCalled()
+    await expect(gw.readWorkspace(CERT, { action: 'write', cwd: '/x' })).rejects.toThrow('invalid_request')
+    expect(read).not.toHaveBeenCalled()
+    const query = { action: 'list', cwd: '/x', path: '' }
+    await expect(gw.readWorkspace(CERT, query)).resolves.toMatchObject({ action: 'list' })
+    expect(read).toHaveBeenCalledTimes(1)
+    await authority.revoke(deviceId)
+    await expect(gw.readWorkspace(CERT, query)).rejects.toMatchObject({ code: 'device_not_authorized' })
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
   it('denies every operation to an unauthorized certificate and never mutates the ledger', async () => {
     const { authority } = await grantedAuthority()
     const { gw, ledger } = gateway(authority)

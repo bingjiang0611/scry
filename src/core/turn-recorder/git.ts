@@ -899,6 +899,43 @@ export function parseNumstat(stdout: string, repoRoot: string): DiffFile[] {
 // 「工作区未提交改动」= 当前工作树 vs HEAD，语义上独立于每轮 turn diff。
 // 直接 `git diff HEAD` 会漏掉未跟踪新文件，所以复用 beginGitTurnDiff 的快照树：
 // 它已经把 untracked（排除 ignored）用隔离 index/object dir 暂存成一棵 tree，不动真实 index。
+export interface WorkspaceGitDiff {
+  status: 'captured' | 'unavailable' | 'timeout' | 'failed'
+  reason?: TurnDiffReason
+  patch: string
+  truncated: boolean
+}
+
+// A bounded current-worktree vs HEAD view, including untracked files. Reuse the
+// isolated, filter-disabled snapshot; never refresh/write the user's real index.
+// Unlike gitNumstat, failure is not an empty/clean diff. Huge output fails at the
+// existing 16 MiB subprocess bound; the phone preview retains at most 64 KiB.
+export async function readWorkspaceGitDiff(cwd: string): Promise<WorkspaceGitDiff> {
+  const capture = await beginGitTurnDiff(cwd)
+  try {
+    if (capture.status !== 'ready' || !capture.repoRoot || !capture.beforeTree) {
+      return { status: capture.status === 'ready' ? 'failed' : capture.status,
+        reason: capture.reason ?? 'git_error', patch: '', truncated: false }
+    }
+    const patch = await gitCommand(snapshotGitArgs(capture.filterOverrides ?? [], [
+      'diff', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color',
+      'HEAD', capture.beforeTree, '--', ...(capture.pathspec ?? ['.'])
+    ]), {
+      cwd: capture.repoRoot,
+      env: { ...process.env, GIT_OBJECT_DIRECTORY: capture.objectDir,
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs },
+      deadline: Date.now() + TURN_DIFF_BEGIN_DEADLINE_MS
+    })
+    return { status: 'captured', patch: utf8Prefix(patch, 64 * 1024).value,
+      truncated: Buffer.byteLength(patch) > 64 * 1024 }
+  } catch (error) {
+    return { status: error instanceof GitDeadlineError ? 'timeout' : 'failed',
+      reason: error instanceof GitDeadlineError ? 'deadline' : 'git_error', patch: '', truncated: false }
+  } finally {
+    await cancelGitTurnDiff(capture)
+  }
+}
+
 export async function gitNumstat(cwd: string): Promise<DiffFile[]> {
   const capture = await beginGitTurnDiff(cwd)
   try {

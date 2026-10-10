@@ -6,6 +6,7 @@ export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, Rem
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
+import { readRemoteWorkspace, type RemoteSessionStatus, type RemoteSessionStatusQuery } from './remote-workspace'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { decodedBase64ByteLength, isSupportedImageMimeType, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
@@ -62,6 +63,7 @@ export interface HostControllerDependencies {
   outputStore?: RunOutputStore
   // Resolves and authorizes a workspace against the known-project authority.
   workspace: WorkspaceAuthorizer
+  readSessionStatus?(query: RemoteSessionStatusQuery): RemoteSessionStatus
   // The only injected leaf: performs the real Provider run for a routed intent.
   // `output` streams the assistant's real trace CONTENT (masked, bounded) to the
   // device; distinct from the opaque lifecycle `progress` markers.
@@ -191,6 +193,7 @@ export class HostController {
       ...(deps.listDirectories ? { directories: { list: deps.listDirectories } } : {}),
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
       ...(deps.listCommands ? { commands: { list: deps.listCommands } as RemoteCommandSource } : {}),
+      workspace: { read: (query) => readRemoteWorkspace(deps.workspace, query, deps.readSessionStatus) },
       ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {}),
       ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {}),
       ...(deps.readHistoryPreview ? { historyPreview: { read: deps.readHistoryPreview } as RemoteHistoryPreviewSource } : {})
@@ -299,6 +302,10 @@ export class HostController {
 
   // Device-facing: one session's real conversation content, authorized by the
   // same verified peer certificate. Async (reads the trace archive/transcript).
+  readWorkspace(peerCertSHA256: string, query: unknown) {
+    return this.#gateway.readWorkspace(peerCertSHA256, query)
+  }
+
   readHistoryPreview(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryPreview> {
     return this.#gateway.readHistoryPreview(peerCertSHA256, query)
   }

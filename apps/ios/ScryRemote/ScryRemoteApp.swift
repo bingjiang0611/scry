@@ -31,8 +31,8 @@ struct RootView: View {
 
   var body: some View {
     Group {
-      if !model.signedIn {
-        SignInView()
+      if !model.canShowWorkspace {
+        PairView()
       } else {
         switch model.route {
         case .home: HomeView()
@@ -48,7 +48,7 @@ struct RootView: View {
     .background(Palette.surface.ignoresSafeArea())
     .tint(Palette.blue)
     .safeAreaInset(edge: .top, spacing: 0) {
-      if model.signedIn, !run.pendingQuestions.isEmpty, !showQuestion {
+      if model.canShowWorkspace, !run.pendingQuestions.isEmpty, !showQuestion {
         Button { showQuestion = true } label: {
           Label("任务正在等待你的决定 · 查看", systemImage: "hand.raised")
             .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
@@ -58,12 +58,12 @@ struct RootView: View {
     }
     // Questions belong to the run, not a particular route. Returning home or
     // continuing an archived conversation must never hide a waiting request.
-    .onChange(of: run.pendingQuestions.first?.questionId) { _, id in showQuestion = model.signedIn && id != nil }
-    .sheet(isPresented: Binding(get: { model.signedIn && showQuestion }, set: { showQuestion = $0 })) {
-      if model.signedIn, let request = run.pendingQuestions.first {
+    .onChange(of: run.pendingQuestions.first?.questionId) { _, id in showQuestion = model.canShowWorkspace && id != nil }
+    .sheet(isPresented: Binding(get: { model.canShowWorkspace && showQuestion }, set: { showQuestion = $0 })) {
+      if model.canShowWorkspace, let request = run.pendingQuestions.first {
         RemoteQuestionSheet(request: request, submitting: run.questionAnswering, error: run.questionError,
-          onAnswer: { if model.signedIn { run.answerPendingQuestion(answers: $0) } },
-          onCancel: { if model.signedIn { run.answerPendingQuestion(answers: [:], cancel: true) } })
+          onAnswer: { if model.canShowWorkspace { run.answerPendingQuestion(answers: $0) } },
+          onCancel: { if model.canShowWorkspace { run.answerPendingQuestion(answers: [:], cancel: true) } })
           .id(request.questionId)
       }
     }
@@ -77,7 +77,7 @@ struct RootView: View {
         }
     )
     .animation(.easeInOut(duration: 0.2), value: model.route)
-    .animation(.easeInOut(duration: 0.2), value: model.signedIn)
+    .animation(.easeInOut(duration: 0.2), value: model.canShowWorkspace)
     // The run channel is the honest source of reachability: reflect a real
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
@@ -87,9 +87,9 @@ struct RootView: View {
         model.bindDraft(externalSessionId: external, to: identity)
       }
     }
-    .onChange(of: model.signedIn) { signedIn in
-      showQuestion = signedIn && !run.pendingQuestions.isEmpty
-      if signedIn { resumeRecoveredRun() }
+    .onChange(of: model.canShowWorkspace) { paired in
+      showQuestion = paired && !run.pendingQuestions.isEmpty
+      if paired { resumeRecoveredRun() }
     }
     .onAppear {
       #if DEBUG
@@ -106,6 +106,6 @@ struct RootView: View {
     // transcript/new-task checks do not silently exercise ChatView instead.
     guard !ProcessInfo.processInfo.arguments.contains("-uiPreview") else { return }
     #endif
-    if model.signedIn, run.hasRecoverableRun { model.route = .chat }
+    if model.canShowWorkspace, run.hasRecoverableRun { model.route = .chat }
   }
 }

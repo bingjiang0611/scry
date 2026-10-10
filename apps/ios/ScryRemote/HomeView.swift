@@ -277,11 +277,8 @@ struct SettingsView: View {
           settingsSection("安全") {
             settingRow(Symbol.link, "重新配对", "替换此设备的远程授权") { model.route = .pair }
           }
-          Button("退出登录（保留本机配对）") { model.signOut() }
-            .font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
-            .foregroundStyle(Palette.muted)
           if let error = model.destructiveActionError { Notice(text: error, warning: true) }
-          Text("已读会话缓存到手机（最多 64 MB / 20 个会话），受 iOS 数据保护且不备份。退出登录保留缓存；清除配对会删除缓存。")
+          Text("已读会话缓存到手机（最多 64 MB / 20 个会话），受 iOS 数据保护且不备份。关闭 App 保留缓存；清除配对会删除缓存。")
             .font(.caption).foregroundStyle(Palette.muted)
           Button(run.historyCacheClearing ? "正在清除缓存…" : "清除本机会话缓存") {
             Task {
@@ -291,7 +288,7 @@ struct SettingsView: View {
           }.disabled(run.historyCacheClearing).frame(minHeight: 44)
           if let cacheNotice { Text(cacheNotice).font(.caption).foregroundStyle(Palette.muted) }
           Button(role: .destructive) { confirmUnpair = true } label: {
-            Text("退出并清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
+            Text("清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
           }
           .buttonStyle(.plain).foregroundStyle(Palette.negative)
           .disabled(run.hasUnresolvedRun || run.historyCacheClearing)

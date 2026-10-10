@@ -27,6 +27,33 @@ final class ConversationUITests: XCTestCase {
     add(attachment)
   }
 
+  func testQRPairingHasNoAccountGate() {
+    app.launchArguments = ["-uiPreview", "-route", "pair"]
+    app.launch()
+    XCTAssertTrue(app.buttons["扫描配对码"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.buttons["粘贴配对码"].exists)
+    XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Apple'")).firstMatch.exists)
+    capture("qr-only-pairing")
+  }
+
+  func testSessionStatusAndReadOnlyWorkspaceBrowser() {
+    launch("transcript", extra: ["-uiWorkspaceFixture"])
+    XCTAssertTrue(app.buttons["session-runtime-status"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["session-runtime-status"].label.contains("正在运行"))
+    app.buttons["项目文件与 Diff"].tap()
+    XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
+    app.buttons["README.md"].tap()
+    XCTAssertTrue(app.staticTexts["# Project fixture"].waitForExistence(timeout: 10))
+    capture("workspace-file")
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    app.buttons["未提交 Diff"].tap()
+    XCTAssertTrue(app.staticTexts["+new"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["-old"].exists)
+    capture("workspace-diff")
+    app.buttons["完成"].tap()
+    XCTAssertTrue(app.buttons["项目文件与 Diff"].exists)
+  }
+
   func testToolAndReasoningDisclosure() {
     launch("transcript")
     let tool = app.buttons.matching(identifier: "tool-detail-toggle").matching(NSPredicate(format: "label CONTAINS %@", "编辑 HomeView.swift")).firstMatch

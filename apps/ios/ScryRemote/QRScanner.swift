@@ -34,22 +34,22 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
         DispatchQueue.main.async {
           guard let self, !self.finished else { return }
           if allowed { self.configureCamera() }
-          else { self.fail("未允许相机访问。可在系统设置中开启，或粘贴 Mac 上的配对码。") }
+          else { self.fail("未允许相机访问。请在系统设置中允许 Scry 使用相机，再扫描配对码。") }
         }
       }
-    default: fail("相机访问已关闭。可在系统设置中开启，或粘贴 Mac 上的配对码。")
+    default: fail("相机访问已关闭。请在系统设置中允许 Scry 使用相机，再扫描配对码。")
     }
   }
 
   private func configureCamera() {
     guard let device = AVCaptureDevice.default(for: .video) else {
-      fail("此设备没有可用相机，请粘贴配对码。"); return
+      fail("此设备没有可用相机，无法扫码配对。"); return
     }
     do {
       let input = try AVCaptureDeviceInput(device: device)
       let output = AVCaptureMetadataOutput()
       guard session.canAddInput(input), session.canAddOutput(output) else {
-        fail("无法启动相机，请粘贴配对码。"); return
+        fail("无法启动相机，请关闭扫描页后重试。"); return
       }
       session.addInput(input)
       session.addOutput(output)
@@ -62,7 +62,7 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
       view.layer.addSublayer(layer)
       preview = layer
       captureQueue.async { [session] in session.startRunning() }
-    } catch { fail("无法启动相机：\(error.localizedDescription)。可改用粘贴配对码。") }
+    } catch { fail("无法启动相机：\(error.localizedDescription)。请关闭扫描页后重试。") }
   }
 
   private func fail(_ message: String) {

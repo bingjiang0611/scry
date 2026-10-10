@@ -64,6 +64,7 @@ export interface HostControllerFactoryDependencies {
   listProviders?(): RemoteProviderRef[]
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   listSessions?(): RemoteSessionRef[]
+  readSessionStatus?: HostControllerDependencies['readSessionStatus']
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
 }
@@ -151,6 +152,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
     ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
+    ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
     ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
     ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {})
   }

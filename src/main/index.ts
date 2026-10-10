@@ -166,6 +166,7 @@ import {
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import { assertTrustedIpcEvent as assertTrustedIpcEventForWindow, registerTrustedIpcHandler } from './ipc-trust'
 import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
+import { observeSessionStatus } from './remote/remote-workspace'
 import type {
   TerminalCloseRequest,
   TerminalRecordingRequest,
@@ -4135,6 +4136,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         out.sort((a, b) => b.ts - a.ts)
         return out
       },
+      readSessionStatus: (query) => observeSessionStatus(query, runs.activeStates()),
       // First-screen evidence avoids the complete-history reader. Indexed
       // archives read only two turns; legacy/index-rebuild paths can still
       // materialize older data, and their provenance stays explicit.

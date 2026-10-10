@@ -11,6 +11,8 @@ import RemoteTransport
 struct ChatView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var showFiles = false
+  private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: run.activeSessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -28,6 +30,12 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      Label(run.observationInterrupted ? "状态未知 · 同步已中断" : !run.pendingQuestions.isEmpty ? "等待你的决定" : stateLabel,
+            systemImage: run.lifecycle == .running && !run.observationInterrupted ? "play.circle.fill" : "info.circle")
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(run.observationInterrupted ? Palette.muted : stateColor)
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading).padding(.horizontal, 20)
+        .accessibilityIdentifier("session-runtime-status")
       if !paired { Notice(text: "尚未连接 Mac · 发送已停用。") }
       if let error = run.submitError {
         VStack(alignment: .leading, spacing: 7) {
@@ -55,6 +63,9 @@ struct ChatView: View {
       footer
     }
     .background(Palette.surface)
+    .sheet(isPresented: $showFiles) {
+      if let projectCwd { WorkspaceBrowserView(cwd: projectCwd).id(projectCwd) }
+    }
     .onAppear { run.loadActiveContext() }
 #if DEBUG
     .onAppear {
@@ -66,6 +77,9 @@ struct ChatView: View {
   private var header: some View {
     RemoteHeader(title: completedTurns.first?.prompt ?? run.prompt ?? "会话", subtitle: sessionContext, link: model.link,
                  backAction: { model.goBack() }) {
+      Button { showFiles = true } label: {
+        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
+      }.accessibilityLabel("项目文件与 Diff").disabled(projectCwd == nil)
       Menu {
         Button { if run.resetRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
           .disabled(run.hasUnresolvedRun)
