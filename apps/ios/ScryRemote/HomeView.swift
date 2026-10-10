@@ -48,11 +48,11 @@ struct HomeView: View {
     .onAppear {
       if run.hasConnection { run.loadSessions(); run.loadProjects() }
     }
-    .alert("当前任务尚未结束", isPresented: $showActiveRun) {
+    .alert("上次提交尚未核对", isPresented: $showActiveRun) {
       Button("返回当前任务") { model.route = .chat }
       Button("留在列表", role: .cancel) {}
     } message: {
-      Text("先核对当前任务结果，再切换会话。本次提交标识和草稿会保留，不会重复执行。")
+      Text("Mac 还没有确认收到这次提交。先核对结果，再新建任务；提交标识和草稿会保留，不会重复执行。")
     }
   }
 
@@ -64,6 +64,7 @@ struct HomeView: View {
         else { ProgressView("正在读取会话…").frame(maxWidth: .infinity).padding(.top, 52) }
       case let .loaded(list):
         let filtered = filteredSessions(list)
+        liveRunsSection(list)
         if filtered.isEmpty {
           EmptyState(title: "没有匹配的会话", detail: "试试其他关键词。", symbol: Symbol.search).padding(.top, 24)
         } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -87,6 +88,45 @@ struct HomeView: View {
     }
     .scrollIndicators(.hidden)
     .scrollDismissesKeyboard(.interactively)
+    .refreshable { await run.refreshSessions() }
+  }
+
+  // Live runs whose session is not in the list yet (just started, or archived
+  // on the Mac). Rows already in the list carry their own live badge.
+  @ViewBuilder private func liveRunsSection(_ list: [G0Transport.RunSessionRef]) -> some View {
+    let listed = Set(list.compactMap { session in session.externalSessionId.map { "\(session.providerId)\u{0}\(session.cwd)\u{0}\($0)" } })
+    let unlisted = run.liveRuns.filter { live in
+      live.externalSessionId.map { !listed.contains("\(live.providerId)\u{0}\(live.cwd)\u{0}\($0)") } ?? true
+    }
+    if !unlisted.isEmpty {
+      VStack(alignment: .leading, spacing: 0) {
+        sectionTitle("进行中")
+        ForEach(unlisted) { live in
+          Button {
+            guard let external = live.externalSessionId else { return }
+            model.open(OpenedSession(providerId: live.providerId, agentProfileId: live.agentProfileId, cwd: live.cwd,
+                                     externalSessionId: external, label: live.prompt, isActive: true), run: run)
+          } label: {
+            HStack(alignment: .top, spacing: 10) {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(live.prompt.isEmpty ? "(无预览)" : live.prompt).font(.system(size: 15.5)).lineLimit(1)
+                Text("\(projectName(live.cwd)) · \(live.providerId.uppercased())")
+                  .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
+              }
+              Spacer(minLength: 8)
+              if live.externalSessionId == nil {
+                Text("启动中").font(.system(size: 10)).foregroundStyle(Palette.muted)
+              } else {
+                LiveRunBadge(live: live, waiting: run.openLiveQuestion(live) != nil)
+              }
+            }
+            .padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain).disabled(live.externalSessionId == nil)
+        }
+      }
+      .padding(.horizontal, 19)
+    }
   }
 
   private var notPairedEmpty: some View {
@@ -164,9 +204,9 @@ struct HomeView: View {
       Text(projectName(cwd)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
       Spacer()
       Button {
-        guard !run.hasUnresolvedRun else { showActiveRun = true; return }
-        // A finished run's state (including its error) belongs to that session.
-        _ = run.resetRun()
+        // A finished run's state (including its error) belongs to that session;
+        // a running one stays on the Mac and in the live-run list.
+        guard run.detachFocusedRun() else { showActiveRun = true; return }
         if case let .loaded(projects) = run.projects, let project = projects.first(where: { $0.path == cwd }) {
           run.chooseProject(project)
         }
@@ -184,12 +224,9 @@ struct HomeView: View {
     let openable = session.externalSessionId?.isEmpty == false
     Button {
       guard openable, let external = session.externalSessionId else { return }
-      let identity = RemoteRunStore.SessionIdentity.opened(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
-      model.readOnlyTranscript = run.hasUnresolvedRun && identity != run.activeSessionIdentity
-      model.openedSession = OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
-                                          cwd: session.cwd, externalSessionId: external, label: session.label,
-                                          isActive: session.isActive == true)
-      model.route = .transcript
+      model.open(OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
+                               cwd: session.cwd, externalSessionId: external, label: session.label,
+                               isActive: session.isActive == true), run: run)
     } label: {
       HStack(alignment: .top, spacing: 10) {
         VStack(alignment: .leading, spacing: 4) {
@@ -202,7 +239,9 @@ struct HomeView: View {
           }
         }
         Spacer(minLength: 8)
-        if session.isActive == true {
+        if let live = run.liveRun(providerId: session.providerId, cwd: session.cwd, externalSessionId: session.externalSessionId) {
+          LiveRunBadge(live: live, waiting: run.openLiveQuestion(live) != nil)
+        } else if session.isActive == true {
           Text("运行中").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.blue)
         } else if !openable {
           // No Provider session id and not running on the Mac: nothing to open.
@@ -225,8 +264,7 @@ struct HomeView: View {
       }
       .padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
       CircleButton(symbol: Symbol.plus, label: "新任务", filled: true, disabled: !run.hasConnection) {
-        guard !run.hasUnresolvedRun else { showActiveRun = true; return }
-        _ = run.resetRun()
+        guard run.detachFocusedRun() else { showActiveRun = true; return }
         model.route = .newSession
       }
     }
@@ -256,6 +294,19 @@ struct HomeView: View {
     if seconds < 3600 { return "\(Int(seconds / 60))m" }
     if seconds < 86400 { return "\(Int(seconds / 3600))h" }
     return "\(Int(seconds / 86400))d"
+  }
+}
+
+// Host-proven live state for one run. "Mac" marks a run the owner started in
+// the Mac app, so the phone never implies it started it.
+struct LiveRunBadge: View {
+  let live: G0Transport.LiveRun
+  let waiting: Bool
+  var body: some View {
+    let origin = live.origin == "mac" ? "Mac · " : ""
+    let (text, color): (String, Color) = live.state == "stopping" ? ("停止中", Palette.muted)
+      : waiting ? ("等待决定", Palette.amber) : ("运行中", Palette.blue)
+    Text(origin + text).font(.system(size: 10, weight: .semibold)).foregroundStyle(color)
   }
 }
 

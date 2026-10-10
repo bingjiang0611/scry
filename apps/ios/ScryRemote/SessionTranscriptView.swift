@@ -84,6 +84,8 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
   @State private var olderReadRequest = 0
+  @State private var showLiveQuestion = false
+  @State private var confirmStop: G0Transport.LiveRun?
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -100,7 +102,11 @@ struct SessionTranscriptView: View {
     guard let identity = sessionIdentity else { return [] }
     return run.completedTurns(for: identity)
   }
-  private var runBusy: Bool { run.isBusy }
+  // A run in this session that this store is not watching: started on the Mac,
+  // or left running when the user switched away from it.
+  private var otherLive: G0Transport.LiveRun? { readOnly ? nil : run.otherLiveRun(for: sessionIdentity) }
+  private var otherLiveQuestion: G0Transport.RunQuestionRequest? { otherLive.flatMap { run.openLiveQuestion($0) } }
+  private var runBusy: Bool { run.isBusy || otherLive != nil }
   private var controlsMatch: Bool {
     guard let session else { return false }
     return run.controlsReady && run.chosenProvider?.id == session.providerId &&
@@ -131,6 +137,13 @@ struct SessionTranscriptView: View {
                 systemImage: run.observationReconnecting ? "wifi.exclamationmark" : "play.circle.fill")
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(run.observationReconnecting ? Palette.muted : Palette.blue)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 20)
+            .accessibilityIdentifier("session-runtime-status")
+        } else if let live = otherLive {
+          liveRunBar(live)
+        } else if run.liveRunsStatus == .observed {
+          Label("未检测到运行", systemImage: "info.circle")
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 20)
             .accessibilityIdentifier("session-runtime-status")
         } else {
@@ -168,13 +181,31 @@ struct SessionTranscriptView: View {
     .sheet(isPresented: $showFiles) {
       if let session { WorkspaceBrowserView(cwd: session.cwd).id(session.cwd) }
     }
+    .onChange(of: otherLiveQuestion?.questionId, initial: true) { _, id in showLiveQuestion = id != nil }
+    .confirmationDialog(confirmStop?.origin == "mac" ? "停止 Mac 上的这次运行？" : "停止这次运行？",
+                        isPresented: Binding(get: { confirmStop != nil }, set: { if !$0 { confirmStop = nil } }),
+                        titleVisibility: .visible, presenting: confirmStop) { live in
+      Button("停止运行", role: .destructive) { run.stopLiveRun(live) }
+    } message: { _ in
+      Text("与 Mac 上的停止按钮相同：请求 Agent 停止，结果以 Agent 实际结束为准。")
+    }
+    .sheet(isPresented: $showLiveQuestion) {
+      if let live = otherLive, let request = otherLiveQuestion {
+        RemoteQuestionSheet(request: request, submitting: run.liveActionRunId == live.runId, error: run.liveActionError,
+          onAnswer: { run.answerLiveQuestion(live, request: request, answers: $0) },
+          onCancel: { run.answerLiveQuestion(live, request: request, answers: [:], cancel: true) })
+          .id(request.questionId)
+      }
+    }
     .onAppear {
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
       // different session identity invalidates old history/poll callbacks.
       run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
       if !readOnly && historyAllowsControls { loadSessionControls() }
+      if !readOnly { run.watchHistory(sessionIdentity) }
     }
+    .onDisappear { if !readOnly { run.watchHistory(nil) } }
     .onChange(of: historyAllowsControls) {
       if !readOnly && historyAllowsControls { loadSessionControls() }
     }
@@ -185,6 +216,8 @@ struct SessionTranscriptView: View {
       while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         guard !Task.isCancelled else { return }
+        // The live-run long-poll already delivers this session's changes.
+        if run.historyIsWatched(sessionIdentity) { continue }
         await run.refreshHistory(providerId: s.providerId, cwd: s.cwd,
                                  externalSessionId: s.externalSessionId)
       }
@@ -406,6 +439,10 @@ struct SessionTranscriptView: View {
       } else if run.stopRequested && run.canStop {
         Text("已请求停止，等待 Mac 上的 Agent 实际结束…")
           .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
+      } else if let live = otherLive {
+        Text(live.origin == "mac" ? "此会话正在 Mac 上运行；可先写下一条消息，结束后再发送。"
+                                  : "此会话的任务仍在运行；可先写下一条消息，结束后再发送。")
+          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
       } else if runBusy {
         Text("可先写下一条消息；本轮结果同步完成后再发送。")
           .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
@@ -418,6 +455,35 @@ struct SessionTranscriptView: View {
     .padding(.horizontal, 14).padding(.bottom, 4)
     .background(Palette.surface)
     .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
+  }
+
+  private func liveRunBar(_ live: G0Transport.LiveRun) -> some View {
+    let waiting = run.openLiveQuestion(live) != nil
+    let origin = live.origin == "mac" ? "Mac 上" : "任务"
+    let text = live.state == "stopping" ? "\(origin)正在停止…"
+      : waiting ? "\(origin)等待你的决定" : "\(origin)正在运行 · 内容随 Mac 记录更新"
+    return VStack(alignment: .leading, spacing: 2) {
+      HStack(spacing: 8) {
+        Button { if waiting { showLiveQuestion = true } } label: {
+          Label(text, systemImage: waiting ? "hand.raised" : "play.circle.fill")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(waiting ? Palette.amber : Palette.blue)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .buttonStyle(.plain).accessibilityIdentifier("session-runtime-status")
+        if live.state != "stopping" {
+          Button(run.liveActionRunId == live.runId ? "请求中…" : "停止") { confirmStop = live }
+            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.negative)
+            .disabled(run.liveActionRunId != nil)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityIdentifier("stop-live-run")
+        }
+      }
+      if let error = run.liveActionError {
+        Text(error).font(.system(size: 11)).foregroundStyle(Palette.negative)
+      }
+    }
+    .padding(.horizontal, 20)
   }
 
   private func userBubble(_ text: String, attachments: [RemoteRunStore.SentAttachment] = []) -> some View {

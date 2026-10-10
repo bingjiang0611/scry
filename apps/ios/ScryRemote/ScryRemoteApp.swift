@@ -1,4 +1,5 @@
 import SwiftUI
+import RemoteTransport
 
 @main
 struct ScryRemoteApp: App {
@@ -61,6 +62,18 @@ struct RootView: View {
             .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
             .background(Palette.warnBg)
         }
+      } else if model.canShowWorkspace, let waiting = waitingElsewhere.first, let external = waiting.externalSessionId {
+        // A run this screen is not showing waits for a decision (another
+        // session, or a run started on the Mac). Open its session to answer.
+        Button {
+          model.open(OpenedSession(providerId: waiting.providerId, agentProfileId: waiting.agentProfileId, cwd: waiting.cwd,
+                                   externalSessionId: external, label: waiting.prompt, isActive: true), run: run)
+        } label: {
+          Label(waitingElsewhere.count > 1 ? "\(waitingElsewhere.count) 个任务等待你的决定 · 查看" : "另一个任务等待你的决定 · 查看",
+                systemImage: "hand.raised")
+            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
+            .background(Palette.warnBg)
+        }
       }
     }
     // Questions belong to the run, not a particular route. Returning home or
@@ -99,14 +112,16 @@ struct RootView: View {
     // next request opens a fresh one instead of waiting on a dead connection.
     .onChange(of: scenePhase) { _, phase in
       switch phase {
-      case .background: Task { await RemoteSessionRegistry.shared.resetAll() }
+      case .background:
+        run.stopLiveRuns()
+        Task { await RemoteSessionRegistry.shared.resetAll() }
       case .active: if model.canShowWorkspace { run.foregrounded() }
       default: break
       }
     }
     .onChange(of: model.canShowWorkspace) { paired in
       showQuestion = paired && !run.pendingQuestions.isEmpty
-      if paired { resumeRecoveredRun() }
+      if paired { resumeRecoveredRun(); run.startLiveRuns() } else { run.stopLiveRuns() }
     }
     .onAppear {
       #if DEBUG
@@ -114,6 +129,16 @@ struct RootView: View {
       run.applyUIPreviewArguments()
       #endif
       resumeRecoveredRun()
+      if model.canShowWorkspace { run.startLiveRuns() }
+    }
+  }
+
+  // Waiting runs other than the one the current transcript already presents.
+  private var waitingElsewhere: [G0Transport.LiveRun] {
+    let shown = model.route == .transcript ? model.openedSession : nil
+    return run.waitingLiveRuns.filter { live in
+      guard let shown else { return true }
+      return !(live.providerId == shown.providerId && live.cwd == shown.cwd && live.externalSessionId == shown.externalSessionId)
     }
   }
 

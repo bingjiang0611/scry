@@ -272,6 +272,26 @@ public enum G0Transport {
     }
   }
   public struct RunQuestionAnswerOutcome: Sendable, Equatable, Codable { public let status: String }
+  // One run the host proves is live right now. `remote` runs were submitted by a
+  // paired device; `mac` runs belong to the Mac UI. Both carry open questions.
+  // Absence from the list is "not observed", never "completed".
+  public struct LiveRun: Sendable, Equatable, Codable, Identifiable {
+    public var id: String { runId }
+    public let origin: String
+    public let runId: String
+    public let providerId: String
+    public let agentProfileId: String?
+    public let cwd: String
+    public let externalSessionId: String?
+    public let prompt: String
+    public let state: String
+    public let questions: [RunQuestionRequest]
+  }
+  public struct LiveRunsOutcome: Sendable, Equatable, Codable {
+    public let revision: String
+    public let runs: [LiveRun]
+    public let historyVersion: RunHistoryVersion?
+  }
   // One host-authorized project directory the device may target. The device can
   // never authorize a new one; it only chooses among these, and the host
   // re-checks the cwd on submit regardless.
@@ -478,6 +498,8 @@ public enum G0Transport {
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
   private struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
+  private struct LiveRunsHistory: Encodable { let providerId: String; let cwd: String; let externalSessionId: String; let known: String? }
+  private struct LiveRunsRequest: Encodable { let op = "liveRuns"; let revision: String?; let waitMs: Int; let history: LiveRunsHistory? }
   private struct RunResponse: Decodable {
     let runId: String?
     let status: String?
@@ -500,6 +522,7 @@ public enum G0Transport {
     let output: RunOutputBody?
     let watch: RunWatchBody?
     let stop: RunStopBody?
+    let liveRuns: LiveRunsOutcome?
     let error: String?
   }
   private struct RunWatchBody: Decodable {
@@ -730,6 +753,19 @@ public enum G0Transport {
                            questions: watch.questions,
                            output: RunOutputPage(chunks: watch.output.chunks, cursor: watch.output.cursor),
                            state: watch.state)
+  }
+
+  // Long-poll for the live-run list (and optionally one session's history
+  // version). Returns when either differs from what the caller holds, or after
+  // `waitMs` (host-capped at 20 s). A read on its own lane.
+  public static func relayLiveRuns(endpoint: RelayEndpoint, identity: G0ProbeIdentity, revision: String?, waitMs: Int,
+                                   history: (providerId: String, cwd: String, externalSessionId: String, known: String?)? = nil) async throws -> LiveRunsOutcome {
+    let request = try JSONEncoder().encode(LiveRunsRequest(revision: revision, waitMs: waitMs, history: history.map {
+      LiveRunsHistory(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId, known: $0.known)
+    }))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .status))
+    guard let live = response.liveRuns else { throw ProbeError.unexpectedReply }
+    return live
   }
 
   // Asks the host to interrupt the Provider for this run. "requested" is only a

@@ -166,6 +166,9 @@ struct RemoteProbe {
         print("watch state=\(watch.state ?? "none") ms=\(millis(clock.now - started))")
         if ["settled", "failed", "cancelled"].contains(watch.state ?? "") { break }
         if args[8] == "stop", !stopSent, ["dispatched", "running"].contains(watch.state ?? "") {
+          // The live-run list rides its own lane on the same session.
+          let listed = try await G0Transport.relayLiveRuns(endpoint: live, identity: identity, revision: nil, waitMs: 0)
+          for run in listed.runs { print("live-run \(run.origin) \(run.state) \(run.runId == submitted.runId ? "self" : "other") \(run.prompt)") }
           let stopStarted = clock.now
           print("stop \(try await G0Transport.relayRunStop(endpoint: live, identity: identity, runId: submitted.runId)) ms=\(millis(clock.now - stopStarted))")
           stopSent = true

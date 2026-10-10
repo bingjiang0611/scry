@@ -1,4 +1,5 @@
 import { connect as netConnect } from 'node:net'
+import { Duplex } from 'node:stream'
 import { connect as tlsConnect } from 'node:tls'
 import type { OutboundLeg } from './relay-client'
 
@@ -46,13 +47,34 @@ export function createRelayConnect(opts: RelayConnectOptions): RelayConnectFacto
     const socket = useTls
       ? tlsConnect({ host: opts.host, port: opts.port, ca: opts.tls!.ca, servername: opts.tls!.servername, rejectUnauthorized: opts.tls!.rejectUnauthorized ?? true })
       : netConnect({ host: opts.host, port: opts.port })
-    // Write the auth line before the transport serves inner mTLS on the same
-    // readiness event. Listener order guarantees this runs first: the factory
-    // registers here, the transport registers its serve() listener afterwards.
-    socket.once(readyEvent, () => {
-      try { socket.write(authLine) } catch { socket.destroy() }
+    // The leg the transport sees is a JS Duplex over the socket, like the WSS
+    // leg. A native socket handed to the inner TLS server is read through its
+    // handle, so no JS 'data' event would ever reveal that a device took this
+    // leg. Without 'relaySession' the pool keeps counting a consumed leg as
+    // waiting while a persistent device lane holds it open, and stops
+    // replacing it: with as many lanes open as the pool size, the relay has
+    // no leg left for the next one.
+    let consumed = false
+    const leg = new Duplex({
+      read() { socket.resume() },
+      write(chunk, _encoding, cb) { socket.write(chunk, cb) },
+      final(cb) { socket.end(cb) },
+      destroy(err, cb) { socket.destroy(); cb(err) }
     })
-    return socket as unknown as OutboundLeg
+    socket.once(readyEvent, () => {
+      // The auth line goes out before the transport starts inner TLS on 'ready'.
+      try { socket.write(authLine) } catch { socket.destroy(); return }
+      leg.emit(readyEvent)
+    })
+    socket.on('data', (bytes: Buffer) => {
+      // The relay sends nothing on an idle leg; the first bytes are the device's.
+      if (!consumed) { consumed = true; leg.emit('relaySession') }
+      if (!leg.push(bytes)) socket.pause()
+    })
+    socket.on('end', () => leg.push(null))
+    socket.on('close', () => { if (!leg.destroyed) leg.destroy() })
+    socket.on('error', (error) => { if (!leg.destroyed) leg.destroy(error) })
+    return leg
   }
   return { connect, readyEvent }
 }
