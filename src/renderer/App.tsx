@@ -17,6 +17,7 @@ import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { SessionChatView } from './components/ChatView'
 import { ViewChrome } from './components/ViewChrome'
+import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
@@ -701,6 +702,7 @@ export function App() {
     const setWindowTheme = window.scry.setTheme
     if (typeof setWindowTheme === 'function') void setWindowTheme(theme).catch(() => {})
   }, [theme])
+  const [networkLabel, setNetworkLabel] = useState('')
   const backgroundWorkByRun = useBackgroundWork()
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const [waitingQuestionRunIds, setWaitingQuestionRunIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -1359,6 +1361,7 @@ export function App() {
   const currentRunRequest = useCallback(
     (): Omit<AgentStartRequest, 'prompt' | 'attachments'> => ({
       cwd: cwdRef.current ?? undefined,
+      networkLabel,
       expectedExternalSessionId: activeSessionIdRef.current,
       providerId: integrations.selectedProviderId,
       agentId: integrations.selectedId,
@@ -1369,6 +1372,7 @@ export function App() {
       permissionMode: integrations.runControls.permissionMode
     }),
     [
+      networkLabel,
       integrations.runControls.effort,
       integrations.runControls.model,
       integrations.runControls.permissionMode,
@@ -2112,6 +2116,7 @@ export function App() {
               onTogglePanel={toggleOverviewPanel}
             />
 
+            <LlmPerformancePanel turns={session.turns} busy={session.busy} networkLabel={networkLabel} onNetworkLabel={setNetworkLabel} />
             <SessionChatView
               draftStore={draftStore}
               draftKey={draftKey}

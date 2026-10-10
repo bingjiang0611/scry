@@ -12,6 +12,7 @@ import type {
 } from '../shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '../shared/billing'
 import type { RendererPerformanceSample } from '../shared/performance'
+import type { LlmPerformanceHistory } from '../shared/llm-performance'
 import type {
   AgentForkSessionRequest,
   AgentForkSessionResult,
@@ -189,6 +190,8 @@ const api = {
   stats: (): Promise<DbStats> => ipcRenderer.invoke('agent:stats'),
   usageAnalytics: (rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> =>
     ipcRenderer.invoke('agent:usageAnalytics', rangeDays),
+  llmPerformanceHistory: (): Promise<LlmPerformanceHistory> =>
+    ipcRenderer.invoke('agent:llmPerformanceHistory'),
   billingState: (): Promise<BillingGuardianState> => ipcRenderer.invoke('agent:billingState'),
   syncBillingAdmin: (): Promise<BillingSyncResult> => ipcRenderer.invoke('agent:syncBillingAdmin'),
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),

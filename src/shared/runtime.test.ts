@@ -35,6 +35,13 @@ describe('provider termination semantics', () => {
 })
 
 describe('runtime frontdoor mapping', () => {
+  it('captures a bounded manual network label without changing runtime controls', () => {
+    const request = normalizeAgentStartRequest({ prompt: 'task', networkLabel: '  VPN A  ' })
+    expect(request).toMatchObject({ networkLabel: 'VPN A', providerId: 'claude', permissionMode: 'default' })
+    expect(normalizeAgentStartRequest({ prompt: 'task', networkLabel: ' ' }).networkLabel).toBeUndefined()
+    expect(() => normalizeAgentStartRequest({ prompt: 'task', networkLabel: 'x'.repeat(81) })).toThrow('网络标签')
+    expect(() => normalizeAgentStartRequest({ prompt: 'task', networkLabel: 1 as unknown as string })).toThrow('网络标签')
+  })
   it('maps supported UI agents to runtime providers without falling back for unknown agents', () => {
     expect(runtimeProviderForAgentId('claude')).toBe('claude_sdk')
     expect(runtimeProviderForAgentId('codex')).toBe('codex_cli')

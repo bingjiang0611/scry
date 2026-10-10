@@ -26,6 +26,7 @@ export interface NormalizeCtx {
   toolUseById?: Map<string, TraceEvent> // SDK tool_result 不重复携带工具身份时，用对应 tool_use 补全
   agentToolUseIds?: Set<string> // task_* 只回指已观测的 Agent tool_use，不把其他后台任务混进来
   agentTaskToolUseById?: Map<string, string> // 仅保留由 Agent tool_use 建立的 task_id 别名
+  streamMessageIds?: Map<string, string>
 }
 
 // Anthropic content block（assistant message.content[] 里的元素）
@@ -497,14 +498,28 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
     }
   }
   if (m.type === 'stream_event') {
-    // C1：partial message —— 提取模型文本的 token 增量（其余 delta：thinking/工具入参 暂不流式）
+    // A text delta is a chunk, not one token. Retain native message identity for timing.
     const e = m.event as Record<string, unknown> | undefined
+    const streamKey = String(m.parent_tool_use_id ?? '')
+    if (e?.type === 'message_start') {
+      const message = e.message as Record<string, unknown> | undefined
+      if (typeof message?.id === 'string') (ctx.streamMessageIds ??= new Map()).set(streamKey, message.id)
+    }
+    if (e?.type === 'message_stop') {
+      const messageId = ctx.streamMessageIds?.get(streamKey)
+      ctx.streamMessageIds?.delete(streamKey)
+      return [base(ctx, {
+        kind: 'harness', stage: 'runtime:llm_stream_end', messageId,
+        parentToolUseId: (m.parent_tool_use_id as string | null) ?? null
+      })]
+    }
     const delta = e?.delta as Record<string, unknown> | undefined
     if (e?.type === 'content_block_delta' && delta?.type === 'text_delta' && typeof delta.text === 'string') {
       return [base(ctx, {
         kind: 'model',
         stage: 'text_delta',
         text: delta.text,
+        messageId: ctx.streamMessageIds?.get(streamKey),
         parentToolUseId: (m.parent_tool_use_id as string | null) ?? null
       })]
     }

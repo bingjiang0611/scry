@@ -1220,7 +1220,19 @@ describe('parseTranscriptToTurns', () => {
   })
 })
 
-describe('normalizeSdkMessage stream_event（C1 token 流式）', () => {
+describe('normalizeSdkMessage stream_event（文本块流式）', () => {
+  it('retains independent root/child stream identities and ends a response without inventing API duration', () => {
+    const context = ctx()
+    const stream = (event: Record<string, unknown>, parent: string | null = null) => normalizeSdkMessage({ type: 'stream_event', parent_tool_use_id: parent, event }, context)
+    expect(stream({ type: 'message_start', message: { id: 'root' } })).toEqual([])
+    stream({ type: 'message_start', message: { id: 'child' } }, 'agent')
+    const delta = { type: 'content_block_delta', delta: { type: 'text_delta', text: 'abc' } }
+    expect(stream(delta)[0].messageId).toBe('root')
+    expect(stream(delta, 'agent')[0]).toMatchObject({ messageId: 'child', parentToolUseId: 'agent' })
+    expect(stream({ type: 'message_stop' })[0]).toMatchObject({ kind: 'harness', stage: 'runtime:llm_stream_end', messageId: 'root' })
+    expect(stream(delta)[0].messageId).toBeUndefined()
+    expect(stream(delta, 'agent')[0].messageId).toBe('child')
+  })
   it('content_block_delta 的 text_delta → model/text_delta', () => {
     const evs = normalizeSdkMessage(
       {
