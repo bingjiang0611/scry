@@ -1,20 +1,22 @@
 <!doctype html>
 <html lang="zh-CN">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Scry 性能弹窗 v4 · 全局平均状态检查</title>
+<title>Scry 性能弹窗 v5 · 全局平均状态检查</title>
 <style>html{background:#151515;color:#ddd;font:13px system-ui}body{margin:24px auto;max-width:980px;padding:0 20px}h1{font-size:18px}h2{font-size:13px;font-weight:500;margin-top:26px}p{color:#999;font-size:12px}iframe{display:block;width:760px;max-width:100%;height:700px;border:1px solid #383838;border-radius:8px;background:#151515}</style>
 <h1>状态与尺寸检查 · 非产品界面</h1>
 <p>示例数据。嵌入窗口为 760px 宽；同一方案的状态检查，不是方案选择。</p>
 <h2>浅色 · 长数字 · 760px 图表弹窗</h2>
-<iframe title="浅色长数字弹窗" src="index.html?theme=light&state=long&view=details&v=4"></iframe>
+<iframe title="浅色长数字弹窗" src="index.html?theme=light&state=long&view=details&v=5"></iframe>
 <h2>全部工具等待 · 0 / 5 可测，不填零；仅此时全局曲线断开</h2>
-<iframe title="工具等待弹窗" src="index.html?state=tool&view=details&v=4" loading="lazy"></iframe>
+<iframe title="工具等待弹窗" src="index.html?state=tool&view=details&v=5" loading="lazy"></iframe>
 <h2>无运行会话 · 全局为空，不借用历史</h2>
-<iframe title="无运行会话弹窗" src="index.html?state=empty&view=details&v=4" loading="lazy"></iframe>
+<iframe title="无运行会话弹窗" src="index.html?state=empty&view=details&v=5" loading="lazy"></iframe>
 <h2>运行结束 · 清除实时数值和曲线，近期对照保留</h2>
-<iframe title="结束会话弹窗" src="index.html?state=complete&view=details&v=4" loading="lazy"></iframe>
+<iframe title="结束会话弹窗" src="index.html?state=complete&view=details&v=5" loading="lazy"></iframe>
 <h2>历史读取失败 · 全局实时图表保留</h2>
-<iframe title="历史错误弹窗" src="index.html?history=error&view=details&v=4" loading="lazy"></iframe>
+<iframe title="历史错误弹窗" src="index.html?history=error&view=details&v=5" loading="lazy"></iframe>
 <h2>部分可测 · 1 / 5，缺失四个不当作零</h2>
-<iframe title="部分可测全局平均" src="index.html?state=partial&view=details&v=4" loading="lazy"></iframe>
+<iframe title="部分可测全局平均" src="index.html?state=partial&view=details&v=5" loading="lazy"></iframe>
+<h2>有文本流但仅终态 token usage · 实时 token 不可测，等待仍可测</h2>
+<iframe title="缺少实时 token 证据" src="index.html?state=unavailable&view=details&v=5" loading="lazy"></iframe>
 </html>

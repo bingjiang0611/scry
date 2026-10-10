@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light"><link rel="icon" href="data:,">
-<title>Scry · LLM 性能全局运行平均 v4</title>
+<title>Scry · LLM 性能全局 token 平均 v5</title>
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="prototype.css">
 <link rel="stylesheet" href="modal.css">
@@ -18,7 +18,7 @@
 <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
 <symbol id="chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
 </defs></svg>
-<div class="preview"><span><b>设计稿 v4</b> · 全局运行平均 · 示例数据，尚未接入实时会话</span><span class="right-note">仅预览，不修改已安装 App</span></div>
+<div class="preview"><span><b>设计稿 v5</b> · 全局运行平均 · 示例数据，尚未接入实时会话</span><span class="right-note">仅预览，不修改已安装 App</span></div>
 <div class="app">
 <aside class="sidebar" aria-label="会话导航">
 <div class="brand"><b>Scry</b><small>设计预览</small></div>
@@ -47,17 +47,17 @@
 <div class="sheet-body">
 <div class="session-source"><svg class="i"><use href="#chart"/></svg><strong id="session-name">全部运行会话</strong><span class="source-model" id="source-model"></span><span class="state-label"><i class="state-dot" id="state-dot"></i><span id="run-state">输出中</span></span></div>
 <div class="metric-grid">
-<dl class="metric primary"><dt>平均接收速度</dt><dd id="current-rate">—</dd><small id="current-coverage"></small></dl>
+<dl class="metric primary"><dt>平均输出速度</dt><dd id="current-rate">—</dd><small id="current-coverage"></small></dl>
 <dl class="metric"><dt title="运行会话中已测得的首次输出等待的等权平均，不是请求 TTFT">平均首次输出等待</dt><dd id="first-wait">—</dd><small id="wait-coverage"></small></dl>
 <dl class="metric"><dt>平均会话均速</dt><dd id="run-average">—</dd><small id="average-coverage"></small></dl>
 </div>
-<div class="chart-heading"><span class="legend-dot"></span><span>全部运行 · 可测会话等权平均</span><span class="right" id="curve-caption">近 30 秒 · 字/s</span></div>
-<div class="curve-wrap"><svg class="curve" id="curve" role="img" aria-label="所有运行会话的可测平均接收速度趋势；仅全部不可测时断开" viewBox="0 0 800 164"></svg><div id="chart-empty" class="chart-empty hidden"></div></div>
+<div class="chart-heading"><span class="legend-dot"></span><span>全部运行 · 可测会话等权平均</span><span class="right" id="curve-caption">近 30 秒 · token/s</span></div>
+<div class="curve-wrap"><svg class="curve" id="curve" role="img" aria-label="所有运行会话的可靠 token 平均输出速度趋势；仅全部不可测时断开" viewBox="0 0 800 164"></svg><div id="chart-empty" class="chart-empty hidden"></div></div>
 <section class="comparison"><div class="comparison-head"><strong>历史同类对照</strong><span id="history-context">Sonnet 4.6 / Claude · 30 天 · 示例组</span></div>
 <div class="comparison-grid" id="comparison-grid"></div>
 <div class="comparison-legend" id="comparison-legend"><span><i class="legend-dot"></i>环境 01 · 代理开 · n=18</span><span><i class="legend-dot secondary"></i>环境 02 · 代理关 · n=7</span><span class="legend-note">配置线索 ≠ 实际路径</span></div>
 </section>
-<div class="footer-line"><details class="info"><summary>数据口径</summary><ul><li>实时范围是 Scry 登记的所有正在运行会话，跨项目、Provider 与模型；不受当前打开页面或会话影响。结束/取消的运行立即退出当前集合，不从历史回填。</li><li>每个会话等权：平均接收速度为当时可测会话速度之和 / 可测会话数，不是总吞吐。各指标显示自己的可用数量；工具/审批等待、缺少流证据不填 0，真正观测到的 0 可以参与。</li><li>平均会话均速为所有运行会话中有可计时文本片段的会话均速的等权平均。首次输出等待只平均已收到首个文本的当前运行会话；尚未收到的不作为 0，不是请求 TTFT。</li><li>每个趋势点使用当时运行集合。部分会话等工具时，其他可测会话继续贡献；只有全部不可测才断开。并发数、模型组合、语言与上下文变化也会改变平均值，不当模型或网络基准。</li><li>历史按模型/Provider/Profile/上游/环境分别展示成功样本中位数，不把不同模型的全局平均当网络对照。API 吞吐为已完成样本的 canonical token/API 时间推导，不是实时主文本速度；示例 API 有效样本为 14/5。</li><li>字符/s 不等于 token/s 或网速。系统代理配置不证明实际请求路径/VPN 节点；缺少网络证据的记录不合成一种网络。</li></ul></details><span class="sample-tag">设计示例 · 尚未接入实时会话</span></div>
+<div class="footer-line"><details class="info"><summary>数据口径</summary><ul><li>实时范围是 Scry 登记的所有正在运行会话，跨项目、Provider 与模型；不受当前打开页面或会话影响。结束/取消的运行立即退出当前集合，不从历史回填。</li><li>每个会话等权：当时有可靠实时主输出 token 计数及对应时间窗的会话贡献速度；工具/审批等待或证据缺失不填 0。只统计 token，不从文本长度或经验比例换算。</li><li>实时 token 证据不足时速度显示 —，不存在字符速度备用显示。只有终态 canonical token/API 时间也不能回填实时曲线；此证据仅用于历史 API 推导。</li><li>平均会话均速为当前运行会话已测 token 片段均速的等权平均。各指标分别标可用数量；首次输出等待仍基于首个主文本的接收时间，单位 s，与 token 计数可用性独立，不是请求 TTFT。</li><li>每点按当时运行集合；部分会话等待时，其他有 token 证据的会话继续贡献。只有全部不可测才断开；模型组合、并发数和 Provider 原生 token 口径变化也影响平均，不是标准化模型基准。</li><li>历史按模型/Provider/Profile/上游/环境分别展示成功样本中位数。输出速度仅取有可靠 token 流证据的记录；API 推导为已完成样本 canonical 输出 token / API 时间，可能含 prefill/推理及子代理口径，不能等同实时主输出速度。不同来源不混用。</li><li>token/s 不代表带宽或纯服务端解码。系统代理配置不证明实际路径/VPN 节点；未知网络不归为一种网络。</li></ul></details><span class="sample-tag">设计示例 · 尚未接入实时会话</span></div>
 </div>
 </dialog>
 <script type="module">
@@ -71,7 +71,7 @@ const scenarios = {
   tool: {status:'全部工具等待'},
   waiting: {status:'等待输出', empty:'所有运行会话均未收到可测文本'},
   empty: {status:'暂无运行', empty:'没有正在运行的会话'},
-  unavailable: {status:'不可测', empty:'运行会话尚无可用流式测量'},
+  unavailable: {status:'token 不可测', empty:'Provider 未提供可靠的实时 token 计数'},
   complete: {status:'暂无运行', empty:'所有会话已结束，不再回填实时数据'},
   long: {status:'正在采集'},
   partial: {status:'部分可测'}
@@ -87,9 +87,9 @@ const metric = (id, value, unit) => {
     node.append(suffix)
   }
 }
-metric('current-rate', snapshot.current.value, '字/s')
+metric('current-rate', snapshot.current.value, 'token/s')
 metric('first-wait', snapshot.wait.value, 's')
-metric('run-average', snapshot.sessionAverage.value, '字/s')
+metric('run-average', snapshot.sessionAverage.value, 'token/s')
 text('current-coverage', snapshot.current.measured+' / '+snapshot.running+' 可测')
 text('wait-coverage', snapshot.wait.measured+' / '+snapshot.running+' 已测得')
 text('average-coverage', snapshot.sessionAverage.measured+' / '+snapshot.running+' 可测')
@@ -106,8 +106,8 @@ if (!snapshot.running) {
 if (state === 'empty') text('history-context', '暂无测量记录')
 const svg = document.getElementById('curve')
 if (scenario.empty) svg.setAttribute('aria-label', scenario.empty)
-const scale = params.get('state') === 'long' ? 100 : 1
-const ceiling = 140 * scale
+const scale = params.get('state') === 'long' ? 250 : 1
+const ceiling = 60 * scale
 const x = index => 44 + (index + 1) / 30 * 736
 const y = value => 139 - value / ceiling * 119
 const svgNS = 'http://www.w3.org/2000/svg'
@@ -118,7 +118,7 @@ const element = (name, attrs, content) => {
   svg.append(node)
   return node
 }
-for (const tick of [0,40,80,120]) {
+for (const tick of [0,20,40,60]) {
   element('line', {class:'grid', x1:44, x2:780, y1:y(tick * scale), y2:y(tick * scale)})
   element('text', {x:32, y:y(tick * scale)+3, 'text-anchor':'end'}, String(tick * scale))
 }
@@ -129,7 +129,7 @@ if (scenario.empty) {
   text('chart-empty', scenario.empty)
   document.getElementById('chart-empty').classList.remove('hidden')
 } else {
-  const series = [28,34,43,58,52,49,65,77,64,82,88,80,78,83,85,82,71,95,103,89,87,118,102,91,93,86,95,88,81,84].map(value => value * scale)
+  const series = [12,14,18,22,21,23,24,27,29,28,30,31,29,31,33,35,34,38,41,37,35,44,42,36,35,34,33,34,31,32].map(value => value * scale)
   if (state === 'tool') {
     for(let i=25;i<series.length;i++) series[i]=null
     element('rect', {class:'pause', x:x(24)+6, y:20, width:x(29)-x(24)-6, height:119})
@@ -152,9 +152,9 @@ if (scenario.empty) {
   if (snapshot.current.value !== null) element('circle', {class:'last-point', cx:x(29), cy:y(snapshot.current.value), r:4})
 }
 const comparisons = [
-  {title:'接收均速 · 字/s', values:[77,66], units:'字/s', maximum:100},
+  {title:'输出均速 · token/s · n=9/4', values:[30,26], units:'token/s', maximum:40},
   {title:'首次输出 · s', values:[1.6,2.2], units:'s', maximum:3},
-  {title:'API 推导 · tok/s · n=14/5', values:[31.6,29.1], units:'tok/s', maximum:40}
+  {title:'API 推导 · token/s · n=14/5', values:[31.6,29.1], units:'token/s', maximum:40}
 ]
 const grid=document.getElementById('comparison-grid')
 for (const comparison of comparisons) {
