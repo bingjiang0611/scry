@@ -76,19 +76,36 @@ final class ConversationUITests: XCTestCase {
     capture("offline-chat")
   }
 
-  func testHistoryFullReaderRendersMarkdown() {
-    launch("transcript", extra: ["-uiMockFirstScreen"])
-    let read = app.buttons["阅读全文"].firstMatch
-    XCTAssertTrue(read.waitForExistence(timeout: 5))
-    read.tap()
-    XCTAssertTrue(app.scrollViews["history-markdown-reader"].waitForExistence(timeout: 5))
-    XCTAssertTrue(app.staticTexts["历史 Markdown 标题"].waitForExistence(timeout: 5))
-    XCTAssertTrue(app.staticTexts["列表项目"].exists)
-    XCTAssertTrue(app.staticTexts["let answer = 42"].exists)
-    XCTAssertFalse(app.staticTexts["# 历史 Markdown 标题"].exists)
-    capture("history-full-markdown")
-    app.buttons["关闭"].tap()
-    XCTAssertTrue(read.waitForExistence(timeout: 5))
+  func testHistoryIsCompleteByScrollingWithoutDisclosure() {
+    launch("transcript", extra: ["-uiMockContinuousHistory"])
+    XCTAssertFalse(app.buttons["阅读全文"].exists)
+    XCTAssertFalse(app.buttons["显示本轮较早内容"].exists)
+    XCTAssertFalse(app.buttons["查看更早的消息"].exists)
+
+    let markers = ["长回复末尾", "五百字之后的标题", "列表项目", "let answer = 42", "长回复开头",
+                   "本轮第 1 段内容", "技能和mcp不用检测数量了 点击进入的时候再加载吧 这样可以节省性能",
+                   "最早一轮的用户输入"]
+    var seen = Set<String>()
+    var promptLabel: String?
+    let scroll = app.scrollViews.firstMatch
+    for _ in 0..<24 {
+      for marker in markers where app.staticTexts[marker].isHittable { seen.insert(marker) }
+      let longPrompt = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "用户输入末尾")).firstMatch
+      if longPrompt.isHittable { promptLabel = longPrompt.label }
+      if seen.count == markers.count { break }
+      scroll.swipeDown()
+    }
+    XCTAssertEqual(seen, Set(markers), "所有轮次和长回复应直接出现在连续滚动中")
+    XCTAssertEqual(promptLabel, String(repeating: "完整用户输入。", count: 90) + "用户输入末尾")
+    XCTAssertFalse(app.staticTexts["# 长回复开头"].exists)
+    capture("history-continuous-scroll-oldest")
+  }
+
+  func testHistoryUpdatesWhenMacStartsAfterOpeningInactiveSession() {
+    launch("transcript", extra: ["-uiMockContinuousHistory", "-uiMockMacStartsLater"])
+    XCTAssertTrue(app.staticTexts["Mac 后来新增的用户输入"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Mac 后来新增的回复"].waitForExistence(timeout: 5))
+    capture("history-mac-starts-after-opening")
   }
 
   func testSlashCommandInsertion() {

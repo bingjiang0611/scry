@@ -8,51 +8,27 @@ import RemoteTransport
 // turns are the host's read of real archived content, the live turn shows the
 // REAL lifecycle + streamed output (a possibly-incomplete cache), and nothing is
 // fabricated. File diffs still live on the Mac.
-// Large archived payloads must not parse every Markdown block during first
-// layout. Disclosure preserves the complete text; it never modifies the cache.
-// Presentation identity only, never a canonical turn ID or prompt dedup key.
-private struct HistoryTextPresentation: Identifiable {
-  let id = UUID()
-  let title: String
-  let text: String
-}
-
-private struct HistoryTextReader: View {
-  let text: String
-  @State private var blocks: [ConversationMarkdownBlock]?
-
-  var body: some View {
-    ScrollView {
-      if let blocks {
-        ConversationMarkdownText(source: "", parsedBlocks: blocks).padding(16)
-      } else { ProgressView().padding(24) }
-    }
-    .accessibilityIdentifier("history-markdown-reader")
-    .task(id: text) {
-      // Parse the immutable reading snapshot once, off the UI actor. Lazy blocks
-      // preserve headings/lists/code without parsing the full answer on first tap.
-      let parsed = await ConversationMarkdownParser.parseForReading(text)
-      guard !Task.isCancelled else { return }
-      blocks = parsed
-    }
-  }
-}
-
-private func historyExcerpt(_ text: String) -> String {
-  String(String.UnicodeScalarView(text.unicodeScalars.prefix(500)))
-}
-
+// Full text stays inline. Parse archived Markdown off the UI actor and create
+// blocks lazily as the reader scrolls, rather than hiding content behind buttons.
 private struct HistoryChunkView: View {
   let kind: String
   let text: String
-  let onRead: (String, String) -> Void
-  private var excerpt: String { historyExcerpt(text) }
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      ConversationChunk(kind: kind, text: excerpt)
-      if excerpt != text {
-        Button("阅读全文") { onRead("内容", text) }
-          .font(.system(size: 13)).frame(minHeight: 44)
+  @State private var blocks: [ConversationMarkdownBlock]?
+
+  @ViewBuilder var body: some View {
+    switch kind {
+    case "reasoning", "tool", "tool_result", "truncated":
+      ConversationChunk(kind: kind, text: text)
+    default:
+      Group {
+        if let blocks {
+          ConversationMarkdownText(source: "", parsedBlocks: blocks)
+        } else { ProgressView() }
+      }
+      .task(id: text) {
+        let parsed = await ConversationMarkdownParser.parseForReading(text)
+        guard !Task.isCancelled else { return }
+        blocks = parsed
       }
     }
   }
@@ -60,44 +36,28 @@ private struct HistoryChunkView: View {
 
 private struct HistoryTurnView: View {
   let turn: G0Transport.RunHistoryTurn
-  let revision: Int
-  let onRead: (String, String) -> Void
-  @State private var visibleItems = 16
-  private var promptExcerpt: String { historyExcerpt(turn.userText) }
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    LazyVStack(alignment: .leading, spacing: 10) {
       if !turn.userText.isEmpty {
         HStack {
           Spacer(minLength: 40)
-          VStack(alignment: .leading, spacing: 6) {
-            Text(promptExcerpt)
-              .font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
-            if promptExcerpt != turn.userText {
-              Button("阅读全文") { onRead("消息", turn.userText) }.font(.system(size: 13)).frame(minHeight: 44)
-            }
-          }
-          .foregroundStyle(Palette.ink).padding(.vertical, 10).padding(.horizontal, 14)
-          .frame(maxWidth: 320, alignment: .leading)
-          .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+          Text(turn.userText)
+            .font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
+            .foregroundStyle(Palette.ink).padding(.vertical, 10).padding(.horizontal, 14)
+            .frame(maxWidth: 320, alignment: .leading)
+            .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
       }
-      if turn.items.count > visibleItems {
-        Button("显示本轮较早内容") { visibleItems += 20 }.font(.system(size: 13)).frame(minHeight: 44)
-      }
-      ForEach(Array(turn.items.indices.suffix(visibleItems)), id: \.self) { index in
-        HistoryChunkView(kind: turn.items[index].kind, text: turn.items[index].text, onRead: onRead)
+      ForEach(turn.items.indices, id: \.self) { index in
+        HistoryChunkView(kind: turn.items[index].kind, text: turn.items[index].text)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
-      .onChange(of: revision) { visibleItems = 16 }
   }
 }
 
 struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
-  @State private var visibleTurnCount = 2
-  @State private var readingAnchor: String?
-  @State private var historyText: HistoryTextPresentation?
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -151,21 +111,13 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", readingAnchor: readingAnchor) {
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
         historyBody
         if hasLiveTurn { liveTurn }
       }
       footer
     }
     .background(Palette.surface)
-    .onChange(of: sessionIdentity) { visibleTurnCount = 2; readingAnchor = nil; historyText = nil }
-    .sheet(item: $historyText) { item in
-      NavigationStack {
-        HistoryTextReader(text: item.text).background(Palette.surface)
-          .navigationTitle(item.title).navigationBarTitleDisplayMode(.inline)
-          .toolbar { ToolbarItem(placement: .confirmationAction) { Button("关闭") { historyText = nil } } }
-      }
-    }
     .onAppear {
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
@@ -176,23 +128,15 @@ struct SessionTranscriptView: View {
     .onChange(of: historyAllowsControls) {
       if historyAllowsControls { loadSessionControls() }
     }
-    .task(id: session?.externalSessionId) {
-      guard let s = session, s.isActive else { return }
-      var active = true
-      while active && !Task.isCancelled {
+    .task(id: sessionIdentity) {
+      guard let s = session else { return }
+      // The Mac can start another turn after this screen opens. Keep checking
+      // while it is visible, including after a terminal/archive transition.
+      while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         guard !Task.isCancelled else { return }
-        active = await run.refreshMacSession(providerId: s.providerId, cwd: s.cwd,
-                                             externalSessionId: s.externalSessionId)
-        if !active {
-          // The catalog can flip to terminal just before the archive rename.
-          // Give that atomic commit one beat, then fetch the final durable turn.
-          try? await Task.sleep(nanoseconds: 1_000_000_000)
-          if !Task.isCancelled {
-            await run.refreshFinalHistory(providerId: s.providerId, cwd: s.cwd,
-                                          externalSessionId: s.externalSessionId)
-          }
-        }
+        await run.refreshHistory(providerId: s.providerId, cwd: s.cwd,
+                                 externalSessionId: s.externalSessionId)
       }
     }
   }
@@ -202,16 +146,9 @@ struct SessionTranscriptView: View {
     case .idle, .loading:
       transcriptLoadingState
     case let .partial(turns), let .loaded(turns):
-      if turns.count > visibleTurnCount {
-        Button("查看更早的消息") {
-          readingAnchor = "history-turn-\(visibleTurnCount - 1)"
-          visibleTurnCount += 20
-        }.font(.system(size: 13)).frame(maxWidth: .infinity, minHeight: 44)
-      }
-      // Distance-from-end is presentation identity only, not a canonical turn
-      // id. It preserves disclosure/anchors when a tail preview becomes full.
-      ForEach(Array((0..<min(turns.count, visibleTurnCount)).reversed()), id: \.self) { distance in
-        turnView(turns[turns.count - 1 - distance]).id("history-turn-\(distance)")
+      // Array indices are presentation identity only, not canonical turn IDs.
+      ForEach(turns.indices, id: \.self) { index in
+        HistoryTurnView(turn: turns[index])
       }
       ForEach(completedTurns) { turn in completedTurnView(turn) }
     case .empty:
@@ -321,12 +258,6 @@ struct SessionTranscriptView: View {
   private func projectName(_ cwd: String?) -> String {
     guard let cwd else { return "" }
     return cwd.split(separator: "/").last.map(String.init) ?? cwd
-  }
-
-  private func turnView(_ turn: G0Transport.RunHistoryTurn) -> some View {
-    HistoryTurnView(turn: turn, revision: run.historyRevision) { title, text in
-      historyText = HistoryTextPresentation(title: title, text: text)
-    }
   }
 
   // The in-progress follow-up: user bubble + honest lifecycle + streamed output.
