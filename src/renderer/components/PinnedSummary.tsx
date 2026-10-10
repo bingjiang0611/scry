@@ -148,7 +148,10 @@ function PinnedSummaryBody({
   const inventoryExpanded = expandedSections.has('inventory')
   const webExpanded = expandedSections.has('web')
   const agentsExpanded = expandedSections.has('agents')
+  const showInventory = capabilityCalls.length > 0
   const showWebReferences = webSources.length > 0
+  const showAgents = agentRows.length > 0
+  const showContext = showInventory || showWebReferences || showAgents
 
   useEffect(() => {
     if (!temporary) return
@@ -173,73 +176,70 @@ function PinnedSummaryBody({
     <div className={`pinned-summary-layer ${temporary ? 'is-temporary' : 'is-persistent'}`}>
       <aside className="pinned-summary-card" aria-label="固定摘要" ref={cardRef}>
         <div className="pinned-summary-section-title">Environment</div>
-        <button
-          type="button"
-          className="pinned-summary-row"
-          disabled={!onOpenChanges}
-          onClick={onOpenChanges}
-          title={gitDiff.length > 0 ? `${gitDiff.length} 个工作区文件的 Git 净改动` : '当前没有可打开的 Git 净改动证据'}
-        >
-          <span className="pinned-summary-row-icon"><Icon name="diff" /></span>
-          <span className="pinned-summary-row-main">Changes</span>
-          <span className="pinned-summary-row-value" data-evidence={gitDiff.length > 0 ? 'available' : 'unknown'}>
-            {gitDiff.length > 0 ? (
-              <><span className="additions">+{additions.toLocaleString()}</span><span className="deletions">−{deletions.toLocaleString()}</span></>
-            ) : '—'}
-          </span>
-        </button>
+        {gitDiff.length > 0 && (
+          <button
+            type="button"
+            className="pinned-summary-row"
+            disabled={!onOpenChanges}
+            onClick={onOpenChanges}
+            title={`${gitDiff.length} 个工作区文件的 Git 净改动`}
+          >
+            <span className="pinned-summary-row-icon"><Icon name="diff" /></span>
+            <span className="pinned-summary-row-main">Changes</span>
+            <span className="pinned-summary-row-value" data-evidence="available">
+              <span className="additions">+{additions.toLocaleString()}</span><span className="deletions">−{deletions.toLocaleString()}</span>
+            </span>
+          </button>
+        )}
         <div className="pinned-summary-row is-static">
           <span className="pinned-summary-row-icon"><Icon name="folder" /></span>
           <span className="pinned-summary-row-main" title={cwd ?? '当前会话未绑定工作区'}>{workspaceName}</span>
           <span className="pinned-summary-row-value" />
         </div>
 
-        <div className="pinned-summary-divider" />
-        <div className="pinned-summary-section-title">Context</div>
+        {showContext && (
+          <>
+            <div className="pinned-summary-divider" />
+            <div className="pinned-summary-section-title">Context</div>
+          </>
+        )}
 
-        <section className={`pinned-summary-expandable ${inventoryExpanded ? 'is-open' : ''}`}>
-          <button
-            type="button"
-            className="pinned-summary-row"
-            aria-expanded={inventoryExpanded}
-            aria-controls={`${detailsId}-inventory`}
-            onClick={() => onToggleSection('inventory')}
-            title={callScope}
-          >
-            <span className="pinned-summary-row-icon"><Icon name="tool" /></span>
-            <span className="pinned-summary-row-main">Skills &amp; MCP · 本会话</span>
-            <span className="pinned-summary-row-value">
-              <span className="pinned-summary-count" data-evidence={capabilityCalls.length > 0 ? 'observed' : 'unknown'} title="已观测到的 Skill / MCP 工具种类数，非配置数量">
-                {capabilityCalls.length || '—'}
+        {showInventory && (
+          <section className={`pinned-summary-expandable ${inventoryExpanded ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="pinned-summary-row"
+              aria-expanded={inventoryExpanded}
+              aria-controls={`${detailsId}-inventory`}
+              onClick={() => onToggleSection('inventory')}
+              title={callScope}
+            >
+              <span className="pinned-summary-row-icon"><Icon name="tool" /></span>
+              <span className="pinned-summary-row-main">Skills &amp; MCP · 本会话</span>
+              <span className="pinned-summary-row-value">
+                <span className="pinned-summary-count" data-evidence="observed" title="已观测到的 Skill / MCP 工具种类数，非配置数量">
+                  {capabilityCalls.length}
+                </span>
+                <Icon name={inventoryExpanded ? 'chevronUp' : 'chevronDown'} />
               </span>
-              <Icon name={inventoryExpanded ? 'chevronUp' : 'chevronDown'} />
-            </span>
-          </button>
-          <div id={`${detailsId}-inventory`} className="pinned-summary-detail" hidden={!inventoryExpanded}>
-            {inventoryExpanded && (
-              <>
-                {capabilityCalls.map((call) => (
-                  <button
-                    type="button"
-                    className="pinned-summary-detail-row"
-                    key={call.key}
-                    onClick={() => onOpenCall(call.runId, call.event)}
-                    title={`${call.name} · 已观测 ${call.count} 次${call.inferredCount ? `（其中 ${call.inferredCount} 次为明确请求并成功读取技能文件后的加载推断，非原生 Skill 调用）` : ''} · 点击定位会话证据`}
-                  >
-                    <span className="pinned-summary-detail-icon"><Icon name={call.kind === 'skill' ? 'tool' : 'plug'} /></span>
-                    <span>{call.name}</span>
-                    <em>×{call.count}</em>
-                  </button>
-                ))}
-                {capabilityCalls.length === 0 && (
-                  <div className="pinned-summary-empty" data-evidence="unknown" title={callScope}>
-                    尚未观测到 Skill 或 MCP 调用
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </section>
+            </button>
+            <div id={`${detailsId}-inventory`} className="pinned-summary-detail" hidden={!inventoryExpanded}>
+              {inventoryExpanded && capabilityCalls.map((call) => (
+                <button
+                  type="button"
+                  className="pinned-summary-detail-row"
+                  key={call.key}
+                  onClick={() => onOpenCall(call.runId, call.event)}
+                  title={`${call.name} · 已观测 ${call.count} 次${call.inferredCount ? `（其中 ${call.inferredCount} 次为明确请求并成功读取技能文件后的加载推断，非原生 Skill 调用）` : ''} · 点击定位会话证据`}
+                >
+                  <span className="pinned-summary-detail-icon"><Icon name={call.kind === 'skill' ? 'tool' : 'plug'} /></span>
+                  <span>{call.name}</span>
+                  <em>×{call.count}</em>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         {showWebReferences && (
           <section className={`pinned-summary-expandable ${webExpanded ? 'is-open' : ''}`}>
@@ -254,58 +254,51 @@ function PinnedSummaryBody({
               <span className="pinned-summary-row-icon"><Icon name="globe" /></span>
               <span className="pinned-summary-row-main">Web references</span>
               <span className="pinned-summary-row-value">
-                <span className="pinned-summary-count" data-evidence={webSources.length > 0 ? 'observed' : 'unknown'}>
-                  {webSources.length > 0 ? `${webSources.length}${webSourceScan.complete ? '' : '+'}` : '—'}
+                <span className="pinned-summary-count" data-evidence="observed">
+                  {webSources.length}{webSourceScan.complete ? '' : '+'}
                 </span>
                 <Icon name={webExpanded ? 'chevronUp' : 'chevronDown'} />
               </span>
             </button>
             <div id={`${detailsId}-web`} className="pinned-summary-detail" hidden={!webExpanded}>
-              {webExpanded && (
-                <>
-                  {webSources.map((source) => (
-                    <div className="pinned-summary-detail-row is-static" key={source.url}>
-                      <span className="pinned-summary-detail-icon"><Icon name="globe" /></span>
-                      <span title={source.url}>{source.label}</span>
-                    </div>
-                  ))}
-                </>
-              )}
+              {webExpanded && webSources.map((source) => (
+                <div className="pinned-summary-detail-row is-static" key={source.url}>
+                  <span className="pinned-summary-detail-icon"><Icon name="globe" /></span>
+                  <span title={source.url}>{source.label}</span>
+                </div>
+              ))}
             </div>
           </section>
         )}
 
-        <section className={`pinned-summary-expandable ${agentsExpanded ? 'is-open' : ''}`}>
-          <button
-            type="button"
-            className="pinned-summary-row"
-            aria-expanded={agentsExpanded}
-            aria-controls={`${detailsId}-agents`}
-            onClick={() => onToggleSection('agents')}
-            title="仅展示当前已加载 TraceEvent 中可证明的子 Agent"
-          >
-            <span className="pinned-summary-row-icon"><Icon name="agents" /></span>
-            <span className="pinned-summary-row-main">Subagents</span>
-            <span className="pinned-summary-row-value">
-              <span className="pinned-summary-count" data-evidence={agentRows.length > 0 ? 'available' : 'unknown'}>{agentRows.length || '—'}</span>
-              <Icon name={agentsExpanded ? 'chevronUp' : 'chevronDown'} />
-            </span>
-          </button>
-          <div id={`${detailsId}-agents`} className="pinned-summary-detail" hidden={!agentsExpanded}>
-            {agentsExpanded && (
-              <>
-                {agentRows.map((agent) => (
-                  <button type="button" className="pinned-summary-detail-row" key={agent.id} onClick={onOpenAgents}>
-                    <span className="pinned-summary-detail-icon"><Icon name="agents" /></span>
-                    <span>{agent.name}</span>
-                    <em data-status={agent.status}>{AGENT_STATUS_LABEL[agent.status]}</em>
-                  </button>
-                ))}
-                {agentRows.length === 0 && <div className="pinned-summary-empty" data-evidence="unknown">未观测到子 Agent</div>}
-              </>
-            )}
-          </div>
-        </section>
+        {showAgents && (
+          <section className={`pinned-summary-expandable ${agentsExpanded ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="pinned-summary-row"
+              aria-expanded={agentsExpanded}
+              aria-controls={`${detailsId}-agents`}
+              onClick={() => onToggleSection('agents')}
+              title="仅展示当前已加载 TraceEvent 中可证明的子 Agent"
+            >
+              <span className="pinned-summary-row-icon"><Icon name="agents" /></span>
+              <span className="pinned-summary-row-main">Subagents</span>
+              <span className="pinned-summary-row-value">
+                <span className="pinned-summary-count" data-evidence="available">{agentRows.length}</span>
+                <Icon name={agentsExpanded ? 'chevronUp' : 'chevronDown'} />
+              </span>
+            </button>
+            <div id={`${detailsId}-agents`} className="pinned-summary-detail" hidden={!agentsExpanded}>
+              {agentsExpanded && agentRows.map((agent) => (
+                <button type="button" className="pinned-summary-detail-row" key={agent.id} onClick={onOpenAgents}>
+                  <span className="pinned-summary-detail-icon"><Icon name="agents" /></span>
+                  <span>{agent.name}</span>
+                  <em data-status={agent.status}>{AGENT_STATUS_LABEL[agent.status]}</em>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </aside>
     </div>
   )

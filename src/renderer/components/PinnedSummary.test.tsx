@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Turn } from '../format'
-import { PinnedSummary, usePinnedSummaryVisibility, webSourcesFromTurns, type PinnedSummarySection } from './PinnedSummary'
+import { PinnedSummary, usePinnedSummaryVisibility, webSourcesFromTurns, type PinnedSummarySection, type PinnedSummaryProps } from './PinnedSummary'
 import { OverviewPanel } from './OverviewPanel'
 
 const turn = (userText: string, input?: unknown): Turn => ({
@@ -31,11 +31,12 @@ const session: Turn = {
 
 const render = (
   turns: Turn[],
-  expandedSections: ReadonlySet<PinnedSummarySection> = new Set(['inventory'])
+  expandedSections: ReadonlySet<PinnedSummarySection> = new Set(['inventory']),
+  gitDiff: PinnedSummaryProps['gitDiff'] = [{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }]
 ) => renderToStaticMarkup(
   <PinnedSummary
     cwd="/repo/scry"
-    gitDiff={[{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }]}
+    gitDiff={gitDiff}
     turns={turns}
     busy={false}
     temporary={false}
@@ -87,26 +88,55 @@ describe('PinnedSummary', () => {
     expect(html).not.toContain('已连接')
   })
 
-  it('labels missing call evidence as unknown instead of showing a fake zero', () => {
+  it('omits unobserved Context groups and their heading instead of asserting zero calls', () => {
     for (const turns of [[], [turn('提到 used-workflow 不等于调用')]]) {
       const html = render(turns)
-      expect(html).toContain('尚未观测到 Skill 或 MCP 调用')
-      expect(html).toContain('未观测到不等于未调用')
-      expect(html).toContain('data-evidence="unknown"')
-      const callsSection = html.slice(html.indexOf('Skills &amp; MCP · 本会话'), html.indexOf('</section>'))
-      expect(callsSection).toContain('>—</span>')
-      expect(callsSection).not.toContain('>0<')
-      expect(html).not.toContain('当前清单为空')
+      expect(html).not.toContain('Skills &amp; MCP · 本会话')
+      expect(html).not.toContain('Web references')
+      expect(html).not.toContain('Subagents')
+      expect(html).not.toContain('>Context<')
+      expect(html).not.toContain('pinned-summary-divider')
+      expect(html).not.toContain('尚未观测到')
+      expect(html).not.toContain('>0<')
+      expect(html).toContain('>Environment<')
+      expect(html).toContain('>scry</span>')
     }
   })
 
-  it('hides Web references without actual URLs and preserves other unknown groups', () => {
-    const empty = render([])
-    expect(empty).not.toContain('Web references')
-    expect(empty).toContain('Skills &amp; MCP · 本会话')
-    expect(empty).toContain('Subagents')
-    expect(empty.match(/>—<\/span>/g)).toHaveLength(2)
+  it('hides Changes without a Git diff, keeping the workspace visible', () => {
+    const html = render([], new Set(), [])
+    expect(html).not.toContain('>Changes<')
+    expect(html).not.toContain('additions')
+    expect(html).not.toContain('deletions')
+    expect(html).toContain('>scry</span>')
+  })
 
+  it('shows only populated Context groups', () => {
+    const onlySkill = render([{ ...session, userText: '', items: session.items.slice(0, 1) }])
+    expect(onlySkill).toContain('Skills &amp; MCP · 本会话')
+    expect(onlySkill).toContain('未观测到不等于未调用')
+    expect(onlySkill).not.toContain('Web references')
+    expect(onlySkill).not.toContain('Subagents')
+
+    const onlyAgent = render([{
+      ...turn('调查代码'),
+      items: [{ id: 'agent', runId: 'run-1', ts: '', kind: 'agent', stage: 'agent:research', tool: 'Agent', toolUseId: 'a1', name: 'research' }]
+    }], new Set(['agents']))
+    expect(onlyAgent).toContain('Subagents')
+    expect(onlyAgent).toContain('research')
+    expect(onlyAgent).toContain('>1</span>')
+    expect(onlyAgent).toContain('>Context<')
+    expect(onlyAgent).not.toContain('Skills &amp; MCP · 本会话')
+    expect(onlyAgent).not.toContain('Web references')
+
+    const onlyWeb = render([turn('https://example.com/docs')], new Set(['web']))
+    expect(onlyWeb).toContain('Web references')
+    expect(onlyWeb).toContain('>Context<')
+    expect(onlyWeb).not.toContain('Skills &amp; MCP · 本会话')
+    expect(onlyWeb).not.toContain('Subagents')
+  })
+
+  it('hides Web references without actual URLs', () => {
     const bounded = render([turn('x'.repeat(120_001))])
     expect(bounded).not.toContain('Web references')
 
@@ -121,7 +151,7 @@ describe('PinnedSummary', () => {
   it('links each disclosure button to a stable detail region', () => {
     const html = render([session])
     const controls = [...html.matchAll(/aria-controls="([^"]+)"/g)].map((match) => match[1])
-    expect(controls).toHaveLength(3)
+    expect(controls).toHaveLength(2)
     for (const id of controls) expect(html).toContain(`id="${id}"`)
     expect(html).toContain('hidden=""')
   })

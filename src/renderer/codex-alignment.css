@@ -1681,8 +1681,9 @@ select:focus-visible,
   align-items: center;
   margin-bottom: 2px;
   color: var(--dim2);
-  font-size: 14px;
-  font-weight: 570;
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.06em;
 }
 
 .pinned-summary-row {
@@ -1853,17 +1854,6 @@ button.pinned-summary-detail-row:hover {
 
 .pinned-summary-detail-row em[data-status='failed'] {
   color: var(--bad);
-}
-
-.pinned-summary-empty {
-  padding: 8px 4px 8px 0;
-  color: var(--dim3);
-  font-size: var(--text-supporting-size);
-  line-height: 1.5;
-}
-
-.pinned-summary-empty[data-evidence='unavailable'] {
-  color: var(--warn);
 }
 
 @container main-pane (max-width: 760px) {
