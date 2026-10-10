@@ -39,7 +39,9 @@ private struct HistoryChunkView: View {
 private struct HistoryTurnView: View {
   let turn: G0Transport.RunHistoryTurn
   var body: some View {
-    LazyVStack(alignment: .leading, spacing: 10) {
+    // The conversation owns the lazy layout. Nested lazy stacks estimate whole
+    // tall turns independently and can leave the tail viewport empty.
+    Group {
       if !turn.userText.isEmpty {
         HStack {
           Spacer(minLength: 40)
