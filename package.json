@@ -45,7 +45,7 @@
     "pack:artifact": "npm run build && npm run build:cli && node scripts/run-electron-builder.mjs && npm run check:packaged-app && npm run smoke:electron",
     "pack:release": "SCRY_RELEASE_BUILD=1 npm run pack",
     "check:packaged-app": "node scripts/check-packaged-app.mjs",
-    "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/electron-security-smoke.mjs",
+    "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/electron-security-smoke.mjs && node scripts/electron-security-smoke.mjs --files-only",
     "install:mac": "npm run pack:release && node scripts/install-macos.mjs --require-release",
     "install:mac:dev": "npm run pack && node scripts/install-macos.mjs"
   },

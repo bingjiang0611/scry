@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
@@ -59,6 +61,15 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           text: 'smoke fixture result Authorization: Bearer sk-ant-api03-scry-smoke-not-a-real-key-000000' +
             (request.prompt === 'packaged fake-provider smoke' ? `\n${'x'.repeat(12 * 1024 * 1024)}\nCOMPLETE_LARGE_TOOL_TAIL` : '')
         })
+        if (request.prompt === 'file links smoke') {
+          if (!request.cwd) throw new Error('file-link fixture requires a workspace')
+          const absolute = pathToFileURL(join(dirname(request.cwd), 'rotom-team/docs/NATIVE-DELIVERY.md')).href
+          request.emit({
+            id: `${request.runId}:files`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'model', stage: 'text_delta', messageId: `${request.runId}:message`,
+            text: `验收总表：\`rotom-team/docs/NATIVE-DELIVERY.md\`\n\n[absolute](${absolute}) [license](../LICENSE) [binary](../asset.custom) \`missing.md\``
+          })
+        }
         if (request.prompt === 'performance long stream') {
           // Packaged soak-only pressure path: exercise batching, renderer ACK and the large-stream
           // lightweight Markdown transition without any external Provider or user content.

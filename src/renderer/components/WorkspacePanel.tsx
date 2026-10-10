@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { canOpenWorkspaceFileExternally, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFilePage, type WorkspaceFileSnapshot } from '@shared/workspace'
+import { canOpenWorkspaceFileExternally, WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFilePage, type WorkspaceFileSnapshot } from '@shared/workspace'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 
@@ -584,6 +584,7 @@ function FileEditor({
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [externallyOpened, setExternallyOpened] = useState(false)
   const dirty = snapshot != null && content !== snapshot.content
   const dirtyRef = useRef(dirty)
   const loadSequence = useRef(0)
@@ -593,6 +594,7 @@ function FileEditor({
   const load = useCallback(async (): Promise<void> => {
     const sequence = ++loadSequence.current
     setLoading(true)
+    setExternallyOpened(false)
     onError(null)
     try {
       const read = readOnly ? window.scry.workspaceReadKnown : window.scry.workspaceRead
@@ -604,7 +606,18 @@ function FileEditor({
       setContent(next.content)
     } catch (loadError) {
       if (loadSequence.current !== sequence) return
-      if (errorMessage(loadError).includes('分页只读视图')) {
+      if (errorMessage(loadError).includes(WORKSPACE_FILE_PREVIEW_UNSUPPORTED)) {
+        try {
+          const open = readOnly ? window.scry.workspaceOpenKnownExternal : window.scry.workspaceOpenExternal
+          const opened = await open({ cwd, path: entry.path })
+          if (loadSequence.current !== sequence) return
+          setExternallyOpened(opened)
+          if (!opened) onError('已取消系统打开')
+        } catch (openError) {
+          if (loadSequence.current !== sequence) return
+          onError(errorMessage(openError))
+        }
+      } else if (errorMessage(loadError).includes('分页只读视图')) {
         try {
           const readPage = readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage
           const first = await readPage({ cwd, path: entry.path, offset: 0 })
@@ -632,6 +645,7 @@ function FileEditor({
 
   useEffect(() => {
     void load()
+    return () => { ++loadSequence.current }
   }, [load])
 
   useEffect(() => {
@@ -691,6 +705,7 @@ function FileEditor({
 
   const markdown = /\.(md|mdx)$/i.test(entry.name)
   if (loading && !snapshot && !page) return <div className="workspace-empty">读取文件…</div>
+  if (externallyOpened) return <div className="workspace-empty">已使用系统默认应用打开 {entry.name}</div>
   if (!snapshot && !page) return <div className="workspace-empty">文件无法打开</div>
   if (page) {
     const start = page.totalBytes === 0 ? 0 : page.offset + 1

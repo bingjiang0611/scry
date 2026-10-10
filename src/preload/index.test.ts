@@ -42,6 +42,7 @@ const invokeChannels = {
   chooseFolder: 'agent:chooseFolder',
   clipboardImage: 'agent:clipboardImage',
   workspaceList: 'workspace:list',
+  workspaceResolveFile: 'workspace:resolveFile',
   workspaceRead: 'workspace:read',
   workspaceReadPage: 'workspace:readPage',
   workspaceReadKnown: 'workspace:readKnown',

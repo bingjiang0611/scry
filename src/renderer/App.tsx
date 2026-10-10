@@ -12,7 +12,7 @@ import {
   type RuntimeProvider
 } from '@shared/runtime'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
-import { canOpenWorkspaceFileExternally, type WorkspaceEntry } from '@shared/workspace'
+import type { WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { SessionChatView } from './components/ChatView'
@@ -1998,17 +1998,19 @@ export function App() {
   const openWorkspaceFile = useCallback((target: WorkspaceFileTarget): void => {
     if (!cwd) return
     setComposerError(null)
-    if (canOpenWorkspaceFileExternally(target.path)) {
-      const open = target.cwd === cwd ? window.scry.workspaceOpenExternal : window.scry.workspaceOpenKnownExternal
-      void open({ cwd: target.cwd, path: target.path }).catch((error) => {
-        setComposerError(error instanceof Error ? error.message : String(error))
-      })
-      return
-    }
-    surfacePane.restore()
-    const request = { id: ++workspaceOpenSequenceRef.current, ...target }
-    setWorkspaceOpenRequests((previous) => new Map(previous).set(currentSurface.id, request))
-    dispatchRightSurface({ type: 'open', kind: 'files' })
+    void window.scry.workspaceResolveFile(target).then(async (resolved) => {
+      if (resolved.mode === 'external') {
+        const open = resolved.cwd === cwd ? window.scry.workspaceOpenExternal : window.scry.workspaceOpenKnownExternal
+        await open({ cwd: resolved.cwd, path: resolved.path })
+        return
+      }
+      surfacePane.restore()
+      const request = { id: ++workspaceOpenSequenceRef.current, cwd: resolved.cwd, path: resolved.path }
+      setWorkspaceOpenRequests((previous) => new Map(previous).set(currentSurface.id, request))
+      dispatchRightSurface({ type: 'open', kind: 'files' })
+    }).catch((error) => {
+      setComposerError(error instanceof Error ? error.message : String(error))
+    })
   }, [cwd, surfacePane.restore, currentSurface.id, dispatchRightSurface])
   const addWorkspaceReference = useCallback((entry: WorkspaceEntry): void => {
     setInput((current) => appendWorkspaceReference(current, workspaceReferenceToken(entry)))

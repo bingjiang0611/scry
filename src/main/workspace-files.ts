@@ -4,6 +4,8 @@ import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, 
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   canOpenWorkspaceFileExternally,
+  WORKSPACE_FILE_PREVIEW_UNSUPPORTED,
+  type WorkspaceFileOpenTarget,
   type WorkspaceCreateRequest,
   type WorkspaceEntry,
   type WorkspaceFilePage,
@@ -16,6 +18,7 @@ import {
   type WorkspaceRenameRequest,
   type WorkspaceWriteRequest
 } from '../shared/workspace.js'
+import type { HomeFileAccess } from './home-file-access'
 
 export const WORKSPACE_FILE_PAGE_LIMIT = 64 * 1024
 export const WORKSPACE_DIRECTORY_LIMIT = 200
@@ -78,11 +81,17 @@ function binary(bytes: Buffer): boolean {
   return bytes.subarray(0, Math.min(bytes.length, 8_192)).includes(0)
 }
 
+class UnsupportedFilePreviewError extends Error {
+  constructor(message: string) {
+    super(`${WORKSPACE_FILE_PREVIEW_UNSUPPORTED}: ${message}`)
+  }
+}
+
 function decodeText(bytes: Buffer): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {
-    throw new Error('文件不是有效的 UTF-8 文本，不能在 Scry 中编辑')
+    throw new UnsupportedFilePreviewError('文件不是有效的 UTF-8 文本，不能在 Scry 中编辑')
   }
 }
 
@@ -158,7 +167,7 @@ export async function readWorkspaceFile(request: WorkspacePathRequest): Promise<
   const info = await stat(target.realPath)
   if (!info.isFile()) throw new Error('目标不是文件')
   const bytes = await readFile(target.realPath)
-  if (binary(bytes)) throw new Error('二进制文件不能在文本编辑器中打开')
+  if (binary(bytes)) throw new UnsupportedFilePreviewError('二进制文件不能在文本编辑器中打开')
   return {
     name: basename(target.path),
     path: target.portable,
@@ -182,7 +191,7 @@ function decodeUtf8Page(bytes: Buffer, atEnd: boolean): { content: string; bytes
       return { content: new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end)), bytes: end }
     } catch { /* a page may end inside one UTF-8 sequence */ }
   }
-  throw new Error('文件不是有效的 UTF-8 文本，不能在 Scry 中查看')
+  throw new UnsupportedFilePreviewError('文件不是有效的 UTF-8 文本，不能在 Scry 中查看')
 }
 
 export async function readWorkspaceFilePage(request: WorkspaceFilePageRequest): Promise<WorkspaceFilePage> {
@@ -200,7 +209,7 @@ export async function readWorkspaceFilePage(request: WorkspaceFilePageRequest): 
     if (request.snapshot !== undefined && request.snapshot !== snapshot) throw new Error('文件已变化，请重新载入')
     const probe = Buffer.alloc(Math.min(8_192, info.size))
     const probeRead = probe.length ? await handle.read(probe, 0, probe.length, 0) : { bytesRead: 0 }
-    if (binary(probe.subarray(0, probeRead.bytesRead))) throw new Error('二进制文件不能在文本查看器中打开')
+    if (binary(probe.subarray(0, probeRead.bytesRead))) throw new UnsupportedFilePreviewError('二进制文件不能在文本查看器中打开')
     const length = Math.min(limit + 3, info.size - offset)
     const bytes = Buffer.alloc(length)
     const result = length ? await handle.read(bytes, 0, length, offset) : { bytesRead: 0 }
@@ -223,9 +232,39 @@ export async function readWorkspaceFilePage(request: WorkspaceFilePageRequest): 
   }
 }
 
+export async function resolveWorkspaceFileOpenTarget(
+  request: WorkspacePathRequest,
+  homeAccess: HomeFileAccess
+): Promise<WorkspaceFileOpenTarget> {
+  const target = await homeAccess.resolveFile(request)
+  if (canOpenWorkspaceFileExternally(target.path)) return { ...target, mode: 'external' }
+  const canonical = target.cwd === '~' ? await homeAccess.authorize(target) : target
+  try {
+    await readWorkspaceFilePage({ ...canonical, limit: 65_536 })
+    return { ...target, mode: 'text' }
+  } catch (error) {
+    if (!(error instanceof UnsupportedFilePreviewError)) throw error
+    return { ...target, mode: 'external' }
+  }
+}
+
 async function externalFileTarget(request: WorkspacePathRequest) {
   const target = await checkedPath(request.cwd, request.path)
-  if (!(await stat(target.realPath)).isFile()) throw new Error('目标不是文件')
+  const handle = await open(target.realPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) throw new Error('目标不是文件')
+    const header = Buffer.alloc(4)
+    const { bytesRead } = await handle.read(header, 0, header.length, 0)
+    const magic = bytesRead === 4 ? header.readUInt32BE(0) : 0
+    const executable = (info.mode & 0o111) !== 0 || header.subarray(0, 2).toString() === '#!' ||
+      [0x7f454c46, 0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca].includes(magic) ||
+      header.subarray(0, 2).toString() === 'MZ' ||
+      /\.(?:app|command|exe|com|bat|cmd|ps1|vbs|vbe|wsf|wsh|msi|scr|desktop|lnk|webloc|url|scpt|applescript|workflow|pkg|jar|class|sh|bash|zsh|fish|py|pyc|pyo|rb|pl|php|lua|js|jse|mjs|cjs)$/i.test(target.realPath)
+    if (executable) throw new Error('不允许自动打开可执行文件；请在文本视图检查代码，或在 Finder 中自行处理')
+  } finally {
+    await handle.close()
+  }
   return target
 }
 
@@ -238,9 +277,6 @@ export async function openWorkspaceFileExternally(
     choose: (candidates: readonly WorkspacePathRequest[]) => Promise<WorkspacePathRequest | null>
   }
 ): Promise<boolean> {
-  if (!canOpenWorkspaceFileExternally(request.path)) {
-    throw new Error('该文件类型不允许从 Scry 打开到外部应用')
-  }
   pathParts(request.path)
   let target: Awaited<ReturnType<typeof externalFileTarget>>
   try {

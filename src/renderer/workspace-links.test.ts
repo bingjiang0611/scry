@@ -36,13 +36,20 @@ describe('workspace file references', () => {
     )).toEqual({ cwd: '/Users/example/myNote', path: '待读清单.md' })
   })
 
-  it('rejects paths outside cwd, traversal and remote file URLs', () => {
-    expect(resolveWorkspaceFileReference(cwd, '/Users/example/other/secret.txt')).toBeNull()
-    expect(resolveWorkspaceFileReference(cwd, '/Users/example/project-copy/secret.txt')).toBeNull()
-    expect(resolveWorkspaceFileReference(cwd, '../secret.txt')).toBeNull()
-    expect(resolveWorkspaceFileReference(cwd, '@../secret.txt')).toBeNull()
+  it('passes cross-directory references to main for canonical read-only authorization', () => {
+    expect(resolveWorkspaceFileTarget([cwd], '/Users/example/other/secret.txt')).toEqual({ cwd, path: '/Users/example/other/secret.txt' })
+    expect(resolveWorkspaceFileTarget([cwd], '../secret.txt')).toEqual({ cwd, path: '../secret.txt' })
+    expect(resolveWorkspaceFileTarget([cwd], '@../LICENSE')).toEqual({ cwd, path: '../LICENSE' })
+    expect(resolveWorkspaceFileTarget([cwd], '@assets/custom.format')).toEqual({ cwd, path: 'assets/custom.format' })
+    expect(resolveWorkspaceFileTarget([cwd], '/Users/example/LICENSE')).toEqual({ cwd, path: '/Users/example/LICENSE' })
+  })
+
+  it('rejects remote file URLs, named home users and non-file URL schemes', () => {
     expect(resolveWorkspaceFileReference(cwd, '~someone/Papers/report.md')).toBeNull()
     expect(resolveWorkspaceFileReference(cwd, 'file://server/share/report.pdf')).toBeNull()
+    for (const reference of ['@https://example.com/data.json', '@javascript:alert(1)', '@data:text/html,test', '@#section']) {
+      expect(resolveWorkspaceFileReference(cwd, reference)).toBeNull()
+    }
   })
 
   it('keeps home-relative files clickable through the separately authorized home root', () => {
@@ -54,6 +61,8 @@ describe('workspace file references', () => {
       cwd: '~',
       path: 'Papers/report.md'
     })
+    expect(resolveWorkspaceFileTarget([cwd], '~/.gitignore')).toEqual({ cwd: '~', path: '.gitignore' })
+    expect(resolveWorkspaceFileTarget([cwd], '~/Notes/config')).toEqual({ cwd: '~', path: 'Notes/config' })
     expect(resolveWorkspaceFileTarget([cwd], '~/Papers/folder/')).toBeNull()
   })
 })

@@ -10,9 +10,11 @@ import {
   readWorkspaceFile,
   readWorkspaceFilePage,
   renameWorkspaceEntry,
+  resolveWorkspaceFileOpenTarget,
   trashWorkspaceEntry,
   writeWorkspaceFile
 } from './workspace-files'
+import { HomeFileAccess } from './home-file-access'
 
 const roots: string[] = []
 
@@ -133,6 +135,37 @@ describe('workspace files', () => {
 
     await expect(readWorkspaceFile({ cwd: root, path: 'binary.dat' })).rejects.toThrow('二进制')
     await expect(readWorkspaceFile({ cwd: root, path: 'invalid.txt' })).rejects.toThrow('UTF-8')
+  })
+
+  it('selects text or the system viewer from actual content, without swallowing missing-file failures', async () => {
+    const root = await fixture()
+    const access = new HomeFileAccess(root)
+    await writeFile(join(root, 'LICENSE'), 'plain text')
+    await writeFile(join(root, 'asset.custom'), Buffer.from([0, 1, 2, 3]))
+    await writeFile(join(root, 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
+    for (const [path, mode] of [['LICENSE', 'text'], ['asset.custom', 'external'], ['report.docx', 'external']]) {
+      expect(await resolveWorkspaceFileOpenTarget({ cwd: root, path }, access)).toMatchObject({ cwd: await realpath(root), path, mode })
+    }
+    await expect(resolveWorkspaceFileOpenTarget({ cwd: root, path: 'missing.md' }, access)).rejects.toThrow('不存在')
+  })
+
+  it('opens Office and arbitrary binary formats, but never launches executable files', async () => {
+    const root = await fixture()
+    await writeFile(join(root, 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
+    await writeFile(join(root, 'asset.custom'), Buffer.from([0, 1, 2, 3]))
+    const open = vi.fn(async () => {})
+    for (const path of ['report.docx', 'asset.custom']) {
+      await openWorkspaceFileExternally({ cwd: root, path }, open)
+    }
+    expect(open).toHaveBeenNthCalledWith(1, join(await realpath(root), 'report.docx'))
+    expect(open).toHaveBeenNthCalledWith(2, join(await realpath(root), 'asset.custom'))
+
+    await writeFile(join(root, 'run.command'), '#!/bin/sh\necho unsafe')
+    await writeFile(join(root, 'disguised.png'), Buffer.from([0xcf, 0xfa, 0xed, 0xfe]))
+    for (const path of ['run.command', 'disguised.png']) {
+      await expect(openWorkspaceFileExternally({ cwd: root, path }, open)).rejects.toThrow('可执行')
+    }
+    expect(open).toHaveBeenCalledTimes(2)
   })
 
   it('只允许把工作区内的安全预览格式交给外部应用', async () => {
