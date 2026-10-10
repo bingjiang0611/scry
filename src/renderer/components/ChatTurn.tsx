@@ -178,6 +178,8 @@ function UserMessageImpl({
                 key={`${attachment.name}:${attachment.size}:${index}`}
                 onClick={() => setPreview(attachment)}
                 aria-label={`放大查看图片 ${attachment.name}`}
+                aria-haspopup="dialog"
+                aria-expanded={preview === attachment}
               >
                 <img src={attachmentSrc(attachment)} alt="" loading="lazy" decoding="async" />
               </button>

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readTraceArchiveAsync, upsertTraceArchiveTurn, type TraceArchive } from './transcript-archive'
+import { readTraceArchiveAsync, readTraceArchivePageAsync, upsertTraceArchiveTurn, type TraceArchive } from './transcript-archive'
 import {
   DEFAULT_SESSION_HISTORY_PAGE_SIZE,
   MAX_SESSION_HISTORY_PAGE_SIZE,
@@ -10,6 +10,7 @@ import {
   mergeSessionTurns,
   readSessionHistoryAfterCompletedRuns,
   sessionHistoryPage,
+  sessionArchiveIsPageable,
   type LoadedSessionTurn
 } from './session-history'
 
@@ -17,6 +18,36 @@ const roots: string[] = []
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe('archive source paging', () => {
+  it('Pi 的 turn-local enrichment 允许源级分页；Qoder 和 Claude transcript 保留原有路径', () => {
+    expect(sessionArchiveIsPageable('pi', null)).toBe(true)
+    expect(sessionArchiveIsPageable('codex', null)).toBe(true)
+    expect(sessionArchiveIsPageable('claude', null)).toBe(true)
+    expect(sessionArchiveIsPageable('qoder', null)).toBe(false)
+    expect(sessionArchiveIsPageable('claude', '/transcript.jsonl')).toBe(false)
+  })
+
+  it('Pi 热索引只读请求页，逐页恢复所有旧轮次而不保留全会话 cache', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-pi-pages-'))
+    roots.push(root)
+    const args = { userDataDir: root, cwd: '/repo', sessionId: 'pi-session', providerId: 'pi' as const }
+    for (let index = 0; index < 52; index++) {
+      expect(upsertTraceArchiveTurn({ ...args, turn: {
+        runId: `run-${index}`, userText: `task ${index}`, items: [], done: true, ts: index + 1
+      } })).toBe(true)
+    }
+    const cold = await readTraceArchivePageAsync(args, { limit: 12 })
+    expect(cold.totalTurns).toBe(52)
+    expect(cold.archive?.turns).toHaveLength(12)
+    const latest = await readTraceArchivePageAsync(args, { limit: 12 })
+    expect(latest).toMatchObject({ offset: 40, totalTurns: 52, turnFilesRead: 12, readMode: 'indexed' })
+    const older = await readTraceArchivePageAsync(args, { before: latest.offset, limit: 40, snapshotTotalTurns: 52 })
+    expect(older).toMatchObject({ offset: 0, totalTurns: 52, hasOlder: false, turnFilesRead: 40, readMode: 'indexed' })
+    expect([...older.archive!.turns, ...latest.archive!.turns].map(turn => turn.runId))
+      .toEqual(Array.from({ length: 52 }, (_, index) => `run-${index}`))
+  })
 })
 
 describe('session history terminal convergence', () => {

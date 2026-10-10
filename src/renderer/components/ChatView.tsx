@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type {
   AgentModelRef,
@@ -103,25 +103,118 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
   return <ChatView {...props} input={input} />
 }
 
-const ChatTranscriptTurns = memo(function ChatTranscriptTurns({
-  turns, selectedId, focusedTurnRunId, onTurnRef, onSelect, onOpenDiff, onForkTurn,
-  pendingQuestions, onAnswerQuestion
-}: Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'>) {
-  return <>{turns.map((turn) => {
-    const selectedTurn = selectedId != null && turn.items.some((event) => event.id === selectedId)
-    return <div
-      key={turn.runId}
-      className={`turn transcript-turn ${selectedTurn ? 'is-selected' : ''} ${focusedTurnRunId === turn.runId ? 'turn-jump-target' : ''}`}
-      data-run-id={turn.runId}
-      data-selected={selectedTurn || undefined}
-      ref={onTurnRef ? (el) => onTurnRef(turn.runId, el) : undefined}
-    >
+type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
+  'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'>
+
+// One/two history pages retain the existing DOM. Beyond 80 loaded turns, keep
+// lightweight jump targets and mount content within 1200px of the viewport.
+const TRANSCRIPT_WINDOW_THRESHOLD = 80
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
+export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, focusedTurnRunId, ...props }: TranscriptProps) {
+  const windowed = turns.length > TRANSCRIPT_WINDOW_THRESHOLD
+  return <>{turns.map((turn, index) => <TranscriptTurn
+    key={turn.runId} {...props} turn={turn} index={index} total={turns.length}
+    windowed={windowed} initiallyVisible={!windowed || index >= turns.length - 40}
+    focused={focusedTurnRunId === turn.runId}
+  />)}</>
+})
+
+const TranscriptTurn = memo(function TranscriptTurn({
+  turn, index, total, windowed, initiallyVisible, focused,
+  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, pendingQuestions = [], onAnswerQuestion
+}: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
+  turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
+}) {
+  const selected = useMemo(() => selectedId != null && turn.items.some(event => event.id === selectedId), [turn.items, selectedId])
+  const shell = useRef<HTMLDivElement | null>(null)
+  const height = useRef(240)
+  const [visible, setVisible] = useState(initiallyVisible)
+  const pinned = focused || selected || !turn.done || pendingQuestions.some(question => question.runId === turn.runId)
+  const mounted = !windowed || visible || pinned
+  const labelPreview = turn.userText.length > 80 ? `${turn.userText.slice(0, 80)}…` : turn.userText
+  const setShell = useCallback((element: HTMLDivElement | null) => {
+    shell.current = element
+    onTurnRef?.(turn.runId, element)
+  }, [onTurnRef, turn.runId])
+
+  useBrowserLayoutEffect(() => {
+    const element = shell.current
+    if (!mounted || !element) return
+    let firstMeasurement = true
+    const measure = () => {
+      const rect = element.getBoundingClientRect()
+      const scroller = element.closest<HTMLElement>('.chat-transcript')
+      // .chat disables native anchoring. A newly materialized placeholder that
+      // starts above the viewport shifts the next visible turn, even if its bottom
+      // was visible. Later resizing only adjusts entirely offscreen content, never
+      // pushes a reader down an already mounted streaming answer.
+      const anchorEdge = firstMeasurement ? rect.top : rect.top + height.current
+      if (windowed && scroller && anchorEdge < scroller.getBoundingClientRect().top) {
+        scroller.scrollTop += rect.height - height.current
+      }
+      height.current = rect.height
+      firstMeasurement = false
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [mounted, windowed])
+
+  useEffect(() => {
+    if (!windowed) return
+    const element = shell.current!
+    let intersecting = initiallyVisible
+    const release = (focusTarget: Node | null) => {
+      if (intersecting || element.dataset.virtualized === 'true') return
+      // A collapsed caret is not a retained text selection. Recheck on blur and
+      // selection release, otherwise previously focused rows accumulate forever.
+      const selection = window.getSelection()
+      const selectedRange = selection != null && !selection.isCollapsed &&
+        selection.rangeCount > 0 && selection.getRangeAt(0).intersectsNode(element)
+      const engaged = element.contains(focusTarget) || selectedRange ||
+        element.querySelector('[aria-expanded="true"], details[open]') != null
+      if (!engaged) {
+        height.current = element.getBoundingClientRect().height
+        setVisible(false)
+      }
+    }
+    const recheck = () => release(document.activeElement)
+    const blur = (event: FocusEvent) => {
+      const target = event.relatedTarget instanceof Node ? event.relatedTarget : null
+      if (!element.contains(target)) release(target)
+    }
+    const observer = new IntersectionObserver((entries) => {
+      // Rapid focus/scroll can queue both enter and leave before delivery.
+      intersecting = entries[entries.length - 1].isIntersecting
+      if (intersecting) setVisible(true)
+      else recheck()
+    }, { root: element.closest('.chat-transcript'), rootMargin: '1200px 0px' })
+    observer.observe(element)
+    element.addEventListener('focusout', blur)
+    document.addEventListener('selectionchange', recheck)
+    return () => {
+      observer.disconnect()
+      element.removeEventListener('focusout', blur)
+      document.removeEventListener('selectionchange', recheck)
+    }
+  }, [windowed])
+
+  return <div
+    className={`turn transcript-turn ${selected ? 'is-selected' : ''} ${focused ? 'turn-jump-target' : ''}`}
+    data-run-id={turn.runId} data-selected={selected || undefined} data-virtualized={!mounted || undefined}
+    ref={setShell} role="article"
+    aria-label={!mounted ? `第 ${index + 1} / ${total} 轮：${labelPreview}` : undefined}
+    tabIndex={windowed ? 0 : undefined} onFocusCapture={() => setVisible(true)}
+    style={windowed ? { contentVisibility: 'visible', ...(!mounted ? { height: height.current } : {}) } : undefined}
+  >
+    {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
       <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
         onForkTurn={onForkTurn} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} />
-    </div>
-  })}</>
+    </>}
+  </div>
 })
 
 interface ClipboardDataLike {
@@ -470,7 +563,7 @@ export function ChatView({
           {!sessionLoading && historyWindow?.hasOlder && (
             <div className="history-window-note" role="note" aria-label="历史轮次范围">
               <span>
-                仅挂载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·
+                时间线已加载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·
                 更早轮次仍在本机归档中，未丢弃
               </span>
               <button

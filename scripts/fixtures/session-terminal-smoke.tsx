@@ -49,7 +49,8 @@ Object.defineProperty(window, 'scry', { value: {
     sessionListeners.add(listener)
     return () => sessionListeners.delete(listener)
   },
-  listProjects: async () => projects, recentFolders: async () => projects.map((project) => project.cwd),
+  // Match IPC snapshot identity; never share the mutable fixture catalog with React.
+  listProjects: async () => structuredClone(projects), recentFolders: async () => projects.map((project) => project.cwd),
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }), detect: async () => [],
   listSkills: async () => ({ state: 'unavailable', data: null }),
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),

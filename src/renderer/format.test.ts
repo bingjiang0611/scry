@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
   aggregateCalls,
   aggregateFiles,
@@ -1282,8 +1282,42 @@ describe('buildSessionReport（Session Token 用量报告）', () => {
 })
 
 describe('applyTraceBatch（性能：批量合并，语义不变）', () => {
+  afterEach(() => vi.restoreAllMocks())
   const e = (p: Partial<TraceEvent> & { id: string }): TraceEvent =>
     ({ ts: '', runId: 'r1', kind: 'tool', stage: 'tool:X', ...p }) as TraceEvent
+
+  it('纯流式追加复用 immutable 轮次和事件索引，不重新扫描历史', () => {
+    const previous: Turn[] = Array.from({ length: 200 }, (_, index) => ({
+      runId: `old-${index}`, userText: '', done: true, items: []
+    }))
+    const warmed = applyTraceBatch(previous, [
+      ...Array.from({ length: 500 }, (_, index) => e({ id: `tool-${index}` })),
+      e({ id: 'text', kind: 'model', stage: 'text_delta', text: 'a' })
+    ], new Set())
+    const turnsMap = vi.spyOn(warmed, 'map')
+    const itemsMap = vi.spyOn(warmed.at(-1)!.items, 'map')
+    const next = applyTraceBatch(warmed, [e({ id: 'delta', kind: 'model', stage: 'text_delta', text: 'b' })], new Set())
+    expect(next.at(-1)!.items.at(-1)!.text).toBe('ab')
+    expect(warmed.at(-1)!.items.at(-1)!.text).toBe('a')
+    expect(next[0]).toBe(warmed[0])
+    expect(turnsMap).not.toHaveBeenCalled()
+    expect(itemsMap).not.toHaveBeenCalled()
+  })
+
+  it('分支批次不污染旧快照的索引；插入、删除、权威替换后索引仍一致', () => {
+    const cleared = new Set<string>()
+    const base = applyTraceBatch([], [e({ id: 'a' }), e({ id: 'b' })], cleared)
+    const branch = applyTraceBatch(base, [e({ id: 'c', runId: 'r2' })], cleared)
+    expect(applyTraceBatch(base, [e({ id: 'd', runId: 'r2' })], cleared).at(-1)!.items.map(item => item.id)).toEqual(['d'])
+    const changed = applyTraceBatch(branch, [e({ id: 'a', kind: 'harness', stage: 'result_superseded' }),
+      e({ id: 'b', text: 'updated' }), e({ id: 'prefix', kind: 'model', stage: 'text_delta', text: 'hel', messageId: 'm' })], cleared)
+    const final = applyTraceBatch(changed, [e({ id: 'answer', kind: 'model', stage: 'text', text: 'hello', messageId: 'm',
+      runtimeMetadata: { replacesStreamedText: true } })], cleared)
+    const updated = applyTraceBatch(final, [e({ id: 'b', text: 'again' })], cleared)
+    expect(updated[0].items.map(item => item.id)).toEqual(['b', 'answer'])
+    expect(updated[0].items[0].text).toBe('again')
+    expect(base[0].items.map(item => item.id)).toEqual(['a', 'b'])
+  })
 
   it('工具正文落盘补充引用不重排时间线、不双计调用或结束正在收口的轮次', () => {
     const preview = e({ id: 'tool', stage: 'tool_result', toolUseId: 'call', text: 'preview' })

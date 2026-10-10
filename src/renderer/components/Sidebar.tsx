@@ -1,6 +1,6 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import type { BackgroundWork } from '@shared/background-work'
 import { sessionAttentionKey } from '@shared/session-attention'
@@ -29,7 +29,7 @@ const providerDisplayName: Record<SessionProviderId, string> = {
   legacy_unknown: '历史会话'
 }
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   id,
   projects,
   activeCwd,
@@ -129,21 +129,24 @@ export function Sidebar({
     }
   }, [projectMenu])
   const ql = q.trim().toLowerCase()
-  const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
-  // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名，避免丢掉工作目录上下文。
-  const pinned = projects
-    .flatMap((project) => project.sessions
-      .filter((session) => session.pinnedAt && matches(session))
-      .map((session) => ({ session, cwd: project.cwd, name: project.name })))
-    .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
-  const filtered = projects
-    .map((project) => ({
-      ...project,
-      totalSessions: project.sessions.length,
-      projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
-      sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
-    }))
-    .filter((project) => project.projectMatch || project.sessions.length > 0)
+  const { pinned, filtered } = useMemo(() => {
+    const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
+    // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名。
+    const pinned = projects
+      .flatMap((project) => project.sessions
+        .filter((session) => session.pinnedAt && matches(session))
+        .map((session) => ({ session, cwd: project.cwd, name: project.name })))
+      .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
+    const filtered = projects
+      .map((project) => ({
+        ...project,
+        totalSessions: project.sessions.length,
+        projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
+        sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
+      }))
+      .filter((project) => project.projectMatch || project.sessions.length > 0)
+    return { pinned, filtered }
+  }, [projects, ql])
   const isActive = (cwd: string, session: SessionMeta): boolean => sessionMatchesSelection(cwd, session, {
     cwd: activeCwd,
     sessionId: activeSessionId,
@@ -409,7 +412,7 @@ export function Sidebar({
       )}
     </aside>
   )
-}
+})
 
 function ProjectDialog({
   mode,

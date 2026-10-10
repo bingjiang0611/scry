@@ -34,6 +34,7 @@ import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
 import { recordedSessionModel, runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
 import { useAgentSession } from './hooks/useAgentSession'
+import { useEventCallback } from './hooks/useEventCallback'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
@@ -2043,6 +2044,26 @@ export function App() {
     }
   }
 
+  // Stream commits must not invalidate the history navigator. These handlers keep
+  // their identity while reading the latest session/provider state when invoked.
+  const sidebarActions = {
+    onNewChat: useEventCallback(newConversation),
+    onPick: useEventCallback(pickSession),
+    onTogglePin: useEventCallback(togglePinSession),
+    onArchive: useEventCallback(archiveSession),
+    onRenameSession: useEventCallback(renameSession),
+    onNewProjectChat: useEventCallback(newConversationInProject),
+    onToggleProjectPin: useEventCallback(toggleProjectPin),
+    onRenameProject: useEventCallback(renameProject),
+    onRemoveProject: useEventCallback(removeProject),
+    onRevealProject: useEventCallback((project: ProjectMeta) => window.scry.revealProject(project.cwd)),
+    onUndoArchive: useEventCallback(undoArchive),
+    onAnalytics: useEventCallback(() => changeView('analytics')),
+    onSkills: useEventCallback(openSkills),
+    onMcp: useEventCallback(openMcp),
+    onSettings: useEventCallback(() => setShowSettings(true))
+  }
+
   return (
     <div
       className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
@@ -2060,24 +2081,10 @@ export function App() {
           waitingQuestionRunIds={waitingQuestionRunIds}
           unreadSessionKeys={unreadSessionKeys}
           backgroundWorkByRun={backgroundWorkByRun}
-          onNewChat={newConversation}
-          onPick={pickSession}
-          onTogglePin={(cwd, session) => void togglePinSession(cwd, session)}
-          onArchive={(cwd, session) => void archiveSession(cwd, session)}
-          onRenameSession={renameSession}
-          onNewProjectChat={(projectCwd) => void newConversationInProject(projectCwd)}
-          onToggleProjectPin={(project) => void toggleProjectPin(project)}
-          onRenameProject={renameProject}
-          onRemoveProject={removeProject}
-          onRevealProject={(project) => void window.scry.revealProject(project.cwd)}
+          {...sidebarActions}
           archiveUndo={archiveUndo}
-          onUndoArchive={() => void undoArchive()}
-          onAnalytics={() => changeView('analytics')}
           analyticsActive={view === 'analytics'}
-          onSkills={openSkills}
-          onMcp={openMcp}
           catalogHealth={catalogHealth}
-          onSettings={() => setShowSettings(true)}
       />
       <PaneSplitter
           className="sidebar-resizer"

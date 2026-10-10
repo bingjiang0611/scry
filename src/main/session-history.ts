@@ -1,6 +1,7 @@
 import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '../shared/trace'
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
+import type { SessionProviderId } from '../shared/provider'
 import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
 import { waitForCompletedRuns } from './context-admission'
@@ -37,15 +38,15 @@ export async function readSessionHistoryAfterCompletedRuns<T>(
 
 const ATTACHMENT_MARKER = 'Scry pasted image attachments:'
 
+/** Pi enrichment is turn-local; Qoder still reconciles Provider-owned full history. */
+export function sessionArchiveIsPageable(providerId: SessionProviderId, transcriptPath: string | null): boolean {
+  return !transcriptPath && providerId !== 'qoder'
+}
+
 /**
- * 默认只**交付**最近一段轮次。
- *
- * 保证的范围：一次 agent:loadSession 的 IPC 载荷与 renderer 挂载的 turn 数受此上限约束，
- * 所以长会话（数千轮、数十万事件）不会再因为单次 structured clone + 全量挂载卡死界面。
- *
- * 明确不保证：main 进程仍然完整读取、解析、合并并 hydrate 整个会话，然后把全部轮次留在
- * 单条 sessionHistoryCache 里供翻页复用。也就是说这不降低 main 侧的解析开销与常驻内存，
- * 只降低 IPC 传输量与 renderer 的挂载/渲染量。更早的轮次一律可按页取回，不丢弃。
+ * 默认交付最近 40 轮；更早证据仍可按页取回。
+ * Archive-only paths (including Pi) read only requested turn files. Claude transcript
+ * and Qoder reconciliation still require full-source parsing before this projection.
  */
 export const DEFAULT_SESSION_HISTORY_PAGE_SIZE = 40
 export const MAX_SESSION_HISTORY_PAGE_SIZE = 200

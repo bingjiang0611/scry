@@ -41,7 +41,8 @@ Object.defineProperty(window, 'scry', { value: {
   onSession: (cb: (event: unknown) => void) => subscribe('session', cb),
   onTurnDone: (cb: (event: unknown) => void) => subscribe('done', cb),
   onError: () => () => {},
-  listProjects: async () => projects, recentFolders: async () => ['/fixture'],
+  // Match IPC snapshot identity; never share the mutable fixture catalog with React.
+  listProjects: async () => structuredClone(projects), recentFolders: async () => ['/fixture'],
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
   detect: async () => agents, detectFast: async () => agents,
   listSkills: async (context: ProviderContext) => {
@@ -80,6 +81,10 @@ Object.defineProperty(window, 'scry', { value: {
       sessionId: runId, runId, providerId: 'claude', mtime: requests.length,
       preview: request.prompt, count: 1
     })
+    // Production start publishes the provisional/resumed session before replying.
+    // The fixture used to expose its mutated catalog by reference instead.
+    emit('session', { runId, sessionId: run.externalSessionId ?? runId, providerId: 'claude',
+      ...(run.externalSessionId ? { externalSessionId: run.externalSessionId } : { pending: true }) })
     update()
     return { runId }
   }
