@@ -39,7 +39,13 @@ struct RootView: View {
         case .newSession: NewSessionView()
         case .chat: ChatView()
         case .pair: PairView()
-        case .transcript: SessionTranscriptView()
+        case .transcript:
+          if model.readOnlyTranscript {
+            ReadOnlySessionTranscriptView(owner: run)
+              .id(model.openedSession.map { RemoteRunStore.SessionIdentity.opened(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId) })
+          } else {
+            SessionTranscriptView()
+          }
         case .settings: SettingsView()
         }
       }

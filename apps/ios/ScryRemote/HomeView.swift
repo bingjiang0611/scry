@@ -182,10 +182,8 @@ struct HomeView: View {
     let openable = session.externalSessionId?.isEmpty == false
     Button {
       guard openable, let external = session.externalSessionId else { return }
-      if run.hasUnresolvedRun {
-        let identity = RemoteRunStore.SessionIdentity.opened(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
-        guard identity == run.activeSessionIdentity else { showActiveRun = true; return }
-      }
+      let identity = RemoteRunStore.SessionIdentity.opened(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
+      model.readOnlyTranscript = run.hasUnresolvedRun && identity != run.activeSessionIdentity
       model.openedSession = OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
                                           cwd: session.cwd, externalSessionId: external, label: session.label,
                                           isActive: session.isActive == true)

@@ -30,7 +30,7 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Label(run.observationInterrupted ? "状态未知 · 同步已中断" : !run.pendingQuestions.isEmpty ? "等待你的决定" : stateLabel,
+      Label(run.observationInterrupted ? (run.terminalLifecycleKnown ? "任务已结束 · 输出同步已中断" : "状态未知 · 同步已中断") : !run.pendingQuestions.isEmpty ? "等待你的决定" : stateLabel,
             systemImage: run.lifecycle == .running && !run.observationInterrupted ? "play.circle.fill" : "info.circle")
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(run.observationInterrupted ? Palette.muted : stateColor)
@@ -211,7 +211,7 @@ struct ChatView: View {
     case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
     case .dispatched: return "主机已派发，准备执行…"
     case .running: return "运行中 · 尚无输出内容"
-    case .failed, .cancelled: return "主机未缓存此运行的输出内容"
+    case .failed, .cancelled: return "尚未读取到此运行的输出"
     default: return "等待主机…"
     }
   }
