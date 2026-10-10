@@ -59,25 +59,37 @@ async function exercise(webContents) {
   await click('#running')
   await wait(`document.querySelectorAll('.sb-sess.running .sb-running').length === 8`)
   const activeSpinners = await read(`document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect.target.matches('.sb-running')).length`)
-  if (activeSpinners !== 0) throw new Error(`Running sessions retained ${activeSpinners} animated spinners`)
+  if (activeSpinners !== 8) throw new Error(`Expected 8 rotating running rings, got ${activeSpinners}`)
   const runningRingThemes = await read(`(() => {
     const root = document.documentElement;
     const rings = Array.from(document.querySelectorAll('.sb-sess.running .sb-running'));
     if (rings.filter(ring => ring.closest('.sb-sess.active')).length !== 1) throw new Error('Expected selected and background running sessions');
     const probe = document.createElement('span');
-    probe.style.color = 'var(--ok)';
+    probe.style.color = 'var(--dim2)';
     root.append(probe);
     const originalTheme = root.getAttribute('data-theme');
     try {
       return ['dark', 'light'].map(theme => {
         root.setAttribute('data-theme', theme);
-        const green = getComputedStyle(probe).color;
+        const neutral = getComputedStyle(probe).color;
         for (const ring of rings) {
           const style = getComputedStyle(ring);
-          if (style.animationName !== 'none' || style.borderRadius !== '50%' ||
-              [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor].some(color => color !== green)) {
-            throw new Error(theme + ': expected a static green running ring');
+          if (style.animationName !== 'sb-running-spin' || style.animationDuration !== '0.9s' ||
+              style.animationTimingFunction !== 'linear' || style.animationIterationCount !== 'infinite' ||
+              style.borderRadius !== '50%' || style.borderTopColor !== 'rgba(0, 0, 0, 0)' ||
+              [style.borderRightColor, style.borderBottomColor, style.borderLeftColor].some(color => color !== neutral)) {
+            throw new Error(theme + ': expected a neutral rotating running ring');
           }
+        }
+        const waitingRing = rings[0];
+        waitingRing.setAttribute('data-background-waiting', 'true');
+        try {
+          const style = getComputedStyle(waitingRing);
+          if (style.animationName !== 'none' || style.backgroundColor !== neutral || style.borderTopWidth !== '0px') {
+            throw new Error(theme + ': expected a neutral static background-waiting dot');
+          }
+        } finally {
+          waitingRing.removeAttribute('data-background-waiting');
         }
         return theme;
       });
@@ -87,6 +99,21 @@ async function exercise(webContents) {
       else root.setAttribute('data-theme', originalTheme);
     }
   })()`)
+  await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  const ringTransform = await read(`getComputedStyle(document.querySelector('.sb-running')).transform`)
+  await wait(`getComputedStyle(document.querySelector('.sb-running')).transform !== ${JSON.stringify(ringTransform)}`)
+  await webContents.debugger.attach('1.3')
+  try {
+    await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await wait(`matchMedia('(prefers-reduced-motion: reduce)').matches && Array.from(document.querySelectorAll('.sb-running')).every(ring => getComputedStyle(ring).animationName === 'none')`)
+  } finally {
+    await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+    webContents.debugger.detach()
+  }
+  await click('#running')
+  await wait(`document.querySelectorAll('.sb-running').length === 0`)
+  await click('#running')
+  await wait(`document.querySelectorAll('.sb-running').length === 8`)
 
   await click('#load-older')
   await wait(`document.querySelectorAll('[data-run-id]').length === 80`)
@@ -167,6 +194,7 @@ async function exercise(webContents) {
   if (mountedAtEnd >= 40) throw new Error(`Scroll/focus retained ${mountedAtEnd} mounted turns`)
   return { historicalSessions: 277, streamCommits: 20, sidebarStreamRenders: streamRenders,
     latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners, runningRingThemes,
+    rotatingTransform: true, reducedMotion: true, completedIndicatorsRemoved: true, neutralBackgroundWaiting: true,
     viewport, historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
     viewportAnchorPreserved: true, selectedEvidenceRetained: true, shellHeightPreserved: true,
     keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }

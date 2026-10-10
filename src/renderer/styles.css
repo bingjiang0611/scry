@@ -463,8 +463,13 @@ body.pane-resizing * {
   width: 11px;
   height: 11px;
   box-sizing: border-box;
-  border: 2px solid var(--ok);
+  border: 2px solid var(--dim2);
+  border-top-color: transparent;
   border-radius: 50%;
+  animation: sb-running-spin 900ms linear infinite;
+}
+@keyframes sb-running-spin {
+  to { transform: rotate(360deg); }
 }
 .ctx-overlay {
   position: fixed;
@@ -7784,6 +7789,8 @@ textarea:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sb-running { animation: none; }
+
   *,
   *::before,
   *::after {

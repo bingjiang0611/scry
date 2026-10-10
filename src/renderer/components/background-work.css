@@ -36,7 +36,7 @@
 .background-work-empty { display: flex; align-items: center; gap: 8px; }
 .background-work-panel[data-quiet] { border-left-color: #b98b36; }
 .run-status[data-background-waiting] .run-status-dot { animation: none; background: #b98b36; }
-.sb-running[data-background-waiting] { animation: none; border: 0; background: #b98b36; border-radius: 50%; }
+.sb-running[data-background-waiting] { animation: none; border: 0; background: var(--dim2); border-radius: 50%; }
 @media (max-width: 700px) {
   .background-work-details > summary { gap: 5px; flex-wrap: wrap; }
   .background-work-name { flex: 1 1 calc(100% - 24px); }

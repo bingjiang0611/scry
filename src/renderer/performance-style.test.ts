@@ -30,10 +30,11 @@ describe('idle renderer paint budget', () => {
     expect(declaration(styles, '@keyframes skeleton-shimmer')).toContain('transform: translateX')
   })
 
-  it('shows running sessions as static green rings', () => {
-    expect(declaration(styles, '.sb-running')).toContain('border: 2px solid var(--ok)')
-    expect(declaration(styles, '.sb-running')).not.toContain('animation:')
-    expect(styles).not.toContain('sb-running-spin')
+  it('shows running sessions as neutral rotating rings', () => {
+    expect(declaration(styles, '.sb-running')).toContain('border: 2px solid var(--dim2)')
+    expect(declaration(styles, '.sb-running')).toContain('border-top-color: transparent')
+    expect(declaration(styles, '.sb-running')).toContain('animation: sb-running-spin 900ms linear infinite')
+    expect(declaration(styles, '@keyframes sb-running-spin')).toContain('transform: rotate(360deg)')
   })
 
   it('pauses incidental animations when the Electron page is hidden', () => {
