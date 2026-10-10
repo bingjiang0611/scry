@@ -22,7 +22,7 @@ final class HistoryReadHandler: ChannelInboundHandler, @unchecked Sendable {
   func handlerAdded(context: ChannelHandlerContext) {
     self.context = context
     deadline = context.eventLoop.scheduleTask(in: .seconds(10)) { [self, channel = context.channel] in
-      fail(ProbeError.disconnected)
+      fail(RelayTransportError.timedOut(stage: "history-handshake"))
       channel.close(promise: nil)
     }
   }
@@ -54,7 +54,7 @@ final class HistoryReadHandler: ChannelInboundHandler, @unchecked Sendable {
     bytes.append(10)
     context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
     deadline = context.eventLoop.scheduleTask(in: .seconds(30)) { [self, channel = context.channel] in
-      fail(ProbeError.disconnected)
+      fail(RelayTransportError.timedOut(stage: "history-response"))
       channel.close(promise: nil)
     }
   }

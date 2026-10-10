@@ -8,6 +8,11 @@ import NIOTLS
 
 enum ProbeError: Error { case invalidArguments, invalidFrame, oversized, disconnected, unexpectedReply }
 
+public enum RelayTransportError: Error, Sendable {
+  case closed(code: UInt16?, reason: String)
+  case timedOut(stage: String)
+}
+
 // Converts the outer WebSocket's binary frames into the inner TLS byte stream.
 // Text, fragmentation and overflow terminate the stream; never skip bytes and
 // continue an allegedly reliable TLS connection after a gap.
@@ -30,7 +35,14 @@ final class TunnelCodec: ChannelDuplexHandler {
     case .ping:
       context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .pong, maskKey: .random(), data: frame.unmaskedData)), promise: nil)
     case .pong: break
-    case .connectionClose: context.close(promise: nil)
+    case .connectionClose:
+      var payload = frame.unmaskedData
+      let code = payload.readInteger(as: UInt16.self)
+      let reason = payload.readString(length: min(payload.readableBytes, 123)) ?? ""
+      // Preserve the relay's close cause before TLS sees an anonymous EOF.
+      // This is untrusted diagnostic text, never authentication evidence.
+      context.fireErrorCaught(RelayTransportError.closed(code: code, reason: reason))
+      context.close(promise: nil)
     default:
       context.fireErrorCaught(ProbeError.invalidFrame)
       context.close(promise: nil)
@@ -48,7 +60,8 @@ final class TunnelCodec: ChannelDuplexHandler {
   }
 }
 
-final class ProbeHandler: ChannelInboundHandler {
+// Mutable state belongs exclusively to the channel event loop.
+final class ProbeHandler: ChannelInboundHandler, @unchecked Sendable {
   typealias InboundIn = ByteBuffer
   typealias OutboundOut = ByteBuffer
   private let request: Data
@@ -57,6 +70,7 @@ final class ProbeHandler: ChannelInboundHandler {
   private var received = Data()
   private var sent = false
   private var settled = false
+  private var deadline: Scheduled<Void>?
 
   init(request: Data, result: EventLoopPromise<Data>, maxResponseBytes: Int = 65_536) {
     self.request = request
@@ -64,10 +78,26 @@ final class ProbeHandler: ChannelInboundHandler {
     self.maxResponseBytes = maxResponseBytes
   }
 
+  func handlerAdded(context: ChannelHandlerContext) {
+    let channel = context.channel
+    // The relay can close between HTTP upgrade and this handler's installation.
+    // closeFuture also covers that already-closed case; channelInactive cannot.
+    channel.closeFuture.whenComplete { [self] _ in fail(ProbeError.disconnected, channel: channel) }
+    guard !settled else { return }
+    deadline = context.eventLoop.scheduleTask(in: .seconds(10)) { [self] in
+      fail(RelayTransportError.timedOut(stage: "inner-handshake"), channel: channel)
+    }
+  }
+
   func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
     if let tlsEvent = event as? TLSUserEvent, case .handshakeCompleted = tlsEvent, !sent {
       // No 0-RTT or writes before the inner host-authenticated handshake.
       sent = true
+      deadline?.cancel()
+      let channel = context.channel
+      deadline = context.eventLoop.scheduleTask(in: .seconds(30)) { [self] in
+        fail(RelayTransportError.timedOut(stage: "response"), channel: channel)
+      }
       var bytes = request
       bytes.append(10)
       context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
@@ -77,25 +107,28 @@ final class ProbeHandler: ChannelInboundHandler {
 
   func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let bytes = unwrapInboundIn(data)
-    guard received.count + bytes.readableBytes <= maxResponseBytes else { fail(ProbeError.oversized, context: context); return }
+    guard received.count + bytes.readableBytes <= maxResponseBytes else { fail(ProbeError.oversized, channel: context.channel); return }
     received.append(contentsOf: bytes.readableBytesView)
     guard let newline = received.firstIndex(of: 10) else { return }
     do {
       guard newline == received.count - 1 else { throw ProbeError.unexpectedReply }
       let reply = Data(received.prefix(upTo: newline))
-      if !settled { settled = true; result.succeed(reply) }
+      if !settled { settled = true; deadline?.cancel(); deadline = nil; result.succeed(reply) }
       context.close(promise: nil)
-    } catch { fail(error, context: context) }
+    } catch { fail(error, channel: context.channel) }
   }
 
-  func errorCaught(context: ChannelHandlerContext, error: Error) { fail(error, context: context) }
+  func errorCaught(context: ChannelHandlerContext, error: Error) { fail(error, channel: context.channel) }
   func channelInactive(context: ChannelHandlerContext) {
-    if !settled { settled = true; result.fail(ProbeError.disconnected) }
+    fail(ProbeError.disconnected, channel: context.channel)
     context.fireChannelInactive()
   }
-  private func fail(_ error: Error, context: ChannelHandlerContext) {
-    if !settled { settled = true; result.fail(error) }
-    context.close(promise: nil)
+  private func fail(_ error: Error, channel: Channel) {
+    guard !settled else { return }
+    settled = true
+    deadline?.cancel(); deadline = nil
+    result.fail(error)
+    channel.close(promise: nil)
   }
 }
 
@@ -704,30 +737,12 @@ public enum G0Transport {
     }
   }
 
-  // A relay leg is single-use. When a device issues several reads back-to-back,
-  // the host's replacement warm leg may not yet be registered and the relay
-  // closes the new socket. Retry only this pre-response transport condition;
-  // submit requests retain the same intent id and are idempotent host-side.
-  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int? = nil) async throws -> Data {
-    var lastError: Error = ProbeError.disconnected
-    for attempt in 0..<3 {
-      do { return try await exchangeRelayOnce(endpoint: endpoint, mode: mode, identity: identity, request: request, responseLimit: responseLimit) }
-      catch {
-        lastError = error
-        let description = String(describing: error).lowercased()
-        let retryable = error is NIOSSLError && description.contains("uncleanshutdown") ||
-          description.contains("disconnected") || description.contains("connection reset")
-        guard retryable, attempt < 2 else { throw error }
-        try await Task.sleep(nanoseconds: UInt64(180 + attempt * 220) * 1_000_000)
-      }
-    }
-    throw lastError
-  }
-
   // Relay variant of `exchange`. Mirrors the loopback security decisions but
   // dials a public relay and routes by hostId+mode instead of a fixed port, and
   // pins the inner server to the host anchor without leaf-hostname verification.
-  private static func exchangeRelayOnce(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int?) async throws -> Data {
+  // Do not replay exchanges by matching error strings. A lost response is not
+  // evidence that a request did not run; explicit UI reconciliation owns retry.
+  static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int? = nil) async throws -> Data {
     guard request.count < 1_250_000 else { throw ProbeError.invalidArguments }
     return try await withRelayChannel(endpoint: endpoint, mode: mode, identity: identity) { channel, innerContext in
       let result = channel.eventLoop.makePromise(of: Data.self)

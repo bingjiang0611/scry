@@ -18,19 +18,23 @@ it('signals consumption once on actual websocket bytes without changing the payl
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const address = server.address() as { port: number }
-  const { connect } = createRelayConnectWS({ url: `ws://127.0.0.1:${address.port}`, hostId: randomUUID(), token: 'isolated-fixture', mode: 'run' })
+  const { connect, readyEvent } = createRelayConnectWS({ url: `ws://127.0.0.1:${address.port}`, hostId: randomUUID(), token: 'isolated-fixture', mode: 'run' })
   const leg = connect()
   let consumed = 0
+  let served = 0
+  leg.once(readyEvent, () => { served++ })
   leg.on('relaySession', () => { consumed++ })
   try {
     await once(leg, 'connect')
     expect(consumed).toBe(0)
+    expect(served).toBe(0) // Idle relay registration must not start the TLS handshake timer.
     for (const value of ['client-hello', 'next-tls-record']) {
       const data = once(leg, 'data')
       const bytes = Buffer.from(value)
       peer!.write(Buffer.concat([Buffer.from([0x82, bytes.length]), bytes]))
       expect((await data)[0]).toEqual(bytes)
       expect(consumed).toBe(1)
+      expect(served).toBe(1)
     }
   } finally {
     leg.destroy()

@@ -365,6 +365,7 @@ enum RemoteSelfTest {
       }
       let client = RemoteRunClient(connection: connection)
       do {
+        print("SESSIONPROBE stage=catalog")
         let sessions = try await client.sessions()
         guard let provider = argumentValue("-sessionReadProbeProvider"), let cwd = argumentValue("-sessionReadProbeCwd"),
               let external = argumentValue("-sessionReadProbeSession"),
@@ -373,13 +374,16 @@ enum RemoteSelfTest {
           exit(0)
         }
         let previewStarted = Date()
+        print("SESSIONPROBE stage=history-connection")
         let (preview, previewMs, snapshot, firstPageMs, fullBytes, verifyMs) = try await client.withHistoryConnection { reader in
+          print("SESSIONPROBE stage=preview")
           let preview = try await reader.preview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
           let previewMs = Date().timeIntervalSince(previewStarted) * 1000
           let fullStarted = Date()
           let timing = SessionPageTiming(started: fullStarted)
+          print("SESSIONPROBE stage=full-history previewMs=\(previewMs) status=\(preview.status)")
           let snapshot = try await client.historySnapshot(providerId: session.providerId, cwd: session.cwd,
-            externalSessionId: external, connection: reader, progress: { _, total in await timing.received(total: total) })
+            externalSessionId: external, connection: reader, progress: { received, total in await timing.received(received: received, total: total) })
           return (preview, previewMs, snapshot, await timing.firstPageMs, await timing.totalBytes, Date().timeIntervalSince(fullStarted) * 1000)
         }
         print("SESSIONPROBE target provider=\(provider) cwd=\(cwd) session=\(external) previewMs=\(String(format: "%.1f", previewMs)) previewBytes=\(preview.bytes ?? 0) firstFullPageMs=\(String(format: "%.1f", firstPageMs ?? verifyMs)) fullVerificationMs=\(String(format: "%.1f", verifyMs)) fullBytes=\(fullBytes.map(String.init) ?? "unavailable") turns=\(snapshot.turns.count) status=\(preview.status)")
@@ -397,10 +401,16 @@ enum RemoteSelfTest {
     let started: Date
     var firstPageMs: Double?
     var totalBytes: Int?
+    var reportedBytes = 0
     init(started: Date) { self.started = started }
-    func received(total: Int) {
+    func received(received: Int, total: Int) {
+      let elapsed = Date().timeIntervalSince(started) * 1000
       totalBytes = total
-      if firstPageMs == nil { firstPageMs = Date().timeIntervalSince(started) * 1000 }
+      if firstPageMs == nil { firstPageMs = elapsed }
+      if reportedBytes == 0 || received - reportedBytes >= 1_048_576 || received == total {
+        print("SESSIONPROBE stage=full-progress bytes=\(received) total=\(total) elapsedMs=\(elapsed)")
+        reportedBytes = received
+      }
     }
   }
 
