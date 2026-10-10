@@ -28,8 +28,10 @@ export interface RelayWSOptions {
   mode: 'run' | 'pair'
 }
 
-export function createRelayConnectWS(opts: RelayWSOptions): { connect: () => OutboundLeg; readyEvent: 'connect' } {
-  return { connect: () => wsLeg(opts), readyEvent: 'connect' }
+export function createRelayConnectWS(opts: RelayWSOptions): { connect: () => OutboundLeg; readyEvent: 'relaySession' } {
+  // An idle relay leg is not a TLS peer yet. Start the inner server only when
+  // device bytes arrive, otherwise its handshake deadline expires while idle.
+  return { connect: () => wsLeg(opts), readyEvent: 'relaySession' }
 }
 
 function wsLeg(opts: RelayWSOptions): OutboundLeg {
@@ -56,7 +58,7 @@ function wsLeg(opts: RelayWSOptions): OutboundLeg {
   })
   ws.addEventListener('open', () => {
     // Authenticate (and, for the official relay, claim this host's room), then
-    // hand the leg to ReverseTunnelTransport via 'connect'.
+    // mark outer connectivity. Inner TLS starts on the first device bytes.
     ws.send(JSON.stringify({ token: opts.token, ...(opts.enroll ? { enroll: true } : {}) }))
     duplex.emit('connect')
   })
