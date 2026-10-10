@@ -7,7 +7,7 @@ describe('DockBadgeState', () => {
     const badge = new DockBadgeState(setCount)
     badge.view('session-a', true)
 
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: true,
       sessionViewed: true,
       needsAttention: true
@@ -21,7 +21,7 @@ describe('DockBadgeState', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)
 
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: false,
       sessionViewed: true,
       needsAttention: true
@@ -37,12 +37,12 @@ describe('DockBadgeState', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)
     badge.view('session-a', false)
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: false,
       sessionViewed: true,
       needsAttention: true
     })
-    badge.markTerminal('session-b', {
+    badge.markAttention('session-b', {
       windowFocused: false,
       sessionViewed: false,
       needsAttention: true
@@ -58,17 +58,17 @@ describe('DockBadgeState', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)
 
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: true,
       sessionViewed: false,
       needsAttention: true
     })
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: false,
       sessionViewed: false,
       needsAttention: true
     })
-    badge.markTerminal('session-b', {
+    badge.markAttention('session-b', {
       windowFocused: false,
       sessionViewed: false,
       needsAttention: true
@@ -83,12 +83,12 @@ describe('DockBadgeState', () => {
     const snapshots = vi.fn()
     const badge = new DockBadgeState(() => {}, snapshots)
 
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: false,
       sessionViewed: false,
       needsAttention: true
     })
-    badge.markTerminal('session-b', {
+    badge.markAttention('session-b', {
       windowFocused: false,
       sessionViewed: false,
       needsAttention: true
@@ -103,11 +103,52 @@ describe('DockBadgeState', () => {
     expect(badge.snapshot()).toEqual({ revision: 3, unreadSessionKeys: ['session-b'] })
   })
 
+  it('后台待回答按会话去重，查看后只清除该会话', () => {
+    const setCount = vi.fn()
+    const badge = new DockBadgeState(setCount)
+    const background = { windowFocused: true, sessionViewed: false, needsAttention: true }
+
+    badge.markAttention('question-session', background)
+    badge.markAttention('question-session', background)
+    badge.markAttention('completed-session', background)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['question-session', 'completed-session'])
+
+    badge.view('question-session', true)
+    expect(setCount.mock.calls).toEqual([[1], [2], [1]])
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['completed-session'])
+  })
+
+  it('待回答先于原生 session ID 时迁移提醒，避免重复计数和残留', () => {
+    const setCount = vi.fn()
+    const badge = new DockBadgeState(setCount)
+    badge.view('run-id', false)
+    badge.markAttention('run-id', { windowFocused: false, sessionViewed: true, needsAttention: true })
+
+    badge.rekey('run-id', 'native-session')
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['native-session'])
+    badge.markAttention('native-session', { windowFocused: false, sessionViewed: true, needsAttention: true })
+    expect(badge.count).toBe(1)
+    badge.focusWindow()
+    expect(badge.count).toBe(0)
+  })
+
+  it('后台会话获取原生 ID 不会改变当前查看的会话，已有目标提醒合并', () => {
+    const badge = new DockBadgeState(() => {})
+    badge.view('viewed-session', false)
+    const background = { windowFocused: false, sessionViewed: false, needsAttention: true }
+    badge.markAttention('run-id', background)
+    badge.markAttention('native-session', background)
+
+    badge.rekey('run-id', 'native-session')
+    badge.focusWindow()
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['native-session'])
+  })
+
   it('用户停止的轮次不增加 badge', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)
 
-    badge.markTerminal('session-a', {
+    badge.markAttention('session-a', {
       windowFocused: false,
       sessionViewed: true,
       needsAttention: false

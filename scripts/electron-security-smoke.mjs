@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
-const devApp = devTerminalOnly || process.argv[2] === '--dev'
+const devQuestionOnly = process.argv[2] === '--dev-question-only'
+const devApp = devTerminalOnly || devQuestionOnly || process.argv[2] === '--dev'
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
@@ -164,6 +165,44 @@ async function main() {
     return results.every((result) => result.state === 'unsupported' && result.reason.includes('SCRY_DISABLED_PROVIDERS'))
   }))`)
   assert.deepEqual(disabledCapabilities, [true, true, true, true], 'smoke must not start non-fixture providers')
+  if (devQuestionOnly) {
+    const result = await evaluate(`(async () => {
+      const waitFor = async (read, label) => {
+        const deadline = Date.now() + 10_000
+        while (Date.now() < deadline) {
+          const value = await read()
+          if (value) return value
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        throw new Error('Timed out waiting for ' + label)
+      }
+      const { runId } = await window.scry.start({
+        providerId: 'codex', cwd: ${JSON.stringify(workspace)}, prompt: 'dock badge question smoke'
+      })
+      const pendingRun = async (questionId) => {
+        const active = (await window.scry.activeRuns()).find(run => run.runId === runId)
+        return active?.pendingQuestions?.some(question => question.questionId === questionId) ? active : null
+      }
+      const firstQuestionId = runId + ':question:1'
+      await waitFor(() => pendingRun(firstQuestionId), 'initial question')
+      await window.scry.focusRun(null)
+      const answered = await window.scry.answerQuestion({
+        runId, questionId: firstQuestionId, behavior: 'answered',
+        answers: { 'Continue the isolated badge smoke?': 'Continue' }
+      })
+      if (!answered) throw new Error('Fixture question response was rejected')
+      const run = await waitFor(() => pendingRun(runId + ':question:2'), 'background question')
+      const unread = await window.scry.unreadSessions()
+      await window.scry.stop(runId)
+      return { done: run.done, pendingCount: run.pendingQuestions.length, unread }
+    })()`)
+    assert.equal(result.done, false, 'question attention must arrive before a terminal result')
+    assert.equal(result.pendingCount, 1)
+    assert.equal(result.unread.unreadSessionKeys.length, 1, 'background question must trigger Dock attention')
+    console.log(JSON.stringify({ ok: true, questionAttention: result }))
+    cdp.close()
+    return
+  }
   if (devTerminalOnly) {
     const result = await evaluate(`(async () => {
       const outputs = new Map(), exited = new Set()

@@ -17,8 +17,25 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
     run: (request) => {
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       let stopped = false
+      const questionAbort = new AbortController()
       const promise = Promise.resolve().then(async () => {
         request.onExternalSessionId?.(sessionId)
+        if (request.prompt === 'dock badge question smoke') {
+          if (!request.requestUserInput) throw new Error('Question smoke requires requestUserInput')
+          for (const step of [1, 2]) {
+            await request.requestUserInput({
+              runId: request.runId,
+              questionId: `${request.runId}:question:${step}`,
+              providerId: 'codex',
+              questions: [{
+                header: 'Dock badge',
+                question: 'Continue the isolated badge smoke?',
+                options: [{ label: 'Continue', description: 'Finish the fixture run' }],
+                multiSelect: false
+              }]
+            }, questionAbort.signal)
+          }
+        }
         request.emit({
           id: `${request.runId}:tool`,
           runId: request.runId,
@@ -79,8 +96,14 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
       })
       return {
         promise,
-        interrupt: () => { stopped = true },
-        forceKill: () => { stopped = true },
+        interrupt: () => {
+          stopped = true
+          questionAbort.abort()
+        },
+        forceKill: () => {
+          stopped = true
+          questionAbort.abort()
+        },
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => sessionId,
         getProviderTurnId: () => `${request.runId}:provider-turn`

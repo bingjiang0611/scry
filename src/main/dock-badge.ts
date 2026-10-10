@@ -1,6 +1,6 @@
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 
-export interface DockBadgeTerminalState {
+export interface DockBadgeAttentionState {
   windowFocused: boolean
   sessionViewed: boolean
   needsAttention: boolean
@@ -25,7 +25,7 @@ export class DockBadgeState {
     if (this.viewedSessionKey) this.clear(this.viewedSessionKey)
   }
 
-  markTerminal(sessionKey: string, state: DockBadgeTerminalState): void {
+  markAttention(sessionKey: string, state: DockBadgeAttentionState): void {
     if (!state.needsAttention) return
     if (state.sessionViewed) this.viewedSessionKey = sessionKey
     if (state.windowFocused && state.sessionViewed) {
@@ -33,6 +33,15 @@ export class DockBadgeState {
       return
     }
     if (this.unreadSessionKeys.has(sessionKey)) return
+    this.unreadSessionKeys.add(sessionKey)
+    this.publish()
+  }
+
+  // Questions can arrive before the Provider supplies a native session ID.
+  rekey(previousSessionKey: string, sessionKey: string): void {
+    if (previousSessionKey === sessionKey) return
+    if (this.viewedSessionKey === previousSessionKey) this.viewedSessionKey = sessionKey
+    if (!this.unreadSessionKeys.delete(previousSessionKey)) return
     this.unreadSessionKeys.add(sessionKey)
     this.publish()
   }
