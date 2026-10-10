@@ -10,6 +10,7 @@ import '../../src/renderer/codex-alignment.css'
 // Production App, isolated bridge: no real Provider, workspace, or user data.
 localStorage.clear()
 const requests: AgentStartRequest[] = []
+const capabilityRequests: { skills: ProviderContext[]; mcp: ProviderContext[] } = { skills: [], mcp: [] }
 const runs = new Map<string, ActiveRun>()
 const projects: ProjectMeta[] = [{ cwd: '/fixture', name: 'Models', mtime: 1, sessions: [] }]
 const listeners = new Map<string, Set<(event: never) => void>>()
@@ -26,8 +27,13 @@ let focusedRun: string | null = null
 const status = document.createElement('output')
 status.id = 'model-state'
 status.hidden = true
-const update = () => { status.textContent = JSON.stringify({ requests }) }
-const agents = [{ id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude' }]
+const update = () => { status.textContent = JSON.stringify({ requests, capabilityRequests }) }
+const agents = [
+  { id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude' },
+  { id: 'codex', name: 'Codex', path: '/fixture/codex', bin: 'codex' },
+  { id: 'pi:first', name: 'Pi first', path: '/fixture/pi', bin: 'pi' },
+  { id: 'pi:second', name: 'Pi second', path: '/fixture/pi', bin: 'pi' }
+]
 Object.defineProperty(window, 'scry', { value: {
   activeRun: async () => focusedRun ? runs.get(focusedRun) : null,
   activeRuns: async () => [...runs.values()],
@@ -38,8 +44,16 @@ Object.defineProperty(window, 'scry', { value: {
   listProjects: async () => projects, recentFolders: async () => ['/fixture'],
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
   detect: async () => agents, detectFast: async () => agents,
-  listSkills: async () => ({ state: 'unavailable', data: null }),
-  mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
+  listSkills: async (context: ProviderContext) => {
+    capabilityRequests.skills.push(context)
+    update()
+    return { ...context, mode: 'read', state: 'unavailable', data: null, reason: 'fixture Skill unavailable' }
+  },
+  mcpSnapshot: async (context: ProviderContext) => {
+    capabilityRequests.mcp.push(context)
+    update()
+    return { ...context, mode: 'read', state: 'unavailable', data: null, reason: 'fixture MCP unavailable' }
+  },
   usageStats: async () => null, stats: async () => null,
   setCwd: async (cwd: string) => cwd,
   focusRun: async (runId: string | null) => { focusedRun = runId; return true },

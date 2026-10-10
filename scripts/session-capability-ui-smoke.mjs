@@ -696,7 +696,7 @@ async function exerciseSessionTerminals(contents, scenario) {
   return { scenario, scopedTabs: true, sameWorkspace: true, crossWorkspace: true, screenPreserved: true, recordingPreserved: true, fileRootAndReadOnlyPreserved: true, hideShowPreserved: true, nativePromotion: true, collisionReachable: true, noImplicitRestart: true, explicitRestartAndNewUseOwnedCwd: true, explicitClose: true }
 }
 
-async function exerciseSessionModels(contents) {
+async function exerciseSessionModels(contents, screenshotPath) {
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression) => {
     const deadline = Date.now() + 5000
@@ -797,7 +797,60 @@ async function exerciseSessionModels(contents) {
   await wait(`${modelIs('model-1')} && document.querySelector('.model-effort-effort').textContent === 'High'`)
   await click('.sb-new')
   await wait(`document.querySelector('.run-status') == null && ${modelIs('model-2')}`)
-  return { models: actual.map((request) => request.model.id), newDefault: 'model-2', effortIsolated: true, nativeCapture: true, backgroundTerminalCapture: true, queuedContinuation: true, persisted: true, legacyArchiveRestored: true }
+  const capabilities = `JSON.parse(document.querySelector('#model-state').textContent).capabilityRequests`
+  if (!await read(`${capabilities}.skills.length === 0 && ${capabilities}.mcp.length === 0`)) {
+    throw new Error('Skills/MCP inventory loaded before opening its page')
+  }
+  if (!await read(`document.querySelector('.sb-nav .sb-navmeta') == null && document.querySelector('.sb-nav .sb-navdot') == null`)) {
+    throw new Error('Skills/MCP navigation still displays background inventory metadata')
+  }
+  await click('.sb-new')
+  await wait(modelIs('model-2'))
+  await click('.sb-nav [title="Skills"]')
+  await wait(`${capabilities}.skills.length === 1 && document.querySelector('.capabilities-modal--skills')?.textContent.includes('fixture Skill unavailable')`)
+  if (!await read(`${capabilities}.mcp.length === 0`)) throw new Error('Opening Skills also loaded MCP')
+  await click('.capability-kind-tabs [role="tab"]:nth-child(2)')
+  await wait(`${capabilities}.mcp.length === 1 && document.querySelector('.capabilities-modal--mcp')?.textContent.includes('fixture MCP unavailable')`)
+  await click('[aria-label="刷新 MCP 运行状态"]')
+  await wait(`${capabilities}.mcp.length === 2`)
+  await click('[aria-label="关闭能力面板"]')
+
+  const selectAgent = async (id) => {
+    await click('.clibtn')
+    await wait(`document.querySelector('.climenu [data-agent-id="${id}"]') != null`)
+    await click(`.climenu [data-agent-id="${id}"]`)
+    await wait(`document.querySelector('.clibtn').dataset.agentId === '${id}'`)
+  }
+  await selectAgent('codex')
+  if (!await read(`${capabilities}.skills.length === 1 && ${capabilities}.mcp.length === 2`)) throw new Error('Hidden inventory refreshed on Provider switch')
+  await click('.sb-nav [title="Skills"]')
+  await wait(`${capabilities}.skills.length === 2`)
+  if (!await read(`${capabilities}.skills.at(-1).providerId === 'codex'`)) throw new Error('Skills loaded the previous Provider context')
+  await click('[aria-label="关闭能力面板"]')
+  await selectAgent('pi:first')
+  await click('.sb-nav [title="MCP"]')
+  await wait(`${capabilities}.mcp.length === 3`)
+  if (!await read(`${capabilities}.mcp.at(-1).agentProfileId === 'pi:first'`)) throw new Error('MCP lost its Pi Profile context')
+  await click('[aria-label="关闭能力面板"]')
+  await selectAgent('pi:second')
+  if (!await read(`${capabilities}.skills.length === 2 && ${capabilities}.mcp.length === 3`)) throw new Error('Hidden inventory refreshed on Pi Profile switch')
+  await click('.sb-nav [title="Skills"]')
+  await wait(`${capabilities}.skills.length === 3`)
+  if (!await read(`${capabilities}.skills.at(-1).agentProfileId === 'pi:second'`)) throw new Error('Skills loaded the previous Pi Profile')
+  await click('[aria-label="关闭能力面板"]')
+  await click('#remount')
+  await wait(`document.querySelector('.clibtn')?.dataset.agentId === 'pi:second'`)
+  if (!await read(`${capabilities}.skills.length === 3 && ${capabilities}.mcp.length === 3`)) throw new Error('Remount restarted hidden inventory discovery')
+  if (screenshotPath) for (const theme of ['dark', 'light']) {
+    await read(`document.documentElement.dataset.theme = '${theme}'; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    const bounds = await read(`(() => {
+      const { x, y, width, height } = document.querySelector('.sb-nav').getBoundingClientRect()
+      return { x: Math.round(x), y: Math.round(y), width: Math.ceil(width), height: Math.ceil(height) }
+    })()`)
+    const image = await contents.capturePage(bounds)
+    require('node:fs').writeFileSync(screenshotPath + '-' + theme + '.png', image.toPNG())
+  }
+  return { models: actual.map((request) => request.model.id), newDefault: 'model-2', effortIsolated: true, nativeCapture: true, backgroundTerminalCapture: true, queuedContinuation: true, persisted: true, legacyArchiveRestored: true, lazyInventory: { backgroundRequests: 0, skillsRequests: 3, mcpRequests: 3, providerAndProfileContext: true } }
 }
 
 async function exerciseOverviewDensity(contents, screenshotPath) {
@@ -991,7 +1044,7 @@ try {
         let sessionModels = null
         if (${!overviewOnly && !selectionOnly && !piCommandsOnly && !terminalsOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-model.html'))})
-          sessionModels = await (${exerciseSessionModels.toString()})(win.webContents)
+          sessionModels = await (${exerciseSessionModels.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_CAPABILITIES_UI_SCREENSHOT ?? '')})
         }
         const sessionTerminals = []
         for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly ? [] : ['restored', 'pending'])}) {

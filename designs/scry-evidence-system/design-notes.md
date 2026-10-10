@@ -73,3 +73,14 @@ SQLite 与 archive 都不保存 Provider 当前运行态、MCP 认证、配置�
 - `npm run install:mac:dev` 原子替换 `/Applications/Scry.app`，旧包备份 `/Applications/.Scry.app.backup`。安装后 App 0.2.156、私有 CLI 0.2.47，strict/deep signature 有效；Apple Development 本机开发签名，非 Developer ID 公证发行包。
 - 源/安装 `app.asar` SHA-256：`7a431140a6b159a2f14dfc5f5ac9727bc7472e2670156f459f286f7497ac57b7`；安装包 CSS 定向读取证实标题栏 `min-height: 44px; padding: 0` 与滚动区 `padding: 8px 0 16px`。
 - 原进程 PID 53922 仍运行，未退出/重载/中断用户任务。磁盘安装已验证；完全退出再打开才激活新版本，原截图真实会话的视觉验收仍待用户重放。未 push。
+
+## D-20261010-sidebar-lazy-inventory · 侧栏能力按需读取
+
+- Scope / status：project:Scry 侧栏技能 / MCP 导航与清单读取 / confirmed（需求确认；成品待审）。用户本次截图：“技能和 mcp 不用检测数量了，点击进入的时候再加载吧，这样可以节省性能”。不改变固定摘要的已观测调用计数。
+- Rule：侧栏只保留图标与入口名称，不计算 Skill 数量或 MCP 连接汇总；隐藏页面不读取清单，打开入口或切换能力标签才读取对应清单。后台 turn 完成或新会话仍可失效 Provider/slash 缓存，但仅在技能页面可见时回读 Skills。
+- Reuse / applied：复用 `Sidebar`、`CapabilitiesModal`、`useIntegrations` 的现有刷新函数、上下文与请求序号；从 hook 的启动/context effect 移除 eager 清单请求，按活动页面加载。删除侧栏计数 props、连接汇总 helper 和无消费者样式，不新增数据通道、组件、依赖、轮询或预取缓存。
+- Preserve：Provider/Profile/cwd 改变仍清除旧清单，MCP 手动刷新、认证、错误与 unavailable 语义保留；仓库配置 trust/fingerprint、Provider 执行、斜杠命令和运行控制发现不改动。字体、间距、hover 和焦点样式沿用项目 tokens。属于用户明确要求的局部减法，不推广为全局导航规范。
+- Checks：新增生产 App + 隔离 bridge 的 Electron 场景在旧实现上因“页面打开前已读取 Skills/MCP”失败。修复后 `--models-only` 通过：启动、新会话、turn 完成、重挂载和隐藏页面下的 Provider/Pi Profile 切换没有清单请求；Skills 点击只读 Skills，切换标签才读 MCP，刷新与后续入口请求携带正确 Provider/Profile。fixture 总计 Skills 3 次、MCP 3 次（含手动刷新），后台 0 次。保留 unavailable 原因文案。原 Sidebar 连接汇总断言按新需求替换为无徽标断言，详情页的真实状态断言未削弱。
+- Evidence：274 项 focused unit、`npm run typecheck:web`、build 通过。深浅主题的真实 Electron 侧栏截图暂存 `/tmp/scry-capabilities-lazy-{dark,light}.png`，与用户原图比较：数量与状态点移除，入口对齐及原图标保留。测量的是清单 IPC 次数，不声称整机 CPU 或启动耗时的定量提升。
+- Gaps：本轮 `npm run typecheck` 首次在并行 remote WIP 的 `readSessionStatus` / `query` 类型合同处失败，未修复或纳入本提交；本轮不重跑完整 UI gate。未安装/重启当前 App，未执行真实 Provider/MCP 外部操作。未把 fixture 当作完整安装版验收。
+- Next use：轻导航需要动态清单装饰时 → 先检查是否会触发 Provider/文件系统读取 → 用真实 hook/IPC 请求计数证明隐藏页面为零，并复核开启、关闭、标签切换和上下文失效。
