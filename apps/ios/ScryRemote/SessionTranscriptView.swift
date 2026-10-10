@@ -14,6 +14,7 @@ private struct HistoryChunkView: View {
   let kind: String
   let text: String
   @State private var blocks: [ConversationMarkdownBlock]?
+  @State private var parsedSource: String?
 
   @ViewBuilder var body: some View {
     switch kind {
@@ -21,7 +22,7 @@ private struct HistoryChunkView: View {
       ConversationChunk(kind: kind, text: text)
     default:
       Group {
-        if let blocks {
+        if let blocks, parsedSource == text {
           ConversationMarkdownText(source: "", parsedBlocks: blocks)
         } else { ProgressView() }
       }
@@ -29,6 +30,7 @@ private struct HistoryChunkView: View {
         let parsed = await ConversationMarkdownParser.parseForReading(text)
         guard !Task.isCancelled else { return }
         blocks = parsed
+        parsedSource = text
       }
     }
   }
@@ -59,6 +61,7 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
+  @State private var olderReadRequest = 0
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -113,7 +116,7 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", stopFollowingRequest: olderReadRequest) {
         historyBody
         if hasLiveTurn { liveTurn }
       }
@@ -147,13 +150,32 @@ struct SessionTranscriptView: View {
   }
 
   @ViewBuilder private var historyBody: some View {
+    if run.activeSessionIdentity == sessionIdentity, run.historyCapacityLimit {
+      Button("加载完整历史（完整字节传输）") {
+        if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId) }
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(run.historySyncing)
+      .accessibilityHint("明确选择后下载完整历史；不会裁剪内容")
+    }
     switch run.activeSessionIdentity == sessionIdentity ? run.history : .loading {
     case .idle, .loading:
       transcriptLoadingState
     case let .partial(turns), let .loaded(turns):
-      // Array indices are presentation identity only, not canonical turn IDs.
-      ForEach(turns.indices, id: \.self) { index in
-        HistoryTurnView(turn: turns[index])
+      if run.historyOlderBefore != nil {
+        Button(run.historySyncing ? "正在读取更早历史…" : "加载更早的完整历史") {
+          olderReadRequest += 1
+          if let s = session { run.loadOlderHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId) }
+        }
+        .buttonStyle(.bordered)
+        .disabled(run.historySyncing)
+        .accessibilityHint("仅读取更早轮次，不会裁剪当前历史")
+      }
+      // Snapshot ordinals preserve existing view identity when older pages are
+      // prepended. They are presentation positions, not canonical turn IDs.
+      let first = run.historyPageOffset
+      ForEach(first..<(first + turns.count), id: \.self) { ordinal in
+        HistoryTurnView(turn: turns[ordinal - first])
       }
       ForEach(completedTurns) { turn in completedTurnView(turn) }
     case .empty:
@@ -256,6 +278,7 @@ struct SessionTranscriptView: View {
   }
 
   private var historyStatus: String {
+    if let source = run.historyPageSource, run.historyOlderBefore != nil { return "最近完整历史 · \(source) · 可继续加载更早轮次" }
     if case .partial = run.history { return "部分历史 · 完整性尚未核对" }
     if run.historyFromCache { return "本地历史 · 尚未重新核对主机" }
     if run.historySyncing { return "正在读取历史" }

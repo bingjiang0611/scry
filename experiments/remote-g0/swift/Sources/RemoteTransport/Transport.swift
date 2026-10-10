@@ -362,6 +362,30 @@ public enum G0Transport {
     public let dataBase64: String; public let cursor: Int; public let totalBytes: Int
     public let hasMore: Bool; public let snapshot: String
   }
+  public struct RunHistoryTurnsPage: Sendable, Equatable, Codable {
+    public let turns: [RunHistoryTurn]; public let offset: Int; public let totalTurns: Int
+    public let hasOlder: Bool; public let snapshot: String; public let source: String; public let completeness: String
+    public init(turns: [RunHistoryTurn], offset: Int, totalTurns: Int, hasOlder: Bool,
+                snapshot: String, source: String, completeness: String) {
+      self.turns = turns; self.offset = offset; self.totalTurns = totalTurns; self.hasOlder = hasOlder
+      self.snapshot = snapshot; self.source = source; self.completeness = completeness
+    }
+    public func validate() throws {
+      guard offset >= 0, totalTurns >= offset, turns.count <= totalTurns - offset,
+            hasOlder == (offset > 0), !snapshot.isEmpty, snapshot.utf8.count <= 256,
+            ["active_memory", "indexed_archive", "index_rebuild", "monolithic", "claude_transcript"].contains(source),
+            ["partial", "complete"].contains(completeness),
+            completeness != "complete" || (offset == 0 && turns.count == totalTurns && source != "active_memory") else {
+        throw ProbeError.unexpectedReply
+      }
+    }
+    fileprivate func validated(before: Int?, limit: Int, expectedSnapshot: String?) throws -> Self {
+      try validate()
+      guard turns.count <= limit, offset + turns.count == (before ?? totalTurns),
+            expectedSnapshot == nil || expectedSnapshot == snapshot else { throw ProbeError.unexpectedReply }
+      return self
+    }
+  }
   public struct RunHistoryPreviewItem: Sendable, Equatable, Codable {
     public let kind: String; public let text: String; public let truncated: Bool
     public init(kind: String, text: String, truncated: Bool) { self.kind = kind; self.text = text; self.truncated = truncated }
@@ -372,6 +396,10 @@ public enum G0Transport {
     public init(userText: String, userTextTruncated: Bool, items: [RunHistoryPreviewItem], truncated: Bool) {
       self.userText = userText; self.userTextTruncated = userTextTruncated; self.items = items; self.truncated = truncated
     }
+  }
+  public struct RunHistoryVersion: Sendable, Equatable, Codable {
+    public let version: String
+    public let readMode: String
   }
   public struct RunHistoryPreview: Sendable, Equatable, Codable {
     public let status: String; public let reason: String?; public let source: String?
@@ -424,10 +452,17 @@ public enum G0Transport {
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
   private struct RunSessionsPageRequest: Encodable {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
+    var keepAlive: Bool? = nil
   }
   private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
+  private struct RunHistoryVersionRequest: Encodable { let op = "historyVersion"; let providerId: String; let cwd: String; let externalSessionId: String }
   private struct RunHistoryPreviewRequest: Encodable {
     let op = "historyPreview"; let providerId: String; let cwd: String; let externalSessionId: String
+    var keepAlive: Bool? = nil
+  }
+  struct RunHistoryTurnsPageRequest: Encodable {
+    let op = "historyTurnsPage"; let providerId: String; let cwd: String; let externalSessionId: String
+    let before: Int?; let limit: Int?; let snapshot: String?
     var keepAlive: Bool? = nil
   }
   struct RunHistoryPageRequest: Encodable {
@@ -451,8 +486,10 @@ public enum G0Transport {
     let sessions: [RunSessionRef]?
     let sessionsPage: RunSessionPage?
     let history: [RunHistoryTurn]?
+    let historyVersion: RunHistoryVersion?
     let historyPreview: RunHistoryPreview?
     let historyPage: RunHistoryPage?
+    let historyTurnsPage: RunHistoryTurnsPage?
     let output: RunOutputBody?
     let error: String?
   }
@@ -587,10 +624,22 @@ public enum G0Transport {
       guard let preview = reply.historyPreview else { throw ProbeError.unexpectedReply }
       return preview
     }
+    public func turnsPage(providerId: String, cwd: String, externalSessionId: String, before: Int?, limit: Int, snapshot: String?) async throws -> RunHistoryTurnsPage {
+      let request = try JSONEncoder().encode(RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot, keepAlive: true))
+      let reply = try await response(request, limit: 8 * 1024 * 1024)
+      guard let page = reply.historyTurnsPage else { throw ProbeError.unexpectedReply }
+      return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
+    }
     public func page(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> RunHistoryPage {
       let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: 256 * 1_024, snapshot: snapshot, keepAlive: true))
       let reply = try await response(request, limit: 512 * 1_024)
       guard let page = reply.historyPage else { throw ProbeError.unexpectedReply }
+      return page
+    }
+    public func sessionsPage(cursor: Int, snapshot: String?) async throws -> RunSessionPage {
+      let request = try JSONEncoder().encode(RunSessionsPageRequest(cursor: cursor, limit: 100, snapshot: snapshot, keepAlive: true))
+      let reply = try await response(request, limit: 2 * 1_024 * 1_024)
+      guard let page = reply.sessionsPage else { throw ProbeError.unexpectedReply }
       return page
     }
   }
@@ -608,6 +657,13 @@ public enum G0Transport {
   }
 
   // Small first-screen evidence. Unavailable is explicit and is not decoded as an empty transcript.
+  public static func relayRunHistoryVersion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryVersion {
+    let request = try JSONEncoder().encode(RunHistoryVersionRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let version = response.historyVersion else { throw ProbeError.unexpectedReply }
+    return version
+  }
+
   public static func relayRunHistoryPreview(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
     let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024))
@@ -628,6 +684,13 @@ public enum G0Transport {
   // snapshot and accumulated bytes across disconnects; a changed source fails
   // explicitly instead of combining two transcript versions.
   // Omit the limit by default: the host owns the frame budget and page size.
+  public static func relayRunHistoryTurnsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, before: Int? = nil, limit: Int = 3, snapshot: String? = nil) async throws -> RunHistoryTurnsPage {
+    let request = try JSONEncoder().encode(RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    guard let page = response.historyTurnsPage else { throw ProbeError.unexpectedReply }
+    return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
+  }
+
   public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int? = nil, snapshot: String? = nil) async throws -> RunHistoryPage {
     let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))

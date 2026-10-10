@@ -94,6 +94,8 @@ final class AppModel: ObservableObject {
     return Binding(get: { self.drafts[resolved] ?? ComposerDraft() }, set: { self.drafts[resolved] = $0 })
   }
   @Published private(set) var destructiveActionError: String?
+  @Published private(set) var connectionObservation: RemoteRunStore.ConnectionObservation = .unverified
+  @Published private(set) var connectionNotice: String?
   private var pairingTask: Task<Void, Never>?
   private let connections = RemoteConnectionStore()
 
@@ -120,19 +122,53 @@ final class AppModel: ObservableObject {
     if let host = connections.load()?.relayHost { link = .offline(host: host) }
   }
 
-  // Honest connection status from the run channel: a real successful exchange
-  // proves reachability (.connected); a transport failure demotes to .offline.
-  // Only meaningful when a grant exists; never fabricates a connected dot.
+  // A green link requires a successful transport exchange. Host business errors
+  // (including revocation/unavailable) remain visibly paired but never become
+  // connected; their exact code stays available in this projection.
   func markReachable(_ ok: Bool) {
     guard let host = connectionHost else { return }
     link = ok ? .connected(host: host) : .offline(host: host)
+    if ok { connectionObservation = .reachable; connectionNotice = nil }
+    else if connectionObservation == .unverified { connectionObservation = .transportFailure }
+  }
+
+  func markObservation(_ observation: RemoteRunStore.ConnectionObservation) {
+    connectionObservation = observation
+    guard let host = connectionHost else { return }
+    switch observation {
+    case .reachable:
+      link = .connected(host: host); connectionNotice = nil
+    case .transportFailure:
+      link = .offline(host: host); connectionNotice = "未收到主机响应，传输状态未知。"
+    case .unverified:
+      break
+    case let .hostReply(code):
+      // A valid authenticated reply proves transport reachability. Snapshot,
+      // capacity and unavailable errors must not erase an already-proven green
+      // link; revoked grants are the explicit exception.
+      if Self.isRevocation(code) { link = .offline(host: host) }
+      connectionNotice = "主机已响应，但本次操作不可用（\(code)）。"
+    case let .protocolFailure(code):
+      link = .offline(host: host)
+      connectionNotice = "主机已响应，但协议不匹配（\(code)）。请更新并完全退出后重新打开 Mac。"
+    }
+  }
+
+  private static func isRevocation(_ code: String) -> Bool {
+    ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code)
   }
 
   func statusText() -> String {
     switch link {
     case .notPaired: return "未连接 · 请在 Mac 上配对"
     case .pairing: return "配对中 · 等待 Mac 确认"
-    case .offline: return "已配对 · 尚未验证可达"
+    case .offline:
+      switch connectionObservation {
+      case let .hostReply(code): return "已配对 · 主机已响应（\(code)）"
+      case let .protocolFailure(code): return "已配对 · 协议不匹配（\(code)）"
+      case .transportFailure: return "已配对 · 传输失败"
+      default: return "已配对 · 尚未验证可达"
+      }
     case .connected: return "已连接 · 主机可达"
     }
   }
@@ -295,7 +331,7 @@ final class AppModel: ObservableObject {
       connections.clear()
       runStore.clearAllState()
       pairingTask?.cancel(); pairingTask = nil
-      pairing = .idle; link = .notPaired; route = .home
+      pairing = .idle; link = .notPaired; connectionObservation = .unverified; connectionNotice = nil; route = .home
       query = ""; sessions = []; drafts = [:]; draftAliases = [:]
     } catch {
       destructiveActionError = "无法清除本机配对凭据：\(error)。未报告为已清除，请重试。"

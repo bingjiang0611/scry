@@ -43,9 +43,75 @@ actor RemoteHistoryCache {
     let key: String
     let preview: G0Transport.RunHistoryPreview
   }
+  private struct CatalogEntry: Codable {
+    let version: Int
+    let key: String
+    let sessions: [G0Transport.RunSessionRef]
+  }
+  struct StructuredWindow: Codable, Sendable {
+    let page: G0Transport.RunHistoryTurnsPage
+    let fetchedAt: Date
+  }
+  private struct WindowEntry: Codable {
+    let version: Int
+    let key: String
+    let window: StructuredWindow
+  }
+
+  static func catalogKey(connection: RemoteConnection) -> String {
+    let fields = [connection.hostId, connection.anchorPEM, connection.deviceId]
+    let bytes = try! JSONEncoder().encode(fields)
+    return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+  }
 
   func fileURL(_ key: String) -> URL { directory.appendingPathComponent(key + ".json") }
   private func previewFileURL(_ key: String) -> URL { directory.appendingPathComponent("preview-" + key + ".json") }
+  private func catalogFileURL(_ key: String) -> URL { directory.appendingPathComponent("catalog-" + key + ".json") }
+  private func windowFileURL(_ key: String) -> URL { directory.appendingPathComponent("window-" + key + ".json") }
+
+  func readWindow(_ key: String) throws -> StructuredWindow? {
+    let url = windowFileURL(key)
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard size <= byteLimit else { throw CocoaError(.fileReadTooLarge) }
+    let entry = try JSONDecoder().decode(WindowEntry.self, from: Data(contentsOf: url))
+    guard entry.version == 1, entry.key == key else { throw CocoaError(.fileReadCorruptFile) }
+    try entry.window.page.validate()
+    guard entry.window.page.offset + entry.window.page.turns.count == entry.window.page.totalTurns else {
+      throw CocoaError(.fileReadCorruptFile)
+    }
+    return entry.window
+  }
+
+  @discardableResult
+  func writeWindow(_ page: G0Transport.RunHistoryTurnsPage, key: String, epoch expectedEpoch: Int) throws -> Bool {
+    guard expectedEpoch == epoch else { return false }
+    try page.validate()
+    guard page.offset + page.turns.count == page.totalTurns else { throw CocoaError(.fileWriteUnknown) }
+    let data = try JSONEncoder().encode(WindowEntry(version: 1, key: key, window: StructuredWindow(page: page, fetchedAt: Date())))
+    guard data.count <= byteLimit else { return false }
+    try persist(data, to: windowFileURL(key))
+    return FileManager.default.fileExists(atPath: windowFileURL(key).path)
+  }
+
+  func readCatalog(_ key: String) throws -> [G0Transport.RunSessionRef]? {
+    let url = catalogFileURL(key)
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard size <= byteLimit else { throw CocoaError(.fileReadTooLarge) }
+    let entry = try JSONDecoder().decode(CatalogEntry.self, from: Data(contentsOf: url))
+    guard entry.version == 1, entry.key == key else { throw CocoaError(.fileReadCorruptFile) }
+    return entry.sessions
+  }
+
+  @discardableResult
+  func writeCatalog(_ sessions: [G0Transport.RunSessionRef], key: String, epoch expectedEpoch: Int) throws -> Bool {
+    guard expectedEpoch == epoch else { return false }
+    let data = try JSONEncoder().encode(CatalogEntry(version: 1, key: key, sessions: sessions))
+    guard data.count <= byteLimit else { return false }
+    try persist(data, to: catalogFileURL(key))
+    return FileManager.default.fileExists(atPath: catalogFileURL(key).path)
+  }
 
   func read(_ key: String) throws -> RemoteHistorySnapshot? {
     let url = fileURL(key)

@@ -16,6 +16,13 @@ import RemoteTransport
 //   - A transport failure surfaces verbatim; we never pretend "offline" success.
 @MainActor
 final class RemoteRunStore: ObservableObject {
+  enum ConnectionObservation: Equatable {
+    case unverified
+    case reachable
+    case transportFailure
+    case hostReply(code: String)
+    case protocolFailure(code: String)
+  }
   enum ProjectsState: Equatable {
     case idle
     case loading
@@ -161,6 +168,7 @@ final class RemoteRunStore: ObservableObject {
     }
   }
   @Published private(set) var catalog: CatalogState = .idle
+  @Published private(set) var catalogRefreshError: String?
 
   enum HistoryPreviewState: Equatable {
     case idle
@@ -188,12 +196,17 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var historyProgress: String?
   @Published private(set) var historyRefreshError: String?
   @Published private(set) var historyStorageNotice: String?
+  @Published private(set) var historyCapacityLimit = false
   @Published private(set) var historyCacheClearing = false
   // Whether the host was actually reached on the LAST attempt. Paired != reachable:
   // a persisted grant only means we MAY reach the host; only a real successful
   // exchange proves it. nil = not tried yet. This is the honest source of the
   // connection status (fixes "shows offline while sending works").
   @Published private(set) var reachable: Bool?
+  // `reachable` is retained for the existing link indicator; this richer value
+  // prevents an authenticated business/protocol reply from being rendered as
+  // transport-offline (or as a successful connected state).
+  @Published private(set) var connectionObservation: ConnectionObservation = .unverified
   @Published private(set) var lifecycle: Lifecycle = .unknown
   @Published private(set) var output: [OutputLine] = []
   // The user's own submitted message, echoed immediately as a chat bubble
@@ -256,6 +269,12 @@ final class RemoteRunStore: ObservableObject {
   private var prefetchGeneration = 0
   private var warmedScreens: [String: G0Transport.RunHistoryPreview] = [:]
   private var cachedHistory: (key: String, snapshot: RemoteHistorySnapshot, persisted: Bool)?
+  private var historyVersions: [String: String] = [:]
+  private var historyWindow: G0Transport.RunHistoryTurnsPage?
+  var historyOlderBefore: Int? { historyWindow.flatMap { $0.hasOlder ? $0.offset : nil } }
+  var historyPageSnapshot: String? { historyWindow?.snapshot }
+  var historyPageSource: String? { historyWindow?.source }
+  var historyPageOffset: Int { historyWindow?.offset ?? 0 }
   private var historyRequestGeneration = 0
   private var historyPreviewKey: String?
   private var pendingSubmission: PendingSubmission?
@@ -399,6 +418,32 @@ final class RemoteRunStore: ObservableObject {
     return Date().timeIntervalSince(date) < interval
   }
 
+  private var connectionSuccessRevision = 0
+
+  private func recordSuccess() {
+    connectionSuccessRevision += 1
+    reachable = true
+    connectionObservation = .reachable
+  }
+
+  private func recordFailure(_ error: Error, since revision: Int? = nil) {
+    if let runError = error as? G0Transport.RunError, case let .host(code) = runError {
+      connectionSuccessRevision += 1
+      if code == "unknown_op" || ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code) {
+        reachable = nil
+      } else {
+        reachable = true
+      }
+      connectionObservation = code == "unknown_op" ? .protocolFailure(code: code) : .hostReply(code: code)
+      return
+    }
+    // Only a newer authenticated reply can supersede a failed request.
+    // Another pending request is not evidence that the connection works.
+    if let revision, connectionSuccessRevision > revision { return }
+    reachable = false
+    connectionObservation = .transportFailure
+  }
+
   func chooseProject(_ ref: G0Transport.RunProjectRef) {
     chosen = ref
     if let provider = chosenProvider {
@@ -446,24 +491,62 @@ final class RemoteRunStore: ObservableObject {
       return
     }
     if !hasCachedValue { catalog = .loading }
+    catalogRefreshError = nil
     let requestDataGeneration = dataGeneration
+    let disk = historyDisk
+    let diskKey = RemoteHistoryCache.catalogKey(connection: client.connection)
+    let requestConnectionRevision = connectionSuccessRevision
     catalogTask = Task { [weak self] in
+      let diskEpoch = await disk.epoch
       do {
-        let list = try await client.sessions()
+        if !hasCachedValue {
+          do {
+            if let cached = try await disk.readCatalog(diskKey) {
+              await MainActor.run {
+                guard let self, self.dataGeneration == requestDataGeneration else { return }
+                self.catalog = cached.isEmpty ? .empty : .loaded(cached)
+              }
+            }
+          } catch {
+            await MainActor.run {
+              guard let self, self.dataGeneration == requestDataGeneration else { return }
+              self.catalogRefreshError = "本地列表缓存不可用，将核对主机：\(Self.describe(error))"
+            }
+          }
+        }
+        let list = try await client.sessions(progress: { [weak self] page in
+          await MainActor.run {
+            guard let self, self.dataGeneration == requestDataGeneration else { return }
+            self.recordSuccess()
+            self.catalog = page.isEmpty ? .empty : .loaded(page)
+            // Only warm after the frozen catalog is complete. A partial page
+            // must not start work for sessions that may not belong to it.
+          }
+        })
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.catalogTask = nil
-          self.reachable = true
+          self.recordSuccess()
           self.catalogLoadedAt = Date()
+          self.catalogRefreshError = nil
           self.catalog = list.isEmpty ? .empty : .loaded(list)
           self.prefetchHistory(list)
+        }
+        do {
+          _ = try await disk.writeCatalog(list, key: diskKey, epoch: diskEpoch)
+        } catch {
+          await MainActor.run {
+            guard let self, self.dataGeneration == requestDataGeneration else { return }
+            self.catalogRefreshError = "会话列表未保存到手机缓存：\(Self.describe(error))"
+          }
         }
       } catch {
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.catalogTask = nil
-          self.reachable = false
-          if !hasCachedValue { self.catalog = .failed(Self.describe(error)) }
+          self.recordFailure(error, since: requestConnectionRevision)
+          if !self.catalog.hasVisibleValue { self.catalog = .failed(Self.describe(error)) }
+          else { self.catalogRefreshError = Self.describe(error) }
         }
       }
     }
@@ -547,7 +630,7 @@ final class RemoteRunStore: ObservableObject {
   // Show protected local data before opening the relay. Only an authenticated
   // host response can mark it current/reachable. The single memory entry keeps
   // large transcripts bounded; other conversations reopen from disk off-main.
-  func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false) {
+  func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false, legacyFull: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
@@ -570,12 +653,14 @@ final class RemoteRunStore: ObservableObject {
     let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
     let client = RemoteRunClient(connection: connection)
     let disk = historyDisk
+    let requestConnectionRevision = connectionSuccessRevision
     let memory = cachedHistory?.key == key ? cachedHistory?.snapshot : nil
     historyRequestGeneration += 1
     let request = historyRequestGeneration
     let requestGeneration = generation
     historyFromCache = false; historyFetchedAt = nil; historyProgress = nil
-    historyRefreshError = nil; historyStorageNotice = nil
+    historyRefreshError = nil; historyStorageNotice = nil; historyCapacityLimit = false
+    historyWindow = nil
     if historyPreviewKey != key { historyPreview = .idle; historyPreviewKey = nil }
     if case .available = historyPreview {} else { historyPreview = .loading }
     if let memory { showHistory(memory, key: key, cached: true, persisted: cachedHistory?.persisted == true) }
@@ -600,11 +685,15 @@ final class RemoteRunStore: ObservableObject {
       var cached = memory
       var persisted = self.cachedHistory?.key == key && self.cachedHistory?.persisted == true
       var cachedPreview: G0Transport.RunHistoryPreview?
-      do { cachedPreview = try await disk.readPreview(key) }
+      var cachedWindow: RemoteHistoryCache.StructuredWindow?
+      do { cachedPreview = try await disk.readPreview(key); cachedWindow = try await disk.readWindow(key) }
       catch { if current() { self.historyStorageNotice = "本地首屏镜像不可用，将从主机重新读取" } }
       guard current() else { return }
       if let cachedPreview, cached == nil, !hasLocalTurns { self.showPreview(cachedPreview, key: key, cached: true) }
-      if cached == nil {
+      if let cachedWindow, cached == nil {
+        self.showHistoryWindow(cachedWindow.page, cached: true, fetchedAt: cachedWindow.fetchedAt)
+      }
+      if cached == nil, cachedWindow == nil || legacyFull || hasLocalTurns {
         do { cached = try await disk.read(key); persisted = cached != nil }
         catch { if current() { self.historyStorageNotice = "本地缓存不可用，将从主机重新读取" } }
       }
@@ -616,8 +705,8 @@ final class RemoteRunStore: ObservableObject {
            (0..<30).contains(Date().timeIntervalSince(cached.fetchedAt)) { return }
       }
       if hasLocalTurns {
-        if cached == nil { self.history = .baseUnavailable; self.historyRevision += 1 }
-        let notice = cached == nil
+        if cached == nil && cachedWindow == nil { self.history = .baseUnavailable; self.historyRevision += 1 }
+        let notice = cached == nil && cachedWindow == nil
           ? "历史基底未缓存，以下仅为本机运行增量；重启后重新核对完整主机历史。"
           : "保留历史基底与本机运行增量，避免重复；重启后重新核对完整主机历史。"
         self.historyStorageNotice = notice + (cached != nil && !persisted ? " 当前基底仅存内存，未写入手机缓存。" : "")
@@ -625,7 +714,7 @@ final class RemoteRunStore: ObservableObject {
       }
       @MainActor func failed(_ error: Error) {
         guard current() else { return }
-        self.showHistoryFailure(error, cached: cached)
+        self.showHistoryFailure(error, cached: cached, since: requestConnectionRevision)
       }
       do {
         #if DEBUG
@@ -634,13 +723,46 @@ final class RemoteRunStore: ObservableObject {
         }
         #endif
         try await client.withHistoryConnection { [cached, persisted] reader in
-          // Preview and all complete pages share one fresh, readonly mTLS tunnel.
+          // Preview and structured recent pages share one fresh, readonly mTLS tunnel.
+          if !legacyFull {
+            // A first-screen preview remains explicitly partial. It also gives
+            // an oversized turn a readable surface before the capacity reply.
+            if case .loading = self.history {
+              let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+              guard current() else { return }
+              if preview.available {
+                self.showPreview(preview, key: key, cached: false)
+                self.recordSuccess()
+              }
+            }
+            do {
+              let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil)
+              guard current() else { return }
+              self.showHistoryWindow(recent, cached: false, fetchedAt: Date())
+              self.recordSuccess()
+              do {
+                let saved = try await disk.writeWindow(recent, key: key, epoch: diskEpoch)
+                if current(), !saved { self.historyStorageNotice = "最近历史窗口未保存到手机缓存" }
+              } catch {
+                if current() { self.historyStorageNotice = "最近历史窗口未保存到手机缓存：\(Self.describe(error))" }
+              }
+              return
+            } catch let error as G0Transport.RunError {
+              guard case .host(code: "history_capacity_exceeded") = error else { throw error }
+              guard current() else { return }
+              self.historyCapacityLimit = true
+              self.historyStorageNotice = "最近窗口超过传输容量；可明确选择加载完整历史。"
+              self.recordFailure(error, since: requestConnectionRevision)
+              if case .loading = self.history { self.history = .failed("最近窗口超过传输容量，可选择加载完整历史。") }
+              return
+            }
+          }
           do {
             let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
             guard current() else { return }
             if preview.available {
               if cached == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
-              self.reachable = true
+              self.recordSuccess()
               do {
                 let saved = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
                 if current(), !saved { self.historyStorageNotice = "首屏镜像未保存到手机缓存" }
@@ -671,7 +793,7 @@ final class RemoteRunStore: ObservableObject {
                 }
               })
             guard current() else { return }
-            self.reachable = true
+            self.recordSuccess()
             let alreadySaved = persisted && cached?.fingerprint == snapshot.fingerprint
             self.showHistory(snapshot, key: key, cached: false, persisted: alreadySaved)
             self.historySyncing = false
@@ -694,12 +816,14 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  private func showHistoryFailure(_ error: Error, cached: RemoteHistorySnapshot?) {
-    if let runError = error as? G0Transport.RunError, case .host(code: "unknown_op") = runError {
-      // An authenticated host replied: this is protocol mismatch, not offline.
-      reachable = true
-    } else { reachable = false }
+  func loadCompleteHistory(providerId: String, cwd: String, externalSessionId: String) {
+    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, legacyFull: true)
+  }
+
+  private func showHistoryFailure(_ error: Error, cached: RemoteHistorySnapshot?, since revision: Int? = nil) {
+    recordFailure(error, since: revision)
     historyRefreshError = Self.describe(error)
+    if historyWindow != nil { return }
     if cached == nil, case .available = historyPreview {
       history = .partial(historyPreviewTurns)
     } else if cached == nil { history = .failed(Self.describe(error)) }
@@ -725,6 +849,16 @@ final class RemoteRunStore: ObservableObject {
     historyRevision += 1
   }
 
+  private func showHistoryWindow(_ page: G0Transport.RunHistoryTurnsPage, cached: Bool, fetchedAt: Date) {
+    historyWindow = page
+    if page.totalTurns == 0 { history = .empty }
+    else if page.completeness == "complete" { history = .loaded(page.turns) }
+    else { history = .partial(page.turns) }
+    historyFromCache = cached
+    historyFetchedAt = fetchedAt
+    historyRevision += 1
+  }
+
   private func showHistory(_ snapshot: RemoteHistorySnapshot, key: String, cached: Bool, persisted: Bool) {
     let rendered: Bool
     switch history { case .loaded, .empty: rendered = true; default: rendered = false }
@@ -740,6 +874,55 @@ final class RemoteRunStore: ObservableObject {
     historyFetchedAt = snapshot.fetchedAt
   }
 
+  func loadOlderHistory(providerId: String, cwd: String, externalSessionId: String) {
+    guard let window = historyWindow, window.hasOlder,
+          let connection = connections.load(), historyTask == nil else { return }
+    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let requestConnectionRevision = connectionSuccessRevision
+    let requestGeneration = generation
+    historyRequestGeneration += 1
+    let request = historyRequestGeneration
+    let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    historySyncing = true
+    historyTask = Task { [weak self] in
+      guard let self else { return }
+      defer {
+        if self.historyRequestGeneration == request { self.historyTask = nil; self.historySyncing = false }
+      }
+      let epoch = await self.historyDisk.epoch
+      do {
+        let page = try await RemoteRunClient(connection: connection).withHistoryConnection { reader in
+          try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
+            before: window.offset, limit: 3, snapshot: window.snapshot)
+        }
+        guard !Task.isCancelled, self.isCurrent(requestGeneration, identity: identity),
+              self.connections.load() == connection, self.historyRequestGeneration == request else { return }
+        self.recordSuccess()
+        guard page.totalTurns == window.totalTurns else {
+          self.historyRefreshError = "历史分页总数发生变化，保留已读取内容；请刷新最近历史。"
+          return
+        }
+        let turns = page.turns + window.turns
+        let complete = page.offset == 0 && turns.count == window.totalTurns && window.source != "active_memory"
+        let combined = G0Transport.RunHistoryTurnsPage(turns: turns, offset: page.offset,
+          totalTurns: window.totalTurns, hasOlder: page.hasOlder, snapshot: window.snapshot,
+          source: window.source, completeness: complete ? "complete" : "partial")
+        self.showHistoryWindow(combined, cached: false, fetchedAt: Date())
+        do {
+          let saved = try await self.historyDisk.writeWindow(combined, key: key, epoch: epoch)
+          if self.historyRequestGeneration == request, !saved { self.historyStorageNotice = "已读取历史超过手机缓存容量，本次仅保留在内存中。" }
+        } catch {
+          if self.historyRequestGeneration == request { self.historyStorageNotice = "历史窗口保存失败：\(Self.describe(error))" }
+        }
+      } catch {
+        guard !Task.isCancelled, self.isCurrent(requestGeneration, identity: identity),
+              self.historyRequestGeneration == request else { return }
+        self.historyRefreshError = Self.describe(error)
+        self.recordFailure(error, since: requestConnectionRevision)
+      }
+    }
+  }
+
   func clearHistoryCache() async throws {
     historyCacheClearing = true
     defer { historyCacheClearing = false }
@@ -750,6 +933,7 @@ final class RemoteRunStore: ObservableObject {
     historyTask?.cancel()
     historyTask = nil
     cachedHistory = nil
+    historyWindow = nil
     history = .idle; historyPreview = .idle; historyPreviewKey = nil; historySyncing = false; historyFromCache = false
     historyFetchedAt = nil; historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
     try await historyDisk.clear()
@@ -771,9 +955,38 @@ final class RemoteRunStore: ObservableObject {
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     let requestGeneration = generation
     await historyTask?.value
-    guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
-    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
-    await historyTask?.value
+    guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity),
+          let client = makeClient() else { return }
+    let key = RemoteHistoryCache.key(connection: client.connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    let requestConnectionRevision = connectionSuccessRevision
+    do {
+      let version = try await client.historyVersion(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+      guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
+      recordSuccess()
+      if historyPageSnapshot == version.version || historyVersions[key] == version.version {
+        historyVersions[key] = version.version
+        return
+      }
+      // Do not throw away the older pages/full snapshot a reader explicitly
+      // opened. A source change is surfaced; an explicit refresh owns rebasing.
+      if let window = historyWindow, window.turns.count > 3 {
+        historyStorageNotice = "主机历史来源版本有变化；刷新最近历史可重新核对，当前阅读位置与旧历史已保留。"
+        return
+      }
+      if historyWindow == nil, cachedHistory != nil {
+        historyStorageNotice = "当前完整快照已保留，尚未核对主机当前历史；可明确刷新最近历史。"
+        return
+      }
+      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
+      await historyTask?.value
+      guard isCurrent(requestGeneration, identity: identity), historyRefreshError == nil,
+            let loadedVersion = historyPageSnapshot else { return }
+      historyVersions[key] = loadedVersion
+    } catch {
+      guard isCurrent(requestGeneration, identity: identity) else { return }
+      recordFailure(error, since: requestConnectionRevision)
+      historyRefreshError = Self.describe(error)
+    }
   }
 
   // Re-opening the same session does not discard its live observation. If the
@@ -832,13 +1045,14 @@ final class RemoteRunStore: ObservableObject {
     }
     if !hasCachedValue { providers = .loading }
     let requestDataGeneration = dataGeneration
+    let requestConnectionRevision = connectionSuccessRevision
     providersTask = Task { [weak self] in
       do {
         let list = try await client.providers()
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.providersTask = nil
-          self.reachable = true
+          self.recordSuccess()
           self.providersLoadedAt = Date()
           let usable = list.filter { $0.available }
           self.providers = usable.isEmpty ? .empty : .loaded(usable)
@@ -869,7 +1083,7 @@ final class RemoteRunStore: ObservableObject {
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.providersTask = nil
-          self.reachable = false
+          self.recordFailure(error, since: requestConnectionRevision)
           if !hasCachedValue { self.providers = .failed(Self.describe(error)) }
         }
       }
@@ -997,7 +1211,7 @@ final class RemoteRunStore: ObservableObject {
           guard let self, self.dataGeneration == requestDataGeneration,
                 self.commandsRequestGeneration == requestGeneration else { return }
           self.commandsTask = nil
-          self.reachable = true
+          self.recordSuccess()
           self.commandCache[key] = catalog
           self.commands = catalog.commands.isEmpty ? .empty(catalog.reason) : .loaded(catalog.commands)
         }
@@ -1046,13 +1260,14 @@ final class RemoteRunStore: ObservableObject {
     }
     if !hasCachedValue { projects = .loading }
     let requestDataGeneration = dataGeneration
+    let requestConnectionRevision = connectionSuccessRevision
     projectsTask = Task { [weak self] in
       do {
         let list = try await client.projects()
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.projectsTask = nil
-          self.reachable = true
+          self.recordSuccess()
           self.projectsLoadedAt = Date()
           self.projects = list.isEmpty ? .empty : .loaded(list)
           _ = self.restoreActiveContext()
@@ -1061,7 +1276,7 @@ final class RemoteRunStore: ObservableObject {
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.projectsTask = nil
-          self.reachable = false
+          self.recordFailure(error, since: requestConnectionRevision)
           if !hasCachedValue { self.projects = .failed(Self.describe(error)) }
         }
       }
@@ -1080,6 +1295,7 @@ final class RemoteRunStore: ObservableObject {
     directoriesTask?.cancel()
     directories = .loading
     let requestGeneration = generation
+    let requestConnectionRevision = connectionSuccessRevision
     directoriesTask = Task { [weak self] in
       do {
         let listing = try await client.directories(path: path)
@@ -1087,14 +1303,14 @@ final class RemoteRunStore: ObservableObject {
           guard let self, self.generation == requestGeneration,
                 self.directoriesRequestGeneration == directoriesRequest else { return }
           self.directoriesTask = nil
-          self.reachable = true; self.directories = .loaded(listing)
+          self.recordSuccess(); self.directories = .loaded(listing)
         }
       } catch {
         await MainActor.run {
           guard let self, self.generation == requestGeneration,
                 self.directoriesRequestGeneration == directoriesRequest else { return }
           self.directoriesTask = nil
-          self.reachable = false; self.directories = .failed(Self.describe(error))
+          self.recordFailure(error, since: requestConnectionRevision); self.directories = .failed(Self.describe(error))
         }
       }
     }
@@ -1155,12 +1371,16 @@ final class RemoteRunStore: ObservableObject {
     }
     submitTask?.cancel()
     let requestGeneration = generation
+    let requestConnectionRevision = connectionSuccessRevision
     submitTask = Task { [weak self] in
+      defer {
+        Task { @MainActor [weak self] in self?.submitTask = nil }
+      }
       do {
         let outcome = try await client.submit(routing: pending.routing, intentId: pending.intentId)
         await MainActor.run {
           guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.reachable = true
+          self.recordSuccess()
           self.runId = outcome.runId
           self.terminalDrainCompleted = false
           let saved = self.saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
@@ -1174,7 +1394,7 @@ final class RemoteRunStore: ObservableObject {
       } catch {
         await MainActor.run {
           guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.reachable = false
+          self.recordFailure(error, since: requestConnectionRevision)
           self.lifecycle = .submitting
           self.retryAvailable = true
           self.submitError = "提交结果未知：\(Self.describe(error))。请重试核对，不会创建新的任务。"
@@ -1197,6 +1417,7 @@ final class RemoteRunStore: ObservableObject {
         self.apply(runState: state, generation: generation, identity: identity)
       }
       while !Task.isCancelled {
+        let requestConnectionRevision = self.connectionSuccessRevision
         do {
           let page = try await client.poll(cursor: ledgerCursor)
           ledgerCursor = page.cursor
@@ -1218,7 +1439,7 @@ final class RemoteRunStore: ObservableObject {
           }
           await MainActor.run { [weak self] in
             guard let self, self.isCurrent(generation, identity: identity) else { return }
-            self.reachable = true
+            self.recordSuccess()
             self.observationInterrupted = false
           }
         } catch {
@@ -1226,7 +1447,7 @@ final class RemoteRunStore: ObservableObject {
           // and say exactly that, so a stale/unknown result cannot look settled.
           await MainActor.run {
             guard self.isCurrent(generation, identity: identity) else { return }
-            self.reachable = false
+            self.recordFailure(error, since: requestConnectionRevision)
             self.observationInterrupted = true
             self.submitError = "观察中断：\(Self.describe(error))。运行结果未知。"
             self.pollTask = nil
@@ -1505,8 +1726,8 @@ final class RemoteRunStore: ObservableObject {
     clearRecoveryCheckpoint()
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
-    catalog = .idle; history = .idle; historyPreview = .idle; historyPreviewKey = nil; reachable = nil
-    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil
+    catalog = .idle; catalogRefreshError = nil; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
+    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil; historyVersions = [:]
     historyRequestGeneration += 1
     historySyncing = false; historyFromCache = false; historyFetchedAt = nil
     historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
@@ -1624,6 +1845,9 @@ final class RemoteRunStore: ObservableObject {
     let disk = RemoteHistoryCache(directory: directory)
     let key = RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "session")
     _ = try await disk.write(snapshot, key: key, epoch: 0)
+    let catalogKey = RemoteHistoryCache.catalogKey(connection: connection)
+    let catalogFixture = [G0Transport.RunSessionRef(sessionId: "catalog-session", externalSessionId: "session", providerId: "pi", cwd: "/fixture", label: "fixture", ts: 1)]
+    _ = try await disk.writeCatalog(catalogFixture, key: catalogKey, epoch: await disk.epoch)
     let store = RemoteRunStore(connections: connections, historyDisk: disk)
     store.historyTestOffline = true
     store.commands = .loaded([.init(name: "old-project", description: "fixture", source: "custom")])
@@ -1633,12 +1857,33 @@ final class RemoteRunStore: ObservableObject {
     store.prefetchHistory([.init(sessionId: "fixture", externalSessionId: "session", providerId: "pi", cwd: "/fixture", label: "fixture", ts: 1)])
     await store.prefetchTask?.value
     var checks: [(String, Bool)] = [
+      ("store.catalogCacheUsesGrantNamespace", (try? await disk.readCatalog(catalogKey)) == catalogFixture),
       ("store.sessionSwitchDropsOldCommands", store.slashCommands.isEmpty),
       ("store.warmingDoesNotSwitchSession", store.activeSessionIdentity == beforeIdentity && store.prompt == nil),
       ("store.warmingUsesBoundedMirror", store.warmedScreens[key]?.available == true && ((try? JSONEncoder().encode(store.warmedScreens[key]).count) ?? Int.max) <= 16 * 1024),
       ("store.offlineKeepsDiskHistory", store.history == .loaded(snapshot.turns) && store.historyFromCache && store.reachable == false),
       ("store.offlineUpdateErrorVisible", store.historyRefreshError != nil)
     ]
+    // Pending work does not prove reachability; a newer authenticated reply does.
+    let transportError = NSError(domain: "ScryHistoryFixture", code: 9)
+    store.reachable = true; store.connectionObservation = .reachable
+    store.historyTask = Task {}; store.recordFailure(transportError)
+    checks.append(("store.historyFailureDemotesWhenAlone", store.reachable == false))
+    store.reachable = true; store.connectionObservation = .reachable
+    store.historyTask = Task {}; store.catalogTask = Task {}
+    let failedRequestRevision = store.connectionSuccessRevision
+    store.recordFailure(transportError, since: failedRequestRevision)
+    checks.append(("store.pendingRequestDoesNotProveReachability", store.reachable == false))
+    store.recordSuccess()
+    store.recordFailure(transportError, since: failedRequestRevision)
+    checks.append(("store.historyFailureDoesNotOverrideConcurrentSuccess", store.reachable == true && store.connectionObservation == .reachable))
+    store.historyTask?.cancel(); store.historyTask = nil; store.catalogTask?.cancel(); store.catalogTask = nil
+    store.reachable = true; store.submitTask = Task {}; store.recordFailure(transportError)
+    checks.append(("store.submitFailureDemotesWhenAlone", store.reachable == false))
+    store.submitTask?.cancel(); store.submitTask = nil
+    store.reachable = true; store.pollTask = Task {}; store.recordFailure(transportError)
+    checks.append(("store.pollFailureDemotesWhenAlone", store.reachable == false))
+    store.pollTask?.cancel(); store.pollTask = nil
     store.historyTask = Task {}
     store.prefetchHistory([.init(sessionId: "fixture", externalSessionId: "session", providerId: "pi", cwd: "/fixture", label: "fixture", ts: 1)])
     checks.append(("store.warmingYieldsToForeground", store.prefetchTask == nil))
@@ -1691,7 +1936,7 @@ final class RemoteRunStore: ObservableObject {
     checks.append(("store.unavailableCannotEraseMirror", !overwritten && preservedPreview == preview))
     mirrorStore.showHistoryFailure(G0Transport.RunError.host(code: "unknown_op"), cached: nil)
     checks.append(("store.protocolFailureKeepsMirror", mirrorStore.history == .partial(mirrorStore.historyPreviewTurns) && mirrorStore.historyFromCache))
-    checks.append(("store.protocolFailureNotOffline", mirrorStore.reachable == true))
+    checks.append(("store.protocolFailureNotOffline", mirrorStore.reachable == nil && mirrorStore.connectionObservation == .protocolFailure(code: "unknown_op")))
     checks.append(("store.protocolFailureActionable", mirrorStore.historyRefreshError?.contains("重新打开") == true))
     let reopened = RemoteRunStore(connections: connections, historyDisk: disk)
     reopened.historyTestOffline = true
@@ -1701,6 +1946,28 @@ final class RemoteRunStore: ObservableObject {
     reopened.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "different-session", force: true)
     await reopened.historyTask?.value
     checks.append(("store.mirrorDoesNotCrossSessions", reopened.historyPreviewTurns.isEmpty))
+    let windowKey = RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "window-only")
+    let window = G0Transport.RunHistoryTurnsPage(turns: snapshot.turns, offset: 3,
+      totalTurns: 3 + snapshot.turns.count, hasOlder: true, snapshot: "window-version", source: "indexed_archive", completeness: "partial")
+    checks.append(("store.windowMirrorSaved", try await disk.writeWindow(window, key: windowKey, epoch: await disk.epoch)))
+    let windowStore = RemoteRunStore(connections: connections, historyDisk: disk)
+    windowStore.historyTestOffline = true
+    windowStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only")
+    await windowStore.historyTask?.value
+    checks.append(("store.offlineWindowRetainsWholeTurns", windowStore.history == .partial(snapshot.turns) && windowStore.historyFromCache))
+    checks.append(("store.offlineWindowRetainsOlderCursor", windowStore.historyOlderBefore == 3 && windowStore.historyPageOffset == 3))
+    let windowIdentity = SessionIdentity.opened(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only")
+    windowStore.completedLiveTurns[windowIdentity] = [.init(id: "local-window-run", runId: "local-window-run", prompt: "local window prompt",
+      attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "window-only")]
+    windowStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true)
+    await windowStore.historyTask?.value
+    checks.append(("store.localOverlayKeepsPartialWindowBase", windowStore.history == .partial(snapshot.turns) && windowStore.completedTurns(for: windowIdentity).count == 1))
+    let olderOnly = G0Transport.RunHistoryTurnsPage(turns: snapshot.turns, offset: 0,
+      totalTurns: 3 + snapshot.turns.count, hasOlder: false, snapshot: "window-version", source: "indexed_archive", completeness: "partial")
+    do {
+      _ = try await disk.writeWindow(olderOnly, key: windowKey, epoch: await disk.epoch)
+      checks.append(("store.rejectOlderOnlyAsTailCache", false))
+    } catch { checks.append(("store.rejectOlderOnlyAsTailCache", true)) }
     let oldEpoch = await disk.epoch
     try await mirrorStore.clearHistoryCache()
     let resurrected = try await disk.writePreview(preview, key: previewKey, epoch: oldEpoch)

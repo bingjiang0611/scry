@@ -67,6 +67,20 @@ final class HistoryConnectionTests: XCTestCase {
     }
   }
 
+  func testProgressingFrameMayTakeLongerThanThirtySeconds() throws {
+    let handler = HistoryReadHandler()
+    let channel = try connectedChannel(handler)
+    defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+    channel.pipeline.fireUserInboundEventTriggered(TLSUserEvent.handshakeCompleted(negotiatedProtocol: nil))
+    let reply = handler.request(Data("request".utf8), limit: 100, on: channel)
+    channel.embeddedEventLoop.advanceTime(by: .seconds(20))
+    _ = try channel.writeInbound(ByteBuffer(string: "{\"page\":"))
+    channel.embeddedEventLoop.advanceTime(by: .seconds(20))
+    XCTAssertTrue(channel.isActive)
+    _ = try channel.writeInbound(ByteBuffer(string: "1}\n"))
+    XCTAssertEqual(try reply.wait(), Data("{\"page\":1}".utf8))
+  }
+
   func testUnsolicitedOrTrailingRepliesFailClosed() throws {
     for payload in ["reply\nextra", "reply\n"] {
       let handler = HistoryReadHandler()

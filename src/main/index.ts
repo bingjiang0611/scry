@@ -60,6 +60,7 @@ import { isMcpGuardReport } from '../shared/mcpguard-report'
 import { appendLlmPerformance, appendUsage, cleanupUsageAtomicTemps, deleteUsageSessionRows, readUsageStats, usageSessionRunIds } from './usage-jsonl'
 import { LlmPerformanceObserver } from './llm-performance'
 import { readLlmPerformanceHistory } from './llm-performance-history'
+import { LlmPerformanceSampler } from '../shared/llm-performance'
 import { stopObservedBackgroundTask } from './background-task-control'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isRendererPerformanceSample } from '../shared/performance'
@@ -166,7 +167,8 @@ import {
 } from './workspace-authorization'
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import { assertTrustedIpcEvent as assertTrustedIpcEventForWindow, registerTrustedIpcHandler } from './ipc-trust'
-import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
+import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveCanonicalRemoteProjectDirectory, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
+import { readRemoteHistoryTurnsPage, readRemoteHistoryVersion } from './remote/history-reader'
 import { observeSessionStatus } from './remote/remote-workspace'
 import type {
   TerminalCloseRequest,
@@ -2210,6 +2212,7 @@ interface RunControl {
 
 // 每个 run 独立持有 Provider handle、问题与 diff 生命周期；focused 只表示当前 UI 正在看谁。
 const runs = new RunRegistry<ActiveRun, RunControl>()
+const llmPerformanceSampler = new LlmPerformanceSampler()
 // 停止是一个生命周期而不是一次调用：它把真实进度（已请求/已强杀/未确认终止）发给 renderer，
 // 并把同一份快照挂在 ActiveRun 上，让重挂的 renderer 也能拿到诚实状态。
 const runStopLifecycle = new RunStopLifecycle({
@@ -3762,6 +3765,7 @@ handleTrusted('agent:answerQuestion', (event, response: unknown) => {
 // B2：sqlite 跨会话分析（工具频率 / 按目录花费），纯文件做不到的结构化查询
 handleTrusted('agent:stats', () => statsQuery())
 handleTrusted('agent:llmPerformanceHistory', () => readLlmPerformanceHistory(app.getPath('userData')))
+handleTrusted('agent:llmPerformanceSummary', () => llmPerformanceSampler.sample(runs.activeStates()))
 
 handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => {
   if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
@@ -4115,14 +4119,16 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // projects (a session whose cwd is not an authorized project dir is not
       // offered), non-archived, most-recent-first. Display metadata only; opening
       // a session's content is re-authorized separately.
+      sessionCatalogRevision: () => createHash('sha256').update(JSON.stringify(canonicalRemoteProjectRoots(knownProjectDirectories()))).digest('hex'),
       listSessions: () => {
+        const roots = canonicalRemoteProjectRoots(knownProjectDirectories())
         const activeRuns = runs.activeStates()
         const out: { sessionId: string; externalSessionId?: string; providerId: string; agentProfileId?: string; cwd: string; label: string; ts: number; pinnedAt?: number; isActive?: boolean }[] = []
         for (const s of appSessionStore().load()) {
           if (s.archivedAt) continue
           if (!s.cwd) continue
           let canonical: string
-          try { canonical = resolveRemoteProjectDirectory(s.cwd) } catch { continue }
+          try { canonical = resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { continue }
           const isActive = activeRuns.some((run) =>
             run.providerId === s.providerId && run.cwd === canonical &&
             (run.runId === s.runId || Boolean(s.externalSessionId && run.externalSessionId === s.externalSessionId)))
@@ -4145,6 +4151,24 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // First-screen evidence avoids the complete-history reader. Indexed
       // archives read only two turns; legacy/index-rebuild paths can still
       // materialize older data, and their provenance stays explicit.
+      readHistoryVersion: async ({ providerId, cwd, externalSessionId }) => {
+        const canonical = resolveRemoteProjectDirectory(cwd)
+        return readRemoteHistoryVersion({
+          cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
+          userDataDir: app.getPath('userData')
+        }, () => runs.activeStates().find((run) =>
+          run.providerId === providerId && run.cwd === canonical &&
+          (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
+      },
+      readHistoryTurnsPage: async ({ providerId, cwd, externalSessionId, before, limit = 3, snapshot }) => {
+        const canonical = resolveRemoteProjectDirectory(cwd)
+        return readRemoteHistoryTurnsPage({
+          cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
+          userDataDir: app.getPath('userData')
+        }, { before, limit, snapshot }, () => runs.activeStates().find((run) =>
+          run.providerId === providerId && run.cwd === canonical &&
+          (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
+      },
       readHistoryPreview: async ({ providerId, cwd, externalSessionId }) => {
         if (!providerId || !externalSessionId) return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
         let canonical: string

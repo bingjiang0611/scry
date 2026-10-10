@@ -185,8 +185,10 @@ extension RemoteHeader where Right == EmptyView {
 // scrolls up. New chunks must not steal their reading position.
 struct ConversationScrollView<Content: View>: View {
   let revision: String
+  var stopFollowingRequest: Int = 0
   @ViewBuilder let content: () -> Content
   @State private var following = true
+  @State private var browsingOlder = false
 
   var body: some View {
     GeometryReader { viewport in
@@ -210,11 +212,13 @@ struct ConversationScrollView<Content: View>: View {
         .scrollDismissesKeyboard(.interactively)
         .simultaneousGesture(DragGesture().onChanged { value in
           if value.translation.height > 8 { following = false }
+          if value.translation.height < -8 { browsingOlder = false }
         })
         .onPreferenceChange(ConversationBottom.self) { bottom in
-          if bottom > 0 && bottom <= viewport.size.height + 30 { following = true }
+          if !browsingOlder && bottom > 0 && bottom <= viewport.size.height + 30 { following = true }
         }
         .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
+        .onChange(of: stopFollowingRequest) { browsingOlder = true; following = false }
         .onChange(of: revision) {
           if following { proxy.scrollTo("bottom", anchor: .bottom) }
         }
@@ -229,6 +233,7 @@ struct ConversationScrollView<Content: View>: View {
         .overlay(alignment: .bottomTrailing) {
           if !following {
             Button {
+              browsingOlder = false
               following = true
               withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo("bottom", anchor: .bottom) }
             } label: {

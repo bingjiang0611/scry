@@ -75,7 +75,12 @@ export class InnerMtlsHost {
     if (!Number.isFinite(certificateExpiresAt)) { socket.destroy(); return }
     this.#connections.add(socket)
     socket.once('close', () => this.#connections.delete(socket))
-    socket.setTimeout(30_000, () => socket.destroy())
+    // This is an idle timeout, not a computation deadline. A history/archive
+    // read may legitimately take longer than 30 seconds; the client can cancel
+    // the TLS channel when its request is superseded. Disable the idle timer
+    // while dispatching and arm it again only after a response is written.
+    const armIdleTimeout = (): void => { socket.setTimeout(30_000, () => { socket.destroy() }) }
+    armIdleTimeout()
     let buffer = Buffer.alloc(0)
     let busy = false
     let historyOnly = false
@@ -92,17 +97,23 @@ export class InnerMtlsHost {
       let keepAlive = false
       try {
         const request = JSON.parse(frame.toString('utf8')) as { op?: string; keepAlive?: boolean }
-        keepAlive = request.keepAlive === true && (request.op === 'historyPreview' || request.op === 'historyPage')
+        keepAlive = request.keepAlive === true && [
+          'historyPreview', 'historyPage', 'historyVersion', 'historyTurnsPage', 'sessionsPage', 'directoriesPage',
+          'projects', 'providers', 'commands'
+        ].includes(request.op ?? '')
       } catch { /* dispatch reports malformed JSON */ }
       if (historyOnly && !keepAlive) { socket.end(JSON.stringify({ error: 'history_connection_read_only' }) + '\n'); return }
       historyOnly ||= keepAlive
       busy = true
+      socket.setTimeout(0)
       void this.#dispatch(controller, fingerprint, frame)
         .then((res) => {
           busy = false
           const reply = JSON.stringify(res) + '\n'
-          if (keepAlive) socket.write(reply)
-          else socket.end(reply)
+          if (keepAlive) {
+            socket.write(reply)
+            armIdleTimeout()
+          } else socket.end(reply)
         })
         .catch(() => socket.destroy())
     })
@@ -110,7 +121,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown }
+    let request: { op?: string; intentId?: string; detail?: string; cursor?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -194,6 +205,22 @@ export class InnerMtlsHost {
       if (request.op === 'historyPreview') {
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
         return { historyPreview: await controller.readHistoryPreview(fingerprint, { providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
+      }
+      if (request.op === 'historyVersion') {
+        if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
+        return { historyVersion: await controller.readHistoryVersion(fingerprint, { providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
+      }
+      if (request.op === 'historyTurnsPage') {
+        if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string' ||
+            (request.before !== undefined && !Number.isSafeInteger(request.before)) ||
+            (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
+            (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
+        return { historyTurnsPage: await controller.readHistoryTurnsPage(fingerprint, {
+          providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId,
+          ...(typeof request.before === 'number' ? { before: request.before } : {}),
+          ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
+          ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
+        }) }
       }
       if (request.op === 'history') {
         // Legacy bounded response retained for older clients.

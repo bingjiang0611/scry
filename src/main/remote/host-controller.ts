@@ -1,8 +1,8 @@
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource } from './remote-gateway'
+import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
-export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview } from './remote-gateway'
+export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview, RemoteHistoryVersion, RemoteHistoryTurnsPage, RemoteHistoryTurnsPageQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -86,10 +86,14 @@ export interface HostControllerDependencies {
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   // Snapshot of the host session catalog a device may browse. Absent => empty.
   listSessions?(): RemoteSessionRef[]
+  sessionCatalogRevision?(): string
   // Read one session's real conversation content. Absent => empty transcript.
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   // Small recent evidence only; unlike full history, unavailable is explicit.
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
+  // Metadata-only source stamp used by refresh; it must not materialize history.
+  readHistoryVersion?(query: RemoteHistoryQuery): Promise<RemoteHistoryVersion>
+  readHistoryTurnsPage?(query: RemoteHistoryTurnsPageQuery): Promise<RemoteHistoryTurnsPage>
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
@@ -194,9 +198,11 @@ export class HostController {
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
       ...(deps.listCommands ? { commands: { list: deps.listCommands } as RemoteCommandSource } : {}),
       workspace: { read: (query) => readRemoteWorkspace(deps.workspace, query, deps.readSessionStatus) },
-      ...(deps.listSessions ? { sessions: { list: deps.listSessions } } : {}),
+      ...(deps.listSessions ? { sessions: { list: deps.listSessions, ...(deps.sessionCatalogRevision ? { revision: deps.sessionCatalogRevision } : {}) } } : {}),
       ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {}),
-      ...(deps.readHistoryPreview ? { historyPreview: { read: deps.readHistoryPreview } as RemoteHistoryPreviewSource } : {})
+      ...(deps.readHistoryPreview ? { historyPreview: { read: deps.readHistoryPreview } as RemoteHistoryPreviewSource } : {}),
+      ...(deps.readHistoryVersion ? { historyVersion: { read: deps.readHistoryVersion } as RemoteHistoryVersionSource } : {}),
+      ...(deps.readHistoryTurnsPage ? { historyTurnsPage: { read: deps.readHistoryTurnsPage } as RemoteHistoryTurnsPageSource } : {})
     })
 
     const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
@@ -310,12 +316,20 @@ export class HostController {
     return this.#gateway.readHistoryPreview(peerCertSHA256, query)
   }
 
+  readHistoryVersion(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryVersion> {
+    return this.#gateway.readHistoryVersion(peerCertSHA256, query)
+  }
+
   readHistory(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]> {
     return this.#gateway.readHistory(peerCertSHA256, query)
   }
 
   readHistoryPage(peerCertSHA256: string, query: RemoteHistoryPageQuery): Promise<RemoteHistoryPage> {
     return this.#gateway.readHistoryPage(peerCertSHA256, query)
+  }
+
+  readHistoryTurnsPage(peerCertSHA256: string, query: RemoteHistoryTurnsPageQuery): Promise<RemoteHistoryTurnsPage> {
+    return this.#gateway.readHistoryTurnsPage(peerCertSHA256, query)
   }
 
   // Device-facing: the assistant's real streamed output CONTENT for one run,
