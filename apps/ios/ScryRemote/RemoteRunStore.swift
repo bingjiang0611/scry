@@ -755,27 +755,19 @@ final class RemoteRunStore: ObservableObject {
     try await historyDisk.clear()
   }
 
-  func refreshMacSession(providerId: String, cwd: String, externalSessionId: String) async -> Bool {
+  func refreshHistory(providerId: String, cwd: String, externalSessionId: String) async {
     #if DEBUG
-    if mockMode { return false }
+    if mockMode {
+      if ProcessInfo.processInfo.arguments.contains("-uiMockMacStartsLater"), case let .loaded(turns) = history {
+        let prompt = "Mac 后来新增的用户输入"
+        if turns.last?.userText != prompt {
+          history = .loaded(turns + [.init(userText: prompt, items: [.init(kind: "output", text: "Mac 后来新增的回复")])])
+          historyRevision += 1
+        }
+      }
+      return
+    }
     #endif
-    guard historyTask == nil, !historyCacheClearing, let client = makeClient() else { return true }
-    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
-    let requestGeneration = generation
-    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
-    do {
-      let sessions = try await client.sessions()
-      // Do not let the final archive reload get swallowed by an in-flight
-      // pre-terminal snapshot. The view waits once more before that last read.
-      await historyTask?.value
-      guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return false }
-      return sessions.first(where: {
-        $0.providerId == providerId && $0.cwd == cwd && $0.externalSessionId == externalSessionId
-      })?.isActive == true
-    } catch { return !Task.isCancelled && isCurrent(requestGeneration, identity: identity) }
-  }
-
-  func refreshFinalHistory(providerId: String, cwd: String, externalSessionId: String) async {
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     let requestGeneration = generation
     await historyTask?.value
@@ -1885,6 +1877,20 @@ final class RemoteRunStore: ObservableObject {
           attachments: [], lifecycle: .settled, output: [.init(id: 1, kind: "output", text: "模拟续聊结果必须保留")],
           resultSummary: nil, externalSessionId: "codex-pinned-1")]
       }
+    }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockContinuousHistory") {
+      history = .loaded([
+        .init(userText: "最早一轮的用户输入", items: [.init(kind: "output", text: "最早一轮的回复")]),
+        .init(userText: "第二轮用户输入", items: [.init(kind: "output", text: "第二轮回复")]),
+        .init(userText: "技能和mcp不用检测数量了 点击进入的时候再加载吧 这样可以节省性能", items:
+          (1...20).map { .init(kind: "output", text: "本轮第 \($0) 段内容") }),
+        .init(userText: String(repeating: "完整用户输入。", count: 90) + "用户输入末尾", items: [
+          .init(kind: "output", text: "# 长回复开头\n\n" + String(repeating: "完整回复。", count: 100) +
+            "\n\n## 五百字之后的标题\n\n- 列表项目\n\n```swift\nlet answer = 42\n```\n\n## 长回复末尾")
+        ])
+      ])
+      historyFromCache = true; historyFetchedAt = Date()
+      prompt = nil; output = []; runId = nil; resultSummary = nil
     }
     if ProcessInfo.processInfo.arguments.contains("-uiMockLoading") {
       history = .loading; prompt = nil; output = []; runId = nil; resultSummary = nil

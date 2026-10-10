@@ -185,7 +185,6 @@ extension RemoteHeader where Right == EmptyView {
 // scrolls up. New chunks must not steal their reading position.
 struct ConversationScrollView<Content: View>: View {
   let revision: String
-  var readingAnchor: String? = nil
   @ViewBuilder let content: () -> Content
   @State private var following = true
 
@@ -202,6 +201,9 @@ struct ConversationScrollView<Content: View>: View {
               })
           }
           .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 10)
+          .background(GeometryReader { geometry in
+            Color.clear.preference(key: ConversationHeight.self, value: geometry.size.height)
+          })
         }
         .coordinateSpace(name: "conversation-scroll")
         .scrollIndicators(.hidden)
@@ -216,8 +218,10 @@ struct ConversationScrollView<Content: View>: View {
         .onChange(of: revision) {
           if following { proxy.scrollTo("bottom", anchor: .bottom) }
         }
-        .onChange(of: readingAnchor) {
-          if let readingAnchor { following = false; proxy.scrollTo(readingAnchor, anchor: .top) }
+        .onPreferenceChange(ConversationHeight.self) { _ in
+          // Archived Markdown finishes parsing after initial layout. Keep the
+          // tail visible without moving a reader who already scrolled up.
+          if following { proxy.scrollTo("bottom", anchor: .bottom) }
         }
         .onChange(of: viewport.size.height) {
           if following { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -239,6 +243,11 @@ struct ConversationScrollView<Content: View>: View {
       }
     }
   }
+}
+
+private struct ConversationHeight: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct ConversationBottom: PreferenceKey {
