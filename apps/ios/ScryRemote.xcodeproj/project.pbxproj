@@ -8,7 +8,7 @@
     100000000000000000000002 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
     100000000000000000000003 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
     100000000000000000000004 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
-    100000000000000000000005 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
+    100000000000000000000005 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceBrowserView.swift; sourceTree = "<group>"; };
     100000000000000000000006 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
     100000000000000000000007 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionView.swift; sourceTree = "<group>"; };
     100000000000000000000008 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };

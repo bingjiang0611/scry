@@ -24,6 +24,10 @@ struct RemoteRunClient {
 
   enum ClientError: Error, Equatable { case missingCredentials }
 
+  func workspace(_ query: G0Transport.WorkspaceQuery) async throws -> G0Transport.WorkspaceResult {
+    try await G0Transport.relayWorkspace(endpoint: endpoint(), identity: try identity(), query: query)
+  }
+
   // A bounded attachment carried inside the existing inner-mTLS request. Images
   // become native Provider image inputs on the Mac; UTF-8 text/code files are
   // appended to Provider context with their real filename. Unsupported binary

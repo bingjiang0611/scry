@@ -1,6 +1,7 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
+import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
 
 // G1 application service: the device-facing surface that a verified remote peer
 // reaches once its inner-mTLS identity is established. It composes the two host
@@ -233,6 +234,7 @@ export interface RemoteOutputReader {
 export interface RemoteGatewayDependencies {
   authority: DeviceAuthorizer
   ledger: SessionLedger
+  workspace?: { read(query: RemoteWorkspaceQuery): Promise<RemoteWorkspaceResult> }
   // Absent => the device sees an empty (honest) authorized-project list.
   projects?: RemoteProjectSource
   // Absent => hierarchical browsing is unavailable (honest empty root list).
@@ -324,6 +326,7 @@ export class RemoteGateway {
   #history?: RemoteHistorySource
   #historyPreview?: RemoteHistoryPreviewSource
   #output?: RemoteOutputReader
+  #workspace?: RemoteGatewayDependencies['workspace']
   #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
   #historyBuilds = new Map<string, Promise<{ bytes: Buffer; snapshot: string }>>()
 
@@ -338,12 +341,20 @@ export class RemoteGateway {
     this.#history = deps.history
     this.#historyPreview = deps.historyPreview
     this.#output = deps.output
+    this.#workspace = deps.workspace
   }
 
   // Fail closed on anything that is not a currently-authorized owner device.
   #authorize(peerCertSHA256: string): void {
     if (typeof peerCertSHA256 !== 'string' || !HASH.test(peerCertSHA256)) throw new RemoteGatewayError('device_not_authorized')
     if (!this.#authority.authorizesCertificate(peerCertSHA256)) throw new RemoteGatewayError('device_not_authorized')
+  }
+
+  async readWorkspace(peerCertSHA256: string, query: unknown): Promise<RemoteWorkspaceResult> {
+    this.#authorize(peerCertSHA256)
+    const parsed = parseRemoteWorkspaceQuery(query)
+    if (!this.#workspace) throw new RemoteGatewayError('workspace_unavailable')
+    return this.#workspace.read(parsed)
   }
 
   // Durably record a device's task submission. The runId is assigned by the

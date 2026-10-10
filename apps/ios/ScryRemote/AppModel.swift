@@ -8,13 +8,6 @@ import UIKit
 // remain first-class UI states. The app must never display invented tasks, a
 // green connected dot, Agent output or approvals merely to look complete.
 
-enum AuthState: Equatable {
-  case signedOut
-  case signingIn
-  case signedIn(name: String)
-  case failed(String)
-}
-
 // A host binding is only "connected" when a real, currently-live owner-device
 // grant and successful transport exchange exist. A persisted grant alone is
 // represented as offline until a request proves reachability.
@@ -68,7 +61,6 @@ enum PairingUIState: Equatable {
 
 @MainActor
 final class AppModel: ObservableObject {
-  @Published var auth: AuthState = .signedOut
   @Published var link: HostLink = .notPaired
   @Published var route: Route = .home
   @Published var query: String = ""
@@ -109,7 +101,12 @@ final class AppModel: ObservableObject {
   // the UI shows a truthful empty state rather than mock rows.
   @Published private(set) var sessions: [Session] = []
 
-  var signedIn: Bool { if case .signedIn = auth { return true }; return false }
+  var canShowWorkspace: Bool {
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-uiPreview") { return true }
+    #endif
+    return hasConnection
+  }
 
   // A persisted PUBLIC connection descriptor means this device already paired
   // (key + granted cert live in the Keychain); it does NOT need to scan a new QR.
@@ -148,7 +145,6 @@ final class AppModel: ObservableObject {
   func applyUIPreviewArguments() {
     let args = ProcessInfo.processInfo.arguments
     guard args.contains("-uiPreview") else { return }
-    auth = .signedIn(name: "预览")
     link = args.contains("-connected") ? .connected(host: "Studio Mac") : .notPaired
     if let index = args.firstIndex(of: "-route"), index + 1 < args.count {
       switch args[index + 1] {
@@ -187,6 +183,7 @@ final class AppModel: ObservableObject {
     catch { pairing = .failed("配对码无法识别：\(error)"); return }
     pairing = .proving
     link = .pairing
+    route = .pair // Keep the grant receipt visible when QR-only onboarding unlocks the workspace.
     let label = deviceLabel()
     pairingTask = Task { [weak self] in
       let client = RemotePairingClient()
@@ -280,24 +277,12 @@ final class AppModel: ObservableObject {
     if case .pairing = link { link = connectionHost.map { .offline(host: $0) } ?? .notPaired }
   }
 
-  var canGoBack: Bool { signedIn && route != .home }
+  var canGoBack: Bool { canShowWorkspace && route != .home }
 
   func goBack() {
     guard canGoBack else { return }
     if route == .pair { cancelPairing() }
     route = .home
-  }
-
-  // Ordinary sign out intentionally retains the paired grant. It only locks
-  // the local UI; destructive unpair is a separate, error-reporting operation.
-  func signOut() {
-    pairingTask?.cancel()
-    pairingTask = nil
-    pairing = .idle
-    auth = .signedOut
-    route = .home
-    query = ""
-    sessions = []
   }
 
   // Clear downloaded private history before removing its grant. If either
@@ -310,15 +295,13 @@ final class AppModel: ObservableObject {
       connections.clear()
       runStore.clearAllState()
       pairingTask?.cancel(); pairingTask = nil
-      pairing = .idle; auth = .signedOut; link = .notPaired; route = .home
+      pairing = .idle; link = .notPaired; route = .home
       query = ""; sessions = []; drafts = [:]; draftAliases = [:]
     } catch {
       destructiveActionError = "无法清除本机配对凭据：\(error)。未报告为已清除，请重试。"
     }
   }
 
-  // Compatibility entry point for callers that only need to leave the UI.
-  func reset() { signOut() }
 }
 
 struct Session: Identifiable, Hashable {

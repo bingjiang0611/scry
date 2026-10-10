@@ -58,6 +58,7 @@ async function harness(
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
     startRun: runProvider, gate: new ProviderOperationGate(),
+    readSessionStatus: () => 'not_observed',
     createOutputStore: (directory) => new RunOutputFileStore(directory),
     ...(listCommands ? { listCommands } : {}),
     ...(readHistory ? { readHistory } : {}),
@@ -98,6 +99,23 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
 const routing = (over: Partial<RemoteIntentRouting> = {}) => JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
 describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
+  it('routes read-only workspace requests through verified TLS and canonical-project authorization', async () => {
+    const start = vi.fn(async () => {})
+    const { identity, controller, caPEM, addr } = await harness(start)
+    const device = await pairDevice(identity, controller)
+    const status = await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'workspace', query: { action: 'status', cwd: AUTHORIZED, providerId: 'pi', externalSessionId: 's' }
+    })
+    expect(status.workspace).toMatchObject({ action: 'status', state: 'not_observed', observedAt: expect.any(String) })
+    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'workspace', query: { action: 'file', cwd: '/unauthorized', path: 'secret' }
+    })).toEqual({ error: 'not authorized' })
+    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'workspace', query: { action: 'write', cwd: AUTHORIZED, path: 'file' }
+    })).toEqual({ error: 'invalid_request' })
+    expect(start).not.toHaveBeenCalled()
+  })
+
   it('authorizes a paired device by its verified peer certificate and reflects lifecycle', async () => {
     const seen: RemoteIntentRouting[] = []
     const { identity, controller, caPEM, addr } = await harness(async ({ routing }) => { seen.push(routing) })

@@ -58,6 +58,7 @@ private struct HistoryTurnView: View {
 struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var showFiles = false
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -95,6 +96,7 @@ struct SessionTranscriptView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      if let session { SessionRunStatusView(session: session) }
       if historyReadyForDisplay, run.historyRefreshError != nil {
         Notice(text: "历史更新失败，当前显示已读取内容。详情见右上角菜单。", warning: true)
       }
@@ -118,6 +120,9 @@ struct SessionTranscriptView: View {
       footer
     }
     .background(Palette.surface)
+    .sheet(isPresented: $showFiles) {
+      if let session { WorkspaceBrowserView(cwd: session.cwd).id(session.cwd) }
+    }
     .onAppear {
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
@@ -214,6 +219,9 @@ struct SessionTranscriptView: View {
     RemoteHeader(title: session?.label.isEmpty == false ? session!.label : "会话",
                  subtitle: "\(projectName(session?.cwd)) · \(session?.providerId.uppercased() ?? "")",
                  link: model.link, backAction: { model.goBack() }) {
+      Button { showFiles = true } label: {
+        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
+      }.accessibilityLabel("项目文件与 Diff").disabled(session == nil)
       Menu {
         Section("历史状态") {
           Text(historyStatus)
