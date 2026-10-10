@@ -8,6 +8,7 @@ import type { ProjectMeta } from '../../src/renderer/env'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 import '../../src/renderer/session-evidence.css'
+import '../../src/renderer/components/background-work.css'
 
 // Count actual production Sidebar executions, not DOM mutations or SSR calls.
 const measuredSidebar = Sidebar as typeof Sidebar & { type: (props: ComponentProps<typeof Sidebar>) => ReactNode }
