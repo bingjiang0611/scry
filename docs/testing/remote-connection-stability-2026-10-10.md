@@ -30,4 +30,10 @@
 
 Mac 新运行进程加载 0.2.163 后，重新对同一会话只读核对预览、进度、完整 digest 与暖重开；仍失败时保留第一个具体错误。真实首屏/失败率/完整下载仍待验收，不承诺毫秒级。Mac 覆盖安装不等于活动 runtime 更新；当前助手依附 Scry，不用 detached helper 规避退出。
 
-私有日志与回执：`.local/ios-stability/`（ignored，不上传）。
+## 用户重启后的真实只读复验
+
+用户确认重启后，核对 Mac 为新进程 PID 18321（2026-10-10 10:38:58 启动）、安装目录 0.2.163，手机 available (paired)。同一显式 Pi 会话的认证只读 probe 成功：preview **2866.3 ms /2333 bytes**，第一全页 **4160.0 ms**，全量 **8,999,860 bytes /32 turns /111480.4 ms**，`SESSIONPROBE DONE failures=0`。客户端完成完整 SHA256 比对和 decode 后才返回成功；本轮没有中断、无限等待或 snapshot 重试报告。探针后恢复无测试参数普通启动。
+
+这是一轮真实成功，不是失败率统计，不是实际 SwiftUI 首帧测量，也不是暖缓存重开验证。完整下载仍耗时约 111 秒，不称已达到快速全量同步或已彻底解决高失败率。实际点击、缓存重开和其他会话仍待用户/后续复验。
+
+私有日志与回执：`.local/ios-stability/`（ignored，不上传），本次为 `after-restart-probe.log` 和 `after-restart-restore.log`。
