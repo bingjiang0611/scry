@@ -696,6 +696,9 @@ async function exerciseSessionTerminals(contents, scenario) {
   await click('[aria-label="切换此会话的保留工作区"]')
   await wait(`globalThis.promotedXterm.getBoundingClientRect().width > 0`)
   if (!await read(`${state}.closes.length === 1 && ${state}.starts.length === ${originalStarts + 4}`)) throw new Error('Merged workbench switching restarted shells')
+  // The dirty indicator updates before React removes its beforeunload protection.
+  // Wait for that protection to clear before navigating to the next fixture.
+  await wait('window.dispatchEvent(new Event("beforeunload", { cancelable: true }))')
   return { scenario, scopedTabs: true, sameWorkspace: true, crossWorkspace: true, screenPreserved: true, recordingPreserved: true, fileRootAndReadOnlyPreserved: true, hideShowPreserved: true, nativePromotion: true, collisionReachable: true, noImplicitRestart: true, explicitRestartAndNewUseOwnedCwd: true, explicitClose: true }
 }
 

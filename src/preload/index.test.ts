@@ -86,6 +86,7 @@ const invokeChannels = {
   usageStats: 'agent:usageStats',
   stats: 'agent:stats',
   usageAnalytics: 'agent:usageAnalytics',
+  llmPerformanceHistory: 'agent:llmPerformanceHistory',
   billingState: 'agent:billingState',
   syncBillingAdmin: 'agent:syncBillingAdmin',
   importBillingFixture: 'agent:importBillingFixture',
@@ -238,6 +239,12 @@ describe('preload IPC boundary', () => {
     const terminalListener = electron.on.mock.calls.at(-1)?.[1]
     terminalListener?.(null, [{ id: 'terminal-1', data: 'a' }, { id: 'terminal-1', data: 'b' }])
     expect(terminalCallback.mock.calls.map(([event]) => event.data)).toEqual(['a', 'b'])
+  })
+
+  it('does not forward renderer-selected paths to performance history', async () => {
+    await callableApi.llmPerformanceHistory('/tmp/renderer-selected-file')
+    expect(electron.invoke).toHaveBeenCalledTimes(1)
+    expect(electron.invoke).toHaveBeenCalledWith('agent:llmPerformanceHistory')
   })
 
   it('rejects malformed mcpguard reports before they reach the renderer', async () => {
