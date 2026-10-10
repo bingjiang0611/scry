@@ -59,7 +59,34 @@ async function exercise(webContents) {
   await click('#running')
   await wait(`document.querySelectorAll('.sb-sess.running .sb-running').length === 8`)
   const activeSpinners = await read(`document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect.target.matches('.sb-running')).length`)
-  if (activeSpinners !== 1) throw new Error(`Background sessions retained ${activeSpinners} animated spinners`)
+  if (activeSpinners !== 0) throw new Error(`Running sessions retained ${activeSpinners} animated spinners`)
+  const runningRingThemes = await read(`(() => {
+    const root = document.documentElement;
+    const rings = Array.from(document.querySelectorAll('.sb-sess.running .sb-running'));
+    if (rings.filter(ring => ring.closest('.sb-sess.active')).length !== 1) throw new Error('Expected selected and background running sessions');
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--ok)';
+    root.append(probe);
+    const originalTheme = root.getAttribute('data-theme');
+    try {
+      return ['dark', 'light'].map(theme => {
+        root.setAttribute('data-theme', theme);
+        const green = getComputedStyle(probe).color;
+        for (const ring of rings) {
+          const style = getComputedStyle(ring);
+          if (style.animationName !== 'none' || style.borderRadius !== '50%' ||
+              [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor].some(color => color !== green)) {
+            throw new Error(theme + ': expected a static green running ring');
+          }
+        }
+        return theme;
+      });
+    } finally {
+      probe.remove();
+      if (originalTheme === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', originalTheme);
+    }
+  })()`)
 
   await click('#load-older')
   await wait(`document.querySelectorAll('[data-run-id]').length === 80`)
@@ -139,7 +166,7 @@ async function exercise(webContents) {
   const mountedAtEnd = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   if (mountedAtEnd >= 40) throw new Error(`Scroll/focus retained ${mountedAtEnd} mounted turns`)
   return { historicalSessions: 277, streamCommits: 20, sidebarStreamRenders: streamRenders,
-    latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners,
+    latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners, runningRingThemes,
     viewport, historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
     viewportAnchorPreserved: true, selectedEvidenceRetained: true, shellHeightPreserved: true,
     keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }

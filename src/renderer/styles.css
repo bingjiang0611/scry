@@ -463,25 +463,8 @@ body.pane-resizing * {
   width: 11px;
   height: 11px;
   box-sizing: border-box;
-  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
-  border-right-color: currentColor;
+  border: 2px solid var(--ok);
   border-radius: 50%;
-  color: var(--dim);
-  animation: sb-running-spin 0.75s linear infinite;
-}
-.sb-sess.active .sb-running {
-  color: var(--accent);
-  animation-duration: 1.5s;
-  animation-timing-function: steps(12);
-}
-/* Background state stays visible, but only the selected run needs continuous motion. */
-.sb-sess:not(.active) .sb-running {
-  animation-play-state: paused;
-}
-@keyframes sb-running-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .ctx-overlay {
   position: fixed;
@@ -7808,10 +7791,6 @@ textarea:focus-visible,
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-  .sb-running {
-    animation: none !important;
-    border-color: currentColor;
   }
 }
 

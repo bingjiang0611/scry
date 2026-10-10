@@ -25,17 +25,15 @@ describe('idle renderer paint budget', () => {
     }
   })
 
-  it('keeps the restored running and skeleton motion compositor-only', () => {
-    expect(declaration(styles, '.sb-running')).toContain('animation: sb-running-spin')
+  it('keeps skeleton motion compositor-only', () => {
     expect(declaration(styles, '.sk-line::after')).toContain('animation: skeleton-shimmer')
-    expect(declaration(styles, '@keyframes sb-running-spin')).toContain('transform: rotate')
     expect(declaration(styles, '@keyframes skeleton-shimmer')).toContain('transform: translateX')
   })
 
-  it('keeps background run status visible without frame-rate motion', () => {
-    expect(declaration(styles, '.sb-sess:not(.active) .sb-running')).toContain('animation-play-state: paused')
-    expect(declaration(styles, '.sb-sess.active .sb-running')).toContain('animation-timing-function: steps(12)')
-    expect(declaration(styles, '.sb-sess.active .sb-running')).toContain('animation-duration: 1.5s')
+  it('shows running sessions as static green rings', () => {
+    expect(declaration(styles, '.sb-running')).toContain('border: 2px solid var(--ok)')
+    expect(declaration(styles, '.sb-running')).not.toContain('animation:')
+    expect(styles).not.toContain('sb-running-spin')
   })
 
   it('pauses incidental animations when the Electron page is hidden', () => {
