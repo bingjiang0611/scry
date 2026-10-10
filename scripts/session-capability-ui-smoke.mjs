@@ -14,7 +14,7 @@ const modelsOnly = process.argv.includes('--models-only')
 const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
 const summaryOnly = process.argv.includes('--summary-only')
-const fixtures = summaryOnly ? ['pinned-summary-performance'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance']
+const fixtures = summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance']
 
 // Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
 // Scry's main process or preload, discover providers, touch user data, or start a CDP port.
@@ -162,6 +162,12 @@ async function exercise() {
   check(button('#pinned', 'hsf-invoke').textContent.includes('×1'), 'Pinned call count missing')
   check(!text('#pinned').includes('加载推断'), 'Pinned inference suffix should stay out of the compact row')
   check(document.querySelector('#overview [aria-label="Skill 1，展开明细"]') != null, 'Overview disagrees with pinned count')
+  const rowSize = parseFloat(getComputedStyle(document.querySelector('#pinned .pinned-summary-row-main')).fontSize)
+  for (const title of document.querySelectorAll('#pinned .pinned-summary-section-title')) {
+    const style = getComputedStyle(title)
+    check(parseFloat(style.fontSize) <= 12 && parseFloat(style.fontSize) < rowSize, 'Summary heading overpowers row content')
+  }
+  check(!text('#pinned').includes('Changes') && !text('#pinned').includes('Subagents'), 'Empty summary rows remained visible')
 
   button('#pinned', 'hsf-invoke').click()
   await waitFor(() => document.querySelector('#selection').dataset.clicks === '1')
@@ -223,10 +229,11 @@ async function exercise() {
   check(document.querySelector('#overview .turn-hook-item').open === true, 'Reopening Hooks should expand handler details')
 
   document.querySelector('#empty').click()
-  await waitFor(() => text('#pinned').includes('尚未观测到'))
+  await waitFor(() => document.querySelector('#pinned .pinned-summary-expandable') == null)
   check(!text('#pinned').includes('hsf-invoke') && !text('#pinned').includes('browser / navigate'), 'New session retained old rows')
-  check(!text('#pinned').includes('Web references'), 'Known-zero Web references row remained visible')
-  check(document.querySelector('#pinned [data-evidence="unknown"]').textContent === '—', 'Missing evidence became fake zero')
+  check(!text('#pinned').includes('Context') && document.querySelector('#pinned .pinned-summary-divider') == null, 'Empty Context left a heading or divider')
+  check(document.querySelectorAll('#pinned button').length === 0, 'Empty session retained summary actions')
+  check(document.querySelector('#pinned [data-evidence]') == null, 'Missing summary evidence became a fabricated count')
 
   document.querySelector('#pending').click()
   await waitFor(() => text('#pinned').includes('browser / navigate'))
@@ -941,8 +948,21 @@ try {
         if (${fixtures.includes('pinned-summary-performance')}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pinned-summary-performance.html'))})
           result.summarySampling = await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseSummarySampling.toString()})()`)})
+          const summaryScreenshot = ${JSON.stringify(process.env.SCRY_SUMMARY_UI_SCREENSHOT ?? '')}
+          if (summaryScreenshot) {
+            for (const theme of ['dark', 'light']) {
+              const bounds = await win.webContents.executeJavaScript(\`document.documentElement.setAttribute('data-theme', '\${theme}'); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+                const { x, y, width, height } = document.querySelector('.pinned-summary-card').getBoundingClientRect()
+                resolve({ x: Math.round(x), y: Math.round(y), width: Math.ceil(width), height: Math.ceil(height) })
+              })))\`)
+              const image = await win.webContents.capturePage(bounds)
+              require('node:fs').writeFileSync(summaryScreenshot + '-' + theme + '.png', image.toPNG())
+            }
+          }
         }
         if (${summaryOnly}) {
+          await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
+          Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()`)}))
           console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
           app.exit(0)
           return

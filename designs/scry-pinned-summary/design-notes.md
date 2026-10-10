@@ -31,16 +31,17 @@
 - 卡片高度固定；折叠项展开后若内容超出，仍可滚动卡片自身，但不展示滚动条轨道或滑块。
 - 所有 Skill 使用统一 Skill 图标，所有 MCP 使用统一 MCP 图标。
 - Environment 不提供添加按钮，卡片不展示底部证据摘要或“证据详情”入口。
-- 某项存在精确证据且数量为 0 时不渲染该行。
+- Changes、Skills & MCP、Web references、Subagents 仅在有对应数据时渲染；没有已加载证据时直接省略，不显示空态或 `—`。Context 全空时同时省略标题和分隔线。工作区绑定信息保留。
+- Environment / Context 是辅助分组标题，使用 11px、550 字重和 0.06em 字距，不应比主行标题更醒目。
 - 紧凑摘要只列可用或已发生的项目，unavailable 项不进入此清单；完整 MCP / Diagnostics Surface 仍必须明确展示 unavailable，避免摘要冒充能力全貌。
 - Footer 只保留一句证据质量摘要，避免抢占视觉层级。
 
 ## 证据约束
 
-- Changes 必须来自真实 Git diff；采集失败时显示 `— / 不可用`，不能显示 `+0 −0`。
+- Changes 必须来自真实 Git diff；无可展示 diff 时摘要省略该行，不能显示 `+0 −0`，也不能从省略推断工作区没有改动。
 - branch 必须来自当前 canonical workspace；无 Git 仓库时显示 `非 Git 工作区`。
 - Skills、MCP 必须基于当前会话已加载 TraceEvent 的逻辑调用聚合；不能用配置清单、名称提及或 Skill 文件路径引用冒充调用。Web reading、Subagents 沿用各自真实可观测证据。
-- Provider 不提供某项能力时明确显示 unavailable，不为对齐 UI 推断数量。
+- 摘要不以空列表断言没有调用或能力可用；完整 Overview / Diagnostics 的 unavailable 与证据质量语义保持不变，不为对齐 UI 推断数量。
 - started / progress / response 仍按 logical call 去重后计数。
 
 ## D-20260908-session-capability-calls
@@ -54,6 +55,19 @@
 - Follow-up defect：Qoder 将显式 `/rate-native-hsf-invoke` 请求落实为成功的 `Read(.../hsf-invoke/SKILL.md)`，没有原生 Skill 事件。首次改动漏掉了此路径。`skill-load-evidence.ts` 现在要求轮首显式技能命令（含工作区前缀别名）与关联的读取成功结果，才把该 Read 在展示层归类为一次 Skill 加载，并标注“加载推断”。普通扫描、路径提及、失败/结果缺失不计入；已有原生调用/注入时不重复推断。原始 Read 保留为点击定位目标，canonical archive / recorder 不改写。
 - Follow-up evidence：292 项 focused 测试、typecheck、build 通过。只读重放该真实轮次：Skill 从 0 变为 `hsf-invoke ×1（加载推断）`，总调用数仍为 108。此项为原始归档的展示投影验证，不等同于安装版真实交互验收。
 - Revisit：会话分页、调用证据合同或摘要导航改变时复核。此规则不提升为跨项目视觉偏好。
+
+## D-20261010-summary-dynamic
+
+- Scope / status：project:Scry 固定摘要 / confirmed（需求确认；成品待审）。
+- Feedback：本次用户消息：“没有数据的，比如 skills 就不要展示，有的时候再展示，应该是动态的”，“Environment 和 Context 字体太大了，不协调”。
+- Rule：复用已有调用、引用、子 Agent 和 Git diff 投影按数据显隐；空 Context 不保留标题或分隔线。此条替代 D-20260908-session-capability-calls 的摘要空态文案要求，不改变完整证据 Surface。
+- Preserve：工作区绑定信息、固定卡片尺寸与位置、展开状态、证据点击定位、采样节奏、推断 provenance 和未知不等于零的合同。
+- Reuse / applied：延续 `P-SCRY-SUMMARY-LIVE` 对应的生产组件与现有 Electron fixture；`PinnedSummary.tsx`、`codex-alignment.css`、对应单测与 UI 脚本。没有新增组件、业务状态或依赖。
+- Craft / judgement：保留计数的等宽数字与既有图标对齐；标题缩小和空组减法属于本次用户明确反馈下的一般层级判断，不推广为全局审美。
+- Evidence：新验收用例在旧实现上出现 4 项预期失败；修复后 33 项 focused unit、`--summary-only` Electron DOM 检查通过，包含空会话、恢复数据、迟到读取结果、跨轮去重、折叠/重挂载。typecheck 与 build 通过。对比同一 fixture 的修改前/后深色截图，并检查修改后浅色：标题退为辅助层级，Changes / Subagents 空行消失。截图为本机 `/tmp/scry-summary-before-*`、`/tmp/scry-summary-after-*`，不是用户认可版本或持久收藏。
+- Gaps：完整 `session-capability-ui-smoke.mjs` 在终端 Surface 的未保存编辑器保留用例失败（`Workspace navigation discarded or asked to discard a retained editor`）；不扩大本次范围修复。未重启/安装正在使用的 App，未执行当前安装版真实 Provider 会话验收。
+- Library receipt：既有 `P-SCRY-SUMMARY-LIVE` 实时来源可检索 `D-20261010-summary-dynamic`；build 生成 34 条索引。check 仍报告既有 Pi Model Selector 原文路径失效，未更改该无关记录；索引不代表视觉验收。
+- Next use：固定摘要加入新的可选数据组时 → 由已有证据派生显隐，不添加假零或未知占位 → 检查空/单组/混合组、数据到达/清除、展开区域关联和分组标题层级。
 
 ## 已归档方向
 
