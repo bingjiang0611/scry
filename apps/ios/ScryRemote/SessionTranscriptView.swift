@@ -249,7 +249,9 @@ struct SessionTranscriptView: View {
     }
     switch run.activeSessionIdentity == sessionIdentity ? run.history : .loading {
     case .idle, .loading:
-      transcriptLoadingState
+      // The detached run's live turn is already real content; a skeleton
+      // above it would read as "nothing loaded yet".
+      if detachedLive == nil { transcriptLoadingState }
     case let .partial(turns), let .loaded(turns):
       if run.historyOlderBefore != nil {
         Button(run.historySyncing ? "正在读取更早历史…" : "加载更早的完整历史") {
