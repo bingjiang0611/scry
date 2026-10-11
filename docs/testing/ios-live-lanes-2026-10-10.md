@@ -71,3 +71,7 @@
 - iOS：聚焦运行保持原有 watch。切换会话或新建任务时，已有主机回执的运行会脱离聚焦，继续在 Mac 上运行，并通过 `liveRuns` 显示状态、停止和问题。只有无回执的提交仍需先核对。脱离的运行不归档为“完成”，内容以 Mac 记录的历史为准。首页支持下拉刷新、“进行中”分组和逐行状态（`Mac ·` 前缀表示 Mac 发起）。
 - 修复：原始 TCP 中继腿（`createRelayConnect`，用于 `SCRY_REMOTE_RELAY` 和 smoke）从不发出 `relaySession`。持久通道占住的腿仍被计为空闲，连接池不再补充，导致第 `poolSize+1` 条通道收到 `no_host_leg`。现在包装成 JS Duplex，在收到第一个字节时发出该事件。生产 WSS 腿本来就会发出。
 - 检查：`src/main/remote` 28 个文件 230 个测试通过（含新的 `relay-connect.test.ts`，旧实现下 2/2 失败）；`typecheck` 通过；Swift 包 27 个测试通过；`smoke:relay-run` 6/6 通过，真实 Swift 客户端在 `status` 通道解码 `liveRuns`；iOS 真机构建通过。`smoke:relay` / `smoke:relay-pair` 在旧代码上同样以 `relay-e2e.mjs:67 .authority` 失败，属于既有问题。
+- 真机（0.1.12，Pi · Rotom，临时工作区）：
+  - A（sleep 60）和 B 并行。B 在等待决定时新建了 C，B 被脱离，横幅显示“另一个任务等待你的决定”。点击横幅打开 B 并回答 blue，`b-par.txt`=blue。ledger 显示 B 的等待（11:40:31–11:42:55）与 C 的运行（11:42:14 起）有重叠。
+  - 首页逐行显示“运行中 / 等待决定”。运行结束后，历史通过长轮询自动刷新。
+  - 真机发现：脱离的远程运行在新会话中显示 `history_unavailable`，原因是远程运行不在 Mac 的活动运行内存中，会话记录要到运行结束才写入。修复：手机通过 `watch` 读取该运行在主机上的真实输出。只有当历史里还没有这一轮时才显示，避免与实时写入的转写重复。复测（任务 D）：运行中显示 prompt 和 `bash`，结束后由历史接管，没有重复。另外，脱离运行的文本增量与聚焦运行一样合并显示。

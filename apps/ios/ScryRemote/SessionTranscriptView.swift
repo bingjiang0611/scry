@@ -107,6 +107,18 @@ struct SessionTranscriptView: View {
   private var otherLive: G0Transport.LiveRun? { readOnly ? nil : run.otherLiveRun(for: sessionIdentity) }
   private var otherLiveQuestion: G0Transport.RunQuestionRequest? { otherLive.flatMap { run.openLiveQuestion($0) } }
   private var runBusy: Bool { run.isBusy || otherLive != nil }
+  // Show the detached run's streamed output unless history already holds its
+  // turn (a Provider transcript written live); never show both.
+  private var detachedLive: G0Transport.LiveRun? {
+    guard let live = otherLive, live.origin == "remote", run.detachedRunId == live.runId,
+          run.activeSessionIdentity == sessionIdentity else { return nil }
+    switch run.history {
+    case let .loaded(turns), let .partial(turns):
+      if !live.prompt.isEmpty, turns.last?.userText.hasPrefix(live.prompt) == true { return nil }
+    default: break
+    }
+    return live
+  }
   private var controlsMatch: Bool {
     guard let session else { return false }
     return run.controlsReady && run.chosenProvider?.id == session.providerId &&
@@ -171,9 +183,10 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", stopFollowingRequest: olderReadRequest) {
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)", stopFollowingRequest: olderReadRequest) {
         historyBody
         if hasLiveTurn { liveTurn }
+        if let live = detachedLive { detachedTurn(live) }
       }
       if !readOnly { footer }
     }
@@ -205,7 +218,8 @@ struct SessionTranscriptView: View {
       if !readOnly && historyAllowsControls { loadSessionControls() }
       if !readOnly { run.watchHistory(sessionIdentity) }
     }
-    .onDisappear { if !readOnly { run.watchHistory(nil) } }
+    .onDisappear { if !readOnly { run.watchHistory(nil); run.followDetached(nil) } }
+    .onChange(of: otherLive?.runId, initial: true) { _, _ in run.followDetached(otherLive) }
     .onChange(of: historyAllowsControls) {
       if !readOnly && historyAllowsControls { loadSessionControls() }
     }
@@ -262,6 +276,9 @@ struct SessionTranscriptView: View {
       Text("历史基底当前不可用，并不表示会话没有历史。以下仅显示本机保留的运行记录。")
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
       ForEach(completedTurns) { turn in completedTurnView(turn) }
+    case .failed("history_unavailable") where detachedLive != nil:
+      // A session this run is creating has no record until the run ends.
+      EmptyView()
     case let .failed(reason):
       EmptyState(title: "暂时无法读取会话", detail: reason + "\n已输入的草稿会保留。", symbol: "exclamationmark.triangle")
       Button("重新读取") {
@@ -381,6 +398,22 @@ struct SessionTranscriptView: View {
         ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
       }
       if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private func detachedTurn(_ live: G0Transport.LiveRun) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if !live.prompt.isEmpty { userBubble(live.prompt, attachments: []) }
+      if run.detachedOutput.isEmpty {
+        Text("运行中 · 尚无输出内容").font(.system(size: 15)).foregroundStyle(Palette.muted)
+      } else {
+        ForEach(ConversationEntry.group(run.detachedOutput, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+          ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+        }
+      }
+      Text("以上为主机实时输出的缓存，可能不完整；运行结束后以会话记录为准。")
+        .font(.system(size: 11)).foregroundStyle(Palette.muted)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
