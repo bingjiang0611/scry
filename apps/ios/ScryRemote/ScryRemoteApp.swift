@@ -42,11 +42,13 @@ struct RootView: View {
         case .chat: ChatView()
         case .pair: PairView()
         case .transcript:
+          // A session switch inside this route (the waiting-decision banner)
+          // must re-run onAppear, which loads and watches the new session.
+          let identity = model.openedSession.map { RemoteRunStore.SessionIdentity.opened(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId) }
           if model.readOnlyTranscript {
-            ReadOnlySessionTranscriptView(owner: run)
-              .id(model.openedSession.map { RemoteRunStore.SessionIdentity.opened(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId) })
+            ReadOnlySessionTranscriptView(owner: run).id(identity)
           } else {
-            SessionTranscriptView()
+            SessionTranscriptView().id(identity)
           }
         case .settings: SettingsView()
         }
