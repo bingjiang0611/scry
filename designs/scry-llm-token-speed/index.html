@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Scry · LLM token 速度 原型 v6</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Token snapshot: src/renderer/styles.css + codex-alignment.css (dark). */
+:root {
+  color-scheme: dark;
+  --bg: #151515; --panel: #1c1c1c; --panel2: #232323; --panel3: #2b2b2b;
+  --border: #333331; --border2: #454541; --border3: #292927;
+  --fg: #f1f1ef; --dim: #b5b5af; --dim2: #8d8d87; --dim3: #686864;
+  --accent: #5b9cff; --ok: #69cc93; --warn: #efb958; --bad: #f36c67;
+  --surface-hover: rgb(255 255 255 / 6%); --surface-muted: rgb(255 255 255 / 4%);
+  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --shadow-pop: 0 32px 88px rgb(0 0 0 / 46%), 0 10px 28px rgb(0 0 0 / 24%), inset 0 0 0 1px rgb(255 255 255 / 2.5%);
+  --m0: #5b9cff; --m1: #d37ec8; --m2: #efa84f; --m3: #69cc93; --m4: #ab9cf2; --m5: #6fd3d8; --m6: #efb958;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  background: #0d0d0d; color: var(--fg); font: 13px/1.45 var(--font-ui); -webkit-font-smoothing: antialiased; }
+.num { font-variant-numeric: tabular-nums; }
+
+.modal { width: min(880px, calc(100vw - 48px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow-pop); overflow: hidden; }
+.head { display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 0 14px 0 22px; border-bottom: 1px solid var(--border3); }
+.head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.live { display: inline-flex; align-items: center; gap: 7px; color: var(--dim2); font-size: 12px; }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim3); }
+.live.on { color: var(--dim); }
+.live.on i { background: var(--ok); box-shadow: 0 0 0 3px rgb(105 204 147 / 18%); }
+.seg { margin-left: auto; display: inline-flex; padding: 2px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--border3); }
+.seg button { border: 0; background: none; color: var(--dim2); font: inherit; font-size: 12px; padding: 4px 11px; border-radius: 7px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--panel3); color: var(--fg); }
+.x { width: 30px; height: 30px; border: 0; border-radius: 9px; background: none; color: var(--dim2); font-size: 18px; cursor: pointer; }
+.x:hover { background: var(--surface-hover); color: var(--fg); }
+.body { overflow: auto; padding: 18px 22px 22px; display: grid; gap: 22px; }
+
+/* Running now: only a single line when idle. */
+.running { display: grid; gap: 6px; }
+.run { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
+  padding: 8px 12px; border-radius: 10px; background: var(--panel2); }
+.run .dot { width: 8px; height: 8px; border-radius: 50%; }
+.run b { font-weight: 550; }
+.run span { color: var(--dim2); }
+.state { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--surface-muted); color: var(--dim); }
+.state.gen { color: var(--ok); background: rgb(105 204 147 / 12%); }
+.run .speed { min-width: 92px; text-align: right; }
+.run .speed strong { font-size: 14px; font-weight: 600; }
+.run .speed small { color: var(--dim2); margin-left: 3px; }
+
+h3 { margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 600; }
+h3 small { color: var(--dim2); font-weight: 400; font-size: 12px; }
+h3 .right { margin-left: auto; }
+
+/* Timeline */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 220px; overflow: visible; }
+.axis text { fill: var(--dim3); font-size: 10.5px; }
+.axis line { stroke: var(--border3); }
+.dotp { transition: opacity .12s; }
+.dotp.dim { opacity: .12; }
+.med { stroke-dasharray: 4 4; stroke-width: 1.5; }
+.tip { position: absolute; pointer-events: none; padding: 7px 10px; border-radius: 8px; background: var(--panel3);
+  border: 1px solid var(--border2); font-size: 12px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+.tip b { font-size: 13px; }
+.tip span { color: var(--dim2); }
+.empty { height: 220px; display: grid; place-items: center; color: var(--dim2); border: 1px dashed var(--border2); border-radius: 12px; text-align: center; }
+
+/* Model comparison */
+.models { display: grid; }
+.mhead, .mrow { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(200px, 2fr) 96px 64px; gap: 14px; align-items: center; }
+.mhead { padding: 0 10px 6px; color: var(--dim3); font-size: 11px; }
+.mhead > :nth-child(n+3), .mrow > :nth-child(n+3) { text-align: right; }
+.mrow { padding: 9px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; background: none; color: inherit; font: inherit; text-align: left; width: 100%; }
+.mrow:hover { background: var(--surface-muted); }
+.mrow[aria-pressed="true"] { background: var(--panel2); border-color: var(--border); }
+.mname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mname i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.mname b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mname span { color: var(--dim3); font-size: 11px; white-space: nowrap; }
+.bar { position: relative; height: 16px; }
+.bar .track { position: absolute; inset: 7px 0; border-radius: 2px; background: var(--border3); }
+.bar .iqr { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; opacity: .32; }
+.bar .p50 { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; border-radius: 2px; }
+.speedv strong { font-size: 15px; font-weight: 600; }
+.speedv small { color: var(--dim2); font-size: 11px; margin-left: 2px; }
+.nv { color: var(--dim); }
+.nv small { color: var(--dim3); }
+.scale { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(200px, 2fr) 96px 64px; gap: 14px; padding: 2px 10px 0; color: var(--dim3); font-size: 10.5px; }
+.scale div { display: flex; justify-content: space-between; }
+
+details { color: var(--dim2); font-size: 12px; }
+details summary { cursor: pointer; color: var(--dim); }
+details ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
+.proto { position: fixed; left: 12px; bottom: 10px; color: var(--dim3); font-size: 11px; }
+.proto a { color: var(--dim2); margin-right: 8px; }
+</style>
+</head>
+<body>
+<div class="modal" role="dialog" aria-label="LLM 性能">
+  <header class="head">
+    <h2>LLM 性能</h2>
+    <span class="live" id="live"><i></i><span></span></span>
+    <div class="seg" role="group" aria-label="时间范围" id="range">
+      <button data-h="1">1 小时</button><button data-h="24">24 小时</button><button data-h="168">7 天</button>
+    </div>
+    <button class="x" aria-label="关闭">×</button>
+  </header>
+  <div class="body">
+    <section class="running" id="running" hidden></section>
+    <section>
+      <h3>输出速度 <small>每个点是一轮 · token/s</small><small class="right" id="scope"></small></h3>
+      <div class="chart" id="chart"></div>
+    </section>
+    <section>
+      <h3>模型对比 <small>中位数 · 色带为中间 50% · 点击筛选</small></h3>
+      <div class="models" id="models"></div>
+    </section>
+    <details>
+      <summary>数据口径</summary>
+      <ul>
+        <li>输出速度 = 本轮主会话所有 LLM 调用的 output tokens 之和 ÷ 这些调用的耗时之和。耗时从请求发出到响应结束，含首 token 等待，不含工具执行。</li>
+        <li>output tokens 来自 Provider 上报的每次调用用量，可能包含思考 token；耗时为本机计时，属于估算，不是服务端生成速度。</li>
+                <li>失败或停止的轮次保留计数，不进入中位数；缺少用量或耗时的轮次不补 0。</li>
+      </ul>
+    </details>
+  </div>
+</div>
+<div class="proto">原型数据：本机 Pi 会话文件（近 7 天），不是 Scry 运行记录；“运行中”三行是样例 ·
+  <a href="?">默认</a><a href="?state=running">运行中</a><a href="?state=empty">无数据</a></div>
+
+<script src="data.js"></script>
+<script>
+const params = new URLSearchParams(location.search)
+const stateParam = params.get('state')
+const sample = window.SAMPLE
+const now = sample.generatedAt
+const turns = stateParam === 'empty' ? [] : sample.turns.map(t => ({ ...t, tps: t.tok / (t.dur / 1000) }))
+let hours = 24
+let selected = null
+
+const palette = ['--m0', '--m1', '--m2', '--m3', '--m4', '--m5', '--m6']
+// Stable colors: most-used model first, independent of the selected range.
+const counts = turns.reduce((map, t) => map.set(t.model, (map.get(t.model) ?? 0) + 1), new Map())
+const modelOrder = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a))
+const color = model => `var(${palette[modelOrder.indexOf(model) % palette.length]})`
+const short = model => model.split('/').pop()
+const upstream = model => model.split('/')[0]
+const fmt = v => v >= 100 ? Math.round(v).toString() : v.toFixed(1)
+const q = (values, p) => { const s = [...values].sort((a, b) => a - b); const i = (s.length - 1) * p; const lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo) }
+
+function render() {
+  for (const b of document.querySelectorAll('#range button')) b.setAttribute('aria-pressed', String(+b.dataset.h === hours))
+  const inRange = turns.filter(t => t.t >= now - hours * 3600_000)
+  renderRunning()
+  renderChart(inRange)
+  renderModels(inRange)
+}
+
+function renderRunning() {
+  const live = document.getElementById('live')
+  const box = document.getElementById('running')
+  const runs = stateParam === 'running' ? [
+    { model: 'openai-codex/gpt-6.1-sol', project: 'scry', state: '生成中', gen: true, tps: 23.4, calls: 6 },
+    { model: 'cc-switch/claude-opus-5-5', project: 'rate-native', state: '工具执行', tps: 41.8, calls: 3 },
+    { model: 'qoder/ultimate', project: 'etch', state: '等待首次输出', calls: 0 }
+  ] : []
+  live.className = runs.length ? 'live on' : 'live'
+  live.querySelector('span').textContent = runs.length ? `${runs.length} 个会话运行中` : '无运行中的会话'
+  box.hidden = !runs.length
+  box.innerHTML = runs.map(r => `<div class="run"><i class="dot" style="background:${color(r.model)}"></i>
+    <div><b>${short(r.model)}</b> <span>· ${r.project}</span></div>
+    <span class="state${r.gen ? ' gen' : ''}">${r.state}</span>
+    <div class="speed num">${r.tps != null ? `<strong>${fmt(r.tps)}</strong><small>token/s</small>` : '<small>本轮尚无调用</small>'}</div></div>`).join('')
+}
+
+function renderChart(rows) {
+  const box = document.getElementById('chart')
+  const ok = rows.filter(t => !t.failed)
+  document.getElementById('scope').textContent = selected ? `仅 ${short(selected)}` : ok.length ? `${ok.length} 轮` : ''
+  if (!ok.length) {
+    box.innerHTML = `<div class="empty"><div>${turns.length ? '这个时间范围内没有完成的轮次' : '还没有可测速度的轮次'}<br><span style="color:var(--dim3)">每完成一轮对话，这里会出现一个点</span></div></div>`
+    return
+  }
+  const W = box.clientWidth, H = 220, L = 34, R = 8, T = 8, B = 22
+  const yMax = Math.max(10, Math.ceil(q(ok.map(t => t.tps), 0.98) / 10) * 10)
+  const x0 = now - hours * 3600_000
+  const x = t => L + (t - x0) / (now - x0) * (W - L - R)
+  const y = v => T + (1 - Math.min(v, yMax) / yMax) * (H - T - B)
+  const ticks = [0, yMax / 2, yMax]
+  const xticks = Array.from({ length: 5 }, (_, i) => x0 + (now - x0) * i / 4)
+  const xlabel = t => { const d = new Date(t); return hours > 24 ? `${d.getMonth() + 1}/${d.getDate()}` : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+  const models = [...new Set(ok.map(t => t.model))]
+  const medians = models.map(m => ({ m, v: q(ok.filter(t => t.model === m).map(t => t.tps), 0.5) }))
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="每轮输出速度散点图">
+    <g class="axis">${ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`).join('')}
+      ${xticks.map(t => `<text x="${x(t)}" y="${H - 5}" text-anchor="middle">${xlabel(t)}</text>`).join('')}</g>
+    ${medians.filter(d => d.m === selected).map(d => `<line class="med" x1="${L}" x2="${W - R}" y1="${y(d.v)}" y2="${y(d.v)}" stroke="${color(d.m)}"/><text x="${W - R}" y="${y(d.v) - 6}" text-anchor="end" fill="${color(d.m)}" font-size="11">中位 ${fmt(d.v)}</text>`).join('')}
+    ${ok.map((t, i) => `<circle class="dotp${selected && t.model !== selected ? ' dim' : ''}" data-i="${i}" cx="${x(t.t)}" cy="${y(t.tps)}" r="${t.tps > yMax ? 3.5 : 3}" fill="${color(t.model)}" fill-opacity=".85"/>`).join('')}
+  </svg><div class="tip" hidden></div>`
+  const tip = box.querySelector('.tip')
+  box.querySelector('svg').addEventListener('mousemove', e => {
+    const target = e.target.closest('circle')
+    if (!target) { tip.hidden = true; return }
+    const t = ok[+target.dataset.i]
+    const d = new Date(t.t)
+    tip.hidden = false
+    tip.style.left = target.getAttribute('cx') + 'px'
+    tip.style.top = target.getAttribute('cy') + 'px'
+    tip.innerHTML = `<b class="num">${fmt(t.tps)} token/s</b> <span>· ${short(t.model)}</span><br><span class="num">${t.tok.toLocaleString()} tokens / ${(t.dur / 1000).toFixed(1)} s · ${t.calls} 次调用 · ${d.toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`
+  })
+  box.querySelector('svg').addEventListener('mouseleave', () => { tip.hidden = true })
+}
+
+function renderModels(rows) {
+  const box = document.getElementById('models')
+  const groups = [...new Set(rows.map(t => t.model))].map(m => {
+    const all = rows.filter(t => t.model === m)
+    const ok = all.filter(t => !t.failed).map(t => t.tps)
+    return { m, n: all.length, ok: ok.length, p25: q(ok, .25), p50: q(ok, .5), p75: q(ok, .75) }
+  }).filter(g => g.ok > 0).sort((a, b) => b.p50 - a.p50)
+  if (!groups.length) { box.innerHTML = '<div style="color:var(--dim2);padding:4px 10px">暂无对比数据</div>'; return }
+  const max = Math.max(10, Math.ceil(Math.max(...groups.map(g => g.p75)) / 10) * 10)
+  const pct = v => `${Math.min(v, max) / max * 100}%`
+  box.innerHTML = `<div class="mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span title="成功轮数 / 全部轮数">轮数</span></div>
+    ${groups.map(g => `<button class="mrow" aria-pressed="${g.m === selected}" data-m="${g.m}">
+      <span class="mname"><i style="background:${color(g.m)}"></i><b>${short(g.m)}</b><span>${upstream(g.m)}</span></span>
+      <span class="bar"><span class="track"></span>
+        <span class="iqr" style="left:${pct(g.p25)};width:calc(${pct(g.p75)} - ${pct(g.p25)});background:${color(g.m)}"></span>
+        <span class="p50" style="left:${pct(g.p50)};background:${color(g.m)}"></span></span>
+      <span class="speedv num"><strong>${fmt(g.p50)}</strong><small>token/s</small></span>
+      <span class="nv num" title="${g.n - g.ok} 轮失败或停止，不计入速度">${g.ok}${g.n > g.ok ? `<small> / ${g.n}</small>` : ''}</span>
+    </button>`).join('')}
+    <div class="scale"><span></span><div><span>0</span><span>${max / 2}</span><span>${max} token/s</span></div></div>`
+  for (const b of box.querySelectorAll('.mrow')) b.onclick = () => { selected = selected === b.dataset.m ? null : b.dataset.m; render() }
+}
+
+for (const b of document.querySelectorAll('#range button')) b.onclick = () => { hours = +b.dataset.h; render() }
+addEventListener('resize', render)
+render()
+</script>
+</body>
+</html>
