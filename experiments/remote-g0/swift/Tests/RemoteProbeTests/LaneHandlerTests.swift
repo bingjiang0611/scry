@@ -21,9 +21,23 @@ final class LaneHandlerTests: XCTestCase {
     catch { return "other" }
   }
 
-  func testKeepAliveRequestPrefixKeepsFields() {
+  func testKeepAliveRequestPrefixKeepsFields() throws {
     let request = Data(#"{"op":"poll","cursor":3}"#.utf8)
-    XCTAssertEqual(String(decoding: RelaySession.keepAliveRequest(request), as: UTF8.self), #"{"keepAlive":true,"op":"poll","cursor":3}"#)
+    XCTAssertEqual(String(decoding: try RelaySession.keepAliveRequest(request), as: UTF8.self), #"{"keepAlive":true,"op":"poll","cursor":3}"#)
+  }
+
+  func testDeviceModelMetadataSurvivesEscapingAndReconnectRequests() throws {
+    let model = "iPhone 17 Pro \"test\""
+    for request in [Data("{}".utf8), Data(#"{"op":"poll","cursor":3}"#.utf8)] {
+      let bytes = try RelaySession.keepAliveRequest(request, deviceLabel: model)
+      let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+      XCTAssertEqual(fields["deviceLabel"] as? String, model)
+      XCTAssertEqual(fields["keepAlive"] as? Bool, true)
+      if request.count > 2 {
+        XCTAssertEqual(fields["op"] as? String, "poll")
+        XCTAssertEqual(fields["cursor"] as? Int, 3)
+      }
+    }
   }
 
   func testMarkedRepliesKeepTheLaneAndSendInOrder() throws {

@@ -99,6 +99,30 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
 const routing = (over: Partial<RemoteIntentRouting> = {}) => JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
 describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
+  it('refreshes only the verified peer device label without changing its pairing or authority', async () => {
+    const start = vi.fn(async () => {})
+    const { identity, controller, caPEM, addr } = await harness(start)
+    const device = await pairDevice(identity, controller)
+    const other = await pairDevice(identity, controller)
+    const before = controller.authority.inspectLocal().grants
+    const reply = await call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'poll', cursor: 0, deviceLabel: 'iPhone 17 Pro', deviceId: other.deviceId
+    })
+    expect(reply.poll).toBeDefined()
+    const expected = before.map((grant) => grant.deviceId === device.deviceId ? { ...grant, deviceLabel: 'iPhone 17 Pro' } : grant)
+    expect(controller.authority.inspectLocal().grants).toEqual(expected)
+    for (const deviceLabel of ['bad\nlabel', '\u202espoof', 'x'.repeat(81), '', null, 42]) {
+      expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0, deviceLabel }))
+        .toEqual({ error: 'invalid_device_label' })
+    }
+    expect(controller.authority.inspectLocal().grants).toEqual(expected)
+    await controller.authority.revoke(device.deviceId)
+    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0, deviceLabel: 'spoof' }))
+      .toEqual({ error: 'device_not_authorized' })
+    expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone 17 Pro')
+    expect(start).not.toHaveBeenCalled()
+  })
+
   it('routes read-only workspace requests through verified TLS and canonical-project authorization', async () => {
     const start = vi.fn(async () => {})
     const { identity, controller, caPEM, addr } = await harness(start)
@@ -185,6 +209,9 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const stranger = await identity.issue({ ...verified, deviceId: randomUUID() })
     const reply = await call(addr, caPEM, stranger.certificatePEM, keyPEM, { op: 'submit', intentId: randomUUID(), detail: routing() })
     expect(reply.error).toBe('device_not_authorized')
+    expect(await call(addr, caPEM, stranger.certificatePEM, keyPEM, { op: 'poll', cursor: 0, deviceLabel: 'iPhone 17 Pro' }))
+      .toEqual({ error: 'device_not_authorized' })
+    expect(controller.authority.inspectLocal().grants).toEqual([])
     await controller.idle()
     expect(ran).toBe(0)
   })

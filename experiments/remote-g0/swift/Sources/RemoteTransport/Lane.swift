@@ -32,10 +32,13 @@ public final class RelaySession: Sendable {
   public enum Lane: Sendable, CaseIterable { case control, watch, status, bulk }
 
   private let lanes: [Lane: RelayLane]
+  private let deviceLabel: String?
 
   // `identity` is read when a tunnel opens, so Keychain material is loaded once
   // per tunnel instead of once per request.
-  public init(endpoint: G0Transport.RelayEndpoint, identity: @escaping @Sendable () throws -> G0ProbeIdentity) {
+  public init(endpoint: G0Transport.RelayEndpoint, identity: @escaping @Sendable () throws -> G0ProbeIdentity,
+              deviceLabel: String? = nil) {
+    self.deviceLabel = deviceLabel
     let base = G0Transport.RelayEndpoint(host: endpoint.host, port: endpoint.port, hostId: endpoint.hostId,
                                          relayServerName: endpoint.relayServerName, outerTLS: endpoint.outerTLS)
     var lanes: [Lane: RelayLane] = [:]
@@ -47,7 +50,7 @@ public final class RelaySession: Sendable {
   }
 
   func exchange(_ request: Data, lane: Lane, limit: Int, replayable: Bool) async throws -> Data {
-    try await lanes[lane]!.exchange(Self.keepAliveRequest(request), limit: limit, replayable: replayable)
+    try await lanes[lane]!.exchange(Self.keepAliveRequest(request, deviceLabel: deviceLabel), limit: limit, replayable: replayable)
   }
 
   // Opens the control lane ahead of the first user action. Errors are returned
@@ -65,10 +68,15 @@ public final class RelaySession: Sendable {
   // Every run request is a JSONEncoder object starting with `{`. Prefixing keeps
   // its fields intact; history structs that already carry keepAlive:true only
   // repeat the same value (the host's JSON.parse keeps the last duplicate).
-  static func keepAliveRequest(_ request: Data) -> Data {
+  static func keepAliveRequest(_ request: Data, deviceLabel: String? = nil) throws -> Data {
     precondition(request.first == UInt8(ascii: "{") && request.count >= 2)
-    if request.count == 2 { return Data("{\"keepAlive\":true}".utf8) }
-    return Data("{\"keepAlive\":true,".utf8) + request.dropFirst()
+    var prefix = Data("{\"keepAlive\":true".utf8)
+    if let deviceLabel {
+      prefix += Data(",\"deviceLabel\":".utf8)
+      prefix += try JSONEncoder().encode(deviceLabel)
+    }
+    if request.count == 2 { return prefix + Data("}".utf8) }
+    return prefix + Data(",".utf8) + request.dropFirst()
   }
 }
 

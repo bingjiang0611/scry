@@ -132,6 +132,29 @@ pairing needs a reachable relay + running host (and, for a public wss relay, the
 outer relay CA which the code does not yet carry — an outer-TLS deployment
 follow-up, not new crypto). Keychain is exercised only on a signed build.
 
+## Paired device model
+
+The product reads the hardware identifier with `uname`, not `UIDevice.name`.
+`RemoteDeviceModel` maps iOS-17-compatible iPhones through the verified iPhone 17e
+identifiers to their marketing names. Unknown hardware displays its identifier;
+add a mapping only after corroborating the identifier and marketing name in the
+sources listed in that helper. Simulator labels are explicitly marked.
+
+New pairings use this model label. After updating both the phone App and Mac host,
+the first authenticated request on a reconnected lane also refreshes an existing
+label such as `iPhone`; no unpair/re-pair is needed. An offline device keeps its
+previous label until it sends a request. The host selects the grant from the
+verified TLS peer certificate, never a request-supplied device ID. The bounded
+label is self-reported display metadata, not hardware attestation, and does not
+change the certificate, expiry, revocation, or owner-device authority.
+
+Focused checks:
+
+```sh
+swift test --package-path experiments/remote-g0/swift -j 4 --filter 'DeviceModelTests|LaneHandlerTests'
+npm run test:unit -- src/main/remote/pairing.test.ts src/main/remote/inner-mtls-host.test.ts src/main/remote/remote-host-service.test.ts --exclude '.local/**'
+```
+
 ## History cache (2026-10-08)
 
 `RemoteHistoryCache.swift` persists complete history in protected, backup-excluded

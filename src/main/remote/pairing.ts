@@ -71,6 +71,8 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 function fail(code: string): never { throw new Error(code) }
 const isTime = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= max
+const validDeviceLabel = (value: unknown): value is string => text(value, 320) && [...value].length <= 80 &&
+  !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const keys = (value: Record<string, unknown>, expected: string[]) => {
   if (Object.keys(value).sort().join('\0') !== expected.sort().join('\0')) fail('invalid_pairing_state')
@@ -128,8 +130,7 @@ export class PairingAuthority {
   prove(input: { pairingId: string; secret: string; csrPEM: string; deviceLabel: string }, tlsPeerPublicKeySHA256: string): Promise<PairingReceipt> {
     return this.serial(async () => {
       let pairing = this.authenticate(input.pairingId, input.secret)
-      if (typeof tlsPeerPublicKeySHA256 !== 'string' || !HASH.test(tlsPeerPublicKeySHA256) || !text(input.csrPEM, 16_384) || !text(input.deviceLabel, 320) ||
-          [...input.deviceLabel].length > 80 || /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(input.deviceLabel)) fail('invalid_device_proof')
+      if (typeof tlsPeerPublicKeySHA256 !== 'string' || !HASH.test(tlsPeerPublicKeySHA256) || !text(input.csrPEM, 16_384) || !validDeviceLabel(input.deviceLabel)) fail('invalid_device_proof')
       const proof = await this.dependencies.verifyCSR(input.csrPEM)
       if (proof.publicKeySHA256 !== tlsPeerPublicKeySHA256 || !HASH.test(proof.csrSHA256)) fail('channel_key_mismatch')
       pairing = this.authenticate(input.pairingId, input.secret)
@@ -220,6 +221,18 @@ export class PairingAuthority {
     })
   }
 
+  // Self-reported display metadata, not hardware attestation or a new authorization.
+  // Only the verified peer certificate may select the existing grant to update.
+  updateDeviceLabel(certificateSHA256: string, deviceLabel: unknown): Promise<void> {
+    return this.serial(async () => {
+      const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256)
+      if (!grant || !this.authorizesCertificate(certificateSHA256)) fail('device_not_authorized')
+      if (!validDeviceLabel(deviceLabel)) fail('invalid_device_label')
+      if (grant.deviceLabel === deviceLabel) return
+      this.persist({ ...this.data, grants: this.data.grants.map(g => g.deviceId === grant.deviceId ? { ...g, deviceLabel } : g) })
+    })
+  }
+
   authorizesCertificate(certificateSHA256: string): boolean {
     if (typeof certificateSHA256 !== 'string' || !HASH.test(certificateSHA256)) return false
     try { this.available() } catch { return false }
@@ -298,7 +311,7 @@ export function validatePairingState(value: unknown): PairingState {
   const grants: DeviceGrant[] = value.grants.map((g: unknown) => {
     if (!record(g)) return fail('invalid_pairing_state')
     keys(g, ['certificatePEM', 'certificateSHA256', 'publicKeySHA256', 'deviceId', 'expiresAt', 'pairingId', 'deviceLabel', 'authority', 'source', 'confirmedAt', 'revokedAt'])
-    if (g.authority !== 'owner-device' || g.source !== 'local_confirmation' || !text(g.certificatePEM, 16_384) || !text(g.deviceLabel, 320) ||
+    if (g.authority !== 'owner-device' || g.source !== 'local_confirmation' || !text(g.certificatePEM, 16_384) || !validDeviceLabel(g.deviceLabel) ||
         typeof g.deviceId !== 'string' || !UUID.test(g.deviceId) || typeof g.pairingId !== 'string' || !UUID.test(g.pairingId) ||
         typeof g.certificateSHA256 !== 'string' || !HASH.test(g.certificateSHA256) || typeof g.publicKeySHA256 !== 'string' || !HASH.test(g.publicKeySHA256) ||
         !isTime(g.expiresAt) || !isTime(g.confirmedAt) || g.expiresAt <= g.confirmedAt || (g.revokedAt !== null && !isTime(g.revokedAt))) return fail('invalid_pairing_state')
@@ -317,7 +330,7 @@ export function validatePairingState(value: unknown): PairingState {
     if (p.state === 'awaiting_local_confirmation' && record(p.proof)) {
       keys(p.proof, ['csrPEM', 'csrSHA256', 'publicKeySHA256', 'deviceLabel'])
       const proof = p.proof
-      if (text(proof.csrPEM, 16_384) && text(proof.deviceLabel, 320) && typeof proof.csrSHA256 === 'string' && HASH.test(proof.csrSHA256) && typeof proof.publicKeySHA256 === 'string' && HASH.test(proof.publicKeySHA256)) {
+      if (text(proof.csrPEM, 16_384) && validDeviceLabel(proof.deviceLabel) && typeof proof.csrSHA256 === 'string' && HASH.test(proof.csrSHA256) && typeof proof.publicKeySHA256 === 'string' && HASH.test(proof.publicKeySHA256)) {
         return { ...common, state: 'awaiting_local_confirmation', proof: { csrPEM: proof.csrPEM, csrSHA256: proof.csrSHA256, publicKeySHA256: proof.publicKeySHA256, deviceLabel: proof.deviceLabel } }
       }
     }
