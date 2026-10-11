@@ -194,6 +194,7 @@ struct SessionTranscriptView: View {
     .sheet(isPresented: $showFiles) {
       if let session { WorkspaceBrowserView(cwd: session.cwd).id(session.cwd) }
     }
+    .macLocalLinks(cwd: session?.cwd)
     .onChange(of: otherLiveQuestion?.questionId, initial: true) { _, id in showLiveQuestion = id != nil }
     .confirmationDialog(confirmStop?.origin == "mac" ? "停止 Mac 上的这次运行？" : "停止这次运行？",
                         isPresented: Binding(get: { confirmStop != nil }, set: { if !$0 { confirmStop = nil } }),
