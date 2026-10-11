@@ -767,6 +767,15 @@ function OverviewPanelBody({
     }
     return null
   }, [turns])
+  const contextDescription = ctx
+    ? `上下文${ctx.model ? ` · ${ctx.model}` : ''} · 已占 ${ctx.pct}% · 残余 ${fmtTok(Math.max(0, ctx.win - ctx.used))} · ${
+      ctx.quality === 'inferred'
+        ? '推断：Provider usage 比例换算'
+        : ctx.quality === 'exact'
+          ? '精确：最近一次 Provider 请求用量'
+          : '旧记录：证据质量未标记'
+    }${busy ? ' · 随请求用量上报更新，非逐 token' : ''}`
+    : '仅在 Provider 同时上报上下文占用与模型窗口时显示'
   const logicalCallEvents = useMemo(() => turns.flatMap((turn) => logicalCallEventsForTurn(turn.items, turn.userText)), [turns])
   const calls = useMemo(() => aggregateCalls(logicalCallEvents), [logicalCallEvents])
   const turnCallRows = useMemo<TurnCallRow[]>(() => {
@@ -925,7 +934,7 @@ function OverviewPanelBody({
       <div className="ov-scroll overview-scroll-content">
 
       {(
-        <div className={`ctx-gauge ${ctx ? (ctx.pct >= 80 ? 'hot' : ctx.pct >= 50 ? 'warm' : '') : 'empty'}`}>
+        <div className={`ctx-gauge ${ctx ? (ctx.pct >= 80 ? 'hot' : ctx.pct >= 50 ? 'warm' : '') : 'empty'}`} title={contextDescription}>
           <div
             className="ring"
             style={ctx ? ({ '--p': Math.min(ctx.pct, 100) } as CSSProperties) : undefined}
@@ -934,28 +943,7 @@ function OverviewPanelBody({
             <span>{ctx ? `${ctx.pct}%` : '—'}</span>
           </div>
           <div className="ctx-copy">
-            <div className="lbl">上下文{ctx?.model ? ` · ${ctx.model}` : ''}</div>
-            {ctx ? (
-              <>
-                <div className="v">
-                  {fmtTok(ctx.used)} / {fmtTok(ctx.win)}
-                </div>
-                <div className="sub">
-                  已占 {ctx.pct}% · 残余 {fmtTok(Math.max(0, ctx.win - ctx.used))} · {
-                    ctx.quality === 'inferred'
-                      ? '推断：Provider usage 比例换算'
-                      : ctx.quality === 'exact'
-                        ? '精确：最近一次 Provider 请求用量'
-                        : '旧记录：证据质量未标记'
-                  }{busy ? ' · 随请求用量上报更新，非逐 token' : ''}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="v">暂无上下文数据</div>
-                <div className="sub">仅在 Provider 同时上报上下文占用与模型窗口时显示</div>
-              </>
-            )}
+            <div className="v">{ctx ? `${fmtTok(ctx.used)} / ${fmtTok(ctx.win)}` : '暂无上下文数据'}</div>
           </div>
         </div>
       )}

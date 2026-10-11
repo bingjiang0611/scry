@@ -307,22 +307,23 @@ async function exercise() {
   button('#archive-sidebar', '撤销').click()
   await waitFor(() => sidebarRows() === 2)
   document.querySelector('#context-start').click()
-  await waitFor(() => text('#overview .ctx-copy .v').includes('100.0k / 272.0k'))
+  await waitFor(() => text('#overview .ctx-copy').trim() === '100.0k / 272.0k')
+  check(document.querySelector('#overview .ctx-gauge').title.includes('精确：最近一次 Provider 请求用量'), 'Compact context lost its evidence-quality tooltip')
   check(text('#overview').includes('运行中'), 'Context fixture ended before live updates')
   check(text('#overview').includes('未观测到'), 'Missing compaction evidence was displayed as zero')
   document.querySelector('#context-update').click()
-  await waitFor(() => text('#overview .ctx-copy .v').includes('201.6k / 272.0k'))
+  await waitFor(() => text('#overview .ctx-copy').trim() === '201.6k / 272.0k')
   check(document.querySelector('#overview .ring').getAttribute('aria-label') === '上下文占用 74%', 'Live context gauge did not update')
   check(text('#overview').includes('等待 result'), 'Context snapshots leaked into billing totals')
   document.querySelector('#context-compact').click()
-  await waitFor(() => text('#overview .ctx-copy .v').includes('暂无上下文数据'))
+  await waitFor(() => text('#overview .ctx-copy').trim() === '暂无上下文数据')
   check(text('#overview').includes('Compact1 次'), 'Completed compaction was not counted once')
   document.querySelector('#context-after').click()
-  await waitFor(() => text('#overview .ctx-copy .v').includes('20.0k / 272.0k'))
+  await waitFor(() => text('#overview .ctx-copy').trim() === '20.0k / 272.0k')
   document.querySelector('#empty').click()
   await waitFor(() => !text('#overview').includes('20.0k / 272.0k'))
   check(!text('#overview').includes('Compact1 次'), 'New session inherited the previous compaction count')
-  return { liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
+  return { compactContextCopy: true, contextEvidenceTooltip: true, liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
 async function exercisePiCommands(contents) {

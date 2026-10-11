@@ -28,6 +28,24 @@ function render(items: TraceEvent[], previous: Turn[] = []): string {
 }
 
 describe('OverviewPanel request-level context', () => {
+  it.each<{ quality: TraceEvent['contextUsageQuality']; description: string }>([
+    { quality: 'exact', description: '精确：最近一次 Provider 请求用量' },
+    { quality: 'inferred', description: '推断：Provider usage 比例换算' },
+    { quality: undefined, description: '旧记录：证据质量未标记' }
+  ])('shows only the live token ratio while retaining $quality evidence in the tooltip', ({ quality, description }) => {
+    const html = render([sample('current', 2100, { contextUsageQuality: quality })])
+    expect(html).toContain('<div class="ctx-copy"><div class="v">2.1k / 272.0k</div></div>')
+    expect(html).toContain(`title="上下文 · ultimate · 已占 1% · 残余 269.9k · ${description} · 随请求用量上报更新，非逐 token"`)
+    expect(html).toContain('aria-label="上下文占用 1%"')
+  })
+
+  it('keeps unavailable context explicit without extra visible explanation', () => {
+    const html = render([])
+    expect(html).toContain('<div class="ctx-copy"><div class="v">暂无上下文数据</div></div>')
+    expect(html).toContain('title="仅在 Provider 同时上报上下文占用与模型窗口时显示"')
+    expect(html).not.toContain('0.0k /')
+  })
+
   it('updates within the unfinished turn rather than retaining the previous result; does not bill samples', () => {
     const previous: Turn = {
       runId: 'old', userText: 'old', done: true,
