@@ -259,6 +259,9 @@ const skillNamesFromCommand = (command: string): string[] => {
   return [...names]
 }
 
+// Root items that run a tool the model called. Their completion is tool activity, not model output.
+const CODEX_TOOL_ITEM_TYPES = ['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'collabAgentToolCall', 'fileChange']
+
 const hookEventName = (value: unknown): string => {
   const name = String(value ?? 'hook')
   return name.charAt(0).toUpperCase() + name.slice(1)
@@ -912,19 +915,34 @@ export function createCodexAdapter(
       let lastRequestUsage: TokenUsage | undefined
       let modelContextWindow: number | undefined
       let model: string | undefined
-      // Start of the root thread's next model request: turn start, the latest tool/hook completion,
-      // or the previous usage update. agentMessage completion is mid-response and does not move it.
+      // Per-request timing for the root thread. Codex sends a request's usage update only after the
+      // tools that request called have finished (turn.rs drains in-flight tools before the token count),
+      // so the usage update is not the end of generation, and that request's own tool/hook completions
+      // are not the next request's start.
+      // Start: turn start, the previous usage update, or a tool/hook completion before any output.
       let llmCallStartMs: number | undefined
-      // First output item of that request (reasoning/agentMessage/webSearch start or delta). Codex's own
-      // per-request TTFT uses the same OutputItemAdded signal but is not exposed over app-server.
+      // First output item (reasoning/agentMessage/webSearch start or delta). Codex's own per-request
+      // TTFT uses the same OutputItemAdded signal but is not exposed over app-server.
       let llmCallFirstTokenMs: number | undefined
+      // Last sign that generation reached this point: output, or a tool about to run (its call is complete).
+      let llmCallLastOutputMs: number | undefined
+      // PreToolUse hooks already seen whose tool item has not started yet. That tool start is the same
+      // tool after its hook ran, not more generation.
+      let llmCallPendingToolHooks = 0
       const advanceLlmCallStart = (atMs: number): void => {
+        if (llmCallLastOutputMs != null) return
         llmCallStartMs = llmCallStartMs == null ? atMs : Math.max(llmCallStartMs, atMs)
-        // A tool finishing mid-response moves the boundary past an earlier first item: that pairing is unknown.
-        if (llmCallFirstTokenMs != null && llmCallFirstTokenMs < llmCallStartMs) llmCallFirstTokenMs = undefined
       }
-      const observeLlmFirstToken = (atMs: number): void => {
-        if (llmCallStartMs != null && atMs >= llmCallStartMs) llmCallFirstTokenMs ??= atMs
+      const observeLlmOutput = (atMs: number, firstToken: boolean): void => {
+        if (llmCallStartMs == null || atMs < llmCallStartMs) return
+        if (firstToken) llmCallFirstTokenMs ??= atMs
+        llmCallLastOutputMs = Math.max(llmCallLastOutputMs ?? atMs, atMs)
+      }
+      const resetLlmCall = (startMs: number): void => {
+        llmCallStartMs = startMs
+        llmCallFirstTokenMs = undefined
+        llmCallLastOutputMs = undefined
+        llmCallPendingToolHooks = 0
       }
       let modelProvider: string | undefined
       let serviceTier: string | null | undefined
@@ -1161,12 +1179,10 @@ export function createCodexAdapter(
                   state.boundaryMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
                 }
               }
-              if (isRoot) {
-                llmCallStartMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
-                llmCallFirstTokenMs = undefined
-              }
+              // turn.startedAt is whole Unix seconds; the local receipt time keeps millisecond precision.
+              if (isRoot) resetLlmCall(observedAtMs)
             } else if (method === 'item/agentMessage/delta') {
-              if (isRoot) observeLlmFirstToken(observedAtMs)
+              if (isRoot) observeLlmOutput(observedAtMs, true)
               runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
                 stage: 'text_delta',
@@ -1177,7 +1193,7 @@ export function createCodexAdapter(
                 ...traceContext
               }))
             } else if (method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') {
-              if (isRoot) observeLlmFirstToken(observedAtMs)
+              if (isRoot) observeLlmOutput(observedAtMs, true)
               runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
                 stage: 'thinking',
@@ -1194,9 +1210,15 @@ export function createCodexAdapter(
               emitObservedResponse(notificationThreadId, responseId, observedAtMs, traceContext, 'raw_response')
             } else if (method === 'item/started' || method === 'item/completed') {
               const item = record(params.item)
-              // Tool items start only after the model finished the call, so they never mark a first token.
-              if (isRoot && method === 'item/started' && ['reasoning', 'agentMessage', 'webSearch'].includes(String(item.type))) {
-                observeLlmFirstToken(observedAtMs)
+              if (isRoot) {
+                const type = String(item.type ?? '')
+                if (['reasoning', 'agentMessage', 'webSearch'].includes(type)) {
+                  observeLlmOutput(observedAtMs, method === 'item/started')
+                } else if (method === 'item/started' && CODEX_TOOL_ITEM_TYPES.includes(type)) {
+                  // A tool item starts only after the model finished generating its call: an end, never a first token.
+                  if (llmCallPendingToolHooks > 0) llmCallPendingToolHooks -= 1
+                  else observeLlmOutput(observedAtMs, false)
+                }
               }
               if (item.type === 'collabAgentToolCall' && item.tool === 'spawnAgent') {
                 const receiverThreadIds = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.map(String) : []
@@ -1244,13 +1266,7 @@ export function createCodexAdapter(
                     traceContext,
                     'agent_message_item'
                   )
-                } else if ([
-                  'commandExecution',
-                  'mcpToolCall',
-                  'dynamicToolCall',
-                  'collabAgentToolCall',
-                  'fileChange'
-                ].includes(type)) {
+                } else if (CODEX_TOOL_ITEM_TYPES.includes(type)) {
                   const completedAtMs =
                     usageNumber(params.completedAtMs) ?? observedAtMs
                   advanceTimingBoundary(notificationThreadId, completedAtMs)
@@ -1294,11 +1310,16 @@ export function createCodexAdapter(
                 method === 'hook/completed',
                 runRequest.cwd
               ))
+              const run = record(params.run)
               if (method === 'hook/completed') {
-                const run = record(params.run)
                 const completedAtMs = epochMilliseconds(run.completedAt) ?? observedAtMs
                 advanceTimingBoundary(notificationThreadId, completedAtMs)
-                if (isRoot) advanceLlmCallStart(completedAtMs)
+                // run.completedAt is whole seconds: use the receipt time for per-request timing.
+                if (isRoot) advanceLlmCallStart(observedAtMs)
+              } else if (isRoot && hookEventName(run.eventName) === 'PreToolUse') {
+                // PreToolUse runs before the tool item starts, once the model has finished the call.
+                observeLlmOutput(observedAtMs, false)
+                llmCallPendingToolHooks += 1
               }
             } else if (method === 'thread/tokenUsage/updated') {
               // Child threads report their own cumulative usage. It must not be added to the root turn.
@@ -1319,25 +1340,24 @@ export function createCodexAdapter(
                   : undefined
               if (delta && hasPositiveUsage(delta)) turnUsage = addUsage(turnUsage, delta)
               // One usage update per completed model response. A repeated snapshot has no positive
-              // delta and must not become a second call. Duration is local: boundary → this update.
+              // delta and must not become a second call. Duration is local: start → last output signal;
+              // without one (no output item, no tool) the update itself is the end.
               const callTokens = delta && hasPositiveUsage(delta) ? delta.outputTokens : undefined
-              if (callTokens != null && callTokens > 0 && llmCallStartMs != null && observedAtMs > llmCallStartMs) {
+              const callEndMs = llmCallLastOutputMs ?? observedAtMs
+              if (callTokens != null && callTokens > 0 && llmCallStartMs != null && callEndMs > llmCallStartMs) {
                 runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                   kind: 'harness',
                   stage: 'runtime:llm_call',
                   llmCall: {
                     outputTokens: callTokens,
-                    durationMs: observedAtMs - llmCallStartMs,
+                    durationMs: callEndMs - llmCallStartMs,
                     ...(llmCallFirstTokenMs != null ? { firstTokenMs: llmCallFirstTokenMs - llmCallStartMs } : {}),
                     ...(model ? { model } : {})
                   }
                 }))
               }
               // An unknown delta (first resumed snapshot) still ends a response; a zero delta is a repeat.
-              if (!delta || hasPositiveUsage(delta)) {
-                llmCallStartMs = observedAtMs
-                llmCallFirstTokenMs = undefined
-              }
+              if (!delta || hasPositiveUsage(delta)) resetLlmCall(observedAtMs)
               if (usage.total) lastSeenCumulativeUsage = total
               lastRequestUsage = usage.last ? last : undefined
               modelContextWindow = usageNumber(usage.modelContextWindow) ?? modelContextWindow
