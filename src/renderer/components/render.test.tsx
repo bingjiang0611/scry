@@ -4412,10 +4412,16 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).toContain('本会话无 MCP 调用')
   })
 
+  it('不再展示底部本会话 Token 用量区块，保留文件足迹', () => {
+    expect(html).not.toContain('本会话 Token 用量')
+    expect(html).not.toContain('仅聚合当前会话已加载的轮次；不会混入其他会话')
+    expect(html).not.toContain('<span class="fchip">1 turns</span>')
+    expect(html).toContain('overview-file-footprint')
+  })
+
   it('会话数据只聚合当前会话，不混入 usage.jsonl 与 SQLite 的跨会话累计', () => {
-    expect(html).toContain('本会话 Token 用量')
-    expect(html).toContain('1.7k tok')
-    expect(html).toContain('<span class="fchip">1 turns</span>')
+    expect(html).toContain('<strong>3.0k</strong>')
+    expect(html).toContain('<strong>1.5k / 200</strong>')
     expect(html).not.toContain('累计 Token 用量')
     expect(html).not.toContain('3.4k tok')
     expect(html).not.toContain('SQLite 历史累计')

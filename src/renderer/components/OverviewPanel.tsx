@@ -1779,23 +1779,6 @@ function OverviewPanelBody({
           )
         })()}
 
-      {turns.length > 0 && (
-        <div className="panel-section">
-          <h4>
-            本会话 Token 用量<span className="more">当前会话</span>
-          </h4>
-          <div className="pstats">
-            <span className="fchip cost">
-              {tin.value == null || tout.value == null ? '未提供 token' : `${fmtTok(tin.value + tout.value)} tok`}
-            </span>
-            <span className="fchip">
-              {formatObserved(tin)}→{formatObserved(tout)} tok
-            </span>
-            <span className="fchip">{turns.length} turns</span>
-          </div>
-          <div className="psrc">仅聚合当前会话已加载的轮次；不会混入其他会话</div>
-        </div>
-      )}
         </div>
       )}
 

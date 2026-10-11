@@ -919,6 +919,9 @@ async function exerciseOverviewDensity(contents, screenshotPath) {
     if (!await contents.executeJavaScript(`document.querySelector('#overview-session-tab').getAttribute('aria-selected') === 'true' && !document.querySelector('#overview-session-panel').hidden && document.querySelector('#overview-turns-panel').hidden`)) {
       throw new Error('Overview native tab click did not select session data')
     }
+    if (!await contents.executeJavaScript(`!document.querySelector('#overview-session-panel').textContent.includes('本会话 Token 用量') && !document.querySelector('#overview-session-panel .pstats') && document.querySelector('#overview-file-footprint') != null && document.querySelector('#overview .overview-metric-grid') != null`)) {
+      throw new Error('Overview retained the redundant token section or removed adjacent evidence')
+    }
     contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab', modifiers: ['shift'] })
     contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] })
     await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
