@@ -252,6 +252,13 @@ final class RemoteRunStore: ObservableObject {
   private var liveRunsRevision: String?
   private var liveHistoryTarget: SessionIdentity?
   private var liveAnswerIds: [String: String] = [:]
+  // Real streamed output of one detached remote run the open transcript shows.
+  // A brand-new phone session has no archive until the run ends, and remote
+  // runs are not in the Mac's active-run memory, so this host output store is
+  // the only live evidence. Mac runs need none: their history includes it.
+  @Published private(set) var detachedRunId: String?
+  @Published private(set) var detachedOutput: [OutputLine] = []
+  private var detachedTask: Task<Void, Never>?
 
   // A run remains unresolved until its durable intent is acknowledged and a
   // terminal run has had its output drained. This derived gate is the small
@@ -1784,8 +1791,12 @@ final class RemoteRunStore: ObservableObject {
     guard seenOutputSequences.insert(chunk.seq).inserted else { return }
     // Real streamed Provider output proves execution has started.
     if lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
-    // Providers stream text/reasoning in small deltas. Keep those deltas as one
-    // readable block instead of rendering one SwiftUI Text row per token.
+    Self.coalesce(chunk, into: &output)
+  }
+
+  // Providers stream text/reasoning in small deltas. Keep those deltas as one
+  // readable block instead of rendering one SwiftUI Text row per token.
+  static func coalesce(_ chunk: G0Transport.RunOutputChunk, into output: inout [OutputLine]) {
     if let last = output.last, last.kind == chunk.kind,
        chunk.kind == "output" || chunk.kind == "reasoning" {
       output[output.count - 1] = OutputLine(id: chunk.seq, kind: chunk.kind, text: last.text + chunk.text)
@@ -1870,6 +1881,7 @@ final class RemoteRunStore: ObservableObject {
     generation += 1
     dataGeneration += 1
     stopLiveRuns()
+    followDetached(nil)
     liveRuns = []; liveRunsRevision = nil; liveRunsStatus = .unknown; liveHistoryTarget = nil
     liveActionRunId = nil; liveActionError = nil; liveAnsweredQuestions = []; liveAnswerIds = [:]
     pollTask?.cancel(); pollTask = nil
@@ -2575,6 +2587,41 @@ extension RemoteRunStore {
 
   func openLiveQuestion(_ run: G0Transport.LiveRun) -> G0Transport.RunQuestionRequest? {
     run.questions.first { !liveAnsweredQuestions.contains("\(run.runId)\u{0}\($0.questionId)") }
+  }
+
+  func followDetached(_ live: G0Transport.LiveRun?) {
+    let runId = live?.origin == "remote" ? live?.runId : nil
+    guard runId != detachedRunId else { return }
+    detachedTask?.cancel()
+    detachedTask = nil
+    detachedRunId = runId
+    detachedOutput = []
+    guard let runId, let client = makeClient() else { return }
+    detachedTask = Task { [weak self] in
+      var ledgerCursor = 0, outputCursor = 0, failures = 0
+      while !Task.isCancelled {
+        do {
+          let watch = try await client.watch(runId: runId, cursor: ledgerCursor, outputCursor: outputCursor)
+          guard !Task.isCancelled, let self, self.detachedRunId == runId else { return }
+          failures = 0
+          ledgerCursor = watch.poll.cursor
+          outputCursor = watch.output.cursor
+          // Chunks arrive strictly after outputCursor, so none repeats. A
+          // "truncated" marker is covered by the view's may-be-incomplete note.
+          for chunk in watch.output.chunks where chunk.kind != "truncated" {
+            Self.coalesce(chunk, into: &self.detachedOutput)
+          }
+          // The run's own terminal state ends the stream; history takes over.
+          if ["settled", "failed", "cancelled"].contains(watch.state ?? "") { return }
+        } catch is CancellationError {
+          return
+        } catch {
+          if Task.isCancelled { return }
+          failures += 1
+          try? await Task.sleep(for: .seconds(min(8, 1 << min(failures, 3))))
+        }
+      }
+    }
   }
 
   func stopLiveRun(_ run: G0Transport.LiveRun) {
