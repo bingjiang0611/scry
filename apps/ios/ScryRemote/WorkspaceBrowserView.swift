@@ -87,6 +87,13 @@ private struct WorkspaceContentView: View {
   @State private var revision = 0
   @State private var error: String?
 
+  private static let codeFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+  private static func width(of lines: [String]) -> CGFloat {
+    let widest = lines.map { ($0 as NSString).size(withAttributes: [.font: codeFont]).width }.max() ?? 0
+    return ceil(widest) + 1
+  }
+
   var body: some View {
     VStack(spacing: 10) {
       if path == nil {
@@ -97,15 +104,21 @@ private struct WorkspaceContentView: View {
         Notice(text: "Diff 不可用：\(diff.reason ?? diff.status.rawValue)", warning: true)
       } else if let text = file?.content ?? diff?.patch {
         if text.isEmpty { Text(path == nil ? "当前没有未提交改动" : "空文件").foregroundStyle(Palette.muted) }
+        let lines = text.components(separatedBy: "\n")
         ScrollView([.vertical, .horizontal]) {
           LazyVStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
-              Text(line.isEmpty ? " " : line).font(.system(size: 13, design: .monospaced))
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+              Text(line.isEmpty ? " " : line).font(Font(Self.codeFont))
                 .foregroundStyle(path == nil && line.hasPrefix("+") ? Palette.positive
                   : path == nil && line.hasPrefix("-") ? Palette.negative : Palette.ink)
                 .textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
             }
-          }.padding(12)
+          }
+          // A lazy stack is only as wide as its loaded rows, while the scroll
+          // content is as wide as the longest row measured so far, so the stack
+          // was centred and long lines pushed text to the right. Pin the width.
+          .frame(width: Self.width(of: lines), alignment: .leading)
+          .padding(12)
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         if let file {
           Text("字节 \(file.offset)–\(file.nextOffset) / \(file.totalBytes)").font(.caption).monospacedDigit()
