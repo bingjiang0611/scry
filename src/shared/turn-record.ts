@@ -2,7 +2,7 @@ import type { ProviderId } from './provider.js'
 import { isCreditUsageEvidence, type CreditUsageEvidence } from './credit-usage.js'
 import { isToolContent, isToolContentRef } from './tool-content.js'
 import { normalizeTurnDiffSnapshot, type CompactionTrigger, type DangerLevel, type DiffFile, type TurnDiffCollection, type TurnDiffReason, type TurnDiffStatus } from './trace.js'
-import type { AgentIntervention } from './runtime.js'
+import { isSupportedImageMimeType, type AgentImageMimeType, type AgentIntervention, type AgentSteerEvidence } from './runtime.js'
 
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
 export type EvidenceStatus = 'available' | 'partial' | 'disabled' | 'unavailable'
@@ -176,8 +176,13 @@ export interface TurnCompaction {
   agentId?: string
 }
 
+/** Full payloads stay in the trace archive; workspace records retain content identity. */
+export type TurnSteerEvidence = Omit<AgentSteerEvidence, 'attachments'> & {
+  attachments: Array<{ name: string; mimeType: AgentImageMimeType; size: number; sha256: string }>
+}
+
 export interface TurnEvidence {
-  user: Evidence<{ text?: string; textHash?: string }>
+  user: Evidence<{ text?: string; textHash?: string; steers?: TurnSteerEvidence[] }>
   assistant: Evidence<{ text?: string; textHash?: string; contentRefs?: import('./tool-content.js').ToolContentRef[] }>
   tools: Evidence<TurnCall[]>
   skills: Evidence<TurnCall[]>
@@ -501,6 +506,26 @@ function isTextPayload(value: unknown): boolean {
     (raw.contentRefs === undefined || Array.isArray(raw.contentRefs) && raw.contentRefs.length > 0 && raw.contentRefs.every(isToolContentRef))
 }
 
+function isUserTextPayload(value: unknown): boolean {
+  if (!isTextPayload(value)) return false
+  const raw = value as Record<string, unknown>
+  if (raw.steers === undefined) return true
+  return Array.isArray(raw.steers) && raw.steers.every(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const steer = value as Record<string, unknown>
+    return typeof steer.messageId === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(steer.messageId) &&
+      typeof steer.prompt === 'string' && typeof steer.status === 'string' && ['pending', 'accepted', 'rejected', 'unavailable', 'unknown'].includes(steer.status) &&
+      isOptionalString(steer.message) && isOptionalString(steer.providerTurnId) &&
+      Array.isArray(steer.attachments) && steer.attachments.every(value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+        const attachment = value as Record<string, unknown>
+        return typeof attachment.name === 'string' && typeof attachment.mimeType === 'string' && isSupportedImageMimeType(attachment.mimeType) &&
+          Number.isSafeInteger(attachment.size) && Number(attachment.size) >= 0 &&
+          typeof attachment.sha256 === 'string' && /^sha256:[0-9a-f]{64}$/.test(attachment.sha256)
+      })
+  })
+}
+
 function isTurnCall(value: unknown): value is TurnCall {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
@@ -702,7 +727,7 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
     '$.turnRole', 'requires an observed turn role status')
 
   const sections: Array<[string, (payload: unknown) => boolean, boolean?]> = [
-    ['user', isTextPayload], ['assistant', isTextPayload],
+    ['user', isUserTextPayload], ['assistant', isTextPayload],
     ['tools', (payload) => isArrayOf(payload, isTurnCall)],
     ['skills', (payload) => isArrayOf(payload, isTurnCall)],
     ['mcps', (payload) => isArrayOf(payload, isTurnCall)],

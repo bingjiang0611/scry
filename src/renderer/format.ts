@@ -89,6 +89,12 @@ export function fileWriteCoverage(items: TraceEvent[]): FileCoverage {
 
 export interface Turn {
   runId: string
+  /** Live run identity retained for Steer admission; history turns may omit it. */
+  providerId?: import('@shared/provider').ProviderId
+  agentProfileId?: string
+  cwd?: string
+  externalSessionId?: string
+  sessionId?: string
   /** Renderer-only placeholder shown while main is admitting a newly submitted run. */
   pendingStart?: boolean
   providerTurnId?: string

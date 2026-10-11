@@ -17,6 +17,7 @@ import {
 import { listRecords, stableHash } from '../../core/turn-recorder/store'
 import {
   createPiAdapter,
+  PI_RPC_COMMAND_TIMEOUT_MS,
   PI_RPC_STARTUP_TIMEOUT_MS,
   piRpcEnvironment,
   piUserEntryIdAfterBaseline,
@@ -51,6 +52,7 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.slice(newline + 1)
     if (!raw) continue
     const command = JSON.parse(raw)
+    require('node:fs').appendFileSync(process.cwd() + '/fixture-commands', JSON.stringify(command) + '\\n')
     const response = (data) => send({ type: 'response', id: command.id, command: command.type, success: true, ...(data ? { data } : {}) })
     if (command.type === 'get_state') {
       if (promptMessage === 'final-state-hang') {
@@ -252,6 +254,10 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message === 'steer-active' || command.message === 'steer-timeout' || command.message === 'steer-end-race') {
+        send({ type: 'message_start', message: { role: 'assistant' } })
+        continue
+      }
       if (command.message === 'hang') continue
       if (command.message === 'stop-before-final-state') {
         send({ type: 'message_start', message: { role: 'assistant' } })
@@ -301,7 +307,35 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'turn_end', toolResults: [message] })
         send({ type: 'agent_end', willRetry: false, messages: [message] })
       } else send({ type: 'agent_end', willRetry: false })
-      setTimeout(() => send({ type: 'agent_settled' }), 20)
+      setTimeout(() => send({ type: 'agent_settled' }), command.message === 'steer-active' ? 500 : 20)
+    } else if (command.type === 'steer') {
+      require('node:fs').appendFileSync(process.cwd() + '/fixture-steers', JSON.stringify(command) + '\\n')
+      if (command.message === 'steer-reject') {
+        send({ type: 'response', id: command.id, command: command.type, success: false, error: 'native steer rejected' })
+        if (promptMessage === 'steer-active') setTimeout(() => send({ type: 'agent_settled' }), 10)
+      } else if (command.message === 'steer-process-exit') {
+        process.exit(17)
+      } else if (command.message === 'steer-timeout') {
+        continue
+      } else if (command.message === 'steer-end-restart') {
+        send({ type: 'agent_end' })
+        send({ type: 'agent_start' })
+        send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'cycle restarted' } })
+        response()
+        continue
+      } else {
+        const entry = {
+          type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId,
+          message: { role: 'user', content: command.message }
+        }
+        entries.push(entry)
+        leafId = entry.id
+        if (command.message === 'steer-end-race') send({ type: 'agent_end' })
+        response()
+        if (promptMessage === 'steer-active' || promptMessage === 'steer-end-race') {
+          setTimeout(() => send({ type: 'agent_settled' }), 10)
+        }
+      }
     } else if (command.type === 'extension_ui_response' && command.id.startsWith('question-')) {
       require('node:fs').appendFileSync(process.cwd() + '/question-responses', JSON.stringify(command) + '\\n')
       if (command.cancelled) acknowledgePrompt()
@@ -675,7 +709,141 @@ describe('Pi RPC Provider', () => {
     })
   })
 
-  it('waits for agent_settled and normalizes stream, subagent tools, session and usage', async () => {
+  it('admits native Pi steer with images without aborting and keeps the root provider identity', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      let capability!: () => void
+      const ready = new Promise<void>((resolve) => { capability = resolve })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-steer', prompt: 'steer-active', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => {
+          events.push(event)
+          if (event.stage === 'runtime:steer_capability') capability()
+        }
+      })
+      await ready
+      await expect(handle.steer!({
+        messageId: 'steer-message', prompt: 'supplementary',
+        attachments: [{ kind: 'image', name: 'diagram.png', mimeType: 'image/png', dataBase64: 'aGk=' }]
+      })).resolves.toMatchObject({ status: 'accepted' })
+      await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'pi-user-1', status: 'completed' })
+      const steer = JSON.parse(readFileSync(join(cwd, 'fixture-steers'), 'utf8').trim())
+      expect(steer).toMatchObject({ type: 'steer', message: 'supplementary', images: [{ type: 'image', data: 'aGk=', mimeType: 'image/png' }] })
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8')
+        .trim().split('\n').map((line) => JSON.parse(line))
+      expect(commands.some((command) => command.type === 'abort')).toBe(false)
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: 'harness', stage: 'runtime:steer_capability',
+        steerCapability: { status: 'available', attachments: true }
+      }))
+    })
+  }, 15_000)
+
+  it('distinguishes native steer rejection from an admission timeout', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      let ready!: () => void
+      const active = new Promise<void>((resolve) => { ready = resolve })
+      const rejected = adapter.run({
+        runId: 'run-steer-reject', prompt: 'steer-active', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => {
+          if (event.stage === 'runtime:steer_capability') ready()
+        }
+      })
+      await active
+      await expect(rejected.steer!({ messageId: 'reject', prompt: 'steer-reject', attachments: [] }))
+        .resolves.toMatchObject({ status: 'rejected', message: expect.stringContaining('native steer rejected') })
+      await expect(rejected.promise).resolves.toMatchObject({ status: 'completed' })
+    })
+
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      let ready!: () => void
+      const active = new Promise<void>((resolve) => { ready = resolve })
+      const handle = adapter.run({
+        runId: 'run-steer-timeout', prompt: 'steer-timeout', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => {
+          if (event.stage === 'runtime:steer_capability') ready()
+        }
+      })
+      await active
+      vi.useFakeTimers()
+      try {
+        const result = handle.steer!({ messageId: 'timeout', prompt: 'steer-timeout', attachments: [] })
+        await vi.advanceTimersByTimeAsync(PI_RPC_COMMAND_TIMEOUT_MS + 1)
+        await expect(result).resolves.toMatchObject({ status: 'unknown', message: expect.stringContaining('admission 未知') })
+      } finally {
+        vi.useRealTimers()
+      }
+      handle.forceKill()
+      await expect(handle.promise).resolves.toMatchObject({ status: 'interrupted' })
+    })
+  }, 20_000)
+
+  it('quarantines steer admission when agent_end wins and refuses idle or settled steer', async () => {
+    await withRotomFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      let ready!: () => void
+      const active = new Promise<void>((resolve) => { ready = resolve })
+      const handle = adapter.run({
+        runId: 'run-steer-race', prompt: 'steer-end-race', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: (event) => {
+          if (event.stage === 'runtime:steer_capability') ready()
+        }
+      })
+      await expect(handle.steer!({ messageId: 'too-early', prompt: 'idle', attachments: [] }))
+        .resolves.toMatchObject({ status: 'unavailable' })
+      await active
+      await expect(handle.steer!({ messageId: 'race', prompt: 'steer-end-race', attachments: [] }))
+        .resolves.toMatchObject({ status: 'unknown', message: expect.stringContaining('归属未知') })
+      const first = await handle.promise
+      expect(first).toMatchObject({ status: 'completed' })
+      const next = await adapter.run({
+        runId: 'run-after-steer-race', prompt: 'next', cwd, resume: first.externalSessionId,
+        agentProfileId: profile.id, attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      }).promise
+      expect(next).toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
+      expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(2)
+      await expect(handle.steer!({ messageId: 'settled', prompt: 'late', attachments: [] }))
+        .resolves.toMatchObject({ status: 'rejected' })
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8')
+        .trim().split('\n').map((line) => JSON.parse(line))
+      expect(commands.some((command) => command.type === 'abort')).toBe(false)
+    })
+  }, 15_000)
+
+  it('admits a new active agent cycle without reusing a completed cycle admission guard', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      let ready!: () => void
+      let restarted!: () => void
+      const active = new Promise<void>(resolve => { ready = resolve })
+      const newCycle = new Promise<void>(resolve => { restarted = resolve })
+      const handle = adapter.run({
+        runId: 'steer-cycles', prompt: 'steer-active', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => {
+          if (event.stage === 'runtime:steer_capability') ready()
+          if (event.kind === 'model' && event.text === 'cycle restarted') restarted()
+        }
+      })
+      try {
+        await active
+        await expect(handle.steer!({ messageId: 'old-cycle', prompt: 'steer-end-restart', attachments: [] }))
+          .resolves.toMatchObject({ status: 'unknown' })
+        await newCycle
+        await expect(handle.steer!({ messageId: 'new-cycle', prompt: 'supplement', attachments: [] }))
+          .resolves.toMatchObject({ status: 'accepted' })
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
+      } finally {
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it('records the authoritative native session and root entry with model/effort controls', async () => {
     await withFixture(async (profile, cwd) => {
       const events: TraceEvent[] = []
       const onSession = vi.fn()
@@ -1471,6 +1639,15 @@ describe('Pi RPC Provider', () => {
       { type: 'message', id: 'user-1', parentId: null, message: { role: 'user' } },
       { type: 'message', id: 'user-2', parentId: 'user-1', message: { role: 'user' } }
     ])).toThrow('多个新增')
+    expect(piUserEntryIdAfterBaseline('leaf-before', [
+      { type: 'message', id: 'root-expanded', parentId: 'leaf-before', message: { role: 'user', content: 'expanded slash command' } },
+      { type: 'message', id: 'assistant-after-root', parentId: 'root-expanded', message: { role: 'assistant' } },
+      { type: 'message', id: 'supplementary-same-prompt', parentId: 'assistant-after-root', message: { role: 'user', content: '/same' } }
+    ], true)).toBe('root-expanded')
+    expect(() => piUserEntryIdAfterBaseline('leaf-before', [
+      { type: 'message', id: 'root-expanded', parentId: 'leaf-before', message: { role: 'user', content: 'expanded slash command' } },
+      { type: 'message', id: 'unrelated-branch', parentId: 'leaf-before', message: { role: 'user', content: '/same' } }
+    ], true)).toThrow('active branch')
   }, 15_000)
 
   it('cancels the exact managed provisional lifecycle when Pi rejects prompt preflight', async () => {

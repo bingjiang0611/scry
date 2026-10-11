@@ -40,6 +40,18 @@ function record(): Record<string, unknown> {
 }
 
 describe('AgentTurnRecord strict schema-v1 validation', () => {
+  it('keeps legacy root prompts valid while validating supplemental Steer status and image identity', () => {
+    const steer = { messageId: 'message-1', prompt: 'supplement', status: 'unknown', message: 'native response unconfirmed', attachments: [{ name: 'screen.png', mimeType: 'image/png', size: 9, sha256: `sha256:${'a'.repeat(64)}` }] }
+    const withSteer = (value: unknown) => ({ ...record(), user: { status: 'available', quality: 'exact', source: ['scry_provider_adapter'], value: { text: 'original', steers: [value] } } })
+    expect(isAgentTurnRecord(record())).toBe(true)
+    expect(isAgentTurnRecord(withSteer(steer))).toBe(true)
+    expect(isAgentTurnRecord(withSteer({ ...steer, status: 'completed' }))).toBe(false)
+    expect(isAgentTurnRecord(withSteer({ ...steer, status: ['accepted'] }))).toBe(false)
+    expect(isAgentTurnRecord(withSteer({ ...steer, attachments: [{ ...steer.attachments[0], mimeType: ['image/png'] }] }))).toBe(false)
+    expect(isAgentTurnRecord(withSteer({ ...steer, attachments: [{ ...steer.attachments[0], sha256: 'fake hash' }] }))).toBe(false)
+    expect(isAgentTurnRecord(withSteer({ ...steer, attachments: [{ ...steer.attachments[0], size: -1 }] }))).toBe(false)
+  })
+
   it('keeps legacy records valid and validates independent credits without accepting USD/unit/provider confusion', () => {
     expect(isAgentTurnRecord(record())).toBe(true)
     const valid = record()

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -29,6 +29,26 @@ afterEach(() => {
 })
 
 describe('attachment store', () => {
+  it('appends isolated Steer batches without replacing root or previous attachment bytes', () => {
+    const userDataDir = root()
+    const image = { kind: 'image' as const, name: 'screen.png', mimeType: 'image/png' as const, dataBase64: png.toString('base64') }
+    const [original] = prepareRunAttachments(userDataDir, 'run-steer', [image])
+    const [first] = prepareRunAttachments(userDataDir, 'run-steer', [image], undefined, 'message-1')
+    const [second] = prepareRunAttachments(userDataDir, 'run-steer', [image], undefined, 'message-2')
+    expect(new Set([original.path, first.path, second.path]).size).toBe(3)
+    for (const attachment of [original, first, second]) expect(readFileSync(attachment.path)).toEqual(png)
+  })
+
+  it('rolls back only a failed Steer batch and rejects path-like batch identities', () => {
+    const userDataDir = root()
+    const image = { kind: 'image' as const, name: 'screen.png', mimeType: 'image/png' as const, dataBase64: png.toString('base64') }
+    const [original] = prepareRunAttachments(userDataDir, 'run-steer', [image])
+    expect(() => prepareRunAttachments(userDataDir, 'run-steer', [image, { ...image, dataBase64: 'aGVsbG8=' }], undefined, 'message-1')).toThrow('不匹配')
+    expect(readFileSync(original.path)).toEqual(png)
+    expect(readdirSync(attachmentRunDir(userDataDir, 'run-steer')!)).toEqual(['01-screen.png'])
+    expect(() => prepareRunAttachments(userDataDir, 'run-steer', [image], undefined, '../../escape')).toThrow('批次身份非法')
+  })
+
   it('does not expose native Pi image paths that would make the agent read the same attachment again', () => {
     const attachment = {
       kind: 'image' as const,

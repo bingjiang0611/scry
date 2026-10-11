@@ -10,6 +10,21 @@ interface JsonRpcMessage {
   emittedAtMs?: number
 }
 
+/** A response-level JSON-RPC error is authoritative provider feedback. */
+export class CodexAppServerResponseError extends Error {
+  readonly code: number | undefined
+  readonly data: unknown
+  readonly method: string
+
+  constructor(method: string, error: { code?: number; message?: string; data?: unknown }) {
+    super(error.message ?? 'Codex app-server request failed')
+    this.name = 'CodexAppServerResponseError'
+    this.code = error.code
+    this.data = error.data
+    this.method = method
+  }
+}
+
 // These requests establish native execution/session identity. Releasing their waiters on a
 // clock would lose ownership of a possibly accepted operation. Only a reply, transport failure
 // or explicit shutdown settles them; never retry an unconfirmed mutation.
@@ -166,6 +181,12 @@ export class CodexAppServerClient {
     return this.requestOnGeneration<T>(method, params, this.processGeneration)
   }
 
+  /** Controls belonging to an existing turn must never bootstrap a new transport. */
+  requestRunning<T = unknown>(method: string, params?: unknown): Promise<T> {
+    if (!this.process) return Promise.reject(new Error('Codex app-server is not running'))
+    return this.requestOnGeneration<T>(method, params, this.processGeneration)
+  }
+
   failureForCurrentGeneration(): Promise<Error> {
     const state = this.generationFailureState
     if (!this.process || !state || state.generation !== this.processGeneration) {
@@ -237,7 +258,7 @@ export class CodexAppServerClient {
       if (!pending || pending.generation !== generation) return
       pending.cancelTimeout()
       this.pending.delete(message.id)
-      if (message.error) pending.reject(new Error(message.error.message ?? 'Codex app-server request failed'))
+      if (message.error) pending.reject(new CodexAppServerResponseError(pending.method, message.error))
       else pending.resolve(message.result)
       return
     }

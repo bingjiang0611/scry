@@ -1,4 +1,8 @@
 import type {
+  AgentSteerRequest,
+  AgentSteerResult
+} from '@shared/runtime'
+import type {
   DetectedAgent,
   ParsedTurn,
   ProjectMeta,
@@ -44,7 +48,10 @@ type OptionalBridgeMethod =
   | 'focusedRunSnapshot'
   | 'unreadSessions'
   | 'onUnreadSessions'
-type RendererScryApi = Omit<ScryApi, OptionalBridgeMethod> & Partial<Pick<ScryApi, OptionalBridgeMethod>>
+type RendererScryApi = Omit<ScryApi, OptionalBridgeMethod> & Partial<Pick<ScryApi, OptionalBridgeMethod>> & {
+  /** Added by the native Steer bridge; optional keeps stale dev preload failures explicit in the UI. */
+  steer?: (request: AgentSteerRequest) => Promise<AgentSteerResult>
+}
 
 declare global {
   interface Window {

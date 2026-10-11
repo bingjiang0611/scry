@@ -111,6 +111,7 @@ const invokeChannels = {
   answerQuestion: 'agent:answerQuestion',
   stop: 'agent:stop',
   stopBackgroundTask: 'agent:stopBackgroundTask',
+  steer: 'agent:steer',
   traceAck: 'agent:traceAck',
   traceResynchronized: 'agent:traceResynchronized',
   remoteStatus: 'remote:status',

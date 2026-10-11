@@ -4,6 +4,33 @@ import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 
 describe('aggregateTurnEvidence', () => {
+  it('preserves Steer admission evidence without rewriting the canonical root prompt or double counting usage', () => {
+    const bytes = Buffer.from('image payload')
+    const steer = { messageId: 'message-1', prompt: '补充要求', attachments: [{ kind: 'image' as const, name: 'screen.png', mimeType: 'image/png' as const, dataBase64: bytes.toString('base64') }] }
+    const events: TraceEvent[] = [
+      { id: 'pending', ts: '2026-10-11T00:00:00Z', runId: 'r', kind: 'human', stage: 'steer', steer: { ...steer, status: 'pending' } },
+      { id: 'accepted', ts: '2026-10-11T00:00:01Z', runId: 'r', kind: 'human', stage: 'steer', steer: { ...steer, status: 'accepted', providerTurnId: 'native-turn' } },
+      { id: 'usage', ts: '2026-10-11T00:00:02Z', runId: 'r', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 3 }
+    ]
+    const evidence = aggregateTurnEvidence({ userText: 'original prompt', events })
+    expect(evidence.user.value).toEqual({
+      text: 'original prompt', textHash: `sha256:${createHash('sha256').update('original prompt').digest('hex')}`,
+      steers: [{ messageId: steer.messageId, prompt: steer.prompt, status: 'accepted', providerTurnId: 'native-turn', attachments: [{ name: 'screen.png', mimeType: 'image/png', size: bytes.byteLength, sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}` }] }]
+    })
+    expect(JSON.stringify(evidence.user)).not.toContain(steer.attachments[0].dataBase64)
+    expect(evidence.usage.value).toMatchObject({ inputTokens: 10, outputTokens: 3 })
+    expect(evidence.tools.value).toEqual([])
+    expect(evidence.interventions?.value).toEqual([])
+  })
+
+  it('retains unknown delivery as unknown instead of treating it as an accepted supplementary message', () => {
+    const evidence = aggregateTurnEvidence({ userText: 'root', events: [{
+      id: 'unknown', ts: '2026-10-11T00:00:01Z', runId: 'r', kind: 'human', stage: 'steer',
+      steer: { messageId: 'message-1', prompt: 'supplement', attachments: [], status: 'unknown', message: 'response unconfirmed' }
+    }] })
+    expect(evidence.user.value?.steers).toEqual([{ messageId: 'message-1', prompt: 'supplement', attachments: [], status: 'unknown', message: 'response unconfirmed' }])
+  })
+
   it('preserves unavailable model timing when activity exceeds the turn wall clock', () => {
     const evidence = aggregateTurnEvidence({ events: [
       { id: 'call', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'tool', stage: 'tool_use', toolUseId: 'call', toolName: 'Read' },

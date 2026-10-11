@@ -134,7 +134,7 @@ describe('composer prompt history', () => {
       { runId: 'two', userText: '已发送', items: [], done: true },
       { runId: 'empty', userText: '  ', items: [], done: true }
     ]
-    const queued = [{ text: '等待发送', attachments: [], request: {} }]
+    const queued = [{ messageId: 'queued-history', text: '等待发送', attachments: [], request: {} }]
     expect(composerPromptHistory(turns, queued)).toEqual(['已发送', '等待发送'])
   })
 })
@@ -3006,10 +3006,13 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
           { id: 'draft-1', kind: 'image', name: 'draft.png', mimeType: 'image/png', dataBase64: 'aQ==', previewUrl: 'data:image/png;base64,aQ==' }
         ]}
         queuedPrompts={[{
+          messageId: 'queued-render',
           text: '继续检查',
           attachments: [{ kind: 'image', name: 'queued.png', mimeType: 'image/png', dataBase64: 'aQ==' }],
           request: { providerId: 'claude', permissionMode: 'default' }
         }]}
+        steerCapability={{ status: 'available', attachments: true }}
+        onSteerQueuedPrompt={() => {}}
         slashOpen={false}
         slashLoading={false}
         slashCmds={[]}
@@ -3037,6 +3040,8 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('当前任务结束后依次发送')
     expect(chatHtml).toContain('queue-count">1')
     expect(chatHtml).toContain('aria-label="移除队列第 1 条消息"')
+    expect(chatHtml).toContain('↳')
+    expect(chatHtml).toContain('不中断模型，将这条消息补充给当前任务')
     expect(chatHtml).toContain('title="同一会话不能切换 Agent；请新建会话后重新选择"')
     expect(chatHtml).toMatch(/class="clibtn"[^>]*disabled=""/)
     expect(chatHtml).toMatch(/aria-label="选择 Model 与 Effort"(?![^>]*disabled)/)

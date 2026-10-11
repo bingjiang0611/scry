@@ -171,12 +171,15 @@ export function prepareRunAttachments(
   userDataDir: string,
   runId: string,
   attachments: AgentInputAttachment[],
-  owner?: { providerId: ProviderId; cwd: string; sessionId?: string }
+  owner?: { providerId: ProviderId; cwd: string; sessionId?: string },
+  batchId?: string
 ): PreparedAttachment[] {
   if (attachments.length === 0) return []
+  if (batchId && !/^[A-Za-z0-9_-]{1,80}$/.test(batchId)) throw new Error('附件批次身份非法')
   const candidate = attachmentRunDir(userDataDir, runId)
   if (!candidate) throw new Error('附件 runId 非法')
   const dir = createTrustedRunDir(userDataDir, runId)
+  const writtenPaths: string[] = []
   try {
     if (owner) writeOwnerAtomic(dir, { schemaVersion: 1, runId, ...owner })
     return attachments.map((attachment, index) => {
@@ -185,14 +188,24 @@ export function prepareRunAttachments(
       const bytes = Buffer.from(attachment.dataBase64.replace(/\s+/g, ''), 'base64')
       if (bytes.byteLength !== declaredLength) throw new Error(`图片 ${attachment.name} 的 base64 数据无效`)
       if (!matchesImageMime(bytes, attachment.mimeType)) throw new Error(`图片 ${attachment.name} 与 ${attachment.mimeType} 不匹配`)
-      const fileName = safeAttachmentName(attachment.name, attachment.mimeType, index)
+      const fileName = `${batchId ? `steer-${batchId}-` : ''}${safeAttachmentName(attachment.name, attachment.mimeType, index)}`
       const path = join(dir, fileName)
       writeFileSync(path, bytes, { mode: 0o600, flag: 'wx' })
+      writtenPaths.push(path)
       return { ...attachment, name: fileName, size: bytes.byteLength, path }
     })
   } catch (error) {
-    const rollback = deleteRunAttachments(userDataDir, runId)
-    if (rollback.failed) throw new AggregateError([error, new Error(rollback.failed)], '附件写入与回滚均失败')
+    if (batchId) {
+      // A later Steer batch must never roll back the root prompt or earlier admissions.
+      const rollbackErrors: unknown[] = []
+      for (const path of writtenPaths) {
+        try { unlinkSync(path) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+      }
+      if (rollbackErrors.length > 0) throw new AggregateError([error, ...rollbackErrors], '附件写入与批次回滚均失败')
+    } else {
+      const rollback = deleteRunAttachments(userDataDir, runId)
+      if (rollback.failed) throw new AggregateError([error, new Error(rollback.failed)], '附件写入与回滚均失败')
+    }
     throw error
   }
 }

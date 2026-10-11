@@ -32,7 +32,7 @@ interface CallCandidate {
   section: CallSection
 }
 
-function hash(text: string): string {
+function hash(text: string | Uint8Array): string {
   return `sha256:${createHash('sha256').update(text).digest('hex')}`
 }
 
@@ -584,9 +584,22 @@ export function aggregateTurnEvidence(args: {
     }]
   })
 
+  // Admission lifecycle is one supplementary message, never an extra logical turn.
+  const steerById = new Map<string, NonNullable<TraceEvent['steer']>>()
+  for (const event of args.events) {
+    if (event.kind === 'human' && event.stage === 'steer' && event.steer) steerById.set(event.steer.messageId, event.steer)
+  }
+  const steers = [...steerById.values()].map(({ attachments, ...steer }) => ({
+    ...steer,
+    attachments: attachments.map(attachment => {
+      const bytes = Buffer.from(attachment.dataBase64, 'base64')
+      return { name: attachment.name, mimeType: attachment.mimeType, size: bytes.byteLength, sha256: hash(bytes) }
+    })
+  }))
+
   return {
     user: args.userText != null
-      ? available({ text: args.userText, textHash: hash(args.userText) }, [source])
+      ? available({ text: args.userText, textHash: hash(args.userText), ...(steers.length > 0 ? { steers } : {}) }, [source])
       : unavailable('top-level user prompt was not observable', [source]),
     assistant: !observable.assistant
       ? unavailable('provider does not expose assistant text to lifecycle hooks', [source])

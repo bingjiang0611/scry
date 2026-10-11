@@ -19,6 +19,8 @@ import type {
   AgentQuestionRequest,
   AgentQuestionResponse,
   AgentRunControlCatalog,
+  AgentSteerInput,
+  AgentSteerResult,
   RuntimeProvider
 } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
@@ -42,6 +44,8 @@ export interface ProviderRunHandle {
   interrupt: () => void
   forceKill: () => void
   stopBackgroundTask?: (taskId: string) => Promise<BackgroundTaskStopResult>
+  /** Present only for native non-interrupting, active-run message admission. */
+  steer?: (input: AgentSteerInput) => Promise<AgentSteerResult>
   /**
    * forceKill 实际会杀掉什么。必填：只有 adapter 能证明硬杀仅限于本 run 时
    * 才能写 run_scoped；复用 client/server 的 transport 必须写 shared_transport，

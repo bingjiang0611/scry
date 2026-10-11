@@ -21,6 +21,8 @@ import type {
   AgentQuestionResponse,
   AgentRunControlCatalog,
   AgentStartRequest,
+  AgentSteerRequest,
+  AgentSteerResult,
   AgentStopState,
   RuntimeProvider
 } from '../shared/runtime'
@@ -226,6 +228,7 @@ const api = {
   adoptActiveRun: (runId: string): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:adoptActiveRun', runId),
   answerQuestion: (response: AgentQuestionResponse): Promise<boolean> => ipcRenderer.invoke('agent:answerQuestion', response),
   stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('agent:stop', runId),
+  steer: (request: AgentSteerRequest): Promise<AgentSteerResult> => ipcRenderer.invoke('agent:steer', request),
   stopBackgroundTask: (request: { runId: string; taskId: string }): Promise<BackgroundTaskStopResult> => ipcRenderer.invoke('agent:stopBackgroundTask', request),
   onBackgroundWork: (cb: (event: { runId: string; work: BackgroundWork }) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: { runId: string; work: BackgroundWork }): void => cb(value)

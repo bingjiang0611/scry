@@ -49,6 +49,18 @@ import {
   type ComposerDraft,
   type ComposerDraftAttachment
 } from './composer-drafts'
+import {
+  activeSteerIdentityMatches,
+  isSteerDrainBlocked,
+  isSteerRemovalBlocked,
+  latestSteerCapability,
+  latestSteerEvidenceForTurns,
+  newSteerMessageId,
+  retainProtectedSteerPrompts,
+  steerStateForMessage,
+  updateQueuedPromptByMessageId,
+  type QueuedSteerState
+} from './steer'
 
 const AnalyticsView = lazy(() => import('./components/AnalyticsView').then((module) => ({ default: module.AnalyticsView })))
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
@@ -275,9 +287,12 @@ export function migrateSessionComposerDraft(
 }
 
 export interface QueuedPrompt {
+  /** Stable identity used by native Steer and queue mutations across session-key migrations. */
+  messageId: string
   text: string
   attachments: AgentInputAttachment[]
   request: Omit<AgentStartRequest, 'prompt' | 'attachments'>
+  steer?: QueuedSteerState
 }
 
 export function enqueuePrompt(
@@ -289,6 +304,7 @@ export function enqueuePrompt(
   const text = prompt.trim()
   if (!text && attachments.length === 0) return queue
   return [...queue, {
+    messageId: newSteerMessageId(),
     text,
     attachments: attachments.map((attachment) => ({ ...attachment })),
     request: {
@@ -337,10 +353,14 @@ export function updateSessionPromptQueue(
 export function migrateSessionPromptQueue(
   queues: SessionPromptQueues,
   fromKey: string,
-  toKey: string
+  toKey: string,
+  capture?: { runId: string; externalSessionId: string }
 ): SessionPromptQueues {
   if (fromKey === toKey || !queues.has(fromKey)) return queues
-  const source = queues.get(fromKey) ?? []
+  const source = (queues.get(fromKey) ?? []).map(prompt => {
+    if (!capture || (prompt.request.expectedExternalSessionId != null && prompt.request.expectedExternalSessionId !== capture.runId)) return prompt
+    return { ...prompt, request: { ...prompt.request, expectedExternalSessionId: capture.externalSessionId } }
+  })
   const target = queues.get(toKey) ?? []
   const updated = new Map(queues)
   updated.delete(fromKey)
@@ -353,10 +373,7 @@ export function dequeueStartedPromptFromSessions(
   queues: SessionPromptQueues,
   started: QueuedPrompt
 ): SessionPromptQueues {
-  for (const [key, queue] of queues) {
-    if (queue[0] === started) return updateSessionPromptQueue(queues, key, (current) => current.slice(1))
-  }
-  return queues
+  return updateQueuedPromptByMessageId(queues, started.messageId, () => null)
 }
 
 export function buildForkSessionRequest(
@@ -894,7 +911,7 @@ export function App() {
         migrateRightSurface(draftOwner.key, capturedKey)
         integrations.migrateSessionModel(draftOwner.key, capturedKey)
         setSessionDrafts((current) => migrateSessionComposerDraft(current, draftOwner.key, capturedKey))
-        setSessionPromptQueues((current) => migrateSessionPromptQueue(current, draftOwner.key, capturedKey))
+        setSessionPromptQueues((current) => migrateSessionPromptQueue(current, draftOwner.key, capturedKey, { runId: event.runId, externalSessionId: event.sessionId! }))
       }
       markRunFinished(event.runId)
       setWorkspaceRefreshKey((current) => current + 1)
@@ -912,6 +929,29 @@ export function App() {
       loadProjects()
     }
   })
+  const steerEvidenceByMessageId = useMemo(
+    () => latestSteerEvidenceForTurns(session.turns),
+    [session.turns]
+  )
+  const activeSteerTurn = [...session.turns].reverse().find((turn) => !turn.done && !turn.error)
+  const steerCapability = activeSteerTurn ? latestSteerCapability(activeSteerTurn.items) ?? null : null
+  useEffect(() => {
+    for (const [messageId, evidence] of steerEvidenceByMessageId) {
+      setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => {
+        if (evidence.status === 'accepted') return null
+        if (prompt.steer?.status === 'unknown' || prompt.steer?.status === 'pending') return prompt
+        if (evidence.status === 'pending' && prompt.steer) return prompt
+        const next: QueuedSteerState = {
+          status: evidence.status,
+          ...(evidence.message ? { message: evidence.message } : {}),
+          ...(evidence.providerTurnId ? { providerTurnId: evidence.providerTurnId } : {})
+        }
+        return prompt.steer?.status === next.status && prompt.steer?.message === next.message
+          ? prompt
+          : { ...prompt, steer: next }
+      }))
+    }
+  }, [steerEvidenceByMessageId])
   useEffect(() => {
     if (activeSessionId == null || sessionLoading || integrations.hasSessionModel) return
     // Restore legacy/remote sessions from Scry's recorded request, not observed
@@ -962,7 +1002,10 @@ export function App() {
   const queuedDrainGenerationRef = useRef(0)
   const queueKeyRef = useRef(draftKey)
   queueKeyRef.current = draftKey
-  const pausedQueuedPromptsRef = useRef(new Set<QueuedPrompt>())
+  const pausedQueuedPromptsRef = useRef(new Set<string>())
+  // React state is intentionally not the double-click guard: two clicks can happen before
+  // the pending row repaint. This ref is the synchronous admission barrier.
+  const steerInFlightRef = useRef(new Set<string>())
   const resetPromptQueueControl = useCallback((): void => {
     // 切换上下文只重置当前启动控制；队列本身按会话保存，不能被跨会话切换误删。
     const reset = resetQueuedPromptControl(queuedDrainGenerationRef.current)
@@ -974,10 +1017,17 @@ export function App() {
     const key = queueKeyRef.current
     resetPromptQueueControl()
     setSessionPromptQueues((current) => updateSessionPromptQueue(current, key, (queue) => {
-      for (const prompt of queue) pausedQueuedPromptsRef.current.delete(prompt)
-      return []
+      const retained = retainProtectedSteerPrompts(queue, steerEvidenceByMessageId, steerInFlightRef.current)
+      const retainedIds = new Set(retained.map(prompt => prompt.messageId))
+      for (const prompt of queue) {
+        // An explicit stop must not discard uncertain inputs, or start them as an ordinary
+        // turn if their outstanding admission later returns a definite rejection.
+        if (retainedIds.has(prompt.messageId)) pausedQueuedPromptsRef.current.add(prompt.messageId)
+        else pausedQueuedPromptsRef.current.delete(prompt.messageId)
+      }
+      return retained
     }))
-  }, [resetPromptQueueControl])
+  }, [resetPromptQueueControl, steerEvidenceByMessageId])
   const sessionSelectionSeqRef = useRef(0)
   // Provider selection changes this callback's identity. Runtime subscriptions/bootstrap must
   // not restart with it, or the previous focused run can overwrite an in-flight session choice.
@@ -1126,7 +1176,7 @@ export function App() {
               migrateRightSurface(previousKey, capturedKey)
               integrations.migrateSessionModel(previousKey, capturedKey)
               setSessionDrafts((current) => migrateSessionComposerDraft(current, previousKey, capturedKey))
-              setSessionPromptQueues((current) => migrateSessionPromptQueue(current, previousKey, capturedKey))
+              setSessionPromptQueues((current) => migrateSessionPromptQueue(current, previousKey, capturedKey, { runId: event.runId, externalSessionId: capturedSessionId }))
               if (draftOwner) localDraftOwnersRef.current.set(event.runId, { ...draftOwner, key: capturedKey })
             }
             if (adopted) selectSessionId(adopted)
@@ -1437,16 +1487,18 @@ export function App() {
     // 历史页尚未恢复完成时不能启动队列，否则会用上一会话残留的 busy/身份状态发送。
     if (sessionLoading || session.busy) return
     const queueKey = draftKey
-    if (queuedStartPendingRef.current || queuedPrompts.length === 0) return
-    const queued = queuedPrompts[0]
-    if (pausedQueuedPromptsRef.current.has(queued)) return
+    if (queuedStartPendingRef.current) return
+    const { next: queued } = takeNextQueuedPrompt(queuedPrompts)
+    if (!queued) return
+    // Preserve FIFO and pause barriers, including the render before ACK removal commits.
+    if (pausedQueuedPromptsRef.current.has(queued.messageId) || steerInFlightRef.current.has(queued.messageId) ||
+      isSteerDrainBlocked(steerStateForMessage(queued.steer, steerEvidenceByMessageId.get(queued.messageId)))) return
     const queuedAgentId = queued.request.agentId ?? queued.request.providerId
     if (!queuedAgentId || !integrations.agents.some((agent) => agent.id === queuedAgentId)) {
       setComposerError(`队列中的 ${queuedAgentId ?? '未知'} Provider 当前不可用；消息仍保留在队列`)
       return
     }
-    const { next } = takeNextQueuedPrompt(queuedPrompts)
-    if (!next) return
+    const next = queued
     queuedStartPendingRef.current = true
     queuedStartInFlightRef.current = true
     const queueGeneration = queuedDrainGenerationRef.current
@@ -1454,13 +1506,13 @@ export function App() {
       .then(() => {
         // 即使期间切到了别的会话，也要从它原属的会话队列中移除已成功启动的消息。
         setSessionPromptQueues((current) => dequeueStartedPromptFromSessions(current, next))
-        pausedQueuedPromptsRef.current.delete(next)
+        pausedQueuedPromptsRef.current.delete(next.messageId)
         if (queueGeneration !== queuedDrainGenerationRef.current || queueKeyRef.current !== queueKey) return
         queuedStartInFlightRef.current = false
         queuedStartPendingRef.current = false
       })
       .catch((error) => {
-        pausedQueuedPromptsRef.current.add(next)
+        pausedQueuedPromptsRef.current.add(next.messageId)
         if (queueGeneration !== queuedDrainGenerationRef.current || queueKeyRef.current !== queueKey) return
         // Keep the failed item at the head and pause automatic draining. Removing that
         // head is the explicit "skip" action, so later prompts can never overtake it.
@@ -1468,7 +1520,7 @@ export function App() {
         queuedStartPendingRef.current = true
         setComposerError(`${error instanceof Error ? error.message : String(error)}；队首消息仍保留，队列已暂停`)
       })
-  }, [draftKey, integrations.agents, queuedPrompts, session.busy, sessionLoading, startPrompt])
+  }, [draftKey, integrations.agents, queuedPrompts, session.busy, sessionLoading, startPrompt, steerEvidenceByMessageId])
 
   // Agent / 目录就绪后立即预取；用户输入 / 时只展示缓存，不再现场等 Provider。
   useEffect(() => {
@@ -1978,17 +2030,122 @@ export function App() {
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [diffReview, handleRightSurfaceAction, panelVisible, rightSurface.activeId])
-  const removeQueuedPrompt = (index: number): void => {
+  const steerQueuedPrompt = useCallback((messageId: string): void => {
+    if (steerInFlightRef.current.size > 0) return
+    let queued: QueuedPrompt | undefined
+    for (const queue of sessionPromptQueues.values()) {
+      const index = queue.findIndex((prompt) => prompt.messageId === messageId)
+      if (index < 0) continue
+      if (index === 0 && queuedStartInFlightRef.current) {
+        setComposerError('队首消息正在启动，不能同时作为 Steer 发送')
+        return
+      }
+      queued = queue[index]
+      break
+    }
+    if (!queued) return
+    const localState = steerStateForMessage(queued.steer, steerEvidenceByMessageId.get(messageId))
+    if (isSteerRemovalBlocked(localState)) return
+    const active = [...session.turns].reverse().find((turn) => !turn.done && !turn.error)
+    const capability = active ? latestSteerCapability(active.items) : undefined
+    if (!active || !capability) {
+      setComposerError('当前运行仍在等待可验证的 Steer 能力证据')
+      return
+    }
+    if (capability.status !== 'available') {
+      setComposerError(capability.reason)
+      return
+    }
+    if (queued.attachments.length > 0 && !capability.attachments) {
+      setComposerError('当前运行不支持 Steer 图片附件；原消息仍保留在队列')
+      return
+    }
+    const providerId = queued.request.providerId
+    const expectedExternalSessionId = queued.request.expectedExternalSessionId
+    if (!providerId || typeof expectedExternalSessionId !== 'string' || !expectedExternalSessionId) {
+      setComposerError('队列消息缺少可信 Provider 或会话身份，未发送 Steer')
+      return
+    }
+    const activeIdentity = active as typeof active & Partial<Pick<ActiveRun, 'providerId' | 'agentProfileId' | 'cwd' | 'externalSessionId' | 'sessionId'>>
+    const activeProviderId = [...active.items].reverse().find((event) => event.providerId)?.providerId
+    const requestCwd = queued.request.cwd ?? activeIdentity.cwd
+    if (!activeSteerIdentityMatches({
+      request: { providerId, agentProfileId: queued.request.agentProfileId, cwd: requestCwd, expectedExternalSessionId },
+      active: {
+        providerId: activeIdentity.providerId ?? activeProviderId,
+        agentProfileId: activeIdentity.agentProfileId,
+        cwd: activeIdentity.cwd,
+        externalSessionId: activeSessionIdRef.current ?? activeIdentity.externalSessionId,
+        sessionId: activeIdentity.sessionId
+      },
+    })) {
+      setComposerError('当前运行身份已变化，未将消息发送到另一个会话')
+      return
+    }
+    if (typeof window.scry.steer !== 'function') {
+      setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => ({
+        ...prompt,
+        steer: { status: 'unavailable', message: '当前 Scry preload 不支持 Steer，消息未发送；请重启到当前版本' }
+      })))
+      return
+    }
+    steerInFlightRef.current.add(messageId)
+    setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => ({
+      ...prompt,
+      steer: { status: 'pending' }
+    })))
+    const request = {
+      runId: active.runId,
+      providerId,
+      messageId,
+      prompt: queued.text,
+      attachments: queued.attachments.map((attachment) => ({ ...attachment })),
+      expectedExternalSessionId,
+      ...(queued.request.agentProfileId ? { agentProfileId: queued.request.agentProfileId } : {}),
+      ...(requestCwd ? { cwd: requestCwd } : {})
+    }
+    void Promise.resolve()
+      .then(() => window.scry.steer!(request))
+      .then((result) => {
+        steerInFlightRef.current.delete(messageId)
+        if (result.status === 'accepted') {
+          setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, () => null))
+          return
+        }
+        setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => ({
+          ...prompt,
+          steer: { status: result.status, message: result.message }
+        })))
+      })
+      .catch((error) => {
+        steerInFlightRef.current.delete(messageId)
+        setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => ({
+          ...prompt,
+          steer: {
+            status: 'unknown',
+            message: `Steer 调用结果未知：${error instanceof Error ? error.message : String(error)}`
+          }
+        })))
+      })
+  }, [session.turns, sessionPromptQueues, steerEvidenceByMessageId])
+
+  const removeQueuedPrompt = (messageId: string): void => {
+    const index = queuedPrompts.findIndex((candidate) => candidate.messageId === messageId)
+    if (index < 0) return
     if (index === 0 && queuedStartInFlightRef.current) {
       setComposerError('队首消息正在启动，完成前不能移除')
       return
     }
+    const prompt = queuedPrompts[index]
+    const state = steerStateForMessage(prompt.steer, steerEvidenceByMessageId.get(messageId))
+    if (steerInFlightRef.current.has(messageId) || isSteerRemovalBlocked(state)) {
+      setComposerError(state?.status === 'unknown' ? '结果未知的 Steer 不能移除；请先核对 Provider 回执' : 'Steer 正在提交，完成前不能移除')
+      return
+    }
     if (index === 0) queuedStartPendingRef.current = false
-    setQueuedPrompts((queue) => {
-      const removed = queue[index]
-      if (removed) pausedQueuedPromptsRef.current.delete(removed)
-      return queue.filter((_, i) => i !== index)
-    })
+    setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, () => null))
+    const removed = queuedPrompts[index]
+    if (removed) pausedQueuedPromptsRef.current.delete(removed.messageId)
   }
   const removeDraftAttachment = (id: string): void => {
     setDraftAttachments((prev) => {
@@ -2157,6 +2314,10 @@ export function App() {
               busy={session.busy}
               draftAttachments={draftAttachments}
               queuedPrompts={queuedPrompts}
+              steerCapability={steerCapability}
+              steerEvidenceByMessageId={steerEvidenceByMessageId}
+              steerInFlightMessageIds={steerInFlightRef.current}
+              onSteerQueuedPrompt={steerQueuedPrompt}
               slashOpen={slashOpen}
               slashLoading={slashLoading}
               slashCmds={slashCmds}

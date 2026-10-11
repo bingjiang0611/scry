@@ -210,6 +210,63 @@ export interface AgentStartRequest {
   permissionMode?: AgentPermissionMode
 }
 
+export type AgentSteerCapability =
+  | { status: 'available'; attachments: boolean }
+  | { status: 'unavailable'; reason: string }
+
+export interface AgentSteerInput {
+  messageId: string
+  prompt: string
+  attachments: AgentInputAttachment[]
+}
+
+export interface AgentSteerRequest extends AgentSteerInput {
+  runId: string
+  providerId: ProviderId
+  agentProfileId?: string
+  cwd?: string
+  expectedExternalSessionId: string
+}
+
+/** Acceptance means native admission, not that the model has followed the message. */
+export type AgentSteerResult =
+  | { status: 'accepted'; providerTurnId?: string }
+  | { status: 'rejected' | 'unavailable' | 'unknown'; message: string }
+
+export interface AgentSteerEvidence extends AgentSteerInput {
+  status: 'pending' | AgentSteerResult['status']
+  message?: string
+  providerTurnId?: string
+}
+
+export function normalizeAgentSteerRequest(payload: unknown): AgentSteerRequest {
+  if (!payload || typeof payload !== 'object') throw new Error('Steer 请求格式无效')
+  const value = payload as Partial<AgentSteerRequest>
+  const runId = boundedControlValue(value.runId)
+  const messageId = boundedControlValue(value.messageId)
+  const sessionId = boundedControlValue(value.expectedExternalSessionId)
+  if (!runId || !messageId || !/^[A-Za-z0-9_-]{1,80}$/.test(messageId) || !sessionId) {
+    throw new Error('Steer 缺少可信 run、消息或会话身份')
+  }
+  if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(value.providerId ?? '')) {
+    throw new Error('Steer Provider 无效')
+  }
+  if (value.agentProfileId !== undefined && !boundedControlValue(value.agentProfileId)) throw new Error('Steer profile 无效')
+  if (value.cwd !== undefined && (typeof value.cwd !== 'string' || !value.cwd.trim())) throw new Error('Steer 工作目录无效')
+  if (typeof value.prompt !== 'string' || !Array.isArray(value.attachments)) throw new Error('Steer 消息格式无效')
+  const attachments = normalizeAgentAttachments(value.attachments).map(({ path: _path, ...attachment }) => attachment)
+  if (attachments.length !== value.attachments.length) throw new Error('Steer 附件无效，消息未发送')
+  if (!value.prompt.trim() && attachments.length === 0) throw new Error('Steer 消息为空')
+  return {
+    runId, messageId, expectedExternalSessionId: sessionId,
+    providerId: value.providerId!,
+    ...(value.agentProfileId ? { agentProfileId: value.agentProfileId } : {}),
+    ...(value.cwd ? { cwd: value.cwd } : {}),
+    prompt: value.prompt,
+    attachments
+  }
+}
+
 export interface AgentQuestionOption {
   label: string
   description: string

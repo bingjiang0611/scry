@@ -6,6 +6,8 @@ import type {
   AgentQuestionRequest,
   AgentQuestionResponse,
   AgentRunControlCatalog,
+  AgentSteerCapability,
+  AgentSteerEvidence,
   AgentRunControls,
   AgentStopState
 } from '@shared/runtime'
@@ -22,6 +24,7 @@ import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
 import type { ComposerDraftStore } from '../composer-drafts'
+import { steerStateForMessage } from '../steer'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 
@@ -50,6 +53,10 @@ interface ChatViewProps {
   busy: boolean
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
+  steerCapability?: AgentSteerCapability | null
+  steerEvidenceByMessageId?: ReadonlyMap<string, AgentSteerEvidence & { eventId: string }>
+  steerInFlightMessageIds?: ReadonlySet<string>
+  onSteerQueuedPrompt?: (messageId: string) => void
   slashOpen: boolean
   slashLoading: boolean
   slashCmds: SlashCmd[]
@@ -82,7 +89,7 @@ interface ChatViewProps {
   onPasteImages: (files: File[]) => void
   onPasteClipboardImage: () => void
   onRemoveDraftAttachment: (id: string) => void
-  onRemoveQueuedPrompt: (index: number) => void
+  onRemoveQueuedPrompt: (messageId: string) => void
   onSelectAgent: (agentId: string) => void
   onAddPiAgent?: () => void
   onRemovePiAgent?: (id: string) => void
@@ -372,6 +379,10 @@ export function ChatView({
   busy,
   draftAttachments,
   queuedPrompts,
+  steerCapability = null,
+  steerEvidenceByMessageId = new Map(),
+  steerInFlightMessageIds = new Set(),
+  onSteerQueuedPrompt,
   slashOpen,
   slashLoading,
   slashCmds,
@@ -639,29 +650,75 @@ export function ChatView({
               <span className="queue-hint">当前任务结束后依次发送</span>
             </div>
             <div className="queue-list" role="list">
-              {queuedPrompts.map((prompt, index) => (
-                <div className="queue-item" role="listitem" key={`${index}:${prompt.text}:${prompt.attachments.map((a) => a.name).join(',')}`}>
-                  <span className="queue-index" aria-hidden="true">{index + 1}</span>
-                  <span className="queue-text" title={prompt.text}>
-                    {prompt.text || `${prompt.attachments.length} 张图片`}
-                  </span>
-                  {prompt.attachments.length > 0 && (
-                    <span className="queue-attach" title={prompt.attachments.map((a) => a.name).join('\n')}>
-                      <Icon name="image" /> {prompt.attachments.length}
+              {queuedPrompts.map((prompt, index) => {
+                const evidence = steerEvidenceByMessageId.get(prompt.messageId)
+                const steerState = steerStateForMessage(prompt.steer, evidence)
+                const pending = steerState?.status === 'pending'
+                const unknown = steerState?.status === 'unknown'
+                const hasConcurrentSteer = steerInFlightMessageIds.size > 0
+                const capabilityReason = !busy
+                  ? '当前任务已结束，Steer 仅可发送给运行中的任务'
+                  : steerCapability == null
+                    ? '正在等待运行时 Steer 能力证据'
+                    : steerCapability.status === 'unavailable'
+                      ? steerCapability.reason
+                      : prompt.attachments.length > 0 && !steerCapability.attachments
+                        ? '当前运行不支持 Steer 图片附件'
+                        : undefined
+                const steerDisabled = pending || unknown || steerState?.status === 'unavailable' ||
+                  capabilityReason != null || hasConcurrentSteer
+                const steerLabel = pending ? '提交中' : steerState?.status === 'rejected' ? '重试 Steer' : '↳ Steer'
+                const steerTitle = pending
+                  ? 'Steer 正在提交；完成前不能重复提交或移除'
+                  : unknown
+                    ? `结果未知：${steerState.message ?? '请先核对 Provider 回执'}；不能重发或移除`
+                    : steerState?.status === 'rejected'
+                      ? `Provider 明确拒绝：${steerState.message ?? '未提供原因'}；点击重试`
+                      : steerState?.status === 'unavailable'
+                        ? steerState.message ?? '当前运行不支持 Steer'
+                        : capabilityReason ?? '不中断模型，将这条消息补充给当前任务'
+                return (
+                  <div className={`queue-item${pending ? ' is-steer-pending' : ''}${unknown ? ' is-steer-unknown' : ''}`} role="listitem" key={prompt.messageId}>
+                    <span className="queue-index" aria-hidden="true">{index + 1}</span>
+                    <span className="queue-text" title={prompt.text}>
+                      {prompt.text || `${prompt.attachments.length} 张图片`}
+                      {steerState?.status === 'rejected' && <small className="queue-steer-reason">{steerState.message ?? 'Provider 已拒绝'}</small>}
+                      {steerState?.status === 'unavailable' && <small className="queue-steer-reason">{steerState.message ?? 'Steer 不可用'}</small>}
+                      {unknown && <small className="queue-steer-reason">{steerState.message ?? '结果未知；暂不重发或自动出队'}</small>}
                     </span>
-                  )}
-                  <button
-                    type="button"
-                    className="queue-remove"
-                    onClick={() => onRemoveQueuedPrompt(index)}
-                    title="移除排队消息"
-                    aria-label={`移除队列第 ${index + 1} 条消息`}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </div>
-              ))}
+                    {prompt.attachments.length > 0 && (
+                      <span className="queue-attach" title={prompt.attachments.map((a) => a.name).join('\n')}>
+                        <Icon name="image" /> {prompt.attachments.length}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className={`queue-steer${pending ? ' is-pending' : ''}`}
+                      onClick={() => onSteerQueuedPrompt?.(prompt.messageId)}
+                      disabled={steerDisabled || !onSteerQueuedPrompt}
+                      title={steerTitle}
+                      aria-label={`${steerLabel}：队列第 ${index + 1} 条消息`}
+                      aria-busy={pending}
+                    >
+                      <span aria-hidden="true">↳</span> {steerLabel.replace('↳ ', '')}
+                    </button>
+                    <button
+                      type="button"
+                      className="queue-remove"
+                      onClick={() => onRemoveQueuedPrompt(prompt.messageId)}
+                      disabled={pending || unknown}
+                      title={pending ? 'Steer 正在提交，不能移除' : unknown ? '结果未知的 Steer 不能移除' : '移除排队消息'}
+                      aria-label={`移除队列第 ${index + 1} 条消息`}
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
+            {steerCapability?.status === 'unavailable' && (
+              <div className="queue-steer-capability" role="note">Steer 不可用：{steerCapability.reason}</div>
+            )}
           </div>
         )}
         {draftAttachments.length > 0 && (
