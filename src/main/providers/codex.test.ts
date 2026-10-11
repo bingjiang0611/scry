@@ -1311,20 +1311,29 @@ describe('Codex provider adapter', () => {
       total: { inputTokens: input, outputTokens: output, totalTokens: input + output }, last: { inputTokens: 10, outputTokens: output, totalTokens: 10 + output }
     } })
     notify?.('turn/started', { ...ids, turn: { id: 'turn-calls', startedAt: 100, status: 'inProgress' } }, { emittedAtMs: 100_500 })
+    // The first output item (reasoning) marks the first token; later deltas do not move it.
+    notify?.('item/started', { ...ids, item: { id: 'reasoning-1', type: 'reasoning', summary: [], content: [] } }, { emittedAtMs: 101_200 })
+    notify?.('item/agentMessage/delta', { ...ids, itemId: 'message-0', delta: 'x' }, { emittedAtMs: 101_500 })
     notify?.('thread/tokenUsage/updated', usage(10, 30), { emittedAtMs: 103_000 })
     // A repeated snapshot is not another response.
     notify?.('thread/tokenUsage/updated', usage(10, 30), { emittedAtMs: 103_050 })
     notify?.('item/completed', { ...ids, item: { id: 'tool-1', type: 'commandExecution', command: 'pwd', status: 'completed' }, completedAtMs: 105_000 }, { emittedAtMs: 105_100 })
+    // A tool item starts only after the model finished generating its call: never a first token.
+    notify?.('item/started', { ...ids, item: { id: 'tool-2', type: 'commandExecution', command: 'ls', status: 'inProgress' } }, { emittedAtMs: 105_300 })
+    notify?.('item/agentMessage/delta', { ...ids, itemId: 'message-1', delta: 'd' }, { emittedAtMs: 105_800 })
     // Mid-response text completion must not shorten the request.
     notify?.('item/completed', { ...ids, item: { id: 'message-1', type: 'agentMessage', text: 'done' } }, { emittedAtMs: 106_000 })
     notify?.('thread/tokenUsage/updated', { threadId: 'child-thread', turnId: 'child', tokenUsage: { last: { outputTokens: 999 } } }, { emittedAtMs: 106_500 })
     notify?.('thread/tokenUsage/updated', { ...usage(20, 70), tokenUsage: { ...usage(20, 70).tokenUsage, last: { inputTokens: 10, outputTokens: 40, totalTokens: 50 } } }, { emittedAtMs: 107_000 })
-    notify?.('turn/completed', { ...ids, turn: { id: 'turn-calls', status: 'completed' } }, { emittedAtMs: 108_000 })
+    // A request with no observable output item has no first-token evidence.
+    notify?.('thread/tokenUsage/updated', { ...usage(30, 80), tokenUsage: { ...usage(30, 80).tokenUsage, last: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } } }, { emittedAtMs: 108_000 })
+    notify?.('turn/completed', { ...ids, turn: { id: 'turn-calls', status: 'completed' } }, { emittedAtMs: 108_500 })
     await handle.promise
 
     expect(events.filter((event) => event.stage === 'runtime:llm_call').map((event) => event.llmCall)).toEqual([
-      { outputTokens: 30, durationMs: 3_000, model: 'gpt-test' },
-      { outputTokens: 40, durationMs: 2_000, model: 'gpt-test' }
+      { outputTokens: 30, durationMs: 3_000, firstTokenMs: 1_200, model: 'gpt-test' },
+      { outputTokens: 40, durationMs: 2_000, firstTokenMs: 800, model: 'gpt-test' },
+      { outputTokens: 10, durationMs: 1_000, model: 'gpt-test' }
     ])
   })
 

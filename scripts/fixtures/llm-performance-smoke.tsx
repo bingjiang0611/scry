@@ -17,15 +17,17 @@ document.documentElement.dataset.platform = 'macos'
 const traceListeners = new Set<(events: TraceEvent[]) => void>()
 const doneListeners = new Set<(event: { runId: string }) => void>()
 const rows: LlmPerformanceHistoryRow[] = []
-// Seeded history: two models with measured speed, plus rounds that must never draw speed.
-const historyRow = (runId: string, minutesAgo: number, model: string, speed: number | undefined, failed = false): LlmPerformanceHistoryRow => ({
+// Seeded history: two models with measured speed (only fast-model has first-token evidence),
+// plus rounds that must never draw speed or wait.
+const historyRow = (runId: string, minutesAgo: number, model: string, speed: number | undefined, failed = false, firstTokenMs?: number): LlmPerformanceHistoryRow => ({
   runId, ts: new Date(Date.now() - minutesAgo * 60_000).toISOString(), providerId: 'pi', model, networkLabel: '', failed,
   performance: { state: 'complete', observedAt: new Date().toISOString(), networkLabel: '', streamCharacters: 0, recentOutput: [], windowMs: 3000,
-    streamDurationMs: 0, ...(speed == null ? {} : { outputTokens: speed * 10, apiDurationMs: 10_000, apiTokensPerSecond: speed, tokenTimingSource: 'observed_calls' as const, llmCalls: 3 }) }
+    streamDurationMs: 0, ...(speed == null ? {} : { outputTokens: speed * 10, apiDurationMs: 10_000, apiTokensPerSecond: speed, tokenTimingSource: 'observed_calls' as const, llmCalls: 3 }),
+    ...(firstTokenMs == null ? {} : { firstTokenMs, firstTokenCalls: 3 }) }
 })
-for (const [index, minutesAgo] of [30, 40, 50, 60, 70].entries()) rows.push(historyRow(`fast-${index}`, minutesAgo, 'fast-model', 60 + index))
+for (const [index, minutesAgo] of [30, 40, 50, 60, 70].entries()) rows.push(historyRow(`fast-${index}`, minutesAgo, 'fast-model', 60 + index, false, 1000 + index * 500))
 for (const [index, minutesAgo] of [35, 45, 55].entries()) rows.push(historyRow(`slow-${index}`, minutesAgo, 'slow-model', 20 + index))
-rows.push(historyRow('failed-fast', 42, 'fast-model', 999, true), historyRow('unmeasured', 44, 'unmeasured-model', undefined))
+rows.push(historyRow('failed-fast', 42, 'fast-model', 999, true, 99_000), historyRow('unmeasured', 44, 'unmeasured-model', undefined))
 rows.reverse()
 const registry = new RunRegistry<ActiveRun, { runId: string }>()
 const dataListeners = new Set<(event: { runId: string; kind: 'turn_recorded' }) => void>()
@@ -87,7 +89,7 @@ for (const [id, action] of Object.entries({
   'performance-stream': () => {
     publish('first', { text: 'abc' }, 1000); publish('first', { text: 'def' }, 2000)
     publish('second', { text: 'other model' }, 3000)
-    publish('second', { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 80, durationMs: 2000, model: 'pi-live-model' } }, 3100)
+    publish('second', { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 80, durationMs: 2000, firstTokenMs: 1500, model: 'pi-live-model' } }, 3100)
     publish('second', { text: 'still streaming' }, 3200)
   },
   'performance-focus': () => { registry.focus('waiting') },

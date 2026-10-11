@@ -217,6 +217,8 @@ process.stdin.on('data', (chunk) => {
         // Pi stamps message.timestamp at request creation. Errored/aborted retries carry tokens too.
         for (const [stopReason, output, ageMs] of [['toolUse', 120, 3000], ['error', 50, 2000], ['aborted', 30, 1000], ['stop', 0, 1000], ['stop', 80, 2000]]) {
           send({ type: 'message_start', message: { role: 'assistant' } })
+          // Only the first call streams a content block; the last one has no first-token signal.
+          if (stopReason === 'toolUse') send({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0 } })
           send({ type: 'message_end', message: {
             role: 'assistant', provider: 'qoder', model: 'ultimate', stopReason, content: [], timestamp: Date.now() - ageMs,
             usage: { input: 10, output, cost: { total: 0 } }
@@ -923,6 +925,10 @@ describe('Pi RPC Provider', () => {
       expect(calls[0]!.durationMs).toBeGreaterThanOrEqual(3000)
       expect(calls[0]!.durationMs).toBeLessThan(13_000)
       expect(calls[4]!.durationMs).toBeGreaterThanOrEqual(2000)
+      // First content block received after the request stamp and no later than message_end.
+      expect(calls[0]!.firstTokenMs).toBeGreaterThanOrEqual(3000)
+      expect(calls[0]!.firstTokenMs).toBeLessThanOrEqual(calls[0]!.durationMs)
+      expect(calls[4]).not.toHaveProperty('firstTokenMs')
     })
   }, 15_000)
 

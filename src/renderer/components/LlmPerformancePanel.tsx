@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { LlmPerformanceHistory, LlmPerformanceSummary, LlmRunningSession, LlmSpeedSample } from '@shared/llm-performance'
-import { llmSpeedSamples, quantile, smoothLlmSpeed } from '@shared/llm-performance'
+import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary, LlmRunningSession } from '@shared/llm-performance'
+import { llmMetricSamples, quantile, smoothLlmMetric } from '@shared/llm-performance'
 import type { ProviderId } from '@shared/provider'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
@@ -17,6 +17,16 @@ const PALETTE = 7
 const providerName: Record<ProviderId, string> = { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi' }
 
 const formatSpeed = (value: number): string => value >= 100 ? Math.round(value).toString() : value.toFixed(1)
+const formatSeconds = (value: number): string => value >= 100 ? Math.round(value).toString() : value.toFixed(1)
+const METRICS: Record<LlmMetric, { label: string; unit: string; format: (value: number) => string; chartLabel: string }> = {
+  speed: { label: '输出速度', unit: 'token/s', format: formatSpeed, chartLabel: '各模型输出速度曲线' },
+  firstToken: { label: '首 token', unit: '秒', format: formatSeconds, chartLabel: '各模型首 token 等待曲线' }
+}
+/** Round up to a readable axis maximum: 1/2/5 × 10^n. */
+function niceCeil(value: number): number {
+  const power = 10 ** Math.floor(Math.log10(value))
+  return [1, 2, 5, 10].map(step => step * power).find(candidate => candidate >= value)!
+}
 const pad = (value: number): string => String(value).padStart(2, '0')
 const clock = (ts: number): string => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 const day = (ts: number): string => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}` }
@@ -61,6 +71,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
   const [history, setHistory] = useState<LlmPerformanceHistory | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [hours, setHours] = useState<RangeHours>(24)
+  const [metric, setMetric] = useState<LlmMetric>('speed')
   const [selected, setSelected] = useState<string | null>(null)
   const [visible, setVisible] = useState(!document.hidden)
   useEffect(() => {
@@ -101,19 +112,25 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
     return () => { current = false; window.clearTimeout(timer); unsubscribe?.() }
   }, [open, visible])
 
-  const samples = useMemo(() => llmSpeedSamples(history?.rows ?? []), [history])
-  // Stable colours: most-used model first, independent of the selected range.
+  const speedSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'speed'), [history])
+  const firstTokenSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'firstToken'), [history])
+  const samples = metric === 'speed' ? speedSamples : firstTokenSamples
+  // Stable colours: most-used model first, independent of the selected range and metric.
   const colorOf = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const sample of samples) counts.set(sample.model, (counts.get(sample.model) ?? 0) + 1)
+    for (const sample of speedSamples) counts.set(sample.model, (counts.get(sample.model) ?? 0) + 1)
+    for (const sample of firstTokenSamples) counts.set(sample.model, counts.get(sample.model) ?? 0)
     const order = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!)
     return (model: string): string => `var(--llm-model-${Math.max(0, order.indexOf(model)) % PALETTE})`
-  }, [samples])
+  }, [speedSamples, firstTokenSamples])
   // The right edge follows the clock once per minute; per-second summary polling must not redraw the chart.
   const minute = Math.floor(Date.now() / 60_000)
   const to = minute * 60_000 + 60_000
   const from = to - hours * 3_600_000
-  const inRange = useMemo(() => samples.filter(sample => sample.ts >= from && sample.ts <= to), [samples, from, to])
+  const within = (list: LlmMetricSample[]): LlmMetricSample[] => list.filter(sample => sample.ts >= from && sample.ts <= to)
+  const inRange = useMemo(() => within(samples), [samples, from, to])
+  const speedInRange = useMemo(() => within(speedSamples), [speedSamples, from, to])
+  const firstTokenInRange = useMemo(() => within(firstTokenSamples), [firstTokenSamples, from, to])
   const oldestKept = history?.truncated && history.rows.length ? Date.parse(history.rows.at(-1)!.ts) : undefined
   const sessions = summary?.sessions ?? []
 
@@ -145,24 +162,33 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
                 <div className="llm-perf-run-speed">
                   {session.tokensPerSecond != null && <><strong>{formatSpeed(session.tokensPerSecond)}</strong><small>token/s</small></>}
                 </div>
+                <div className="llm-perf-run-speed">
+                  {session.firstTokenMs != null && <><small>首 token</small><strong>{formatSeconds(session.firstTokenMs / 1000)}</strong><small>秒</small></>}
+                </div>
               </div>
             ))}
           </section>
         )}
         <section>
-          <h3>输出速度 <span>token/s</span>
+          <h3>
+            <span className="llm-perf-metric" role="group" aria-label="指标">
+              {(['speed', 'firstToken'] as const).map(item => (
+                <button key={item} type="button" aria-pressed={metric === item} onClick={() => setMetric(item)}>{METRICS[item].label}</button>
+              ))}
+            </span>
+            <span>{METRICS[metric].unit}</span>
             {oldestKept != null && oldestKept > from && <small className="llm-perf-truncated">只含最近 {history!.rows.length} 轮</small>}
           </h3>
           {historyError
             ? <p className="llm-perf-alert" role="alert">历史读取失败：{historyError}</p>
             : !history ? <div className="llm-perf-empty">读取中</div>
               : !inRange.length ? <div className="llm-perf-empty">{samples.length ? '这个时间范围内没有数据' : '还没有数据'}</div>
-                : <SpeedChart samples={inRange} from={from} to={to} hours={hours} selected={selected} colorOf={colorOf} />}
+                : <MetricChart samples={inRange} metric={metric} from={from} to={to} hours={hours} selected={selected} colorOf={colorOf} />}
         </section>
-        {!historyError && inRange.length > 0 && (
+        {!historyError && speedInRange.length > 0 && (
           <section>
             <h3>模型对比</h3>
-            <ModelComparison samples={inRange} selected={selected} colorOf={colorOf}
+            <ModelComparison samples={speedInRange} firstToken={firstTokenInRange} selected={selected} colorOf={colorOf}
               onSelect={model => setSelected(current => current === model ? null : model)} />
           </section>
         )}
@@ -171,8 +197,9 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
   )
 }
 
-function SpeedChart({ samples, from, to, hours, selected, colorOf }: {
-  samples: LlmSpeedSample[]
+function MetricChart({ samples, metric, from, to, hours, selected, colorOf }: {
+  samples: LlmMetricSample[]
+  metric: LlmMetric
   from: number
   to: number
   hours: RangeHours
@@ -190,13 +217,15 @@ function SpeedChart({ samples, from, to, hours, selected, colorOf }: {
     return () => observer.disconnect()
   }, [])
   const series = useMemo(() => {
-    const byModel = new Map<string, LlmSpeedSample[]>()
+    const byModel = new Map<string, LlmMetricSample[]>()
     for (const sample of samples) byModel.set(sample.model, [...byModel.get(sample.model) ?? [], sample])
-    return [...byModel].map(([model, own]) => ({ model, points: smoothLlmSpeed(own, from, to, BANDWIDTH_MINUTES[hours] * 60_000, GRID) }))
+    return [...byModel].map(([model, own]) => ({ model, points: smoothLlmMetric(own, from, to, BANDWIDTH_MINUTES[hours] * 60_000, GRID) }))
   }, [samples, from, to, hours])
-  const measured = series.flatMap(item => item.points.flatMap(point => point.speed == null ? [] : [point.speed]))
-  // A single fast round must not flatten every other curve; higher values clamp to the top.
-  const yMax = Math.max(10, Math.ceil(quantile(measured, 0.98) * 1.1 / 20) * 20)
+  const measured = series.flatMap(item => item.points.flatMap(point => point.value == null ? [] : [point.value]))
+  // A single extreme round must not flatten every other curve; higher values clamp to the top.
+  const yMax = metric === 'speed'
+    ? Math.max(10, Math.ceil(quantile(measured, 0.98) * 1.1 / 20) * 20)
+    : niceCeil(Math.max(1, quantile(measured, 0.98) * 1.1))
   const H = 240, L = 30, R = 12, T = 12, B = 22
   const x = (ts: number): number => L + (ts - from) / (to - from) * (width - L - R)
   const y = (value: number): number => T + (1 - Math.min(value, yMax) / yMax) * (H - T - B)
@@ -206,13 +235,13 @@ function SpeedChart({ samples, from, to, hours, selected, colorOf }: {
     ? Array.from({ length: 7 }, (_, i) => new Date(firstMidnight).setDate(new Date(firstMidnight).getDate() + i)).filter(ts => ts <= to)
     : Array.from({ length: 5 }, (_, i) => from + (to - from) * i / 4)
   const hits = hover == null ? [] : series
-    .filter(item => item.points[hover].speed != null && (!selected || item.model === selected))
-    .sort((a, b) => b.points[hover].speed! - a.points[hover].speed!)
+    .filter(item => item.points[hover].value != null && (!selected || item.model === selected))
+    .sort((a, b) => b.points[hover].value! - a.points[hover].value!)
   const hoverTs = hover == null ? 0 : series[0].points[hover].ts
   return (
     <div className="llm-perf-chart" ref={box}>
       {width > 0 && (
-        <svg viewBox={`0 0 ${width} ${H}`} role="img" aria-label="各模型输出速度曲线"
+        <svg viewBox={`0 0 ${width} ${H}`} role="img" aria-label={METRICS[metric].chartLabel}
           onMouseMove={event => {
             const px = event.clientX - event.currentTarget.getBoundingClientRect().left
             setHover(Math.max(0, Math.min(GRID - 1, Math.round((px - L) / (width - L - R) * (GRID - 1)))))
@@ -244,7 +273,7 @@ function SpeedChart({ samples, from, to, hours, selected, colorOf }: {
           {hits.length
             ? hits.map(item => (
               <div key={item.model} className="llm-perf-tip-row"><i style={{ background: colorOf(item.model) }} />{item.model}
-                <b>{formatSpeed(item.points[hover].speed!)}</b></div>
+                <b>{METRICS[metric].format(item.points[hover].value!)}</b></div>
             ))
             : <div className="llm-perf-tip-row">空闲</div>}
         </div>
@@ -253,24 +282,33 @@ function SpeedChart({ samples, from, to, hours, selected, colorOf }: {
   )
 }
 
-function ModelComparison({ samples, selected, colorOf, onSelect }: {
-  samples: LlmSpeedSample[]
+function ModelComparison({ samples, firstToken, selected, colorOf, onSelect }: {
+  samples: LlmMetricSample[]
+  firstToken: LlmMetricSample[]
   selected: string | null
   colorOf: (model: string) => string
   onSelect: (model: string) => void
 }) {
   const groups = useMemo(() => {
-    const byModel = new Map<string, number[]>()
-    for (const sample of samples) byModel.set(sample.model, [...byModel.get(sample.model) ?? [], sample.tokensPerSecond])
-    return [...byModel].map(([model, speeds]) => ({
-      model, rounds: speeds.length, p25: quantile(speeds, 0.25), p50: quantile(speeds, 0.5), p75: quantile(speeds, 0.75)
-    })).sort((a, b) => b.p50 - a.p50)
-  }, [samples])
+    const valuesByModel = (list: LlmMetricSample[]): Map<string, number[]> => {
+      const byModel = new Map<string, number[]>()
+      for (const sample of list) byModel.set(sample.model, [...byModel.get(sample.model) ?? [], sample.value])
+      return byModel
+    }
+    const waits = valuesByModel(firstToken)
+    return [...valuesByModel(samples)].map(([model, speeds]) => {
+      const wait = waits.get(model)
+      return {
+        model, rounds: speeds.length, p25: quantile(speeds, 0.25), p50: quantile(speeds, 0.5), p75: quantile(speeds, 0.75),
+        firstToken: wait ? quantile(wait, 0.5) : undefined
+      }
+    }).sort((a, b) => b.p50 - a.p50)
+  }, [samples, firstToken])
   const max = Math.max(10, Math.ceil(Math.max(...groups.map(group => group.p75)) / 10) * 10)
   const percent = (value: number): string => `${Math.min(value, max) / max * 100}%`
   return (
     <div className="llm-perf-models">
-      <div className="llm-perf-mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span>轮数</span></div>
+      <div className="llm-perf-mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span>首 token</span><span>轮数</span></div>
       {groups.map(group => (
         <button key={group.model} type="button" className="llm-perf-mrow" aria-pressed={selected === group.model} onClick={() => onSelect(group.model)}>
           <span className="llm-perf-mname"><i style={{ background: colorOf(group.model) }} /><b>{group.model}</b></span>
@@ -278,6 +316,9 @@ function ModelComparison({ samples, selected, colorOf, onSelect }: {
             <span className="iqr" style={{ left: percent(group.p25), width: `calc(${percent(group.p75)} - ${percent(group.p25)})`, background: colorOf(group.model) }} />
             <span className="p50" style={{ left: percent(group.p50), background: colorOf(group.model) }} /></span>
           <span className="llm-perf-speed"><strong>{formatSpeed(group.p50)}</strong><small>token/s</small></span>
+          <span className="llm-perf-speed llm-perf-wait">{group.firstToken != null
+            ? <><strong>{formatSeconds(group.firstToken)}</strong><small>秒</small></>
+            : <small>—</small>}</span>
           <span className="llm-perf-rounds">{group.rounds}</span>
         </button>
       ))}

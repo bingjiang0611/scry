@@ -79,3 +79,13 @@
 - Applied：`src/renderer/components/LlmPerformancePanel.tsx`、`llm-performance.css`；采集在 `src/main/providers/{pi,codex}.ts`、`src/main/llm-performance.ts`。
 - Evidence：`scripts/session-capability-ui-smoke.mjs --performance-only` 用真实指针验证悬停/空闲/选中/范围，并截取深浅两种主题；`electron-security-smoke --dev-performance-only` 通过。还没有用真实 Pi/Codex 轮次在真实 App 里验收。
 - Revisit：用户看完真实数据下的生产弹窗后；或要加逐调用 TTFT、超出上限的值贴顶标记时。
+
+## D-20261011-scry-llm-first-token
+
+- Scope / status：project:/Users/baobingjiang/IdeaProjects/vibecoding/scry / confirmed（需求与展示方式；成品待审）
+- Feedback：用户确认要采集首 token（“需要”），展示方式选“图表切换 + 对比表加列”。
+- Rule / reason：把网络/排队/prefill 与生成速度分开看。首 token = 请求开始 → 第一个内容块（含思考块开始），单位秒；输出速度口径不变。
+- Applied：图表标题处「输出速度 / 首 token」切换，单位随之变为 token/s 或 秒；模型对比加「首 token」列（P50，无证据显示 —）；运行中会话行显示本轮平均首 token。
+- Preserve：v9 连续彩色曲线与 0 轴空闲规则同样用于首 token 图。
+- Evidence：fixture 截图（深色，首 token 模式与运行中会话）；还没有真实 Pi/Codex 轮次验收。
+- Revisit：首 token 图里 0 轴容易被读成“0 秒很快”；若用户觉得误导，再改空闲画法。

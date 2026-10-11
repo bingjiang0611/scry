@@ -480,7 +480,8 @@ export interface TraceEvent {
   durationMs?: number
   durationApiMs?: number // 仅 result：SDK 权威 API 耗时
   // 一次成功完成的主 Agent 模型请求：本机计时（请求开始→消息结束，含首 token 等待）。只用于速度观测，不是计费用量。
-  llmCall?: { outputTokens: number; durationMs: number; model?: string }
+  // firstTokenMs：请求开始→模型开始输出第一个内容块（含思考）；Provider 没有可对齐的首块信号时缺省。
+  llmCall?: { outputTokens: number; durationMs: number; firstTokenMs?: number; model?: string }
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   costUsd?: number
   costSource?: CostSource

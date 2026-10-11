@@ -915,8 +915,16 @@ export function createCodexAdapter(
       // Start of the root thread's next model request: turn start, the latest tool/hook completion,
       // or the previous usage update. agentMessage completion is mid-response and does not move it.
       let llmCallStartMs: number | undefined
+      // First output item of that request (reasoning/agentMessage/webSearch start or delta). Codex's own
+      // per-request TTFT uses the same OutputItemAdded signal but is not exposed over app-server.
+      let llmCallFirstTokenMs: number | undefined
       const advanceLlmCallStart = (atMs: number): void => {
         llmCallStartMs = llmCallStartMs == null ? atMs : Math.max(llmCallStartMs, atMs)
+        // A tool finishing mid-response moves the boundary past an earlier first item: that pairing is unknown.
+        if (llmCallFirstTokenMs != null && llmCallFirstTokenMs < llmCallStartMs) llmCallFirstTokenMs = undefined
+      }
+      const observeLlmFirstToken = (atMs: number): void => {
+        if (llmCallStartMs != null && atMs >= llmCallStartMs) llmCallFirstTokenMs ??= atMs
       }
       let modelProvider: string | undefined
       let serviceTier: string | null | undefined
@@ -1153,8 +1161,12 @@ export function createCodexAdapter(
                   state.boundaryMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
                 }
               }
-              if (isRoot) llmCallStartMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
+              if (isRoot) {
+                llmCallStartMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
+                llmCallFirstTokenMs = undefined
+              }
             } else if (method === 'item/agentMessage/delta') {
+              if (isRoot) observeLlmFirstToken(observedAtMs)
               runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
                 stage: 'text_delta',
@@ -1165,6 +1177,7 @@ export function createCodexAdapter(
                 ...traceContext
               }))
             } else if (method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') {
+              if (isRoot) observeLlmFirstToken(observedAtMs)
               runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
                 stage: 'thinking',
@@ -1181,6 +1194,10 @@ export function createCodexAdapter(
               emitObservedResponse(notificationThreadId, responseId, observedAtMs, traceContext, 'raw_response')
             } else if (method === 'item/started' || method === 'item/completed') {
               const item = record(params.item)
+              // Tool items start only after the model finished the call, so they never mark a first token.
+              if (isRoot && method === 'item/started' && ['reasoning', 'agentMessage', 'webSearch'].includes(String(item.type))) {
+                observeLlmFirstToken(observedAtMs)
+              }
               if (item.type === 'collabAgentToolCall' && item.tool === 'spawnAgent') {
                 const receiverThreadIds = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.map(String) : []
                 for (const receiverThreadId of receiverThreadIds) {
@@ -1308,11 +1325,19 @@ export function createCodexAdapter(
                 runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                   kind: 'harness',
                   stage: 'runtime:llm_call',
-                  llmCall: { outputTokens: callTokens, durationMs: observedAtMs - llmCallStartMs, ...(model ? { model } : {}) }
+                  llmCall: {
+                    outputTokens: callTokens,
+                    durationMs: observedAtMs - llmCallStartMs,
+                    ...(llmCallFirstTokenMs != null ? { firstTokenMs: llmCallFirstTokenMs - llmCallStartMs } : {}),
+                    ...(model ? { model } : {})
+                  }
                 }))
               }
               // An unknown delta (first resumed snapshot) still ends a response; a zero delta is a repeat.
-              if (!delta || hasPositiveUsage(delta)) llmCallStartMs = observedAtMs
+              if (!delta || hasPositiveUsage(delta)) {
+                llmCallStartMs = observedAtMs
+                llmCallFirstTokenMs = undefined
+              }
               if (usage.total) lastSeenCumulativeUsage = total
               lastRequestUsage = usage.last ? last : undefined
               modelContextWindow = usageNumber(usage.modelContextWindow) ?? modelContextWindow
