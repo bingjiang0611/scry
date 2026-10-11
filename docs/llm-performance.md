@@ -1,6 +1,6 @@
 # LLM 性能
 
-左侧「LLM 性能」位于技能上方。点击打开居中弹窗，内容自上而下：运行中的会话（无会话时隐藏）、各模型输出速度曲线、模型对比。右上角切换 1 小时 / 24 小时 / 7 天。关闭、Escape 和焦点返回沿用 ModalFrame。设计原型与反馈见 [brief](../designs/scry-llm-token-speed/brief.md)。
+左侧「LLM 性能」位于技能上方。点击打开居中弹窗，内容自上而下：运行中的会话（无会话时隐藏）、各模型曲线（「输出速度 / 首 token」切换）、模型对比。右上角切换 1 小时 / 24 小时 / 7 天。关闭、Escape 和焦点返回沿用 ModalFrame。设计原型与反馈见 [brief](../designs/scry-llm-token-speed/brief.md)。
 
 ## 速度口径
 
@@ -8,6 +8,13 @@
 - 一轮速度 = 本轮主 Agent 成功调用的输出 token 之和 ÷ 这些调用的耗时之和。耗时从请求开始到消息结束，包含首 token 等待，不含工具执行。子 Agent 调用不计入。
 - 输出 token 含 Provider 计入的 reasoning token。reasoning 不流式输出，所以不用「首 token 之后」的口径，否则会高估速度。
 - 失败或停止的轮次保留在历史里，但不进入曲线和中位数。没有 token 或耗时证据的轮次直接省略，不显示为 0。
+
+## 首 token 口径
+
+- 一次调用的首 token 等待 = 请求开始 → 模型开始输出第一个内容块（正文、思考或工具调用）。单位秒，本机计时。
+- 首块包含思考块的开始，所以首 token 不含思考耗时。它主要反映网络往返、厂商排队和读入上下文（prefill）；生成速度的差异留在输出速度里。
+- 一轮的首 token = 本轮带首块信号的调用的平均值（`firstTokenMs`，调用数 `firstTokenCalls`）。没有首块信号的调用不计入，也不当作 0。
+- 输出速度的口径不变，仍包含首 token 等待。
 
 ## Provider 接线
 
@@ -18,18 +25,29 @@
 | Codex | 每次根线程 `thread/tokenUsage/updated` 的正向输出 token 增量；耗时 = 本次通知时间 − 上一个边界（轮次开始、工具/Hook 完成、上一次 usage 通知中的最晚者）。重复快照（增量为 0）不算新调用；子线程不计 | `observed_calls` |
 | Qoder / OpenCode | 未接入单次调用证据 | 无，速度缺失 |
 
-`observed_calls` 是本机计时的估算：包含本机 IPC 延迟，Codex 还依赖 usage 通知紧随响应结束这一时序。Provider API 时间存在时优先用它，不与本机计时混用。单次调用证据记在 trace 事件的 `llmCall` 字段（Pi 在 `runtime:llm_stream_end`，Codex 在 `runtime:llm_call`），不参与计费用量。
+首 token 来源：
+
+| Provider | 首块信号 | 缺失时 |
+| --- | --- | --- |
+| Pi | 该消息的第一个 `message_update`（Pi 只为 text/thinking/toolcall 的 start/delta/end 发出） | 无更新的调用不计 |
+| Codex | 边界之后根线程第一个 `item/started`（`reasoning` / `agentMessage` / `webSearch`）或正文/思考 delta。Codex 自己的单请求 TTFT 也用 OutputItemAdded，但 app-server 不下发 | 工具 item 不算（模型生成完调用才开始）；工具中途完成把边界移过首块时，本次调用记未知 |
+| Claude / Qoder / OpenCode | 未接入 | 「首 token」列显示 —，首 token 图不画该模型 |
+
+Codex 在有扩展参与流式条目时可能延迟下发 `item/started`，此时首 token 偏大。
+
+`observed_calls` 是本机计时的估算：包含本机 IPC 延迟，Codex 还依赖 usage 通知紧随响应结束这一时序。Provider API 时间存在时优先用它，不与本机计时混用。单次调用证据记在 trace 事件的 `llmCall` 字段（`outputTokens`、`durationMs`、可选 `firstTokenMs`；Pi 在 `runtime:llm_stream_end`，Codex 在 `runtime:llm_call`），不参与计费用量。
 
 ## 曲线
 
 - 每个模型一条连续曲线：在 180 个时间点上，对附近轮次做高斯加权几何平均。带宽 1 小时 = 4 分钟、24 小时 = 40 分钟、7 天 = 4 小时。几何平均让单个异常轮次不主导曲线。
 - 1.5 倍带宽内没有轮次的时段，曲线平滑落到 0 轴。0 轴只是绘图基线，不是测量值：悬停显示「空闲」；中位数、分布和轮数都不计入空闲。落向 0 轴的过渡段高度只是视觉过渡。
-- 纵轴上限 = 测量值 98 分位 × 1.1，向上取整到 20；更高的值贴顶。7 天视图在本地零点放刻度。
+- 纵轴上限 = 测量值 98 分位 × 1.1。输出速度向上取整到 20；首 token 取 1/2/5 × 10ⁿ。更高的值贴顶。7 天视图在本地零点放刻度。
+- 首 token 图沿用同一条连续曲线规则：空闲落到 0 轴。0 秒在这里同样只是基线，悬停显示「空闲」。
 - 模型颜色按全部历史的轮数排序，切换范围时不变。点击模型行突出该模型，其他曲线变淡。
 
 ## 运行中的会话
 
-摘要只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化；一个会话只取当前主 run。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。每行显示模型（无调用证据前显示 Provider）、项目、状态，以及本轮已完成调用的速度；没有单次调用证据的 Provider（如运行中的 Claude）不显示速度。读取失败时清空旧摘要并显示错误。
+摘要只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化；一个会话只取当前主 run。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。每行显示模型（无调用证据前显示 Provider）、项目、状态，以及本轮已完成调用的速度和平均首 token；没有单次调用证据的 Provider（如运行中的 Claude）不显示速度。读取失败时清空旧摘要并显示错误。
 
 ## 历史与归属
 
@@ -50,4 +68,6 @@ npm run build
 node scripts/electron-security-smoke.mjs --dev-performance-only
 ```
 
-UI fixture 使用生产 App、registry 和 observer，配合预置历史。它用真实指针事件验证：失败与无证据轮次不进图、模型中位数、悬停（有数据处显示速度，空闲处显示「空闲」）、选中模型、范围切换、运行中会话的单次调用速度、成员结束/停止/空闲、焦点独立、隐藏/关闭停止刷新、读取错误清空，以及两种主题和窄窗口。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter。两者都不启动真实付费 Provider。
+UI fixture 使用生产 App、registry 和 observer，配合预置历史。它用真实指针事件验证：失败与无证据轮次不进图、模型中位数、首 token 列与指标切换（无证据显示 —）、悬停（有数据处显示速度，空闲处显示「空闲」）、选中模型、范围切换、运行中会话的单次调用速度、成员结束/停止/空闲、焦点独立、隐藏/关闭停止刷新、读取错误清空，以及两种主题和窄窗口。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter。两者都不启动真实付费 Provider。
+
+UI fixture 在后台用 `showInactive()` 打开窗口，可能被用户窗口遮挡；被遮挡的窗口不出帧，会卡住 `requestAnimationFrame` 和按帧派发的 mousemove。因此 fixture 进程带 `--disable-backgrounding-occluded-windows`，显式 `hide()` 仍会让 `document.hidden` 为真。`win.setSize()` 是异步的，点击和测量前等待 `innerWidth` 更新。

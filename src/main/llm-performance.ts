@@ -20,6 +20,8 @@ export class LlmPerformanceObserver {
   private callTokens = 0
   private callDurationMs = 0
   private calls = 0
+  private firstTokenMs = 0
+  private firstTokenCalls = 0
   private model?: string
 
   constructor(private readonly networkLabel = '', private readonly clock = { monotonic: () => performance.now(), now: () => Date.now() }) {
@@ -70,6 +72,10 @@ export class LlmPerformanceObserver {
       this.calls++
       this.callTokens += event.llmCall.outputTokens
       this.callDurationMs += event.llmCall.durationMs
+      if (event.llmCall.firstTokenMs != null) {
+        this.firstTokenCalls++
+        this.firstTokenMs += event.llmCall.firstTokenMs
+      }
       this.model = event.llmCall.model ?? this.model
     }
     const terminal = event.kind === 'harness' && (event.stage === 'result' || event.stage === 'runtime:turn_wall')
@@ -108,6 +114,7 @@ export class LlmPerformanceObserver {
       ...(apiDurationMs != null && apiDurationMs > 0 && outputTokens != null
         ? { apiTokensPerSecond: outputTokens / (apiDurationMs / 1000) } : {}),
       ...(observedCalls ? { llmCalls: this.calls } : {}),
+      ...(this.firstTokenCalls > 0 ? { firstTokenMs: this.firstTokenMs / this.firstTokenCalls, firstTokenCalls: this.firstTokenCalls } : {}),
       ...(this.model ? { model: this.model } : {})
     }
   }

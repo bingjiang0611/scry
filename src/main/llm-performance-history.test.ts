@@ -76,11 +76,14 @@ describe('performance history shares usage deletion but not billing totals', () 
     const dir = mkdtempSync(join(tmpdir(), 'scry-llm-history-calls-'))
     try {
       const observed = { ...sample('observed'), providerId: 'pi' as const, performance: { ...sample().performance,
-        outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, tokenTimingSource: 'observed_calls' as const, llmCalls: 2, model: 'ultimate' } }
+        outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, tokenTimingSource: 'observed_calls' as const, llmCalls: 2,
+        firstTokenMs: 1500, firstTokenCalls: 2, model: 'ultimate' } }
       appendLlmPerformance(dir, { cwd: '/repo' }, observed)
       appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...observed, runId: 'forged',
         performance: { ...observed.performance, tokenTimingSource: 'guessed' } } }) + '\n')
-      expect(await readLlmPerformanceHistory(dir, now)).toEqual({ rows: [observed], invalidLines: 1, truncated: false })
+      appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...observed, runId: 'negative-wait',
+        performance: { ...observed.performance, firstTokenMs: -1 } } }) + '\n')
+      expect(await readLlmPerformanceHistory(dir, now)).toEqual({ rows: [observed], invalidLines: 2, truncated: false })
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })

@@ -12,6 +12,7 @@ export interface LlmRunningSession {
   outputStarted: boolean
   /** Completed main-agent calls of this turn only; absent until a Provider gives per-call evidence. */
   tokensPerSecond?: number
+  firstTokenMs?: number
 }
 
 /** A bounded, read-only snapshot of currently registered sessions for the global modal. */
@@ -37,7 +38,8 @@ export function summarizeRunningLlmSessions(activeRuns: readonly ActiveRun[], no
         key, providerId: run.providerId, cwd: run.cwd, model: sample?.model,
         state: sample?.state ?? 'waiting',
         outputStarted: sample?.firstOutputWaitMs != null,
-        ...(sample?.apiTokensPerSecond != null ? { tokensPerSecond: sample.apiTokensPerSecond } : {})
+        ...(sample?.apiTokensPerSecond != null ? { tokensPerSecond: sample.apiTokensPerSecond } : {}),
+        ...(sample?.firstTokenMs != null ? { firstTokenMs: sample.firstTokenMs } : {})
       }
     })
   }
@@ -72,6 +74,10 @@ export interface LlmPerformance {
   tokenTimingSource?: 'provider_api' | 'observed_calls'
   /** Completed main-agent calls behind observed_calls timing. */
   llmCalls?: number
+  /** Mean per-call wait from request start to the first content block (thinking included). Local timing. */
+  firstTokenMs?: number
+  /** Calls behind firstTokenMs; calls without an aligned first-block signal are not counted. */
+  firstTokenCalls?: number
   /** Model of the latest observed call. */
   model?: string
 }
@@ -94,19 +100,24 @@ export interface LlmPerformanceHistory {
   truncated: boolean
 }
 
-export interface LlmSpeedSample {
+export type LlmMetric = 'speed' | 'firstToken'
+
+export interface LlmMetricSample {
   ts: number
   model: string
-  tokensPerSecond: number
+  /** speed: token/s. firstToken: seconds from request start to the first content block. */
+  value: number
 }
 
-/** Successful rounds with both token and timing evidence. Missing evidence is omitted, never 0. */
-export function llmSpeedSamples(rows: readonly LlmPerformanceHistoryRow[]): LlmSpeedSample[] {
+/** Successful rounds with evidence for the metric. Missing evidence is omitted, never 0. */
+export function llmMetricSamples(rows: readonly LlmPerformanceHistoryRow[], metric: LlmMetric): LlmMetricSample[] {
   return rows.flatMap(row => {
     const ts = Date.parse(row.ts)
-    const speed = row.performance.apiTokensPerSecond
-    return !row.failed && speed != null && speed > 0 && Number.isFinite(ts)
-      ? [{ ts, model: row.model, tokensPerSecond: speed }] : []
+    const value = metric === 'speed'
+      ? row.performance.apiTokensPerSecond
+      : row.performance.firstTokenMs != null ? row.performance.firstTokenMs / 1000 : undefined
+    return !row.failed && value != null && value > 0 && Number.isFinite(ts)
+      ? [{ ts, model: row.model, value }] : []
   })
 }
 
@@ -117,20 +128,20 @@ export function quantile(values: readonly number[], p: number): number {
   return sorted[low] + (sorted[Math.ceil(index)] - sorted[low]) * (index - low)
 }
 
-export interface LlmSpeedPoint {
+export interface LlmMetricPoint {
   ts: number
-  /** Smoothed measured speed; null when no round lies within 1.5 bandwidths (idle). */
-  speed: number | null
+  /** Smoothed measured value; null when no round lies within 1.5 bandwidths (idle). */
+  value: number | null
   /** Drawing height: eases to the 0 axis when idle. It is not a measurement. */
   drawn: number
 }
 
 /**
  * Gaussian-weighted geometric mean of one model's rounds on a regular grid. The geometric mean keeps
- * one outlier from dominating. The curve stays continuous, but idle points are marked with speed=null
- * so no tooltip or statistic presents the 0 baseline as a 0 token/s measurement.
+ * one outlier from dominating. The curve stays continuous, but idle points are marked with value=null
+ * so no tooltip or statistic presents the 0 baseline as a measurement.
  */
-export function smoothLlmSpeed(samples: readonly LlmSpeedSample[], from: number, to: number, bandwidthMs: number, points: number): LlmSpeedPoint[] {
+export function smoothLlmMetric(samples: readonly LlmMetricSample[], from: number, to: number, bandwidthMs: number, points: number): LlmMetricPoint[] {
   return Array.from({ length: points }, (_, index) => {
     const ts = from + (to - from) * index / (points - 1)
     let weight = 0
@@ -142,9 +153,9 @@ export function smoothLlmSpeed(samples: readonly LlmSpeedSample[], from: number,
       if (Math.abs(distance) <= 1.5) near = true
       const w = Math.exp(-distance * distance / 2)
       weight += w
-      logSum += w * Math.log(sample.tokensPerSecond)
+      logSum += w * Math.log(sample.value)
     }
-    const speed = weight > 1e-6 ? Math.exp(logSum / weight) : 0
-    return { ts, speed: near ? speed : null, drawn: speed * Math.min(1, weight / 0.6) }
+    const value = weight > 1e-6 ? Math.exp(logSum / weight) : 0
+    return { ts, value: near ? value : null, drawn: value * Math.min(1, weight / 0.6) }
   })
 }

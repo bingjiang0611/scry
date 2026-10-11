@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { llmSpeedSamples, smoothLlmSpeed, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow } from './llm-performance'
+import { llmMetricSamples, smoothLlmMetric, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow } from './llm-performance'
 import type { ActiveRun } from './trace'
 import { RunRegistry } from '../main/run-registry'
 
@@ -14,14 +14,15 @@ const run = (runId: string, partial: Partial<LlmPerformance> | undefined = {}): 
 describe('running LLM sessions', () => {
   it('reads only bounded observations and keeps the latest main run per scoped session', () => {
     const old = { ...run('old', { state: 'streaming' }), providerId: 'pi' as const, cwd: '/a', sessionId: 'session' }
-    const current = { ...run('new', { state: 'tool', firstOutputWaitMs: 900, apiTokensPerSecond: 42, model: 'm' }), providerId: 'pi' as const, cwd: '/a', sessionId: 'session' }
+    const current = { ...run('new', { state: 'tool', firstOutputWaitMs: 900, apiTokensPerSecond: 42, firstTokenMs: 1200, model: 'm' }), providerId: 'pi' as const, cwd: '/a', sessionId: 'session' }
     Object.defineProperty(current, 'items', { get: () => { throw new Error('trace must not be scanned') } })
     const summary = summarizeRunningLlmSessions([old, current, { ...run('other', undefined), cwd: '/b', sessionId: 'session' }])
     expect(summary.sessions).toEqual([
-      expect.objectContaining({ providerId: 'pi', cwd: '/a', model: 'm', state: 'tool', outputStarted: true, tokensPerSecond: 42 }),
+      expect.objectContaining({ providerId: 'pi', cwd: '/a', model: 'm', state: 'tool', outputStarted: true, tokensPerSecond: 42, firstTokenMs: 1200 }),
       expect.objectContaining({ cwd: '/b', state: 'waiting', outputStarted: false })
     ])
     expect(summary.sessions[1]).not.toHaveProperty('tokensPerSecond')
+    expect(summary.sessions[1]).not.toHaveProperty('firstTokenMs')
   })
 
   it('excludes done runs at the production registry boundary', () => {
@@ -43,20 +44,29 @@ describe('LLM speed history', () => {
   it('omits failed rounds and rounds without token timing instead of treating them as 0 token/s', () => {
     const missing = row(2000)
     delete missing.performance.apiTokensPerSecond
-    expect(llmSpeedSamples([row(1000), missing, row(3000, { failed: true })])).toEqual([{ ts: 1000, model: 'm', tokensPerSecond: 20 }])
+    expect(llmMetricSamples([row(1000), missing, row(3000, { failed: true })], 'speed')).toEqual([{ ts: 1000, model: 'm', value: 20 }])
+  })
+
+  it('reads first-token wait in seconds and omits rounds without a first-block signal', () => {
+    const timed = row(1000)
+    timed.performance.firstTokenMs = 2500
+    const failed = row(3000, { failed: true })
+    failed.performance.firstTokenMs = 100
+    // Speed evidence alone (e.g. Claude provider_api) never becomes a 0 s first-token wait.
+    expect(llmMetricSamples([timed, row(2000), failed], 'firstToken')).toEqual([{ ts: 1000, model: 'm', value: 2.5 }])
   })
 
   it('keeps the curve continuous on the 0 axis while marking idle points as unmeasured', () => {
     const minute = 60_000
-    const samples = [{ ts: 10 * minute, model: 'm', tokensPerSecond: 20 }, { ts: 11 * minute, model: 'm', tokensPerSecond: 80 }]
-    const points = smoothLlmSpeed(samples, 0, 60 * minute, minute, 61)
+    const samples = [{ ts: 10 * minute, model: 'm', value: 20 }, { ts: 11 * minute, model: 'm', value: 80 }]
+    const points = smoothLlmMetric(samples, 0, 60 * minute, minute, 61)
     const busy = points[10]
     const idle = points[40]
     // Weighted geometric mean (≈33.8) stays below the weighted arithmetic mean (≈42.6) of a 4x outlier.
-    expect(busy.speed).toBeCloseTo(Math.exp((Math.log(20) + Math.exp(-0.5) * Math.log(80)) / (1 + Math.exp(-0.5))))
-    expect(busy.speed).toBeLessThan((20 + Math.exp(-0.5) * 80) / (1 + Math.exp(-0.5)))
-    expect(busy.drawn).toBeCloseTo(busy.speed!)
-    expect(idle).toEqual({ ts: 40 * minute, speed: null, drawn: 0 })
+    expect(busy.value).toBeCloseTo(Math.exp((Math.log(20) + Math.exp(-0.5) * Math.log(80)) / (1 + Math.exp(-0.5))))
+    expect(busy.value).toBeLessThan((20 + Math.exp(-0.5) * 80) / (1 + Math.exp(-0.5)))
+    expect(busy.drawn).toBeCloseTo(busy.value!)
+    expect(idle).toEqual({ ts: 40 * minute, value: null, drawn: 0 })
     expect(points.every(point => Number.isFinite(point.drawn))).toBe(true)
   })
 })

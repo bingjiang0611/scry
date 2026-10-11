@@ -999,7 +999,8 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
     const deadline = Date.now() + 5000
     while (!await read(expression)) {
       if (Date.now() > deadline) throw new Error('LLM performance timed out: ' + expression + '; ' + await read('document.body.innerText'))
-      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+      // Not requestAnimationFrame: it never fires while the window is hidden, which would hang the hidden-window check.
+      await new Promise(resolve => setTimeout(resolve, 16))
     }
   }
   const pointOf = async (selector, fraction = 0.5) => read(`(() => {
@@ -1034,6 +1035,8 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   const models = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).map(node => node.textContent)`)
   if (!models[0].includes('fast-model') || !models[0].includes('62.0') || !models[0].includes('5') || !models[1].includes('slow-model') || !models[1].includes('21.0'))
     throw new Error('Model medians wrong: ' + JSON.stringify(models))
+  // First-token column: fast-model median 2.0 s (failed 99 s round excluded); slow-model has no evidence, not 0.
+  if (!models[0].includes('2.0秒') || !models[1].includes('—') || models[1].includes('0.0秒')) throw new Error('First-token column wrong: ' + JSON.stringify(models))
   if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('unmeasured-model')`)) throw new Error('Failed or unmeasured history leaked into speed')
   if (await read(`${modal}.textContent.includes('字符/s') || ${modal}.textContent.includes('数据口径')`)) throw new Error('Legacy character/definition UI leaked into the modal')
   // Real pointer hover: the busy region names measured speed, the idle region says 空闲 instead of 0.
@@ -1050,9 +1053,21 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   await click('.llm-perf-range button:nth-child(1)')
   await wait(`${modal}.querySelector('.llm-perf-range button[aria-pressed="true"]').textContent === '1 小时' && ${modal}.querySelectorAll('.llm-perf-mrow').length === 2`)
   await click('.llm-perf-range button:nth-child(2)')
+  // Metric switch: the same chart draws first-token wait in seconds, only for models with that evidence.
+  await click('.llm-perf-metric button:nth-child(2)')
+  await wait(`${modal}.querySelector('.llm-perf-metric button[aria-pressed="true"]')?.textContent === '首 token' && ${modal}.querySelector('.llm-perf-chart svg')?.getAttribute('aria-label').includes('首 token') && ${modal}.querySelectorAll('.llm-perf-line').length === 1`)
+  if (await read(`${modal}.querySelector('section h3').textContent.includes('token/s') || !${modal}.querySelector('section h3').textContent.includes('秒')`)) throw new Error('First-token chart kept the speed unit')
+  await hover('.llm-perf-chart svg', 0.94)
+  await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('fast-model') && !${modal}.querySelector('.llm-perf-tip')?.textContent.includes('slow-model')`)
+  const waitTip = await read(`Number(${modal}.querySelector('.llm-perf-tip b').textContent)`)
+  if (!(waitTip >= 1 && waitTip <= 3)) throw new Error('First-token tooltip is not the measured seconds: ' + waitTip)
+  contents.sendInputEvent({ type: 'mouseMove', x: 2, y: 2 })
+  await wait(`${modal}.querySelector('.llm-perf-tip') == null`)
+  await click('.llm-perf-metric button:nth-child(1)')
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2 && ${modal}.querySelector('section h3').textContent.includes('token/s')`)
   // Live sessions: per-call evidence gives token/s; Claude's final-only usage does not while running.
   await click('#performance-stream')
-  await wait(`${runs}.some(text => text.includes('pi-live-model') && text.includes('生成中') && text.includes('40.0token/s'))`)
+  await wait(`${runs}.some(text => text.includes('pi-live-model') && text.includes('生成中') && text.includes('40.0token/s') && text.includes('首 token1.5秒'))`)
   if (await read(`${runs}.some(text => text.includes('project-a') && text.includes('token/s'))`)) throw new Error('Session without per-call evidence showed speed')
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
@@ -1074,14 +1089,18 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   await wait(`${modal}.textContent.includes('无运行中的会话') && ${modal}.querySelector('.llm-perf-running') == null`)
   for (const theme of ['dark', 'light']) {
     win.setSize(1000, 800)
+    await wait(`innerWidth === 1000`)
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
     const bounds = await read(`(() => { const node = ${modal}, r = node.getBoundingClientRect(); if (node.scrollWidth > node.clientWidth) throw new Error('Performance modal overflows'); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
     if (screenshot) require('node:fs').writeFileSync(screenshot + '-' + theme + '.png', (await contents.capturePage(bounds)).toPNG())
   }
+  // setSize is asynchronous: measure and click only after the renderer reports the new viewport.
   win.setSize(700, 700)
+  await wait(`innerWidth === 700`)
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   if (!await read(`${modal}.scrollWidth <= ${modal}.clientWidth && ${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth`)) throw new Error('Narrow performance modal overflows')
   win.setSize(1000, 800)
+  await wait(`innerWidth === 1000`)
   await click('#performance-summary-error')
   await wait(`${modal}.textContent.includes('运行中会话读取失败：fixture summary unavailable')`)
   if (await read(`${modal}.textContent.includes('无运行中的会话')`)) throw new Error('Summary error retained a stale idle headline')
@@ -1096,7 +1115,7 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
   if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed', 'focus independent', 'done/stopped/idle excluded', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed', 'focus independent', 'done/stopped/idle excluded', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
 }
 
 try {
@@ -1120,6 +1139,8 @@ try {
   for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
+    // macOS pipes are asynchronous: exit only after the result line is flushed, or the parent sees no result.
+    const finish = (result) => process.stdout.write('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
@@ -1136,8 +1157,7 @@ try {
           await win.loadFile(${JSON.stringify(join(temp, 'llm-performance.html'))})
           result.llmPerformance = await (${exerciseLlmPerformance.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LLM_UI_SCREENSHOT ?? '')})
           if (${performanceOnly}) {
-            console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
-            app.exit(0)
+            finish(result)
             return
           }
         }
@@ -1159,8 +1179,7 @@ try {
         if (${summaryOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()`)}))
-          console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
-          app.exit(0)
+          finish(result)
           return
         }
         if (!${selectionOnly || modelsOnly || terminalsOnly}) {
@@ -1194,13 +1213,14 @@ try {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
           sessionTerminals.push(await (${exerciseSessionTerminals.toString()})(win.webContents, scenario))
         }
-        console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals }))
-        app.exit(0)
+        finish({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals })
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
   await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu'], {
+    // The fixture window is shown inactive and may sit behind the user's windows. Occluded windows stop
+    // producing frames, which stalls requestAnimationFrame and frame-aligned mousemove; hide() still hides.
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows'], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''

@@ -925,17 +925,21 @@ interface UsageAggregate {
 
 /**
  * Pi stamps an assistant message when its request is created; message_end arrives when the response
- * is complete. Their difference is one call's local time, including first-token wait. Errored or
- * aborted calls are retried by Pi and must not count as generation speed.
+ * is complete. Their difference is one call's local time, including first-token wait. The first
+ * message_update is the first content block (text, thinking or tool call), so it marks the first token.
+ * Errored or aborted calls are retried by Pi and must not count as generation speed.
  */
-function piLlmCall(message: JsonRecord, endedAtMs: number): Pick<TraceEvent, 'llmCall'> {
+function piLlmCall(message: JsonRecord, endedAtMs: number, firstContentAtMs: number | undefined): Pick<TraceEvent, 'llmCall'> {
   const startedAtMs = number(message.timestamp)
   const outputTokens = number(record(message.usage).output)
   const completed = message.stopReason === 'stop' || message.stopReason === 'toolUse' || message.stopReason === 'length'
   if (!completed || startedAtMs == null || outputTokens == null || outputTokens <= 0 || endedAtMs <= startedAtMs) return {}
+  const firstTokenMs = firstContentAtMs != null && firstContentAtMs >= startedAtMs && firstContentAtMs <= endedAtMs
+    ? firstContentAtMs - startedAtMs : undefined
   return { llmCall: {
     outputTokens,
     durationMs: endedAtMs - startedAtMs,
+    ...(firstTokenMs != null ? { firstTokenMs } : {}),
     ...(typeof message.model === 'string' ? { model: message.model } : {})
   } }
 }
@@ -1058,6 +1062,7 @@ async function runPiAgent(
   let streamedThinking = false
   let assistantMessageSequence = 0
   let assistantMessageId: string | undefined
+  let assistantFirstContentAtMs: number | undefined
   let assistantToolCallIds = new Set<string>()
   let toolTermination: TraceEvent['toolTermination']
   const nextAssistantMessageId = (message: JsonRecord): string => {
@@ -1123,10 +1128,12 @@ async function runPiAgent(
         assistantToolCallIds.clear()
         toolTermination = undefined
         assistantMessageId = nextAssistantMessageId(message)
+        assistantFirstContentAtMs = undefined
       }
       return
     }
     if (event.type === 'message_update') {
+      assistantFirstContentAtMs ??= Date.now()
       const delta = record(event.assistantMessageEvent)
       const messageId = currentAssistantMessageId()
       if (delta.type === 'text_delta' && typeof delta.delta === 'string') {
@@ -1188,8 +1195,9 @@ async function runPiAgent(
           }
         }
       }
-      request.emit(piEvent(request.runId, { kind: 'harness', stage: 'runtime:llm_stream_end', messageId, ...piLlmCall(message, Date.now()) }))
+      request.emit(piEvent(request.runId, { kind: 'harness', stage: 'runtime:llm_stream_end', messageId, ...piLlmCall(message, Date.now(), assistantFirstContentAtMs) }))
       assistantMessageId = undefined
+      assistantFirstContentAtMs = undefined
       return
     }
     if (event.type === 'tool_execution_start') {

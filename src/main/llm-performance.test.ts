@@ -91,6 +91,16 @@ describe('local LLM performance observation', () => {
     // Turn usage also counts retried/failed calls; it must not replace the per-call numerator.
     const end = emit(9000, { kind: 'harness', stage: 'result', tokensOut: 400, durationMs: 9000 })
     expect(end).toMatchObject({ state: 'complete', outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, llmCalls: 2, model: 'ultimate' })
+    expect(end).not.toHaveProperty('firstTokenMs')
+  })
+
+  it('averages first-token wait over root calls that carry it, never counting missing calls as 0', () => {
+    const { emit } = fixture()
+    emit(1000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 4000, firstTokenMs: 1000 } })
+    emit(1500, { kind: 'harness', stage: 'runtime:llm_call', agentId: 'child', llmCall: { outputTokens: 9, durationMs: 9, firstTokenMs: 9 } })
+    emit(2000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 1000 } })
+    const end = emit(3000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 3000, firstTokenMs: 2000 } })
+    expect(end).toMatchObject({ llmCalls: 3, firstTokenMs: 1500, firstTokenCalls: 2 })
   })
 
   it('keeps Provider API time authoritative and never labels it as observed calls', () => {

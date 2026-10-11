@@ -33,7 +33,7 @@ function isSample(value: unknown): value is LlmPerformanceHistoryRow {
   if (sample.tokenTimingSource !== undefined && !['provider_api', 'observed_calls'].includes(String(sample.tokenTimingSource))) return false
   if (sample.model !== undefined && typeof sample.model !== 'string') return false
   return ['streamCharacters', 'windowMs', 'streamDurationMs'].every(number) &&
-    ['firstOutputWaitMs', 'averageCharactersPerSecond', 'outputTokens', 'apiDurationMs', 'apiTokensPerSecond', 'llmCalls']
+    ['firstOutputWaitMs', 'averageCharactersPerSecond', 'outputTokens', 'apiDurationMs', 'apiTokensPerSecond', 'llmCalls', 'firstTokenMs', 'firstTokenCalls']
       .every(key => sample[key] === undefined || number(key))
 }
 
