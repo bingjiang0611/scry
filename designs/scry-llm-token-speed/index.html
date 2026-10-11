@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>Scry · LLM token 速度 原型 v6</title>
+<title>Scry · LLM token 速度 原型 v7</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 /* Token snapshot: src/renderer/styles.css + codex-alignment.css (dark). */
@@ -52,22 +52,26 @@ body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding
 .run .speed small { color: var(--dim2); margin-left: 3px; }
 
 h3 { margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 600; }
-h3 small { color: var(--dim2); font-weight: 400; font-size: 12px; }
 h3 .right { margin-left: auto; }
 
 /* Timeline */
 .chart { position: relative; }
-.chart svg { display: block; width: 100%; height: 220px; overflow: visible; }
+.chart svg { display: block; width: 100%; height: 240px; overflow: visible; }
 .axis text { fill: var(--dim3); font-size: 10.5px; }
 .axis line { stroke: var(--border3); }
-.dotp { transition: opacity .12s; }
-.dotp.dim { opacity: .12; }
-.med { stroke-dasharray: 4 4; stroke-width: 1.5; }
+.series path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.series { transition: opacity .12s; }
+.series.dim { opacity: .14; }
+.cross { stroke: var(--border2); stroke-dasharray: 3 3; }
+h3 .unit { color: var(--dim3); font-weight: 400; font-size: 12px; }
 .tip { position: absolute; pointer-events: none; padding: 7px 10px; border-radius: 8px; background: var(--panel3);
   border: 1px solid var(--border2); font-size: 12px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
-.tip b { font-size: 13px; }
-.tip span { color: var(--dim2); }
-.empty { height: 220px; display: grid; place-items: center; color: var(--dim2); border: 1px dashed var(--border2); border-radius: 12px; text-align: center; }
+.tip { transform: translate(-50%, 0); min-width: 150px; }
+.tip-t { color: var(--dim2); margin-bottom: 4px; }
+.tip-r { display: flex; align-items: center; gap: 7px; line-height: 1.7; }
+.tip-r i { width: 7px; height: 7px; border-radius: 50%; }
+.tip-r b { margin-left: auto; padding-left: 14px; font-weight: 600; }
+.empty { height: 240px; display: grid; place-items: center; color: var(--dim2); border: 1px dashed var(--border2); border-radius: 12px; text-align: center; }
 
 /* Model comparison */
 .models { display: grid; }
@@ -80,7 +84,6 @@ h3 .right { margin-left: auto; }
 .mname { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mname i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .mname b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mname span { color: var(--dim3); font-size: 11px; white-space: nowrap; }
 .bar { position: relative; height: 16px; }
 .bar .track { position: absolute; inset: 7px 0; border-radius: 2px; background: var(--border3); }
 .bar .iqr { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; opacity: .32; }
@@ -88,13 +91,9 @@ h3 .right { margin-left: auto; }
 .speedv strong { font-size: 15px; font-weight: 600; }
 .speedv small { color: var(--dim2); font-size: 11px; margin-left: 2px; }
 .nv { color: var(--dim); }
-.nv small { color: var(--dim3); }
 .scale { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(200px, 2fr) 96px 64px; gap: 14px; padding: 2px 10px 0; color: var(--dim3); font-size: 10.5px; }
 .scale div { display: flex; justify-content: space-between; }
 
-details { color: var(--dim2); font-size: 12px; }
-details summary { cursor: pointer; color: var(--dim); }
-details ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
 .proto { position: fixed; left: 12px; bottom: 10px; color: var(--dim3); font-size: 11px; }
 .proto a { color: var(--dim2); margin-right: 8px; }
 </style>
@@ -112,25 +111,16 @@ details ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
   <div class="body">
     <section class="running" id="running" hidden></section>
     <section>
-      <h3>输出速度 <small>每个点是一轮 · token/s</small><small class="right" id="scope"></small></h3>
+      <h3>输出速度 <span class="unit">token/s</span></h3>
       <div class="chart" id="chart"></div>
     </section>
     <section>
-      <h3>模型对比 <small>中位数 · 色带为中间 50% · 点击筛选</small></h3>
+      <h3>模型对比</h3>
       <div class="models" id="models"></div>
     </section>
-    <details>
-      <summary>数据口径</summary>
-      <ul>
-        <li>输出速度 = 本轮主会话所有 LLM 调用的 output tokens 之和 ÷ 这些调用的耗时之和。耗时从请求发出到响应结束，含首 token 等待，不含工具执行。</li>
-        <li>output tokens 来自 Provider 上报的每次调用用量，可能包含思考 token；耗时为本机计时，属于估算，不是服务端生成速度。</li>
-                <li>失败或停止的轮次保留计数，不进入中位数；缺少用量或耗时的轮次不补 0。</li>
-      </ul>
-    </details>
   </div>
 </div>
-<div class="proto">原型数据：本机 Pi 会话文件（近 7 天），不是 Scry 运行记录；“运行中”三行是样例 ·
-  <a href="?">默认</a><a href="?state=running">运行中</a><a href="?state=empty">无数据</a></div>
+<div class="proto">原型 · <a href="?">默认</a><a href="?state=running">运行中</a><a href="?state=empty">无数据</a></div>
 
 <script src="data.js"></script>
 <script>
@@ -148,7 +138,6 @@ const counts = turns.reduce((map, t) => map.set(t.model, (map.get(t.model) ?? 0)
 const modelOrder = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a))
 const color = model => `var(${palette[modelOrder.indexOf(model) % palette.length]})`
 const short = model => model.split('/').pop()
-const upstream = model => model.split('/')[0]
 const fmt = v => v >= 100 ? Math.round(v).toString() : v.toFixed(1)
 const q = (values, p) => { const s = [...values].sort((a, b) => a - b); const i = (s.length - 1) * p; const lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo) }
 
@@ -174,45 +163,110 @@ function renderRunning() {
   box.innerHTML = runs.map(r => `<div class="run"><i class="dot" style="background:${color(r.model)}"></i>
     <div><b>${short(r.model)}</b> <span>· ${r.project}</span></div>
     <span class="state${r.gen ? ' gen' : ''}">${r.state}</span>
-    <div class="speed num">${r.tps != null ? `<strong>${fmt(r.tps)}</strong><small>token/s</small>` : '<small>本轮尚无调用</small>'}</div></div>`).join('')
+    <div class="speed num">${r.tps != null ? `<strong>${fmt(r.tps)}</strong><small>token/s</small>` : ''}</div></div>`).join('')
+}
+
+// Kernel-smoothed speed on a regular time grid: Gaussian-weighted geometric mean of nearby turns
+// (robust to single outliers). Where no turn lies within 1.5 bandwidths, the line breaks instead
+// of drawing speed across a period without data.
+const bandwidthMs = () => ({ 1: 4, 24: 40, 168: 240 })[hours] * 60_000
+const GRID = 160
+
+// Monotone cubic (Fritsch–Carlson): smooth without overshooting real values.
+function smoothPath(pts) {
+  const n = pts.length, d = [], m = []
+  for (let i = 0; i < n - 1; i++) d.push((pts[i + 1][1] - pts[i][1]) / (pts[i + 1][0] - pts[i][0]))
+  m[0] = d[0]; m[n - 1] = d[n - 2]
+  for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = m[i + 1] = 0; continue }
+    const a = m[i] / d[i], b = m[i + 1] / d[i], h = a * a + b * b
+    if (h > 9) { const t = 3 / Math.sqrt(h); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i] }
+  }
+  let path = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 0; i < n - 1; i++) {
+    const dx = (pts[i + 1][0] - pts[i][0]) / 3
+    path += ` C${pts[i][0] + dx},${pts[i][1] + m[i] * dx} ${pts[i + 1][0] - dx},${pts[i + 1][1] - m[i + 1] * dx} ${pts[i + 1][0]},${pts[i + 1][1]}`
+  }
+  return path
 }
 
 function renderChart(rows) {
   const box = document.getElementById('chart')
   const ok = rows.filter(t => !t.failed)
-  document.getElementById('scope').textContent = selected ? `仅 ${short(selected)}` : ok.length ? `${ok.length} 轮` : ''
   if (!ok.length) {
-    box.innerHTML = `<div class="empty"><div>${turns.length ? '这个时间范围内没有完成的轮次' : '还没有可测速度的轮次'}<br><span style="color:var(--dim3)">每完成一轮对话，这里会出现一个点</span></div></div>`
+    box.innerHTML = `<div class="empty">${turns.length ? '这个时间范围内没有数据' : '还没有数据'}</div>`
     return
   }
-  const W = box.clientWidth, H = 220, L = 34, R = 8, T = 8, B = 22
-  const yMax = Math.max(10, Math.ceil(q(ok.map(t => t.tps), 0.98) / 10) * 10)
+  const h = bandwidthMs()
   const x0 = now - hours * 3600_000
+  const grid = Array.from({ length: GRID }, (_, i) => x0 + (now - x0) * i / (GRID - 1))
+  const models = [...new Set(ok.map(t => t.model))].sort((a, b) => modelOrder.indexOf(a) - modelOrder.indexOf(b))
+  const series = models.map(m => {
+    const own = ok.filter(t => t.model === m && t.tps > 0)
+    const values = grid.map(at => {
+      let weight = 0, sum = 0, near = false
+      for (const t of own) {
+        const d = (t.t - at) / h
+        if (Math.abs(d) > 3) continue
+        if (Math.abs(d) <= 1.5) near = true
+        const w = Math.exp(-d * d / 2)
+        weight += w; sum += w * Math.log(t.tps)
+      }
+      return near ? Math.exp(sum / weight) : null
+    })
+    const segments = []
+    values.forEach((v, i) => {
+      if (v == null) return
+      if (i === 0 || values[i - 1] == null) segments.push([])
+      segments.at(-1).push({ t: grid[i], v })
+    })
+    return { m, values, segments }
+  })
+  const W = box.clientWidth, H = 240, L = 30, R = 12, T = 12, B = 22
+  const all = series.flatMap(s => s.values.filter(v => v != null))
+  // An isolated fast turn must not flatten every other curve; values above the axis clamp to the top.
+  const yMax = Math.max(10, Math.ceil(q(all, .98) * 1.1 / 20) * 20)
   const x = t => L + (t - x0) / (now - x0) * (W - L - R)
   const y = v => T + (1 - Math.min(v, yMax) / yMax) * (H - T - B)
-  const ticks = [0, yMax / 2, yMax]
-  const xticks = Array.from({ length: 5 }, (_, i) => x0 + (now - x0) * i / 4)
   const xlabel = t => { const d = new Date(t); return hours > 24 ? `${d.getMonth() + 1}/${d.getDate()}` : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
-  const models = [...new Set(ok.map(t => t.model))]
-  const medians = models.map(m => ({ m, v: q(ok.filter(t => t.model === m).map(t => t.tps), 0.5) }))
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="每轮输出速度散点图">
-    <g class="axis">${ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`).join('')}
+  // 7 days: one tick per local midnight, so labels are evenly spaced calendar days.
+  const firstMidnight = new Date(x0).setHours(24, 0, 0, 0)
+  const xticks = hours > 24
+    ? Array.from({ length: 7 }, (_, i) => new Date(firstMidnight).setDate(new Date(firstMidnight).getDate() + i)).filter(t => t <= now)
+    : Array.from({ length: 5 }, (_, i) => x0 + (now - x0) * i / 4)
+  const lines = series.map(s => {
+    const dim = selected && s.m !== selected
+    const strong = selected === s.m
+    return `<g class="series${dim ? ' dim' : ''}">${s.segments.map(seg => seg.length > 1
+      ? `<path d="${smoothPath(seg.map(p => [x(p.t), y(p.v)]))}" stroke="${color(s.m)}" stroke-width="${strong ? 2.6 : 2}"/>`
+      : `<circle cx="${x(seg[0].t)}" cy="${y(seg[0].v)}" r="2.6" fill="${color(s.m)}"/>`).join('')}</g>`
+  }).join('')
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="各模型输出速度曲线">
+    <g class="axis">${[0, yMax / 2, yMax].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`).join('')}
       ${xticks.map(t => `<text x="${x(t)}" y="${H - 5}" text-anchor="middle">${xlabel(t)}</text>`).join('')}</g>
-    ${medians.filter(d => d.m === selected).map(d => `<line class="med" x1="${L}" x2="${W - R}" y1="${y(d.v)}" y2="${y(d.v)}" stroke="${color(d.m)}"/><text x="${W - R}" y="${y(d.v) - 6}" text-anchor="end" fill="${color(d.m)}" font-size="11">中位 ${fmt(d.v)}</text>`).join('')}
-    ${ok.map((t, i) => `<circle class="dotp${selected && t.model !== selected ? ' dim' : ''}" data-i="${i}" cx="${x(t.t)}" cy="${y(t.tps)}" r="${t.tps > yMax ? 3.5 : 3}" fill="${color(t.model)}" fill-opacity=".85"/>`).join('')}
+    ${lines}
+    <line class="cross" y1="${T}" y2="${H - B}" hidden/>
+    <g class="marks"></g>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
   </svg><div class="tip" hidden></div>`
-  const tip = box.querySelector('.tip')
-  box.querySelector('svg').addEventListener('mousemove', e => {
-    const target = e.target.closest('circle')
-    if (!target) { tip.hidden = true; return }
-    const t = ok[+target.dataset.i]
-    const d = new Date(t.t)
+  const svg = box.querySelector('svg'), tip = box.querySelector('.tip'), cross = svg.querySelector('.cross'), marks = svg.querySelector('.marks')
+  svg.addEventListener('mousemove', e => {
+    const px = e.clientX - svg.getBoundingClientRect().left
+    const i = Math.max(0, Math.min(GRID - 1, Math.round((px - L) / (W - L - R) * (GRID - 1))))
+    const at = grid[i]
+    const hits = series.filter(s => s.values[i] != null && (!selected || s.m === selected))
+      .map(s => ({ m: s.m, p: { t: at, v: s.values[i] } })).sort((a, b) => b.p.v - a.p.v)
+    if (!hits.length) { tip.hidden = true; cross.setAttribute('hidden', ''); marks.innerHTML = ''; return }
+    cross.removeAttribute('hidden'); cross.setAttribute('x1', x(at)); cross.setAttribute('x2', x(at))
+    marks.innerHTML = hits.map(h => `<circle cx="${x(h.p.t)}" cy="${y(h.p.v)}" r="3.5" fill="${color(h.m)}" stroke="var(--panel)" stroke-width="1.5"/>`).join('')
     tip.hidden = false
-    tip.style.left = target.getAttribute('cx') + 'px'
-    tip.style.top = target.getAttribute('cy') + 'px'
-    tip.innerHTML = `<b class="num">${fmt(t.tps)} token/s</b> <span>· ${short(t.model)}</span><br><span class="num">${t.tok.toLocaleString()} tokens / ${(t.dur / 1000).toFixed(1)} s · ${t.calls} 次调用 · ${d.toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`
+    tip.style.left = Math.min(Math.max(x(at), 110), W - 110) + 'px'
+    tip.style.top = T + 'px'
+    tip.innerHTML = `<div class="tip-t">${xlabel(at)}</div>` + hits.map(h =>
+      `<div class="tip-r"><i style="background:${color(h.m)}"></i>${short(h.m)}<b class="num">${fmt(h.p.v)}</b></div>`).join('')
   })
-  box.querySelector('svg').addEventListener('mouseleave', () => { tip.hidden = true })
+  svg.addEventListener('mouseleave', () => { tip.hidden = true; cross.setAttribute('hidden', ''); marks.innerHTML = '' })
 }
 
 function renderModels(rows) {
@@ -222,19 +276,19 @@ function renderModels(rows) {
     const ok = all.filter(t => !t.failed).map(t => t.tps)
     return { m, n: all.length, ok: ok.length, p25: q(ok, .25), p50: q(ok, .5), p75: q(ok, .75) }
   }).filter(g => g.ok > 0).sort((a, b) => b.p50 - a.p50)
-  if (!groups.length) { box.innerHTML = '<div style="color:var(--dim2);padding:4px 10px">暂无对比数据</div>'; return }
+  if (!groups.length) { box.innerHTML = '<div style="color:var(--dim2);padding:4px 10px">暂无数据</div>'; return }
   const max = Math.max(10, Math.ceil(Math.max(...groups.map(g => g.p75)) / 10) * 10)
   const pct = v => `${Math.min(v, max) / max * 100}%`
-  box.innerHTML = `<div class="mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span title="成功轮数 / 全部轮数">轮数</span></div>
+  box.innerHTML = `<div class="mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span>轮数</span></div>
     ${groups.map(g => `<button class="mrow" aria-pressed="${g.m === selected}" data-m="${g.m}">
-      <span class="mname"><i style="background:${color(g.m)}"></i><b>${short(g.m)}</b><span>${upstream(g.m)}</span></span>
+      <span class="mname"><i style="background:${color(g.m)}"></i><b>${short(g.m)}</b></span>
       <span class="bar"><span class="track"></span>
         <span class="iqr" style="left:${pct(g.p25)};width:calc(${pct(g.p75)} - ${pct(g.p25)});background:${color(g.m)}"></span>
         <span class="p50" style="left:${pct(g.p50)};background:${color(g.m)}"></span></span>
       <span class="speedv num"><strong>${fmt(g.p50)}</strong><small>token/s</small></span>
-      <span class="nv num" title="${g.n - g.ok} 轮失败或停止，不计入速度">${g.ok}${g.n > g.ok ? `<small> / ${g.n}</small>` : ''}</span>
+      <span class="nv num" title="${g.n - g.ok} 轮失败或停止，不计入速度">${g.ok}</span>
     </button>`).join('')}
-    <div class="scale"><span></span><div><span>0</span><span>${max / 2}</span><span>${max} token/s</span></div></div>`
+    <div class="scale"><span></span><div><span>0</span><span>${max / 2}</span><span>${max}</span></div></div>`
   for (const b of box.querySelectorAll('.mrow')) b.onclick = () => { selected = selected === b.dataset.m ? null : b.dataset.m; render() }
 }
 
