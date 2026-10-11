@@ -1,0 +1,1063 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scry · Steer 交互设计稿</title>
+<style>
+/* Subset of Scry's current theme tokens. No external fonts or assets. */
+:root {
+  color-scheme: dark;
+  --bg: #07090d;
+  --panel: #0b0f15;
+  --panel2: #10151e;
+  --border: #202633;
+  --border3: #171c26;
+  --fg: #f4f6fa;
+  --dim: #b7bfcc;
+  --dim2: #7f899a;
+  --accent: #6aa8ff;
+  --accent-soft: rgba(106,168,255,.12);
+  --ok: #69cc93;
+  --warn: #efb958;
+  --bad: #f36c67;
+  --sidebar: #0d1118;
+  --main: #090c11;
+  --overview: #0b0f15;
+  --hover: rgba(255,255,255,.035);
+  --inset: rgba(0,0,0,.08);
+  --font: -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",system-ui,sans-serif
+}
+:root[data-theme=light] {
+  color-scheme: light;
+  --bg: #f3f5f7;
+  --panel: #fff;
+  --panel2: #f6f7f9;
+  --border: #d9dee5;
+  --border3: #e7eaee;
+  --fg: #1d2229;
+  --dim: #4d5662;
+  --dim2: #6d7682;
+  --accent: #3f72b7;
+  --accent-soft: rgba(63,114,183,.1);
+  --ok: #18794e;
+  --warn: #94620b;
+  --bad: #bf3f3a;
+  --sidebar: #f4f6f8;
+  --main: #fff;
+  --overview: #f8fafc;
+  --hover: rgba(29,34,41,.045);
+  --inset: rgba(29,34,41,.02)
+}
+* {
+  box-sizing: border-box
+}
+html {
+  background: var(--bg)
+}
+body {
+  margin: 0;
+  color: var(--fg);
+  font: 13px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased
+}
+button,select,textarea {
+  font: inherit
+}
+button,select {
+  color: inherit
+}
+button {
+  cursor: pointer
+}
+button:disabled,button[aria-disabled=true] {
+  cursor: default;
+  opacity: .48
+}
+button:focus-visible,select:focus-visible,textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px
+}
+button {
+  border: 0;
+  background: none
+}
+svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0
+}
+button svg {
+  pointer-events: none
+}
+[hidden] {
+  display: none!important
+}
+.mono {
+  font-family: ui-monospace,SFMono-Regular,Menlo,monospace
+}
+.dim {
+  color: var(--dim2)
+}
+.numeric {
+  font-variant-numeric: tabular-nums
+}
+.design-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 19px 24px 17px
+}
+.design-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px
+}
+.design-title h1 {
+  font-size: 18px;
+  letter-spacing: -.5px;
+  margin: 0;
+  font-weight: 600
+}
+.design-title span {
+  color: var(--dim2);
+  font-size: 12px
+}
+.design-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center
+}
+.design-controls label {
+  color: var(--dim2);
+  font-size: 12px
+}
+.control {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 6px;
+  min-height: 32px;
+  padding: 4px 10px
+}
+.control:hover {
+  background: var(--hover)
+}
+.app {
+  height: calc(100vh - 168px);
+  min-height: 560px;
+  max-height: 850px;
+  max-width: 1432px;
+  margin: 0 24px;
+  display: grid;
+  grid-template-columns: 210px minmax(0,1fr) 240px;
+  grid-template-rows: 40px minmax(0,1fr) 25px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--main)
+}
+.windowbar {
+  grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding: 0 15px;
+  background: var(--panel);
+  color: var(--dim2);
+  font-size: 11px
+}
+.windowbrand {
+  display: flex;
+  align-items: center;
+  gap: 17px
+}
+.traffic {
+  display: flex;
+  gap: 6px
+}
+.traffic i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border)
+}
+.windowbrand strong {
+  color: var(--fg);
+  font-size: 12px;
+  letter-spacing: .5px
+}
+.design-flag {
+  display: flex;
+  gap: 6px;
+  align-items: center
+}
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px 12px
+}
+.nav-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border-radius: 5px;
+  color: var(--dim);
+  font-size: 12px
+}
+.nav-main.active {
+  background: var(--accent-soft);
+  color: var(--accent)
+}
+.nav-title {
+  font-size: 10px;
+  color: var(--dim2);
+  padding: 25px 8px 8px;
+  letter-spacing: .4px
+}
+.workspace {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 8px;
+  font-weight: 500;
+  font-size: 12px
+}
+.session {
+  margin: 4px 0 0 8px;
+  padding: 9px 10px 9px 13px;
+  border-left: 1px solid var(--border);
+  color: var(--dim2);
+  font-size: 12px
+}
+.session.selected {
+  background: var(--hover);
+  color: var(--fg);
+  border-radius: 0 5px 5px 0
+}
+.session small {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--dim2);
+  font-size: 10px;
+  margin-top: 4px
+}
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block
+}
+.sidebar-bottom {
+  margin-top: auto;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--border);
+  color: var(--dim2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px
+}
+.chat {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column
+}
+.chat-head {
+  padding: 15px 22px;
+  border-bottom: 1px solid var(--border3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center
+}
+.chat-head strong {
+  font-size: 13px;
+  font-weight: 550
+}
+.chat-sub {
+  font-size: 10px;
+  color: var(--dim2);
+  margin-top: 3px
+}
+.run-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap
+}
+.transcript {
+  overflow: auto;
+  flex: 1;
+  padding: 23px 24px 14px;
+  min-height: 130px
+}
+.user-msg {
+  margin: 0 0 20px auto;
+  width: fit-content;
+  max-width: 90%;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  border-radius: 8px;
+  padding: 10px 13px;
+  font-size: 12px
+}
+.assistant-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim2);
+  font-size: 11px;
+  margin: 8px 0
+}
+.assistant-label strong {
+  font-weight: 500;
+  color: var(--dim)
+}
+.assistant-copy {
+  line-height: 1.8;
+  color: var(--dim);
+  font-size: 12px;
+  margin: 8px 0 14px
+}
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border3);
+  border-radius: 6px;
+  padding: 9px 11px;
+  font-size: 11px;
+  color: var(--dim);
+  margin-bottom: 6px
+}
+.tool .path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap
+}
+.tool .result {
+  margin-left: auto;
+  color: var(--ok);
+  font-size: 10px
+}
+.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dim2);
+  padding-top: 9px
+}
+.spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  flex: none
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg)
+  }
+}
+.steer-message {
+  margin-top: 18px;
+  margin-bottom: 0
+}
+.receipt {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--accent);
+  margin-bottom: 4px
+}
+.composer-area {
+  padding: 12px 18px 15px;
+  border-top: 1px solid var(--border3)
+}
+.run-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--dim2);
+  font-size: 11px;
+  margin-bottom: 10px
+}
+.run-status .elapsed {
+  margin-left: auto
+}
+.run-status .running {
+  color: var(--accent)
+}
+/* Queue remains in its current place, above the composer. */
+.prompt-queue {
+  border: 1px solid var(--border3);
+  border-radius: 10px;
+  background: var(--inset);
+  padding: 6px;
+  margin-bottom: 8px
+}
+.queue-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px 8px;
+  min-height: 25px;
+  color: var(--dim2);
+  font-size: 10.5px
+}
+.queue-title svg {
+  width: 12px;
+  height: 12px
+}
+.queue-count {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--hover)
+}
+.queue-hint {
+  margin-left: auto;
+  font-size: 10px
+}
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px
+}
+.queue-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0,1fr) auto auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 40px;
+  padding: 3px 5px;
+  border-radius: 5px
+}
+.queue-item:hover,.queue-item:focus-within {
+  background: var(--hover)
+}
+.queue-index {
+  color: var(--dim2);
+  font-size: 10px;
+  text-align: center
+}
+.queue-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dim)
+}
+.queue-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--dim2);
+  margin-right: 4px
+}
+.queue-attach svg {
+  width: 12px;
+  height: 12px
+}
+.queue-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center
+}
+.steer-wrap {
+  position: relative;
+  display: flex
+}
+.steer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 76px;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  color: var(--dim);
+  background: var(--panel);
+  font-size: 11px
+}
+.steer:not(:disabled):not([aria-disabled=true]):hover,.steer:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent)
+}
+.steer svg {
+  width: 13px;
+  height: 13px
+}
+.tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 4;
+  background: var(--fg);
+  color: var(--main);
+  font-size: 11px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 16px #0002
+}
+.steer-wrap:hover .tooltip,.steer-wrap:focus-within .tooltip {
+  display: block;
+  animation: tip .5s step-end
+}
+@keyframes tip {
+  from {
+    visibility: hidden
+  }
+  to {
+    visibility: visible
+  }
+}
+.remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 5px;
+  color: var(--dim2)
+}
+.remove:not(:disabled):hover {
+  color: var(--bad);
+  background: var(--hover)
+}
+.remove svg {
+  width: 13px;
+  height: 13px
+}
+.queue-feedback {
+  grid-column: 2/-1;
+  font-size: 10px;
+  color: var(--bad);
+  padding: 2px 0 5px
+}
+.queue-feedback.unknown {
+  color: var(--warn)
+}
+.queue-policy {
+  font-size: 10px;
+  color: var(--dim2);
+  padding: 5px 6px 3px;
+  border-top: 1px solid var(--border3);
+  margin-top: 4px
+}
+.composer-shell {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden
+}
+.composer-shell:focus-within {
+  border-color: var(--accent)
+}
+textarea {
+  background: transparent;
+  border: 0;
+  resize: vertical;
+  width: 100%;
+  min-height: 65px;
+  max-height: 130px;
+  padding: 13px 13px 5px;
+  color: var(--fg);
+  font-size: 12px;
+  display: block
+}
+textarea:focus-visible {
+  outline: none
+}
+textarea::placeholder {
+  color: var(--dim2)
+}
+.composer-options {
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10px;
+  color: var(--dim2)
+}
+.option {
+  display: flex;
+  gap: 5px;
+  align-items: center
+}
+.composer-options svg {
+  width: 12px;
+  height: 12px
+}
+.composer-divider {
+  height: 10px;
+  width: 1px;
+  background: var(--border)
+}
+.send-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px
+}
+.enqueue {
+  min-height: 28px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  padding: 4px 9px;
+  border-radius: 5px;
+  color: var(--dim);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px
+}
+.enqueue:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent)
+}
+.stop-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--hover);
+  border-radius: 5px;
+  color: var(--dim2)
+}
+.composer-note {
+  font-size: 9px;
+  color: var(--dim2);
+  padding-top: 7px;
+  text-align: center
+}
+.evidence {
+  background: var(--overview);
+  border-left: 1px solid var(--border);
+  padding: 16px 14px;
+  color: var(--dim)
+}
+.evidence h2 {
+  font-size: 11px;
+  font-weight: 550;
+  margin: 0 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 7px
+}
+.section-label {
+  color: var(--dim2);
+  font-size: 10px;
+  margin: 22px 0 8px
+}
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px
+}
+.metric span {
+  color: var(--dim2);
+  font-size: 10px;
+  display: block
+}
+.metric strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+  margin-top: 3px
+}
+.metric small {
+  color: var(--dim2);
+  font-size: 9px
+}
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border3)
+}
+.file-row code {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis
+}
+.file-row span {
+  color: var(--ok);
+  margin-left: auto
+}
+.evidence-notice {
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px;
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--dim2)
+}
+.evidence-notice strong {
+  font-weight: 500;
+  color: var(--dim)
+}
+.statusbar {
+  grid-column: 1/-1;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 13px;
+  color: var(--dim2);
+  font-size: 9px
+}
+.annotation {
+  max-width: 1432px;
+  margin: 0 24px;
+  padding: 17px 2px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 24px;
+  font-size: 11px;
+  color: var(--dim2)
+}
+.annotation strong {
+  font-weight: 500;
+  color: var(--dim);
+  display: block;
+  margin-bottom: 3px
+}
+.annotation span {
+  color: var(--accent);
+  font-size: 10px;
+  margin-right: 6px
+}
+.live-status {
+  color: var(--accent);
+  font-size: 10px;
+  min-height: 15px;
+  margin-top: 8px
+}
+.sr-only {
+  position: absolute;
+  clip: rect(0,0,0,0);
+  width: 1px;
+  height: 1px;
+  overflow: hidden
+}
+@media(min-width:1480px) {
+  .app,.annotation {
+    margin-left: auto;
+    margin-right: auto
+  }
+}
+@media(max-width:1080px) {
+  .app {
+    grid-template-columns: 175px minmax(0,1fr)
+  }
+  .evidence {
+    display: none
+  }
+  .design-title span {
+    display: none
+  }
+}
+@media(max-width:740px) {
+  .design-bar {
+    padding: 14px;
+    flex-wrap: wrap;
+    gap: 10px
+  }
+  .design-controls {
+    flex-wrap: wrap
+  }
+  .app {
+    margin: 0 12px;
+    grid-template-columns: minmax(0,1fr);
+    height: auto;
+    min-height: 640px;
+    grid-template-rows: 40px 1fr 25px
+  }
+  .sidebar {
+    display: none
+  }
+  .chat {
+    min-height: 570px
+  }
+  .transcript {
+    max-height: 300px
+  }
+  .chat-head {
+    padding: 12px 14px
+  }
+  .composer-area {
+    padding: 10px
+  }
+  .queue-hint {
+    display: none
+  }
+  .annotation {
+    margin: 0 14px;
+    grid-template-columns: 1fr;
+    gap: 10px
+  }
+  .composer-options {
+    gap: 6px
+  }
+  .optional-effort {
+    display: none
+  }
+  .design-flag {
+    font-size: 9px
+  }
+  .queue-item {
+    column-gap: 5px
+  }
+  .steer {
+    min-width: 65px;
+    padding: 4px 6px
+  }
+  .tooltip {
+    white-space: normal;
+    width: 200px
+  }
+  .annotation {
+    padding-bottom: 20px
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  .spinner,.tooltip {
+    animation: none!important
+  }
+}
+</style>
+</head>
+<body>
+<svg hidden aria-hidden="true"><defs>
+<symbol id="i-steer" viewBox="0 0 24 24"><path d="M4 4v7a3 3 0 0 0 3 3h13m-5-5 5 5-5 5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+<symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="2"/><path d="m21 15-5-5L5 19"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2m8-8 2-2"/></symbol>
+</defs></svg>
+<header class="design-bar">
+  <div class="design-title"><h1>Scry / Steer</h1><span>队列消息 → 当前任务 · 交互设计稿</span></div>
+  <div class="design-controls">
+    <label for="scenario">演示状态</label>
+    <select class="control" id="scenario">
+      <option value="ready">正常提交</option><option value="pending">提交中</option><option value="error">提交失败</option><option value="unknown">结果未知</option><option value="unsupported">不支持 Steer</option><option value="ended">当前任务已结束</option>
+    </select>
+    <button class="control" id="reset">重置</button>
+    <button class="control" id="theme" aria-label="切换到浅色主题">浅色</button>
+  </div>
+</header>
+<main class="app" aria-label="Scry 设计预览，所有数据和 Provider 回执均为模拟">
+  <div class="windowbar"><div class="windowbrand"><span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span><strong>scry</strong></div><span class="design-flag">设计预览 · 模拟数据 / 未连接 Provider</span><span class="mono">scry</span></div>
+  <aside class="sidebar" aria-label="会话预览">
+    <div class="nav-main"><svg><use href="#i-panel"/></svg>概览</div>
+    <div class="nav-main active"><svg><use href="#i-message"/></svg>会话</div>
+    <div class="nav-title">工作区</div>
+    <div class="workspace"><svg><use href="#i-folder"/></svg>scry<svg style="margin-left:auto;width:12px"><use href="#i-chevron"/></svg></div>
+    <div class="session selected">消息队列与运行控制<small><span class="dot"></span><span id="sidebar-run">Codex · 运行中</span></small></div>
+    <div class="session">梳理 Provider 能力</div><div class="session">修复用量统计</div>
+    <div class="sidebar-bottom"><svg><use href="#i-settings"/></svg>设置<span style="margin-left:auto">Local-first</span></div>
+  </aside>
+  <section class="chat" aria-label="会话和消息队列">
+    <header class="chat-head"><div><strong>消息队列与运行控制</strong><div class="chat-sub mono">~/IdeaProjects/vibecoding/scry</div></div><div class="run-chip"><span class="dot"></span><span id="run-chip-text">运行中</span></div></header>
+    <div class="transcript" id="transcript">
+      <div class="user-msg">检查消息队列的实现，先给出修改方案。</div>
+      <div class="assistant-label"><svg><use href="#i-message"/></svg><strong>Codex</strong><span>·</span><span>当前任务</span></div>
+      <p class="assistant-copy">我会先检查消息排队、发送入口与 Provider 的运行接口，<br>确认哪些能力可以在不中断当前任务的情况下使用。</p>
+      <div class="tool"><svg><use href="#i-check"/></svg><span>Read</span><span class="path mono">src/renderer/components/ChatView.tsx</span><span class="result">完成</span></div>
+      <div class="tool"><svg><use href="#i-check"/></svg><span>Read</span><span class="path mono">src/main/providers/types.ts</span><span class="result">完成</span></div>
+      <div class="working" id="working"><span class="spinner" aria-hidden="true"></span>正在检查运行时能力…</div>
+      <div id="receipts"></div>
+    </div>
+    <div class="composer-area">
+      <div class="run-status"><span class="dot"></span><span class="running" id="run-status-text">当前任务运行中</span><span>· Codex</span><span class="elapsed numeric">02:18</span></div>
+      <section class="prompt-queue" id="queue" aria-label="排队中的消息">
+        <div class="queue-title"><svg><use href="#i-clock"/></svg><span>等待运行</span><span class="queue-count numeric" id="queue-count">2</span><span class="queue-hint" id="queue-hint">当前任务结束后依次发送</span></div>
+        <div class="queue-list" id="queue-list" role="list"></div>
+        <div class="queue-policy" id="queue-policy" hidden></div>
+      </section>
+      <div class="composer-shell">
+        <label for="draft" class="sr-only">新消息</label><textarea id="draft" placeholder="补充要求，或添加下一条消息…"></textarea>
+        <div class="composer-options"><span class="option"><svg><use href="#i-plus"/></svg></span><span class="option">Codex<svg><use href="#i-chevron"/></svg></span><span class="composer-divider"></span><span class="option">gpt-5.4<svg><use href="#i-chevron"/></svg></span><span class="option optional-effort">High<svg><use href="#i-chevron"/></svg></span><span class="send-actions"><span class="stop-indicator" title="停止当前任务（仅静态展示）"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></span><button class="enqueue" id="enqueue" disabled><svg><use href="#i-plus"/></svg>加入队列</button></span></div>
+      </div>
+      <div class="composer-note" id="composer-note">新消息默认排队 · Steer 只发送你点击的那一条</div>
+      <div class="live-status" id="live-status" role="status" aria-live="polite"></div>
+    </div>
+  </section>
+  <aside class="evidence" aria-label="模拟证据概览">
+    <h2><svg><use href="#i-panel"/></svg>本轮概览</h2>
+    <div class="section-label">运行</div><div class="metrics"><div class="metric"><span>状态</span><strong id="evidence-run" style="font-size:12px;color:var(--accent)">运行中</strong><small>模拟状态</small></div><div class="metric"><span>工具调用</span><strong class="numeric">2</strong><small>模拟数据</small></div></div>
+    <div class="section-label">文件足迹</div><div class="file-row"><svg><use href="#i-check"/></svg><code>ChatView.tsx</code><span>读取</span></div><div class="file-row"><svg><use href="#i-check"/></svg><code>types.ts</code><span>读取</span></div>
+    <div class="section-label">Steer</div><div style="font-size:11px" id="steer-evidence">尚未提交补充消息</div>
+    <div class="evidence-notice"><strong>同一任务，不先停止</strong><br>Steer 的回执只证明 Provider 接收，不能证明模型已遵循新要求。</div>
+  </aside>
+  <footer class="statusbar"><span>Local-first · 本地设计稿</span><span id="status-footer">当前任务持续运行 · 队列等待</span></footer>
+</main>
+<footer class="annotation">
+  <div><strong><span>01</span>直接补充，不打断</strong>行内 Steer 常驻；悬停或聚焦说明「不中断模型」。</div>
+  <div><strong><span>02</span>收到回执才移出队列</strong>提交中锁定该条；明确失败保留消息，结果未知不自动重发。</div>
+  <div><strong><span>03</span>能力不同，明确呈现</strong>不支持时禁用并解释；不把「停止后重发」冒充 Steer。</div>
+</footer>
+<script>
+'use strict'
+const $ = id => document.getElementById(id)
+const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`
+const initialMessages = () => [
+  { id: 'message-1', text: '先出设计稿，不要改产品代码。', attachments: 0, status: 'queued' },
+  { id: 'message-2', text: '设计确认后，再补充深色、浅色和不支持 Steer 时的交互状态。', attachments: 1, status: 'queued' }
+]
+let messages = initialMessages()
+let receiptCount = 0
+let nextId = 3
+let generation = 0
+let timer
+const escapeHTML = text => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+function announce(text) { $('live-status').textContent = text }
+function renderQueue() {
+  const scenario = $('scenario').value
+  const unavailable = scenario === 'unsupported' || scenario === 'ended'
+  const busy = messages.some(message => message.status === 'pending')
+  $('queue').hidden = messages.length === 0
+  $('queue-count').textContent = messages.length
+  $('queue-list').innerHTML = messages.map((message, index) => {
+    const pending = message.status === 'pending'
+    const unknown = message.status === 'unknown'
+    const error = message.status === 'error'
+    const disabled = unavailable || busy || unknown
+    const tip = scenario === 'unsupported' ? '当前 Provider 不支持原生 Steer，消息仍按队列发送' : scenario === 'ended' ? '当前任务已结束，不能再 Steer' : unknown ? '结果未知，不重发；等待核对 Provider 回执' : pending ? '等待 Provider 回执，不重复提交' : '不中断模型，将这条消息补充给当前任务'
+    return `<div class="queue-item" role="listitem" data-message-id="${message.id}" aria-busy="${pending}">
+      <span class="queue-index numeric" aria-hidden="true">${index + 1}</span>
+      <span class="queue-text" title="${escapeHTML(message.text)}">${escapeHTML(message.text)}</span>
+      <span class="queue-actions">${message.attachments ? `<span class="queue-attach" title="1 张附件（示例，不含真实图片）">${icon('image')}1</span>` : ''}<span class="steer-wrap"><button class="steer" data-action="steer" data-id="${message.id}" aria-label="${error ? '重试 Steer' : 'Steer'} 第 ${index + 1} 条消息" aria-describedby="tip-${message.id}" ${pending ? 'aria-disabled="true"' : disabled ? 'disabled' : ''}>${pending ? '<span class="spinner" aria-hidden="true"></span>提交中' : `${icon('steer')}${error ? '重试' : 'Steer'}`}</button><span class="tooltip" role="tooltip" id="tip-${message.id}">${tip}</span></span></span>
+      <button class="remove" data-action="remove" data-id="${message.id}" aria-label="移除队列第 ${index + 1} 条消息" title="移除排队消息" ${pending || unknown ? 'disabled' : ''}>${icon('x')}</button>
+      ${error ? '<div class="queue-feedback">Provider 拒绝接收，消息仍在队列中。可重试或等待当前任务结束。</div>' : ''}
+      ${unknown ? '<div class="queue-feedback unknown">未能确认接收结果。暂不重发或自动出队，需先核对 Provider 回执。</div>' : ''}
+    </div>`
+  }).join('')
+  $('queue-policy').hidden = !unavailable
+  $('queue-policy').textContent = scenario === 'ended' ? '当前任务已结束 · 下一轮按队列顺序发送，不改为 Steer。' : '当前 Provider 未提供原生 Steer · 排队功能不受影响。'
+  $('queue-hint').textContent = scenario === 'ended' ? '等待下一轮发送' : '当前任务结束后依次发送'
+}
+function updateRun() {
+  const ended = $('scenario').value === 'ended'
+  $('run-chip-text').textContent = ended ? '已结束' : '运行中'
+  $('run-status-text').textContent = ended ? '当前任务已结束' : '当前任务运行中'
+  $('evidence-run').textContent = ended ? '已结束' : '运行中'
+  $('sidebar-run').textContent = ended ? 'Codex · 已结束' : 'Codex · 运行中'
+  $('working').hidden = ended
+  $('status-footer').textContent = ended ? '当前任务已结束 · 等待下一轮' : '当前任务持续运行 · 队列等待'
+}
+function reset() {
+  generation++
+  clearTimeout(timer)
+  messages = initialMessages()
+  receiptCount = 0
+  nextId = 3
+  $('receipts').replaceChildren()
+  $('steer-evidence').textContent = '尚未提交补充消息'
+  $('draft').value = ''
+  $('enqueue').disabled = true
+  const scenario = $('scenario').value
+  if (['pending', 'error', 'unknown'].includes(scenario)) messages[0].status = scenario
+  announce(scenario === 'pending' ? '演示：等待 Provider 回执，消息尚未出队。' : scenario === 'error' ? '演示：明确失败，原消息保留在队列。' : scenario === 'unknown' ? '演示：接收结果未知，不自动重发。' : '')
+  updateRun()
+  renderQueue()
+}
+function steer(id) {
+  const message = messages.find(item => item.id === id)
+  if (!message || !['queued', 'error'].includes(message.status)) return
+  message.status = 'pending'
+  const token = generation
+  announce('正在提交补充消息，当前任务未停止…')
+  renderQueue()
+  const button = $('queue-list').querySelector(`[data-action="steer"][data-id="${id}"]`)
+  button.focus()
+  timer = setTimeout(() => {
+    if (token !== generation) return
+    messages = messages.filter(item => item.id !== id)
+    receiptCount++
+    const receipt = document.createElement('div')
+    receipt.className = 'user-msg steer-message'
+    receipt.innerHTML = `<div class="receipt">${icon('steer')}Steer · Provider 已接收（模拟）</div>${escapeHTML(message.text)}${message.attachments ? '<div class="dim" style="font-size:10px;margin-top:4px">含 1 张附件 · 模拟</div>' : ''}`
+    $('receipts').append(receipt)
+    $('steer-evidence').textContent = `${receiptCount} 条补充消息已接收（模拟）`
+    announce('Provider 已接收补充消息（模拟）。当前任务继续运行，其他消息仍在队列。')
+    renderQueue()
+    $('transcript').scrollTop = $('transcript').scrollHeight
+    const next = $('queue-list').querySelector('.steer:not(:disabled)')
+    ;(next || $('draft')).focus()
+  }, 1100)
+}
+$('queue-list').addEventListener('click', event => {
+  const button = event.target.closest('button[data-action]')
+  if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return
+  if (button.dataset.action === 'steer') steer(button.dataset.id)
+  else {
+    messages = messages.filter(message => message.id !== button.dataset.id)
+    renderQueue()
+    announce('已移除排队消息，未发送给 Provider。')
+    ;($('queue-list').querySelector('.steer:not(:disabled)') || $('draft')).focus()
+  }
+})
+$('draft').addEventListener('input', () => { $('enqueue').disabled = !$('draft').value.trim() })
+$('enqueue').addEventListener('click', () => {
+  const text = $('draft').value.trim()
+  if (!text) return
+  messages.push({ id: `message-${nextId++}`, text, attachments: 0, status: 'queued' })
+  $('draft').value = ''
+  $('enqueue').disabled = true
+  renderQueue()
+  announce('消息已加入队列，尚未发送给 Provider。')
+  $('draft').focus()
+})
+$('scenario').addEventListener('change', reset)
+$('reset').addEventListener('click', reset)
+$('theme').addEventListener('click', () => {
+  const light = document.documentElement.dataset.theme !== 'light'
+  document.documentElement.dataset.theme = light ? 'light' : 'dark'
+  $('theme').textContent = light ? '深色' : '浅色'
+  $('theme').setAttribute('aria-label', light ? '切换到深色主题' : '切换到浅色主题')
+})
+reset()
+</script>
+</body>
+</html>

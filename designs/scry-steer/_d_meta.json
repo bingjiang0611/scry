@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry Steer": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-11T05:04:05.020Z",
+          "status": "needs-review",
+          "subtitle": "队列行内 Steer · 原生能力与回执状态设计",
+          "viewport": {
+            "width": 1512,
+            "height": 798
+          },
+          "section": "Composer"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-11T05:04:05.021Z",
+  "updatedAt": "2026-10-11T05:04:05.021Z"
+}
