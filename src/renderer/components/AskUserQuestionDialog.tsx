@@ -182,7 +182,10 @@ export function AskUserQuestionInline({
     }
     if (event.key === 'Enter' && (event.target as HTMLElement).tagName === 'INPUT') {
       const input = event.target as HTMLInputElement
-      if (input.type === 'text') event.preventDefault()
+      if (input.type === 'text') {
+        event.preventDefault()
+        submit()
+      }
     }
   }
 

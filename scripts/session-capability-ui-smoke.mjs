@@ -347,6 +347,12 @@ async function exercisePiCommands(contents) {
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
+  const enter = async (modifiers = []) => {
+    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return', modifiers })
+    contents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers })
+    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return', modifiers })
+    await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  }
   contents.focus()
   await click('#pi-command .question-option')
   await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
@@ -358,14 +364,19 @@ async function exercisePiCommands(contents) {
   await wait(`(() => { const input = document.querySelector('#pi-command textarea'); return input.selectionStart === 0 && input.selectionEnd === input.value.length })()`)
   await contents.insertText('Updated objective')
   await wait(`document.querySelector('#pi-command textarea')?.value === 'Updated objective'`)
-  await click('#pi-command .question-submit')
+  await enter()
+  await wait(`document.querySelector('#pi-command textarea')?.value === 'Updated objective\\n'`)
+  if (!await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 1`)) throw new Error('Multiline Enter submitted instead of inserting a newline')
+  await contents.insertText('Second line')
+  await wait(`document.querySelector('#pi-command textarea')?.value === 'Updated objective\\nSecond line'`)
+  await enter(['control'])
   await wait(`document.querySelector('#pi-command').textContent.includes('Save changes?')`)
   await click('#pi-command .question-option')
   await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
   await click('#pi-command .question-submit')
   await wait(`document.querySelectorAll('#pi-command [aria-label="Pi 命令反馈"]').length === 3`)
   const answers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
-  if (answers.length !== 3 || answers[1].answers['Edit objective'] !== 'Updated objective') throw new Error(`Pi chained answers lost their identity or edited content: ${JSON.stringify(answers)}`)
+  if (answers.length !== 3 || answers[1].answers['Edit objective'] !== 'Updated objective\nSecond line') throw new Error(`Pi chained answers lost their identity or edited content: ${JSON.stringify(answers)}`)
   await click('#pi-command-restart')
   await wait(`document.querySelector('#pi-command .question-cancel') != null`)
   await click('#pi-command .question-cancel')
@@ -383,9 +394,15 @@ async function exercisePiCommands(contents) {
     await wait(`document.querySelector('#pi-command .question-other-input') != null`)
     if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-other-input')`)) throw new Error('Native custom-answer input did not receive focus')
     if (!await contents.executeJavaScript(`document.querySelectorAll('#pi-command .question-option').length === 2 && document.querySelector('#pi-command').textContent.includes('Choose an action') && document.querySelector('#pi-command .question-submit').disabled && JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)) throw new Error('Selecting custom answer replaced or submitted the native question')
+    await enter()
+    if (!await contents.executeJavaScript(`document.querySelector('#pi-command .question-submit').disabled && JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)) throw new Error('Empty custom answer submitted on Enter')
     const customAnswer = cancelInput ? '提交所有改动 保证工作区干净 然后构建并安装' : 'Edit'
     await contents.insertText(customAnswer)
     await wait(`document.querySelector('#pi-command .question-other-input').value === ${JSON.stringify(customAnswer)}`)
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      await contents.executeJavaScript(`document.querySelector('#pi-command .question-other-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...${JSON.stringify(composition)} })); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+      if (!await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)) throw new Error('IME confirmation submitted the custom answer')
+    }
     await click('#pi-command .question-option:first-child')
     await wait(`document.querySelector('#pi-command .question-other-input') == null && document.querySelector('#pi-command .question-option:first-child').classList.contains('selected') && !document.querySelector('#pi-command .question-submit').disabled`)
     await click('#pi-command .question-other')
@@ -396,12 +413,12 @@ async function exercisePiCommands(contents) {
       await wait(`JSON.parse(document.querySelector('#pi-command-answers').textContent)[0]?.behavior === 'cancelled'`)
       continue
     }
-    await click('#pi-command .question-submit')
+    await enter()
     await wait(`document.querySelector('#pi-command').textContent.includes('Save changes?')`)
     const customAnswers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
     if (customAnswers.length !== 1 || customAnswers[0].answers['Choose an action'] !== customAnswer || customAnswers[0].nativeCustomAnswer !== true) throw new Error('Native custom-answer submission lost text')
   }
-  return { piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true }
+  return { piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
 }
 
 async function exerciseSessionSelection(contents, scenario) {
