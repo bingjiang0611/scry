@@ -923,6 +923,23 @@ interface UsageAggregate {
   model?: string
 }
 
+/**
+ * Pi stamps an assistant message when its request is created; message_end arrives when the response
+ * is complete. Their difference is one call's local time, including first-token wait. Errored or
+ * aborted calls are retried by Pi and must not count as generation speed.
+ */
+function piLlmCall(message: JsonRecord, endedAtMs: number): Pick<TraceEvent, 'llmCall'> {
+  const startedAtMs = number(message.timestamp)
+  const outputTokens = number(record(message.usage).output)
+  const completed = message.stopReason === 'stop' || message.stopReason === 'toolUse' || message.stopReason === 'length'
+  if (!completed || startedAtMs == null || outputTokens == null || outputTokens <= 0 || endedAtMs <= startedAtMs) return {}
+  return { llmCall: {
+    outputTokens,
+    durationMs: endedAtMs - startedAtMs,
+    ...(typeof message.model === 'string' ? { model: message.model } : {})
+  } }
+}
+
 function addAssistantUsage(
   aggregate: UsageAggregate,
   message: JsonRecord,
@@ -1171,7 +1188,7 @@ async function runPiAgent(
           }
         }
       }
-      request.emit(piEvent(request.runId, { kind: 'harness', stage: 'runtime:llm_stream_end', messageId }))
+      request.emit(piEvent(request.runId, { kind: 'harness', stage: 'runtime:llm_stream_end', messageId, ...piLlmCall(message, Date.now()) }))
       assistantMessageId = undefined
       return
     }

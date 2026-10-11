@@ -1,59 +1,53 @@
 # LLM 性能
 
-左侧「LLM 性能」位于技能上方。点击打开居中弹窗；侧栏没有实时数字或网络设置。弹窗展示数字、近 30 秒趋势和历史同类对照，数据口径默认折叠。关闭、Escape 和焦点返回沿用 ModalFrame。
+左侧「LLM 性能」位于技能上方。点击打开居中弹窗，内容自上而下：运行中的会话（无会话时隐藏）、各模型输出速度曲线、模型对比。右上角切换 1 小时 / 24 小时 / 7 天。关闭、Escape 和焦点返回沿用 ModalFrame。设计原型与反馈见 [brief](../designs/scry-llm-token-speed/brief.md)。
 
-## 实时证据
+## 速度口径
 
-范围是本 Scry 实例登记的全部当前运行会话，跨项目、Provider 和模型。复用 run registry 和每个主 run 的最新 observer 小摘要，不扫描 trace，也不随当前查看会话改变。一个会话只取当前主 run。各指标独立按可测会话等权平均，分别显示「可测数 / 运行数」；缺失不补零。
+- 只用 token/s。不从字符、消息块、分词器或经验比例换算。
+- 一轮速度 = 本轮主 Agent 成功调用的输出 token 之和 ÷ 这些调用的耗时之和。耗时从请求开始到消息结束，包含首 token 等待，不含工具执行。子 Agent 调用不计入。
+- 输出 token 含 Provider 计入的 reasoning token。reasoning 不流式输出，所以不用「首 token 之后」的口径，否则会高估速度。
+- 失败或停止的轮次保留在历史里，但不进入曲线和中位数。没有 token 或耗时证据的轮次直接省略，不显示为 0。
 
-- 输出速度、会话均速只用 token/s。没有权威且区间对齐的主输出 token 计数时显示未知，不从字符、消息块、分词器或经验比例换算。
-- 首次输出等待用秒，计时从本地执行接受到首个主文本输出，包含启动和排队。尚未首输出的运行只计入运行数，不拿已经等待的时长当最终等待值。
-- 终态 canonical usage 不回填实时速度或曲线。全部不可测时只显示未知和空图提示。
-- 主进程运行期间独立每秒采样最多一次，保存最近 30 秒最多 30 点；空闲时停止采样并清空实时值。成员变化最多在下一次采样生效。IPC 只读取缓存；弹窗自身刷新，不使 Sidebar/App 每秒重渲染。隐藏或关闭弹窗停止视图刷新，异步返回不会更新已关闭视图。
-- 实时读取失败清空旧摘要并显示错误，不继续显示上一次的数字。
+## Provider 接线
 
-## 当前五类 Provider 接线
-
-| Provider | 当前生产来源 | 实时 token 速度 |
+| Provider | 来源 | `tokenTimingSource` |
 | --- | --- | --- |
-| Claude | normalize 的主文本 delta；result 的 canonical usage/API 时间 | 未接入区间对齐的主输出 token 计数，不可测 |
-| Codex | agentMessage delta；thread/tokenUsage 用于 canonical turn usage | usage 通知未形成主输出时间窗证据，不可测 |
-| Qoder | SDK 消息经 normalizeQoderMessage/qoderTrace；result usage | 无主输出 token 时间窗证据，不可测 |
-| OpenCode | text delta / retry genuineStreamDelta；assistant 消息终态 usage 聚合 | 无主输出 token 时间窗证据，不可测 |
-| Pi | message_update 文本；message_end usage 与最终 turn result | 无主输出 token 时间窗证据，不可测 |
+| Claude | result 的 canonical 输出 token 与 SDK `durationApiMs` | `provider_api` |
+| Pi | 每次 `message_end` 的 `usage.output`；耗时 = 本机收到时间 − `message.timestamp`（Pi 在创建请求时写入）。`error`/`aborted` 与 0 输出调用不计 | `observed_calls` |
+| Codex | 每次根线程 `thread/tokenUsage/updated` 的正向输出 token 增量；耗时 = 本次通知时间 − 上一个边界（轮次开始、工具/Hook 完成、上一次 usage 通知中的最晚者）。重复快照（增量为 0）不算新调用；子线程不计 | `observed_calls` |
+| Qoder / OpenCode | 未接入单次调用证据 | 无，速度缺失 |
 
-以上描述的是当前 Scry 接线，不宣称上游永远不支持。后续只有实际 adapter 提供权威主输出 token 计数、身份和对应时间窗，并补 Provider wire 回归后，才增加实时测量能力。现在没有新增虚构的 Provider capability 字段。
+`observed_calls` 是本机计时的估算：包含本机 IPC 延迟，Codex 还依赖 usage 通知紧随响应结束这一时序。Provider API 时间存在时优先用它，不与本机计时混用。单次调用证据记在 trace 事件的 `llmCall` 字段（Pi 在 `runtime:llm_stream_end`，Codex 在 `runtime:llm_call`），不参与计费用量。
 
-首次输出等待仍可使用。历史 API 推导仅在完整 canonical 输出 token 和 Provider API 时间都存在且可配对时计算。Claude continuation 取最新累计快照，其他 Provider 的增量结果累加；不以墙钟、工具残差或活动时间代替 API 时间。API 推导可能包含 prefill、思考或 Provider 计入的子代理用量，不是主文本解码速度。
+## 曲线
 
-## 自动网络配置线索
+- 每个模型一条连续曲线：在 180 个时间点上，对附近轮次做高斯加权几何平均。带宽 1 小时 = 4 分钟、24 小时 = 40 分钟、7 天 = 4 小时。几何平均让单个异常轮次不主导曲线。
+- 1.5 倍带宽内没有轮次的时段，曲线平滑落到 0 轴。0 轴只是绘图基线，不是测量值：悬停显示「空闲」；中位数、分布和轮数都不计入空闲。落向 0 轴的过渡段高度只是视觉过渡。
+- 纵轴上限 = 测量值 98 分位 × 1.1，向上取整到 20；更高的值贴顶。7 天视图在本地零点放刻度。
+- 模型颜色按全部历史的轮数排序，切换范围时不变。点击模型行突出该模型，其他曲线变淡。
 
-启动和运行边界异步采集本机配置，不阻塞 Provider 启动。macOS 使用固定的 `scutil --proxy`，只保留 HTTP/HTTPS/SOCKS/PAC/自动发现开关；其他平台系统配置未知。App 环境只保留 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY、NO_PROXY 是否配置，不保存任何值、代理地址或凭据。
+## 运行中的会话
 
-所有运行共享至少 30 秒的缓存及同一次在途采集。记录采集时间与来源；系统读取失败保存未知。没有 LLM、公网 IP 或测速请求，不切 VPN，不读取 SSID。配置快照不证明实际请求使用了代理或直连，也不证明 Provider 生效环境与 App 环境相同。快照不会因运行持续而变成新的事实；下次运行边界重新采集到期缓存。
+摘要只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化；一个会话只取当前主 run。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。每行显示模型（无调用证据前显示 Provider）、项目、状态，以及本轮已完成调用的速度；没有单次调用证据的 Provider（如运行中的 Claude）不显示速度。读取失败时清空旧摘要并显示错误。
 
 ## 历史与归属
 
-- 沿用 `userData/usage.jsonl` 的 `kind: llm_performance`，不增加 DB 或 recorder 事实源。这些行不计入 billing 或 turn 数，沿用原 session 删除归属。
-- 最近 30 天最多 1000 轮，按 Provider/Profile/模型/上游及配置线索分组。配置未知的自动记录不池化为相同网络。旧手动标签明确显示为「历史备注」，不冒充自动检测。
-- 每组可展开逐轮时间、run ID、失败/停止、首次输出等待、canonical 输出 token、API 时间及 API 推导。失败/停止保留，但不计入成功中位数。实时输出 token 历史目前同样不可测。
-- 损坏行和截断保留部分证据提示。历史按需读取，共享一次扫描；文件身份、大小、修改时间和变更时间使追加与原子删除失效，30 天期限也会使缓存失效。缓存只保留一个 userData 文件，返回量有界。
-- Trace 保留本地测速快照与当时已经采集到的配置线索；过早终态的 history 会等待有上限的本机采集完成。进程崩溃或未收口执行不保证有终态测速记录。
+- 沿用 `userData/usage.jsonl` 的 `kind: llm_performance` 行，不增加 DB 或 recorder 事实源。这些行不计入 billing 或 turn 数，沿用原 session 删除归属。
+- 读取最近 30 天最多 1000 轮。截断切进当前时间范围时，标题旁显示「只含最近 N 轮」。损坏行计入 `invalidLines` 后跳过。
+- 每轮仍冻结运行边界的本机网络配置线索（只保留开关，不保存地址或凭据），当前弹窗不展示。
+- 本次改动之前的 Pi/Codex 历史没有速度证据，不会出现在图上。
 
-扫描预算仍为流式 JSONL、30 天/1000 轮。如果实际文件扫描延迟不可接受或需要更长历史，升级到既有 SQLite 投影，保留相同证据与删除合同；不扩大 IPC 上限。
+如果文件扫描延迟不可接受或需要更长历史，升级到既有 SQLite 投影，保留相同证据与删除合同；不扩大 IPC 上限。
 
 ## 验证入口
 
 ```sh
-npm run test:unit -- src/shared/llm-performance.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/llm-performance-sampling.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/shared/trace.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
+npm run test:unit -- src/shared/llm-performance.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/providers/pi.test.ts src/main/providers/codex.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
 node scripts/session-capability-ui-smoke.mjs --performance-only
-npm run typecheck
+npm run typecheck:web
 npm run build
 node scripts/electron-security-smoke.mjs --dev-performance-only
 ```
 
-UI fixture 使用生产 App、registry、sampler 和 observer；跨项目/Provider 的数据由真实观测事件产生，不硬编码摘要。它验证等待/部分可测、成员结束/停止/空闲、焦点独立、逐轮历史、错误清空、隐藏/关闭停止刷新和两种主题。生产 IPC smoke 使用当前构建的 main/preload/renderer、临时 HOME/userData 和显式 smoke adapter，验证登记、采样时钟、冻结配置、失败历史、真实鼠标/键盘与焦点返回。两者都不启动真实付费 Provider。
-
-本次首轮 unit/typecheck/build 通过。UI 首次失败源于 fixture 订阅计数未同步、且把 App 常驻订阅误当作面板残留；第二次失败源于同时出现两个 alert 时只检查第一个。修正计数与选择器后保留原行为断言，没有 skip 或延长超时。生产 IPC smoke 首次因新增临时项目没有登记目录授权被拒绝；修正隔离 fixture 的 recent-folders 登记，未绕过生产授权。旧子任务的组合验证仍缺结束事件，不能算本次通过证据。
-
-设计合同与参考见 [brief](../designs/scry-llm-performance-sidebar/brief.md)。原型样例不代表 Provider 已有实时 token 能力；本次没有付费探针、真实厂商/VPN 对比或安装验收。
+UI fixture 使用生产 App、registry 和 observer，配合预置历史。它用真实指针事件验证：失败与无证据轮次不进图、模型中位数、悬停（有数据处显示速度，空闲处显示「空闲」）、选中模型、范围切换、运行中会话的单次调用速度、成员结束/停止/空闲、焦点独立、隐藏/关闭停止刷新、读取错误清空，以及两种主题和窄窗口。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter。两者都不启动真实付费 Provider。

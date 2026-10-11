@@ -2,10 +2,9 @@ import { createRoot } from 'react-dom/client'
 import { App } from '../../src/renderer/App'
 import { LlmPerformanceObserver } from '../../src/main/llm-performance'
 import { RunRegistry } from '../../src/main/run-registry'
-import { LlmPerformanceSampling } from '../../src/main/llm-performance-sampling'
 import type { ActiveRun } from '../../src/shared/trace'
 import type { TraceEvent } from '../../src/shared/trace'
-import type { LlmPerformanceHistoryRow } from '../../src/shared/llm-performance'
+import { summarizeRunningLlmSessions, type LlmPerformanceHistoryRow } from '../../src/shared/llm-performance'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/analytics-evidence.css'
 import '../../src/renderer/inventory-evidence.css'
@@ -18,8 +17,17 @@ document.documentElement.dataset.platform = 'macos'
 const traceListeners = new Set<(events: TraceEvent[]) => void>()
 const doneListeners = new Set<(event: { runId: string }) => void>()
 const rows: LlmPerformanceHistoryRow[] = []
+// Seeded history: two models with measured speed, plus rounds that must never draw speed.
+const historyRow = (runId: string, minutesAgo: number, model: string, speed: number | undefined, failed = false): LlmPerformanceHistoryRow => ({
+  runId, ts: new Date(Date.now() - minutesAgo * 60_000).toISOString(), providerId: 'pi', model, networkLabel: '', failed,
+  performance: { state: 'complete', observedAt: new Date().toISOString(), networkLabel: '', streamCharacters: 0, recentOutput: [], windowMs: 3000,
+    streamDurationMs: 0, ...(speed == null ? {} : { outputTokens: speed * 10, apiDurationMs: 10_000, apiTokensPerSecond: speed, tokenTimingSource: 'observed_calls' as const, llmCalls: 3 }) }
+})
+for (const [index, minutesAgo] of [30, 40, 50, 60, 70].entries()) rows.push(historyRow(`fast-${index}`, minutesAgo, 'fast-model', 60 + index))
+for (const [index, minutesAgo] of [35, 45, 55].entries()) rows.push(historyRow(`slow-${index}`, minutesAgo, 'slow-model', 20 + index))
+rows.push(historyRow('failed-fast', 42, 'fast-model', 999, true), historyRow('unmeasured', 44, 'unmeasured-model', undefined))
+rows.reverse()
 const registry = new RunRegistry<ActiveRun, { runId: string }>()
-const sampling = new LlmPerformanceSampling(() => registry.activeStates())
 const dataListeners = new Set<(event: { runId: string; kind: 'turn_recorded' }) => void>()
 const clocks = new Map<string, { time: number; observer: LlmPerformanceObserver }>()
 const epoch = Date.now() - 10_000
@@ -29,7 +37,6 @@ for (const [runId, providerId, cwd] of [['first', 'claude', '/project-a'], ['sec
   clocks.set(runId, clock)
   registry.register({ runId, providerId, cwd, externalSessionId: runId, done: false, items: [], userText: '' }, { runId })
 }
-sampling.registryChanged()
 let failHistory = false
 let failSummary = false
 let summaryReads = 0
@@ -70,7 +77,7 @@ Object.defineProperty(window, 'scry', { value: {
   llmPerformanceSummary: async () => {
     summaryReads++; update()
     if (failSummary) throw new Error('fixture summary unavailable')
-    return sampling.read()
+    return summarizeRunningLlmSessions(registry.activeStates())
   }
 
 } })
@@ -80,26 +87,25 @@ for (const [id, action] of Object.entries({
   'performance-stream': () => {
     publish('first', { text: 'abc' }, 1000); publish('first', { text: 'def' }, 2000)
     publish('second', { text: 'other model' }, 3000)
+    publish('second', { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 80, durationMs: 2000, model: 'pi-live-model' } }, 3100)
+    publish('second', { text: 'still streaming' }, 3200)
   },
   'performance-focus': () => { registry.focus('waiting') },
   'performance-complete': () => {
     publish('first', { kind: 'harness', stage: 'result', tokensOut: 100, durationApiMs: 5000 }, 3000)
     const end = publish('first', { kind: 'harness', stage: 'runtime:turn_wall', durationMs: 3000 }, 3000)
-    rows.push({ runId: 'first', ts: end.ts, providerId: 'claude', model: 'fixture-model', networkLabel: '', failed: false, performance: end.llmPerformance! })
+    rows.unshift({ runId: 'first', ts: new Date().toISOString(), providerId: 'claude', model: 'fixture-model', networkLabel: '', failed: false, performance: end.llmPerformance! })
     registry.get('first')!.state.done = true
-    sampling.registryChanged()
     dataListeners.forEach(listener => listener({ runId: 'first', kind: 'turn_recorded' }))
     update()
   },
   'performance-stop': () => {
     const end = publish('second', { kind: 'harness', stage: 'runtime:turn_wall' }, 4000)
-    rows.push({ runId: 'second', ts: end.ts, providerId: 'pi', model: 'other-model', networkLabel: 'old manual note', failed: true,
-      performance: { ...end.llmPerformance!, networkLabel: 'old manual note' } })
+    rows.unshift({ runId: 'second', ts: new Date().toISOString(), providerId: 'pi', model: 'pi-live-model', networkLabel: '', failed: true, performance: end.llmPerformance! })
     registry.get('second')!.state.done = true
-    sampling.registryChanged()
     dataListeners.forEach(listener => listener({ runId: 'second', kind: 'turn_recorded' }))
   },
-  'performance-empty': () => { registry.get('waiting')!.state.done = true; sampling.registryChanged() },
+  'performance-empty': () => { registry.get('waiting')!.state.done = true },
   'performance-history-error': () => { failHistory = true },
   'performance-summary-error': () => { failSummary = true }
 

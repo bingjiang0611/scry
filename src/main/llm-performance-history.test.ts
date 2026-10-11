@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { LlmPerformanceHistoryRow } from '../shared/llm-performance'
-import { compareLlmPerformance } from '../shared/llm-performance'
 import { appendLlmPerformance, appendUsage, deleteUsageSessionRows, readUsageStats, usageJsonlPath } from './usage-jsonl'
 import { LLM_HISTORY_LIMIT, readLlmPerformanceHistory } from './llm-performance-history'
 import { readTraceArchiveAsync, upsertTraceArchiveTurn } from './transcript-archive'
@@ -73,13 +72,15 @@ describe('performance history shares usage deletion but not billing totals', () 
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
-  it('does not invent missing speed, pool different models/profiles/upstreams or include failures in medians', () => {
-    const first = sample('1')
-    const missing = { ...sample('2'), performance: { ...first.performance, averageCharactersPerSecond: undefined, firstOutputWaitMs: undefined } }
-    const failed = { ...sample('3'), failed: true, performance: { ...first.performance, averageCharactersPerSecond: 999 } }
-    const groups = compareLlmPerformance([first, missing, failed, { ...sample('4'), model: 'other' }, { ...sample('5'), agentProfileId: 'other' }, { ...sample('6'), upstreamProvider: 'other' }])
-    expect(groups).toHaveLength(4)
-    expect(groups[0]).toMatchObject({ runs: 3, failedRuns: 1, speedSamples: 1, waitSamples: 1, medianCharactersPerSecond: 6, medianWaitMs: 1000, apiSamples: 0 })
-    expect(groups[0].medianApiTokensPerSecond).toBeUndefined()
+  it('roundtrips observed per-call token timing and rejects an unknown timing source', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-llm-history-calls-'))
+    try {
+      const observed = { ...sample('observed'), providerId: 'pi' as const, performance: { ...sample().performance,
+        outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, tokenTimingSource: 'observed_calls' as const, llmCalls: 2, model: 'ultimate' } }
+      appendLlmPerformance(dir, { cwd: '/repo' }, observed)
+      appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...observed, runId: 'forged',
+        performance: { ...observed.performance, tokenTimingSource: 'guessed' } } }) + '\n')
+      expect(await readLlmPerformanceHistory(dir, now)).toEqual({ rows: [observed], invalidLines: 1, truncated: false })
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })

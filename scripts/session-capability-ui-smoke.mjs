@@ -1002,19 +1002,21 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
       await read('new Promise(resolve => requestAnimationFrame(resolve))')
     }
   }
+  const pointOf = async (selector, fraction = 0.5) => read(`(() => {
+    const node = document.querySelector(${JSON.stringify(selector)});
+    if (!node) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
+    node.scrollIntoView({ block: 'center' });
+    const rect = node.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width * ${fraction}), y = Math.round(rect.top + rect.height / 2);
+    if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)});
+    return { x, y };
+  })()`)
   const click = async selector => {
-    const point = await read(`(() => {
-      const node = document.querySelector(${JSON.stringify(selector)});
-      if (!node) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
-      node.scrollIntoView({ block: 'center' });
-      const rect = node.getBoundingClientRect();
-      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
-      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)});
-      return { x, y };
-    })()`)
+    const point = await pointOf(selector)
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
+  const hover = async (selector, fraction) => contents.sendInputEvent({ type: 'mouseMove', ...await pointOf(selector, fraction) })
   win.showInactive()
   contents.focus()
   await wait(`document.querySelector('.sb-navitem[title="LLM 性能"]') != null`)
@@ -1022,25 +1024,44 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   if (nav.indexOf('LLM 性能') !== 1 || nav.indexOf('技能') !== 2) throw new Error('LLM 性能 entry is not directly above Skills')
   const baselineListeners = await read(`JSON.parse(document.querySelector('#performance-fixture-state').textContent).dataListeners`)
   await click('.sb-navitem[title="LLM 性能"]')
-  await wait(`document.querySelector('.llm-performance-modal') != null`)
-  const modal = `document.querySelector('.llm-performance-modal')`
-  await wait(`${modal}.textContent.includes('全部运行会话 · 3 个') && ${modal}.textContent.includes('0 / 3 可测')`)
-  if (await read(`${modal}.textContent.includes('字符/s') || ${modal}.textContent.includes('刷新') || ${modal}.querySelector('input,select') != null`)) throw new Error('Legacy character/manual controls leaked into v5 modal')
-  if (!await read(`${modal}.textContent.includes('0 / 3 已测得') && ${modal}.textContent.includes('token/s')`)) throw new Error('Waiting sessions fabricated a first-output measurement')
+  await wait(`document.querySelector('.llm-perf-modal') != null`)
+  const modal = `document.querySelector('.llm-perf-modal')`
+  const runs = `Array.from(${modal}.querySelectorAll('.llm-perf-run')).map(node => node.textContent)`
+  await wait(`${modal}.textContent.includes('3 个会话运行中') && ${runs}.length === 3`)
+  if (!await read(`${runs}.every(text => text.includes('等待首次输出') && !text.includes('token/s'))`)) throw new Error('Waiting sessions fabricated speed or output')
+  // History: failed and unmeasured rounds never become a model, a curve or a 0 token/s value.
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2 && ${modal}.querySelectorAll('.llm-perf-mrow').length === 2`)
+  const models = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).map(node => node.textContent)`)
+  if (!models[0].includes('fast-model') || !models[0].includes('62.0') || !models[0].includes('5') || !models[1].includes('slow-model') || !models[1].includes('21.0'))
+    throw new Error('Model medians wrong: ' + JSON.stringify(models))
+  if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('unmeasured-model')`)) throw new Error('Failed or unmeasured history leaked into speed')
+  if (await read(`${modal}.textContent.includes('字符/s') || ${modal}.textContent.includes('数据口径')`)) throw new Error('Legacy character/definition UI leaked into the modal')
+  // Real pointer hover: the busy region names measured speed, the idle region says 空闲 instead of 0.
+  await hover('.llm-perf-chart svg', 0.94)
+  await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('fast-model') && ${modal}.querySelector('.llm-perf-cross') != null`)
+  await hover('.llm-perf-chart svg', 0.1)
+  await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('空闲') && !${modal}.querySelector('.llm-perf-tip').textContent.includes('token')`)
+  contents.sendInputEvent({ type: 'mouseMove', x: 2, y: 2 })
+  await wait(`${modal}.querySelector('.llm-perf-tip') == null`)
+  await click('.llm-perf-mrow:nth-of-type(1)')
+  await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 1 && ${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]')?.textContent.includes('fast-model')`)
+  await click('.llm-perf-mrow[aria-pressed="true"]')
+  await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 0`)
+  await click('.llm-perf-range button:nth-child(1)')
+  await wait(`${modal}.querySelector('.llm-perf-range button[aria-pressed="true"]').textContent === '1 小时' && ${modal}.querySelectorAll('.llm-perf-mrow').length === 2`)
+  await click('.llm-perf-range button:nth-child(2)')
+  // Live sessions: per-call evidence gives token/s; Claude's final-only usage does not while running.
   await click('#performance-stream')
-  await wait(`${modal}.textContent.includes('2 个输出') && ${modal}.textContent.includes('2.0 s') && ${modal}.textContent.includes('2 / 3 已测得')`)
+  await wait(`${runs}.some(text => text.includes('pi-live-model') && text.includes('生成中') && text.includes('40.0token/s'))`)
+  if (await read(`${runs}.some(text => text.includes('project-a') && text.includes('token/s'))`)) throw new Error('Session without per-call evidence showed speed')
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
-  if (!await read(`${modal}.textContent.includes('2.0 s') && ${modal}.textContent.includes('全部运行会话 · 3 个')`)) throw new Error('Focus changed the global source')
+  if (!await read(`${modal}.textContent.includes('3 个会话运行中')`)) throw new Error('Focus changed the global source')
   await click('#performance-complete')
-  await wait(`${modal}.textContent.includes('全部运行会话 · 2 个')`)
-  await wait(`${modal}.textContent.includes('3.0 s') && ${modal}.textContent.includes('1 / 2 已测得')`)
-  if (await read(`${modal}.querySelector('.llm-performance-metrics').textContent.includes('20.0 token/s') || ${modal}.querySelector('.llm-performance-line') != null`)) throw new Error('Final-only usage rendered as live rate or curve')
-  await wait(`${modal}.querySelector('.llm-performance-history-row')?.textContent.includes('20.0 token/s')`)
-  await click('.llm-performance-rounds summary')
-  if (!await read(`${modal}.textContent.includes('输出 100 token') && ${modal}.textContent.includes('API 时间 5.0 s')`)) throw new Error('Canonical per-round history missing')
+  await wait(`${modal}.textContent.includes('2 个会话运行中')`)
+  await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('fixture-model') && node.textContent.includes('20.0'))`)
   await click('#performance-stop')
-  await wait(`${modal}.textContent.includes('全部运行会话 · 1 个') && ${modal}.textContent.includes('0 / 1 已测得') && ${modal}.textContent.includes('失败或停止') && ${modal}.textContent.includes('历史备注：old manual note')`)
+  await wait(`${modal}.textContent.includes('1 个会话运行中') && !Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model'))`)
   const fixtureState = `JSON.parse(document.querySelector('#performance-fixture-state').textContent)`
   win.hide()
   await wait(`document.hidden`)
@@ -1050,10 +1071,7 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   win.showInactive()
   await wait(`!document.hidden && ${fixtureState}.summaryReads > ${hiddenReads}`)
   await click('#performance-empty')
-  await wait(`${modal}.textContent.includes('全部运行会话 · 0 个') && ${modal}.textContent.includes('0 / 0 已测得')`)
-  await click('#performance-summary-error')
-  await wait(`${modal}.textContent.includes('实时读取失败：fixture summary unavailable')`)
-  if (await read(`${modal}.textContent.includes('全部运行会话 · 0 个')`)) throw new Error('Summary error retained stale headline')
+  await wait(`${modal}.textContent.includes('无运行中的会话') && ${modal}.querySelector('.llm-perf-running') == null`)
   for (const theme of ['dark', 'light']) {
     win.setSize(1000, 800)
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
@@ -1062,19 +1080,23 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   }
   win.setSize(700, 700)
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-  if (!await read(`${modal}.scrollWidth <= ${modal}.clientWidth`)) throw new Error('Narrow performance modal overflows')
+  if (!await read(`${modal}.scrollWidth <= ${modal}.clientWidth && ${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth`)) throw new Error('Narrow performance modal overflows')
+  win.setSize(1000, 800)
+  await click('#performance-summary-error')
+  await wait(`${modal}.textContent.includes('运行中会话读取失败：fixture summary unavailable')`)
+  if (await read(`${modal}.textContent.includes('无运行中的会话')`)) throw new Error('Summary error retained a stale idle headline')
   await click('.modal-x')
-  await wait(`document.querySelector('.llm-performance-modal') == null`)
+  await wait(`document.querySelector('.llm-perf-modal') == null`)
   const closedReads = await read(`${fixtureState}.summaryReads`)
   await read('new Promise(resolve => setTimeout(resolve, 1300))')
   if (await read(`${fixtureState}.summaryReads`) !== closedReads || await read(`${fixtureState}.dataListeners`) !== baselineListeners) throw new Error('Closed modal retained timer or subscription')
   await click('#performance-history-error')
   await click('.sb-navitem[title="LLM 性能"]')
-  await wait(`document.querySelector('.llm-performance-modal') != null`)
-  await wait(`Array.from(document.querySelectorAll('.llm-performance-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
-  if (await read(`document.querySelector('.llm-performance-modal .llm-performance-history-row') != null`)) throw new Error('History error retained an apparently successful comparison')
+  await wait(`document.querySelector('.llm-perf-modal') != null`)
+  await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
+  if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry aggregation across projects/providers', 'equal-session wait and independent coverage', 'focus independent', 'done/stopped/idle excluded', 'no token curve from final usage', 'per-round canonical history', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed', 'focus independent', 'done/stopped/idle excluded', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
 }
 
 try {

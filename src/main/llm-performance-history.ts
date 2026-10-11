@@ -30,8 +30,10 @@ function isSample(value: unknown): value is LlmPerformanceHistoryRow {
       !switches(config.environmentProxy, ['http', 'https', 'all', 'bypass'])) return false
   }
   const number = (key: string): boolean => typeof sample[key] === 'number' && Number.isFinite(sample[key]) && (sample[key] as number) >= 0
+  if (sample.tokenTimingSource !== undefined && !['provider_api', 'observed_calls'].includes(String(sample.tokenTimingSource))) return false
+  if (sample.model !== undefined && typeof sample.model !== 'string') return false
   return ['streamCharacters', 'windowMs', 'streamDurationMs'].every(number) &&
-    ['firstOutputWaitMs', 'averageCharactersPerSecond', 'outputTokens', 'apiDurationMs', 'apiTokensPerSecond']
+    ['firstOutputWaitMs', 'averageCharactersPerSecond', 'outputTokens', 'apiDurationMs', 'apiTokensPerSecond', 'llmCalls']
       .every(key => sample[key] === undefined || number(key))
 }
 

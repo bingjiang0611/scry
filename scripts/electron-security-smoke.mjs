@@ -178,25 +178,23 @@ async function main() {
         throw new Error('Performance IPC timed out: ' + label)
       }
       const initial = await window.scry.llmPerformanceSummary()
-      if (initial.running !== 0 || initial.firstOutputWaitMs !== null) throw new Error('Fresh instance invented running measurements')
+      if (initial.sessions.length !== 0) throw new Error('Fresh instance invented running sessions')
       const first = await window.scry.start({ providerId: 'codex', cwd: ${JSON.stringify(workspace)}, prompt: 'llm performance smoke' })
       const second = await window.scry.start({ providerId: 'codex', cwd: ${JSON.stringify(secondWorkspace)}, prompt: 'llm performance smoke' })
       const active = await waitFor(async () => {
         const runs = await window.scry.activeRuns()
         return runs.length === 2 && runs.every(run => run.llmPerformance?.firstOutputWaitMs != null) ? runs : null
       }, 'main observer snapshots')
-      // No performance IPC while the independent instance clock collects its next point.
-      await new Promise(resolve => setTimeout(resolve, 1200))
       const sampled = await window.scry.llmPerformanceSummary()
-      const expectedWait = active.reduce((sum, run) => sum + run.llmPerformance.firstOutputWaitMs, 0) / 2
-      if (sampled.running !== 2 || sampled.firstOutputWaitMeasured !== 2 || sampled.firstOutputWaitMs !== expectedWait || sampled.trend.length < 2)
-        throw new Error('Main registry/observer/clock aggregation mismatch: ' + JSON.stringify(sampled))
+      if (sampled.sessions.length !== 2 || !sampled.sessions.every(session => session.outputStarted && session.providerId === 'codex'))
+        throw new Error('Main registry/observer session mismatch: ' + JSON.stringify(sampled))
+      // Speed comes only from the run's own per-call observation, never from the summary itself.
+      const speeds = active.map(run => run.llmPerformance.apiTokensPerSecond ?? null).sort()
+      if (JSON.stringify(sampled.sessions.map(session => session.tokensPerSecond ?? null).sort()) !== JSON.stringify(speeds))
+        throw new Error('Main synthesized session speed: ' + JSON.stringify(sampled))
       await window.scry.focusRun(null)
-      if ((await window.scry.llmPerformanceSummary()).running !== 2) throw new Error('Focus removed background runs')
-      if (sampled.liveOutputRate !== null || sampled.sessionAverageRate !== null || sampled.trend.some(point => point.value !== null))
-        throw new Error('Main synthesized realtime tokens')
-      return { runIds: [first.runId, second.runId], running: sampled.running, measured: sampled.firstOutputWaitMeasured,
-        firstOutputWaitMs: sampled.firstOutputWaitMs, trendPoints: sampled.trend.length }
+      if ((await window.scry.llmPerformanceSummary()).sessions.length !== 2) throw new Error('Focus removed background runs')
+      return { runIds: [first.runId, second.runId], running: sampled.sessions.length }
     })()`)
     const point = await evaluate(`(() => {
       const node = document.querySelector('.sb-navitem[title="LLM 性能"]')
@@ -210,25 +208,25 @@ async function main() {
     const modal = await evaluate(`(async () => {
       const deadline = Date.now() + 5000
       while (Date.now() < deadline) {
-        const dialog = document.querySelector('.llm-performance-modal[role="dialog"]')
-        if (dialog?.contains(document.activeElement) && dialog.textContent.includes('全部运行会话 · 2 个') && dialog.textContent.includes('2 / 2 已测得') && dialog.textContent.includes(${JSON.stringify((measurement.firstOutputWaitMs / 1000).toFixed(1) + ' s')}))
-          return { focused: true, labelled: !!dialog.getAttribute('aria-labelledby'), definitionCollapsed: !dialog.querySelector('.llm-performance-definition').open }
+        const dialog = document.querySelector('.llm-perf-modal[role="dialog"]')
+        if (dialog?.contains(document.activeElement) && dialog.textContent.includes('2 个会话运行中') && dialog.querySelectorAll('.llm-perf-run').length === 2)
+          return { focused: true, labelled: !!dialog.getAttribute('aria-labelledby') }
         await new Promise(requestAnimationFrame)
       }
       throw new Error('Production modal did not load real IPC history or focus')
     })()`)
-    assert.deepEqual(modal, { focused: true, labelled: true, definitionCollapsed: true })
+    assert.deepEqual(modal, { focused: true, labelled: true })
     const terminal = await evaluate(`(async () => {
       for (const runId of ${JSON.stringify(measurement.runIds)}) await window.scry.stop(runId)
       const deadline = Date.now() + 10_000
       while (Date.now() < deadline) {
         const summary = await window.scry.llmPerformanceSummary()
         const history = await window.scry.llmPerformanceHistory()
-        const dialog = document.querySelector('.llm-performance-modal')
-        if (summary.running === 0 && history.rows.length === 2 && dialog?.textContent.includes('全部运行会话 · 0 个') &&
-            dialog.querySelectorAll('.llm-performance-history-row').length > 0) {
-          if (!history.rows.every(row => row.failed && row.performance.firstOutputWaitMs != null && row.performance.networkConfiguration && row.performance.apiTokensPerSecond == null))
+        const dialog = document.querySelector('.llm-perf-modal')
+        if (summary.sessions.length === 0 && history.rows.length === 2 && dialog?.textContent.includes('无运行中的会话')) {
+          if (!history.rows.every(row => row.failed && row.performance.firstOutputWaitMs != null && row.performance.networkConfiguration && row.performance.tokenTimingSource !== 'provider_api'))
             throw new Error('Failed rounds lost evidence or fabricated API timing')
+          if (dialog.querySelector('.llm-perf-mrow, .llm-perf-line')) throw new Error('Stopped rounds were drawn as speed')
           return { historyRounds: history.rows.length, networkSources: history.rows.map(row => row.performance.networkConfiguration.source) }
         }
         await new Promise(resolve => setTimeout(resolve, 50))
@@ -238,7 +236,7 @@ async function main() {
 
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-    assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(!document.querySelector('.llm-performance-modal') && document.activeElement?.title === 'LLM 性能'))))`), true)
+    assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(!document.querySelector('.llm-perf-modal') && document.activeElement?.title === 'LLM 性能'))))`), true)
     console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal }))
     cdp.close()
     return

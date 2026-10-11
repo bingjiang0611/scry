@@ -1,8 +1,8 @@
-# Scry LLM 性能 · token 速度 v9（原型，待确认）
+# Scry LLM 性能 · token 速度 v9（方向已确认，已落地生产）
 
 - 来源：用户看 v5 生产弹窗截图后说“烂透了”，要求“可视化较好的观测 token 速度的页面，清晰直观”。用户已选：补真实采集，并先出 HTML 原型确认。
 - 根因：v5 不缺排版，缺数据。本机 usage 历史 150 轮里，Pi/Codex 的实时 token 速度和 API 推导速度都是 0 条可测，所以页面几乎全是 “—”。
-- 状态：仅原型。生产采集和 UI 未改。
+- 状态：用户确认 v9 方向（“没问题 落地吧”）。生产采集与弹窗已按 v9 实现，见 `docs/llm-performance.md`。生产成品尚待用户目视验收。
 
 ## 指标
 
@@ -62,3 +62,20 @@
   - 悬停提示里，空闲时段显示“空闲”，不显示“0 token/s”。
   - 中位数、色带和轮数都不计入空闲时段。
 - 下降到 0 的过渡段按附近轮次的权重缩放。所以这一段的高度只是视觉过渡，不代表真实速度；悬停时这段显示的是附近轮次的真实速度。
+
+## D-20261011-scry-llm-token-speed
+
+- Scope / status：project:/Users/baobingjiang/IdeaProjects/vibecoding/scry / confirmed（方向：v9 原型已认可；生产成品待审）
+- Feedback：
+  - v7：“曲线代替散点”，去掉数据口径块和小字，只留 token/s 单位与坐标数字。
+  - v9：“回复前一版 我说的是线不要断 没数据的时候可以用0轴”。
+  - 落地：“没问题 落地吧”。
+- Rule / reason：每个模型一条连续彩色曲线，空闲时段落到 0 轴。0 轴只是基线：悬停显示“空闲”，统计不计入空闲。速度只用 token/s，不从字符换算，不造数据。
+- Lesson（参考图误读）：用户给的“每日成本”截图只用来说明“线不断”。v8 据此改成单色是过度解读，已回退。
+  - 触发情境：用户给参考图并附一句具体意图。
+  - 设计动作：只借用户点名的那一个属性，其余保持当前已认可版本。
+  - 可检查条件：差异只落在用户点名的属性上；如需改其他维度，先问。
+- Preserve：多模型配色、模型对比行（P25–P75 + P50 + 轮数）、范围切换、运行中会话列表。
+- Applied：`src/renderer/components/LlmPerformancePanel.tsx`、`llm-performance.css`；采集在 `src/main/providers/{pi,codex}.ts`、`src/main/llm-performance.ts`。
+- Evidence：`scripts/session-capability-ui-smoke.mjs --performance-only` 用真实指针验证悬停/空闲/选中/范围，并截取深浅两种主题；`electron-security-smoke --dev-performance-only` 通过。还没有用真实 Pi/Codex 轮次在真实 App 里验收。
+- Revisit：用户看完真实数据下的生产弹窗后；或要加逐调用 TTFT、超出上限的值贴顶标记时。

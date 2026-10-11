@@ -1,49 +1,67 @@
-import { memo, useEffect, useId, useMemo, useState } from 'react'
-import type { LlmPerformanceHistory, LlmPerformanceHistoryRow, LlmPerformanceSummary } from '@shared/llm-performance'
-import { compareLlmPerformanceHistory, performanceHistoryKey, performanceEnvironmentLabel, networkConfigurationLabel } from '@shared/llm-performance'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { LlmPerformanceHistory, LlmPerformanceSummary, LlmRunningSession, LlmSpeedSample } from '@shared/llm-performance'
+import { llmSpeedSamples, quantile, smoothLlmSpeed } from '@shared/llm-performance'
+import type { ProviderId } from '@shared/provider'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
 import './llm-performance.css'
 
-const format = (value: number | null | undefined, unit: string): string => value == null ? '—' : `${value.toFixed(1)} ${unit}`
+type RangeHours = 1 | 24 | 168
+const RANGES: Array<{ hours: RangeHours; label: string }> = [
+  { hours: 1, label: '1 小时' }, { hours: 24, label: '24 小时' }, { hours: 168, label: '7 天' }
+]
+// Smoothing bandwidth per range: wide enough to join neighbouring rounds, narrow enough to keep shifts visible.
+const BANDWIDTH_MINUTES: Record<RangeHours, number> = { 1: 4, 24: 40, 168: 240 }
+const GRID = 180
+const PALETTE = 7
+const providerName: Record<ProviderId, string> = { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi' }
 
-function Trend({ summary }: { summary: LlmPerformanceSummary | null }) {
-  const points = summary?.trend ?? []
-  const values = points.flatMap(point => point.value == null ? [] : [point.value])
-  const max = Math.max(1, ...values)
-  const segments: string[] = []
-  let current: string[] = []
-  points.forEach(point => {
-    if (point.value == null) {
-      if (current.length) segments.push(current.join(' '))
-      current = []
-      return
-    }
-    const x = 388 - ((Date.parse(summary!.observedAt) - point.ts) / 30_000) * 376
-    const y = 112 - (point.value / max) * 92
-    current.push(`${current.length ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`)
-  })
-  if (current.length) segments.push(current.join(' '))
-  return (
-    <div className="llm-performance-chart-wrap">
-      <svg className="llm-performance-chart" viewBox="0 0 400 132" role="img" aria-label="全部运行会话的 token 平均输出趋势">
-        <line className="llm-performance-grid" x1="12" x2="388" y1="112" y2="112" />
-        <line className="llm-performance-grid" x1="12" x2="388" y1="66" y2="66" />
-        <line className="llm-performance-grid" x1="12" x2="388" y1="20" y2="20" />
-        {segments.map((path, index) => <path key={index} className="llm-performance-line" d={path} />)}
-      </svg>
-      {values.length === 0 && <p className="llm-performance-chart-empty">暂无实时 token 证据</p>}
-    </div>
-  )
+const formatSpeed = (value: number): string => value >= 100 ? Math.round(value).toString() : value.toFixed(1)
+const pad = (value: number): string => String(value).padStart(2, '0')
+const clock = (ts: number): string => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
+const day = (ts: number): string => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}` }
+
+function stateLabel(session: LlmRunningSession): string {
+  if (session.state === 'streaming') return '生成中'
+  if (session.state === 'tool') return '工具执行'
+  if (session.state === 'complete') return '收尾中'
+  return session.outputStarted ? '等待模型' : '等待首次输出'
+}
+
+/** Monotone cubic (Fritsch–Carlson): smooth without overshooting the sampled values. */
+function smoothPath(points: Array<[number, number]>): string {
+  const n = points.length
+  const slope: number[] = []
+  const tangent: number[] = []
+  for (let i = 0; i < n - 1; i++) slope.push((points[i + 1][1] - points[i][1]) / (points[i + 1][0] - points[i][0]))
+  tangent[0] = slope[0]
+  tangent[n - 1] = slope[n - 2]
+  for (let i = 1; i < n - 1; i++) tangent[i] = slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) { tangent[i] = tangent[i + 1] = 0; continue }
+    const a = tangent[i] / slope[i]
+    const b = tangent[i + 1] / slope[i]
+    const h = a * a + b * b
+    if (h > 9) { const t = 3 / Math.sqrt(h); tangent[i] = t * a * slope[i]; tangent[i + 1] = t * b * slope[i] }
+  }
+  let path = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`
+  for (let i = 0; i < n - 1; i++) {
+    const dx = (points[i + 1][0] - points[i][0]) / 3
+    path += ` C${(points[i][0] + dx).toFixed(1)},${(points[i][1] + tangent[i] * dx).toFixed(1)} ` +
+      `${(points[i + 1][0] - dx).toFixed(1)},${(points[i + 1][1] - tangent[i + 1] * dx).toFixed(1)} ` +
+      `${points[i + 1][0].toFixed(1)},${points[i + 1][1].toFixed(1)}`
+  }
+  return path
 }
 
 export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const titleId = useId()
   const [summary, setSummary] = useState<LlmPerformanceSummary | null>(null)
+  const [summaryError, setSummaryError] = useState<string | null>(null)
   const [history, setHistory] = useState<LlmPerformanceHistory | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [summaryError, setSummaryError] = useState<string | null>(null)
+  const [hours, setHours] = useState<RangeHours>(24)
+  const [selected, setSelected] = useState<string | null>(null)
   const [visible, setVisible] = useState(!document.hidden)
   useEffect(() => {
     const changed = (): void => setVisible(!document.hidden)
@@ -67,17 +85,15 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
     }
     const loadHistory = async (): Promise<void> => {
       const request = ++historyRequest
-      setLoading(true)
-      setHistoryError(null)
       try {
         const next = await window.scry.llmPerformanceHistory()
-        if (current && request === historyRequest) setHistory(next)
+        if (current && request === historyRequest) { setHistory(next); setHistoryError(null) }
       } catch (error) {
         if (current && request === historyRequest) {
           setHistory(null)
           setHistoryError(error instanceof Error ? error.message : String(error))
         }
-      } finally { if (current && request === historyRequest) setLoading(false) }
+      }
     }
     void loadSummary()
     void loadHistory()
@@ -85,80 +101,187 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
     return () => { current = false; window.clearTimeout(timer); unsubscribe?.() }
   }, [open, visible])
 
+  const samples = useMemo(() => llmSpeedSamples(history?.rows ?? []), [history])
+  // Stable colours: most-used model first, independent of the selected range.
+  const colorOf = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const sample of samples) counts.set(sample.model, (counts.get(sample.model) ?? 0) + 1)
+    const order = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!)
+    return (model: string): string => `var(--llm-model-${Math.max(0, order.indexOf(model)) % PALETTE})`
+  }, [samples])
+  // The right edge follows the clock once per minute; per-second summary polling must not redraw the chart.
+  const minute = Math.floor(Date.now() / 60_000)
+  const to = minute * 60_000 + 60_000
+  const from = to - hours * 3_600_000
+  const inRange = useMemo(() => samples.filter(sample => sample.ts >= from && sample.ts <= to), [samples, from, to])
+  const oldestKept = history?.truncated && history.rows.length ? Date.parse(history.rows.at(-1)!.ts) : undefined
+  const sessions = summary?.sessions ?? []
+
   if (!open) return null
   return (
-    <ModalFrame labelledBy={titleId} className="llm-performance-modal" onClose={onClose}>
-      <header className="modal-head">
-        <div><span className="llm-performance-eyebrow">全局实时观测</span><h2 id={titleId}>LLM 性能</h2></div>
+    <ModalFrame labelledBy={titleId} className="llm-perf-modal" onClose={onClose}>
+      <header className="llm-perf-head">
+        <h2 id={titleId}>LLM 性能</h2>
+        <span className={`llm-perf-live${sessions.length ? ' on' : ''}`}>
+          <i aria-hidden="true" />{summary ? sessions.length ? `${sessions.length} 个会话运行中` : '无运行中的会话' : '读取中'}
+        </span>
+        <div className="llm-perf-range" role="group" aria-label="时间范围">
+          {RANGES.map(range => (
+            <button key={range.hours} type="button" aria-pressed={hours === range.hours} onClick={() => setHours(range.hours)}>{range.label}</button>
+          ))}
+        </div>
         <button type="button" className="modal-x" onClick={onClose} aria-label="关闭 LLM 性能"><Icon name="x" /></button>
       </header>
-      <div className="llm-performance-body">
-        <div className="llm-performance-source">
-          <strong>全部运行会话{summary ? ` · ${summary.running} 个` : ''}</strong>
-          {summary && <span>{summary.outputting} 个输出 · {summary.nonOutputting} 个非输出</span>}
-        </div>
-        {summaryError && <p role="alert">实时读取失败：{summaryError}</p>}
-        <div className="llm-performance-metrics">
-          <Metric label="平均输出速度" value={format(summary?.liveOutputRate, 'token/s')} coverage={summary ? `${summary.liveOutputMeasured} / ${summary.running} 可测` : '覆盖未知'} />
-          <Metric label="平均首次输出等待" value={format(summary?.firstOutputWaitMs == null ? null : summary.firstOutputWaitMs / 1000, 's')} coverage={summary ? `${summary.firstOutputWaitMeasured} / ${summary.running} 已测得` : '覆盖未知'} />
-          <Metric label="平均会话均速" value={format(summary?.sessionAverageRate, 'token/s')} coverage={summary ? `${summary.sessionAverageMeasured} / ${summary.running} 可测` : '覆盖未知'} />
-        </div>
-        <div className="llm-performance-chart-heading"><span>全部运行 · 可测会话等权平均</span><small>近 30 秒 · token/s</small></div>
-        <Trend summary={summary} />
-        <p className="llm-performance-unavailable" role="status">{summary?.networkConfiguration
-          ? `本机配置快照采集于 ${new Date(summary.networkConfiguration.observedAt).toLocaleTimeString()}` : '本机配置线索未知'} · 配置线索 ≠ 实际请求路径</p>
-        <PerformanceHistory history={history} historyError={historyError} loading={loading} />
-        <details className="llm-performance-definition"><summary>数据口径</summary>{summary?.networkConfiguration && <p>{networkConfigurationLabel(summary.networkConfiguration)}。来源：{summary.networkConfiguration.source === 'app-environment' ? 'App 环境' : 'macOS 系统及 App 环境'}；启动和运行边界采集，不代表 Provider 的实际请求路径。</p>}<p>范围是 Scry 登记的全部当前运行会话，不受当前查看会话影响。每个会话等权，结束或停止后在下一次采样退出实时集合（最多 1 秒）。实时速度只接受 Provider 权威且与时间区间对齐的 token 证据；当前五类 Provider 均无此证据，因此显示不可用。首次输出等待包含启动和排队；尚未首输出的会话只计运行数。历史 API 推导与实时输出速度分开。自动网络线索只读取本机系统代理开关和 App 环境变量是否配置，不保存地址或凭据、不探测公网、VPN 或 SSID；缓存至少 30 秒。旧手动标签仅为历史备注。</p></details>
+      <div className="llm-perf-body">
+        {summaryError && <p className="llm-perf-alert" role="alert">运行中会话读取失败：{summaryError}</p>}
+        {sessions.length > 0 && (
+          <section className="llm-perf-running" aria-label="运行中的会话">
+            {sessions.map(session => (
+              <div key={session.key} className="llm-perf-run">
+                <i aria-hidden="true" style={session.model ? { background: colorOf(session.model) } : undefined} />
+                <div><b>{session.model ?? (session.providerId ? providerName[session.providerId] : '未知 Provider')}</b>
+                  {session.cwd && <span> · {session.cwd.split('/').filter(Boolean).pop()}</span>}</div>
+                <span className={`llm-perf-state${session.state === 'streaming' ? ' gen' : ''}`}>{stateLabel(session)}</span>
+                <div className="llm-perf-run-speed">
+                  {session.tokensPerSecond != null && <><strong>{formatSpeed(session.tokensPerSecond)}</strong><small>token/s</small></>}
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+        <section>
+          <h3>输出速度 <span>token/s</span>
+            {oldestKept != null && oldestKept > from && <small className="llm-perf-truncated">只含最近 {history!.rows.length} 轮</small>}
+          </h3>
+          {historyError
+            ? <p className="llm-perf-alert" role="alert">历史读取失败：{historyError}</p>
+            : !history ? <div className="llm-perf-empty">读取中</div>
+              : !inRange.length ? <div className="llm-perf-empty">{samples.length ? '这个时间范围内没有数据' : '还没有数据'}</div>
+                : <SpeedChart samples={inRange} from={from} to={to} hours={hours} selected={selected} colorOf={colorOf} />}
+        </section>
+        {!historyError && inRange.length > 0 && (
+          <section>
+            <h3>模型对比</h3>
+            <ModelComparison samples={inRange} selected={selected} colorOf={colorOf}
+              onSelect={model => setSelected(current => current === model ? null : model)} />
+          </section>
+        )}
       </div>
     </ModalFrame>
   )
 }
 
-const PerformanceHistory = memo(function PerformanceHistory({ history, historyError, loading }: {
-  history: LlmPerformanceHistory | null
-  historyError: string | null
-  loading: boolean
+function SpeedChart({ samples, from, to, hours, selected, colorOf }: {
+  samples: LlmSpeedSample[]
+  from: number
+  to: number
+  hours: RangeHours
+  selected: string | null
+  colorOf: (model: string) => string
 }) {
-  const comparisons = useMemo(() => compareLlmPerformanceHistory(history?.rows ?? []), [history])
-  const roundsByGroup = useMemo(() => {
-    const groups = new Map<string, LlmPerformanceHistoryRow[]>()
-    for (const row of history?.rows ?? []) {
-      const key = performanceHistoryKey(row)
-      const group = groups.get(key) ?? []
-      group.push(row)
-      groups.set(key, group)
-    }
-    return groups
-  }, [history])
+  const box = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  const [hover, setHover] = useState<number | null>(null)
+  useEffect(() => {
+    const node = box.current!
+    const observer = new ResizeObserver(() => setWidth(node.clientWidth))
+    observer.observe(node)
+    setWidth(node.clientWidth)
+    return () => observer.disconnect()
+  }, [])
+  const series = useMemo(() => {
+    const byModel = new Map<string, LlmSpeedSample[]>()
+    for (const sample of samples) byModel.set(sample.model, [...byModel.get(sample.model) ?? [], sample])
+    return [...byModel].map(([model, own]) => ({ model, points: smoothLlmSpeed(own, from, to, BANDWIDTH_MINUTES[hours] * 60_000, GRID) }))
+  }, [samples, from, to, hours])
+  const measured = series.flatMap(item => item.points.flatMap(point => point.speed == null ? [] : [point.speed]))
+  // A single fast round must not flatten every other curve; higher values clamp to the top.
+  const yMax = Math.max(10, Math.ceil(quantile(measured, 0.98) * 1.1 / 20) * 20)
+  const H = 240, L = 30, R = 12, T = 12, B = 22
+  const x = (ts: number): number => L + (ts - from) / (to - from) * (width - L - R)
+  const y = (value: number): number => T + (1 - Math.min(value, yMax) / yMax) * (H - T - B)
+  const label = (ts: number): string => hours > 24 ? day(ts) : clock(ts)
+  const firstMidnight = new Date(from).setHours(24, 0, 0, 0)
+  const ticks = hours > 24
+    ? Array.from({ length: 7 }, (_, i) => new Date(firstMidnight).setDate(new Date(firstMidnight).getDate() + i)).filter(ts => ts <= to)
+    : Array.from({ length: 5 }, (_, i) => from + (to - from) * i / 4)
+  const hits = hover == null ? [] : series
+    .filter(item => item.points[hover].speed != null && (!selected || item.model === selected))
+    .sort((a, b) => b.points[hover].speed! - a.points[hover].speed!)
+  const hoverTs = hover == null ? 0 : series[0].points[hover].ts
   return (
-    <section className="llm-performance-history">
-      <div className="llm-performance-history-head"><strong>历史同类对照</strong><span>按 Provider / Profile / 模型 / 上游 / 环境分组</span></div>
-      {loading && <p role="status">正在读取历史…</p>}
-      {historyError && <p role="alert">历史读取失败：{historyError}</p>}
-      {!loading && !historyError && comparisons.length === 0 && <p>暂无历史测量。</p>}
-      {!historyError && comparisons.length > 0 && <div className="llm-performance-history-list">{comparisons.map(row => (
-        <div key={row.key}><article className="llm-performance-history-row">
-          <div><strong>{row.model}</strong><span>{row.providerId}{row.agentProfileId ? ` · ${row.agentProfileId}` : ''}{row.upstreamProvider ? ` · ${row.upstreamProvider}` : ''}</span><small>{performanceEnvironmentLabel(roundsByGroup.get(row.key)![0])} · {row.runs} 轮 · {row.failedRuns} 失败或停止</small></div>
-          <div><span>输出均速</span><b>{format(row.medianLiveTokensPerSecond, 'token/s')}</b><small>{row.liveTokenSamples} 轮可测</small></div>
-          <div><span>首次输出</span><b>{format(row.medianWaitMs == null ? null : row.medianWaitMs / 1000, 's')}</b><small>{row.waitSamples} 轮有数据</small></div>
-          <div><span>API 推导</span><b>{format(row.medianApiTokensPerSecond, 'token/s')}</b><small>{row.apiSamples} 轮可测</small></div>
-        </article>
-        <details className="llm-performance-rounds"><summary>查看 {row.runs} 轮</summary>
-          {roundsByGroup.get(row.key)!.map(item => (
-            <div key={item.runId} className="llm-performance-round">
-              <time dateTime={item.ts}>{new Date(item.ts).toLocaleString()}</time>
-              <span>{item.failed ? '失败或停止' : '完成'} · {item.runId}</span>
-              <span>首次输出 {format(item.performance.firstOutputWaitMs == null ? null : item.performance.firstOutputWaitMs / 1000, 's')} · API {format(item.performance.apiTokensPerSecond, 'token/s')}</span>
-              <small>输出 {item.performance.outputTokens ?? '未知'} token · API 时间 {format(item.performance.apiDurationMs == null ? null : item.performance.apiDurationMs / 1000, 's')}</small>
-            </div>
+    <div className="llm-perf-chart" ref={box}>
+      {width > 0 && (
+        <svg viewBox={`0 0 ${width} ${H}`} role="img" aria-label="各模型输出速度曲线"
+          onMouseMove={event => {
+            const px = event.clientX - event.currentTarget.getBoundingClientRect().left
+            setHover(Math.max(0, Math.min(GRID - 1, Math.round((px - L) / (width - L - R) * (GRID - 1)))))
+          }}
+          onMouseLeave={() => setHover(null)}>
+          <g className="llm-perf-axis">
+            {[0, yMax / 2, yMax].map(value => (
+              <g key={value}><line x1={L} x2={width - R} y1={y(value)} y2={y(value)} />
+                <text x={L - 8} y={y(value) + 3.5} textAnchor="end">{value}</text></g>
+            ))}
+            {ticks.map(ts => <text key={ts} x={x(ts)} y={H - 5} textAnchor="middle">{label(ts)}</text>)}
+          </g>
+          {series.map(item => (
+            <path key={item.model} className={`llm-perf-line${selected && item.model !== selected ? ' dim' : ''}`}
+              d={smoothPath(item.points.map(point => [x(point.ts), y(point.drawn)]))}
+              stroke={colorOf(item.model)} strokeWidth={selected === item.model ? 2.6 : 2} />
           ))}
-        </details></div>
-      ))}</div>}
-      {history && (history.invalidLines > 0 || history.truncated) && <p className="llm-performance-history-note" role="status">历史为部分证据：{history.truncated ? '已限制为最近 1000 轮；' : ''}{history.invalidLines > 0 ? `${history.invalidLines} 行损坏或不支持。` : ''}</p>}
-    </section>
+          {hover != null && <>
+            <line className="llm-perf-cross" x1={x(hoverTs)} x2={x(hoverTs)} y1={T} y2={H - B} />
+            {hits.map(item => <circle key={item.model} cx={x(hoverTs)} cy={y(item.points[hover].drawn)} r={3.5}
+              fill={colorOf(item.model)} stroke="var(--panel)" strokeWidth={1.5} />)}
+          </>}
+          <rect x={L} y={T} width={Math.max(0, width - L - R)} height={H - T - B} fill="transparent" />
+        </svg>
+      )}
+      {hover != null && (
+        <div className="llm-perf-tip" style={{ left: Math.min(Math.max(x(hoverTs), 110), width - 110), top: T }}>
+          <div className="llm-perf-tip-time">{hours > 24 ? `${day(hoverTs)} ${clock(hoverTs)}` : clock(hoverTs)}</div>
+          {hits.length
+            ? hits.map(item => (
+              <div key={item.model} className="llm-perf-tip-row"><i style={{ background: colorOf(item.model) }} />{item.model}
+                <b>{formatSpeed(item.points[hover].speed!)}</b></div>
+            ))
+            : <div className="llm-perf-tip-row">空闲</div>}
+        </div>
+      )}
+    </div>
   )
-})
+}
 
-function Metric({ label, value, coverage }: { label: string; value: string; coverage: string }) {
-  return <dl className="llm-performance-metric"><dt>{label}</dt><dd>{value}</dd><small>{coverage}</small></dl>
+function ModelComparison({ samples, selected, colorOf, onSelect }: {
+  samples: LlmSpeedSample[]
+  selected: string | null
+  colorOf: (model: string) => string
+  onSelect: (model: string) => void
+}) {
+  const groups = useMemo(() => {
+    const byModel = new Map<string, number[]>()
+    for (const sample of samples) byModel.set(sample.model, [...byModel.get(sample.model) ?? [], sample.tokensPerSecond])
+    return [...byModel].map(([model, speeds]) => ({
+      model, rounds: speeds.length, p25: quantile(speeds, 0.25), p50: quantile(speeds, 0.5), p75: quantile(speeds, 0.75)
+    })).sort((a, b) => b.p50 - a.p50)
+  }, [samples])
+  const max = Math.max(10, Math.ceil(Math.max(...groups.map(group => group.p75)) / 10) * 10)
+  const percent = (value: number): string => `${Math.min(value, max) / max * 100}%`
+  return (
+    <div className="llm-perf-models">
+      <div className="llm-perf-mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span>轮数</span></div>
+      {groups.map(group => (
+        <button key={group.model} type="button" className="llm-perf-mrow" aria-pressed={selected === group.model} onClick={() => onSelect(group.model)}>
+          <span className="llm-perf-mname"><i style={{ background: colorOf(group.model) }} /><b>{group.model}</b></span>
+          <span className="llm-perf-bar" aria-hidden="true"><span className="track" />
+            <span className="iqr" style={{ left: percent(group.p25), width: `calc(${percent(group.p75)} - ${percent(group.p25)})`, background: colorOf(group.model) }} />
+            <span className="p50" style={{ left: percent(group.p50), background: colorOf(group.model) }} /></span>
+          <span className="llm-perf-speed"><strong>{formatSpeed(group.p50)}</strong><small>token/s</small></span>
+          <span className="llm-perf-rounds">{group.rounds}</span>
+        </button>
+      ))}
+      <div className="llm-perf-scale"><span /><div><span>0</span><span>{max / 2}</span><span>{max}</span></div></div>
+    </div>
+  )
 }
