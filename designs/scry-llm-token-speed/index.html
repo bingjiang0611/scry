@@ -2,89 +2,97 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>Scry · LLM token 速度 原型 v8</title>
+<title>Scry · LLM token 速度 原型 v9</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-/* Token snapshot: src/renderer/styles.css + codex-alignment.css (dark). Monochrome chart per user reference. */
+/* Token snapshot: src/renderer/styles.css + codex-alignment.css (dark). */
 :root {
   color-scheme: dark;
-  --panel: #161616; --panel2: #1f1f1f; --panel3: #2a2a2a;
-  --border: #2c2c2a; --border3: #232322;
-  --fg: #f1f1ef; --dim: #b5b5af; --dim2: #8d8d87; --dim3: #62625e;
-  --ok: #69cc93;
-  --line: #f1f1ef; --line-muted: rgb(241 241 239 / 16%);
+  --bg: #151515; --panel: #1c1c1c; --panel2: #232323; --panel3: #2b2b2b;
+  --border: #333331; --border2: #454541; --border3: #292927;
+  --fg: #f1f1ef; --dim: #b5b5af; --dim2: #8d8d87; --dim3: #686864;
+  --accent: #5b9cff; --ok: #69cc93; --warn: #efb958; --bad: #f36c67;
+  --surface-hover: rgb(255 255 255 / 6%); --surface-muted: rgb(255 255 255 / 4%);
   --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
   --shadow-pop: 0 32px 88px rgb(0 0 0 / 46%), 0 10px 28px rgb(0 0 0 / 24%), inset 0 0 0 1px rgb(255 255 255 / 2.5%);
+  --m0: #5b9cff; --m1: #d37ec8; --m2: #efa84f; --m3: #69cc93; --m4: #ab9cf2; --m5: #6fd3d8; --m6: #efb958;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
-  background: #0a0a0a; color: var(--fg); font: 13px/1.45 var(--font-ui); -webkit-font-smoothing: antialiased; }
+  background: #0d0d0d; color: var(--fg); font: 13px/1.45 var(--font-ui); -webkit-font-smoothing: antialiased; }
 .num { font-variant-numeric: tabular-nums; }
 
-.modal { width: min(900px, calc(100vw - 48px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column;
+.modal { width: min(880px, calc(100vw - 48px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow-pop); overflow: hidden; }
-.head { display: flex; align-items: center; gap: 14px; padding: 22px 18px 0 28px; }
-.head h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: .01em; }
+.head { display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 0 14px 0 22px; border-bottom: 1px solid var(--border3); }
+.head h2 { margin: 0; font-size: 15px; font-weight: 650; }
 .live { display: inline-flex; align-items: center; gap: 7px; color: var(--dim2); font-size: 12px; }
-.live i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim3); }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim3); }
 .live.on { color: var(--dim); }
 .live.on i { background: var(--ok); box-shadow: 0 0 0 3px rgb(105 204 147 / 18%); }
-.pill { margin-left: auto; display: inline-flex; padding: 4px; border-radius: 999px; border: 1px solid var(--border); background: #121212; }
-.pill button { border: 1px solid transparent; background: none; color: var(--dim2); font: inherit; font-size: 12.5px; letter-spacing: .04em;
-  padding: 6px 16px; border-radius: 999px; cursor: pointer; }
-.pill button:hover { color: var(--dim); }
-.pill button[aria-pressed="true"] { background: var(--panel3); border-color: rgb(255 255 255 / 6%); color: var(--fg); }
-.x { width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--dim2); font-size: 18px; cursor: pointer; }
-.x:hover { background: rgb(255 255 255 / 6%); color: var(--fg); }
-.body { overflow: auto; padding: 8px 28px 26px; display: grid; gap: 26px; }
+.seg { margin-left: auto; display: inline-flex; padding: 2px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--border3); }
+.seg button { border: 0; background: none; color: var(--dim2); font: inherit; font-size: 12px; padding: 4px 11px; border-radius: 7px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--panel3); color: var(--fg); }
+.x { width: 30px; height: 30px; border: 0; border-radius: 9px; background: none; color: var(--dim2); font-size: 18px; cursor: pointer; }
+.x:hover { background: var(--surface-hover); color: var(--fg); }
+.body { overflow: auto; padding: 18px 22px 22px; display: grid; gap: 22px; }
 
-/* Running now: hidden when idle. */
-.running { display: grid; gap: 2px; margin-top: 10px; }
-.run { display: grid; grid-template-columns: minmax(0, 1fr) auto 110px; gap: 14px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border3); }
+/* Running now: only a single line when idle. */
+.running { display: grid; gap: 6px; }
+.run { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
+  padding: 8px 12px; border-radius: 10px; background: var(--panel2); }
+.run .dot { width: 8px; height: 8px; border-radius: 50%; }
 .run b { font-weight: 550; }
 .run span { color: var(--dim2); }
-.state { font-size: 11.5px; color: var(--dim2); display: inline-flex; align-items: center; gap: 6px; }
-.state.gen { color: var(--ok); }
-.state.gen::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
-.run .speed { text-align: right; }
-.run .speed strong { font-size: 15px; font-weight: 600; }
+.state { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--surface-muted); color: var(--dim); }
+.state.gen { color: var(--ok); background: rgb(105 204 147 / 12%); }
+.run .speed { min-width: 92px; text-align: right; }
+.run .speed strong { font-size: 14px; font-weight: 600; }
 .run .speed small { color: var(--dim2); margin-left: 3px; }
 
-/* Chart */
-.chart { position: relative; margin-top: 6px; }
-.chart svg { display: block; width: 100%; height: 300px; overflow: visible; }
-.axis text { fill: var(--dim3); font-size: 12px; }
-.axis line { stroke: var(--border3); }
-.line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.line.main { stroke: var(--line); stroke-width: 2.6; }
-.line.other { stroke: var(--line-muted); stroke-width: 1.4; }
-.cross { stroke: rgb(255 255 255 / 18%); }
-.tip { position: absolute; top: 0; pointer-events: none; padding: 8px 11px; border-radius: 10px; background: #242424;
-  border: 1px solid #333; font-size: 12px; white-space: nowrap; transform: translateX(-50%); min-width: 150px; }
-.tip-t { color: var(--dim2); margin-bottom: 4px; }
-.tip-r { display: flex; gap: 14px; line-height: 1.75; color: var(--dim2); }
-.tip-r.main { color: var(--fg); }
-.tip-r b { margin-left: auto; font-weight: 600; }
-.empty { height: 300px; display: grid; place-items: center; color: var(--dim2); }
+h3 { margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 600; }
+h3 .right { margin-left: auto; }
 
-/* Models */
-.mrow { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 2.2fr) 110px 56px; gap: 18px; align-items: center;
-  width: 100%; padding: 12px 0; border: 0; border-top: 1px solid var(--border3); background: none; color: var(--dim2); font: inherit; text-align: left; cursor: pointer; }
-.mrow:first-child { border-top: 0; }
-.mrow:hover { color: var(--dim); }
-.mrow[aria-pressed="true"] { color: var(--fg); }
-.mrow b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar { position: relative; height: 14px; }
-.bar .track { position: absolute; left: 0; right: 0; top: 6.5px; height: 1px; background: var(--border); }
-.bar .iqr { position: absolute; top: 3px; bottom: 3px; border-radius: 999px; background: rgb(241 241 239 / 10%); }
-.bar .p50 { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--dim3); }
-.mrow[aria-pressed="true"] .iqr { background: rgb(241 241 239 / 22%); }
-.mrow[aria-pressed="true"] .p50 { background: var(--line); }
-.speedv { text-align: right; }
-.speedv strong { font-size: 16px; font-weight: 600; }
-.speedv small { font-size: 11px; margin-left: 3px; color: var(--dim3); }
-.nv { text-align: right; color: var(--dim3); }
+/* Timeline */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 240px; overflow: visible; }
+.axis text { fill: var(--dim3); font-size: 10.5px; }
+.axis line { stroke: var(--border3); }
+.series path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.series { transition: opacity .12s; }
+.series.dim { opacity: .14; }
+.cross { stroke: var(--border2); stroke-dasharray: 3 3; }
+h3 .unit { color: var(--dim3); font-weight: 400; font-size: 12px; }
+.tip { position: absolute; pointer-events: none; padding: 7px 10px; border-radius: 8px; background: var(--panel3);
+  border: 1px solid var(--border2); font-size: 12px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+.tip { transform: translate(-50%, 0); min-width: 150px; }
+.tip-t { color: var(--dim2); margin-bottom: 4px; }
+.tip-r { display: flex; align-items: center; gap: 7px; line-height: 1.7; }
+.tip-r i { width: 7px; height: 7px; border-radius: 50%; }
+.tip-r b { margin-left: auto; padding-left: 14px; font-weight: 600; }
+.empty { height: 240px; display: grid; place-items: center; color: var(--dim2); border: 1px dashed var(--border2); border-radius: 12px; text-align: center; }
+
+/* Model comparison */
+.models { display: grid; }
+.mhead, .mrow { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(200px, 2fr) 96px 64px; gap: 14px; align-items: center; }
+.mhead { padding: 0 10px 6px; color: var(--dim3); font-size: 11px; }
+.mhead > :nth-child(n+3), .mrow > :nth-child(n+3) { text-align: right; }
+.mrow { padding: 9px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; background: none; color: inherit; font: inherit; text-align: left; width: 100%; }
+.mrow:hover { background: var(--surface-muted); }
+.mrow[aria-pressed="true"] { background: var(--panel2); border-color: var(--border); }
+.mname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mname i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.mname b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar { position: relative; height: 16px; }
+.bar .track { position: absolute; inset: 7px 0; border-radius: 2px; background: var(--border3); }
+.bar .iqr { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; opacity: .32; }
+.bar .p50 { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; border-radius: 2px; }
+.speedv strong { font-size: 15px; font-weight: 600; }
+.speedv small { color: var(--dim2); font-size: 11px; margin-left: 2px; }
+.nv { color: var(--dim); }
+.scale { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(200px, 2fr) 96px 64px; gap: 14px; padding: 2px 10px 0; color: var(--dim3); font-size: 10.5px; }
+.scale div { display: flex; justify-content: space-between; }
 
 .proto { position: fixed; left: 12px; bottom: 10px; color: var(--dim3); font-size: 11px; }
 .proto a { color: var(--dim2); margin-right: 8px; }
@@ -93,17 +101,23 @@ body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding
 <body>
 <div class="modal" role="dialog" aria-label="LLM 性能">
   <header class="head">
-    <h2>输出速度</h2>
+    <h2>LLM 性能</h2>
     <span class="live" id="live"><i></i><span></span></span>
-    <div class="pill" role="group" aria-label="时间范围" id="range">
+    <div class="seg" role="group" aria-label="时间范围" id="range">
       <button data-h="1">1 小时</button><button data-h="24">24 小时</button><button data-h="168">7 天</button>
     </div>
     <button class="x" aria-label="关闭">×</button>
   </header>
   <div class="body">
     <section class="running" id="running" hidden></section>
-    <section class="chart" id="chart"></section>
-    <section id="models"></section>
+    <section>
+      <h3>输出速度 <span class="unit">token/s</span></h3>
+      <div class="chart" id="chart"></div>
+    </section>
+    <section>
+      <h3>模型对比</h3>
+      <div class="models" id="models"></div>
+    </section>
   </div>
 </div>
 <div class="proto">原型 · <a href="?">默认</a><a href="?state=running">运行中</a><a href="?state=empty">无数据</a></div>
@@ -118,43 +132,46 @@ const turns = stateParam === 'empty' ? [] : sample.turns.map(t => ({ ...t, tps: 
 let hours = 24
 let selected = null
 
+const palette = ['--m0', '--m1', '--m2', '--m3', '--m4', '--m5', '--m6']
+// Stable colors: most-used model first, independent of the selected range.
+const counts = turns.reduce((map, t) => map.set(t.model, (map.get(t.model) ?? 0) + 1), new Map())
+const modelOrder = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a))
+const color = model => `var(${palette[modelOrder.indexOf(model) % palette.length]})`
 const short = model => model.split('/').pop()
 const fmt = v => v >= 100 ? Math.round(v).toString() : v.toFixed(1)
 const q = (values, p) => { const s = [...values].sort((a, b) => a - b); const i = (s.length - 1) * p; const lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo) }
 
 function render() {
   for (const b of document.querySelectorAll('#range button')) b.setAttribute('aria-pressed', String(+b.dataset.h === hours))
-  const ok = turns.filter(t => !t.failed && t.t >= now - hours * 3600_000)
-  // One highlighted model at a time; default to the busiest one in range.
-  const byCount = [...ok.reduce((map, t) => map.set(t.model, (map.get(t.model) ?? 0) + 1), new Map())].sort((a, b) => b[1] - a[1])
-  if (!byCount.some(([m]) => m === selected)) selected = byCount[0]?.[0] ?? null
+  const inRange = turns.filter(t => t.t >= now - hours * 3600_000)
   renderRunning()
-  renderChart(ok)
-  renderModels(ok)
+  renderChart(inRange)
+  renderModels(inRange)
 }
 
 function renderRunning() {
   const live = document.getElementById('live')
   const box = document.getElementById('running')
   const runs = stateParam === 'running' ? [
-    { model: 'openai-codex/gpt-6.1-sol', project: 'scry', state: '生成中', gen: true, tps: 23.4 },
-    { model: 'cc-switch/claude-opus-5-5', project: 'rate-native', state: '工具执行', tps: 41.8 },
-    { model: 'qoder/ultimate', project: 'etch', state: '等待首次输出' }
+    { model: 'openai-codex/gpt-6.1-sol', project: 'scry', state: '生成中', gen: true, tps: 23.4, calls: 6 },
+    { model: 'cc-switch/claude-opus-5-5', project: 'rate-native', state: '工具执行', tps: 41.8, calls: 3 },
+    { model: 'qoder/ultimate', project: 'etch', state: '等待首次输出', calls: 0 }
   ] : []
   live.className = runs.length ? 'live on' : 'live'
   live.querySelector('span').textContent = runs.length ? `${runs.length} 个会话运行中` : '无运行中的会话'
   box.hidden = !runs.length
-  box.innerHTML = runs.map(r => `<div class="run">
+  box.innerHTML = runs.map(r => `<div class="run"><i class="dot" style="background:${color(r.model)}"></i>
     <div><b>${short(r.model)}</b> <span>· ${r.project}</span></div>
     <span class="state${r.gen ? ' gen' : ''}">${r.state}</span>
     <div class="speed num">${r.tps != null ? `<strong>${fmt(r.tps)}</strong><small>token/s</small>` : ''}</div></div>`).join('')
 }
 
 // Kernel-smoothed speed on a regular time grid: Gaussian-weighted geometric mean of nearby turns
-// (robust to single outliers). Where no turn lies within 1.5 bandwidths, the line breaks: missing
-// speed is never drawn as 0 or bridged across idle time.
+// (robust to single outliers). The drawn line is continuous: it eases down to the 0 axis where no
+// turns are nearby (user choice). Idle is only a drawing baseline — the tooltip says 空闲 and no
+// statistic treats it as a 0 token/s measurement.
 const bandwidthMs = () => ({ 1: 4, 24: 40, 168: 240 })[hours] * 60_000
-const GRID = 180
+const GRID = 160
 
 // Monotone cubic (Fritsch–Carlson): smooth without overshooting real values.
 function smoothPath(pts) {
@@ -175,30 +192,9 @@ function smoothPath(pts) {
   return path
 }
 
-function seriesFor(model, ok, grid, h) {
-  const own = ok.filter(t => t.model === model && t.tps > 0)
-  const values = grid.map(at => {
-    let weight = 0, sum = 0, near = false
-    for (const t of own) {
-      const d = (t.t - at) / h
-      if (Math.abs(d) > 3) continue
-      if (Math.abs(d) <= 1.5) near = true
-      const w = Math.exp(-d * d / 2)
-      weight += w; sum += w * Math.log(t.tps)
-    }
-    return near ? Math.exp(sum / weight) : null
-  })
-  const segments = []
-  values.forEach((v, i) => {
-    if (v == null) return
-    if (i === 0 || values[i - 1] == null) segments.push([])
-    segments.at(-1).push(i)
-  })
-  return { m: model, values, segments }
-}
-
-function renderChart(ok) {
+function renderChart(rows) {
   const box = document.getElementById('chart')
+  const ok = rows.filter(t => !t.failed)
   if (!ok.length) {
     box.innerHTML = `<div class="empty">${turns.length ? '这个时间范围内没有数据' : '还没有数据'}</div>`
     return
@@ -206,75 +202,88 @@ function renderChart(ok) {
   const h = bandwidthMs()
   const x0 = now - hours * 3600_000
   const grid = Array.from({ length: GRID }, (_, i) => x0 + (now - x0) * i / (GRID - 1))
-  const series = [...new Set(ok.map(t => t.model))].map(m => seriesFor(m, ok, grid, h))
-  const main = series.find(s => s.m === selected)
+  const models = [...new Set(ok.map(t => t.model))].sort((a, b) => modelOrder.indexOf(a) - modelOrder.indexOf(b))
+  const series = models.map(m => {
+    const own = ok.filter(t => t.model === m && t.tps > 0)
+    const values = grid.map(at => {
+      let weight = 0, sum = 0, near = false
+      for (const t of own) {
+        const d = (t.t - at) / h
+        if (Math.abs(d) > 3) continue
+        if (Math.abs(d) <= 1.5) near = true
+        const w = Math.exp(-d * d / 2)
+        weight += w; sum += w * Math.log(t.tps)
+      }
+      const speed = weight > 1e-6 ? Math.exp(sum / weight) : 0
+      return { value: near ? speed : null, drawn: speed * Math.min(1, weight / 0.6) }
+    })
+    return { m, values: values.map(p => p.value), drawn: values.map(p => p.drawn) }
+  })
+  const W = box.clientWidth, H = 240, L = 30, R = 12, T = 12, B = 22
   const all = series.flatMap(s => s.values.filter(v => v != null))
   // An isolated fast turn must not flatten every other curve; values above the axis clamp to the top.
   const yMax = Math.max(10, Math.ceil(q(all, .98) * 1.1 / 20) * 20)
-  const W = box.clientWidth, H = 300, L = 92, R = 4, T = 14, B = 34
-  const x = i => L + i / (GRID - 1) * (W - L - R)
+  const x = t => L + (t - x0) / (now - x0) * (W - L - R)
   const y = v => T + (1 - Math.min(v, yMax) / yMax) * (H - T - B)
-  const base = y(0)
-  const dayLabel = t => new Date(t).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-  const timeLabel = t => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
-  const xlabel = t => hours > 24 ? dayLabel(t) : timeLabel(t)
+  const xlabel = t => { const d = new Date(t); return hours > 24 ? `${d.getMonth() + 1}/${d.getDate()}` : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+  // 7 days: one tick per local midnight, so labels are evenly spaced calendar days.
   const firstMidnight = new Date(x0).setHours(24, 0, 0, 0)
   const xticks = hours > 24
     ? Array.from({ length: 7 }, (_, i) => new Date(firstMidnight).setDate(new Date(firstMidnight).getDate() + i)).filter(t => t <= now)
-    : Array.from({ length: 3 }, (_, i) => x0 + (now - x0) * i / 2)
-  const tx = t => L + (t - x0) / (now - x0) * (W - L - R)
-  const path = (s, idx) => smoothPath(idx.map(i => [x(i), y(s.values[i])]))
-  const area = (s, idx) => `${path(s, idx)} L${x(idx.at(-1))},${base} L${x(idx[0])},${base} Z`
-  const dot = (s, i, cls) => `<circle cx="${x(i)}" cy="${y(s.values[i])}" r="${cls === 'main' ? 2.6 : 1.6}" fill="${cls === 'main' ? 'var(--line)' : 'var(--line-muted)'}"/>`
-  const others = series.filter(s => s !== main).map(s => s.segments.map(idx => idx.length > 1
-    ? `<path class="line other" d="${path(s, idx)}"/>` : dot(s, idx[0], 'other')).join('')).join('')
-  const mainSvg = main.segments.map(idx => idx.length > 1
-    ? `<path d="${area(main, idx)}" fill="url(#fill)"/><path class="line main" d="${path(main, idx)}"/>` : dot(main, idx[0], 'main')).join('')
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="输出速度曲线">
-    <defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f1f1ef" stop-opacity=".13"/><stop offset="1" stop-color="#f1f1ef" stop-opacity=".03"/></linearGradient></defs>
-    <g class="axis">${[0, yMax / 2, yMax].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>
-      <text x="${L - 14}" y="${y(v) + 4}" text-anchor="end">${v ? `${v} token/s` : '0'}</text>`).join('')}
-      ${xticks.map((t, i) => `<text x="${tx(t)}" y="${H - 8}" text-anchor="${hours > 24 ? 'middle' : ['start', 'middle', 'end'][i]}">${xlabel(t)}</text>`).join('')}</g>
-    ${others}${mainSvg}
-    <line class="cross" y1="${T}" y2="${base}" hidden/><g class="marks"></g>
-    <rect x="${L}" y="${T}" width="${W - L - R}" height="${base - T}" fill="transparent"/>
+    : Array.from({ length: 5 }, (_, i) => x0 + (now - x0) * i / 4)
+  const lines = series.map(s => {
+    const dim = selected && s.m !== selected
+    const strong = selected === s.m
+    return `<g class="series${dim ? ' dim' : ''}"><path d="${smoothPath(grid.map((t, i) => [x(t), y(s.drawn[i])]))}" stroke="${color(s.m)}" stroke-width="${strong ? 2.6 : 2}"/></g>`
+  }).join('')
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="各模型输出速度曲线">
+    <g class="axis">${[0, yMax / 2, yMax].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`).join('')}
+      ${xticks.map(t => `<text x="${x(t)}" y="${H - 5}" text-anchor="middle">${xlabel(t)}</text>`).join('')}</g>
+    ${lines}
+    <line class="cross" y1="${T}" y2="${H - B}" hidden/>
+    <g class="marks"></g>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
   </svg><div class="tip" hidden></div>`
   const svg = box.querySelector('svg'), tip = box.querySelector('.tip'), cross = svg.querySelector('.cross'), marks = svg.querySelector('.marks')
-  const hide = () => { tip.hidden = true; cross.setAttribute('hidden', ''); marks.innerHTML = '' }
   svg.addEventListener('mousemove', e => {
     const px = e.clientX - svg.getBoundingClientRect().left
     const i = Math.max(0, Math.min(GRID - 1, Math.round((px - L) / (W - L - R) * (GRID - 1))))
-    const hits = series.filter(s => s.values[i] != null).sort((a, b) => (b === main) - (a === main) || b.values[i] - a.values[i])
-    if (!hits.length) return hide()
-    cross.removeAttribute('hidden'); cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i))
-    marks.innerHTML = main.values[i] != null ? `<circle cx="${x(i)}" cy="${y(main.values[i])}" r="4.5" fill="var(--line)" stroke="var(--panel)" stroke-width="2"/>` : ''
+    const at = grid[i]
+    const hits = series.filter(s => s.values[i] != null && (!selected || s.m === selected))
+      .map(s => ({ m: s.m, p: { t: at, v: s.values[i], drawn: s.drawn[i] } })).sort((a, b) => b.p.v - a.p.v)
+    cross.removeAttribute('hidden'); cross.setAttribute('x1', x(at)); cross.setAttribute('x2', x(at))
     tip.hidden = false
-    tip.style.left = Math.min(Math.max(x(i), L + 80), W - 80) + 'px'
-    tip.innerHTML = `<div class="tip-t">${hours > 24 ? `${dayLabel(grid[i])} ${timeLabel(grid[i])}` : timeLabel(grid[i])}</div>` + hits.map(s =>
-      `<div class="tip-r${s === main ? ' main' : ''}">${short(s.m)}<b class="num">${fmt(s.values[i])}</b></div>`).join('')
+    tip.style.left = Math.min(Math.max(x(at), 110), W - 110) + 'px'
+    tip.style.top = T + 'px'
+    if (!hits.length) { marks.innerHTML = ''; tip.innerHTML = `<div class="tip-t">${xlabel(at)}</div><div class="tip-r">空闲</div>`; return }
+    marks.innerHTML = hits.map(h => `<circle cx="${x(h.p.t)}" cy="${y(h.p.drawn)}" r="3.5" fill="${color(h.m)}" stroke="var(--panel)" stroke-width="1.5"/>`).join('')
+    tip.innerHTML = `<div class="tip-t">${xlabel(at)}</div>` + hits.map(h =>
+      `<div class="tip-r"><i style="background:${color(h.m)}"></i>${short(h.m)}<b class="num">${fmt(h.p.v)}</b></div>`).join('')
   })
-  svg.addEventListener('mouseleave', hide)
+  svg.addEventListener('mouseleave', () => { tip.hidden = true; cross.setAttribute('hidden', ''); marks.innerHTML = '' })
 }
 
-function renderModels(ok) {
+function renderModels(rows) {
   const box = document.getElementById('models')
-  const groups = [...new Set(ok.map(t => t.model))].map(m => {
-    const v = ok.filter(t => t.model === m).map(t => t.tps)
-    return { m, n: v.length, p25: q(v, .25), p50: q(v, .5), p75: q(v, .75) }
-  }).sort((a, b) => b.p50 - a.p50)
-  if (!groups.length) { box.innerHTML = ''; return }
+  const groups = [...new Set(rows.map(t => t.model))].map(m => {
+    const all = rows.filter(t => t.model === m)
+    const ok = all.filter(t => !t.failed).map(t => t.tps)
+    return { m, n: all.length, ok: ok.length, p25: q(ok, .25), p50: q(ok, .5), p75: q(ok, .75) }
+  }).filter(g => g.ok > 0).sort((a, b) => b.p50 - a.p50)
+  if (!groups.length) { box.innerHTML = '<div style="color:var(--dim2);padding:4px 10px">暂无数据</div>'; return }
   const max = Math.max(10, Math.ceil(Math.max(...groups.map(g => g.p75)) / 10) * 10)
   const pct = v => `${Math.min(v, max) / max * 100}%`
-  box.innerHTML = groups.map(g => `<button class="mrow" aria-pressed="${g.m === selected}" data-m="${g.m}">
-      <b>${short(g.m)}</b>
+  box.innerHTML = `<div class="mhead"><span>模型</span><span>速度分布</span><span>中位速度</span><span>轮数</span></div>
+    ${groups.map(g => `<button class="mrow" aria-pressed="${g.m === selected}" data-m="${g.m}">
+      <span class="mname"><i style="background:${color(g.m)}"></i><b>${short(g.m)}</b></span>
       <span class="bar"><span class="track"></span>
-        <span class="iqr" style="left:${pct(g.p25)};width:calc(${pct(g.p75)} - ${pct(g.p25)})"></span>
-        <span class="p50" style="left:${pct(g.p50)}"></span></span>
+        <span class="iqr" style="left:${pct(g.p25)};width:calc(${pct(g.p75)} - ${pct(g.p25)});background:${color(g.m)}"></span>
+        <span class="p50" style="left:${pct(g.p50)};background:${color(g.m)}"></span></span>
       <span class="speedv num"><strong>${fmt(g.p50)}</strong><small>token/s</small></span>
-      <span class="nv num">${g.n} 轮</span>
-    </button>`).join('')
-  for (const b of box.querySelectorAll('.mrow')) b.onclick = () => { selected = b.dataset.m; render() }
+      <span class="nv num" title="${g.n - g.ok} 轮失败或停止，不计入速度">${g.ok}</span>
+    </button>`).join('')}
+    <div class="scale"><span></span><div><span>0</span><span>${max / 2}</span><span>${max}</span></div></div>`
+  for (const b of box.querySelectorAll('.mrow')) b.onclick = () => { selected = selected === b.dataset.m ? null : b.dataset.m; render() }
 }
 
 for (const b of document.querySelectorAll('#range button')) b.onclick = () => { hours = +b.dataset.h; render() }
