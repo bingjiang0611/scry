@@ -65,6 +65,15 @@ enum RemoteSelfTest {
     check("markdown.heading", markdown.contains { if case .heading(1) = $0.kind { return $0.text == "标题" }; return false })
     check("markdown.list", markdown.contains { if case .unordered = $0.kind { return $0.text == "项目" }; return false })
     check("markdown.code", markdown.contains { if case .code("swift") = $0.kind { return $0.text == "let answer = 42" }; return false })
+    // Mac-local links: only loopback HTTP(S) is intercepted; paths map like a static server.
+    let local = URL(string: "http://127.0.0.1:4311/designs/scry-steer/")!
+    check("link.loopbackIntercepted", MacLocalLink.isLoopback(local) && MacLocalLink.isLoopback(URL(string: "http://localhost:5173/a")!))
+    check("link.remoteKeepsSystemAction", !MacLocalLink.isLoopback(URL(string: "https://example.com/designs/")!) &&
+      !MacLocalLink.isLoopback(URL(string: "file:///tmp/a.html")!))
+    check("link.directoryMapsToIndex", MacLocalLink.workspacePath(for: local) == "designs/scry-steer/index.html" &&
+      MacLocalLink.workspacePath(for: URL(string: "http://127.0.0.1:4311/designs/scry-steer")!) == "designs/scry-steer/index.html")
+    check("link.fileKeepsName", MacLocalLink.workspacePath(for: URL(string: "http://127.0.0.1:4311/a/b%20c.html?x=1#y")!) == "a/b c.html")
+    check("link.dotSegmentsRejected", MacLocalLink.workspacePath(for: URL(string: "http://127.0.0.1:4311/a/%2E%2E/b.html")!) == nil)
     check("run.recoveryCheckpointRoundTrip", RemoteRunStore.selfTestRecoveryCheckpointRoundTrip())
     check("run.generationSessionIsolation", RemoteRunStore.selfTestGenerationIsolation())
     check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())

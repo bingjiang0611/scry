@@ -68,6 +68,7 @@ struct ChatView: View {
     .sheet(isPresented: $showFiles) {
       if let projectCwd { WorkspaceBrowserView(cwd: projectCwd).id(projectCwd) }
     }
+    .macLocalLinks(cwd: projectCwd)
     .onAppear { run.loadActiveContext() }
 #if DEBUG
     .onAppear {
