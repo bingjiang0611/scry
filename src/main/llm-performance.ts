@@ -17,6 +17,10 @@ export class LlmPerformanceObserver {
   private recentOutput: LlmPerformance['recentOutput'] = []
   private state: LlmPerformance['state'] = 'waiting'
   private messageId?: string
+  private callTokens = 0
+  private callDurationMs = 0
+  private calls = 0
+  private model?: string
 
   constructor(private readonly networkLabel = '', private readonly clock = { monotonic: () => performance.now(), now: () => Date.now() }) {
     this.started = clock.monotonic()
@@ -62,6 +66,12 @@ export class LlmPerformanceObserver {
       this.endSegment()
       if (this.state === 'streaming') this.state = 'waiting'
     }
+    if (root && event.llmCall) {
+      this.calls++
+      this.callTokens += event.llmCall.outputTokens
+      this.callDurationMs += event.llmCall.durationMs
+      this.model = event.llmCall.model ?? this.model
+    }
     const terminal = event.kind === 'harness' && (event.stage === 'result' || event.stage === 'runtime:turn_wall')
     if (terminal) {
       this.endSegment()
@@ -74,10 +84,15 @@ export class LlmPerformanceObserver {
     // Claude continuation results are cumulative; other adapters emit increments.
     // Reuse the canonical usage selection and require complete numerator/denominator
     // coverage. Residual/activity time is never a generation denominator.
-    const apiDurationMs = timing?.value.method === 'provider_api' && results.every(item => item.durationApiMs != null)
+    const providerApiMs = timing?.value.method === 'provider_api' && results.every(item => item.durationApiMs != null)
       ? timing.value.cumulativeMs : undefined
-    const outputTokens = results.length && results.every(item => item.tokensOut != null)
+    const resultTokens = results.length && results.every(item => item.tokensOut != null)
       ? results.reduce((sum, item) => sum + item.tokensOut!, 0) : undefined
+    // Without Provider API time, pair only per-call tokens with the same calls' local timing.
+    // Turn usage also counts failed/aborted calls, so it is never divided by observed call time.
+    const observedCalls = providerApiMs == null && this.calls > 0
+    const apiDurationMs = observedCalls ? this.callDurationMs : providerApiMs
+    const outputTokens = observedCalls ? this.callTokens : terminal ? resultTokens : undefined
     return {
       state: this.state,
       observedAt: new Date(wall).toISOString(),
@@ -88,10 +103,12 @@ export class LlmPerformanceObserver {
       windowMs: WINDOW_MS,
       streamDurationMs,
       ...(streamDurationMs > 0 && !this.untimedSegment ? { averageCharactersPerSecond: this.characters / (streamDurationMs / 1000) } : {}),
-      ...(terminal && outputTokens != null ? { outputTokens } : {}),
-      ...(apiDurationMs != null ? { apiDurationMs } : {}),
+      ...(outputTokens != null ? { outputTokens } : {}),
+      ...(apiDurationMs != null ? { apiDurationMs, tokenTimingSource: observedCalls ? 'observed_calls' as const : 'provider_api' as const } : {}),
       ...(apiDurationMs != null && apiDurationMs > 0 && outputTokens != null
-        ? { apiTokensPerSecond: outputTokens / (apiDurationMs / 1000) } : {})
+        ? { apiTokensPerSecond: outputTokens / (apiDurationMs / 1000) } : {}),
+      ...(observedCalls ? { llmCalls: this.calls } : {}),
+      ...(this.model ? { model: this.model } : {})
     }
   }
 }

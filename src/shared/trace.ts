@@ -479,6 +479,8 @@ export interface TraceEvent {
   messageId?: string // SDK assistant message.id = llm_request 级（一个 run 内多条）；result 事件无
   durationMs?: number
   durationApiMs?: number // 仅 result：SDK 权威 API 耗时
+  // 一次成功完成的主 Agent 模型请求：本机计时（请求开始→消息结束，含首 token 等待）。只用于速度观测，不是计费用量。
+  llmCall?: { outputTokens: number; durationMs: number; model?: string }
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   costUsd?: number
   costSource?: CostSource

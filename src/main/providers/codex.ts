@@ -912,6 +912,12 @@ export function createCodexAdapter(
       let lastRequestUsage: TokenUsage | undefined
       let modelContextWindow: number | undefined
       let model: string | undefined
+      // Start of the root thread's next model request: turn start, the latest tool/hook completion,
+      // or the previous usage update. agentMessage completion is mid-response and does not move it.
+      let llmCallStartMs: number | undefined
+      const advanceLlmCallStart = (atMs: number): void => {
+        llmCallStartMs = llmCallStartMs == null ? atMs : Math.max(llmCallStartMs, atMs)
+      }
       let modelProvider: string | undefined
       let serviceTier: string | null | undefined
       let authMode: string | undefined
@@ -1147,6 +1153,7 @@ export function createCodexAdapter(
                   state.boundaryMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
                 }
               }
+              if (isRoot) llmCallStartMs = epochMilliseconds(turn.startedAt) ?? observedAtMs
             } else if (method === 'item/agentMessage/delta') {
               runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
                 kind: 'model',
@@ -1230,6 +1237,7 @@ export function createCodexAdapter(
                   const completedAtMs =
                     usageNumber(params.completedAtMs) ?? observedAtMs
                   advanceTimingBoundary(notificationThreadId, completedAtMs)
+                  if (isRoot) advanceLlmCallStart(completedAtMs)
                 }
               }
             } else if (method === 'turn/plan/updated') {
@@ -1273,6 +1281,7 @@ export function createCodexAdapter(
                 const run = record(params.run)
                 const completedAtMs = epochMilliseconds(run.completedAt) ?? observedAtMs
                 advanceTimingBoundary(notificationThreadId, completedAtMs)
+                if (isRoot) advanceLlmCallStart(completedAtMs)
               }
             } else if (method === 'thread/tokenUsage/updated') {
               // Child threads report their own cumulative usage. It must not be added to the root turn.
@@ -1292,6 +1301,18 @@ export function createCodexAdapter(
                   ? last
                   : undefined
               if (delta && hasPositiveUsage(delta)) turnUsage = addUsage(turnUsage, delta)
+              // One usage update per completed model response. A repeated snapshot has no positive
+              // delta and must not become a second call. Duration is local: boundary → this update.
+              const callTokens = delta && hasPositiveUsage(delta) ? delta.outputTokens : undefined
+              if (callTokens != null && callTokens > 0 && llmCallStartMs != null && observedAtMs > llmCallStartMs) {
+                runRequest.emit(newEventAt(runRequest.runId, observedAtMs, {
+                  kind: 'harness',
+                  stage: 'runtime:llm_call',
+                  llmCall: { outputTokens: callTokens, durationMs: observedAtMs - llmCallStartMs, ...(model ? { model } : {}) }
+                }))
+              }
+              // An unknown delta (first resumed snapshot) still ends a response; a zero delta is a repeat.
+              if (!delta || hasPositiveUsage(delta)) llmCallStartMs = observedAtMs
               if (usage.total) lastSeenCumulativeUsage = total
               lastRequestUsage = usage.last ? last : undefined
               modelContextWindow = usageNumber(usage.modelContextWindow) ?? modelContextWindow

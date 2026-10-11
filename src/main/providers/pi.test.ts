@@ -213,6 +213,19 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message === 'call-timing') {
+        // Pi stamps message.timestamp at request creation. Errored/aborted retries carry tokens too.
+        for (const [stopReason, output, ageMs] of [['toolUse', 120, 3000], ['error', 50, 2000], ['aborted', 30, 1000], ['stop', 0, 1000], ['stop', 80, 2000]]) {
+          send({ type: 'message_start', message: { role: 'assistant' } })
+          send({ type: 'message_end', message: {
+            role: 'assistant', provider: 'qoder', model: 'ultimate', stopReason, content: [], timestamp: Date.now() - ageMs,
+            usage: { input: 10, output, cost: { total: 0 } }
+          } })
+        }
+        send({ type: 'agent_end' })
+        send({ type: 'agent_settled' })
+        continue
+      }
       if (command.message.startsWith('cached-context:')) {
         const [, provider, turn] = command.message.split(':')
         const samples = turn === 'first'
@@ -891,6 +904,25 @@ describe('Pi RPC Provider', () => {
       const messageIds = [...new Set(streamedModelEvents.map((event) => event.messageId))]
       expect(messageIds).toHaveLength(1)
       expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
+    })
+  }, 15_000)
+
+  it('times completed main calls from request creation and excludes errored, aborted or empty calls', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      const result = await adapter.run({
+        runId: 'call-timing', prompt: 'call-timing', cwd, agentProfileId: profile.id, attachments: [],
+        permissionMode: 'full_access', emit: (event) => events.push(event)
+      }).promise
+      expect(result.status).toBe('completed')
+      const calls = events.filter((event) => event.stage === 'runtime:llm_stream_end').map((event) => event.llmCall)
+      expect(calls.map((call) => call?.outputTokens)).toEqual([120, undefined, undefined, undefined, 80])
+      expect(calls[0]).toMatchObject({ model: 'ultimate', durationMs: expect.any(Number) })
+      // Local receipt time minus the request stamp; process latency may add a little, never subtract.
+      expect(calls[0]!.durationMs).toBeGreaterThanOrEqual(3000)
+      expect(calls[0]!.durationMs).toBeLessThan(13_000)
+      expect(calls[4]!.durationMs).toBeGreaterThanOrEqual(2000)
     })
   }, 15_000)
 

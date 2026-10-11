@@ -1289,6 +1289,45 @@ describe('Codex provider adapter', () => {
     }))
   })
 
+  it('times each root model request from turn start or tool completion to its usage update', async () => {
+    let notify: ((method: string, params: unknown, envelope?: { emittedAtMs?: number }) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'pro' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-calls' }, model: 'gpt-test' }
+      if (method === 'turn/start') return { turn: { id: 'turn-calls' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-calls', prompt: 'inspect', cwd: '/isolated-copy', attachments: [], emit: (event) => events.push(event)
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    const ids = { threadId: 'thread-calls', turnId: 'turn-calls' }
+    const usage = (input: number, output: number) => ({ ...ids, tokenUsage: {
+      total: { inputTokens: input, outputTokens: output, totalTokens: input + output }, last: { inputTokens: 10, outputTokens: output, totalTokens: 10 + output }
+    } })
+    notify?.('turn/started', { ...ids, turn: { id: 'turn-calls', startedAt: 100, status: 'inProgress' } }, { emittedAtMs: 100_500 })
+    notify?.('thread/tokenUsage/updated', usage(10, 30), { emittedAtMs: 103_000 })
+    // A repeated snapshot is not another response.
+    notify?.('thread/tokenUsage/updated', usage(10, 30), { emittedAtMs: 103_050 })
+    notify?.('item/completed', { ...ids, item: { id: 'tool-1', type: 'commandExecution', command: 'pwd', status: 'completed' }, completedAtMs: 105_000 }, { emittedAtMs: 105_100 })
+    // Mid-response text completion must not shorten the request.
+    notify?.('item/completed', { ...ids, item: { id: 'message-1', type: 'agentMessage', text: 'done' } }, { emittedAtMs: 106_000 })
+    notify?.('thread/tokenUsage/updated', { threadId: 'child-thread', turnId: 'child', tokenUsage: { last: { outputTokens: 999 } } }, { emittedAtMs: 106_500 })
+    notify?.('thread/tokenUsage/updated', { ...usage(20, 70), tokenUsage: { ...usage(20, 70).tokenUsage, last: { inputTokens: 10, outputTokens: 40, totalTokens: 50 } } }, { emittedAtMs: 107_000 })
+    notify?.('turn/completed', { ...ids, turn: { id: 'turn-calls', status: 'completed' } }, { emittedAtMs: 108_000 })
+    await handle.promise
+
+    expect(events.filter((event) => event.stage === 'runtime:llm_call').map((event) => event.llmCall)).toEqual([
+      { outputTokens: 30, durationMs: 3_000, model: 'gpt-test' },
+      { outputTokens: 40, durationMs: 2_000, model: 'gpt-test' }
+    ])
+  })
+
   it('records each Codex raw response as an observed model call bounded by prior activity', async () => {
     let notify: ((
       method: string,
