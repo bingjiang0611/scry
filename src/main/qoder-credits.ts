@@ -1,6 +1,7 @@
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { QoderCreditEvidence, UsageAnalytics } from '../shared/trace'
+import type { QoderCreditEvidence, UsageAnalytics, UsageAnalyticsAggregate } from '../shared/trace'
+import { QODER_USD_PER_CREDIT } from '../shared/qoder-pricing'
 import { dedupeCreditRequests, isCreditUsageEvidence, type CreditRequest } from '../shared/credit-usage'
 import { qoderCreditRequests, type CreditTurn } from '../shared/qoder-credit-requests'
 import { readTraceArchiveAsync } from './transcript-archive'
@@ -161,10 +162,34 @@ export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow
   }
   const scoped = rows.filter((row) => analytics.days.includes(dayOf(row.tsStart)))
   const evidence = aggregateCredits(scoped)
+  const qoder = analytics.byProvider.find((row) => row.provider === 'qoder')
+  // A canonical USD cost takes precedence over the Credit equivalent. Never
+  // add another estimate on top of Provider-reported dollars. This projection
+  // is read-only; native Credits remain the metering evidence in the ledger.
+  const convert = qoder?.costUsd == null
+  const enrich = <T extends UsageAnalyticsAggregate>(row: T, credits: QoderCreditEvidence | undefined): T => {
+    if (!convert || credits?.credits == null) return { ...row, qoderCredits: credits }
+    const knownTurns = scoped.filter((item) => item.evidence.credits != null &&
+      (!('day' in row) || dayOf(item.tsStart) === row.day)).length
+    return {
+      ...row, qoderCredits: credits,
+      costUsd: (row.costUsd ?? 0) + credits.credits * QODER_USD_PER_CREDIT,
+      costKnownRows: row.costKnownRows + knownTurns,
+      estimatedCostRows: row.estimatedCostRows + knownTurns
+    }
+  }
+  const byProvider = analytics.byProvider.map((row) => row.provider === 'qoder' ? enrich(row, evidence) : row)
+  const projectedQoder = byProvider.find((row) => row.provider === 'qoder')
   return {
     ...analytics,
-    totals: { ...analytics.totals, qoderCredits: evidence },
-    byProvider: analytics.byProvider.map((row) => row.provider === 'qoder' ? { ...row, qoderCredits: evidence } : row),
-    byDay: analytics.byDay.map((row) => ({ ...row, qoderCredits: aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === row.day)) }))
+    totals: enrich(analytics.totals, evidence),
+    byProvider,
+    // Credits are attributed to a Provider/turn, not to an auto-routed model.
+    byModel: convert && evidence?.credits != null && projectedQoder
+      ? [...analytics.byModel.filter((row) => row.provider !== 'qoder'), projectedQoder]
+      : analytics.byModel,
+    byDay: analytics.byDay.map((row) => enrich(row, aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === row.day)))),
+    dailyByProvider: analytics.dailyByProvider.map((row) => row.provider === 'qoder'
+      ? enrich(row, aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === row.day))) : row)
   }
 }

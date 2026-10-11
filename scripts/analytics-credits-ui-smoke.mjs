@@ -21,21 +21,23 @@ async function exercise() {
     const timer = setTimeout(() => { observer.disconnect(); reject(new Error('DOM condition timed out')) }, 5000)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
-  await waitFor(() => document.querySelector('.usage-provider-main')?.textContent.includes('12.5 Credits'))
-  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.25', 'Credits polluted USD total')
+  await waitFor(() => document.querySelector('.usage-cost-card')?.textContent.includes('12.5 Credits'))
+  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.38', 'Qoder USD equivalent missing from total')
+  const qoderRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'Qoder')
+  check(qoderRow.querySelector('.usage-provider-main > span:last-child').textContent === '$0.13', 'Qoder Credits not converted to USD')
   check(document.body.textContent.includes('Credits 已知下界'), 'Missing partial evidence')
   const groupButton = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
   groupButton('明细维度', '日期').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('日期'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.25 + 12.5 Credits'), 'Day breakdown mixed or lost units')
+  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.38'), 'Day breakdown lost Qoder USD equivalent')
   groupButton('明细维度', '模型').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('模型'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('12.5 Credits'), 'Model breakdown lost Qoder credits')
+  check(document.querySelector('.usage-table-wrap').textContent.includes('$0.13'), 'Model breakdown lost Qoder USD equivalent')
   groupButton('趋势指标', 'TOKEN').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('Token'))
   groupButton('趋势指标', '成本').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('成本'))
-  check(!document.querySelector('.usage-chart .is-qoder'), 'Qoder credits plotted on USD axis')
+  check(document.querySelector('.usage-chart .is-qoder'), 'Qoder USD equivalent missing from cost chart')
   groupButton('分析时间范围', '30 天').click()
   await waitFor(() => document.querySelector('#fixture-status').dataset.range === '30')
   document.querySelector('[aria-label="刷新分析数据"]').click()
@@ -43,7 +45,7 @@ async function exercise() {
   for (const node of document.querySelectorAll('.usage-provider-main')) {
     check(node.scrollWidth <= node.clientWidth + 1, 'Provider amount overflows')
   }
-  return { sqliteAndArchiveProjection: true, separateUnits: true, dayAndModel: true, chartSwitch: true, refresh: true, range: true }
+  return { sqliteAndArchiveProjection: true, usdEquivalent: true, dayAndModel: true, chartSwitch: true, refresh: true, range: true }
 }
 
 try {

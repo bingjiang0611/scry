@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { QoderCreditEvidence, UsageAnalytics } from '@shared/trace'
 import { AnalyticsView } from './AnalyticsView'
+import { QODER_USD_PER_CREDIT } from '@shared/qoder-pricing'
 
 const evidence: QoderCreditEvidence = {
   credits: 12.5, knownRequests: 4, missingRequests: 1, matchedTurns: 2, totalTurns: 3,
@@ -15,45 +16,50 @@ const aggregate = {
 }
 function render(credits: number | null | undefined) {
   const qoderCredits = credits === undefined ? undefined : { ...evidence, credits }
-  const row = { ...aggregate, qoderCredits }
+  const row = { ...aggregate, qoderCredits,
+    costUsd: credits == null ? null : credits * QODER_USD_PER_CREDIT,
+    costKnownRows: credits == null ? 0 : 1, estimatedCostRows: credits == null ? 0 : 1
+  }
   const data: UsageAnalytics = {
     status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
-    days: ['2026-09-09'], totals: { ...row, costUsd: 1.25, costKnownRows: 1, estimatedCostRows: 1 },
+    days: ['2026-09-09'], totals: row,
     byProvider: [{ ...row, provider: 'qoder', model: null }],
     byModel: [{ ...aggregate, provider: 'qoder', model: 'ultimate' }],
     byDay: [{ ...row, day: '2026-09-09' }],
-    dailyByProvider: [{ ...aggregate, day: '2026-09-09', provider: 'qoder' }]
+    dailyByProvider: [{ ...row, day: '2026-09-09', provider: 'qoder' }]
   }
   return renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false} error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
 }
 
 describe('AnalyticsView Qoder Credits', () => {
-  it('Qoder-only 分析在概览与明细统一显示 Credit，不回退成美元成本', () => {
+  it('shows Qoder USD equivalent in total, breakdown, share and chart while retaining partial Credits evidence', () => {
     const html = render(12.5)
-    expect(html).toContain('QODER CREDIT')
-    expect(html).toContain('<strong>12.5 Credits</strong>')
-    expect(html).not.toContain('<strong>$1.25</strong>')
-    expect(html).toContain('独立计量')
+    expect(html).toContain('RAW TOKEN COST')
+    expect(html).toContain('<strong>$0.13</strong>')
+    expect(html).toContain('Qoder 12.5 Credits')
     expect(html).toContain('Credits 已知下界')
     expect(html).toContain('2/3 轮已关联，4 个请求有计量，1 个请求缺失')
-    expect(html).toContain('不计入美元总额、占比或成本趋势')
+    expect(html).toContain('1 Credit = $0.01')
+    expect(html).toContain('不代表实际账单')
     expect(html).not.toContain('另计 Qoder')
-    expect(html).toContain('该时间范围没有可绘制的成本数据')
-    expect(html).not.toContain('usage-provider-track')
+    expect(html).not.toContain('该时间范围没有可绘制的成本数据')
+    expect(html).toContain('usage-provider-track')
+    expect(html).toContain('usage-chart-point is-qoder')
     expect(html).not.toContain('$12.50')
     const details = html.slice(html.indexOf('<section class="usage-breakdown">'))
-    expect(details).toContain('<th>Credit</th>')
-    expect(details).toContain('>12.5 Credits</td><td>—</td>')
+    expect(details).toContain('<th>成本（USD）</th>')
+    expect(details).toContain('>$0.13</td><td>100.0%</td>')
     expect(details).not.toContain('ultimate')
   })
 
   it('distinguishes unknown, measured zero and tiny positive credits', () => {
     expect(render(null)).toContain('Credit 不可用')
     expect(render(null)).not.toContain('>0 Credits<')
-    expect(render(undefined)).not.toContain('usage-provider-track is-unknown')
-    expect(render(0)).toContain('>0 Credits</td>')
+    expect(render(undefined)).toContain('usage-provider-track is-unknown')
+    expect(render(null)).toContain('<strong>—</strong>')
+    expect(render(0)).toContain('>$0.00</td>')
     expect(render(0)).toContain('Credits 已知下界')
     expect(render(0.0001)).toContain('&lt;0.01 Credits')
-    expect(render(0.0001)).not.toContain('>0 Credits</td>')
+    expect(render(0.0001)).toContain('&lt;$0.01')
   })
 })
