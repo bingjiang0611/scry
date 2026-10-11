@@ -918,13 +918,10 @@ function addAssistantUsage(
   aggregate.cacheWrite += cacheWrite ?? 0
   aggregate.reasoning += reasoning ?? 0
   const contextEvidence = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
-  // Pi reports an all-zero usage object for transport failures. Treating that as an exact context
-  // sample replaces the last known session context with 0 in Scry's overview.
+  // Pi normalizes input/cacheRead/cacheWrite into disjoint counts, including for OpenAI/Codex.
+  // Cached tokens still occupy context. All-zero transport failures are not context samples.
   if (contextEvidence > 0) {
-    const billingProvider = billingProviderForUpstream(provider)
-    aggregate.lastContextTokens = billingProvider === 'codex' || billingProvider === 'openai'
-      ? (input ?? 0)
-      : contextEvidence
+    aggregate.lastContextTokens = contextEvidence
     aggregate.lastContextModel = model
     aggregate.lastContextProvider = provider
     aggregate.contextUsageSource = 'pi_rpc_assistant_usage'

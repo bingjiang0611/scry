@@ -211,6 +211,27 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message.startsWith('cached-context:')) {
+        const [, provider, turn] = command.message.split(':')
+        const samples = turn === 'first'
+          ? [{ input: 9100, cacheRead: 0, cacheWrite: 0 }]
+          : [
+            { input: 942, cacheRead: 100000, cacheWrite: 256 },
+            { input: 9100, cacheRead: 100000, cacheWrite: 0 },
+            { input: 0, cacheRead: 110000, cacheWrite: 0 },
+            { input: 0, cacheRead: 0, cacheWrite: 0 }
+          ]
+        for (const usage of samples) {
+          send({ type: 'message_start', message: { role: 'assistant' } })
+          send({ type: 'message_end', message: {
+            role: 'assistant', provider, model: 'test-model', stopReason: 'stop', content: [],
+            usage: { ...usage, output: 4 }
+          } })
+        }
+        send({ type: 'agent_end' })
+        send({ type: 'agent_settled' })
+        continue
+      }
       if (command.message.startsWith('context-telemetry:')) {
         const scenario = command.message.slice('context-telemetry:'.length)
         const sample = (input) => {
@@ -686,7 +707,7 @@ describe('Pi RPC Provider', () => {
         expect.objectContaining({ kind: 'agent', tool: 'Agent', toolUseId: 'tool-1' }),
         expect.objectContaining({
           kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 4, costUsd: 0.01,
-          contextTokens: 10, contextModel: 'test-model', contextProvider: 'openai-codex',
+          contextTokens: 13, contextModel: 'test-model', contextProvider: 'openai-codex',
           contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact',
           billingProvider: 'codex', upstreamProvider: 'openai-codex',
           modelUsage: [expect.objectContaining({
@@ -702,6 +723,33 @@ describe('Pi RPC Provider', () => {
       const messageIds = [...new Set(streamedModelEvents.map((event) => event.messageId))]
       expect(messageIds).toHaveLength(1)
       expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
+    })
+  }, 15_000)
+
+  it.each(['openai', 'openai-codex'])('includes Pi-normalized cached context across resumed turns for %s', async (provider) => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const firstEvents: TraceEvent[] = []
+      const first = await adapter.run({
+        runId: 'context-first', prompt: `cached-context:${provider}:first`, cwd,
+        agentProfileId: profile.id, attachments: [], permissionMode: 'full_access',
+        emit: (event) => firstEvents.push(event)
+      }).promise
+      expect(first.status).toBe('completed')
+      expect(firstEvents.find((event) => event.stage === 'result')?.contextTokens).toBe(9100)
+      const nextEvents: TraceEvent[] = []
+      const next = await adapter.run({
+        runId: 'context-second', prompt: `cached-context:${provider}:second`, cwd, resume: first.externalSessionId,
+        agentProfileId: profile.id, attachments: [], permissionMode: 'full_access',
+        emit: (event) => nextEvents.push(event)
+      }).promise
+      expect(next.status).toBe('completed')
+      expect(nextEvents.filter((event) => event.stage === 'context_usage').map((event) => event.contextTokens))
+        .toEqual([101198, 109100, 110000])
+      expect(nextEvents.find((event) => event.stage === 'result')).toMatchObject({
+        contextTokens: 110000, contextModel: 'test-model', contextProvider: provider,
+        contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact'
+      })
     })
   }, 15_000)
 
@@ -721,7 +769,7 @@ describe('Pi RPC Provider', () => {
           }
         })
         await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
-        expect(samplesBeforeResult.map((event) => event.contextTokens)).toEqual(scenario === 'success' ? [50000, 8000] : [50000])
+        expect(samplesBeforeResult.map((event) => event.contextTokens)).toEqual(scenario === 'success' ? [50003, 8003] : [50003])
         expect(samplesBeforeResult[0]).toMatchObject({
           contextModel: 'test-model', contextProvider: 'openai-codex',
           contextUsageSource: 'pi_rpc_assistant_usage', contextUsageQuality: 'exact',
@@ -734,7 +782,7 @@ describe('Pi RPC Provider', () => {
         expect(compactions).toHaveLength(completed ? 1 : 0)
         if (completed) expect(compactions[0].compaction).toEqual({ trigger: 'auto', preTokens: 50000 })
         const result = events.find((event) => event.stage === 'result')!
-        expect(result.contextTokens).toBe(scenario === 'success' ? 8000 : scenario === 'idle' ? undefined : 50000)
+        expect(result.contextTokens).toBe(scenario === 'success' ? 8003 : scenario === 'idle' ? undefined : 50003)
         expect(result.tokensIn).toBe(scenario === 'success' ? 58000 : 50000)
       })
     }, 15_000
