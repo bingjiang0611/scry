@@ -106,11 +106,33 @@ describe('Qoder native Credits projection', () => {
       cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null
     }], costs: [{ tsStart, provider: 'anthropic', model: 'sonnet', costUsd: 1.25, confidence: 'estimated', costSource: 'sdk_estimate' }] })
     const enriched = withQoderCredits(analytics, rows)
-    expect(enriched.totals).toMatchObject({ costUsd: 1.25, inputTokens: 100, qoderCredits: { credits: 2.5, totalTurns: 2, completeness: 'partial' } })
-    expect(enriched.byProvider.find((row) => row.provider === 'qoder')).toMatchObject({ costUsd: null, qoderCredits: { credits: 2.5 } })
-    expect(enriched.byDay.at(-1)?.qoderCredits?.credits).toBe(2.5)
+    expect(enriched.totals).toMatchObject({ costUsd: 1.275, estimatedCostRows: 3, inputTokens: 100, qoderCredits: { credits: 2.5, totalTurns: 2, completeness: 'partial' } })
+    expect(enriched.byProvider.find((row) => row.provider === 'qoder')).toMatchObject({ costUsd: 0.025, estimatedCostRows: 2, qoderCredits: { credits: 2.5 } })
+    expect(enriched.byDay.at(-1)).toMatchObject({ costUsd: 1.275, qoderCredits: { credits: 2.5 } })
+    expect(enriched.dailyByProvider.find((row) => row.provider === 'qoder')).toMatchObject({ costUsd: 0.025, qoderCredits: { credits: 2.5 } })
+    expect(enriched.byModel.filter((row) => row.provider === 'qoder')).toMatchObject([{ model: null, costUsd: 0.025 }])
+    expect(withQoderCredits(enriched, rows)).toEqual(enriched)
     expect(withQoderCredits(analytics, [{ ...rows[0], tsStart: 0 }]).totals.qoderCredits).toBeUndefined()
     expect(analytics.totals.qoderCredits).toBeUndefined()
+  })
+
+  it('keeps missing Credits unknown, converts real zero, and never adds to canonical USD', () => {
+    const analytics = buildUsageAnalytics({ nowMs: tsStart, rangeDays: 7, tokens: [{
+      ...scope, provider: 'qoder', model: 'ultimate', inputTokens: 100, outputTokens: 20,
+      cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null
+    }], costs: [] })
+    const creditRow = (credits: number | null) => ({ ...scope, evidence: {
+      credits, knownRequests: credits == null ? 0 : 1, missingRequests: 1, matchedTurns: 1,
+      totalTurns: 1, source: 'qoder_native_transcript' as const, completeness: 'partial' as const
+    } })
+    expect(withQoderCredits(analytics, [creditRow(null)]).totals).toMatchObject({ costUsd: null, estimatedCostRows: 0 })
+    expect(withQoderCredits(analytics, [creditRow(0)]).totals).toMatchObject({ costUsd: 0, estimatedCostRows: 1 })
+    expect(withQoderCredits(analytics, [creditRow(2000)]).totals).toMatchObject({ costUsd: 20, estimatedCostRows: 1 })
+    const reported = buildUsageAnalytics({ nowMs: tsStart, rangeDays: 7, tokens: [], costs: [{
+      tsStart, provider: 'qoder', model: null, costUsd: 3, confidence: 'provider_reported', costSource: 'provider_reported'
+    }] })
+    expect(withQoderCredits(reported, [creditRow(2000)]).totals).toMatchObject({ costUsd: 3, estimatedCostRows: 0, providerReportedCostRows: 1 })
+    expect(analytics.totals.costUsd).toBeNull()
   })
 
   it('refreshes growing native logs and preserves unavailable, real zero and unmatched turns', async () => {
