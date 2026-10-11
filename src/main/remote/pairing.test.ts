@@ -151,6 +151,43 @@ describe('pairing authority (synthetic crypto adapter; no human or Provider exec
     expect(authority.inspectLocal().grants).toHaveLength(0)
   })
 
+  it('persists a peer label update across restart without reissuing a grant or rewriting unchanged labels', async () => {
+    const store = new MemoryStore()
+    const { authority, dependencies, issue } = setup(store)
+    const { pairing } = await pending(authority)
+    const grant = await authority.confirmLocal(pairing.pairingId, KEY)
+    const commit = vi.spyOn(store, 'commit')
+    await authority.updateDeviceLabel(CERT, 'iPhone 17 Pro')
+    await authority.updateDeviceLabel(CERT, 'iPhone 17 Pro')
+    expect(commit).toHaveBeenCalledTimes(1)
+    const expected = { ...grant, deviceLabel: 'iPhone 17 Pro' }
+    expect(authority.inspectLocal().grants).toEqual([expected])
+    expect(issue).toHaveBeenCalledTimes(1)
+    authority.close()
+    const restored = new PairingAuthority(dependencies)
+    expect(restored.inspectLocal().grants).toEqual([expected])
+    expect(restored.authorizesCertificate(CERT)).toBe(true)
+  })
+
+  it('rejects ungranted and expired peers and fences authorization after a label persistence failure', async () => {
+    const store = new MemoryStore()
+    const { authority, dependencies, time } = setup(store)
+    const { pairing } = await pending(authority)
+    const grant = await authority.confirmLocal(pairing.pairingId, KEY)
+    await expect(authority.updateDeviceLabel(KEY, 'spoof')).rejects.toThrow('device_not_authorized')
+    expect(authority.inspectLocal().grants).toEqual([grant])
+    store.failure = 'before'
+    await expect(authority.updateDeviceLabel(CERT, 'iPhone 17 Pro')).rejects.toThrow('injected_write_failure')
+    expect(authority.authorizesCertificate(CERT)).toBe(false)
+    authority.close()
+    store.failure = undefined
+    const restored = new PairingAuthority(dependencies)
+    expect(restored.inspectLocal().grants).toEqual([grant])
+    time.wall = grant.expiresAt
+    await expect(restored.updateDeviceLabel(CERT, 'spoof')).rejects.toThrow('device_not_authorized')
+    expect(restored.inspectLocal().grants).toEqual([grant])
+  })
+
   it('revocation rejects new calls immediately and persists across normal host restart', async () => {
     const { authority, dependencies } = setup()
     const { pairing } = await pending(authority)

@@ -357,7 +357,7 @@ final class RemoteSessionRegistry: @unchecked Sendable {
     return lock.withLock {
       if key == wanted, let current { return current }
       let replaced = current
-      let session = RelaySession(endpoint: endpoint(), identity: identity)
+      let session = RelaySession(endpoint: endpoint(), identity: identity, deviceLabel: RemoteDeviceModel.currentLabel)
       key = wanted
       current = session
       if let replaced { Task { await replaced.reset() } }

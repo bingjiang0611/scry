@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#endif
+import RemoteTransport
 
 // Truthful UI state for the v5 Codex Refined interface. Connection, catalog,
 // history and run state come only from the paired host; empty/unpaired/offline
@@ -232,7 +230,7 @@ final class AppModel: ObservableObject {
     pairing = .proving
     link = .pairing
     route = .pair // Keep the grant receipt visible when QR-only onboarding unlocks the workspace.
-    let label = deviceLabel()
+    let label = RemoteDeviceModel.currentLabel
     pairingTask = Task { [weak self] in
       let client = RemotePairingClient()
       do {
@@ -308,14 +306,6 @@ final class AppModel: ObservableObject {
         }
       }
     }
-  }
-
-  private func deviceLabel() -> String {
-#if canImport(UIKit)
-    return UIDevice.current.name
-#else
-    return "iPhone"
-#endif
   }
 
   func cancelPairing() {
