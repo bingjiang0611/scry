@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | Claude | result 的 canonical 输出 token 与 SDK `durationApiMs` | `provider_api` |
 | Pi | 每次 `message_end` 的 `usage.output`；耗时 = 本机收到时间 − `message.timestamp`（Pi 在创建请求时写入）。`error`/`aborted` 与 0 输出调用不计 | `observed_calls` |
-| Codex | 每次根线程 `thread/tokenUsage/updated` 的正向输出 token 增量；耗时 = 本次通知时间 − 上一个边界（轮次开始、工具/Hook 完成、上一次 usage 通知中的最晚者）。重复快照（增量为 0）不算新调用；子线程不计 | `observed_calls` |
+| Codex | 每次根线程 `thread/tokenUsage/updated` 的正向输出 token 增量；耗时 = 开始 → 最后一个生成信号（见下文）。重复快照（增量为 0）不算新调用；子线程不计 | `observed_calls` |
 | Qoder / OpenCode | 未接入单次调用证据 | 无，速度缺失 |
 
 首 token 来源：
@@ -30,10 +30,23 @@
 | Provider | 首块信号 | 缺失时 |
 | --- | --- | --- |
 | Pi | 该消息的第一个 `message_update`（Pi 只为 text/thinking/toolcall 的 start/delta/end 发出） | 无更新的调用不计 |
-| Codex | 边界之后根线程第一个 `item/started`（`reasoning` / `agentMessage` / `webSearch`）或正文/思考 delta。Codex 自己的单请求 TTFT 也用 OutputItemAdded，但 app-server 不下发 | 工具 item 不算（模型生成完调用才开始）；工具中途完成把边界移过首块时，本次调用记未知 |
+| Codex | 开始之后根线程第一个 `item/started`（`reasoning` / `agentMessage` / `webSearch`）或正文/思考 delta。Codex 自己的单请求 TTFT 也用 OutputItemAdded，但 app-server 不下发 | 工具 item 不算（模型生成完调用才开始） |
 | Claude / Qoder / OpenCode | 未接入 | 「首 token」列显示 —，首 token 图不画该模型 |
 
 Codex 在有扩展参与流式条目时可能延迟下发 `item/started`，此时首 token 偏大。
+
+### Codex 单次调用的起止
+
+Codex 等这次请求调用的工具全部跑完，才发出它的 usage 通知（codex-rs `turn.rs` 先 drain in-flight 工具，再发 token count）。所以 usage 通知不是生成结束，这次请求自己的工具完成也不是下一次请求的开始。真实顺序：
+
+```
+请求开始 → 首块 → … → PreToolUse 开始 → 工具运行 → 工具/Hook 完成 → usage 通知 → 下一次请求开始
+```
+
+- 开始：轮次开始、上一次 usage 通知，或本次还没有任何输出时完成的工具/Hook（例如 UserPromptSubmit），取最晚者。
+- 结束：最后一个生成信号。信号包括正文/思考 delta、`reasoning`/`agentMessage`/`webSearch` item 的开始与完成、`PreToolUse` Hook 开始，以及没有前置 PreToolUse 的工具 item 开始。没有任何信号时以 usage 通知为结束。
+- 时间一律用本机收到通知的毫秒时间。`turn.startedAt` 与 Hook `completedAt` 是整秒，会让开始提前最多 1 秒。
+- 已知近似：PreToolUse Hook 与工具 item 只按先后计数配对。一次请求里有的工具有 Hook、有的没有，并且并行开始时，配对可能错位；结束时间的偏差不超过一次 Hook 耗时。
 
 `observed_calls` 是本机计时的估算：包含本机 IPC 延迟，Codex 还依赖 usage 通知紧随响应结束这一时序。Provider API 时间存在时优先用它，不与本机计时混用。单次调用证据记在 trace 事件的 `llmCall` 字段（`outputTokens`、`durationMs`、可选 `firstTokenMs`；Pi 在 `runtime:llm_stream_end`，Codex 在 `runtime:llm_call`），不参与计费用量。
 
