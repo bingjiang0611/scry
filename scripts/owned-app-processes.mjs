@@ -2,7 +2,9 @@ import { execFileSync } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 
 function processes() {
-  const output = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,stat=,lstart=,command='], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
+  // lstart order depends on locale (en_NZ uses day before month). Identity capture and
+  // revalidation must parse the same stable format, without weakening signal checks.
+  const output = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,stat=,lstart=,command='], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } })
   const rows = new Map()
   for (const line of output.split('\n')) {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w+\s+\w+\s+\d+\s+[\d:]+\s+\d+)\s+(.*)$/)

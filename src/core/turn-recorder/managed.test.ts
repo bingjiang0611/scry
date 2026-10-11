@@ -84,6 +84,28 @@ async function startManaged(root: string, sessionId = 'session-1'): Promise<void
 }
 
 describe('managed canonical recorder', () => {
+  it('commits root prompt and supplementary admission outcomes together without creating another recorder turn', async () => {
+    const root = await workspace()
+    await startManaged(root)
+    const user = aggregateTurnEvidence({ userText: '/rate-workflow 1', source: 'scry_provider_adapter', events: [
+      { id: 'steer-accepted', ts: '2026-07-29T12:00:04.000Z', runId: 'run-1', kind: 'human', stage: 'steer', steer: { messageId: 'message-1', prompt: '补充要求', attachments: [], status: 'accepted', providerTurnId: 'turn-1' } },
+      { id: 'steer-unknown', ts: '2026-07-29T12:00:06.000Z', runId: 'run-1', kind: 'human', stage: 'steer', steer: { messageId: 'message-2', prompt: '不自动重发', attachments: [], status: 'unknown', message: 'response unconfirmed' } }
+    ] }).user
+    const evidence = { ...canonicalEvidence(), user }
+    const archiveFingerprint = stableHash({ evidence, timing })
+    const prepared = await prepareManagedRecorderTurn({ workspace: root, provider: 'codex', sessionId: 'session-1', runId: 'run-1', providerTurnId: 'turn-1', userText: '/rate-workflow 1', evidence, timing, status: 'completed', archiveFingerprint })
+    expect(prepared.status).toBe('prepared')
+    if (prepared.status !== 'prepared') throw new Error('expected canonical handoff')
+    await expect(commitManagedRecorderTurn({ workspace: root, provider: 'codex', sessionId: 'session-1', runId: 'run-1', recordId: prepared.recordId, providerTurnId: 'turn-1', userText: '/rate-workflow 1', evidence, timing, status: 'completed', archiveFingerprint })).resolves.toMatchObject({ status: 'committed' })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].user.value).toMatchObject({ text: '/rate-workflow 1', steers: [
+      { messageId: 'message-1', prompt: '补充要求', status: 'accepted' },
+      { messageId: 'message-2', prompt: '不自动重发', status: 'unknown' }
+    ] })
+    expect(records[0].usage.value).toMatchObject({ inputTokens: 100, outputTokens: 20 })
+  })
+
   it('includes Claude in the managed recorder provider set', () => {
     expect(isManagedRecorderProvider('claude')).toBe(true)
   })

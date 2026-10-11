@@ -19,6 +19,7 @@ import {
   type AgentInputAttachment,
   type AgentQuestionRequest,
   type AgentQuestionResponse,
+  type AgentSteerEvidence,
   type RunTerminationReason
 } from '@shared/runtime'
 import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionDialog'
@@ -62,6 +63,30 @@ export function attachmentSrc(attachment: AgentInputAttachment): string {
   const src = `data:${attachment.mimeType};base64,${attachment.dataBase64}`
   attachmentSrcCache.set(attachment, src)
   return src
+}
+
+export function SteerEvidenceMessage({ evidence }: { evidence: AgentSteerEvidence }) {
+  const terminal = evidence.status !== 'pending'
+  const label = evidence.status === 'accepted'
+    ? 'Provider 已接收'
+    : evidence.status === 'rejected'
+      ? 'Provider 已拒绝'
+      : evidence.status === 'unavailable'
+        ? 'Steer 不可用'
+        : evidence.status === 'unknown'
+          ? '结果未知'
+          : '提交中'
+  return (
+    <div className={`steer-evidence steer-${evidence.status}`} data-steer-message-id={evidence.messageId} role="note">
+      <div className="steer-evidence-head">
+        <Icon name={evidence.status === 'accepted' ? 'check' : evidence.status === 'pending' ? 'clock' : 'alert'} />
+        <b>Steer · {label}</b>
+        {terminal && <span>原生回执不代表模型已读取或遵循</span>}
+      </div>
+      <UserMessage text={evidence.prompt} attachments={evidence.attachments} />
+      {evidence.message && <div className="steer-evidence-message">{evidence.message}</div>}
+    </div>
+  )
 }
 
 function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachment; onClose: () => void }) {
@@ -1364,6 +1389,11 @@ function AssistantTurnImpl({
     () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
     [items]
   )
+  const latestSteerEvents = useMemo(() => {
+    const latest = new Map<string, TraceEvent>()
+    for (const event of visibleItems) if (event.steer) latest.set(event.steer.messageId, event)
+    return latest
+  }, [visibleItems])
   const result = resultOf({ items })
   // Failed provider turns can still have an authoritative native boundary. Exposing that
   // boundary lets Pi/Rotom recover exactly as its terminal tree navigation does, instead
@@ -1524,6 +1554,14 @@ function AssistantTurnImpl({
         )
       }
       for (const ev of visibleItems) {
+        if (ev.kind === 'human' && ev.stage === 'steer' && ev.steer) {
+          if (latestSteerEvents.get(ev.steer.messageId)?.id === ev.id) {
+            flushLive()
+            flushTools()
+            out.push(<SteerEvidenceMessage key={ev.id} evidence={ev.steer} />)
+          }
+          continue
+        }
         if (ev.kind === 'harness') {
           if (ev.providerId === 'pi' && ev.runtimeProvider === 'pi_rpc' && ev.text &&
             (ev.providerCommand || ev.stage === 'runtime:extension_message' ||
@@ -1627,6 +1665,7 @@ function AssistantTurnImpl({
     nestedLiveKey,
     nestedLiveText,
     nestedLiveThinking,
+    latestSteerEvents,
     projection.liveParentToolUseId,
     selectedId,
     turn.done,

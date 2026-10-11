@@ -64,6 +64,7 @@ import { LlmPerformanceSampling } from './llm-performance-sampling'
 import { LlmNetworkConfigurationCache } from './llm-network-configuration'
 import type { LlmNetworkConfiguration } from '../shared/llm-performance'
 import { stopObservedBackgroundTask } from './background-task-control'
+import { RunSteering, steerObservedRun } from './run-steering'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isRendererPerformanceSample } from '../shared/performance'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
@@ -77,11 +78,13 @@ import {
   type AgentPermissionMode,
   type AgentInputAttachment,
   type AgentStartRequest,
+  type AgentSteerInput,
+  type AgentSteerResult,
   type RuntimeProvider
 } from '../shared/runtime'
 import { capabilityUnavailable, type DeleteArchivedSessionsResult, type DeleteSessionResult, type ProviderContext, type ProviderId, type SessionProviderId } from '../shared/provider'
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
-import type { AuthorizedMcpExecution } from './providers/types'
+import type { AuthorizedMcpExecution, ProviderRunHandle } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
 import { piRpcEnvironment, probePiAgent } from './providers/pi'
@@ -2199,6 +2202,7 @@ interface RunControl {
   interrupt: () => void
   forceKill: () => void
   stopBackgroundTask: (taskId: string) => Promise<BackgroundTaskStopResult>
+  steer: (input: AgentSteerInput) => Promise<AgentSteerResult>
   /**
    * 硬杀当下的真实作用范围，直接来自 Provider handle。handle 还没创建时返回 undefined：
    * 没有可调用对象就不能声称已经发出 run-scoped 强制终止。
@@ -3152,24 +3156,14 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       console.warn('[scry] native session renderer notification failed:', runId, error)
     }
   }
-  let h: {
-    promise: Promise<{
-      externalSessionId?: string
-      providerTurnId?: string
-      forkTurnId?: string
-      stopped?: boolean
-      status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
-      recordingFailure?: { message: string }
-    }>
-    interrupt: () => void
-    forceKill: () => void
-    forceKillScope: AgentForceKillScope
-    stopBackgroundTask?: (taskId: string) => Promise<BackgroundTaskStopResult>
-    getExternalSessionId: () => string | undefined
-    getProviderTurnId?: () => string | undefined
-    getForkTurnId?: () => string | undefined
-    getRecordingFailure?: () => { message: string } | undefined
-  } | null = null
+  let h: ProviderRunHandle | null = null
+  const steering = new RunSteering(
+    runState,
+    () => h?.steer,
+    (input) => prepareRunAttachments(app.getPath('userData'), runId, input.attachments,
+      cwd ? { providerId, cwd, sessionId: runState.externalSessionId } : undefined, input.messageId),
+    emit
+  )
   let interrupted = false
   let observedProviderStartedAt: string | undefined
   const runProvider = async (): Promise<{
@@ -3219,10 +3213,18 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       onExternalSessionId: publishSessionId,
       requestUserInput: (question, signal) => userQuestionBroker.request({ ...question, providerId }, signal)
     })
+    if (!h.steer) emit({
+      id: mainEventId('steer-capability', runId), ts: new Date().toISOString(), runId,
+      kind: 'harness', stage: 'runtime:steer_capability',
+      steerCapability: { status: 'unavailable', reason: `${providerId} 当前接入未提供已验证的原生 Steer；消息仍按队列发送。` }
+    })
     if (interrupted) h.interrupt()
     let result: Awaited<typeof h.promise>
     try {
-      result = await h.promise
+      try { result = await h.promise } finally {
+        steering.close()
+        await steering.idle()
+      }
     } catch (error) {
       emit({
         id: mainEventId('provider-ended', runId),
@@ -3276,6 +3278,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     },
     forceKillScope: () => h?.forceKillScope,
     stopBackgroundTask: (taskId) => h?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
+    steer: (input) => steering.submit(input),
     cwd,
     resume,
     getExternalSessionId: () => h?.getExternalSessionId(),
@@ -3837,6 +3840,7 @@ handleTrusted('agent:traceResynchronized', () => {
 handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
 
 handleTrusted('agent:stop', (_event, runId: string) => requestRunStop(runId))
+handleTrusted('agent:steer', (_event, payload: unknown) => steerObservedRun(payload, (runId) => runs.get(runId)))
 
 // Shared by the Mac stop button and a paired device stopping a Mac run.
 function requestRunStop(runId: string): boolean {

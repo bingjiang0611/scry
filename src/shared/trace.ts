@@ -3,6 +3,8 @@ import type {
   AgentIntervention,
   AgentQuestionRequest,
   AgentStopState,
+  AgentSteerCapability,
+  AgentSteerEvidence,
   RunTerminationReason,
   RuntimeFailureStage,
   RuntimeProvider
@@ -515,6 +517,8 @@ export interface TraceEvent {
   runtimeMetadata?: Record<string, unknown>
   backgroundWork?: BackgroundWork
   intervention?: AgentIntervention
+  steerCapability?: AgentSteerCapability
+  steer?: AgentSteerEvidence
   compaction?: ContextCompaction
 }
 

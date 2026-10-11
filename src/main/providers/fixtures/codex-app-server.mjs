@@ -45,6 +45,8 @@ input.on('line', (line) => {
     send({ id: message.id, result: { turn: { id: 'turn-1' } } })
     send({ method: 'item/agentMessage/delta', emittedAtMs: 1_234, params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello' } })
     send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', items: [], error: null, durationMs: 12 } } })
+  } else if (message.method === 'test/error') {
+    send({ id: message.id, error: { code: -32601, message: 'method unavailable', data: { method: message.params?.method } } })
   } else if (message.method === 'test/serverRequest') {
     pendingServerRequest = message.id
     send({ id: 'approval-1', method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', command: 'pwd' } })

@@ -14,7 +14,9 @@ import {
   classifyRunTermination,
   normalizeAgentQuestionRequest,
   type AgentPermissionMode,
-  type AgentRunControlCatalog
+  type AgentRunControlCatalog,
+  type AgentSteerInput,
+  type AgentSteerResult
 } from '../../shared/runtime'
 import { homedir } from 'node:os'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
@@ -27,6 +29,7 @@ import type {
 } from '../codex-hook-trust'
 import {
   CodexAppServerClient,
+  CodexAppServerResponseError,
   type CodexNotificationEnvelope
 } from './codex-app-server'
 import { createCodexIsolatedHome } from './codex-isolated-home'
@@ -236,6 +239,17 @@ function canonicalTurnStatus(
 const explicitSkillMention = (prompt: string): { name: string; text: string } | undefined => {
   const match = /^\s*[$/]([A-Za-z0-9_.:-]+)(?=\s|$)/.exec(prompt)
   return match ? { name: match[1], text: prompt.slice(match[0].length).trimStart() } : undefined
+}
+
+/** Encode the native UserInput union once for both initial turns and same-turn steering. */
+const codexInput = (prompt: string, attachments: ProviderRunRequest['attachments']): unknown[] => {
+  const input: unknown[] = []
+  if (prompt) input.push({ type: 'text', text: prompt, text_elements: [] })
+  for (const attachment of attachments) {
+    if (attachment.path) input.push({ type: 'localImage', path: attachment.path })
+    else input.push({ type: 'image', url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` })
+  }
+  return input
 }
 
 const skillNamesFromCommand = (command: string): string[] => {
@@ -915,6 +929,7 @@ export function createCodexAdapter(
       }
       const timingByThread = new Map<string, ResponseTimingState>()
       let finish: ((value: ProviderRunResult) => void) | undefined
+      let turnCompleted = false
       let interruptDispatched = false
       const dispatchInterrupt = (): void => {
         if (interruptDispatched || !externalSessionId || !turnId) return
@@ -1304,6 +1319,7 @@ export function createCodexAdapter(
                 }
                 return
               }
+              turnCompleted = true
               const turn = record(params.turn)
               const turnError = record(turn.error)
               const effectiveError = Object.keys(turnError).length > 0 ? turnError : lastTurnError
@@ -1467,7 +1483,7 @@ export function createCodexAdapter(
           }
           runRequest.onExternalSessionId?.(externalSessionId)
           if (stopped) return { externalSessionId, stopped: true, status: 'interrupted' }
-          const input: unknown[] = []
+          let input: unknown[] = []
           const mention = explicitSkillMention(runRequest.prompt)
           const skill = mention
             ? (await skills.list({ providerId: 'codex', cwd: runRequest.cwd })).data?.find(
@@ -1487,11 +1503,10 @@ export function createCodexAdapter(
             )
           }
           const text = skill && mention ? mention.text : runRequest.prompt
-          if (text) input.push({ type: 'text', text, text_elements: [] })
-          for (const attachment of runRequest.attachments) {
-            if (attachment.path) input.push({ type: 'localImage', path: attachment.path })
-            else input.push({ type: 'image', url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` })
-          }
+          input = [
+            ...input,
+            ...codexInput(text, runRequest.attachments)
+          ]
           const turn = await request<CodexTurnResponse>('turn/start', {
             threadId: externalSessionId,
             input,
@@ -1502,6 +1517,12 @@ export function createCodexAdapter(
             ...(runRequest.effort ? { effort: runRequest.effort } : {})
           }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
           turnId = turn.turn.id
+          runRequest.emit(newEvent(runRequest.runId, {
+            kind: 'harness',
+            stage: 'runtime:steer_capability',
+            steerCapability: { status: 'available', attachments: true },
+            runtimeMetadata: { source: 'codex_app_server', threadId: externalSessionId, turnId }
+          }))
           if (externalSessionId) {
             const startedAtMs = epochMilliseconds(turn.turn.startedAt) ?? Date.now()
             const state = timingState(externalSessionId)
@@ -1528,6 +1549,42 @@ export function createCodexAdapter(
         }
       })()
 
+      const steer = async (input: AgentSteerInput): Promise<AgentSteerResult> => {
+        const threadId = externalSessionId
+        const expectedTurnId = turnId
+        if (stopped || turnCompleted || !threadId || !expectedTurnId) {
+          return {
+            status: 'unavailable',
+            message: stopped
+              ? 'Codex turn has stopped'
+              : turnCompleted
+                ? 'Codex turn has completed'
+                : 'Codex native turn identity is not ready'
+          }
+        }
+        const client = activeClient
+        // Do not let client.request() auto-start a new generation after this run lost its
+        // transport; steering is same-turn admission, never a restart path.
+        if (!client || client.pid == null) return { status: 'unknown', message: 'Codex app-server transport is unavailable' }
+        try {
+          const response = await client.requestRunning<{ turnId?: unknown }>('turn/steer', {
+            threadId,
+            expectedTurnId,
+            clientUserMessageId: input.messageId,
+            input: codexInput(input.prompt, input.attachments)
+          })
+          if (response?.turnId !== expectedTurnId) return { status: 'unknown', message: 'Codex Steer 回执缺少匹配的原生 turn 身份，不能确认接收。' }
+          return { status: 'accepted', providerTurnId: response.turnId }
+        } catch (error) {
+          if (error instanceof CodexAppServerResponseError) {
+            if (error.code === -32601) return { status: 'unavailable', message: error.message }
+            if (error.code === undefined || error.code === -32603) return { status: 'unknown', message: error.message }
+            return { status: 'rejected', message: error.message }
+          }
+          return { status: 'unknown', message: error instanceof Error ? error.message : String(error) }
+        }
+      }
+
       const interrupt = (): void => {
         stopped = true
         for (const controller of approvalControllers) controller.abort()
@@ -1537,6 +1594,7 @@ export function createCodexAdapter(
       return {
         promise,
         interrupt,
+        steer,
         forceKill: () => activeClient?.close(),
         // app-server client 按 cwd 复用（clientActivity 计数）：close() 会断掉同一 client 上
         // 所有并发 run，所以不能当作 run-scoped 硬杀自动发出。

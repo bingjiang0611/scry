@@ -17,7 +17,9 @@ import {
   classifyRunTermination,
   type AgentQuestionRequest,
   type AgentQuestionResponse,
-  type AgentRunControlCatalog
+  type AgentRunControlCatalog,
+  type AgentSteerInput,
+  type AgentSteerResult
 } from '../../shared/runtime'
 import {
   classifyTool,
@@ -54,7 +56,7 @@ const bounded = (value: unknown, max = 200_000): string => {
 
 const PI_BOOTSTRAP_MAX_BYTES = 64 * 1024
 const PI_NODE_PROBE_TIMEOUT_MS = 5_000
-const PI_RPC_COMMAND_TIMEOUT_MS = 15_000
+export const PI_RPC_COMMAND_TIMEOUT_MS = 15_000
 // Resuming a large Pi session includes loading its JSONL history and extensions before the first
 // response. That cold-start work can legitimately exceed an ordinary command's deadline (the
 // reported 8.3 MiB session took about 20 seconds), so startup has its own bounded allowance.
@@ -214,15 +216,15 @@ class PiRpcProcess {
     child.stdout.pipe(decoder)
     decoder.on('data', (message: JsonRecord) => this.receive(message))
     decoder.on('error', (error: Error) => {
-      this.fail(new Error(`Pi RPC stdout JSONL 解码失败：${error.message}`, { cause: error }))
+      this.fail(new PiRpcTransportError('process', `Pi RPC stdout JSONL 解码失败：${error.message}`, { cause: error }))
       this.terminate()
     })
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => { this.stderr = `${this.stderr}${chunk}`.slice(-16_384) })
-    child.on('error', (error) => this.fail(error))
+    child.on('error', (error) => this.fail(new PiRpcTransportError('process', `Pi RPC 进程错误：${error.message}`, { cause: error })))
     child.on('close', (code, signal) => {
       if (!this.closing && !this.failed) {
-        this.fail(new Error(`Pi RPC 进程提前退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）：${this.stderr.trim()}`))
+        this.fail(new PiRpcTransportError('process', `Pi RPC 进程提前退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）：${this.stderr.trim()}`))
       }
     })
   }
@@ -284,7 +286,7 @@ class PiRpcProcess {
     return new Promise((resolve, reject) => {
       const timer = timeoutMs === null ? undefined : setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`Pi RPC ${String(command.type ?? 'command')} 超时`))
+        reject(new PiRpcTransportError('timeout', `Pi RPC ${String(command.type ?? 'command')} 超时`))
       }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer, command: String(command.type ?? 'command') })
       this.child.stdin.write(`${JSON.stringify({ ...command, id })}\n`, (error) => {
@@ -293,7 +295,7 @@ class PiRpcProcess {
         if (!pending) return
         clearTimeout(pending.timer)
         this.pending.delete(id)
-        reject(error)
+        reject(new PiRpcTransportError('write', `Pi RPC stdin 写入失败：${error.message}`, { cause: error }))
       })
     })
   }
@@ -457,6 +459,13 @@ class PiRpcCommandError extends Error {
   }
 }
 
+class PiRpcTransportError extends Error {
+  constructor(readonly reason: 'timeout' | 'write' | 'process', message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'PiRpcTransportError'
+  }
+}
+
 class PiRecorderError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
@@ -482,6 +491,9 @@ interface PiRunState {
   sessionId?: string
   providerTurnId?: string
   rpc?: PiRpcProcess
+  steerAdmissionUncertain?: boolean
+  steerDispatched?: boolean
+  steer?: (input: AgentSteerInput) => Promise<AgentSteerResult>
 }
 
 function piEntrySnapshot(response: JsonRecord): PiEntrySnapshot {
@@ -509,27 +521,36 @@ function isUserMessageEntry(entry: JsonRecord): boolean {
   return entry.type === 'message' && record(entry.message).role === 'user'
 }
 
-export function piUserEntryIdAfterBaseline(baselineLeafId: string | null, entries: JsonRecord[]): string | null {
+export function piUserEntryIdAfterBaseline(
+  baselineLeafId: string | null,
+  entries: JsonRecord[],
+  allowSteeringEntries = false
+): string | null {
   const candidates = entries.filter(isUserMessageEntry)
   if (candidates.length === 0) return null
-  if (candidates.length !== 1) throw new Error('Pi RPC prompt 对应多个新增 user session entries')
-  const candidate = candidates[0]
-  if (typeof candidate.id !== 'string' || !candidate.id) {
-    throw new Error('Pi RPC prompt 的 user session entry 缺少稳定 id')
-  }
-  const byId = new Map(entries.map((entry) => [entry.id, entry]))
-  let parentId = candidate.parentId
-  const visited = new Set<string>()
-  while (parentId !== baselineLeafId) {
-    if (typeof parentId !== 'string' || !parentId || visited.has(parentId)) {
-      throw new Error('Pi RPC user session entry 无法回溯到 prompt 前冻结的 active leaf')
+  if (!allowSteeringEntries && candidates.length !== 1) throw new Error('Pi RPC prompt 对应多个新增 user session entries')
+  const root = candidates[0]
+  if (typeof root.id !== 'string' || !root.id) throw new Error('Pi RPC prompt 的 user session entry 缺少稳定 id')
+  const byId = new Map(entries.map(entry => [entry.id, entry]))
+  for (const candidate of candidates) {
+    let parentId = candidate.parentId
+    const visited = new Set<string>()
+    let reachedRoot = candidate === root
+    while (parentId !== baselineLeafId) {
+      if (typeof parentId !== 'string' || !parentId || visited.has(parentId)) {
+        throw new Error('Pi RPC user session entry 无法回溯到 prompt 前冻结的 active leaf')
+      }
+      visited.add(parentId)
+      if (parentId === root.id) reachedRoot = true
+      const parent = byId.get(parentId)
+      if (!parent) throw new Error('Pi RPC user session entry 的新增 ancestry 不完整')
+      parentId = parent.parentId
     }
-    visited.add(parentId)
-    const parent = byId.get(parentId)
-    if (!parent) throw new Error('Pi RPC user session entry 的新增 ancestry 不完整')
-    parentId = parent.parentId
+    if (!reachedRoot) throw new Error('Pi RPC prompt 对应多个 active branch user entries')
   }
-  return candidate.id
+  // get_entries uses append order. Only an actual Steer dispatch permits additional
+  // users, all on the same ancestry. Expanded slash text must not select a later user.
+  return root.id
 }
 
 async function piEntryBaseline(rpc: PiRpcProcess): Promise<PiEntrySnapshot> {
@@ -539,7 +560,8 @@ async function piEntryBaseline(rpc: PiRpcProcess): Promise<PiEntrySnapshot> {
 async function waitForPiUserEntryId(
   rpc: PiRpcProcess,
   baseline: PiEntrySnapshot,
-  isSettled: () => boolean
+  isSettled: () => boolean,
+  hasSteerInput: () => boolean
 ): Promise<string> {
   for (;;) {
     let changed!: () => void
@@ -557,7 +579,11 @@ async function waitForPiUserEntryId(
       }, null)
       const rows = record(response.data).entries
       if (!Array.isArray(rows)) throw new Error('Pi RPC get_entries 返回了无效增量 entries')
-      const id = piUserEntryIdAfterBaseline(baseline.leafId, rows.map(record))
+      const id = piUserEntryIdAfterBaseline(
+        baseline.leafId,
+        rows.map(record),
+        hasSteerInput()
+      )
       if (id) return id
       // Only a post-settlement snapshot proves missing identity. Do not kill a running
       // Provider because its prompt entry has not appeared within an arbitrary five seconds.
@@ -1029,6 +1055,11 @@ async function runPiAgent(
   let extensionCommand: string | undefined
   let extensionCommandError: string | undefined
   let agentSettled = false
+  let agentEnded = false
+  let steerCapabilityEmitted = false
+  let steerPending = false
+  let resolveAgentCycleEnd!: () => void
+  let agentCycleEnd = new Promise<void>(resolve => { resolveAgentCycleEnd = resolve })
   let settledResolve: (() => void) | undefined
   const settled = new Promise<void>((resolve) => { settledResolve = resolve })
   let rpcFailureReject: ((error: Error) => void) | undefined
@@ -1036,13 +1067,34 @@ async function runPiAgent(
   void rpcFailure.catch(() => undefined)
   const offFailure = rpc.onFailure((error) => rpcFailureReject?.(error))
   const off = rpc.onEvent((event) => {
+    // Owned follow-up/Goal work can begin another agent cycle before canonical settlement.
+    // Rearm only on agent_start, never on a late message from an ended cycle.
+    if (event.type === 'agent_start' && agentEnded && !agentSettled) {
+      agentEnded = false
+      agentCycleEnd = new Promise<void>(resolve => { resolveAgentCycleEnd = resolve })
+    }
     if (event.type === 'agent_start' || event.type === 'tool_execution_start' ||
       (event.type === 'message_start' || event.type === 'message_end') &&
       ['user', 'assistant', 'toolResult'].includes(String(record(event.message).role))) {
       agentStarted = true
+      if (!steerCapabilityEmitted && !agentSettled && !state.stopped) {
+        steerCapabilityEmitted = true
+        request.emit(piEvent(request.runId, {
+          kind: 'harness', stage: 'runtime:steer_capability', providerId: 'pi', runtimeProvider: 'pi_rpc',
+          steerCapability: { status: 'available', attachments: true }
+        }))
+      }
+    }
+    if (event.type === 'agent_end') {
+      if (steerPending) state.steerAdmissionUncertain = true
+      agentEnded = true
+      resolveAgentCycleEnd()
     }
     if (event.type === 'agent_settled') {
+      if (steerPending) state.steerAdmissionUncertain = true
       agentSettled = true
+      agentEnded = true
+      resolveAgentCycleEnd()
       settledResolve?.()
       return
     }
@@ -1257,6 +1309,47 @@ async function runPiAgent(
       })
       .catch(() => rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true }))
   })
+  const uncertainSteer = (message: string): AgentSteerResult => {
+    state.steerAdmissionUncertain = true
+    return { status: 'unknown', message }
+  }
+  state.steer = async (input) => {
+    if (state.stopped) return { status: 'rejected', message: 'Pi run 已停止，steer 未发送' }
+    if (agentSettled || agentEnded) return { status: 'rejected', message: 'Pi agent 已结束，steer 未发送' }
+    if (!agentStarted) return { status: 'unavailable', message: 'Pi agent 尚未进入 active run' }
+    const images = input.attachments.map((attachment) => ({
+      type: 'image',
+      data: attachment.dataBase64,
+      mimeType: attachment.mimeType
+    }))
+    steerPending = true
+    state.steerDispatched = true
+    const cycleEnd = agentCycleEnd
+    try {
+      const outcome = await Promise.race([
+        rpc.send({ type: 'steer', message: input.prompt, ...(images.length > 0 ? { images } : {}) })
+          .then(() => 'ack' as const),
+        cycleEnd.then(() => 'ended' as const)
+      ])
+      // Pi's RPC response has no turn guard. Once agent_end/settled wins the race, the
+      // message may have been admitted to a future idle queue; never report it accepted.
+      if (outcome === 'ended' || cycleEnd !== agentCycleEnd || agentEnded || agentSettled || state.stopped) {
+        return uncertainSteer('Pi agent 在 steer 确认前结束，消息归属未知')
+      }
+      return { status: 'accepted', providerTurnId: state.providerTurnId }
+    } catch (error) {
+      if (cycleEnd !== agentCycleEnd || agentEnded || agentSettled || state.stopped) {
+        return uncertainSteer('Pi agent 在 steer 确认前结束，消息归属未知')
+      }
+      if (error instanceof PiRpcCommandError) {
+        return { status: 'rejected', message: `Pi steer 被 Provider 拒绝：${error.message}` }
+      }
+      // Timeout, process exit and stdin write failures do not prove whether Pi admitted it.
+      return uncertainSteer(`Pi steer admission 未知：${(error as Error).message}`)
+    } finally {
+      steerPending = false
+    }
+  }
   const startedAt = Date.now()
   try {
     // Capability probes remain bounded; an explicitly started run stays cancellable while
@@ -1403,14 +1496,19 @@ async function runPiAgent(
           durationMs: Date.now() - startedAt,
           providerCommand: { name: extensionCommand, source: 'extension', modelTurn: 'unobserved' }
         }))
-        retainRpc = mayReuse && !state.stopped && Boolean(state.sessionId) && rpc.reusable()
+        retainRpc = mayReuse && !state.stopped && !state.steerAdmissionUncertain && Boolean(state.sessionId) && rpc.reusable()
         return {
           externalSessionId: state.sessionId, stopped: state.stopped,
           status: state.stopped ? 'interrupted' : extensionCommandError === undefined ? 'completed' : 'failed'
         }
       }
     }
-    state.providerTurnId = await waitForPiUserEntryId(rpc, entryBaseline, () => agentSettled)
+    state.providerTurnId = await waitForPiUserEntryId(
+      rpc,
+      entryBaseline,
+      () => agentSettled,
+      () => state.steerDispatched === true
+    )
     // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity
     // deadline here: transport/process failures reject rpcFailure, and users retain stop controls.
     await Promise.race([settled, rpcFailure])
@@ -1448,8 +1546,9 @@ async function runPiAgent(
     const terminationReason = endedByTool ? undefined : classifyRunTermination({ rawReason: usage.lastStopReason, message: failureText })
     // A settled Rotom RPC remains bound to this native session and retains its provider transport.
     // Reusing it makes Scry match terminal Pi instead of paying a fresh WebSocket/proxy handshake
-    // and replaying the complete context on every user turn.
-    retainRpc = mayReuse && !state.stopped && Boolean(state.sessionId) && rpc.reusable()
+    // and replaying the complete context on every user turn. An uncertain native steer may still
+    // be queued in Pi's idle queue, so quarantine this transport rather than carry it forward.
+    retainRpc = mayReuse && !state.stopped && !state.steerAdmissionUncertain && Boolean(state.sessionId) && rpc.reusable()
     // Pi may settle cleanly at the RPC layer while the upstream model reports `aborted` (for
     // example Qoder aborting a long generation). Only an explicit Scry stop is an interruption;
     // an explicit tool termination is a separate execution boundary, not Goal approval.
@@ -1645,6 +1744,9 @@ export function createPiAdapter(options: {
           state.rpc?.notify({ type: 'abort' })
           setTimeout(() => state.rpc?.abort(), 2_000)
         },
+        steer: (input) => state.steer?.(input) ?? Promise.resolve({
+          status: 'unavailable', message: 'Pi native run 尚未准备好'
+        }),
         forceKill: () => {
           state.stopped = true
           state.rpc?.forceTerminate()

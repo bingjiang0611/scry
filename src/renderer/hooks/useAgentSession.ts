@@ -419,6 +419,10 @@ export function beginOptimisticTurn(prev: Turn[], pendingRunId: string, request:
   return [...prev, {
     runId: pendingRunId,
     pendingStart: true,
+    providerId: request.providerId,
+    agentProfileId: request.agentProfileId,
+    cwd: request.cwd,
+    externalSessionId: request.expectedExternalSessionId ?? undefined,
     userText: request.prompt,
     attachments: request.attachments,
     items: [],
@@ -443,7 +447,17 @@ export function confirmOptimisticTurn(
   const index = visible.findIndex((turn) => turn.runId === runId)
   if (index === -1) {
     return replayRunLifecycleDeltas(
-      [...visible, { runId, userText: request.prompt, attachments: request.attachments, items: [], done: false }],
+      [...visible, {
+        runId,
+        providerId: request.providerId,
+        agentProfileId: request.agentProfileId,
+        cwd: request.cwd,
+        externalSessionId: request.expectedExternalSessionId ?? undefined,
+        userText: request.prompt,
+        attachments: request.attachments,
+        items: [],
+        done: false
+      }],
       lifecycleDeltas
     )
   }
@@ -451,6 +465,10 @@ export function confirmOptimisticTurn(
   next[index] = {
     ...next[index],
     pendingStart: undefined,
+    providerId: request.providerId,
+    agentProfileId: request.agentProfileId,
+    cwd: request.cwd,
+    externalSessionId: request.expectedExternalSessionId ?? undefined,
     userText: request.prompt,
     attachments: request.attachments
   }

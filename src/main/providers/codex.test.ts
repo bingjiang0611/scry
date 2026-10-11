@@ -17,8 +17,20 @@ const appServer = vi.hoisted(() => ({
 const runtime = vi.hoisted(() => ({ env: {} as NodeJS.ProcessEnv }))
 
 vi.mock('./codex-app-server', () => ({
+  CodexAppServerResponseError: class extends Error {
+    readonly code: number | undefined
+    readonly data: unknown
+    readonly method: string
+    constructor(method: string, error: { code?: number; message?: string; data?: unknown }) {
+      super(error.message)
+      this.code = error.code
+      this.data = error.data
+      this.method = method
+    }
+  },
   CodexAppServerClient: class {
     request = appServer.request
+    requestRunning = appServer.request
     start = appServer.start
     onNotification = appServer.onNotification
     onRequest = appServer.onRequest
@@ -38,6 +50,7 @@ vi.mock('../claude-locate', () => ({
   shellEnv: () => ({})
 }))
 
+import { CodexAppServerResponseError } from './codex-app-server'
 import { codexMcpConfigArgs, createCodexAdapter } from './codex'
 
 describe('Codex provider adapter', () => {
@@ -2237,6 +2250,151 @@ describe('Codex provider adapter', () => {
         input: expect.objectContaining({ source: 'skill_path_in_command' })
       })
     )
+  })
+
+  it('steers the active native turn with exact text and image input without interrupting it', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => {
+      notify = listener
+      return () => {}
+    })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-steer' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-steer' } }
+      if (method === 'turn/steer') return { turnId: 'turn-steer' }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const events: TraceEvent[] = []
+    const handle = createCodexAdapter().run({
+      runId: 'run-steer', prompt: 'initial', cwd: '/repo', attachments: [], emit: (event) => events.push(event)
+    })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+
+    await expect(handle.steer?.({
+      messageId: 'message-steer',
+      prompt: ' preserve exact text  ',
+      attachments: [{ kind: 'image', name: 'screen.png', mimeType: 'image/png', dataBase64: 'aW1hZ2U=', size: 5 }]
+    })).resolves.toEqual({ status: 'accepted', providerTurnId: 'turn-steer' })
+    expect(appServer.request).toHaveBeenCalledWith('turn/steer', {
+      threadId: 'thread-steer',
+      expectedTurnId: 'turn-steer',
+      clientUserMessageId: 'message-steer',
+      input: [
+        { type: 'text', text: ' preserve exact text  ', text_elements: [] },
+        { type: 'image', url: 'data:image/png;base64,aW1hZ2U=' }
+      ]
+    })
+    expect(appServer.request).not.toHaveBeenCalledWith('turn/interrupt', expect.anything())
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'harness', stage: 'runtime:steer_capability', steerCapability: { status: 'available', attachments: true }
+    }))
+    notify?.('turn/completed', { threadId: 'thread-steer', turnId: 'turn-steer', turn: { id: 'turn-steer', status: 'completed' } })
+    await handle.promise
+  })
+
+  it('maps explicit native steer rejection and unsupported methods without guessing transport errors', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => { notify = listener; return () => {} })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-reject' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-reject' } }
+      if (method === 'turn/steer') throw new CodexAppServerResponseError('turn/steer', { code: -32001, message: 'turn cannot accept steering' })
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({ runId: 'run-reject', prompt: 'initial', cwd: '/repo', attachments: [], emit: () => {} })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    await expect(handle.steer?.({ messageId: 'message-reject', prompt: 'follow up', attachments: [] })).resolves.toEqual({
+      status: 'rejected', message: 'turn cannot accept steering'
+    })
+    notify?.('turn/completed', { threadId: 'thread-reject', turnId: 'turn-reject', turn: { status: 'completed' } })
+    await handle.promise
+
+    appServer.request.mockClear()
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'turn/steer') throw new CodexAppServerResponseError('turn/steer', { code: -32601, message: 'method unavailable' })
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-unavailable' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-unavailable' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const unavailable = createCodexAdapter().run({ runId: 'run-unavailable', prompt: 'initial', cwd: '/repo', attachments: [], emit: () => {} })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    await expect(unavailable.steer?.({ messageId: 'message-unavailable', prompt: 'follow up', attachments: [] })).resolves.toEqual({
+      status: 'unavailable', message: 'method unavailable'
+    })
+    notify?.('turn/completed', { threadId: 'thread-unavailable', turnId: 'turn-unavailable', turn: { status: 'completed' } })
+    await unavailable.promise
+  })
+
+  it('does not turn malformed acknowledgement or native internal failure into accepted/retryable delivery', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    let response: unknown
+    appServer.onNotification.mockImplementation(listener => { notify = listener; return () => {} })
+    appServer.request.mockImplementation(async method => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-malformed' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-malformed' } }
+      if (method === 'turn/steer') {
+        if (response instanceof Error) throw response
+        return response
+      }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({ runId: 'run-malformed', prompt: 'initial', cwd: '/repo', attachments: [], emit: () => {} })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    for (const value of [{}, null, { turnId: 'other-turn' }, new CodexAppServerResponseError('turn/steer', { code: -32603, message: 'internal failure' })]) {
+      response = value
+      await expect(handle.steer?.({ messageId: 'message-malformed', prompt: 'follow up', attachments: [] })).resolves.toMatchObject({ status: 'unknown' })
+    }
+    notify?.('turn/completed', { threadId: 'thread-malformed', turn: { id: 'turn-malformed', status: 'completed' } })
+    await handle.promise
+  })
+
+  it('reports transport timeout as unknown and refuses steering after native completion', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => { notify = listener; return () => {} })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-timeout' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-timeout' } }
+      if (method === 'turn/steer') throw new Error('Codex app-server request timed out: turn/steer (response_unconfirmed)')
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({ runId: 'run-timeout', prompt: 'initial', cwd: '/repo', attachments: [], emit: () => {} })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    await expect(handle.steer?.({ messageId: 'message-timeout', prompt: 'follow up', attachments: [] })).resolves.toEqual({
+      status: 'unknown', message: 'Codex app-server request timed out: turn/steer (response_unconfirmed)'
+    })
+    notify?.('turn/completed', { threadId: 'thread-timeout', turnId: 'turn-timeout', turn: { status: 'completed' } })
+    await handle.promise
+    const callsBeforeRefusedSteer = appServer.request.mock.calls.length
+    await expect(handle.steer?.({ messageId: 'message-after', prompt: 'too late', attachments: [] })).resolves.toEqual({
+      status: 'unavailable', message: 'Codex turn has completed'
+    })
+    expect(appServer.request.mock.calls.length).toBe(callsBeforeRefusedSteer)
+  })
+
+  it('refuses steering when the stop race has ended the run before dispatch', async () => {
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => { notify = listener; return () => {} })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'thread-stale' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-stale' } }
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const handle = createCodexAdapter().run({ runId: 'run-stale', prompt: 'initial', cwd: '/repo', attachments: [], emit: () => {} })
+    await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/start', expect.anything()))
+    handle.interrupt()
+    const callsBeforeRefusedSteer = appServer.request.mock.calls.length
+    await expect(handle.steer?.({ messageId: 'message-stale', prompt: 'too late', attachments: [] })).resolves.toEqual({
+      status: 'unavailable', message: 'Codex turn has stopped'
+    })
+    expect(appServer.request.mock.calls.length).toBe(callsBeforeRefusedSteer)
+    notify?.('turn/completed', { threadId: 'thread-stale', turnId: 'turn-stale', turn: { status: 'interrupted' } })
+    await handle.promise
   })
 
   it('maps native Codex hook lifecycle notifications into Scry hook events', async () => {

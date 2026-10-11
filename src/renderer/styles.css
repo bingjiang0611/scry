@@ -2322,7 +2322,7 @@ body.pane-resizing * {
 }
 .queue-item {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto 30px;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto 30px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -2348,6 +2348,50 @@ body.pane-resizing * {
   white-space: nowrap;
   color: var(--fg);
   font-size: 12.5px;
+}
+.queue-steer-reason {
+  display: block;
+  overflow: hidden;
+  color: var(--dim2);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-steer-capability {
+  padding: 6px 5px 2px;
+  color: var(--dim2);
+  font-size: 10.5px;
+}
+.queue-steer {
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--border3);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: 10.5px/1 var(--font-ui);
+  white-space: nowrap;
+}
+.queue-steer:hover,
+.queue-steer:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+.queue-steer:disabled {
+  color: var(--dim3);
+  cursor: not-allowed;
+  opacity: .75;
+}
+.queue-steer.is-pending {
+  color: var(--warn);
+}
+.queue-item.is-steer-unknown {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border3));
+}
+.queue-item.is-steer-pending .queue-text {
+  color: var(--dim);
 }
 .queue-attach {
   display: inline-flex;
@@ -2376,7 +2420,7 @@ body.pane-resizing * {
   color: var(--dim2);
   cursor: pointer;
 }
-.queue-remove:hover,
+.queue-remove:hover:not(:disabled),
 .queue-remove:focus-visible {
   color: var(--bad);
   background: rgba(255, 92, 106, 0.08);
@@ -2388,6 +2432,51 @@ body.pane-resizing * {
 }
 .queue-remove:active {
   transform: scale(0.96);
+}
+.queue-remove:disabled {
+  color: var(--dim3);
+  cursor: not-allowed;
+  opacity: .6;
+}
+.steer-evidence {
+  margin: 8px 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border3);
+  border-radius: 8px;
+  background: var(--surface-inset-soft);
+}
+.steer-evidence-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+.steer-evidence-head .ico {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+.steer-evidence-head span {
+  margin-left: auto;
+  color: var(--dim2);
+  font-size: 10px;
+}
+.steer-evidence .turn-user {
+  margin-top: 5px;
+}
+.steer-evidence-message {
+  margin-top: 5px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.steer-rejected .steer-evidence-head .ico,
+.steer-unknown .steer-evidence-head .ico,
+.steer-unavailable .steer-evidence-head .ico {
+  color: var(--warn);
+}
+.steer-evidence.steer-pending .steer-evidence-head .ico {
+  color: var(--warn);
 }
 .draft-attachments {
   display: flex;

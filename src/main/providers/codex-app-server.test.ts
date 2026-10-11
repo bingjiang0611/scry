@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { CodexAppServerClient } from './codex-app-server'
+import { CodexAppServerClient, CodexAppServerResponseError } from './codex-app-server'
 
 function manualRequestTimeouts(): {
   schedule: (run: () => void, delayMs: number) => () => void
@@ -34,6 +34,28 @@ function manualRequestTimeouts(): {
 }
 
 describe('CodexAppServerClient', () => {
+  it('never starts or replaces a transport for a same-turn control request', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
+    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture] })
+    const start = vi.spyOn(client, 'start')
+    try {
+      await expect(client.requestRunning('turn/steer', { threadId: 'old', expectedTurnId: 'old', input: [] })).rejects.toThrow('not running')
+      expect(start).not.toHaveBeenCalled()
+      await client.start()
+      const pid = client.pid
+      start.mockClear()
+      await expect(client.requestRunning('skills/list', { cwds: ['/repo'] })).resolves.toMatchObject({ data: [{ cwd: '/repo' }] })
+      expect(client.pid).toBe(pid)
+      expect(start).not.toHaveBeenCalled()
+      await client.shutdown()
+      start.mockClear()
+      await expect(client.requestRunning('turn/steer', {})).rejects.toThrow('not running')
+      expect(start).not.toHaveBeenCalled()
+    } finally {
+      await client.shutdown()
+    }
+  })
+
   it('initializes, correlates requests and forwards notifications', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
     const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], requestTimeoutMs: 10_000 })
@@ -60,6 +82,23 @@ describe('CodexAppServerClient', () => {
       client.close()
     }
   }, 15_000)
+
+  it('preserves explicit native JSON-RPC errors as typed response failures', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
+    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture], requestTimeoutMs: 10_000 })
+    try {
+      let error: unknown
+      try {
+        await client.request('test/error', { method: 'turn/steer' })
+      } catch (caught) {
+        error = caught
+      }
+      expect(error).toBeInstanceOf(CodexAppServerResponseError)
+      expect(error).toMatchObject({ code: -32601, method: 'test/error' })
+    } finally {
+      await client.shutdown()
+    }
+  })
 
   it('lets the selected run translate native server requests', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
