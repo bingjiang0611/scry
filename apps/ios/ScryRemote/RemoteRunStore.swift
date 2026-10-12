@@ -1,5 +1,8 @@
 import Foundation
 import RemoteTransport
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // Device-side observable state for ONE remote run, driven strictly by what the
 // host proves over the granted-cert inner mTLS channel (RemoteRunClient). It
@@ -72,6 +75,18 @@ final class RemoteRunStore: ObservableObject {
     let name: String
     let kind: RemoteRunClient.Attachment.Kind
     let size: Int
+    // Decoded image bytes kept in memory only, so the sent bubble can show a
+    // thumbnail and full-screen preview of exactly what was uploaded.
+    let imageData: Data?
+
+    init(name: String, kind: RemoteRunClient.Attachment.Kind, size: Int, imageData: Data? = nil) {
+      self.name = name; self.kind = kind; self.size = size; self.imageData = imageData
+    }
+
+    init(_ attachment: RemoteRunClient.Attachment) {
+      self.init(name: attachment.name, kind: attachment.kind, size: attachment.size,
+                imageData: attachment.kind == .image ? Data(base64Encoded: attachment.dataBase64) : nil)
+    }
   }
 
   // A transport response is only allowed to mutate the session that initiated
@@ -431,9 +446,7 @@ final class RemoteRunStore: ObservableObject {
       activeRouting = checkpoint.routing
       contextNeedsRestore = true
       prompt = checkpoint.routing?.prompt
-      sentAttachments = checkpoint.routing?.attachments.map {
-        SentAttachment(name: $0.name, kind: $0.kind, size: $0.size)
-      } ?? []
+      sentAttachments = checkpoint.routing?.attachments.map(SentAttachment.init) ?? []
       if let runId = checkpoint.runId {
         self.runId = runId
         terminalDrainCompleted = false
@@ -1406,7 +1419,7 @@ final class RemoteRunStore: ObservableObject {
     guard resetRun() else { return false }
     activeSessionIdentity = identity
     self.prompt = trimmed
-    sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
+    sentAttachments = attachments.map(SentAttachment.init)
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
                                           agentProfileId: chosenProvider?.agentProfileId, prompt: trimmed,
                                           modelId: chosenModel?.id, modelProviderId: chosenModel?.providerId,
@@ -2018,7 +2031,7 @@ final class RemoteRunStore: ObservableObject {
     guard resetRun() else { return false }
     activeSessionIdentity = identity
     self.prompt = trimmed
-    sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
+    sentAttachments = attachments.map(SentAttachment.init)
     liveExternalSessionId = resumeId
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
                                           agentProfileId: matchingProvider.agentProfileId, prompt: trimmed,
@@ -2392,7 +2405,7 @@ final class RemoteRunStore: ObservableObject {
     runId = "mock-run-visual-only"
     prompt = "把首页改成更紧凑的项目分组，同时保留真实运行证据。"
     sentAttachments = [
-      SentAttachment(name: "home-reference.png", kind: .image, size: 184_320),
+      SentAttachment(name: "home-reference.png", kind: .image, size: 184_320, imageData: Self.mockImageData()),
       SentAttachment(name: "notes.md", kind: .text, size: 4_812)
     ]
     lifecycle = .settled
@@ -2492,10 +2505,22 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
+  // Visual-only bytes so the DEBUG chat fixture exercises thumbnail + preview.
+  private static func mockImageData() -> Data? {
+    #if canImport(UIKit)
+    UIGraphicsImageRenderer(size: CGSize(width: 390, height: 844)).image { context in
+      UIColor(red: 0.12, green: 0.2, blue: 0.35, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 390, height: 844))
+      UIColor(red: 0.45, green: 0.7, blue: 1, alpha: 1).setFill(); context.fill(CGRect(x: 24, y: 120, width: 342, height: 180))
+    }.jpegData(compressionQuality: 0.8)
+    #else
+    nil
+    #endif
+  }
+
   private func applyMockRun(prompt: String, attachments: [RemoteRunClient.Attachment]) {
     resetRun()
     self.prompt = prompt
-    sentAttachments = attachments.map { SentAttachment(name: $0.name, kind: $0.kind, size: $0.size) }
+    sentAttachments = attachments.map(SentAttachment.init)
     runId = "mock-run-visual-only"
     lifecycle = .settled
     terminalDrainCompleted = true
