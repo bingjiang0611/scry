@@ -38,6 +38,16 @@ describe('trace turn progress', () => {
       cwd: '/repo', sessionId: 'session-1', providerId: 'opencode'
     })).toEqual(['run-1'])
     await expect(recoverTraceTurnProgress(userDataDir, {
+      cwd: '/repo',
+      isLiveManagedRun: (candidate) => candidate === 'run-1'
+    })).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    expect(traceProgressSessionRunIds(userDataDir, {
+      cwd: '/repo', sessionId: 'session-1', providerId: 'opencode'
+    })).toEqual(['run-1'])
+    expect(readTraceArchive({
+      cwd: '/repo', sessionId: 'session-1', providerId: 'opencode', userDataDir
+    })).toBeNull()
+    await expect(recoverTraceTurnProgress(userDataDir, {
       cwd: '/repo', sessionId: 'session-1', providerId: 'opencode'
     })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
     expect(readTraceArchive({

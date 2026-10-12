@@ -867,6 +867,12 @@ describe('managed trace turn coordinator', () => {
     const request = input(workspace, userDataDir)
 
     await persistManagedTraceProgress(request)
+    const liveProgressFiles = await readdir(join(userDataDir, 'managed-turn-progress'))
+    await expect(recoverManagedTraceProgress(userDataDir, {
+      cwd: workspace,
+      isLiveManagedRun: (candidate) => candidate === request.turn.runId
+    })).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    expect(await readdir(join(userDataDir, 'managed-turn-progress'))).toEqual(liveProgressFiles)
     expect(readTraceArchive({
       cwd: workspace,
       sessionId: 'session-1',
@@ -1031,6 +1037,13 @@ describe('managed trace turn coordinator', () => {
     const request = input(workspace, userDataDir)
 
     await expect(commitManagedTraceTurn(request, { waitMs: 0 })).rejects.toThrow('open identity')
+    const liveJournalFiles = await readdir(join(userDataDir, 'managed-turn-commits'))
+    await expect(recoverManagedTraceTurns(userDataDir, {
+      cwd: workspace,
+      isLiveManagedRun: (candidate) => candidate === request.turn.runId
+    })).resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    expect(await readdir(join(userDataDir, 'managed-turn-commits'))).toEqual(liveJournalFiles)
+    expect(await listRecords(join(workspace, '.scry'))).toHaveLength(0)
     await startManaged(workspace)
     await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, waitMs: 100 })).resolves.toEqual({
       recovered: 1,

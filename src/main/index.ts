@@ -2503,11 +2503,15 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         nextAction: '等待目标会话完成后重试；草稿已保留'
       })
     }
+  // Still-owned runs finish on their original execution chain, not through crash recovery.
+  const isLiveManagedRun = (candidate: string | undefined): boolean =>
+    !!candidate && runs.unsettledStates().some((run) => run.runId === candidate)
   const traceProgressRecovery = cwd
     ? await recoverTraceTurnProgress(app.getPath('userData'), {
         cwd,
         providerId,
-        ...(resume ? { sessionId: resume } : {})
+        ...(resume ? { sessionId: resume } : {}),
+        isLiveManagedRun
       })
     : { recovered: 0, pending: 0, errors: [] }
   startPerf.mark('trace_progress_recovery_ready', { recovered: traceProgressRecovery.recovered })
@@ -2535,14 +2539,16 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       providerId,
       ...(resume ? { sessionId: resume } : {}),
       waitMs: 250,
-      commitHookEnv: managedCommitHookEnv
+      commitHookEnv: managedCommitHookEnv,
+      isLiveManagedRun
     })
     const progressRecovery = await recoverManagedTraceProgress(app.getPath('userData'), {
       cwd,
       providerId,
       ...(resume ? { sessionId: resume } : {}),
       waitMs: 250,
-      commitHookEnv: managedCommitHookEnv
+      commitHookEnv: managedCommitHookEnv,
+      isLiveManagedRun
     })
     // 本进程知道哪些 run 还活着，所以可以安全地弃掉“没有 Provider 证据且主已不在”的 provisional 轮次，
     // 不再把这个工作区永久卡在“仍有 N 轮待恢复”。真有证据的轮次仍然 fail closed。
@@ -2553,8 +2559,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       abandonProvisional: journalRecovery.pending === 0 && progressRecovery.pending === 0,
       // 发送前的恢复检查不能同步排仓库回调积压，否则会卡在“正在启动”。
       commitNotifications: 'detach' as const,
-      isLiveManagedRun: (candidate: string | undefined): boolean =>
-        !!candidate && runs.unsettledStates().some((run) => run.runId === candidate)
+      isLiveManagedRun
     }
     const recorderRecovery = resume
       ? await recoverManagedRecorderTurns(cwd, managedCommitHookEnv, { ...abandonProvisionalOptions, sessionId: resume })

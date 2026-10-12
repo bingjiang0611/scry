@@ -212,7 +212,12 @@ export async function persistUnresolvedTraceTurnProgress(args: {
 
 export async function recoverTraceTurnProgress(
   userDataDir: string,
-  filter: { cwd?: string; sessionId?: string; providerId?: ProviderId } = {}
+  filter: {
+    cwd?: string
+    sessionId?: string
+    providerId?: ProviderId
+    isLiveManagedRun?: (runId: string) => boolean
+  } = {}
 ): Promise<TraceTurnProgressRecovery> {
   let recovered = 0
   let pending = 0
@@ -227,6 +232,7 @@ export async function recoverTraceTurnProgress(
       if (filter.cwd != null && request.cwd !== filter.cwd) continue
       if (filter.sessionId) continue
       if (filter.providerId && request.providerId !== filter.providerId) continue
+      if (filter.isLiveManagedRun?.(request.turn.runId)) continue
       // Provider 产出任何内容之前就失败的轮次不可能再拿到原生 session id，也不是可恢复的 Provider turn。
       // 旧版本曾把这类失败永久卡成 pending；保留它只会让修正环境后的下一次启动继续失败。
       if (isProviderlessTerminalTurn(request.turn)) {
@@ -251,6 +257,7 @@ export async function recoverTraceTurnProgress(
     if (filter.cwd != null && request.cwd !== filter.cwd) continue
     if (filter.sessionId && request.sessionId !== filter.sessionId) continue
     if (filter.providerId && request.providerId !== filter.providerId) continue
+    if (filter.isLiveManagedRun?.(request.turn.runId)) continue
     const existing = findTraceArchiveTurnMatches({
       cwd: request.cwd,
       sessionId: request.sessionId,
