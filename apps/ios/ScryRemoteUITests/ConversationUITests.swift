@@ -167,4 +167,18 @@ final class ConversationUITests: XCTestCase {
     XCTAssertEqual(input.value as? String, "/review ")
     capture("slash-command-inserted")
   }
+
+  func testSentImageAttachmentOpensPreview() {
+    launch("chat")
+    let thumbnail = app.buttons["查看 home-reference.png"]
+    XCTAssertTrue(thumbnail.waitForExistence(timeout: 5))
+    if !thumbnail.isHittable { app.swipeDown() }
+    thumbnail.tap()
+    let close = app.buttons["关闭预览"]
+    XCTAssertTrue(close.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.images["home-reference.png"].exists)
+    capture("sent-image-preview")
+    close.tap()
+    XCTAssertTrue(thumbnail.waitForExistence(timeout: 5))
+  }
 }

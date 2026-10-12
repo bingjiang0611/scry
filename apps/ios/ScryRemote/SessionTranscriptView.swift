@@ -526,10 +526,7 @@ struct SessionTranscriptView: View {
     HStack {
       Spacer(minLength: 40)
       VStack(alignment: .leading, spacing: 8) {
-        ForEach(attachments) { item in
-          Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
-            .font(.system(size: 11, weight: .medium)).lineLimit(1)
-        }
+        if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
         Text(text).font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
       }
       .foregroundStyle(Palette.ink)

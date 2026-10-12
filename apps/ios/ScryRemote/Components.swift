@@ -731,6 +731,145 @@ struct DraftAttachment: Identifiable, Equatable {
     let value = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
     return kind == .image ? "图片 · \(value)" : "文本文件 · \(value)"
   }
+
+  // Mirrors the host limits in src/main/remote/host-controller.ts.
+  static let maxCount = 4
+  static let maxEachBytes = 512 * 1024
+  static let maxTotalBytes = 700 * 1024
+
+  // Each image gets an even share of the budget still free for the images
+  // left in this batch. A fixed per-image target let the first two or three
+  // photos consume the whole 700 KB and the rest were rejected.
+  static func imageBudget(usedBytes: Int, remainingImages: Int) -> Int {
+    min(maxEachBytes, max(0, maxTotalBytes - usedBytes) / max(1, remainingImages))
+  }
+
+  #if canImport(UIKit)
+  // Lowers quality first, then resolution, until the JPEG fits `maxBytes`.
+  // The renderer scale is pinned to 1: the default screen scale (3x) used to
+  // triple the pixel dimensions and inflate every photo.
+  static func compactJPEG(_ data: Data, maxBytes: Int) -> Data? {
+    guard maxBytes > 0, let source = UIImage(data: data) else { return nil }
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    for maxSide: CGFloat in [1600, 1280, 1024, 768] {
+      let scale = min(1, maxSide / max(source.size.width, source.size.height))
+      let size = CGSize(width: max(1, (source.size.width * scale).rounded()),
+                        height: max(1, (source.size.height * scale).rounded()))
+      let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+        source.draw(in: CGRect(origin: .zero, size: size))
+      }
+      for quality in [0.72, 0.58, 0.44, 0.32] {
+        if let out = image.jpegData(compressionQuality: quality), out.count <= maxBytes { return out }
+      }
+    }
+    return nil
+  }
+  #else
+  static func compactJPEG(_ data: Data, maxBytes: Int) -> Data? { nil }
+  #endif
+}
+
+struct AttachmentPreviewItem: Identifiable {
+  let id = UUID()
+  let name: String
+  let data: Data
+}
+
+#if canImport(UIKit)
+struct AttachmentThumbnail: View {
+  let data: Data
+  let side: CGFloat
+  // Decoded once per view identity instead of on every body evaluation.
+  @State private var image: UIImage?
+
+  var body: some View {
+    ZStack {
+      Palette.canvas
+      if let image {
+        Image(uiImage: image).resizable().scaledToFill()
+      } else {
+        Image(systemName: Symbol.photo).foregroundStyle(Palette.muted)
+      }
+    }
+    .frame(width: side, height: side)
+    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    .task(id: data) { image = UIImage(data: data)?.preparingThumbnail(of: CGSize(width: side * 3, height: side * 3)) }
+  }
+}
+
+// Full-screen view of the exact bytes staged or sent; pinch to zoom, double-tap to reset.
+struct AttachmentImagePreview: View {
+  let item: AttachmentPreviewItem
+  // Decoded once; the body re-evaluates on every pinch frame.
+  private let image: UIImage?
+  @Environment(\.dismiss) private var dismiss
+  @State private var scale: CGFloat = 1
+  @State private var baseScale: CGFloat = 1
+
+  init(item: AttachmentPreviewItem) {
+    self.item = item
+    image = UIImage(data: item.data)
+  }
+
+  var body: some View {
+    ZStack(alignment: .topTrailing) {
+      Color.black.ignoresSafeArea()
+      if let image {
+        Image(uiImage: image).resizable().scaledToFit()
+          .scaleEffect(scale)
+          .gesture(MagnifyGesture()
+            .onChanged { scale = min(5, max(1, baseScale * $0.magnification)) }
+            .onEnded { _ in baseScale = scale })
+          .onTapGesture(count: 2) { withAnimation { scale = 1; baseScale = 1 } }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .accessibilityLabel(item.name)
+      } else {
+        Text("无法显示该图片").foregroundStyle(Palette.muted).frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+      Button { dismiss() } label: {
+        Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+          .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
+      }
+      .accessibilityLabel("关闭预览").padding(16)
+    }
+  }
+}
+#endif
+
+// Attachments inside a sent user bubble: tappable image thumbnails plus
+// file labels. Images without retained bytes (e.g. history) fall back to a label.
+struct SentAttachmentList: View {
+  let attachments: [RemoteRunStore.SentAttachment]
+  @State private var previewing: AttachmentPreviewItem?
+
+  var body: some View {
+    let images = attachments.filter { $0.imageData != nil }
+    let others = attachments.filter { $0.imageData == nil }
+    VStack(alignment: .leading, spacing: 8) {
+      #if canImport(UIKit)
+      if !images.isEmpty {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 64, maximum: 96), spacing: 6)], alignment: .leading, spacing: 6) {
+          ForEach(images) { item in
+            if let data = item.imageData {
+              Button { previewing = AttachmentPreviewItem(name: item.name, data: data) } label: {
+                AttachmentThumbnail(data: data, side: 64)
+              }
+              .buttonStyle(.plain).accessibilityLabel("查看 \(item.name)")
+            }
+          }
+        }
+      }
+      #endif
+      ForEach(others) { item in
+        Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
+          .font(.system(size: 11, weight: .medium)).lineLimit(1)
+      }
+    }
+    #if canImport(UIKit)
+    .fullScreenCover(item: $previewing) { AttachmentImagePreview(item: $0) }
+    #endif
+  }
 }
 
 struct MessageComposer: View {
@@ -764,11 +903,12 @@ struct MessageComposer: View {
   @State private var showFiles = false
   @State private var photoItems: [PhotosPickerItem] = []
   @State private var attachmentError: String?
+  @State private var previewing: AttachmentPreviewItem?
   @FocusState private var inputFocused: Bool
 
-  private let maxCount = 4
-  private let maxEachBytes = 512 * 1024
-  private let maxTotalBytes = 700 * 1024
+  private let maxCount = DraftAttachment.maxCount
+  private let maxEachBytes = DraftAttachment.maxEachBytes
+  private let maxTotalBytes = DraftAttachment.maxTotalBytes
 
   private var slashToken: String? {
     guard text.hasPrefix("/") else { return nil }
@@ -841,7 +981,7 @@ struct MessageComposer: View {
     }
     .padding(.horizontal, 4)
     .background(Palette.surface)
-    .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: maxCount, matching: .images)
+    .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: max(1, maxCount - attachments.count), matching: .images)
     .fileImporter(isPresented: $showFiles,
                   allowedContentTypes: [.image, .text, .sourceCode, .json, .xml],
                   allowsMultipleSelection: true) { result in
@@ -852,6 +992,7 @@ struct MessageComposer: View {
       guard !items.isEmpty else { return }
       Task { await importPhotos(items); photoItems = [] }
     }
+    .fullScreenCover(item: $previewing) { AttachmentImagePreview(item: $0) }
   }
 
   private var slashMenu: some View {
@@ -1006,11 +1147,23 @@ struct MessageComposer: View {
 
   private func attachmentChip(_ item: DraftAttachment) -> some View {
     HStack(spacing: 7) {
-      Image(systemName: item.kind == .image ? Symbol.photo : Symbol.file)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(item.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-        Text(item.detail).font(.system(size: 9)).foregroundStyle(Palette.muted)
+      Button {
+        if item.kind == .image { previewing = AttachmentPreviewItem(name: item.name, data: item.data) }
+      } label: {
+        HStack(spacing: 7) {
+          if item.kind == .image {
+            AttachmentThumbnail(data: item.data, side: 30)
+          } else {
+            Image(systemName: Symbol.file)
+          }
+          VStack(alignment: .leading, spacing: 1) {
+            Text(item.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            Text(item.detail).font(.system(size: 9)).foregroundStyle(Palette.muted)
+          }
+        }
       }
+      .buttonStyle(.plain).disabled(item.kind != .image)
+      .accessibilityLabel(item.kind == .image ? "查看 \(item.name)" : item.name)
       Button { attachments.removeAll { $0.id == item.id } } label: {
         Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).frame(width: 22, height: 22)
       }
@@ -1020,29 +1173,50 @@ struct MessageComposer: View {
     .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
   }
 
+  // Errors are only set, never cleared, by an individual item, so a later
+  // successful item in the same batch cannot hide an earlier rejection.
   @MainActor private func append(_ item: DraftAttachment) {
     guard attachments.count < maxCount else { attachmentError = "附件最多 4 项"; return }
     guard !item.name.isEmpty && item.name.count <= 160 else { attachmentError = "附件名称过长"; return }
     guard item.data.count <= maxEachBytes else { attachmentError = "\(item.name) 超过 512 KB；请压缩后重试"; return }
-    guard attachments.reduce(0, { $0 + $1.data.count }) + item.data.count <= maxTotalBytes else {
+    guard usedBytes + item.data.count <= maxTotalBytes else {
       attachmentError = "附件总大小不能超过 700 KB"; return
     }
-    attachments.append(item); attachmentError = nil
+    attachments.append(item)
+  }
+
+  private var usedBytes: Int { attachments.reduce(0) { $0 + $1.data.count } }
+
+  private func imageBudget(remainingImages: Int) -> Int {
+    DraftAttachment.imageBudget(usedBytes: usedBytes, remainingImages: remainingImages)
   }
 
   @MainActor private func importPhotos(_ items: [PhotosPickerItem]) async {
-    for (index, item) in items.prefix(maxCount).enumerated() {
+    attachmentError = nil
+    let selected = Array(items.prefix(maxCount - attachments.count))
+    if selected.count < items.count { attachmentError = "附件最多 4 项，已忽略多余图片" }
+    var loaded: [Data] = []
+    for item in selected {
       do {
-        guard let data = try await item.loadTransferable(type: Data.self), let jpeg = compactJPEG(data) else {
-          attachmentError = "无法读取所选图片"; continue
-        }
-        append(.init(kind: .image, name: "photo-\(index + 1).jpg", mimeType: "image/jpeg", data: jpeg))
+        guard let data = try await item.loadTransferable(type: Data.self) else { attachmentError = "无法读取所选图片"; continue }
+        loaded.append(data)
       } catch { attachmentError = "图片读取失败：\(error.localizedDescription)" }
+    }
+    for (index, data) in loaded.enumerated() {
+      guard let jpeg = DraftAttachment.compactJPEG(data, maxBytes: imageBudget(remainingImages: loaded.count - index)) else {
+        attachmentError = "无法把所选图片压缩到剩余附件额度内"; continue
+      }
+      append(.init(kind: .image, name: "photo-\(attachments.count + 1).jpg", mimeType: "image/jpeg", data: jpeg))
     }
   }
 
   @MainActor private func importFiles(_ urls: [URL]) {
-    for url in urls.prefix(maxCount) {
+    attachmentError = nil
+    let selected = Array(urls.prefix(maxCount - attachments.count))
+    if selected.count < urls.count { attachmentError = "附件最多 4 项，已忽略多余文件" }
+    // Only used to split the size budget; the scoped read below stays authoritative.
+    var remainingImages = selected.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }.count
+    for url in selected {
       let scoped = url.startAccessingSecurityScopedResource()
       defer { if scoped { url.stopAccessingSecurityScopedResource() } }
       do {
@@ -1054,7 +1228,11 @@ struct MessageComposer: View {
         }
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         if type?.conforms(to: .image) == true {
-          guard let jpeg = compactJPEG(data) else { attachmentError = "无法压缩 \(url.lastPathComponent) 到 512 KB 内"; continue }
+          let budget = imageBudget(remainingImages: remainingImages)
+          remainingImages -= 1
+          guard let jpeg = DraftAttachment.compactJPEG(data, maxBytes: budget) else {
+            attachmentError = "无法把 \(url.lastPathComponent) 压缩到剩余附件额度内"; continue
+          }
           append(.init(kind: .image, name: url.deletingPathExtension().lastPathComponent + ".jpg", mimeType: "image/jpeg", data: jpeg))
         } else {
           guard String(data: data, encoding: .utf8) != nil else {
@@ -1065,20 +1243,4 @@ struct MessageComposer: View {
       } catch { attachmentError = "文件读取失败：\(error.localizedDescription)" }
     }
   }
-
-  #if canImport(UIKit)
-  @MainActor private func compactJPEG(_ data: Data) -> Data? {
-    guard let source = UIImage(data: data) else { return nil }
-    let maxSide: CGFloat = 1280
-    let scale = min(1, maxSide / max(source.size.width, source.size.height))
-    let size = CGSize(width: max(1, source.size.width * scale), height: max(1, source.size.height * scale))
-    let image = UIGraphicsImageRenderer(size: size).image { _ in source.draw(in: CGRect(origin: .zero, size: size)) }
-    for quality in [0.72, 0.58, 0.44, 0.32, 0.22] {
-      if let out = image.jpegData(compressionQuality: quality), out.count <= maxEachBytes { return out }
-    }
-    return nil
-  }
-  #else
-  private func compactJPEG(_ data: Data) -> Data? { nil }
-  #endif
 }

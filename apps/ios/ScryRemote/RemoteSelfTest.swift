@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import UIKit
 import RemoteTransport
 
 // DEBUG-only, launch-argument driven (`-selfTest`) runtime verification of the
@@ -10,6 +11,38 @@ import RemoteTransport
 // lines and exits non-zero on the first failure so a simulator run can assert.
 #if DEBUG
 enum RemoteSelfTest {
+  // Four detailed full-resolution iPhone screenshots must all fit the host's
+  // 700 KB attachment budget, and the sent copies must keep previewable bytes.
+  @MainActor static func selfTestFourScreenshotsFitBudget() -> (Int, Int, Bool) {
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    var generator = SystemRandomNumberGenerator()
+    let sources: [Data] = (0..<4).compactMap { index in
+      UIGraphicsImageRenderer(size: CGSize(width: 1179, height: 2556), format: format).image { context in
+        UIColor(white: 0.07, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 1179, height: 2556))
+        for _ in 0..<1800 {
+          UIColor(hue: .random(in: 0...1, using: &generator), saturation: 0.4, brightness: .random(in: 0.3...1, using: &generator), alpha: 1).setFill()
+          context.fill(CGRect(x: .random(in: 0...1150, using: &generator), y: .random(in: 0...2530, using: &generator),
+                              width: .random(in: 4...120, using: &generator), height: .random(in: 4...28, using: &generator)))
+        }
+        ("截图 \(index)" as NSString).draw(at: CGPoint(x: 40, y: 120), withAttributes: [.font: UIFont.systemFont(ofSize: 64), .foregroundColor: UIColor.white])
+      }.pngData()
+    }
+    var used = 0
+    var accepted: [Data] = []
+    for (index, data) in sources.enumerated() {
+      let budget = DraftAttachment.imageBudget(usedBytes: used, remainingImages: sources.count - index)
+      guard let jpeg = DraftAttachment.compactJPEG(data, maxBytes: budget), used + jpeg.count <= DraftAttachment.maxTotalBytes else { continue }
+      used += jpeg.count; accepted.append(jpeg)
+    }
+    let sent = accepted.map {
+      RemoteRunStore.SentAttachment(RemoteRunClient.Attachment(kind: .image, name: "photo.jpg", mimeType: "image/jpeg",
+                                                              dataBase64: $0.base64EncodedString(), size: $0.count))
+    }
+    let previewable = sent.count == accepted.count && zip(sent, accepted).allSatisfy { $0.imageData == $1 && UIImage(data: $1) != nil }
+    return (accepted.count, used, previewable)
+  }
+
   @MainActor static func runIfRequested() {
     guard ProcessInfo.processInfo.arguments.contains("-selfTest") else { return }
     var failures = 0
@@ -119,6 +152,10 @@ enum RemoteSelfTest {
     let profileB = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true, agentProfileId: "pi:b")
     check("provider.profileRowIdentity", profileA.selectionId != profileB.selectionId)
     check("run.drainBeyond400", RemoteRunStore.selfTestDrain(cursor: 400, next: 401, chunkCount: 401))
+    let (photoCount, photoBytes, photosPreviewable) = selfTestFourScreenshotsFitBudget()
+    print("  attachments.fourScreenshots count=\(photoCount) bytes=\(photoBytes)")
+    check("attachments.fourScreenshotsFitBudget", photoCount == 4 && photoBytes <= DraftAttachment.maxTotalBytes)
+    check("attachments.sentImagesPreviewable", photosPreviewable)
 
     // 4. Keychain: insert-only device key + upsertable grant round-trip in an
     //    isolated test service, then cleaned up. An UNSIGNED simulator build has
