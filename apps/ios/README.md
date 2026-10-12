@@ -5,7 +5,7 @@ Two targets live here:
 - **ScryRemoteG0** (`com.scry.remote.g0`) — isolated native SwiftUI transport/Keychain verification app. **Not** the product; it cannot start Providers, write files or operate terminals.
 - **ScryRemote** (`com.scry.remote`) — the product SwiftUI app (`ScryRemote.xcodeproj`), implementing the selected **v5 · Codex Refined** direction: sign-in, live pairing, flat session catalog, transcript continuation, new task, project/Provider pickers, attachment composer and settings. iOS 17+.
 
-The remote implementation and evidence boundaries are documented in [the implementation ledger](../../docs/research/scry-ios-remote-implementation.md).
+The current desktop host implementation is under `src/main/remote/`; this README is the maintained product and verification guide. It does not claim public deployment or complete Provider acceptance.
 
 ## ScryRemote product UI (design v5)
 
@@ -21,8 +21,8 @@ Honesty invariants (enforced by the model and host, not decoration):
 - The composer accepts up to four bounded image or UTF-8 text/code attachments. Images become native Provider attachments; text files become explicit Provider context blocks. Unsupported or oversized files fail visibly instead of being shown as uploaded.
 - QR pairing is the only onboarding path; no Apple account or manual-code entry is required/offered. Existing Keychain grants and cached history survive an app update. DEBUG visual fixtures never create a host grant.
 - Session headers show current observed run state (including unavailable/unknown); historical-session checks are scoped by provider, profile, canonical cwd and external session ID. “No observed run” is not “completed”.
-- The header folder button opens read-only project files and current-worktree vs HEAD diff, including untracked files. File pages are 64 KiB with snapshot-fenced continuation; diff previews are capped at 64 KiB and explicitly marked when incomplete. Device grants and canonical project/path containment are rechecked for every request. See [verification and limits](../../docs/testing/ios-workspace-2026-10-10.md).
-- Live runs use persistent control/watch/bulk inner-mTLS lanes, host long-poll `watch`, explicit `stop` receipts and automatic read-only reconnect. Writes (submit/answer/stop) are never replayed after their bytes were sent; outcomes stay unknown until reconciled. See [contract, checks and device E2E](../../docs/testing/ios-live-lanes-2026-10-10.md).
+- The header folder button opens read-only project files and current-worktree vs HEAD diff, including untracked files. File pages are 64 KiB with snapshot-fenced continuation; diff previews are capped at 64 KiB and explicitly marked when incomplete. Device grants and canonical project/path containment are rechecked for every request.
+- Live runs use persistent control/watch/bulk inner-mTLS lanes, host long-poll `watch`, explicit `stop` receipts and automatic read-only reconnect. Writes (submit/answer/stop) are never replayed after their bytes were sent; outcomes stay unknown until reconciled.
 - Pairing scans a real short-lived code, proves device-key possession over inner TLS 1.3/mTLS, waits for Mac confirmation, and only then stores the public connection descriptor.
 
 Build (Simulator, unsigned) and signed device build:
@@ -155,7 +155,7 @@ swift test --package-path experiments/remote-g0/swift -j 4 --filter 'DeviceModel
 npm run test:unit -- src/main/remote/pairing.test.ts src/main/remote/inner-mtls-host.test.ts src/main/remote/remote-host-service.test.ts --exclude '.local/**'
 ```
 
-## History cache (2026-10-08)
+## History cache
 
 `RemoteHistoryCache.swift` persists complete history in protected, backup-excluded
 Caches storage (64 MiB / 20 entries). Previously downloaded history appears before
@@ -167,4 +167,4 @@ DEBUG `-historyCacheTest` exercises isolated temporary cache and store fixtures,
 without a relay, real Provider calls or real recovery-checkpoint writes. Run it
 separately from `-selfTest`; both print PASS/FAIL and exit. Device protection-class
 verification cannot be replaced by Simulator results.
-See [verification and limits](../../docs/testing/ios-history-cache-2026-10-08.md).
+The cache is disposable history, not a permanent backup or evidence that the Mac is online.

@@ -1,6 +1,6 @@
 # Scry Remote G0 transport probe
 
-Local implementation evidence for [the technical plan](../../docs/research/scry-ios-remote-technical-plan.md). **Not a remote-control product, public relay, pairing authority, or completed G0 gate.** No Provider, real workspace, `.scry`, analytics DB, APNs or user credentials are accessed.
+Local implementation evidence for the current iOS remote product and host boundaries documented in [`apps/ios/README.md`](../../apps/ios/README.md). **Not a remote-control product, public relay, pairing authority, or completed G0 gate.** No Provider, real workspace, `.scry`, analytics DB, APNs or user credentials are accessed.
 
 ## Implemented
 
