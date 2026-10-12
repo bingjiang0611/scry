@@ -50,6 +50,7 @@
 
 - preload 类型、main handler、renderer 调用和测试是否一起更新？
 - sender/frame/origin、cwd、relative path、symlink、protected name 是否都重验？
+- 切换项目或会话只是展示上下文变化，不得关闭或接管仍在运行的 Shell；owner/epoch 必须拒绝旧 renderer 的写入，真正关闭标签、显式重启或 App 退出才结束对应进程。
 - terminal backpressure/ack、resize、close、window crash/navigation 清理是否保持？
 - Renderer 是否仍不能直接访问 Node、任意 fs 或 spawn？
 
