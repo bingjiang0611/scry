@@ -413,10 +413,30 @@ export class RemoteGateway {
     return { runId: receipt.event.runId, status: receipt.status }
   }
 
-  // Read the durable event stream after the caller's cursor.
+  // Reconcile a submit whose receipt was lost. Scoped like submitIntent, so a
+  // device can only learn about its own intent ids.
+  intentStatus(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
+    this.#authorize(peerCertSHA256)
+    if (typeof input?.intentId !== 'string') throw new RemoteGatewayError('invalid_intent_id')
+    const found = this.#ledger.intentRun(scopedIntentId(peerCertSHA256, input.intentId))
+    if (!found) throw new RemoteGatewayError('unknown_intent')
+    return { runId: found.runId, state: found.lifecycle }
+  }
+
+  // Read the durable event stream after the caller's cursor. The intent body
+  // (prompt + base64 attachments, up to ~1 MB) is the host's dispatch input,
+  // not device evidence: every watch would otherwise download it again.
   poll(peerCertSHA256: string, input: { cursor: number }): ReturnType<SessionLedger['since']> {
     this.#authorize(peerCertSHA256)
-    return this.#ledger.since(input.cursor)
+    const page = this.#ledger.since(input.cursor)
+    return {
+      ...page,
+      events: page.events.map((event) => {
+        if (event.kind !== 'intent_recorded' || event.detail === undefined) return event
+        const { detail: _detail, ...rest } = event
+        return rest
+      })
+    }
   }
 
   runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {

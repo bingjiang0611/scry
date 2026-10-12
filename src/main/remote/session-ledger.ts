@@ -344,6 +344,15 @@ export class SessionLedger {
     return this.#runs.get(runId)?.lifecycle
   }
 
+  // Read-only lookup for a device whose submit receipt was lost: the intent id
+  // answers "was it recorded?" without resending the payload.
+  intentRun(intentId: string): { runId: string; lifecycle: RunLifecycle } | undefined {
+    this.#assertDeterminate()
+    const runId = this.#byIntent.get(intentId)
+    const entry = runId ? this.#runs.get(runId) : undefined
+    return entry ? { runId: entry.runId, lifecycle: entry.lifecycle } : undefined
+  }
+
   recordedIntents(): Array<{ runId: string; detail?: string }> {
     this.#assertDeterminate()
     const pending: Array<{ runId: string; detail?: string }> = []

@@ -461,6 +461,8 @@ public enum G0Transport {
   }
 
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
+  private struct RunIntentStatusRequest: Encodable { let op = "intentStatus"; let intentId: String }
+  private struct RunIntentBody: Decodable { let runId: String; let state: String }
   private struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   private struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
   private struct RunQuestionsRequest: Encodable { let op = "questions"; let runId: String }
@@ -523,6 +525,7 @@ public enum G0Transport {
     let watch: RunWatchBody?
     let stop: RunStopBody?
     let liveRuns: LiveRunsOutcome?
+    let intent: RunIntentBody?
     let error: String?
   }
   private struct RunWatchBody: Decodable {
@@ -548,6 +551,21 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
     guard let runId = response.runId, let status = response.status else { throw ProbeError.unexpectedReply }
     return RunSubmitOutcome(runId: runId, status: status)
+  }
+
+  // Read-only reconciliation of a submit whose receipt was lost. nil means the
+  // host has no record of this device's intent id, so a resend cannot duplicate
+  // it. Older hosts answer `unknown_op`, surfaced as RunError.host.
+  public static func relayRunIntentStatus(endpoint: RelayEndpoint, identity: G0ProbeIdentity, intentId: String) async throws -> RunSubmitOutcome? {
+    let request = try JSONEncoder().encode(RunIntentStatusRequest(intentId: intentId))
+    let response: RunResponse
+    do {
+      response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    } catch RunError.host(code: "unknown_intent") {
+      return nil
+    }
+    guard let intent = response.intent else { throw ProbeError.unexpectedReply }
+    return RunSubmitOutcome(runId: intent.runId, status: "duplicate")
   }
 
   // Poll ledger events strictly after `cursor` (server-authoritative sequence).

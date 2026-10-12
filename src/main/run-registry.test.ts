@@ -20,6 +20,17 @@ describe('RunRegistry', () => {
     expect(registry.activeStates().map((run) => run.runId)).toEqual(['run-a', 'run-b'])
   })
 
+  it('设备发起的 run 注册后可见但不抢占 Mac 当前焦点', () => {
+    const registry = new RunRegistry<{ runId: string; done: boolean }, { runId: string }>()
+    registry.register({ runId: 'mac-run', done: false }, { runId: 'mac-run' })
+    registry.register({ runId: 'remote-run', done: false }, { runId: 'remote-run' }, { focus: false })
+
+    expect(registry.focusedState()?.runId).toBe('mac-run')
+    expect(registry.activeStates().map((run) => run.runId)).toEqual(['mac-run', 'remote-run'])
+    expect(registry.focus('remote-run')).toBe(true)
+    expect(registry.isViewed('remote-run')).toBe(true)
+  })
+
   it('切换焦点不删除后台 run，移除一个 run 也不影响另一个', () => {
     const registry = new RunRegistry<
       { runId: string; done: boolean },

@@ -245,4 +245,62 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
     expect(markers.some(m => JSON.stringify(m).includes('Hello from the agent'))).toBe(false)
   })
+
+  // The Mac and the phone's history read this observation while the first turn
+  // is still running (it has no archive yet). Before this hook existed a
+  // device-started run was invisible to both until it ended.
+  it('exposes the live run to a Mac observer before the archive, and settles only after it', async () => {
+    const order: string[] = []
+    let releaseProvider!: () => void
+    const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve })
+    const { run } = fakeRun(async (req) => {
+      req.emit(textEvent('working'))
+      req.onExternalSessionId?.('pi-session-1')
+      await providerGate
+      return { status: 'completed' }
+    })
+    let releaseArchive!: () => void
+    const archiveGate = new Promise<void>((resolve) => { releaseArchive = resolve })
+    const observed: TraceEvent[] = []
+    const start = createRemoteRunBinding({
+      run,
+      nextScryRunId: () => 'scry-observed',
+      observe: (info) => {
+        order.push(`observe:${info.scryRunId}`)
+        return {
+          attach: () => order.push('attach'),
+          event: (ev) => observed.push(ev),
+          session: (id) => order.push(`session:${id}`),
+          done: ({ status }) => order.push(`done:${status}`),
+          settled: () => order.push('settled')
+        }
+      },
+      onRunArchive: async () => { order.push('archive:start'); await archiveGate; order.push('archive:end') }
+    })
+    const finished = start({ runId: 'l', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {} })
+    await vi.waitFor(() => expect(order).toContain('attach'))
+    // Live, not archived: the event is already observable while the Provider runs.
+    expect(observed.map((ev) => ev.text)).toEqual(['working'])
+    expect(order).toEqual(['observe:scry-observed', 'session:pi-session-1', 'attach'])
+    releaseProvider()
+    await vi.waitFor(() => expect(order).toContain('archive:start'))
+    expect(order).not.toContain('settled')
+    releaseArchive()
+    await finished
+    expect(order.slice(3)).toEqual(['done:completed', 'archive:start', 'archive:end', 'settled'])
+  })
+
+  it('settles the observer even when the Provider cannot start', async () => {
+    const settled = vi.fn()
+    const done = vi.fn()
+    const start = createRemoteRunBinding({
+      run: () => { throw new Error('spawn failed') },
+      nextScryRunId: () => 'scry-dead',
+      observe: () => ({ attach: () => {}, event: () => {}, session: () => {}, done, settled })
+    })
+    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {} }))
+      .rejects.toThrow('spawn failed')
+    expect(done).not.toHaveBeenCalled()
+    expect(settled).toHaveBeenCalledTimes(1)
+  })
 })

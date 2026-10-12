@@ -112,6 +112,12 @@ struct RemoteRunClient {
     return try await G0Transport.relayRunSubmit(endpoint: endpoint(), identity: try identity(), intentId: intentId, detail: detail)
   }
 
+  // nil: the host never recorded this intent (safe to resend). Non-nil: it did,
+  // and this is its runId. Never resends the intent body.
+  func intentStatus(intentId: String) async throws -> G0Transport.RunSubmitOutcome? {
+    try await G0Transport.relayRunIntentStatus(endpoint: endpoint(), identity: try identity(), intentId: intentId)
+  }
+
   // Poll ledger events strictly after `cursor`; returns events + the next cursor.
   func poll(cursor: Int) async throws -> G0Transport.RunPollOutcome {
     try await G0Transport.relayRunPoll(endpoint: endpoint(), identity: try identity(), cursor: cursor)
