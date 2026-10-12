@@ -2435,6 +2435,24 @@ final class RemoteRunStore: ObservableObject {
       historyFromCache = true; historyFetchedAt = Date()
       prompt = nil; output = []; runId = nil; resultSummary = nil
     }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockMarkdownTable") {
+      let markdown = """
+      ## 性能（日志实测）
+      | 问题 | 证据 | 判断 |
+      |---|:---:|---:|
+      | **文件树扫描太慢** | `reload_tree.bg.scan` 共 141 次，7 万多个文件单次扫描 5–117 秒。 | 文件结构一变，增量更新就退回整树扫描。 |
+      | 全文搜索慢 | `search.complete` 最长 32 秒 | 两者争用磁盘 IO |
+
+      表格之后的正文
+      """
+      if ProcessInfo.processInfo.arguments.contains("-uiMockMarkdownHistory") {
+        history = .loaded([.init(userText: "检查性能", items: [.init(kind: "output", text: markdown)])])
+        prompt = nil; output = []; runId = nil; resultSummary = nil
+      } else {
+        prompt = "检查性能"
+        output = [.init(id: 1, kind: "output", text: markdown)]
+      }
+    }
     if ProcessInfo.processInfo.arguments.contains("-uiMockLoading") {
       history = .loading; prompt = nil; output = []; runId = nil; resultSummary = nil
     }

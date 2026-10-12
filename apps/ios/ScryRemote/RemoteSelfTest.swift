@@ -65,6 +65,30 @@ enum RemoteSelfTest {
     check("markdown.heading", markdown.contains { if case .heading(1) = $0.kind { return $0.text == "标题" }; return false })
     check("markdown.list", markdown.contains { if case .unordered = $0.kind { return $0.text == "项目" }; return false })
     check("markdown.code", markdown.contains { if case .code("swift") = $0.kind { return $0.text == "let answer = 42" }; return false })
+    // GFM tables: preserve inline source, alignment, row width and block boundaries.
+    let tableSource = "| 问题 | 证据 | 判断 |\r\n|---|:---:|---:|\r\n| **扫描太慢** | `141` 次 | [优化](https://example.com) |"
+    let tableBlocks = ConversationMarkdownParser.parse(tableSource)
+    check("markdown.tableStructured", tableBlocks.count == 1)
+    if case let .table(table) = tableBlocks.first?.kind {
+      check("markdown.tableHeaders", table.headers == ["问题", "证据", "判断"])
+      check("markdown.tableInline", table.rows == [["**扫描太慢**", "`141` 次", "[优化](https://example.com)"]])
+      check("markdown.tableAlignment", table.alignments == [.left, .center, .right])
+    } else { check("markdown.tableParsed", false) }
+    let uneven = ConversationMarkdownParser.parse("A | B\n- | -\none\ntwo | three | ignored\n\n正文")
+    if case let .table(table) = uneven.first?.kind {
+      check("markdown.tableUnevenRows", table.rows == [["one", ""], ["two", "three"]])
+      check("markdown.tableBlankBoundary", uneven.count == 2 && uneven.last?.text == "正文")
+    } else { check("markdown.tableUnevenParsed", false) }
+    let escaped = ConversationMarkdownParser.parse(#"| A\|B | C |"# + "\n|---|---|\n" + #"| `x\|y` | **a\|b** |"#)
+    if case let .table(table) = escaped.first?.kind {
+      check("markdown.tableEscapedPipes", table.headers == ["A|B", "C"] && table.rows == [["`x|y`", "**a|b**"]])
+    } else { check("markdown.tableEscapedParsed", false) }
+    let boundary = ConversationMarkdownParser.parse("| A | B |\n|---|---|\n| x | y |\n## 标题\n- 项目\n> 引用\n```\n| A | B |\n|---|---|\n```")
+    check("markdown.tableBlockBoundary", boundary.count == 5 && boundary[1].text == "标题" && boundary[4].text == "| A | B |\n|---|---|")
+    let invalid = ConversationMarkdownParser.parse("| A | B |\n|---|\n| x | y |\n\n管道 x | y\n\n| A | B |\n|--x|---|")
+    check("markdown.tableInvalidIsText", !invalid.contains { if case .table = $0.kind { return true }; return false })
+    let emptyTable = ConversationMarkdownParser.parse("| A |\n---")
+    check("markdown.tableHeaderOnly", emptyTable.count == 1 && { if case let .table(table) = emptyTable[0].kind { return table.rows.isEmpty }; return false }())
     // Mac-local links: only loopback HTTP(S) is intercepted; paths map like a static server.
     let local = URL(string: "http://127.0.0.1:4311/designs/scry-steer/")!
     check("link.loopbackIntercepted", MacLocalLink.isLoopback(local) && MacLocalLink.isLoopback(URL(string: "http://localhost:5173/a")!))

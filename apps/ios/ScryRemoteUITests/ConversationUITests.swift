@@ -135,6 +135,29 @@ final class ConversationUITests: XCTestCase {
     capture("history-mac-starts-after-opening")
   }
 
+  func testMarkdownTableInLiveOutputAndHistory() {
+    for route in ["chat", "transcript"] {
+      launch(route, extra: ["-uiMockMarkdownTable"] + (route == "transcript" ? ["-uiMockMarkdownHistory"] : []))
+      let table = app.scrollViews["markdown-table"]
+      XCTAssertTrue(table.waitForExistence(timeout: 10))
+      XCTAssertTrue(app.staticTexts["问题"].isHittable)
+      XCTAssertTrue(app.staticTexts["文件树扫描太慢"].isHittable, "单元格应解析粗体而不是显示星号")
+      XCTAssertFalse(app.staticTexts["|---|:---:|---:|"].exists)
+      XCTAssertTrue(app.staticTexts["表格之后的正文"].isHittable)
+      let firstColumn = app.staticTexts["问题"].frame
+      let longCell = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "reload_tree.bg.scan")).firstMatch
+      XCTAssertGreaterThan(longCell.frame.height, 40, "长单元格应换行而不是截断")
+      capture("markdown-\(route)-left")
+      table.swipeLeft()
+      XCTAssertTrue(app.staticTexts["判断"].isHittable, "宽表格必须能横向滑动到最后一列")
+      XCTAssertTrue(app.staticTexts["两者争用磁盘 IO"].isHittable)
+      XCTAssertLessThan(app.staticTexts["问题"].frame.minX, firstColumn.minX)
+      capture("markdown-\(route)-right")
+      table.swipeRight()
+      XCTAssertTrue(app.staticTexts["问题"].isHittable)
+    }
+  }
+
   func testSlashCommandInsertion() {
     launch("chat", extra: ["-uiMockSlash"])
     let command = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "/review")).firstMatch
