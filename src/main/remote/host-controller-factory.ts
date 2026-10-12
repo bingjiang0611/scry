@@ -169,7 +169,8 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   let controller: HostController
   try {
     controller = new HostController(controllerDeps)
-    // Only recorded-but-undispatched intents may start; dispatched outcomes stay unknown.
+    // Orphaned dispatched runs close as failed (outcome unknown, never re-run);
+    // only recorded-but-undispatched intents may start.
     controller.recover()
   } catch (error) {
     try { await outputStore.close() } finally {

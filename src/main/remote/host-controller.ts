@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
 import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
@@ -228,6 +228,9 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
   }
 }
 
+// Device-visible failure detail for a run orphaned by a host restart.
+export const HOST_RESTARTED_DETAIL = 'host_restarted: Mac 上的 Scry 在这轮结束前重启，已无法观测它的结果；Provider 可能已部分执行，请在 Mac 上核对后再决定是否重发'
+
 export class HostController {
   readonly authority: PairingAuthority
   readonly terminals = new RemoteTerminalOwnership()
@@ -313,9 +316,15 @@ export class HostController {
     })
   }
 
-  // On startup, dispatch any intent that was durably recorded but never
-  // dispatched (crash recovery), exactly once.
+  // Startup only, before any executor exists in this process.
+  //   - A run still `dispatched` lost its executor with the previous process, so
+  //     nothing can ever report its terminal result. Close it as failed with that
+  //     reason instead of leaving the device showing it as running forever. Its
+  //     Provider outcome stays unknown, and it is never re-run.
+  //   - Dispatch any intent that was durably recorded but never dispatched,
+  //     exactly once.
   recover(): void {
+    for (const runId of this.#ledger.dispatchedRuns()) this.#ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
     this.#dispatcher.pump()
   }
 
@@ -364,6 +373,21 @@ export class HostController {
       return { status: 'answered' }
     }
     return this.#interactions.answer(input.runId, { answerId: input.answerId, response: input.response })
+  }
+
+  // Trusted Mac UI answering a question of a device-started run. Same broker as
+  // the device path, so whichever side answers first settles it exactly once.
+  // `response.runId` is ignored: the caller resolved the ledger runId itself.
+  // false = not accepted, like the Mac broker: no longer pending (answered on the
+  // device or withdrawn) or not a valid answer to that question. A ledger write
+  // failure still throws.
+  answerOwnerQuestion(runId: string, response: AgentQuestionResponse): boolean {
+    try {
+      return this.#interactions.answer(runId, { answerId: randomUUID(), response: { ...response, runId } }).status === 'answered'
+    } catch (error) {
+      if (error instanceof RemoteInteractionError) return false
+      throw error
+    }
   }
 
   private authorizeDevice(peerCertSHA256: string): void {

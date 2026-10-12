@@ -88,6 +88,45 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     })])
   })
 
+  it('mirrors a pending question to the Mac observer and closes it even when the broker rejects', async () => {
+    const order: string[] = []
+    const question = (questionId: string) => ({
+      runId: 'scry-mirror', questionId, questionKind: 'clarification' as const,
+      questions: [{ question: 'Pick', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: 'a' }, { label: 'B', description: 'b' }] }]
+    })
+    const requestUserInput = vi.fn(async (request: { runId: string; questionId: string }) => {
+      order.push(`broker:${request.questionId}`)
+      if (request.questionId === 'q-withdrawn') throw new Error('provider_cancelled')
+      return { runId: request.runId, questionId: request.questionId, behavior: 'answered' as const, answers: { Pick: 'A' } }
+    })
+    const { run } = fakeRun(async (req) => {
+      await req.requestUserInput?.(question('q-answered'), new AbortController().signal)
+      await req.requestUserInput?.(question('q-withdrawn'), new AbortController().signal).catch(() => {})
+      return { status: 'completed' }
+    })
+    let ledgerRunId: string | undefined
+    const start = createRemoteRunBinding({
+      run,
+      nextScryRunId: () => 'scry-mirror',
+      observe: (info) => {
+        ledgerRunId = info.ledgerRunId
+        return {
+          attach: () => {}, event: () => {}, session: () => {},
+          question: (request) => order.push(`open:${request.runId}:${request.questionId}`),
+          questionClosed: (questionId) => order.push(`closed:${questionId}`),
+          done: () => {}, settled: () => {}
+        }
+      }
+    })
+    await start({ runId: 'ledger-mirror', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {}, requestUserInput })
+    // The Mac answers through the ledger runId; the question it shows carries the scry runId.
+    expect(ledgerRunId).toBe('ledger-mirror')
+    expect(order).toEqual([
+      'open:scry-mirror:q-answered', 'broker:q-answered', 'closed:q-answered',
+      'open:scry-mirror:q-withdrawn', 'broker:q-withdrawn', 'closed:q-withdrawn'
+    ])
+  })
+
   it('forwards only explicitly selected model, effort and permission controls', async () => {
     const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-controls' })
@@ -271,6 +310,8 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
           attach: () => order.push('attach'),
           event: (ev) => observed.push(ev),
           session: (id) => order.push(`session:${id}`),
+          question: () => {},
+          questionClosed: () => {},
           done: ({ status }) => order.push(`done:${status}`),
           settled: () => order.push('settled')
         }
@@ -296,7 +337,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const start = createRemoteRunBinding({
       run: () => { throw new Error('spawn failed') },
       nextScryRunId: () => 'scry-dead',
-      observe: () => ({ attach: () => {}, event: () => {}, session: () => {}, done, settled })
+      observe: () => ({ attach: () => {}, event: () => {}, session: () => {}, question: () => {}, questionClosed: () => {}, done, settled })
     })
     await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {} }))
       .rejects.toThrow('spawn failed')

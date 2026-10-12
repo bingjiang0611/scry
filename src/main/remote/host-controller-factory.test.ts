@@ -152,7 +152,9 @@ describe('createHostController (production persistence binding)', () => {
       const startRun = vi.fn(async () => {})
       const restored = await factory(dir, startRun)
       expect(restored.controller.runState(CERT, { runId: settled.runId })).toBe('settled')
-      expect(restored.controller.runState(CERT, { runId: pending.runId })).toBe('dispatched')
+      // No executor survived the kill: the orphan closes as failed (outcome
+      // unknown) instead of staying `dispatched` forever, and is never re-run.
+      expect(restored.controller.runState(CERT, { runId: pending.runId })).toBe('failed')
       expect(startRun).not.toHaveBeenCalled()
       expect((await restored.controller.runOutput(CERT, { runId: pending.runId, cursor: 0 })).chunks.map((chunk) => chunk.text))
         .toEqual(['durable before crash', 'child durable tail'])
