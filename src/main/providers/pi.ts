@@ -1409,11 +1409,22 @@ async function runPiAgent(
         thinkingLevel: initialState.thinkingLevel ?? null
       }
     }))
+    let modelChanged = false
     if (request.model) {
       if (!request.model.providerId) throw new Error('Pi 模型选择缺少 upstream providerId')
-      await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
+      const currentModel = record(initialState.model)
+      modelChanged = currentModel.provider !== request.model.providerId || currentModel.id !== request.model.id
+      // Even a same-model set performs auth lookup, appends a model-change entry and reapplies
+      // native thinking defaults. Preserve that last effect when no explicit effort was selected.
+      // Compare with this run's fresh state, not UI state or a previous pooled turn.
+      if (modelChanged || !request.effort) {
+        await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
+      }
     }
-    if (request.effort) await rpc.send({ type: 'set_thinking_level', level: request.effort })
+    // A model switch may clamp/reset thinking; the pre-switch level is no longer authoritative.
+    if (request.effort && (modelChanged || request.effort !== initialState.thinkingLevel)) {
+      await rpc.send({ type: 'set_thinking_level', level: request.effort })
+    }
     // Model-window telemetry is optional. Do not put its native catalog latency in front of
     // entry baseline, recorder identity, or the prompt; the response can enrich context usage
     // while the turn is already running. The rejection is handled here so a delayed/failed

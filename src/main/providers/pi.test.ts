@@ -34,6 +34,8 @@ if (process.argv.includes('--approve') || process.argv.includes('--no-approve'))
 let buffer = ''
 let leafId = 'active-leaf'
 let sessionId = 'pi-session-1'
+let model = { provider: 'test-provider', id: 'test-model' }
+let thinkingLevel = 'high'
 let entrySeq = 0
 let promptMessage = ''
 let acknowledgePrompt
@@ -69,8 +71,8 @@ process.stdin.on('data', (chunk) => {
         continue
       }
       const state = {
-        model: { provider: 'test-provider', id: 'test-model' },
-        thinkingLevel: 'high',
+        model,
+        thinkingLevel,
         isStreaming: false,
         isCompacting: false,
         pendingMessageCount: 0,
@@ -82,6 +84,16 @@ process.stdin.on('data', (chunk) => {
         require('node:fs').writeFileSync(process.cwd() + '/final-state-requested', '')
       }
       response(state)
+    }
+    else if (command.type === 'set_model') {
+      model = { provider: command.provider, id: command.modelId }
+      // Model switches may reset thinking before the explicit effort selection is applied.
+      thinkingLevel = 'off'
+      response(model)
+    }
+    else if (command.type === 'set_thinking_level') {
+      thinkingLevel = command.level
+      response()
     }
     else if (command.type === 'get_available_models') {
       const models = () => response({ models: [{
@@ -858,6 +870,50 @@ describe('Pi RPC Provider', () => {
       } finally {
         handle.forceKill()
         await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it.each([
+    { name: 'unchanged controls', model: { providerId: 'test-provider', id: 'test-model' }, effort: 'high', controls: [] },
+    { name: 'unchanged effort without a model selection', model: undefined, effort: 'high', controls: [] },
+    { name: 'same model with native default effort', model: { providerId: 'test-provider', id: 'test-model' }, effort: undefined, controls: ['set_model'] },
+    { name: 'changed effort', model: { providerId: 'test-provider', id: 'test-model' }, effort: 'low', controls: ['set_thinking_level'] },
+    { name: 'changed model', model: { providerId: 'test-provider', id: 'other-model' }, effort: 'high', controls: ['set_model', 'set_thinking_level'] },
+    { name: 'changed upstream provider', model: { providerId: 'other-provider', id: 'test-model' }, effort: 'high', controls: ['set_model', 'set_thinking_level'] }
+  ])('only sends necessary Pi controls before cold and reused prompts: $name', async ({ model, effort, controls }) => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      try {
+        let commandOffset = 0
+        for (let turn = 0; turn < 2; turn++) {
+          const events: TraceEvent[] = []
+          await expect(adapter.run({
+            runId: `controls-${turn}`, prompt: 'hello', cwd, agentProfileId: profile.id,
+            attachments: [], permissionMode: 'full_access', model, effort,
+            ...(turn ? { resume: 'pi-session-1' } : {}),
+            emit: (event) => events.push(event)
+          }).promise).resolves.toMatchObject({ status: 'completed', externalSessionId: 'pi-session-1' })
+          const allCommands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').trim().split('\n')
+            .map((line) => JSON.parse(line) as { type: string; provider?: string; modelId?: string; level?: string })
+          const commands = allCommands.slice(commandOffset)
+          commandOffset = allCommands.length
+          const beforePrompt = commands.slice(0, commands.findIndex((command) => command.type === 'prompt'))
+          const settings = beforePrompt.filter((command) => ['set_model', 'set_thinking_level'].includes(command.type))
+          const expectedControls = turn === 0 || !effort ? controls : []
+          expect(settings.map((command) => command.type)).toEqual(expectedControls)
+          if (expectedControls.includes('set_model')) expect(settings[0]).toMatchObject({ provider: model!.providerId, modelId: model!.id })
+          if (expectedControls.includes('set_thinking_level')) expect(settings.at(-1)).toMatchObject({ level: effort })
+          expect(events.find((event) => event.stage === 'runtime:init')?.runtimeMetadata).toMatchObject({
+            model: turn === 0 ? { provider: 'test-provider', id: 'test-model' }
+              : { provider: model?.providerId ?? 'test-provider', id: model?.id ?? 'test-model' },
+            thinkingLevel: turn === 0 ? 'high' : effort ?? 'off'
+          })
+          expect(events.some((event) => event.stage === 'text_delta' && event.text)).toBe(true)
+        }
+        expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
+      } finally {
         await adapter.dispose?.()
       }
     })

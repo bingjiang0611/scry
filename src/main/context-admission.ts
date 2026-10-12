@@ -35,12 +35,14 @@ export function localOnlySessionShell(
 export function expectedSessionMatches(
   expected: string | null | undefined,
   actual: string | undefined,
-  candidates: Array<{ runId: string; externalSessionId?: string; sessionId?: string }>
+  candidates: () => Array<{ runId: string; externalSessionId?: string; sessionId?: string }>
 ): boolean {
   if (expected === undefined) return true
   if (expected === null) return actual === undefined
   if (expected === actual) return true
-  return candidates.some((run) => {
+  // Most sends already carry the native session id. Read the catalog only for alias resolution,
+  // and obtain a fresh snapshot at each admission boundary rather than caching across waits.
+  return candidates().some((run) => {
     if (run.runId !== expected) return false
     if ((run.externalSessionId ?? run.sessionId) === actual) return true
     // main 侧没有任何原生 session（actual === undefined）时，这一轮必然新建 session，

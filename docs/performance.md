@@ -198,6 +198,34 @@ The conversation-pipeline changes from `7f92982` were packaged as App 0.2.162; p
 - Installed executable and ASAR compare byte-for-byte with the tested development-signed, non-notarized artifact: executable SHA-256 `3193f3798f0cbacf366c8242b664a67b15e2351df48e0af34aeadd3e2c0f4c9f`; ASAR SHA-256 `0a098bbffba9f90fe63dbd2b14fd0aee2083d5ed8bd8d6d7d3470b7af855b1b6`.
 - The user's already-running Scry process was not stopped. Relaunch is required to use the installed code. No real Provider latency/throughput or signed/notarized release acceptance is claimed.
 
+## First-output preparation: redundant admission and Pi controls
+
+- `agent:start` still validates session ownership before draining, after draining, and before committing admission. Each check now loads catalog aliases lazily: an unspecified/new/exact native session needs no catalog read; run-ID aliases and local-only shells still resolve against a fresh snapshot. No aliases are cached across waits.
+- Pi compares requested model (upstream provider + model id) and thinking level against this run's fresh `get_state`, including pooled processes. Unchanged model + explicit effort no longer issue `set_model` / `set_thinking_level`. If effort is omitted, an explicit model selection still calls `set_model` to preserve native thinking-default application. Model changes still precede explicit thinking selection: a switch can clamp/reset thinking, so the old level cannot justify skipping it. Permission, trust, entry baseline and recorder gates are unchanged.
+- Streaming remains bounded by the existing 16 ms main-process batch and renderer frame scheduling. Existing blocked-disk/FIFO/backpressure/projection tests pass; no measured UI bottleneck justifies removing batching. Reviewed native dispatch paths do not show duplicated history injection, so prompt contents and Provider cache policy are unchanged.
+
+### Local evidence (Node 24.18.0, App source 0.2.172)
+
+| Check | Result | Scope |
+| --- | --- | --- |
+| Cached catalog benchmark, 10,000 entries, three checks | Eager mean 1.3017 ms; direct lazy path below 0.001 ms; alias resolution mean 1.5142 ms | Real temporary catalog, same-machine microbenchmark, not full send latency |
+| Pi RPC controls | Unchanged model + effort: two setters reduced to zero; changed controls remain ordered | Isolated native-process fixture, cold and reused process, not real Provider |
+| Focused suite | 10 files / 188 tests passed | Admission, catalog, Pi lifecycle/environment, streaming and LLM metrics |
+| Typecheck / build | Both passed | Main, preload and renderer build; no App installation |
+
+Regression controls: before the Pi fix, three new cases failed on redundant setters. Intentionally restoring eager catalog evaluation made all four direct-admission cases fail; the lazy implementation was restored. These are expected negative controls, not ignored failures. Focused runs exclude the nested `.local` checkout to avoid reporting duplicate suites.
+
+Reproduce from the repository root:
+
+```bash
+./node_modules/.bin/vitest bench src/main/context-admission.bench.ts --run --exclude '**/.local/**'
+npm run test:unit -- src/main/context-admission.test.ts src/main/app-store.test.ts src/main/providers/pi.test.ts src/main/providers/pi-lifecycle.test.ts src/main/providers/pi-environment.test.ts src/main/trace-output.test.ts src/main/live-trace-ingestion.test.ts src/renderer/turn-stream-projection.test.ts src/main/llm-performance.test.ts src/shared/llm-performance.test.ts --exclude '**/.local/**'
+npm run typecheck
+npm run build
+```
+
+No real account/model requests, renderer first-paint measurement, packaging or installation were performed. These changes reduce preparation work, not measured model TTFT. To attribute remaining delay, compare `SCRY_PERF_LOG=1` admission/launch/first-text checkpoints with Provider request-to-first-block timing and renderer paint under the same model, prompt, history and network. Keep this distinction rather than changing the TTFT clock to make the metric smaller.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:
