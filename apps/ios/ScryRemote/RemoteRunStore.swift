@@ -284,6 +284,7 @@ final class RemoteRunStore: ObservableObject {
   private let connections: RemoteConnectionStore
   private var pollTask: Task<Void, Never>?
   private var submitTask: Task<Void, Never>?
+  private var submitTaskSeq = 0
   private var catalogTask: Task<Void, Never>?
   private var historyTask: Task<Void, Never>?
   private var providersTask: Task<Void, Never>?
@@ -448,7 +449,8 @@ final class RemoteRunStore: ObservableObject {
         terminalDrainCompleted = false
         lifecycle = .submitting
         retryAvailable = true
-        submitError = "上次提交结果未知。可重试核对；将复用原 intent ID，不会创建重复任务。"
+        submitError = "上次提交结果未知。正在向 Mac 核对；将复用原 intent ID，不会创建重复任务。"
+        reconcilePending(resendIfUnknown: false)
       } else {
         submitError = "本地恢复记录不完整，未自动执行任何操作"
       }
@@ -1418,12 +1420,13 @@ final class RemoteRunStore: ObservableObject {
     return true
   }
 
-  // Retry only the unresolved submission. The intent id and routing are kept
-  // byte-for-byte stable so a late first receipt is an idempotent duplicate.
+  // Retry only the unresolved submission. First ask the host whether it already
+  // recorded this intent id (a read, no payload); resend the byte-identical
+  // intent only when the host says it has no record of it.
   func retrySubmission() {
     guard pendingSubmission != nil, lifecycle == .submitting else { return }
     submitError = "正在重新核对提交结果…"
-    submitPending()
+    reconcilePending(resendIfUnknown: true)
   }
 
   private func submitPending() {
@@ -1436,24 +1439,17 @@ final class RemoteRunStore: ObservableObject {
     submitTask?.cancel()
     let requestGeneration = generation
     let requestConnectionRevision = connectionSuccessRevision
+    submitTaskSeq += 1
+    let taskSeq = submitTaskSeq
     submitTask = Task { [weak self] in
+      // A reconcile may hand off to a resend (or back); only the newest task owns the slot.
       defer {
-        Task { @MainActor [weak self] in self?.submitTask = nil }
+        Task { @MainActor [weak self] in if self?.submitTaskSeq == taskSeq { self?.submitTask = nil } }
       }
       do {
         let outcome = try await client.submit(routing: pending.routing, intentId: pending.intentId)
         await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.recordSuccess()
-          self.runId = outcome.runId
-          self.terminalDrainCompleted = false
-          let saved = self.saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
-                                                   identity: pending.identity, runId: outcome.runId)
-          self.pendingSubmission = nil
-          self.retryAvailable = false
-          if saved { self.submitError = nil }
-          self.lifecycle = .recorded
-          self.startPolling(runId: outcome.runId, client: client, generation: requestGeneration, identity: pending.identity)
+          self?.adoptSubmission(outcome, pending: pending, client: client, generation: requestGeneration)
         }
       } catch {
         await MainActor.run {
@@ -1461,10 +1457,70 @@ final class RemoteRunStore: ObservableObject {
           self.recordFailure(error, since: requestConnectionRevision)
           self.lifecycle = .submitting
           self.retryAvailable = true
+          self.submitError = "提交结果未知：\(Self.describe(error))。正在向 Mac 核对，不会创建新的任务。"
+          // The host may have recorded the intent before the reply was lost.
+          // Checking is a read; resending stays a user decision.
+          self.reconcilePending(resendIfUnknown: false)
+        }
+      }
+    }
+  }
+
+  private func reconcilePending(resendIfUnknown: Bool) {
+    guard let pending = pendingSubmission, let client = makeClient() else { return }
+    submitTask?.cancel()
+    let requestGeneration = generation
+    let requestConnectionRevision = connectionSuccessRevision
+    submitTaskSeq += 1
+    let taskSeq = submitTaskSeq
+    submitTask = Task { [weak self] in
+      // A reconcile may hand off to a resend (or back); only the newest task owns the slot.
+      defer {
+        Task { @MainActor [weak self] in if self?.submitTaskSeq == taskSeq { self?.submitTask = nil } }
+      }
+      do {
+        let found = try await client.intentStatus(intentId: pending.intentId)
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
+          self.recordSuccess()
+          if let found {
+            self.adoptSubmission(found, pending: pending, client: client, generation: requestGeneration)
+          } else if resendIfUnknown {
+            self.submitPending()
+          } else {
+            self.submitError = "Mac 没有收到这次提交。可重试发送；将复用原 intent ID，不会创建重复任务。"
+          }
+        }
+      } catch G0Transport.RunError.host(code: "unknown_op") {
+        // Older host without reconciliation: the idempotent resend is the only check.
+        await MainActor.run {
+          guard let self, resendIfUnknown, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
+          self.submitPending()
+        }
+      } catch {
+        await MainActor.run {
+          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
+          self.recordFailure(error, since: requestConnectionRevision)
+          self.retryAvailable = true
           self.submitError = "提交结果未知：\(Self.describe(error))。请重试核对，不会创建新的任务。"
         }
       }
     }
+  }
+
+  private func adoptSubmission(_ outcome: G0Transport.RunSubmitOutcome, pending: PendingSubmission,
+                               client: RemoteRunClient, generation requestGeneration: Int) {
+    guard isCurrent(requestGeneration, identity: pending.identity) else { return }
+    recordSuccess()
+    runId = outcome.runId
+    terminalDrainCompleted = false
+    let saved = saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
+                                       identity: pending.identity, runId: outcome.runId)
+    pendingSubmission = nil
+    retryAvailable = false
+    if saved { submitError = nil }
+    lifecycle = .recorded
+    startPolling(runId: outcome.runId, client: client, generation: requestGeneration, identity: pending.identity)
   }
 
   private func startPolling(runId: String, client: RemoteRunClient, generation: Int,

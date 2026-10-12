@@ -115,7 +115,7 @@ import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { RunStopLifecycle } from './run-stop-lifecycle'
 import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/remote-host-service'
-import { createRemoteRunBinding } from './remote/remote-run-binding'
+import { createRemoteRunBinding, type RemoteRunObserver } from './remote/remote-run-binding'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
 import { createRelayConnectWS } from './remote/relay-connect-ws'
@@ -3854,6 +3854,119 @@ function requestRunStop(runId: string): boolean {
   return true
 }
 
+// Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
+// remote-history reader sees one active-run truth: history while the first turn
+// is still running, the Mac sidebar/session view, stop, and same-session
+// conflicts. They are never auto-focused. Questions stay on the device broker:
+// the Mac shows the run as running, not as answerable here.
+const remoteRunIds = new Set<string>()
+function observeRemoteRun(info: {
+  providerId: string
+  cwd: string
+  prompt: string
+  scryRunId: string
+  agentProfileId?: string
+  resume?: string
+  attachments: AgentInputAttachment[]
+}): RemoteRunObserver {
+  const runId = info.scryRunId
+  const providerId = info.providerId as ProviderId
+  // GatedExecutor already authorized this cwd through the same resolver; the
+  // canonical form is what Mac and remote-history readers match on.
+  const cwd = resolveRemoteProjectDirectory(info.cwd)
+  // Same adapter lookup providerRegistry.run uses, not the cached picker snapshot
+  // (empty until its first refresh, e.g. when dispatch recovers after a restart).
+  const runtimeProvider = providerRegistry.get(providerId).runtimeProvider
+  const runState: ActiveRun = {
+    runId,
+    providerId,
+    ...(info.agentProfileId ? { agentProfileId: info.agentProfileId } : {}),
+    cwd,
+    ...(info.resume ? { externalSessionId: info.resume, sessionId: info.resume } : {}),
+    userText: info.prompt,
+    attachments: info.attachments,
+    items: [],
+    done: false
+  }
+  let handle: ProviderRunHandle | undefined
+  let resolveSettled!: () => void
+  const settled = new Promise<void>((resolve) => { resolveSettled = resolve })
+  const unsupportedSteer: AgentSteerResult = { status: 'unavailable', message: '这轮由手机发起，当前 Provider 不支持运行中追加消息。' }
+  const control: RunControl = {
+    runId,
+    providerId,
+    interrupt: () => handle?.interrupt(),
+    forceKill: () => handle?.forceKill(),
+    forceKillScope: () => handle?.forceKillScope,
+    stopBackgroundTask: (taskId) => handle?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
+    steer: (input) => handle?.steer?.(input) ?? Promise.resolve(unsupportedSteer),
+    cwd,
+    ...(info.resume ? { resume: info.resume } : {}),
+    getExternalSessionId: () => handle?.getExternalSessionId() ?? runState.externalSessionId,
+    canonicalLifecycle: false,
+    runtimeProvider,
+    runState,
+    // The Mac adopts this run for display only. Resume binding for a Mac
+    // follow-up comes from the catalog row loadSession reads, like any session.
+    adoptSession: () => {},
+    // Remote runs create no provisional catalog row, turn diff or managed recorder.
+    cleanupProvisional: () => {},
+    finalizeTurnDiff: async () => {},
+    cancelTurnDiff: async () => {},
+    settled
+  }
+  remoteRunIds.add(runId)
+  runs.register(runState, control, { focus: false })
+  const announceSession = (sessionId: string, pending: boolean): void => {
+    win?.webContents.send('agent:session', {
+      runId, sessionId, providerId, agentProfileId: info.agentProfileId,
+      ...(pending ? { pending: true } : { externalSessionId: sessionId })
+    })
+  }
+  announceSession(info.resume ?? runId, !info.resume)
+  return {
+    attach: (value) => { handle = value },
+    event: (ev) => {
+      runState.items.push(ev)
+      if (runs.isViewed(runId)) queueTrace(ev)
+    },
+    session: (externalSessionId) => {
+      runState.externalSessionId = externalSessionId
+      runState.sessionId = externalSessionId
+      announceSession(externalSessionId, false)
+    },
+    done: ({ status, errorText }) => {
+      if (runState.done) return
+      runState.done = true
+      flushTraceSend()
+      const sessionId = runState.externalSessionId ?? runId
+      if (status === 'failed') {
+        runState.error = errorText ?? `${providerId} Provider 返回失败终态`
+        win?.webContents.send('agent:error', { runId, message: runState.error })
+        return
+      }
+      win?.webContents.send('agent:turnDone', {
+        runId, sessionId, externalSessionId: sessionId, providerId, agentProfileId: info.agentProfileId,
+        stopped: status === 'interrupted' || status === 'cancelled'
+      })
+    },
+    settled: () => {
+      if (!runState.done) {
+        // The Provider never reached a terminal result (it failed to start).
+        runState.done = true
+        runState.error = '手机发起的运行未能启动'
+        flushTraceSend()
+        win?.webContents.send('agent:error', { runId, message: runState.error })
+      }
+      runState.providerSettled = true
+      runStopLifecycle.settle(runId)
+      runs.remove(runId)
+      remoteRunIds.delete(runId)
+      resolveSettled()
+    }
+  }
+}
+
 // B2-lite：累计用量统计（读 usage.jsonl 聚合）
 handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
   readUsageStats(app.getPath('userData'), context ? {
@@ -4081,10 +4194,11 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         // Persist the run as a REAL Scry trace archive (same path a local,
         // non-managed run uses) so the owner can OPEN the transcript on the Mac,
         // not just see it listed. Managed recorder stays OFF for remote runs.
-        onRunArchive: ({ providerId, cwd, prompt, scryRunId, externalSessionId, attachments, items, status }) => {
+        observe: observeRemoteRun,
+        onRunArchive: async ({ providerId, cwd, prompt, scryRunId, externalSessionId, attachments, items, status }) => {
           const runtimeProvider = remoteProviderRuntime.get(providerId)
           if (!runtimeProvider) return
-          void archiveTraceTurn({
+          await archiveTraceTurn({
             providerId: providerId as ProviderId,
             runtimeProvider,
             cwd,
@@ -4174,7 +4288,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // goes through the same broker as the Mac dialog, so whichever side answers
       // first settles the question exactly once.
       macRuns: {
-        list: () => runs.activeStates().flatMap((run) => run.providerId && run.cwd ? [{
+        list: () => runs.activeStates().flatMap((run) => run.providerId && run.cwd && !remoteRunIds.has(run.runId) ? [{
           runId: run.runId,
           providerId: run.providerId,
           ...(run.agentProfileId ? { agentProfileId: run.agentProfileId } : {}),

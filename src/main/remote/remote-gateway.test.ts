@@ -161,6 +161,38 @@ describe('RemoteGateway', () => {
     expect(ledger.describe().events).toBe(2)
   })
 
+  // A lost submit receipt used to leave the phone with only one recovery: resend
+  // the whole intent (prompt + base64 image). Reconciliation is now a read.
+  it('reconciles a lost receipt by intent id without resending, scoped to the device', () => {
+    const firstCert = '1'.repeat(64)
+    const secondCert = '2'.repeat(64)
+    const { gw, ledger } = gateway({ authorizesCertificate: (fingerprint) => fingerprint === firstCert || fingerprint === secondCert })
+    const intentId = randomUUID()
+    expectCode(() => gw.intentStatus(firstCert, { intentId }), 'unknown_intent')
+    const submitted = gw.submitIntent(firstCert, { intentId, detail: 'with attachment' })
+    ledger.markDispatched(submitted.runId)
+    expect(gw.intentStatus(firstCert, { intentId })).toEqual({ runId: submitted.runId, state: 'dispatched' })
+    // Another device cannot probe this device's intent ids.
+    expectCode(() => gw.intentStatus(secondCert, { intentId }), 'unknown_intent')
+    expectCode(() => gw.intentStatus('3'.repeat(64), { intentId }), 'device_not_authorized')
+    expect(ledger.describe().events).toBe(2)
+  })
+
+  it('does not echo the intent body back to devices through poll', async () => {
+    const { authority } = await grantedAuthority()
+    const { gw, ledger } = gateway(authority)
+    const submit = gw.submitIntent(CERT, { intentId: randomUUID(), detail: '{"prompt":"x","attachments":[{"dataBase64":"AAAA"}]}' })
+    ledger.markDispatched(submit.runId)
+    ledger.markProgress(submit.runId, '{"event":"started"}')
+    const events = gw.poll(CERT, { cursor: 0 }).events
+    expect(events[0]).toMatchObject({ kind: 'intent_recorded', runId: submit.runId })
+    expect(events[0]).not.toHaveProperty('detail')
+    // Lifecycle markers the device does use keep their detail.
+    expect(events[2]).toMatchObject({ kind: 'run_progress', detail: '{"event":"started"}' })
+    // The host's own dispatch input is untouched.
+    expect(ledger.since(0).events[0].detail).toContain('dataBase64')
+  })
+
   it('reflects host-driven lifecycle to the device through poll (device cannot drive it)', async () => {
     const { authority } = await grantedAuthority()
     const { gw, ledger } = gateway(authority)

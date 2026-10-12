@@ -327,6 +327,10 @@ export class HostController {
     return result
   }
 
+  intentStatus(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
+    return this.#gateway.intentStatus(peerCertSHA256, input)
+  }
+
   poll(peerCertSHA256: string, input: { cursor: number }): ReturnType<SessionLedger['since']> {
     return this.#gateway.poll(peerCertSHA256, input)
   }

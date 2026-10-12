@@ -15,10 +15,12 @@ export class RunRegistry<
   private readonly entries = new Map<string, { state: State; control: Control }>()
   private focusedRunId: string | null = null
 
-  register(state: State, control: Control): void {
+  // A run started elsewhere (a paired device) must not take over what the Mac
+  // UI is showing; it is observable but only focused when the user opens it.
+  register(state: State, control: Control, options: { focus?: boolean } = {}): void {
     if (state.runId !== control.runId) throw new Error(`runId mismatch: ${state.runId} != ${control.runId}`)
     this.entries.set(state.runId, { state, control })
-    this.focusedRunId = state.runId
+    if (options.focus !== false) this.focusedRunId = state.runId
   }
 
   get(runId: string): { state: State; control: Control } | undefined {
