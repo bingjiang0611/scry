@@ -2,6 +2,16 @@ import type { CapabilityEnvelope } from '../../shared/provider'
 import type { AgentPermissionMode, AgentRunControlCatalog } from '../../shared/runtime'
 import type { RemoteProviderRef } from './remote-gateway'
 
+// A user-named profile often already starts with the Provider name
+// ("Pi · Rotom"); prefixing it again showed "Pi · Pi · Rotom" on the phone.
+function contextLabel(provider: string, profile: string): string {
+  const name = profile.trim()
+  const lower = name.toLowerCase()
+  const prefix = provider.toLowerCase()
+  const named = lower === prefix || (lower.startsWith(prefix) && /^[\s·:/|-]/.test(lower.slice(prefix.length)))
+  return named ? name : `${provider} · ${name}`
+}
+
 // One phone picker entry for one available Provider context (Pi profiles are
 // separate contexts). Pure so the probe-failure rule below is testable.
 export function remoteProviderEntry(input: {
@@ -14,7 +24,7 @@ export function remoteProviderEntry(input: {
   permissionOverride?: AgentPermissionMode
 }): RemoteProviderRef {
   const { descriptor, profile, controls, permissionOverride } = input
-  const label = profile ? `${descriptor.label} · ${profile.label}` : descriptor.label
+  const label = profile ? contextLabel(descriptor.label, profile.label) : descriptor.label
   if (controls.state === 'unknown') {
     // A failed probe is not "this Provider has no controls" (`unsupported`).
     // Publishing it without permissions would make the phone fall back to

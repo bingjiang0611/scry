@@ -165,6 +165,15 @@ background verification; unchanged fingerprints avoid full re-downloads. Setting
 can clear the cache, and destructive unpair clears it before deleting credentials.
 This is disposable history, not a permanent backup or evidence that the Mac is online.
 
+Runs sent from the phone stay visible as a local overlay. Structured turn pages
+carry the Scry run id (`runId`), and the phone takes the same id from the run's
+`bound` ledger marker. The phone reads host history next to local runs only
+when every local run has that id. It hides a local copy only when the host page
+contains its id; it never matches by prompt text. Older Macs, transcript-only
+turns and runs without ids keep the earlier behavior: the base is unavailable
+and the local runs stay visible. The Mac splits each relay WebSocket message at
+256 KiB, because the phone rejects WebSocket frames above 1.5 MiB.
+
 DEBUG `-historyCacheTest` exercises isolated temporary cache and store fixtures,
 without a relay, real Provider calls or real recovery-checkpoint writes. Run it
 separately from `-selfTest`; both print PASS/FAIL and exit. Device protection-class

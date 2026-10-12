@@ -116,6 +116,8 @@ final class RemoteRunStore: ObservableObject {
     let output: [OutputLine]
     let resultSummary: String?
     let externalSessionId: String?
+    // Scry run id from the host `bound` marker; matches history page turn ids.
+    var hostRunId: String? = nil
   }
 
   private struct PendingSubmission {
@@ -238,6 +240,9 @@ final class RemoteRunStore: ObservableObject {
   // The Provider session id the live run reported (from the ledger `session`
   // marker). Lets a follow-up into an opened session resume the LATEST id.
   @Published private(set) var liveExternalSessionId: String?
+  // The host Scry run id of the live run (ledger `bound` marker). Archived
+  // history turns carry the same id, so the device can recognize its own run.
+  @Published private(set) var liveHostRunId: String?
   @Published private(set) var activeSessionIdentity: SessionIdentity?
   @Published private(set) var observationInterrupted = false
   // Transport dropped mid-observation and is being re-established
@@ -699,8 +704,15 @@ final class RemoteRunStore: ObservableObject {
     // The legacy history contract has no canonical turn ids. Keep the base of
     // a locally extended conversation stable rather than deduplicating by text
     // or double-rendering the same run after an archive refresh.
-    let hasLocalTurns = !(completedLiveTurns[identity] ?? []).isEmpty ||
-      (activeSessionIdentity == identity && prompt != nil)
+    let localTurns = completedLiveTurns[identity] ?? []
+    let liveTurnPending = activeSessionIdentity == identity && prompt != nil
+    let hasLocalTurns = !localTurns.isEmpty || liveTurnPending
+    // Newer hosts tag structured page turns with the Scry run id. When every
+    // local run has its host id (and the live one finished draining), the host
+    // window can be read and each local copy hidden only once the host record
+    // provably contains that run. Otherwise keep the stable base + local overlay.
+    let localRunsMatchable = hasLocalTurns && !legacyFull && localTurns.allSatisfy { $0.hostRunId != nil } &&
+      (!liveTurnPending || (liveHostRunId != nil && terminalDrainCompleted))
     if activeSessionIdentity != identity {
       guard resetRun() else { return }
       activeSessionIdentity = identity
@@ -734,7 +746,7 @@ final class RemoteRunStore: ObservableObject {
         showPreview(screen, key: key, cached: true)
       } else if case .available = historyPreview, !hasLocalTurns {
         history = .partial(historyPreviewTurns)
-      } else { history = .loading }
+      } else { history = localRunsMatchable ? .baseUnavailable : .loading }
     }
     historySyncing = true
     historyTask = Task { [weak self] in
@@ -774,7 +786,7 @@ final class RemoteRunStore: ObservableObject {
         if !hasLocalTurns, memory != nil, !force,
            (0..<30).contains(Date().timeIntervalSince(cached.fetchedAt)) { return }
       }
-      if hasLocalTurns {
+      if hasLocalTurns && !localRunsMatchable {
         if cached == nil && cachedWindow == nil { self.history = .baseUnavailable; self.historyRevision += 1 }
         let notice = cached == nil && cachedWindow == nil
           ? "历史基底未缓存，以下仅为本机运行增量；重启后重新核对完整主机历史。"
@@ -808,8 +820,14 @@ final class RemoteRunStore: ObservableObject {
             do {
               let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil)
               guard current() else { return }
-              self.showHistoryWindow(recent, key: key, cached: false, fetchedAt: Date())
               self.recordSuccess()
+              // An older Mac (or a transcript-only window) gives no run ids, so
+              // overlap with local runs cannot be proven; never risk a duplicate.
+              if hasLocalTurns, !recent.turns.contains(where: { $0.runId != nil }) {
+                self.historyStorageNotice = "主机历史未带运行标识，无法与本机运行去重；更新 Mac Scry 后可显示完整历史。"
+                return
+              }
+              self.showHistoryWindow(recent, key: key, cached: false, fetchedAt: Date())
               do {
                 let saved = try await disk.writeWindow(recent, key: key, epoch: diskEpoch)
                 if current(), !saved { self.historyStorageNotice = "最近历史窗口未保存到手机缓存" }
@@ -893,7 +911,8 @@ final class RemoteRunStore: ObservableObject {
   private func showHistoryFailure(_ error: Error, cached: RemoteHistorySnapshot?, since revision: Int? = nil) {
     recordFailure(error, since: revision)
     historyRefreshError = Self.describe(error)
-    if historyWindow != nil { return }
+    // Keep local runs visible; a preview without run ids could duplicate them.
+    if historyWindow != nil || history == .baseUnavailable { return }
     if cached == nil, case .available = historyPreview {
       history = .partial(historyPreviewTurns)
     } else if cached == nil { history = .failed(Self.describe(error)) }
@@ -1087,9 +1106,36 @@ final class RemoteRunStore: ObservableObject {
     // Only stable run identity can deduplicate evidence; repeated prompt text
     // is not identity ("continue" may legitimately appear many times).
     guard identity == activeSessionIdentity else { return turns }
-    return turns.filter {
+    return Self.turnsNotInHistory(turns, hostRunIds: historyRunIds, historyHasOlder: historyOlderBefore != nil).filter {
       Self.shouldIncludeCompletedTurn($0.id, currentRunId: runId, archived: archivedActiveTurn)
     }
+  }
+
+  // Scry run ids present in the displayed host history (structured pages only).
+  private var historyRunIds: Set<String> {
+    switch history {
+    case let .loaded(turns), let .partial(turns): return Set(turns.compactMap(\.runId))
+    default: return []
+    }
+  }
+
+  // The finished live run is already shown by the host record; avoid a second copy.
+  var liveTurnInHistory: Bool {
+    guard terminalDrainCompleted, let id = liveHostRunId else { return false }
+    return historyRunIds.contains(id)
+  }
+
+  // A local run is hidden only when the host page contains its run id. Older
+  // local runs before a matched one were archived earlier: when the window has
+  // older pages they live there; when it is complete they are kept because the
+  // host provably lacks them (e.g. a failed best-effort archive write).
+  nonisolated static func turnsNotInHistory(_ turns: [CompletedLiveTurn], hostRunIds: Set<String>,
+                                            historyHasOlder: Bool) -> [CompletedLiveTurn] {
+    func inHistory(_ turn: CompletedLiveTurn) -> Bool { turn.hostRunId.map(hostRunIds.contains) == true }
+    guard let lastMatched = turns.lastIndex(where: inHistory) else { return turns }
+    return turns.enumerated().filter { index, turn in
+      !inHistory(turn) && (index > lastMatched || !historyHasOlder)
+    }.map(\.element)
   }
 
   // Load the Providers the host offers. Only available ones are selectable (an
@@ -1629,6 +1675,11 @@ final class RemoteRunStore: ObservableObject {
             self.archiveActiveTurnIfNeeded()
             self.clearRecoveryCheckpoint()
             self.terminalDrainCompleted = true
+            // The host archives the run before its settled marker. Read the
+            // host record now so the local copy can give way to it.
+            if let externalSessionId = identity.externalSessionId {
+              self.loadHistory(providerId: identity.providerId, cwd: identity.cwd, externalSessionId: externalSessionId, force: true)
+            }
           }
           self.pollTask = nil
           return
@@ -1842,6 +1893,7 @@ final class RemoteRunStore: ObservableObject {
         // The Provider's own session id for THIS run. Captured so a chained
         // follow-up resumes the latest session (continuous memory), not a stale id.
         if marker["event"] == "session", let ext = marker["externalSessionId"], !ext.isEmpty { liveExternalSessionId = ext }
+        if marker["event"] == "bound", marker["ledgerRunId"] == runId, let id = marker["scryRunId"], !id.isEmpty { liveHostRunId = id }
       }
     case "run_settled": if lifecycle != .cancelled { lifecycle = .settled }
     case "run_failed": lifecycle = .failed; if let d = ev.detail, submitError == nil { submitError = "主机报告失败：\(d)" }
@@ -1918,6 +1970,7 @@ final class RemoteRunStore: ObservableObject {
     resultSummary = nil
     submitError = nil
     liveExternalSessionId = nil
+    liveHostRunId = nil
     observationInterrupted = false
     observationReconnecting = false
     stopRequesting = false
@@ -1939,7 +1992,7 @@ final class RemoteRunStore: ObservableObject {
           let prompt, !prompt.isEmpty, isTerminal(generation: generation, identity: identity) else { return }
     let turn = CompletedLiveTurn(id: runId ?? UUID().uuidString.lowercased(), runId: runId,
       prompt: prompt, attachments: sentAttachments, lifecycle: lifecycle, output: output,
-      resultSummary: resultSummary, externalSessionId: liveExternalSessionId)
+      resultSummary: resultSummary, externalSessionId: liveExternalSessionId, hostRunId: liveHostRunId)
     completedLiveTurns[identity, default: []].append(turn)
     archivedActiveTurn = true
   }
@@ -1975,7 +2028,7 @@ final class RemoteRunStore: ObservableObject {
     historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
     lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
     runId = nil; submitError = nil; truncated = false; resultSummary = nil
-    liveExternalSessionId = nil; activeSessionIdentity = nil
+    liveExternalSessionId = nil; liveHostRunId = nil; activeSessionIdentity = nil
     observationInterrupted = false; observationReconnecting = false; stopRequesting = false; stopRequested = false; stopError = nil; terminalDrainCompleted = false; retryAvailable = false
     pendingQuestions = []; pendingQuestionAnswerId = nil; questionAnswering = false; questionError = nil
     completedLiveTurns = [:]
@@ -2160,6 +2213,32 @@ final class RemoteRunStore: ObservableObject {
     store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
     await store.historyTask?.value
     checks.append(("store.missingBaseIsNotEmpty", store.history == .baseUnavailable && store.completedTurns(for: identity).count == 1))
+    // A local run without its host run id must not trigger a host read that
+    // could duplicate it; one with an id reads the host and keeps it visible
+    // when that read fails.
+    checks.append(("store.unmatchableLocalRunSkipsHostRead", store.historyRefreshError == nil))
+    store.historyTestOffline = true
+    store.completedLiveTurns[identity] = [.init(id: "fixture-run", runId: "fixture-run", prompt: "local prompt",
+      attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "session", hostRunId: "scry-local")]
+    store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session", force: true)
+    await store.historyTask?.value
+    checks.append(("store.matchableLocalRunReadsHost", store.historyRefreshError != nil && store.history == .baseUnavailable && store.completedTurns(for: identity).count == 1))
+    store.history = .partial([.init(runId: "scry-older", userText: "older", items: []), .init(runId: "scry-local", userText: "local prompt", items: [])])
+    checks.append(("store.hostRecordReplacesLocalRun", store.completedTurns(for: identity).isEmpty))
+    store.history = .partial([.init(runId: "scry-other", userText: "local prompt", items: [])])
+    checks.append(("store.samePromptIsNotRunIdentity", store.completedTurns(for: identity).count == 1))
+    store.historyTestOffline = false
+    func localRun(_ id: String, host: String?) -> CompletedLiveTurn {
+      .init(id: id, runId: id, prompt: id, attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "session", hostRunId: host)
+    }
+    let localRuns = [localRun("a", host: "scry-a"), localRun("b", host: "scry-b")]
+    checks.append(("store.dedupeKeepsNewerUnarchivedRun", turnsNotInHistory(localRuns, hostRunIds: ["scry-a"], historyHasOlder: false).map(\.id) == ["b"]))
+    checks.append(("store.dedupeDropsOlderRunInOlderPages", turnsNotInHistory(localRuns, hostRunIds: ["scry-b"], historyHasOlder: true).isEmpty))
+    checks.append(("store.dedupeKeepsRunMissingFromCompleteHistory", turnsNotInHistory(localRuns, hostRunIds: ["scry-b"], historyHasOlder: false).map(\.id) == ["a"]))
+    checks.append(("store.dedupeWithoutIdsKeepsAll", turnsNotInHistory([localRun("c", host: nil)], hostRunIds: ["scry-c"], historyHasOlder: true).count == 1))
+    store.completedLiveTurns[identity] = [.init(id: "fixture-run", runId: "fixture-run", prompt: "local prompt",
+      attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "session")]
+    store.history = .baseUnavailable
     // Exercise the actual new mirror path, not the retired byte-suffix setter.
     let preview = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: Data("""
       {"status":"available","source":"indexed_archive","partial":true,"truncated":true,"bytes":0,
@@ -2434,6 +2513,21 @@ final class RemoteRunStore: ObservableObject {
           resultSummary: nil, externalSessionId: "codex-pinned-1")]
       }
     }
+    // Screenshot fixtures for history failure states; no relay or host grant.
+    if ProcessInfo.processInfo.arguments.contains("-uiMockHistoryFailure"), let identity = activeSessionIdentity {
+      prompt = nil; output = []; runId = nil; resultSummary = nil
+      liveRunsStatus = .observed
+      historyRefreshError = "中继连接已关闭（1009 message too big）"
+      if ProcessInfo.processInfo.arguments.contains("-uiMockBaseUnavailable") {
+        history = .baseUnavailable
+        completedLiveTurns[identity] = [.init(id: "preview-completed", runId: "preview-completed", prompt: "什么进度了",
+          attachments: [], lifecycle: .settled, output: [.init(id: 1, kind: "output", text: "代码已修复并提交。\n\n- 表格已按行列渲染\n- 编译通过")],
+          resultSummary: "输入 815 · 输出 101 · $0.01077", externalSessionId: "codex-pinned-1")]
+      } else {
+        history = .partial([.init(userText: "ios端输出要支持markdown 这个表格展示有问题 修复", items: [
+          .init(kind: "tool", text: "bash"), .init(kind: "tool_result", text: "ok")])])
+      }
+    }
     if ProcessInfo.processInfo.arguments.contains("-uiMockContinuousHistory") {
       history = .loaded([
         .init(userText: "最早一轮的用户输入", items: [.init(kind: "output", text: "最早一轮的回复")]),
@@ -2581,6 +2675,15 @@ final class RemoteRunStore: ObservableObject {
         return "Mac 端不支持当前读取协议（unknown_op）。请更新 Scry，并完全退出后重新打开 Mac 端；仅覆盖安装不会更新正在运行的进程。"
       }
       return code
+    }
+    // Relay close/timeout reasons are untrusted diagnostics, shown as such.
+    if let relay = error as? RelayTransportError {
+      switch relay {
+      case let .closed(code, reason):
+        return "中继连接已关闭（\(code.map(String.init) ?? "无关闭码")\(reason.isEmpty ? "" : " \(reason)")）"
+      case let .timedOut(stage):
+        return "连接 Mac 超时（\(stage)）；请确认 Mac 未休眠且 Scry 正在运行"
+      }
     }
     return "\(error)"
   }

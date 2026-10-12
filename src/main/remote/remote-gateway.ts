@@ -177,6 +177,8 @@ export interface RemoteSessionPage {
 // content chunks (text/reasoning/tool/tool_result), the SAME shape a live run
 // streams. This is trace-derived content, never fabricated.
 export interface RemoteHistoryTurn {
+  // Scry run id, only on structured turn pages (see history-reader pageTurn).
+  runId?: string
   userText: string
   items: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }[]
 }
