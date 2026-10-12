@@ -331,6 +331,31 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     } finally { socket.destroy() }
   })
 
+  it('re-arms the idle timeout on a long keep-alive lane without stacking timeout listeners', async () => {
+    const { identity, controller, caPEM, addr } = await harness(async () => {})
+    const device = await pairDevice(identity, controller)
+    const warnings: Error[] = []
+    const onWarning = (warning: Error) => { warnings.push(warning) }
+    process.on('warning', onWarning)
+    const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
+      minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
+    try {
+      await once(socket, 'secureConnect')
+      let buffer = ''
+      for (let i = 0; i < 15; i++) {
+        socket.write(JSON.stringify({ op: 'poll', cursor: 0, keepAlive: true }) + '\n')
+        while (!buffer.includes('\n')) buffer += ((await once(socket, 'data'))[0] as Buffer).toString('utf8')
+        expect(buffer.startsWith('{"keepAlive":true,"poll"')).toBe(true)
+        buffer = ''
+      }
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(warnings.filter((warning) => warning.name === 'MaxListenersExceededWarning')).toEqual([])
+    } finally {
+      process.off('warning', onWarning)
+      socket.destroy()
+    }
+  })
+
   it('keeps one-shot replies unmarked and refuses a one-shot request on a kept lane', async () => {
     const { identity, controller, caPEM, addr } = await harness(async () => {})
     const device = await pairDevice(identity, controller)

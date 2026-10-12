@@ -79,23 +79,34 @@ export class InnerMtlsHost {
     if (!Number.isFinite(certificateExpiresAt)) { socket.destroy(); return }
     this.#connections.add(socket)
     socket.once('close', () => this.#connections.delete(socket))
+    let buffer = Buffer.alloc(0)
+    let busy = false
+    let kept = false
+    // Diagnostics only: name why the host tore a channel down, because the device
+    // sees every host-side destroy as the same relay `peer_closed`.
+    const abort = (reason: string): void => {
+      if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] destroy reason=${reason} buffered=${buffer.length}`)
+      socket.destroy()
+    }
     // This is an idle timeout, not a computation deadline. A history/archive
     // read may legitimately take longer than 30 seconds; the client can cancel
     // the TLS channel when its request is superseded. Disable the idle timer
     // while dispatching and arm it again only after a response is written.
-    const armIdleTimeout = (): void => { socket.setTimeout(30_000, () => { socket.destroy() }) }
+    // One listener for the connection's lifetime; re-arming only resets the timer.
+    // Passing a callback per arm would stack a listener per keep-alive request.
+    socket.on('timeout', () => abort('idle_timeout'))
+    const armIdleTimeout = (): void => { socket.setTimeout(30_000) }
     armIdleTimeout()
-    let buffer = Buffer.alloc(0)
-    let busy = false
-    let kept = false
     socket.on('data', (bytes: Buffer) => {
-      if (busy || Date.now() >= certificateExpiresAt || buffer.length + bytes.length > this.#maxFrame) { socket.destroy(); return }
+      if (busy) { abort('data_while_busy'); return }
+      if (Date.now() >= certificateExpiresAt) { abort('certificate_expired'); return }
+      if (buffer.length + bytes.length > this.#maxFrame) { abort(`frame_too_large:${buffer.length + bytes.length}`); return }
       buffer = Buffer.concat([buffer, bytes])
       const end = buffer.indexOf(10)
       if (end < 0) return
       // One outstanding request, never pipelined commands; every request still
       // checks the device grant inside HostController.
-      if (end !== buffer.length - 1) { socket.destroy(); return }
+      if (end !== buffer.length - 1) { abort('pipelined_request'); return }
       const frame = buffer.subarray(0, end)
       buffer = Buffer.alloc(0)
       let keepAlive = false
@@ -116,9 +127,15 @@ export class InnerMtlsHost {
             armIdleTimeout()
           } else socket.end(JSON.stringify(res) + '\n')
         })
-        .catch(() => socket.destroy())
+        .catch((error) => abort(`dispatch_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`))
     })
-    socket.on('error', () => { /* peer reset; nothing to report */ })
+    socket.on('error', (error) => {
+      // Peer reset; nothing to report to the device.
+      if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] socket error: ${error.message}`)
+    })
+    if (process.env.SCRY_INNER_MTLS_DEBUG) {
+      socket.once('close', (hadError) => console.log(`[inner-mtls] close hadError=${hadError} busy=${busy} buffered=${buffer.length}`))
+    }
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {

@@ -57,13 +57,18 @@ export interface RemoteRunBindingDependencies {
   // Mac-side live observation of this run (index.ts registers it in the same
   // RunRegistry as local runs). Opened before the Provider starts so no event
   // is missed; settled exactly once after the archive write, on every path.
-  observe?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; agentProfileId?: string; resume?: string; attachments: AgentInputAttachment[] }): RemoteRunObserver
+  observe?(info: { providerId: string; cwd: string; prompt: string; ledgerRunId: string; scryRunId: string; agentProfileId?: string; resume?: string; attachments: AgentInputAttachment[] }): RemoteRunObserver
 }
 
 export interface RemoteRunObserver {
   attach(handle: ProviderRunHandle): void
   event(ev: TraceEvent): void
   session(externalSessionId: string): void
+  // A native question is pending on the remote broker (request.runId is the
+  // scry runId), so the Mac can show it too. Closed exactly once per question,
+  // whichever side answered or when the Provider withdrew it.
+  question(request: AgentQuestionRequest): void
+  questionClosed(questionId: string): void
   // The Provider reached a terminal result; the archive may still be writing.
   done(result: { status: 'completed' | 'failed' | 'cancelled' | 'interrupted'; errorText?: string }): void
   settled(): void
@@ -123,7 +128,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
     }
     let lastErrorText: string | undefined
     const observer = deps.observe?.({
-      providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, agentProfileId: routing.agentProfileId,
+      providerId: routing.providerId, cwd: routing.cwd, prompt, ledgerRunId, scryRunId, agentProfileId: routing.agentProfileId,
       ...(resume ? { resume } : {}), attachments
     })
     try {
@@ -209,7 +214,13 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         requestUserInput: async (request, signal) => {
           if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
           const openedAtMs = Date.now()
-          const response = await requestUserInput(request, signal)
+          observer?.question(request)
+          let response: AgentQuestionResponse
+          try {
+            response = await requestUserInput(request, signal)
+          } finally {
+            observer?.questionClosed(request.questionId)
+          }
           const closedAtMs = Date.now()
           record({
             id: `remote-intervention-${request.questionId}`,

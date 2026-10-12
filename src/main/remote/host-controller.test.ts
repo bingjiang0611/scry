@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { HostController, type HostControllerDependencies, type MacRunView, type RemoteIntentRouting } from './host-controller'
+import { HOST_RESTARTED_DETAIL, HostController, type HostControllerDependencies, type MacRunView, type RemoteIntentRouting } from './host-controller'
 import type { IssuedPairingCertificate, PairingDependencies, PairingPersistence, PairingState } from './pairing'
 import type { LedgerEvent, LedgerStore } from './session-ledger'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
@@ -73,6 +73,28 @@ describe('HostController (composition root)', () => {
     expect(controller.runState(CERT, { runId: submit.runId })).toBe('settled')
     const feed = controller.poll(CERT, { cursor: 0 })
     expect(feed.events.map((e) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
+  })
+
+  it('on restart closes runs orphaned mid-execution as failed with an honest reason and never re-runs them', async () => {
+    const ledgerStore = new MemoryLedgerStore()
+    const orphan = randomUUID()
+    const recorded = randomUUID()
+    ledgerStore.log = [
+      { seq: 1, at: 1, runId: orphan, kind: 'intent_recorded', intentId: randomUUID(), detail: routing({ prompt: 'was running' }) },
+      { seq: 2, at: 2, runId: orphan, kind: 'run_dispatched' },
+      { seq: 3, at: 3, runId: orphan, kind: 'run_progress', detail: JSON.stringify({ event: 'question_opened' }) },
+      { seq: 4, at: 4, runId: recorded, kind: 'intent_recorded', intentId: randomUUID(), detail: routing({ prompt: 'never dispatched' }) }
+    ]
+    const runProvider = vi.fn(async (_input: { routing: RemoteIntentRouting }) => {})
+    const { controller } = await grantedController(runProvider, undefined, { ledgerStore })
+    controller.recover()
+    await controller.idle()
+
+    expect(controller.runState(CERT, { runId: orphan })).toBe('failed')
+    const failed = ledgerStore.log.find((event) => event.runId === orphan && event.kind === 'run_failed')
+    expect(failed?.detail).toBe(HOST_RESTARTED_DETAIL)
+    expect(runProvider.mock.calls.map(([input]) => input.routing.prompt)).toEqual(['never dispatched'])
+    expect(controller.runState(CERT, { runId: recorded })).toBe('settled')
   })
 
   it('accepts bounded explicit run controls and rejects invalid permission modes', async () => {
@@ -302,6 +324,26 @@ describe('HostController live runs (multi-task and Mac runs)', () => {
     controller.answerQuestion(CERT, { runId, answerId: randomUUID(), response: { runId, questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never })
     await controller.idle()
     expect(answered).toMatchObject({ behavior: 'answered' })
+  })
+
+  it('lets the Mac owner answer a device-started question exactly once through the same broker', async () => {
+    let answered: unknown
+    const runProvider = vi.fn(async (input: LiveInput) => {
+      answered = await input.requestUserInput(question(input.runId), input.stopSignal)
+    })
+    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'ask me' }) })
+    await vi.waitFor(async () => expect((await controller.liveRuns(CERT, { waitMs: 0 })).runs[0]?.state).toBe('waiting'))
+    // The Mac renderer's response carries the scry runId; the owner path keys by ledger runId.
+    expect(controller.answerOwnerQuestion(runId, { runId: 'remote-run-x-0', questionId: 'q-other', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(false)
+    expect(controller.answerOwnerQuestion(runId, { runId: 'remote-run-x-0', questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(true)
+    await controller.idle()
+    expect(answered).toMatchObject({ behavior: 'answered', answers: { 'Which?': 'A' } })
+    // The device and a second Mac answer both see it settled; nothing answers twice.
+    expect(() => controller.answerQuestion(CERT, { runId, answerId: randomUUID(), response: { runId, questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never }))
+      .toThrow()
+    expect(controller.answerOwnerQuestion(runId, { runId, questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(false)
+    expect(runProvider).toHaveBeenCalledTimes(1)
   })
 
   it('exposes only authorized Mac runs and routes device stop/answer to the Mac controls', async () => {

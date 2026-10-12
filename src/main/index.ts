@@ -76,6 +76,9 @@ import {
   type AgentForkSessionResult,
   type AgentPermissionMode,
   type AgentInputAttachment,
+  type AgentIntervention,
+  type AgentQuestionRequest,
+  type AgentQuestionResponse,
   type AgentStartRequest,
   type AgentSteerInput,
   type AgentSteerResult,
@@ -122,6 +125,8 @@ import { createRelayConnectWS } from './remote/relay-connect-ws'
 import { ensureHostIdentity } from './remote/host-identity'
 import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
+import { remoteProviderEntry } from './remote/remote-provider-snapshot'
+import type { RemoteProviderRef } from './remote/remote-gateway'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { sessionAttentionKey } from '../shared/session-attention'
@@ -2235,51 +2240,63 @@ const runStopLifecycle = new RunStopLifecycle({
   },
   warn: (message, runId, error) => console.warn(`[scry] ${message}:`, runId, error)
 })
-const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) => {
-  if (change.kind === 'open') {
-    const run = runs.get(change.request.runId)?.state
-    if (run) {
-      run.pendingQuestions = [
-        ...(run.pendingQuestions ?? []).filter((item) => item.questionId !== change.request.questionId),
-        change.request
-      ]
-      const sessionKey = activeRunSessionKey(run)
-      if (sessionKey) dockBadge.markAttention(sessionKey, {
-        windowFocused: Boolean(win?.isFocused()),
-        sessionViewed: runs.isViewed(run.runId),
-        needsAttention: true
-      })
-    }
-    win?.webContents.send('agent:questionAttention', {
-      runId: change.request.runId,
-      pendingCount: run?.pendingQuestions?.length ?? 1
-    })
-    if (runs.isFocused(change.request.runId)) win?.webContents.send('agent:userQuestion', change.request)
-    return
-  }
-  const run = runs.get(change.runId)?.state
+// One pending-question projection for the run state, dock and renderer. Shared by
+// the Mac broker and device-started runs, whose questions live on the remote
+// broker but are mirrored here so the Mac can answer them too.
+function publishQuestionOpened(request: AgentQuestionRequest): void {
+  const run = runs.get(request.runId)?.state
   if (run) {
-    run.pendingQuestions = (run.pendingQuestions ?? []).filter((item) => item.questionId !== change.questionId)
-    const event: TraceEvent = {
-      id: mainEventId('intervention', change.runId),
-      ts: change.intervention.closedAt,
-      runId: change.runId,
-      kind: 'human',
-      stage: 'intervention',
-      toolUseId: change.questionId,
-      providerId: change.intervention.request.providerId,
-      agentId: change.intervention.request.agentId,
-      durationMs: change.intervention.durationMs,
-      intervention: change.intervention
-    }
-    appendCoalescedTrace(run.items, event)
-    if (runs.isFocused(change.runId)) queueTrace(event)
+    run.pendingQuestions = [
+      ...(run.pendingQuestions ?? []).filter((item) => item.questionId !== request.questionId),
+      request
+    ]
+    const sessionKey = activeRunSessionKey(run)
+    if (sessionKey) dockBadge.markAttention(sessionKey, {
+      windowFocused: Boolean(win?.isFocused()),
+      sessionViewed: runs.isViewed(run.runId),
+      needsAttention: true
+    })
   }
   win?.webContents.send('agent:questionAttention', {
-    runId: change.runId,
+    runId: request.runId,
+    pendingCount: run?.pendingQuestions?.length ?? 1
+  })
+  if (runs.isFocused(request.runId)) win?.webContents.send('agent:userQuestion', request)
+}
+// `intervention` is absent for device-started runs: remote-run-binding records
+// their intervention trace event itself.
+function publishQuestionClosed(runId: string, questionId: string, intervention?: AgentIntervention): void {
+  const run = runs.get(runId)?.state
+  if (run) {
+    run.pendingQuestions = (run.pendingQuestions ?? []).filter((item) => item.questionId !== questionId)
+    if (intervention) {
+      const event: TraceEvent = {
+        id: mainEventId('intervention', runId),
+        ts: intervention.closedAt,
+        runId,
+        kind: 'human',
+        stage: 'intervention',
+        toolUseId: questionId,
+        providerId: intervention.request.providerId,
+        agentId: intervention.request.agentId,
+        durationMs: intervention.durationMs,
+        intervention
+      }
+      appendCoalescedTrace(run.items, event)
+      if (runs.isFocused(runId)) queueTrace(event)
+    }
+  }
+  win?.webContents.send('agent:questionAttention', {
+    runId,
     pendingCount: run?.pendingQuestions?.length ?? 0
   })
-  if (runs.isFocused(change.runId)) win?.webContents.send('agent:userQuestionClosed', change)
+  if (runs.isFocused(runId)) {
+    win?.webContents.send('agent:userQuestionClosed', { kind: 'closed', runId, questionId, ...(intervention ? { intervention } : {}) })
+  }
+}
+const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) => {
+  if (change.kind === 'open') publishQuestionOpened(change.request)
+  else publishQuestionClosed(change.runId, change.questionId, change.intervention)
 })
 // 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲一批数组发。
 // 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空全部）。
@@ -3775,6 +3792,11 @@ handleTrusted('agent:adoptActiveRun', (_event, runId: string): ActiveRun | null 
 })
 handleTrusted('agent:answerQuestion', (event, response: unknown) => {
   if (!win || event.sender.id !== win.webContents.id) return false
+  const runId = (response as { runId?: unknown } | null)?.runId
+  const ledgerRunId = typeof runId === 'string' ? remoteRunLedgerIds.get(runId) : undefined
+  // A device-started run's question lives on the remote broker; answering it
+  // here settles the same question the device sees, exactly once.
+  if (ledgerRunId) return remoteHostService?.controller.answerOwnerQuestion(ledgerRunId, response as AgentQuestionResponse) ?? false
   return userQuestionBroker.answer(response)
 })
 
@@ -3857,13 +3879,16 @@ function requestRunStop(runId: string): boolean {
 // Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
 // remote-history reader sees one active-run truth: history while the first turn
 // is still running, the Mac sidebar/session view, stop, and same-session
-// conflicts. They are never auto-focused. Questions stay on the device broker:
-// the Mac shows the run as running, not as answerable here.
+// conflicts. They are never auto-focused. Their questions stay on the device
+// broker and are mirrored here, so either side can answer them.
 const remoteRunIds = new Set<string>()
+// scry runId -> durable ledger runId, the key of the remote question broker.
+const remoteRunLedgerIds = new Map<string, string>()
 function observeRemoteRun(info: {
   providerId: string
   cwd: string
   prompt: string
+  ledgerRunId: string
   scryRunId: string
   agentProfileId?: string
   resume?: string
@@ -3916,6 +3941,7 @@ function observeRemoteRun(info: {
     settled
   }
   remoteRunIds.add(runId)
+  remoteRunLedgerIds.set(runId, info.ledgerRunId)
   runs.register(runState, control, { focus: false })
   const announceSession = (sessionId: string, pending: boolean): void => {
     win?.webContents.send('agent:session', {
@@ -3935,6 +3961,8 @@ function observeRemoteRun(info: {
       runState.sessionId = externalSessionId
       announceSession(externalSessionId, false)
     },
+    question: (request) => publishQuestionOpened(request),
+    questionClosed: (questionId) => publishQuestionClosed(runId, questionId),
     done: ({ status, errorText }) => {
       if (runState.done) return
       runState.done = true
@@ -3962,6 +3990,7 @@ function observeRemoteRun(info: {
       runStopLifecycle.settle(runId)
       runs.remove(runId)
       remoteRunIds.delete(runId)
+      remoteRunLedgerIds.delete(runId)
       resolveSettled()
     }
   }
@@ -4055,16 +4084,7 @@ async function resolveRemoteRelay(stateDirectory: string): Promise<RemoteRelayRe
 // we keep a periodically-refreshed snapshot (id/label/available). Availability
 // mirrors the real describe() result; nothing is fabricated, and the run path
 // still validates the chosen providerId on submit.
-let remoteProviderSnapshot: {
-  id: string
-  label: string
-  available: boolean
-  agentProfileId?: string
-  modelId?: string
-  models?: { id: string; providerId?: string; label: string; description?: string; isDefault?: boolean; efforts?: { id: string; label: string; description?: string; isDefault?: boolean }[] }[]
-  efforts?: { id: string; label: string; description?: string; isDefault?: boolean }[]
-  permissions?: { id: string; label: string; description?: string; isDefault?: boolean }[]
-}[] = []
+let remoteProviderSnapshot: RemoteProviderRef[] = []
 // providerId -> runtimeProvider, so a device-initiated run can be written into
 // the Mac session catalog with the correct runtime (recordSession below).
 let remoteProviderRuntime = new Map<string, RuntimeProvider>()
@@ -4089,40 +4109,13 @@ async function loadRemoteProviderSnapshot(): Promise<void> {
           ...(controlsCwd ? { cwd: controlsCwd } : {}),
           ...(profile ? { agentProfileId: profile.id } : {})
         })
-        const models = controls.data?.models.map((option) => ({
-          id: option.model.id,
-          ...(option.model.providerId ? { providerId: option.model.providerId } : {}),
-          label: option.label,
-          ...(option.description ? { description: option.description } : {}),
-          ...(option.isDefault ? { isDefault: true } : {}),
-          ...(option.efforts.length ? { efforts: option.efforts } : {})
-        })) ?? []
-        const model = controls.data?.models.find((option) => option.isDefault) ?? controls.data?.models[0]
-        const remotePermissionMode = configuredRemotePermissionMode()
-        const advertisedPermissions = remotePermissionMode
-          ? controls.data?.permissions.filter((option) => option.id === remotePermissionMode)
-          : controls.data?.permissions
-        return {
-          id: descriptor.id,
-          label: profile ? `${descriptor.label} · ${profile.label}` : descriptor.label,
-          available: true,
-          ...(profile ? { agentProfileId: profile.id } : {}),
-          ...(model?.model.id ? { modelId: model.model.id } : {}),
-          ...(models.length ? { models } : {}),
-          ...(model?.efforts.length ? { efforts: model.efforts } : {}),
-          ...(controls.data?.permissions.length || remotePermissionMode ? {
-            // An owner-set override is authoritative. Advertise only the mode
-            // that will really execute so the phone renders it as locked rather
-            // than offering choices that the Mac would silently ignore.
-            permissions: (advertisedPermissions?.length ? advertisedPermissions : [{
-              id: remotePermissionMode ?? 'default',
-              label: remotePermissionMode === 'full_access' ? '完全访问' : remotePermissionMode === 'auto_review' ? '自动审查' : '默认审批'
-            }]).map((option) => ({
-              ...option,
-              ...(remotePermissionMode ? { isDefault: true } : option.id === 'default' ? { isDefault: true } : {})
-            }))
-          } : {})
-        }
+        return remoteProviderEntry({
+          descriptor,
+          ...(profile ? { profile } : {}),
+          controls,
+          previous: remoteProviderSnapshot,
+          permissionOverride: configuredRemotePermissionMode()
+        })
       }))
     }))
     remoteProviderSnapshot = contexts.flat()

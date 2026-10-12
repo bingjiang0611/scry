@@ -362,6 +362,12 @@ export class SessionLedger {
     return pending
   }
 
+  // Runs whose executor was started but has not reported a terminal result.
+  dispatchedRuns(): string[] {
+    this.#assertDeterminate()
+    return [...this.#runs.values()].filter((entry) => entry.lifecycle === 'dispatched').map((entry) => entry.runId)
+  }
+
   describe(): { runs: number; events: number; lastSeq: number } {
     return { runs: this.#runs.size, events: this.#lastSeq, lastSeq: this.#lastSeq }
   }
