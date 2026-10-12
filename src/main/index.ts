@@ -2446,7 +2446,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       }
     )
     if (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
-      !expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...catalogAliases()])) {
+      !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...catalogAliases()])) {
       throw contextChangedError()
     }
     if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
@@ -2481,7 +2481,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
     if (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
-      !expectedSessionMatches(expectedSessionId, resume, [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
+      !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
       throw contextChangedError()
     }
     if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
@@ -2710,7 +2710,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const committedExpectedSessionId = request.forkLastTurn || request.restartLastTurn ? resume ?? null : expectedSessionId
   if (
     committedResume !== resume || committedRevision !== contextRevision ||
-    !expectedSessionMatches(committedExpectedSessionId, committedResume, [...committedRuns, ...catalogAliases()])
+    !expectedSessionMatches(committedExpectedSessionId, committedResume, () => [...committedRuns, ...catalogAliases()])
   ) throw contextChangedError()
   if (cwd && committedResume && deletingSessions.has(scopedSessionKey(committedResume))) {
     throw new AgentRuntimeError('这个会话正在删除，已拒绝启动新一轮', {
