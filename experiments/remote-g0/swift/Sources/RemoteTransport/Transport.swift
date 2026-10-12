@@ -371,9 +371,14 @@ public enum G0Transport {
     public init(kind: String, text: String) { self.kind = kind; self.text = text }
   }
   // One turn of a session's real conversation: the prompt + assistant content.
+  // `runId` is the Scry run id on structured turn pages (nil for transcript-only
+  // turns, legacy snapshots and older hosts). It lets a device recognize its own
+  // archived run; it is never derived from prompt text.
   public struct RunHistoryTurn: Sendable, Equatable, Codable {
-    public let userText: String; public let items: [RunHistoryChunk]
-    public init(userText: String, items: [RunHistoryChunk]) { self.userText = userText; self.items = items }
+    public let runId: String?; public let userText: String; public let items: [RunHistoryChunk]
+    public init(runId: String? = nil, userText: String, items: [RunHistoryChunk]) {
+      self.runId = runId; self.userText = userText; self.items = items
+    }
   }
   // A single chunk of the assistant's REAL streamed output content (masked +
   // bounded host-side). kind ∈ output|reasoning|tool|tool_result|truncated.

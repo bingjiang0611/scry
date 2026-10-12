@@ -25,6 +25,14 @@ function historyError(code: 'history_unavailable' | 'history_snapshot_changed' |
   return Object.assign(new Error(code), { code })
 }
 
+// runId is the Scry run id recorded with the archived/active turn. A device
+// matches it against the `bound` ledger marker of its own run, so it can drop
+// its local copy only when the host record provably contains that run.
+// Transcript-only turns have no Scry run and carry no id.
+function pageTurn(turn: { runId?: string; userText: string; items: Parameters<typeof flattenTraceItems>[0] }): RemoteHistoryTurnsPage['turns'][number] {
+  return { ...(turn.runId ? { runId: turn.runId } : {}), userText: turn.userText, items: flattenTraceItems(turn.items) }
+}
+
 function hash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
@@ -83,12 +91,10 @@ export async function readRemoteHistoryTurnsPage(
     const end = request.before ?? totalTurns
     if (end > totalTurns) throw historyError('invalid_history_cursor')
     offset = Math.max(0, end - request.limit)
-    turns = merged.slice(offset, Math.min(end, merged.length)).map((turn) => ({
-      userText: turn.userText, items: flattenTraceItems(turn.items)
-    }))
+    turns = merged.slice(offset, Math.min(end, merged.length)).map(pageTurn)
     if (frozenActive && end > merged.length) {
       if (!run || snapshot !== version.version) throw historyError('history_snapshot_changed')
-      turns.push({ userText: run.userText, items: flattenTraceItems(run.items) })
+      turns.push(pageTurn(run))
     }
     source = frozenActive && end > merged.length ? 'active_memory' : path ? 'claude_transcript' : version.readMode === 'indexed' ? 'indexed_archive' : version.readMode
   } else {
@@ -103,11 +109,10 @@ export async function readRemoteHistoryTurnsPage(
     offset = Math.max(0, end - request.limit)
     const archivedEnd = Math.min(end, page.totalTurns)
     const archived = page.archive?.turns ?? []
-    turns = archived.slice(Math.max(0, offset - page.offset), Math.max(0, archivedEnd - page.offset))
-      .map((turn) => ({ userText: turn.userText, items: flattenTraceItems(turn.items) }))
+    turns = archived.slice(Math.max(0, offset - page.offset), Math.max(0, archivedEnd - page.offset)).map(pageTurn)
     if (frozenActive && end > page.totalTurns) {
       if (!run || snapshot !== version.version) throw historyError('history_snapshot_changed')
-      turns.push({ userText: run.userText, items: flattenTraceItems(run.items) })
+      turns.push(pageTurn(run))
     }
     source = frozenActive && end > page.totalTurns ? 'active_memory' : page.readMode === 'indexed' ? 'indexed_archive' : page.readMode
   }

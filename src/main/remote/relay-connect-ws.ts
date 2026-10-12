@@ -7,6 +7,13 @@ import type { OutboundLeg } from './relay-client'
 // relay while NO_PROXY/local private relays still connect directly.
 const relayDispatcher = new EnvHttpProxyAgent()
 
+// Node TLS hands one large plaintext write (e.g. a multi-MB history page) to
+// this Duplex as ONE ciphertext chunk. The relay forwards each WebSocket
+// message as one frame, and the iOS device rejects frames above 1.5 MiB
+// (NIO maxFrameSize), which closed the tunnel and failed every large read.
+// Bound each message well below that limit; the bytes stay one ordered stream.
+export const MAX_RELAY_WS_MESSAGE_BYTES = 256 * 1024
+
 // Host-side outbound leg for the Cloudflare Worker relay. On Cloudflare the relay
 // speaks WebSocket (Workers cannot accept arbitrary inbound TCP), so the Mac host
 // dials each warm reverse-tunnel leg over WSS and adapts it to the Duplex that
@@ -42,8 +49,13 @@ function wsLeg(opts: RelayWSOptions): OutboundLeg {
   const duplex = new Duplex({
     read() {},
     write(chunk, _enc, cb) {
-      try { ws.send(chunk as Uint8Array); cb() }
-      catch (err) { cb(err as Error) }
+      const bytes = chunk as Buffer
+      try {
+        for (let offset = 0; offset < bytes.length; offset += MAX_RELAY_WS_MESSAGE_BYTES) {
+          ws.send(bytes.subarray(offset, offset + MAX_RELAY_WS_MESSAGE_BYTES))
+        }
+        cb()
+      } catch (err) { cb(err as Error) }
     },
     // TLS `socket.end(response)` reaches this after queueing its close_notify.
     // Do not close the outer WebSocket immediately: the relay may tear down the

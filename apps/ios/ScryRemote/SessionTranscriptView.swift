@@ -154,10 +154,8 @@ struct SessionTranscriptView: View {
         } else if let live = otherLive {
           liveRunBar(live)
         } else if run.liveRunsStatus == .observed {
-          Label("未检测到运行", systemImage: "info.circle")
-            .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 20)
-            .accessibilityIdentifier("session-runtime-status")
+          // Idle is shown in the header subtitle; a full row adds noise.
+          EmptyView()
         } else {
           SessionRunStatusView(session: session)
         }
@@ -167,8 +165,8 @@ struct SessionTranscriptView: View {
         Button("返回恢复任务") { model.route = .chat }
           .font(.system(size: 13, weight: .semibold)).padding(.vertical, 6)
       }
-      if historyReadyForDisplay, run.historyRefreshError != nil {
-        Notice(text: "历史更新失败，当前显示已读取内容。详情见右上角菜单。", warning: true)
+      if historyReadyForDisplay || run.history == .baseUnavailable, let reason = run.historyRefreshError {
+        historyErrorBanner(reason)
       }
       if let error = run.submitError {
         VStack(alignment: .leading, spacing: 7) {
@@ -185,7 +183,7 @@ struct SessionTranscriptView: View {
       }
       ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)", stopFollowingRequest: olderReadRequest) {
         historyBody
-        if hasLiveTurn { liveTurn }
+        if hasLiveTurn && !run.liveTurnInHistory { liveTurn }
         if let live = detachedLive { detachedTurn(live) }
       }
       if !readOnly { footer }
@@ -276,8 +274,18 @@ struct SessionTranscriptView: View {
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case .baseUnavailable:
-      Text("历史基底当前不可用，并不表示会话没有历史。以下仅显示本机保留的运行记录。")
-        .font(.system(size: 13)).foregroundStyle(Palette.muted)
+      HStack(spacing: 10) {
+        if run.historySyncing { ProgressView().controlSize(.small) }
+        Text(run.historySyncing ? "正在读取 Mac 上的会话记录…" : "还没有读到 Mac 上的更早记录（不代表没有）。下面是本机这次发出的对话。")
+          .font(.system(size: 13)).foregroundStyle(Palette.muted)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        // The error banner already offers retry; one action per state.
+        if !run.historySyncing, run.historyRefreshError == nil, let s = session {
+          Button("重新读取") { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) }
+            .font(.system(size: 13, weight: .semibold))
+        }
+      }
+      .accessibilityIdentifier("history-base-unavailable")
       ForEach(completedTurns) { turn in completedTurnView(turn) }
     case .failed("history_unavailable") where detachedLive != nil:
       // A session this run is creating has no record until the run ends.
@@ -334,7 +342,7 @@ struct SessionTranscriptView: View {
 
   private var header: some View {
     RemoteHeader(title: session?.label.isEmpty == false ? session!.label : "会话",
-                 subtitle: "\(projectName(session?.cwd)) · \(session?.providerId.uppercased() ?? "")",
+                 subtitle: headerSubtitle,
                  link: model.link, backAction: { model.goBack() }) {
       Button { showFiles = true } label: {
         Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
@@ -356,7 +364,7 @@ struct SessionTranscriptView: View {
         }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
-        Image(systemName: historyIsPartial ? "clock" : Symbol.more)
+        Image(systemName: Symbol.more)
           .font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
       }
       .accessibilityLabel("更多选项，\(historyStatus)")
@@ -369,9 +377,45 @@ struct SessionTranscriptView: View {
     run.loadCommands(providerId: s.providerId, cwd: s.cwd, agentProfileId: s.agentProfileId)
   }
 
-  private var historyIsPartial: Bool {
-    if case .partial = run.history { return true }
-    return run.historyFromCache || run.historyRefreshError != nil
+  private var headerSubtitle: String {
+    var parts = [projectName(session?.cwd), providerName]
+    // Only the long-poll proves "nothing observed"; it is not "completed".
+    if run.liveRunsStatus == .observed, otherLive == nil, !(run.activeSessionIdentity == sessionIdentity && run.canStop) {
+      parts.append("未检测到运行")
+    }
+    return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+
+  private var providerName: String {
+    guard let id = session?.providerId else { return "" }
+    if let provider = run.chosenProvider, provider.id == id {
+      return provider.label.components(separatedBy: " · ").first ?? provider.label
+    }
+    return id.prefix(1).uppercased() + id.dropFirst()
+  }
+
+  private func historyErrorBanner(_ reason: String) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Image(systemName: "exclamationmark.circle").font(.system(size: 13, weight: .medium)).padding(.top, 1)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(run.history == .baseUnavailable ? "无法读取 Mac 上的会话记录" : "历史同步失败，显示的是上次读到的内容")
+          .font(.system(size: 12, weight: .semibold))
+        Text(reason).font(.system(size: 11)).lineLimit(2).textSelection(.enabled)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      if let s = session {
+        Button(run.historySyncing ? "重试中…" : "重试") {
+          run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true)
+        }
+        .font(.system(size: 12, weight: .semibold)).disabled(run.historySyncing)
+        .frame(minWidth: 44, minHeight: 32)
+      }
+    }
+    .foregroundStyle(Palette.warnInk)
+    .padding(.vertical, 8).padding(.horizontal, 12)
+    .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .padding(.horizontal, 16).padding(.bottom, 9)
+    .accessibilityIdentifier("history-refresh-error")
   }
 
   private var historyStatus: String {

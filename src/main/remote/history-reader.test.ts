@@ -47,6 +47,8 @@ describe('production remote history reader', () => {
     const recent = await readRemoteHistoryTurnsPage(args, { limit: 3 }, inactive)
     expect(recent).toMatchObject({ offset: 2, totalTurns: 5, hasOlder: true, completeness: 'partial' })
     expect(recent.turns.map(turn => turn.userText)).toEqual(['question-2', 'question-3', 'question-4'])
+    // The device dedupes its own completed runs by this archived Scry run id.
+    expect(recent.turns.map(turn => turn.runId)).toEqual(['run-2', 'run-3', 'run-4'])
     expect(recent.turns[0].items).toEqual([
       { kind: 'reasoning', text: 'reason-2' }, { kind: 'output', text: `reply-2:${'x'.repeat(1800)}` }
     ])
@@ -72,7 +74,7 @@ describe('production remote history reader', () => {
     const run = live()
     const page = await readRemoteHistoryTurnsPage(args, { limit: 1 }, () => run)
     expect(page).toMatchObject({ offset: 0, totalTurns: 1, hasOlder: false, source: 'active_memory', completeness: 'partial' })
-    expect(page.turns).toEqual([{ userText: run.userText, items: [{ kind: 'output', text: 'stream-a' }] }])
+    expect(page.turns).toEqual([{ runId: 'live', userText: run.userText, items: [{ kind: 'output', text: 'stream-a' }] }])
   })
 
   it('keeps archived older pages readable while coalesced live text advances, but detects the new live version', async () => {
@@ -122,6 +124,8 @@ describe('production remote history reader', () => {
     const page = await readRemoteHistoryTurnsPage(args, { limit: 3 }, inactive)
     expect(page).toMatchObject({ source: 'claude_transcript', totalTurns: 1, completeness: 'complete' })
     expect(page.turns[0]).toMatchObject({ userText: 'native question', items: [{ kind: 'output', text: 'native answer' }] })
+    // A transcript-only turn has no Scry run; never invent an id for it.
+    expect(page.turns[0]).not.toHaveProperty('runId')
     const run = { ...live(), providerId: 'claude' as const }
     const activePage = await readRemoteHistoryTurnsPage(args, { limit: 1 }, () => run)
     expect(activePage).toMatchObject({ source: 'active_memory', totalTurns: 2, completeness: 'partial' })
