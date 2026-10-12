@@ -262,6 +262,16 @@ private struct ConversationBottom: PreferenceKey {
 
 // MARK: - Conversation content
 
+struct ConversationMarkdownTable: Sendable {
+  enum Alignment: Sendable {
+    case left, center, right
+  }
+
+  let headers: [String]
+  let alignments: [Alignment]
+  let rows: [[String]]
+}
+
 struct ConversationMarkdownBlock: Identifiable, Sendable {
   enum Kind: Sendable {
     case paragraph
@@ -270,6 +280,7 @@ struct ConversationMarkdownBlock: Identifiable, Sendable {
     case ordered(String)
     case quote
     case code(String?)
+    case table(ConversationMarkdownTable)
     case divider
   }
 
@@ -299,7 +310,10 @@ enum ConversationMarkdownParser {
       blocks.append(.init(id: blocks.count, kind: kind, text: text))
     }
 
-    for rawLine in lines {
+    var lineIndex = 0
+    while lineIndex < lines.count {
+      let rawLine = lines[lineIndex]
+      lineIndex += 1
       let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
 
       if let fence = codeFence {
@@ -320,6 +334,26 @@ enum ConversationMarkdownParser {
         continue
       }
       guard !trimmed.isEmpty else { continue }
+
+      if lineIndex < lines.count, !startsBlock(trimmed),
+         let headers = tableCells(trimmed), !headers.isEmpty,
+         let alignments = tableAlignments(tableCells(lines[lineIndex]) ?? [lines[lineIndex].trimmingCharacters(in: .whitespaces)]),
+         alignments.count == headers.count {
+        var tableLines = [rawLine, lines[lineIndex]]
+        var rows: [[String]] = []
+        lineIndex += 1
+        while lineIndex < lines.count {
+          let row = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+          guard !row.isEmpty, !startsBlock(row) else { break }
+          let cells = tableCells(row) ?? [row]
+          // GFM pads short rows and ignores cells beyond the header width.
+          rows.append(Array(cells.prefix(headers.count)) + Array(repeating: "", count: max(0, headers.count - cells.count)))
+          tableLines.append(lines[lineIndex])
+          lineIndex += 1
+        }
+        append(.table(.init(headers: headers, alignments: alignments, rows: rows)), tableLines.joined(separator: "\n"))
+        continue
+      }
 
       let hashes = trimmed.prefix { $0 == "#" }.count
       if hashes > 0, hashes <= 6, trimmed.dropFirst(hashes).first == " " {
@@ -355,6 +389,49 @@ enum ConversationMarkdownParser {
     return blocks
   }
 
+  // Split only unescaped pipes. GFM also requires pipes inside code spans to
+  // be escaped; removing that escape here keeps inline code's visible text exact.
+  private static func tableCells(_ line: String) -> [String]? {
+    var cells: [String] = []
+    var cell = ""
+    var characters = line.trimmingCharacters(in: .whitespaces).makeIterator()
+    while let character = characters.next() {
+      if character == "\\", let next = characters.next() {
+        cell.append(next == "|" ? "" : "\\")
+        cell.append(next)
+      } else if character == "|" {
+        cells.append(cell.trimmingCharacters(in: .whitespaces))
+        cell = ""
+      } else {
+        cell.append(character)
+      }
+    }
+    guard !cells.isEmpty else { return nil }
+    cells.append(cell.trimmingCharacters(in: .whitespaces))
+    if cells.first == "" { cells.removeFirst() }
+    if cells.last == "" { cells.removeLast() }
+    return cells
+  }
+
+  private static func tableAlignments(_ cells: [String]) -> [ConversationMarkdownTable.Alignment]? {
+    var alignments: [ConversationMarkdownTable.Alignment] = []
+    for cell in cells {
+      var dashes = cell[...]
+      if dashes.first == ":" { dashes = dashes.dropFirst() }
+      if dashes.last == ":" { dashes = dashes.dropLast() }
+      guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
+      alignments.append(cell.hasSuffix(":") ? (cell.hasPrefix(":") ? .center : .right) : .left)
+    }
+    return alignments
+  }
+
+  private static func startsBlock(_ line: String) -> Bool {
+    let hashes = line.prefix { $0 == "#" }.count
+    return line.hasPrefix("```") || line.hasPrefix("~~~") || line.hasPrefix(">") ||
+      isDivider(line) || unorderedItem(line) != nil || orderedItem(line) != nil ||
+      (hashes > 0 && hashes <= 6 && line.dropFirst(hashes).first == " ")
+  }
+
   private static func unorderedItem(_ line: String) -> String? {
     for prefix in ["- ", "* ", "+ "] where line.hasPrefix(prefix) {
       let value = String(line.dropFirst(2))
@@ -385,6 +462,7 @@ private struct ConversationMarkdownInline: View {
   var muted = false
   var size: CGFloat = 16
   var weight: Font.Weight = .regular
+  var alignment: TextAlignment = .leading
 
   private var rendered: AttributedString {
     (try? AttributedString(
@@ -401,7 +479,54 @@ private struct ConversationMarkdownInline: View {
       .lineSpacing(muted ? 3 : 5)
       .textSelection(.enabled)
       .tint(Palette.blue)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .multilineTextAlignment(alignment)
+      .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
+  }
+}
+
+private struct ConversationMarkdownTableView: View {
+  let table: ConversationMarkdownTable
+  let muted: Bool
+  // Keep prose cells readable on a phone; wide tables scroll rather than
+  // compressing every column to fit the conversation's viewport.
+  private let columnWidth: CGFloat = 220
+
+  var body: some View {
+    ScrollView(.horizontal) {
+      VStack(alignment: .leading, spacing: 0) {
+        tableRow(table.headers, header: true)
+        ForEach(table.rows.indices, id: \.self) { index in
+          tableRow(table.rows[index], header: false)
+        }
+      }
+      .background(Palette.canvas)
+      .overlay(Rectangle().strokeBorder(Palette.line))
+    }
+    .accessibilityIdentifier("markdown-table")
+  }
+
+  private func tableRow(_ cells: [String], header: Bool) -> some View {
+    HStack(alignment: .top, spacing: 0) {
+      ForEach(cells.indices, id: \.self) { column in
+        ConversationMarkdownInline(source: cells[column], muted: muted, size: muted ? 14 : 16,
+                                   weight: header ? .semibold : .regular,
+                                   alignment: textAlignment(table.alignments[column]))
+          .monospacedDigit()
+          .padding(12)
+          .frame(width: columnWidth, alignment: .topLeading)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .background(header ? Palette.line.opacity(0.35) : Color.clear)
+    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 0.5) }
+  }
+
+  private func textAlignment(_ alignment: ConversationMarkdownTable.Alignment) -> TextAlignment {
+    switch alignment {
+    case .left: return .leading
+    case .center: return .center
+    case .right: return .trailing
+    }
   }
 }
 
@@ -464,6 +589,8 @@ struct ConversationMarkdownText: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
       .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Palette.line.opacity(0.8)))
+    case let .table(table):
+      ConversationMarkdownTableView(table: table, muted: muted)
     case .divider:
       Rectangle().fill(Palette.line).frame(height: 0.5).padding(.vertical, 3)
     }
