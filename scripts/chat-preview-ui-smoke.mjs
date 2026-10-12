@@ -193,6 +193,83 @@ async function exerciseNativeComposerEnter(contents) {
   return { hostRendersWhileTyping: 0, latestDraftSubmitted: true }
 }
 
+async function exerciseNativeWorkspace(contents) {
+  const read = (expression) => contents.executeJavaScript(expression)
+  const check = async (expression, message) => {
+    if (!await read(expression)) throw new Error(message)
+  }
+  const wait = async (expression) => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() > deadline) {
+        const state = await read(`({ value: document.querySelector('#workspace-fixture textarea')?.value, heading: document.querySelector('#workspace-fixture h1')?.textContent, dirty: document.querySelector('#workspace-fixture').dataset.dirty, focused: document.activeElement?.outerHTML })`)
+        throw new Error(`Workspace timed out: ${expression}; ${JSON.stringify(state)}`)
+      }
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+    }
+  }
+  const click = async (selector) => {
+    const point = await read(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      element.scrollIntoView({ block: 'center' });
+      const rect = element.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
+      if (!element.contains(document.elementFromPoint(x, y))) throw new Error('Workspace control obscured: ' + ${JSON.stringify(selector)});
+      return { x, y };
+    })()`)
+    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+  }
+  const toggle = '#workspace-fixture [aria-expanded]'
+  const source = '#workspace-fixture textarea'
+  const save = '#workspace-fixture .workspace-editorbar .primary'
+  await read(`document.querySelector('#workspace-fixture').hidden = false`)
+  await wait(`document.querySelector('#workspace-fixture h1')?.textContent === 'Preview first'`)
+  await check(`!document.querySelector('${source}') && !document.querySelector('${save}')`, 'Markdown must default to preview only')
+  await check(`(() => {
+    const body = document.querySelector('#workspace-fixture .workspace-editorbody').getBoundingClientRect();
+    const preview = document.querySelector('#workspace-fixture .workspace-preview').getBoundingClientRect();
+    return Math.abs(body.width - preview.width) < 1 && Math.abs(body.height - preview.height) < 1;
+  })()`, 'Collapsed preview must fill both dimensions')
+  await click(toggle)
+  await wait(`document.querySelector('${toggle}').getAttribute('aria-expanded') === 'true' && document.querySelector('${source}')`)
+  await click(source)
+  await wait(`document.activeElement === document.querySelector('${source}')`)
+  contents.selectAll()
+  await contents.insertText('# Edited preview')
+  await wait(`document.querySelector('#workspace-fixture h1')?.textContent === 'Edited preview' && document.querySelector('#workspace-fixture').dataset.dirty === 'true'`)
+  await click(toggle)
+  await wait(`!document.querySelector('${source}')`)
+  await check(`!document.querySelector('${save}').disabled`, 'Hidden unsaved source lost its save action')
+  await click(toggle)
+  await wait(`document.querySelector('${source}')?.value === '# Edited preview'`)
+  await click(toggle)
+  await wait(`!document.querySelector('${source}')`)
+  await click(save)
+  await wait(`document.querySelector('#workspace-fixture').dataset.dirty === 'false' && !document.querySelector('${save}')`)
+  await click(toggle)
+  await wait(`document.querySelector('${source}')`)
+  for (const file of ['second.MDX', 'preview.md']) {
+    await click(`[data-file="${file}"]`)
+    await wait(`document.querySelector('#workspace-fixture .workspace-title b')?.textContent === '${file}' && document.querySelector('#workspace-fixture h1')?.textContent === 'Edited preview'`)
+    await check(`!document.querySelector('${source}')`, 'New Markdown file did not reset to preview')
+  }
+  await click('[data-file="notes.txt"]')
+  await wait(`document.querySelector('${source}')?.value === 'Plain text'`)
+  await check(`!document.querySelector('${toggle}') && !document.querySelector('${source}').readOnly`, 'Plain text editing regressed')
+  await click('[data-file="readonly.md"]')
+  await wait(`document.querySelector('#workspace-fixture h1')?.textContent === 'Preview first'`)
+  await check(`!document.querySelector('${source}')`, 'Read-only Markdown must default to preview')
+  await click(toggle)
+  await wait(`document.querySelector('${source}')?.readOnly`)
+  await check(`!document.querySelector('${save}')`, 'Read-only source exposed save')
+  await click('[data-file="large.md"]')
+  await wait(`document.querySelector('${source}')?.value === '# Paged source'`)
+  await check(`document.querySelector('${source}').readOnly && !document.querySelector('${toggle}')`, 'Paged read-only view regressed')
+  await read(`document.querySelector('#workspace-fixture').hidden = true`)
+  return { previewDefault: true, fullSize: true, nativeToggleAndEdit: true, draftRetained: true, saveWhileCollapsed: true, fileReset: true, plainText: true, readOnly: true, paged: true }
+}
+
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
   await build({
@@ -226,10 +303,12 @@ try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         let result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         result.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
+        result.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents)
         win.setSize(560, 480)
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         result = { wide: result, narrow: await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )}) }
         result.narrow.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
+        result.narrow.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents)
         console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }

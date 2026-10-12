@@ -584,6 +584,7 @@ function FileEditor({
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [sourceExpanded, setSourceExpanded] = useState(false)
   const [externallyOpened, setExternallyOpened] = useState(false)
   const dirty = snapshot != null && content !== snapshot.content
   const dirtyRef = useRef(dirty)
@@ -732,9 +733,19 @@ function FileEditor({
   }
 
   return (
-    <div className={`workspace-editor ${markdown ? 'markdown' : ''}`}>
+    <div className={`workspace-editor ${markdown ? 'markdown' : ''} ${sourceExpanded ? 'source-expanded' : ''}`}>
       <div className="workspace-editorbar">
         <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round(snapshot!.size / 1024 * 10) / 10} KiB</span>
+        {markdown && (
+          <button
+            type="button"
+            className="btn"
+            aria-expanded={sourceExpanded}
+            onClick={() => setSourceExpanded((expanded) => !expanded)}
+          >
+            {sourceExpanded ? '收起源码' : '展开源码'}
+          </button>
+        )}
         <button
           type="button"
           className="btn"
@@ -745,28 +756,30 @@ function FileEditor({
         >
           重新载入
         </button>
-        {!readOnly && (
+        {!readOnly && (!markdown || sourceExpanded || dirty) && (
           <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
             {saving ? '保存中…' : '保存 ⌘S'}
           </button>
         )}
       </div>
       <div className="workspace-editorbody">
-        <div className="workspace-source">
-          {markdown && <div className="workspace-pane-label">MARKDOWN</div>}
-          <textarea
-            className="workspace-textarea"
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            onKeyDown={onEditorKeyDown}
-            readOnly={readOnly}
-            spellCheck={false}
-            aria-label={`编辑 ${entry.name}`}
-          />
-        </div>
+        {(!markdown || sourceExpanded) && (
+          <div className="workspace-source">
+            {markdown && <div className="workspace-pane-label">MARKDOWN</div>}
+            <textarea
+              className="workspace-textarea"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              onKeyDown={onEditorKeyDown}
+              readOnly={readOnly}
+              spellCheck={false}
+              aria-label={`${readOnly ? '查看' : '编辑'} ${entry.name}`}
+            />
+          </div>
+        )}
         {markdown && (
           <div className="workspace-preview">
-            <div className="workspace-pane-label">PREVIEW</div>
+            {sourceExpanded && <div className="workspace-pane-label">PREVIEW</div>}
             <article className="md workspace-preview-content">
               <Markdown>{content}</Markdown>
             </article>

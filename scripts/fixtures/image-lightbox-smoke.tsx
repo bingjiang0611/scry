@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { ComposerProjectFixture } from './composer-project-smoke'
+import { WorkspacePreviewFixture } from './workspace-preview-smoke'
 import { AssistantTurn, UserMessage } from '../../src/renderer/components/ChatTurn'
 import MarkdownImpl from '../../src/renderer/components/MarkdownImpl'
 import '../../src/renderer/styles.css'
@@ -64,6 +65,7 @@ createRoot(document.getElementById('root')!).render(
       <AssistantTurn turn={toolTurn} selectedId={null} onSelect={() => {}} />
     </section>
     <ComposerProjectFixture />
+    <WorkspacePreviewFixture />
     <aside id="summary" style={{ position: 'fixed', right: 0, top: 0, width: '25vw', height: '100vh', zIndex: 20 }}>Environment</aside>
   </>
 )
