@@ -226,6 +226,17 @@ npm run build
 
 No real account/model requests, renderer first-paint measurement, packaging or installation were performed. These changes reduce preparation work, not measured model TTFT. To attribute remaining delay, compare `SCRY_PERF_LOG=1` admission/launch/first-text checkpoints with Provider request-to-first-block timing and renderer paint under the same model, prompt, history and network. Keep this distinction rather than changing the TTFT clock to make the metric smaller.
 
+## 0.2.173 local installation
+
+The first-output preparation changes from `88935b2` were built in a clean temporary export with an independent dependency copy, avoiding the ignored `.local` checkout. Only the App version changed to 0.2.173; private recorder CLI remains 0.2.47. No real Provider probes were enabled.
+
+- Node 24.18.0: typecheck, full unit suite (206 files / 2,627 tests passed; three opt-in external probes skipped), shell suite, production build, packaged resource checks and packaged Electron security/interaction/file-preview smoke passed.
+- CLI release tests passed (32 files / 571 tests). The initial npm 12.2.0 tarball smoke failed on its changed `pack --json` output shape; the unchanged smoke passed with the already-installed npm 10.9.4 via a temporary PATH shim. No global toolchain or test assertions changed.
+- The complete renderer UI command did **not** pass. Its first session-capability fixture exited without a result receipt. A diagnostic copy with progress logging then failed the existing terminal-restoration assertion waiting for `/fixture/new/same.ts` in the composer. The cause remains unresolved; no renderer or fixture code was changed for this installation. Credits, chat preview/composer, session performance, background/recovery and steer fixtures were subsequently run individually and passed. These passes do not replace the failed complete UI result.
+- After `npm run pack` passed, its exact artifact was installed with the repository's `scripts/install-macos.mjs` transaction. Installed App version, private CLI version and deep/strict signature verification passed. Executable and ASAR compare byte-for-byte with the packaged artifact: SHA-256 `44e7eacfc511dd6c994b2a8d57e10e1a89b815f502715e8490759c2d8aa395c1` and `15a912d492bcfb118369a707fa6b2c5f234565c60a3cf46bdc57c5535e38ffc8` respectively.
+- `/Applications/Scry.app` is development-signed, not notarized. The previous 0.2.172 bundle remains at `/Applications/.Scry.app.backup`. The user's running App was not stopped; relaunch is required to use the new code. No installed-App real-model TTFT comparison is claimed.
+- Ephemeral logs: `/tmp/scry-0.2.173-{cli-release,cli-package,renderer-ui,ui-diagnostic,remaining-ui,pack,install}.log`.
+
 ## Budgets and review rules
 
 Initial budgets, to be adjusted only with same-machine evidence:
