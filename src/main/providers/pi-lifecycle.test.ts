@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -27,19 +27,48 @@ if (fs.existsSync(process.cwd() + '/stubborn')) {
   process.on('SIGTERM', () => {})
   setInterval(() => {}, 1000)
 }
+const sessionFile = process.cwd() + '/fixture-session.jsonl'
+const resumeIndex = process.argv.indexOf('--session')
+if (resumeIndex >= 0 && !fs.existsSync(sessionFile)) {
+  process.stderr.write("No session found matching '" + process.argv[resumeIndex + 1] + "'")
+  process.exit(1)
+}
+const entries = fs.existsSync(sessionFile)
+  ? fs.readFileSync(sessionFile, 'utf8').trim().split('\\n').slice(1).map((line) => JSON.parse(line))
+  : []
+const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
 require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
   const command = JSON.parse(line)
   fs.appendFileSync(process.cwd() + '/commands', command.type + '\\n')
   const fail = fs.existsSync(process.cwd() + '/fail-probe')
   const data = {
-    get_state: { cwd: process.cwd(), sessionId: 'fixture-session' },
-    get_entries: { entries: [], leafId: null },
+    get_state: {
+      cwd: process.cwd(), sessionId: 'fixture-session', sessionFile,
+      isStreaming: false, isCompacting: false, pendingMessageCount: 0
+    },
+    get_entries: { entries, leafId: entries.at(-1)?.id ?? null },
     get_available_models: { models: [] },
     get_available_thinking_levels: { levels: ['off'] },
-    get_commands: { commands: [] }
+    get_commands: { commands: [{ name: 'fixture-menu', source: 'extension' }] }
   }[command.type]
-  process.stdout.write(JSON.stringify({ type: 'response', id: command.id, command: command.type,
-    success: !fail, data, ...(fail ? { error: 'fixture probe failed' } : {}) }) + '\\n')
+  if (command.type === 'prompt' && command.message !== '/fixture-menu') {
+    entries.push({
+      type: 'message', id: 'user-' + (entries.length + 1), parentId: entries.at(-1)?.id ?? null,
+      message: { role: 'user', content: command.message }
+    })
+    fs.writeFileSync(sessionFile, [
+      { type: 'session', id: 'fixture-session' }, ...entries
+    ].map((entry) => JSON.stringify(entry)).join('\\n') + '\\n')
+    send({ type: 'agent_start' })
+    if (command.message === 'stop-after-persist') {
+      send({ type: 'extension_ui_request', id: 'persisted', method: 'setStatus', statusKey: 'persisted', text: 'Persisted' })
+      return
+    }
+    send({ type: 'agent_end', messages: [] })
+    send({ type: 'agent_settled' })
+  }
+  send({ type: 'response', id: command.id, command: command.type,
+    success: !fail, data, ...(fail ? { error: 'fixture probe failed' } : {}) })
 })
 `)
   chmodSync(executable, 0o755)
@@ -129,6 +158,104 @@ describe('Pi startup and probe lifecycle', () => {
       })
       await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
       expect(readFileSync(join(cwd, 'commands'), 'utf8').split('\n')).not.toContain('prompt')
+    })
+  })
+
+  it('does not advertise an unpersisted startup id, so the next send starts a real session', async () => {
+    await withProbeFixture(async (profile, cwd, starts) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const onSession = vi.fn()
+      const handle = adapter.run({
+        runId: 'stop-before-persist', prompt: 'must not run', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', onExternalSessionId: onSession,
+        emit: (event) => { if (event.stage === 'runtime:init') handle.interrupt() }
+      })
+      const stopped = await handle.promise
+      expect(stopped).toMatchObject({ stopped: true, status: 'interrupted' })
+      expect(stopped.externalSessionId).toBeUndefined()
+      expect(handle.getExternalSessionId!()).toBeUndefined()
+      expect(onSession).not.toHaveBeenCalled()
+      expect(existsSync(join(cwd, 'fixture-session.jsonl'))).toBe(false)
+
+      const next = adapter.run({
+        runId: 'next-send', prompt: 'run now', cwd, agentProfileId: profile.id,
+        resume: stopped.externalSessionId, attachments: [], permissionMode: 'full_access',
+        emit: vi.fn(), onExternalSessionId: onSession
+      })
+      await expect(next.promise).resolves.toMatchObject({ externalSessionId: 'fixture-session', status: 'completed' })
+      expect(onSession).toHaveBeenCalledExactlyOnceWith('fixture-session')
+      expect(existsSync(join(cwd, 'fixture-session.jsonl'))).toBe(true)
+      expect(starts()).toHaveLength(2)
+    })
+  })
+
+  it('does not advertise a fresh menu-only session that has never persisted a conversation', async () => {
+    await withProbeFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const onSession = vi.fn()
+      const handle = adapter.run({
+        runId: 'fresh-menu', prompt: '/fixture-menu', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn(), onExternalSessionId: onSession
+      })
+      const result = await handle.promise
+      expect(result.status).toBe('completed')
+      expect(result.externalSessionId).toBeUndefined()
+      expect(handle.getExternalSessionId!()).toBeUndefined()
+      expect(onSession).not.toHaveBeenCalled()
+      expect(existsSync(join(cwd, 'fixture-session.jsonl'))).toBe(false)
+    })
+  })
+
+  it('preserves a persisted resume id even when stopped during initialization', async () => {
+    await withProbeFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'fixture-session.jsonl'), [
+        { type: 'session', id: 'fixture-session' },
+        { type: 'message', id: 'user-1', parentId: null, message: { role: 'user', content: 'previous prompt' } }
+      ].map((entry) => JSON.stringify(entry)).join('\n') + '\n')
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const onSession = vi.fn()
+      const handle = adapter.run({
+        runId: 'stop-resumed', prompt: 'must not run', cwd, agentProfileId: profile.id,
+        resume: 'fixture-session', attachments: [], permissionMode: 'full_access', onExternalSessionId: onSession,
+        emit: (event) => { if (event.stage === 'runtime:init') handle.interrupt() }
+      })
+      await expect(handle.promise).resolves.toMatchObject({ externalSessionId: 'fixture-session', status: 'interrupted' })
+      expect(onSession).toHaveBeenCalledExactlyOnceWith('fixture-session')
+      expect(readFileSync(join(cwd, 'commands'), 'utf8').split('\n')).not.toContain('prompt')
+    })
+  })
+
+  it('preserves the first native prompt if stopped before its RPC acknowledgement', async () => {
+    await withProbeFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const onSession = vi.fn()
+      const handle = adapter.run({
+        runId: 'stop-after-persist', prompt: 'stop-after-persist', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', onExternalSessionId: onSession,
+        // Terminate at the exact native persistence marker, without waiting for the
+        // fixture's deliberately withheld prompt acknowledgement or abort lifecycle.
+        emit: (event) => { if (event.stage === 'runtime:extension_ui') handle.forceKill!() }
+      })
+      await expect(handle.promise).resolves.toMatchObject({ externalSessionId: 'fixture-session', status: 'interrupted' })
+      expect(onSession).toHaveBeenCalledExactlyOnceWith('fixture-session')
+      expect(existsSync(join(cwd, 'fixture-session.jsonl'))).toBe(true)
+    })
+  })
+
+  it('does not silently replace a missing resumed session with a new one', async () => {
+    await withProbeFixture(async (profile, cwd, starts) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const onSession = vi.fn()
+      const handle = adapter.run({
+        runId: 'missing-resume', prompt: 'must not run', cwd, agentProfileId: profile.id,
+        resume: 'fixture-session', attachments: [], permissionMode: 'full_access', emit: vi.fn(),
+        onExternalSessionId: onSession
+      })
+      await expect(handle.promise).rejects.toThrow("No session found matching 'fixture-session'")
+      expect(onSession).not.toHaveBeenCalled()
+      expect(existsSync(join(cwd, 'commands'))).toBe(false)
+      expect(existsSync(join(cwd, 'fixture-session.jsonl'))).toBe(false)
+      expect(starts()).toHaveLength(1)
     })
   })
 
