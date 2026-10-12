@@ -42,6 +42,11 @@ const entries = [
   { type: 'message', id: 'active-leaf', parentId: 'active-user', timestamp: new Date().toISOString(), message: { role: 'assistant' } },
   { type: 'message', id: 'abandoned-user', parentId: 'active-leaf', timestamp: new Date().toISOString(), message: { role: 'user' } }
 ]
+const sessionFile = process.cwd() + '/pi-session-1.jsonl'
+// This fixture starts with native conversation entries, so its session is already on disk.
+require('node:fs').writeFileSync(sessionFile, [
+  { type: 'session', id: sessionId, cwd: process.cwd() }, ...entries
+].map((entry) => JSON.stringify(entry)).join('\\n') + '\\n')
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => {
@@ -70,7 +75,7 @@ process.stdin.on('data', (chunk) => {
         isCompacting: false,
         pendingMessageCount: 0,
         sessionId,
-        sessionFile: '/tmp/pi-session-1.jsonl',
+        sessionFile,
         cwd: process.cwd()
       }
       if (promptMessage === 'stop-before-final-state') {

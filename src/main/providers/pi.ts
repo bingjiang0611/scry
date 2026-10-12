@@ -489,11 +489,22 @@ interface PiEntrySnapshot {
 interface PiRunState {
   stopped: boolean
   sessionId?: string
+  sessionFile?: string
+  persistedSessionId?: string
   providerTurnId?: string
   rpc?: PiRpcProcess
   steerAdmissionUncertain?: boolean
   steerDispatched?: boolean
   steer?: (input: AgentSteerInput) => Promise<AgentSteerResult>
+}
+
+function publishPersistedPiSession(request: ProviderRunRequest, state: PiRunState): void {
+  if (!state.sessionId || state.persistedSessionId === state.sessionId || !state.sessionFile) return
+  // Pi assigns an ID/path at startup, but creates the JSONL only after a conversation
+  // entry. Publishing the in-memory ID makes an early stop poison the next resume.
+  if (!statSync(state.sessionFile, { throwIfNoEntry: false })?.isFile()) return
+  state.persistedSessionId = state.sessionId
+  request.onExternalSessionId?.(state.persistedSessionId)
 }
 
 function piEntrySnapshot(response: JsonRecord): PiEntrySnapshot {
@@ -1382,7 +1393,8 @@ async function runPiAgent(
     const initialState = record((await rpc.send({ type: 'get_state' }, null)).data)
     if (typeof initialState.sessionId === 'string' && initialState.sessionId) {
       state.sessionId = initialState.sessionId
-      request.onExternalSessionId?.(initialState.sessionId)
+      state.sessionFile = typeof initialState.sessionFile === 'string' ? initialState.sessionFile : undefined
+      publishPersistedPiSession(request, state)
     }
     request.emit(piEvent(request.runId, {
       kind: 'harness',
@@ -1417,7 +1429,7 @@ async function runPiAgent(
     const explicitSkillEvent = await proveExplicitPiSkill(rpc, request)
     extensionCommand = await piExtensionCommand(rpc, request.prompt)
     const entryBaseline = await piEntryBaseline(rpc)
-    if (state.stopped) return { externalSessionId: state.sessionId, stopped: true, status: 'interrupted' }
+    if (state.stopped) return { externalSessionId: state.persistedSessionId, stopped: true, status: 'interrupted' }
     if (request.managedRecorder) {
       if (!request.cwd || !state.sessionId || !request.managedRecorderIdentity) {
         throw new PiRecorderError('Pi managed recorder 缺少 workspace、session 或受信任轮次身份')
@@ -1521,9 +1533,10 @@ async function runPiAgent(
           durationMs: Date.now() - startedAt,
           providerCommand: { name: extensionCommand, source: 'extension', modelTurn: 'unobserved' }
         }))
-        retainRpc = mayReuse && !state.stopped && !state.steerAdmissionUncertain && Boolean(state.sessionId) && rpc.reusable()
+        publishPersistedPiSession(request, state)
+        retainRpc = mayReuse && !state.stopped && !state.steerAdmissionUncertain && Boolean(state.persistedSessionId) && rpc.reusable()
         return {
-          externalSessionId: state.sessionId, stopped: state.stopped,
+          externalSessionId: state.persistedSessionId, stopped: state.stopped,
           status: state.stopped ? 'interrupted' : extensionCommandError === undefined ? 'completed' : 'failed'
         }
       }
@@ -1534,12 +1547,13 @@ async function runPiAgent(
       () => agentSettled,
       () => state.steerDispatched === true
     )
+    publishPersistedPiSession(request, state)
     // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity
     // deadline here: transport/process failures reject rpcFailure, and users retain stop controls.
     await Promise.race([settled, rpcFailure])
-    // A user stop already has the authoritative session identity from startup. Asking Pi for one
-    // more state snapshot after abort only delays the queued next turn and can hit an avoidable
-    // timeout while the launcher is shutting down.
+    // Startup supplies the native ID/path; persistence is checked independently. Asking Pi
+    // for one more state snapshot after abort only delays the queued next turn and can hit
+    // an avoidable timeout while the launcher is shutting down.
     let finalState = initialState
     if (!state.stopped) {
       try {
@@ -1557,7 +1571,8 @@ async function runPiAgent(
     }
     if (typeof finalState.sessionId === 'string' && finalState.sessionId) {
       state.sessionId = finalState.sessionId
-      request.onExternalSessionId?.(finalState.sessionId)
+      state.sessionFile = typeof finalState.sessionFile === 'string' ? finalState.sessionFile : undefined
+      publishPersistedPiSession(request, state)
     }
     const endedByTool = !state.stopped && usage.lastStopReason === 'toolUse' &&
       toolTermination !== undefined && toolNames.size === 0
@@ -1573,7 +1588,7 @@ async function runPiAgent(
     // Reusing it makes Scry match terminal Pi instead of paying a fresh WebSocket/proxy handshake
     // and replaying the complete context on every user turn. An uncertain native steer may still
     // be queued in Pi's idle queue, so quarantine this transport rather than carry it forward.
-    retainRpc = mayReuse && !state.stopped && !state.steerAdmissionUncertain && Boolean(state.sessionId) && rpc.reusable()
+    retainRpc = mayReuse && !state.stopped && !state.steerAdmissionUncertain && Boolean(state.persistedSessionId) && rpc.reusable()
     // Pi may settle cleanly at the RPC layer while the upstream model reports `aborted` (for
     // example Qoder aborting a long generation). Only an explicit Scry stop is an interruption;
     // an explicit tool termination is a separate execution boundary, not Goal approval.
@@ -1633,14 +1648,14 @@ async function runPiAgent(
       })
     }
     return {
-      externalSessionId: state.sessionId,
+      externalSessionId: state.persistedSessionId,
       providerTurnId: state.providerTurnId,
       stopped: state.stopped,
       status: state.stopped ? 'interrupted' : 'completed'
     }
   } catch (error) {
     if (state.stopped && !(error instanceof PiRecorderError)) return {
-      externalSessionId: state.sessionId,
+      externalSessionId: state.persistedSessionId,
       providerTurnId: state.providerTurnId,
       stopped: true,
       status: 'interrupted'
@@ -1760,7 +1775,15 @@ export function createPiAdapter(options: {
         if (!request.agentProfileId) throw new Error('Pi Provider run 缺少 agentProfileId')
         const profile = await options.resolveProfile(request.agentProfileId)
         if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
-        return runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool)
+        let result: ProviderRunResult
+        try {
+          result = await runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool)
+        } finally {
+          // Prompt admission can race a stop/transport exit. Recheck after transport
+          // cleanup, including failures, so persisted history remains resumable.
+          publishPersistedPiSession(request, state)
+        }
+        return { ...result, externalSessionId: state.persistedSessionId }
       })()
       return {
         promise,
@@ -1778,7 +1801,7 @@ export function createPiAdapter(options: {
         },
         // 每轮 run 自己 spawn 一个 Pi RPC 子进程：SIGKILL 不会波及其他 run。
         forceKillScope: 'run_scoped',
-        getExternalSessionId: () => state.sessionId,
+        getExternalSessionId: () => state.persistedSessionId,
         getProviderTurnId: () => state.providerTurnId
       }
     },
