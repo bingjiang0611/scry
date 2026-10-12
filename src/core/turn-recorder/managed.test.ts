@@ -283,6 +283,40 @@ describe('managed canonical recorder', () => {
     await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
   })
 
+  it.each([false, true])('workspace recovery leaves a live Pi turn untouched (native identity: %s)', async (hasNativeIdentity) => {
+    const root = await workspace()
+    const sessionId = 'pi-session-live'
+    const runId = 'run-pi-live'
+    const prompt = '另一会话仍在执行'
+    await handleRecorderHook({
+      provider: 'pi',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      managed: true,
+      payload: { session_id: sessionId, prompt, timestamp: timing.startedAt },
+      env: {
+        ...process.env,
+        SCRY_MANAGED_RUN_ID: runId,
+        SCRY_MANAGED_PROMPT_HASH: createHash('sha256').update(prompt).digest('hex')
+      }
+    })
+    const openPath = join(root, '.scry', 'runtime', 'pi', safeKey(sessionId), 'open.json')
+    if (hasNativeIdentity) {
+      const open = JSON.parse(await readFile(openPath, 'utf8'))
+      await writeFile(openPath, JSON.stringify({ ...open, providerTurnId: 'pi-live-entry' }))
+    }
+    const before = await readFile(openPath, 'utf8')
+
+    await expect(recoverManagedRecorderTurns(root, process.env, {
+      provider: 'pi',
+      isLiveManagedRun: (candidate) => candidate === runId
+    })).resolves.toEqual({ recovered: 0, pending: 0 })
+    expect(await readFile(openPath, 'utf8')).toBe(before)
+    // Unknown ownership is still fail closed; this is not permission to discard the turn.
+    await expect(recoverManagedRecorderTurns(root, process.env, { provider: 'pi' }))
+      .resolves.toEqual({ recovered: 0, pending: 1 })
+  })
+
   // 真实故障：Provider 进程早已消失，open/quarantined 轮次没有 providerTurnId 也没有 canonical handoff，
   // 永远不会自己收口，却让 agent:start 永久报“精确记录仍有 N 轮待恢复”。
   it('主已不在的 provisional 轮次在授权后被弃掉，不再永久阻断', async () => {
@@ -303,11 +337,11 @@ describe('managed canonical recorder', () => {
 
     // 默认保守：不知道 run 存活情况时继续 pending，不得删掉可能正在跑的轮次。
     await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
-    // run 还活着时即使开了开关也不能弃掉。
+    // run 还活着时不需要恢复，也不能弃掉。
     await expect(recoverManagedRecorderTurns(root, process.env, {
       abandonProvisional: true,
       isLiveManagedRun: (candidate) => candidate === 'run-pi-orphan'
-    })).resolves.toEqual({ recovered: 0, pending: 1 })
+    })).resolves.toEqual({ recovered: 0, pending: 0 })
     // 主已不在：弃掉并计入 recovered，再扫一次已经干净。
     await expect(recoverManagedRecorderTurns(root, process.env, {
       abandonProvisional: true,
@@ -1031,6 +1065,10 @@ describe('managed canonical recorder', () => {
       archiveFingerprint
     })
     expect(prepared.status).toBe('prepared')
+    expect(await recoverManagedRecorderTurns(root, process.env, {
+      isLiveManagedRun: (candidate) => candidate === 'run-1'
+    })).toEqual({ recovered: 0, pending: 0 })
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
     expect(await recoverManagedRecorderTurns(root)).toEqual({ recovered: 0, pending: 1 })
 
     const canonical = join(
@@ -1044,7 +1082,13 @@ describe('managed canonical recorder', () => {
       'canonical.json'
     )
     const handoff = JSON.parse(await readFile(canonical, 'utf8')) as Record<string, unknown>
-    await writeFile(canonical, JSON.stringify({ ...handoff, phase: 'archive_committed' }))
+    const committedHandoff = JSON.stringify({ ...handoff, phase: 'archive_committed' })
+    await writeFile(canonical, committedHandoff)
+    expect(await recoverManagedRecorderTurns(root, process.env, {
+      isLiveManagedRun: (candidate) => candidate === 'run-1'
+    })).toEqual({ recovered: 0, pending: 0 })
+    expect(await readFile(canonical, 'utf8')).toBe(committedHandoff)
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
 
     expect(await recoverManagedRecorderTurns(root)).toEqual({ recovered: 1, pending: 0 })
     expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
@@ -1255,6 +1299,12 @@ describe('managed canonical recorder', () => {
       managedRunId?: string
     }
     expect(open).toMatchObject({ generation: 2, managedRunId: 'run-b' })
+    expect(await recoverManagedRecorderTurns(root, process.env, {
+      isLiveManagedRun: (candidate) => candidate === 'run-a' || candidate === 'run-b'
+    })).toEqual({ recovered: 0, pending: 0 })
+    expect(await recoverManagedRecorderTurns(root, process.env, {
+      isLiveManagedRun: (candidate) => candidate === 'run-b'
+    })).toEqual({ recovered: 0, pending: 1 })
     await expect(readFile(join(runtimeRoot, 'turns', '00000001', 'pending-open.json'), 'utf8'))
       .resolves.toContain('run-a')
   })

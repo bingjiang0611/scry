@@ -720,6 +720,7 @@ export async function recoverManagedTraceProgress(
     providerId?: ManagedRecorderProviderId
     waitMs?: number
     commitHookEnv?: NodeJS.ProcessEnv
+    isLiveManagedRun?: (runId: string) => boolean
   } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
@@ -741,6 +742,7 @@ export async function recoverManagedTraceProgress(
     if (options.cwd && progress.request.cwd !== options.cwd) continue
     if (options.sessionId && progress.request.sessionId !== options.sessionId) continue
     if (options.providerId && progress.request.providerId !== options.providerId) continue
+    if (options.isLiveManagedRun?.(progress.request.turn.runId)) continue
     try {
       const canonicalJournalPath = journalPath(userDataDir, progress.request.turn.runId)
       const journal = await readJson<ManagedTurnJournal>(canonicalJournalPath)
@@ -784,6 +786,7 @@ export async function recoverManagedTraceTurns(
     providerId?: ManagedRecorderProviderId
     waitMs?: number
     commitHookEnv?: NodeJS.ProcessEnv
+    isLiveManagedRun?: (runId: string) => boolean
   } = {}
 ): Promise<ManagedTurnRecovery> {
   let recovered = 0
@@ -805,6 +808,7 @@ export async function recoverManagedTraceTurns(
     if (options.cwd && journal.request.cwd !== options.cwd) continue
     if (options.sessionId && journal.request.sessionId !== options.sessionId) continue
     if (options.providerId && journal.request.providerId !== options.providerId) continue
+    if (options.isLiveManagedRun?.(journal.request.turn.runId)) continue
     const result = await withDirectoryLock(
       lockPath(userDataDir, journal.request.turn.runId),
       () => replayJournal(path, userDataDir, journal, options.waitMs ?? 250, options.commitHookEnv),
