@@ -51,6 +51,11 @@ export class DockBadgeState {
     this.clear(sessionKey)
   }
 
+  // Unread state is process-local; the OS may still display a previous launch's badge.
+  sync(): void {
+    this.setCount(this.count)
+  }
+
   get count(): number {
     return this.unreadSessionKeys.size
   }
@@ -69,7 +74,7 @@ export class DockBadgeState {
 
   private publish(): void {
     this.revision += 1
-    this.setCount(this.unreadSessionKeys.size)
+    this.sync()
     this.onChange?.(this.snapshot())
   }
 }

@@ -2,6 +2,38 @@ import { describe, expect, it, vi } from 'vitest'
 import { DockBadgeState } from './dock-badge'
 
 describe('DockBadgeState', () => {
+  it('启动同步清除系统残留角标，不制造未读状态变化', () => {
+    let nativeCount = 1
+    const snapshots = vi.fn()
+    const badge = new DockBadgeState((count) => { nativeCount = count }, snapshots)
+
+    badge.sync()
+
+    expect(nativeCount).toBe(0)
+    expect(badge.snapshot()).toEqual({ revision: 0, unreadSessionKeys: [] })
+    expect(snapshots).not.toHaveBeenCalled()
+  })
+
+  it('同步以当前未读计数为准，不清除未查看的其他会话', () => {
+    const setCount = vi.fn()
+    const snapshots = vi.fn()
+    const badge = new DockBadgeState(setCount, snapshots)
+    badge.markAttention('session-a', {
+      windowFocused: false,
+      sessionViewed: false,
+      needsAttention: true
+    })
+    const snapshot = badge.snapshot()
+    setCount.mockClear()
+    snapshots.mockClear()
+
+    badge.sync()
+
+    expect(setCount.mock.calls).toEqual([[1]])
+    expect(badge.snapshot()).toEqual(snapshot)
+    expect(snapshots).not.toHaveBeenCalled()
+  })
+
   it('前台正在查看的会话完成时不增加 badge', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)

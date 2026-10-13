@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
@@ -105,9 +106,32 @@ async function main() {
     preview: 'security smoke',
     ts: Date.now()
   }]))
+  const badgeReceipt = join(temp, 'dock-badge.json')
+  const questionEntry = join(temp, 'question-main.mjs')
+  if (devQuestionOnly) {
+    // Exercise the production startup against a badge left by a previous launch.
+    // Forward every call to Electron; a denied OS permission remains explicit.
+    writeFileSync(questionEntry, `
+      import { app } from 'electron'
+      import { writeFileSync } from 'node:fs'
+      app.whenReady().then(async () => {
+        const initial = { success: app.setBadgeCount(1), nativeCount: app.getBadgeCount() }
+        const requests = []
+        const setBadgeCount = app.setBadgeCount.bind(app)
+        app.setBadgeCount = (count) => {
+          const success = setBadgeCount(count)
+          requests.push({ count, success, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() })
+          writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests }))
+          return success
+        }
+        writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests }))
+        await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
+      })
+    `)
+  }
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? questionEntry : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
@@ -330,6 +354,12 @@ async function main() {
     return
   }
   if (devQuestionOnly) {
+    const startupBadge = JSON.parse(readFileSync(badgeReceipt, 'utf8'))
+    assert.equal(startupBadge.requests[0]?.count, 0, 'production startup must synchronize the empty unread count to Dock')
+    if (startupBadge.requests[0].success) {
+      assert.equal(startupBadge.requests[0].nativeCount, 0)
+      assert.equal(startupBadge.requests[0].dockBadge, '')
+    }
     const result = await evaluate(`(async () => {
       const waitFor = async (read, label) => {
         const deadline = Date.now() + 10_000
@@ -357,13 +387,21 @@ async function main() {
       if (!answered) throw new Error('Fixture question response was rejected')
       const run = await waitFor(() => pendingRun(runId + ':question:2'), 'background question')
       const unread = await window.scry.unreadSessions()
+      await window.scry.focusRun(runId)
+      const viewed = await window.scry.unreadSessions()
       await window.scry.stop(runId)
-      return { done: run.done, pendingCount: run.pendingQuestions.length, unread }
+      return { done: run.done, pendingCount: run.pendingQuestions.length, unread, viewed }
     })()`)
     assert.equal(result.done, false, 'question attention must arrive before a terminal result')
     assert.equal(result.pendingCount, 1)
     assert.equal(result.unread.unreadSessionKeys.length, 1, 'background question must trigger Dock attention')
-    console.log(JSON.stringify({ ok: true, questionAttention: result }))
+    assert.equal(result.viewed.unreadSessionKeys.length, 0, 'viewing the pending session must clear its attention')
+    const badgeLifecycle = JSON.parse(readFileSync(badgeReceipt, 'utf8'))
+    assert.deepEqual(badgeLifecycle.requests.map(request => request.count), [0, 1, 0])
+    for (const request of badgeLifecycle.requests) {
+      if (request.success) assert.equal(request.nativeCount, request.count)
+    }
+    console.log(JSON.stringify({ ok: true, badgeLifecycle, questionAttention: result }))
     cdp.close()
     return
   }
