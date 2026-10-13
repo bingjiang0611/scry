@@ -342,10 +342,14 @@ async function main() {
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
     }
     await clickFile('rotom-team/docs/NATIVE-DELIVERY.md · 在右侧文件面板打开')
-    await wait(`document.querySelector('textarea[aria-label="编辑 NATIVE-DELIVERY.md"]')?.value === '# Actual sibling delivery\\n'`)
-    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="编辑 NATIVE-DELIVERY.md"]').readOnly`), true)
+    // Markdown opens as a read-only preview first (7d4b6bd); expanding the
+    // source must show the actual file bytes in a read-only textarea.
+    await wait(`document.querySelector('.workspace-preview h1')?.textContent === 'Actual sibling delivery' && document.querySelector('.workspace-editorbar')?.textContent.includes('只读预览')`)
+    await evaluate(`Array.from(document.querySelectorAll('.workspace-editorbar button')).find(button => button.textContent === '展开源码').click()`)
+    await wait(`document.querySelector('textarea[aria-label="查看 NATIVE-DELIVERY.md"]')?.value === '# Actual sibling delivery\\n'`)
+    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="查看 NATIVE-DELIVERY.md"]').readOnly`), true)
     await clickFile('../LICENSE · 打开文件')
-    await wait(`document.querySelector('textarea[aria-label="编辑 LICENSE"]')?.value === 'Actual license without an extension'`)
+    await wait(`document.querySelector('textarea[aria-label="查看 LICENSE"]')?.value === 'Actual license without an extension'`)
     await clickFile('missing.md · 在右侧文件面板打开')
     await wait(`document.body.textContent.includes('文件不存在：missing.md')`)
     console.log(JSON.stringify({ fileLinks: { siblingProject: true, actualContent: true, readOnlyOutsideWorkspace: true,
