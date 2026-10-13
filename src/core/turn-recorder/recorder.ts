@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 import { open as openFile, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
@@ -233,8 +234,15 @@ function explicitTimestampOf(payload: Record<string, unknown>): string | undefin
   return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined
 }
 
+/** Arrival time of the hook being applied; a queued hook replays with the time it actually arrived. */
+const hookArrival = new AsyncLocalStorage<string>()
+
+function observedNow(): string {
+  return hookArrival.getStore() ?? new Date().toISOString()
+}
+
 function timestampOf(payload: Record<string, unknown>): string {
-  return explicitTimestampOf(payload) ?? new Date().toISOString()
+  return explicitTimestampOf(payload) ?? observedNow()
 }
 
 function startFingerprintOf(provider: ProviderId, event: string, payload: Record<string, unknown>): string {
@@ -310,8 +318,38 @@ function usageTrace(payload: Record<string, unknown>, runId: string, at: string)
     cacheCreationTokens: number('cache_creation_input_tokens') ?? number('cacheCreationTokens'),
     reasoningTokens: number('reasoning_tokens') ?? number('reasoningTokens'),
     costUsd: number('cost_usd') ?? number('costUsd'),
+    ...contextUsageInput(payload),
     ...(payload.usage_complete === false || (!authoritative && partialUsage) ? { runtimeMetadata: { usageComplete: false } } : {}),
     isError: payload.error != null
+  }
+}
+
+/**
+ * `context_usage: { context_tokens, context_window, model, provider? }` is the integration's
+ * reading of the host's own context meter at turn end. Context occupancy only means something
+ * against a named model's window, so all three required fields must be present and valid;
+ * anything less is dropped rather than paired with a guessed window.
+ */
+function contextUsageInput(payload: Record<string, unknown>): Partial<TraceEvent> {
+  if (subagentScopedPayload(payload)) return {}
+  const context = nestedRecord(payload, 'context_usage')
+  if (!context) return {}
+  const tokens = context.context_tokens
+  const window = context.context_window
+  const model = context.model
+  const provider = context.provider
+  const identifier = (value: unknown): value is string =>
+    typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}$/.test(value)
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens < 0) return {}
+  if (typeof window !== 'number' || !Number.isFinite(window) || window <= 0) return {}
+  if (!identifier(model) || (provider !== undefined && !identifier(provider))) return {}
+  return {
+    contextTokens: tokens,
+    contextModel: model,
+    ...(provider ? { contextProvider: provider } : {}),
+    contextUsageSource: 'lifecycle_context_usage',
+    contextUsageQuality: 'exact',
+    modelUsage: [{ model, contextWindow: window, ...(provider ? { upstreamProvider: provider } : {}) }]
   }
 }
 
@@ -350,8 +388,12 @@ function inferredSkillEvents(
   }))
 }
 
+/** Recorder-owned marker set only after reading the host's own rollout metadata; never trusted from input. */
+const CODEX_SUBAGENT_MARKER = 'scry_codex_subagent_transcript'
+
 export function subagentScopedPayload(payload: Record<string, unknown>): boolean {
   return !!(
+    payload[CODEX_SUBAGENT_MARKER] === true ||
     stringAt(payload, 'agent_id', 'agentId') ||
     stringAt(payload, 'agent_type', 'agentType') ||
     stringAt(payload, 'agent_transcript_path', 'agentTranscriptPath')
@@ -966,6 +1008,12 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
   }
   let usageObserved = false
   let usageFinished = false
+  // Codex writes the model of every request into `turn_context` and the window plus the latest
+  // request's input size into `token_count`. Both are host-authored facts, so they bind the
+  // turn's usage to a model and its context occupancy without consulting any config default.
+  let turnModels = new Set<string>()
+  let contextWindow: number | undefined
+  let lastRequestInputTokens: number | undefined
   let lastAssistant: string | undefined
   let injectedSkill: string | undefined
   let logicalIdsByOuterCall = new Map<string, string[]>()
@@ -1003,13 +1051,24 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
           reasoningTokens: Math.max(0, latestTurnCumulative.reasoningTokens - turnUsageBaseline.reasoningTokens)
         }
       : usage
+    // One model per turn is the only case where usage and context can be attributed; several
+    // models stay unattributed instead of picking one.
+    const model = turnModels.size === 1 ? [...turnModels][0] : undefined
+    const context = model && contextWindow && lastRequestInputTokens != null
     current.events.push({
       id: `codex-usage-${stableHash([current.providerTurnId, finalUsage]).slice(0, 16)}`,
       ts: at,
       runId,
       kind: 'harness',
       stage: 'result',
-      ...finalUsage
+      ...finalUsage,
+      ...(model ? { modelUsage: [{ model, ...(context ? { contextWindow } : {}) }] } : {}),
+      ...(context ? {
+        contextTokens: lastRequestInputTokens,
+        contextModel: model,
+        contextUsageSource: 'codex_rollout_last_usage',
+        contextUsageQuality: 'exact' as const
+      } : {})
     })
     current.observable.usage = true
   }
@@ -1148,6 +1207,8 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
       usageObserved = false
       usageFinished = false
+      turnModels = new Set()
+      lastRequestInputTokens = undefined
       lastAssistant = undefined
       injectedSkill = undefined
       logicalIdsByOuterCall = new Map()
@@ -1157,6 +1218,12 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       continue
     }
     if (!current) continue
+
+    if (type === 'turn_context') {
+      const model = stringAt(payload, 'model')
+      if (model) turnModels.add(model)
+      continue
+    }
 
     const hook = codexHookEvent(payload, runId, at)
     if (hook) {
@@ -1241,6 +1308,11 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       const info = nestedRecord(payload, 'info') ?? {}
       const last = nestedRecord(info, 'last_token_usage')
       const total = nestedRecord(info, 'total_token_usage')
+      const window = info.model_context_window
+      if (typeof window === 'number' && Number.isFinite(window) && window > 0) contextWindow = window
+      if (last && typeof last.input_tokens === 'number' && Number.isFinite(last.input_tokens) && last.input_tokens >= 0) {
+        lastRequestInputTokens = last.input_tokens
+      }
       if (total) {
         const number = (key: string): number => typeof total[key] === 'number' && Number.isFinite(total[key]) ? total[key] as number : 0
         latestTurnCumulative = {
@@ -2233,7 +2305,7 @@ async function storeLifecycleEvent(
     schemaVersion: 1,
     id,
     event,
-    observedAt: new Date().toISOString(),
+    observedAt: observedNow(),
     traceEvents,
     ...(transcriptPathOf(payload) ? { transcriptPath: transcriptPathOf(payload) } : {})
   }
@@ -2626,6 +2698,43 @@ function isSynthetic(payload: Record<string, unknown>): boolean {
   return payload.isMeta === true || payload.synthetic === true || stringAt(payload, 'source') === 'synthetic'
 }
 
+/**
+ * Codex guardian (auto-review) subagents reuse the parent session_id and carry no agent_id,
+ * but their transcript_path is the child's own rollout, whose first `session_meta` row
+ * declares `source.subagent`. A rollout named after the session itself is the main thread
+ * and is never opened.
+ */
+async function codexSubagentTranscript(payload: Record<string, unknown>, sessionId: string): Promise<boolean> {
+  const path = transcriptPathOf(payload)
+  if (!path) return false
+  const name = basename(path)
+  if (!name.startsWith('rollout-') || !name.endsWith('.jsonl') || name.includes(sessionId)) return false
+  let handle
+  try {
+    handle = await openFile(path, 'r')
+    const chunks: Buffer[] = []
+    let total = 0
+    for (;;) {
+      const chunk = Buffer.alloc(64 * 1024)
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total)
+      if (bytesRead === 0) break
+      const slice = chunk.subarray(0, bytesRead)
+      const newline = slice.indexOf(0x0a)
+      chunks.push(newline >= 0 ? slice.subarray(0, newline) : slice)
+      total += bytesRead
+      if (newline >= 0 || total >= 4 * 1024 * 1024) break
+    }
+    const first = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+    const meta = first.type === 'session_meta' ? nestedRecord(first, 'payload') : undefined
+    const source = meta ? nestedRecord(meta, 'source') : undefined
+    return !!source && 'subagent' in source
+  } catch {
+    return false
+  } finally {
+    await handle?.close()
+  }
+}
+
 function trustedManagedIdentityPayload(
   payload: Record<string, unknown>,
   managed: boolean | undefined,
@@ -2634,6 +2743,7 @@ function trustedManagedIdentityPayload(
   const trusted = { ...payload }
   delete trusted.scry_managed_run_id
   delete trusted.scry_managed_prompt_hash
+  delete trusted[CODEX_SUBAGENT_MARKER]
   if (!managed) return trusted
   const runId = env.SCRY_MANAGED_RUN_ID?.trim()
   const promptHash = env.SCRY_MANAGED_PROMPT_HASH?.trim()
@@ -2660,6 +2770,288 @@ async function isCommittedProviderTurn(
   )
 }
 
+async function applyHookLocked(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  input: RecorderHookInput,
+  sessionId: string
+): Promise<RecorderHookResult> {
+  const taskNotification = input.provider === 'claude' &&
+    START_EVENTS.has(input.event) &&
+    isClaudeTaskNotification(input.payload)
+  const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
+  let open = await readJson<OpenTurnState>(openPath(root))
+  const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
+  if (taskNotification) {
+    if (!open) return { status: 'ignored' as const, reason: 'task notification has no real user turn' }
+    if (open.managedByScry) {
+      return { status: 'recorded' as const, reason: 'managed task continuation kept in canonical Scry turn' }
+    }
+    await rememberContinuationProviderTurn(root, open, incomingProviderTurnId)
+    await storeLifecycleEvent(enablement, open, input.event, input.payload)
+    return { status: 'recorded' as const, reason: 'task notification continued the current Claude turn' }
+  }
+  if (START_EVENTS.has(input.event) && subagentScopedPayload(input.payload)) {
+    // A sub-agent prompt is not a new user turn: superseding the open parent turn here would end
+    // it early and orphan every later parent event.
+    if (!open) return { status: 'ignored', reason: 'sub-agent prompt has no open parent turn' }
+    await storeLifecycleEvent(enablement, open, input.event, input.payload)
+    return { status: 'recorded', reason: 'sub-agent turn attributed to the open parent turn' }
+  }
+  if (START_EVENTS.has(input.event)) {
+    const providerTurnId = incomingProviderTurnId
+    const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
+    let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) && !providerTurnId
+    const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
+    const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
+    const hasManagedIdentity = !!(
+      open?.managedRunId || open?.managedPromptHash ||
+      incomingManagedRunId || incomingManagedPromptHash
+    )
+    const sameManagedIdentity = hasManagedIdentity &&
+      !!open?.managedRunId && !!open.managedPromptHash &&
+      open.managedRunId === incomingManagedRunId &&
+      open.managedPromptHash === incomingManagedPromptHash
+    const sameManagedQoderPrompt = input.provider === 'qoder' &&
+      input.managed === true &&
+      open?.managedByScry === true &&
+      !providerTurnId &&
+      !open.providerTurnId &&
+      !!open.prompt &&
+      open.prompt === promptOf(input.payload) &&
+      (hasManagedIdentity ? sameManagedIdentity : true)
+    if (
+      providerTurnId &&
+      providerTurnId !== open?.providerTurnId &&
+      await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, providerTurnId)
+    ) return { status: 'duplicate' as const }
+    if (open && (
+      open.startFingerprint === startFingerprint ||
+      (providerTurnId && open.providerTurnId === providerTurnId) ||
+      sameManagedQoderPrompt
+    )) return { status: 'duplicate' as const }
+    if (open) {
+      if (open.managedByScry && !input.managed) {
+        return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
+      }
+      if (open.managedByScry || input.managed) {
+        await quarantineOpenTurn(
+          enablement.dataRoot,
+          root,
+          open,
+          open.managedByScry ? 'managed_replaced' : 'legacy_migration'
+        )
+      } else {
+        const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
+        protectNextStart ||= fallback === 'interrupted' &&
+          STALE_TERMINAL_PROVIDERS.has(input.provider) &&
+          !open.providerTurnId &&
+          !providerTurnId
+        open.status = 'closing'
+        // The new prompt only proves this turn stopped converging. Its timestamp is this turn's
+        // successor, not its end, so it may set neither terminalAt nor completedAt.
+        open.closingAt ??= timestampOf(input.payload)
+        open.endReason ??= fallback === 'interrupted' ? 'superseded_by_next_turn' : 'provider_terminal'
+        await writeJsonAtomic(openPath(root), open, { sync: false })
+        const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+        if (finalized.status === 'pending') return finalized
+      }
+    }
+    open = await beginOpenTurn(
+      enablement,
+      input.provider,
+      sessionId,
+      input.event,
+      input.payload,
+      input.managed === true,
+      protectNextStart
+    )
+    if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
+    return { status: 'started' as const }
+  }
+  if (!open) {
+    // Repeated Stop/SessionEnd for an already committed turn is normal shutdown noise.
+    if (END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
+    if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
+    const orphanId = stableHash({ event: input.event, payload: input.payload })
+    await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: observedNow() }, { sync: false })
+    await updateHealth(enablement.dataRoot, {
+      lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
+      increment: { orphanEvents: 1 }
+    })
+    return { status: 'orphan' as const }
+  }
+  if (open.managedByScry) {
+    if (!END_EVENTS.has(input.event) && !SESSION_END_EVENTS.has(input.event)) return { status: 'recorded' as const }
+    open.status = 'closing'
+    open.closingAt = timestampOf(input.payload)
+    open.endReason ??= SESSION_END_EVENTS.has(input.event) ? 'session_end' : 'provider_terminal'
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+    return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
+  }
+  if (
+    incomingProviderTurnId &&
+    open.providerTurnId &&
+    incomingProviderTurnId !== open.providerTurnId &&
+    !isContinuationProviderTurn(open, incomingProviderTurnId)
+  ) {
+    if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
+      return { status: 'duplicate' as const }
+    }
+    // 子 agent 线程复用父会话 id，但带自己的 turn_id（Codex 实测：agent_id/agent_type 同时出现）。
+    // 这类事件属于当前打开的顶层轮，不能丢成 orphan；但它的终态只结束子 agent，不结束父轮。
+    if (subagentScopedPayload(input.payload)) {
+      await storeLifecycleEvent(enablement, open, input.event, input.payload)
+      return { status: 'recorded' as const, reason: 'sub-agent turn attributed to the open parent turn' }
+    }
+    const orphanId = stableHash({ event: input.event, payload: input.payload })
+    await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: observedNow() }, { sync: false })
+    await updateHealth(enablement.dataRoot, {
+      lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
+      increment: { orphanEvents: 1 }
+    })
+    return { status: 'orphan' as const }
+  }
+  const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
+  const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
+  if (open.deferredTerminalEventId) {
+    if (endEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+    await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
+    open.status = 'open'
+    delete open.closingAt
+    delete open.deferredTerminalAt
+    delete open.deferredTerminalEventId
+    delete open.staleTerminalProtection
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  }
+  const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
+  // Stale-terminal protection weighs one Provider terminal against a possibly newer one. A session
+  // or process end has no such competitor: deferring or discarding it would leave the turn open
+  // for the next prompt to close, which is the inflation this path exists to prevent.
+  if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
+    return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
+  }
+  if (endEvent && !sessionEndEvent && !incomingProviderTurnId && !explicitTerminalAt && open.staleTerminalProtection) {
+    const terminalAt = explicitTerminalAt ?? timestampOf(input.payload)
+    const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
+    if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS) {
+      const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
+      open.status = 'closing'
+      open.closingAt = terminalAt
+      open.terminalAt = terminalAt
+      open.terminalAtSource = 'recorder_observed_terminal'
+      open.endReason ??= 'provider_terminal'
+      open.deferredTerminalAt = new Date().toISOString()
+      open.deferredTerminalEventId = eventId
+      await writeJsonAtomic(openPath(root), open, { sync: false })
+      return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
+    }
+  }
+  await storeLifecycleEvent(enablement, open, input.event, input.payload)
+  if (!endEvent) return { status: 'recorded' as const }
+  const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
+  open.status = 'closing'
+  open.closingAt = timestampOf(input.payload)
+  open.terminalAt = terminalAt
+  open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
+  open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
+  // A session/process end is not a completion, and it fires while the Provider is shutting down
+  // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
+  // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
+  // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
+  if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
+  await writeJsonAtomic(openPath(root), open, { sync: false })
+  if (sessionEndEvent) {
+    return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }
+  }
+  if (
+    input.provider === 'claude' &&
+    input.event === 'Stop' &&
+    (open.providerTurnId || continuationProviderTurnIds(open).length > 0)
+  ) {
+    return { status: 'pending' as const, reason: 'Claude turn awaits continuations or recorder recovery' }
+  }
+  return finalizeOpenTurn(enablement, open, input.payload, 'completed', { allowUnstableTranscript: true })
+}
+
+interface QueuedHook {
+  schemaVersion: 1
+  provider: ProviderId
+  sessionId: string
+  event: string
+  payload: Record<string, unknown>
+  managed?: boolean
+  arrivedAt: string
+}
+
+function isLockTimeout(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ELOCKTIMEOUT'
+}
+
+function hookInbox(dataRoot: string, provider: ProviderId, sessionId: string): string {
+  return join(sessionRoot(dataRoot, provider, sessionId), 'inbox')
+}
+
+async function queueHook(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  input: RecorderHookInput,
+  sessionId: string
+): Promise<void> {
+  const arrivedAt = new Date().toISOString()
+  const entry: QueuedHook = {
+    schemaVersion: 1,
+    provider: input.provider,
+    sessionId,
+    event: input.event,
+    payload: input.payload,
+    ...(input.managed ? { managed: true } : {}),
+    arrivedAt
+  }
+  // Names sort by arrival; the UUID only separates hooks that arrive in the same millisecond.
+  const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${randomUUID()}.json`
+  await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
+  await appendRotatingLog(
+    join(enablement.dataRoot, 'logs', 'recorder.log'),
+    `${arrivedAt} WARN session lock busy; queued ${input.provider} ${input.event} for replay`
+  ).catch(() => undefined)
+}
+
+/**
+ * Apply queued hooks in arrival order. Caller must hold the session lock. Delivery is
+ * at-least-once: a crash between apply and unlink replays the hook, which the lifecycle
+ * event ids, start fingerprints and committed-turn checks already absorb.
+ */
+async function replayQueuedHooks(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  provider: ProviderId,
+  sessionId: string
+): Promise<number> {
+  const inbox = hookInbox(enablement.dataRoot, provider, sessionId)
+  let replayed = 0
+  for (const name of (await listFiles(inbox)).filter((file) => file.endsWith('.json')).sort()) {
+    const path = join(inbox, name)
+    const queued = await readJson<QueuedHook>(path)
+    if (queued?.schemaVersion === 1 && queued.provider === provider && queued.sessionId === sessionId) {
+      try {
+        await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
+          provider,
+          event: queued.event,
+          workspace: enablement.workspaceRoot,
+          payload: queued.payload,
+          managed: queued.managed
+        }, sessionId))
+        replayed++
+      } catch (error) {
+        // Same accounting as a live hook that fails: counted as dropped, never silently retried forever.
+        await recordError(enablement.dataRoot, error)
+      }
+    } else {
+      await recordError(enablement.dataRoot, `unreadable queued recorder hook: ${name}`)
+    }
+    await rm(path, { force: true })
+  }
+  return replayed
+}
+
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
   input = {
     ...input,
@@ -2676,195 +3068,25 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     START_EVENTS.has(input.event) &&
     isClaudeTaskNotification(input.payload)
   if (isSynthetic(input.payload) && !taskNotification) return { status: 'ignored', reason: 'synthetic/meta prompt' }
+  if (input.provider === 'codex' && await codexSubagentTranscript(input.payload, sessionId)) {
+    input = { ...input, payload: { ...input.payload, [CODEX_SUBAGENT_MARKER]: true } }
+  }
   try {
-    const result = await withRecorderSessionLock(enablement.dataRoot, input.provider, sessionId, async () => {
-      const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
-      let open = await readJson<OpenTurnState>(openPath(root))
-      const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
-      if (taskNotification) {
-        if (!open) return { status: 'ignored' as const, reason: 'task notification has no real user turn' }
-        if (open.managedByScry) {
-          return { status: 'recorded' as const, reason: 'managed task continuation kept in canonical Scry turn' }
-        }
-        await rememberContinuationProviderTurn(root, open, incomingProviderTurnId)
-        await storeLifecycleEvent(enablement, open, input.event, input.payload)
-        return { status: 'recorded' as const, reason: 'task notification continued the current Claude turn' }
-      }
-      if (START_EVENTS.has(input.event)) {
-        const providerTurnId = incomingProviderTurnId
-        const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
-        let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) && !providerTurnId
-        const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
-        const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
-        const hasManagedIdentity = !!(
-          open?.managedRunId || open?.managedPromptHash ||
-          incomingManagedRunId || incomingManagedPromptHash
-        )
-        const sameManagedIdentity = hasManagedIdentity &&
-          !!open?.managedRunId && !!open.managedPromptHash &&
-          open.managedRunId === incomingManagedRunId &&
-          open.managedPromptHash === incomingManagedPromptHash
-        const sameManagedQoderPrompt = input.provider === 'qoder' &&
-          input.managed === true &&
-          open?.managedByScry === true &&
-          !providerTurnId &&
-          !open.providerTurnId &&
-          !!open.prompt &&
-          open.prompt === promptOf(input.payload) &&
-          (hasManagedIdentity ? sameManagedIdentity : true)
-        if (
-          providerTurnId &&
-          providerTurnId !== open?.providerTurnId &&
-          await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, providerTurnId)
-        ) return { status: 'duplicate' as const }
-        if (open && (
-          open.startFingerprint === startFingerprint ||
-          (providerTurnId && open.providerTurnId === providerTurnId) ||
-          sameManagedQoderPrompt
-        )) return { status: 'duplicate' as const }
-        if (open) {
-          if (open.managedByScry && !input.managed) {
-            return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
-          }
-          if (open.managedByScry || input.managed) {
-            await quarantineOpenTurn(
-              enablement.dataRoot,
-              root,
-              open,
-              open.managedByScry ? 'managed_replaced' : 'legacy_migration'
-            )
-          } else {
-            const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
-            protectNextStart ||= fallback === 'interrupted' &&
-              STALE_TERMINAL_PROVIDERS.has(input.provider) &&
-              !open.providerTurnId &&
-              !providerTurnId
-            open.status = 'closing'
-            // The new prompt only proves this turn stopped converging. Its timestamp is this turn's
-            // successor, not its end, so it may set neither terminalAt nor completedAt.
-            open.closingAt ??= timestampOf(input.payload)
-            open.endReason ??= fallback === 'interrupted' ? 'superseded_by_next_turn' : 'provider_terminal'
-            await writeJsonAtomic(openPath(root), open, { sync: false })
-            const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
-            if (finalized.status === 'pending') return finalized
-          }
-        }
-        open = await beginOpenTurn(
-          enablement,
-          input.provider,
-          sessionId,
-          input.event,
-          input.payload,
-          input.managed === true,
-          protectNextStart
-        )
-        if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
-        return { status: 'started' as const }
-      }
-      if (!open) {
-        // Repeated Stop/SessionEnd for an already committed turn is normal shutdown noise.
-        if (END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
-        if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
-        const orphanId = stableHash({ event: input.event, payload: input.payload })
-        await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
-        await updateHealth(enablement.dataRoot, {
-          lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
-          increment: { orphanEvents: 1 }
-        })
-        return { status: 'orphan' as const }
-      }
-      if (open.managedByScry) {
-        if (!END_EVENTS.has(input.event) && !SESSION_END_EVENTS.has(input.event)) return { status: 'recorded' as const }
-        open.status = 'closing'
-        open.closingAt = timestampOf(input.payload)
-        open.endReason ??= SESSION_END_EVENTS.has(input.event) ? 'session_end' : 'provider_terminal'
-        await writeJsonAtomic(openPath(root), open, { sync: false })
-        return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
-      }
-      if (
-        incomingProviderTurnId &&
-        open.providerTurnId &&
-        incomingProviderTurnId !== open.providerTurnId &&
-        !isContinuationProviderTurn(open, incomingProviderTurnId)
-      ) {
-        if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
-          return { status: 'duplicate' as const }
-        }
-        // 子 agent 线程复用父会话 id，但带自己的 turn_id（Codex 实测：agent_id/agent_type 同时出现）。
-        // 这类事件属于当前打开的顶层轮，不能丢成 orphan；但它的终态只结束子 agent，不结束父轮。
-        if (subagentScopedPayload(input.payload)) {
-          await storeLifecycleEvent(enablement, open, input.event, input.payload)
-          return { status: 'recorded' as const, reason: 'sub-agent turn attributed to the open parent turn' }
-        }
-        const orphanId = stableHash({ event: input.event, payload: input.payload })
-        await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: new Date().toISOString() }, { sync: false })
-        await updateHealth(enablement.dataRoot, {
-          lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
-          increment: { orphanEvents: 1 }
-        })
-        return { status: 'orphan' as const }
-      }
-      const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
-      const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
-      if (open.deferredTerminalEventId) {
-        if (endEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
-        await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
-        open.status = 'open'
-        delete open.closingAt
-        delete open.deferredTerminalAt
-        delete open.deferredTerminalEventId
-        delete open.staleTerminalProtection
-        await writeJsonAtomic(openPath(root), open, { sync: false })
-      }
-      const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
-      // Stale-terminal protection weighs one Provider terminal against a possibly newer one. A session
-      // or process end has no such competitor: deferring or discarding it would leave the turn open
-      // for the next prompt to close, which is the inflation this path exists to prevent.
-      if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
-        return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
-      }
-      if (endEvent && !sessionEndEvent && !incomingProviderTurnId && !explicitTerminalAt && open.staleTerminalProtection) {
-        const terminalAt = explicitTerminalAt ?? timestampOf(input.payload)
-        const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
-        if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS) {
-          const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
-          open.status = 'closing'
-          open.closingAt = terminalAt
-          open.terminalAt = terminalAt
-          open.terminalAtSource = 'recorder_observed_terminal'
-          open.endReason ??= 'provider_terminal'
-          open.deferredTerminalAt = new Date().toISOString()
-          open.deferredTerminalEventId = eventId
-          await writeJsonAtomic(openPath(root), open, { sync: false })
-          return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
-        }
-      }
-      await storeLifecycleEvent(enablement, open, input.event, input.payload)
-      if (!endEvent) return { status: 'recorded' as const }
-      const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
-      open.status = 'closing'
-      open.closingAt = timestampOf(input.payload)
-      open.terminalAt = terminalAt
-      open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
-      open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
-      // A session/process end is not a completion, and it fires while the Provider is shutting down
-      // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
-      // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
-      // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
-      if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
-      await writeJsonAtomic(openPath(root), open, { sync: false })
-      if (sessionEndEvent) {
-        return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }
-      }
-      if (
-        input.provider === 'claude' &&
-        input.event === 'Stop' &&
-        (open.providerTurnId || continuationProviderTurnIds(open).length > 0)
-      ) {
-        return { status: 'pending' as const, reason: 'Claude turn awaits continuations or recorder recovery' }
-      }
-      return finalizeOpenTurn(enablement, open, input.payload, 'completed', { allowUnstableTranscript: true })
-    }, { waitMs: SESSION_LOCK_WAIT_MS })
+    let entered = false
+    let result: RecorderHookResult
+    try {
+      result = await withRecorderSessionLock(enablement.dataRoot, input.provider, sessionId, async () => {
+        entered = true
+        await replayQueuedHooks(enablement, input.provider, sessionId)
+        return applyHookLocked(enablement, input, sessionId)
+      }, { waitMs: SESSION_LOCK_WAIT_MS })
+    } catch (error) {
+      if (entered || !isLockTimeout(error)) throw error
+      // The session is busy (a long finalize, recovery or a stuck peer). The event was never applied,
+      // so queue it durably instead of dropping it; the next lock holder replays it in arrival order.
+      await queueHook(enablement, input, sessionId)
+      return { status: 'pending', reason: 'session busy; event queued for replay' }
+    }
     try {
       const pending = START_EVENTS.has(input.event) || END_EVENTS.has(input.event)
         ? await pendingHealth(enablement.dataRoot)
@@ -2958,6 +3180,21 @@ export async function recoverRecorder(
   let expired = 0
   let managedPresent = false
   for (const item of await runtimeSessions(enablement.dataRoot)) {
+    // Hooks queued behind a busy lock must land before this pass judges the open turn.
+    const queuedNames = (await listFiles(join(item.sessionDir, 'inbox'))).filter((name) => name.endsWith('.json')).sort()
+    const queuedSessionId = queuedNames.length > 0
+      ? (await readJson<QueuedHook>(join(item.sessionDir, 'inbox', queuedNames[0])))?.sessionId
+      : undefined
+    if (queuedSessionId) {
+      try {
+        await withRecorderSessionLock(enablement.dataRoot, item.provider, queuedSessionId,
+          () => replayQueuedHooks(enablement, item.provider, queuedSessionId), { waitMs: SESSION_LOCK_WAIT_MS })
+      } catch (error) {
+        if (!isLockTimeout(error)) throw error
+        pending++
+        continue
+      }
+    }
     const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
     if (!initial) continue
     // Expiry can degrade evidence only after a real terminal boundary, never create that boundary.
