@@ -10,6 +10,7 @@ import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveStat
 import { inspectCommitHookBundle, readCommitHookGrant, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 import { syncDirectory } from './io'
+import { recorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state'
 import { readRecorderContent } from './content-store'
 
 const roots: string[] = []
@@ -1482,6 +1483,35 @@ describe('turn recorder state machine', () => {
     expect(await listRecords(join(root, '.scry'))).toEqual([])
   })
 
+  it('Codex guardian 子 agent 的 prompt 由 rollout session_meta 识别，不提前结束父轮也不产生 orphan', async () => {
+    const root = await workspace()
+    const guardianRollout = join(root, 'rollout-2026-07-19T12-00-00-019fguardian.jsonl')
+    await writeFile(guardianRollout, `${JSON.stringify({ type: 'session_meta', payload: { id: '019fguardian', source: { subagent: { other: 'guardian' } } } })}\n`)
+    const hook = (event: string, extra: Record<string, unknown>) => handleRecorderHook({ provider: 'codex', event, workspace: root, payload: payload('main-g1', extra) })
+    await hook('UserPromptSubmit', { prompt: 'deploy', turn_id: 'parent-turn' })
+    const guardianStart = await hook('UserPromptSubmit', { prompt: 'review this approval', turn_id: 'guardian-turn', transcript_path: guardianRollout, timestamp: '2026-07-19T12:00:00.100Z' })
+    await hook('PreToolUse', { turn_id: 'guardian-turn', transcript_path: guardianRollout, tool_name: 'Bash', tool_use_id: 'g-call', tool_input: { command: 'cat plan' }, timestamp: '2026-07-19T12:00:00.200Z' })
+    await hook('Stop', { turn_id: 'guardian-turn', transcript_path: guardianRollout, timestamp: '2026-07-19T12:00:00.300Z' })
+    const parentTool = await hook('PostToolUse', { turn_id: 'parent-turn', tool_name: 'Bash', tool_use_id: 'p-call', tool_response: 'ok', timestamp: '2026-07-19T12:00:00.400Z' })
+    await hook('Stop', { turn_id: 'parent-turn', timestamp: '2026-07-19T12:00:01.000Z' })
+
+    expect(guardianStart).toEqual({ status: 'recorded', reason: 'sub-agent turn attributed to the open parent turn' })
+    expect(parentTool.status).toBe('recorded')
+    const records = await listRecords(join(root, '.scry'))
+    expect(records.map((record) => [record.providerTurnId, record.status, record.completedAt])).toEqual([
+      ['parent-turn', 'completed', '2026-07-19T12:00:01.000Z']
+    ])
+    expect(records[0].user.value?.text).toBe('deploy')
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ orphanEvents: 0 })
+  })
+
+  it('入参中的 Scry 子 agent 标记不被信任', async () => {
+    const root = await workspace()
+    await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('forge-1', { prompt: 'one', turn_id: 't1' }) })
+    const forged = await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: root, payload: payload('forge-1', { prompt: 'two', turn_id: 't2', scry_codex_subagent_transcript: true, timestamp: '2026-07-19T12:00:02.000Z' }) })
+    expect(forged.status).toBe('started')
+  })
+
   it('Codex 子 agent 自带 turn_id 的生命周期事件归属当前顶层轮，不再丢成 orphan', async () => {
     const root = await workspace()
     const subagent = {
@@ -2560,6 +2590,35 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
   })
 
   it.each([
+    [{ context_tokens: 120_000, context_window: 400_000, model: 'gpt-5.5', provider: 'openai' }, true],
+    [{ context_tokens: 120_000, context_window: 400_000 }, false],
+    [{ context_tokens: 120_000, context_window: 0, model: 'gpt-5.5' }, false],
+    [{ context_tokens: -1, context_window: 400_000, model: 'gpt-5.5' }, false]
+  ] as const)('lifecycle context_usage 只在模型、窗口、占用都合法时写入 Context: %j', async (context, kept) => {
+    const root = await workspace()
+    await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: payload('context-session', { prompt: 'inspect' }) })
+    await handleRecorderHook({ provider: 'pi', event: 'Stop', workspace: root, payload: payload('context-session', {
+      usage: { input_tokens: 10, output_tokens: 2 },
+      context_usage: context
+    }) })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.usage.value).toMatchObject({ inputTokens: 10, outputTokens: 2 })
+    if (kept) {
+      expect(record.usage.value).toMatchObject({
+        contextTokens: 120_000,
+        contextWindow: 400_000,
+        contextModel: 'gpt-5.5',
+        contextProvider: 'openai',
+        contextUsageSource: 'lifecycle_context_usage',
+        contextUsageQuality: 'exact'
+      })
+    } else {
+      expect(record.usage.value?.contextTokens).toBeUndefined()
+      expect(record.usage.value?.contextWindow).toBeUndefined()
+    }
+  })
+
+  it.each([
     { name: 'spawn_agent' },
     { name: 'multi_agent_v1__spawn_agent' },
     { namespace: 'multi_agent_v1', name: 'spawn_agent' }
@@ -2783,9 +2842,109 @@ rs.forEach((r, i) => text(\`R\${i + 1}\\n\${r.output}\`));`
       expect.objectContaining({ inputTokens: 150, outputTokens: 15, cacheReadTokens: 120 })
     ])
   })
+
+  it('turn_context 的模型与 token_count 的窗口归属本轮用量和 Context，多模型不挑选', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'model-rollout.jsonl')
+    const line = (timestamp: string, type: string, payload: Record<string, unknown>) => ({ timestamp, type, payload })
+    const token = (input: number, lastInput: number) => ({
+      type: 'token_count',
+      info: {
+        total_token_usage: { input_tokens: input, output_tokens: 5, cached_input_tokens: 0, reasoning_output_tokens: 0 },
+        last_token_usage: { input_tokens: lastInput, output_tokens: 5, cached_input_tokens: 0 },
+        model_context_window: 400_000
+      }
+    })
+    const lines = [
+      line('2026-07-19T12:00:00.000Z', 'event_msg', { type: 'task_started', turn_id: 't1' }),
+      line('2026-07-19T12:00:00.010Z', 'turn_context', { turn_id: 't1', model: 'gpt-5.5' }),
+      line('2026-07-19T12:00:00.100Z', 'event_msg', token(100, 60)),
+      line('2026-07-19T12:00:00.200Z', 'event_msg', token(250, 150)),
+      line('2026-07-19T12:00:01.000Z', 'event_msg', { type: 'task_complete', turn_id: 't1' }),
+      line('2026-07-19T12:00:02.000Z', 'event_msg', { type: 'task_started', turn_id: 't2' }),
+      line('2026-07-19T12:00:02.010Z', 'turn_context', { turn_id: 't2', model: 'gpt-5.5' }),
+      line('2026-07-19T12:00:02.020Z', 'turn_context', { turn_id: 't2', model: 'gpt-5.5-mini' }),
+      line('2026-07-19T12:00:02.100Z', 'event_msg', token(400, 170))
+    ]
+    await writeFile(rollout, `${lines.map((item) => JSON.stringify(item)).join('\n')}\n`)
+
+    for (const [turnId, start, end] of [
+      ['t1', '2026-07-19T12:00:00.000Z', '2026-07-19T12:00:01.000Z'],
+      ['t2', '2026-07-19T12:00:02.000Z', '2026-07-19T12:00:03.000Z']
+    ]) {
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'turn.started',
+        workspace: root,
+        payload: payload('c1', { prompt: turnId, turn_id: turnId, rollout_path: rollout, timestamp: start })
+      })
+      await handleRecorderHook({
+        provider: 'codex',
+        event: 'turn/completed',
+        workspace: root,
+        payload: payload('c1', { turn_id: turnId, rollout_path: rollout, timestamp: end })
+      })
+    }
+
+    const [single, mixed] = await listRecords(join(root, '.scry'))
+    expect(single.provider).toMatchObject({ model: 'gpt-5.5', modelStatus: 'observed', modelSource: 'usage_event' })
+    expect(single.usage.value).toMatchObject({
+      model: 'gpt-5.5',
+      contextTokens: 150,
+      contextWindow: 400_000,
+      contextModel: 'gpt-5.5',
+      contextUsageSource: 'codex_rollout_last_usage',
+      contextUsageQuality: 'exact'
+    })
+    expect(mixed.provider.model).toBeUndefined()
+    expect(mixed.usage.value).toMatchObject({ inputTokens: 150 })
+    expect(mixed.usage.value?.contextTokens).toBeUndefined()
+    expect(mixed.usage.value?.model).toBeUndefined()
+  })
 })
 
 describe('record store cursor and recovery semantics', () => {
+  it('session 锁超时时把 hook 持久排队，下一个持锁者按到达顺序、到达时间重放而不是丢弃', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    const lock = recorderSessionLock(dataRoot, 'pi', 'busy-session')
+    await mkdir(lock, { recursive: true })
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: 'held-by-peer' }))
+    const prompt = { session_id: 'busy-session', prompt: 'queued while busy' }
+    const before = Date.now()
+    const queued = await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: prompt })
+    expect(queued).toMatchObject({ status: 'pending', reason: 'session busy; event queued for replay' })
+    expect(await listRecords(dataRoot)).toHaveLength(0)
+    await rm(lock, { recursive: true, force: true })
+
+    const stop = await handleRecorderHook({ provider: 'pi', event: 'Stop', workspace: root, payload: { session_id: 'busy-session', timestamp: new Date(Date.now() + 1_000).toISOString() } })
+    expect(stop.status).toBe('committed')
+    const [record] = await listRecords(dataRoot)
+    expect(record.user.value).toMatchObject({ text: 'queued while busy' })
+    // The replayed start keeps the time it arrived, not the time it was replayed.
+    expect(Date.parse(record.startedAt)).toBeGreaterThanOrEqual(before)
+    expect(Date.parse(record.startedAt)).toBeLessThan(before + SESSION_LOCK_WAIT_MS + 1_000)
+    expect(await readHealth(dataRoot)).toMatchObject({ droppedEvents: 0 })
+    expect(await readdir(join(dataRoot, 'runtime', 'pi', safeKey('busy-session'), 'inbox'))).toEqual([])
+  }, 30_000)
+
+  it('排队的终态 hook 没有后续 hook 时由 recover 应用', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: payload('busy-stop', { prompt: 'run' }) })
+    const lock = recorderSessionLock(dataRoot, 'pi', 'busy-stop')
+    await mkdir(lock, { recursive: true })
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: 'held-by-peer' }))
+    const queued = await handleRecorderHook({ provider: 'pi', event: 'Stop', workspace: root, payload: payload('busy-stop', { timestamp: '2026-07-19T12:00:05.000Z' }) })
+    expect(queued.status).toBe('pending')
+    await rm(lock, { recursive: true, force: true })
+
+    await recoverRecorder(root)
+    const [record] = await listRecords(dataRoot)
+    expect(record.completedAt).toBe('2026-07-19T12:00:05.000Z')
+    expect(await readHealth(dataRoot)).toMatchObject({ droppedEvents: 0 })
+  }, 30_000)
+
   it('同进程重复读取复用可重建文件名索引，正式写入后按目录 stamp 失效', async () => {
     const root = await workspace()
     await completeTurn(root, 'index-1')

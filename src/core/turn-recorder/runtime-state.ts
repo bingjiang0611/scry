@@ -171,6 +171,8 @@ export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true
       }
+      // A hook queued behind a busy session lock still needs a recovery pass to be applied.
+      if ((await listFiles(join(providerRoot, session, 'inbox'))).some((name) => name.endsWith('.json'))) return true
     }
   }
   return false

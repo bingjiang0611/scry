@@ -270,7 +270,11 @@ export async function withDirectoryLock<T>(
         await recoverStaleLock(lockDir, stale)
         continue
       }
-      if (Date.now() >= deadline) throw new Error(`lock timeout: ${lockDir}`)
+      if (Date.now() >= deadline) {
+        const timeout = new Error(`lock timeout: ${lockDir}`) as NodeJS.ErrnoException
+        timeout.code = 'ELOCKTIMEOUT'
+        throw timeout
+      }
       await delay(20)
     }
   }
