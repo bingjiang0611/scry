@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   deleteTraceTurnProgressArtifacts,
   persistTraceTurnProgress,
+  persistTraceTurnCheckpoint,
   persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
   traceProgressSessionRunIds
@@ -24,6 +25,38 @@ afterEach(() => {
 })
 
 describe('trace turn progress', () => {
+  it('recovers the latest running checkpoint after restart, but never recovers a live owner', async () => {
+    const args = { userDataDir: root(), cwd: '/repo', sessionId: 'phone-session',
+      providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const }
+    const turn = { runId: 'phone-run', userText: 'sent on iOS', items: [], done: false, ts: 1 }
+    await persistTraceTurnCheckpoint({ ...args, turn })
+    const event = { id: 'e1', runId: turn.runId, ts: '2026-10-13T00:00:00Z', kind: 'model' as const, stage: 'text', text: 'work already done' }
+    await persistTraceTurnCheckpoint({ ...args, turn: { ...turn, items: [event] } })
+    await expect(persistTraceTurnCheckpoint({ ...args, sessionId: 'wrong', turn })).rejects.toThrow('collision')
+    await expect(recoverTraceTurnProgress(args.userDataDir, { isLiveManagedRun: () => true }))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+    expect(readTraceArchive(args)).toBeNull()
+    await expect(recoverTraceTurnProgress(args.userDataDir))
+      .resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
+    const restored = readTraceArchive(args)!.turns[0]
+    expect(restored).toMatchObject({ ...turn, done: true, status: 'interrupted', items: [event] })
+    expect(restored.error).toContain('可能不完整')
+    await expect(recoverTraceTurnProgress(args.userDataDir))
+      .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
+  })
+
+  it('replaces running evidence with terminal progress and rejects later stale checkpoints', async () => {
+    const args = { userDataDir: root(), cwd: '/repo', sessionId: 'phone-session',
+      providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const }
+    const turn = { runId: 'phone-run', userText: 'sent on iOS', items: [], done: false, ts: 1 }
+    await persistTraceTurnCheckpoint({ ...args, turn })
+    await persistTraceTurnProgress({ ...args, turn: { ...turn, done: true, status: 'completed' } })
+    await expect(persistTraceTurnCheckpoint({ ...args, turn })).rejects.toThrow('collision')
+    await expect(persistTraceTurnProgress({ ...args, turn: { ...turn, done: true, status: 'failed' } })).rejects.toThrow('collision')
+    await recoverTraceTurnProgress(args.userDataDir)
+    expect(readTraceArchive(args)!.turns).toEqual([expect.objectContaining({ runId: turn.runId, status: 'completed' })])
+  })
+
   it('recovers a non-managed terminal turn after a crash before final archive', async () => {
     const userDataDir = root()
     await persistTraceTurnProgress({

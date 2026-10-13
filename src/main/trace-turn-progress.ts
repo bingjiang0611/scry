@@ -14,6 +14,8 @@ import {
 
 interface TraceTurnProgress {
   schemaVersion: 1
+  // Only a running checkpoint may be superseded. Terminal progress is immutable.
+  state?: 'running'
   persistedAt: string
   request: {
     cwd: string
@@ -66,7 +68,9 @@ function validProgress(value: TraceTurnProgress | null): value is TraceTurnProgr
       turn && typeof turn.runId === 'string' && turn.runId.length > 0 &&
       typeof turn.userText === 'string' && Array.isArray(turn.items) &&
       turn.items.every((item) => item && typeof item === 'object' && typeof item.kind === 'string' && typeof item.stage === 'string') &&
-      turn.done === true && typeof turn.status === 'string' && TERMINAL_STATUSES.has(turn.status) &&
+      (value.state === 'running'
+        ? turn.done === false && turn.status === undefined
+        : value.state === undefined && turn.done === true && typeof turn.status === 'string' && TERMINAL_STATUSES.has(turn.status)) &&
       typeof turn.ts === 'number' && Number.isFinite(turn.ts)
     )
 }
@@ -155,24 +159,44 @@ function atomicTempPaths(path: string): string[] {
   return names.filter((name) => pattern.test(name)).map((name) => join(dir, name))
 }
 
-export async function persistTraceTurnProgress(args: {
-  userDataDir: string
-  cwd: string
-  sessionId: string
-  providerId: ProviderId
-  runtimeProvider: RuntimeProvider
-  turn: TraceArchiveTurn
-}): Promise<void> {
+type TraceProgressRequest = TraceTurnProgress['request'] & { userDataDir: string }
+
+function sameProgressRun(a: TraceTurnProgress['request'], b: TraceTurnProgress['request']): boolean {
+  return a.cwd === b.cwd && a.sessionId === b.sessionId && a.providerId === b.providerId &&
+    a.runtimeProvider === b.runtimeProvider && a.turn.runId === b.turn.runId
+}
+
+// The caller serializes checkpoints and awaits the last write before terminal
+// persistence, so a delayed running snapshot cannot overwrite a settled turn.
+export async function persistTraceTurnCheckpoint(args: TraceProgressRequest): Promise<void> {
+  const path = progressPath(args.userDataDir, args.turn.runId)
+  const existing = await readJson<TraceTurnProgress>(path)
+  if (existing && (!validProgress(existing) || existing.state !== 'running' || !sameProgressRun(existing.request, args))) {
+    throw new Error(`trace turn checkpoint collision for ${args.turn.runId}`)
+  }
+  const { userDataDir: _userDataDir, ...request } = args
+  const { status: _status, error: _error, completedAt: _completedAt, durationMs: _durationMs, ...turn } = request.turn
+  const policy = existing?.request.turn.toolContentPolicy
+  const next: TraceTurnProgress = {
+    schemaVersion: 1, state: 'running', persistedAt: new Date().toISOString(),
+    request: { ...request, turn: protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}), done: false }, args.cwd) }
+  }
+  await writeJsonAtomic(path, next)
+}
+
+export async function persistTraceTurnProgress(args: TraceProgressRequest): Promise<void> {
   const path = progressPath(args.userDataDir, args.turn.runId)
   const existing = await readJson<TraceTurnProgress>(path)
   const policy = existing?.request.turn.toolContentPolicy
   args = { ...args, turn: protectToolContent({ ...args.turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd) }
   const { userDataDir: _userDataDir, ...request } = args
   if (existing) {
-    if (!validProgress(existing) || stableHash(existing.request) !== stableHash(request)) {
+    if (!validProgress(existing) || (existing.state === 'running'
+      ? !sameProgressRun(existing.request, request)
+      : stableHash(existing.request) !== stableHash(request))) {
       throw new Error(`trace turn progress collision for ${args.turn.runId}`)
     }
-    return
+    if (existing.state !== 'running') return
   }
   await writeJsonAtomic(path, {
     schemaVersion: 1,
@@ -258,6 +282,12 @@ export async function recoverTraceTurnProgress(
     if (filter.sessionId && request.sessionId !== filter.sessionId) continue
     if (filter.providerId && request.providerId !== filter.providerId) continue
     if (filter.isLiveManagedRun?.(request.turn.runId)) continue
+    if (progress.state === 'running') {
+      // A live owner is excluded above. Only restart recovery converts this
+      // partial snapshot to interrupted; never invent a completed Provider turn.
+      request.turn = { ...request.turn, done: true, status: 'interrupted',
+        error: '主机退出前未记录运行终态；已恢复最后保存的内容，可能不完整。' }
+    }
     const existing = findTraceArchiveTurnMatches({
       cwd: request.cwd,
       sessionId: request.sessionId,

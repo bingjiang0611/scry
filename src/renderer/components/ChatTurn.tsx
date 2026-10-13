@@ -1766,6 +1766,8 @@ function AssistantTurnImpl({
           {turn.errorHint && <div className="errhint">→ {turn.errorHint}</div>}
         </div>
       )}
+      {/* History/attachment evidence can be partial without a Provider failure. */}
+      {!turn.error && turn.errorHint && <div className="errhint" role="note">{turn.errorHint}</div>}
       {backgroundWork && <BackgroundWorkPanel key={turn.runId} runId={turn.runId} work={backgroundWork} />}
       {!terminal && (
         <div className="skeleton" aria-label="运行中">

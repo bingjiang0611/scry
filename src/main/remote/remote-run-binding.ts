@@ -29,6 +29,19 @@ import { traceEventToOutputChunk } from './trace-output'
 //     rejects (dispatcher -> markFailed), every other terminal resolves
 //     (dispatcher -> markSettled). Nothing is fabricated as success.
 
+export interface RemoteRunTrace {
+  providerId: string
+  cwd: string
+  prompt: string
+  scryRunId: string
+  externalSessionId: string
+  providerTurnId?: string
+  forkTurnId?: string
+  agentProfileId?: string
+  attachments: AgentInputAttachment[]
+  items: TraceEvent[]
+}
+
 export interface RemoteRunBindingDependencies {
   // The real provider run entry. index.ts passes providerRegistry.run bound to
   // the registry; tests pass a fake to assert the wiring without spawning a CLI.
@@ -53,7 +66,10 @@ export interface RemoteRunBindingDependencies {
   // the Provider's real streamed events.
   // Awaited before the observer settles and before the ledger settles, so a
   // reader that sees the run end can already read its archive.
-  onRunArchive?(info: { providerId: string; cwd: string; prompt: string; scryRunId: string; externalSessionId: string; agentProfileId?: string; attachments: AgentInputAttachment[]; items: TraceEvent[]; status: 'completed' | 'failed' | 'cancelled' | 'interrupted' }): void | Promise<void>
+  onRunArchive?(info: RemoteRunTrace & { status: 'completed' | 'failed' | 'cancelled' | 'interrupted'; error?: string }): void | Promise<void>
+  // Coalesced running evidence for crash recovery, not a fabricated terminal.
+  // At most one write in flight; final archiving waits for it before replacing it.
+  onRunCheckpoint?(info: RemoteRunTrace): Promise<void>
   // Mac-side live observation of this run (index.ts registers it in the same
   // RunRegistry as local runs). Opened before the Provider starts so no event
   // is missed; settled exactly once after the archive write, on every path.
@@ -131,17 +147,61 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       providerId: routing.providerId, cwd: routing.cwd, prompt, ledgerRunId, scryRunId, agentProfileId: routing.agentProfileId,
       ...(resume ? { resume } : {}), attachments
     })
+    const items: TraceEvent[] = []
+    let providerHandle: ProviderRunHandle | undefined
+    let providerTurnId: string | undefined
+    let forkTurnId: string | undefined
+    let status: 'completed' | 'failed' | 'cancelled' | 'interrupted' = 'failed'
+    let checkpointTimer: ReturnType<typeof setTimeout> | undefined
+    let checkpointWrite: Promise<void> | undefined
+    let checkpointDirty = false
+    let finishing = false
+    const trace = (): RemoteRunTrace => ({
+      providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId,
+      externalSessionId: capturedExternalSessionId!, agentProfileId: routing.agentProfileId,
+      providerTurnId: providerTurnId ?? providerHandle?.getProviderTurnId?.(),
+      forkTurnId: forkTurnId ?? providerHandle?.getForkTurnId?.(),
+      attachments, items
+    })
+    const scheduleCheckpoint = (): void => {
+      if (!deps.onRunCheckpoint || !capturedExternalSessionId || finishing) return
+      checkpointDirty = true
+      if (checkpointTimer || checkpointWrite) return
+      // A hard crash may lose at most the unflushed interval plus an in-flight
+      // disk write. Recovery labels the retained snapshot incomplete/interrupted.
+      checkpointTimer = setTimeout(() => {
+        checkpointTimer = undefined
+        checkpointDirty = false
+        checkpointWrite = deps.onRunCheckpoint!(structuredClone(trace()))
+          .catch(() => { progress(marker({ event: 'history_capture_failed' })) })
+          .finally(() => {
+            checkpointWrite = undefined
+            if (checkpointDirty) scheduleCheckpoint()
+          })
+      }, 1000)
+      checkpointTimer.unref()
+    }
+    scheduleCheckpoint()
     try {
       await runObserved()
+    } catch (error) {
+      lastErrorText ??= error instanceof Error ? error.message : String(error)
+      throw error
     } finally {
+      finishing = true
+      clearTimeout(checkpointTimer)
+      await checkpointWrite
+      observer?.done({ status, ...(lastErrorText ? { errorText: lastErrorText } : {}) })
+      // A rejected Provider promise is still a real run. Previously it skipped
+      // archiving entirely, leaving a clickable catalog row with no transcript.
+      if (capturedExternalSessionId) {
+        try { await deps.onRunArchive?.({ ...trace(), status, ...(lastErrorText ? { error: lastErrorText } : {}) }) }
+        catch { progress(marker({ event: 'history_capture_failed' })) }
+      }
       observer?.settled()
     }
+    progress(marker({ event: 'settled', status }))
     async function runObserved(): Promise<void> {
-      // Every REAL trace event, accumulated so the run can be written to the Scry
-      // trace archive (same evidence a local run produces), making it openable on
-      // the Mac. Separate from the `output` forwarding above (which production
-      // persists as cursor pages); this is also retained in the local trace archive.
-      const items: TraceEvent[] = []
       // Whether the Provider streamed any assistant TEXT during the run. Some
       // Providers (e.g. qoder for a short turn) deliver the final answer only on
       // the terminal result event; without this we would drop the answer entirely
@@ -152,6 +212,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       const record = (ev: TraceEvent): void => {
         items.push(ev)
         observer?.event(ev)
+        scheduleCheckpoint()
       }
       const emit = (ev: TraceEvent): void => {
         record(ev)
@@ -205,6 +266,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         emit,
         onExternalSessionId: (externalSessionId) => {
           capturedExternalSessionId = externalSessionId
+          scheduleCheckpoint()
           observer?.session(externalSessionId)
           progress(marker({ event: 'session', externalSessionId }))
           // Bind the Provider's REAL session id into the Mac catalog so the owner
@@ -257,26 +319,19 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         input: { model: request.model, effort: request.effort, permissionMode: request.permissionMode }
       })
       const handle = deps.run(routing.providerId, request)
+      providerHandle = handle
       observer?.attach(handle)
       const interrupt = (): void => { handle.interrupt() }
       if (stopSignal?.aborted) interrupt()
       else stopSignal?.addEventListener('abort', interrupt, { once: true })
       const result = await handle.promise.finally(() => stopSignal?.removeEventListener('abort', interrupt))
-      const status = result.status ?? 'completed'
-      observer?.done({ status, ...(lastErrorText ? { errorText: lastErrorText } : {}) })
-      // Write the durable trace archive from the REAL events so the Mac can open
-      // the transcript. Only when the Provider gave us its session id (the archive
-      // is keyed by it); a run that died before a session has nothing to key or
-      // resume. Best-effort - never let a catalog/archive write mask the run result.
-      if (capturedExternalSessionId) {
-        try { await deps.onRunArchive?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId: capturedExternalSessionId, agentProfileId: routing.agentProfileId, attachments, items, status }) } catch { /* archive is best-effort */ }
-      }
+      status = result.status ?? 'completed'
+      providerTurnId = result.providerTurnId
+      forkTurnId = result.forkTurnId
       if (result.status === 'failed') {
         throw new Error(lastErrorText ? `provider_run_failed: ${lastErrorText}` : 'provider_run_failed')
       }
-      // completed / interrupted / cancelled / stopped are all non-error terminals:
-      // resolve so the dispatcher records an honest settlement (not a failure).
-      progress(marker({ event: 'settled', status }))
+      // The outer finally persists evidence before the ledger can settle.
     }
   }
 }

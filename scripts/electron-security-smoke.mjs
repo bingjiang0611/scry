@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -8,11 +9,12 @@ import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
+const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
 const devQuestionOnly = process.argv[2] === '--dev-question-only'
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = nativeHistoryOnly || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -106,6 +108,26 @@ async function main() {
     preview: 'security smoke',
     ts: Date.now()
   }]))
+  const nativeSessionId = '01a1338c-3d8b-775b-8645-fd964faa29a3'
+  if (nativeHistoryOnly) {
+    // Reproduce a phone-created catalog row after host restart: no Scry archive,
+    // but the Provider's real-format JSONL survives. No Provider is ever launched.
+    const nativeDir = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
+    mkdirSync(nativeDir, { recursive: true })
+    const entry = (id, parentId, role, text) => ({ type: 'message', id, parentId,
+      timestamp: '2026-10-13T04:36:31Z', message: { role, content: [{ type: 'text', text }] } })
+    writeFileSync(join(nativeDir, `2026-10-13_${nativeSessionId}.jsonl`), [
+      { type: 'session', version: 3, id: nativeSessionId, cwd: canonicalWorkspace },
+      entry('u', null, 'user', '手机发起的真实格式消息'),
+      entry('old', 'u', 'assistant', 'abandoned branch must not appear'),
+      entry('a', 'u', 'assistant', '主机重启前已有的原生回复')
+    ].map((value) => JSON.stringify(value)).join('\n'))
+    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
+      sessionId: nativeSessionId, externalSessionId: nativeSessionId, runId: 'remote-run-fixture-1',
+      providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace,
+      preview: '手机会话恢复测试', ts: Date.now()
+    }]))
+  }
   const badgeReceipt = join(temp, 'dock-badge.json')
   const questionEntry = join(temp, 'question-main.mjs')
   if (devQuestionOnly) {
@@ -171,6 +193,70 @@ async function main() {
       throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
     }
     return response.result?.value
+  }
+  if (nativeHistoryOnly) {
+    const wait = expression => evaluate(`(async () => {
+      const deadline = performance.now() + 10000;
+      while (!(${expression})) {
+        if (performance.now() > deadline) throw new Error('Native history UI timed out: ' + ${JSON.stringify(expression)});
+        await new Promise(requestAnimationFrame);
+      }
+    })()`)
+    await wait(`Array.from(document.querySelectorAll('button')).some(button => button.textContent.includes('手机会话恢复测试'))`)
+    const point = await evaluate(`(() => {
+      const button = Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('手机会话恢复测试'));
+      button.scrollIntoView({ block: 'center' });
+      const rect = button.getBoundingClientRect();
+      const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+      if (!button.contains(document.elementFromPoint(x, y))) throw new Error('Session row obscured');
+      return { x, y };
+    })()`)
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+    await wait(`document.body.textContent.includes('主机重启前已有的原生回复')`)
+    const text = await evaluate('document.body.textContent')
+    assert.ok(text.includes('手机发起的真实格式消息'))
+    assert.ok(text.includes('Pi 原生会话记录'))
+    assert.ok(!text.includes('abandoned branch must not appear'))
+    assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+    // Continue/reopen after one canonical archived turn is added. The original
+    // native-only prefix must survive, and a requested page limit must be real.
+    const nativePath = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`, `2026-10-13_${nativeSessionId}.jsonl`)
+    const entries = readFileSync(nativePath, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+    let parentId = entries.at(-1).id
+    for (let i = 0; i < 40; i++) {
+      entries.push({ type: 'message', id: `continued-user-${i}`, parentId, timestamp: '2026-10-13T05:00:00Z',
+        message: { role: 'user', content: [{ type: 'text', text: `continued prompt ${i}` }] } })
+      parentId = `continued-reply-${i}`
+      entries.push({ type: 'message', id: parentId, parentId: `continued-user-${i}`, timestamp: '2026-10-13T05:00:01Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: `continued reply ${i}` }] } })
+    }
+    writeFileSync(nativePath, entries.map(entry => JSON.stringify(entry)).join('\n'))
+    const context = { providerId: 'pi', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
+    const page = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
+    assert.equal(page.totalTurns, 41)
+    assert.equal(page.offset, 38)
+    assert.equal(page.turns.length, 3)
+    assert.equal(page.hasOlder, true)
+    const hash = value => createHash('sha256').update(value).digest('hex')
+    const archiveDir = join(userDataDir, 'trace-archives-v2', 'pi', `cwd-${hash(canonicalWorkspace)}`)
+    mkdirSync(archiveDir, { recursive: true })
+    writeFileSync(join(archiveDir, `sid-${hash(nativeSessionId)}.json`), JSON.stringify({ version: 3,
+      providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace, sessionId: nativeSessionId,
+      turns: [{ runId: 'scry-continuation', providerTurnId: 'continued-user-39', userText: 'continued prompt 39',
+        done: true, status: 'completed', ts: Date.now(), items: [{ id: 'canonical', runId: 'scry-continuation',
+          kind: 'model', stage: 'text', text: 'continued reply 39', ts: '2026-10-13T05:00:01Z' }] }]
+    }))
+    const reopened = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
+    assert.equal(reopened.totalTurns, 41)
+    assert.equal(reopened.turns.length, 3)
+    assert.equal(reopened.turns.at(-1).runId, 'scry-continuation')
+    const oldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
+    assert.equal(oldest.turns.length, 1)
+    assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
+    console.log('Pi native history: click restores phone conversation; provenance, 41-turn pagination and continuation/reopen verified without Provider execution')
+    cdp.close()
+    return
   }
 
   const boundary = await evaluate(`(() => ({

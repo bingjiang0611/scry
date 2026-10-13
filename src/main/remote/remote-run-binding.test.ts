@@ -336,6 +336,79 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     expect(order.slice(3)).toEqual(['done:completed', 'archive:start', 'archive:end', 'settled'])
   })
 
+  it('preserves native turn IDs so continuation archives can replace the matching native record', async () => {
+    const { run } = fakeRun(async (request) => {
+      request.onExternalSessionId?.('phone-session')
+      return { status: 'completed', providerTurnId: 'native-user', forkTurnId: 'native-leaf' }
+    })
+    const onRunArchive = vi.fn()
+    const start = createRemoteRunBinding({ run, onRunArchive })
+    await start({ runId: 'ledger', routing: { providerId: 'pi', cwd: '/w', prompt: 'phone prompt' },
+      progress: () => {}, output: () => {} })
+    expect(onRunArchive).toHaveBeenCalledWith(expect.objectContaining({
+      providerTurnId: 'native-user', forkTurnId: 'native-leaf'
+    }))
+  })
+
+  it('archives partial events and the real error when the Provider promise rejects', async () => {
+    const { run } = fakeRun(async (request) => {
+      request.onExternalSessionId?.('phone-session')
+      request.emit(textEvent('already visible on phone'))
+      throw new Error('transport disconnected')
+    })
+    const onRunArchive = vi.fn()
+    const start = createRemoteRunBinding({ run, onRunArchive })
+    await expect(start({ runId: 'ledger', routing: { providerId: 'pi', cwd: '/w', prompt: 'phone prompt' },
+      progress: () => {}, output: () => {} })).rejects.toThrow('transport disconnected')
+    expect(onRunArchive).toHaveBeenCalledOnce()
+    expect(onRunArchive).toHaveBeenCalledWith(expect.objectContaining({
+      externalSessionId: 'phone-session', status: 'failed', error: 'transport disconnected',
+      items: expect.arrayContaining([expect.objectContaining({ text: 'already visible on phone' })])
+    }))
+  })
+
+  it('coalesces live checkpoints and drains an in-flight write before terminal archive', async () => {
+    vi.useFakeTimers()
+    try {
+      let request!: ProviderRunRequest
+      let finish!: () => void
+      const gate = new Promise<void>((resolve) => { finish = resolve })
+      const { run } = fakeRun(async (value) => {
+        request = value
+        request.onExternalSessionId?.('phone-session')
+        request.emit(textEvent('first'))
+        await gate
+        return { status: 'completed' }
+      })
+      let release!: () => void
+      const diskGate = new Promise<void>((resolve) => { release = resolve })
+      const onRunCheckpoint = vi.fn(async () => { await diskGate })
+      const onRunArchive = vi.fn()
+      const start = createRemoteRunBinding({ run, onRunCheckpoint, onRunArchive })
+      const pending = start({ runId: 'ledger', routing: { providerId: 'pi', cwd: '/w', prompt: 'phone prompt' },
+        progress: () => {}, output: () => {} })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(onRunCheckpoint).toHaveBeenCalledOnce()
+      request.emit(textEvent('second'))
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(onRunCheckpoint).toHaveBeenCalledOnce()
+      // The captured snapshot is immutable while the Provider keeps emitting.
+      expect(onRunCheckpoint.mock.calls[0]).toEqual([expect.objectContaining({
+        items: expect.not.arrayContaining([expect.objectContaining({ text: 'second' })])
+      })])
+      finish()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onRunArchive).not.toHaveBeenCalled()
+      release()
+      await pending
+      expect(onRunArchive).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'completed', items: expect.arrayContaining([expect.objectContaining({ text: 'second' })])
+      }))
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(onRunCheckpoint).toHaveBeenCalledOnce()
+    } finally { vi.useRealTimers() }
+  })
+
   it('settles the observer even when the Provider cannot start', async () => {
     const settled = vi.fn()
     const done = vi.fn()
@@ -346,7 +419,9 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     })
     await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {} }))
       .rejects.toThrow('spawn failed')
-    expect(done).not.toHaveBeenCalled()
+    // A rejected launch now reports its real failure before settlement, rather
+    // than making the observer guess that every rejection was a startup failure.
+    expect(done).toHaveBeenCalledWith({ status: 'failed', errorText: 'spawn failed' })
     expect(settled).toHaveBeenCalledTimes(1)
   })
 })
