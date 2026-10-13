@@ -205,10 +205,15 @@ const TranscriptTurn = memo(function TranscriptTurn({
       else recheck()
     }, { root: element.closest('.chat-transcript'), rootMargin: '1200px 0px' })
     observer.observe(element)
+    // Portaled dialogs can blur before React clears the trigger's expanded state.
+    // Recheck after the disclosure commit, even when the row stays offscreen.
+    const disclosureObserver = new MutationObserver(recheck)
+    disclosureObserver.observe(element, { attributes: true, subtree: true, attributeFilter: ['aria-expanded', 'open'] })
     element.addEventListener('focusout', blur)
     document.addEventListener('selectionchange', recheck)
     return () => {
       observer.disconnect()
+      disclosureObserver.disconnect()
       element.removeEventListener('focusout', blur)
       document.removeEventListener('selectionchange', recheck)
     }
