@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.47 \
+npm install -g @ali/scry-turn-recorder@0.2.48 \
   --registry=https://registry.anpm.alibaba-inc.com
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -119,9 +119,9 @@ Agent、skill 与提示词不应主动调用这些命令。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
 
-## 未发布：完整性修复（模型 / Context / 锁超时 / guardian）
+## 0.2.48 完整性修复（模型 / Context / 锁超时 / guardian）
 
-只作用于之后生成的新记录，不改历史文件、recordId 或 outbox；源码合入不代表 npm 已发布或本机 CLI 已升级。
+只作用于之后生成的新记录，不改历史文件、recordId 或 outbox。
 
 - **Codex 模型与 Context**：rollout 的 `turn_context.model` 与 `token_count.info.model_context_window` 现在进入用量证据。一轮只有一个模型时写 `usage.value.model`（`provider.modelStatus=observed`、`modelSource=usage_event`）；同时有窗口和本轮最后一次请求的 `last_token_usage.input_tokens` 时写 `contextTokens`/`contextWindow`（`contextUsageSource=codex_rollout_last_usage`）。一轮出现多个模型时不挑选，模型与 Context 都留空。
 - **lifecycle `context_usage` 入参**：`{ context_tokens, context_window, model, provider? }`，由集成层在轮次结束时读取宿主自己的 Context 计量。三个必填值都合法才写入（`contextUsageSource=lifecycle_context_usage`），缺任何一项整体丢弃，不用猜测的窗口配对。子代理上下文不归入主轮。
