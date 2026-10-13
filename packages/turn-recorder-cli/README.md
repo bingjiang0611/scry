@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.48 \
+npm install -g @ali/scry-turn-recorder@0.2.49 \
   --registry=https://registry.anpm.alibaba-inc.com
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -118,6 +118,11 @@ Agent、skill 与提示词不应主动调用这些命令。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
+
+## 0.2.49 锁超时排队修正
+
+- **hook 等锁上限从 10s 改为 3s**（`HOOK_LOCK_WAIT_MS`）。0.2.48 的等待与 Provider 工具 hook 的 10s 超时相同，宿主可能在事件入队前就杀掉 hook；现在 3s 后即写入 `inbox/`。`recover` 与 managed 路径仍等待 10s（`SESSION_LOCK_WAIT_MS`）。
+- **重放沿用真实到达时间**：0.2.48 把入队时刻（等锁结束后）当作到达时间，重放出的工具 / 轮次开始时间会晚约一个等锁周期；现在取 hook 进入时的时间。
 
 ## 0.2.48 完整性修复（模型 / Context / 锁超时 / guardian）
 
