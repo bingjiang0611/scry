@@ -25,7 +25,6 @@ const result = (isError: boolean): TraceEvent => ({
   id: 'r', ts: '2020', runId: 'x', kind: 'harness', stage: 'result', isError,
   tokensIn: 11, tokensOut: 22, costUsd: 0.5
 })
-const controls = (): TraceEvent => ({ id: 'c', ts: '2020', runId: 'x', kind: 'harness', stage: 'runtime:controls' })
 const textEvent = (text: string): TraceEvent => ({ id: 't', ts: '2020', runId: 'x', kind: 'model', stage: 'text', text })
 const thinkingEvent = (thinking: string): TraceEvent => ({ id: 'k', ts: '2020', runId: 'x', kind: 'model', stage: 'thinking', thinking })
 const toolUse = (tool: string, filePath?: string): TraceEvent => ({ id: 'u', ts: '2020', runId: 'x', kind: 'tool', stage: `tool:${tool}`, tool, toolUseId: 'tu1', ...(filePath ? { filePath } : {}) })
@@ -33,7 +32,7 @@ const toolResult = (output: string): TraceEvent => ({ id: 'o', ts: '2020', runId
 
 describe('remote run binding (live seam; no Provider process is spawned)', () => {
   it('runs the routed provider once and reports a truthful settled lifecycle', async () => {
-    const { run, calls } = fakeRun(async (req) => { req.emit(controls()); req.emit(result(false)); return { status: 'completed' } })
+    const { run, calls } = fakeRun(async (req) => { req.emit(result(false)); return { status: 'completed' } })
     const progress = vi.fn()
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-1' })
     await start({ runId: 'ledger-1', routing: { cwd: '/w', providerId: 'claude', agentProfileId: 'p', prompt: '  hi  ' }, progress, output: () => {} })
@@ -48,7 +47,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
 
     const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
     expect(markers[0]).toEqual({ event: 'bound', ledgerRunId: 'ledger-1', scryRunId: 'scry-1', providerId: 'claude', cwd: '/w' })
-    expect(markers).toContainEqual({ event: 'started' })
+    expect(markers.filter(marker => marker.event === 'started')).toEqual([{ event: 'started' }])
     expect(markers).toContainEqual({ event: 'result', isError: false, tokensIn: 11, tokensOut: 22, costUsd: 0.5 })
     expect(markers.at(-1)).toEqual({ event: 'settled', status: 'completed' })
   })
@@ -81,11 +80,14 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       progress: () => {}, output: () => {}, requestUserInput
     })
     expect(requestUserInput).toHaveBeenCalledWith(expect.objectContaining({ runId: 'scry-question', questionId: 'permission-1' }), expect.any(AbortSignal))
-    expect(onRunArchive.mock.calls[0]?.[0].items).toEqual([expect.objectContaining({
-      kind: 'human', stage: 'intervention', intervention: expect.objectContaining({
-        resolution: 'answered', response: expect.objectContaining({ answers: { Continue: 'Allow' } })
+    expect(onRunArchive.mock.calls[0]?.[0].items).toEqual([
+      expect.objectContaining({ kind: 'harness', stage: 'runtime:controls', runId: 'scry-question' }),
+      expect.objectContaining({
+        kind: 'human', stage: 'intervention', intervention: expect.objectContaining({
+          resolution: 'answered', response: expect.objectContaining({ answers: { Continue: 'Allow' } })
+        })
       })
-    })])
+    ])
   })
 
   it('mirrors a pending question to the Mac observer and closes it even when the broker rejects', async () => {
@@ -162,7 +164,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
   it('resumes and archives the SAME provider session even when the Provider does not re-emit its session id', async () => {
     // Qoder resumes successfully but does not call onExternalSessionId again.
     // routing.resume must therefore be the catalog/archive identity.
-    const { run, calls } = fakeRun(async (req) => { req.emit(textEvent('continued')); req.emit(controls()); req.emit(result(false)); return { status: 'completed' } })
+    const { run, calls } = fakeRun(async (req) => { req.emit(textEvent('continued')); req.emit(result(false)); return { status: 'completed' } })
     const onRunStarted = vi.fn()
     const onRunSession = vi.fn()
     const onRunArchive = vi.fn()
@@ -183,7 +185,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
   it('surfaces the run to the Mac catalog: onRunStarted at bind, onRunSession with the real externalSessionId', async () => {
     const { run } = fakeRun(async (req) => {
       req.onExternalSessionId?.('ext-abc')
-      req.emit(controls()); req.emit(result(false)); return { status: 'completed' }
+      req.emit(result(false)); return { status: 'completed' }
     })
     const onRunStarted = vi.fn()
     const onRunSession = vi.fn()
@@ -204,7 +206,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
   })
 
   it('does NOT archive when the run never got a Provider session id (nothing to key or resume)', async () => {
-    const { run } = fakeRun(async (req) => { req.emit(controls()); req.emit({ ...result(true), text: 'died' }); return { status: 'failed' } })
+    const { run } = fakeRun(async (req) => { req.emit({ ...result(true), text: 'died' }); return { status: 'failed' } })
     const onRunArchive = vi.fn()
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-x', onRunArchive })
     await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' }, progress: () => {}, output: () => {} }))
@@ -267,7 +269,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       req.emit(thinkingEvent('let me think'))
       req.emit(toolUse('Edit', '/w/file.ts'))
       req.emit(toolResult('edit applied'))
-      req.emit(controls()); req.emit(result(false)); return { status: 'completed' }
+      req.emit(result(false)); return { status: 'completed' }
     })
     const progress = vi.fn()
     const output = vi.fn()
@@ -321,7 +323,10 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const finished = start({ runId: 'l', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {} })
     await vi.waitFor(() => expect(order).toContain('attach'))
     // Live, not archived: the event is already observable while the Provider runs.
-    expect(observed.map((ev) => ev.text)).toEqual(['working'])
+    expect(observed).toEqual([
+      expect.objectContaining({ kind: 'harness', stage: 'runtime:controls', runId: 'scry-observed' }),
+      expect.objectContaining({ kind: 'model', stage: 'text', text: 'working' })
+    ])
     expect(order).toEqual(['observe:scry-observed', 'session:pi-session-1', 'attach'])
     releaseProvider()
     await vi.waitFor(() => expect(order).toContain('archive:start'))

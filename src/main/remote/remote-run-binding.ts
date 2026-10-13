@@ -186,7 +186,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
           }))
         }
       }
-      const handle = deps.run(routing.providerId, {
+      const request: ProviderRunRequest = {
         runId: scryRunId,
         prompt: providerPrompt,
         cwd: routing.cwd,
@@ -245,7 +245,18 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
           })
           return response
         }
+      }
+      // Like desktop runs, retain the requested controls as selection evidence
+      // in both the live observer and archive. Provider usage is not a substitute.
+      emit({
+        id: `controls:${scryRunId}`,
+        ts: new Date().toISOString(),
+        runId: scryRunId,
+        kind: 'harness',
+        stage: 'runtime:controls',
+        input: { model: request.model, effort: request.effort, permissionMode: request.permissionMode }
       })
+      const handle = deps.run(routing.providerId, request)
       observer?.attach(handle)
       const interrupt = (): void => { handle.interrupt() }
       if (stopSignal?.aborted) interrupt()
