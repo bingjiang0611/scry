@@ -128,10 +128,54 @@ final class ConversationUITests: XCTestCase {
     capture("history-continuous-scroll-oldest")
   }
 
+  func testReadingOlderMessagesStaysPutWhenReasoningExpands() {
+    launch("transcript")
+    let scroll = app.scrollViews["conversation-scroll"]
+    let marker = app.staticTexts["请检查 iOS 远程首页的信息层级，并给出可以直接落地的修改。"]
+    for _ in 0..<6 {
+      if marker.isHittable && app.buttons["回到最新"].exists { break }
+      scroll.swipeDown()
+    }
+    XCTAssertTrue(marker.isHittable)
+    XCTAssertTrue(app.buttons["回到最新"].exists)
+    let before = marker.frame.minY
+    let reasoning = app.buttons["reasoning-toggle"].firstMatch
+    reasoning.tap()
+    XCTAssertEqual(reasoning.value as? String, "已展开")
+    XCTAssertEqual(marker.frame.minY, before, accuracy: 2, "展开旧回复不能被底部锚点拉回最新消息")
+    XCTAssertTrue(app.buttons["回到最新"].exists)
+    capture("older-reading-position-after-expansion")
+  }
+
+  func testOpeningAndSendingFromOlderMessagesGoToLatest() {
+    for route in ["chat", "transcript"] {
+      launch(route, extra: route == "chat" ? ["-uiMockLongOutput"] : ["-uiMockFirstScreen"])
+      let tail = app.staticTexts[route == "chat" ? "实时回复末尾" : "完整内容末尾"]
+      let tailVisible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in tail.exists && tail.isHittable }, object: tail)
+      XCTAssertEqual(XCTWaiter.wait(for: [tailVisible], timeout: 15), .completed,
+                     "进入会话后应直接看到末尾，包括异步解析的长 Markdown")
+      let scroll = app.scrollViews["conversation-scroll"]
+      scroll.swipeDown()
+      XCTAssertTrue(app.buttons["回到最新"].waitForExistence(timeout: 5))
+      let input = app.descendants(matching: .any)["message-input"]
+      input.tap()
+      input.typeText("滚动定位回归")
+      app.buttons["发送"].tap()
+      let reply = app.staticTexts["这是 DEBUG 视觉预览回复；没有连接 Provider，也没有写入真实 ledger。"]
+      let replyVisible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in reply.exists && reply.isHittable }, object: reply)
+      XCTAssertEqual(XCTWaiter.wait(for: [replyVisible], timeout: 5), .completed,
+                     "从旧消息处发送，也必须恢复跟随最新消息")
+      XCTAssertFalse(app.buttons["回到最新"].exists)
+      capture("\(route)-send-returns-to-latest")
+    }
+  }
+
   func testHistoryUpdatesWhenMacStartsAfterOpeningInactiveSession() {
     launch("transcript", extra: ["-uiMockContinuousHistory", "-uiMockMacStartsLater"])
     XCTAssertTrue(app.staticTexts["Mac 后来新增的用户输入"].waitForExistence(timeout: 8))
-    XCTAssertTrue(app.staticTexts["Mac 后来新增的回复"].waitForExistence(timeout: 5))
+    let reply = app.staticTexts["Mac 后来新增的回复"]
+    let replyVisible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in reply.exists && reply.isHittable }, object: reply)
+    XCTAssertEqual(XCTWaiter.wait(for: [replyVisible], timeout: 5), .completed)
     capture("history-mac-starts-after-opening")
   }
 

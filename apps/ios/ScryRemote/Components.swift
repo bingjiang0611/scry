@@ -186,6 +186,8 @@ extension RemoteHeader where Right == EmptyView {
 struct ConversationScrollView<Content: View>: View {
   let revision: String
   var stopFollowingRequest: Int = 0
+  var followLatestRequest: Int = 0
+  var onFollowingChange: (Bool) -> Void = { _ in }
   @ViewBuilder let content: () -> Content
   @State private var following = true
   @State private var browsingOlder = false
@@ -203,11 +205,17 @@ struct ConversationScrollView<Content: View>: View {
               })
           }
           .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 10)
-          .background(GeometryReader { geometry in
-            Color.clear.preference(key: ConversationHeight.self, value: geometry.size.height)
-          })
+          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
+            // Read the committed lazy-layout height, not a background reader's
+            // placeholder size, then scroll after the new layout is installed.
+            DispatchQueue.main.async {
+              if following { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+          }
         }
         .coordinateSpace(name: "conversation-scroll")
+        .defaultScrollAnchor(following ? .bottom : nil)
+        .accessibilityIdentifier("conversation-scroll")
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .simultaneousGesture(DragGesture().onChanged { value in
@@ -217,14 +225,19 @@ struct ConversationScrollView<Content: View>: View {
         .onPreferenceChange(ConversationBottom.self) { bottom in
           if !browsingOlder && bottom > 0 && bottom <= viewport.size.height + 30 { following = true }
         }
-        .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
-        .onChange(of: stopFollowingRequest) { browsingOlder = true; following = false }
-        .onChange(of: revision) {
-          if following { proxy.scrollTo("bottom", anchor: .bottom) }
+        .onAppear {
+          browsingOlder = false
+          following = true
+          DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
         }
-        .onPreferenceChange(ConversationHeight.self) { _ in
-          // Archived Markdown finishes parsing after initial layout. Keep the
-          // tail visible without moving a reader who already scrolled up.
+        .onChange(of: following, initial: true) { _, value in onFollowingChange(value) }
+        .onChange(of: stopFollowingRequest) { browsingOlder = true; following = false }
+        .onChange(of: followLatestRequest) {
+          browsingOlder = false
+          following = true
+          proxy.scrollTo("bottom", anchor: .bottom)
+        }
+        .onChange(of: revision) {
           if following { proxy.scrollTo("bottom", anchor: .bottom) }
         }
         .onChange(of: viewport.size.height) {
@@ -248,11 +261,6 @@ struct ConversationScrollView<Content: View>: View {
       }
     }
   }
-}
-
-private struct ConversationHeight: PreferenceKey {
-  static var defaultValue: CGFloat = 0
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct ConversationBottom: PreferenceKey {
@@ -538,7 +546,10 @@ struct ConversationMarkdownText: View {
   private var blocks: [ConversationMarkdownBlock] { parsedBlocks ?? ConversationMarkdownParser.parse(source) }
 
   var body: some View {
-    LazyVStack(alignment: .leading, spacing: muted ? 8 : 11) {
+    // The outer conversation already virtualizes rows. Its tail needs a
+    // message's full height; a second lazy stack can leave a long live reply's
+    // tail viewport empty even after the outer scroll reaches its bottom.
+    VStack(alignment: .leading, spacing: muted ? 8 : 11) {
       ForEach(blocks) { block in
         blockView(block)
       }
