@@ -131,7 +131,7 @@ async function main() {
   const badgeReceipt = join(temp, 'dock-badge.json')
   const questionEntry = join(temp, 'question-main.mjs')
   if (devQuestionOnly) {
-    // Exercise the production startup against a badge left by a previous launch.
+    // Exercise startup and repeated viewing against a stale native Dock badge.
     // Forward every call to Electron; a denied OS permission remains explicit.
     writeFileSync(questionEntry, `
       import { app } from 'electron'
@@ -139,14 +139,20 @@ async function main() {
       app.whenReady().then(async () => {
         const initial = { success: app.setBadgeCount(1), nativeCount: app.getBadgeCount() }
         const requests = []
+        let residual = null
         const setBadgeCount = app.setBadgeCount.bind(app)
         app.setBadgeCount = (count) => {
           const success = setBadgeCount(count)
           requests.push({ count, success, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() })
-          writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests }))
+          if (count === 0 && requests.some(request => request.count === 1) && !residual) {
+            // The session is already read. Recreate native drift without changing unread state.
+            const restored = setBadgeCount(1)
+            residual = { success: restored, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() }
+          }
+          writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
           return success
         }
-        writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests }))
+        writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
         await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
       })
     `)
@@ -482,19 +488,37 @@ async function main() {
       const unread = await window.scry.unreadSessions()
       await window.scry.focusRun(runId)
       const viewed = await window.scry.unreadSessions()
-      await window.scry.stop(runId)
-      return { done: run.done, pendingCount: run.pendingQuestions.length, unread, viewed }
+      return { runId, done: run.done, pendingCount: run.pendingQuestions.length, unread, viewed }
     })()`)
     assert.equal(result.done, false, 'question attention must arrive before a terminal result')
     assert.equal(result.pendingCount, 1)
     assert.equal(result.unread.unreadSessionKeys.length, 1, 'background question must trigger Dock attention')
     assert.equal(result.viewed.unreadSessionKeys.length, 0, 'viewing the pending session must clear its attention')
+    const beforeRepeat = JSON.parse(readFileSync(badgeReceipt, 'utf8'))
+    assert.ok(beforeRepeat.residual, 'fixture must recreate a native badge after the session is read')
+    if (beforeRepeat.residual.success) {
+      assert.equal(beforeRepeat.residual.nativeCount, 1)
+      assert.equal(beforeRepeat.residual.dockBadge, '1')
+    }
+    const repeatedView = await evaluate(`(async () => {
+      await window.scry.focusRun(${JSON.stringify(result.runId)})
+      const snapshot = await window.scry.unreadSessions()
+      await window.scry.stop(${JSON.stringify(result.runId)})
+      return snapshot
+    })()`)
+    assert.deepEqual(repeatedView, result.viewed, 'repeated viewing must not manufacture unread changes')
     const badgeLifecycle = JSON.parse(readFileSync(badgeReceipt, 'utf8'))
-    assert.deepEqual(badgeLifecycle.requests.map(request => request.count), [0, 1, 0])
+    const counts = badgeLifecycle.requests.map(request => request.count)
+    assert.deepEqual(counts.filter((count, index) => index === 0 || count !== counts[index - 1]), [0, 1, 0])
+    assert.equal(badgeLifecycle.requests.length, beforeRepeat.requests.length + 1,
+      'repeated viewing of an already-read session must resynchronize Dock')
+    const lastRequest = badgeLifecycle.requests.at(-1)
+    assert.equal(lastRequest.count, 0)
+    if (lastRequest.success) assert.equal(lastRequest.dockBadge, '')
     for (const request of badgeLifecycle.requests) {
       if (request.success) assert.equal(request.nativeCount, request.count)
     }
-    console.log(JSON.stringify({ ok: true, badgeLifecycle, questionAttention: result }))
+    console.log(JSON.stringify({ ok: true, badgeLifecycle, questionAttention: result, repeatedView }))
     cdp.close()
     return
   }

@@ -34,6 +34,42 @@ describe('DockBadgeState', () => {
     expect(snapshots).not.toHaveBeenCalled()
   })
 
+  it.each(['view', 'focus', 'empty-focus', 'empty-view'] as const)(
+    '已读状态不变时仍通过 %s 清除系统残留角标', (action) => {
+      let nativeCount = 1
+      const snapshots = vi.fn()
+      const badge = new DockBadgeState((count) => { nativeCount = count }, snapshots)
+      if (action === 'view') badge.view('session-a', true)
+      else if (action === 'empty-view') badge.view(null, true)
+      else {
+        if (action === 'focus') badge.view('session-a', false)
+        badge.focusWindow()
+      }
+
+      expect(nativeCount).toBe(0)
+      expect(badge.snapshot()).toEqual({ revision: 0, unreadSessionKeys: [] })
+      expect(snapshots).not.toHaveBeenCalled()
+    }
+  )
+
+  it('查看已读会话只同步真实计数，不丢弃其他未读提醒', () => {
+    let nativeCount = 0
+    const snapshots = vi.fn()
+    const badge = new DockBadgeState((count) => { nativeCount = count }, snapshots)
+    badge.markAttention('unread-session', {
+      windowFocused: false, sessionViewed: false, needsAttention: true
+    })
+    const snapshot = badge.snapshot()
+    snapshots.mockClear()
+    nativeCount = 9
+
+    badge.view('read-session', true)
+
+    expect(nativeCount).toBe(1)
+    expect(badge.snapshot()).toEqual(snapshot)
+    expect(snapshots).not.toHaveBeenCalled()
+  })
+
   it('前台正在查看的会话完成时不增加 badge', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)
@@ -46,7 +82,7 @@ describe('DockBadgeState', () => {
     })
 
     expect(badge.count).toBe(0)
-    expect(setCount).not.toHaveBeenCalled()
+    expect(setCount.mock.calls).toEqual([[0], [0]])
   })
 
   it('后台完成后重新聚焦窗口会清除当前已展示会话的 badge', () => {

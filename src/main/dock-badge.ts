@@ -18,11 +18,11 @@ export class DockBadgeState {
 
   view(sessionKey: string | null, windowFocused: boolean): void {
     this.viewedSessionKey = sessionKey
-    if (sessionKey && windowFocused) this.clear(sessionKey)
+    if (windowFocused) this.clear(sessionKey)
   }
 
   focusWindow(): void {
-    if (this.viewedSessionKey) this.clear(this.viewedSessionKey)
+    this.clear(this.viewedSessionKey)
   }
 
   markAttention(sessionKey: string, state: DockBadgeAttentionState): void {
@@ -67,8 +67,12 @@ export class DockBadgeState {
     }
   }
 
-  private clear(sessionKey: string): void {
-    if (!this.unreadSessionKeys.delete(sessionKey)) return
+  private clear(sessionKey: string | null): void {
+    if (!sessionKey || !this.unreadSessionKeys.delete(sessionKey)) {
+      // Viewing an already-read session must still reconcile a stale native badge.
+      this.sync()
+      return
+    }
     this.publish()
   }
 
