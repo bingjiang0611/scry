@@ -2994,9 +2994,9 @@ function hookInbox(dataRoot: string, provider: ProviderId, sessionId: string): s
 async function queueHook(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
-  sessionId: string
+  sessionId: string,
+  arrivedAt: string
 ): Promise<void> {
-  const arrivedAt = new Date().toISOString()
   const entry: QueuedHook = {
     schemaVersion: 1,
     provider: input.provider,
@@ -3011,7 +3011,7 @@ async function queueHook(
   await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
   await appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
-    `${arrivedAt} WARN session lock busy; queued ${input.provider} ${input.event} for replay`
+    `${new Date().toISOString()} WARN session lock busy; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
   ).catch(() => undefined)
 }
 
@@ -3053,6 +3053,8 @@ async function replayQueuedHooks(
 }
 
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
+  // Taken before the lock wait: a hook queued after SESSION_LOCK_WAIT_MS still arrived now.
+  const arrivedAt = new Date().toISOString()
   input = {
     ...input,
     payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
@@ -3084,7 +3086,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       if (entered || !isLockTimeout(error)) throw error
       // The session is busy (a long finalize, recovery or a stuck peer). The event was never applied,
       // so queue it durably instead of dropping it; the next lock holder replays it in arrival order.
-      await queueHook(enablement, input, sessionId)
+      await queueHook(enablement, input, sessionId, arrivedAt)
       return { status: 'pending', reason: 'session busy; event queued for replay' }
     }
     try {
