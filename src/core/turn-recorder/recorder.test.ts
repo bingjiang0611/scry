@@ -2921,9 +2921,10 @@ describe('record store cursor and recovery semantics', () => {
     expect(stop.status).toBe('committed')
     const [record] = await listRecords(dataRoot)
     expect(record.user.value).toMatchObject({ text: 'queued while busy' })
-    // The replayed start keeps the time it arrived, not the time it was replayed.
+    // The replayed start keeps the time the hook arrived: not when it was replayed, and not
+    // when the lock wait expired SESSION_LOCK_WAIT_MS later and the hook was queued.
     expect(Date.parse(record.startedAt)).toBeGreaterThanOrEqual(before)
-    expect(Date.parse(record.startedAt)).toBeLessThan(before + SESSION_LOCK_WAIT_MS + 1_000)
+    expect(Date.parse(record.startedAt)).toBeLessThan(before + 1_000)
     expect(await readHealth(dataRoot)).toMatchObject({ droppedEvents: 0 })
     expect(await readdir(join(dataRoot, 'runtime', 'pi', safeKey('busy-session'), 'inbox'))).toEqual([])
   }, 30_000)
