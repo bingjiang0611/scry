@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { App, sessionComposerDraftKey } from '../../src/renderer/App'
 import type { ProviderContext } from '../../src/shared/provider'
+import type { WorkspaceFileOpenTarget, WorkspacePathRequest } from '../../src/shared/workspace'
 import type { TerminalDataEvent, TerminalExitEvent, TerminalRecordingRequest, TerminalSessionInfo, TerminalStartRequest } from '../../src/shared/terminal'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
@@ -63,6 +64,7 @@ Object.defineProperty(window, 'scry', { value: {
       kind: 'model', stage: 'text', text: 'Open `/fixture/' + (context.externalSessionId === 'one' ? 'new' : 'old') + '/same.ts`' }]
   }], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' }),
   workspaceList: async () => ({ entries: [], truncated: false }),
+  workspaceResolveFile: async (request: WorkspacePathRequest): Promise<WorkspaceFileOpenTarget> => ({ ...request, mode: 'text' }),
   workspaceRead: async ({ cwd, path }: { cwd: string; path: string }) => ({ name: path, path, content: `${cwd}/${path}`, size: 30, mtimeMs: 1, revision: '1', language: 'text' }),
   workspaceReadKnown: async ({ cwd, path }: { cwd: string; path: string }) => ({ name: path, path, content: `${cwd}/${path}`, size: 30, mtimeMs: 1, revision: '1', language: 'text' }),
   terminalActive: async () => [...sessions.values()],
