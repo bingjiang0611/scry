@@ -12,6 +12,7 @@ struct ChatView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
+  @State private var latestReadRequest = 0
   private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: run.activeSessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
@@ -52,7 +53,7 @@ struct ChatView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)") {
+      ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", followLatestRequest: latestReadRequest) {
             if !hasTurn {
               EmptyState(title: "开始一段新会话",
                          detail: "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。")
@@ -62,6 +63,7 @@ struct ChatView: View {
               if run.prompt != nil { assistantTurn }
             }
       }
+      .id(run.activeSessionIdentity)
       footer
     }
     .background(Palette.surface)
@@ -197,7 +199,10 @@ struct ChatView: View {
         } else {
           accepted = run.submit(prompt: draft, providerId: providerId, attachments: payload)
         }
-        if accepted { currentDraft.wrappedValue = .init() }
+        if accepted {
+          currentDraft.wrappedValue = .init()
+          latestReadRequest += 1
+        }
       }
       if let stopError = run.stopError {
         Text(stopError).font(.system(size: 11)).foregroundStyle(Palette.negative).padding(.horizontal, 5)

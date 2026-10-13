@@ -324,7 +324,7 @@ final class RemoteRunStore: ObservableObject {
   private var prefetchGeneration = 0
   private var warmedScreens: [String: G0Transport.RunHistoryPreview] = [:]
   private var cachedHistory: (key: String, snapshot: RemoteHistorySnapshot, persisted: Bool)?
-  private var historyVersions: [String: String] = [:]
+  var historyFollowingLatest = true
   private var historyWindow: G0Transport.RunHistoryTurnsPage?
   private var historyWindowKey: String?
   var historyOlderBefore: Int? { historyWindow.flatMap { $0.hasOlder ? $0.offset : nil } }
@@ -694,11 +694,12 @@ final class RemoteRunStore: ObservableObject {
   // Show protected local data before opening the relay. Only an authenticated
   // host response can mark it current/reachable. The single memory entry keeps
   // large transcripts bounded; other conversations reopen from disk off-main.
-  func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false, legacyFull: Bool = false) {
+  func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false, legacyFull: Bool = false,
+                   onlyWhileFollowing: Bool = false) {
     #if DEBUG
     if mockMode { return }
     #endif
-    guard !historyCacheClearing else { return }
+    guard !historyCacheClearing, !onlyWhileFollowing || historyFollowingLatest else { return }
     prefetchTask?.cancel()
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     // The legacy history contract has no canonical turn ids. Keep the base of
@@ -716,6 +717,7 @@ final class RemoteRunStore: ObservableObject {
     if activeSessionIdentity != identity {
       guard resetRun() else { return }
       activeSessionIdentity = identity
+      historyFollowingLatest = true
       commandsRequestGeneration += 1
       commandsTask?.cancel(); commandsTask = nil; commands = .idle
       history = .idle
@@ -753,6 +755,7 @@ final class RemoteRunStore: ObservableObject {
       guard let self else { return }
       @MainActor func current() -> Bool {
         !Task.isCancelled && self.historyRequestGeneration == request &&
+          (!onlyWhileFollowing || self.historyFollowingLatest) &&
           self.isCurrent(requestGeneration, identity: identity) && self.connections.load() == connection
       }
       defer {
@@ -1036,9 +1039,11 @@ final class RemoteRunStore: ObservableObject {
     if mockMode {
       if ProcessInfo.processInfo.arguments.contains("-uiMockMacStartsLater"), case let .loaded(turns) = history {
         let prompt = "Mac 后来新增的用户输入"
-        if turns.last?.userText != prompt {
-          history = .loaded(turns + [.init(userText: prompt, items: [.init(kind: "output", text: "Mac 后来新增的回复")])])
-          historyRevision += 1
+        if turns.last?.userText != prompt, historyNeedsRefresh("mock-mac-later") {
+          let updated = turns + [.init(userText: prompt, items: [.init(kind: "output", text: "Mac 后来新增的回复")])]
+          showHistoryWindow(.init(turns: Array(updated.suffix(3)), offset: max(0, updated.count - 3),
+            totalTurns: updated.count, hasOlder: updated.count > 3, snapshot: "mock-mac-later",
+            source: "indexed_archive", completeness: "partial"), key: "mock-history", cached: false, fetchedAt: Date())
         }
       }
       return
@@ -1060,30 +1065,25 @@ final class RemoteRunStore: ObservableObject {
       let version = try await client.historyVersion(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
       guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
       recordSuccess()
-      if historyPageSnapshot == version.version || historyVersions[key] == version.version {
-        historyVersions[key] = version.version
-        return
-      }
-      // Do not throw away the older pages/full snapshot a reader explicitly
-      // opened. A source change is surfaced; an explicit refresh owns rebasing.
-      if let window = historyWindow, window.turns.count > 3 {
-        historyStorageNotice = "主机历史来源版本有变化；刷新最近历史可重新核对，当前阅读位置与旧历史已保留。"
-        return
-      }
-      if historyWindow == nil, cachedHistory != nil {
-        historyStorageNotice = "当前完整快照已保留，尚未核对主机当前历史；可明确刷新最近历史。"
-        return
-      }
-      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
+      guard historyNeedsRefresh(version.version) else { return }
+      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, onlyWhileFollowing: true)
       await historyTask?.value
-      guard isCurrent(requestGeneration, identity: identity), historyRefreshError == nil,
-            let loadedVersion = historyPageSnapshot else { return }
-      historyVersions[key] = loadedVersion
     } catch {
-      guard isCurrent(requestGeneration, identity: identity) else { return }
+      guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
       recordFailure(error, since: requestConnectionRevision)
       historyRefreshError = Self.describe(error)
     }
+  }
+
+  private func historyNeedsRefresh(_ version: String) -> Bool {
+    if historyPageSnapshot == version { return false }
+    // Keep an old snapshot only while the user is actually reading it. A large
+    // cache or loaded older pages must not pin the latest-message view forever.
+    if !historyFollowingLatest, historyWindow != nil || cachedHistory != nil {
+      historyStorageNotice = "Mac 有新消息；已保留当前阅读位置，点“回到最新”同步最近消息。"
+      return false
+    }
+    return true
   }
 
   // Re-opening the same session does not discard its live observation. If the
@@ -2022,7 +2022,7 @@ final class RemoteRunStore: ObservableObject {
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
     catalog = .idle; catalogRefreshError = nil; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyWindowKey = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
-    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil; historyVersions = [:]
+    catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil; historyFollowingLatest = true
     historyRequestGeneration += 1
     historySyncing = false; historyFromCache = false; historyFetchedAt = nil
     historyProgress = nil; historyRefreshError = nil; historyStorageNotice = nil
@@ -2300,10 +2300,14 @@ final class RemoteRunStore: ObservableObject {
       totalTurns: 3, hasOlder: true, snapshot: "current-window", source: "active_memory", completeness: "partial")
     let currentFetchedAt = Date(timeIntervalSince1970: 1_700_000_000)
     refreshStore.showHistoryWindow(currentWindow, key: windowKey, cached: false, fetchedAt: currentFetchedAt)
+    refreshStore.liveRunsStatus = .observed
+    refreshStore.liveHistoryTarget = windowIdentity
+    checks.append(("store.healthyHistoryWatchSkipsFallback", refreshStore.historyIsWatched(windowIdentity)))
     refreshStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true)
     checks.append(("store.refreshImmediatelyKeepsNewerWindow", refreshStore.history == .partial(currentWindow.turns) && refreshStore.historyPageSnapshot == "current-window"))
     await refreshStore.historyTask?.value
     checks.append(("store.failedRefreshKeepsNewerWindow", refreshStore.history == .partial(currentWindow.turns) && refreshStore.historyPageSnapshot == "current-window" && refreshStore.historyOlderBefore == 2 && refreshStore.historyPageSource == "active_memory" && refreshStore.historyFetchedAt == currentFetchedAt && refreshStore.historyRefreshError != nil))
+    checks.append(("store.failedRefreshEnablesFallbackDespiteSeenVersion", !refreshStore.historyIsWatched(windowIdentity)))
     connections.save(foreignConnection)
     refreshStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true)
     await refreshStore.historyTask?.value
@@ -2315,6 +2319,28 @@ final class RemoteRunStore: ObservableObject {
     refreshStore.showHistoryWindow(completeWindow, key: windowKey, cached: false, fetchedAt: currentFetchedAt)
     refreshStore.showHistory(snapshot, key: windowKey, cached: false, persisted: true)
     checks.append(("store.fullSnapshotReplacesDifferentWindowBase", refreshStore.history == .loaded(snapshot.turns) && refreshStore.historyPageSnapshot == nil))
+    // Freshness is about the displayed source version, not how much history
+    // was previously read. Only an explicit reader position may defer rebasing.
+    checks.append(("store.latestRefreshesFullCache", refreshStore.historyNeedsRefresh("new-version")))
+    let extendedWindow = G0Transport.RunHistoryTurnsPage(turns: Array(repeating: snapshot.turns.last!, count: 4), offset: 0,
+      totalTurns: 4, hasOlder: false, snapshot: "extended-window", source: "indexed_archive", completeness: "complete")
+    refreshStore.showHistoryWindow(extendedWindow, key: windowKey, cached: false, fetchedAt: currentFetchedAt)
+    checks.append(("store.latestRefreshesExtendedWindow", refreshStore.historyNeedsRefresh("new-version")))
+    refreshStore.historyFollowingLatest = false
+    checks.append(("store.readerPositionKeepsExtendedWindow", !refreshStore.historyNeedsRefresh("new-version") && refreshStore.historyPageSnapshot == "extended-window"))
+    refreshStore.showHistoryWindow(currentWindow, key: windowKey, cached: false, fetchedAt: currentFetchedAt)
+    checks.append(("store.readerPositionKeepsRecentWindow", !refreshStore.historyNeedsRefresh("new-version") && refreshStore.historyPageSnapshot == "current-window"))
+    refreshStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true, onlyWhileFollowing: true)
+    checks.append(("store.automaticRefreshCannotStartWhileReadingOlder", refreshStore.historyTask == nil && refreshStore.historyPageSnapshot == "current-window"))
+    refreshStore.historyFollowingLatest = true
+    refreshStore.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "window-only", force: true, onlyWhileFollowing: true)
+    refreshStore.historyFollowingLatest = false
+    await refreshStore.historyTask?.value
+    checks.append(("store.readerMovedDuringRefreshKeepsWindow", refreshStore.historyPageSnapshot == "current-window" && refreshStore.historyRefreshError == nil))
+    refreshStore.historyFollowingLatest = true
+    checks.append(("store.returnToLatestRefreshes", refreshStore.historyNeedsRefresh("new-version")))
+    checks.append(("store.displayedVersionSkipsRefresh", !refreshStore.historyNeedsRefresh("current-window")))
+    checks.append(("store.clearedRefreshErrorRestoresHistoryWatch", refreshStore.historyIsWatched(windowIdentity)))
     // A history browser cannot own, restore, delete, or submit the recovery run.
     mirrorStore.runId = "unresolved-recovery"
     mirrorStore.lifecycle = .failed
@@ -2542,6 +2568,16 @@ final class RemoteRunStore: ObservableObject {
       historyFromCache = true; historyFetchedAt = Date()
       prompt = nil; output = []; runId = nil; resultSummary = nil
     }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockMacStartsLater"), case let .loaded(turns) = history {
+      // A full cached base reproduces the production refresh gate, rather than
+      // bypassing it with a direct append that would mask a stale-history bug.
+      cachedHistory = ("mock-history", .init(turns: turns, fingerprint: "mock-old", fetchedAt: Date()), false)
+    }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockLongOutput") {
+      prompt = "检查长回复滚动定位"
+      output = [.init(id: 1, kind: "output", text: "## 实时回复开头\n\n" +
+        String(repeating: "完整实时回复保留全部内容。\n\n", count: 150) + "## 实时回复末尾")]
+    }
     if ProcessInfo.processInfo.arguments.contains("-uiMockMarkdownTable") {
       let markdown = """
       ## 性能（日志实测）
@@ -2721,10 +2757,11 @@ extension RemoteRunStore {
     if identity != nil, liveRunsTask != nil { stopLiveRuns(); startLiveRuns() }
   }
 
-  // True when the long-poll is delivering this session's history changes, so
-  // the transcript's fallback polling can stay idle.
+  // Observing a source version is not successful reconciliation. If its read
+  // failed, keep the existing paced fallback active even with an unchanged
+  // long-poll version; otherwise the latest messages could stay stale forever.
   func historyIsWatched(_ identity: SessionIdentity?) -> Bool {
-    liveRunsStatus == .observed && identity != nil && liveHistoryTarget == identity
+    liveRunsStatus == .observed && identity != nil && liveHistoryTarget == identity && historyRefreshError == nil
   }
 
   private func runLiveRunsLoop() async {

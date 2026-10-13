@@ -8,8 +8,9 @@ import RemoteTransport
 // turns are the host's read of real archived content, the live turn shows the
 // REAL lifecycle + streamed output (a possibly-incomplete cache), and nothing is
 // fabricated. File diffs still live on the Mac.
-// Full text stays inline. Parse archived Markdown off the UI actor and create
-// blocks lazily as the reader scrolls, rather than hiding content behind buttons.
+// Full text stays inline. Parse archived Markdown off the UI actor; the
+// conversation virtualizes rows, while each visible reply exposes its full
+// height so tail positioning does not stop at a placeholder.
 private struct HistoryChunkView: View {
   let kind: String
   let text: String
@@ -84,6 +85,8 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
   @State private var olderReadRequest = 0
+  @State private var latestReadRequest = 0
+  @State private var followingLatest = true
   @State private var showLiveQuestion = false
   @State private var confirmStop: G0Transport.LiveRun?
   private var composer: Binding<AppModel.ComposerDraft> {
@@ -181,11 +184,17 @@ struct SessionTranscriptView: View {
           }
         }
       }
-      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)", stopFollowingRequest: olderReadRequest) {
+      ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)", stopFollowingRequest: olderReadRequest,
+                             followLatestRequest: latestReadRequest, onFollowingChange: { value in
+        guard run.activeSessionIdentity == sessionIdentity else { return }
+        run.historyFollowingLatest = value
+        followingLatest = value
+      }) {
         historyBody
         if hasLiveTurn && !run.liveTurnInHistory { liveTurn }
         if let live = detachedLive { detachedTurn(live) }
       }
+      .id(sessionIdentity)
       if !readOnly { footer }
     }
     .background(Palette.surface)
@@ -221,6 +230,12 @@ struct SessionTranscriptView: View {
     .onChange(of: otherLive?.runId, initial: true) { _, _ in run.followDetached(otherLive) }
     .onChange(of: historyAllowsControls) {
       if !readOnly && historyAllowsControls { loadSessionControls() }
+    }
+    .task(id: followingLatest ? sessionIdentity : nil) {
+      guard followingLatest, let s = session else { return }
+      // Returning to the tail must reconcile a version the long-poll already
+      // reported while the reader was browsing older messages.
+      await run.refreshHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
     }
     .task(id: sessionIdentity) {
       guard let s = session else { return }
@@ -512,6 +527,7 @@ struct SessionTranscriptView: View {
         if run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
                              cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue)) {
           composer.wrappedValue = .init()
+          latestReadRequest += 1
         }
       }
       if let stopError = run.stopError {
