@@ -72,6 +72,7 @@ interface OpenCodeEventState {
   toolStartedAt: Map<string, number>
   streamedTextByMessageId: Map<string, string>
   clearedTextMessageIds: Set<string>
+  partTypesById: Map<string, string>
   messages: Map<string, Record<string, unknown>>
 }
 
@@ -89,6 +90,7 @@ const eventState = (request: ProviderRunRequest): OpenCodeEventState => {
     toolStartedAt: new Map<string, number>(),
     streamedTextByMessageId: new Map<string, string>(),
     clearedTextMessageIds: new Set<string>(),
+    partTypesById: new Map<string, string>(),
     messages: new Map<string, Record<string, unknown>>()
   }
   eventStates.set(request, created)
@@ -849,7 +851,10 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     }, timestamp))
     return
   }
-  if (type === 'session.next.text.delta' || (type === 'message.part.delta' && payload.field === 'text')) {
+  const cachedPartType = type === 'message.part.delta' && typeof payload.partID === 'string'
+    ? eventState(request).partTypesById.get(payload.partID)
+    : undefined
+  if (type === 'session.next.text.delta' || (type === 'message.part.delta' && payload.field === 'text' && cachedPartType !== 'reasoning')) {
     const messageId = typeof payload.assistantMessageID === 'string'
       ? payload.assistantMessageID
       : typeof payload.messageID === 'string'
@@ -879,11 +884,14 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     }))
     return
   }
-  if (type === 'session.next.reasoning.delta' || (type === 'message.part.delta' && payload.field === 'reasoning')) {
+  if (type === 'session.next.reasoning.delta' || (type === 'message.part.delta' && (payload.field === 'reasoning' || (payload.field === 'text' && cachedPartType === 'reasoning')))) {
     request.emit(newEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: String(payload.delta ?? '') }))
     return
   }
   const part = type === 'message.part.updated' ? record(payload.part) : payload
+  if (type === 'message.part.updated' && typeof part.id === 'string' && typeof part.type === 'string') {
+    eventState(request).partTypesById.set(part.id, part.type)
+  }
   const toolState = record(part.state)
   const toolTime = record(toolState.time)
   const isPartTool = type === 'message.part.updated' && part.type === 'tool'

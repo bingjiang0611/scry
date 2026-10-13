@@ -1385,6 +1385,49 @@ describe('OpenCode provider adapter', () => {
     ])
   })
 
+  it('routes message.part.delta text through the cached part type', () => {
+    const events: TraceEvent[] = []
+    const request = {
+      runId: 'run-part-delta',
+      prompt: 'inspect',
+      cwd: '/repo',
+      attachments: [],
+      emit: (event: TraceEvent) => events.push(event)
+    } satisfies ProviderRunRequest
+
+    emitOpenCodeEvent(request, {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-part-delta',
+        part: { id: 'part-reasoning', type: 'reasoning', messageID: 'assistant-part-delta' }
+      }
+    }, 'session-part-delta')
+    emitOpenCodeEvent(request, {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-part-delta', messageID: 'assistant-part-delta', partID: 'part-reasoning', field: 'text', delta: 'internal'
+      }
+    }, 'session-part-delta')
+    emitOpenCodeEvent(request, {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-part-delta',
+        part: { id: 'part-text', type: 'text', messageID: 'assistant-part-delta' }
+      }
+    }, 'session-part-delta')
+    emitOpenCodeEvent(request, {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-part-delta', messageID: 'assistant-part-delta', partID: 'part-text', field: 'text', delta: 'answer'
+      }
+    }, 'session-part-delta')
+
+    expect(events).toEqual([
+      expect.objectContaining({ kind: 'model', stage: 'thinking', thinking: 'internal' }),
+      expect.objectContaining({ kind: 'model', stage: 'text_delta', text: 'answer', messageId: 'assistant-part-delta' })
+    ])
+  })
+
   it('normalizes the native OpenCode Skill identity', () => {
     const events: TraceEvent[] = []
     const request = {

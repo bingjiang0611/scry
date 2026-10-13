@@ -3997,7 +3997,7 @@ function observeRemoteRun(info: {
   return {
     attach: (value) => { handle = value },
     event: (ev) => {
-      runState.items.push(ev)
+      appendCoalescedTrace(runState.items, ev)
       if (runs.isViewed(runId)) queueTrace(ev)
     },
     session: (externalSessionId) => {
