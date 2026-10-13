@@ -29,7 +29,6 @@ struct RootView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @Environment(\.scenePhase) private var scenePhase
-  @State private var showQuestion = false
 
   var body: some View {
     Group {
@@ -58,8 +57,9 @@ struct RootView: View {
     .background(Palette.surface.ignoresSafeArea())
     .tint(Palette.blue)
     .safeAreaInset(edge: .top, spacing: 0) {
-      if model.canShowWorkspace, !run.pendingQuestions.isEmpty, !showQuestion {
-        Button { showQuestion = true } label: {
+      // A screen that shows the focused run puts this in its status strip instead.
+      if model.canShowWorkspace, !run.pendingQuestions.isEmpty, !model.showRunQuestion, !focusedRunOnScreen {
+        Button { model.showRunQuestion = true } label: {
           Label("任务正在等待你的决定 · 查看", systemImage: "hand.raised")
             .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
             .background(Palette.warnBg)
@@ -80,8 +80,8 @@ struct RootView: View {
     }
     // Questions belong to the run, not a particular route. Returning home or
     // continuing an archived conversation must never hide a waiting request.
-    .onChange(of: run.pendingQuestions.first?.questionId) { _, id in showQuestion = model.canShowWorkspace && id != nil }
-    .sheet(isPresented: Binding(get: { model.canShowWorkspace && showQuestion }, set: { showQuestion = $0 })) {
+    .onChange(of: run.pendingQuestions.first?.questionId) { _, id in model.showRunQuestion = model.canShowWorkspace && id != nil }
+    .sheet(isPresented: Binding(get: { model.canShowWorkspace && model.showRunQuestion }, set: { model.showRunQuestion = $0 })) {
       if model.canShowWorkspace, let request = run.pendingQuestions.first {
         RemoteQuestionSheet(request: request, submitting: run.questionAnswering, error: run.questionError,
           onAnswer: { if model.canShowWorkspace { run.answerPendingQuestion(answers: $0) } },
@@ -122,7 +122,7 @@ struct RootView: View {
       }
     }
     .onChange(of: model.canShowWorkspace) { paired in
-      showQuestion = paired && !run.pendingQuestions.isEmpty
+      model.showRunQuestion = paired && !run.pendingQuestions.isEmpty
       if paired { resumeRecoveredRun(); run.startLiveRuns() } else { run.stopLiveRuns() }
     }
     .onAppear {
@@ -132,6 +132,18 @@ struct RootView: View {
       #endif
       resumeRecoveredRun()
       if model.canShowWorkspace { run.startLiveRuns() }
+    }
+  }
+
+  // ChatView always shows the focused run; a transcript shows it when the run
+  // belongs to the opened session (SessionTranscriptView's status strip).
+  private var focusedRunOnScreen: Bool {
+    switch model.route {
+    case .chat: return true
+    case .transcript:
+      guard !model.readOnlyTranscript, let s = model.openedSession else { return false }
+      return run.activeSessionIdentity == .opened(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+    default: return false
     }
   }
 
