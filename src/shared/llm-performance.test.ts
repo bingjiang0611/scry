@@ -18,7 +18,7 @@ describe('running LLM sessions', () => {
     Object.defineProperty(current, 'items', { get: () => { throw new Error('trace must not be scanned') } })
     const summary = summarizeRunningLlmSessions([old, current, { ...run('other', undefined), cwd: '/b', sessionId: 'session' }])
     expect(summary.sessions).toEqual([
-      expect.objectContaining({ providerId: 'pi', cwd: '/a', model: 'm', state: 'tool', outputStarted: true, tokensPerSecond: 42, firstTokenMs: 1200 }),
+      expect.objectContaining({ runId: 'new', observedAt: new Date(0).toISOString(), providerId: 'pi', cwd: '/a', model: 'm', state: 'tool', outputStarted: true, tokensPerSecond: 42, firstTokenMs: 1200 }),
       expect.objectContaining({ cwd: '/b', state: 'waiting', outputStarted: false })
     ])
     expect(summary.sessions[1]).not.toHaveProperty('tokensPerSecond')
@@ -54,6 +54,40 @@ describe('LLM speed history', () => {
     failed.performance.firstTokenMs = 100
     // Speed evidence alone (e.g. Claude provider_api) never becomes a 0 s first-token wait.
     expect(llmMetricSamples([timed, row(2000), failed], 'firstToken')).toEqual([{ ts: 1000, model: 'm', value: 2.5 }])
+  })
+
+  it('includes one provisional sample per running Sol turn, using observation time rather than poll time', () => {
+    const active = { ...run('sol', { model: 'gpt-6.1-sol', apiTokensPerSecond: 23.1, firstTokenMs: 3400,
+      observedAt: new Date(5000).toISOString(), state: 'tool' }), providerId: 'codex' as const }
+    const sessions = summarizeRunningLlmSessions([active], 9000).sessions
+    expect(llmMetricSamples([], 'speed', sessions)).toEqual([
+      { ts: 5000, model: 'gpt-6.1-sol', value: 23.1, provisional: true }
+    ])
+    expect(llmMetricSamples([], 'firstToken', sessions)).toEqual([
+      { ts: 5000, model: 'gpt-6.1-sol', value: 3.4, provisional: true }
+    ])
+    active.llmPerformance!.apiTokensPerSecond = 30
+    const updated = summarizeRunningLlmSessions([active], 10_000).sessions
+    expect(llmMetricSamples([], 'speed', updated)).toHaveLength(1)
+    expect(llmMetricSamples([], 'speed', updated)[0].value).toBe(30)
+  })
+
+  it('lets persisted completion or failure replace a stale running snapshot without double counting', () => {
+    const sessions = summarizeRunningLlmSessions([run('1000', { model: 'm', apiTokensPerSecond: 40 })]).sessions
+    expect(llmMetricSamples([row(1000)], 'speed', sessions)).toEqual([{ ts: 1000, model: 'm', value: 20 }])
+    expect(llmMetricSamples([row(1000, { failed: true })], 'speed', sessions)).toEqual([])
+  })
+
+  it('omits missing live evidence, unknown models and terminal observations instead of inventing data', () => {
+    const sessions = summarizeRunningLlmSessions([
+      run('missing', { model: 'm' }),
+      run('unknown-model', { apiTokensPerSecond: 50 }),
+      run('terminal', { state: 'complete', model: 'm', apiTokensPerSecond: 60, firstTokenMs: 900 }),
+      run('speed-only', { model: 'm', apiTokensPerSecond: 40 })
+    ]).sessions
+    expect(llmMetricSamples([], 'speed', sessions)).toEqual([{ ts: 0, model: 'm', value: 40, provisional: true }])
+    expect(llmMetricSamples([], 'firstToken', sessions)).toEqual([])
+    expect(llmMetricSamples([], 'speed', [])).toEqual([])
   })
 
   it('keeps the curve continuous on the 0 axis while marking idle points as unmeasured', () => {

@@ -1068,6 +1068,16 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   // Live sessions: per-call evidence gives token/s; Claude's final-only usage does not while running.
   await click('#performance-stream')
   await wait(`${runs}.some(text => text.includes('pi-live-model') && text.includes('生成中') && text.includes('40.0token/s') && text.includes('首 token1.5秒'))`)
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 3 && Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0token/s') && node.textContent.includes('1.5秒') && node.textContent.includes('0 + 1 运行中'))`)
+  await click('.llm-perf-metric button:nth-child(2)')
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2`)
+  await click('.llm-perf-metric button:nth-child(1)')
+  win.setSize(700, 700)
+  await wait(`innerWidth === 700`)
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  if (!await read(`${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth`)) throw new Error('Running performance samples overflow the narrow modal')
+  win.setSize(1000, 800)
+  await wait(`innerWidth === 1000`)
   if (await read(`${runs}.some(text => text.includes('project-a') && text.includes('token/s'))`)) throw new Error('Session without per-call evidence showed speed')
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
@@ -1115,7 +1125,7 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
   if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed', 'focus independent', 'done/stopped/idle excluded', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
 }
 
 try {
