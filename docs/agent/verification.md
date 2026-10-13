@@ -10,6 +10,10 @@
 - evidence 测试要覆盖真实空值、不可观测、partial、重复和乱序，不只测完整 happy path。
 - Recorder 测试覆盖 crash fence、原子写、lock recovery、duplicate event/Stop、cursor 与 corrupt record。
 - 不用固定 sleep 掩盖竞态；等待 receipt、事件、进程退出、文件原子出现或 queue drain。
+- 自动化 Electron 测试默认不激活 App、不抢系统焦点。
+  - 完整 App fixture 设置 `SCRY_TEST_APP=1`。独立 fixture 在 macOS ready 前设置 `app.setActivationPolicy('prohibited')`，窗口用 `show: false`，需要绘制时用 `showInactive()`；需要后台动画帧时仅为测试关闭 `backgroundThrottling`。
+  - 保留 Chromium 原生输入与页面内焦点检查，不用 `win.focus()`。后台测试不等于前台 OS 焦点/Dock 验收，确需此类验收时先征得用户同意。
+  - Dock attention 专项运行 `node scripts/electron-security-smoke.mjs --dev-question-only --foreground`。未传 `--foreground` 时在启动 App 前拒绝执行，不删减焦点/角标断言。
 - 当前仓库没有 ESLint/Prettier 命令，不要发明不存在的门禁或做大范围无关格式化。
 
 迭代时运行最小相关检查：
