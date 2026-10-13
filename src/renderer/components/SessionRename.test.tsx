@@ -23,6 +23,8 @@ it('shows bounded session hover cards and renames via the real sidebar DOM with 
     const main = join(dir, 'main.cjs')
     await writeFile(main, `
       const { app, BrowserWindow } = require('electron')
+      if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
+      app.on('browser-window-focus', () => { console.error('UI fixture stole native window focus'); app.exit(1) })
       app.setPath('userData', ${JSON.stringify(join(dir, 'userData'))})
       app.whenReady().then(() => {
         const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } })

@@ -12,6 +12,12 @@ const performanceOnly = ['--dev-performance-only', '--performance-only'].include
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
 const devQuestionOnly = process.argv[2] === '--dev-question-only'
+const foreground = process.argv.includes('--foreground')
+// Dock attention is cleared only by a genuinely focused native window.
+// Do not silently weaken that acceptance test or activate the app by default.
+if (devQuestionOnly && !foreground) {
+  throw new Error('Dock attention requires native foreground focus; explicitly opt in with --dev-question-only --foreground')
+}
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
 const devApp = nativeHistoryOnly || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
@@ -174,6 +180,7 @@ async function main() {
         HOME: home,
         ELECTRON_ENABLE_LOGGING: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
+        SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
         // The smoke adapter replaces Codex only. Never discover/start real Provider services.
         SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',

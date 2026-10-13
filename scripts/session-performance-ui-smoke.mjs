@@ -213,18 +213,19 @@ try {
   await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron');
-    if (process.platform === 'darwin') app.setActivationPolicy('accessory');
+    if (process.platform === 'darwin') app.setActivationPolicy('prohibited');
+    app.on('browser-window-focus', () => { console.error('Performance fixture stole native window focus'); app.exit(1); });
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))});
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))});
     app.whenReady().then(async () => {
-      const win = new BrowserWindow({ title: 'Scry performance regression', show: true, width: 1100, height: 750,
+      const win = new BrowserWindow({ title: 'Scry performance regression', show: false, width: 1100, height: 750,
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }));
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       win.webContents.on('console-message', event => console.error(event.message));
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))});
-        win.focus();
+        win.showInactive();
         win.webContents.focus();
         const result = await (${exercise.toString()})(win.webContents);
         console.log('SCRY_SESSION_PERFORMANCE=' + JSON.stringify(result));

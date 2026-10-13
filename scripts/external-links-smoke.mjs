@@ -14,7 +14,21 @@ const temp = await mkdtemp(join(tmpdir(), 'scry-external-links-'))
 
 async function exercise(window, shell, dialog) {
   const assert = require('node:assert/strict')
+  // Wait for the production startup show path, not just did-finish-load.
+  if (!window.isVisible()) await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Test window was not shown')), 5000)
+    window.once('show', () => { clearTimeout(timer); resolve() })
+  })
+  assert.equal(window.isFocused(), false, 'Test app must show without stealing native focus')
   const contents = window.webContents
+  assert.equal(contents.getBackgroundThrottling(), false, 'Background test UI must keep rendering')
+  let frameTimer
+  try {
+    await Promise.race([
+      contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => resolve(true)))'),
+      new Promise((_resolve, reject) => { frameTimer = setTimeout(() => reject(new Error('Background animation frame stalled')), 5000) })
+    ])
+  } finally { clearTimeout(frameTimer) }
   const rendererUrl = contents.getURL()
   const opened = []
   const prompts = []
@@ -82,6 +96,7 @@ try {
   await writeFile(join(temp, 'main.cjs'), `
     const { app, shell, dialog } = require('electron')
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
+    app.on('browser-window-focus', () => { console.error('Test app stole native window focus'); app.exit(1) })
     app.once('browser-window-created', (_event, window) => {
       window.webContents.once('did-finish-load', async () => {
         try {
@@ -106,7 +121,7 @@ try {
       clearTimeout(timer)
       if (code !== 0 || !output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) {
         reject(new Error(`External links fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
-      } else { console.log('External links: native clicks open directly; unsafe URLs and renderer navigation remain blocked'); resolve() }
+      } else { console.log('Background startup: no native focus; external links: native clicks open directly; unsafe URLs and renderer navigation remain blocked'); resolve() }
     })
   })
 } finally {
