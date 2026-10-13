@@ -98,7 +98,9 @@ struct RootView: View {
           if horizontal > 72 && horizontal > vertical * 1.35 { model.goBack() }
         }
     )
-    .animation(.easeInOut(duration: 0.2), value: model.route)
+    // Route replacement can remove a focused TextField while the system is
+    // resizing for its keyboard. An implicit animation of the entire root
+    // loops SwiftUI layout on iOS 26.5; keep page replacement unanimated.
     .animation(.easeInOut(duration: 0.2), value: model.canShowWorkspace)
     // The run channel is the honest source of reachability: reflect a real
     // successful/failed host exchange into the paired link status so the UI never
@@ -127,7 +129,7 @@ struct RootView: View {
     }
     .onAppear {
       #if DEBUG
-      model.applyUIPreviewArguments()
+      model.applyUIPreviewArguments(runStore: run)
       run.applyUIPreviewArguments()
       #endif
       resumeRecoveredRun()

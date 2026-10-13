@@ -110,11 +110,7 @@ struct SessionTranscriptView: View {
   private var detachedLive: G0Transport.LiveRun? {
     guard let live = otherLive, live.origin == "remote", run.detachedRunId == live.runId,
           run.activeSessionIdentity == sessionIdentity else { return nil }
-    switch run.history {
-    case let .loaded(turns), let .partial(turns):
-      if !live.prompt.isEmpty, turns.last?.userText.hasPrefix(live.prompt) == true { return nil }
-    default: break
-    }
+    if run.detachedTurnInHistory { return nil }
     return live
   }
   private var controlsMatch: Bool {

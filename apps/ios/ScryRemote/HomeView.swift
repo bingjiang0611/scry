@@ -352,9 +352,6 @@ struct SettingsView: View {
               model.route = .pair
             }
           }
-          settingsSection("远程体验") {
-            settingRow(Symbol.shield, "默认权限", "由每次任务的 Provider 设置决定") {}
-          }
           settingsSection("安全") {
             settingRow(Symbol.link, "重新配对", "替换此设备的远程授权") { model.route = .pair }
           }

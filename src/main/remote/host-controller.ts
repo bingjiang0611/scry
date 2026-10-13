@@ -498,9 +498,11 @@ export class HostController {
     const deadline = Date.now() + waitMs
     while (true) {
       const seen = this.#changeSeq
+      const output = await this.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor })
+      // Read lifecycle and its ledger evidence together after the async output
+      // read. Otherwise a newly terminal state can omit its failure/result event.
       const poll = this.poll(peerCertSHA256, { cursor: input.cursor })
       const questions = this.pendingQuestions(peerCertSHA256, { runId: input.runId })
-      const output = await this.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor })
       const state = this.#ledger.runState(input.runId) ?? null
       const terminal = state === 'settled' || state === 'failed' || state === 'cancelled'
       const remaining = deadline - Date.now()

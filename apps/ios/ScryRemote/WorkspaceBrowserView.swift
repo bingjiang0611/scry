@@ -119,7 +119,9 @@ private struct WorkspaceContentView: View {
           // was centred and long lines pushed text to the right. Pin the width.
           .frame(width: Self.width(of: lines), alignment: .leading)
           .padding(12)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .defaultScrollAnchor(.topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         if let file {
           Text("字节 \(file.offset)–\(file.nextOffset) / \(file.totalBytes)").font(.caption).monospacedDigit()
           if file.hasMore { Button("读取下一页") { snapshot = file.snapshot; offset = file.nextOffset }.frame(minHeight: 44) }

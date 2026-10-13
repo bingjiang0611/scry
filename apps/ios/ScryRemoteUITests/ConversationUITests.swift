@@ -27,6 +27,44 @@ final class ConversationUITests: XCTestCase {
     add(attachment)
   }
 
+  func testOpeningSearchResultWithKeyboardVisibleStaysResponsive() {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
+    app.launch()
+    let search = app.textFields.firstMatch
+    XCTAssertTrue(search.waitForExistence(timeout: 10))
+    search.tap()
+    search.typeText("重构")
+    XCTAssertTrue(app.keyboards.firstMatch.exists)
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "重构远程会话列表")).firstMatch.tap()
+    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
+    app.buttons["项目文件与 Diff"].tap()
+    XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 10))
+    capture("search-keyboard-navigation-responsive")
+  }
+
+  func testSettingsDoesNotOfferANoopPermissionButton() {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "settings"]
+    app.launch()
+    XCTAssertTrue(app.buttons["重新配对, 替换此设备的远程授权"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "默认权限")).firstMatch.exists)
+    capture("settings-no-dead-permission-entry")
+  }
+
+  func testRepeatedPromptDoesNotHideDetachedOutput() {
+    launch("transcript", extra: ["-uiMockDetachedRepeatedPrompt"])
+    XCTAssertTrue(app.staticTexts["旧轮回答"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["新轮实时输出"].exists)
+    capture("detached-repeated-prompt-keeps-live-output")
+  }
+
+  func testRecoveredChatKeepsReconciledEarlierTurns() {
+    launch("chat", extra: ["-uiMockReconciledChat"])
+    XCTAssertTrue(app.staticTexts["恢复前的问题"].waitForExistence(timeout: 10))
+    XCTAssertEqual(app.staticTexts.matching(identifier: "恢复前的回答").count, 1)
+    XCTAssertTrue(app.staticTexts["下一轮回答"].exists)
+    capture("recovered-chat-keeps-previous-turn")
+  }
+
   func testQRPairingHasNoAccountGate() {
     app.launchArguments = ["-uiPreview", "-route", "pair"]
     app.launch()
@@ -46,6 +84,7 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
     app.buttons["README.md"].tap()
     XCTAssertTrue(app.staticTexts["# Project fixture"].waitForExistence(timeout: 10))
+    XCTAssertLessThan(app.staticTexts["# Project fixture"].frame.minY, app.navigationBars.firstMatch.frame.maxY + 40)
     capture("workspace-file")
     app.navigationBars.buttons.element(boundBy: 0).tap()
     app.buttons["未提交 Diff"].tap()
