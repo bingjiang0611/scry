@@ -78,18 +78,6 @@ struct PlainIcon: View {
   }
 }
 
-// A message the Mac has not acknowledged yet. The outbox resends it on its own
-// until the Mac answers, so there is nothing for the user to do but wait.
-struct SendingLabel: View {
-  var body: some View {
-    HStack(spacing: 8) {
-      ProgressView().controlSize(.mini)
-      Text("发送中…").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-    }
-    .accessibilityElement(children: .combine)
-  }
-}
-
 struct Notice: View {
   let text: String
   var warning = false
@@ -130,21 +118,6 @@ struct StatusDot: View {
     case .pairing: return Palette.amber
     case .notPaired, .offline: return Palette.faint
     }
-  }
-}
-
-struct EvidenceChip: View {
-  let symbol: String?
-  let text: String
-  var body: some View {
-    HStack(spacing: 7) {
-      if let symbol { Image(systemName: symbol).font(.system(size: 12)) }
-      Text(text).font(.system(size: 12))
-    }
-    .foregroundStyle(Palette.muted)
-    .monospacedDigit()
-    .padding(.vertical, 6).padding(.horizontal, 11)
-    .background(Palette.canvas, in: Capsule())
   }
 }
 
@@ -735,6 +708,208 @@ struct ConversationChunk: View {
   }
 }
 
+// MARK: - Turns and session status
+
+// One conversation turn for every source: the Mac's session record, this
+// device's follow-up, or a run started elsewhere. The source decides which
+// evidence exists, never the layout. A normal finish stays silent; usage and
+// run id sit in the prompt's context menu, and a value the host did not send
+// says so instead of showing 0 (CLAUDE.md 证据不能说谎).
+struct TurnUserBubble: View {
+  let text: String
+  var attachments: [RemoteRunStore.SentAttachment] = []
+  var runId: String?
+  var usage: String?
+  // The run has not ended, so its usage cannot exist yet.
+  var usagePending = false
+
+  var body: some View {
+    HStack {
+      Spacer(minLength: 40)
+      VStack(alignment: .leading, spacing: 8) {
+        if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
+        Text(text).font(.system(size: 16)).lineSpacing(3)
+      }
+      .foregroundStyle(Palette.ink)
+      .padding(.vertical, 10).padding(.horizontal, 14)
+      .frame(maxWidth: 320, alignment: .leading)
+      .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+      // Long press opens the menu instead of text selection; copy keeps the prompt reusable.
+      .contextMenu {
+        #if canImport(UIKit)
+        Button { UIPasteboard.general.string = text } label: { Label("复制", systemImage: "doc.on.doc") }
+        #endif
+        Section("本轮详情") {
+          Text("用量 · " + (usage ?? (usagePending ? "运行结束后由 Mac 提供" : "Mac 未提供")))
+          Text("Run · " + (runId ?? "未提供"))
+        }
+      }
+    }
+  }
+}
+
+struct TurnOutputList: View {
+  let lines: [RemoteRunStore.OutputLine]
+  var body: some View {
+    ForEach(ConversationEntry.group(lines, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+      ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+    }
+  }
+}
+
+// The only per-turn status: an ending that was not a normal finish, or output
+// the host cut short. Progress belongs to the session status strip.
+struct TurnOutcomeNote: View {
+  let text: String
+  let failed: Bool
+
+  init?(lifecycle: RemoteRunStore.Lifecycle, hasOutput: Bool, truncated: Bool = false) {
+    var parts: [String] = []
+    switch lifecycle {
+    case .failed: parts.append("运行失败")
+    case .cancelled: parts.append("已停止")
+    default: break
+    }
+    if !hasOutput, [.settled, .failed, .cancelled].contains(lifecycle) { parts.append("未读取到输出") }
+    if truncated { parts.append("输出已达上限，内容被截断") }
+    guard !parts.isEmpty else { return nil }
+    text = parts.joined(separator: " · ")
+    failed = lifecycle == .failed
+  }
+
+  var body: some View {
+    Label(text, systemImage: "exclamationmark.circle")
+      .font(.system(size: 12.5, weight: .medium))
+      .foregroundStyle(failed ? Palette.negative : Palette.warnInk)
+      .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+      .accessibilityIdentifier("turn-outcome")
+  }
+}
+
+// A turn this device already saw end. Same layout as a Mac history turn.
+struct CompletedTurnView: View {
+  let turn: RemoteRunStore.CompletedLiveTurn
+  var body: some View {
+    Group {
+      TurnUserBubble(text: turn.prompt, attachments: turn.attachments,
+                     runId: turn.hostRunId ?? turn.runId, usage: turn.resultSummary)
+      TurnOutputList(lines: turn.output)
+      if let note = TurnOutcomeNote(lifecycle: turn.lifecycle, hasOutput: !turn.output.isEmpty) { note }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+// The run this store is driving. While it runs, the transcript shows only real
+// content; its state is in the status strip.
+struct FocusedTurnView: View {
+  @EnvironmentObject var run: RemoteRunStore
+  var body: some View {
+    Group {
+      if let prompt = run.prompt {
+        TurnUserBubble(text: prompt, attachments: run.sentAttachments, runId: run.runId,
+                       usage: run.resultSummary, usagePending: !run.terminalLifecycleKnown)
+      }
+      TurnOutputList(lines: run.output)
+      if let note = TurnOutcomeNote(lifecycle: run.lifecycle, hasOutput: !run.output.isEmpty, truncated: run.truncated) { note }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+// What is happening in this session right now, in one line above the composer.
+// Screens pick the single most urgent state, so the same run state never
+// appears twice on screen.
+struct SessionStatusLine {
+  enum Tone { case neutral, running, attention, warning }
+  struct Action {
+    let title: String
+    var destructive = false
+    var disabled = false
+    let perform: () -> Void
+  }
+  let text: String
+  var tone: Tone = .neutral
+  var busy = false
+  var action: Action?
+
+  static let offline = SessionStatusLine(text: "未连接 Mac，暂时无法发送", tone: .warning)
+
+  // The focused run, in the order the user must act on it. `recorded` and
+  // `dispatched` are not execution, so they read “等待开始”, not “运行中”.
+  @MainActor static func focusedRun(_ run: RemoteRunStore, onAnswer: @escaping () -> Void,
+                         onStop: @escaping () -> Void) -> SessionStatusLine? {
+    if !run.pendingQuestions.isEmpty {
+      return .init(text: "需要你决定", tone: .attention, action: .init(title: "回答", perform: onAnswer))
+    }
+    let stopAction: Action? = run.canStop && !run.stopRequested
+      ? .init(title: "停止", destructive: true, disabled: run.stopRequesting, perform: onStop) : nil
+    if run.observationReconnecting {
+      return .init(text: "连接中断，正在重连", tone: .warning, busy: true, action: stopAction)
+    }
+    if run.observationInterrupted {
+      let fallback = run.terminalLifecycleKnown ? "运行已结束，输出同步中断" : "同步中断，运行状态未知"
+      return .init(text: run.submitError ?? fallback, tone: .warning,
+                   action: .init(title: "重新连接", perform: { run.retryObservation() }))
+    }
+    if let error = run.stopError { return .init(text: error, tone: .warning, action: stopAction) }
+    if let error = run.submitError { return .init(text: error, tone: .warning, action: stopAction) }
+    if run.canStop {
+      if run.stopRequested { return .init(text: "正在停止，等待 Agent 实际结束", busy: true) }
+      return .init(text: run.lifecycle == .running ? "运行中" : "等待开始", tone: .running, busy: true,
+                   action: .init(title: "停止", destructive: true, disabled: run.stopRequesting, perform: onStop))
+    }
+    if run.lifecycle == .submitting { return .init(text: "发送中", busy: true) }
+    return nil
+  }
+}
+
+struct SessionStatusStrip: View {
+  let status: SessionStatusLine
+
+  private var color: Color {
+    switch status.tone {
+    case .neutral: return Palette.muted
+    case .running: return Palette.blue
+    case .attention: return Palette.amber
+    case .warning: return Palette.warnInk
+    }
+  }
+  private var symbol: String {
+    switch status.tone {
+    case .attention: return "hand.raised"
+    case .warning: return "exclamationmark.circle"
+    case .neutral, .running: return "info.circle"
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 9) {
+      if status.busy { ProgressView().controlSize(.mini).tint(color) }
+      else { Image(systemName: symbol).font(.system(size: 13, weight: .medium)) }
+      Text(status.text).fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if let action = status.action {
+        Button(action.title, action: action.perform)
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(action.destructive ? Palette.negative : color)
+          .disabled(action.disabled)
+          .frame(minWidth: 44, minHeight: 44)
+          .accessibilityIdentifier("session-status-action")
+      }
+    }
+    .font(.system(size: 13, weight: .medium))
+    .foregroundStyle(color)
+    .padding(.leading, 12).padding(.trailing, status.action == nil ? 12 : 4)
+    .frame(minHeight: 44)
+    .background(status.tone == .warning ? Palette.warnBg : Palette.canvas,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .padding(.horizontal, 12).padding(.top, 8)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("session-runtime-status")
+  }
+}
+
 // MARK: - Attachments and composer
 
 struct DraftAttachment: Identifiable, Equatable {
@@ -917,9 +1092,6 @@ struct MessageComposer: View {
   var slashCommandsLoading = false
   var slashCommandsReason: String?
   var onRefreshSlashCommands: (() -> Void)?
-  // When set, the current run can be interrupted; the send slot becomes Stop.
-  var onStop: (() -> Void)?
-  var stopping = false
   let onSend: () -> Void
 
   @State private var showPhotos = false
@@ -967,27 +1139,17 @@ struct MessageComposer: View {
         if inputFocused {
           PlainIcon(symbol: "keyboard.chevron.compact.down", label: "收起键盘") { inputFocused = false }
         }
-        if let onStop {
-          Button(action: onStop) {
-            Image(systemName: stopping ? "hourglass" : "stop.fill")
-              .font(.system(size: 13, weight: .bold)).foregroundStyle(Palette.surface)
-              .frame(width: 32, height: 32).background(Palette.ink, in: Circle())
-              .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-          }
-          .buttonStyle(.plain).disabled(disabled || stopping)
-          .accessibilityLabel(stopping ? "正在请求停止" : "停止运行").accessibilityIdentifier("stop-run")
-        } else {
-          Button(action: onSend) {
-            Image(systemName: Symbol.send)
-              .font(.system(size: 15, weight: .bold))
-              .foregroundStyle(disabled || sendDisabled ? Palette.muted : Palette.surface)
-              .frame(width: 32, height: 32)
-              .background(disabled || sendDisabled ? Palette.muted.opacity(0.35) : Palette.ink, in: Circle())
-              .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-          }
-          .buttonStyle(.plain).disabled(disabled || sendDisabled)
-          .accessibilityLabel("发送")
+        // Stop lives in the session status strip, so send never changes meaning.
+        Button(action: onSend) {
+          Image(systemName: Symbol.send)
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(disabled || sendDisabled ? Palette.muted : Palette.surface)
+            .frame(width: 32, height: 32)
+            .background(disabled || sendDisabled ? Palette.muted.opacity(0.35) : Palette.ink, in: Circle())
+            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
         }
+        .buttonStyle(.plain).disabled(disabled || sendDisabled)
+        .accessibilityLabel("发送")
       }
       if contextLabel != nil || !modelOptions.isEmpty || !effortOptions.isEmpty {
         Rectangle().fill(Palette.line).frame(height: 0.5)

@@ -3,9 +3,9 @@ import RemoteTransport
 
 // A conversation view aligned with ChatGPT / Codex mobile: the user's message
 // appears immediately as a right-aligned bubble, and the assistant's turn streams
-// in below it. It stays honest (CLAUDE.md 证据不能说谎): the assistant turn shows
-// the REAL lifecycle (recorded/dispatched/running/settled/failed/cancelled) and
-// only the host's REAL streamed output content (a live cache, possibly
+// in below it. It stays honest (CLAUDE.md 证据不能说谎): the status strip shows
+// the REAL lifecycle (recorded/dispatched/running/failed/cancelled), and the turn
+// shows only the host's REAL streamed output content (a live cache, possibly
 // incomplete/truncated). Token/cost come only from the ledger `result` marker.
 // Nothing is fabricated; with no active run it shows a truthful empty state.
 struct ChatView: View {
@@ -13,6 +13,7 @@ struct ChatView: View {
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
   @State private var latestReadRequest = 0
+  @State private var confirmStop = false
   private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: run.activeSessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
@@ -31,35 +32,17 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Label(run.observationInterrupted ? (run.terminalLifecycleKnown ? "任务已结束 · 输出同步已中断" : "状态未知 · 同步已中断")
-              : run.observationReconnecting ? "连接中断，正在重连 · 运行状态以 Mac 为准"
-              : !run.pendingQuestions.isEmpty ? "等待你的决定" : stateLabel,
-            systemImage: run.lifecycle == .running && !run.observationInterrupted ? "play.circle.fill" : "info.circle")
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(run.observationInterrupted ? Palette.muted : stateColor)
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading).padding(.horizontal, 20)
-        .accessibilityIdentifier("session-runtime-status")
-      if !paired { Notice(text: "尚未连接 Mac · 发送已停用。") }
-      if let error = run.submitError {
-        VStack(alignment: .leading, spacing: 7) {
-          Notice(text: error, warning: true)
-          if run.observationInterrupted {
-            Button("重新连接并继续观察") { run.retryObservation() }
-              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
-          }
-        }
-      }
       ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", followLatestRequest: latestReadRequest) {
             if !hasTurn {
               EmptyState(title: "开始一段新会话",
                          detail: "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。")
             } else {
-              ForEach(completedTurns) { turn in completedTurn(turn) }
-              if let prompt = run.prompt { userBubble(prompt) }
-              if run.prompt != nil { assistantTurn }
+              ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
+              if run.prompt != nil { FocusedTurnView() }
             }
       }
       .id(run.activeSessionIdentity)
+      if let status { SessionStatusStrip(status: status) }
       footer
     }
     .background(Palette.surface)
@@ -67,6 +50,11 @@ struct ChatView: View {
       if let projectCwd { WorkspaceBrowserView(cwd: projectCwd).id(projectCwd) }
     }
     .macLocalLinks(cwd: projectCwd)
+    .confirmationDialog("停止这次运行？", isPresented: $confirmStop, titleVisibility: .visible) {
+      Button("停止运行", role: .destructive) { run.stopRun() }
+    } message: {
+      Text("请求 Agent 停止，结果以 Agent 实际结束为准。")
+    }
     .onAppear { run.loadActiveContext() }
 #if DEBUG
     .onAppear {
@@ -97,75 +85,23 @@ struct ChatView: View {
     return run.hasConnection ? "已配对的 Mac" : "未连接"
   }
 
-  // The user's own message — right-aligned filled bubble, ChatGPT/Codex style.
-  private func userBubble(_ text: String, attachments: [RemoteRunStore.SentAttachment]? = nil) -> some View {
-    HStack {
-      Spacer(minLength: 40)
-      VStack(alignment: .leading, spacing: 8) {
-        let sent = attachments ?? run.sentAttachments
-        if !sent.isEmpty { SentAttachmentList(attachments: sent) }
-        Text(text).font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
-      }
-      .foregroundStyle(Palette.ink)
-      .padding(.vertical, 10).padding(.horizontal, 14)
-      .frame(maxWidth: 320, alignment: .leading)
-      .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+  // Design A: this run's state in one line above the composer, most urgent first.
+  private var status: SessionStatusLine? {
+    if !paired { return .offline }
+    if let focused = SessionStatusLine.focusedRun(run, onAnswer: { model.showRunQuestion = true },
+                                                  onStop: { confirmStop = true }) {
+      return focused
     }
-  }
-
-  private func completedTurn(_ turn: RemoteRunStore.CompletedLiveTurn) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      userBubble(turn.prompt, attachments: turn.attachments)
-      HStack(spacing: 8) {
-        Circle().fill(turn.lifecycle == .settled ? Palette.green : Palette.negative).frame(width: 7, height: 7)
-        Text(turn.lifecycle == .settled ? "已完成" : "运行结束：\(turn.lifecycle.rawValue)")
-          .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-      }
-      ForEach(ConversationEntry.group(turn.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
-        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
-      }
-      if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
+    if !runBusy, run.chosen == nil || run.chosenProvider == nil {
+      return .init(text: "发送前请在“新任务”中选择项目与 Provider")
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  // The assistant turn: a small state chip, the streamed content, and honest
-  // provenance. Left-aligned like an assistant message.
-  @ViewBuilder private var assistantTurn: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 8) {
-        Circle().fill(stateColor).frame(width: 7, height: 7)
-        Text(stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-        if run.lifecycle == .running || run.lifecycle == .submitting {
-          ProgressView().controlSize(.mini)
-        }
-      }
-
-      if run.output.isEmpty, run.lifecycle != .submitting {
-        Text(placeholderForState)
-          .font(.system(size: 15)).foregroundStyle(Palette.muted)
-      } else {
-        ForEach(ConversationEntry.group(run.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
-        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
-      }
-      }
-
-      if let result = run.resultSummary {
-        EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)")
-      }
-
-      if !run.output.isEmpty || run.lifecycle == .settled {
-        Text("以上为主机实时输出的缓存" + (run.truncated ? " · 已达上限，内容被截断" : "，可能不完整；文件 diff 需在主机查看"))
-          .font(.system(size: 10)).foregroundStyle(Palette.muted)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    return nil
   }
 
   private var footer: some View {
     VStack(alignment: .leading, spacing: 6) {
       MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: paired ? "继续这段对话…" : "连接后可输入",
+                      placeholder: !paired ? "连接后可输入" : runBusy ? "运行结束后可发送，先写也行" : "继续这段对话…",
                       disabled: !paired,
                       sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       contextLabel: run.chosenProvider?.label, contextLocked: true,
@@ -182,9 +118,7 @@ struct ChatView: View {
                           run.loadCommands(providerId: providerId, cwd: cwd,
                                            agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
-                      },
-                      onStop: run.canStop ? { run.stopRun() } : nil,
-                      stopping: run.stopRequesting) {
+                      }) {
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
         let currentDraft = composer
@@ -200,55 +134,12 @@ struct ChatView: View {
           latestReadRequest += 1
         }
       }
-      if let stopError = run.stopError {
-        Text(stopError).font(.system(size: 11)).foregroundStyle(Palette.negative).padding(.horizontal, 5)
-      } else if run.stopRequested && run.canStop {
-        Text("已请求停止，等待 Mac 上的 Agent 实际结束…")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
-      } else if runBusy {
-        Text("可先写下一条消息；本轮结果同步完成后再发送。")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
-      } else if run.chosen == nil || run.chosenProvider == nil {
-        Text("发送前请在“新任务”中选择项目与 Provider。")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
-      }
     }
     .padding(.horizontal, 14).padding(.bottom, 4)
     .background(Palette.surface)
     .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
   }
 
-  private var placeholderForState: String {
-    switch run.lifecycle {
-    case .submitting: return "发送中…"
-    case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
-    case .dispatched: return "主机已派发，准备执行…"
-    case .running: return "运行中 · 尚无输出内容"
-    case .failed, .cancelled: return "尚未读取到此运行的输出"
-    default: return "等待主机…"
-    }
-  }
-  private var stateLabel: String {
-    switch run.lifecycle {
-    case .unknown: return "等待主机"
-    case .submitting: return "发送中"
-    case .recorded: return "意图已记录（未执行）"
-    case .dispatched: return "主机已派发"
-    case .running: return "运行中"
-    case .settled: return "已完成"
-    case .failed: return "失败"
-    case .cancelled: return "已取消"
-    }
-  }
-  private var stateColor: Color {
-    switch run.lifecycle {
-    case .settled: return Palette.green
-    case .running: return Palette.blue
-    case .failed: return Palette.negative
-    case .cancelled, .submitting, .recorded, .dispatched: return Palette.amber
-    case .unknown: return Palette.muted
-    }
-  }
 }
 
 struct RemoteQuestionSheet: View {

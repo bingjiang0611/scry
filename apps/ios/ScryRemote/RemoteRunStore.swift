@@ -2534,6 +2534,38 @@ final class RemoteRunStore: ObservableObject {
     checks.append(("recovery.effortCannotReplaceModel", !store.controlsReady))
     store.chooseModel(nil)
     checks.append(("recovery.explicitModelChoice", store.controlsReady))
+    // Exercise the actual shared projection, including the action wiring. No
+    // relay calls: the action is the screen's confirmation, not stopRun itself.
+    store.runId = "status-fixture"
+    var stopConfirmations = 0
+    func status() -> SessionStatusLine? {
+      SessionStatusLine.focusedRun(store, onAnswer: {}, onStop: { stopConfirmations += 1 })
+    }
+    for (lifecycle, text) in [(Lifecycle.submitting, "发送中"), (.recorded, "等待开始"),
+                              (.dispatched, "等待开始"), (.running, "运行中")] {
+      store.lifecycle = lifecycle
+      checks.append(("status.\(lifecycle.rawValue)", status()?.text == text))
+    }
+    store.stopError = "停止请求结果未知，可再次点击停止"
+    let failedStop = status()
+    failedStop?.action?.perform()
+    checks.append(("status.failedStopRetainsConfirmation", failedStop?.text == store.stopError && stopConfirmations == 1))
+    store.stopError = nil
+    store.observationReconnecting = true
+    status()?.action?.perform()
+    checks.append(("status.reconnectingRetainsStop", stopConfirmations == 2))
+    store.observationReconnecting = false
+    store.stopRequested = true
+    checks.append(("status.stopping", status()?.text == "正在停止，等待 Agent 实际结束" && status()?.action == nil))
+    store.stopRequested = false
+    store.lifecycle = .settled
+    checks.append(("status.settledIsSilent", status() == nil))
+    checks.append(("outcome.normalFinishSilent", TurnOutcomeNote(lifecycle: .settled, hasOutput: true) == nil))
+    for lifecycle in [Lifecycle.settled, .failed, .cancelled] {
+      checks.append(("outcome.\(lifecycle.rawValue)MissingOutput",
+                     TurnOutcomeNote(lifecycle: lifecycle, hasOutput: false)?.text.contains("未读取到输出") == true))
+    }
+    checks.append(("outcome.truncationVisible", TurnOutcomeNote(lifecycle: .settled, hasOutput: true, truncated: true)?.text.contains("截断") == true))
     return checks
   }
 
@@ -2743,6 +2775,28 @@ final class RemoteRunStore: ObservableObject {
       // Explicitly synthetic sheet fixture; it never reaches answerQuestion.
       let fixture = #"{"runId":"fixture-run","questionId":"fixture-question","questionKind":"input","questions":[{"header":"录屏验证 · 模拟请求","question":"输入一段多行说明","options":[],"multiSelect":false,"inputMode":"multiline"}]}"#
       pendingQuestions = [try! JSONDecoder().decode(G0Transport.RunQuestionRequest.self, from: Data(fixture.utf8))]
+    }
+    // Status-strip fixtures: this device's run in progress or failed, and a run
+    // the Mac started in the same session. Nothing is sent; mockMode never delivers.
+    if ProcessInfo.processInfo.arguments.contains("-uiMockRunning") || ProcessInfo.processInfo.arguments.contains("-uiMockFailed") {
+      let failed = ProcessInfo.processInfo.arguments.contains("-uiMockFailed")
+      prompt = "有办法不会收吗 不然每次回来看代码都要重新等待 jdtls 加载"
+      sentAttachments = []; resultSummary = nil; runId = "mock-run-visual-only"
+      output = [.init(id: 1, kind: "tool", text: "rg -n jdtls ~/.config"),
+                .init(id: 2, kind: "output", text: "jdtls 的工作区默认放在临时目录，所以每次都要重新索引。")]
+      lifecycle = failed ? .failed : .running
+      terminalDrainCompleted = failed
+    }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockMacRun") {
+      prompt = nil; output = []; runId = nil; resultSummary = nil; lifecycle = .unknown
+      let live = #"{"origin":"mac","runId":"mock-mac-run","providerId":"codex","cwd":"/Users/demo/Projects/scry","externalSessionId":"codex-pinned-1","prompt":"","state":"running","questions":[]}"#
+      liveRuns = [try! JSONDecoder().decode(G0Transport.LiveRun.self, from: Data(live.utf8))]
+      liveRunsStatus = .observed
+    }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockStopFailure") {
+      if ProcessInfo.processInfo.arguments.contains("-uiMockMacRun") {
+        liveActionError = "停止请求结果未知，可再次点击停止"
+      } else { stopError = "停止请求结果未知，可再次点击停止" }
     }
   }
 

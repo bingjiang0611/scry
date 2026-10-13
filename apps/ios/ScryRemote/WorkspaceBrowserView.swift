@@ -154,24 +154,22 @@ struct SessionRunStatusView: View {
   @State private var error: String?
   @State private var showDetails = false
 
-  private var label: String {
-    if error != nil { return "状态未知" }
+  // Only states worth a line: no run observed stays silent, like the long-poll path.
+  private var line: SessionStatusLine? {
+    let details = SessionStatusLine.Action(title: "详情", perform: { showDetails = true })
+    if error != nil { return .init(text: "无法确认 Mac 上的运行状态", action: details) }
     switch status?.state {
-    case .running: return "正在运行"
-    case .waiting: return "等待你的决定"
-    case .not_observed: return "未检测到运行"
-    case nil: return "正在核对状态…"
+    case .running: return .init(text: "运行中", tone: .running, busy: true, action: details)
+    case .waiting: return .init(text: "需要你决定", tone: .attention, action: details)
+    case .not_observed, nil: return nil
     }
   }
   var body: some View {
-    Button { showDetails = true } label: {
-      Label(label, systemImage: status?.state == .running ? "play.circle.fill" : "info.circle")
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(status?.state == .running ? Palette.positive : Palette.muted)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    // The container stays mounted while silent so the status poll keeps running.
+    VStack(spacing: 0) {
+      if let line { SessionStatusStrip(status: line) }
     }
-    .buttonStyle(.plain).padding(.horizontal, 20).accessibilityIdentifier("session-runtime-status")
-    .alert(label, isPresented: $showDetails) { Button("知道了", role: .cancel) {} } message: {
+    .alert(line?.text ?? "运行状态", isPresented: $showDetails) { Button("知道了", role: .cancel) {} } message: {
       Text(error ?? "仅反映 Mac Scry 当前可见的运行，不代表其他终端中的 Agent。未检测到运行不等于任务已完成。\n核对时间：\(status?.observedAt ?? "尚未取得")")
     }
     .task(id: [session.providerId, session.agentProfileId, session.cwd, session.externalSessionId, String(describing: scenePhase)]) {

@@ -38,8 +38,10 @@ final class ConversationUITests: XCTestCase {
 
   func testSessionStatusAndReadOnlyWorkspaceBrowser() {
     launch("transcript", extra: ["-uiWorkspaceFixture"])
-    XCTAssertTrue(app.buttons["session-runtime-status"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.buttons["session-runtime-status"].label.contains("正在运行"))
+    // Design A: the run state is one strip above the composer, not a button row.
+    let strip = app.descendants(matching: .any)["session-runtime-status"]
+    XCTAssertTrue(strip.waitForExistence(timeout: 10))
+    XCTAssertTrue(strip.staticTexts["运行中"].exists)
     app.buttons["项目文件与 Diff"].tap()
     XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
     app.buttons["README.md"].tap()
@@ -99,8 +101,67 @@ final class ConversationUITests: XCTestCase {
     let input = app.descendants(matching: .any)["message-input"]
     XCTAssertFalse(input.isEnabled)
     XCTAssertFalse(app.buttons["发送"].isEnabled)
-    XCTAssertTrue(app.staticTexts["尚未连接 Mac · 发送已停用。"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["session-runtime-status"].staticTexts["未连接 Mac，暂时无法发送"].exists)
     capture("offline-chat")
+  }
+
+  // Design A: a run reads the same whether this phone or the Mac started it,
+  // and the state lives in one strip, not in the turn or the composer.
+  func testRunStatusIsTheSameForPhoneAndMacRuns() {
+    for origin in ["-uiMockRunning", "-uiMockMacRun"] {
+      launch("transcript", extra: [origin])
+      let strip = app.descendants(matching: .any)["session-runtime-status"]
+      XCTAssertTrue(strip.waitForExistence(timeout: 10), origin)
+      XCTAssertTrue(strip.staticTexts["运行中"].exists, origin)
+      XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "session-runtime-status").count, 1, origin)
+      XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Mac 上正在")).firstMatch.exists, origin)
+      // Stop still needs a second confirmation, with one wording for both.
+      app.buttons["session-status-action"].tap()
+      XCTAssertTrue(app.staticTexts["停止这次运行？"].waitForExistence(timeout: 5), origin)
+      capture("stop-confirm\(origin)")
+      app.terminate()
+    }
+  }
+
+  func testFailedStopStillOffersConfirmationBackedRetry() {
+    for origin in ["-uiMockRunning", "-uiMockMacRun"] {
+      launch("transcript", extra: [origin, "-uiMockStopFailure"])
+      XCTAssertTrue(app.staticTexts["停止请求结果未知，可再次点击停止"].waitForExistence(timeout: 5))
+      app.buttons["session-status-action"].tap()
+      XCTAssertTrue(app.staticTexts["停止这次运行？"].waitForExistence(timeout: 5))
+      app.terminate()
+    }
+  }
+
+  func testTurnDetailsDoNotInventMissingUsage() {
+    launch("transcript", extra: ["-uiMockFailed"])
+    app.staticTexts["有办法不会收吗 不然每次回来看代码都要重新等待 jdtls 加载"].press(forDuration: 1)
+    XCTAssertTrue(app.staticTexts["用量 · Mac 未提供"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["复制"].exists)
+    capture("turn-details")
+  }
+
+  func testQuestionStripReopensTheSheet() {
+    launch("transcript", extra: ["-uiMockRunning", "-uiMockQuestion"])
+    let sheetTitle = app.staticTexts["需要你的决定"]
+    XCTAssertTrue(sheetTitle.waitForExistence(timeout: 10))
+    app.swipeDown(velocity: .fast)
+    let strip = app.descendants(matching: .any)["session-runtime-status"]
+    XCTAssertTrue(strip.waitForExistence(timeout: 5))
+    XCTAssertTrue(strip.staticTexts["需要你决定"].exists)
+    // The global question banner stays hidden while this strip shows the question.
+    XCTAssertFalse(app.buttons["任务正在等待你的决定 · 查看"].exists)
+    capture("question-strip")
+    app.buttons["session-status-action"].tap()
+    XCTAssertTrue(sheetTitle.waitForExistence(timeout: 5))
+  }
+
+  func testFailedTurnKeepsItsOutcomeInTheTurn() {
+    launch("transcript", extra: ["-uiMockFailed"])
+    let outcome = app.descendants(matching: .any)["turn-outcome"]
+    XCTAssertTrue(outcome.waitForExistence(timeout: 10))
+    XCTAssertTrue(outcome.staticTexts["运行失败"].exists)
+    capture("failed-turn")
   }
 
   func testHistoryIsCompleteByScrollingWithoutDisclosure() {

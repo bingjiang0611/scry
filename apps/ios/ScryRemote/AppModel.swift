@@ -66,6 +66,9 @@ final class AppModel: ObservableObject {
   // The session currently opened for read-only transcript replay (nil = none).
   @Published var openedSession: OpenedSession?
   @Published var readOnlyTranscript = false
+  // The focused run's question sheet. App-level because questions belong to the
+  // run; a screen's status strip reopens it after the user dismisses it.
+  @Published var showRunQuestion = false
 
   // Opening another session leaves a run with a host receipt running on the
   // Mac (its status, questions and stop stay reachable via the live-run list).

@@ -2,7 +2,9 @@
 
 ## D-20261013-scry-ios-transcript
 
-- 范围 / 状态：Scry iOS 会话详情（`SessionTranscriptView`）；需求已确认，设计稿待选方向，未改生产代码。
+- 范围 / 状态：Scry iOS 会话详情（`SessionTranscriptView`，以及同一种会话屏 `ChatView`）；需求已确认。
+- 选定：2026-10-13 用户回复“A”，选中方向 A（底部状态条）。基线：commit `b06c4ee`，`index.html` sha256 `e0e9d7a9…451b`。未回答的 A1（用量放长按）按设计稿默认实现。
+- 实现差异：“长按回合 → 本轮详情”会与 Agent 正文的文字选择冲突，改为长按**用户气泡**打开系统菜单（复制 + 本轮详情），与 iMessage 一致；用户气泡不再支持局部选择，只能整段复制。本轮详情不显示来源。
 - 用户原话：“手机发送消息和 mac 发送消息在手机端 UI 不一样，我理解应该是一致的，不区分；目前各种状态很乱，希望可以简洁些。重新设计会话详情的 UI，先出设计稿。”
 
 ## 任务
@@ -38,8 +40,8 @@
 
 ## 统一规则（三个方向共用）
 
-1. 一个 `TurnView`：用户气泡 + Agent 内容 + 可选尾部。所有来源同一组件，同一样式，不显示来源。
-2. 已结束且正常的回合：不显示任何状态或用量。用量 / 来源 / runId 放进“本轮详情”（长按或点 Agent 内容尾部空白）。缺数据写“Mac 未提供”。
+1. 统一回合结构：用户气泡 + Agent 内容 + 可选尾部。所有来源共用气泡与内容组件，不显示来源；外层会话负责相同的行间距与懒布局。
+2. 已结束且正常、有输出的回合：不显示状态或用量。用量 / runId 放进“本轮详情”（长按用户气泡）；不显示来源。缺用量写“Mac 未提供”。
 3. 状态分层，每层只有一个位置：
 
 | 层 | 内容 | 位置 |
@@ -80,3 +82,17 @@
 - 6 个状态下屏幕上运行状态只出现一处。
 - 失败 / 已停止 / 离线 / 历史失败仍可见且可操作。
 - 现有 XCTest（工具展开、离线禁发、草稿保留）仍通过。
+
+## 实现与验证回执（2026-10-13）
+
+- 已实现方向 A，成品待用户验收：`Components.swift` 共享气泡、回合异常与底部状态条；`ChatView` / `SessionTranscriptView` / `SessionRunStatusView` 删除重复运行状态。正常完成静默，等待开始不冒充执行。
+- 失败、停止、结束但无输出及截断保留回合提示。实时缓存仍标明可能不完整；停止失败保留二次确认后的重试入口；只读条合并历史失败提示。未知错误文本完整换行，不用省略号掩盖原因。
+- 本轮独立评审指出上述四个边界问题，已修复；用户气泡及行间距进一步统一。未改传输合同、权限、草稿键或附件限制。
+- 最终版本模拟器渲染：iPhone 17 / iOS 26.5，Xcode 26.6。见 [运行中](implementation-running.png)、[历史读取失败](implementation-history-warning.png)。另核对 Mac 运行停止失败后底部仍有“停止”入口。均为 DEBUG fixture，不代表真实 Mac/Provider 链路通过。
+- `xcodebuild build-for-testing` 通过，包含 App 和 UI 测试目标；App 内 `-selfTest` 69 项通过，其中新增 13 项状态/异常检查。未签名模拟器 Keychain 检查明确跳过。
+- 反向验证：临时撤回“settled + 空输出”提示修复，`run.outcome.settledMissingOutput` 确实失败（`failures=1`）；恢复修复后 69 项通过（`failures=0`）。
+- 新增 XCTest：手机/Mac 同一状态条、停止二次确认、停止失败重试、问题 sheet 重开、失败回合和长按缺失用量；更新离线提示断言。**只验证编译，尚未验证运行**：首次测试因 `DTServiceHubClient failed to bless service hub` 导致 runner 连接挂起；独立新模拟器复现同一错误，终止等待，未放宽断言或超时。
+- 尚未验收：真实 iPhone + Mac 联动，长按菜单、问题 sheet 重开、草稿与工具展开的当前版本坐标交互，以及只读历史失败的实际交互。需恢复 Xcode 测试服务或在真机重放。
+- Mac 历史仍不提供附件、用量和 lifecycle；本次未擅自扩展 `RunHistoryTurn`，不能承诺补齐这些数据。
+- 日志保留在 `/tmp/scry-transcript-{build-final,selftest-final,control-selftest,test-isolated}.log`；测试模拟器仅本次创建，验证后删除。
+- 设计库：本条沿用 `D-20261013-scry-ios-transcript`，不重复注册。全库仍有 5 个不属于本次的缺失来源：`P-PI-MODEL-SELECTOR`、`D-20260912-scry-ios-remote`、`D-20261008-scry-ios-continuity`、`P-SCRY-SESSION-HISTORY`、`D-20261010-scry-llm-sidebar`；未删除旧条目来凑通过。

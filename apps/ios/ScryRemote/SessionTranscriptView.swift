@@ -5,9 +5,9 @@ import RemoteTransport
 // composer to CONTINUE the conversation. A follow-up resumes the SAME Provider
 // session (RemoteRunStore.submitFollowUp with resume = the session id), so the
 // run keeps the prior context. It stays honest (CLAUDE.md 证据不能说谎): past
-// turns are the host's read of real archived content, the live turn shows the
-// REAL lifecycle + streamed output (a possibly-incomplete cache), and nothing is
-// fabricated. File diffs still live on the Mac.
+// turns are the host's read of real archived content, the live turn shows only
+// streamed output (a possibly-incomplete cache) while its REAL lifecycle sits
+// in the status strip, and nothing is fabricated. File diffs still live on the Mac.
 // Full text stays inline. Parse archived Markdown off the UI actor; the
 // conversation virtualizes rows, while each visible reply exposes its full
 // height so tail positioning does not stop at a placeholder.
@@ -44,16 +44,7 @@ private struct HistoryTurnView: View {
     // The conversation owns the lazy layout. Nested lazy stacks estimate whole
     // tall turns independently and can leave the tail viewport empty.
     Group {
-      if !turn.userText.isEmpty {
-        HStack {
-          Spacer(minLength: 40)
-          Text(turn.userText)
-            .font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
-            .foregroundStyle(Palette.ink).padding(.vertical, 10).padding(.horizontal, 14)
-            .frame(maxWidth: 320, alignment: .leading)
-            .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-      }
+      if !turn.userText.isEmpty { TurnUserBubble(text: turn.userText, runId: turn.runId) }
       ForEach(ConversationEntry.group(turn.items, id: { index, _ in index }, kind: \.kind, text: \.text)) { entry in
         HistoryChunkView(kind: entry.kind, text: entry.text, result: entry.result)
       }
@@ -88,7 +79,9 @@ struct SessionTranscriptView: View {
   @State private var latestReadRequest = 0
   @State private var followingLatest = true
   @State private var showLiveQuestion = false
-  @State private var confirmStop: G0Transport.LiveRun?
+  @State private var stopTarget: StopTarget?
+  // One stop confirmation for every run, wherever it was started.
+  private enum StopTarget { case focused, live(G0Transport.LiveRun) }
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
   }
@@ -111,7 +104,6 @@ struct SessionTranscriptView: View {
   private var otherLiveQuestion: G0Transport.RunQuestionRequest? { otherLive.flatMap { run.openLiveQuestion($0) } }
   // This conversation's message that is still sending after the user left it.
   private var backgroundSend: RemoteRunStore.PendingSubmission? { readOnly ? nil : run.backgroundSend(for: sessionIdentity) }
-  private var focusedSending: Bool { run.activeSessionIdentity == sessionIdentity && run.lifecycle == .submitting }
   private var runBusy: Bool { run.isBusy || otherLive != nil || backgroundSend != nil }
   // Show the detached run's streamed output unless history already holds its
   // turn (a Provider transcript written live); never show both.
@@ -145,47 +137,6 @@ struct SessionTranscriptView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      if let session {
-        if focusedSending || backgroundSend != nil {
-          // The message bubble already shows "发送中"; no second status row.
-          EmptyView()
-        } else if run.activeSessionIdentity == sessionIdentity, run.canStop {
-          // This device's own live run. Remote runs are not in the Mac
-          // RunRegistry, so the host status read would say "not observed".
-          Label(run.observationReconnecting ? "连接中断，正在重连 · 运行状态以 Mac 为准"
-                  : !run.pendingQuestions.isEmpty ? "等待你的决定"
-                  : run.lifecycle == .running ? "运行中" : "主机已派发",
-                systemImage: run.observationReconnecting ? "wifi.exclamationmark" : "play.circle.fill")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(run.observationReconnecting ? Palette.muted : Palette.blue)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 20)
-            .accessibilityIdentifier("session-runtime-status")
-        } else if let live = otherLive {
-          liveRunBar(live)
-        } else if run.liveRunsStatus == .observed {
-          // Idle is shown in the header subtitle; a full row adds noise.
-          EmptyView()
-        } else {
-          SessionRunStatusView(session: session)
-        }
-      }
-      if readOnly {
-        Notice(text: "只读历史浏览，不改变旧任务与草稿；请返回恢复任务核对结果后再续聊。", warning: true)
-        Button("返回恢复任务") { model.route = .chat }
-          .font(.system(size: 13, weight: .semibold)).padding(.vertical, 6)
-      }
-      if historyReadyForDisplay || run.history == .baseUnavailable, let reason = run.historyRefreshError {
-        historyErrorBanner(reason)
-      }
-      if let error = run.submitError {
-        VStack(alignment: .leading, spacing: 7) {
-          Notice(text: error, warning: true)
-          if run.observationInterrupted {
-            Button("重新连接并继续观察") { run.retryObservation() }
-              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
-          }
-        }
-      }
       ConversationScrollView(revision: "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)", stopFollowingRequest: olderReadRequest,
                              followLatestRequest: latestReadRequest, onFollowingChange: { value in
         guard run.activeSessionIdentity == sessionIdentity else { return }
@@ -193,16 +144,16 @@ struct SessionTranscriptView: View {
         followingLatest = value
       }) {
         historyBody
-        if hasLiveTurn && !run.liveTurnInHistory { liveTurn }
+        if hasLiveTurn && !run.liveTurnInHistory { FocusedTurnView() }
         if let live = detachedLive { detachedTurn(live) }
         if let pending = backgroundSend {
-          VStack(alignment: .leading, spacing: 10) {
-            userBubble(pending.routing.prompt, attachments: pending.routing.attachments.map(RemoteRunStore.SentAttachment.init))
-            SendingLabel()
-          }.frame(maxWidth: .infinity, alignment: .leading)
+          TurnUserBubble(text: pending.routing.prompt,
+                         attachments: pending.routing.attachments.map(RemoteRunStore.SentAttachment.init),
+                         usagePending: true)
         }
       }
       .id(sessionIdentity)
+      statusStrip
       if !readOnly { footer }
     }
     .background(Palette.surface)
@@ -211,12 +162,17 @@ struct SessionTranscriptView: View {
     }
     .macLocalLinks(cwd: session?.cwd)
     .onChange(of: otherLiveQuestion?.questionId, initial: true) { _, id in showLiveQuestion = id != nil }
-    .confirmationDialog(confirmStop?.origin == "mac" ? "停止 Mac 上的这次运行？" : "停止这次运行？",
-                        isPresented: Binding(get: { confirmStop != nil }, set: { if !$0 { confirmStop = nil } }),
-                        titleVisibility: .visible, presenting: confirmStop) { live in
-      Button("停止运行", role: .destructive) { run.stopLiveRun(live) }
+    .confirmationDialog("停止这次运行？",
+                        isPresented: Binding(get: { stopTarget != nil }, set: { if !$0 { stopTarget = nil } }),
+                        titleVisibility: .visible, presenting: stopTarget) { target in
+      Button("停止运行", role: .destructive) {
+        switch target {
+        case .focused: run.stopRun()
+        case let .live(live): run.stopLiveRun(live)
+        }
+      }
     } message: { _ in
-      Text("与 Mac 上的停止按钮相同：请求 Agent 停止，结果以 Agent 实际结束为准。")
+      Text("请求 Agent 停止，结果以 Agent 实际结束为准。")
     }
     .sheet(isPresented: $showLiveQuestion) {
       if let live = otherLive, let request = otherLiveQuestion {
@@ -290,26 +246,15 @@ struct SessionTranscriptView: View {
       ForEach(first..<(first + turns.count), id: \.self) { ordinal in
         HistoryTurnView(turn: turns[ordinal - first])
       }
-      ForEach(completedTurns) { turn in completedTurnView(turn) }
+      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
     case .empty:
-      ForEach(completedTurns) { turn in completedTurnView(turn) }
+      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
       Text("这条会话没有可读取的历史记录，你仍可以在下方继续对话。")
         .font(.system(size: 13)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case .baseUnavailable:
-      HStack(spacing: 10) {
-        if run.historySyncing { ProgressView().controlSize(.small) }
-        Text(run.historySyncing ? "正在读取 Mac 上的会话记录…" : "还没有读到 Mac 上的更早记录（不代表没有）。下面是本机这次发出的对话。")
-          .font(.system(size: 13)).foregroundStyle(Palette.muted)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        // The error banner already offers retry; one action per state.
-        if !run.historySyncing, run.historyRefreshError == nil, let s = session {
-          Button("重新读取") { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) }
-            .font(.system(size: 13, weight: .semibold))
-        }
-      }
-      .accessibilityIdentifier("history-base-unavailable")
-      ForEach(completedTurns) { turn in completedTurnView(turn) }
+      // The missing record is reported once, in the status strip.
+      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
     case .failed("history_unavailable") where detachedLive != nil:
       // A session this run is creating has no record until the run ends.
       EmptyView()
@@ -323,7 +268,7 @@ struct SessionTranscriptView: View {
       .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
       DisclosureGroup("错误详情") { Text(reason).font(.caption).textSelection(.enabled) }
         .font(.caption).foregroundStyle(Palette.muted)
-      ForEach(completedTurns) { turn in completedTurnView(turn) }
+      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
     }
   }
 
@@ -401,13 +346,8 @@ struct SessionTranscriptView: View {
   }
 
   private var headerSubtitle: String {
-    var parts = [projectName(session?.cwd), providerName]
-    // Only the long-poll proves "nothing observed"; it is not "completed".
-    if run.liveRunsStatus == .observed, otherLive == nil, !focusedSending, backgroundSend == nil,
-       !(run.activeSessionIdentity == sessionIdentity && run.canStop) {
-      parts.append("未检测到运行")
-    }
-    return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    // Identity only; every run state is in the status strip.
+    [projectName(session?.cwd), providerName].filter { !$0.isEmpty }.joined(separator: " · ")
   }
 
   private var providerName: String {
@@ -418,24 +358,73 @@ struct SessionTranscriptView: View {
     return id.prefix(1).uppercased() + id.dropFirst()
   }
 
-  private func historyErrorBanner(_ reason: String) -> some View {
-    HStack(alignment: .top, spacing: 8) {
-      Image(systemName: "exclamationmark.circle").font(.system(size: 13, weight: .medium)).padding(.top, 1)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(run.history == .baseUnavailable ? "无法读取 Mac 上的会话记录" : "历史同步失败，显示的是上次读到的内容")
-          .font(.system(size: 12, weight: .semibold))
-        // The exact reason stays in the header menu (历史状态).
-        Text("正在自动重试").font(.system(size: 11))
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      // The paced refresh keeps retrying while this error stands (historyIsWatched).
-      ProgressView().controlSize(.small)
+  // Design A: one line above the composer for everything happening in this
+  // session, most urgent first. A run reads the same whether this phone or the
+  // Mac started it.
+  @ViewBuilder private var statusStrip: some View {
+    if let status {
+      SessionStatusStrip(status: status)
+    } else if let session, !readOnly, run.liveRunsStatus != .observed {
+      // Hosts without the live-run long-poll: the slower status read fills in.
+      SessionRunStatusView(session: session)
     }
-    .foregroundStyle(Palette.warnInk)
-    .padding(.vertical, 8).padding(.horizontal, 12)
-    .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    .padding(.horizontal, 16).padding(.bottom, 9)
-    .accessibilityIdentifier("history-refresh-error")
+  }
+
+  private var status: SessionStatusLine? {
+    if readOnly {
+      let issue = historyIssue
+      return .init(text: issue.map { "只读浏览 · \($0.text)" } ?? "只读浏览，不影响正在恢复的任务",
+                   tone: issue?.tone ?? .neutral, busy: issue?.busy ?? false,
+                   action: .init(title: "返回任务", perform: { model.route = .chat }))
+    }
+    if !run.hasConnection { return .offline }
+    if run.activeSessionIdentity == sessionIdentity,
+       let focused = SessionStatusLine.focusedRun(run, onAnswer: { model.showRunQuestion = true },
+                                              onStop: { stopTarget = .focused }) {
+      return focused
+    }
+    if let live = otherLive {
+      if otherLiveQuestion != nil {
+        return .init(text: "需要你决定", tone: .attention, action: .init(title: "回答", perform: { showLiveQuestion = true }))
+      }
+      if let error = run.liveActionError {
+        return .init(text: error, tone: .warning,
+                     action: .init(title: "停止", destructive: true, disabled: run.liveActionRunId != nil,
+                                   perform: { stopTarget = .live(live) }))
+      }
+      if live.state == "stopping" { return .init(text: "正在停止，等待 Agent 实际结束", busy: true) }
+      return .init(text: "运行中", tone: .running, busy: true,
+                   action: .init(title: run.liveActionRunId == live.runId ? "请求中…" : "停止", destructive: true,
+                                 disabled: run.liveActionRunId != nil, perform: { stopTarget = .live(live) }))
+    }
+    if backgroundSend != nil { return .init(text: "发送中", busy: true) }
+    if let history = historyIssue { return history }
+    if !runBusy, historyAllowsControls, !controlsMatch, run.providers != .loading {
+      return .init(text: "未读到原 Provider 设置，暂时无法发送",
+                   action: .init(title: "重新读取", perform: reloadProviders))
+    }
+    return nil
+  }
+
+  private var historyIssue: SessionStatusLine? {
+    guard run.activeSessionIdentity == sessionIdentity else { return nil }
+    // The exact reason stays in the header menu (历史状态); the paced
+    // refresh keeps retrying while this error stands (historyIsWatched).
+    if historyReadyForDisplay || run.history == .baseUnavailable, run.historyRefreshError != nil {
+      return .init(text: run.history == .baseUnavailable ? "无法读取 Mac 上的会话记录，正在重试"
+                                                          : "历史同步失败，显示上次内容，正在重试",
+                   tone: .warning, busy: true)
+    }
+    guard run.history == .baseUnavailable else { return nil }
+    if run.historySyncing { return .init(text: "正在读取 Mac 上的会话记录", busy: true) }
+    return .init(text: "未读到 Mac 上更早的记录（不代表没有）",
+                 action: .init(title: "重新读取", perform: {
+                   if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) }
+                 }))
+  }
+
+  private func reloadProviders() {
+    if let s = session { run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId, force: true) }
   }
 
   private var historyStatus: String {
@@ -452,55 +441,15 @@ struct SessionTranscriptView: View {
     return cwd.split(separator: "/").last.map(String.init) ?? cwd
   }
 
-  // The in-progress follow-up: user bubble + honest lifecycle + streamed output.
-  private func completedTurnView(_ turn: RemoteRunStore.CompletedLiveTurn) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      userBubble(turn.prompt, attachments: turn.attachments)
-      HStack(spacing: 8) {
-        Circle().fill(turn.lifecycle == .settled ? Palette.green : Palette.negative).frame(width: 7, height: 7)
-        Text(turn.lifecycle == .settled ? "已完成" : "运行结束：\(turn.lifecycle.rawValue)")
-          .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-      }
-      ForEach(ConversationEntry.group(turn.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
-        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
-      }
-      if let result = turn.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
+  // A run in this session that this store is not driving. It streams until the
+  // session record holds the turn (detachedLive), then history replaces it.
   private func detachedTurn(_ live: G0Transport.LiveRun) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if !live.prompt.isEmpty { userBubble(live.prompt, attachments: []) }
-      if run.detachedOutput.isEmpty {
-        Text("运行中 · 尚无输出内容").font(.system(size: 15)).foregroundStyle(Palette.muted)
-      } else {
-        ForEach(ConversationEntry.group(run.detachedOutput, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
-          ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
-        }
-      }
-      Text("以上为主机实时输出的缓存，可能不完整；运行结束后以会话记录为准。")
-        .font(.system(size: 11)).foregroundStyle(Palette.muted)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  private var liveTurn: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if let prompt = run.prompt { userBubble(prompt, attachments: run.sentAttachments) }
-      HStack(spacing: 8) {
-        Circle().fill(stateColor).frame(width: 7, height: 7)
-        Text(stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-        if run.lifecycle == .running || run.lifecycle == .submitting { ProgressView().controlSize(.mini) }
-      }
-      if run.output.isEmpty, run.lifecycle != .submitting {
-        Text(placeholderForState).font(.system(size: 15)).foregroundStyle(Palette.muted)
-      } else {
-        ForEach(ConversationEntry.group(run.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
-        ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
-      }
-      }
-      if let result = run.resultSummary { EvidenceChip(symbol: Symbol.gauge, text: "用量 · \(result)") }
+    Group {
+      if !live.prompt.isEmpty { TurnUserBubble(text: live.prompt, runId: live.runId, usagePending: true) }
+      TurnOutputList(lines: run.detachedOutput)
+      // This cache can omit or truncate chunks; it is not the archive.
+      Text("实时输出可能不完整；运行结束后以会话记录为准。")
+        .font(.system(size: 12.5)).foregroundStyle(Palette.muted)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -508,7 +457,8 @@ struct SessionTranscriptView: View {
   private var footer: some View {
     VStack(alignment: .leading, spacing: 5) {
       MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: "继续这段对话…", disabled: !run.hasConnection,
+                      placeholder: !run.hasConnection ? "连接后可输入" : runBusy ? "运行结束后可发送，先写也行" : "继续这段对话…",
+                      disabled: !run.hasConnection,
                       sendDisabled: runBusy || !controlsMatch || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       contextLabel: run.chosenProvider?.label ?? session?.providerId.uppercased(), contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
@@ -525,9 +475,7 @@ struct SessionTranscriptView: View {
                           run.loadCommands(providerId: s.providerId, cwd: s.cwd,
                                            agentProfileId: s.agentProfileId, force: true)
                         }
-                      },
-                      onStop: run.canStop ? { run.stopRun() } : nil,
-                      stopping: run.stopRequesting) {
+                      }) {
         guard let s = session else { return }
         if run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
                              cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue)) {
@@ -535,101 +483,9 @@ struct SessionTranscriptView: View {
           latestReadRequest += 1
         }
       }
-      if let stopError = run.stopError {
-        Text(stopError).font(.system(size: 11)).foregroundStyle(Palette.negative).padding(.horizontal, 5)
-      } else if run.stopRequested && run.canStop {
-        Text("已请求停止，等待 Mac 上的 Agent 实际结束…")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
-      } else if let live = otherLive {
-        Text(live.origin == "mac" ? "此会话正在 Mac 上运行；可先写下一条消息，结束后再发送。"
-                                  : "此会话的任务仍在运行；可先写下一条消息，结束后再发送。")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
-      } else if runBusy {
-        Text("可先写下一条消息；本轮结果同步完成后再发送。")
-          .font(.system(size: 11)).foregroundStyle(Palette.muted).padding(.horizontal, 5)
-      } else if !controlsMatch {
-        Button("重新读取原 Provider 设置") {
-          if let s = session { run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId, force: true) }
-        }.font(.system(size: 12)).padding(.horizontal, 5)
-      }
     }
     .padding(.horizontal, 14).padding(.bottom, 4)
     .background(Palette.surface)
     .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
-  }
-
-  private func liveRunBar(_ live: G0Transport.LiveRun) -> some View {
-    let waiting = run.openLiveQuestion(live) != nil
-    let origin = live.origin == "mac" ? "Mac 上" : "任务"
-    let text = live.state == "stopping" ? "\(origin)正在停止…"
-      : waiting ? "\(origin)等待你的决定" : "\(origin)正在运行 · 内容随 Mac 记录更新"
-    return VStack(alignment: .leading, spacing: 2) {
-      HStack(spacing: 8) {
-        Button { if waiting { showLiveQuestion = true } } label: {
-          Label(text, systemImage: waiting ? "hand.raised" : "play.circle.fill")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(waiting ? Palette.amber : Palette.blue)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        }
-        .buttonStyle(.plain).accessibilityIdentifier("session-runtime-status")
-        if live.state != "stopping" {
-          Button(run.liveActionRunId == live.runId ? "请求中…" : "停止") { confirmStop = live }
-            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.negative)
-            .disabled(run.liveActionRunId != nil)
-            .frame(minWidth: 44, minHeight: 44)
-            .accessibilityIdentifier("stop-live-run")
-        }
-      }
-      if let error = run.liveActionError {
-        Text(error).font(.system(size: 11)).foregroundStyle(Palette.negative)
-      }
-    }
-    .padding(.horizontal, 20)
-  }
-
-  private func userBubble(_ text: String, attachments: [RemoteRunStore.SentAttachment] = []) -> some View {
-    HStack {
-      Spacer(minLength: 40)
-      VStack(alignment: .leading, spacing: 8) {
-        if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
-        Text(text).font(.system(size: 16)).lineSpacing(3).textSelection(.enabled)
-      }
-      .foregroundStyle(Palette.ink)
-      .padding(.vertical, 10).padding(.horizontal, 14)
-      .frame(maxWidth: 320, alignment: .leading)
-      .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-    }
-  }
-
-  private var placeholderForState: String {
-    switch run.lifecycle {
-    case .submitting: return "发送中…"
-    case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
-    case .dispatched: return "主机已派发，准备执行…"
-    case .running: return "运行中 · 尚无输出内容"
-    case .failed, .cancelled: return "尚未读取到此运行的输出"
-    default: return "等待主机…"
-    }
-  }
-  private var stateLabel: String {
-    switch run.lifecycle {
-    case .unknown: return "等待主机"
-    case .submitting: return "发送中"
-    case .recorded: return "意图已记录（未执行）"
-    case .dispatched: return "主机已派发"
-    case .running: return "运行中"
-    case .settled: return "已完成"
-    case .failed: return "失败"
-    case .cancelled: return "已取消"
-    }
-  }
-  private var stateColor: Color {
-    switch run.lifecycle {
-    case .settled: return Palette.green
-    case .running: return Palette.blue
-    case .failed: return Palette.negative
-    case .cancelled, .submitting, .recorded, .dispatched: return Palette.amber
-    case .unknown: return Palette.muted
-    }
   }
 }
