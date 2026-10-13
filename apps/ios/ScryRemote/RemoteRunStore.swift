@@ -2683,6 +2683,8 @@ final class RemoteRunStore: ObservableObject {
         return "中继连接已关闭（\(code.map(String.init) ?? "无关闭码")\(reason.isEmpty ? "" : " \(reason)")）"
       case let .timedOut(stage):
         return "连接 Mac 超时（\(stage)）；请确认 Mac 未休眠且 Scry 正在运行"
+      case .frameTooLarge:
+        return "Mac 一次发来的数据超过手机接收上限（invalidFrameLength）。请把 Mac Scry 更新到 0.2.174 或更高，并完全退出后重新打开。"
       }
     }
     return "\(error)"

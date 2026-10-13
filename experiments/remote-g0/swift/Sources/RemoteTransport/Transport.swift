@@ -11,6 +11,9 @@ enum ProbeError: Error { case invalidArguments, invalidFrame, oversized, disconn
 public enum RelayTransportError: Error, Sendable {
   case closed(code: UInt16?, reason: String)
   case timedOut(stage: String)
+  // The peer sent a WebSocket frame above the 1.5 MiB device limit. Older Mac
+  // hosts sent a whole history page as one frame; newer hosts split it.
+  case frameTooLarge
 }
 
 // Converts the outer WebSocket's binary frames into the inner TLS byte stream.
@@ -57,6 +60,16 @@ final class TunnelCodec: ChannelDuplexHandler {
       return
     }
     context.write(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .binary, maskKey: .random(), data: bytes)), promise: promise)
+  }
+
+  // The frame decoder before this handler reports oversized frames as an
+  // anonymous NIO error; name it so the device can say what the host must fix.
+  func errorCaught(context: ChannelHandlerContext, error: Error) {
+    if let wsError = error as? NIOWebSocketError, case .invalidFrameLength = wsError {
+      context.fireErrorCaught(RelayTransportError.frameTooLarge)
+    } else {
+      context.fireErrorCaught(error)
+    }
   }
 }
 
