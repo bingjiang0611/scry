@@ -112,8 +112,8 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
     return () => { current = false; window.clearTimeout(timer); unsubscribe?.() }
   }, [open, visible])
 
-  const speedSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'speed'), [history])
-  const firstTokenSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'firstToken'), [history])
+  const speedSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'speed', summary?.sessions), [history, summary])
+  const firstTokenSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'firstToken', summary?.sessions), [history, summary])
   const samples = metric === 'speed' ? speedSamples : firstTokenSamples
   // Stable colours: most-used model first, independent of the selected range and metric.
   const colorOf = useMemo(() => {
@@ -123,7 +123,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
     const order = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!)
     return (model: string): string => `var(--llm-model-${Math.max(0, order.indexOf(model)) % PALETTE})`
   }, [speedSamples, firstTokenSamples])
-  // The right edge follows the clock once per minute; per-second summary polling must not redraw the chart.
+  // The right edge follows the clock once per minute; running measurements refresh with the summary.
   const minute = Math.floor(Date.now() / 60_000)
   const to = minute * 60_000 + 60_000
   const from = to - hours * 3_600_000
@@ -179,6 +179,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
             <span>{METRICS[metric].unit}</span>
             {oldestKept != null && oldestKept > from && <small className="llm-perf-truncated">只含最近 {history!.rows.length} 轮</small>}
           </h3>
+          {!historyError && history && inRange.some(sample => sample.provisional) && <p className="llm-perf-live-note">曲线和模型对比含运行中轮次的已完成调用；轮数显示为「已完成 + 运行中」，结束前数值会更新。</p>}
           {historyError
             ? <p className="llm-perf-alert" role="alert">历史读取失败：{historyError}</p>
             : !history ? <div className="llm-perf-empty">读取中</div>
@@ -299,7 +300,8 @@ function ModelComparison({ samples, firstToken, selected, colorOf, onSelect }: {
     return [...valuesByModel(samples)].map(([model, speeds]) => {
       const wait = waits.get(model)
       return {
-        model, rounds: speeds.length, p25: quantile(speeds, 0.25), p50: quantile(speeds, 0.5), p75: quantile(speeds, 0.75),
+        model, running: samples.filter(sample => sample.model === model && sample.provisional).length,
+        rounds: speeds.length, p25: quantile(speeds, 0.25), p50: quantile(speeds, 0.5), p75: quantile(speeds, 0.75),
         firstToken: wait ? quantile(wait, 0.5) : undefined
       }
     }).sort((a, b) => b.p50 - a.p50)
@@ -319,7 +321,7 @@ function ModelComparison({ samples, firstToken, selected, colorOf, onSelect }: {
           <span className="llm-perf-speed llm-perf-wait">{group.firstToken != null
             ? <><strong>{formatSeconds(group.firstToken)}</strong><small>秒</small></>
             : <small>—</small>}</span>
-          <span className="llm-perf-rounds">{group.rounds}</span>
+          <span className="llm-perf-rounds">{group.rounds - group.running}{group.running > 0 && ` + ${group.running} 运行中`}</span>
         </button>
       ))}
       <div className="llm-perf-scale"><span /><div><span>0</span><span>{max / 2}</span><span>{max}</span></div></div>

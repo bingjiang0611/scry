@@ -4,6 +4,9 @@ import { sessionAttentionKey } from './session-attention.js'
 
 export interface LlmRunningSession {
   key: string
+  runId: string
+  /** Latest observer update, not the summary polling time. */
+  observedAt?: string
   providerId?: ProviderId
   cwd?: string
   /** Model of the latest completed call in this turn; unknown before the first call. */
@@ -35,7 +38,8 @@ export function summarizeRunningLlmSessions(activeRuns: readonly ActiveRun[], no
     sessions: [...sessions].map(([key, run]) => {
       const sample = run.llmPerformance
       return {
-        key, providerId: run.providerId, cwd: run.cwd, model: sample?.model,
+        key, runId: run.runId, observedAt: sample?.observedAt,
+        providerId: run.providerId, cwd: run.cwd, model: sample?.model,
         state: sample?.state ?? 'waiting',
         outputStarted: sample?.firstOutputWaitMs != null,
         ...(sample?.apiTokensPerSecond != null ? { tokensPerSecond: sample.apiTokensPerSecond } : {}),
@@ -107,11 +111,13 @@ export interface LlmMetricSample {
   model: string
   /** speed: token/s. firstToken: seconds from request start to the first content block. */
   value: number
+  /** Running turn's completed calls; replaced by the persisted round on completion. */
+  provisional?: boolean
 }
 
-/** Successful rounds with evidence for the metric. Missing evidence is omitted, never 0. */
-export function llmMetricSamples(rows: readonly LlmPerformanceHistoryRow[], metric: LlmMetric): LlmMetricSample[] {
-  return rows.flatMap(row => {
+/** Successful rounds and provisional completed-call evidence. Missing evidence is omitted, never 0. */
+export function llmMetricSamples(rows: readonly LlmPerformanceHistoryRow[], metric: LlmMetric, sessions: readonly LlmRunningSession[] = []): LlmMetricSample[] {
+  const samples: LlmMetricSample[] = rows.flatMap(row => {
     const ts = Date.parse(row.ts)
     const value = metric === 'speed'
       ? row.performance.apiTokensPerSecond
@@ -119,6 +125,19 @@ export function llmMetricSamples(rows: readonly LlmPerformanceHistoryRow[], metr
     return !row.failed && value != null && value > 0 && Number.isFinite(ts)
       ? [{ ts, model: row.model, value }] : []
   })
+  // History wins even when the final round failed or has no metric. A stale summary must not
+  // double count a completed round or bring stopped/failed evidence back into statistics.
+  const persisted = new Set(rows.map(row => row.runId))
+  for (const session of sessions) {
+    if (persisted.has(session.runId) || session.state === 'complete' || !session.model || !session.observedAt) continue
+    const ts = Date.parse(session.observedAt)
+    const value = metric === 'speed' ? session.tokensPerSecond
+      : session.firstTokenMs != null ? session.firstTokenMs / 1000 : undefined
+    if (value != null && value > 0 && Number.isFinite(ts)) {
+      samples.push({ ts, model: session.model, value, provisional: true })
+    }
+  }
+  return samples
 }
 
 export function quantile(values: readonly number[], p: number): number {

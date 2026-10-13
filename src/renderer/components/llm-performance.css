@@ -34,6 +34,7 @@
 .llm-perf-metric button[aria-pressed='true'] { background: var(--panel3); color: var(--fg); }
 .llm-perf-truncated { margin-left: auto; color: var(--dim2); font-weight: 400; font-size: 11px; }
 .llm-perf-alert { margin: 0; color: var(--bad, #f36c67); font-size: 12px; }
+.llm-perf-live-note { margin: 0 0 10px; color: var(--dim2); font-size: 11px; }
 
 .llm-perf-running { display: grid; gap: 6px; }
 .llm-perf-run { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 104px 104px; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--panel2); }

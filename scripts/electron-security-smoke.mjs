@@ -255,7 +255,10 @@ async function main() {
         }
         await new Promise(resolve => setTimeout(resolve, 50))
       }
-      throw new Error('Live production modal did not clear stopped runs or refresh owned history')
+      throw new Error('Live production modal did not clear stopped runs or refresh owned history: ' + JSON.stringify({
+        summary: await window.scry.llmPerformanceSummary(), history: await window.scry.llmPerformanceHistory(),
+        dialog: document.querySelector('.llm-perf-modal')?.textContent
+      }))
     })()`)
 
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
