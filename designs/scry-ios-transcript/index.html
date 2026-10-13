@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scry iOS · 会话详情重设计</title>
+<style>
+  :root {
+    --ink:#E8E7E4; --muted:#A6A5A0; --faint:#858580; --line:#2B2B29;
+    --blue:#86ACF4; --green:#75C79A; --amber:#D5AA72; --neg:#E68C90;
+    --canvas:#1C1C1A; --surface:#121210; --message:#252422;
+    --warnBg:#30271C; --warnInk:#E8BA80;
+    --page:#0B0B0A;
+  }
+  html { background: var(--page); }
+  * { box-sizing: border-box; }
+  body { margin:0; color:var(--ink); font:14px/1.5 -apple-system, "PingFang SC", "SF Pro Text", sans-serif; }
+  .wrap { max-width: 1680px; margin: 0 auto; padding: 36px 32px 80px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 44px 0 12px; }
+  p.lead, .note { color: var(--muted); margin: 0; }
+  .note { font-size: 12.5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td b { font-weight: 600; }
+  .tag { display:inline-block; padding:1px 7px; border-radius: 999px; font-size: 11.5px; background: var(--canvas); color: var(--muted); }
+
+  /* state switcher */
+  .states { position: sticky; top: 0; z-index: 10; display:flex; gap:6px; flex-wrap: wrap; padding: 12px 0; background: var(--page); }
+  .states button { all: unset; cursor: pointer; padding: 7px 13px; border-radius: 999px; background: var(--canvas); color: var(--muted); font-size: 13px; }
+  .states button[aria-pressed="true"] { background: var(--ink); color: #111; font-weight: 600; }
+  .states button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  .row { display:flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .col { width: 390px; }
+  .col h3 { font-size: 15px; margin: 0 0 4px; }
+  .col .thesis { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; min-height: 38px; }
+  .baseline img { width: 390px; border-radius: 28px; display:block; border: 1px solid var(--line); }
+  .baseline ol { color: var(--muted); font-size: 12.5px; padding-left: 18px; margin: 10px 0 0; }
+
+  /* phone */
+  .phone { width: 390px; height: 780px; border-radius: 34px; background: var(--surface); border: 1px solid #2a2a28;
+           overflow: hidden; display:flex; flex-direction:column; position: relative; }
+  .sb { height: 44px; display:flex; align-items:center; justify-content: space-between; padding: 0 28px; font-weight:600; font-size: 15px; flex: none; }
+  .hdr { display:flex; align-items:center; gap: 8px; padding: 4px 10px; min-height: 52px; border-bottom: .5px solid rgba(43,43,41,.7); flex:none; }
+  .ib { width: 40px; height: 40px; display:grid; place-items:center; color: var(--ink); flex:none; }
+  .ib svg { width: 20px; height: 20px; }
+  .ttl { flex:1; min-width:0; }
+  .ttl b { display:block; font-size: 16px; font-weight: 600; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+  .ttl span { font-size: 11.5px; color: var(--muted); display:flex; align-items:center; gap: 5px; }
+  .dot { width:7px; height:7px; border-radius:50%; background: var(--green); display:inline-block; }
+  .dot.off { background: var(--faint); }
+
+  .banner { margin: 8px 14px 0; padding: 9px 12px; border-radius: 12px; background: var(--warnBg); color: var(--warnInk);
+            font-size: 12.5px; display:flex; gap: 8px; align-items: center; flex: none; }
+  .banner .act { margin-left: auto; font-weight: 600; white-space: nowrap; }
+
+  .scroll { flex:1; overflow:auto; padding: 14px 18px 18px; display:flex; flex-direction:column; gap: 14px; scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display:none; }
+  .user { align-self: flex-end; max-width: 300px; background: var(--message); border-radius: 6px; padding: 9px 13px; font-size: 15.5px; line-height: 1.55; }
+  .att { display:flex; gap:7px; align-items:center; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+  .att i { width: 30px; height: 30px; border-radius: 4px; background: linear-gradient(135deg,#3a3c44,#2a2b30); display:inline-block; outline: 1px solid rgba(255,255,255,.1); outline-offset:-1px; }
+  .sending { align-self: flex-end; font-size: 11.5px; color: var(--muted); margin-top: -8px; display:flex; gap:6px; align-items:center; }
+  .agent { display:flex; flex-direction:column; gap: 2px; font-size: 15.5px; line-height: 1.6; }
+  .agent p { margin: 4px 0; }
+  .agent code { font: 13.5px ui-monospace, Menlo, monospace; background: var(--canvas); padding: 1px 5px; border-radius: 4px; }
+  .tool { display:flex; align-items:center; gap: 10px; min-height: 40px; color: var(--muted); font-size: 13px; }
+  .tool .mono { font-family: ui-monospace, Menlo, monospace; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tool .n { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tool svg { width: 16px; height: 16px; flex:none; }
+  .caret { display:inline-block; width: 7px; height: 16px; background: var(--muted); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* turn tail (exceptions + direction B live state) */
+  .tail { display:flex; align-items:center; gap: 8px; font-size: 12.5px; color: var(--muted); min-height: 32px; }
+  .tail .act { font-weight: 600; margin-left: auto; padding: 6px 2px; }
+  .tail.neg { color: var(--neg); }
+  .tail.amber { color: var(--amber); }
+  .tail.blue { color: var(--blue); }
+  .spin { width: 12px; height: 12px; border-radius: 50%; border: 1.6px solid currentColor; border-right-color: transparent; animation: rot .8s linear infinite; flex:none; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* direction A strip */
+  .strip { display:flex; align-items:center; gap: 9px; margin: 0 12px; padding: 0 12px; height: 40px; border-radius: 12px;
+           background: var(--canvas); font-size: 13px; color: var(--muted); flex:none; }
+  .strip .act { margin-left:auto; font-weight: 600; }
+  .strip.blue { color: var(--blue); } .strip.amber { color: var(--amber); }
+  .strip.warn { background: var(--warnBg); color: var(--warnInk); }
+  .strip .t { font-variant-numeric: tabular-nums; color: var(--faint); }
+
+  /* composer */
+  .comp { border-top: .5px solid rgba(43,43,41,.7); padding: 8px 14px 6px; flex: none; }
+  .strip + .comp { border-top: 0; }
+  .field { color: var(--faint); font-size: 15.5px; padding: 6px 4px 10px; }
+  .crow { display:flex; align-items:center; justify-content: space-between; }
+  .plus { width: 34px; height: 34px; display:grid; place-items:center; color: var(--ink); }
+  .send { width: 34px; height: 34px; border-radius: 50%; display:grid; place-items:center; background: #2f2f2c; color: var(--faint); }
+  .send.on { background: var(--ink); color: #111; }
+  .send.stop { background: var(--ink); color: #111; }
+  .send.amber { background: var(--amber); color: #111; width:auto; padding: 0 12px; border-radius: 17px; font-size: 13px; font-weight: 600; }
+  .send svg { width: 16px; height: 16px; }
+  .meta { display:flex; gap: 10px; align-items:center; font-size: 12px; color: var(--muted); padding: 8px 4px 2px; }
+  .comp.disabled .field, .comp.disabled .plus { opacity: .45; }
+  .home { height: 22px; display:grid; place-items:center; flex:none; } .home i { width: 130px; height: 5px; border-radius: 3px; background: #e8e7e4; opacity: .8; }
+
+  /* sheet */
+  .sheet { position:absolute; left:0; right:0; bottom:0; background: #1f1f1d; border-radius: 18px 18px 0 0; padding: 10px 18px 30px; z-index: 3;
+           box-shadow: 0 -10px 40px rgba(0,0,0,.5); }
+  .sheet .grab { width: 36px; height: 5px; border-radius: 3px; background: #48484a; margin: 0 auto 14px; }
+  .sheet h4 { margin: 0 0 4px; font-size: 16px; } .sheet p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  .opt { padding: 12px 14px; border-radius: 10px; border: .5px solid var(--line); background: var(--canvas); margin-bottom: 8px; font-size: 14px; }
+  .opt.sel { border: 1.5px solid var(--blue); }
+  .dl { display:grid; grid-template-columns: 76px 1fr; gap: 8px 10px; font-size: 13px; }
+  .dl dt { color: var(--muted); } .dl dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .scrim { position:absolute; inset:0; background: rgba(0,0,0,.45); z-index: 2; }
+
+  .cmp td:first-child { white-space: nowrap; font-weight: 600; }
+  .rec { border: 1px solid var(--blue); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
+  .rec b { color: var(--blue); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Scry iOS · 会话详情重设计</h1>
+  <p class="lead">设计稿 v1 · 2026-10-13 · 三个结构方向，同一段会话、同一组状态。视觉沿用已认可的 dark workbench，只改结构与状态。</p>
+
+  <h2>1 · 现状：为什么乱</h2>
+  <div class="row">
+    <div class="col baseline">
+      <img src="baseline-sending.png" alt="现状：发送中">
+      <ol>
+        <li>Mac 发的两轮没有任何装饰；手机发的一轮带“发送中”点。</li>
+        <li>composer 下方还有一行提示，和回合里的状态重复。</li>
+      </ol>
+    </div>
+    <div class="col baseline">
+      <img src="baseline-history-failure.png" alt="现状：历史失败">
+      <ol>
+        <li>同一屏 4 种状态：副标题“未检测到运行”、横幅、灰色说明句、绿点“已完成”。</li>
+        <li>只有手机发的回合有“用量”chip，看起来像另一种消息。</li>
+      </ol>
+    </div>
+    <div class="col" style="width:520px">
+      <table>
+        <tr><th>根因</th><th>证据（SessionTranscriptView.swift）</th></tr>
+        <tr><td>同一回合 5 条渲染路径</td><td><code>HistoryTurnView</code> / <code>completedTurnView</code> / <code>liveTurn</code> / <code>detachedTurn</code> / <code>backgroundSend</code>，各带不同装饰</td></tr>
+        <tr><td>数据形状不同</td><td>Mac 历史 <code>RunHistoryTurn</code> 只有正文；本机回合有 lifecycle、用量、附件 → 手机发的“多出来”</td></tr>
+        <tr><td>状态有 5 个位置</td><td>副标题、顶部状态行（3 种实现）、回合状态点（7 种文案）、composer 提示（5 种）、横幅（3 种）</td></tr>
+        <tr><td>按来源区分文案</td><td>“Mac 上正在运行” vs “任务正在运行”；停止确认标题也分两种</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2>2 · 统一规则（三个方向共用）</h2>
+  <table>
+    <tr><th style="width:160px">规则</th><th>做法</th><th style="width:330px">证据边界</th></tr>
+    <tr><td><b>一个回合组件</b></td><td>用户气泡 + Agent 内容 + 可选尾部。历史、续聊、Mac 发起、本机发起全部同一组件，不显示来源。</td><td>来源仍保留在“本轮详情”，可查但不打扰。</td></tr>
+    <tr><td><b>正常结束 = 静默</b></td><td>删除“已完成”绿点和用量 chip。长按回合 → 本轮详情（用量、耗时、runId、来源）。</td><td>不显示 ≠ 宣称成功；缺数据写“Mac 未提供”，不写 0。</td></tr>
+    <tr><td><b>进行中只有一处</b></td><td>发送中 → 等待开始 → 运行中 → 停止中；需要你决定。位置由方向决定。</td><td>recorded / dispatched 合并为“等待开始”，不叫“运行中”。</td></tr>
+    <tr><td><b>异常就地</b></td><td>失败 / 已停止 / 未读取到输出：该回合尾部一行。</td><td>必须可见，不可折叠。</td></tr>
+    <tr><td><b>会话问题一条</b></td><td>连接中断、历史读取失败、更早记录未读、只读浏览：一条横幅，带一个动作。</td><td>历史来源 / 快照说明进入标题 <code>···</code> 的会话信息。</td></tr>
+    <tr><td><b>颜色只给行动</b></td><td>蓝 = 运行中，琥珀 = 需要你，红 = 失败。灰 = 其它。</td><td>删除 composer 下方 5 种提示行，用 placeholder 表达。</td></tr>
+  </table>
+
+  <h2>3 · 三个方向</h2>
+  <p class="note">切换状态，三台手机同步。“空闲”下点 Agent 回复可看本轮详情。</p>
+  <div class="states" role="group" aria-label="状态">
+    <button data-s="idle" aria-pressed="true">空闲</button>
+    <button data-s="sending">发送中</button>
+    <button data-s="running">运行中</button>
+    <button data-s="waiting">需要你决定</button>
+    <button data-s="failed">失败</button>
+    <button data-s="offline">连接中断</button>
+    <button data-s="detail">本轮详情</button>
+  </div>
+  <div class="row" id="dirs"></div>
+
+  <h2>4 · 比较</h2>
+  <table class="cmp">
+    <tr><th>方向</th><th>状态在哪</th><th>得到</th><th>放弃</th><th>风险</th></tr>
+    <tr><td>A 底部状态条</td><td>composer 上方一条，包含进行中 + 会话问题</td><td>位置唯一，最好找；停止 / 回答始终在拇指区</td><td>状态离内容远；多占 40pt 垂直空间</td><td>空闲 / 运行切换时 composer 上下跳动，需要动效收敛</td></tr>
+    <tr><td>B 回合尾部</td><td>最新回合 Agent 内容下方；会话问题在顶部横幅</td><td>与 Mac 一致（状态跟着回合走）；Mac 发起的运行也自然落在对应回合</td><td>两处位置（尾部 + 横幅），但职责不重叠</td><td>用户上翻阅读时看不到尾部状态 → 需配“回到底部”按钮带蓝点</td></tr>
+    <tr><td>C 输入框即状态</td><td>发送键变成停止 / 回答；流式尾部只有光标</td><td>元素最少，最接近 ChatGPT / Codex 手机端</td><td>“等待开始”和“运行中”没有文字区分；停止 Mac 发起的运行藏在一个图标里</td><td>可发现性最弱；离线时整个 composer 替换</td></tr>
+  </table>
+  <div class="rec">
+    <b>推荐 B。</b> 你的判断是“手机和 Mac 应该一致”，B 正是 Mac 的结构：状态属于回合，不属于发送端。
+    它让 Mac 发起的运行和手机发起的运行落在同一位置，同一文案，同一个停止。
+    A 的问题是把“回合的事”和“连接的事”塞进一条，状态多时仍要排优先级；C 太隐蔽，停止别人（Mac）发起的运行不该只是一个方块图标。
+  </div>
+
+  <h2>5 · 不在本稿内 / 需要你确认</h2>
+  <table>
+    <tr><td style="width:220px"><b>Mac 发的图片附件</b></td><td>历史数据不带附件，所以 Mac 发的图片在手机上看不到。要一致需扩展 <code>RunHistoryTurn</code>（Mac 侧改动），不是 UI 能补的。</td></tr>
+    <tr><td><b>历史回合的失败状态</b></td><td>历史数据不带 lifecycle。Mac 上失败的回合在手机上会和正常回合一样静默。可选：利用已有 <code>runId</code> 让 Mac 附带终态。</td></tr>
+    <tr><td><b>假设 A1</b></td><td>日常不需要逐轮看用量，长按查看即可。如果你需要常驻用量，B 可以在回合尾部加一行灰字——但只有在历史回合也带用量后才加，否则又会出现“手机的多一行”。</td></tr>
+  </table>
+</div>
+
+<script>
+const I = {
+  back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  folder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>',
+  more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>',
+  term:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>',
+  spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/></svg>',
+  chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>',
+  up:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  stop:'<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="22" height="22"><path d="M12 5v14M5 12h14"/></svg>',
+  alert:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/></svg>',
+  wifi:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M2 9a15 15 0 0120 0M5.5 12.5a10 10 0 0113 0M9 16a5 5 0 016 0M12 19.5v.01"/></svg>',
+  lock:'<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3" fill="none" stroke="currentColor" stroke-width="2"/></svg>'
+}
+
+const tool = (cmd, n) => `<div class="tool">${I.term}<span class="mono">${cmd}</span><span class="n">${n} 行</span>${I.chev}</div>`
+const think = `<div class="tool">${I.spark}<span style="flex:1">思考过程</span>${I.chev}</div>`
+const user = (t, att) => `<div class="user">${att ? `<div class="att"><i></i>home-reference.png · 180 KB</div>` : ''}${t}</div>`
+
+// Same three turns for every direction. Turn 1 was sent from the Mac, turn 2
+// from the phone — they must render identically.
+const turn1 = user('请检查 iOS 远程首页的信息层级，并给出可以直接落地的修改。') +
+  `<div class="agent">${think}${tool('读取 HomeView.swift', 8)}<p>发现<b>三个主要问题</b>：项目与会话的视觉层级接近、运行状态缺少时间语境、底部操作抢占了过多空间。建议先压缩标题区，再把 <code>Provider</code> 与时间放入会话元信息。</p></div>`
+const turn2 = user('按 Codex Refined 的方向继续，先不要加入底栏。', true) +
+  `<div class="agent" data-detail><p>已保留无底栏结构，并将导航、内容与证据层分开。下一步可以重点比较列表密度和 Composer 的控制层级。</p></div>`
+const lastPrompt = '有办法不会收吗 不然每次回来看代码都要重新等待 jdtls 加载'
+
+function lastTurn(state, dir) {
+  const u = user(lastPrompt)
+  const tools = tool('rg -n "jdtls" ~/.config', 14)
+  const tailB = {
+    sending: '',
+    running: `<div class="tail blue"><span class="spin"></span>运行中<span class="act" style="color:var(--neg)">停止</span></div>`,
+    waiting: `<div class="tail amber">${I.alert}需要你决定<span class="act">回答</span></div>`
+  }
+  if (state === 'sending') {
+    const sending = (dir === 'B') ? `<div class="sending"><span class="spin"></span>发送中</div>` : ''
+    return u + sending
+  }
+  if (state === 'running' || state === 'waiting') {
+    const text = state === 'running'
+      ? `<p>jdtls 的工作区默认放在临时目录，App 回到前台时被系统回收，所以每次都要重新索引。我在找它的配置位置<span class="caret"></span></p>`
+      : `<p>需要修改 <code>~/.config/nvim</code> 下的 LSP 配置，这会写入你的个人目录。</p>`
+    return u + `<div class="agent">${tools}${text}${dir === 'B' ? tailB[state] : ''}</div>`
+  }
+  if (state === 'failed') {
+    return u + `<div class="agent">${tools}<p>jdtls 的工作区默认放在临时目录，App 回到前台时被</p>
+      <div class="tail neg">${I.alert}运行失败 · Provider 进程退出（code 1）<span class="act">详情</span></div></div>`
+  }
+  return u + `<div class="agent" data-detail>${tools}<p>可以。把 jdtls 的 <code>-data</code> 指到持久目录，例如 <code>~/.cache/jdtls/&lt;项目名&gt;</code>，下次打开直接复用索引，不用重新加载。</p></div>`
+}
+
+function header(state) {
+  const off = state === 'offline'
+  return `<div class="sb"><span>15:56</span><span style="font-size:12px">●●●  Wi‑Fi  ▮</span></div>
+  <div class="hdr"><span class="ib">${I.back}</span>
+    <div class="ttl"><b>重构远程会话列表并统一信息层级</b><span><i class="dot ${off ? 'off' : ''}"></i>scry · Codex</span></div>
+    <span class="ib">${I.folder}</span><span class="ib">${I.more}</span></div>`
+}
+
+function banner(state, dir) {
+  if (dir === 'A') return ''
+  if (state === 'offline') return `<div class="banner">${I.wifi}连接中断，正在重连<span class="act">重试</span></div>`
+  return ''
+}
+
+function strip(state) {
+  switch (state) {
+    case 'sending': return `<div class="strip"><span class="spin"></span>发送中</div>`
+    case 'running': return `<div class="strip blue"><span class="spin"></span>运行中<span class="act" style="color:var(--neg)">停止</span></div>`
+    case 'waiting': return `<div class="strip amber">${I.alert}需要你决定<span class="act">回答</span></div>`
+    case 'offline': return `<div class="strip warn">${I.wifi}连接中断，正在重连<span class="act">重试</span></div>`
+    default: return ''
+  }
+}
+
+function composer(state, dir) {
+  const busy = state === 'sending' || state === 'running' || state === 'waiting'
+  const off = state === 'offline'
+  let placeholder = '继续这段对话…'
+  if (busy) placeholder = '运行结束后可发送，先写也行'
+  if (off) placeholder = '离线，无法发送'
+  let send = `<span class="send">${I.up}</span>`
+  if (dir === 'C') {
+    if (state === 'sending') send = `<span class="send" style="color:var(--muted)"><span class="spin"></span></span>`
+    if (state === 'running') send = `<span class="send stop" title="停止">${I.stop}</span>`
+    if (state === 'waiting') send = `<span class="send amber">回答</span>`
+    if (state === 'running') placeholder = '运行中 · 先写下一条也行'
+  }
+  return `<div class="comp ${off ? 'disabled' : ''}">
+    <div class="field">${placeholder}</div>
+    <div class="crow"><span class="plus">${I.plus}</span>${send}</div>
+    <div class="meta">${I.lock}<span>默认审批</span><span>GPT-5.6</span><span>中</span></div>
+  </div><div class="home"><i></i></div>`
+}
+
+function overlay(state, dir) {
+  if (state === 'detail') return `<div class="scrim"></div><div class="sheet"><div class="grab"></div>
+    <h4>本轮详情</h4><p>第 2 轮 · 长按任一回合打开</p>
+    <dl class="dl"><dt>输入</dt><dd>18,420 tokens</dd><dt>输出</dt><dd>1,286 tokens</dd><dt>费用</dt><dd>$0.084</dd>
+    <dt>耗时</dt><dd>Mac 未提供</dd><dt>发起</dt><dd>本机（iPhone）</dd><dt>runId</dt><dd style="font-family:ui-monospace,Menlo;font-size:12px">r_8f2c…a41</dd></dl></div>`
+  if (state === 'waiting' && dir === 'C') return `<div class="scrim"></div><div class="sheet"><div class="grab"></div>
+    <h4>允许修改 ~/.config/nvim？</h4><p>Agent 需要写入你的个人目录外的配置文件。</p>
+    <div class="opt sel">允许这一次</div><div class="opt">拒绝</div></div>`
+  return ''
+}
+
+const DIRS = [
+  { id:'A', name:'A · 底部状态条', thesis:'所有“正在发生的事”都在 composer 上方一条：位置唯一，停止和回答始终在拇指区。' },
+  { id:'B', name:'B · 回合尾部（推荐）', thesis:'状态属于回合，跟着最新回合走，和 Mac 一致；连接这类会话问题才用顶部横幅。' },
+  { id:'C', name:'C · 输入框即状态', thesis:'发送键变成停止 / 回答，流式尾部只有光标；额外元素最少。' }
+]
+
+function render(state) {
+  const scrollState = state === 'detail' ? 'idle' : state
+  document.getElementById('dirs').innerHTML = DIRS.map(d => `
+    <div class="col"><h3>${d.name}</h3><p class="thesis">${d.thesis}</p>
+      <div class="phone">${header(scrollState)}${banner(scrollState, d.id)}
+        <div class="scroll">${turn1}${turn2}${lastTurn(scrollState, d.id)}</div>
+        ${d.id === 'A' ? strip(scrollState) : ''}${composer(scrollState, d.id)}${overlay(state, d.id)}
+      </div></div>`).join('')
+  document.querySelectorAll('.scroll').forEach(s => { s.scrollTop = s.scrollHeight })
+  document.querySelectorAll('[data-detail]').forEach(el => {
+    el.style.cursor = 'pointer'
+    el.addEventListener('click', () => select('detail'))
+  })
+}
+
+function select(state) {
+  document.querySelectorAll('.states button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.s === state)))
+  render(state)
+}
+document.querySelectorAll('.states button').forEach(b => b.addEventListener('click', () => select(b.dataset.s)))
+select('idle')
+</script>
+</body>
+</html>
