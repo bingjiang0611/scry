@@ -391,21 +391,31 @@ final class RemoteRunStore: ObservableObject {
     #if DEBUG
     if mockMode { return true }
     #endif
-    return connections.load() != nil
+    return loadConnection() != nil
   }
   var hostLabel: String? {
     #if DEBUG
     if mockMode { return "Studio Mac" }
     #endif
-    return connections.load()?.relayHost
+    return loadConnection()?.relayHost
   }
 
   var hasRecoverableRun: Bool {
     pendingSubmission != nil || runId != nil
   }
 
+  // Preview fixtures can run inside an already paired installation. Every
+  // transport path (including paged history) must use this gate, not the
+  // persisted descriptor directly. Do not clear or replace the real pairing.
+  private func loadConnection() -> RemoteConnection? {
+    #if DEBUG
+    if mockMode || ProcessInfo.processInfo.arguments.contains("-uiPreview") { return nil }
+    #endif
+    return connections.load()
+  }
+
   private func makeClient() -> RemoteRunClient? {
-    guard let connection = connections.load() else { return nil }
+    guard let connection = loadConnection() else { return nil }
     return RemoteRunClient(connection: connection)
   }
 
@@ -418,7 +428,7 @@ final class RemoteRunStore: ObservableObject {
 
   private func saveRecoveryCheckpoint(intentId: String?, routing: RemoteRunClient.Routing?,
                                       identity: SessionIdentity, runId: String?) -> Bool {
-    guard let connection = connections.load(), let url = recoveryURL else {
+    guard let connection = loadConnection(), let url = recoveryURL else {
       submitError = "无法保存恢复记录：尚未配对或存储目录不可用"
       return false
     }
@@ -468,7 +478,7 @@ final class RemoteRunStore: ObservableObject {
         catch let error as CocoaError where error.code == .fileNoSuchFile { }
         return true
       }
-      guard let connection = connections.load() else {
+      guard let connection = loadConnection() else {
         submitError = "无法保存待发送消息：尚未配对"
         return false
       }
@@ -484,7 +494,7 @@ final class RemoteRunStore: ObservableObject {
     guard let url = outboxURL, FileManager.default.fileExists(atPath: url.path) else { return }
     do {
       let file = try JSONDecoder().decode(OutboxFile.self, from: Data(contentsOf: url))
-      guard file.version == 1, let connection = connections.load(), file.hostId == connection.hostId else {
+      guard file.version == 1, let connection = loadConnection(), file.hostId == connection.hostId else {
         submitError = "本地待发送消息不属于当前已配对主机，未发送"
         return
       }
@@ -512,7 +522,7 @@ final class RemoteRunStore: ObservableObject {
         throw CocoaError(.fileReadCorruptFile)
       }
       let checkpoint = try JSONDecoder().decode(RecoveryCheckpoint.self, from: Data(contentsOf: url))
-      guard checkpoint.version == 1, let connection = connections.load(), checkpoint.hostId == connection.hostId else {
+      guard checkpoint.version == 1, let connection = loadConnection(), checkpoint.hostId == connection.hostId else {
         submitError = "本地恢复记录不属于当前已配对主机"
         return
       }
@@ -694,7 +704,7 @@ final class RemoteRunStore: ObservableObject {
   // take priority. Before channel establishment, NIO/upgrade deadlines still apply.
   private func prefetchHistory(_ sessions: [G0Transport.RunSessionRef]) {
     guard prefetchTask == nil, historyTask == nil, !historyCacheClearing, !hasUnresolvedRun,
-          let connection = connections.load() else { return }
+          let connection = loadConnection() else { return }
     let recent = Array(sessions.filter { $0.externalSessionId?.isEmpty == false }
       .sorted { $0.ts > $1.ts }.prefix(2))
     let keys = Set(recent.compactMap { session -> String? in
@@ -710,18 +720,18 @@ final class RemoteRunStore: ObservableObject {
       @MainActor func current() -> Bool {
         !Task.isCancelled && self.dataGeneration == requestDataGeneration &&
           self.prefetchGeneration == warmingGeneration && self.historyTask == nil &&
-          self.connections.load() == connection
+          self.loadConnection() == connection
       }
       var missing: [(G0Transport.RunSessionRef, String)] = []
       for session in recent {
         guard !Task.isCancelled, self.dataGeneration == requestDataGeneration,
               self.prefetchGeneration == warmingGeneration,
-              self.connections.load() == connection, let external = session.externalSessionId else { break }
+              self.loadConnection() == connection, let external = session.externalSessionId else { break }
         let key = RemoteHistoryCache.key(connection: connection, providerId: session.providerId, cwd: session.cwd, sessionId: external)
         do {
           let cached = try await disk.readPreview(key)
           guard !Task.isCancelled, self.prefetchGeneration == warmingGeneration,
-                self.dataGeneration == requestDataGeneration, self.connections.load() == connection else { break }
+                self.dataGeneration == requestDataGeneration, self.loadConnection() == connection else { break }
           if let cached { self.warmScreen(cached, key: key) }
           else { missing.append((session, key)) }
         } catch {
@@ -795,7 +805,7 @@ final class RemoteRunStore: ObservableObject {
       commandsTask?.cancel(); commandsTask = nil; commands = .idle
       history = .idle
     } else if historyTask != nil { return }
-    guard let connection = connections.load() else { history = .failed("尚未配对"); return }
+    guard let connection = loadConnection() else { history = .failed("尚未配对"); return }
     let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
     let client = RemoteRunClient(connection: connection)
     let disk = historyDisk
@@ -829,7 +839,7 @@ final class RemoteRunStore: ObservableObject {
       @MainActor func current() -> Bool {
         !Task.isCancelled && self.historyRequestGeneration == request &&
           (!onlyWhileFollowing || self.historyFollowingLatest) &&
-          self.isCurrent(requestGeneration, identity: identity) && self.connections.load() == connection
+          self.isCurrent(requestGeneration, identity: identity) && self.loadConnection() == connection
       }
       defer {
         if self.historyRequestGeneration == request {
@@ -952,7 +962,7 @@ final class RemoteRunStore: ObservableObject {
                 guard let self else { return }
                 await MainActor.run {
                   guard self.historyRequestGeneration == request,
-                        self.isCurrent(requestGeneration, identity: identity), self.connections.load() == connection else { return }
+                        self.isCurrent(requestGeneration, identity: identity), self.loadConnection() == connection else { return }
                   self.historyProgress = "\(received / 1024) / \(max(1, (total + 1023) / 1024)) KB"
                 }
               })
@@ -997,7 +1007,7 @@ final class RemoteRunStore: ObservableObject {
   private func applyHistoryPreview(_ turns: [G0Transport.RunHistoryTurn], request: Int,
                                    generation: Int, identity: SessionIdentity, connection: RemoteConnection) {
     guard !Task.isCancelled, historyRequestGeneration == request,
-          isCurrent(generation, identity: identity), connections.load() == connection else { return }
+          isCurrent(generation, identity: identity), loadConnection() == connection else { return }
     // A snapshot retry withdraws unverified network content, not a previously
     // verified warm screen. A nonempty new preview has no full digest receipt.
     if turns.isEmpty && historyFromCache { return }
@@ -1043,7 +1053,7 @@ final class RemoteRunStore: ObservableObject {
 
   func loadOlderHistory(providerId: String, cwd: String, externalSessionId: String) {
     guard let window = historyWindow, window.hasOlder,
-          let connection = connections.load(), historyTask == nil else { return }
+          let connection = loadConnection(), historyTask == nil else { return }
     let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     let requestConnectionRevision = connectionSuccessRevision
     let requestGeneration = generation
@@ -1064,7 +1074,7 @@ final class RemoteRunStore: ObservableObject {
             before: window.offset, limit: 3, snapshot: window.snapshot)
         }
         guard !Task.isCancelled, self.isCurrent(requestGeneration, identity: identity),
-              self.connections.load() == connection, self.historyRequestGeneration == request else { return }
+              self.loadConnection() == connection, self.historyRequestGeneration == request else { return }
         self.recordSuccess()
         guard page.totalTurns == window.totalTurns else {
           self.historyRefreshError = "历史分页总数发生变化，保留已读取内容；请刷新最近历史。"
@@ -2484,6 +2494,49 @@ final class RemoteRunStore: ObservableObject {
     store.prefetchTask = pendingWarm
     _ = store.resetRun()
     checks.append(("store.runTransitionCancelsWarming", pendingWarm.isCancelled))
+    return checks
+  }
+
+  static func selfTestPreviewConnectionIsolation() -> [(String, Bool)] {
+    let suite = "ScryPreviewIsolation.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let connections = RemoteConnectionStore(defaults: defaults)
+    let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "fixture", anchorPEM: "fixture-anchor", deviceId: "fixture-grant")
+    connections.save(connection)
+    let store = RemoteRunStore(connections: connections)
+    var checks = [("preview.normalClientAvailable", store.makeClient()?.connection == connection)]
+    store.mockMode = true
+    let blocked = store.makeClient() == nil && store.loadConnection() == nil
+    checks.append(("preview.pairedTransportBlocked", blocked))
+    // A failing control must not send even a fixture request. The positive
+    // client check above proves this is not merely an unpaired installation.
+    guard blocked else { return checks }
+
+    let identity = SessionIdentity.opened(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    store.activeSessionIdentity = identity
+    store.runId = "mock-run-visual-only"
+    store.lifecycle = .running
+    store.observationInterrupted = true
+    store.foregrounded()
+    store.prepareForSession(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    store.stopRun()
+    checks.append(("preview.noObservationOrStop", store.pollTask == nil && store.liveRunsTask == nil &&
+      !store.stopRequesting && store.lifecycle == .running))
+
+    store.historyWindow = G0Transport.RunHistoryTurnsPage(turns: [], offset: 1,
+      totalTurns: 1, hasOlder: true, snapshot: "fixture", source: "indexed_archive", completeness: "partial")
+    store.loadOlderHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    checks.append(("preview.noPagedHistoryTransport", store.historyTask == nil))
+
+    let liveJSON = #"{"origin":"mac","runId":"fixture-live","providerId":"pi","cwd":"/fixture","externalSessionId":"session","prompt":"fixture","state":"running","questions":[]}"#
+    let live = try! JSONDecoder().decode(G0Transport.LiveRun.self, from: Data(liveJSON.utf8))
+    store.followDetached(live)
+    store.stopLiveRun(live)
+    checks.append(("preview.noDetachedTransportOrStop", store.detachedTask == nil && store.liveActionRunId == nil))
+    store.mockMode = false
+    checks.append(("preview.pairingPreserved", connections.load() == connection && store.makeClient()?.connection == connection))
     return checks
   }
 
