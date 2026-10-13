@@ -7,7 +7,6 @@ struct HomeView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var pinnedExpanded = true
-  @State private var showActiveRun = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -32,8 +31,8 @@ struct HomeView: View {
           HStack {
             Image(systemName: run.observationInterrupted ? "wifi.exclamationmark" : "bubble.left.and.bubble.right")
             VStack(alignment: .leading, spacing: 3) {
-              Text(run.retryAvailable ? "核对上次提交" : "返回当前任务").font(.system(size: 14, weight: .semibold))
-              Text(run.observationInterrupted ? "观察中断，点击恢复；主机可能仍在运行" : "任务尚未收敛，保留原会话继续查看")
+              Text("返回当前任务").font(.system(size: 14, weight: .semibold))
+              Text(run.lifecycle == .submitting ? "发送中…" : run.observationInterrupted ? "观察中断，点击恢复；主机可能仍在运行" : "任务进行中")
                 .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             Spacer()
@@ -48,16 +47,11 @@ struct HomeView: View {
     .onAppear {
       if run.hasConnection { run.loadSessions(); run.loadProjects() }
     }
-    .alert("上次提交尚未核对", isPresented: $showActiveRun) {
-      Button("返回当前任务") { model.route = .chat }
-      Button("留在列表", role: .cancel) {}
-    } message: {
-      Text("Mac 还没有确认收到这次提交。先核对结果，再新建任务；提交标识和草稿会保留，不会重复执行。")
-    }
   }
 
   @ViewBuilder private var content: some View {
     ScrollView {
+      backgroundSendsSection
       switch run.catalog {
       case .idle, .loading:
         if !run.hasConnection { notPairedEmpty }
@@ -123,6 +117,36 @@ struct HomeView: View {
             .padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
           }
           .buttonStyle(.plain).disabled(live.externalSessionId == nil)
+        }
+      }
+      .padding(.horizontal, 19)
+    }
+  }
+
+  // Messages left while still sending. They resend on their own and become
+  // live runs once the Mac records them; only a Mac rejection can be dismissed.
+  @ViewBuilder private var backgroundSendsSection: some View {
+    if !run.backgroundSends.isEmpty {
+      VStack(alignment: .leading, spacing: 0) {
+        sectionTitle("发送中")
+        ForEach(run.backgroundSends) { pending in
+          HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(pending.routing.prompt).font(.system(size: 15.5)).lineLimit(1)
+              Text(pending.failure.map { "Mac 拒绝了这条消息（\($0)），未执行" }
+                   ?? "\(projectName(pending.routing.cwd)) · \(pending.routing.providerId.uppercased())")
+                .font(.system(size: 11.5)).foregroundStyle(pending.failure == nil ? Palette.muted : Palette.negative).lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            if pending.failure == nil {
+              ProgressView().controlSize(.small).accessibilityLabel("发送中")
+            } else {
+              Button { run.discardRejectedSend(pending.intentId) } label: {
+                Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 44, height: 44)
+              }.buttonStyle(.plain).foregroundStyle(Palette.muted).accessibilityLabel("移除")
+            }
+          }
+          .padding(.vertical, 12)
         }
       }
       .padding(.horizontal, 19)
@@ -206,7 +230,7 @@ struct HomeView: View {
       Button {
         // A finished run's state (including its error) belongs to that session;
         // a running one stays on the Mac and in the live-run list.
-        guard run.detachFocusedRun() else { showActiveRun = true; return }
+        guard run.detachFocusedRun() else { return }
         if case let .loaded(projects) = run.projects, let project = projects.first(where: { $0.path == cwd }) {
           run.chooseProject(project)
         }
@@ -264,7 +288,7 @@ struct HomeView: View {
       }
       .padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
       CircleButton(symbol: Symbol.plus, label: "新任务", filled: true, disabled: !run.hasConnection) {
-        guard run.detachFocusedRun() else { showActiveRun = true; return }
+        guard run.detachFocusedRun() else { return }
         model.route = .newSession
       }
     }
@@ -348,8 +372,8 @@ struct SettingsView: View {
             Text("清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
           }
           .buttonStyle(.plain).foregroundStyle(Palette.negative)
-          .disabled(run.hasUnresolvedRun || run.historyCacheClearing)
-          if run.hasUnresolvedRun { Text("请先核对当前任务，再清除配对。清除配对不会停止 Mac 上的运行。")
+          .disabled(run.hasUnresolvedRun || run.hasUnsentMessages || run.historyCacheClearing)
+          if run.hasUnresolvedRun || run.hasUnsentMessages { Text("仍有消息在发送或任务未结束，完成后再清除配对。清除配对不会停止 Mac 上的运行。")
             .font(.caption).foregroundStyle(Palette.muted) }
         }
         .padding(16)

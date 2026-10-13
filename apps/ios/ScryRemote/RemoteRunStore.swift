@@ -120,10 +120,21 @@ final class RemoteRunStore: ObservableObject {
     var hostRunId: String? = nil
   }
 
-  private struct PendingSubmission {
+  // A message the host has not acknowledged yet. It stays in the persisted
+  // outbox and is resent with the same intentId until the host answers; the
+  // host ledger dedupes by intentId, so a lost reply never creates a second run.
+  // `failure` is set only by a definitive host rejection, never by the network.
+  struct PendingSubmission: Codable, Equatable, Identifiable {
     let intentId: String
     let routing: RemoteRunClient.Routing
     let identity: SessionIdentity
+    var failure: String? = nil
+    var id: String { intentId }
+  }
+
+  enum DeliveryResult<Outcome> {
+    case accepted(Outcome)
+    case rejected(String)
   }
 
   private struct RecoveryCheckpoint: Codable {
@@ -251,9 +262,9 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var stopRequesting = false
   @Published private(set) var stopRequested = false
   @Published private(set) var stopError: String?
-  // ~2 minutes of capped backoff before asking the user to retry by hand.
-  nonisolated static let observationRetryLimit = 20
-  @Published private(set) var retryAvailable = false
+  // Every unacknowledged submission, including the focused one. Persisted in
+  // outbox.json so a killed app keeps sending after relaunch.
+  @Published private(set) var outbox: [PendingSubmission] = []
   @Published private(set) var completedLiveTurns: [SessionIdentity: [CompletedLiveTurn]] = [:]
   @Published private(set) var pendingQuestions: [G0Transport.RunQuestionRequest] = []
   @Published private(set) var questionAnswering = false
@@ -303,8 +314,8 @@ final class RemoteRunStore: ObservableObject {
 
   private let connections: RemoteConnectionStore
   private var pollTask: Task<Void, Never>?
-  private var submitTask: Task<Void, Never>?
-  private var submitTaskSeq = 0
+  private var deliveryTasks: [String: Task<Void, Never>] = [:]
+  private var pausedDeliveries = Set<String>()
   private var catalogTask: Task<Void, Never>?
   private var historyTask: Task<Void, Never>?
   private var providersTask: Task<Void, Never>?
@@ -369,7 +380,9 @@ final class RemoteRunStore: ObservableObject {
     let args = ProcessInfo.processInfo.arguments
     if args.contains("-uiPreview") || args.contains("-selfTest") || args.contains("-historyCacheTest") { return }
     #endif
+    restoreOutbox()
     restoreRecoveryCheckpoint()
+    for pending in outbox where pending.failure == nil { startDelivery(pending) }
   }
 
   // A persisted PUBLIC connection descriptor means this device is paired and may
@@ -412,16 +425,72 @@ final class RemoteRunStore: ObservableObject {
     let checkpoint = RecoveryCheckpoint(version: 1, hostId: connection.hostId, intentId: intentId,
                                         routing: routing, identity: identity, runId: runId)
     do {
-      let directory = url.deletingLastPathComponent()
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-        attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-      try JSONEncoder().encode(checkpoint).write(to: url, options: .atomic)
-      try FileManager.default.setAttributes(
-        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: url.path)
+      try Self.writeProtected(JSONEncoder().encode(checkpoint), to: url)
       return true
     } catch {
       submitError = "无法保存恢复记录：\(Self.describe(error))"
       return false
+    }
+  }
+
+  private static func writeProtected(_ data: Data, to url: URL) throws {
+    let directory = url.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+      attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+    try data.write(to: url, options: .atomic)
+    try FileManager.default.setAttributes(
+      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: url.path)
+  }
+
+  private struct OutboxFile: Codable {
+    let version: Int
+    let hostId: String
+    let items: [PendingSubmission]
+  }
+
+  private var outboxURL: URL? {
+    recoveryURL?.deletingLastPathComponent().appendingPathComponent("outbox.json", isDirectory: false)
+  }
+
+  // Write the outbox before the first send: a message that is not on disk would
+  // be forgotten by a killed app even though the host may never have received it.
+  private func persistOutbox(_ items: [PendingSubmission]) -> Bool {
+    #if DEBUG
+    if mockMode || ProcessInfo.processInfo.arguments.contains("-historyCacheTest") { return true }
+    #endif
+    guard let url = outboxURL else {
+      submitError = "无法保存待发送消息：存储目录不可用"
+      return false
+    }
+    do {
+      if items.isEmpty {
+        do { try FileManager.default.removeItem(at: url) }
+        catch let error as CocoaError where error.code == .fileNoSuchFile { }
+        return true
+      }
+      guard let connection = connections.load() else {
+        submitError = "无法保存待发送消息：尚未配对"
+        return false
+      }
+      try Self.writeProtected(JSONEncoder().encode(OutboxFile(version: 1, hostId: connection.hostId, items: items)), to: url)
+      return true
+    } catch {
+      submitError = "无法保存待发送消息：\(Self.describe(error))"
+      return false
+    }
+  }
+
+  private func restoreOutbox() {
+    guard let url = outboxURL, FileManager.default.fileExists(atPath: url.path) else { return }
+    do {
+      let file = try JSONDecoder().decode(OutboxFile.self, from: Data(contentsOf: url))
+      guard file.version == 1, let connection = connections.load(), file.hostId == connection.hostId else {
+        submitError = "本地待发送消息不属于当前已配对主机，未发送"
+        return
+      }
+      outbox = file.items
+    } catch {
+      submitError = "本地待发送消息损坏，未发送：\(Self.describe(error))"
     }
   }
 
@@ -463,12 +532,16 @@ final class RemoteRunStore: ObservableObject {
           submitError = "已恢复运行标识，但当前配对凭据不可用"
         }
       } else if let intentId = checkpoint.intentId, let routing = checkpoint.routing {
-        pendingSubmission = PendingSubmission(intentId: intentId, routing: routing, identity: checkpoint.identity)
+        let pending = outbox.first { $0.intentId == intentId }
+          ?? PendingSubmission(intentId: intentId, routing: routing, identity: checkpoint.identity)
+        // A checkpoint from a build without the outbox still names an unsent intent.
+        if !outbox.contains(where: { $0.intentId == intentId }) {
+          outbox.append(pending)
+          _ = persistOutbox(outbox)
+        }
+        pendingSubmission = pending
         terminalDrainCompleted = false
         lifecycle = .submitting
-        retryAvailable = true
-        submitError = "上次提交结果未知。正在向 Mac 核对；将复用原 intent ID，不会创建重复任务。"
-        reconcilePending(resendIfUnknown: false)
       } else {
         submitError = "本地恢复记录不完整，未自动执行任何操作"
       }
@@ -1065,7 +1138,11 @@ final class RemoteRunStore: ObservableObject {
       let version = try await client.historyVersion(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
       guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
       recordSuccess()
-      guard historyNeedsRefresh(version.version) else { return }
+      guard historyNeedsRefresh(version.version) else {
+        // The shown snapshot is the host's current version: the earlier failure no longer applies.
+        if historyPageSnapshot == version.version { historyRefreshError = nil }
+        return
+      }
       loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, onlyWhileFollowing: true)
       await historyTask?.value
     } catch {
@@ -1440,16 +1517,16 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  // Submit a durable intent. Until a receipt arrives the state is explicitly
-  // submitting; a transport-unknown result keeps the same intentId available
-  // for a user retry, rather than creating a second host run.
+  // Submit a durable intent. The message goes to the persisted outbox first and
+  // is then delivered automatically: transport failures resend the same intentId
+  // until the host answers, so a bad network only delays it (the UI spins).
   @discardableResult
   func submit(prompt: String, providerId: String, attachments: [RemoteRunClient.Attachment] = []) -> Bool {
     guard !historyOnly else { return false }
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
     guard !hasUnresolvedRun else {
-      submitError = "当前任务仍在观察或提交核对中，请先返回并继续该任务"
+      submitError = "当前任务仍在发送或运行中，请先返回该任务"
       return false
     }
     guard let cwd = chosen?.path else { submitError = "请先选择一个主机已授权的项目"; return false }
@@ -1462,124 +1539,167 @@ final class RemoteRunStore: ObservableObject {
     #endif
     guard makeClient() != nil else { submitError = "尚未配对"; return false }
     let identity = SessionIdentity.new(providerId: providerId, cwd: cwd)
-    guard resetRun() else { return false }
-    activeSessionIdentity = identity
-    self.prompt = trimmed
-    sentAttachments = attachments.map(SentAttachment.init)
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
                                           agentProfileId: chosenProvider?.agentProfileId, prompt: trimmed,
                                           modelId: chosenModel?.id, modelProviderId: chosenModel?.providerId,
                                           effort: chosenEffort, permissionMode: permissionMode,
                                           attachments: attachments)
-    activeRouting = routing
-    pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
+    guard resetRun() else { return false }
+    return sendFocused(PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity),
+                       attachments: attachments)
+  }
+
+  // Persist first, then show and deliver. If the outbox cannot be written the
+  // send is refused (the composer keeps the draft) instead of spinning on a
+  // message a killed app would forget.
+  private func sendFocused(_ pending: PendingSubmission, attachments: [RemoteRunClient.Attachment]) -> Bool {
+    guard persistOutbox(outbox + [pending]) else { return false }
+    outbox.append(pending)
+    activeSessionIdentity = pending.identity
+    prompt = pending.routing.prompt
+    sentAttachments = attachments.map(SentAttachment.init)
+    activeRouting = pending.routing
+    pendingSubmission = pending
     terminalDrainCompleted = false
     lifecycle = .submitting
-    submitPending()
+    // Marks which outbox message is focused after a relaunch.
+    _ = saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
+                               identity: pending.identity, runId: nil)
+    startDelivery(pending)
     return true
   }
 
-  // Retry only the unresolved submission. First ask the host whether it already
-  // recorded this intent id (a read, no payload); resend the byte-identical
-  // intent only when the host says it has no record of it.
-  func retrySubmission() {
-    guard pendingSubmission != nil, lifecycle == .submitting else { return }
-    submitError = "正在重新核对提交结果…"
-    reconcilePending(resendIfUnknown: true)
-  }
-
-  private func submitPending() {
-    guard let pending = pendingSubmission, let client = makeClient() else { return }
-    guard saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
-                                 identity: pending.identity, runId: nil) else {
-      retryAvailable = true
-      return
-    }
-    submitTask?.cancel()
-    let requestGeneration = generation
-    let requestConnectionRevision = connectionSuccessRevision
-    submitTaskSeq += 1
-    let taskSeq = submitTaskSeq
-    submitTask = Task { [weak self] in
-      // A reconcile may hand off to a resend (or back); only the newest task owns the slot.
-      defer {
-        Task { @MainActor [weak self] in if self?.submitTaskSeq == taskSeq { self?.submitTask = nil } }
-      }
-      do {
-        let outcome = try await client.submit(routing: pending.routing, intentId: pending.intentId)
-        await MainActor.run {
-          self?.adoptSubmission(outcome, pending: pending, client: client, generation: requestGeneration)
-        }
-      } catch {
-        await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.recordFailure(error, since: requestConnectionRevision)
-          self.lifecycle = .submitting
-          self.retryAvailable = true
-          self.submitError = "提交结果未知：\(Self.describe(error))。正在向 Mac 核对，不会创建新的任务。"
-          // The host may have recorded the intent before the reply was lost.
-          // Checking is a read; resending stays a user decision.
-          self.reconcilePending(resendIfUnknown: false)
-        }
-      }
+  private func startDelivery(_ pending: PendingSubmission) {
+    guard deliveryTasks[pending.intentId] == nil, let client = makeClient() else { return }
+    deliveryTasks[pending.intentId] = Task { [weak self] in
+      let result = await Self.deliver(
+        submit: { try await client.submit(routing: pending.routing, intentId: pending.intentId) },
+        status: { try await client.intentStatus(intentId: pending.intentId) },
+        transportFailed: { error in self?.recordFailure(error) },
+        pause: { attempt in
+          self?.pausedDeliveries.insert(pending.intentId)
+          defer { self?.pausedDeliveries.remove(pending.intentId) }
+          try await Self.deliveryPause(attempt)
+        })
+      guard let self, let result else { return }
+      self.deliveryFinished(pending, result: result, client: client)
     }
   }
 
-  private func reconcilePending(resendIfUnknown: Bool) {
-    guard let pending = pendingSubmission, let client = makeClient() else { return }
-    submitTask?.cancel()
-    let requestGeneration = generation
-    let requestConnectionRevision = connectionSuccessRevision
-    submitTaskSeq += 1
-    let taskSeq = submitTaskSeq
-    submitTask = Task { [weak self] in
-      // A reconcile may hand off to a resend (or back); only the newest task owns the slot.
-      defer {
-        Task { @MainActor [weak self] in if self?.submitTaskSeq == taskSeq { self?.submitTask = nil } }
-      }
+  // Resend until the host answers. Only an authenticated host reply ends the
+  // loop: a receipt (new or duplicate of this intentId) or a definitive
+  // rejection. nil means the task was cancelled; a newer attempt owns the intent.
+  static func deliver<Outcome>(submit: () async throws -> Outcome,
+                               status: () async throws -> Outcome?,
+                               transportFailed: (Error) -> Void,
+                               pause: (Int) async throws -> Void) async -> DeliveryResult<Outcome>? {
+    var attempt = 0
+    while !Task.isCancelled {
       do {
-        let found = try await client.intentStatus(intentId: pending.intentId)
-        await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.recordSuccess()
-          if let found {
-            self.adoptSubmission(found, pending: pending, client: client, generation: requestGeneration)
-          } else if resendIfUnknown {
-            self.submitPending()
-          } else {
-            self.submitError = "Mac 没有收到这次提交。可重试发送；将复用原 intent ID，不会创建重复任务。"
-          }
+        return .accepted(try await submit())
+      } catch G0Transport.RunError.host(code: "intent_payload_conflict") {
+        // Recorded earlier under a differently encoded payload (e.g. an app
+        // update between attempts): adopt that run instead of failing.
+        do {
+          if let found = try await status() { return .accepted(found) }
+          return .rejected("intent_payload_conflict")
+        } catch let G0Transport.RunError.host(code) {
+          return .rejected(code)
+        } catch {
+          if Task.isCancelled { return nil }
+          transportFailed(error)
         }
-      } catch G0Transport.RunError.host(code: "unknown_op") {
-        // Older host without reconciliation: the idempotent resend is the only check.
-        await MainActor.run {
-          guard let self, resendIfUnknown, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.submitPending()
-        }
+      } catch let G0Transport.RunError.host(code) {
+        return .rejected(code)
+      } catch RemoteRunClient.ClientError.missingCredentials {
+        return .rejected("missing_credentials")
       } catch {
-        await MainActor.run {
-          guard let self, self.isCurrent(requestGeneration, identity: pending.identity) else { return }
-          self.recordFailure(error, since: requestConnectionRevision)
-          self.retryAvailable = true
-          self.submitError = "提交结果未知：\(Self.describe(error))。请重试核对，不会创建新的任务。"
-        }
+        if Task.isCancelled { return nil }
+        transportFailed(error)
+      }
+      attempt += 1
+      do { try await pause(attempt) } catch { return nil }
+    }
+    return nil
+  }
+
+  // 1, 2, 4, then every 8 seconds. Foregrounding wakes waiting sends at once.
+  private static func deliveryPause(_ attempt: Int) async throws {
+    let seconds = min(8, 1 << min(attempt - 1, 3))
+    try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+  }
+
+  // Restart sends that are waiting out a backoff (foreground). A send whose
+  // request is in flight keeps going, so a large payload is not uploaded twice.
+  // Resending is still safe: the host dedupes by intentId.
+  private func wakeDelivery() {
+    for intentId in pausedDeliveries {
+      deliveryTasks.removeValue(forKey: intentId)?.cancel()
+    }
+    pausedDeliveries = []
+    for pending in outbox where pending.failure == nil { startDelivery(pending) }
+  }
+
+  private func deliveryFinished(_ pending: PendingSubmission, result: DeliveryResult<G0Transport.RunSubmitOutcome>,
+                                client: RemoteRunClient) {
+    guard let index = outbox.firstIndex(where: { $0.intentId == pending.intentId }),
+          outbox[index].failure == nil else { return }
+    deliveryTasks.removeValue(forKey: pending.intentId)?.cancel()
+    let focused = pendingSubmission?.intentId == pending.intentId
+    var remaining = outbox
+    switch result {
+    case let .accepted(outcome):
+      recordSuccess()
+      remaining.remove(at: index)
+      if focused { adoptSubmission(outcome, pending: pending, client: client) }
+    case let .rejected(code):
+      if focused {
+        remaining.remove(at: index)
+        pendingSubmission = nil
+        lifecycle = .failed
+        submitError = "Mac 拒绝了这条消息（\(code)），未执行。"
+        clearRecoveryCheckpoint()
+      } else {
+        // Nobody is looking at this message; keep it visible on the home list.
+        remaining[index].failure = code
       }
     }
+    // A stale file only causes a deduped resend after relaunch; keep going.
+    _ = persistOutbox(remaining)
+    outbox = remaining
+  }
+
+  // Messages sent from a screen the user has since left. They keep sending in
+  // the background and appear as live runs once the host records them.
+  var backgroundSends: [PendingSubmission] {
+    outbox.filter { $0.intentId != pendingSubmission?.intentId }
+  }
+
+  var hasUnsentMessages: Bool { outbox.contains { $0.failure == nil } }
+
+  func backgroundSend(for identity: SessionIdentity?) -> PendingSubmission? {
+    guard let identity else { return nil }
+    return backgroundSends.last { $0.identity == identity && $0.failure == nil }
+  }
+
+  // Only a host-rejected message can be dismissed; an unanswered one keeps sending.
+  func discardRejectedSend(_ intentId: String) {
+    guard outbox.contains(where: { $0.intentId == intentId && $0.failure != nil }) else { return }
+    let remaining = outbox.filter { $0.intentId != intentId }
+    _ = persistOutbox(remaining)
+    outbox = remaining
   }
 
   private func adoptSubmission(_ outcome: G0Transport.RunSubmitOutcome, pending: PendingSubmission,
-                               client: RemoteRunClient, generation requestGeneration: Int) {
-    guard isCurrent(requestGeneration, identity: pending.identity) else { return }
-    recordSuccess()
+                               client: RemoteRunClient) {
     runId = outcome.runId
     terminalDrainCompleted = false
     let saved = saveRecoveryCheckpoint(intentId: pending.intentId, routing: pending.routing,
                                        identity: pending.identity, runId: outcome.runId)
     pendingSubmission = nil
-    retryAvailable = false
     if saved { submitError = nil }
     lifecycle = .recorded
-    startPolling(runId: outcome.runId, client: client, generation: requestGeneration, identity: pending.identity)
+    startPolling(runId: outcome.runId, client: client, generation: generation, identity: pending.identity)
   }
 
   private func startPolling(runId: String, client: RemoteRunClient, generation: Int,
@@ -1644,7 +1764,6 @@ final class RemoteRunStore: ObservableObject {
           if failures > 0 || self.observationReconnecting {
             failures = 0
             self.observationReconnecting = false
-            if self.submitError?.hasPrefix("连接中断") == true { self.submitError = nil }
           }
           self.observationInterrupted = false
         } catch {
@@ -1652,9 +1771,10 @@ final class RemoteRunStore: ObservableObject {
           self.recordFailure(error, since: requestConnectionRevision)
           failures += 1
           // Host-rejected reads (revoked device, unknown run) cannot heal by
-          // retrying. Transport loss can: keep observing with capped backoff and
-          // say so; the Provider may still be running and nothing is assumed.
-          if error is G0Transport.RunError || failures >= Self.observationRetryLimit {
+          // retrying. Transport loss can: keep observing with capped backoff for
+          // as long as it takes; the status row says it is reconnecting and the
+          // Provider may still be running, so nothing is assumed.
+          if error is G0Transport.RunError {
             self.observationReconnecting = false
             self.observationInterrupted = true
             self.submitError = Self.observationFailure(error, lifecycle: self.lifecycle, operation: operation)
@@ -1662,7 +1782,6 @@ final class RemoteRunStore: ObservableObject {
             return
           }
           self.observationReconnecting = true
-          self.submitError = "连接中断，正在重连（第 \(failures) 次）…运行状态以 Mac 为准。"
           let delay = min(8.0, 0.5 * pow(2.0, Double(failures - 1)))
           try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
           continue
@@ -1777,6 +1896,7 @@ final class RemoteRunStore: ObservableObject {
     guard !historyOnly, let client = makeClient() else { return }
     Task { try? await client.prewarm() }
     startLiveRuns()
+    wakeDelivery()
     if observationInterrupted, pollTask == nil, !terminalDrainCompleted, runId != nil { retryObservation() }
   }
 
@@ -1938,15 +2058,14 @@ final class RemoteRunStore: ObservableObject {
   }
 
   // Leave the focused run running on the Mac and stop watching it here, so the
-  // user can open another session or start a new task. Only a run with a host
-  // receipt can be left: an unacknowledged submission keeps its recovery path.
+  // user can open another session or start a new task. An unacknowledged
+  // message stays in the outbox and keeps sending in the background.
   // Its partial live turn is not archived as "completed"; the host live-run
   // list keeps showing the run, its questions and stop, and history shows its
   // content once the Provider writes it.
   func detachFocusedRun() -> Bool {
     guard !historyOnly else { return false }
     if !hasUnresolvedRun { return resetRun() }
-    guard pendingSubmission == nil, runId != nil else { return false }
     clearRunState()
     return true
   }
@@ -1955,8 +2074,8 @@ final class RemoteRunStore: ObservableObject {
     prefetchTask?.cancel()
     generation += 1
     pollTask?.cancel(); pollTask = nil
-    submitTask?.cancel(); submitTask = nil
     historyTask?.cancel(); historyTask = nil
+    // Unfocus only; its outbox delivery task keeps running.
     pendingSubmission = nil
     activeRouting = nil
     clearRecoveryCheckpoint()
@@ -1977,7 +2096,6 @@ final class RemoteRunStore: ObservableObject {
     stopRequested = false
     stopError = nil
     terminalDrainCompleted = false
-    retryAvailable = false
     pendingQuestions = []
     pendingQuestionAnswerId = nil
     questionAnswering = false
@@ -2007,7 +2125,11 @@ final class RemoteRunStore: ObservableObject {
     liveRuns = []; liveRunsRevision = nil; liveRunsStatus = .unknown; liveHistoryTarget = nil
     liveActionRunId = nil; liveActionError = nil; liveAnsweredQuestions = []; liveAnswerIds = [:]
     pollTask?.cancel(); pollTask = nil
-    submitTask?.cancel(); submitTask = nil
+    for task in deliveryTasks.values { task.cancel() }
+    deliveryTasks = [:]; pausedDeliveries = []
+    // Unpair discards unsent messages: they belong to the old grant.
+    _ = persistOutbox([])
+    outbox = []
     catalogTask?.cancel(); catalogTask = nil
     prefetchGeneration += 1
     prefetchTask?.cancel(); prefetchTask = nil; warmedScreens.removeAll()
@@ -2029,7 +2151,7 @@ final class RemoteRunStore: ObservableObject {
     lifecycle = .unknown; output = []; seenOutputSequences = []; prompt = nil; sentAttachments = []
     runId = nil; submitError = nil; truncated = false; resultSummary = nil
     liveExternalSessionId = nil; liveHostRunId = nil; activeSessionIdentity = nil
-    observationInterrupted = false; observationReconnecting = false; stopRequesting = false; stopRequested = false; stopError = nil; terminalDrainCompleted = false; retryAvailable = false
+    observationInterrupted = false; observationReconnecting = false; stopRequesting = false; stopRequested = false; stopError = nil; terminalDrainCompleted = false
     pendingQuestions = []; pendingQuestionAnswerId = nil; questionAnswering = false; questionError = nil
     completedLiveTurns = [:]
     archivedActiveTurn = false
@@ -2050,7 +2172,7 @@ final class RemoteRunStore: ObservableObject {
     let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
     guard !hasUnresolvedRun else {
-      submitError = "当前任务仍在观察或提交核对中，请先返回并继续该任务"
+      submitError = "当前任务仍在发送或运行中，请先返回该任务"
       return false
     }
     guard !resume.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -2077,26 +2199,21 @@ final class RemoteRunStore: ObservableObject {
       submitError = "当前会话身份不匹配，已阻止切换会话继续"
       return false
     }
+    // One turn per conversation: a follow-up must not race its own earlier message.
+    guard backgroundSend(for: identity) == nil else { return false }
     let modelId = chosenModel?.id
     let modelProviderId = chosenModel?.providerId
     let effort = chosenEffort
     let permission = permissionMode
     guard resetRun() else { return false }
-    activeSessionIdentity = identity
-    self.prompt = trimmed
-    sentAttachments = attachments.map(SentAttachment.init)
     liveExternalSessionId = resumeId
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
                                           agentProfileId: matchingProvider.agentProfileId, prompt: trimmed,
                                           modelId: modelId, modelProviderId: modelProviderId,
                                           effort: effort, permissionMode: permission,
                                           resume: resumeId, attachments: attachments)
-    activeRouting = routing
-    pendingSubmission = PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity)
-    terminalDrainCompleted = false
-    lifecycle = .submitting
-    submitPending()
-    return true
+    return sendFocused(PendingSubmission(intentId: UUID().uuidString.lowercased(), routing: routing, identity: identity),
+                       attachments: attachments)
   }
 
   #if DEBUG
@@ -2174,9 +2291,6 @@ final class RemoteRunStore: ObservableObject {
     store.recordFailure(transportError, since: failedRequestRevision)
     checks.append(("store.historyFailureDoesNotOverrideConcurrentSuccess", store.reachable == true && store.connectionObservation == .reachable))
     store.historyTask?.cancel(); store.historyTask = nil; store.catalogTask?.cancel(); store.catalogTask = nil
-    store.reachable = true; store.submitTask = Task {}; store.recordFailure(transportError)
-    checks.append(("store.submitFailureDemotesWhenAlone", store.reachable == false))
-    store.submitTask?.cancel(); store.submitTask = nil
     store.reachable = true; store.pollTask = Task {}; store.recordFailure(transportError)
     checks.append(("store.pollFailureDemotesWhenAlone", store.reachable == false))
     store.pollTask?.cancel(); store.pollTask = nil
@@ -2386,6 +2500,19 @@ final class RemoteRunStore: ObservableObject {
     store.lifecycle = .submitting
     checks.append(("pending.resetRejected", !store.resetRun() && store.pendingSubmission?.intentId == "keep-this-intent"))
     checks.append(("pending.submitRejected", !store.submit(prompt: "next", providerId: "codex") && store.pendingSubmission?.intentId == "keep-this-intent"))
+    // Leaving an unsent message must not block a new task; it keeps sending from the outbox.
+    store.outbox = [store.pendingSubmission!]
+    checks.append(("pending.detachDoesNotBlock", store.detachFocusedRun() && !store.hasUnresolvedRun && store.pendingSubmission == nil))
+    checks.append(("pending.detachKeepsOutbox", store.backgroundSends.map(\.intentId) == ["keep-this-intent"] &&
+      store.backgroundSend(for: identity)?.routing.prompt == "same prompt"))
+    store.discardRejectedSend("keep-this-intent")
+    checks.append(("pending.unansweredSendNotDiscardable", store.outbox.count == 1))
+    store.outbox[0].failure = "grant_revoked"
+    store.discardRejectedSend("keep-this-intent")
+    checks.append(("pending.rejectedSendDiscardable", store.outbox.isEmpty))
+    let file = OutboxFile(version: 1, hostId: "host", items: [PendingSubmission(intentId: "a", routing: routing, identity: identity, failure: "x")])
+    let decoded = (try? JSONEncoder().encode(file)).flatMap { try? JSONDecoder().decode(OutboxFile.self, from: $0) }
+    checks.append(("outbox.roundTrip", decoded?.items == file.items && decoded?.hostId == "host"))
     store.pendingSubmission = nil
     store.runId = "first"; store.prompt = "same prompt"; store.lifecycle = .settled
     checks.append(("drain.blocksReset", !store.resetRun()))
@@ -2553,6 +2680,19 @@ final class RemoteRunStore: ObservableObject {
         history = .partial([.init(userText: "ios端输出要支持markdown 这个表格展示有问题 修复", items: [
           .init(kind: "tool", text: "bash"), .init(kind: "tool_result", text: "ok")])])
       }
+    }
+    // Screenshot fixture for an unacknowledged message (focused and background);
+    // nothing is sent because mockMode never starts delivery.
+    if ProcessInfo.processInfo.arguments.contains("-uiMockSending"), let identity = activeSessionIdentity {
+      let routing = RemoteRunClient.Routing(cwd: roots[0].path, providerId: "codex", agentProfileId: nil,
+                                            prompt: "有办法不会收吗 不然每次回来看代码都要重新等待 jdtls 加载")
+      let focused = PendingSubmission(intentId: "mock-sending", routing: routing, identity: identity)
+      let other = RemoteRunClient.Routing(cwd: roots[1].path, providerId: "pi", agentProfileId: nil, prompt: "整理今天的测试结果")
+      outbox = [focused, PendingSubmission(intentId: "mock-background", routing: other,
+                                           identity: .new(providerId: "pi", cwd: roots[1].path))]
+      pendingSubmission = focused
+      prompt = routing.prompt; sentAttachments = []; output = []; runId = nil; resultSummary = nil
+      lifecycle = .submitting; terminalDrainCompleted = false
     }
     if ProcessInfo.processInfo.arguments.contains("-uiMockContinuousHistory") {
       history = .loaded([

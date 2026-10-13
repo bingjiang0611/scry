@@ -109,7 +109,10 @@ struct SessionTranscriptView: View {
   // or left running when the user switched away from it.
   private var otherLive: G0Transport.LiveRun? { readOnly ? nil : run.otherLiveRun(for: sessionIdentity) }
   private var otherLiveQuestion: G0Transport.RunQuestionRequest? { otherLive.flatMap { run.openLiveQuestion($0) } }
-  private var runBusy: Bool { run.isBusy || otherLive != nil }
+  // This conversation's message that is still sending after the user left it.
+  private var backgroundSend: RemoteRunStore.PendingSubmission? { readOnly ? nil : run.backgroundSend(for: sessionIdentity) }
+  private var focusedSending: Bool { run.activeSessionIdentity == sessionIdentity && run.lifecycle == .submitting }
+  private var runBusy: Bool { run.isBusy || otherLive != nil || backgroundSend != nil }
   // Show the detached run's streamed output unless history already holds its
   // turn (a Provider transcript written live); never show both.
   private var detachedLive: G0Transport.LiveRun? {
@@ -143,7 +146,10 @@ struct SessionTranscriptView: View {
     VStack(spacing: 0) {
       header
       if let session {
-        if run.activeSessionIdentity == sessionIdentity, run.canStop {
+        if focusedSending || backgroundSend != nil {
+          // The message bubble already shows "发送中"; no second status row.
+          EmptyView()
+        } else if run.activeSessionIdentity == sessionIdentity, run.canStop {
           // This device's own live run. Remote runs are not in the Mac
           // RunRegistry, so the host status read would say "not observed".
           Label(run.observationReconnecting ? "连接中断，正在重连 · 运行状态以 Mac 为准"
@@ -174,10 +180,6 @@ struct SessionTranscriptView: View {
       if let error = run.submitError {
         VStack(alignment: .leading, spacing: 7) {
           Notice(text: error, warning: true)
-          if run.retryAvailable {
-            Button("重试核对（复用同一 intentId）") { run.retrySubmission() }
-              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
-          }
           if run.observationInterrupted {
             Button("重新连接并继续观察") { run.retryObservation() }
               .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
@@ -193,6 +195,12 @@ struct SessionTranscriptView: View {
         historyBody
         if hasLiveTurn && !run.liveTurnInHistory { liveTurn }
         if let live = detachedLive { detachedTurn(live) }
+        if let pending = backgroundSend {
+          VStack(alignment: .leading, spacing: 10) {
+            userBubble(pending.routing.prompt, attachments: pending.routing.attachments.map(RemoteRunStore.SentAttachment.init))
+            SendingLabel()
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }
       }
       .id(sessionIdentity)
       if !readOnly { footer }
@@ -375,7 +383,7 @@ struct SessionTranscriptView: View {
           }
         }
         if !readOnly {
-          Button { run.resetRun(); model.route = .newSession } label: { Label("新任务", systemImage: Symbol.compose) }
+          Button { if run.detachFocusedRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
         }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
@@ -395,7 +403,8 @@ struct SessionTranscriptView: View {
   private var headerSubtitle: String {
     var parts = [projectName(session?.cwd), providerName]
     // Only the long-poll proves "nothing observed"; it is not "completed".
-    if run.liveRunsStatus == .observed, otherLive == nil, !(run.activeSessionIdentity == sessionIdentity && run.canStop) {
+    if run.liveRunsStatus == .observed, otherLive == nil, !focusedSending, backgroundSend == nil,
+       !(run.activeSessionIdentity == sessionIdentity && run.canStop) {
       parts.append("未检测到运行")
     }
     return parts.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -415,16 +424,12 @@ struct SessionTranscriptView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(run.history == .baseUnavailable ? "无法读取 Mac 上的会话记录" : "历史同步失败，显示的是上次读到的内容")
           .font(.system(size: 12, weight: .semibold))
-        Text(reason).font(.system(size: 11)).lineLimit(2).textSelection(.enabled)
+        // The exact reason stays in the header menu (历史状态).
+        Text("正在自动重试").font(.system(size: 11))
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      if let s = session {
-        Button(run.historySyncing ? "重试中…" : "重试") {
-          run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true)
-        }
-        .font(.system(size: 12, weight: .semibold)).disabled(run.historySyncing)
-        .frame(minWidth: 44, minHeight: 32)
-      }
+      // The paced refresh keeps retrying while this error stands (historyIsWatched).
+      ProgressView().controlSize(.small)
     }
     .foregroundStyle(Palette.warnInk)
     .padding(.vertical, 8).padding(.horizontal, 12)
@@ -486,9 +491,9 @@ struct SessionTranscriptView: View {
       HStack(spacing: 8) {
         Circle().fill(stateColor).frame(width: 7, height: 7)
         Text(stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-        if run.lifecycle == .running { ProgressView().controlSize(.mini) }
+        if run.lifecycle == .running || run.lifecycle == .submitting { ProgressView().controlSize(.mini) }
       }
-      if run.output.isEmpty {
+      if run.output.isEmpty, run.lifecycle != .submitting {
         Text(placeholderForState).font(.system(size: 15)).foregroundStyle(Palette.muted)
       } else {
         ForEach(ConversationEntry.group(run.output, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
@@ -598,7 +603,7 @@ struct SessionTranscriptView: View {
 
   private var placeholderForState: String {
     switch run.lifecycle {
-    case .submitting: return "正在核对提交结果…结果未知时可安全重试"
+    case .submitting: return "发送中…"
     case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
     case .dispatched: return "主机已派发，准备执行…"
     case .running: return "运行中 · 尚无输出内容"
@@ -609,7 +614,7 @@ struct SessionTranscriptView: View {
   private var stateLabel: String {
     switch run.lifecycle {
     case .unknown: return "等待主机"
-    case .submitting: return "提交中 · 结果未知"
+    case .submitting: return "发送中"
     case .recorded: return "意图已记录（未执行）"
     case .dispatched: return "主机已派发"
     case .running: return "运行中"

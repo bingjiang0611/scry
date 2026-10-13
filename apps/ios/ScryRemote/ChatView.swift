@@ -43,10 +43,6 @@ struct ChatView: View {
       if let error = run.submitError {
         VStack(alignment: .leading, spacing: 7) {
           Notice(text: error, warning: true)
-          if run.retryAvailable {
-            Button("重试核对（复用同一 intentId）") { run.retrySubmission() }
-              .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
-          }
           if run.observationInterrupted {
             Button("重新连接并继续观察") { run.retryObservation() }
               .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16)
@@ -86,8 +82,8 @@ struct ChatView: View {
         Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
       }.accessibilityLabel("项目文件与 Diff").disabled(projectCwd == nil)
       Menu {
-        Button { if run.resetRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
-          .disabled(run.hasUnresolvedRun)
+        // Leaving keeps an unsent message sending and a run running on the Mac.
+        Button { if run.detachFocusedRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
         Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
@@ -140,12 +136,12 @@ struct ChatView: View {
       HStack(spacing: 8) {
         Circle().fill(stateColor).frame(width: 7, height: 7)
         Text(stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
-        if run.lifecycle == .running {
+        if run.lifecycle == .running || run.lifecycle == .submitting {
           ProgressView().controlSize(.mini)
         }
       }
 
-      if run.output.isEmpty {
+      if run.output.isEmpty, run.lifecycle != .submitting {
         Text(placeholderForState)
           .font(.system(size: 15)).foregroundStyle(Palette.muted)
       } else {
@@ -224,7 +220,7 @@ struct ChatView: View {
 
   private var placeholderForState: String {
     switch run.lifecycle {
-    case .submitting: return "正在核对提交结果…结果未知时可安全重试"
+    case .submitting: return "发送中…"
     case .recorded: return "意图已记录，等待主机派发…（recorded ≠ 已执行）"
     case .dispatched: return "主机已派发，准备执行…"
     case .running: return "运行中 · 尚无输出内容"
@@ -235,7 +231,7 @@ struct ChatView: View {
   private var stateLabel: String {
     switch run.lifecycle {
     case .unknown: return "等待主机"
-    case .submitting: return "提交中 · 结果未知"
+    case .submitting: return "发送中"
     case .recorded: return "意图已记录（未执行）"
     case .dispatched: return "主机已派发"
     case .running: return "运行中"
