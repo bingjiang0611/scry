@@ -4424,6 +4424,7 @@ let performanceResourceMonitor: PerformanceResourceMonitor | null = null
 app.whenReady().then(() => {
   if (!primaryInstance) return
   const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform })
+  dockBadge.sync()
   void warmShellEnv()
   // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，
   // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
