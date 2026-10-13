@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { WorkspacePathRequest } from '../shared/workspace.js'
@@ -23,7 +24,13 @@ function homeRelativeParts(path: string): string[] {
 }
 
 export class HomeFileAccess {
+  private readonly fileReferences = new Map<string, string>()
+
   constructor(private readonly homeDir: string) {}
+
+  isReadOnlyTarget(cwd: string): boolean {
+    return cwd === '~' || cwd.startsWith('scry-file:')
+  }
 
   /** Resolve link text without changing workspace write authorization. Ancestor lookup stays inside home. */
   async resolveFile(request: WorkspacePathRequest): Promise<WorkspacePathRequest> {
@@ -44,14 +51,16 @@ export class HomeFileAccess {
         target = await realpath(candidate)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        if (!isInside(home, candidate) && !isInside(cwd, candidate)) throw new Error('文件不在已授权的工作区或用户目录中')
       }
       if (target !== null) {
-        if (!isInside(home, target) && !isInside(cwd, target)) throw new Error('符号链接目标不在已授权的目录中')
         if (!(await lstat(target)).isFile()) throw new Error('目标不是文件')
-        return isInside(cwd, target) && request.cwd !== '~'
-          ? { cwd, path: relative(cwd, target) }
-          : { cwd: '~', path: relative(home, target) }
+        if (isInside(cwd, target) && request.cwd !== '~') return { cwd, path: relative(cwd, target) }
+        if (isInside(home, target)) return { cwd: '~', path: relative(home, target) }
+        // A clicked link can target any OS-readable file, but it exposes only
+        // this canonical file to read/open handlers, never a writable root.
+        const reference = `scry-file:${randomUUID()}`
+        this.fileReferences.set(reference, target)
+        return { cwd: reference, path: basename(target) }
       }
       if (!searchAncestors || base === home) break
       base = dirname(base)
@@ -60,7 +69,13 @@ export class HomeFileAccess {
   }
 
   async authorize<T extends WorkspacePathRequest>(request: T): Promise<T> {
-    if (request.cwd !== '~') throw new Error('无效的用户目录文件请求')
+    if (request.cwd !== '~') {
+      const file = this.fileReferences.get(request.cwd)
+      if (!file || request.path !== basename(file)) throw new Error('无效的用户目录文件请求或文件链接引用')
+      if (await realpath(file) !== file) throw new Error('文件链接目标已变化，请重新打开链接')
+      if (!(await lstat(file)).isFile()) throw new Error('目标不是文件')
+      return { ...request, cwd: dirname(file), path: basename(file) }
+    }
     const home = await realpath(resolve(this.homeDir))
     const parts = homeRelativeParts(request.path)
     let canonical: string

@@ -1328,11 +1328,11 @@ handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
 handleTrusted('workspace:readPage', (_event, request: WorkspaceFilePageRequest) =>
   readWorkspaceFilePage(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathRequest) =>
-  readWorkspaceFile(request.cwd === '~'
+  readWorkspaceFile(homeFileAccess.isReadOnlyTarget(request.cwd)
     ? await homeFileAccess.authorize(request)
     : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
 handleTrusted('workspace:readPageKnown', async (_event, request: WorkspaceFilePageRequest) =>
-  readWorkspaceFilePage(request.cwd === '~'
+  readWorkspaceFilePage(homeFileAccess.isReadOnlyTarget(request.cwd)
     ? await homeFileAccess.authorize(request)
     : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
 handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
@@ -1365,7 +1365,7 @@ handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) 
   ))
 handleTrusted('workspace:openKnownExternal', async (_event, request: WorkspacePathRequest) =>
   openWorkspaceFileExternally(
-    request.cwd === '~'
+    homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
       : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
     (path) => shell.openExternal(pathToFileURL(path).href)

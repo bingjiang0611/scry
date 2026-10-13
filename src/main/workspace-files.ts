@@ -238,7 +238,7 @@ export async function resolveWorkspaceFileOpenTarget(
 ): Promise<WorkspaceFileOpenTarget> {
   const target = await homeAccess.resolveFile(request)
   if (canOpenWorkspaceFileExternally(target.path)) return { ...target, mode: 'external' }
-  const canonical = target.cwd === '~' ? await homeAccess.authorize(target) : target
+  const canonical = homeAccess.isReadOnlyTarget(target.cwd) ? await homeAccess.authorize(target) : target
   try {
     await readWorkspaceFilePage({ ...canonical, limit: 65_536 })
     return { ...target, mode: 'text' }
