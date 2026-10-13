@@ -48,6 +48,9 @@ export interface RecorderOpenTurnState {
 }
 
 export const SESSION_LOCK_WAIT_MS = 10_000
+// A lifecycle hook queues its event once this wait expires, so it must stay well under the
+// Provider's hook timeout (10s for tool hooks); otherwise the host kills the hook before it queues.
+export const HOOK_LOCK_WAIT_MS = 3_000
 
 export function recorderSessionRoot(dataRoot: string, provider: ProviderId, sessionId: string): string {
   return join(dataRoot, 'runtime', provider, safeKey(sessionId))

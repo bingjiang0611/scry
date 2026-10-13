@@ -32,6 +32,7 @@ import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, limitTurnDiffPa
 import { appendRotatingLog, listFiles, readJson, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import {
+  HOOK_LOCK_WAIT_MS,
   SESSION_LOCK_WAIT_MS,
   recorderOpenPath as openPath,
   recorderPendingHealth,
@@ -3053,7 +3054,7 @@ async function replayQueuedHooks(
 }
 
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
-  // Taken before the lock wait: a hook queued after SESSION_LOCK_WAIT_MS still arrived now.
+  // Taken before the lock wait: a hook queued after HOOK_LOCK_WAIT_MS still arrived now.
   const arrivedAt = new Date().toISOString()
   input = {
     ...input,
@@ -3081,7 +3082,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         entered = true
         await replayQueuedHooks(enablement, input.provider, sessionId)
         return applyHookLocked(enablement, input, sessionId)
-      }, { waitMs: SESSION_LOCK_WAIT_MS })
+      }, { waitMs: HOOK_LOCK_WAIT_MS })
     } catch (error) {
       if (entered || !isLockTimeout(error)) throw error
       // The session is busy (a long finalize, recovery or a stuck peer). The event was never applied,
