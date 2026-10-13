@@ -101,14 +101,47 @@ describe('HomeFileAccess', () => {
     expect(await access.resolveFile({ cwd: '~', path: 'LICENSE' })).toEqual({ cwd: '~', path: 'LICENSE' })
   })
 
-  it('does not resolve files outside the canonical home or follow escaping symlinks', async () => {
+  it('opens outside-home links and escaping symlinks through file-scoped read-only references', async () => {
     const cwd = join(home, 'project')
     await mkdir(cwd)
     await writeFile(join(parent, 'outside.md'), 'outside')
+    await writeFile(join(parent, 'other.md'), 'other')
     await symlink(join(parent, 'outside.md'), join(cwd, 'escaped.md'))
-    for (const path of [join(parent, 'outside.md'), '../../outside.md', 'escaped.md']) {
-      await expect(access.resolveFile({ cwd, path })).rejects.toThrow('授权')
+    await symlink(join(parent, 'outside.md'), join(home, 'linked.md'))
+    for (const request of [
+      ...[join(parent, 'outside.md'), '../../outside.md', 'escaped.md'].map((path) => ({ cwd, path })),
+      { cwd: '~', path: 'linked.md' }
+    ]) {
+      const target = await access.resolveFile(request)
+      expect(target.cwd).toMatch(/^scry-file:/)
+      expect(target.path).toBe('outside.md')
+      const canonical = await access.authorize(target)
+      expect((await readWorkspaceFile(canonical)).content).toBe('outside')
+      const pageRequest = await access.authorize({ ...target, limit: 10, offset: 1 })
+      expect(pageRequest).toMatchObject({ limit: 10, offset: 1 })
+      expect((await readWorkspaceFilePage(pageRequest)).content).toBe('utside')
+      await expect(access.authorize({ ...target, path: 'other.md' })).rejects.toThrow('无效')
+      await expect(readWorkspaceFile(target)).rejects.toThrow()
     }
+    await expect(access.authorize({ cwd: 'scry-file:forged', path: 'outside.md' })).rejects.toThrow('无效')
+    await expect(new HomeFileAccess(home).authorize(await access.resolveFile({ cwd, path: 'escaped.md' }))).rejects.toThrow('无效')
+  })
+
+  it('revalidates a file reference without following a replacement symlink', async () => {
+    const cwd = join(home, 'project')
+    await mkdir(cwd)
+    const outside = join(parent, 'outside.md')
+    await writeFile(outside, 'outside')
+    await writeFile(join(parent, 'other.md'), 'other')
+    const target = await access.resolveFile({ cwd, path: outside })
+    await rm(outside)
+    await symlink(join(parent, 'other.md'), outside)
+    await expect(access.authorize(target)).rejects.toThrow('文件链接目标已变化')
+  })
+
+  it('rejects missing files, invalid paths and directories', async () => {
+    const cwd = join(home, 'project')
+    await mkdir(cwd)
     await expect(access.resolveFile({ cwd, path: 'missing.md' })).rejects.toThrow('不存在')
     await expect(access.resolveFile({ cwd, path: 'bad\0.md' })).rejects.toThrow('无效')
     await expect(access.resolveFile({ cwd, path: '.' })).rejects.toThrow('目标不是文件')

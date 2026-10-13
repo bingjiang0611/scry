@@ -149,6 +149,29 @@ describe('workspace files', () => {
     await expect(resolveWorkspaceFileOpenTarget({ cwd: root, path: 'missing.md' }, access)).rejects.toThrow('不存在')
   })
 
+  it('opens resolved outside-home text, Office and binary links without granting directory or write access', async () => {
+    const root = await fixture()
+    const outside = await fixture()
+    const access = new HomeFileAccess(root)
+    await writeFile(join(outside, 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
+    await writeFile(join(outside, 'asset.custom'), Buffer.from([0, 1, 2, 3]))
+    const open = vi.fn(async () => {})
+    for (const [path, mode] of [['README.md', 'text'], ['report.docx', 'external'], ['asset.custom', 'external']]) {
+      await symlink(join(outside, path), join(root, `linked-${path}`))
+      const target = await resolveWorkspaceFileOpenTarget({ cwd: root, path: `linked-${path}` }, access)
+      expect(target).toMatchObject({ cwd: expect.stringMatching(/^scry-file:/), path, mode })
+      const canonical = await access.authorize(target)
+      if (mode === 'text') expect((await readWorkspaceFile(canonical)).content).toBe('# Scry\n')
+      else await openWorkspaceFileExternally(canonical, open)
+      await expect(writeWorkspaceFile({ ...target, content: 'must not write', expectedRevision: 'x' })).rejects.toThrow()
+    }
+    expect(open.mock.calls).toEqual([
+      [join(await realpath(outside), 'report.docx')],
+      [join(await realpath(outside), 'asset.custom')]
+    ])
+    expect(await readFile(join(outside, 'README.md'), 'utf8')).toBe('# Scry\n')
+  })
+
   it('opens Office and arbitrary binary formats, but never launches executable files', async () => {
     const root = await fixture()
     await writeFile(join(root, 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))

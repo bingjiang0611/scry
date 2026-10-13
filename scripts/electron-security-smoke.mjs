@@ -377,7 +377,7 @@ async function main() {
     writeFileSync(join(canonicalHome, 'projects', 'asset.custom'), Buffer.from([0, 1, 2, 3]))
     writeFileSync(join(canonicalHome, 'projects', 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
     writeFileSync(join(cwd, 'run.command'), '#!/bin/sh\necho never-run')
-    writeFileSync(join(temp, 'outside.md'), 'Must not read outside home')
+    writeFileSync(join(temp, 'outside.md'), '# Actual outside-home delivery\n')
     symlinkSync(join(temp, 'outside.md'), join(cwd, 'escaped.md'))
     const resolved = await evaluate(`(async () => {
       const cwd = ${JSON.stringify(cwd)};
@@ -386,24 +386,37 @@ async function main() {
       const snapshot = await window.scry.workspaceReadKnown(text);
       const binary = await window.scry.workspaceResolveFile({ cwd, path: '../asset.custom' });
       const office = await window.scry.workspaceResolveFile({ cwd, path: '../report.docx' });
+      const outside = [];
+      for (const path of ['escaped.md', ${JSON.stringify(join(temp, 'outside.md'))}]) {
+        const target = await window.scry.workspaceResolveFile({ cwd, path });
+        const file = await window.scry.workspaceReadKnown(target);
+        const page = await window.scry.workspaceReadPageKnown({ ...target, limit: 10 });
+        outside.push({ mode: target.mode, content: file.content, page: page.content });
+      }
+      const target = await window.scry.workspaceResolveFile({ cwd, path: 'escaped.md' });
       const denied = [];
-      for (const request of [
-        { cwd, path: 'escaped.md' }, { cwd, path: ${JSON.stringify(join(temp, 'outside.md'))} },
-        { cwd: ${JSON.stringify(temp)}, path: 'outside.md' }
+      for (const operation of [
+        () => window.scry.workspaceResolveFile({ cwd: ${JSON.stringify(temp)}, path: 'outside.md' }),
+        () => window.scry.workspaceReadKnown({ ...target, path: 'other.md' }),
+        () => window.scry.workspaceReadKnown({ cwd: 'scry-file:forged', path: 'outside.md' }),
+        () => window.scry.workspaceWrite({ ...target, content: 'must not write', expectedRevision: 'x' })
       ]) {
-        try { await window.scry.workspaceResolveFile(request); denied.push(false); }
+        try { await operation(); denied.push(false); }
         catch { denied.push(true); }
       }
       let executableDenied = false;
       try { await window.scry.workspaceOpenExternal({ cwd, path: 'run.command' }); }
       catch (error) { executableDenied = String(error).includes('可执行'); }
-      return { text, content: snapshot.content, binary: binary.mode, office: office.mode, denied, executableDenied };
+      return { text, content: snapshot.content, binary: binary.mode, office: office.mode, outside, denied, executableDenied };
     })()`)
     assert.deepEqual(resolved.text, { cwd: '~', path: 'projects/rotom-team/docs/NATIVE-DELIVERY.md', mode: 'text' })
     assert.equal(resolved.content, '# Actual sibling delivery\n')
     assert.equal(resolved.binary, 'external')
     assert.equal(resolved.office, 'external')
-    assert.deepEqual(resolved.denied, [true, true, true])
+    assert.deepEqual(resolved.outside, [0, 1].map(() => ({
+      mode: 'text', content: '# Actual outside-home delivery\n', page: '# Actual outs'
+    })))
+    assert.deepEqual(resolved.denied, [true, true, true, true])
     assert.equal(resolved.executableDenied, true)
     await evaluate(`(async () => {
       let offDone, offError;
@@ -420,7 +433,8 @@ async function main() {
       const deadline = performance.now() + 8000;
       while (!(${expression})) {
         if (performance.now() > deadline) throw new Error('File-link condition timed out: ' + ${JSON.stringify(expression)});
-        await new Promise(requestAnimationFrame);
+        // Hidden windows can suspend animation frames; keep the failure deadline live.
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     })()`)
     const clickFile = async title => {
@@ -445,10 +459,14 @@ async function main() {
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="查看 NATIVE-DELIVERY.md"]').readOnly`), true)
     await clickFile('../LICENSE · 打开文件')
     await wait(`document.querySelector('textarea[aria-label="查看 LICENSE"]')?.value === 'Actual license without an extension'`)
+    await clickFile('escaped.md · 打开文件')
+    await wait(`document.querySelector('.workspace-preview h1')?.textContent === 'Actual outside-home delivery' && document.querySelector('.workspace-editorbar')?.textContent.includes('只读预览')`)
+    assert.equal(readFileSync(join(temp, 'outside.md'), 'utf8'), '# Actual outside-home delivery\n')
     await clickFile('missing.md · 在右侧文件面板打开')
     await wait(`document.body.textContent.includes('文件不存在：missing.md')`)
     console.log(JSON.stringify({ fileLinks: { siblingProject: true, actualContent: true, readOnlyOutsideWorkspace: true,
-      extensionlessLink: true, officeAndUnknownBinary: true, missingFileReported: true, canonicalContainment: true, executableDenied: true } }))
+      extensionlessLink: true, officeAndUnknownBinary: true, outsideHomeSymlink: true, fileScopedReads: true,
+      missingFileReported: true, outsideWorkspaceWriteDenied: true, executableDenied: true } }))
     cdp.close()
     return
   }
