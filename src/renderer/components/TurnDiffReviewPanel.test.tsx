@@ -63,6 +63,21 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
     expect(html).not.toContain('第一轮前基线')
   })
 
+  it.each(['turn', 'session'] as const)('%s 预览保留标题标识，但不显示临时快照横幅', (scope) => {
+    const html = markup({ turnDiff: snapshot(), scope, preview: true })
+    expect(html).toContain('运行中预览')
+    expect(html).not.toContain('运行中的临时 Git 快照')
+    expect(html).not.toContain('diff-review-notice')
+  })
+
+  it('预览仍显示 patch 截断警告', () => {
+    const turnDiff = snapshot()
+    turnDiff.files[0].patchStatus = 'truncated'
+    const html = markup({ turnDiff, preview: true })
+    expect(html).toContain('该文件 patch 已按本轮预算截断')
+    expect(html).toContain('diff-review-notice warn')
+  })
+
   it('文件导航显式显示完整条目数，避免窄栏只露出前三项时被误认成缺数据', () => {
     const turnDiff = snapshot()
     turnDiff.files = Array.from({ length: 17 }, (_, index) => ({

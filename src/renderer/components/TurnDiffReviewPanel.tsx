@@ -83,12 +83,6 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
         </button>
       </header>
 
-      {preview && (
-        <div className="diff-review-notice warn">
-          <Icon name="alert" /> 运行中的临时 Git 快照，本轮结束后会被终态覆盖。
-        </div>
-      )}
-
       <div className="diff-review-summary">
         <div className="diff-review-prompt" title={review.userText}>
           {review.userText || '未记录本轮提示词'}
