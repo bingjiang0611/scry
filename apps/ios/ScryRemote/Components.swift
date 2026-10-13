@@ -78,6 +78,18 @@ struct PlainIcon: View {
   }
 }
 
+// A message the Mac has not acknowledged yet. The outbox resends it on its own
+// until the Mac answers, so there is nothing for the user to do but wait.
+struct SendingLabel: View {
+  var body: some View {
+    HStack(spacing: 8) {
+      ProgressView().controlSize(.mini)
+      Text("发送中…").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.muted)
+    }
+    .accessibilityElement(children: .combine)
+  }
+}
+
 struct Notice: View {
   let text: String
   var warning = false

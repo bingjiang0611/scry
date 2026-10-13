@@ -310,11 +310,50 @@ enum RemoteSelfTest {
           check(name, passed)
         }
       } catch { check("unexpected", false); print(error) }
+      for (name, passed) in await selfTestDelivery() { check(name, passed) }
       do { try FileManager.default.removeItem(at: root) }
       catch { check("cleanup", false); print(error) }
       print("HISTORYTEST DONE failures=\(failures)")
       exit(failures == 0 ? 0 : 1)
     }
+  }
+
+  // Send delivery against scripted host replies (no relay): transport loss keeps
+  // resending the same request, only a host answer ends the loop.
+  @MainActor private static func selfTestDelivery() async -> [(String, Bool)] {
+    struct Lost: Error {}
+    var checks: [(String, Bool)] = []
+    var sends = 0, failures = 0, pauses: [Int] = []
+    let delivered = await RemoteRunStore.deliver(
+      submit: { () async throws -> String in sends += 1; if sends < 4 { throw Lost() }; return "run-1" },
+      status: { () async throws -> String? in nil },
+      transportFailed: { _ in failures += 1 },
+      pause: { pauses.append($0) })
+    if case .accepted("run-1") = delivered { checks.append(("delivery.resendsUntilReceipt", sends == 4 && failures == 3)) }
+    else { checks.append(("delivery.resendsUntilReceipt", false)) }
+    checks.append(("delivery.backoffAttempts", pauses == [1, 2, 3]))
+
+    sends = 0
+    let rejected = await RemoteRunStore.deliver(
+      submit: { () async throws -> String in sends += 1; throw G0Transport.RunError.host(code: "grant_revoked") },
+      status: { () async throws -> String? in nil },
+      transportFailed: { _ in }, pause: { _ in })
+    if case .rejected("grant_revoked") = rejected { checks.append(("delivery.hostRejectionIsFinal", sends == 1)) }
+    else { checks.append(("delivery.hostRejectionIsFinal", false)) }
+
+    let adopted = await RemoteRunStore.deliver(
+      submit: { () async throws -> String in throw G0Transport.RunError.host(code: "intent_payload_conflict") },
+      status: { () async throws -> String? in "run-existing" },
+      transportFailed: { _ in }, pause: { _ in })
+    if case .accepted("run-existing") = adopted { checks.append(("delivery.conflictAdoptsRecordedRun", true)) }
+    else { checks.append(("delivery.conflictAdoptsRecordedRun", false)) }
+
+    let cancelled = await RemoteRunStore.deliver(
+      submit: { () async throws -> String in throw Lost() },
+      status: { () async throws -> String? in nil },
+      transportFailed: { _ in }, pause: { _ in throw CancellationError() })
+    checks.append(("delivery.cancelledPauseYieldsToNewerAttempt", cancelled == nil))
+    return checks
   }
 
   private actor HistoryPages {
