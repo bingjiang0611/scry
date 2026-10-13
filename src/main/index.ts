@@ -34,6 +34,7 @@ import {
   type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
+import { readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
 import {
   hydrateSessionHistoryPage,
   mergeSessionTurns,
@@ -252,6 +253,7 @@ import {
   deleteTraceTurnProgressArtifacts,
   isProviderlessTerminalTurn,
   persistTraceTurnProgress,
+  persistTraceTurnCheckpoint,
   persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
   shouldUseManagedTerminalPersistence,
@@ -1830,7 +1832,35 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   // Cancellation is not evidence of an empty session. Reject it so the renderer
   // cannot replace an existing timeline with an empty successful response.
   signal.throwIfAborted()
-  if (!fp && !archived) {
+  // Older phone runs could lose their Scry archive if the host exited before
+  // the Provider returned. Pi's native session is independent durable evidence;
+  // read it offline rather than treating a missing Scry archive as no messages.
+  let nativeTurns: LoadedSessionTurn[] | null = null
+  let nativeReadNotice: string | undefined
+  // An in-flight native tail has no Scry run ID; the live RunRegistry owns that
+  // display. Do not add an unmatchable second copy while the Provider is running.
+  if (payload.providerId === 'pi' && matchingRuns.length === 0) {
+    let native: LoadedSessionTurn[] | null = null
+    try {
+      native = await readPiNativeHistory({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
+        cwd, sessionId: payload.externalSessionId, signal })
+    } catch (error) {
+      signal.throwIfAborted()
+      if (!archived) throw error
+      // A truncated/unsupported native file must not hide an intact Scry archive.
+      nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${error instanceof Error ? error.message : String(error)}`
+    }
+    if (native && !archived) nativeTurns = native
+    else if (native) {
+      // A successful continuation must not hide the previously recovered prefix.
+      // Reconcile only Provider-native turn IDs, never prompts or output text.
+      const completeArchive = await readTraceArchiveAsync(archiveArgs, signal)
+      nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
+        { userDataDir }, { hydrateAttachments: false }))
+    }
+  }
+  signal.throwIfAborted()
+  if (!fp && !archived && !nativeTurns) {
     perf.finish({ returnedTurns: 0 })
     return null
   }
@@ -1857,10 +1887,14 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   else sessionByContext.delete(key)
   if (cwd) rememberProject(cwd)
   const historyContext = { userDataDir }
-  const merged = await providerRegistry.enrichSession(
+  const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
     { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
     mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
   )
+  if (nativeReadNotice && merged.length) {
+    const last = merged[merged.length - 1]
+    last.errorHint = [last.errorHint, nativeReadNotice].filter(Boolean).join('\n')
+  }
   perf.mark('merge', { mergedTurns: merged.length })
   signal.throwIfAborted()
   const hookConfig =
@@ -1876,13 +1910,13 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     transcriptTurns: turns,
     archive: archived,
     context: historyContext,
-    ...(archivePaged ? {
+    ...(archivePaged && !nativeTurns ? {
       archiveSource: archiveArgs,
       archiveSnapshotTotalTurns: archivePage?.totalTurns ?? 0
     } : {}),
     hookConfig
   }
-  const unhydratedPage: SessionHistoryPage = archivePage
+  const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
     ? {
         turns: merged,
         offset: archivePage.offset,
@@ -4090,9 +4124,6 @@ async function resolveRemoteRelay(stateDirectory: string): Promise<RemoteRelayRe
 // mirrors the real describe() result; nothing is fabricated, and the run path
 // still validates the chosen providerId on submit.
 let remoteProviderSnapshot: RemoteProviderRef[] = []
-// providerId -> runtimeProvider, so a device-initiated run can be written into
-// the Mac session catalog with the correct runtime (recordSession below).
-let remoteProviderRuntime = new Map<string, RuntimeProvider>()
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
@@ -4124,7 +4155,6 @@ async function loadRemoteProviderSnapshot(): Promise<void> {
       }))
     }))
     remoteProviderSnapshot = contexts.flat()
-    remoteProviderRuntime = new Map(descriptors.map((d) => [d.id, d.runtimeProvider]))
   } catch { /* keep the last good snapshot rather than fabricate */ }
 }
 // A slow Provider control probe may exceed the timer interval. Coalesce those ticks and keep the
@@ -4174,16 +4204,14 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       startRun: createRemoteRunBinding({
         run: (providerId, request) => providerRegistry.run(providerId as ProviderId, remotePermissionMode ? { ...request, permissionMode: remotePermissionMode } : request),
         onRunStarted: ({ providerId, cwd, prompt, scryRunId, agentProfileId }) => {
-          const runtimeProvider = remoteProviderRuntime.get(providerId)
-          if (!runtimeProvider) return
+          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
           try {
             appSessionStore().recordPending({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, cwd, prompt })
             win?.webContents.send('remote:sessionRecorded', { cwd })
           } catch { /* catalog visibility is best-effort */ }
         },
         onRunSession: ({ providerId, cwd, prompt, scryRunId, externalSessionId, agentProfileId }) => {
-          const runtimeProvider = remoteProviderRuntime.get(providerId)
-          if (!runtimeProvider) return
+          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
           try {
             appSessionStore().record({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, externalSessionId, cwd, prompt })
             win?.webContents.send('remote:sessionRecorded', { cwd })
@@ -4193,24 +4221,41 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         // non-managed run uses) so the owner can OPEN the transcript on the Mac,
         // not just see it listed. Managed recorder stays OFF for remote runs.
         observe: observeRemoteRun,
-        onRunArchive: async ({ providerId, cwd, prompt, scryRunId, externalSessionId, attachments, items, status }) => {
-          const runtimeProvider = remoteProviderRuntime.get(providerId)
-          if (!runtimeProvider) return
-          await archiveTraceTurn({
+        onRunCheckpoint: async ({ providerId, cwd, prompt, scryRunId, externalSessionId, providerTurnId, forkTurnId, attachments, items }) => {
+          // Startup may still be cleaning/replaying the same progress directory.
+          await startupManagedRecovery
+          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
+          const { turn } = buildTraceArchiveTurn({
+            providerId: providerId as ProviderId, runtimeProvider, cwd,
+            sessionId: externalSessionId, runId: scryRunId, providerTurnId, forkTurnId, userText: prompt,
+            attachments, items, done: false, status: 'interrupted', managedRecorderEnabled: false
+          })
+          await persistTraceTurnCheckpoint({ userDataDir: app.getPath('userData'), cwd,
+            sessionId: externalSessionId, providerId: providerId as ProviderId, runtimeProvider, turn })
+        },
+        onRunArchive: async ({ providerId, cwd, prompt, scryRunId, externalSessionId, providerTurnId, forkTurnId, attachments, items, status, error }) => {
+          await startupManagedRecovery
+          // Registry identity is available even before the phone opens its Provider picker.
+          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
+          const args: ArchiveTraceTurnArgs = {
             providerId: providerId as ProviderId,
             runtimeProvider,
             cwd,
             sessionId: externalSessionId,
             runId: scryRunId,
+            providerTurnId,
+            forkTurnId,
             userText: prompt,
             attachments,
             items,
             done: true,
             status,
+            error,
             managedRecorderEnabled: false
-          })
-            .then(() => { win?.webContents.send('remote:sessionRecorded', { cwd }) })
-            .catch((error) => console.warn('[scry] remote trace archive write failed:', error))
+          }
+          await persistTerminalProgress(args)
+          await archiveTraceTurn(args)
+          win?.webContents.send('remote:sessionRecorded', { cwd })
         }
       }),
       // The phone's new-session picker chooses only among the host's already
@@ -4458,7 +4503,9 @@ app.whenReady().then(() => {
     await cleanupTraceArchiveTemps(app.getPath('userData'))
     startupPerf.mark('recovery_temps_cleaned')
     try {
-      const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'))
+      const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'), {
+        isLiveManagedRun: (runId) => runs.unsettledStates().some((run) => run.runId === runId)
+      })
       if (traceProgress.pending > 0) console.warn('[scry] trace turn progress recovery pending:', traceProgress)
       for (const scope of await managedRecoveryScopes(app.getPath('userData'))) {
         const commitHookEnv = await resolveGrantedManagedCommitHookEnv(scope.cwd)
