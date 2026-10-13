@@ -10,7 +10,7 @@ import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveStat
 import { inspectCommitHookBundle, readCommitHookGrant, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 import { syncDirectory } from './io'
-import { recorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state'
+import { HOOK_LOCK_WAIT_MS, recorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state'
 import { readRecorderContent } from './content-store'
 
 const roots: string[] = []
@@ -2914,6 +2914,9 @@ describe('record store cursor and recovery semantics', () => {
     const before = Date.now()
     const queued = await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: prompt })
     expect(queued).toMatchObject({ status: 'pending', reason: 'session busy; event queued for replay' })
+    // The hook must queue well inside the Provider's 10s hook timeout, not wait out the session lock.
+    expect(Date.now() - before).toBeLessThan(HOOK_LOCK_WAIT_MS + 2_000)
+    expect(HOOK_LOCK_WAIT_MS + 2_000).toBeLessThan(SESSION_LOCK_WAIT_MS)
     expect(await listRecords(dataRoot)).toHaveLength(0)
     await rm(lock, { recursive: true, force: true })
 
@@ -2922,7 +2925,7 @@ describe('record store cursor and recovery semantics', () => {
     const [record] = await listRecords(dataRoot)
     expect(record.user.value).toMatchObject({ text: 'queued while busy' })
     // The replayed start keeps the time the hook arrived: not when it was replayed, and not
-    // when the lock wait expired SESSION_LOCK_WAIT_MS later and the hook was queued.
+    // when the lock wait expired HOOK_LOCK_WAIT_MS later and the hook was queued.
     expect(Date.parse(record.startedAt)).toBeGreaterThanOrEqual(before)
     expect(Date.parse(record.startedAt)).toBeLessThan(before + 1_000)
     expect(await readHealth(dataRoot)).toMatchObject({ droppedEvents: 0 })
