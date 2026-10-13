@@ -209,6 +209,10 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       // the final output ONLY when nothing was streamed, so a Provider that streams
       // incrementally is never double-emitted.
       let sawAssistantText = false
+      // The device output log is append-only, unlike the Mac trace projection. Keep
+      // message-scoped stream state so an authoritative replacement becomes only
+      // its unseen suffix (or is suppressed when identical).
+      const outputByMessageId = new Map<string, string>()
       const record = (ev: TraceEvent): void => {
         items.push(ev)
         observer?.event(ev)
@@ -223,9 +227,39 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         //                in production, so reconnect/restart can catch up. This is
         //                trace-derived content; token/cost stay on ledger `result`.
         const chunk = traceEventToOutputChunk(ev)
+        const messageId = typeof ev.messageId === 'string' ? ev.messageId : undefined
+        const replacesStreamedText = ev.runtimeMetadata?.replacesStreamedText === true
+        if (replacesStreamedText && messageId && ev.stage === 'text' && ev.text === '') {
+          outputByMessageId.delete(messageId)
+        }
         if (chunk) {
-          if (chunk.kind === 'output') sawAssistantText = true
-          output(chunk)
+          let forwarded: typeof chunk | null = chunk
+          if (chunk.kind === 'output' && messageId) {
+            const previous = outputByMessageId.get(messageId)
+            if (replacesStreamedText && previous !== undefined) {
+              const genuineDelta = ev.runtimeMetadata?.genuineStreamDelta
+              if (previous === chunk.text) {
+                forwarded = null
+              } else if (chunk.text.startsWith(previous)) {
+                forwarded = { ...chunk, text: chunk.text.slice(previous.length) }
+              } else if (typeof genuineDelta === 'string' && genuineDelta.length > 0) {
+                forwarded = { ...chunk, text: genuineDelta }
+              } else {
+                // An append-only sink cannot retract a non-prefix correction. Keep
+                // the authoritative chunk so the corrected answer is not lost.
+                // Retracting that earlier prefix requires a replace/reset envelope
+                // in both host and iOS when real runs need non-prefix corrections.
+                forwarded = chunk
+              }
+            }
+            outputByMessageId.set(messageId, replacesStreamedText ? chunk.text : ev.stage === 'text_delta'
+              ? `${previous ?? ''}${chunk.text}`
+              : chunk.text)
+          }
+          if (forwarded) {
+            if (forwarded.kind === 'output') sawAssistantText = true
+            if (forwarded.text.length > 0) output(forwarded)
+          }
         }
         // Only honest, opaque lifecycle markers cross to the ledger; no transcript
         // bytes, no secrets. Provider-canonical usage on the result event is

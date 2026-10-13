@@ -287,6 +287,36 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     expect(markers.some(m => JSON.stringify(m).includes('Hello from the agent'))).toBe(false)
   })
 
+  it('keeps authoritative replacements correct on the append-only output seam', async () => {
+    const { run } = fakeRun(async (req) => {
+      req.emit({
+        id: 'delta', ts: '2020', runId: 'x', kind: 'model', stage: 'text_delta', text: 'hel', messageId: 'assistant-1'
+      })
+      req.emit({
+        id: 'prefix', ts: '2020', runId: 'x', kind: 'model', stage: 'text', text: 'hello', messageId: 'assistant-1',
+        runtimeMetadata: { replacesStreamedText: true }
+      })
+      req.emit({
+        id: 'identical', ts: '2020', runId: 'x', kind: 'model', stage: 'text', text: 'hello', messageId: 'assistant-1',
+        runtimeMetadata: { replacesStreamedText: true }
+      })
+      req.emit({
+        id: 'canonical', ts: '2020', runId: 'x', kind: 'model', stage: 'text', text: 'canonical', messageId: 'assistant-1',
+        runtimeMetadata: { replacesStreamedText: true }
+      })
+      req.emit(result(false)); return { status: 'completed' }
+    })
+    const output = vi.fn()
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-replacement' })
+    await start({ runId: 'ledger-replacement', routing: { cwd: '/w', providerId: 'opencode', prompt: 'go' }, progress: () => {}, output })
+
+    expect(output.mock.calls.map(c => c[0])).toEqual([
+      { kind: 'output', text: 'hel' },
+      { kind: 'output', text: 'lo' },
+      { kind: 'output', text: 'canonical' }
+    ])
+  })
+
   // The Mac and the phone's history read this observation while the first turn
   // is still running (it has no archive yet). Before this hook existed a
   // device-started run was invisible to both until it ended.
