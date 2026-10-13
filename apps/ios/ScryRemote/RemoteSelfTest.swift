@@ -137,6 +137,7 @@ enum RemoteSelfTest {
     check("run.submittingIsNotRecorded", RemoteRunStore.Lifecycle.submitting != .recorded)
     check("run.stateGates", RemoteRunStore.selfTestStateGates())
     for (name, passed) in RemoteRunStore.selfTestInteractionState() { check("run.\(name)", passed) }
+    for (name, passed) in RemoteRunStore.selfTestConnectionReplacement() { check("run.\(name)", passed) }
     for (name, passed) in RemoteRunStore.selfTestPreviewConnectionIsolation() { check("run.\(name)", passed) }
     let model = AppModel()
     let identity = RemoteRunStore.SessionIdentity.new(providerId: "codex", cwd: "/fixture")

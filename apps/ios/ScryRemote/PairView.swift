@@ -5,6 +5,7 @@ import SwiftUI
 // Mac issues a real grant.
 struct PairView: View {
   @EnvironmentObject var model: AppModel
+  @EnvironmentObject var run: RemoteRunStore
 
   var body: some View {
     VStack(spacing: 0) {
@@ -58,7 +59,7 @@ struct PairView: View {
     .background(Palette.surface)
     .fullScreenCover(isPresented: scanning) {
       ZStack(alignment: .topTrailing) {
-        QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code) },
+        QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code, runStore: run) },
                   onFailure: { message in model.pairing = .failed(message) }).ignoresSafeArea()
         Button("取消") { model.pairing = .idle }
           .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)

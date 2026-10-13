@@ -24,7 +24,7 @@ struct ChatView: View {
   private var paired: Bool { run.hasConnection }
   private var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
     guard let identity = run.activeSessionIdentity else { return [] }
-    return run.completedTurns(for: identity)
+    return run.completedTurns(for: identity, historyRendered: false)
   }
   private var hasTurn: Bool { !completedTurns.isEmpty || run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
   private var runBusy: Bool { run.isBusy }

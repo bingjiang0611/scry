@@ -236,6 +236,26 @@ describe('HostController live watch and stop', () => {
     expect(done.state).toBe('settled')
   })
 
+  it('returns terminal ledger details when a run fails during the awaited output read', async () => {
+    let fail!: (error: Error) => void
+    const { controller } = await grantedController(() => new Promise<void>((_, reject) => { fail = reject }))
+    const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
+    await vi.waitFor(() => expect(fail).toBeDefined())
+    const before = controller.poll(CERT, { cursor: 0 })
+    const readOutput = controller.runOutput.bind(controller)
+    vi.spyOn(controller, 'runOutput').mockImplementationOnce(async (peer, input) => {
+      const output = await readOutput(peer, input)
+      fail(new Error('provider killed during output read'))
+      await controller.idle()
+      return output
+    })
+    const watch = await controller.watchRun(CERT, { runId, cursor: before.cursor, outputCursor: 0, waitMs: 0 })
+    expect(watch.state).toBe('failed')
+    expect(watch.poll.events).toContainEqual(expect.objectContaining({
+      runId, kind: 'run_failed', detail: 'provider killed during output read'
+    }))
+  })
+
   it('rejects watch and stop for a revoked device', async () => {
     const { controller, deviceId } = await grantedController(async () => {})
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })

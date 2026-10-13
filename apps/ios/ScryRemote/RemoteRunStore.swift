@@ -288,6 +288,7 @@ final class RemoteRunStore: ObservableObject {
   // runs are not in the Mac's active-run memory, so this host output store is
   // the only live evidence. Mac runs need none: their history includes it.
   @Published private(set) var detachedRunId: String?
+  @Published private(set) var detachedHostRunId: String?
   @Published private(set) var detachedOutput: [OutputLine] = []
   private var detachedTask: Task<Void, Never>?
 
@@ -331,6 +332,7 @@ final class RemoteRunStore: ObservableObject {
   private var projectsLoadedAt: Date?
   private var commandCache: [String: G0Transport.RunCommandCatalog] = [:]
   private let historyDisk: RemoteHistoryCache
+  private let stateDirectory: URL?
   private var prefetchTask: Task<Void, Never>?
   private var prefetchGeneration = 0
   private var warmedScreens: [String: G0Transport.RunHistoryPreview] = [:]
@@ -371,9 +373,11 @@ final class RemoteRunStore: ObservableObject {
     self.init(connections: owner.connections, historyDisk: owner.historyDisk, historyOnly: true)
   }
 
-  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache(), historyOnly: Bool = false) {
+  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache(), historyOnly: Bool = false,
+       stateDirectory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ScryRemote", isDirectory: true)) {
     self.connections = connections
     self.historyDisk = historyDisk
+    self.stateDirectory = stateDirectory
     self.historyOnly = historyOnly
     if historyOnly { return }
     #if DEBUG
@@ -421,9 +425,7 @@ final class RemoteRunStore: ObservableObject {
 
   private var recoveryURL: URL? {
     if historyOnly { return nil }
-    return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-      .appendingPathComponent("ScryRemote", isDirectory: true)
-      .appendingPathComponent("active-run.json", isDirectory: false)
+    return stateDirectory?.appendingPathComponent("active-run.json", isDirectory: false)
   }
 
   private func saveRecoveryCheckpoint(intentId: String?, routing: RemoteRunClient.Routing?,
@@ -509,9 +511,13 @@ final class RemoteRunStore: ObservableObject {
     if mockMode || ProcessInfo.processInfo.arguments.contains("-historyCacheTest") { return }
     #endif
     guard let url = recoveryURL else { return }
+    do { try Self.removeStateFile(at: url) }
+    catch { submitError = "无法清除恢复记录：\(Self.describe(error))" }
+  }
+
+  private static func removeStateFile(at url: URL) throws {
     do { try FileManager.default.removeItem(at: url) }
     catch let error as CocoaError where error.code == .fileNoSuchFile { }
-    catch { submitError = "无法清除恢复记录：\(Self.describe(error))" }
   }
 
   private func restoreRecoveryCheckpoint() {
@@ -1188,12 +1194,15 @@ final class RemoteRunStore: ObservableObject {
     loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
   }
 
-  func completedTurns(for identity: SessionIdentity) -> [CompletedLiveTurn] {
+  func completedTurns(for identity: SessionIdentity, historyRendered: Bool = true) -> [CompletedLiveTurn] {
     let turns = completedLiveTurns[identity] ?? []
     // Only stable run identity can deduplicate evidence; repeated prompt text
     // is not identity ("continue" may legitimately appear many times).
     guard identity == activeSessionIdentity else { return turns }
-    return Self.turnsNotInHistory(turns, hostRunIds: historyRunIds, historyHasOlder: historyOlderBefore != nil).filter {
+    // ChatView renders only local turns, including after recovery. Archive
+    // reconciliation can replace them only on a screen that renders the archive.
+    let visible = historyRendered ? Self.turnsNotInHistory(turns, hostRunIds: historyRunIds, historyHasOlder: historyOlderBefore != nil) : turns
+    return visible.filter {
       Self.shouldIncludeCompletedTurn($0.id, currentRunId: runId, archived: archivedActiveTurn)
     }
   }
@@ -1209,6 +1218,11 @@ final class RemoteRunStore: ObservableObject {
   // The finished live run is already shown by the host record; avoid a second copy.
   var liveTurnInHistory: Bool {
     guard terminalDrainCompleted, let id = liveHostRunId else { return false }
+    return historyRunIds.contains(id)
+  }
+
+  var detachedTurnInHistory: Bool {
+    guard let id = detachedHostRunId else { return false }
     return historyRunIds.contains(id)
   }
 
@@ -1581,17 +1595,21 @@ final class RemoteRunStore: ObservableObject {
 
   private func startDelivery(_ pending: PendingSubmission) {
     guard deliveryTasks[pending.intentId] == nil, let client = makeClient() else { return }
+    let requestGeneration = dataGeneration
     deliveryTasks[pending.intentId] = Task { [weak self] in
       let result = await Self.deliver(
         submit: { try await client.submit(routing: pending.routing, intentId: pending.intentId) },
         status: { try await client.intentStatus(intentId: pending.intentId) },
-        transportFailed: { error in self?.recordFailure(error) },
+        transportFailed: { error in
+          guard let self, self.dataGeneration == requestGeneration else { return }
+          self.recordFailure(error)
+        },
         pause: { attempt in
           self?.pausedDeliveries.insert(pending.intentId)
           defer { self?.pausedDeliveries.remove(pending.intentId) }
           try await Self.deliveryPause(attempt)
         })
-      guard let self, let result else { return }
+      guard !Task.isCancelled, let self, self.dataGeneration == requestGeneration, let result else { return }
       self.deliveryFinished(pending, result: result, client: client)
     }
   }
@@ -1663,6 +1681,14 @@ final class RemoteRunStore: ObservableObject {
       remaining.remove(at: index)
       if focused { adoptSubmission(outcome, pending: pending, client: client) }
     case let .rejected(code):
+      // A definitive host reply is connection evidence even when it rejects
+      // execution. Missing local credentials are not a reply from the Mac.
+      if code == "missing_credentials" {
+        reachable = nil
+        connectionObservation = .unverified
+      } else {
+        recordFailure(G0Transport.RunError.host(code: code))
+      }
       if focused {
         remaining.remove(at: index)
         pendingSubmission = nil
@@ -2125,9 +2151,32 @@ final class RemoteRunStore: ObservableObject {
     archivedActiveTurn = true
   }
 
-  // Used by destructive unpair. It invalidates every outstanding request before
-  // releasing the visible state, so old history/poll callbacks cannot reappear.
-  func clearAllState() {
+  enum ConnectionReplacementError: LocalizedError {
+    case pendingWork
+    var errorDescription: String? { "仍有消息在发送或任务未结束，完成后再重新配对。" }
+  }
+
+  func prepareConnectionReplacement(_ connection: RemoteConnection) throws {
+    guard let previous = loadConnection(),
+          previous.hostId != connection.hostId || previous.deviceId != connection.deviceId || previous.anchorPEM != connection.anchorPEM else { return }
+    guard !hasUnsentMessages, !hasUnresolvedRun else { throw ConnectionReplacementError.pendingWork }
+    // Routing-only migration retains the same grant. A different host/grant
+    // must not inherit its metadata, pending sends, polls or recovery record.
+    try clearAllState()
+  }
+
+  // Used by destructive unpair and grant replacement. Storage failure must
+  // reach the caller before it removes the credentials or claims success.
+  func clearAllState() throws {
+    #if DEBUG
+    let skipDisk = mockMode || ProcessInfo.processInfo.arguments.contains("-historyCacheTest")
+    #else
+    let skipDisk = false
+    #endif
+    if !skipDisk {
+      if let url = outboxURL { try Self.removeStateFile(at: url) }
+      if let url = recoveryURL { try Self.removeStateFile(at: url) }
+    }
     generation += 1
     dataGeneration += 1
     stopLiveRuns()
@@ -2137,8 +2186,7 @@ final class RemoteRunStore: ObservableObject {
     pollTask?.cancel(); pollTask = nil
     for task in deliveryTasks.values { task.cancel() }
     deliveryTasks = [:]; pausedDeliveries = []
-    // Unpair discards unsent messages: they belong to the old grant.
-    _ = persistOutbox([])
+    // Persisted files were removed successfully before releasing their state.
     outbox = []
     catalogTask?.cancel(); catalogTask = nil
     prefetchGeneration += 1
@@ -2150,7 +2198,6 @@ final class RemoteRunStore: ObservableObject {
     directoriesTask?.cancel(); directoriesTask = nil
     pendingSubmission = nil
     activeRouting = nil
-    clearRecoveryCheckpoint()
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
     catalog = .idle; catalogRefreshError = nil; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyWindowKey = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
@@ -2566,6 +2613,15 @@ final class RemoteRunStore: ObservableObject {
     let file = OutboxFile(version: 1, hostId: "host", items: [PendingSubmission(intentId: "a", routing: routing, identity: identity, failure: "x")])
     let decoded = (try? JSONEncoder().encode(file)).flatMap { try? JSONDecoder().decode(OutboxFile.self, from: $0) }
     checks.append(("outbox.roundTrip", decoded?.items == file.items && decoded?.hostId == "host"))
+    let client = RemoteRunClient(connection: RemoteConnection(relayHost: "fixture.invalid", relayPort: 443,
+      relayTLS: "system", hostId: "fixture", anchorPEM: "fixture", deviceId: "device"))
+    for code in ["grant_revoked", "missing_credentials"] {
+      let pending = PendingSubmission(intentId: code, routing: routing, identity: identity)
+      store.outbox = [pending]; store.reachable = true; store.connectionObservation = .reachable
+      store.deliveryFinished(pending, result: .rejected(code), client: client)
+      checks.append(("connection.rejection.\(code)", store.reachable == nil &&
+        store.connectionObservation == (code == "missing_credentials" ? .unverified : .hostReply(code: code))))
+    }
     store.pendingSubmission = nil
     store.runId = "first"; store.prompt = "same prompt"; store.lifecycle = .settled
     checks.append(("drain.blocksReset", !store.resetRun()))
@@ -2578,6 +2634,18 @@ final class RemoteRunStore: ObservableObject {
     store.runId = "second"; store.prompt = "same prompt"; store.lifecycle = .settled
     store.terminalDrainCompleted = true; store.archiveActiveTurnIfNeeded(); _ = store.resetRun()
     checks.append(("completed.repeatedPromptPreserved", store.completedTurns(for: identity).count == 2))
+    store.completedLiveTurns[identity] = [.init(id: "ledger-old", runId: "ledger-old", prompt: "continue",
+      attachments: [], lifecycle: .settled, output: [.init(id: 1, kind: "output", text: "previous reply")],
+      resultSummary: nil, externalSessionId: nil, hostRunId: "host-old")]
+    store.history = .loaded([.init(runId: "host-old", userText: "continue", items: [.init(kind: "output", text: "previous reply")])])
+    checks.append(("completed.archiveReplacesLocal", store.completedTurns(for: identity).isEmpty))
+    checks.append(("completed.chatKeepsReconciledLocal", store.completedTurns(for: identity, historyRendered: false).count == 1))
+    store.detachedHostRunId = nil
+    checks.append(("detached.promptAloneCannotHideOutput", !store.detachedTurnInHistory))
+    store.detachedHostRunId = "host-new"
+    checks.append(("detached.differentRunPreserved", !store.detachedTurnInHistory))
+    store.detachedHostRunId = "host-old"
+    checks.append(("detached.sameRunDeduplicated", store.detachedTurnInHistory))
     store.chosenProvider = .init(id: "codex", label: "Codex", available: true, modelId: nil,
       permissions: [.init(id: "default", label: "Default", description: "Ask")])
     store.restoredControlErrors[.model] = "missing"
@@ -2619,6 +2687,64 @@ final class RemoteRunStore: ObservableObject {
                      TurnOutcomeNote(lifecycle: lifecycle, hasOutput: false)?.text.contains("未读取到输出") == true))
     }
     checks.append(("outcome.truncationVisible", TurnOutcomeNote(lifecycle: .settled, hasOutput: true, truncated: true)?.text.contains("截断") == true))
+    return checks
+  }
+
+  static func selfTestConnectionReplacement() -> [(String, Bool)] {
+    let suite = "ScryConnectionReplacement.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let connections = RemoteConnectionStore(defaults: defaults)
+    let old = RemoteConnection(relayHost: "a.invalid", relayPort: 443, relayTLS: "system", hostId: "a", anchorPEM: "a", deviceId: "a")
+    let new = RemoteConnection(relayHost: "b.invalid", relayPort: 443, relayTLS: "system", hostId: "b", anchorPEM: "b", deviceId: "b")
+    connections.save(old)
+    let model = AppModel(connections: connections)
+    model.markReachable(true)
+    model.markObservation(.unverified)
+    let unknownIsOffline = model.link == .offline(host: old.relayHost) && model.connectionNotice == nil
+    model.markReachable(true)
+    model.markObservation(.hostReply(code: "grant_revoked"))
+    let revokedIsOffline = model.link == .offline(host: old.relayHost)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = RemoteRunStore(connections: connections, stateDirectory: directory)
+    let identity = SessionIdentity.new(providerId: "codex", cwd: "/fixture")
+    let pending = PendingSubmission(intentId: "old-intent", routing: .init(cwd: "/fixture", providerId: "codex", agentProfileId: nil, prompt: "old prompt"), identity: identity)
+    var checks: [(String, Bool)] = [("connection.modelUnverifiedNotGreen", unknownIsOffline), ("connection.modelRevokedNotGreen", revokedIsOffline)]
+    store.outbox = [pending]
+    do {
+      try store.prepareConnectionReplacement(new)
+      checks.append(("replacement.pendingRefused", false))
+    } catch {
+      checks.append(("replacement.pendingRefused", connections.load() == old && store.outbox == [pending]))
+    }
+    store.outbox = []
+    store.chosen = .init(path: "/old-host", label: "Old host")
+    do {
+      let migrated = RemoteConnection(relayHost: "new-route.invalid", relayPort: 443, relayTLS: "system", hostId: "a", anchorPEM: "a", deviceId: "a")
+      try store.prepareConnectionReplacement(migrated)
+      checks.append(("replacement.sameGrantRetainsContext", store.chosen?.path == "/old-host"))
+      try store.prepareConnectionReplacement(new)
+      checks.append(("replacement.newGrantClearsContext", store.chosen == nil && store.outbox.isEmpty && store.deliveryTasks.isEmpty && store.connectionObservation == .unverified))
+    } catch { checks.append(("replacement.cleanup", false)) }
+    // Real filesystem failures in an isolated directory. No production outbox,
+    // recovery record, history or Keychain material is touched.
+    for file in ["outbox.json", "active-run.json"] {
+      do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(file)
+        try Data("private prompt".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path); try? FileManager.default.removeItem(at: url) }
+        store.chosen = .init(path: "/must-retain", label: "Must retain")
+        do {
+          try store.clearAllState()
+          checks.append(("cleanup.\(file)FailureVisible", false))
+        } catch {
+          checks.append(("cleanup.\(file)FailureVisible", store.chosen?.path == "/must-retain" && FileManager.default.fileExists(atPath: url.path)))
+        }
+      } catch { checks.append(("cleanup.\(file)Fixture", false)) }
+    }
     return checks
   }
 
@@ -2737,6 +2863,14 @@ final class RemoteRunStore: ObservableObject {
     liveExternalSessionId = "codex-mock-session"
     loadMockDirectories(path: chosen?.path)
     activeSessionIdentity = .opened(providerId: "codex", cwd: roots[0].path, externalSessionId: "codex-pinned-1")
+    if ProcessInfo.processInfo.arguments.contains("-uiMockReconciledChat"), let identity = activeSessionIdentity {
+      completedLiveTurns[identity] = [.init(id: "old-ledger", runId: "old-ledger", prompt: "恢复前的问题",
+        attachments: [], lifecycle: .settled, output: [.init(id: 1, kind: "output", text: "恢复前的回答")],
+        resultSummary: nil, externalSessionId: "codex-pinned-1", hostRunId: "old-host-run")]
+      history = .loaded([.init(runId: "old-host-run", userText: "恢复前的问题", items: [.init(kind: "output", text: "恢复前的回答")])])
+      prompt = "恢复后的下一轮"; output = [.init(id: 1, kind: "output", text: "下一轮回答")]
+      sentAttachments = []; resultSummary = nil
+    }
     if ProcessInfo.processInfo.arguments.contains("-uiMockFirstScreen") {
       let turns = (1...40).map { index in
         G0Transport.RunHistoryTurn(userText: "模拟历史消息 \(index)", items: [
@@ -2845,6 +2979,15 @@ final class RemoteRunStore: ObservableObject {
       let live = #"{"origin":"mac","runId":"mock-mac-run","providerId":"codex","cwd":"/Users/demo/Projects/scry","externalSessionId":"codex-pinned-1","prompt":"","state":"running","questions":[]}"#
       liveRuns = [try! JSONDecoder().decode(G0Transport.LiveRun.self, from: Data(live.utf8))]
       liveRunsStatus = .observed
+    }
+    if ProcessInfo.processInfo.arguments.contains("-uiMockDetachedRepeatedPrompt") {
+      prompt = nil; output = []; runId = nil; resultSummary = nil; lifecycle = .unknown
+      history = .loaded([.init(runId: "old-host-run", userText: "continue with previous work", items: [.init(kind: "output", text: "旧轮回答")])])
+      let live = #"{"origin":"remote","runId":"new-ledger-run","providerId":"codex","cwd":"/Users/demo/Projects/scry","externalSessionId":"codex-pinned-1","prompt":"continue","state":"running","questions":[]}"#
+      liveRuns = [try! JSONDecoder().decode(G0Transport.LiveRun.self, from: Data(live.utf8))]
+      liveRunsStatus = .observed
+      detachedRunId = "new-ledger-run"; detachedHostRunId = "new-host-run"
+      detachedOutput = [.init(id: 1, kind: "output", text: "新轮实时输出")]
     }
     if ProcessInfo.processInfo.arguments.contains("-uiMockStopFailure") {
       if ProcessInfo.processInfo.arguments.contains("-uiMockMacRun") {
@@ -3083,6 +3226,7 @@ extension RemoteRunStore {
     detachedTask?.cancel()
     detachedTask = nil
     detachedRunId = runId
+    detachedHostRunId = nil
     detachedOutput = []
     guard let runId, let client = makeClient() else { return }
     detachedTask = Task { [weak self] in
@@ -3094,6 +3238,13 @@ extension RemoteRunStore {
           failures = 0
           ledgerCursor = watch.poll.cursor
           outputCursor = watch.output.cursor
+          for event in watch.poll.events where event.runId == runId {
+            if let detail = event.detail, let marker = Self.marker(detail),
+               marker["event"] == "bound", marker["ledgerRunId"] == runId,
+               let id = marker["scryRunId"], !id.isEmpty {
+              self.detachedHostRunId = id
+            }
+          }
           // Chunks arrive strictly after outputCursor, so none repeats. A
           // "truncated" marker is covered by the view's may-be-incomplete note.
           for chunk in watch.output.chunks where chunk.kind != "truncated" {

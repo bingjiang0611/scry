@@ -110,7 +110,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var connectionObservation: RemoteRunStore.ConnectionObservation = .unverified
   @Published private(set) var connectionNotice: String?
   private var pairingTask: Task<Void, Never>?
-  private let connections = RemoteConnectionStore()
+  private let connections: RemoteConnectionStore
 
   // No fabricated sessions. Until a real host feed exists this stays empty and
   // the UI shows a truthful empty state rather than mock rows.
@@ -128,7 +128,8 @@ final class AppModel: ObservableObject {
   var hasConnection: Bool { connections.load() != nil }
   var connectionHost: String? { connections.load()?.relayHost }
 
-  init() {
+  init(connections: RemoteConnectionStore = RemoteConnectionStore()) {
+    self.connections = connections
     // Restore the paired state on launch so an already-paired device is never
     // forced to re-scan. Paired != reachable: we show .offline(host) until a real
     // exchange proves the host is reachable (markReachable), never a fake dot.
@@ -154,7 +155,8 @@ final class AppModel: ObservableObject {
     case .transportFailure:
       link = .offline(host: host); connectionNotice = "未收到主机响应，传输状态未知。"
     case .unverified:
-      break
+      link = .offline(host: host)
+      connectionNotice = nil
     case let .hostReply(code):
       // A valid authenticated reply proves transport reachability. Snapshot,
       // capacity and unavailable errors must not erase an already-proven green
@@ -191,7 +193,7 @@ final class AppModel: ObservableObject {
   // pair with `RemoteRunStore`'s explicit `-uiMockData` fixtures for UI review.
   // It is NOT real authentication or a real host grant and is compiled out of
   // Release builds.
-  func applyUIPreviewArguments() {
+  func applyUIPreviewArguments(runStore: RemoteRunStore) {
     let args = ProcessInfo.processInfo.arguments
     guard args.contains("-uiPreview") else { return }
     link = args.contains("-connected") ? .connected(host: "Studio Mac") : .notPaired
@@ -216,7 +218,7 @@ final class AppModel: ObservableObject {
     // relay WSS, inner mTLS and Mac confirmation all remain production paths.
     if let index = args.firstIndex(of: "-pairCode"), index + 1 < args.count {
       route = .pair
-      beginPair(scanned: args[index + 1])
+      beginPair(scanned: args[index + 1], runStore: runStore)
     }
   }
   #endif
@@ -225,7 +227,11 @@ final class AppModel: ObservableObject {
   // possession over the relay (inner TLS 1.3 mTLS to the host), then poll until
   // the Mac operator confirms and a grant is issued. Runs the PROVEN
   // RemotePairingClient; no state is faked.
-  func beginPair(scanned: String) {
+  func beginPair(scanned: String, runStore: RemoteRunStore) {
+    guard !runStore.hasUnsentMessages, !runStore.hasUnresolvedRun else {
+      pairing = .failed(RemoteRunStore.ConnectionReplacementError.pendingWork.localizedDescription)
+      return
+    }
     pairingTask?.cancel()
     let code: PairingCode
     do { code = try PairingCode.parse(scanned) }
@@ -252,7 +258,7 @@ final class AppModel: ObservableObject {
             // the same host again without a fresh QR (key + cert stay in Keychain).
             let connection = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
               relayTLS: code.relayTLS.rawValue, hostId: code.hostId, anchorPEM: code.anchorPEM, deviceId: deviceId)
-            await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection)
+            try await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection, runStore: runStore)
             return
           case let .denied(reason):
             // A host may already know this device key while its public relay
@@ -266,7 +272,7 @@ final class AppModel: ObservableObject {
               let migrated = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
                 relayTLS: code.relayTLS.rawValue, hostId: existing.hostId,
                 anchorPEM: existing.anchorPEM, deviceId: existing.deviceId)
-              await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated)
+              try await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated, runStore: runStore)
               return
             }
             await self?.setPairing(.failed("Mac 拒绝了配对：\(reason)"))
@@ -290,8 +296,17 @@ final class AppModel: ObservableObject {
       link = connectionHost.map { .offline(host: $0) } ?? .notPaired
     }
   }
-  private func setPaired(deviceId: String, host: String, connection: RemoteConnection) {
+  private func setPaired(deviceId: String, host: String, connection: RemoteConnection, runStore: RemoteRunStore) throws {
+    try runStore.prepareConnectionReplacement(connection)
     connections.save(connection)
+    openedSession = nil
+    readOnlyTranscript = false
+    showRunQuestion = false
+    connectionObservation = .unverified
+    connectionNotice = nil
+    // Re-pairing keeps canShowWorkspace true, so RootView's pairing-change
+    // observer will not restart the feed cleared with the previous grant.
+    runStore.startLiveRuns()
     pairing = .paired(deviceId: deviceId)
     // A live grant now exists and the run channel is wired (RemoteRunClient). We
     // show an honest offline-but-paired link (reachability is only learned by an
@@ -332,9 +347,9 @@ final class AppModel: ObservableObject {
     destructiveActionError = nil
     do {
       try await runStore.clearHistoryCache()
+      try runStore.clearAllState()
       try RemoteKeychain().clearAll()
       connections.clear()
-      runStore.clearAllState()
       pairingTask?.cancel(); pairingTask = nil
       pairing = .idle; link = .notPaired; connectionObservation = .unverified; connectionNotice = nil; route = .home
       query = ""; sessions = []; drafts = [:]; draftAliases = [:]
