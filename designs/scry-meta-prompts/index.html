@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#181818">
+  <title>Scry · Meta Prompts 设计稿</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <header class="design-bar">
+    <span><b>Scry</b><span class="design-label">设计稿 · 示例数据</span></span>
+    <div class="directions" aria-label="布局方向">
+      <button class="direction active" data-mode="library" aria-pressed="true">A · 提示词库 <span>推荐</span></button>
+      <button class="direction" data-mode="quick" aria-pressed="false">B · 快捷弹窗</button>
+    </div>
+    <button id="theme" class="quiet" aria-label="切换浅色主题">浅色</button>
+  </header>
+  <div class="shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">Scry</div>
+      <button class="nav new-chat" data-chat><i data-icon="plus"></i>新建会话</button>
+      <div class="session-search"><i data-icon="search"></i><span>搜索会话 / 项目…</span></div>
+      <nav>
+        <span class="nav"><i data-icon="chart"></i>分析</span>
+        <span class="nav"><i data-icon="chart"></i>LLM 性能</span>
+        <span class="nav"><i data-icon="hex"></i>技能</span>
+        <button class="nav active" id="open-prompts"><i data-icon="prompt"></i>Meta Prompts</button>
+        <span class="nav"><i data-icon="cube"></i>MCP</span>
+      </nav>
+      <div class="session-group">项目</div>
+      <div class="project"><i data-icon="folder"></i>scry <span>⌄</span></div>
+      <button class="session" data-chat>提示词管理功能</button>
+      <div class="session">优化会话切换体验</div>
+      <div class="session">检查 recorder 状态</div>
+      <div class="project other"><i data-icon="folder"></i>rate-native</div>
+      <footer class="sidebar-foot"><i data-icon="settings"></i>设置</footer>
+    </aside>
+    <main id="main">
+      <section id="chat" class="chat hidden" aria-label="示例会话">
+        <div class="topline"><span>提示词管理功能</span><span class="muted">scry</span></div>
+        <div class="chat-content">
+          <div class="user-message">在侧栏增加一个地方，管理我经常使用的提示词。先出设计稿。</div>
+          <div class="assistant-message"><div class="assistant-name">Scry</div><p>可以先把提示词保存成独立的文本条目。需要时复制，或放入当前会话的输入框，再按这次任务补充内容。</p><p>它不执行工具，也不会自动发送。</p></div>
+        </div>
+        <div class="composer-wrap"><div class="composer"><textarea id="composer" aria-label="当前会话输入框" placeholder="补充本次任务…"></textarea><div class="composer-bottom"><span>Claude <span class="muted">· 默认权限</span></span><button class="send" disabled aria-label="设计稿不支持发送"><i data-icon="arrow"></i></button></div></div><p class="composer-note">仅演示填入文本，不连接 Provider，不发送消息。</p></div>
+      </section>
+      <section id="library" class="library" aria-label="Meta Prompts 提示词库">
+        <header class="page-header"><div><h1>Meta Prompts</h1><p>常用提示词，随取随用。</p></div><button class="button new-prompt"><i data-icon="plus"></i>新建提示词</button></header>
+        <div class="library-body">
+          <aside class="prompt-list" aria-label="提示词列表">
+            <label class="search"><i data-icon="search"></i><input id="search" type="search" placeholder="搜索标题或正文…" aria-label="搜索提示词"></label>
+            <div class="filters" role="group" aria-label="提示词筛选"><button class="filter active" data-filter="all" aria-pressed="true">全部 <span id="all-count">6</span></button><button class="filter" data-filter="starred" aria-pressed="false"><i data-icon="star"></i>收藏 <span id="star-count">3</span></button></div>
+            <div id="list" class="rows"></div>
+            <div class="list-foot">个人提示词库</div>
+          </aside>
+          <article id="detail" class="detail" aria-label="提示词详情"></article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <dialog id="quick-dialog" class="quick-dialog" aria-labelledby="quick-title">
+    <header class="quick-header"><div><h2 id="quick-title">Meta Prompts</h2><p>选择一条，复制后继续当前任务。</p></div><button class="icon-button" id="close-quick" aria-label="关闭快捷弹窗"><i data-icon="x"></i></button></header>
+    <label class="search quick-search"><i data-icon="search"></i><input id="quick-search" type="search" placeholder="搜索提示词…" aria-label="快捷搜索提示词"></label>
+    <div class="quick-content"><div id="quick-list" class="quick-list"></div><article id="quick-detail" class="quick-detail"></article></div>
+    <footer class="quick-footer"><span><kbd>Esc</kbd> 关闭</span><button id="manage" class="quiet">管理提示词 <i data-icon="arrow-right"></i></button></footer>
+  </dialog>
+  <dialog id="editor" class="editor" aria-labelledby="editor-title">
+    <form id="editor-form">
+      <header><h2 id="editor-title">新建提示词</h2><button type="button" class="icon-button" id="cancel-editor-x" aria-label="关闭编辑器"><i data-icon="x"></i></button></header>
+      <label>标题<input id="edit-title" required maxlength="120" placeholder="例如：先写方案，再开始实现"></label>
+      <label>提示词正文<textarea id="edit-body" required placeholder="写下你希望重复使用的指令…"></textarea></label>
+      <div class="edit-meta"><span>纯文本 · 不执行工具</span><span id="edit-count">0 字</span></div>
+      <footer><button type="button" id="cancel-editor" class="button">取消</button><button type="submit" class="button primary">保存提示词</button></footer>
+    </form>
+  </dialog>
+  <dialog id="discard-dialog" class="confirm-dialog" aria-labelledby="discard-title"><h2 id="discard-title">放弃未保存的修改？</h2><p>关闭后，本次修改不会保存。</p><footer><button id="keep-editing" class="button">继续编辑</button><button id="discard" class="button danger">放弃修改</button></footer></dialog>
+  <dialog id="delete-dialog" class="confirm-dialog" aria-labelledby="delete-title"><h2 id="delete-title">删除这条提示词？</h2><p id="delete-name"></p><footer><button id="cancel-delete" class="button">取消</button><button id="confirm-delete" class="button danger">删除</button></footer></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="prototype.js"></script>
+</body>
+</html>
