@@ -39,6 +39,21 @@
 - 未使用真实 Provider / 账号 / 费用，未进行含附件插入、多窗口同时编辑或换安装位置的数据迁移验收。用户数据被清除会删除该本机库；此实现不提供备份 / 导出。
 - 本轮测试使用临时 HOME / userData；测试 App 均由现有 owned process cleanup 结束并清理临时目录。系统剪贴板测试写入了人工示例文本；原有用户提示词库没有被修改。
 
+## 2026-10-14 · 安装回执
+
+- 用户明确要求「安装吧」。产品源码冻结在 `b7785a1`；按安装约定把 App 从 0.2.181 升为 0.2.182，仅同步根 package / lockfile，内置 CLI 仍为 0.2.49。
+- 实际执行环境：macOS arm64，Node 22.22.1 / npm 10.9.4，Electron 42.10.1；未修改用户默认 Node / npm。
+- 首轮 `check:cli-release` 在 Node 24.18.0 / npm 12.2.0 上，581 测试通过，但 CLI package smoke 因 npm 12 的 pack JSON 返回名称映射对象而不是数组失败。已用实际 dry-run 证实差异；切换本机已有 Node 22 后 pack 返回单元素数组，未改测试、断言或增加兼容代码。
+- `npm run check:cli-release`：通过，581 测试通过，实际 tarball 安装 / CLI bin / init / hook / doctor 验证通过；不发布 npm 包。
+- `npm run install:mac:dev`：通过。包含 typecheck、完整 unit / shell、App / CLI build、开发签名打包、资源与 sandbox preload 检查、打包安全 / 文件 / remote host smoke，再由安装脚本原子替换。
+- 完整 unit：217 文件、2729 测试通过；3 个真实外部探针按默认禁用跳过（billing-admin-real、p0-integration、p1-integration）。shell：PASS setup-scry-workspace。
+- `npm run test:renderer:ui`：在 Node 22 上再次通过，包含 Meta Prompts 与 Credits。
+- `node scripts/electron-security-smoke.mjs /Applications/Scry.app`：安装后的同一产物在临时 userData 下实际启动并通过安全 / reload / restart / terminal / history / modal 验证；用户真实数据未作为 fixture。
+- 安装读回：`/Applications/Scry.app` 的 bundle id 为 `com.scry.app`，App 为 0.2.182，私有 CLI 为 0.2.49；`codesign --verify --deep --strict` 通过。
+- 安装源与安装目标 `Resources/app.asar` 的 SHA-256 都是 `be358198a7f7811001b46f0d9a20e5682ad5652e4fa3159e4ef755299cbc9119`。
+- 旧安装 0.2.179 备份留在 `/Applications/.Scry.app.backup`；开发签名未公证，不宣称正式发行。未强制退出安装前已在运行的另一个 Scry 进程；须重开 `/Applications/Scry.app` 才能使用新版本。
+- 安装、测试通过不是用户对运行版的视觉认可；需求与 A 结构认可范围不变。
+
 ## 历史 Brief（初轮探索，以下旧约束不覆盖当前合同）
 
 - 目标：创建、查找、预览和复制个人常用指令；可选放入当前会话输入框，由用户自行补充和发送。
