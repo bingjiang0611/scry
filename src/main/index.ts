@@ -181,6 +181,7 @@ import {
 } from './workspace-authorization'
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import { assertTrustedIpcEvent as assertTrustedIpcEventForWindow, registerTrustedIpcHandler } from './ipc-trust'
+import { writeClipboardText } from './clipboard-text'
 import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveCanonicalRemoteProjectDirectory, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
 import { readRemoteHistoryTurnsPage, readRemoteHistoryVersion } from './remote/history-reader'
 import { observeSessionStatus } from './remote/remote-workspace'
@@ -1193,6 +1194,7 @@ handleTrusted('app:setTheme', (_event, theme: unknown) => {
   return true as const
 })
 
+handleTrusted('app:copyText', (_event, text: unknown) => writeClipboardText(text, clipboard))
 handleTrusted('app:performanceDiagnosticsEnabled', () => process.env.SCRY_PERF_LOG === '1')
 handleTrusted('app:reportRendererPerformance', (_event, sample: unknown) => {
   if (!isRendererPerformanceSample(sample)) throw new Error('无效的 renderer 性能样本')

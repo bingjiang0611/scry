@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 
 export type IconName =
   | 'plus' | 'minus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
-  | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x'
+  | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x' | 'copy'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'summary' | 'diff' | 'terminal' | 'agents' | 'panel'
   | 'globe' | 'plug' | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose' | 'branch'
@@ -12,6 +12,7 @@ export type IconName =
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
   minus: <path d="M5 12h14" />,
+  copy: <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 4H4v12" /></>,
   search: (
     <>
       <circle cx="11" cy="11" r="7" />

@@ -126,6 +126,7 @@ export type { TraceBacklogState, TraceBatchReceipt }
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
   setTheme: (theme: 'dark' | 'light'): Promise<true> => ipcRenderer.invoke('app:setTheme', theme),
+  copyText: (text: string): Promise<true> => ipcRenderer.invoke('app:copyText', text),
   performanceDiagnosticsEnabled: (): Promise<boolean> => ipcRenderer.invoke('app:performanceDiagnosticsEnabled'),
   reportRendererPerformance: (sample: RendererPerformanceSample): Promise<boolean> =>
     ipcRenderer.invoke('app:reportRendererPerformance', sample),
