@@ -1,27 +1,23 @@
 import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
 import type { RemoteIntentRouting } from './host-controller'
 import type { TraceEvent } from '../../shared/trace'
-import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
+import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest } from '../../shared/runtime'
 import { traceEventToOutputChunk } from './trace-output'
 
-// The LIVE binding for the remote run seam (previously a fail-closed stub). It
-// turns a routed device intent into a REAL Provider run through the same
-// provider registry the local UI uses, and mirrors that run's lifecycle to the
-// ledger via truthful, opaque, non-secret progress markers.
+// The remote binding adapts an authenticated device intent to the canonical
+// App run lifecycle. Production supplies startAppRun from index.ts, so trust,
+// attachments, hooks, managed recorder, RunRegistry observation, diff/archive,
+// and final recording settlement are not duplicated here. The legacy provider
+// seam below exists only for focused protocol tests.
 //
-// It deliberately does NOT reimplement agent:start's ~870-line interactive
-// machinery (renderer session reconciliation, attachments, hooks, managed
-// recorder, RunRegistry/UI visibility, diff/archive). Those remain the
-// interactive path's concern; duplicating them here would fork two divergent
-// run cores. What this binding guarantees:
+// What this binding guarantees:
 //
-//   - Workspace authorization + provider-operation mutual exclusion are already
-//     enforced UPSTREAM (RemoteRunPolicy/GatedExecutor) before this runs, using
-//     the SAME providerOperationKey as local agent:start, so a remote run and a
-//     local run on the same provider/profile are mutually exclusive.
-//   - The injected `run` is invoked exactly once with a freshly minted scry
-//     runId. The ledgerRunId <-> scryRunId correlation is emitted as the FIRST
-//     progress marker so the device (and any turn record) can join the two ids.
+//   - Workspace authorization and provider/profile auth-operation gating are
+//     enforced UPSTREAM (RemoteRunPolicy/GatedExecutor). Canonical admission
+//     handles session conflicts; independent sessions may run concurrently.
+//   - The canonical start callback is invoked exactly once with a freshly minted
+//     scry runId. The ledgerRunId <-> scryRunId correlation is emitted as the
+//     FIRST progress marker so the device can join the two ids.
 //   - Native Provider clarification, editor, and permission prompts are routed
 //     through the authenticated remote interaction broker. The binding never
 //     synthesizes an approval or substitutes an empty answer.
@@ -42,10 +38,32 @@ export interface RemoteRunTrace {
   items: TraceEvent[]
 }
 
+export interface RemoteRunCompletion {
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  recording: 'committed' | 'failed'
+  externalSessionId?: string
+  providerTurnId?: string
+  forkTurnId?: string
+  error?: string
+}
+
 export interface RemoteRunBindingDependencies {
-  // The real provider run entry. index.ts passes providerRegistry.run bound to
-  // the registry; tests pass a fake to assert the wiring without spawning a CLI.
-  run(providerId: string, request: ProviderRunRequest): ProviderRunHandle
+  // Production enters startAppRun. The optional provider seam below is only for
+  // focused protocol tests and older isolated callers.
+  startAppRun?(input: {
+    runId: string
+    ledgerRunId: string
+    request: AgentStartRequest
+    providerPrompt?: string
+    stopSignal: AbortSignal
+    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
+    onTraceEvent(event: TraceEvent): void
+    onSession?(externalSessionId: string): void
+    permissionModeOverride?: AgentStartRequest['permissionMode']
+  }): Promise<RemoteRunCompletion>
+  // Legacy seam retained for focused binding tests. Production provides startAppRun.
+  run?(providerId: string, request: ProviderRunRequest): ProviderRunHandle
+  permissionModeOverride?: AgentStartRequest['permissionMode']
   // scry runId minting; overridable for deterministic tests.
   nextScryRunId?: () => string
   // Optional Mac-catalog side effects so a device-initiated run is VISIBLE in the
@@ -111,7 +129,89 @@ const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (input: RemoteRunInput) => Promise<void> {
   let seq = 0
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
-  return async function startRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal }: RemoteRunInput): Promise<void> {
+  return async function startRemoteRun(input: RemoteRunInput): Promise<void> {
+    if (deps.startAppRun) return startCanonicalRemoteRun(input)
+    return startLegacyRemoteRun(input)
+  }
+
+  async function startCanonicalRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal }: RemoteRunInput): Promise<void> {
+    const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
+    if (prompt.length === 0) throw new Error('remote_run_missing_prompt')
+    const scryRunId = nextScryRunId()
+    const resume = typeof routing.resume === 'string' ? routing.resume.trim() : ''
+    const routedAttachments = routing.attachments ?? []
+    const attachments: AgentInputAttachment[] = routedAttachments
+      .filter((item) => item.kind === 'image')
+      .map((item) => ({ kind: 'image', name: item.name, mimeType: item.mimeType as AgentInputAttachment['mimeType'], dataBase64: item.dataBase64, size: item.size }))
+    const textFiles = routedAttachments.filter((item) => item.kind === 'text')
+    const providerPrompt = textFiles.length === 0 ? prompt : [prompt, textFiles.map((file) => {
+      const content = Buffer.from(file.dataBase64, 'base64').toString('utf8')
+      return `<scry_attached_file name=${JSON.stringify(file.name)} mime=${JSON.stringify(file.mimeType)}>\n${content}\n</scry_attached_file>`
+    }).join('\n\n')].join('\n\n')
+    const outputByMessageId = new Map<string, string>()
+    let sawAssistantText = false
+    const onTraceEvent = (ev: TraceEvent): void => {
+      const chunk = traceEventToOutputChunk(ev)
+      const messageId = typeof ev.messageId === 'string' ? ev.messageId : undefined
+      const replaces = ev.runtimeMetadata?.replacesStreamedText === true
+      if (replaces && messageId && ev.stage === 'text' && ev.text === '') outputByMessageId.delete(messageId)
+      if (ev.stage === 'runtime:controls') progress(marker({ event: 'started', controls: ev.input }))
+      if (ev.kind === 'harness' && ev.stage === 'result') {
+        if (!ev.isError && !sawAssistantText && typeof ev.text === 'string' && ev.text.length > 0) {
+          sawAssistantText = true
+          output({ kind: 'output', text: ev.text })
+        }
+        progress(marker({ event: 'result', isError: Boolean(ev.isError), ...(typeof ev.tokensIn === 'number' ? { tokensIn: ev.tokensIn } : {}), ...(typeof ev.tokensOut === 'number' ? { tokensOut: ev.tokensOut } : {}), ...(typeof ev.costUsd === 'number' ? { costUsd: ev.costUsd } : {}) }))
+      }
+      if (!chunk) return
+      let forwarded = chunk
+      if (chunk.kind === 'output' && messageId) {
+        const previous = outputByMessageId.get(messageId)
+        if (replaces && previous !== undefined) {
+          if (previous === chunk.text) return
+          if (chunk.text.startsWith(previous)) forwarded = { ...chunk, text: chunk.text.slice(previous.length) }
+          else if (typeof ev.runtimeMetadata?.genuineStreamDelta === 'string' && ev.runtimeMetadata.genuineStreamDelta.length > 0) forwarded = { ...chunk, text: ev.runtimeMetadata.genuineStreamDelta }
+        }
+        outputByMessageId.set(messageId, replaces ? chunk.text : ev.stage === 'text_delta' ? `${previous ?? ''}${chunk.text}` : chunk.text)
+      }
+      if (forwarded.text.length > 0) {
+        if (forwarded.kind === 'output') sawAssistantText = true
+        output(forwarded)
+      }
+    }
+    progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
+    if (resume) progress(marker({ event: 'session', externalSessionId: resume, resumed: true }))
+    try {
+      const completion = await deps.startAppRun!({
+        runId: scryRunId,
+        ledgerRunId,
+        request: {
+          prompt, cwd: routing.cwd, providerId: routing.providerId as AgentStartRequest['providerId'],
+          ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}),
+          ...(resume ? { expectedExternalSessionId: resume } : {}), attachments,
+          ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
+          ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {})
+        },
+        ...(providerPrompt !== prompt ? { providerPrompt } : {}),
+        stopSignal: stopSignal ?? new AbortController().signal,
+        requestUserInput: async (question, signal) => {
+          if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
+          return requestUserInput(question, signal)
+        },
+        onTraceEvent,
+        onSession: (externalSessionId) => progress(marker({ event: 'session', externalSessionId })),
+        permissionModeOverride: deps.permissionModeOverride
+      })
+      if (completion.recording === 'failed') throw new Error(completion.error ?? 'remote_recording_failed')
+      if (completion.status === 'failed') throw new Error(completion.error ?? 'provider_run_failed')
+      progress(marker({ event: 'settled', status: completion.status }))
+    } catch (error) {
+      progress(marker({ event: 'settled', status: 'failed' }))
+      throw error
+    }
+  }
+
+  async function startLegacyRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal }: RemoteRunInput): Promise<void> {
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
     // A run with no prompt is not a Provider run; fail closed and truthfully
     // rather than launch an empty turn.
@@ -352,7 +452,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         stage: 'runtime:controls',
         input: { model: request.model, effort: request.effort, permissionMode: request.permissionMode }
       })
-      const handle = deps.run(routing.providerId, request)
+      const handle = deps.run!(routing.providerId, request)
       providerHandle = handle
       observer?.attach(handle)
       const interrupt = (): void => { handle.interrupt() }

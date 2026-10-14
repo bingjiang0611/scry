@@ -12,13 +12,18 @@ const entry = join(root, 'out/main/index.js')
 await access(entry)
 const temp = await mkdtemp(join(tmpdir(), 'scry-external-links-'))
 
-async function exercise(window, shell, dialog) {
+async function exercise(window, shell, dialog, backgroundShowRequested) {
   const assert = require('node:assert/strict')
-  // Wait for the production startup show path, not just did-finish-load.
-  if (!window.isVisible()) await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Test window was not shown')), 5000)
-    window.once('show', () => { clearTimeout(timer); resolve() })
-  })
+  // SCRY_TEST_APP deliberately uses activationPolicy=prohibited on macOS.
+  // The OS may keep that window hidden even after showInactive. Still require
+  // the real production startup path, and keep the native-focus assertion below.
+  let startupTimer
+  try {
+    await Promise.race([
+      backgroundShowRequested,
+      new Promise((_resolve, reject) => { startupTimer = setTimeout(() => reject(new Error('Background show was not requested')), 5000) })
+    ])
+  } finally { clearTimeout(startupTimer) }
   assert.equal(window.isFocused(), false, 'Test app must show without stealing native focus')
   const contents = window.webContents
   assert.equal(contents.getBackgroundThrottling(), false, 'Background test UI must keep rendering')
@@ -98,9 +103,13 @@ try {
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.on('browser-window-focus', () => { console.error('Test app stole native window focus'); app.exit(1) })
     app.once('browser-window-created', (_event, window) => {
+      let acknowledgeShow
+      const backgroundShowRequested = new Promise(resolve => { acknowledgeShow = resolve })
+      const showInactive = window.showInactive.bind(window)
+      window.showInactive = () => { const result = showInactive(); acknowledgeShow(); return result }
       window.webContents.once('did-finish-load', async () => {
         try {
-          await (${exercise.toString()})(window, shell, dialog)
+          await (${exercise.toString()})(window, shell, dialog, backgroundShowRequested)
           app.exit(0)
         } catch (error) { console.error(error); app.exit(1) }
       })

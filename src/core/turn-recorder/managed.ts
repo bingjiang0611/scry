@@ -817,7 +817,7 @@ export async function recoverManagedRecorderTurns(
     // 调用方（main）知道 run 存活情况时传入 abandonProvisional，才会清理不可恢复的 provisional 轮次。
     abandonProvisional?: boolean
     // App 拥有的活跃轮次由原执行链收口；恢复不得重放它们，也不把它们计为 pending。
-    isLiveManagedRun?: (runId: string | undefined) => boolean
+    isLiveManagedRun?: (runId: string | undefined, nativeIdentity?: Pick<RecorderOpenTurnState, 'provider' | 'sessionId' | 'providerTurnId'>) => boolean
     // 常驻 App 走 'detach'：恢复检查在“发送前”跑，不能被仓库回调积压拖住发送。
     commitNotifications?: CommitNotificationDelivery
   } = {}
@@ -864,7 +864,7 @@ export async function recoverManagedRecorderTurns(
       if (
         open &&
         (open.managedByScry || open.status === 'closing') &&
-        !options.isLiveManagedRun?.(open.managedRunId) &&
+        !options.isLiveManagedRun?.(open.managedRunId, open) &&
         (!options.sessionId || open.sessionId === options.sessionId) &&
         !items.some((item) => item.handoff.record.generation === open.generation)
       ) {
@@ -879,7 +879,7 @@ export async function recoverManagedRecorderTurns(
       for (const pendingOpen of quarantined) {
         if (
           (!options.sessionId || pendingOpen.sessionId === options.sessionId) &&
-          !options.isLiveManagedRun?.(pendingOpen.managedRunId) &&
+          !options.isLiveManagedRun?.(pendingOpen.managedRunId, pendingOpen) &&
           !items.some((item) => item.handoff.record.generation === pendingOpen.generation)
         ) {
           const abandoned = await withRecorderSessionLock(

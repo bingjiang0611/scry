@@ -1047,6 +1047,26 @@ describe('managed canonical recorder', () => {
     })).rejects.toThrow('Provider turn id differs from the open lifecycle identity')
   })
 
+  it('excludes a live native turn without a Scry run id, but keeps unmatched opens pending', async () => {
+    const root = await workspace()
+    await startManaged(root)
+    const openPath = join(root, '.scry', 'runtime', 'codex', safeKey('session-1'), 'open.json')
+    const before = await readFile(openPath, 'utf8')
+    expect(JSON.parse(before).managedRunId).toBeUndefined()
+    expect(await recoverManagedRecorderTurns(root, process.env, {
+      abandonProvisional: true,
+      isLiveManagedRun: (runId, native) => runId === undefined && native?.provider === 'codex' &&
+        native.sessionId === 'session-1' && native.providerTurnId === 'turn-1'
+    })).toEqual({ recovered: 0, pending: 0 })
+    expect(await readFile(openPath, 'utf8')).toBe(before)
+    expect(await recoverManagedRecorderTurns(root, process.env, {
+      abandonProvisional: true,
+      isLiveManagedRun: (_runId, native) => native?.providerTurnId === 'different-live-turn'
+    })).toEqual({ recovered: 0, pending: 1 })
+    expect(await readFile(openPath, 'utf8')).toBe(before)
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
+  })
+
   it('通用 recovery 只重放 archive_committed，不提交 prepared', async () => {
     const root = await workspace()
     await startManaged(root)

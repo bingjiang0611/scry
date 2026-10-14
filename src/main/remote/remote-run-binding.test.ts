@@ -31,6 +31,34 @@ const toolUse = (tool: string, filePath?: string): TraceEvent => ({ id: 'u', ts:
 const toolResult = (output: string): TraceEvent => ({ id: 'o', ts: '2020', runId: 'x', kind: 'tool', stage: 'tool:Bash', tool: 'Bash', toolUseId: 'tu1', output })
 
 describe('remote run binding (live seam; no Provider process is spawned)', () => {
+  it('delegates production execution to the canonical App run lifecycle and preserves recording failure', async () => {
+    const startAppRun = vi.fn(async (input: Parameters<NonNullable<import('./remote-run-binding').RemoteRunBindingDependencies['startAppRun']>>[0]) => {
+      input.onTraceEvent(textEvent('canonical output'))
+      return { status: 'completed' as const, recording: 'failed' as const, error: 'archive failed' }
+    })
+    const output = vi.fn()
+    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-1' })
+    await expect(start({
+      runId: 'ledger-canonical', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' },
+      progress: vi.fn(), output
+    })).rejects.toThrow('archive failed')
+    expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'canonical-1', ledgerRunId: 'ledger-canonical', request: expect.objectContaining({ prompt: 'go', cwd: '/w' })
+    }))
+    expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'canonical output' })
+  })
+
+  it('propagates canonical startup rejection as a failed remote lifecycle', async () => {
+    const progress = vi.fn()
+    const startAppRun = vi.fn(async () => { throw new Error('canonical startup failed') })
+    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-rejected' })
+    await expect(start({
+      runId: 'ledger-rejected', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' },
+      progress, output: () => {}
+    })).rejects.toThrow('canonical startup failed')
+    expect(progress.mock.calls.map(call => JSON.parse(call[0] as string)).at(-1)).toEqual({ event: 'settled', status: 'failed' })
+  })
+
   it('runs the routed provider once and reports a truthful settled lifecycle', async () => {
     const { run, calls } = fakeRun(async (req) => { req.emit(result(false)); return { status: 'completed' } })
     const progress = vi.fn()

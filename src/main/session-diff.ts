@@ -60,7 +60,8 @@ export function sessionLoadMatchesRun(run: SessionLoadIdentity, target: SessionL
 }
 
 /**
- * 每个 (provider, cwd) 上下文一份会话净 diff 基线。
+ * App keys entries by provider/profile/cwd and native session, or provisional
+ * run id until the Provider supplies that session. UI selection is not ownership.
  *
  * 关键语义：`ensure` 永远返回一个可用基线。命中同 revision + 同 session 的既有基线时复用
  * 「会话第一轮开始前」的原始快照；否则（新会话 / 恢复选择会话 / 应用重启后进程内无基线 /
@@ -69,6 +70,7 @@ export function sessionLoadMatchesRun(run: SessionLoadIdentity, target: SessionL
  */
 export class SessionDiffBaselineRegistry {
   private readonly entries = new Map<string, SessionDiffBaseline>()
+  private readonly active = new Set<SessionDiffBaseline>()
 
   constructor(
     private readonly begin: (cwd: string) => Promise<GitTurnDiffCapture> = beginGitTurnDiff,
@@ -79,6 +81,8 @@ export class SessionDiffBaselineRegistry {
     const existing = this.entries.get(input.key)
     if (existing && this.usable(existing, input.revision, input.sessionId)) {
       if (input.sessionId && !existing.sessionId) existing.sessionId = input.sessionId
+      this.entries.delete(input.key)
+      this.entries.set(input.key, existing)
       return existing
     }
     if (existing) this.discard(input.key)
@@ -105,12 +109,30 @@ export class SessionDiffBaselineRegistry {
     if (!entry.sessionId) entry.sessionId = sessionId
   }
 
-  /** adoptSession：contextRevision 被顶掉但基线仍描述同一份工作树，跟着改 revision，不重锚。 */
-  rebind(key: string, revision: number, sessionId?: string): void {
+  /** Promote the run's own provisional capture; never relabel another session. */
+  promote(key: string, targetKey: string, sessionId: string): string {
     const entry = this.entries.get(key)
-    if (!entry) return
-    entry.revision = revision
-    if (sessionId) entry.sessionId = sessionId
+    if (!entry || (entry.sessionId && entry.sessionId !== sessionId)) return key
+    if (key !== targetKey && this.entries.has(targetKey)) return key
+    entry.sessionId = sessionId
+    this.entries.delete(key)
+    this.entries.set(targetKey, entry)
+    return targetKey
+  }
+
+  /** One active run per session is enforced by App admission. Keep its capture
+   * pinned while it runs, and retain at most 64 inactive session baselines.
+   * Eviction or App restart re-anchors the next resume honestly as `resumed`. */
+  retain(entry: SessionDiffBaseline): () => void {
+    this.active.add(entry)
+    return () => {
+      this.active.delete(entry)
+      let inactive = [...this.entries.values()].filter(value => !this.active.has(value)).length
+      for (const [key, value] of this.entries) {
+        if (inactive <= 64) break
+        if (!this.active.has(value)) { this.discard(key); inactive-- }
+      }
+    }
   }
 
   discard(key: string): void {

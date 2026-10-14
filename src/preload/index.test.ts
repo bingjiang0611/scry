@@ -118,8 +118,20 @@ const invokeChannels = {
   remoteBeginPairing: 'remote:pairing:begin',
   remoteConfirmPairing: 'remote:pairing:confirm',
   remoteCancelPairing: 'remote:pairing:cancel',
-  remoteRevokeDevice: 'remote:device:revoke'
+  remoteRevokeDevice: 'remote:device:revoke',
+  remoteDesktopHostStatus: 'remote:desktop:status',
+  remoteDesktopHostInvite: 'remote:desktop:invite',
+  remoteDesktopHostDisable: 'remote:desktop:disable'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
+
+const desktopChannels = {
+  list: 'desktopRemote:list', pair: 'desktopRemote:pair', finishPairing: 'desktopRemote:finishPairing',
+  connect: 'desktopRemote:connect', disconnect: 'desktopRemote:disconnect', forget: 'desktopRemote:forget',
+  catalog: 'desktopRemote:catalog', history: 'desktopRemote:history', trace: 'desktopRemote:trace',
+  intents: 'desktopRemote:intents', submit: 'desktopRemote:submit', intentStatus: 'desktopRemote:intentStatus',
+  runStatus: 'desktopRemote:runStatus', stop: 'desktopRemote:stop', answer: 'desktopRemote:answer',
+  files: 'desktopRemote:files', file: 'desktopRemote:file'
+} as const satisfies Record<keyof ScryApi['desktopRemote'], string>
 
 const listenerChannels = {
   onTrace: 'agent:trace',
@@ -154,6 +166,7 @@ describe('preload IPC boundary', () => {
     expect(exposed[0]).toBe('scry')
     expect(Object.keys(api).sort()).toEqual([
       'rendererReady',
+      'desktopRemote',
       ...Object.keys(invokeChannels),
       ...Object.keys(listenerChannels)
     ].sort())
@@ -167,6 +180,24 @@ describe('preload IPC boundary', () => {
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
     }
+  })
+
+  it('exposes only enumerated desktop business operations, never arbitrary transport IPC', async () => {
+    expect(Object.keys(api.desktopRemote).sort()).toEqual(Object.keys(desktopChannels).sort())
+    const methods = api.desktopRemote as unknown as Record<string, (...args: unknown[]) => unknown>
+    for (const [method, channel] of Object.entries(desktopChannels)) {
+      electron.invoke.mockClear()
+      await methods[method]('connection', 'context', 'argument')
+      expect(electron.invoke, method).toHaveBeenCalledTimes(1)
+      expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
+    }
+    const context = { providerId: 'codex', cwd: '/remote', externalSessionId: 'native-session' }
+    await api.desktopRemote.trace('host', context, 'canonical-run')
+    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:trace', 'host', context, 'canonical-run')
+    await api.desktopRemote.history('host', context, 2, 'snapshot')
+    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:history', 'host', context, 2, 'snapshot')
+    await api.desktopRemote.file('host', context, 'README.md', 5, 'file-snapshot')
+    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:file', 'host', context, 'README.md', 5, 'file-snapshot')
   })
 
   it('keeps structured arguments on the main-process side of the bridge', async () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import type { RemotePairingCode } from '../../shared/remote'
 import { projectRemote, confirmArguments, type PendingRow, type RemotePairingViewModel } from '../remote-pairing'
+import { DesktopRemote, RemoteHostPanel } from './DesktopRemote'
 
 // Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
 // data: URL, no innerHTML). The QR encodes only what the code already contains
@@ -40,6 +41,7 @@ export function RemotePairing(): JSX.Element {
   const [code, setCode] = useState<RemotePairingCode | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [desktopRemoteOpen, setDesktopRemoteOpen] = useState(false)
 
   const refresh = useCallback(async () => {
     try { setVm(projectRemote(await window.scry.remoteStatus())) }
@@ -70,12 +72,17 @@ export function RemotePairing(): JSX.Element {
   const cancel = useCallback((pairingId: string) => run(() => window.scry.remoteCancelPairing(pairingId)), [run])
   const revoke = useCallback((deviceId: string) => run(() => window.scry.remoteRevokeDevice(deviceId)), [run])
 
+  if (desktopRemoteOpen) return <DesktopRemote onBack={() => setDesktopRemoteOpen(false)} />
   if (vm === null) return <section className="remote-pairing"><p>加载中…</p></section>
   if (vm.kind === 'disabled') {
     return (
       <section className="remote-pairing">
         <h2>远程访问</h2>
-        <p className="remote-pairing__disabled">远程访问未启用。开发环境可设置 SCRY_REMOTE_HOST=1；正式版可用 SCRY_REMOTE_HOST=0 关闭。</p>
+        <p className="remote-pairing__disabled">手机中继远程访问未启用。桌面 SSH 远程仍可单独使用。</p>
+        <div className="remote-pairing__desktop-actions">
+          <button type="button" onClick={() => setDesktopRemoteOpen(true)}>连接桌面主机</button>
+        </div>
+        <RemoteHostPanel />
       </section>
     )
   }
@@ -84,6 +91,10 @@ export function RemotePairing(): JSX.Element {
     <section className="remote-pairing">
       <h2>远程访问</h2>
       <p className={vm.relayReady ? 'remote-pairing__relay' : 'remote-pairing__relay remote-pairing__relay--dormant'}>{vm.relayHint}</p>
+      <div className="remote-pairing__desktop-actions">
+        <button type="button" onClick={() => setDesktopRemoteOpen(true)}>连接桌面主机</button>
+      </div>
+      <RemoteHostPanel />
       {error && <p className="remote-pairing__error" role="alert">{error}</p>}
 
       <div className="remote-pairing__actions">
