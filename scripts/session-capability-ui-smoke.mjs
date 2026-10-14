@@ -8,7 +8,6 @@ import electron from 'electron'
 import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
 const modelsOnly = process.argv.includes('--models-only')
@@ -16,8 +15,13 @@ const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
 const summaryOnly = process.argv.includes('--summary-only')
 const performanceOnly = process.argv.includes('--performance-only')
+// Opt-in only: this native hide/show check necessarily displays a window.
+const nativeVisibility = process.argv.includes('--native-visibility')
+if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
 const fixtures = metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts']
+
+const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
 // Real React DOM events in isolated, sandboxed Electron fixtures. Meta Prompts uses the
 // production preload and a scoped clipboard handler. No Scry main process, Provider
@@ -1056,7 +1060,7 @@ async function exercisePiPermission(contents, scenario) {
   return { scenario, loadingBlocked: true, explicitPermission: request.permissionMode }
 }
 
-async function exerciseLlmPerformance(contents, win, screenshot) {
+async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibility) {
   const read = expression => contents.executeJavaScript(expression)
   const wait = async expression => {
     const deadline = Date.now() + 5000
@@ -1081,7 +1085,7 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
   const hover = async (selector, fraction) => contents.sendInputEvent({ type: 'mouseMove', ...await pointOf(selector, fraction) })
-  win.showInactive()
+  if (nativeVisibility) win.showInactive()
   contents.focus()
   await wait(`document.querySelector('.sb-navitem[title="LLM 性能"]') != null`)
   const nav = await read(`Array.from(document.querySelectorAll('.sb-navitem')).map(node => node.textContent.trim())`)
@@ -1151,13 +1155,15 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   await click('#performance-stop')
   await wait(`${modal}.textContent.includes('1 个会话运行中') && !Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model'))`)
   const fixtureState = `JSON.parse(document.querySelector('#performance-fixture-state').textContent)`
-  win.hide()
-  await wait(`document.hidden`)
-  const hiddenReads = await read(`${fixtureState}.summaryReads`)
-  await read('new Promise(resolve => setTimeout(resolve, 1300))')
-  if (await read(`${fixtureState}.summaryReads`) !== hiddenReads) throw new Error('Hidden modal kept refreshing')
-  win.showInactive()
-  await wait(`!document.hidden && ${fixtureState}.summaryReads > ${hiddenReads}`)
+  if (nativeVisibility) {
+    win.hide()
+    await wait(`document.hidden`)
+    const hiddenReads = await read(`${fixtureState}.summaryReads`)
+    await read('new Promise(resolve => setTimeout(resolve, 1300))')
+    if (await read(`${fixtureState}.summaryReads`) !== hiddenReads) throw new Error('Hidden modal kept refreshing')
+    win.showInactive()
+    await wait(`!document.hidden && ${fixtureState}.summaryReads > ${hiddenReads}`)
+  }
   await click('#performance-empty')
   await wait(`${modal}.textContent.includes('无运行中的会话') && ${modal}.querySelector('.llm-perf-running') == null`)
   for (const theme of ['dark', 'light']) {
@@ -1188,7 +1194,7 @@ async function exerciseLlmPerformance(contents, win, screenshot) {
   await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
   if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'hidden/closed refresh stopped', 'read errors clear stale evidence'], themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', themes: ['dark', 'light'] }
 }
 
 try {
@@ -1224,6 +1230,7 @@ try {
   for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
+    if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     // macOS pipes are asynchronous: exit only after the result line is flushed, or the parent sees no result.
     const finish = (result) => process.stdout.write('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
@@ -1231,14 +1238,14 @@ try {
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility} } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       try {
         let result = {}, piCommands = {}
         if (${fixtures.includes('meta-prompts')}) {
-          const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
+          const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
           const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
           require(${JSON.stringify(join(temp, 'meta-prompts-ipc.cjs'))}).registerMetaPromptsFixtureIpc(metaWin, metaUrl)
           metaWin.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
@@ -1255,7 +1262,7 @@ try {
         if (${fixtures.includes('llm-performance')}) {
           win.setSize(1000, 800)
           await win.loadFile(${JSON.stringify(join(temp, 'llm-performance.html'))})
-          result.llmPerformance = await (${exerciseLlmPerformance.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LLM_UI_SCREENSHOT ?? '')})
+          result.llmPerformance = await (${exerciseLlmPerformance.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LLM_UI_SCREENSHOT ?? '')}, ${nativeVisibility})
           if (${performanceOnly}) {
             finish(result)
             return

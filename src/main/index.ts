@@ -285,7 +285,7 @@ let win: BrowserWindow | null = null
 let runSeq = 0
 let isShuttingDown = false
 const isOwnedTestApp = process.env.SCRY_TEST_APP === '1'
-// Isolated automation must not activate the app or take focus from the user's work.
+// Isolated automation stays hidden: showInactive still displays a native window.
 if (isOwnedTestApp && process.platform === 'darwin') app.setActivationPolicy('prohibited')
 const mainEventId = (prefix: string, runId: string): string => `${prefix}-${runId}-${randomUUID()}`
 let startupManagedRecovery: Promise<void> = Promise.resolve()
@@ -294,7 +294,7 @@ if (!primaryInstance) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (!win || win.isDestroyed()) return
+    if (isOwnedTestApp || !win || win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()
@@ -1148,10 +1148,9 @@ function createWindow(): void {
     showWindow()
   }
   const showWindow = (): void => {
-    if (windowShown || !win || win.isDestroyed()) return
+    if (isOwnedTestApp || windowShown || !win || win.isDestroyed()) return
     windowShown = true
-    if (isOwnedTestApp) win.showInactive()
-    else win.show()
+    win.show()
   }
   // ready-to-show 只代表第一帧能画，React 还没恢复 workspace/active run；此时 show 会先闪欢迎页。
   // Renderer 在关键快照稳定后主动发 app:rendererReady。保留超时兜底，避免 renderer 异常时窗口永久不可见。
