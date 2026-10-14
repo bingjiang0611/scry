@@ -182,11 +182,11 @@ function normalizeTracePath(value: string): string {
   return `${drive}${absolute && !drive ? '/' : drive ? '/' : ''}${parts.join('/')}` || (absolute ? '/' : '.')
 }
 
-function inferredPath(
+export function matchingFileEvidencePaths(
   path: string,
   cwd: string | undefined,
-  candidates: string[]
-): { path: string; matchedCandidate: boolean } {
+  candidates: readonly string[]
+): string[] {
   const normalized = normalizeTracePath(path)
   const isAbsolute = normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)
   const resolved = !isAbsolute && cwd ? normalizeTracePath(`${cwd}/${normalized}`) : normalized
@@ -194,14 +194,20 @@ function inferredPath(
     const value = normalizeTracePath(candidate)
     return value === normalized || value === resolved
   })
-  if (exact) return { path: exact, matchedCandidate: true }
-  const suffixMatches = candidates.filter((candidate) => {
+  if (exact) return [exact]
+  return candidates.filter((candidate) => {
     const value = normalizeTracePath(candidate)
     return value.endsWith(`/${normalized}`) || resolved.endsWith(`/${value}`)
   })
-  return suffixMatches.length === 1
-    ? { path: suffixMatches[0], matchedCandidate: true }
-    : { path: resolved, matchedCandidate: false }
+}
+
+function inferredPath(path: string, cwd: string | undefined, candidates: string[]): { path: string; matchedCandidate: boolean } {
+  const matches = matchingFileEvidencePaths(path, cwd, candidates)
+  const normalized = normalizeTracePath(path)
+  const absolute = normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)
+  return matches.length === 1
+    ? { path: matches[0], matchedCandidate: true }
+    : { path: !absolute && cwd ? normalizeTracePath(`${cwd}/${normalized}`) : normalized, matchedCandidate: false }
 }
 
 export function inferredReadPathsFromCommand(

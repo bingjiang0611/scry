@@ -1,4 +1,5 @@
 import type { Root, RootContent } from 'mdast'
+import { matchingFileEvidencePaths } from '@shared/file-evidence'
 
 /** A directory followed by filenames in one paragraph is an explicit path context, not a disk search. */
 export function remarkWorkspaceFileDirectories() {
@@ -109,6 +110,25 @@ export function resolveWorkspaceFileTarget(
   if (!explicitWorkspaceToken && !looksLikeRelativeFile(candidate)) return null
   const path = normalizeRelativePath(candidate)
   return path ? { cwd: primaryRoot.cwd, path } : null
+}
+
+/** Expand abbreviated link text only from this turn's file evidence; never search the disk by basename. */
+export function resolveWorkspaceFileTargets(
+  workspaces: readonly string[],
+  reference: string,
+  filePaths: readonly string[]
+): WorkspaceFileTarget[] {
+  const target = resolveWorkspaceFileTarget(workspaces, reference)
+  if (!target) return []
+  const token = stripWorkspaceToken(reference).replaceAll('\\', '/')
+  if (token.startsWith('/') || token.startsWith('~') || token.startsWith('.') || token.startsWith('file:')) return [target]
+  const matches = matchingFileEvidencePaths(target.path, target.cwd, filePaths)
+  const targets = new Map<string, WorkspaceFileTarget>()
+  for (const path of matches) {
+    const candidate = resolveWorkspaceFileTarget(workspaces, `@${path}`)
+    if (candidate) targets.set(JSON.stringify(candidate), candidate)
+  }
+  return targets.size ? [...targets.values()] : [target]
 }
 
 export function resolveWorkspaceFileReference(cwd: string, reference: string): string | null {
