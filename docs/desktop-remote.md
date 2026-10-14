@@ -44,7 +44,8 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - 冻结产物：App **0.2.183**，私有 CLI **0.2.49**，`app.asar` SHA-256 **`07bf7d339ceca352b7f465d5e227450fb20f6f88da96dbfb8c6062724be6c2cc`**。Apple Development 签名，非公证发布版。
 - 最终 gate：Node 22.22.1；typecheck、218 文件 / 2735 单测、shell、完整 renderer UI、CLI release 581 测试与 package smoke、打包体积/资源检查、packaged Electron 安全/文件/远程宿主 smoke 全部通过。3 个真实探针跳过，没有新发真实模型请求。
 - 安装交接：冻结包与一次性安装入口在 `/Users/baobingjiang/Downloads/Scry-0.2.183-install-7EwEFn/`。`install.command` 复用原子安装器，校验版本、签名及上述 hash，保留旧 App 备份，启动后观察 20 秒。已实测运行中拒绝安装：现有 0.2.182 的 hash 未变，未产生安装完成回执。
-- **尚未安装**：当前对话由 `/Applications/Scry.app` 承载，不强制退出。用户结束任务、正常退出 Scry 后运行安装入口；成功以该目录的 `local-install-result.json` 为准，失败或结果未知不得盲目重放。mac2 的 0.2.182 宿主未改动；日常客户端正式配对及升级后的重启验收仍待完成。
+- **安装更新**：用户随后明确要求“直接帮我安装好，我负责重启”。2026-10-14 18:55 已通过仓库 `scripts/install-macos.mjs` 原子安装到 `/Applications/Scry.app`，未退出、停止或启动 App。安装后版本 0.2.183、签名及上述 hash 核对通过；旧进程 PID 56237 仍在运行，重启后的运行版本尚未验收。
+- **安装回执与备份**：实际回执是上述目录的 `install-only-result.json`，日志 `install-only.log`；不再运行旧的安装入口。0.2.182 备份在 `/Applications/.Scry.app.backup`，此前已有备份另存为 `/Applications/.Scry.app.backup-preserved-61334a9d-9515-45d6-b57a-4d62ffdec45c`。mac2 的 0.2.182 宿主未改动；日常客户端正式配对仍待完成。
 
 ## 行为与边界
 
