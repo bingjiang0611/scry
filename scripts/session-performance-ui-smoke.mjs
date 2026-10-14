@@ -44,7 +44,8 @@ async function exercise(webContents) {
     webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
   }
   await wait(`document.hasFocus()`)
-  await wait(`document.querySelectorAll('[data-run-id]').length === 40`)
+  await wait(`document.querySelectorAll('[data-run-id]').length === 40 && document.querySelectorAll('[data-virtualized]').length > 20`)
+  const initialPageMounted = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   const viewport = await read(`(() => { const element = document.querySelector('.chat-transcript'); return { width: element.clientWidth, height: element.clientHeight }; })()`)
   if (viewport.width < 600 || viewport.height < 500) throw new Error(`Invalid transcript viewport: ${JSON.stringify(viewport)}`)
   const initialRenders = await read('Number(document.body.dataset.sidebarRenders)')
@@ -195,7 +196,7 @@ async function exercise(webContents) {
   return { historicalSessions: 277, streamCommits: 20, sidebarStreamRenders: streamRenders,
     latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners, runningRingThemes,
     rotatingTransform: true, reducedMotion: true, completedIndicatorsRemoved: true, neutralBackgroundWaiting: true,
-    viewport, historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
+    viewport, initialPageMounted, historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
     viewportAnchorPreserved: true, selectedEvidenceRetained: true, shellHeightPreserved: true,
     keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }
 }

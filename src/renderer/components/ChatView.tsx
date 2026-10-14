@@ -128,16 +128,17 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
   'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
 
-// One/two history pages retain the existing DOM. Beyond 80 loaded turns, keep
-// lightweight jump targets and mount content within 1200px of the viewport.
-const TRANSCRIPT_WINDOW_THRESHOLD = 80
+// Window the first history page too: completed Markdown answers are expensive
+// even when only 40 turns are loaded. Keep jump targets and materialize nearby rows.
+const TRANSCRIPT_WINDOW_THRESHOLD = 20
+const TRANSCRIPT_INITIAL_VISIBLE_TURNS = 4
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, focusedTurnRunId, ...props }: TranscriptProps) {
   const windowed = turns.length > TRANSCRIPT_WINDOW_THRESHOLD
   return <>{turns.map((turn, index) => <TranscriptTurn
     key={turn.runId} {...props} turn={turn} index={index} total={turns.length}
-    windowed={windowed} initiallyVisible={!windowed || index >= turns.length - 40}
+    windowed={windowed} initiallyVisible={!windowed || index >= turns.length - TRANSCRIPT_INITIAL_VISIBLE_TURNS}
     focused={focusedTurnRunId === turn.runId}
   />)}</>
 })
