@@ -56,6 +56,7 @@ import {
 } from '../App'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, RecorderContentPager, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
+import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import {
   ChatView,
   composerEnterConfirmsIme,
@@ -1641,6 +1642,26 @@ describe('工作区文件面板', () => {
 })
 
 describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
+  it('routes abbreviated file links through their own turn evidence, not another turn or the active project', () => {
+    const historyTurn: Turn = {
+      runId: 'history-links', cwd: '/repo', userText: '设计原型', done: true,
+      items: [
+        ev({ id: 'written', kind: 'tool', stage: 'tool_use', tool: 'Write', fileOp: 'write', filePath: '/repo/designs/scry-unified-remote/brief.md' }),
+        ev({ id: 'reply', kind: 'model', stage: 'text', text: '包含原型、`brief.md`。' })
+      ]
+    }
+    const nextTurn: Turn = { runId: 'next-links', cwd: '/repo', userText: '后续任务', done: true,
+      items: [ev({ id: 'next-reply', kind: 'model', stage: 'text', text: '`brief.md`' })] }
+    const rendered = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/active-project']} onOpen={() => {}}>
+        <AssistantTurn turn={historyTurn} selectedId={null} onSelect={() => {}} />
+        <AssistantTurn turn={nextTurn} selectedId={null} onSelect={() => {}} />
+      </WorkspaceFileLinkProvider>
+    )
+    expect(rendered.match(/title="designs\/scry-unified-remote\/brief.md · 在右侧文件面板打开"/g)).toHaveLength(1)
+    expect(rendered).toContain('title="brief.md · 在右侧文件面板打开"')
+  })
+
   const html = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
 
   it('已完成且带原生轮次边界的 Provider 轮次提供分支入口', () => {

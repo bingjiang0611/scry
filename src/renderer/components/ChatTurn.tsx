@@ -5,7 +5,7 @@ import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
 import { providerHasEnded } from '../run-stop-status'
 import { BackgroundWorkPanel } from './BackgroundWorkPanel'
-import Markdown from './MarkdownImpl'
+import Markdown, { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import type { ContentRef, RecorderContentPage } from '@shared/tool-content'
@@ -1441,6 +1441,10 @@ function AssistantTurnImpl({
     return () => onOpenDiff(turnRef.current, turnDiff, path)
   }, [diffPaths, onOpenDiff, turn.done, turnDiff])
   const { structured } = useMemo(() => aggregateFiles(items), [items])
+  // A short filename belongs to this turn's footprint/diff, not to a later turn
+  // or the currently selected project. Main still canonicalizes every opened target.
+  const linkWorkspaces = useMemo(() => turn.cwd ? [turn.cwd] : [], [turn.cwd])
+  const linkFilePaths = useMemo(() => [...new Set([...structured.map((file) => file.path), ...diffPaths])], [structured, diffPaths])
   const hookSummary = useMemo(() => aggregateHooks(items), [items])
   const hasFiles =
     structured.length > 0 ||
@@ -1709,21 +1713,23 @@ function AssistantTurnImpl({
           </span>
         )}
       </div>
-      <div className="turn-flow">
-        {turnFlowBody}
-        {projection.liveParentToolUseId === null && projection.liveThinking && (
-          <ThinkingBlock
-            key={projection.liveKey || 'live-thinking-tail'}
-            text={projection.liveThinking}
-            streaming={!terminal}
-          />
-        )}
-        {projection.liveParentToolUseId === null && projection.liveText && (
-          <div className={`model-text md${terminal ? '' : ' streaming'}`} key={projection.liveKey || 'live-tail'}>
-            <Markdown streaming={!terminal}>{projection.liveText}</Markdown>
-          </div>
-        )}
-      </div>
+      <WorkspaceFileLinkProvider workspaces={linkWorkspaces} filePaths={linkFilePaths}>
+        <div className="turn-flow">
+          {turnFlowBody}
+          {projection.liveParentToolUseId === null && projection.liveThinking && (
+            <ThinkingBlock
+              key={projection.liveKey || 'live-thinking-tail'}
+              text={projection.liveThinking}
+              streaming={!terminal}
+            />
+          )}
+          {projection.liveParentToolUseId === null && projection.liveText && (
+            <div className={`model-text md${terminal ? '' : ' streaming'}`} key={projection.liveKey || 'live-tail'}>
+              <Markdown streaming={!terminal}>{projection.liveText}</Markdown>
+            </div>
+          )}
+        </div>
+      </WorkspaceFileLinkProvider>
       {unmatchedPendingQuestions.map((request) => (
         <div className="tool-card k-tool question-pending-fallback" key={`${request.runId}:${request.questionId}`}>
           <div className="tool-row">

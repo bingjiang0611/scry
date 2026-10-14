@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { canOpenWorkspaceFileExternally } from '@shared/workspace'
-import { remarkWorkspaceFileDirectories, resolveWorkspaceFileTarget, type WorkspaceFileTarget } from '../workspace-links'
+import { remarkWorkspaceFileDirectories, resolveWorkspaceFileTargets, type WorkspaceFileTarget } from '../workspace-links'
 import { Icon } from './primitives/Icon'
 
 function safeExternalHref(href: string | undefined): string | undefined {
@@ -79,6 +79,7 @@ export function normalizeMarkdownForDisplay(source: string): string {
 
 interface WorkspaceFileLinkContextValue {
   workspaces: readonly string[]
+  filePaths: readonly string[]
   onOpen: (target: WorkspaceFileTarget) => void
 }
 
@@ -86,18 +87,46 @@ const WorkspaceFileLinkContext = createContext<WorkspaceFileLinkContextValue | n
 
 export function WorkspaceFileLinkProvider({
   workspaces,
+  filePaths,
   onOpen,
   children
 }: {
   workspaces: readonly string[]
+  filePaths?: readonly string[]
   onOpen?: (target: WorkspaceFileTarget) => void
   children: ReactNode
 }) {
-  const value = useMemo<WorkspaceFileLinkContextValue | null>(
-    () => workspaces.length > 0 && onOpen ? { workspaces, onOpen } : null,
-    [onOpen, workspaces]
-  )
+  const parent = useContext(WorkspaceFileLinkContext)
+  const value = useMemo<WorkspaceFileLinkContextValue | null>(() => {
+    const roots = [...new Set([...workspaces, ...(parent?.workspaces ?? [])])]
+    const open = onOpen ?? parent?.onOpen
+    return roots.length > 0 && open ? { workspaces: roots, filePaths: filePaths ?? [], onOpen: open } : null
+  }, [onOpen, workspaces, filePaths, parent])
   return <WorkspaceFileLinkContext.Provider value={value}>{children}</WorkspaceFileLinkContext.Provider>
+}
+
+function WorkspaceFileAction({ targets, reference, title, onOpen, children }: {
+  targets: WorkspaceFileTarget[]
+  reference: string
+  title: string
+  onOpen: (target: WorkspaceFileTarget) => void
+  children: ReactNode
+}) {
+  if (targets.length > 1) {
+    const label = `${reference} · 多个匹配，请选择完整路径`
+    return <select className="md-file-ref" title={label} aria-label={label} defaultValue="" onChange={(event) => {
+      onOpen(targets[Number(event.currentTarget.value)])
+      event.currentTarget.value = ''
+    }}>
+      <option value="" disabled>{label}</option>
+      {targets.map((target, index) => <option key={index} value={index}>
+        {target.path.startsWith('/') ? target.path : `${target.cwd}/${target.path}`}
+      </option>)}
+    </select>
+  }
+  return <button type="button" className="md-file-ref" title={title} aria-label={title} onClick={() => onOpen(targets[0])}>
+    <Icon name="file" className="md-file-ref-icon" />{children}
+  </button>
 }
 
 const baseComponents: Components = {
@@ -273,14 +302,13 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
         const external = /^https?:/.test(safe)
         return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{content}</a>
       }
-      const target = workspaceFileLink && href
-        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, `@${node?.properties['data-scry-file-reference'] ?? href}`)
-        : null
-      if (!target) return <span>{content}</span>
-      return <button type="button" className="md-file-ref" title={`${target.path} · 打开文件`}
-        onClick={() => workspaceFileLink?.onOpen(target)}>
-        <Icon name="file" className="md-file-ref-icon" />{content}
-      </button>
+      const targets = workspaceFileLink && href
+        ? resolveWorkspaceFileTargets(workspaceFileLink.workspaces, `@${node?.properties['data-scry-file-reference'] ?? href}`, workspaceFileLink.filePaths)
+        : []
+      if (!targets.length || !workspaceFileLink) return <span>{content}</span>
+      return <WorkspaceFileAction targets={targets} reference={href ?? ''} title={`${targets[0].path} · 打开文件`} onOpen={workspaceFileLink.onOpen}>
+        {content}
+      </WorkspaceFileAction>
     },
     code: ({ node, children: codeChildren, className, ...props }) => {
       const reference = String(codeChildren)
@@ -292,27 +320,20 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
           </a>
         )
       }
-      const target = workspaceFileLink && !reference.includes('\n')
-        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces,
+      const targets = workspaceFileLink && !reference.includes('\n')
+        ? resolveWorkspaceFileTargets(workspaceFileLink.workspaces,
           typeof node?.properties['data-scry-file-reference'] === 'string'
-            ? `@${node.properties['data-scry-file-reference']}` : reference)
-        : null
-      if (!target) return <code {...props} className={className}>{codeChildren}</code>
+            ? `@${node.properties['data-scry-file-reference']}` : reference, workspaceFileLink.filePaths)
+        : []
+      if (!targets.length || !workspaceFileLink) return <code {...props} className={className}>{codeChildren}</code>
 
+      const target = targets[0]
       const external = reference.endsWith('/') || canOpenWorkspaceFileExternally(target.path)
-      const open = workspaceFileLink?.onOpen
       const title = external ? `${target.path} · 在外部应用打开` : `${target.path} · 在右侧文件面板打开`
       return (
-        <button
-          type="button"
-          className="md-file-ref"
-          title={title}
-          aria-label={title}
-          onClick={() => open?.(target)}
-        >
-          <Icon name="file" className="md-file-ref-icon" />
+        <WorkspaceFileAction targets={targets} reference={reference} title={title} onOpen={workspaceFileLink.onOpen}>
           <code {...props} className={className}>{codeChildren}</code>
-        </button>
+        </WorkspaceFileAction>
       )
     }
   }), [workspaceFileLink])

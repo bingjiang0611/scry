@@ -145,6 +145,34 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).not.toContain('not-a-link.png ·')
   })
 
+  it('resolves an abbreviated filename using only the enclosing turn evidence and its original cwd', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/different-project']} onOpen={() => {}}>
+        <WorkspaceFileLinkProvider workspaces={['/repo']} filePaths={[
+          '/repo/designs/scry-unified-remote/brief.md', '/repo/docs/desktop-remote.md'
+        ]}>
+          <MarkdownImpl>{'包含原型、`brief.md`，以及写进 `docs/desktop-remote.md` 的这次反馈记录。'}</MarkdownImpl>
+        </WorkspaceFileLinkProvider>
+        <MarkdownImpl>{'另一轮的 `brief.md`'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html).toContain('designs/scry-unified-remote/brief.md · 在右侧文件面板打开')
+    expect(html).toContain('docs/desktop-remote.md · 在右侧文件面板打开')
+    expect(html).toContain('brief.md · 在右侧文件面板打开')
+  })
+
+  it('offers the full paths when turn evidence contains ambiguous filenames instead of guessing', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} filePaths={['designs/a/brief.md', 'designs/b/brief.md']} onOpen={() => {}}>
+        <MarkdownImpl>{'`brief.md` [brief](brief.md) `./brief.md`'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html.match(/<select/g)).toHaveLength(2)
+    expect(html).toContain('designs/a/brief.md')
+    expect(html).toContain('designs/b/brief.md')
+    expect(html.match(/class="md-file-ref"/g)).toHaveLength(3)
+  })
+
   it('opens an HTTP URL code span in the browser instead of treating its extension as a workspace file', () => {
     const html = renderToStaticMarkup(
       <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>

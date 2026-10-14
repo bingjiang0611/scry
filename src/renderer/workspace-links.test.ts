@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveWorkspaceFileReference, resolveWorkspaceFileTarget } from './workspace-links'
+import { resolveWorkspaceFileReference, resolveWorkspaceFileTarget, resolveWorkspaceFileTargets } from './workspace-links'
 
 describe('workspace file references', () => {
   const cwd = '/Users/example/project'
@@ -23,6 +23,18 @@ describe('workspace file references', () => {
     expect(resolveWorkspaceFileReference(cwd, '.env')).toBe('.env')
     expect(resolveWorkspaceFileReference(cwd, 'assets/payload')).toBe('assets/payload')
     expect(resolveWorkspaceFileReference(cwd, 'identifier')).toBeNull()
+  })
+
+  it('matches abbreviated names against turn evidence, deduplicates targets and preserves explicit paths', () => {
+    const files = [`${cwd}/designs/a/brief.md`, 'designs/a/brief.md', 'designs/b/brief.md', `${cwd}/brief.md`]
+    expect(resolveWorkspaceFileTargets([cwd], 'brief.md', files)).toEqual([{ cwd, path: 'brief.md' }])
+    expect(resolveWorkspaceFileTargets([cwd], 'brief.md', files.slice(0, 3))).toEqual([
+      { cwd, path: 'designs/a/brief.md' }, { cwd, path: 'designs/b/brief.md' }
+    ])
+    expect(resolveWorkspaceFileTargets([cwd], './brief.md', files.slice(0, 3))).toEqual([{ cwd, path: 'brief.md' }])
+    expect(resolveWorkspaceFileTargets([cwd], '~/brief.md', files)).toEqual([{ cwd: '~', path: 'brief.md' }])
+    expect(resolveWorkspaceFileTargets([cwd], 'https://example.com/brief.md', files)).toEqual([])
+    expect(resolveWorkspaceFileTargets([cwd], '/outside/brief.md', files)).toEqual([{ cwd, path: '/outside/brief.md' }])
   })
 
   it('uses the longest known root for absolute paths and the current root for relative paths', () => {
