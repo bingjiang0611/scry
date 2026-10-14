@@ -966,9 +966,11 @@ function addAssistantUsage(
   const cacheRead = number(usage.cacheRead)
   const cacheWrite = number(usage.cacheWrite)
   const reasoning = number(usage.reasoning)
-  const cost = number(record(usage.cost).total)
   const model = typeof message.model === 'string' ? message.model : 'unknown'
   const provider = typeof message.provider === 'string' ? message.provider : undefined
+  // Qoder is credit-billed. Pi's USD catalogue total is not credit evidence;
+  // match the native Qoder adapter rather than treating its zero placeholder as free.
+  const cost = provider === 'qoder' ? undefined : number(record(usage.cost).total)
   const key = `${provider ?? ''}\0${model}`
   aggregate.input += input ?? 0
   aggregate.output += output ?? 0
