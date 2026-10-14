@@ -55,7 +55,9 @@ export function BackgroundWorkPanel({ runId, work, stopTask = (taskId) => window
             <p>任务 {task.taskId} · 启动回执：{new Date(task.observedAt).toLocaleTimeString()}</p>
             <p>时长从收到启动回执起计算；仅展示已观测任务，清单可能不完整。</p>
             {(result || task.stopState) && <p>{result?.message ?? (task.stopState === 'unconfirmed' ? '停止结果未确认' : '已请求停止；等待任务终态')}</p>}
-            {work.taskStop === 'unavailable' && <p>当前 Qoder 的单任务停止未验证；需要时可使用输入框中的“停止本轮”。</p>}
+            {work.taskStop === 'unavailable' && <p>{work.providerId === 'pi'
+              ? 'Pi 单个子 Agent 停止尚未接入。停止本轮会结束主会话观测，不保证后台子 Agent 已停止。'
+              : '当前 Qoder 的单任务停止未验证；需要时可使用输入框中的“停止本轮”。'}</p>}
           </div>
         </details>
         {work.taskStop === 'available' && <button type="button" disabled={Boolean(requested)} onClick={() => void stop(task.taskId)} aria-label={`停止任务 ${task.taskId}`}>

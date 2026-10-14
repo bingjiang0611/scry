@@ -68,6 +68,8 @@ function Fixture() {
       <button id="new-run" onClick={() => { setDone(false); setRun('fixture-next'); setStartedAt(new Date(Date.now()).toISOString()); setWork(initial) }}>new run</button>
       {clockScenario && <button id="unknown-start" onClick={() => setStartedAt('unknown')}>unknown start</button>}
       <button id="unsupported" onClick={() => setWork((work) => ({ ...work, taskStop: 'unavailable' }))}>unsupported</button>
+      <button id="pi-wait" onClick={() => { setDone(false); setWork({ ...initial, providerId: 'pi', taskStop: 'unavailable',
+        tasks: [{ taskId: 'child', toolUseId: 'child', tool: 'Agent', description: 'worker', observedAt: Date.now() }] }) }}>Pi wait</button>
     </nav>
     <ChatView
       turns={[{ runId: run, get userText() { clock.turnReads++; return '迁移笔记（隔离测试）' }, done, items: [
@@ -75,7 +77,7 @@ function Fixture() {
         ...(!clockScenario ? [{ id: 'background', runId: run, ts: startedAt, kind: 'harness' as const, stage: 'runtime:background_work', backgroundWork: work }] : [])
       ] }]}
       selectedId={null} scrollRef={scrollRef} textareaRef={textareaRef}
-      cwd="/synthetic/vault" recent={[]} agents={[]} selectedAgentId="qoder"
+      cwd="/synthetic/vault" recent={[]} agents={[]} selectedAgentId={work.providerId}
       runControls={{ permissionMode: 'default' }} runControlCatalog={{ models: [], permissions: [] }}
       input="核验后继续" busy={!done} draftAttachments={[]} queuedPrompts={[]}
       slashOpen={false} slashLoading={false} slashCmds={[]} slashSel={0}

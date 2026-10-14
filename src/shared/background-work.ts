@@ -12,7 +12,7 @@ export interface BackgroundTask {
 
 /** Observed Provider events, not an exhaustive task registry or process audit. */
 export interface BackgroundWork {
-  providerId: 'qoder'
+  providerId: 'qoder' | 'pi'
   phase: 'working' | 'waiting' | 'inactive'
   quiet: boolean
   lastEventAt: number

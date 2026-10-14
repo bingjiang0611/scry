@@ -8,7 +8,7 @@ export function backgroundWorkStatus(work: BackgroundWork | undefined): { label:
     waiting: true
   }
   if (work.phase === 'waiting') return {
-    label: '等待后台任务',
+    label: work.providerId === 'pi' ? '等待子 Agent' : '等待后台任务',
     hint: '新消息将排队等待',
     waiting: true
   }

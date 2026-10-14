@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { createPiRpcDecoder } from './pi-rpc-decoder'
+import { PiBackgroundWork } from './pi-background-work'
 import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
@@ -1101,7 +1102,15 @@ async function runPiAgent(
   const rpcFailure = new Promise<never>((_resolve, reject) => { rpcFailureReject = reject })
   void rpcFailure.catch(() => undefined)
   const offFailure = rpc.onFailure((error) => rpcFailureReject?.(error))
+  const background = new PiBackgroundWork()
+  const emitBackground = (work: ReturnType<PiBackgroundWork['observe']>): void => {
+    if (work) request.emit(piEvent(request.runId, {
+      kind: 'harness', stage: 'runtime:background_work', backgroundWork: work,
+      runtimeMetadata: { source: 'pi_subagents_async_status_v1' }
+    }))
+  }
   const off = rpc.onEvent((event) => {
+    emitBackground(background.observe(event))
     // Owned follow-up/Goal work can begin another agent cycle before canonical settlement.
     // Rearm only on agent_start, never on a late message from an ended cycle.
     if (event.type === 'agent_start' && agentEnded && !agentSettled) {
@@ -1127,9 +1136,12 @@ async function runPiAgent(
     }
     if (event.type === 'agent_settled') {
       if (steerPending) state.steerAdmissionUncertain = true
-      agentSettled = true
       agentEnded = true
       resolveAgentCycleEnd()
+      // Native idle does not include detached extension work. Keep this run's
+      // listener/usage/recorder owner until the child result and parent continuation.
+      if (background.pending && !state.stopped && event.aborted !== true) return
+      agentSettled = true
       settledResolve?.()
       return
     }
@@ -1686,6 +1698,7 @@ async function runPiAgent(
   } finally {
     off()
     offFailure()
+    emitBackground(background.end())
     abortController.abort()
     if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc, env)
     else await rpc.close()
