@@ -5,6 +5,8 @@ import { delimiter, dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import type { ParsedTurn } from '../normalize'
+import { billingRowsFromItems } from '../billing-ledger'
+import { USAGE_LEDGER_COLS } from '../span-ledger'
 import { shouldUseManagedTerminalPersistence } from '../trace-turn-progress'
 import { piProfileForExecutable } from '../pi-agent-profiles'
 import * as shellEnvironment from '../claude-locate'
@@ -226,6 +228,16 @@ process.stdin.on('data', (chunk) => {
             ...(scenario === 'later-error' ? { errorMessage: 'Qoder: request_failed' } : {})
           } })
         }
+        send({ type: 'agent_end' })
+        send({ type: 'agent_settled' })
+        continue
+      }
+      if (command.message === 'qoder-billing') {
+        send({ type: 'message_end', message: {
+          role: 'assistant', provider: 'qoder', model: 'ultimate', stopReason: 'stop',
+          content: [{ type: 'text', text: '3973' }],
+          usage: { input: 10937, output: 27, reasoning: 19, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }
+        } })
         send({ type: 'agent_end' })
         send({ type: 'agent_settled' })
         continue
@@ -918,6 +930,32 @@ describe('Pi RPC Provider', () => {
       }
     })
   }, 15_000)
+
+  it('persists Pi Qoder token usage in the billing ledger without treating its USD placeholder as free', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await adapter.run({
+        runId: 'pi-qoder-billing', prompt: 'qoder-billing', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => events.push(event)
+      }).promise
+      const terminal = events.find(event => event.stage === 'result')!
+      const rows = billingRowsFromItems({
+        runId: 'pi-qoder-billing', items: events, nowMs: Date.now(),
+        billingProvider: terminal.billingProvider, runtimeProvider: 'pi_rpc'
+      }).usageLedger
+      expect(rows).toHaveLength(1)
+      const row = Object.fromEntries(USAGE_LEDGER_COLS.map((column, index) => [column, rows[0][index]]))
+      expect(row).toMatchObject({
+        provider: 'qoder', source: 'pi_rpc', model: 'ultimate',
+        input_tokens: 10937, output_tokens: 27, reasoning_tokens: 19, cost: null
+      })
+      expect(terminal.billingProvider).toBe('qoder')
+      expect(terminal.costUsd).toBeUndefined()
+      expect(terminal.modelUsage?.[0]).toMatchObject({ billingProvider: 'qoder', upstreamProvider: 'qoder' })
+      expect(terminal.modelUsage?.[0].costUsd).toBeUndefined()
+    })
+  })
 
   it('records the authoritative native session and root entry with model/effort controls', async () => {
     await withFixture(async (profile, cwd) => {

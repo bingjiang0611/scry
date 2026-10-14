@@ -5,6 +5,7 @@ export function billingProviderForUpstream(providerId: string | undefined): Bill
   if (providerId === 'google') return 'gemini'
   if (providerId === 'openai-codex') return 'codex'
   if (providerId === 'opencode') return 'opencode'
+  if (providerId === 'qoder') return 'qoder'
   return undefined
 }
 
