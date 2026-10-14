@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Scry · 源代码管理设计稿</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <header class="designbar">
+    <div><strong>SCRY / 02</strong><span>源代码管理 · 交互设计稿</span><span class="badge">待确认</span></div>
+    <div class="controls">
+      <button id="compare">比较布局</button>
+      <label>场景 <select id="scenario"><option value="ready">已有 PR · 可审查</option><option value="new">新任务 · 无 PR</option><option value="pending">CI 尚未完成</option><option value="stale">仓库已被外部修改</option><option value="auth">GitHub 未登录</option><option value="unknown">推送结果未知</option><option value="busy">Agent 正在写入</option></select></label>
+      <button id="theme" aria-label="切换深浅主题">深色</button>
+    </div>
+  </header>
+  <div class="app" id="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="brandmark">s</span><strong>scry</strong><span class="muted">⌘ K</span></div>
+      <div class="static-nav"><span>◉</span> 对话 <span class="count">8</span></div>
+      <div class="static-nav muted">◫　分析</div>
+      <div class="sidebar-label">项目</div>
+      <div class="project">⌄　scry <span class="muted">本机</span></div>
+      <div class="session selected"><span class="dot"></span>优化会话历史加载</div>
+      <div class="session muted">　修复文件预览链接</div>
+      <div class="session muted">　远程连接状态</div>
+      <div class="sidebar-label">其他项目</div><div class="project muted">›　rate-native</div>
+      <div class="sidebar-bottom"><span class="avatar">B</span> 本地工作区 <span class="muted">⚙</span></div>
+    </aside>
+    <section class="conversation">
+      <header class="chat-header"><strong>优化会话历史加载</strong><span class="muted">Claude</span></header>
+      <div class="chat-body">
+        <div class="user-message">缓存已读取的历史，切换会话时不要重复解析。不要提交我的其他改动。</div>
+        <div class="assistant-label"><span class="brandmark small">s</span> Claude <span class="muted">已完成</span></div>
+        <p>历史缓存已经接入。缓存按会话和文件版本区分，文件变化时会重新读取。</p>
+        <div class="tool-summary"><span>✓</span> 修改 2 个文件 <span class="muted">+38 −9</span></div>
+        <p>回归检查已完成。你可以先看这轮改动，再到源代码管理中确认实际提交范围。</p>
+        <div class="evidence"><strong>本轮文件证据</strong><p class="muted">只描述 Agent 这一轮；不等于 Git 暂存区。</p><div>session-history-cache.ts <span class="added">+31</span></div><div>session-history-cache.test.ts <span class="added">+7</span></div></div>
+      </div>
+      <div class="composer"><div>继续提问，或检查右侧改动…</div><footer><span>Claude · 默认权限</span><span>↵</span></footer></div>
+    </section>
+    <main class="workbench">
+      <header class="surface-bar"><div><span>文件</span><span>本轮 Diff</span><strong>源代码管理</strong><span>终端</span></div><button id="maximize" aria-label="放大源代码管理">⤢</button></header>
+      <div class="repo-header"><div><div class="eyebrow">本机仓库 · GitHub</div><h1>scry <span class="repo-path">~/Projects/scry</span></h1></div><button id="refresh" aria-label="刷新仓库状态">↻ 刷新</button></div>
+      <div class="branch-row"><span class="branch">⑂ feat/history-cache</span><span class="muted" id="upstream">↔ origin / feat/history-cache</span><span id="sync" class="sync"></span></div>
+      <nav class="tabs" aria-label="源代码管理视图"><button data-tab="changes" aria-pressed="true">工作区 <span class="count" id="file-count">3</span></button><button data-tab="pr" aria-pressed="false">拉取请求 <span class="count" id="pr-number">#184</span></button><span class="muted" id="freshness">刚刚读取</span></nav>
+      <div id="notice" role="status"></div>
+      <div id="content" class="content"></div>
+      <footer class="operation-footer"><span id="operation" role="status">尚未执行操作</span><span class="muted">Git 状态与 Agent 文件证据独立</span></footer>
+    </main>
+  </div>
+  <footer class="design-footer"><span>交互原型 · 所有仓库、CI、评论均为演示数据 · 不执行 Git，不访问 GitHub</span><a href="../../docs/research/source-control-technical-plan.md">技术方案</a><span>A / 右侧工作台</span></footer>
+  <dialog id="action-dialog" aria-labelledby="dialog-title"><form id="action-form"><header><h2 id="dialog-title"></h2><button type="button" id="close-dialog" aria-label="关闭对话框">×</button></header><div id="dialog-content"></div><footer><button type="button" id="cancel-dialog">取消</button><button class="primary" type="submit" id="confirm-dialog">确认</button></footer></form></dialog>
+  <dialog id="comparison" aria-labelledby="comparison-title"><header><div><div class="eyebrow">结构比较 · 同一任务，不是两套配色</div><h2 id="comparison-title">把源代码管理放在哪里？</h2></div><button id="close-comparison" aria-label="关闭布局比较">×</button></header><div class="directions"><section><span class="badge">推荐 A</span><h3>会话旁的工作台</h3><div class="wireframe a"><span>会话</span><span>对话<br>任务上下文</span><strong>工作区 / PR<br>文件 → Diff<br>就地提交与审查</strong></div><p>完成一轮后直接检查、提交和交付。沿用现有标签与放大功能，不新增一级导航。</p><p class="muted">代价：窄屏需要放大；跨项目批量 Review 不是主路径。</p><button id="choose-a" class="primary">查看 A 交互稿</button></section><section><span class="badge">备选 B</span><h3>独立仓库中心</h3><div class="wireframe b"><span>仓库<br>PR 列表</span><strong>审查工作区<br>文件树　│　宽幅 Diff<br>检查与提交审查</strong></div><p>以项目和 PR 为入口，适合一天审查多个仓库。聊天退回独立页面，减少面板拥挤。</p><p class="muted">代价：新增一级导航；从聊天进入再返回，多一次上下文切换。</p><button id="choose-b">预览 B 布局</button></section></div><p class="muted comparison-note">B 仅为结构预览；详细交互集中在推荐 A。未获得用户视觉验收。</p></dialog>
+  <script type="module" src="prototype.mjs"></script>
+</body>
+</html>
