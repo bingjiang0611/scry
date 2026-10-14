@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Scry · 远程并入统一会话流程</title>
+<style>
+:root {
+  --bg: #07090d; --panel: #0b0f15; --panel2: #10151e; --panel3: #151b26; --panel-hi: #1b2330;
+  --border: #202633; --border2: #303949; --border3: #171c26;
+  --fg: #f4f6fa; --dim: #b7bfcc; --dim2: #7f899a; --dim3: #535d6e;
+  --accent: #6aa8ff; --accent-soft: rgba(106,168,255,.12); --accent-line: rgba(106,168,255,.4);
+  --selected: #50e3c2; --selected-soft: rgba(80,227,194,.1); --selected-line: rgba(80,227,194,.46);
+  --ok: #69cc93; --warn: #efb958; --warn-soft: rgba(239,185,88,.14); --bad: #f36c67;
+  --provider-pi: #ab9cf2;
+  --sidebar-surface: #0d1118; --main-surface: #090c11;
+  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #1a1d22; color: var(--fg); font: 13px/1.45 var(--font-ui); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- prototype controls (not product UI) ---------- */
+.proto { max-width: 1440px; margin: 0 auto; padding: 18px 20px 10px; display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; color: #c9ced6; }
+.proto h1 { font-size: 15px; margin: 0 8px 0 0; color: #fff; }
+.proto .grp { display: flex; gap: 4px; align-items: center; }
+.proto .grp > span { color: #8b929d; margin-right: 4px; font-size: 12px; }
+.proto button { padding: 5px 10px; border-radius: 6px; border: 1px solid #343a45; color: #c9ced6; font-size: 12px; }
+.proto button[aria-pressed="true"] { background: #e9edf3; color: #111; border-color: #e9edf3; }
+.thesis { max-width: 1440px; margin: 0 auto; padding: 0 20px 12px; color: #9aa1ab; font-size: 12.5px; }
+.thesis b { color: #e4e7ec; font-weight: 600; }
+
+/* ---------- window ---------- */
+.win { width: min(1440px, calc(100% - 40px)); height: 860px; margin: 0 auto 40px; display: grid; grid-template-columns: 252px 1fr; border-radius: 12px; overflow: hidden; border: 1px solid #2a2f38; background: var(--main-surface); box-shadow: 0 30px 80px rgba(0,0,0,.5); position: relative; }
+
+/* sidebar */
+.sb { background: var(--sidebar-surface); border-right: 1px solid var(--border3); display: flex; flex-direction: column; padding: 10px 10px 8px; min-height: 0; }
+.lights { display: flex; gap: 8px; padding: 4px 6px 14px; align-items: center; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .lights i:nth-child(2){background:#febc2e} .lights i:nth-child(3){background:#28c840}
+.lights b { margin-left: 10px; font-size: 14px; }
+.sb-new { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.sb-new:hover { background: var(--panel2); border-color: var(--border2); }
+.sb-search { margin-top: 8px; height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border-radius: 6px; background: var(--panel2); color: var(--dim3); }
+.sb-nav { margin: 8px 0 6px; padding-top: 6px; border-top: 1px solid var(--border3); }
+.nav { width: 100%; height: 31px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border-radius: 5px; color: var(--dim); font-size: 13px; }
+.nav:hover { color: var(--fg); background: var(--panel2); }
+.nav.active { color: var(--fg); background: var(--panel3); }
+.nav .count { margin-left: auto; font-size: 11px; color: var(--dim2); display: inline-flex; align-items: center; gap: 5px; }
+.sb-list { flex: 1; overflow-y: auto; min-height: 0; padding-top: 4px; border-top: 1px solid var(--border3); }
+.machine-head { display: flex; align-items: center; gap: 7px; height: 28px; padding: 10px 8px 0; color: var(--dim2); font-size: 11.5px; letter-spacing: .02em; }
+.machine-head .st { margin-left: auto; font-size: 11px; }
+.proj { height: 29px; display: flex; align-items: center; gap: 7px; padding: 0 7px; color: var(--dim); font-size: 12px; border-radius: 4px; width: 100%; text-align: left; }
+.proj:hover { background: var(--panel2); color: var(--fg); }
+.proj .pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.htag { font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 4px; background: var(--panel3); color: var(--dim2); border: 1px solid var(--border); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.sess { position: relative; width: 100%; height: 32px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 7px; align-items: center; padding: 0 8px 0 27px; border-radius: 5px; color: var(--dim); text-align: left; }
+.sess:hover { background: var(--panel2); color: var(--fg); }
+.sess.active { background: var(--panel3); color: var(--fg); }
+.sess.active::before { content: ""; position: absolute; left: 12px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--selected); }
+.sess .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 7px; align-items: center; }
+.sess .pv { font: 600 10px var(--font-mono); color: var(--provider-pi); }
+.sess .tm { color: var(--dim3); font-size: 11px; }
+.muted-row { padding: 4px 8px 6px 27px; color: var(--dim3); font-size: 11.5px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; background: var(--dim3); }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.off { background: transparent; border: 1.5px solid var(--dim3); }
+.sb-foot { border-top: 1px solid var(--border3); padding-top: 6px; }
+
+/* main */
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { height: 44px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--border3); }
+.topbar .title { font-weight: 600; font-size: 13px; }
+.loc { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); font-size: 12px; background: var(--panel); }
+.loc .sep { color: var(--dim3); }
+.topbar .right { margin-left: auto; display: flex; gap: 4px; color: var(--dim2); }
+.iconbtn { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--dim2); }
+.iconbtn:hover { background: var(--panel2); color: var(--fg); }
+.body { flex: 1; display: grid; grid-template-columns: 1fr; min-height: 0; }
+.body.with-panel { grid-template-columns: 1fr 300px; }
+.chatcol { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.scroll { flex: 1; overflow-y: auto; padding: 26px 0 10px; }
+.thread { width: min(760px, calc(100% - 64px)); margin: 0 auto; }
+.ubub { margin-left: auto; width: max-content; max-width: 70%; padding: 8px 14px; border-radius: 14px; background: var(--panel3); border: 1px solid var(--border2); }
+.aturn { margin-top: 22px; }
+.ahead { display: flex; align-items: center; gap: 9px; color: var(--dim2); font: 12px var(--font-mono); }
+.pg { width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--provider-pi); color: var(--provider-pi); display: grid; place-items: center; font: 700 11px var(--font-mono); }
+.ahead b { font: 600 13px var(--font-ui); color: var(--fg); }
+.ahead .chips { margin-left: auto; display: flex; gap: 6px; }
+.chip { padding: 2px 8px; border-radius: 5px; background: var(--panel2); border: 1px solid var(--border); font-size: 11.5px; }
+.chip b { font: 700 11.5px var(--font-mono); color: var(--accent); }
+.atext { margin: 14px 0 0 0; padding: 4px 0 4px 16px; border-left: 2px solid var(--border2); font-size: 14px; }
+.metrics { margin-top: 14px; display: flex; gap: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 8px 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.metrics div { padding: 0 18px; border-right: 1px solid var(--border); } .metrics div:last-child { border: 0; }
+.metrics small { display: block; font-size: 10px; color: var(--dim3); letter-spacing: .08em; }
+.metrics span { font-size: 14px; font-weight: 600; }
+
+/* composer */
+.composer-wrap { flex: none; padding: 8px 0 18px; }
+.composer-wrap.center { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-bottom: 120px; }
+.hello { width: min(760px, calc(100% - 64px)); margin: 0 auto 18px; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.composer { position: relative; width: min(760px, calc(100% - 64px)); margin: 0 auto; border: 1px solid var(--border2); border-radius: 10px; background: var(--panel2); padding: 7px 10px 9px; }
+.composer:focus-within { border-color: var(--selected-line); box-shadow: 0 0 0 1px var(--selected-soft); }
+.ctx { display: flex; align-items: center; gap: 2px; padding-bottom: 4px; border-bottom: 1px solid var(--border); position: relative; }
+.ctxbtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 7px; border-radius: 6px; color: var(--dim); font-size: 12.5px; }
+.ctxbtn:hover, .ctxbtn[aria-expanded="true"] { background: var(--panel3); color: var(--fg); }
+.ctxbtn .sep { color: var(--dim3); margin: 0 1px; }
+.ctxbtn .chev { width: 12px; height: 12px; opacity: .7; }
+.ctx .slash { color: var(--dim3); }
+textarea.input { display: block; width: 100%; min-height: 64px; resize: none; border: 0; outline: 0 !important; background: transparent; color: var(--fg); font: 14px/1.5 var(--font-ui); padding: 10px 6px 6px; }
+textarea.input::placeholder { color: var(--dim3); }
+.cfoot { display: flex; align-items: center; gap: 4px; }
+.cfoot .r { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.fbtn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border-radius: 6px; color: var(--dim); font-size: 12.5px; }
+.fbtn:hover:not(:disabled) { background: var(--panel3); color: var(--fg); }
+.fbtn:disabled { color: var(--dim3); cursor: not-allowed; }
+.fbtn.perm { color: var(--warn); }
+.fbtn .chev { width: 12px; height: 12px; opacity: .7; }
+.send { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--fg); color: #000; margin-left: 4px; }
+.send:disabled { background: var(--panel-hi); color: var(--dim3); cursor: not-allowed; }
+.strip { display: flex; align-items: center; gap: 8px; padding: 6px 6px 8px; margin-bottom: 2px; border-bottom: 1px solid var(--border); color: var(--dim); font-size: 12.5px; }
+.strip b { color: var(--fg); font-weight: 600; }
+.strip .act { margin-left: auto; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border2); color: var(--fg); font-size: 12px; }
+.strip .act:hover { background: var(--panel3); }
+
+/* menus */
+.menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; background: var(--panel2); border: 1px solid var(--border2); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.55); padding: 6px; min-width: 260px; }
+.menu.down { bottom: auto; top: calc(100% + 6px); }
+.mlabel { padding: 6px 8px 4px; color: var(--dim3); font-size: 11px; }
+.mitem { width: 100%; display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 5px 8px; border-radius: 7px; text-align: left; color: var(--dim); }
+.mitem:hover, .mitem.hover { background: var(--panel3); color: var(--fg); }
+.mitem .grow { flex: 1; min-width: 0; }
+.mitem .grow b { display: block; font-weight: 500; color: var(--fg); font-size: 13px; }
+.mitem .grow small { display: block; color: var(--dim2); font: 11px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mitem .ck { width: 14px; color: var(--selected); }
+.mitem .st { font-size: 11.5px; color: var(--dim2); display: inline-flex; gap: 6px; align-items: center; }
+.mitem[aria-disabled="true"] { cursor: default; }
+.mitem[aria-disabled="true"] .grow b { color: var(--dim2); }
+.mini { height: 24px; padding: 0 9px; border-radius: 5px; border: 1px solid var(--border2); color: var(--fg); font-size: 11.5px; }
+.mini:hover { background: var(--panel-hi); }
+.mdiv { height: 1px; background: var(--border); margin: 5px 2px; }
+.two { display: grid; grid-template-columns: 228px 300px; padding: 0; min-width: 0; }
+.two .col { padding: 6px; } .two .col + .col { border-left: 1px solid var(--border); }
+.msearch { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 8px; margin-bottom: 4px; border-radius: 7px; background: var(--panel); color: var(--dim3); font-size: 12.5px; border: 1px solid var(--border); }
+.empty-col { padding: 22px 12px; color: var(--dim2); font-size: 12.5px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+
+/* right panel */
+.rpanel { border-left: 1px solid var(--border3); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.rtabs { display: flex; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--border3); align-items: center; }
+.rtab { padding: 4px 10px; border-radius: 6px; color: var(--dim2); font-size: 12px; }
+.rtab.on { background: var(--panel3); color: var(--fg); }
+.ro { margin-left: auto; font-size: 11px; color: var(--dim2); display: inline-flex; gap: 5px; align-items: center; }
+.tree { padding: 8px 8px; font: 12px var(--font-mono); color: var(--dim); }
+.tree div { height: 26px; display: flex; align-items: center; gap: 7px; padding: 0 6px; border-radius: 5px; }
+.tree div:hover { background: var(--panel2); }
+.tree .in { padding-left: 22px; }
+.cap { margin: auto 10px 10px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); color: var(--dim2); font-size: 12px; }
+.cap b { color: var(--dim); font-weight: 600; display: block; margin-bottom: 4px; }
+.cap li { margin: 2px 0; }
+.cap ul { margin: 0; padding-left: 16px; }
+
+/* hosts page */
+.page { flex: 1; overflow-y: auto; padding: 30px 0 60px; }
+.pagew { width: min(860px, calc(100% - 64px)); margin: 0 auto; }
+.ph { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 22px; }
+.ph h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+.ph p { margin: 4px 0 0; color: var(--dim2); font-size: 12.5px; }
+.btn { height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--border2); display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.btn:hover { background: var(--panel2); }
+.btn.primary { background: var(--fg); color: #000; border-color: var(--fg); font-weight: 600; }
+.btn.primary:hover { background: #fff; }
+.ph .btn { margin-left: auto; }
+.sec { margin-top: 30px; }
+.sec h3 { margin: 0 0 8px; font-size: 12px; color: var(--dim2); font-weight: 600; letter-spacing: .02em; display: flex; align-items: center; }
+.list { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.hrow { display: grid; grid-template-columns: 18px minmax(0,1.4fr) minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; }
+.hrow + .hrow, .hrow + .hproj, .hproj + .hrow { border-top: 1px solid var(--border); }
+.hrow .nm b { display: block; font-size: 13.5px; font-weight: 600; }
+.hrow .nm small { color: var(--dim2); font: 11.5px var(--font-mono); }
+.hrow .nm small.ui { font: 12px var(--font-ui); }
+.hrow .meta { color: var(--dim2); font-size: 12px; }
+.hrow .meta span { color: var(--dim); }
+.hrow .acts { display: flex; gap: 6px; align-items: center; }
+.caret { color: var(--dim2); transition: transform .12s; }
+.caret.open { transform: rotate(90deg); }
+.hproj { background: var(--panel2); padding: 4px 14px 8px 44px; }
+.prow { display: flex; align-items: center; gap: 9px; height: 36px; color: var(--dim); border-radius: 6px; padding: 0 8px; margin: 0 -8px; }
+.prow:hover { background: var(--panel3); }
+.prow .path { color: var(--dim3); font: 11.5px var(--font-mono); }
+.prow .btn { margin-left: auto; height: 26px; font-size: 12px; opacity: 0; }
+.prow:hover .btn, .prow .btn:focus-visible { opacity: 1; }
+.toggle { width: 32px; height: 18px; border-radius: 999px; background: var(--ok); position: relative; flex: none; }
+.toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+
+/* modal */
+.scrim { position: absolute; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 50; }
+.modal { width: 480px; background: var(--panel2); border: 1px solid var(--border2); border-radius: 14px; box-shadow: 0 20px 64px rgba(0,0,0,.64); }
+.modal header { padding: 18px 20px 4px; }
+.modal header h4 { margin: 0; font-size: 15px; }
+.modal header p { margin: 6px 0 0; color: var(--dim2); font-size: 12.5px; }
+.modal .fields { padding: 14px 20px 6px; display: grid; grid-template-columns: 1fr 1fr 84px; gap: 12px; }
+.modal label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dim2); }
+.modal label.full { grid-column: 1 / -1; }
+.modal input, .modal textarea { height: 32px; border-radius: 7px; border: 1px solid var(--border2); background: var(--panel); color: var(--fg); padding: 0 10px; font: 13px var(--font-ui); }
+.modal textarea { height: 72px; padding: 8px 10px; font: 12px var(--font-mono); resize: none; }
+.modal footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 20px 18px; }
+.kbdpath { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="proto" id="proto"></div>
+<div class="thesis" id="thesis"></div>
+<div class="win" id="win"></div>
+
+<script>
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  chart: '<path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/>',
+  box: '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/>',
+  cube: '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9"/>',
+  term: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  laptop: '<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+  chevR: '<path d="m9 6 6 6-6 6"/>',
+  check: '<path d="m5 12 5 5 9-10"/>',
+  shield: '<path d="M12 3 5 6v6c0 4 3 7.5 7 9 4-1.5 7-5 7-9V6z"/>',
+  clip: '<path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  file: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>'
+}
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+// Sample data. Machine state is per-scene; nothing here is a real connection.
+const MACHINES = [
+  { id: 'local', name: '本机', sub: 'MacBook Pro', projects: [['scry', '~/IdeaProjects/vibecoding/scry'], ['vibecoding', '~/IdeaProjects/vibecoding'], ['Nib', '~/IdeaProjects/Nib'], ['myNote', '~/ObsidianPlace/myNote']], provider: 'Pi · Rotom' },
+  { id: 'mac2', name: 'mac2', sub: 'test@30.7.225.156', projects: [['workspace', '~/workspace'], ['rate-native', '~/work/rate-native'], ['api-gateway', '~/work/api-gateway']], provider: 'Pi · Rotom', providerCount: 2 },
+  { id: 'linux', name: 'build-linux', sub: 'ci@10.0.3.21', projects: [], provider: null }
+]
+const SESSIONS = {
+  local: { scry: [['看下t3code的 同一网络…', '5m'], ['修复 Qoder 计费', '1h']], vibecoding: [['整理 AGENTS.md', '1d']] },
+  mac2: { workspace: [['hello', '10m']], 'rate-native': [['写技术方案', '2h']] }
+}
+
+const S = {
+  dir: 'B',          // A: 两个独立 chip；B: 一个位置 chip + 双栏菜单
+  scene: 'new',      // new | session | offline | hosts
+  localOnly: false,  // 没有保存任何主机时的状态（S1）
+  loc: { m: 'local', p: 'scry' },
+  menu: null,        // 'loc' | 'machine' | 'dir'
+  hoverM: null,
+  modal: false,
+  expanded: 'mac2',
+  draft: ''
+}
+
+function machineState(id) {
+  if (id === 'local') return 'local'
+  if (id === 'linux') return 'off'
+  return S.scene === 'offline' ? 'off' : 'ok'
+}
+const stateText = st => st === 'ok' ? '已连接' : st === 'off' ? '未连接' : ''
+const machines = () => S.localOnly ? MACHINES.slice(0, 1) : MACHINES
+const M = id => MACHINES.find(m => m.id === id)
+
+// ---------- prototype bar ----------
+function renderProto() {
+  const scenes = [['new', '新会话'], ['picker', '选择位置'], ['session', '远程会话'], ['offline', '主机离线'], ['hosts', '主机页'], ['add', '添加主机']]
+  const cur = S.modal ? 'add' : (S.scene === 'new' && S.menu ? 'picker' : S.scene)
+  document.getElementById('proto').innerHTML = `
+    <h1>远程并入统一会话流程</h1>
+    <div class="grp"><span>方向</span>
+      <button aria-pressed="${S.dir === 'A'}" data-dir="A">A 机器与目录分开</button>
+      <button aria-pressed="${S.dir === 'B'}" data-dir="B">B 一个位置选择器</button></div>
+    <div class="grp"><span>场景</span>${scenes.map(([k, l]) => `<button aria-pressed="${cur === k}" data-scene="${k}">${l}</button>`).join('')}</div>
+    <div class="grp"><button aria-pressed="${S.localOnly}" data-local>未添加主机</button></div>`
+  document.getElementById('thesis').innerHTML = S.dir === 'A'
+    ? '<b>A：</b>机器与目录分成两个选择器，各自继承现有菜单。侧栏先按机器分区，再按项目分组。机器作为一级概念，始终可见。'
+    : '<b>B：</b>“在哪里执行”合成一个位置选择器：左栏选机器，右栏选该机器的项目（借鉴 Zed Remote Projects）。侧栏保持项目列表，远程项目只多一个主机标签。'
+}
+
+// ---------- sidebar ----------
+function sessRows(mid, proj) {
+  const list = (SESSIONS[mid] || {})[proj] || []
+  return list.map(([t, tm]) => {
+    const active = (S.scene === 'session' || S.scene === 'offline') && mid === 'mac2' && proj === 'workspace' && t === 'hello'
+    return `<button class="sess ${active ? 'active' : ''}" data-open="${mid}|${proj}"><span class="t"><span class="pv">Pi</span>${esc(t)}</span><span class="tm">${tm}</span></button>`
+  }).join('')
+}
+function projBlock(mid, [name], tag) {
+  const st = machineState(mid)
+  return `<button class="proj" data-newin="${mid}|${name}">${ic('folder')}<span class="pn">${esc(name)}</span>${tag ? `<span class="htag"><span class="dot ${st}"></span>${esc(M(mid).name)}</span>` : ''}</button>${sessRows(mid, name)}`
+}
+function renderSidebar() {
+  const ms = machines()
+  let list = ''
+  if (S.dir === 'A' && ms.length > 1) {
+    list = ms.map(m => {
+      const st = machineState(m.id)
+      const head = `<div class="machine-head">${ic(m.id === 'local' ? 'laptop' : 'server')}<span>${esc(m.name)}</span>${st !== 'local' ? `<span class="st"><span class="dot ${st}"></span> ${stateText(st)}</span>` : ''}</div>`
+      if (m.id === 'linux') return head + `<div class="muted-row">连接后显示会话</div>`
+      const projs = m.id === 'local' ? m.projects.slice(0, 3) : m.projects.slice(0, 2)
+      return head + projs.map(p => projBlock(m.id, p, false)).join('')
+    }).join('')
+  } else {
+    const items = [...M('local').projects.slice(0, 3).map(p => ['local', p])]
+    if (!S.localOnly) items.splice(1, 0, ['mac2', M('mac2').projects[0]], ['mac2', M('mac2').projects[1]])
+    list = items.map(([mid, p]) => projBlock(mid, p, mid !== 'local')).join('')
+    if (!S.localOnly) list += `<div class="muted-row" style="padding-left:9px;margin-top:6px;display:flex;gap:7px;align-items:center"><span class="dot off"></span>build-linux 未连接，会话未加载</div>`
+  }
+  const hostsCount = S.localOnly ? '' : `<span class="count"><span class="dot ${S.scene === 'offline' ? 'off' : 'ok'}"></span>${S.scene === 'offline' ? '0' : '1'}/2</span>`
+  return `<aside class="sb">
+    <div class="lights"><i></i><i></i><i></i><b>Scry</b></div>
+    <button class="sb-new" data-new>${ic('plus')} 新建会话</button>
+    <div class="sb-search">${ic('search')} 搜索会话 / 项目…</div>
+    <nav class="sb-nav">
+      <button class="nav">${ic('chart')} 分析</button>
+      <button class="nav">${ic('chart')} LLM 性能</button>
+      <button class="nav">${ic('box')} 技能</button>
+      <button class="nav">${ic('cube')} MCP</button>
+      <button class="nav">${ic('term')} Meta Prompts</button>
+      <button class="nav ${S.scene === 'hosts' ? 'active' : ''}" data-scene="hosts">${ic('server')} 主机 ${hostsCount}</button>
+    </nav>
+    <div class="sb-list">${list}</div>
+    <div class="sb-foot"><button class="nav">${ic('gear')} 设置</button></div>
+  </aside>`
+}
+
+// ---------- location pickers ----------
+function locLabel() {
+  const m = M(S.loc.m)
+  if (S.localOnly) return `${ic('folder')}<span>${esc(S.loc.p)}</span>`
+  return `${ic(m.id === 'local' ? 'laptop' : 'server')}<span>${esc(m.name)}</span><span class="sep">/</span>${ic('folder')}<span>${esc(S.loc.p)}</span>`
+}
+function machineItem(m, mode) {
+  const st = machineState(m.id)
+  const on = S.loc.m === m.id
+  const hover = mode === 'two' && (S.hoverM || S.loc.m) === m.id
+  const right = st === 'off'
+    ? `<span class="st"><span class="dot off"></span>未连接</span>`
+    : st === 'ok' ? `<span class="st"><span class="dot ok"></span></span>` : ''
+  const attr = mode === 'two' ? `data-hover="${m.id}"` : `data-pickm="${m.id}"`
+  return `<button class="mitem ${hover ? 'hover' : ''}" ${attr} role="menuitemradio" aria-checked="${on}">
+    <span class="ck">${on ? ic('check') : ''}</span>${ic(m.id === 'local' ? 'laptop' : 'server')}
+    <span class="grow"><b>${esc(m.name)}</b><small>${esc(m.sub)}</small></span>${right}</button>`
+}
+function projectList(mid) {
+  const m = M(mid)
+  const st = machineState(mid)
+  if (st === 'off') return `<div class="empty-col"><span>${esc(m.name)} 未连接，无法读取它的项目。</span><button class="mini" data-connect="${mid}">连接</button></div>`
+  const rows = m.projects.map(([n, path]) => {
+    const on = S.loc.m === mid && S.loc.p === n
+    return `<button class="mitem" data-pickp="${mid}|${n}" role="menuitemradio" aria-checked="${on}"><span class="ck">${on ? ic('check') : ''}</span>${ic('folder')}<span class="grow"><b>${esc(n)}</b><small>${esc(path)}</small></span></button>`
+  }).join('')
+  const extra = mid === 'local' ? `<div class="mdiv"></div><button class="mitem"><span class="ck"></span>${ic('plus')}<span class="grow">选择文件夹…</span></button><button class="mitem"><span class="ck"></span><span class="grow" style="padding-left:24px">不绑定项目</span></button>` : ''
+  return rows + extra
+}
+function pickerA() {
+  const m = M(S.loc.m)
+  const machineBtn = S.localOnly ? '' : `<button class="ctxbtn" data-menu="machine" aria-haspopup="menu" aria-expanded="${S.menu === 'machine'}">${ic(m.id === 'local' ? 'laptop' : 'server')}${esc(m.name)}${ic('chev', 'chev')}</button><span class="slash">/</span>`
+  const dirBtn = `<button class="ctxbtn" data-menu="dir" aria-haspopup="menu" aria-expanded="${S.menu === 'dir'}">${ic('folder')}${esc(S.loc.p)}${ic('chev', 'chev')}</button>`
+  let menu = ''
+  if (S.menu === 'machine') menu = `<div class="menu down" role="menu" aria-label="执行机器"><div class="mlabel">在哪台机器上运行</div>${machines().map(x => machineItem(x, 'one')).join('')}<div class="mdiv"></div><button class="mitem" data-scene="hosts"><span class="ck"></span>${ic('gear')}<span class="grow">管理主机…</span></button></div>`
+  if (S.menu === 'dir') menu = `<div class="menu down" role="menu" aria-label="工作目录" style="left:${S.localOnly ? 0 : 92}px"><div class="mlabel">${esc(m.name)} 上的项目</div>${projectList(S.loc.m)}</div>`
+  return `<div class="ctx">${machineBtn}${dirBtn}${menu}</div>`
+}
+function pickerB() {
+  const btn = `<button class="ctxbtn" data-menu="loc" aria-haspopup="menu" aria-expanded="${S.menu === 'loc'}">${locLabel()}${ic('chev', 'chev')}</button>`
+  let menu = ''
+  if (S.menu === 'loc') {
+    if (S.localOnly) {
+      menu = `<div class="menu down" role="menu"><div class="mlabel">项目</div>${projectList('local')}</div>`
+    } else {
+      const hm = S.hoverM || S.loc.m
+      menu = `<div class="menu two down" role="menu" aria-label="执行位置">
+        <div class="col"><div class="mlabel">机器</div>${machines().map(x => machineItem(x, 'two')).join('')}<div class="mdiv"></div><button class="mitem" data-scene="hosts"><span class="ck"></span>${ic('gear')}<span class="grow">管理主机…</span></button></div>
+        <div class="col">${machineState(hm) === 'off' ? '' : `<div class="msearch">${ic('search')} 搜索 ${esc(M(hm).name)} 上的项目</div>`}${projectList(hm)}</div></div>`
+    }
+  }
+  return `<div class="ctx">${btn}${menu}</div>`
+}
+
+// ---------- composer ----------
+function composer({ locked, offline }) {
+  const m = M(locked ? 'mac2' : S.loc.m)
+  const remote = m.id !== 'local'
+  const provider = m.provider || '—'
+  const ctx = locked ? '' : (S.dir === 'A' ? pickerA() : pickerB())
+  const strip = offline ? `<div class="strip"><span class="dot off"></span><span><b>mac2 未连接。</b>草稿会保留，连接后再发送。</span><button class="act" data-connect="mac2">连接</button></div>` : ''
+  const permTitle = remote ? `Provider 以 ${m.name} 上 ${m.sub.split('@')[0]} 用户的权限运行，Scry 不提供额外隔离` : 'Provider 以本机用户权限运行，Scry 不提供额外隔离'
+  return `<div class="composer">${ctx}${strip}
+    <textarea class="input" aria-label="描述任务" placeholder="${offline ? '' : `给 Pi 一个任务…`}">${offline ? '继续把技术方案写完，补上回滚步骤' : ''}</textarea>
+    <div class="cfoot">
+      <button class="fbtn" ${remote ? 'disabled' : ''} title="${remote ? '远程会话暂不支持附件' : '添加图片'}" aria-label="${remote ? '附件：远程会话暂不支持' : '添加图片'}">${ic('clip')}</button>
+      <button class="fbtn perm" title="${esc(permTitle)}">${ic('shield')}完全访问${remote ? ` · ${esc(m.name)}` : ''}${ic('chev', 'chev')}</button>
+      <div class="r">
+        <button class="fbtn" ${locked ? 'title="会话已绑定 Provider"' : ''}>${esc(provider)}${locked ? '' : ic('chev', 'chev')}</button>
+        <button class="fbtn">Qoder Ultimate <span style="color:var(--dim2)">高</span>${ic('chev', 'chev')}</button>
+        <button class="send" ${offline ? 'disabled aria-label="mac2 未连接，无法发送"' : 'aria-label="发送"'}>${ic('up')}</button>
+      </div>
+    </div></div>`
+}
+
+// ---------- main scenes ----------
+function newScene() {
+  return `<div class="topbar"><span class="title">新会话</span><div class="right"><button class="iconbtn" aria-label="右侧面板">${ic('panel')}</button></div></div>
+    <div class="composer-wrap center"><div class="hello">要让 Agent 做什么？</div>${composer({})}</div>`
+}
+function sessionScene(offline) {
+  const dot = offline ? 'off' : 'ok'
+  return `<div class="topbar"><span class="title">hello</span>
+      <span class="loc" title="${offline ? 'mac2 未连接' : 'Agent 在 mac2 上运行'}"><span class="dot ${dot}"></span>${ic('server')}mac2<span class="sep">/</span>workspace</span>
+      <div class="right"><button class="iconbtn" aria-label="更多">${ic('more')}</button><button class="iconbtn" aria-label="右侧面板">${ic('panel')}</button></div></div>
+    <div class="body with-panel"><div class="chatcol">
+      <div class="scroll"><div class="thread">
+        <div class="ubub">hello</div>
+        <div class="aturn"><div class="ahead"><span class="pg">P</span><b>Pi</b><span>run · remote-run-mv80c2jd-0</span><span class="chips"><span class="chip">tok <b>10.9k</b></span><span class="chip">tools <b>0</b></span></span></div>
+          <div class="atext">你好！有什么我可以帮你的？</div>
+          <div class="metrics"><div><small>IN</small><span>10.9k</span></div><div><small>OUT</small><span>12</span></div><div><small>DUR</small><span>7.0s</span></div><div><small>TOOLS</small><span>0</span></div></div>
+        </div>
+      </div></div>
+      <div class="composer-wrap">${composer({ locked: true, offline })}</div>
+    </div>
+    <aside class="rpanel"><div class="rtabs"><button class="rtab">概览</button><button class="rtab on">文件</button><span class="ro" title="远程文件只能查看，不能修改">${ic('lock')}只读</span></div>
+      <div class="tree"><div>${ic('folder')}.git</div><div>${ic('folder')}src</div><div class="in">${ic('file')}index.ts</div><div class="in">${ic('file')}server.ts</div><div>${ic('file')}package.json</div><div>${ic('file')}README.md</div></div>
+    </aside></div>`
+}
+function hostsScene() {
+  const st2 = 'ok'
+  const projRows = M('mac2').projects.map(([n, p]) => `<div class="prow">${ic('folder')}<span>${esc(n)}</span><span class="path">${esc(p)}</span><button class="btn" data-newin="mac2|${n}">${ic('plus')}新建会话</button></div>`).join('')
+  const open = S.expanded === 'mac2'
+  return `<div class="topbar"></div>
+  <div class="page"><div class="pagew">
+    <div class="ph"><div><h2>主机</h2><p>Agent 可以在这些机器上运行。项目、Provider 凭据和记录都留在各自的机器上。</p></div><button class="btn primary" data-add>${ic('plus')}添加主机</button></div>
+
+    <section class="sec"><h3>我连接的主机</h3><div class="list">
+      <div class="hrow"><button class="caret ${open ? 'open' : ''}" data-expand="mac2" aria-expanded="${open}" aria-label="展开 mac2 的项目">${ic('chevR')}</button>
+        <div class="nm"><b>mac2</b><small>test@30.7.225.156:22</small></div>
+        <div class="meta"><span style="display:inline-flex;gap:6px;align-items:center"><span class="dot ${st2}"></span>已连接</span> · 3 个项目 · Pi、Qoder</div>
+        <div class="acts"><button class="btn" data-newin="mac2|workspace">${ic('plus')}新建会话</button><button class="btn">断开</button><button class="iconbtn" aria-label="mac2 更多操作">${ic('more')}</button></div></div>
+      ${open ? `<div class="hproj">${projRows}</div>` : ''}
+      <div class="hrow"><span class="caret" style="opacity:.3">${ic('chevR')}</span>
+        <div class="nm"><b>build-linux</b><small>ci@10.0.3.21:22</small></div>
+        <div class="meta"><span style="display:inline-flex;gap:6px;align-items:center"><span class="dot off"></span>未连接</span> · 项目在连接后读取</div>
+        <div class="acts"><button class="btn" data-connect="linux">连接</button><button class="iconbtn" aria-label="build-linux 更多操作">${ic('more')}</button></div></div>
+    </div></section>
+
+    <section class="sec"><h3>允许其他设备访问本机</h3><div class="list">
+      <div class="hrow" style="grid-template-columns: 32px minmax(0,1fr) auto"><span class="toggle" role="switch" aria-checked="true" aria-label="远程访问"></span>
+        <div class="nm"><b>远程访问已开启</b><small class="ui">其他 Scry 通过 SSH 连接本机；只监听 127.0.0.1</small></div>
+        <div class="acts"><button class="btn">生成 SSH 邀请</button></div></div>
+      <div class="hrow" style="grid-template-columns: 18px minmax(0,1fr) auto">${ic('phone')}
+        <div class="nm"><b>iPhone</b><small class="ui">已授权 · 上次访问 2 小时前</small></div>
+        <div class="acts"><button class="btn">撤销</button></div></div>
+    </div></section>
+  </div></div>`
+}
+function addModal() {
+  return `<div class="scrim" data-close><div class="modal" role="dialog" aria-modal="true" aria-labelledby="addh" onclick="event.stopPropagation()">
+    <header><h4 id="addh">添加主机</h4><p>在目标机器的 Scry 中打开 <span class="kbdpath">主机 › 允许其他设备访问本机</span>，生成 SSH 邀请后粘贴到这里。</p></header>
+    <div class="fields">
+      <label>SSH 用户<input value="test"></label>
+      <label>主机<input value="30.7.225.156"></label>
+      <label>端口<input value="22"></label>
+      <label class="full">邀请<textarea placeholder="scry-invite:…"></textarea></label>
+      <label class="full">名称（可选）<input placeholder="默认使用主机地址"></label>
+    </div>
+    <footer><button class="btn" data-close>取消</button><button class="btn primary">配对</button></footer>
+  </div></div>`
+}
+
+function render() {
+  renderProto()
+  let main = ''
+  if (S.scene === 'new') main = newScene()
+  else if (S.scene === 'session') main = sessionScene(false)
+  else if (S.scene === 'offline') main = sessionScene(true)
+  else main = hostsScene()
+  document.getElementById('win').innerHTML = renderSidebar() + `<main class="main">${main}</main>` + (S.modal ? addModal() : '')
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('button, [data-close]')
+  if (!t) { if (S.menu && !e.target.closest('.menu')) { S.menu = null; S.hoverM = null; render() } return }
+  const d = t.dataset
+  if (d.dir) { S.dir = d.dir; S.menu = null }
+  else if (d.local !== undefined) { S.localOnly = !S.localOnly; S.loc = { m: 'local', p: 'scry' }; S.menu = null }
+  else if (d.scene) {
+    S.modal = false; S.menu = null; S.hoverM = null
+    if (d.scene === 'picker') { S.scene = 'new'; S.menu = S.dir === 'A' ? 'machine' : 'loc' }
+    else if (d.scene === 'add') { S.scene = 'hosts'; S.modal = true }
+    else S.scene = d.scene
+    if ((S.scene === 'session' || S.scene === 'offline') && S.localOnly) S.localOnly = false
+  }
+  else if (d.new !== undefined) { S.scene = 'new'; S.menu = null }
+  else if (d.menu) { S.menu = S.menu === d.menu ? null : d.menu; S.hoverM = null }
+  else if (d.hover) { S.hoverM = d.hover }
+  else if (d.pickm) {
+    const m = M(d.pickm)
+    if (machineState(m.id) === 'off') return
+    S.loc = { m: m.id, p: m.projects[0][0] }; S.menu = null
+  }
+  else if (d.pickp) { const [m, p] = d.pickp.split('|'); S.loc = { m, p }; S.menu = null; S.hoverM = null }
+  else if (d.newin) { const [m, p] = d.newin.split('|'); S.loc = { m, p }; S.scene = 'new'; S.menu = null; S.modal = false }
+  else if (d.open) { if (d.open !== 'mac2|workspace') return; S.scene = 'session' }
+  else if (d.expand) { S.expanded = S.expanded === d.expand ? null : d.expand }
+  else if (d.add !== undefined) { S.modal = true }
+  else if (d.close !== undefined) { if (e.target === t) S.modal = false; else return }
+  else if (d.connect) { return }
+  else return
+  render()
+})
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest('[data-hover]')
+  if (t && S.hoverM !== t.dataset.hover) { S.hoverM = t.dataset.hover; render() }
+})
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && (S.menu || S.modal)) { S.menu = null; S.modal = false; render() }
+})
+const q = new URLSearchParams(location.search)
+if (q.get('dir')) S.dir = q.get('dir')
+render()
+if (q.get('scene')) document.querySelector(`[data-scene="${q.get('scene')}"]`)?.click()
+</script>
+</body>
+</html>
