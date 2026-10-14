@@ -47,6 +47,9 @@ interface ChatViewProps {
   input: string
   sendBlockedReason?: string | null
   composerError?: string | null
+  detectionIssue?: string | null
+  detectionRetrying?: boolean
+  onRetryDetection?: () => void
   submitting?: boolean
   sessionLoading?: boolean
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
@@ -390,6 +393,9 @@ export function ChatView({
   input,
   sendBlockedReason = null,
   composerError = null,
+  detectionIssue = null,
+  detectionRetrying = false,
+  onRetryDetection,
   submitting = false,
   sessionLoading = false,
   sessionEvidenceGap = null,
@@ -523,7 +529,7 @@ export function ChatView({
   const queueing = busy && !remote
   const sendActionLabel = submitting ? '正在启动' : queueing ? '加入队列' : '发送'
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
-  const composerStatus = composerError ?? (hasDraft ? sendBlockedReason : null)
+  const composerStatus = composerError ?? detectionIssue ?? (hasDraft ? sendBlockedReason : null)
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
@@ -928,6 +934,11 @@ export function ChatView({
           >
             <Icon name={composerError ? 'alert' : 'info'} />
             <span>{composerStatus}</span>
+            {detectionIssue && onRetryDetection && (
+              <button type="button" className="composer-retry-detection" onClick={onRetryDetection} disabled={detectionRetrying}>
+                <Icon name="refresh" />{detectionRetrying ? '检测中…' : '重新检测'}
+              </button>
+            )}
           </div>
         )}
         <div className="composer-bottom">

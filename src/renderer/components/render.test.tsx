@@ -3250,7 +3250,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     await applySessionArchiveEffects({
       archive: async () => { calls.push('archive'); return true },
       archivingActiveSession: true,
-      activeSessionBusy: false,
       rememberUndo: () => calls.push('undo'),
       resetConversation: async () => { calls.push('reset') },
       reloadProjects: () => calls.push('reload')
@@ -3261,7 +3260,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     await applySessionArchiveEffects({
       archive: async () => { calls.push('archive'); return true },
       archivingActiveSession: false,
-      activeSessionBusy: false,
       rememberUndo: () => calls.push('undo'),
       resetConversation: async () => { calls.push('reset') },
       reloadProjects: () => calls.push('reload')
@@ -3272,7 +3270,6 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     await applySessionArchiveEffects({
       archive: async () => { calls.push('archive'); return false },
       archivingActiveSession: true,
-      activeSessionBusy: false,
       rememberUndo: () => calls.push('undo'),
       resetConversation: async () => { calls.push('reset') },
       reloadProjects: () => calls.push('reload')
@@ -3280,21 +3277,20 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(calls).toEqual(['archive'])
   })
 
-  // 真实回归：归档一个正在跑的当前会话曾经会 clearTurns + 新会话，把还在跑的轮次从视图里抹掉，
-  // 用户看到“运行中”但时间线空白、停止按钮失效。
-  it('归档正在跑的当前会话只改 catalog，不重置视图', async () => {
+  // Main now requests real stop before acknowledging archive. The renderer must
+  // leave the archived conversation instead of retaining an invisible send target.
+  it('归档正在跑的当前会话也重置视图', async () => {
     const calls: string[] = []
 
     await applySessionArchiveEffects({
       archive: async () => { calls.push('archive'); return true },
       archivingActiveSession: true,
-      activeSessionBusy: true,
       rememberUndo: () => calls.push('undo'),
       resetConversation: async () => { calls.push('reset') },
       reloadProjects: () => calls.push('reload')
     })
 
-    expect(calls).toEqual(['archive', 'undo', 'reload'])
+    expect(calls).toEqual(['archive', 'undo', 'reload', 'reset'])
   })
 
   it('剪贴板图片提取会去重 files/items 里的同一张图', () => {

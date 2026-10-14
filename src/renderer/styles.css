@@ -8234,6 +8234,31 @@ textarea:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.composer-retry-detection {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-retry-detection:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-retry-detection:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .composer-status.is-blocked {
   background: color-mix(in srgb, var(--warn) 8%, transparent);
   color: var(--warn);

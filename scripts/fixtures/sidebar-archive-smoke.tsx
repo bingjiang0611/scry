@@ -35,7 +35,6 @@ export function SidebarArchiveFixture() {
         return true
       },
       archivingActiveSession: meta.sessionId === active,
-      activeSessionBusy: false,
       rememberUndo: () => setUndo(meta),
       resetConversation: async () => {
         setActive(null)
