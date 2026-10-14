@@ -128,14 +128,29 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
   'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
 
-// Window the first history page too: completed Markdown answers are expensive
-// even when only 40 turns are loaded. Keep jump targets and materialize nearby rows.
+// Keep small/light histories intact, but window text-heavy pages even below
+// the turn-count threshold. Source length is a work budget, not a latency estimate.
 const TRANSCRIPT_WINDOW_THRESHOLD = 20
 const TRANSCRIPT_INITIAL_VISIBLE_TURNS = 4
+const TRANSCRIPT_WINDOW_TEXT_BUDGET = 32 * 1024
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
+function shouldWindowTranscript(turns: readonly Turn[]): boolean {
+  if (turns.length > TRANSCRIPT_WINDOW_THRESHOLD) return true
+  if (turns.length <= TRANSCRIPT_INITIAL_VISIBLE_TURNS) return false
+  let characters = 0
+  for (const turn of turns) {
+    for (const event of turn.items) {
+      if (event.kind !== 'model' || (event.stage !== 'text' && event.stage !== 'text_delta')) continue
+      characters += event.text?.length ?? 0
+      if (characters > TRANSCRIPT_WINDOW_TEXT_BUDGET) return true
+    }
+  }
+  return false
+}
+
 export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, focusedTurnRunId, ...props }: TranscriptProps) {
-  const windowed = turns.length > TRANSCRIPT_WINDOW_THRESHOLD
+  const windowed = shouldWindowTranscript(turns)
   return <>{turns.map((turn, index) => <TranscriptTurn
     key={turn.runId} {...props} turn={turn} index={index} total={turns.length}
     windowed={windowed} initiallyVisible={!windowed || index >= turns.length - TRANSCRIPT_INITIAL_VISIBLE_TURNS}

@@ -40,9 +40,17 @@ const turns: Turn[] = Array.from({ length: 120 }, (_, index) => ({
     tool: 'Read', toolUseId: `call-${index}`, filePath: '/fixture/file.txt' }]
 }))
 
+const heavyTurns = turns.slice(-20).map(turn => ({
+  ...turn,
+  items: turn.items.map(event => event.kind === 'model'
+    ? { ...event, text: `${event.text}\n\n${'A completed **Markdown** paragraph. '.repeat(180)}` }
+    : event)
+}))
+
 function Fixture() {
   const [tick, setTick] = useState(0)
   const [historyLimit, setHistoryLimit] = useState(40)
+  const [heavy, setHeavy] = useState(false)
   const [running, setRunning] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [focused, setFocused] = useState<string | undefined>()
@@ -63,6 +71,8 @@ function Fixture() {
       <button id="running" onClick={() => setRunning(value => !value)}>Running</button>
       <button id="jump" onClick={() => { setSelectedId('answer-10'); setFocused('turn-10') }}>Jump to evidence</button>
       <button id="clear-selection" onClick={() => { setSelectedId(null); setFocused(undefined) }}>Clear selection</button>
+      <button id="short-heavy" onClick={() => setHeavy(true)}>Heavy 20</button>
+      <button id="reset-history" onClick={() => { setHeavy(false); setHistoryLimit(40) }}>Reset history</button>
     </header>
     <main style={{ display: 'flex', height: 600 }}>
       <div style={{ width: 260, flexShrink: 0, display: 'flex' }}>
@@ -72,7 +82,7 @@ function Fixture() {
       </div>
       <div className="body chat-body" style={{ height: 600, flex: 1, minWidth: 0 }}>
         <div className="chat chat-transcript" style={{ height: 600, overflow: 'auto' }}>
-          <ChatTranscriptTurns turns={turns.slice(-historyLimit)} selectedId={selectedId} focusedTurnRunId={focused}
+          <ChatTranscriptTurns turns={heavy ? heavyTurns : turns.slice(-historyLimit)} selectedId={selectedId} focusedTurnRunId={focused}
             onTurnRef={onTurnRef} onSelect={setSelectedId} pendingQuestions={[]} />
         </div>
       </div>

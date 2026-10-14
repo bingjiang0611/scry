@@ -48,6 +48,19 @@ async function exercise(webContents) {
   const initialPageMounted = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   const viewport = await read(`(() => { const element = document.querySelector('.chat-transcript'); return { width: element.clientWidth, height: element.clientHeight }; })()`)
   if (viewport.width < 600 || viewport.height < 500) throw new Error(`Invalid transcript viewport: ${JSON.stringify(viewport)}`)
+  await click('#short-heavy')
+  await wait(`document.querySelectorAll('[data-run-id]').length === 20 && document.querySelectorAll('[data-virtualized]').length > 10`)
+  await read(`document.querySelector('.chat-transcript').scrollTop = 0`)
+  await wait(`document.querySelector('[data-run-id="turn-100"] .model-text')?.textContent.includes('Answer 100')`)
+  await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  const shortHeavyMounted = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
+  if (shortHeavyMounted < 1 || shortHeavyMounted > 10) throw new Error(`Invalid settled heavy-history window: ${shortHeavyMounted}`)
+  await read(`(() => { const scroller = document.querySelector('.chat-transcript'); scroller.scrollTop = scroller.scrollHeight; })()`)
+  await wait(`document.querySelector('[data-run-id="turn-119"] .model-text')?.textContent.includes('Answer 119')`)
+  await read(`document.querySelector('.chat-transcript').scrollTop = 0`)
+  await wait(`document.querySelector('[data-run-id="turn-100"] .model-text')?.textContent.includes('Answer 100')`)
+  await click('#reset-history')
+  await wait(`document.querySelectorAll('[data-run-id]').length === 40 && document.querySelectorAll('[data-virtualized]').length > 20`)
   const initialRenders = await read('Number(document.body.dataset.sidebarRenders)')
   for (let index = 1; index <= 20; index++) {
     await click('#stream')
@@ -196,7 +209,8 @@ async function exercise(webContents) {
   return { historicalSessions: 277, streamCommits: 20, sidebarStreamRenders: streamRenders,
     latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners, runningRingThemes,
     rotatingTransform: true, reducedMotion: true, completedIndicatorsRemoved: true, neutralBackgroundWaiting: true,
-    viewport, initialPageMounted, historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
+    viewport, initialPageMounted, shortHeavyMounted, shortHeavyHistoryRecovered: true,
+    historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
     viewportAnchorPreserved: true, selectedEvidenceRetained: true, shellHeightPreserved: true,
     keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }
 }
