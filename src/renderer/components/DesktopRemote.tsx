@@ -17,6 +17,7 @@ import type {
   RemoteSessionRef
 } from '@shared/desktop-remote'
 import type { WorkspaceEntry, WorkspaceFilePage } from '@shared/workspace'
+import { desktopConnectionLabel, refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import './desktop-remote.css'
 
 export function desktopRemoteStateKey(connectionId: string, context: DesktopRemoteContext): string {
@@ -73,17 +74,19 @@ function ConnectionList({
   connections,
   selectedId,
   onSelect,
-  onRefresh
+  onRefresh,
+  error
 }: {
   connections: DesktopRemoteConnection[]
   selectedId: string | null
   onSelect: (id: string) => void
   onRefresh: () => void
+  error: string | null
 }): JSX.Element {
   return (
     <aside className="desktop-remote__connections" aria-label="远程主机">
       <div className="desktop-remote__section-head"><b>远程主机</b><button type="button" onClick={onRefresh}>刷新</button></div>
-      {connections.length === 0 ? <p className="desktop-remote__muted">尚未保存主机。</p> : connections.map((connection) => (
+      {connections.length === 0 ? <p className="desktop-remote__muted">{error ? '主机列表读取失败。' : '尚未保存主机。'}</p> : connections.map((connection) => (
         <button
           type="button"
           key={connection.id}
@@ -92,14 +95,14 @@ function ConnectionList({
         >
           <strong>{connection.label}</strong>
           <span>{connection.ssh.username}@{connection.ssh.hostname}:{connection.ssh.port}</span>
-          <small>{connection.state === 'connected' ? '已连接' : connection.state === 'pairing' ? '等待主机确认' : '未连接'}</small>
+          <small>{desktopConnectionLabel(connection, error)}</small>
         </button>
       ))}
     </aside>
   )
 }
 
-function ClientPairForm({ onPaired }: { onPaired: () => Promise<void> }): JSX.Element {
+function ClientPairForm({ onPaired }: { onPaired: (id: string) => Promise<void> }): JSX.Element {
   const [label, setLabel] = useState('')
   const [username, setUsername] = useState('')
   const [hostname, setHostname] = useState('')
@@ -111,13 +114,14 @@ function ClientPairForm({ onPaired }: { onPaired: () => Promise<void> }): JSX.El
   const pair = async (): Promise<void> => {
     setBusy(true); setError(null)
     try {
-      setPairing(await bridge().pair({ label: label.trim() || hostname.trim(), ssh: { username: username.trim(), hostname: hostname.trim(), port: Number(port) }, invitation: invitation.trim() }))
+      const result = await bridge().pair({ label: label.trim() || hostname.trim(), ssh: { username: username.trim(), hostname: hostname.trim(), port: Number(port) }, invitation: invitation.trim() })
+      setPairing(result); await onPaired(result.connection.id)
     } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
   }
   const finish = async (): Promise<void> => {
     if (!pairing) return
     setBusy(true); setError(null)
-    try { setPairing(await bridge().finishPairing(pairing.connection.id)); await onPaired() }
+    try { setPairing(await bridge().finishPairing(pairing.connection.id)); await onPaired(pairing.connection.id) }
     catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
   }
   return (
@@ -228,7 +232,12 @@ function RemoteFiles({
   </section>
 }
 
-function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemoteConnection; onDisconnect: () => Promise<void> }): JSX.Element {
+function RemoteWorkspace({ connection, onDisconnect, onReconnect, connected }: {
+  connection: DesktopRemoteConnection
+  onDisconnect: () => Promise<void>
+  onReconnect: () => Promise<void>
+  connected: boolean
+}): JSX.Element {
   const api = bridge()
   const [catalog, setCatalog] = useState<DesktopRemoteCatalog | null>(null)
   const [providerSelection, setProviderSelection] = useState('')
@@ -247,6 +256,8 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const generation = useRef(0)
+  // Reconnection refreshes catalog and history concurrently; neither cancels the other.
+  const catalogGeneration = useRef(0)
   const provider = catalog?.providers.find((item) => desktopProviderKey(item) === providerSelection)
   const providerId = provider?.id ?? ''
   const context = useMemo<DesktopRemoteContext>(() => ({ cwd, providerId, ...(provider?.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}), ...(sessionId ? { externalSessionId: sessionId } : {}) }), [cwd, provider?.agentProfileId, providerId, sessionId])
@@ -273,23 +284,25 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
   }, [selectedProvider, stateKey])
 
   const load = useCallback(async () => {
-    const sequence = ++generation.current
+    if (!connected) return
+    const sequence = ++catalogGeneration.current
     setError(null); setStatus(null); setActiveRun(null); setRunStatus(null)
     try {
       const next = await api.catalog(connection.id)
-      if (sequence !== generation.current) return
+      if (sequence !== catalogGeneration.current) return
       setCatalog(next)
       const firstProvider = next.providers.find((item) => item.available) ?? next.providers[0]
       const nextProviderKey = firstProvider ? desktopProviderKey(firstProvider) : ''
       const firstProject = next.projects[0]?.path ?? ''
-      setProviderSelection((current) => current && next.providers.some((item) => desktopProviderKey(item) === current) ? current : nextProviderKey)
+      setProviderSelection((current) => current || nextProviderKey)
       setCwd((current) => current || firstProject)
       if (!nextProviderKey || !firstProject) { setError('远端未提供可用项目或 Provider。'); return }
-    } catch (reason) { if (sequence === generation.current) setError(errorText(reason)) }
-  }, [api, connection.id])
+    } catch (reason) { if (sequence === catalogGeneration.current) setError(errorText(reason)) }
+  }, [api, connection.id, connected])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(); return () => { catalogGeneration.current += 1 } }, [load])
   useEffect(() => {
+    if (!connected) return
     if (!catalog || !providerId || !cwd || !sessionId) {
       setTurns([]); setHistoryEvidence(null)
       return
@@ -303,9 +316,9 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
       }
     }).catch((reason) => { if (sequence === generation.current) setError(errorText(reason)) })
     return () => { generation.current += 1 }
-  }, [api, catalog, connection.id, context, providerId, cwd, sessionId])
+  }, [api, catalog, connection.id, connected, context, providerId, cwd, sessionId])
   useEffect(() => {
-    if (!catalog || !providerId || !cwd) return
+    if (!connected || !catalog || !providerId || !cwd) return
     let cancelled = false
     const poll = async (): Promise<void> => {
       if (pollInFlight.current) return
@@ -337,7 +350,7 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
     }
     void poll(); const timer = window.setInterval(() => { void poll() }, 1500)
     return () => { cancelled = true; pollSequence.current += 1; window.clearInterval(timer) }
-  }, [api, catalog, connection.id, context, cwd, providerId])
+  }, [api, catalog, connection.id, connected, context, cwd, providerId])
 
   const chosenModel = provider?.models?.find((option) => option.id === modelId) ?? provider?.models?.find((option) => option.isDefault) ?? provider?.models?.[0]
   const validModelId = chosenModel?.id
@@ -362,8 +375,9 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
     const without = turns.filter((turn) => turn.runId !== activeRun.runId)
     return [...without, active]
   }, [activeRun, turns])
+  const contextAvailable = connected && provider?.available && catalog?.projects.some(project => project.path === cwd)
   const submit = async (): Promise<void> => {
-    const text = prompt.trim(); if (!text || !providerId || !cwd || submitting || Boolean(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))) return
+    const text = prompt.trim(); if (!contextAvailable || !text || !providerId || !cwd || submitting || Boolean(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))) return
     const submittedGeneration = contextGeneration.current
     const submittedContext = context
     setSubmitting(true); setError(null); setStatus('已记录提交，等待远端派发…')
@@ -400,7 +414,7 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
   }
   const answer = async (response: AgentQuestionResponse): Promise<void> => {
     const runId = currentIntent?.runId
-    if (!runId) { const reason = new Error('问题所属运行已不可用。'); setError(reason.message); throw reason }
+    if (!connected || !runId) { const reason = new Error('远端未连接或问题所属运行已不可用。'); setError(reason.message); throw reason }
     try { await api.answer(connection.id, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
   const contextSessions = catalog?.sessions.filter((session) => session.providerId === providerId && session.cwd === cwd &&
@@ -412,7 +426,7 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
     setCwd(session.cwd); setProviderSelection(desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId }))
   }
   const loadOlderHistory = async (): Promise<void> => {
-    if (!historyEvidence?.hasOlder || historyEvidence.before === undefined || !sessionId) return
+    if (!connected || !historyEvidence?.hasOlder || historyEvidence.before === undefined || !sessionId) return
     const sequence = ++generation.current
     try {
       const history = await api.history(connection.id, context, historyEvidence.before, historyEvidence.snapshot)
@@ -423,69 +437,102 @@ function RemoteWorkspace({ connection, onDisconnect }: { connection: DesktopRemo
   }
   return <div className="desktop-remote__workspace" data-state-key={stateKey}>
     <header className="desktop-remote__workspace-head">
-      <div><b>{connection.label}</b><span>{connection.ssh.hostname} · {connection.state}</span></div>
-      <div><button type="button" onClick={() => void onDisconnect()}>断开</button><button type="button" onClick={() => void load()}>重新加载</button></div>
+      <div><b>执行位置：{connection.label} · 远程</b><span>{connection.ssh.hostname} · {connected ? '已连接' : '未确认连接'}</span></div>
+      <div>{!connected && <button type="button" onClick={() => void onReconnect()}>连接此主机</button>}<button type="button" onClick={() => void onDisconnect()} disabled={!connected}>断开</button><button type="button" onClick={() => void load()} disabled={!connected}>重新加载</button></div>
     </header>
     {error && <p className="desktop-remote__error" role="alert">{error}</p>}
     {status && <p className="desktop-remote__status" role="status">{status}</p>}
-    {!catalog ? <p className="desktop-remote__muted">正在读取远端目录…</p> : <>
+    {!connected && <p className="desktop-remote__warning" role="status">远程主机未连接或状态未知。已保留当前上下文，不能发送，也不会改成本机执行。</p>}
+    {!catalog ? <p className="desktop-remote__muted">{connected ? (error ? '无法读取远端目录，请重新加载。' : '正在读取远端目录…') : '连接后可选择该主机的项目、Provider 和会话。'}</p> : <>
+      {connected && !contextAvailable && <p className="desktop-remote__warning" role="status">所选远端项目或 Provider 当前不可用，请重新选择；不会代选其他运行环境。</p>}
       <div className="desktop-remote__workspace-grid">
         <aside className="desktop-remote__sidebar">
-          <label>项目<select value={cwd} onChange={(event) => { setCwd(event.target.value); setSessionId(undefined) }}>{catalog.projects.map((project) => <option key={project.path} value={project.path}>{project.label}</option>)}</select></label>
-          <label>Provider<select value={providerSelection} onChange={(event) => { setProviderSelection(event.target.value); setSessionId(undefined) }}>{catalog.providers.map((item) => <option key={desktopProviderKey(item)} value={desktopProviderKey(item)} disabled={!item.available}>{item.label}{item.available ? '' : ' · 不可用'}</option>)}</select></label>
+          <label>项目<select disabled={Boolean(sessionId)} value={cwd} onChange={(event) => { setCwd(event.target.value); setSessionId(undefined) }}>{cwd && !catalog.projects.some(project => project.path === cwd) && <option value={cwd}>原项目已不可用：{cwd}</option>}{catalog.projects.map((project) => <option key={project.path} value={project.path}>{project.label}</option>)}</select></label>
+          <label>Provider<select disabled={Boolean(sessionId)} value={providerSelection} onChange={(event) => { setProviderSelection(event.target.value); setSessionId(undefined) }}>{providerSelection && !provider && <option value={providerSelection}>原 Provider / profile 已不可用</option>}{catalog.providers.map((item) => <option key={desktopProviderKey(item)} value={desktopProviderKey(item)} disabled={!item.available}>{item.label}{item.available ? '' : ' · 不可用'}</option>)}</select></label>
           {provider && <ProviderControls provider={provider} modelId={validModelId} effort={validEffort} permissionMode={validPermissionMode} onModel={setModelId} onEffort={setEffort} onPermission={setPermissionMode} />}
-          <label>会话<select value={sessionId ?? ''} onChange={(event) => { const session = contextSessions.find((item) => item.externalSessionId === event.target.value); setSession(session) }}><option value="">新会话</option>{contextSessions.map((session) => <option key={session.sessionId} value={session.externalSessionId}>{session.label}</option>)}</select></label>
-          {selectedSession && <p className="desktop-remote__muted">会话来源：{new Date(selectedSession.ts).toLocaleString()}</p>}
-          <RemoteFiles api={api} connectionId={connection.id} context={context} />
+          <label>会话<select value={sessionId ?? ''} onChange={(event) => { const session = contextSessions.find((item) => item.externalSessionId === event.target.value); setSession(session) }}><option value="">新会话</option>{sessionId && !selectedSession && <option value={sessionId}>当前会话 · {sessionId.slice(0, 8)}</option>}{contextSessions.map((session) => <option key={session.sessionId} value={session.externalSessionId}>{session.label}</option>)}</select></label>
+          {sessionId && <button type="button" onClick={() => setSession(undefined)}>新建此主机的会话</button>}
+          {selectedSession && <p className="desktop-remote__muted">会话归属：{connection.label} · {new Date(selectedSession.ts).toLocaleString()}</p>}
+          {contextAvailable && <RemoteFiles api={api} connectionId={connection.id} context={context} />}
         </aside>
         <main className="desktop-remote__transcript" aria-label="远程会话">
-          {historyEvidence && <p className="desktop-remote__history-evidence" role="note">历史证据：{historyEvidence.status === 'available' ? '可用' : '不可用'}{historyEvidence.reason ? ` · ${historyEvidence.reason}` : ''}{historyEvidence.hasOlder ? ' · 仍有更早记录未加载' : ''}{historyEvidence.hasOlder && historyEvidence.before !== undefined && <button type="button" onClick={() => void loadOlderHistory()}>加载更早记录（每页有上限）</button>}</p>}
+          {historyEvidence && <p className="desktop-remote__history-evidence" role="note">历史证据：{historyEvidence.status === 'available' ? '可用' : '不可用'}{historyEvidence.reason ? ` · ${historyEvidence.reason}` : ''}{historyEvidence.hasOlder ? ' · 仍有更早记录未加载' : ''}{historyEvidence.hasOlder && historyEvidence.before !== undefined && <button type="button" disabled={!connected} onClick={() => void loadOlderHistory()}>加载更早记录（每页有上限）</button>}</p>}
           {displayTurns.length === 0 ? <p className="desktop-remote__muted">此上下文暂无会话记录。</p> : displayTurns.map((turn) => <article className="desktop-remote__turn" key={turn.runId}><UserMessage text={turn.userText} /><AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} pendingQuestions={turn.runId === activeRun?.runId ? activeRun.pendingQuestions : []} onAnswerQuestion={answer} remote /></article>)}
           {runStatus && <p className="desktop-remote__run-status" role="status">远程运行：{runStatus.state}{runStatus.detail ? ` · ${runStatus.detail}` : ''}{runStatus.state === 'unknown' ? '（结果未知，不会自动重试）' : ''}</p>}
-          <div className="desktop-remote__composer"><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !submitting && !(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))) { event.preventDefault(); void submit() } }} placeholder="向远程 Agent 提问…" aria-label="远程提示词" /><div><button type="button" onClick={() => void submit()} disabled={!prompt.trim() || !providerId || !cwd || submitting || Boolean(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))}>发送</button><button type="button" onClick={() => void stop()} disabled={!currentIntent?.runId}>停止</button></div></div>
+          <div className="desktop-remote__composer"><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !submitting && !(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))) { event.preventDefault(); void submit() } }} placeholder="向远程 Agent 提问…" aria-label="远程提示词" /><div><button type="button" onClick={() => void submit()} disabled={!contextAvailable || !prompt.trim() || !providerId || !cwd || submitting || Boolean(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))}>发送</button><button type="button" onClick={() => void stop()} disabled={!connected || !currentIntent?.runId}>停止</button></div></div>
         </main>
       </div>
-      {intents.filter((intent) => intent.status === 'unknown').map((intent) => <p className="desktop-remote__warning" role="note" key={`unknown:${intent.intentId}`}>提交结果未知；Scry 不会盲目重发同一提示词。<button type="button" onClick={() => void checkUnknown(intent)}>检查远端状态</button></p>)}
+      {intents.filter((intent) => intent.status === 'unknown').map((intent) => <p className="desktop-remote__warning" role="note" key={`unknown:${intent.intentId}`}>提交结果未知；Scry 不会盲目重发同一提示词。<button type="button" disabled={!connected} onClick={() => void checkUnknown(intent)}>检查远端状态</button></p>)}
     </>}
   </div>
 }
 
-export function DesktopRemote({ onBack }: { onBack: () => void }): JSX.Element {
-  const [connections, setConnections] = useState<DesktopRemoteConnection[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [screen, setScreen] = useState<'connections' | 'workspace'>('connections')
+export function DesktopRemote({ onBack, initialConnectionId }: { onBack: () => void; initialConnectionId?: string }): JSX.Element {
+  const { connections, loaded, error: readError } = useDesktopConnections()
+  const [selectedId, setSelectedId] = useState<string | null>(initialConnectionId ?? null)
+  const effectiveSelectedId = selectedId ?? connections[0]?.id ?? null
+  const selectedIdRef = useRef(effectiveSelectedId)
+  selectedIdRef.current = effectiveSelectedId
+  const [screen, setScreen] = useState<'connections' | 'workspace'>(initialConnectionId ? 'workspace' : 'connections')
   const [error, setError] = useState<string | null>(null)
-  const refresh = useCallback(async () => {
-    try { const next = await bridge().list(); setConnections(next); setSelectedId((current) => current && next.some((item) => item.id === current) ? current : next[0]?.id ?? null) }
-    catch (reason) { setError(errorText(reason)) }
-  }, [])
-  useEffect(() => { void refresh() }, [refresh])
-  const selected = connections.find((connection) => connection.id === selectedId)
+  const [busy, setBusy] = useState(false)
+  const refresh = refreshDesktopConnections
+  const selected = connections.find(connection => connection.id === effectiveSelectedId)
   const connect = async (): Promise<void> => {
-    if (!selected) return
-    setError(null)
-    try { await bridge().connect(selected.id); await refresh(); setScreen('workspace') }
-    catch (reason) { setError(errorText(reason)) }
+    if (!selected || busy) return
+    setError(null); setBusy(true)
+    try {
+      await bridge().connect(selected.id)
+      await refresh()
+      if (selectedIdRef.current === selected.id) setScreen('workspace')
+    } catch (reason) { setError(errorText(reason)) }
+    finally { setBusy(false) }
   }
   const finishPairing = async (): Promise<void> => {
-    if (!selected) return
-    setError(null)
+    if (!selected || busy) return
+    setError(null); setBusy(true)
     try { await bridge().finishPairing(selected.id); await refresh() }
     catch (reason) { setError(errorText(reason)) }
+    finally { setBusy(false) }
   }
   const disconnect = async (): Promise<void> => {
     if (!selected) return
-    try { await bridge().disconnect(selected.id); await refresh(); setScreen('connections') } catch (reason) { setError(errorText(reason)) }
+    try { await bridge().disconnect(selected.id); await refresh() }
+    catch (reason) { setError(errorText(reason)) }
   }
   const forget = async (): Promise<void> => {
     if (!selected) return
-    try { await bridge().forget(selected.id); await refresh(); setScreen('connections') } catch (reason) { setError(errorText(reason)) }
+    try { await bridge().forget(selected.id); await refresh(); setSelectedId(null); setScreen('connections') }
+    catch (reason) { setError(errorText(reason)) }
   }
-  return <div className="desktop-remote" role="dialog" aria-modal="true" aria-label="桌面远程连接">
-    <header className="desktop-remote__head"><button type="button" onClick={onBack}>返回</button><div><h1>桌面远程</h1><p>连接并检查另一台 Scry 桌面主机</p></div></header>
-    {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-    {screen === 'connections' ? <div className="desktop-remote__body"><ConnectionList connections={connections} selectedId={selectedId} onSelect={setSelectedId} onRefresh={() => void refresh()} /><div className="desktop-remote__main"><ClientPairForm onPaired={refresh} />{selected && <section className="desktop-remote__card"><h2>{selected.label}</h2><p>{selected.ssh.username}@{selected.ssh.hostname}:{selected.ssh.port}</p><p>主机指纹：<code>{selected.anchorSHA256}</code></p><p>状态：{selected.state}</p><div className="desktop-remote__actions"><button type="button" onClick={() => void connect()} disabled={selected.state === 'pairing'}>{selected.state === 'connected' ? '打开远程桌面' : '连接'}</button>{selected.state === 'pairing' && <button type="button" onClick={() => void finishPairing()}>完成配对</button>}<button type="button" onClick={() => void disconnect()} disabled={selected.state !== 'connected'}>断开</button><button type="button" onClick={() => void forget()}>忘记</button></div></section>}</div></div> : selected ? <RemoteWorkspace connection={selected} onDisconnect={disconnect} /> : null}
-  </div>
+  const workspace = screen === 'workspace' && selected?.state !== 'pairing'
+  return <section className="desktop-remote" aria-label="桌面远程连接">
+    <header className="desktop-remote__head">
+      <button type="button" onClick={onBack}>返回</button>
+      <div><h1>{workspace ? '远程会话' : '我连接的主机'}</h1><p>执行、文件和 Provider 凭据留在所选主机，不使用本机运行环境。</p></div>
+      {workspace && <button type="button" onClick={() => setScreen('connections')}>管理连接</button>}
+    </header>
+    {(error || readError) && <p className="desktop-remote__error" role="alert">{error || readError}</p>}
+    {!loaded && !readError && <p>正在读取已保存的主机…</p>}
+    {!workspace ? <div className="desktop-remote__body">
+      <ConnectionList connections={connections} selectedId={effectiveSelectedId} onSelect={setSelectedId} onRefresh={() => void refresh()} error={readError} />
+      <div className="desktop-remote__main">
+        <ClientPairForm onPaired={async id => { await refresh(); setSelectedId(id) }} />
+        {selected && <section className="desktop-remote__card">
+          <h2>{selected.label}</h2><p>{selected.ssh.username}@{selected.ssh.hostname}:{selected.ssh.port}</p>
+          <p>主机指纹：<code>{selected.anchorSHA256}</code></p>
+          <p>状态：{desktopConnectionLabel(selected, readError)}</p>
+          <div className="desktop-remote__actions">
+            <button type="button" onClick={() => void connect()} disabled={busy || selected.state === 'pairing'}>{selected.state === 'connected' ? '打开远程桌面' : '连接'}</button>
+            {selected.state === 'pairing' && <button type="button" onClick={() => void finishPairing()} disabled={busy}>完成配对</button>}
+            <button type="button" onClick={() => void disconnect()} disabled={busy || selected.state !== 'connected'}>断开</button>
+            <button type="button" onClick={() => void forget()} disabled={busy}>忘记</button>
+          </div>
+          <p className="desktop-remote__muted">忘记仅移除本地连接，不会撤销该主机上的设备授权。</p>
+        </section>}
+      </div>
+    </div> : selected ? <RemoteWorkspace key={selected.id} connection={selected} connected={selected.state === 'connected' && !readError} onDisconnect={disconnect} onReconnect={connect} /> : loaded && <p role="alert">所选远程连接已不可用。请管理连接；不会改成本机执行。</p>}
+  </section>
 }
 
 export function RemoteHostPanel(): JSX.Element {
@@ -504,7 +551,7 @@ export function RemoteHostPanel(): JSX.Element {
   const run = async (action: () => Promise<void>): Promise<void> => { setBusy(true); setError(null); try { await action(); await refresh() } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) } }
   if (enabled === null) return error ? <p role="alert">{error}</p> : <p>加载远程桌面主机状态…</p>
   return <section className="desktop-remote__host">
-    <div className="desktop-remote__section-head"><b>桌面远程主机</b><span>{enabled ? '已启用' : '未启用'}</span></div>
+    <div className="desktop-remote__section-head"><b>通过 SSH 访问本机</b><span>{enabled ? '已启用' : '未启用'}</span></div>
     <p className="desktop-remote__muted">SSH 认证不能替代本机配对批准。生成新邀请会使旧的未完成邀请失效。</p>
     {error && <p className="desktop-remote__error" role="alert">{error}</p>}
     <button type="button" onClick={() => void run(async () => setInvite(await window.scry.remoteDesktopHostInvite()))} disabled={busy}>{enabled ? '生成 SSH 邀请' : '启用并生成 SSH 邀请'}</button>

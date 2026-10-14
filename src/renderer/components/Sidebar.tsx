@@ -14,6 +14,7 @@ import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
 import { ProviderGlyph } from './ProviderGlyph'
+import { MachineNavigation } from './MachineNavigation'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -61,7 +62,10 @@ export const Sidebar = memo(function Sidebar({
   onMetaPrompts,
   metaPromptsActive = false,
   catalogHealth,
-  onSettings
+  onSettings,
+  newChatTarget = 'local',
+  onNewChatTarget,
+  onOpenRemote
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -95,6 +99,9 @@ export const Sidebar = memo(function Sidebar({
   metaPromptsActive?: boolean
   catalogHealth?: CatalogHealth
   onSettings?: () => void
+  newChatTarget?: string
+  onNewChatTarget?: (id: string) => void
+  onOpenRemote?: (connectionId?: string) => void
 }) {
   const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)
   const openSessionMenu = (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta): void => {
@@ -176,6 +183,8 @@ export const Sidebar = memo(function Sidebar({
       <button className="sb-new" onClick={onNewChat}>
         <Icon name="plus" /> 新建会话
       </button>
+      {onNewChatTarget && onOpenRemote && <MachineNavigation targetId={newChatTarget} onTarget={onNewChatTarget} onOpen={onOpenRemote} onManage={() => onOpenRemote()} />}
+      <div className="sb-local-sessions">本机会话</div>
       <div className="sb-search">
         <Icon name="search" />
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />

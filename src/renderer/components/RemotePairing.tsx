@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import type { RemotePairingCode } from '../../shared/remote'
 import { projectRemote, confirmArguments, type PendingRow, type RemotePairingViewModel } from '../remote-pairing'
 import { DesktopRemote, RemoteHostPanel } from './DesktopRemote'
+import { SavedRemoteHosts } from './MachineNavigation'
 
 // Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
 // data: URL, no innerHTML). The QR encodes only what the code already contains
@@ -36,12 +37,12 @@ function DeviceCodeQR({ code }: { code: string }): JSX.Element {
 // disabled/dormant as real states and lists only currently paired devices. It
 // holds no secret beyond the
 // short-lived pairing code the host returns for display.
-export function RemotePairing(): JSX.Element {
+export function RemotePairing({ onOpenRemote }: { onOpenRemote?: (connectionId?: string) => void } = {}): JSX.Element {
   const [vm, setVm] = useState<RemotePairingViewModel | null>(null)
   const [code, setCode] = useState<RemotePairingCode | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [desktopRemoteOpen, setDesktopRemoteOpen] = useState(false)
+  const [desktopRemoteOpen, setDesktopRemoteOpen] = useState<{ connectionId?: string } | null>(null)
 
   const refresh = useCallback(async () => {
     try { setVm(projectRemote(await window.scry.remoteStatus())) }
@@ -72,16 +73,25 @@ export function RemotePairing(): JSX.Element {
   const cancel = useCallback((pairingId: string) => run(() => window.scry.remoteCancelPairing(pairingId)), [run])
   const revoke = useCallback((deviceId: string) => run(() => window.scry.remoteRevokeDevice(deviceId)), [run])
 
-  if (desktopRemoteOpen) return <DesktopRemote onBack={() => setDesktopRemoteOpen(false)} />
-  if (vm === null) return <section className="remote-pairing"><p>加载中…</p></section>
+  const openRemote = (connectionId?: string): void => {
+    if (onOpenRemote) onOpenRemote(connectionId)
+    else setDesktopRemoteOpen({ connectionId })
+  }
+  const clientHosts = <section className="remote-client-settings" aria-label="我连接的主机">
+    <h3>我连接的主机</h3>
+    <p>在其他电脑上运行会话。已保存的主机重启后仍可见，未连接不等于未配对。</p>
+    <SavedRemoteHosts onOpen={openRemote} />
+    <div className="remote-pairing__actions"><button type="button" onClick={() => openRemote()}>添加 / 管理远程主机</button></div>
+  </section>
+  if (desktopRemoteOpen) return <DesktopRemote initialConnectionId={desktopRemoteOpen.connectionId} onBack={() => setDesktopRemoteOpen(null)} />
+  if (vm === null) return <section className="remote-pairing">{clientHosts}<h3>允许设备访问本机</h3><p>{error || '加载中…'}</p></section>
   if (vm.kind === 'disabled') {
     return (
       <section className="remote-pairing">
         <h2>远程访问</h2>
+        {clientHosts}
+        <h3>允许设备访问本机</h3>
         <p className="remote-pairing__disabled">手机中继远程访问未启用。桌面 SSH 远程仍可单独使用。</p>
-        <div className="remote-pairing__desktop-actions">
-          <button type="button" onClick={() => setDesktopRemoteOpen(true)}>连接桌面主机</button>
-        </div>
         <RemoteHostPanel />
       </section>
     )
@@ -90,10 +100,9 @@ export function RemotePairing(): JSX.Element {
   return (
     <section className="remote-pairing">
       <h2>远程访问</h2>
+      {clientHosts}
+      <h3>允许设备访问本机</h3>
       <p className={vm.relayReady ? 'remote-pairing__relay' : 'remote-pairing__relay remote-pairing__relay--dormant'}>{vm.relayHint}</p>
-      <div className="remote-pairing__desktop-actions">
-        <button type="button" onClick={() => setDesktopRemoteOpen(true)}>连接桌面主机</button>
-      </div>
       <RemoteHostPanel />
       {error && <p className="remote-pairing__error" role="alert">{error}</p>}
 
@@ -132,7 +141,7 @@ export function RemotePairing(): JSX.Element {
               <span className="remote-pairing__label">{row.label}</span>
               <span className="remote-pairing__status">{row.statusText}</span>
               {row.confirmable && row.fingerprintShort && (
-                <span className="remote-pairing__fp">指纹 {row.fingerprintShort}…（请与手机上显示的一致）</span>
+                <span className="remote-pairing__fp">指纹 {row.fingerprintShort}…（请与连接设备上显示的一致）</span>
               )}
               {row.confirmable
                 ? <button type="button" onClick={() => confirm(row)} disabled={busy}>确认</button>
@@ -143,7 +152,7 @@ export function RemotePairing(): JSX.Element {
         </ul>
       )}
 
-      <h3>已配对设备</h3>
+      <h3>已授权访问本机</h3>
       {vm.devices.length === 0 ? <p className="remote-pairing__empty">暂无</p> : (
         <ul className="remote-pairing__devices">
           {vm.devices.map((d) => (
