@@ -103,7 +103,7 @@ node scripts/desktop-remote-ui-smoke.mjs --negative-control  # 预期失败：�
 
 轮次耗时 15,090 ms；Provider 用量证据为 input 10,937、output 27、total 10,964 tokens。reasoning 19 已包含在 output 中，不再相加。`costUsd=0` 只是 SDK/记录给出的字段，**没有核实 Qoder 实际扣费，不能据此宣称免费**。模型耗时为 `partial/estimated`，危险操作分类为 unavailable；CLI 另有 model identity / turn role / task link 的 `legacy_unset` advisories，不能把它们当成完整身份或无风险证据。
 
-**未修复的计费问题**：首次 SQLite 验收要求 `usage_ledger` 有本轮 token 条目，实际断言失败。随后独立诊断确认 token 已进入 `spans/model_usage`，但计费账本确实为空，没有通过重跑改写这个失败。代码定位发现 `src/shared/billing.ts` 的 `billingProviderForUpstream()` 没有 `qoder` 分支，`src/main/billing-ledger.ts` 会跳过未识别计费 Provider 的条目；这些源码不是本次桌面远程改动引入的。此原因与观测一致，但尚未修复并做对照验证。不能将本次执行/记录成功扩大为完整计费治理验收成功。
+**首次验收的计费缺口（保留历史失败）**：首次 SQLite 验收要求 `usage_ledger` 有本轮 token 条目，实际断言失败。随后独立诊断确认 token 已进入 `spans/model_usage`，但计费账本确实为空，没有通过重跑改写这个失败。代码定位发现 `src/shared/billing.ts` 的 `billingProviderForUpstream()` 没有 `qoder` 分支，`src/main/billing-ledger.ts` 会跳过未识别计费 Provider 的条目；这些源码不是桌面远程改动引入的。当时尚未修复并做对照验证，不能把执行/记录成功扩大为计费验收成功。后续修复与新轮次复测见下节；这条旧记录没有补账。
 
 范围限制：本次只证明上述 Pi→Qoder、单轮无工具场景。其他 Provider、真实工具执行、问题回答、运行中取消等只保留各自既有本地/假 Provider 检查结论；没有用这次计算任务替代它们的双机验收，也没有验证 SSH 后台启动、LAN 直连或 notarized 发布。
 
@@ -111,5 +111,53 @@ node scripts/desktop-remote-ui-smoke.mjs --negative-control  # 预期失败：�
 
 - 客户端：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-desktop-client-acceptance-Y7TGvk/`，含 history、回执、文件读取、断线重连及 cleanup JSON；这是临时验收目录，不是正式安装配置。
 - 宿主：`~/scry-remote-acceptance-0.2.180-GqVCV3/acceptance-*.json` 为 CLI 和只读 SQLite 核对结果；实际 archive / SQLite 留在当前宿主 userData，canonical records 留在上述 workspace。
+
+## 2026-10-14：0.2.181 计费修复与同包双机复测
+
+### 修复与冻结产物
+
+- 源码提交 `57c0e47906cfe1a45c209340fdcf53d54eae2aaa`：共享上游映射识别 `qoder`；Pi adapter 保留 Qoder tokens，但不把 USD 模型目录的零价占位当成实际收费证据，与原生 Qoder adapter 的未知美元成本语义一致。没有推算 credits 或美元费用，也没有改写历史 DB。
+- 新回归贯穿 Pi RPC fixture → result/modelUsage → 实际计费行生成函数。旧实现明确失败：预期 1 条账本记录，实际 0 条。修复后还要求 `provider=qoder`、tokens 正确、`cost=null`，且 result/modelUsage 不再输出零美元。
+- App `0.2.181`，私有 CLI 仍为 `0.2.49`。开发签名产物，**不是 notarized release**。本任务隔离源码和构建位于 `/tmp/scry-billing-release-nitWAN`；没有纳入同时进行的 Meta Prompts UI 改动。共享工作区曾因该 UI 的 `IconName` 类型错误中断发布检查，未修改那部分代码；下列完整检查均在冻结的隔离源码上重新执行。主分支后来独立更新的 `0.2.182` 不属于本次同包验收。
+- 两端 `app.asar` SHA-256 均为 `a7857121fd0274e47e304e8e46e5f48e6ad5f215df8e5e30fdbd444beaba707c`。mac2 的 `codesign --verify --deep --strict` 通过。
+
+### 安装与启动边界
+
+SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，但新进程 `61539` 退出。针对该 PID 的系统日志出现 `mac_non_white_proc` / `ssh_reject` 标签；这只是线索，不能据此确定退出原因，也不能宣称 SSH 启动已修复。没有换启动方式、重签名或绕过终端防护。
+
+用户随后打开的实际仍是旧 `0.2.180`，检查哈希后拒绝在旧包上复测。确认无活跃会话并正常退出后，复用仓库的原子安装 helper 更新原位置；安装前及 staging 校验时均检查 App 已退出。旧包留在 `.Scry.app.backup`。用户再次正常打开后，实际进程 `4470`、磁盘版本、哈希及两个 loopback listener 均符合预期：
+
+- 实际宿主：`/Users/test/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app`。目录名保留历史版本号，**包内版本已是 0.2.181**。
+- 数据目录：`/Users/test/Library/Application Support/scry`；工作区、原设备 grant、CA 和端口 `64050/64051` 保持不变。
+- 测试客户端使用同一 `0.2.181` 产物及原隔离客户端 userData，正常登录 HOME 提供系统 keychain；不是日常本地 App 的安装配置。
+
+### 实际验证
+
+| 项目 | 结果与证据 |
+| --- | --- |
+| 本地完整门禁 | Node 22.22.1 / npm 10.9.4，macOS arm64：`npm run check:cli-release`（含 typecheck、581 tests 与包安装 smoke）、`npm test`（214 files / 2706 tests，3 个真实探针 skipped，shell PASS）、`npm run test:renderer:ui`、`SCRY_RELEASE_BUILD=0 npm run pack:artifact`（含 build、packaged 检查及 Electron smoke）、`git diff --check` 均通过 |
+| 同包真实执行 | 已保存配对经 SSH + pinned mTLS 重连成功。新建 Pi · Rotom session，Qoder Ultimate、low、full_access；仅提交一次“139 × 31，只回复整数，不调用工具或读写文件”，答案 `4309`，工具证据为 `available + []` |
+| SQLite 计费修复 | 只读查询本轮 canonical run：`usage_ledger` 恰好 1 行，`provider=qoder`、`source=pi_rpc`、input 10,937 / output 6 / reasoning 0；`cost=null`。`spans` 和 `model_usage` 也各有 1 条对应结果，USD cost 均为 null |
+| archive / recorder | 真实 SSH 读取该新 session：1 轮，done、无 error、hasOlder=false。新增 canonical record 为 completed，prompt、`4309`、tokens 一致，usage 不含 `costUsd` |
+| CLI 独立核对 | 私有 CLI `turns list/summary/verify`、`doctor` 均成功。默认 summary 明确是新 session 的 1 轮，total tokens 10,943，`costUsd=null`；全工作区 verify 为 2 records（旧 1 + 新 1）、无 errors，doctor healthy、0 pending |
+| 防重与旧数据 | 宿主 durable ledger 中该 run 的 `intent_recorded`、`run_dispatched`、`run_settled` 各 1 条，无 failed/cancelled；确认终态后客户端未决回执为 0。旧 run 的 `usage_ledger` 仍为 0 行，未补写旧账；工作区 Git 状态为空 |
+
+验收辅助脚本曾有三处合同误读：用流式 `text_delta` 读取已合并的 archive `model/text`；把默认 session summary 当成全工作区；把已确认终态后会移除的客户端回执当成历史账本。保留这些首轮断言失败，按现有合同修正后核对**同一轮已保存证据**；提交次数改由宿主 durable ledger 证明。没有重发模型请求，也没有放宽生产实现或测试。
+
+关联标识：
+
+- 客户端 intent：`751cda24-b27e-4d62-8b80-187ca8dafbbc`
+- 宿主 ledger run：`4e9db673-1abf-43df-911c-6c1f91cf5bf5`
+- canonical run：`remote-run-mv7u0g8z-0`；result span：`pi-mv7u0lxa-8`
+- native session：`01a13978-1ff2-768a-8906-e6fb2b8f59ee`；native turn：`87e0b717`
+- record：`0492a47470f0403d57e3c3e73ed72bd4`，文件 `.scry/records/00000000000000000002-0492a47470f0403d57e3c3e73ed72bd4.json`
+
+**范围与最终状态**：这次证明新增 Pi→Qoder 用量的归属、持久化和未知金额语义，不证明 Qoder 实际扣费或完整账单对账；旧漏记数据未修复。真实场景仍限单轮、无工具；SSH 启动失败原因、LAN 直连、其他 Provider 与 notarized release 不在通过范围。已断开并关闭本地测试客户端的 4 个已核对身份进程；mac2 宿主仍运行，配对、测试 session、records、旧包备份及证据保留。
+
+证据索引：
+
+- 本地：`/tmp/scry-billing-acceptance-Gzn1Bo/`，含 `manifest.json`、`verified-evidence.json`、`verify-evidence.mjs`、history、receipt、`host-evidence/` 和 `cleanup.json`。
+- 宿主：`/Users/test/scry-remote-acceptance-0.2.181-kwEx9g/`，含安装/启动日志、`running-host.json`、`billing-sqlite.json`、canonical record 副本、CLI 输出、`remote-ledger-selection.json` 和 `final-host-state.json`；原始 DB 与 records 仍在正常宿主数据目录及工作区。
+- 完整门禁日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13631-477e-74cf-8324-a004d6063f2c/evidence-preserving-reducer/objects/1f/1f225c55e143f1993934b20edd22118bc664da23b3c3a4d645aa06e158e02f1c.txt`。
 
 源方案与历史基线见 [调研记录](research/scry-desktop-remote-host-feasibility.md)。
