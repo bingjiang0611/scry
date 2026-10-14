@@ -9,7 +9,7 @@ Set `SCRY_PERF_LOG=1` before starting Scry to emit one-line JSON samples prefixe
 - `app.startup`: database readiness, window creation, and deferred recovery completion.
 - `agent.start` and `agent.first_provider_trace`: renderer request admission/registration and launch-to-first Provider event, kept separate from total Provider execution time.
 - `agent.terminal_finalize`: Provider terminal handling split into renderer notification, diff completion, archive commit, and SQLite projection; `committed=0` identifies degraded/failed canonical recording paths.
-- `session_history.load`: catalog lookup, archive read, Provider transcript parse, merge/enrichment, visible-page attachment hydration, total/returned turn counts, and transcript byte count.
+- `session_history.load`: catalog lookup, archive read, Provider transcript parse, native history reconciliation, selection side effects, durable project/recent-folder updates (`project_remember`), pure turn merge (`merge_turns`), Provider enrichment (`merge`), visible-page attachment hydration, total/returned turn counts, and transcript byte count. Project bookkeeping is timed separately: it must not be mistaken for archive parsing or merge cost.
 - `session_history.load_older`: indexed archive-page or normalized-cache paging and visible-page hydration.
 
 Provider execution time must be evaluated separately from Scry overhead. A visible terminal event also does not imply that every independent persistence surface has committed.
