@@ -10,6 +10,8 @@ import { stopOwnedApp } from './owned-app-processes.mjs'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-desktop-remote-ui-'))
 const negativeControl = process.argv.includes('--negative-control')
+const negativeMachineControl = process.argv.includes('--negative-machine-control')
+const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
 
@@ -19,6 +21,9 @@ const fixtureSource = `
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { DesktopRemote, RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
+import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
+import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
+import ${JSON.stringify(join(root, 'src/renderer/codex-alignment.css'))}
 
 const firstLedger = '11111111-1111-4111-8111-111111111111'
 const secondLedger = '22222222-2222-4222-8222-222222222222'
@@ -27,7 +32,8 @@ const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
-  intent: null, connected: false, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0
+  intent: null, connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
+  localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
@@ -68,13 +74,13 @@ const question = { runId: firstScryRun, questionId: 'fixture-question', provider
   question: '继续远程运行？', header: '确认', options: [{ label: '继续', description: '继续执行' }], multiSelect: false, allowCustomAnswer: false
 }] }
 const api = {
-  async list() { return [connection] },
+  async list() { if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
   async pair() { throw new Error('pairing is outside this fixture') },
   async finishPairing() { throw new Error('pairing is outside this fixture') },
   async connect() { state.connected = true },
-  async disconnect() {},
+  async disconnect() { state.connected = false },
   async forget() {},
-  async catalog() { return catalog },
+  async catalog() { return structuredClone({ ...catalog, projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })), providers: state.hideProvider ? [beta] : catalog.providers }) },
   async history(_id, context) { state.historyCalls.push(contextFor({ context })); return { turns: [], hasOlder: false, source: 'trace_archive', status: 'available' } },
   async trace(_id, context, runId) {
     state.traceCalls.push({ context: contextFor({ context }), runId })
@@ -103,7 +109,20 @@ const api = {
   async files() { return { entries: [], truncated: false } },
   async file() { throw new Error('no files in fixture') }
 }
+const noopSubscribe = () => () => {}
 window.scry = {
+  // Same minimal full-App bridge contract as session-selection-smoke.tsx.
+  activeRun: async () => null, activeRuns: async () => [],
+  onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
+  listProjects: async () => [], recentFolders: async () => [],
+  catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
+  detect: async () => [], listSkills: async () => ({ state: 'unavailable', data: null }),
+  mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
+  usageStats: async () => null, stats: async () => null, focusRun: async () => true,
+  newSession: async () => { state.localNewSessions++; return true },
+  start: async () => { state.localStarts++; throw new Error('Local execution must not be reached') },
+  remoteStatus: async () => ({ enabled: true, hostId: 'local-host', anchorSHA256: 'local-anchor', relayConfigured: true,
+    pending: [], devices: [{ deviceId: 'phone', deviceLabel: 'Fixture iPhone', confirmedAt: 1, expiresAt: 4102444800000, revoked: false }] }),
   desktopRemote: api, stopBackgroundTask: async () => { state.backgroundStopCalls++; return { status: 'unavailable', message: 'fixture remote task stop trap' } },
   async remoteDesktopHostStatus() { return state.hostEnabled ? { enabled: true, pairPort: 10001, runPort: 10002 } : { enabled: false } },
   async remoteDesktopHostInvite() { state.hostInviteCalls++; state.hostEnabled = true; return 'scry-desktop1:fixture' },
@@ -116,12 +135,16 @@ for (const type of ['keydown', 'change']) document.addEventListener(type, event 
 }, true)
 function Fixture() {
   const [hostView, setHostView] = useState(true)
-  return hostView ? <><RemoteHostPanel /><button data-client-fixture onClick={() => setHostView(false)}>Client fixture</button></> : <DesktopRemote onBack={() => {}} />
+  const [fullApp, setFullApp] = useState(false)
+  if (fullApp) return <App />
+  return <>{hostView ? <><RemoteHostPanel /><button data-client-fixture onClick={() => setHostView(false)}>Client fixture</button></> : <DesktopRemote onBack={() => {}} />}
+    <button data-app-fixture style={{ position: 'fixed', top: 2, right: 2, zIndex: 9999 }} onClick={() => { state.intent = null; setFullApp(true) }}>Full App</button>
+  </>
 }
 createRoot(document.getElementById('root')).render(<Fixture />)
 `
 
-async function exercise(contents) {
+async function exercise(contents, capture) {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression, label = expression) => {
@@ -137,7 +160,7 @@ async function exercise(contents) {
     node.scrollIntoView({ block: 'center', inline: 'nearest' })
     const rect = node.getBoundingClientRect()
     const point = { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
-    if (rect.width <= 0 || rect.height <= 0 || document.elementFromPoint(point.x, point.y) !== node && !node.contains(document.elementFromPoint(point.x, point.y))) throw new Error('Control is not hit-testable: ' + ${JSON.stringify(selector)})
+    if (rect.width <= 0 || rect.height <= 0 || document.elementFromPoint(point.x, point.y) !== node && !node.contains(document.elementFromPoint(point.x, point.y))) throw new Error('Control is not hit-testable: ' + ${JSON.stringify(selector)} + ' ' + JSON.stringify({ point, width: rect.width, height: rect.height, hit: document.elementFromPoint(point.x, point.y)?.outerHTML.slice(0, 300) }))
     return point
   })()`)
   const send = (method, params) => contents.debugger.sendCommand(method, params)
@@ -148,7 +171,7 @@ async function exercise(contents) {
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
   }
   const key = async (key, code = key, modifiers = 0) => {
-    const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'ArrowDown' ? 40 : key === 'ArrowUp' ? 38 : key.length === 1 ? key.toUpperCase().charCodeAt(0) : undefined
+    const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'ArrowDown' ? 40 : key === 'ArrowUp' ? 38 : key.length === 1 ? (key.charCodeAt(0) < 128 ? key.toUpperCase().charCodeAt(0) : 0) : undefined
     const nativeVirtualKeyCode = process.platform === 'darwin'
       ? { Enter: 36, Escape: 53, ArrowDown: 125, ArrowUp: 126, b: 11, f: 3 }[key]
       : virtualKey
@@ -207,12 +230,16 @@ async function exercise(contents) {
   await wait('window.desktopRemoteFixture.submitInputs.length === 2', 'next message')
   const afterAdoption = await fixture()
   check(afterAdoption.submitInputs[1].context.externalSessionId === 'native-session', 'New native session was not adopted for the next message')
+  check(await read('document.querySelector(\'.desktop-remote__sidebar > label:last-of-type select\').value === "native-session"'), 'Adopted session was mislabeled as a new draft before catalog settlement')
   await wait('window.desktopRemoteFixture.traceCalls.some(call => call.runId === "remote-run-fixture-2")', 'second remote run trace')
   check((await bodyText()).includes('second remote run'), 'Second remote run was not displayed before context switch')
   check((await bodyText()).includes('remote background task'), 'Remote background task panel was not visible')
   check(!(await read('document.querySelector("[aria-label^=\\"停止任务\\"]")')), 'Remote background task exposed a task-stop control')
   check((await fixture()).backgroundStopCalls === 0, 'Remote background task reached stopBackgroundTask while visible')
 
+  check(await read('document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\').disabled'), 'Existing session must keep its Provider identity')
+  await click('.desktop-remote__sidebar > button')
+  await wait('!document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\').disabled', 'new draft unlocks execution context')
   await click('.desktop-remote__sidebar > label:nth-of-type(2) select')
   check(await read('document.activeElement?.tagName === "SELECT"'), 'Provider select did not receive native focus')
   await key('b', 'KeyB')
@@ -238,7 +265,86 @@ async function exercise(contents) {
   const finalState = await fixture()
   check(finalState.submitInputs[2].context.providerId === 'claude' && finalState.submitInputs[2].context.agentProfileId === 'alternate', 'Same-provider profile selection routed to the wrong runtime')
 
+  await click('[data-app-fixture]')
+  await wait('document.querySelector(\'select[aria-label="新会话执行位置"]\')?.options.length === 2', 'saved host in production App sidebar')
+  const localBefore = (await fixture()).localNewSessions
+  await click('select[aria-label="新会话执行位置"]')
+  await key('f', 'KeyF'); await key('Enter')
+  await wait('document.querySelector(\'select[aria-label="新会话执行位置"]\').value === "fixture-connection"', 'select remote execution location')
+  check(!await read('!!document.querySelector(".desktop-remote__workspace")'), 'Changing draft target changed the existing conversation')
+  await click('.sb-new')
+  await wait(`window.desktopRemoteFixture.localNewSessions > ${localBefore} || document.querySelector('.desktop-remote__workspace') != null`, 'new session route')
+  check((await fixture()).localNewSessions === localBefore, 'Remote new session called local newSession')
+  await wait('document.querySelector(\'textarea[aria-label="远程提示词"]\') != null', 'remote composer in full App')
+  check((await bodyText()).includes('执行位置：Fixture desktop · 远程'), 'Remote machine identity missing from conversation')
+  check((await bodyText()).includes('本机会话'), 'Local history lacks machine identity')
+
+  // Transport state changes are fixture events, not programmatic UI clicks.
+  await read('window.desktopRemoteFixture.connected = false')
+  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "未连接"', 'SSH exit reflected in sidebar')
+  await click('textarea[aria-label="远程提示词"]'); await insert('unsent offline draft'); await key('Enter')
+  check((await fixture()).submitInputs.length === 3 && (await fixture()).localStarts === 0, 'Offline remote draft reached a Provider')
+  check(await read('document.querySelector(".desktop-remote__composer button").disabled'), 'Offline remote send is enabled')
+  await read('window.desktopRemoteFixture.listFailure = true')
+  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "状态未知"', 'read failure is not an empty or connected list')
+  check(await read('document.querySelector(".saved-remote-host").textContent.includes("Fixture desktop")'), 'Read failure forgot saved host')
+  await read('window.desktopRemoteFixture.listFailure = false')
+  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "未连接"', 'read recovery')
+  await click('.desktop-remote__workspace-head button')
+  await wait('!document.querySelector(".desktop-remote__composer button").disabled', 'explicit reconnect')
+  check(await read('document.querySelector(\'textarea[aria-label="远程提示词"]\').value === "unsent offline draft"'), 'Reconnect discarded the draft')
+  check((await fixture()).submitInputs.length === 3, 'Reconnect automatically resubmitted a draft')
+
+  await capture('remote-workspace')
+  await read('window.desktopRemoteFixture.hideProvider = true')
+  await click('.desktop-remote__workspace-head button:last-child')
+  await wait('document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\')?.selectedOptions[0]?.textContent.includes("原 Provider")', 'missing Provider is not replaced')
+  check(await read('document.querySelector(".desktop-remote__composer button").disabled'), 'Missing Provider allowed submission')
+  await read('window.desktopRemoteFixture.hideProvider = false')
+  await click('.desktop-remote__workspace-head button:last-child')
+  await wait('!document.querySelector(".desktop-remote__composer button").disabled', 'original Provider restored')
+
+  await click('select[aria-label="新会话执行位置"]'); await key('本'); await key('Enter')
+  await wait('document.querySelector(\'select[aria-label="新会话执行位置"]\').value === "local"', 'local draft target')
+  await click('.sb-new')
+  await wait(`window.desktopRemoteFixture.localNewSessions === ${localBefore + 1}`, 'local new-session route remains intact')
+  check(!await read('!!document.querySelector(".desktop-remote__workspace")'), 'Local new session retained the remote composer')
+  check((await fixture()).localStarts === 0, 'New-session selection started an unrequested local model')
+
+  await click('.sb-settings')
+  await click('.settings-rail button:last-child')
+  await wait('document.querySelector(".remote-pairing")?.textContent.includes("Fixture iPhone")', 'inbound device grant')
+  check(await read('document.querySelector(".remote-client-settings").textContent.includes("Fixture desktop")'), 'Settings omitted outbound host')
+  check(!await read('document.querySelector(".remote-client-settings").textContent.includes("Fixture iPhone")'), 'Inbound grants mixed into outbound hosts')
+  await capture('remote-settings')
+  await click('.remote-client-settings .saved-remote-host')
+  await wait('!document.querySelector(".settings-modal") && !!document.querySelector(".desktop-remote__workspace")', 'settings opens host in main view')
+
+  await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
+  await wait('document.querySelector("[data-app-fixture]") != null', 'fixture reload')
+  await click('[data-app-fixture]')
+  await wait('document.querySelector(".saved-remote-host")?.textContent.includes("Fixture desktop")', 'saved hosts after renderer reload')
+  await click('.saved-remote-host')
+  await wait('document.querySelector(".desktop-remote__workspace-head")?.textContent.includes("Fixture desktop")', 'sidebar host opens workspace')
+
+  await wait('document.querySelector(\'.desktop-remote__sidebar > label:last-of-type select\')?.options.length === 2', 'existing remote session')
+  await click('.desktop-remote__sidebar > label:last-of-type select'); await key('o', 'KeyO'); await key('Enter')
+  await wait('document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\').disabled', 'bound session context')
+  await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.catalogRevision = 1')
+  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "未连接"', 'bound session disconnect')
+  await click('.desktop-remote__workspace-head button')
+  await wait('document.querySelector(\'.desktop-remote__sidebar > label:first-of-type select\')?.selectedOptions[0]?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
+
   return {
+    boundSessionReconnectRefreshesCatalog: true,
+    savedHostsAfterRendererReload: true,
+    settingsSeparatesConnectionDirections: true,
+    removedProviderNeverSubstituted: true,
+    fullAppMachineRouting: true,
+    existingSessionIdentityLocked: true,
+    offlineNeverFallsBack: true,
+    readFailureKeepsSavedHosts: true,
+    reconnectPreservesDraft: true,
     hostEnableInviteDisable: true,
     providerProfileIdentity: true,
     nativeCoordinateInput: true,
@@ -263,8 +369,13 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl ? [{ name: 'remove-remote-task-guard', enforce: 'pre', transform(source, id) {
-      if (!id.endsWith('/ChatTurn.tsx')) return
+    plugins: negativeControl || negativeMachineControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeMachineControl && id.endsWith('/App.tsx')) {
+        const route = 'onNewChat: useEventCallback(startNewConversation)'
+        if (!source.includes(route)) throw new Error('machine routing negative control not found')
+        return source.replace(route, 'onNewChat: useEventCallback(newConversation)')
+      }
+      if (!negativeControl || !id.endsWith('/ChatTurn.tsx')) return
       const guard = "work={remote ? { ...backgroundWork, taskStop: 'unavailable' } : backgroundWork}"
       if (!source.includes(guard)) throw new Error('negative control guard not found')
       return source.replace(guard, 'work={backgroundWork}')
@@ -283,14 +394,17 @@ try {
     app.setPath('sessionData', join(root, 'sessionData'))
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const win = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+      const win = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       try {
         await win.loadFile(join(root, 'index.html'))
         win.webContents.debugger.attach('1.3')
-        const result = await (${exercise.toString()})(win.webContents)
+        const result = await (${exercise.toString()})(win.webContents, async name => {
+          await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
+          require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
+        })
         console.log('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
@@ -316,12 +430,12 @@ try {
       if (cleanupTimer) return
       const result = output.match(/^SCRY_DESKTOP_REMOTE_UI_RESULT=(.+)$/m)?.[1]
       if (code !== 0 || !result) { failed = true; reject(new Error(`DesktopRemote UI smoke failed (${code ?? signal}); fixture=${temp}:\\n${output.slice(-8000)}`)) }
-      else { console.log(result); resolve() }
+      else { console.log(result); if (keepArtifacts) console.log('UI artifacts: ' + temp); resolve() }
     })
   })
 } catch (error) {
   failed = true
   throw error
 } finally {
-  if (!cleanupUnknown && !failed) await rm(temp, { recursive: true, force: true })
+  if (!cleanupUnknown && !failed && !keepArtifacts) await rm(temp, { recursive: true, force: true })
 }

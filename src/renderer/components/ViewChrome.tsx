@@ -20,6 +20,7 @@ export function ViewChrome({
     <header className="topbar compact">
       <div className="tb-thread" title={cwd ?? '当前会话未绑定工作目录'}>
         <Icon name="folder" />
+        <span className="execution-location" aria-label="执行位置：本机">本机</span>
         <b>{workspaceLabel}</b>
       </div>
       <div className="tb-spacer" />

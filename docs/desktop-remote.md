@@ -5,7 +5,7 @@
 ## 连接
 
 1. 在执行端打开「远程访问」，选择「启用并生成 SSH 邀请」。宿主只监听两个 `127.0.0.1` 端口，不开放 LAN 通配监听。
-2. 在客户端选择「连接桌面主机」，填写真实 SSH 主机名/IP、用户名、端口和 `scry-desktop1:` 邀请。
+2. 在客户端侧栏选择「远程主机 → 添加 / 管理」，或在「设置 → 远程访问 → 我连接的主机」添加，填写真实 SSH 主机名/IP、用户名、端口和 `scry-desktop1:` 邀请。
 3. 比较客户端与执行端显示的设备公钥指纹。**必须在执行端的待确认列表批准该指纹**；SSH 登录成功不等于设备获批。
 4. 客户端完成配对，连接主机，然后选择远端项目、Provider/profile 和会话。项目必须已被执行端 Scry 识别；不会上传本地仓库或凭据。
 5. 撤销访问应在执行端撤销设备；客户端「忘记」只删除本地连接。已有设备重新配对前，需要先撤销旧 grant。
@@ -19,6 +19,22 @@ ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -p 22 USER@HOST t
 ```
 
 TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化拒绝沿用连接。客户端私钥、证书和待核对回执由 Electron safeStorage 加密保存；加密不可用时不退回明文。
+
+## D-20261014-machine-navigation：执行位置与会话归属
+
+- **范围 / 状态**：Scry 桌面端；需求已确认，成品视觉与日常配置验收待完成。2026-10-14 用户反馈重启后看不到 mac2，询问新建会话是否应该选择机器，随后要求“优化吧”。
+- **信息结构**：侧栏「新会话执行位置」先选本机或已保存主机，再点「新建会话」。远程项目、Provider/profile、模型与历史来自该主机，不继承本机运行环境。切换这个选择器只改变下一次新建的目标，不迁移当前会话。
+- **连接方向**：设置区分「我连接的主机」和「允许设备访问本机」。后者是入站授权（如 iPhone），不是本机连接过的 mac2 列表。远程主机打开主内容区；本机会话列表、会话顶栏和远程会话顶栏标明归属。
+- **状态语义**：保存不等于在线。共享列表每 3 秒向 main 读取状态；失败保留已有身份并标为未知。离线不能发送，不回退本机；显式重连保留草稿且不自动重发。已有会话锁定项目与 Provider/profile，缺失的运行环境不自动代选。目录与历史请求分别取消，避免重连时相互覆盖。
+- **保存边界**：连接仍由 main 在当前 `userData/desktop-connections/desktop-client.state` 加密保存。验收配置与日常配置不同；本轮未把测试私钥导入日常 App，也未完成日常 App 对 mac2 的正式配对。日常配置必须通过新的邀请与宿主指纹批准。
+- **参考 / 保留**：复核 T3 Code 原始 `docs/user/remote-access.md` 的独立远端运行环境语义；采用机器先于项目的归属关系，不引入其外部服务或配置。复用 Scry 的 DesktopRemote、ChatTurn、设置框、主题 tokens 与既有 SSH/mTLS 通道；不扩大远程终端、附件或本地文件能力。
+- **实现入口**：`src/renderer/components/MachineNavigation.tsx`、`src/renderer/hooks/useDesktopConnections.ts`、`src/renderer/App.tsx`、`src/renderer/components/DesktopRemote.tsx`；设置接线在 `RemotePairing.tsx` / `Modals.tsx`。
+- **回归入口**：`MachineNavigation.test.tsx` 覆盖断线保留、读取失败、乱序响应和失效目标；`node scripts/desktop-remote-ui-smoke.mjs --keep` 用生产 App/CSS、隔离 bridge 和原生坐标/键盘验证分流、设置分区、renderer 重载、离线与重连、Provider 消失和已有会话归属。`--negative-machine-control` 故意恢复本机新会话路由，必须失败；原有 `--negative-control` 仍必须捕获远程任务暴露本地停止按钮。
+- **发现并修复**：原生命中检查发现远程绝对定位页面遮挡侧栏；已有会话重连用例先失败，证明目录与历史共用取消序号会丢弃新目录。两者修复后保留回归。隐藏 Electron 截图需等待实际动画/绘制，不能用刚出现的 DOM 冒充已完成绘制。
+- **本轮检查**：macOS / Node 22.22.1；`npm run typecheck`、`npm test`（218 文件 / 2733 测试通过，3 个真实探针跳过，shell 通过）、`npm run build`、完整 `npm run test:renderer:ui`、`git diff --check` 均通过。两个 mutation control 均以预期原因失败。此前失败记录未抹去，也未扩大超时或弱化断言。
+- **设计库回执**：`P-SCRY-DESKTOP-REMOTE` 原位登记并可检索，build 退出 0；全库 check 退出 1，仅报告 5 个既有失效来源：`P-PI-MODEL-SELECTOR`、`D-20260912-scry-ios-remote`、`D-20261008-scry-ios-continuity`、`P-SCRY-SESSION-HISTORY`、`D-20261010-scry-llm-sidebar`。本轮没有修改这些来源，也没有提升为全局偏好或视觉认可。
+- **验收边界**：上述脚本的连接与 Provider 是 fixture，不证明日常 App 已保存 mac2 或当前安装包已升级。真实配对、当前安装版重启后显示及用户视觉认可仍需分别验收；没有新发真实模型请求。
+- **下次检查**：改新会话入口或连接列表时，验证“所选机器 → 该机器的项目与 Provider → 固定会话归属”；离线、未知、目标删除均不得静默回落本机。只有补齐远端 typed API 与验收，才扩展尚不支持的远程功能。
 
 ## 行为与边界
 

@@ -22,6 +22,7 @@ import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
+import { DesktopRemote } from './components/DesktopRemote'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
@@ -67,7 +68,7 @@ import {
 const AnalyticsView = lazy(() => import('./components/AnalyticsView').then((module) => ({ default: module.AnalyticsView })))
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
-type AppView = 'chat' | 'analytics' | 'meta-prompts'
+type AppView = 'chat' | 'analytics' | 'meta-prompts' | 'desktop-remote'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -990,6 +991,9 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const [view, setView] = useState<AppView>('chat')
+  const [newChatTarget, setNewChatTarget] = useState('local')
+  const [remoteConnectionId, setRemoteConnectionId] = useState<string | undefined>()
+  const [remoteDraftGeneration, setRemoteDraftGeneration] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
@@ -1977,6 +1981,23 @@ export function App() {
     setView(next)
     if (next === 'analytics') integrations.loadAnalytics()
   }
+  const openRemote = (connectionId?: string): void => {
+    // Fence pending local history/new-session reads before changing execution view.
+    sessionSelectionSeqRef.current += 1
+    setSessionLoading(false)
+    setShowSettings(false)
+    setShowSkills(false)
+    setShowMcp(false)
+    setShowLlmPerformance(false)
+    setRemoteConnectionId(connectionId)
+    if (connectionId) setNewChatTarget(connectionId)
+    changeView('desktop-remote')
+  }
+  const startNewConversation = async (): Promise<void> => {
+    if (newChatTarget === 'local') { await newConversation(); return }
+    setRemoteDraftGeneration(generation => generation + 1)
+    openRemote(newChatTarget)
+  }
   const openMetaPrompts = (): void => {
     setShowSkills(false)
     setShowMcp(false)
@@ -2226,12 +2247,13 @@ export function App() {
   // Stream commits must not invalidate the history navigator. These handlers keep
   // their identity while reading the latest session/provider state when invoked.
   const sidebarActions = {
-    onNewChat: useEventCallback(newConversation),
-    onPick: useEventCallback(pickSession),
+    onNewChat: useEventCallback(startNewConversation),
+    onOpenRemote: useEventCallback(openRemote),
+    onPick: useEventCallback((...args: Parameters<typeof pickSession>) => { setNewChatTarget('local'); return pickSession(...args) }),
     onTogglePin: useEventCallback(togglePinSession),
     onArchive: useEventCallback(archiveSession),
     onRenameSession: useEventCallback(renameSession),
-    onNewProjectChat: useEventCallback(newConversationInProject),
+    onNewProjectChat: useEventCallback((projectCwd: string) => { setNewChatTarget('local'); return newConversationInProject(projectCwd) }),
     onToggleProjectPin: useEventCallback(toggleProjectPin),
     onRenameProject: useEventCallback(renameProject),
     onRemoveProject: useEventCallback(removeProject),
@@ -2254,8 +2276,10 @@ export function App() {
           id="sidebar-pane"
           version={packageJson.version}
           projects={projects}
-          activeCwd={cwd}
-          activeSessionId={activeSessionId}
+          activeCwd={view === 'desktop-remote' ? null : cwd}
+          activeSessionId={view === 'desktop-remote' ? null : activeSessionId}
+          newChatTarget={newChatTarget}
+          onNewChatTarget={setNewChatTarget}
           activeProviderId={integrations.selectedProviderId}
           activeAgentProfileId={integrations.providerContext.agentProfileId}
           runningRunIds={runningRunIds}
@@ -2283,7 +2307,9 @@ export function App() {
       <div className="main-area" id="main-pane">
         <>
         {view !== 'chat' && <div className="aux-view-topbar" aria-hidden="true" />}
-        {view === 'analytics' ? (
+        {view === 'desktop-remote' ? (
+          <DesktopRemote key={`${remoteConnectionId ?? 'manage'}:${remoteDraftGeneration}`} initialConnectionId={remoteConnectionId} onBack={() => changeView('chat')} />
+        ) : view === 'analytics' ? (
           <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView
               analytics={integrations.analytics}
@@ -2541,6 +2567,7 @@ export function App() {
                 setArchiveUndo(null)
                 workspace.loadProjects()
               }}
+              onOpenRemote={openRemote}
               onClose={() => setShowSettings(false)}
             />
           )}

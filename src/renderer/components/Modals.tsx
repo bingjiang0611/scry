@@ -105,12 +105,14 @@ export function SettingsModal({
   theme,
   onThemeChange,
   onClose,
-  onSessionsChanged
+  onSessionsChanged,
+  onOpenRemote
 }: {
   theme: AppTheme
   onThemeChange: (theme: AppTheme) => void
   onClose: () => void
   onSessionsChanged: () => void
+  onOpenRemote?: (connectionId?: string) => void
 }) {
   const titleId = useId()
   const appearanceRef = useRef<HTMLButtonElement>(null)
@@ -216,7 +218,7 @@ export function SettingsModal({
               onSessionsChanged={onSessionsChanged}
             />
           ) : (
-            <div className="settings-body"><RemotePairing /></div>
+            <div className="settings-body"><RemotePairing onOpenRemote={onOpenRemote} /></div>
           )}
         </div>
       </div>
@@ -225,7 +227,7 @@ export function SettingsModal({
           ? '选择会保存在此设备，并立即应用到全部视图。'
           : tab === 'archived'
             ? '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'
-            : '配对只在这台 Mac 本地进行；设备已配对前不会显示为已授权，请务必核对手机上与此处一致的主机指纹。'}
+            : '配对必须在被访问的主机上批准。请核对连接设备与待确认列表中显示的设备公钥指纹。'}
       </div>
     </ModalFrame>
   )
