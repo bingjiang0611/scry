@@ -77,6 +77,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 
 ## 测试维护纪律
 
+- 手机端操作与验收不使用模拟器或仿真设备；需要操作手机时，直接使用 `ictrl-phone-control` skill，通过 iCTRL 操作真实手机。真机或 iCTRL 不可用时，明确报告阻碍，不改用模拟器，也不将未执行的验收标为通过。
 - 先按业务/权限合同写验收场景；关键回归证明一次旧实现或故意破坏保护时失败。测试可以由 AI 维护，但删断言、改预期、skip、扩大超时必须说明依据；首次失败不能被重跑通过抹掉。
 - 本地 focused 使用 `npm run test:unit -- <test-files>`；`npm test` 是 unit 与 shell 的复合入口。合入沿用现有 CI，macOS gate 同时执行 `npm run test:renderer:ui`（含 Credits），避免有脚本却没有门禁。
 - DOM/事件问题走现有隔离 Electron fixture；CSS 源码、SSR 或程序化 `.click()` 不单独证明 cascade、坐标命中与焦点行为。main IPC 拒绝测试必须触发生产注册 wrapper 并证明特权 listener 未执行，不能只看 iframe 没有 preload API。
