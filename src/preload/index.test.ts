@@ -30,6 +30,7 @@ const callableApi = api as unknown as Record<string, (...args: unknown[]) => unk
 
 const invokeChannels = {
   setTheme: 'app:setTheme',
+  copyText: 'app:copyText',
   performanceDiagnosticsEnabled: 'app:performanceDiagnosticsEnabled',
   reportRendererPerformance: 'app:reportRendererPerformance',
   detectFast: 'agent:detectFast',

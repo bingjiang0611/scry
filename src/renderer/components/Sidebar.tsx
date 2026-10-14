@@ -58,6 +58,8 @@ export const Sidebar = memo(function Sidebar({
   onLlmPerformance,
   onSkills,
   onMcp,
+  onMetaPrompts,
+  metaPromptsActive = false,
   catalogHealth,
   onSettings
 }: {
@@ -89,6 +91,8 @@ export const Sidebar = memo(function Sidebar({
   onLlmPerformance?: () => void
   onSkills?: () => void
   onMcp?: () => void
+  onMetaPrompts?: () => void
+  metaPromptsActive?: boolean
   catalogHealth?: CatalogHealth
   onSettings?: () => void
 }) {
@@ -177,7 +181,7 @@ export const Sidebar = memo(function Sidebar({
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onAnalytics || onLlmPerformance || onSkills || onMcp) && (
+      {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (
         <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
             <button
@@ -209,6 +213,16 @@ export const Sidebar = memo(function Sidebar({
               aria-label="MCP"
             >
               <Icon name="cube" /> MCP
+            </button>
+          )}
+          {onMetaPrompts && (
+            <button
+              type="button"
+              className={`sb-navitem ${metaPromptsActive ? 'active' : ''}`}
+              aria-current={metaPromptsActive ? 'page' : undefined}
+              onClick={onMetaPrompts}
+            >
+              <Icon name="terminal" /> Meta Prompts
             </button>
           )}
         </nav>

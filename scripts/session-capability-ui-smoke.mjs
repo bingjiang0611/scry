@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
+import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
@@ -15,10 +16,12 @@ const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
 const summaryOnly = process.argv.includes('--summary-only')
 const performanceOnly = process.argv.includes('--performance-only')
-const fixtures = performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance']
+const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
+const fixtures = metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts']
 
-// Real React DOM events in an invisible, sandboxed Electron fixture. This does not launch
-// Scry's main process or preload, discover providers, touch user data, or start a CDP port.
+// Real React DOM events in isolated, sandboxed Electron fixtures. Meta Prompts uses the
+// production preload and a scoped clipboard handler. No Scry main process, Provider
+// discovery, real userData, or CDP port is used by this runner.
 async function exerciseSummarySampling() {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   // Hidden Electron windows suspend rAF; the source cadence is an explicit timer.
@@ -1146,9 +1149,21 @@ try {
       }
     }
   })
+  if (fixtures.includes('meta-prompts')) {
+    for (const [entry, name] of [[join(root, 'src/preload/index.ts'), 'meta-prompts-preload'], [join(root, 'scripts/fixtures/meta-prompts-ipc.ts'), 'meta-prompts-ipc']]) {
+      await build({
+        configFile: false, root: temp, envDir: temp, logLevel: 'error',
+        build: {
+          outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
+          lib: { entry, formats: ['cjs'], fileName: () => `${name}.cjs` },
+          rollupOptions: { external: ['electron'] }
+        }
+      })
+    }
+  }
   for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
-    const { app, BrowserWindow } = require('electron')
+    const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     // macOS pipes are asynchronous: exit only after the result line is flushed, or the parent sees no result.
     const finish = (result) => process.stdout.write('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
@@ -1162,6 +1177,21 @@ try {
       win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       try {
         let result = {}, piCommands = {}
+        if (${fixtures.includes('meta-prompts')}) {
+          const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
+          const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
+          require(${JSON.stringify(join(temp, 'meta-prompts-ipc.cjs'))}).registerMetaPromptsFixtureIpc(metaWin, metaUrl)
+          metaWin.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
+          metaWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+          await metaWin.loadFile(${JSON.stringify(join(temp, 'meta-prompts.html'))})
+          result.metaPrompts = await (${exerciseMetaPrompts.toString()})(metaWin.webContents, metaWin, clipboard, ${JSON.stringify(process.env.SCRY_META_PROMPTS_SCREENSHOT ?? '')})
+          metaWin.destroy()
+          ipcMain.removeHandler('app:copyText')
+          if (${metaPromptsOnly}) {
+            finish(result)
+            return
+          }
+        }
         if (${fixtures.includes('llm-performance')}) {
           win.setSize(1000, 800)
           await win.loadFile(${JSON.stringify(join(temp, 'llm-performance.html'))})

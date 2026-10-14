@@ -7,9 +7,11 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
 
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
+const devMetaPromptsOnly = process.argv[2] === '--dev-meta-prompts-only'
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
 const devQuestionOnly = process.argv[2] === '--dev-question-only'
 const foreground = process.argv.includes('--foreground')
@@ -20,7 +22,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = nativeHistoryOnly || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = devMetaPromptsOnly || nativeHistoryOnly || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -206,6 +208,33 @@ async function main() {
       throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
     }
     return response.result?.value
+  }
+  if (devMetaPromptsOnly) {
+    const result = await exerciseMetaPromptsApp(cdp, evaluate)
+    cdp.close()
+    await stopOwnedApp(child)
+    launchApp()
+    const restarted = await waitForTarget(port)
+    cdp = connectCdp(restarted.page.webSocketDebuggerUrl)
+    await cdp.send('Runtime.enable')
+    await evaluate(`(async () => {
+      const deadline = Date.now() + 5000;
+      while (!document.querySelector('[aria-label="主要视图"] .sb-navitem:last-child')) {
+        if (Date.now() > deadline) throw new Error('Restarted App navigation missing');
+        await new Promise(resolve => setTimeout(resolve, 16));
+      }
+      document.querySelector('[aria-label="主要视图"] .sb-navitem:last-child').click();
+    })()`)
+    await evaluate(`(async () => {
+      const deadline = Date.now() + 5000;
+      while (document.querySelector('.mp-body')?.textContent !== ${JSON.stringify(result.body)}) {
+        if (Date.now() > deadline) throw new Error('Prompt lost after full App restart');
+        await new Promise(resolve => setTimeout(resolve, 16));
+      }
+    })()`)
+    cdp.close()
+    console.log(JSON.stringify({ ...result, coldRestartPersistence: true }))
+    return
   }
   if (nativeHistoryOnly) {
     const wait = expression => evaluate(`(async () => {

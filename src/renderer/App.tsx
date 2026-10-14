@@ -16,6 +16,8 @@ import type { WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
 import { PaneSplitter } from './components/PaneSplitter'
 import { SessionChatView } from './components/ChatView'
+import { MetaPromptsView } from './components/MetaPromptsView'
+import { appendMetaPrompt } from './meta-prompts'
 import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
@@ -65,7 +67,7 @@ import {
 const AnalyticsView = lazy(() => import('./components/AnalyticsView').then((module) => ({ default: module.AnalyticsView })))
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
-type AppView = 'chat' | 'analytics'
+type AppView = 'chat' | 'analytics' | 'meta-prompts'
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -987,7 +989,7 @@ export function App() {
   }, [currentSurface.id])
   const [showSettings, setShowSettings] = useState(false)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
-  const [view, setView] = useState<AppView>('chat') // 对话/诊断/分析
+  const [view, setView] = useState<AppView>('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
@@ -1975,6 +1977,19 @@ export function App() {
     setView(next)
     if (next === 'analytics') integrations.loadAnalytics()
   }
+  const openMetaPrompts = (): void => {
+    setShowSkills(false)
+    setShowMcp(false)
+    setShowLlmPerformance(false)
+    changeView('meta-prompts')
+  }
+  const insertMetaPrompt = (body: string): void => {
+    setInput(current => appendMetaPrompt(current, body))
+    setComposerError(null)
+    setSlashHidden(true)
+    changeView('chat')
+    window.setTimeout(() => taRef.current?.focus(), 0)
+  }
   const openTurnDiffReview = useCallback(
     (turn: { runId: string; userText: string }, _turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
       surfacePane.restore()
@@ -2226,6 +2241,7 @@ export function App() {
     onLlmPerformance: useEventCallback(openLlmPerformance),
     onSkills: useEventCallback(openSkills),
     onMcp: useEventCallback(openMcp),
+    onMetaPrompts: useEventCallback(openMetaPrompts),
     onSettings: useEventCallback(() => setShowSettings(true))
   }
 
@@ -2249,6 +2265,7 @@ export function App() {
           {...sidebarActions}
           archiveUndo={archiveUndo}
           analyticsActive={view === 'analytics'}
+          metaPromptsActive={view === 'meta-prompts'}
           catalogHealth={catalogHealth}
       />
       <PaneSplitter
@@ -2278,6 +2295,8 @@ export function App() {
               onBack={() => changeView('chat')}
             />
           </Suspense>
+        ) : view === 'meta-prompts' ? (
+          <MetaPromptsView onBack={() => changeView('chat')} onInsert={insertMetaPrompt} />
         ) : (
           <>
             <ViewChrome
