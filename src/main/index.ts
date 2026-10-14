@@ -4088,12 +4088,17 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
 // is an explicit kill switch. The relay only sees opaque inner-mTLS bytes.
 let remoteHostService: RemoteHostService | null = null
 let desktopRemoteClient: DesktopRemoteClient | null = null
-function requireDesktopRemoteClient(): DesktopRemoteClient {
+function requireDesktopSecureStorage(): typeof safeStorage {
   if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法保存远程设备凭据')
+  return safeStorage
+}
+function requireDesktopRemoteClient(): DesktopRemoteClient {
+  // An empty saved-host list must not initialize/unlock Keychain during startup.
+  // Existing credentials and every persisted write still require secure storage.
   desktopRemoteClient ??= new DesktopRemoteClient({
     directory: join(app.getPath('userData'), 'desktop-connections'),
-    encrypt: (value) => safeStorage.encryptString(value),
-    decrypt: (value) => safeStorage.decryptString(value)
+    encrypt: (value) => requireDesktopSecureStorage().encryptString(value),
+    decrypt: (value) => requireDesktopSecureStorage().decryptString(value)
   })
   return desktopRemoteClient
 }

@@ -36,6 +36,16 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **验收边界**：上述脚本的连接与 Provider 是 fixture，不证明日常 App 已保存 mac2 或当前安装包已升级。真实配对、当前安装版重启后显示及用户视觉认可仍需分别验收；没有新发真实模型请求。
 - **下次检查**：改新会话入口或连接列表时，验证“所选机器 → 该机器的项目与 Provider → 固定会话归属”；离线、未知、目标删除均不得静默回落本机。只有补齐远端 typed API 与验收，才扩展尚不支持的远程功能。
 
+## 0.2.183 安装准备（2026-10-14）
+
+- 新侧栏使主机列表成为启动读取路径。真实隔离 App 在 `safeStorage.isEncryptionAvailable()` 内阻塞；诊断日志显示 ready/window/renderer 均已完成，随后只有该方法的 start、没有 end。原外链 fixture 只向主进程发 SIGTERM，未可靠收敛其子进程，组合命令和独立 smoke 均曾超时；这些失败不计为通过。
+- 修复：空配置仅返回内存中的空列表，不初始化钥匙串或落盘私钥。已有状态解密及每次持久化仍检查安全存储；配对先成功加密保存，才发布连接及发出网络证明。加密失败不留下“已保存”连接，不发 SSH 请求；已有密文解密失败仍报错，不伪装成空列表。mTLS、宿主指纹批准与未知回执规则不变。
+- 新回归：`desktop-client.test.ts` 检查上述空读取、失败前拒绝联网和密文读取失败；外链 fixture 对意外钥匙串访问直接抛错，旧实现明确失败。原始、不替换存储结果的诊断在修复后也完成了全部外链检查。fixture 超时现使用既有 `stopOwnedApp` 按身份收敛进程，并保留失败目录，不加大其 30 秒限时。
+- 冻结产物：App **0.2.183**，私有 CLI **0.2.49**，`app.asar` SHA-256 **`07bf7d339ceca352b7f465d5e227450fb20f6f88da96dbfb8c6062724be6c2cc`**。Apple Development 签名，非公证发布版。
+- 最终 gate：Node 22.22.1；typecheck、218 文件 / 2735 单测、shell、完整 renderer UI、CLI release 581 测试与 package smoke、打包体积/资源检查、packaged Electron 安全/文件/远程宿主 smoke 全部通过。3 个真实探针跳过，没有新发真实模型请求。
+- 安装交接：冻结包与一次性安装入口在 `/Users/baobingjiang/Downloads/Scry-0.2.183-install-7EwEFn/`。`install.command` 复用原子安装器，校验版本、签名及上述 hash，保留旧 App 备份，启动后观察 20 秒。已实测运行中拒绝安装：现有 0.2.182 的 hash 未变，未产生安装完成回执。
+- **尚未安装**：当前对话由 `/Applications/Scry.app` 承载，不强制退出。用户结束任务、正常退出 Scry 后运行安装入口；成功以该目录的 `local-install-result.json` 为准，失败或结果未知不得盲目重放。mac2 的 0.2.182 宿主未改动；日常客户端正式配对及升级后的重启验收仍待完成。
+
 ## 行为与边界
 
 - 远程发送复用 App 的规范执行入口、权限/trust 检查、停止升级、归档和 managed recorder 两阶段提交，不走另一套简化执行器。
