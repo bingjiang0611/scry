@@ -1,6 +1,8 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
 import { memo, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
+import { latestBackgroundWork } from '@shared/background-work'
+import { backgroundWorkStatus } from '../background-work-status'
 import {
   contextCompactionOf,
   contextUsageEvidence,
@@ -863,7 +865,8 @@ function OverviewPanelBody({
   let judge = '轮次已结束'
   if (busy) {
     vstate = 'warn'
-    judge = '运行中'
+    const activeTurn = turns.find(turn => !turn.done && !turn.error)
+    judge = backgroundWorkStatus(activeTurn && latestBackgroundWork(activeTurn.items))?.label ?? '运行中'
   } else if (dangerHi > 0) {
     vstate = 'bad'
     judge = `${dangerHi} 处高危操作`

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as recorder from '../../core/turn-recorder/recorder'
 import { recoverManagedRecorderTurns } from '../../core/turn-recorder/managed'
 import type { ProviderRunHandle } from './types'
+import type { TraceEvent } from '../../shared/trace'
 import { piProfileForExecutable, type PiAgentProfile } from '../pi-agent-profiles'
 import * as locate from '../claude-locate'
 import { createPiAdapter, probePiAgent } from './pi'
@@ -64,9 +65,31 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
       send({ type: 'extension_ui_request', id: 'persisted', method: 'setStatus', statusKey: 'persisted', text: 'Persisted' })
       return
     }
-    send({ type: 'agent_end', messages: [] })
-    send({ type: 'agent_settled' })
+    if (command.message === 'background-child') {
+      const snapshot = (state) => send({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async',
+        widgetLines: ['PI_SUBAGENT_ASYNC_JSON:' + JSON.stringify({ kind: 'pi-subagents.async-status-snapshot', version: 1,
+          generatedAt: Date.now(), omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+          runs: [{ id: 'child-1', kind: 'subagent', label: 'worker', state }] })] })
+      snapshot('running')
+      send({ type: 'agent_end', messages: [] })
+      send({ type: 'agent_settled' })
+      const watcher = fs.watch(process.cwd(), (_event, name) => {
+        if (name !== 'release-child' || !fs.existsSync(process.cwd() + '/release-child')) return
+        watcher.close()
+        if (fs.readFileSync(process.cwd() + '/release-child', 'utf8') === 'exit') process.exit(2)
+        snapshot('complete')
+        send({ type: 'agent_start' })
+        send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'Child reviewed; parent continued' }], stopReason: 'stop' } })
+        send({ type: 'agent_end', messages: [] })
+        send({ type: 'agent_settled' })
+      })
+      send({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'checkpoint', text: 'child waiting checkpoint' })
+    } else {
+      send({ type: 'agent_end', messages: [] })
+      send({ type: 'agent_settled' })
+    }
   }
+  if (command.type === 'abort') send({ type: 'agent_settled', aborted: true })
   send({ type: 'response', id: command.id, command: command.type,
     success: !fail, data, ...(fail ? { error: 'fixture probe failed' } : {}) })
 })
@@ -87,6 +110,45 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
 }
 
 describe('Pi startup and probe lifecycle', () => {
+  it.each(['continue', 'interrupt', 'transport-exit'] as const)('keeps async child ownership through parent idle: %s', async (action) => {
+    await withProbeFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      let checkpoint!: () => void
+      const waiting = new Promise<void>(resolve => { checkpoint = resolve })
+      const handle = adapter.run({
+        runId: 'background', prompt: 'background-child', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit(event) {
+          events.push(event)
+          if (event.text?.includes('child waiting checkpoint')) checkpoint()
+        }
+      })
+      try {
+        await Promise.race([waiting, handle.promise.then(() => { throw new Error('run ended before child checkpoint') })])
+        expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+          providerId: 'pi', phase: 'waiting', taskStop: 'unavailable', tasks: [{ taskId: 'child-1', description: 'worker' }]
+        })
+        expect(events.some(event => event.stage === 'result')).toBe(false)
+        if (action === 'interrupt') handle.interrupt()
+        else writeFileSync(join(cwd, 'release-child'), action === 'transport-exit' ? 'exit' : '')
+        if (action === 'transport-exit') {
+          await expect(handle.promise).rejects.toThrow()
+          expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+            phase: 'inactive', tasks: [{ taskId: 'child-1', status: 'unconfirmed' }]
+          })
+          expect(events.some(event => event.stage === 'result')).toBe(false)
+        } else await expect(handle.promise).resolves.toMatchObject({ status: action === 'interrupt' ? 'interrupted' : 'completed' })
+        if (action === 'continue') {
+          expect(events.some(event => event.text === 'Child reviewed; parent continued')).toBe(true)
+          expect(events.filter(event => event.stage === 'result')).toHaveLength(1)
+        }
+      } finally {
+        handle.forceKill?.()
+        await handle.promise.catch(() => undefined)
+      }
+    })
+  })
+
   it('shares concurrent capability probes, but refreshes after the flight completes', async () => {
     await withProbeFixture(async (profile, cwd, starts) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })

@@ -77,7 +77,19 @@ async function exercise() {
   check(unsupported.innerText.includes('单任务停止未验证'), 'Capability evidence is missing from details')
   unsupported.querySelector('summary').click()
   await wait(() => !unsupported.querySelector('details').open)
-  return { compactDisclosure: true, viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true }
+  click('#pi-wait')
+  await wait(() => status() === '等待子 Agent')
+  check(document.querySelector('.background-work-name').textContent === 'worker', 'Pi child identity missing')
+  check(!document.querySelector('[aria-label="停止任务 child"]'), 'Pi exposes unsupported child stop')
+  check(!document.querySelector('.skeleton'), 'Pi waiting looks like model generation')
+  document.querySelector('.background-work-details summary').click()
+  await wait(() => document.querySelector('.background-work-details').open)
+  check(document.querySelector('.background-work-panel').innerText.includes('不保证后台子 Agent 已停止'), 'Pi stop overclaims child termination')
+  click('#resume')
+  await wait(() => status() === '运行中')
+  click('#done')
+  await wait(() => !document.querySelector('.run-status') && !document.querySelector('.background-work-panel'))
+  return { compactDisclosure: true, viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true, piWaitAndResume: true }
 }
 
 async function exerciseClock() {

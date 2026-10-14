@@ -5,6 +5,7 @@ import { latestBackgroundWork } from '@shared/background-work'
 import type { Turn } from '../format'
 import { AssistantTurn } from './ChatTurn'
 import { Sidebar } from './Sidebar'
+import { OverviewPanel } from './OverviewPanel'
 import { addRunningRunId } from '../App'
 import { BackgroundWorkPanel, backgroundTaskAge } from './BackgroundWorkPanel'
 
@@ -37,6 +38,22 @@ it('does not conflate model waiting with generation, failure, or a completed tur
   const archived = renderToStaticMarkup(<AssistantTurn turn={{ ...turn, done: true }} selectedId={null} onSelect={() => {}} />)
   expect(archived).not.toContain('停止任务 task-1')
   expect(archived).not.toContain('后台任务长时间未更新')
+})
+
+it('shows Pi child waiting consistently without advertising Qoder task controls', () => {
+  const piWork: BackgroundWork = { ...work, providerId: 'pi', taskStop: 'unavailable',
+    tasks: [{ ...work.tasks[0], tool: 'Agent', description: 'worker' }] }
+  const piTurn = { ...turn, items: turn.items.map(item => item.backgroundWork ? { ...item, backgroundWork: piWork } : item) }
+  const html = renderToStaticMarkup(<AssistantTurn turn={piTurn} selectedId={null} onSelect={() => {}} />)
+  expect(html).toContain('等待子 Agent')
+  expect(html).toContain('worker')
+  expect(html).toContain('不保证后台子 Agent 已停止')
+  expect(html).not.toContain('停止任务 task-1')
+  expect(html).not.toContain('当前 Qoder')
+  const overview = renderToStaticMarkup(<OverviewPanel turns={[piTurn]} busy sessionId="pi-session"
+    selected={null} usage={null} stats={null} onSelect={() => {}} />)
+  expect(overview).toContain('等待子 Agent')
+  expect(overview).not.toContain('轮次已结束')
 })
 
 it('uses the latest inactive snapshot instead of reopening an earlier waiting phase', () => {
