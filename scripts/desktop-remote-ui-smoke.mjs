@@ -20,7 +20,7 @@ let failed = false
 const fixtureSource = `
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import { DesktopRemote, RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
+import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
 import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
 import ${JSON.stringify(join(root, 'src/renderer/codex-alignment.css'))}
@@ -134,10 +134,9 @@ for (const type of ['keydown', 'change']) document.addEventListener(type, event 
   if (state.uiEvents.length > 24) state.uiEvents.shift()
 }, true)
 function Fixture() {
-  const [hostView, setHostView] = useState(true)
   const [fullApp, setFullApp] = useState(false)
   if (fullApp) return <App />
-  return <>{hostView ? <><RemoteHostPanel /><button data-client-fixture onClick={() => setHostView(false)}>Client fixture</button></> : <DesktopRemote onBack={() => {}} />}
+  return <><RemoteHostPanel />
     <button data-app-fixture style={{ position: 'fixed', top: 2, right: 2, zIndex: 9999 }} onClick={() => { state.intent = null; setFullApp(true) }}>Full App</button>
   </>
 }
@@ -189,31 +188,51 @@ async function exercise(contents, capture) {
   check((await fixture()).hostInviteCalls === 1, 'Host enable dispatched more than one invitation')
   await click('.desktop-remote__host button:last-child')
   await wait('window.desktopRemoteFixture.hostDisableCalls === 1 && !document.querySelector(".desktop-remote__invite")', 'disable clears invitation')
-  await click('[data-client-fixture]')
-  await wait('document.querySelector(\'.desktop-remote__connection\') != null', 'connection list')
-  check((await fixture()).historyCalls.length === 0, 'New session queried history before a session existed')
-  await click('.desktop-remote__actions button:not([disabled])')
-  await wait('document.querySelector(\'.desktop-remote__workspace\') != null', 'workspace')
-  await wait('document.querySelector(\'textarea[aria-label="远程提示词"]\') != null', 'composer')
-  check((await fixture()).historyCalls.length === 0, 'New session called history without an external session')
 
-  await click('.desktop-remote__controls label:nth-child(3) select')
-  await key('f', 'KeyF')
-  await key('Enter')
-  await wait('document.querySelectorAll(".desktop-remote__controls select")[2]?.value === "full_access"', 'full_access permission selection')
-  await click('textarea[aria-label="远程提示词"]')
+  // Full production App: the remote session uses the same ChatView as local sessions.
+  await click('[data-app-fixture]')
+  const remoteShown = 'document.querySelector(".execution-location.is-remote") != null'
+  const sendDisabled = 'document.querySelector(".runtime-composer button.send").disabled'
+  const composerValue = 'document.querySelector(\'textarea[aria-label="描述任务"]\').value'
+  await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'hosts nav connected count')
+  await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
+  await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  const localBefore = (await fixture()).localNewSessions
+  await click('textarea[aria-label="描述任务"]')
+  await insert('carried draft')
+  await click('.location-button')
+  await wait('document.querySelector(\'[data-machine-id="fixture-connection"]\') != null', 'location menu machines')
+  await click('[data-machine-id="fixture-connection"]')
+  await wait('document.querySelector(\'[data-remote-project="/fixture/project-a"]\') != null', 'remote projects for selected machine')
+  await click('[data-remote-project="/fixture/project-a"]')
+  await wait(remoteShown, 'remote location opens the shared conversation')
+  check(await read('document.querySelector(".execution-location.is-remote").textContent === "Fixture desktop"'), 'Topbar did not name the remote machine')
+  check(await read(`${composerValue} === "carried draft"`), 'Location switch dropped the unsent draft')
+  check((await fixture()).localNewSessions === localBefore, 'Remote location called local newSession')
+  check((await fixture()).historyCalls.length === 0, 'New remote draft queried history before a session existed')
+
+  await wait('document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Default · Fixture desktop"', 'host-named default permission')
+  await click('.permission-mode-trigger')
+  await wait('document.querySelector(".permission-mode-option.is-danger") != null', 'permission options')
+  check(await read('document.querySelector(".permission-mode-option.is-danger").textContent.includes("Full access · Fixture desktop")'), 'Full access copy does not name the executing host')
+  await click('.permission-mode-option.is-danger')
+  await wait('document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'full_access permission selection')
+  await click('textarea[aria-label="描述任务"]')
+  await read(`(() => { const node = document.querySelector('textarea[aria-label="描述任务"]'); node.select() })()`)
   await insert('first prompt')
   await key('Enter')
   await key('Enter')
   await wait('window.desktopRemoteFixture.submitInputs.length === 1', 'double Enter submit')
-  check((await fixture()).submitInputs.length === 1, 'Double Enter submitted more than once')
+  const afterFirstSubmit = await fixture()
+  check(afterFirstSubmit.submitInputs.length === 1, 'Double Enter submitted more than once')
+  check(afterFirstSubmit.submitInputs[0].prompt === 'first prompt', 'Remote submit did not send the composer text')
+  check(afterFirstSubmit.submitInputs[0].permissionMode === 'full_access', 'Selected permission was not submitted')
+  check(afterFirstSubmit.submitInputs[0].context.externalSessionId === undefined, 'First message unexpectedly had a native session')
   await wait('window.desktopRemoteFixture.traceCalls.some(call => call.runId === "remote-run-fixture-1")', 'canonical trace lookup')
-  const afterFirstTrace = await fixture()
-  check(afterFirstTrace.traceCalls.some((call) => call.runId === 'remote-run-fixture-1'), 'Trace did not use canonical scryRunId')
-  check(afterFirstTrace.submitInputs[0].context.externalSessionId === undefined, 'First message unexpectedly had a native session')
-  await wait('window.desktopRemoteFixture.submitInputs.length === 1 && document.querySelector(".question-inline-form") != null', 'remote question')
+  await wait('document.querySelector(".question-inline-form") != null', 'remote question')
+  check(await read('document.querySelector(".clibtn").disabled'), 'Adopted session must keep its Provider identity')
 
-  await click('.desktop-remote__composer button:last-child')
+  await click('.run-status-stop')
   await wait('window.desktopRemoteFixture.stopCalls.length === 1', 'remote stop')
   check((await fixture()).stopCalls[0] === '11111111-1111-4111-8111-111111111111', 'Stop did not use the ledger intent UUID')
   await click('.question-option input[type="radio"]')
@@ -221,130 +240,142 @@ async function exercise(contents, capture) {
   await wait('document.querySelector(".question-error")?.textContent.includes("remote answer rejected")', 'stable answer failure')
   const afterAnswer = await fixture()
   check(afterAnswer.answerCalls.length === 1 && afterAnswer.answerCalls[0].runId === '11111111-1111-4111-8111-111111111111', 'Answer did not use the ledger intent UUID')
-  check(!await read('document.querySelector(".desktop-remote__status")?.textContent.includes("已发送回答")'), 'Failed answer was rendered as success')
+  check(!(await bodyText()).includes('已发送回答'), 'Failed answer was rendered as success')
   await wait('window.desktopRemoteFixture.firstIntentCleared === true', 'clear first intent')
 
-  await click('textarea[aria-label="远程提示词"]')
+  await wait('document.querySelector(".run-status") == null', 'first run no longer blocks the composer')
+  await click('textarea[aria-label="描述任务"]')
   await insert('next prompt after native adoption')
   await key('Enter')
   await wait('window.desktopRemoteFixture.submitInputs.length === 2', 'next message')
-  const afterAdoption = await fixture()
-  check(afterAdoption.submitInputs[1].context.externalSessionId === 'native-session', 'New native session was not adopted for the next message')
-  check(await read('document.querySelector(\'.desktop-remote__sidebar > label:last-of-type select\').value === "native-session"'), 'Adopted session was mislabeled as a new draft before catalog settlement')
+  check((await fixture()).submitInputs[1].context.externalSessionId === 'native-session', 'New native session was not adopted for the next message')
   await wait('window.desktopRemoteFixture.traceCalls.some(call => call.runId === "remote-run-fixture-2")', 'second remote run trace')
-  check((await bodyText()).includes('second remote run'), 'Second remote run was not displayed before context switch')
+  await wait('document.body.textContent.includes("second remote run")', 'second remote run displayed')
   check((await bodyText()).includes('remote background task'), 'Remote background task panel was not visible')
   check(!(await read('document.querySelector("[aria-label^=\\"停止任务\\"]")')), 'Remote background task exposed a task-stop control')
   check((await fixture()).backgroundStopCalls === 0, 'Remote background task reached stopBackgroundTask while visible')
+  check(!(await read('document.querySelector(".location-button")')), 'Existing remote session exposed the location picker')
 
-  check(await read('document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\').disabled'), 'Existing session must keep its Provider identity')
-  await click('.desktop-remote__sidebar > button')
-  await wait('!document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\').disabled', 'new draft unlocks execution context')
-  await click('.desktop-remote__sidebar > label:nth-of-type(2) select')
-  check(await read('document.activeElement?.tagName === "SELECT"'), 'Provider select did not receive native focus')
-  await key('b', 'KeyB')
-  await key('Enter')
-  await wait('document.querySelectorAll(".desktop-remote__controls select")[0]?.value === "beta-default" && document.querySelectorAll(".desktop-remote__controls select")[2]?.value === "default"', 'provider control reset: ' + await read('JSON.stringify([...document.querySelectorAll(".desktop-remote__sidebar select")].map(node => node.value))'))
-  const afterSwitch = await fixture()
-  check((await bodyText()).includes('此上下文暂无会话记录。'), 'Context switch did not clear the previous transcript')
-  check(!(await bodyText()).includes('second remote run'), 'Context switch displayed the previous run')
-  check(afterSwitch.stopCalls.length === 1, 'Context switch stopped the previous remote run')
-  check(afterSwitch.backgroundStopCalls === 0, 'Remote background task reached stopBackgroundTask after context switch')
+  // New conversation stays on the current machine and project.
+  await click('.sb-new')
+  // Controls reset in an effect after remount; wait for the settled default so coordinates stay valid.
+  await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "Alpha Default"', 'new draft on same machine unlocks execution context')
+  check(await read(remoteShown), 'New conversation left the remote machine')
+  check(await read('document.querySelector(".location-button").getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-a"'), 'New conversation changed the project')
+  const afterNew = await fixture()
+  check(afterNew.localNewSessions === localBefore, 'Remote new conversation called local newSession')
+  check(afterNew.stopCalls.length === 1, 'Context switch stopped the previous remote run')
+  check(afterNew.backgroundStopCalls === 0, 'Remote background task reached stopBackgroundTask after context switch')
 
-  // Check that a later poll also respects the switched context. This also ends
-  // Chromium's previous native-select typeahead sequence before selecting P.
-  await wait(`window.desktopRemoteFixture.intentsCalls > ${afterSwitch.intentsCalls}`, 'next-context poll')
+  await click('.clibtn')
+  await wait('document.querySelector(\'.climenu [data-agent-id="qoder"]\') != null', 'remote Provider menu')
+  check(!(await bodyText()).includes('添加 Pi Agent'), 'Remote Provider menu offered local Pi management')
+  await click('.climenu [data-agent-id="qoder"]')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Default · Fixture desktop"', 'provider control reset')
+  await wait(`window.desktopRemoteFixture.intentsCalls > ${afterNew.intentsCalls}`, 'next-context poll')
   check(!(await bodyText()).includes('second remote run'), 'A later poll restored the old transcript')
-  await click('.desktop-remote__sidebar > label:nth-of-type(2) select')
-  await key('p', 'KeyP')
-  await wait('document.querySelectorAll(".desktop-remote__controls select")[0]?.value === "alpha-alternate"', 'same-provider alternate profile')
-  await click('textarea[aria-label="远程提示词"]')
+  await click('.clibtn')
+  await wait('document.querySelector(\'.climenu [data-agent-id="claude:alternate"]\') != null', 'alternate profile option')
+  await click('.climenu [data-agent-id="claude:alternate"]')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Alternate model"', 'same-provider alternate profile')
+  await click('textarea[aria-label="描述任务"]')
   await insert('alternate profile prompt')
   await key('Enter')
   await wait('window.desktopRemoteFixture.submitInputs.length === 3', 'alternate profile submit')
   const finalState = await fixture()
   check(finalState.submitInputs[2].context.providerId === 'claude' && finalState.submitInputs[2].context.agentProfileId === 'alternate', 'Same-provider profile selection routed to the wrong runtime')
 
-  await click('[data-app-fixture]')
-  await wait('document.querySelector(\'select[aria-label="新会话执行位置"]\')?.options.length === 2', 'saved host in production App sidebar')
-  const localBefore = (await fixture()).localNewSessions
-  await click('select[aria-label="新会话执行位置"]')
-  await key('f', 'KeyF'); await key('Enter')
-  await wait('document.querySelector(\'select[aria-label="新会话执行位置"]\').value === "fixture-connection"', 'select remote execution location')
-  check(!await read('!!document.querySelector(".desktop-remote__workspace")'), 'Changing draft target changed the existing conversation')
-  await click('.sb-new')
-  await wait(`window.desktopRemoteFixture.localNewSessions > ${localBefore} || document.querySelector('.desktop-remote__workspace') != null`, 'new session route')
-  check((await fixture()).localNewSessions === localBefore, 'Remote new session called local newSession')
-  await wait('document.querySelector(\'textarea[aria-label="远程提示词"]\') != null', 'remote composer in full App')
-  check((await bodyText()).includes('执行位置：Fixture desktop · 远程'), 'Remote machine identity missing from conversation')
-  check((await bodyText()).includes('本机会话'), 'Local history lacks machine identity')
-
   // Transport state changes are fixture events, not programmatic UI clicks.
-  await read('window.desktopRemoteFixture.connected = false')
-  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "未连接"', 'SSH exit reflected in sidebar')
-  await click('textarea[aria-label="远程提示词"]'); await insert('unsent offline draft'); await key('Enter')
+  await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.intent = null')
+  await wait('document.querySelector(".execution-location.is-remote")?.dataset.state === "disconnected"', 'SSH exit reflected in topbar')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("Fixture desktop 未连接")', 'offline notice without a draft')
+  await click('textarea[aria-label="描述任务"]'); await insert('unsent offline draft'); await key('Enter')
   check((await fixture()).submitInputs.length === 3 && (await fixture()).localStarts === 0, 'Offline remote draft reached a Provider')
-  check(await read('document.querySelector(".desktop-remote__composer button").disabled'), 'Offline remote send is enabled')
+  check(await read(sendDisabled), 'Offline remote send is enabled')
   await read('window.desktopRemoteFixture.listFailure = true')
-  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "状态未知"', 'read failure is not an empty or connected list')
-  check(await read('document.querySelector(".saved-remote-host").textContent.includes("Fixture desktop")'), 'Read failure forgot saved host')
+  await wait('document.querySelector(".execution-location.is-remote")?.dataset.state === "unknown"', 'read failure is not an empty or connected list')
+  check(await read('document.querySelector(".composer-notice").textContent.includes("无法确认 Fixture desktop 的连接状态")'), 'Read failure was not explained')
+  check(await read('document.querySelector(".sb-remote-proj")?.textContent.includes("Fixture desktop")'), 'Read failure forgot saved host')
+  check(!(await read('document.querySelector(".sb-hosts .sb-nav-count")')), 'Read failure showed a host count')
   await read('window.desktopRemoteFixture.listFailure = false')
-  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "未连接"', 'read recovery')
-  await click('.desktop-remote__workspace-head button')
-  await wait('!document.querySelector(".desktop-remote__composer button").disabled', 'explicit reconnect')
-  check(await read('document.querySelector(\'textarea[aria-label="远程提示词"]\').value === "unsent offline draft"'), 'Reconnect discarded the draft')
+  await wait('document.querySelector(".execution-location.is-remote")?.dataset.state === "disconnected"', 'read recovery')
+  await click('.composer-notice button')
+  await wait(`!${sendDisabled}`, 'explicit reconnect')
+  check(await read(`${composerValue} === "unsent offline draft"`), 'Reconnect discarded the draft')
   check((await fixture()).submitInputs.length === 3, 'Reconnect automatically resubmitted a draft')
+  check(!(await read('document.querySelector(".composer-notice")?.textContent.includes("等待远端派发")')), 'Dispatch notice outlived the finished remote intent')
+  check(await read('(() => { const name = document.querySelector(".sb-remote-proj .pname"); return name.scrollWidth <= name.clientWidth })()'), 'Remote project name truncated before the host tag')
 
   await capture('remote-workspace')
-  await read('window.desktopRemoteFixture.hideProvider = true')
-  await click('.desktop-remote__workspace-head button:last-child')
-  await wait('document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\')?.selectedOptions[0]?.textContent.includes("原 Provider")', 'missing Provider is not replaced')
-  check(await read('document.querySelector(".desktop-remote__composer button").disabled'), 'Missing Provider allowed submission')
-  await read('window.desktopRemoteFixture.hideProvider = false')
-  await click('.desktop-remote__workspace-head button:last-child')
-  await wait('!document.querySelector(".desktop-remote__composer button").disabled', 'original Provider restored')
+  await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.hideProvider = true')
+  await wait('document.querySelector(".composer-notice button") != null', 'offline before Provider removal')
+  await click('.composer-notice button')
+  await wait('document.querySelector(".clibtn")?.textContent.includes("原 Provider")', 'missing Provider is not replaced')
+  check(await read(sendDisabled), 'Missing Provider allowed submission')
+  await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.hideProvider = false')
+  await wait('document.querySelector(".composer-notice button") != null', 'offline before Provider restore')
+  await click('.composer-notice button')
+  await wait(`!${sendDisabled}`, 'original Provider restored')
 
-  await click('select[aria-label="新会话执行位置"]'); await key('本'); await key('Enter')
-  await wait('document.querySelector(\'select[aria-label="新会话执行位置"]\').value === "local"', 'local draft target')
+  // Back to this Mac: a new draft picks the local machine; local new sessions stay intact.
+  await click('.sb-new')
+  await wait('document.querySelector(".location-button") != null', 'remote new draft location picker')
+  await click('.location-button')
+  await wait('document.querySelector(\'[data-machine-id="local"]\') != null', 'local machine option')
+  await click('[data-machine-id="local"]')
+  await wait('[...document.querySelectorAll(".location-menu .mitem")].some(node => node.textContent.includes("不绑定项目"))', 'local projects column')
+  await read('[...document.querySelectorAll(".location-menu .mitem")].find(node => node.textContent.includes("不绑定项目")).setAttribute("data-local-unbound", "")')
+  await click('[data-local-unbound]')
+  await wait(`!(${remoteShown})`, 'local location leaves the remote conversation')
   await click('.sb-new')
   await wait(`window.desktopRemoteFixture.localNewSessions === ${localBefore + 1}`, 'local new-session route remains intact')
-  check(!await read('!!document.querySelector(".desktop-remote__workspace")'), 'Local new session retained the remote composer')
+  check(!(await read(remoteShown)), 'Local new session retained the remote composer')
   check((await fixture()).localStarts === 0, 'New-session selection started an unrequested local model')
 
   await click('.sb-settings')
   await click('.settings-rail button:last-child')
   await wait('document.querySelector(".remote-pairing")?.textContent.includes("Fixture iPhone")', 'inbound device grant')
-  check(await read('document.querySelector(".remote-client-settings").textContent.includes("Fixture desktop")'), 'Settings omitted outbound host')
-  check(!await read('document.querySelector(".remote-client-settings").textContent.includes("Fixture iPhone")'), 'Inbound grants mixed into outbound hosts')
+  check(!(await read('document.querySelector(".remote-client-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')
   await capture('remote-settings')
-  await click('.remote-client-settings .saved-remote-host')
-  await wait('!document.querySelector(".settings-modal") && !!document.querySelector(".desktop-remote__workspace")', 'settings opens host in main view')
+  await click('.remote-client-settings button')
+  await wait('!document.querySelector(".settings-modal") && document.querySelector(".hosts-view") != null', 'settings opens hosts page')
+  check(await read('document.querySelector(\'.hosts-section[aria-label="我连接的主机"]\').textContent.includes("Fixture desktop")'), 'Hosts page omitted outbound host')
+  check(!(await read('document.querySelector(\'.hosts-section[aria-label="我连接的主机"]\').textContent.includes("Fixture iPhone")')), 'Hosts page mixed inbound devices into outbound hosts')
+  await wait('document.querySelector(\'.hosts-section[aria-label="允许其他设备访问本机"]\')?.textContent.includes("Fixture iPhone")', 'hosts page inbound section')
+  await click('.hosts-row-toggle')
+  await wait('document.querySelectorAll(".hosts-projects li").length === 2', 'host projects listed')
+  await capture('remote-hosts')
+  await click('.hosts-projects li:last-child .hosts-button')
+  await wait(`${remoteShown} && document.querySelector(".location-button")?.getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-b"`, 'host project opens a remote draft')
 
   await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
   await wait('document.querySelector("[data-app-fixture]") != null', 'fixture reload')
   await click('[data-app-fixture]')
-  await wait('document.querySelector(".saved-remote-host")?.textContent.includes("Fixture desktop")', 'saved hosts after renderer reload')
-  await click('.saved-remote-host')
-  await wait('document.querySelector(".desktop-remote__workspace-head")?.textContent.includes("Fixture desktop")', 'sidebar host opens workspace')
-
-  await wait('document.querySelector(\'.desktop-remote__sidebar > label:last-of-type select\')?.options.length === 2', 'existing remote session')
-  await click('.desktop-remote__sidebar > label:last-of-type select'); await key('o', 'KeyO'); await key('Enter')
-  await wait('document.querySelector(\'.desktop-remote__sidebar > label:nth-of-type(2) select\').disabled', 'bound session context')
+  await wait('document.querySelector(\'[data-remote-session="old-native"]\') != null', 'saved host sessions after renderer reload')
+  const historyBefore = (await fixture()).historyCalls.length
+  await click('[data-remote-session="old-native"]')
+  await wait(`window.desktopRemoteFixture.historyCalls.length > ${historyBefore}`, 'sidebar remote session loads history')
+  check((await fixture()).historyCalls.at(-1).externalSessionId === 'old-native', 'Sidebar session loaded the wrong history')
+  await wait('document.querySelector(".clibtn")?.disabled === true', 'bound session context')
+  check(!(await read('document.querySelector(".location-button")')), 'Bound session exposed the location picker')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.catalogRevision = 1')
-  await wait('document.querySelector(".saved-remote-host__state")?.textContent === "未连接"', 'bound session disconnect')
-  await click('.desktop-remote__workspace-head button')
-  await wait('document.querySelector(\'.desktop-remote__sidebar > label:first-of-type select\')?.selectedOptions[0]?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
+  await wait('document.querySelector(".composer-notice button") != null', 'bound session disconnect')
+  await click('.composer-notice button')
+  await wait('document.querySelector(".sb-remote-proj .pname")?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
 
   return {
     boundSessionReconnectRefreshesCatalog: true,
     savedHostsAfterRendererReload: true,
-    settingsSeparatesConnectionDirections: true,
+    hostsPageSeparatesConnectionDirections: true,
     removedProviderNeverSubstituted: true,
-    fullAppMachineRouting: true,
+    sharedChatViewForRemote: true,
+    locationPickerCarriesDraft: true,
+    hostNamedPermissionCopy: true,
     existingSessionIdentityLocked: true,
     offlineNeverFallsBack: true,
     readFailureKeepsSavedHosts: true,
     reconnectPreservesDraft: true,
+    staleDispatchNoticeCleared: true,
     hostEnableInviteDisable: true,
     providerProfileIdentity: true,
     nativeCoordinateInput: true,

@@ -5,10 +5,10 @@
 ## 连接
 
 1. 在执行端打开「远程访问」，选择「启用并生成 SSH 邀请」。宿主只监听两个 `127.0.0.1` 端口，不开放 LAN 通配监听。
-2. 在客户端侧栏选择「远程主机 → 添加 / 管理」，或在「设置 → 远程访问 → 我连接的主机」添加，填写真实 SSH 主机名/IP、用户名、端口和 `scry-desktop1:` 邀请。
+2. 在客户端侧栏打开「主机」页并选择「添加主机」（「设置 → 远程访问」只提供跳转），填写真实 SSH 主机名/IP、用户名、端口和 `scry-desktop1:` 邀请。
 3. 比较客户端与执行端显示的设备公钥指纹。**必须在执行端的待确认列表批准该指纹**；SSH 登录成功不等于设备获批。
-4. 客户端完成配对，连接主机，然后选择远端项目、Provider/profile 和会话。项目必须已被执行端 Scry 识别；不会上传本地仓库或凭据。
-5. 撤销访问应在执行端撤销设备；客户端「忘记」只删除本地连接。已有设备重新配对前，需要先撤销旧 grant。
+4. 客户端完成配对并连接主机。新建会话时在 composer 的执行位置选择器里选机器和该机器上的项目，再选 Provider/profile；已有远程会话从侧栏带主机标签的项目进入。项目必须已被执行端 Scry 识别；不会上传本地仓库或凭据。
+5. 撤销访问应在执行端撤销设备；客户端「移除主机」只删除本地连接。已有设备重新配对前，需要先撤销旧 grant。
 
 邀请有效期为两分钟；生成新邀请会取消之前未完成的手机或桌面邀请。获批证书的领取以宿主状态为准，不因邀请过期自行判定配对失败。客户端重开后可以继续领取待完成的配对。
 
@@ -28,8 +28,8 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **状态语义**：保存不等于在线。共享列表每 3 秒向 main 读取状态；失败保留已有身份并标为未知。离线不能发送，不回退本机；显式重连保留草稿且不自动重发。已有会话锁定项目与 Provider/profile，缺失的运行环境不自动代选。目录与历史请求分别取消，避免重连时相互覆盖。
 - **保存边界**：连接仍由 main 在当前 `userData/desktop-connections/desktop-client.state` 加密保存。验收配置与日常配置不同；本轮未把测试私钥导入日常 App，也未完成日常 App 对 mac2 的正式配对。日常配置必须通过新的邀请与宿主指纹批准。
 - **参考 / 保留**：复核 T3 Code 原始 `docs/user/remote-access.md` 的独立远端运行环境语义；采用机器先于项目的归属关系，不引入其外部服务或配置。复用 Scry 的 DesktopRemote、ChatTurn、设置框、主题 tokens 与既有 SSH/mTLS 通道；不扩大远程终端、附件或本地文件能力。
-- **实现入口**：`src/renderer/components/MachineNavigation.tsx`、`src/renderer/hooks/useDesktopConnections.ts`、`src/renderer/App.tsx`、`src/renderer/components/DesktopRemote.tsx`；设置接线在 `RemotePairing.tsx` / `Modals.tsx`。
-- **回归入口**：`MachineNavigation.test.tsx` 覆盖断线保留、读取失败、乱序响应和失效目标；`node scripts/desktop-remote-ui-smoke.mjs --keep` 用生产 App/CSS、隔离 bridge 和原生坐标/键盘验证分流、设置分区、renderer 重载、离线与重连、Provider 消失和已有会话归属。`--negative-machine-control` 故意恢复本机新会话路由，必须失败；原有 `--negative-control` 仍必须捕获远程任务暴露本地停止按钮。
+- **实现入口（已被下方方向 B 替换）**：`src/renderer/components/MachineNavigation.tsx`、`src/renderer/hooks/useDesktopConnections.ts`、`src/renderer/App.tsx`、`src/renderer/components/DesktopRemote.tsx`；设置接线在 `RemotePairing.tsx` / `Modals.tsx`。
+- **回归入口（已被下方方向 B 替换）**：`MachineNavigation.test.tsx` 覆盖断线保留、读取失败、乱序响应和失效目标；`node scripts/desktop-remote-ui-smoke.mjs --keep` 用生产 App/CSS、隔离 bridge 和原生坐标/键盘验证分流、设置分区、renderer 重载、离线与重连、Provider 消失和已有会话归属。`--negative-machine-control` 故意恢复本机新会话路由，必须失败；原有 `--negative-control` 仍必须捕获远程任务暴露本地停止按钮。
 - **发现并修复**：原生命中检查发现远程绝对定位页面遮挡侧栏；已有会话重连用例先失败，证明目录与历史共用取消序号会丢弃新目录。两者修复后保留回归。隐藏 Electron 截图需等待实际动画/绘制，不能用刚出现的 DOM 冒充已完成绘制。
 - **本轮检查**：macOS / Node 22.22.1；`npm run typecheck`、`npm test`（218 文件 / 2733 测试通过，3 个真实探针跳过，shell 通过）、`npm run build`、完整 `npm run test:renderer:ui`、`git diff --check` 均通过。两个 mutation control 均以预期原因失败。此前失败记录未抹去，也未扩大超时或弱化断言。
 - **设计库回执**：`P-SCRY-DESKTOP-REMOTE` 原位登记并可检索，build 退出 0；全库 check 退出 1，仅报告 5 个既有失效来源：`P-PI-MODEL-SELECTOR`、`D-20260912-scry-ios-remote`、`D-20261008-scry-ios-continuity`、`P-SCRY-SESSION-HISTORY`、`D-20261010-scry-llm-sidebar`。本轮没有修改这些来源，也没有提升为全局偏好或视觉认可。
@@ -41,7 +41,22 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **用户反馈**：看过 0.2.183 远程页后要求“重新出设计稿”。主机用单独页面管理；Agent 交互流程只用一套；新建会话时选择机器和目录；“只是 Agent 执行位置变了，不要提高用户理解成本”。
 - **受影响部分**：侧栏常驻的「新会话执行位置」下拉和「远程主机」卡片改为一个「主机」导航页。表单式远程左栏、独立标题和“返回”取消，远程会话复用本机的 ChatView/composer/右侧面板。「本机完全访问」文案错误，应写明执行主机。
 - **保留**：上面的状态语义、连接方向和会话锁定规则不变。
-- **原型**：`designs/scry-unified-remote/Unified Remote.html` 与 `brief.md`。方向 A 把机器和目录做成两个选择器；方向 B 用一个双栏位置选择器。状态：方向待用户选择，未接生产。
+- **原型**：`designs/scry-unified-remote/Unified Remote.html` 与 `brief.md`。方向 A 把机器和目录做成两个选择器；方向 B 用一个双栏位置选择器。用户选择 **B**。
+
+### 方向 B 实现（2026-10-14）
+
+- **信息结构**：侧栏去掉「新会话执行位置」与远程卡片，新增常驻「主机」导航（显示已连接/总数；读取失败时不显示数字）。主机页分两节：「我连接的主机」（添加、连接、完成配对、断开、项目入口、移除）与「允许其他设备访问本机」（复用 `RemotePairing`），两个方向不混排。
+- **统一会话**：远程会话与本机共用 `ChatView`、composer、顶栏和侧栏行样式。远程位置只出现在三处：composer 执行位置、顶栏主机标签、侧栏项目上的主机标签。没有保存主机时，composer 渲染与原 `WorkdirPicker` 逐字相同（单测比较 SSR 输出）。
+- **执行位置选择器**：双栏，左栏本机 / 已保存主机及状态 / 管理主机，右栏为本机目录或该主机 catalog 里的项目。只在未绑定会话的新草稿上出现；已有会话锁定机器、项目与 Provider/profile。切换位置只把草稿文本带到空目标，不带附件；不迁移会话。
+- **离线与缺失**：composer 上方提示条说明未连接、未知、待配对或主机已删除，并给出显式「连接」；不回退本机、不自动重发。远程运行中或回执未知时禁止发送，不提供排队。Provider/profile 消失时显示「原 Provider / profile 已不可用」占位，不代选。
+- **权限文案**：远程权限去掉「本机」并附主机名，例如「完全访问 · mac2」，说明为「Agent 以 mac2 上的用户权限运行」。
+- **能力缺口**：远程文件为顶栏按钮打开的只读抽屉；图片附件直接提示不支持；后台任务不暴露单项停止。
+- **catalog 读取**：共享 module store，每个连接在一次「已连接」期间读取一次，运行结束（settled/failed）后再刷新；不对侧栏持续轮询。远程目录只来自宿主 catalog 的项目，不浏览远端任意文件夹。
+- **实现入口**：`LocationPicker.tsx`、`RemoteChat.tsx`、`HostsView.tsx`、`SidebarRemoteProjects.tsx`、`hooks/useRemoteCatalogs.ts`、`remote-location.css`、`hosts-view.css`；`DesktopRemote.tsx` 只保留配对表单、只读文件、宿主面板等共享块。删除 `MachineNavigation.tsx` 及其测试/CSS。
+- **回归入口**：`RemoteLocation.test.tsx`（断线保留、乱序读取、无主机时与 `WorkdirPicker` 一致、已删除主机占位、读取失败标未知、离线连接按钮、主机名权限文案）。`node scripts/desktop-remote-ui-smoke.mjs --keep` 改为全程在生产 App 中验证：主机导航计数、位置选择器带草稿进入远程项目、双 Enter 只提交一次、原生 session 采用、停止/回答用账本 UUID、回答失败不显示成功、Provider/profile 隔离、新建会话留在同一机器、离线/读取失败/重连保留草稿且不重发、Provider 消失不代选、回到本机、设置跳转主机页、主机页项目入口、renderer 重载后侧栏远程会话及重连刷新 catalog。两个 mutation control 仍须失败。
+- **发现并修复**：(1) 侧栏远程项目名先于主机标签被截断，改为标签优先收缩并只预留一个操作按钮宽度；(2) 「已记录提交，等待远端派发…」在远端意图结束后仍残留，改为只在提交中或远程运行仍活跃时显示——首个 effect 版修复在 smoke 中仍失败，改为派生条件后通过；(3) 主机页入站区重复标题。三处均加了 smoke 断言，并在撤回修复时确认断言失败（前两处）。
+- **首轮失败记录**：完整 `test:renderer:ui` 首次在 desktop-remote smoke 的「remote Provider menu」超时：远程会话重挂载后 run controls 在 effect 中重置，测量坐标后布局移动，点击落到相邻的模型按钮。改为等待控件重置到 Provider 默认值后再点击（就绪条件，不是 sleep），随后连续 3 次通过。
+- **验收边界**：smoke 的连接与 Provider 是 fixture，不证明真实 SSH、mac2 或日常安装版；没有发真实模型请求，未重新打包或安装；用户视觉认可待确认。
 
 ## 0.2.183 安装准备（2026-10-14）
 

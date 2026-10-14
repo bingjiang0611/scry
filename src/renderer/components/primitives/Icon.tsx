@@ -7,7 +7,7 @@ export type IconName =
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x' | 'copy'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
   | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'summary' | 'diff' | 'terminal' | 'agents' | 'panel'
-  | 'globe' | 'plug' | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose' | 'branch'
+  | 'globe' | 'laptop' | 'server' | 'plug' | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose' | 'branch'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -133,6 +133,19 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M15 4v16" />
+    </>
+  ),
+  laptop: (
+    <>
+      <rect x="4" y="5" width="16" height="11" rx="1.5" />
+      <path d="M2 19h20" />
+    </>
+  ),
+  server: (
+    <>
+      <rect x="3" y="4" width="18" height="7" rx="1.5" />
+      <rect x="3" y="13" width="18" height="7" rx="1.5" />
+      <path d="M7 7.5h.01M7 16.5h.01" />
     </>
   ),
   globe: (

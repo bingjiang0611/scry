@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CSSProperties, Dispatch, SetStateAction } from 'react'
+import type { ComponentProps, CSSProperties, Dispatch, SetStateAction } from 'react'
 import { flushSync } from 'react-dom'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -22,7 +22,12 @@ import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
-import { DesktopRemote } from './components/DesktopRemote'
+import { RemoteChat, remoteDraftKey } from './components/RemoteChat'
+import { HostsView } from './components/HostsView'
+import { LocationPicker, LOCAL_MACHINE, hostState, type ExecutionLocation } from './components/LocationPicker'
+import { useDesktopConnections } from './hooks/useDesktopConnections'
+import { useConnectedCatalogLoader } from './hooks/useRemoteCatalogs'
+import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
@@ -68,7 +73,16 @@ import {
 const AnalyticsView = lazy(() => import('./components/AnalyticsView').then((module) => ({ default: module.AnalyticsView })))
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
-type AppView = 'chat' | 'analytics' | 'meta-prompts' | 'desktop-remote'
+type AppView = 'chat' | 'analytics' | 'meta-prompts' | 'remote' | 'hosts'
+
+// A conversation on a saved remote desktop. `generation` remounts the remote
+// controller for every opened location, so no run/session state leaks between them.
+interface RemoteTarget {
+  connectionId: string
+  cwd: string
+  session?: RemoteSessionRef
+  generation: number
+}
 
 type AppStyle = CSSProperties & {
   '--sidebar-w': string
@@ -991,9 +1005,12 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const [view, setView] = useState<AppView>('chat')
-  const [newChatTarget, setNewChatTarget] = useState('local')
-  const [remoteConnectionId, setRemoteConnectionId] = useState<string | undefined>()
-  const [remoteDraftGeneration, setRemoteDraftGeneration] = useState(0)
+  const [remoteTarget, setRemoteTarget] = useState<RemoteTarget | null>(null)
+  // Native session id adopted by a new remote draft after its first run; sidebar highlight only.
+  const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
+  const [remoteFilesOpen, setRemoteFilesOpen] = useState(false)
+  const desktopConnections = useDesktopConnections()
+  useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error)
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
@@ -1981,23 +1998,85 @@ export function App() {
     setView(next)
     if (next === 'analytics') integrations.loadAnalytics()
   }
-  const openRemote = (connectionId?: string): void => {
-    // Fence pending local history/new-session reads before changing execution view.
-    sessionSelectionSeqRef.current += 1
-    setSessionLoading(false)
+  const closeOverlays = (): void => {
     setShowSettings(false)
     setShowSkills(false)
     setShowMcp(false)
     setShowLlmPerformance(false)
-    setRemoteConnectionId(connectionId)
-    if (connectionId) setNewChatTarget(connectionId)
-    changeView('desktop-remote')
+  }
+  const openHosts = (): void => {
+    closeOverlays()
+    changeView('hosts')
+  }
+  const setRemoteDraft = (key: string, value: string): void => {
+    setSessionDrafts((current) => updateSessionComposerDraft(current, key, (draft) => ({ ...draft, input: value }), releaseDraft))
+  }
+  const draftText = (key: string): string => draftStore.getSnapshot().get(key)?.input ?? ''
+  const openRemoteLocation = (connectionId: string, remoteCwd: string, remoteSession?: RemoteSessionRef): void => {
+    // Fence pending local history/new-session reads before changing execution location.
+    // The local session keeps running in the background; it is not migrated.
+    sessionSelectionSeqRef.current += 1
+    setSessionLoading(false)
+    closeOverlays()
+    setRemoteTarget((current) => ({ connectionId, cwd: remoteCwd, session: remoteSession, generation: (current?.generation ?? 0) + 1 }))
+    setRemoteAdoptedSession(remoteSession?.externalSessionId)
+    setRemoteFilesOpen(false)
+    changeView('remote')
+  }
+  // Switching the location of an unsent new draft carries its text along; an
+  // existing session never reaches here because its location picker is locked.
+  const pickRemoteLocation = (connectionId: string, remoteCwd: string): void => {
+    const sourceKey = view === 'remote' && remoteTarget ? remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd) : draftKey
+    const targetKey = remoteDraftKey(connectionId, remoteCwd)
+    const text = draftText(sourceKey)
+    if (sourceKey !== targetKey && text && !draftText(targetKey)) {
+      setRemoteDraft(targetKey, text)
+      if (sourceKey === draftKey) setInput('')
+      else setRemoteDraft(sourceKey, '')
+    }
+    openRemoteLocation(connectionId, remoteCwd)
+  }
+  const pickLocalLocation = async (dir: string | null): Promise<void> => {
+    if (view === 'remote' && remoteTarget) {
+      const sourceKey = remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd)
+      const targetKey = sessionComposerDraftKey({ providerId: integrations.selectedProviderId, cwd: dir, sessionId: null })
+      const text = draftText(sourceKey)
+      if (text && !draftText(targetKey)) {
+        setRemoteDraft(targetKey, text)
+        setRemoteDraft(sourceKey, '')
+      }
+      if (dir === cwd) {
+        if (activeSessionId == null) { changeView('chat'); return }
+        await newConversation()
+        return
+      }
+    }
+    if (dir == null) {
+      if (cwd == null) changeView('chat')
+      else await unbindProject()
+      return
+    }
+    await pickRecent(dir)
   }
   const startNewConversation = async (): Promise<void> => {
-    if (newChatTarget === 'local') { await newConversation(); return }
-    setRemoteDraftGeneration(generation => generation + 1)
-    openRemote(newChatTarget)
+    // A new conversation stays on the machine and project currently shown.
+    if (view === 'remote' && remoteTarget) { openRemoteLocation(remoteTarget.connectionId, remoteTarget.cwd); return }
+    await newConversation()
   }
+  const renderLocationPicker = (current: ExecutionLocation) => (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => (
+    <LocationPicker
+      current={current}
+      localCwd={cwd}
+      recent={recent}
+      onPickLocal={(dir) => { void pickLocalLocation(dir) }}
+      onChooseLocalFolder={chooseFolder}
+      onRemoveRecent={removeRecentFolder}
+      onPickRemote={pickRemoteLocation}
+      onManageHosts={openHosts}
+      open={menu.open}
+      onOpenChange={menu.onOpenChange}
+    />
+  )
   const openMetaPrompts = (): void => {
     setShowSkills(false)
     setShowMcp(false)
@@ -2248,12 +2327,14 @@ export function App() {
   // their identity while reading the latest session/provider state when invoked.
   const sidebarActions = {
     onNewChat: useEventCallback(startNewConversation),
-    onOpenRemote: useEventCallback(openRemote),
-    onPick: useEventCallback((...args: Parameters<typeof pickSession>) => { setNewChatTarget('local'); return pickSession(...args) }),
+    onHosts: useEventCallback(openHosts),
+    onPickRemoteSession: useEventCallback((connectionId: string, remoteSession: RemoteSessionRef) => openRemoteLocation(connectionId, remoteSession.cwd, remoteSession)),
+    onNewRemoteProjectChat: useEventCallback((connectionId: string, remoteCwd: string) => openRemoteLocation(connectionId, remoteCwd)),
+    onPick: useEventCallback(pickSession),
     onTogglePin: useEventCallback(togglePinSession),
     onArchive: useEventCallback(archiveSession),
     onRenameSession: useEventCallback(renameSession),
-    onNewProjectChat: useEventCallback((projectCwd: string) => { setNewChatTarget('local'); return newConversationInProject(projectCwd) }),
+    onNewProjectChat: useEventCallback(newConversationInProject),
     onToggleProjectPin: useEventCallback(toggleProjectPin),
     onRenameProject: useEventCallback(renameProject),
     onRemoveProject: useEventCallback(removeProject),
@@ -2276,10 +2357,10 @@ export function App() {
           id="sidebar-pane"
           version={packageJson.version}
           projects={projects}
-          activeCwd={view === 'desktop-remote' ? null : cwd}
-          activeSessionId={view === 'desktop-remote' ? null : activeSessionId}
-          newChatTarget={newChatTarget}
-          onNewChatTarget={setNewChatTarget}
+          activeCwd={view === 'remote' ? null : cwd}
+          activeSessionId={view === 'remote' ? null : activeSessionId}
+          hostsActive={view === 'hosts'}
+          activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
           activeProviderId={integrations.selectedProviderId}
           activeAgentProfileId={integrations.providerContext.agentProfileId}
           runningRunIds={runningRunIds}
@@ -2306,9 +2387,22 @@ export function App() {
       />
       <div className="main-area" id="main-pane">
         <>
-        {view !== 'chat' && <div className="aux-view-topbar" aria-hidden="true" />}
-        {view === 'desktop-remote' ? (
-          <DesktopRemote key={`${remoteConnectionId ?? 'manage'}:${remoteDraftGeneration}`} initialConnectionId={remoteConnectionId} onBack={() => changeView('chat')} />
+        {view !== 'chat' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
+        {view === 'hosts' ? (
+          <HostsView onNewSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} />
+        ) : view === 'remote' && remoteTarget ? (
+          <RemoteView
+            target={remoteTarget}
+            connections={desktopConnections}
+            draftStore={draftStore}
+            onDraftInput={setRemoteDraft}
+            scrollRef={scrollRef}
+            textareaRef={taRef}
+            renderLocationPicker={renderLocationPicker({ machineId: remoteTarget.connectionId, cwd: remoteTarget.cwd })}
+            onSessionAdopted={setRemoteAdoptedSession}
+            filesOpen={remoteFilesOpen}
+            onToggleFiles={() => setRemoteFilesOpen((open) => !open)}
+          />
         ) : view === 'analytics' ? (
           <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView
@@ -2390,6 +2484,7 @@ export function App() {
               onUnbindProject={unbindProject}
               onPickRecent={pickRecent}
               onRemoveRecent={removeRecentFolder}
+              renderLocationPicker={renderLocationPicker({ machineId: LOCAL_MACHINE, cwd })}
               onRetrySlash={retrySlash}
               onPickSlash={pickSlash}
               onSlashSel={setSlashSel}
@@ -2567,11 +2662,53 @@ export function App() {
                 setArchiveUndo(null)
                 workspace.loadProjects()
               }}
-              onOpenRemote={openRemote}
+              onOpenHosts={openHosts}
               onClose={() => setShowSettings(false)}
             />
           )}
       </>
     </div>
+  )
+}
+
+// Remote sessions reuse the local topbar and ChatView. Only the machine pill,
+// the read-only files drawer and the host-named copy differ.
+function RemoteView({
+  target,
+  connections,
+  filesOpen,
+  onToggleFiles,
+  ...chat
+}: {
+  target: RemoteTarget
+  connections: ReturnType<typeof useDesktopConnections>
+  filesOpen: boolean
+  onToggleFiles: () => void
+} & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session' | 'onCloseFiles'>) {
+  const connection = connections.connections.find((item) => item.id === target.connectionId)
+  return (
+    <>
+      <ViewChrome
+        cwd={target.cwd}
+        showSummary={false}
+        showPanel={filesOpen}
+        onTogglePanel={onToggleFiles}
+        panelLabel="只读文件"
+        machine={{
+          label: connection?.label ?? '远程主机不可用',
+          remote: true,
+          state: connection ? hostState(connection, connections.error) : 'unknown'
+        }}
+      />
+      <RemoteChat
+        key={target.generation}
+        connectionId={target.connectionId}
+        cwd={target.cwd}
+        session={target.session}
+        filesOpen={filesOpen}
+        onCloseFiles={onToggleFiles}
+        {...chat}
+      />
+    </>
   )
 }

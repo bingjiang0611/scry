@@ -1,83 +1,29 @@
-.desktop-remote {
-  position: absolute;
-  container-type: inline-size;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  overflow: auto;
-  background: var(--bg, #111);
-  color: var(--text, #eee);
-  padding: 20px 24px 28px;
-  box-sizing: border-box;
-}
-.main-area > .desktop-remote { position: relative; inset: auto; grid-row: 2 / -1; min-height: 0; }
-.desktop-remote button, .desktop-remote input, .desktop-remote select, .desktop-remote textarea,
-.desktop-remote__host button { font: inherit; }
-.desktop-remote button { cursor: pointer; }
-.desktop-remote button:disabled { opacity: .5; cursor: default; }
-.desktop-remote__head, .desktop-remote__workspace-head, .desktop-remote__section-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-}
-.desktop-remote__head { border-bottom: 1px solid var(--border, #333); padding-bottom: 16px; }
-.desktop-remote__head h1 { margin: 0; font-size: 20px; }
-.desktop-remote__head p, .desktop-remote__workspace-head span { margin: 3px 0 0; color: var(--dim, #999); font-size: 12px; }
-.desktop-remote__head > button, .desktop-remote__section-head button, .desktop-remote__workspace-head button,
-.desktop-remote__files button { border: 0; background: transparent; color: var(--accent, #8ab4ff); padding: 5px 0; }
-.desktop-remote__body { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; padding-top: 20px; }
-.desktop-remote__connections { border-right: 1px solid var(--border, #333); padding-right: 16px; }
-.desktop-remote__connection { display: flex; flex-direction: column; align-items: flex-start; width: 100%; gap: 3px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; padding: 10px; text-align: left; }
-.desktop-remote__connection:hover, .desktop-remote__connection.is-active { background: var(--panel, #1d1d1d); border-color: var(--border, #444); }
-.desktop-remote__connection span, .desktop-remote__connection small { color: var(--dim, #999); font-size: 11px; overflow-wrap: anywhere; }
-.desktop-remote__main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(240px, .8fr); align-content: start; gap: 16px; max-width: 1050px; }
-.desktop-remote__card, .desktop-remote__host { border: 1px solid var(--border, #333); border-radius: 9px; background: var(--panel, #181818); padding: 16px; }
+/* Remote building blocks: pairing form, SSH host panel and read-only files. */
+.desktop-remote__card button, .desktop-remote__card input, .desktop-remote__card textarea,
+.desktop-remote__host button, .desktop-remote__files button { font: inherit; cursor: pointer; }
+.desktop-remote__card button:disabled, .desktop-remote__host button:disabled, .desktop-remote__files button:disabled { opacity: .5; cursor: default; }
+.desktop-remote__section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.desktop-remote__section-head button, .desktop-remote__files button { border: 0; background: transparent; color: var(--accent); padding: 5px 0; }
 .desktop-remote__card h2 { margin: 0 0 8px; font-size: 15px; }
 .desktop-remote__card p, .desktop-remote__host p { margin: 8px 0; font-size: 12px; }
-.desktop-remote__muted { color: var(--dim, #999); font-size: 12px; }
-.desktop-remote__error { color: var(--bad, #f48b8b); font-size: 12px; overflow-wrap: anywhere; }
-.desktop-remote__status { color: var(--ok, #83c995); font-size: 12px; }
-.desktop-remote__warning { color: var(--warn, #e6ba6a); font-size: 12px; }
+.desktop-remote__host { border: 1px solid var(--border2); border-radius: 9px; background: var(--panel2); padding: 16px; margin: 12px 0; }
+.desktop-remote__muted { color: var(--dim); font-size: 12px; }
+.desktop-remote__error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 .desktop-remote__form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.desktop-remote label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--dim, #aaa); font-size: 12px; }
-.desktop-remote input, .desktop-remote select, .desktop-remote textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border, #444); border-radius: 5px; background: var(--bg, #111); color: inherit; padding: 7px 8px; }
-.desktop-remote textarea { resize: vertical; }
-.desktop-remote__card > button, .desktop-remote__host > button, .desktop-remote__pairing-result button, .desktop-remote__actions button,
-.desktop-remote__composer button { border: 1px solid var(--border, #555); border-radius: 5px; background: var(--button, #2a2a2a); color: inherit; padding: 7px 11px; }
-.desktop-remote__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.desktop-remote__pairing-result { border-top: 1px solid var(--border, #333); margin-top: 14px; padding-top: 10px; }
-.desktop-remote code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
-.desktop-remote__invite { margin: 10px 0; border: 1px solid var(--border, #444); padding: 8px; }
-.desktop-remote__workspace { min-height: 0; display: flex; flex-direction: column; flex: 1; }
-.desktop-remote__workspace-head { padding: 15px 0; border-bottom: 1px solid var(--border, #333); }
-.desktop-remote__workspace-head b { display: block; }
-.desktop-remote__workspace-head > div:last-child { display: flex; align-items: center; gap: 14px; }
-.desktop-remote__workspace-grid { display: grid; grid-template-columns: 245px minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; padding-top: 16px; }
-.desktop-remote__sidebar { border-right: 1px solid var(--border, #333); padding-right: 16px; overflow: auto; }
-.desktop-remote__controls { border-top: 1px solid var(--border, #333); border-bottom: 1px solid var(--border, #333); padding: 5px 0; }
-.desktop-remote__files { border-top: 1px solid var(--border, #333); margin-top: 15px; padding-top: 10px; }
-.desktop-remote__files ul { list-style: none; margin: 6px 0; padding: 0; max-height: 240px; overflow: auto; }
-.desktop-remote__files li button { display: block; width: 100%; text-align: left; overflow-wrap: anywhere; }
-.desktop-remote__path { color: var(--dim, #999); }
-.desktop-remote__file-preview { border: 1px solid var(--border, #444); margin-top: 8px; padding: 8px; }
+.desktop-remote__card label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--dim); font-size: 12px; }
+.desktop-remote__card input, .desktop-remote__card textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border2); border-radius: 7px; background: var(--main-surface); color: var(--fg); padding: 8px 9px; cursor: text; }
+.desktop-remote__card textarea { resize: vertical; }
+.desktop-remote__card > button, .desktop-remote__host > button, .desktop-remote__pairing-result button { border: 1px solid var(--border2); border-radius: 7px; background: var(--surface-strong); color: var(--fg); padding: 7px 12px; margin-right: 8px; }
+.desktop-remote__pairing-result { border-top: 1px solid var(--border3); margin-top: 14px; padding-top: 10px; }
+.desktop-remote__card code, .desktop-remote__host code, .desktop-remote__files code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.desktop-remote__invite { margin: 10px 0; border: 1px solid var(--border2); border-radius: 7px; padding: 8px; }
+.desktop-remote__files ul { list-style: none; margin: 6px 0; padding: 0; max-height: 360px; overflow: auto; }
+.desktop-remote__files li button { display: block; width: 100%; color: var(--fg); text-align: left; overflow-wrap: anywhere; }
+.desktop-remote__files li button:hover { color: var(--accent); }
+.desktop-remote__path { color: var(--dim); }
+.desktop-remote__file-preview { border: 1px solid var(--border2); border-radius: 7px; margin-top: 8px; padding: 8px; }
 .desktop-remote__file-preview > div { display: flex; justify-content: space-between; gap: 8px; }
-.desktop-remote__file-preview pre { max-height: 280px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
-.desktop-remote__transcript { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; padding-right: 6px; }
-.desktop-remote__transcript > * { flex-shrink: 0; }
-.desktop-remote__turn { border-bottom: 1px solid var(--border, #2b2b2b); padding: 8px 0 16px; }
-.desktop-remote__history-evidence { color: var(--dim, #999); font-size: 11px; }
-.desktop-remote__history-evidence button { margin-left: 8px; border: 1px solid var(--border, #444); border-radius: 4px; background: var(--button, #2a2a2a); color: inherit; padding: 3px 6px; }
-.desktop-remote__run-status { border: 1px solid var(--border, #444); border-radius: 6px; padding: 8px; color: var(--dim, #aaa); font-size: 12px; }
-.desktop-remote__composer { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: flex-end; background: var(--bg, #111); padding-top: 12px; margin-top: auto; }
-.desktop-remote__composer button { white-space: nowrap; min-width: 56px; }
-.desktop-remote__composer textarea { min-height: 40px; max-height: 150px; }
-.desktop-remote__composer > div { display: flex; gap: 6px; }
-@container (max-width: 760px) {
-  .desktop-remote__body, .desktop-remote__workspace-grid, .desktop-remote__main { grid-template-columns: 1fr; }
-  .desktop-remote__connections, .desktop-remote__sidebar { border-right: 0; border-bottom: 1px solid var(--border); padding: 0 0 12px; }
-}
+.desktop-remote__file-preview pre { max-height: 320px; overflow: auto; white-space: pre-wrap; font: 11px/1.5 var(--font-mono); }
 @media (max-width: 800px) {
-  .desktop-remote { padding: 14px; }
-  .desktop-remote__body, .desktop-remote__workspace-grid, .desktop-remote__main { grid-template-columns: 1fr; }
-  .desktop-remote__connections, .desktop-remote__sidebar { border-right: 0; border-bottom: 1px solid var(--border, #333); padding: 0 0 12px; }
+  .desktop-remote__form-grid { grid-template-columns: 1fr; }
 }

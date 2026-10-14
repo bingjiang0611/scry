@@ -1,11 +1,17 @@
 import { Icon } from './primitives/Icon'
+import './remote-location.css'
 
 interface ViewChromeProps {
   cwd: string | null
   showSummary: boolean
   showPanel: boolean
-  onToggleSummary: () => void
+  // Absent for remote sessions: the pinned summary reads local git/turn evidence.
+  onToggleSummary?: () => void
   onTogglePanel: () => void
+  // The machine the Agent executes on. Remote hosts get a distinct pill so the
+  // execution location is visible without a separate page or banner.
+  machine?: { label: string; remote: boolean; state?: 'connected' | 'disconnected' | 'pairing' | 'unknown' }
+  panelLabel?: string
 }
 
 export function ViewChrome({
@@ -13,19 +19,28 @@ export function ViewChrome({
   showSummary,
   showPanel,
   onToggleSummary,
-  onTogglePanel
+  onTogglePanel,
+  machine = { label: '本机', remote: false },
+  panelLabel = '右侧工作区'
 }: ViewChromeProps) {
   const workspaceLabel = cwd?.split('/').filter(Boolean).at(-1) ?? '不绑定项目'
   return (
     <header className="topbar compact">
       <div className="tb-thread" title={cwd ?? '当前会话未绑定工作目录'}>
         <Icon name="folder" />
-        <span className="execution-location" aria-label="执行位置：本机">本机</span>
+        <span
+          className={`execution-location ${machine.remote ? 'is-remote' : ''}`}
+          data-state={machine.state}
+          aria-label={`执行位置：${machine.label}`}
+        >
+          {machine.remote && <Icon name="server" />}
+          {machine.label}
+        </span>
         <b>{workspaceLabel}</b>
       </div>
       <div className="tb-spacer" />
       <div className="tb-statusbar" aria-label="会话工具">
-        <button
+        {onToggleSummary && <button
           type="button"
           className={`tb-action panel-pill summary-pill ${showSummary ? 'on' : ''}`}
           data-pinned-summary-toggle
@@ -36,13 +51,13 @@ export function ViewChrome({
         >
           <Icon name="summary" />
           <span className="tb-action-label">摘要</span>
-        </button>
+        </button>}
         <button
           type="button"
           className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
           onClick={onTogglePanel}
-          title="右侧工作区"
-          aria-label="右侧工作区"
+          title={panelLabel}
+          aria-label={panelLabel}
           aria-pressed={showPanel}
         >
           <Icon name="panel" />

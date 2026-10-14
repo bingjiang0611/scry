@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { defaultOption, DesktopRemote, desktopRemoteStateKey, desktopProviderKey, remoteTurns, shouldQueryUnknownIntent } from './DesktopRemote'
+import { defaultOption, desktopRemoteStateKey, desktopProviderKey, remoteTurns, shouldQueryUnknownIntent } from './DesktopRemote'
 import type { TraceEvent } from '@shared/trace'
 
 const event = (partial: Partial<TraceEvent>): TraceEvent => ({
@@ -33,12 +32,6 @@ describe('desktop remote renderer contract', () => {
     ])
     expect(turns.map((turn) => turn.userText)).toEqual(['first', 'second'])
     expect(turns[0].items).toHaveLength(2)
-  })
-
-  it('renders the remote screen shell during SSR without a privileged bridge', () => {
-    const html = renderToStaticMarkup(<DesktopRemote onBack={() => {}} />)
-    expect(html).toContain('桌面远程')
-    expect(html).toContain('返回')
   })
 
   it('uses explicit host defaults when a catalog marks them', () => {
