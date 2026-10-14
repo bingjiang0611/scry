@@ -10,6 +10,15 @@ import '../../src/renderer/codex-alignment.css'
 // Production App, isolated bridge: no real Provider, workspace, or user data.
 localStorage.clear()
 const requests: AgentStartRequest[] = []
+const controlRequests: ProviderContext[] = []
+const archived = new Set<string>()
+const stoppedRuns: string[] = []
+let detectionFailure = false
+let holdControls = false
+let releaseControls: (() => void) | null = null
+let holdArchive = false
+let releaseArchive: (() => void) | null = null
+let detectionReads = 0
 const capabilityRequests: { skills: ProviderContext[]; mcp: ProviderContext[] } = { skills: [], mcp: [] }
 const runs = new Map<string, ActiveRun>()
 const projects: ProjectMeta[] = [{ cwd: '/fixture', name: 'Models', mtime: 1, sessions: [] }]
@@ -27,7 +36,7 @@ let focusedRun: string | null = null
 const status = document.createElement('output')
 status.id = 'model-state'
 status.hidden = true
-const update = () => { status.textContent = JSON.stringify({ requests, capabilityRequests }) }
+const update = () => { status.textContent = JSON.stringify({ requests, capabilityRequests, controlRequests, detectionReads, stoppedRuns }) }
 const agents = [
   { id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude' },
   { id: 'codex', name: 'Codex', path: '/fixture/codex', bin: 'codex' },
@@ -42,9 +51,17 @@ Object.defineProperty(window, 'scry', { value: {
   onTurnDone: (cb: (event: unknown) => void) => subscribe('done', cb),
   onError: () => () => {},
   // Match IPC snapshot identity; never share the mutable fixture catalog with React.
-  listProjects: async () => structuredClone(projects), recentFolders: async () => ['/fixture'],
+  listProjects: async () => structuredClone(projects.map((project) => ({ ...project,
+    sessions: project.sessions.filter((session) => !archived.has(session.sessionId))
+  }))), recentFolders: async () => ['/fixture'],
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
-  detect: async () => agents, detectFast: async () => agents,
+  detect: async () => {
+    detectionReads++
+    update()
+    return agents.map((agent) => ({ ...agent, health: { state: detectionFailure ? 'unavailable' : 'ready',
+      ...(detectionFailure ? { lastError: 'fixture detection timeout' } : {}) } }))
+  },
+  detectFast: async () => agents,
   listSkills: async (context: ProviderContext) => {
     capabilityRequests.skills.push(context)
     update()
@@ -60,16 +77,36 @@ Object.defineProperty(window, 'scry', { value: {
   focusRun: async (runId: string | null) => { focusedRun = runId; return true },
   adoptActiveRun: async (runId: string) => { focusedRun = runId; return runs.get(runId) },
   newSession: async () => true,
+  setSessionArchived: async (ref: { externalSessionId: string }, value: boolean) => {
+    if (value) {
+      archived.add(ref.externalSessionId)
+      for (const run of runs.values()) if (!run.done &&
+        (run.externalSessionId ?? run.runId) === ref.externalSessionId) {
+        stoppedRuns.push(run.runId)
+        run.done = true
+        emit('done', { runId: run.runId, sessionId: ref.externalSessionId, providerId: run.providerId })
+      }
+    } else archived.delete(ref.externalSessionId)
+    update()
+    if (holdArchive) await new Promise<void>((resolve) => { releaseArchive = resolve })
+    return true
+  },
   loadSession: async (context: ProviderContext) => ({
     turns: [...runs.values()].filter((run) => (run.externalSessionId ?? run.runId) === context.externalSessionId),
     offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete'
   }),
-  runControls: async (context: ProviderContext) => ({ ...context, mode: 'read', state: 'ready', data: {
+  runControls: async (context: ProviderContext) => {
+    controlRequests.push(context)
+    update()
+    if (holdControls) await new Promise<void>((resolve) => { releaseControls = resolve })
+    if (detectionFailure) return { ...context, mode: 'read', state: 'unavailable', data: null, reason: 'fixture detection timeout' }
+    return { ...context, mode: 'read', state: 'ready', data: {
     models: ['model-1', 'model-2'].map((id) => ({
       model: { id }, label: id, efforts: [{ id: 'high', label: 'High' }]
     })),
     permissions: [{ id: 'default', label: '默认审批', description: 'fixture' }]
-  } }),
+    } }
+  },
   start: async (request: AgentStartRequest) => {
     requests.push(request)
     const runId = `run-${requests.length}`
@@ -121,6 +158,15 @@ for (const [id, action] of Object.entries({
       providerId: 'claude', mtime: 1, preview: 'Legacy conversation', count: 1 })
     emit('done', { runId: 'legacy-run', sessionId: 'legacy-session', providerId: 'claude' })
   },
+  'fail-detection': () => {
+    detectionFailure = true
+    root.unmount(); root = createRoot(document.getElementById('root')!); root.render(<App />)
+  },
+  'hold-detection': () => { holdControls = true },
+  'release-detection': () => { holdControls = false; releaseControls?.(); releaseControls = null },
+  'recover-detection': () => { detectionFailure = false },
+  'hold-archive': () => { holdArchive = true },
+  'release-archive': () => { holdArchive = false; releaseArchive?.(); releaseArchive = null },
   'remount': () => { root.unmount(); root = createRoot(document.getElementById('root')!); root.render(<App />) }
 })) {
   const button = document.createElement('button')

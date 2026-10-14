@@ -135,6 +135,7 @@ import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { sessionAttentionKey } from '../shared/session-attention'
 import { archiveSessionId } from './session-id'
+import { archiveSessionAndStop } from './session-archive'
 import {
   codexHookFingerprint,
   createCodexHookGrantStore,
@@ -2185,7 +2186,9 @@ handleTrusted('agent:setSessionPinned', (_e, p: unknown, pinned: unknown) => {
 handleTrusted('agent:setSessionArchived', (_e, p: unknown, archived: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof archived !== 'boolean') throw new Error('无效的存档请求')
-  return appSessionStore().setArchived(ref, archived)
+  return archived
+    ? archiveSessionAndStop(appSessionStore(), ref, runs.activeStates(), requestRunStop)
+    : appSessionStore().setArchived(ref, false)
 })
 
 handleTrusted('agent:listArchivedSessions', () => appSessionStore().listArchivedProjects())
@@ -2419,6 +2422,17 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     })
   }
   const catalogCwd = cwd ?? ''
+  const assertSessionNotArchived = (sessionIds: readonly (string | null | undefined)[]): void => {
+    if (sessionIds.some((sessionId) => sessionId && appSessionStore().isArchived({
+      providerId, agentProfileId, cwd: catalogCwd, externalSessionId: sessionId
+    }))) throw new AgentRuntimeError('这个会话已归档，已拒绝启动新一轮', {
+      provider: runtimeProvider,
+      stage: 'frontdoor',
+      cwd,
+      nextAction: '先撤销归档，再继续该会话；待发送消息不会自动恢复'
+    })
+  }
+  assertSessionNotArchived([request.expectedExternalSessionId])
   if (request.backend !== 'local') {
     throw new AgentRuntimeError(`backend=${request.backend} 尚未实现`, {
       provider: runtimeProvider,
@@ -2855,7 +2869,8 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
-    appSessionStore().remove({ providerId, agentProfileId, cwd: catalogCwd, externalSessionId: runId })
+    const ref = { providerId, agentProfileId, cwd: catalogCwd, externalSessionId: runId }
+    if (!appSessionStore().isArchived(ref)) appSessionStore().remove(ref)
   }
   // emit 早于 diffPreviewer 构造，这里留一个前向钩子；构造完成后接上真正的预览刷新。
   let notifyDiffChange: () => void = () => {}
@@ -3441,6 +3456,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       remoteRunIds.add(runId)
       if (options.ledgerRunId) remoteRunLedgerIds.set(runId, options.ledgerRunId)
     }
+    // Archive may land during async startup checks. Fence again immediately before
+    // registration so it either rejects this start or can stop the registered run.
+    assertSessionNotArchived([request.expectedExternalSessionId, resume, runId])
     runs.register(runState, control, isRemoteRun ? { focus: false } : undefined)
   } catch (error) {
     if (isRemoteRun) {

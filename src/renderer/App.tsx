@@ -666,24 +666,20 @@ interface NewConversationEffects {
 interface SessionArchiveEffects {
   archive: () => Promise<boolean>
   archivingActiveSession: boolean
-  // 归档一个正在跑的会话不能清视图：轮次还在 main 里跑，清掉以后时间线空白、
-  // “停止”拿不到 runId 失效，用户只能看到“运行中”却没任何反应。
-  activeSessionBusy: boolean
   rememberUndo: () => void
   resetConversation: () => Promise<void>
   reloadProjects: () => void
 }
 
-// 归档只改 catalog，但归档的是当前打开的会话时，renderer 还钉着这条已经从侧栏消失的会话 id，
-// 之后每次发送都会被 main 的会话身份守卫拒绝（“发送前会话上下文已变化”）。所以这里必须
-// 回到一个明确的新会话；草稿文本不动。
+// Main archives durably and requests stop before acknowledging. Leave the archived
+// conversation even while Provider shutdown settles; undo never resumes execution.
 export async function applySessionArchiveEffects(effects: SessionArchiveEffects): Promise<void> {
   if (!(await effects.archive())) return
   effects.rememberUndo()
   // Archive is already durable. Refresh the sidebar before resetting the conversation:
   // reset also refreshes Provider catalogs, which may be slow or reject after selection clears.
   effects.reloadProjects()
-  if (effects.archivingActiveSession && !effects.activeSessionBusy) await effects.resetConversation()
+  if (effects.archivingActiveSession) await effects.resetConversation()
 }
 
 export async function applyNewConversationEffects(effects: NewConversationEffects): Promise<void> {
@@ -1036,9 +1032,8 @@ export function App() {
     queuedStartPendingRef.current = reset.pending
     queuedStartInFlightRef.current = reset.inFlight
   }, [])
-  const clearCurrentPromptQueue = useCallback((): void => {
-    const key = queueKeyRef.current
-    resetPromptQueueControl()
+  const clearSessionPromptQueue = useCallback((key = queueKeyRef.current): void => {
+    if (key === queueKeyRef.current) resetPromptQueueControl()
     setSessionPromptQueues((current) => updateSessionPromptQueue(current, key, (queue) => {
       const retained = retainProtectedSteerPrompts(queue, steerEvidenceByMessageId, steerInFlightRef.current)
       const retainedIds = new Set(retained.map(prompt => prompt.messageId))
@@ -1912,6 +1907,7 @@ export function App() {
   }
 
   const archiveSession = async (cwd: string, meta: SessionMeta): Promise<void> => {
+    const selectionSeq = sessionSelectionSeqRef.current
     const ref = sessionRefOf(cwd, meta)
     const archivingActiveSession = sessionMatchesSelection(cwd, meta, {
       cwd: cwdRef.current,
@@ -1919,12 +1915,16 @@ export function App() {
       providerId: integrations.selectedProviderId,
       agentProfileId: integrations.providerContext.agentProfileId
     })
+    if (ref.providerId !== 'legacy_unknown') clearSessionPromptQueue(archivingActiveSession ? queueKeyRef.current : sessionComposerDraftKey({
+      providerId: ref.providerId, agentProfileId: ref.agentProfileId, cwd, sessionId: meta.sessionId
+    }))
     await applySessionArchiveEffects({
       archive: () => window.scry.setSessionArchived(ref, true),
       archivingActiveSession,
-      activeSessionBusy: session.busy || queuedPrompts.length > 0 || composerSubmitting,
       rememberUndo: () => setArchiveUndo({ ref, preview: meta.preview }),
-      resetConversation: newConversation,
+      resetConversation: async () => {
+        if (selectionSeq === sessionSelectionSeqRef.current) await newConversation()
+      },
       reloadProjects: workspace.loadProjects
     })
   }
@@ -2294,7 +2294,7 @@ export function App() {
     window.setTimeout(() => taRef.current?.focus(), 0)
   }, [setInput])
   const stopRun = async (): Promise<void> => {
-    clearCurrentPromptQueue()
+    clearSessionPromptQueue()
     await session.stopRun()
   }
   const [historyOlderLoading, setHistoryOlderLoading] = useState(false)
@@ -2447,6 +2447,9 @@ export function App() {
               runControlsReason={integrations.runControlCapability?.reason}
               sendBlockedReason={sendBlockedReason}
               composerError={composerError}
+              detectionIssue={integrations.agentsScanError ?? providerSendBlockedReason}
+              detectionRetrying={integrations.detectionRetrying}
+              onRetryDetection={() => { setComposerError(null); integrations.retryDetection() }}
               submitting={composerSubmitting}
               sessionLoading={sessionLoading}
               sessionEvidenceGap={activeEvidenceGap}

@@ -613,7 +613,7 @@ function SessionRow({
         <button
           type="button"
           className="sb-act"
-          title="存档会话"
+          title={running ? '存档并停止运行，取消排队消息' : '存档会话（取消排队消息）'}
           aria-label={`存档会话：${session.preview || '(无预览)'}`}
           onClick={() => onArchive(cwd, session)}
         >

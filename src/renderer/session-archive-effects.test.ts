@@ -11,7 +11,6 @@ function fixture() {
   return {
     archive: vi.fn(async () => true),
     archivingActiveSession: true,
-    activeSessionBusy: false,
     rememberUndo: vi.fn(),
     resetConversation: vi.fn(async (): Promise<void> => undefined),
     reloadProjects: vi.fn()
@@ -65,13 +64,18 @@ describe('archive success refreshes the sidebar independently of conversation re
     expect(effects.rememberUndo).not.toHaveBeenCalled()
   })
 
-  it.each(['background session', 'running current session'] as const)('removes %s from the list without resetting the current conversation', async (scenario) => {
+  it('removes a background session without resetting the current conversation', async () => {
     const effects = fixture()
-    effects.archivingActiveSession = scenario !== 'background session'
-    effects.activeSessionBusy = scenario === 'running current session'
+    effects.archivingActiveSession = false
     await applySessionArchiveEffects(effects)
     expect(effects.reloadProjects).toHaveBeenCalledOnce()
     expect(effects.rememberUndo).toHaveBeenCalledOnce()
     expect(effects.resetConversation).not.toHaveBeenCalled()
+  })
+
+  it('leaves the selected archived session even while Provider stop is settling', async () => {
+    const effects = fixture()
+    await applySessionArchiveEffects(effects)
+    expect(effects.resetConversation).toHaveBeenCalledOnce()
   })
 })

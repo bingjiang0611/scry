@@ -535,6 +535,13 @@ export function createAppSessionStore(userDataDir: string) {
       } else delete session.archivedAt
     })
 
+  const isArchived = (ref: AppSessionRef): boolean => load().some((session) =>
+    Boolean(session.archivedAt) && (matchesRef(session, ref) || (
+      session.providerId === ref.providerId && session.agentProfileId === ref.agentProfileId &&
+      session.cwd === ref.cwd && session.runId === ref.externalSessionId
+    ))
+  )
+
   const remove = (args: AppSessionRef): void => {
     const next = load().filter((session) => !matchesRef(session, args))
     // Write the deletion tombstone to fallback first. If primary then fails, its old entry remains retryable.
@@ -556,6 +563,7 @@ export function createAppSessionStore(userDataDir: string) {
     rename,
     setPinned,
     setArchived,
+    isArchived,
     remove
   }
 }

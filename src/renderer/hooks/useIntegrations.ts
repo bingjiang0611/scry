@@ -565,6 +565,11 @@ export function useIntegrations(
   const mcpAuthRequests = useRef(new Map<string, number>())
   const mcpConfigPromiseRef = useRef<Promise<McpLiveStatus[]> | null>(null)
   const runControlRequestSeq = useRef(0)
+  const [detectionRevision, setDetectionRevision] = useState(0)
+  const [runControlsRefreshing, setRunControlsRefreshing] = useState(false)
+  const [agentsScanError, setAgentsScanError] = useState<string | null>(null)
+  const selectedSessionRef = useRef(sessionId)
+  selectedSessionRef.current = sessionId
   const runControlsByProvider = useRef(new Map<ProviderId, AgentRunControls>(
     PROVIDER_IDS.flatMap((providerId) => {
       const controls = storedRunControlPreferences.controlsByProvider[providerId]
@@ -630,13 +635,17 @@ export function useIntegrations(
 
   const rescan = useCallback((): void => {
     setAgentsScanning(true)
+    setAgentsScanError(null)
     window.scry
       .detect()
       .then((detected) => {
         setAgents(detected)
-        setSelectedId((current) => reconcileSelectedAgentId(current, detected))
+        // Refresh health without changing a resumed session's runtime.
+        setSelectedId((current) => selectedSessionRef.current == null
+          ? reconcileSelectedAgentId(current, detected)
+          : current)
       })
-      .catch(() => {})
+      .catch((error: unknown) => setAgentsScanError(error instanceof Error ? error.message : String(error)))
       .finally(() => setAgentsScanning(false))
   }, [])
 
@@ -1064,6 +1073,7 @@ export function useIntegrations(
 
   useEffect(() => {
     const seq = ++runControlRequestSeq.current
+    setRunControlsRefreshing(true)
     const context = providerContext
     const key = contextKey(context)
     const stored = runControlsByProvider.current.get(selectedProviderId) ?? { permissionMode: 'default' as const }
@@ -1090,6 +1100,7 @@ export function useIntegrations(
       setRunControlCatalog(fallback)
       setRunControls(next)
       setRunControlsLoading(false)
+      setRunControlsRefreshing(false)
       return
     }
     void requestRunControlsForSelectedProvider(
@@ -1124,9 +1135,12 @@ export function useIntegrations(
         setRunControls(next)
       })
       .finally(() => {
-        if (seq === runControlRequestSeq.current) setRunControlsLoading(false)
+        if (seq === runControlRequestSeq.current) {
+          setRunControlsLoading(false)
+          setRunControlsRefreshing(false)
+        }
       })
-  }, [cwd, providerContext, requestRunControlCatalog, selectedProviderId])
+  }, [cwd, providerContext, requestRunControlCatalog, selectedProviderId, detectionRevision])
 
   useEffect(() => {
     writeRunControlPreferences(selectedId, runControlsByProvider.current)
@@ -1246,6 +1260,13 @@ export function useIntegrations(
     mcpGuardScanning,
     gitDiff,
     rescan,
+    agentsScanError,
+    detectionRetrying: agentsScanning || runControlsRefreshing,
+    retryDetection: () => {
+      if (agentsScanning || runControlsRefreshing) return
+      rescan()
+      setDetectionRevision((revision) => revision + 1)
+    },
     addPiProfile,
     removePiProfile,
     refreshSkills,
