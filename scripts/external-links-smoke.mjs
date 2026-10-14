@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import electron from 'electron'
+import { stopOwnedApp } from './owned-app-processes.mjs'
 
 // Run after `npm run build`. Use the real main/preload/renderer with isolated data;
 // intercept only OS browser launch/dialogs so this test never visits a live service.
@@ -34,6 +35,8 @@ async function exercise(window, shell, dialog, backgroundShowRequested) {
       new Promise((_resolve, reject) => { frameTimer = setTimeout(() => reject(new Error('Background animation frame stalled')), 5000) })
     ])
   } finally { clearTimeout(frameTimer) }
+  // Fresh-profile discovery is read-only: it must not initialize or unlock Keychain.
+  assert.deepEqual(await contents.executeJavaScript('window.scry.desktopRemote.list()'), [])
   const rendererUrl = contents.getURL()
   const opened = []
   const prompts = []
@@ -99,7 +102,8 @@ async function exercise(window, shell, dialog, backgroundShowRequested) {
 try {
   await mkdir(join(temp, 'home'))
   await writeFile(join(temp, 'main.cjs'), `
-    const { app, shell, dialog } = require('electron')
+    const { app, shell, dialog, safeStorage } = require('electron')
+    safeStorage.isEncryptionAvailable = () => { throw new Error('Fresh-profile startup unexpectedly accessed Keychain') }
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.on('browser-window-focus', () => { console.error('Test app stole native window focus'); app.exit(1) })
     app.once('browser-window-created', (_event, window) => {
@@ -122,17 +126,26 @@ try {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
-    const timer = setTimeout(() => { child.kill('SIGTERM') }, 30_000)
+    let cleanup
+    const timer = setTimeout(() => {
+      cleanup = stopOwnedApp(child).then(
+        () => reject(new Error(`External links fixture timed out; retained at ${temp}:\n${output.slice(-8000)}`)),
+        error => reject(new Error(`External links fixture cleanup unknown; retained at ${temp}`, { cause: error }))
+      )
+    }, 30_000)
     child.stdout.on('data', (chunk) => { output += chunk.toString() })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
     child.once('error', (error) => { clearTimeout(timer); reject(error) })
     child.once('close', (code, signal) => {
       clearTimeout(timer)
+      if (cleanup) return
       if (code !== 0 || !output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) {
         reject(new Error(`External links fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
       } else { console.log('Background startup: no native focus; external links: native clicks open directly; unsafe URLs and renderer navigation remain blocked'); resolve() }
     })
   })
-} finally {
-  await rm(temp, { recursive: true, force: true })
+} catch (error) {
+  console.error(`External links fixture retained: ${temp}`)
+  throw error
 }
+await rm(temp, { recursive: true, force: true })

@@ -221,9 +221,9 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
           pending: { pairingId: invitation.pairingId, secret: invitation.secret, expiresAt: invitation.expiresAt, publicKeySHA256: identity.publicKeySHA256 } }
       : { id, label: input.label, hostId: invitation.hostId, anchorPEM: invitation.anchorPEM, anchorSHA256: invitation.anchorSHA256, ssh,
           pairPort: invitation.pairPort, runPort: invitation.runPort, pending: { pairingId: invitation.pairingId, secret: invitation.secret, expiresAt: invitation.expiresAt, publicKeySHA256: identity.publicKeySHA256 } }
-    state.connections = state.connections.filter((existing) => existing.id !== id)
-    state.connections.push(item)
-    await this.#save(state)
+    const connections = [...state.connections.filter((existing) => existing.id !== id), item]
+    await this.#save({ ...state, connections })
+    state.connections = connections
     const response = await this.#pairRequest(state, item, 'pair.prove')
     return await this.#consumePairingResponse(state, item, response)
   }
@@ -457,9 +457,9 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       const identity = await this.#transport.generateIdentity()
       validateIdentity(identity)
-      const initial: EncryptedState = { version: 1, identity, connections: [], intents: [] }
-      await this.#writeState(initial)
-      return initial
+      // Listing a fresh profile is read-only. Persist this identity with the first
+      // pairing, before any network proof; a failed save must not publish a host.
+      return { version: 1, identity, connections: [], intents: [] }
     }
   }
   async #save(state: EncryptedState): Promise<void> {

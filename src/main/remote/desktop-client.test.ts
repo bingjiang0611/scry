@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity, desktopTlsRequest, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
@@ -16,7 +16,7 @@ const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-async function setup(setupOptions: { submitResponse?: () => unknown; unknownIntent?: boolean } = {}) {
+async function setup(setupOptions: { submitResponse?: () => unknown; unknownIntent?: boolean; encrypt?: typeof encrypt } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -52,11 +52,38 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
     if ((request as { op?: string }).op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
     return { error: 'unexpected_request' }
   }
-  const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => tunnel(), tlsRequest })
-  return { directory, host, invitation, client, phase: () => phase, dropTunnel: () => tunnelShutdowns.at(-1)!() }
+  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => tunnel(), tlsRequest })
+  return { directory, host, invitation, client, phase: () => phase, tunnelCount: () => tunnelCount, dropTunnel: () => tunnelShutdowns.at(-1)!() }
 }
 
 describe('DesktopRemoteClient', () => {
+  it('lists a fresh profile without touching secure storage, and fails pairing before networking when encryption fails', async () => {
+    const unavailable = vi.fn(() => { throw new Error('secure_storage_unavailable') })
+    const fixture = await setup({ encrypt: unavailable })
+    try {
+      await expect(fixture.client.list()).resolves.toEqual([])
+      expect(unavailable).not.toHaveBeenCalled()
+      await expect(access(join(fixture.directory, 'desktop-client.state'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(fixture.client.pair({ label: 'Unsaved', ssh, invitation: fixture.invitation })).rejects.toThrow('secure_storage_unavailable')
+      expect(unavailable).toHaveBeenCalledTimes(1)
+      expect(fixture.tunnelCount()).toBe(0)
+      await expect(fixture.client.list()).resolves.toEqual([])
+      await expect(access(join(fixture.directory, 'desktop-client.state'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('does not turn an unreadable encrypted store into an empty profile', async () => {
+    const fixture = await setup()
+    let restored: DesktopRemoteClient | undefined
+    try {
+      await fixture.client.pair({ label: 'Saved', ssh, invitation: fixture.invitation })
+      await fixture.client.dispose()
+      restored = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt: () => { throw new Error('secure_storage_unavailable') } })
+      await expect(restored.list()).rejects.toThrow('secure_storage_unavailable')
+      await expect(access(join(fixture.directory, 'desktop-client.state'))).resolves.toBeUndefined()
+    } finally { await restored?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('reports an exited SSH tunnel as disconnected and rejects unsent work without creating an unknown receipt', async () => {
     const fixture = await setup()
     try {
