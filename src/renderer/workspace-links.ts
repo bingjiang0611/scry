@@ -1,3 +1,37 @@
+import type { Root, RootContent } from 'mdast'
+
+/** A directory followed by filenames in one paragraph is an explicit path context, not a disk search. */
+export function remarkWorkspaceFileDirectories() {
+  return (tree: Root): void => {
+    const visit = (node: Root | RootContent): void => {
+      if (node.type === 'paragraph') {
+        let directory: string | null = null
+        const inline = (child: RootContent): void => {
+          const reference = child.type === 'inlineCode' ? child.value : child.type === 'link' ? child.url : null
+          if (reference !== null) {
+            const token = stripWorkspaceToken(reference)
+            const path = token.startsWith('file:') ? fileUrlPath(token) : token
+            if (path && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) && !path.startsWith('#')) {
+              if (path.endsWith('/')) directory = path
+              else if (directory && !path.startsWith('/') && !path.startsWith('~')) {
+                child.data = { ...child.data, hProperties: {
+                  ...child.data?.hProperties,
+                  'data-scry-file-reference': `${directory}${path}`
+                } }
+              }
+            }
+            // Do not reinterpret code inside a link independently of its href.
+            return
+          }
+          if ('children' in child) child.children.forEach(inline)
+        }
+        node.children.forEach(inline)
+      } else if ('children' in node) node.children.forEach(visit)
+    }
+    visit(tree)
+  }
+}
+
 function stripWorkspaceToken(reference: string): string {
   const value = reference.trim()
   if (value.startsWith('@"') && value.endsWith('"')) return value.slice(2, -1)
@@ -22,19 +56,11 @@ function normalizeRelativePath(path: string): string | null {
   return parts.join('/')
 }
 
-const LIKELY_WORKSPACE_FILE_EXTENSIONS = new Set([
-  'avif', 'bash', 'bmp', 'c', 'cc', 'cjs', 'cpp', 'css', 'csv', 'env', 'fish', 'gif', 'go', 'gql',
-  'graphql', 'h', 'hpp', 'htm', 'html', 'ini', 'java', 'jpeg', 'jpg', 'js', 'json', 'jsonc', 'jsx',
-  'kt', 'kts', 'less', 'md', 'mdx', 'mjs', 'pdf', 'png', 'py', 'rb', 'rs', 'scss', 'sh', 'sql', 'svg',
-  'swift', 'toml', 'ts', 'tsx', 'txt', 'webp', 'xml', 'yaml', 'yml', 'zsh',
-  'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'zip', 'mp3', 'mp4'
-])
-
 function looksLikeRelativeFile(reference: string): boolean {
-  if (reference.startsWith('./') || reference.startsWith('.\\')) return true
+  if (reference.includes('/') || reference.includes('\\')) return true
   const name = reference.split(/[\\/]/).at(-1) ?? ''
   const dot = name.lastIndexOf('.')
-  return (dot > 0 && LIKELY_WORKSPACE_FILE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())) ||
+  return (dot >= 0 && dot < name.length - 1) ||
     ['LICENSE', 'NOTICE', 'README', 'Makefile', 'Dockerfile'].includes(name)
 }
 
@@ -67,9 +93,8 @@ export function resolveWorkspaceFileTarget(
   const normalizedCandidate = candidate.replaceAll('\\', '/')
 
   if (normalizedCandidate.startsWith('~/')) {
-    if (normalizedCandidate.endsWith('/')) return null
-    const path = normalizeRelativePath(normalizedCandidate.slice(2))
-    return path ? { cwd: '~', path } : null
+    const path = normalizeRelativePath(normalizedCandidate.slice(2)) ?? '.'
+    return { cwd: '~', path }
   }
   if (normalizedCandidate.startsWith('~')) return null
 
@@ -77,7 +102,7 @@ export function resolveWorkspaceFileTarget(
     const root = rootsBySpecificity.find(({ normalized }) => normalizedCandidate.startsWith(`${normalized}/`))
     if (!root) return { cwd: primaryRoot.cwd, path: normalizedCandidate }
     const path = normalizeRelativePath(normalizedCandidate.slice(root.normalized.length + 1))
-    return path ? { cwd: root.cwd, path } : null
+    return { cwd: root.cwd, path: path ?? '.' }
   }
 
   const explicitWorkspaceToken = reference.trim().startsWith('@')

@@ -237,8 +237,10 @@ export async function resolveWorkspaceFileOpenTarget(
   homeAccess: HomeFileAccess
 ): Promise<WorkspaceFileOpenTarget> {
   const target = await homeAccess.resolveFile(request)
-  if (canOpenWorkspaceFileExternally(target.path)) return { ...target, mode: 'external' }
   const canonical = homeAccess.isReadOnlyTarget(target.cwd) ? await homeAccess.authorize(target) : target
+  if ((await lstat(resolve(canonical.cwd, canonical.path))).isDirectory() || canOpenWorkspaceFileExternally(target.path)) {
+    return { ...target, mode: 'external' }
+  }
   try {
     await readWorkspaceFilePage({ ...canonical, limit: 65_536 })
     return { ...target, mode: 'text' }
@@ -250,21 +252,11 @@ export async function resolveWorkspaceFileOpenTarget(
 
 async function externalFileTarget(request: WorkspacePathRequest) {
   const target = await checkedPath(request.cwd, request.path)
-  const handle = await open(target.realPath, constants.O_RDONLY | constants.O_NOFOLLOW)
-  try {
-    const info = await handle.stat()
-    if (!info.isFile()) throw new Error('目标不是文件')
-    const header = Buffer.alloc(4)
-    const { bytesRead } = await handle.read(header, 0, header.length, 0)
-    const magic = bytesRead === 4 ? header.readUInt32BE(0) : 0
-    const executable = (info.mode & 0o111) !== 0 || header.subarray(0, 2).toString() === '#!' ||
-      [0x7f454c46, 0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca].includes(magic) ||
-      header.subarray(0, 2).toString() === 'MZ' ||
-      /\.(?:app|command|exe|com|bat|cmd|ps1|vbs|vbe|wsf|wsh|msi|scr|desktop|lnk|webloc|url|scpt|applescript|workflow|pkg|jar|class|sh|bash|zsh|fish|py|pyc|pyo|rb|pl|php|lua|js|jse|mjs|cjs)$/i.test(target.realPath)
-    if (executable) throw new Error('不允许自动打开可执行文件；请在文本视图检查代码，或在 Finder 中自行处理')
-  } finally {
-    await handle.close()
-  }
+  const info = await lstat(target.realPath)
+  if (!info.isFile() && !info.isDirectory()) throw new Error('目标不是普通文件或文件夹')
+  // A user-requested external open delegates every file type to the OS, including
+  // executables. This does not grant writes or bypass repository execution trust.
+  await access(target.realPath, constants.R_OK)
   return target
 }
 
@@ -290,7 +282,7 @@ export async function openWorkspaceFileExternally(
       try {
         const candidate = await externalFileTarget({ cwd, path: request.path })
         candidates.set(candidate.path, { cwd: candidate.root, path: candidate.portable })
-      } catch { /* Missing, protected, unreadable and symlink targets are not offered. */ }
+      } catch { /* Missing, unreadable and out-of-workspace symlink targets are not offered. */ }
     }
     const offered = [...candidates.values()]
     const selected = await fallback.choose(offered.map((candidate) => ({ ...candidate })))

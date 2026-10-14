@@ -119,6 +119,32 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('/repo/src/fenced.ts')
   })
 
+  it('resolves filenames against the directory written in the same paragraph, without leaking into the next paragraph', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'截图留在 `/var/tmp/screens/`（`remote-workspace.png`、[settings](remote-settings.png)、`asset.custom`）。\n\n`next.md`'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    for (const name of ['remote-workspace.png', 'remote-settings.png', 'asset.custom']) {
+      expect(html).toContain(`/var/tmp/screens/${name} ·`)
+    }
+    expect(html).toContain('next.md · 在右侧文件面板打开')
+    expect(html).not.toContain('/var/tmp/screens/next.md')
+  })
+
+  it('keeps multiple directory groups, absolute files, URLs and fenced code separate', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'`~/screens/` `first.png` `/var/tmp/other/` `second.png` `/repo/docs/explicit.md` `https://example.com/x.png`\n\n```text\n/var/tmp/screens/\nnot-a-link.png\n```'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html).toContain('screens/first.png · 在外部应用打开')
+    expect(html).toContain('/var/tmp/other/second.png · 在外部应用打开')
+    expect(html).toContain('docs/explicit.md · 在右侧文件面板打开')
+    expect(html).toContain('href="https://example.com/x.png"')
+    expect(html).not.toContain('not-a-link.png ·')
+  })
+
   it('opens an HTTP URL code span in the browser instead of treating its extension as a workspace file', () => {
     const html = renderToStaticMarkup(
       <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>

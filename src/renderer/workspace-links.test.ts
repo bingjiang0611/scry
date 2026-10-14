@@ -11,14 +11,18 @@ describe('workspace file references', () => {
     expect(resolveWorkspaceFileReference(cwd, '@src/App.tsx')).toBe('src/App.tsx')
   })
 
-  it('accepts likely relative file paths without turning arbitrary inline code or domains into links', () => {
+  it('accepts relative file paths of any extension while leaving plain identifiers alone', () => {
     expect(resolveWorkspaceFileReference(cwd, 'src/App.tsx')).toBe('src/App.tsx')
     expect(resolveWorkspaceFileReference(cwd, './README.md')).toBe('README.md')
     expect(resolveWorkspaceFileReference(cwd, 'README.md')).toBe('README.md')
     expect(resolveWorkspaceFileReference(cwd, 'package.json')).toBe('package.json')
     expect(resolveWorkspaceFileReference(cwd, 'vite.config.ts')).toBe('vite.config.ts')
     expect(resolveWorkspaceFileReference(cwd, 'Promise<void>')).toBeNull()
-    expect(resolveWorkspaceFileReference(cwd, 'example.com')).toBeNull()
+    expect(resolveWorkspaceFileReference(cwd, 'asset.custom')).toBe('asset.custom')
+    expect(resolveWorkspaceFileReference(cwd, 'run.com')).toBe('run.com')
+    expect(resolveWorkspaceFileReference(cwd, '.env')).toBe('.env')
+    expect(resolveWorkspaceFileReference(cwd, 'assets/payload')).toBe('assets/payload')
+    expect(resolveWorkspaceFileReference(cwd, 'identifier')).toBeNull()
   })
 
   it('uses the longest known root for absolute paths and the current root for relative paths', () => {
@@ -63,6 +67,8 @@ describe('workspace file references', () => {
     })
     expect(resolveWorkspaceFileTarget([cwd], '~/.gitignore')).toEqual({ cwd: '~', path: '.gitignore' })
     expect(resolveWorkspaceFileTarget([cwd], '~/Notes/config')).toEqual({ cwd: '~', path: 'Notes/config' })
-    expect(resolveWorkspaceFileTarget([cwd], '~/Papers/folder/')).toBeNull()
+    expect(resolveWorkspaceFileTarget([cwd], '~/Papers/folder/')).toEqual({ cwd: '~', path: 'Papers/folder' })
+    expect(resolveWorkspaceFileTarget([cwd], '~/')).toEqual({ cwd: '~', path: '.' })
+    expect(resolveWorkspaceFileTarget([cwd], `${cwd}/`)).toEqual({ cwd, path: '.' })
   })
 })

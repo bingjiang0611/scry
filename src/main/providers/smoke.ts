@@ -105,7 +105,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           request.emit({
             id: `${request.runId}:files`, runId: request.runId, ts: new Date().toISOString(),
             kind: 'model', stage: 'text_delta', messageId: `${request.runId}:message`,
-            text: `验收总表：\`rotom-team/docs/NATIVE-DELIVERY.md\`\n\n[absolute](${absolute}) [license](../LICENSE) [binary](../asset.custom) [outside](escaped.md) \`missing.md\``
+            text: `验收总表：\`rotom-team/docs/NATIVE-DELIVERY.md\`\n\n[absolute](${absolute}) [license](../LICENSE) [binary](../asset.custom) [outside](escaped.md) \`missing.md\`\n\n截图留在 \`${join(request.cwd, 'screens')}/\`（\`remote-workspace.png\`、\`remote-hosts.png\`、\`remote-settings.png\`、\`asset.custom\`、\`fail.custom\`）。`
           })
         }
         if (request.prompt === 'performance long stream') {

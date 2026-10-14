@@ -149,6 +149,22 @@ describe('workspace files', () => {
     await expect(resolveWorkspaceFileOpenTarget({ cwd: root, path: 'missing.md' }, access)).rejects.toThrow('不存在')
   })
 
+  it('opens directory links inside and outside home through a target-scoped reference', async () => {
+    const root = await fixture()
+    const outside = await fixture()
+    const access = new HomeFileAccess(root)
+    const open = vi.fn(async () => {})
+    for (const path of [root, join(root, 'src'), outside]) {
+      const target = await resolveWorkspaceFileOpenTarget({ cwd: root, path }, access)
+      expect(target.mode).toBe('external')
+      expect(target.cwd).toMatch(/^scry-file:/)
+      await openWorkspaceFileExternally(await access.authorize(target), open)
+      expect(open).toHaveBeenLastCalledWith(await realpath(path))
+      await expect(access.authorize({ ...target, path: 'README.md' })).rejects.toThrow('无效')
+      await expect(writeWorkspaceFile({ ...target, content: 'must not write', expectedRevision: 'x' })).rejects.toThrow()
+    }
+  })
+
   it('opens resolved outside-home text, Office and binary links without granting directory or write access', async () => {
     const root = await fixture()
     const outside = await fixture()
@@ -172,7 +188,7 @@ describe('workspace files', () => {
     expect(await readFile(join(outside, 'README.md'), 'utf8')).toBe('# Scry\n')
   })
 
-  it('opens Office and arbitrary binary formats, but never launches executable files', async () => {
+  it('delegates Office, arbitrary binary and executable files to the requested system opener', async () => {
     const root = await fixture()
     await writeFile(join(root, 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
     await writeFile(join(root, 'asset.custom'), Buffer.from([0, 1, 2, 3]))
@@ -186,12 +202,13 @@ describe('workspace files', () => {
     await writeFile(join(root, 'run.command'), '#!/bin/sh\necho unsafe')
     await writeFile(join(root, 'disguised.png'), Buffer.from([0xcf, 0xfa, 0xed, 0xfe]))
     for (const path of ['run.command', 'disguised.png']) {
-      await expect(openWorkspaceFileExternally({ cwd: root, path }, open)).rejects.toThrow('可执行')
+      await expect(openWorkspaceFileExternally({ cwd: root, path }, open)).resolves.toBe(true)
+      expect(open).toHaveBeenLastCalledWith(join(await realpath(root), path))
     }
-    expect(open).toHaveBeenCalledTimes(2)
+    expect(open).toHaveBeenCalledTimes(4)
   })
 
-  it('只允许把工作区内的安全预览格式交给外部应用', async () => {
+  it('allows every requested file format while retaining workspace path containment', async () => {
     const root = await fixture()
     await writeFile(join(root, 'report.pdf'), '%PDF fixture')
     await writeFile(join(root, 'page.html'), '<h1>Scry</h1>')
@@ -205,7 +222,8 @@ describe('workspace files', () => {
     await expect(openWorkspaceFileExternally({ cwd: root, path: 'page.html' }, open)).resolves.toBe(true)
     expect(open).toHaveBeenNthCalledWith(1, join(await realpath(root), 'report.pdf'))
     expect(open).toHaveBeenNthCalledWith(2, join(await realpath(root), 'page.html'))
-    await expect(openWorkspaceFileExternally({ cwd: root, path: 'run.command' }, open)).rejects.toThrow('不允许')
+    await expect(openWorkspaceFileExternally({ cwd: root, path: 'run.command' }, open)).resolves.toBe(true)
+    expect(open).toHaveBeenLastCalledWith(join(await realpath(root), 'run.command'))
     await expect(openWorkspaceFileExternally({ cwd: root, path: '../outside.pdf' }, open)).rejects.toThrow('不能越过')
     await expect(openWorkspaceFileExternally({ cwd: root, path: 'node_modules/hidden.pdf' }, open)).resolves.toBe(true)
     await expect(openWorkspaceFileExternally({ cwd: root, path: 'linked.pdf' }, open)).resolves.toBe(true)

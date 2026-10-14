@@ -136,6 +136,23 @@ async function main() {
       preview: '手机会话恢复测试', ts: Date.now()
     }]))
   }
+  const openReceipt = join(temp, 'opened-paths.json')
+  const filesEntry = join(temp, 'files-main.mjs')
+  if (devFilesOnly) {
+    // Run production handlers without launching viewers or executing fixture programs.
+    // The receipt records the exact OS handoff after resolution and authorization.
+    writeFileSync(filesEntry, `
+      import { shell } from 'electron'
+      import { writeFileSync } from 'node:fs'
+      const opened = []
+      shell.openPath = async (path) => {
+        opened.push(path)
+        writeFileSync(${JSON.stringify(openReceipt)}, JSON.stringify(opened))
+        return path.endsWith('/fail.custom') ? 'fixture: no application associated' : ''
+      }
+      await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
+    `)
+  }
   const badgeReceipt = join(temp, 'dock-badge.json')
   const questionEntry = join(temp, 'question-main.mjs')
   if (devQuestionOnly) {
@@ -167,7 +184,7 @@ async function main() {
   }
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
@@ -413,6 +430,12 @@ async function main() {
     writeFileSync(join(canonicalHome, 'projects', 'asset.custom'), Buffer.from([0, 1, 2, 3]))
     writeFileSync(join(canonicalHome, 'projects', 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
     writeFileSync(join(cwd, 'run.command'), '#!/bin/sh\necho never-run')
+    const screens = join(temp, 'screens')
+    mkdirSync(screens)
+    symlinkSync(screens, join(cwd, 'screens'))
+    for (const name of ['remote-workspace.png', 'remote-hosts.png', 'remote-settings.png', 'asset.custom', 'fail.custom']) {
+      writeFileSync(join(screens, name), Buffer.from([0, 1, 2, 3]))
+    }
     writeFileSync(join(temp, 'outside.md'), '# Actual outside-home delivery\n')
     symlinkSync(join(temp, 'outside.md'), join(cwd, 'escaped.md'))
     const resolved = await evaluate(`(async () => {
@@ -440,10 +463,9 @@ async function main() {
         try { await operation(); denied.push(false); }
         catch { denied.push(true); }
       }
-      let executableDenied = false;
-      try { await window.scry.workspaceOpenExternal({ cwd, path: 'run.command' }); }
-      catch (error) { executableDenied = String(error).includes('可执行'); }
-      return { text, content: snapshot.content, binary: binary.mode, office: office.mode, outside, denied, executableDenied };
+      const script = await window.scry.workspaceResolveFile({ cwd, path: 'run.command' });
+      ${devFilesOnly ? "await window.scry.workspaceOpenExternal({ cwd, path: 'run.command' });" : ''}
+      return { text, content: snapshot.content, binary: binary.mode, office: office.mode, outside, denied, script: script.mode };
     })()`)
     assert.deepEqual(resolved.text, { cwd: '~', path: 'projects/rotom-team/docs/NATIVE-DELIVERY.md', mode: 'text' })
     assert.equal(resolved.content, '# Actual sibling delivery\n')
@@ -453,7 +475,8 @@ async function main() {
       mode: 'text', content: '# Actual outside-home delivery\n', page: '# Actual outs'
     })))
     assert.deepEqual(resolved.denied, [true, true, true, true])
-    assert.equal(resolved.executableDenied, true)
+    assert.equal(resolved.script, 'text')
+    if (devFilesOnly) assert.deepEqual(JSON.parse(readFileSync(openReceipt, 'utf8')), [join(cwd, 'run.command')])
     await evaluate(`(async () => {
       let offDone, offError;
       const terminal = new Promise((resolve, reject) => {
@@ -500,9 +523,33 @@ async function main() {
     assert.equal(readFileSync(join(temp, 'outside.md'), 'utf8'), '# Actual outside-home delivery\n')
     await clickFile('missing.md · 在右侧文件面板打开')
     await wait(`document.body.textContent.includes('文件不存在：missing.md')`)
+    if (devFilesOnly) {
+      const waitForOpen = async path => {
+        const deadline = Date.now() + 8000
+        while (JSON.parse(readFileSync(openReceipt, 'utf8')).at(-1) !== path) {
+          if (Date.now() > deadline) throw new Error(`No system handoff for ${path}`)
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+      }
+      await clickFile('screens · 在外部应用打开')
+      await waitForOpen(realpathSync(screens))
+      for (const name of ['remote-workspace.png', 'remote-hosts.png', 'remote-settings.png', 'asset.custom']) {
+        await clickFile(`screens/${name} · ${name.endsWith('.png') ? '在外部应用打开' : '在右侧文件面板打开'}`)
+        await waitForOpen(join(realpathSync(screens), name))
+        await wait(`!document.querySelector('.composer-status.is-error')`)
+      }
+      assert.deepEqual(JSON.parse(readFileSync(openReceipt, 'utf8')), [
+        join(cwd, 'run.command'), realpathSync(screens),
+        ...['remote-workspace.png', 'remote-hosts.png', 'remote-settings.png', 'asset.custom'].map(name => join(realpathSync(screens), name))
+      ])
+      await clickFile('screens/fail.custom · 在右侧文件面板打开')
+      await wait(`document.body.textContent.includes('fixture: no application associated')`)
+      assert.equal(JSON.parse(readFileSync(openReceipt, 'utf8')).filter(path => path.endsWith('/fail.custom')).length, 1)
+    }
     console.log(JSON.stringify({ fileLinks: { siblingProject: true, actualContent: true, readOnlyOutsideWorkspace: true,
       extensionlessLink: true, officeAndUnknownBinary: true, outsideHomeSymlink: true, fileScopedReads: true,
-      missingFileReported: true, outsideWorkspaceWriteDenied: true, executableDenied: true } }))
+      missingFileReported: true, outsideWorkspaceWriteDenied: true,
+      contextualScreenshotsAndDirectory: devFilesOnly, executableHandoff: devFilesOnly, systemErrorReportedWithoutRetry: devFilesOnly } }))
     cdp.close()
     return
   }
