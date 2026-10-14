@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { once } from 'node:events'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { RemoteHostService } from './remote-host-service'
+import { DesktopHostListeners } from './desktop-host-listeners'
 import { RunOutputFileStore } from './run-output-file'
 import { ReverseTunnelTransport, type OutboundLeg } from './relay-client'
 import type { PairingAuthority } from './pairing'
@@ -24,6 +25,7 @@ const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  vi.restoreAllMocks()
 })
 
 // Mode-aware loopback: run legs and pair legs land in separate queues so a run
@@ -211,6 +213,90 @@ describe('RemoteHostService (lifecycle facade)', () => {
     status = service.status()
     if (!status.enabled) throw new Error('unreachable')
     expect(status.devices[0].revoked).toBe(true)
+  })
+
+  it('restores stable SSH ports and disabling desktop preserves phone grants', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
+    const init = { stateDirectory: dir, authorizeWorkspace: (c: string) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore }
+    const first = await RemoteHostService.create(init)
+    cleanups.push(() => first.dispose())
+    await pairDevice(first)
+    const code = await first.beginDesktopPairing()
+    expect(code).toMatch(/^scry-desktop1:/)
+    const ports = first.desktopStatus()
+    expect(ports.enabled).toBe(true)
+    await first.dispose()
+    const second = await RemoteHostService.create(init)
+    cleanups.push(() => second.dispose())
+    await Promise.all([second.start(), second.start()])
+    expect(second.desktopStatus()).toEqual(ports)
+    await second.disableDesktop()
+    expect(second.desktopStatus()).toEqual({ enabled: false })
+    const status = second.status()
+    if (!status.enabled) throw new Error('host not enabled')
+    expect(status.devices).toHaveLength(1)
+    expect(status.devices[0].revoked).toBe(false)
+  })
+
+  it('restored-port failure stays visible without disabling phone grants or leaking a partial listener', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
+    const init = { stateDirectory: dir, authorizeWorkspace: (c: string) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore }
+    const first = await RemoteHostService.create(init)
+    cleanups.push(() => first.dispose())
+    await first.beginDesktopPairing()
+    const ports = first.desktopStatus()
+    if (!ports.enabled) throw new Error('listener not enabled')
+    await first.dispose()
+    const occupied = netServer()
+    await new Promise<void>(resolve => occupied.listen(ports.runPort, '127.0.0.1', resolve))
+    cleanups.push(() => new Promise<void>(resolve => occupied.close(() => resolve())))
+    const failed = await RemoteHostService.create(init)
+    cleanups.push(() => failed.dispose())
+    await failed.start()
+    expect(failed.status().enabled).toBe(true)
+    expect(failed.desktopStatus()).toMatchObject({ enabled: false, reason: expect.stringContaining('EADDRINUSE') })
+    // The authority remains operational while only SSH restore is unavailable.
+    await pairDevice(failed)
+    const status = failed.status()
+    if (!status.enabled) throw new Error('phone authority disabled by SSH failure')
+    expect(status.devices).toHaveLength(1)
+    expect(status.devices[0].revoked).toBe(false)
+    await failed.dispose()
+    rmSync(join(dir, 'desktop-listeners.json'))
+    const pairProbe = netServer()
+    await new Promise<void>((resolve, reject) => pairProbe.once('error', reject).listen(ports.pairPort, '127.0.0.1', resolve))
+    await new Promise<void>(resolve => pairProbe.close(() => resolve()))
+    const fresh = await RemoteHostService.create(init)
+    cleanups.push(() => fresh.dispose())
+    await fresh.start()
+    expect(fresh.desktopStatus()).toEqual({ enabled: false })
+  })
+
+  it('dispose owns pending enable and prevents post-disposal listener publication', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-svc-')); dirs.push(dir)
+    const init = { stateDirectory: dir, authorizeWorkspace: (c: string) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore }
+    const service = await RemoteHostService.create(init)
+    cleanups.push(() => service.dispose())
+    await service.start()
+    let entered!: () => void
+    let release!: () => void
+    const starting = new Promise<void>(resolve => { entered = resolve })
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    const original = DesktopHostListeners.prototype.start
+    vi.spyOn(DesktopHostListeners.prototype, 'start').mockImplementation(async function (this: DesktopHostListeners) {
+      entered()
+      await barrier
+      return original.call(this)
+    })
+    const invitation = expect(service.beginDesktopPairing()).rejects.toThrow()
+    await starting
+    const closing = service.dispose()
+    release()
+    await Promise.all([invitation, closing])
+    expect(service.desktopStatus()).toEqual({ enabled: false })
+    const fresh = await RemoteHostService.create(init)
+    cleanups.push(() => fresh.dispose())
+    await fresh.start()
   })
 
   it('dispose releases the durable leases so a fresh service can be created in the same directory', async () => {

@@ -2,6 +2,8 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
+import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef } from '../../shared/desktop-remote'
+export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef } from '../../shared/desktop-remote'
 
 // G1 application service: the device-facing surface that a verified remote peer
 // reaches once its inner-mTLS identity is established. It composes the two host
@@ -33,11 +35,6 @@ export interface DeviceAuthorizer {
 // picker; `label` is a display-only basename. The device can never authorize a
 // new directory - it only chooses among these, and the workspace authorizer
 // re-checks the cwd on submit regardless.
-export interface RemoteProjectRef {
-  path: string
-  label: string
-}
-
 export interface RemoteProjectSource {
   // Snapshot of the currently host-authorized project directories. Called per
   // request so a directory removed locally stops being offered immediately.
@@ -75,33 +72,6 @@ export interface RemoteDirectorySource {
 // ProviderId the run routing carries; `label` is display-only; `available`
 // reflects whether the host currently has that Provider authenticated/usable.
 // The device still cannot invent a provider - the run path validates it.
-export interface RemoteControlOption {
-  id: string
-  label: string
-  description?: string
-  isDefault?: boolean
-}
-
-export interface RemoteModelOption {
-  id: string
-  providerId?: string
-  label: string
-  description?: string
-  isDefault?: boolean
-  efforts?: RemoteControlOption[]
-}
-
-export interface RemoteProviderRef {
-  id: string
-  label: string
-  available: boolean
-  agentProfileId?: string
-  modelId?: string
-  models?: RemoteModelOption[]
-  efforts?: RemoteControlOption[]
-  permissions?: RemoteControlOption[]
-}
-
 export interface RemoteProviderSource {
   // Snapshot of the host's Providers. Called per request so a newly
   // authenticated (or disabled) Provider is reflected without a reconnect.
@@ -136,18 +106,6 @@ export interface RemoteCommandSource {
 // the Provider's own resumable id (absent => still pending/unresumable). This is
 // display metadata only; it exposes nothing the device could not learn by
 // listing projects + submitting, and the host re-authorizes any later read.
-export interface RemoteSessionRef {
-  sessionId: string
-  externalSessionId?: string
-  providerId: string
-  agentProfileId?: string
-  cwd: string
-  label: string
-  ts: number
-  pinnedAt?: number
-  isActive?: boolean
-}
-
 export interface RemoteSessionSource {
   // Snapshot of the host's session catalog (already filtered to device-visible
   // authorized projects host-side). Called per request so a new/removed session

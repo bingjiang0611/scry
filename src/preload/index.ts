@@ -62,6 +62,7 @@ import type {
   WorkspaceWriteRequest
 } from '../shared/workspace'
 import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
+import type { DesktopRemoteAPI, DesktopHostAccess } from '../shared/desktop-remote'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ScanReport } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
@@ -335,6 +336,28 @@ const api = {
     ipcRenderer.on('agent:error', l)
     return () => ipcRenderer.removeListener('agent:error', l)
   },
+  desktopRemote: {
+    list: () => ipcRenderer.invoke('desktopRemote:list'),
+    pair: (input) => ipcRenderer.invoke('desktopRemote:pair', input),
+    finishPairing: (id) => ipcRenderer.invoke('desktopRemote:finishPairing', id),
+    connect: (id) => ipcRenderer.invoke('desktopRemote:connect', id),
+    disconnect: (id) => ipcRenderer.invoke('desktopRemote:disconnect', id),
+    forget: (id) => ipcRenderer.invoke('desktopRemote:forget', id),
+    catalog: (id) => ipcRenderer.invoke('desktopRemote:catalog', id),
+    history: (id, context, before, snapshot) => ipcRenderer.invoke('desktopRemote:history', id, context, before, snapshot),
+    trace: (id, context, runId) => ipcRenderer.invoke('desktopRemote:trace', id, context, runId),
+    intents: (id) => ipcRenderer.invoke('desktopRemote:intents', id),
+    submit: (id, input) => ipcRenderer.invoke('desktopRemote:submit', id, input),
+    intentStatus: (id, intentId) => ipcRenderer.invoke('desktopRemote:intentStatus', id, intentId),
+    runStatus: (id, runId) => ipcRenderer.invoke('desktopRemote:runStatus', id, runId),
+    stop: (id, runId) => ipcRenderer.invoke('desktopRemote:stop', id, runId),
+    answer: (id, runId, response) => ipcRenderer.invoke('desktopRemote:answer', id, runId, response),
+    files: (id, context, path, cursor) => ipcRenderer.invoke('desktopRemote:files', id, context, path, cursor),
+    file: (id, context, path, offset, snapshot) => ipcRenderer.invoke('desktopRemote:file', id, context, path, offset, snapshot)
+  } satisfies DesktopRemoteAPI,
+  remoteDesktopHostStatus: (): Promise<DesktopHostAccess> => ipcRenderer.invoke('remote:desktop:status'),
+  remoteDesktopHostInvite: (): Promise<string> => ipcRenderer.invoke('remote:desktop:invite'),
+  remoteDesktopHostDisable: (): Promise<void> => ipcRenderer.invoke('remote:desktop:disable'),
   // Trusted-LOCAL remote-access pairing (Mac's own UI only).
   remoteStatus: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
   remoteBeginPairing: (): Promise<RemotePairingCode> => ipcRenderer.invoke('remote:pairing:begin'),

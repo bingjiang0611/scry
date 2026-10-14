@@ -12,17 +12,8 @@ import {
   type AttachmentHydrationBudget
 } from './attachment-store'
 
-export interface LoadedSessionTurn {
-  runId?: string
-  providerTurnId?: string
-  forkTurnId?: string
-  userText: string
-  attachments?: AgentInputAttachment[]
-  items: TraceEvent[]
-  done?: boolean
-  error?: string
-  errorHint?: string
-}
+import type { LoadedSessionTurn } from '../shared/session-history'
+export type { LoadedSessionTurn } from '../shared/session-history'
 
 export async function readSessionHistoryAfterCompletedRuns<T>(
   runs: readonly { done: boolean; settled: Promise<void> }[],

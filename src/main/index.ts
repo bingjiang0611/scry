@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shell, safeStorage, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
@@ -119,7 +119,10 @@ import { UserQuestionBroker, type UserQuestionChange } from './user-question'
 import { RunRegistry } from './run-registry'
 import { RunStopLifecycle } from './run-stop-lifecycle'
 import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/remote-host-service'
-import { createRemoteRunBinding, type RemoteRunObserver } from './remote/remote-run-binding'
+import { DesktopRemoteClient } from './remote/desktop-client'
+import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
+import { createDesktopHostReader } from './remote/desktop-host-reader'
+import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
 import { createRelayConnectWS } from './remote/relay-connect-ws'
@@ -253,7 +256,6 @@ import {
   deleteTraceTurnProgressArtifacts,
   isProviderlessTerminalTurn,
   persistTraceTurnProgress,
-  persistTraceTurnCheckpoint,
   persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
   shouldUseManagedTerminalPersistence,
@@ -325,11 +327,10 @@ function invalidateSessionHistoryLoad(reason: string): void {
   sessionHistoryCache = null
 }
 
-// 会话级净 diff 的持久 baseline registry：每个 (provider,cwd) 上下文一份贯穿会话的 Git 快照。
-// revision + 原生 session id 双重锚定，绝不串会话；找不到可复用基线时当场重锚并标 origin=resumed，
-// 不再像旧实现那样在 resume/loadSession 之后彻底不落 session_diff。
+// Both local and remote runs own baselines by provider/profile/cwd/session.
+// Selection revisions cannot rename or discard a different run's Git capture.
 const sessionDiffBaselines = new SessionDiffBaselineRegistry()
-const discardSessionBaseline = (key: string): void => sessionDiffBaselines.discard(key)
+const sessionBaselineKey = (context: string, sessionId: string): string => JSON.stringify([context, 'session', sessionId])
 const contextAdmission = new ContextAdmission()
 const recordingBlockedSessions = new Map<string, string>()
 const providerOperationGate = new ProviderOperationGate()
@@ -814,7 +815,6 @@ function resetSessionContext(key: string): void {
   bumpSessionRevision(key)
   sessionByContext.delete(key)
   sessionAliasesByContext.delete(key)
-  discardSessionBaseline(key)
 }
 
 function setCurrentCwd(dir: string | undefined): void {
@@ -1876,7 +1876,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   setCurrentCwd(cwd || undefined)
   const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
   // 恢复当前仍在运行或收口的会话只是读取历史：它不能清掉该 run 正在使用的 session diff baseline。
-  // 真正切换到另一条历史会话时才递增 revision 并废弃旧 baseline。
+  // 真正切换到另一条历史会话时递增选择 revision；它不改变任何会话的 baseline。
   const loadingUnsettledRun = runs.unsettledStates().some((run) => sessionLoadMatchesRun(run, {
     providerId: payload.providerId,
     agentProfileId: payload.agentProfileId,
@@ -1885,7 +1885,6 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   }))
   if (!loadingUnsettledRun) {
     bumpSessionRevision(key)
-    discardSessionBaseline(key)
     sessionAliasesByContext.delete(key)
   }
   if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
@@ -2129,10 +2128,8 @@ async function deleteOneSession(
         return result
       }
       const key = providerContextKey(providerId, cwd, agentProfileId)
-      if (sessionByContext.get(key) === externalSessionId) {
-        sessionByContext.delete(key)
-        discardSessionBaseline(key)
-      }
+      if (sessionByContext.get(key) === externalSessionId) sessionByContext.delete(key)
+      sessionDiffBaselines.discard(sessionBaselineKey(key, externalSessionId))
       recordingBlockedSessions.delete(deletionKey)
       dockBadge.remove(deletionKey)
       if (rendererCanReceive()) {
@@ -2254,6 +2251,7 @@ interface RunControl {
   cwd?: string
   resume?: string
   getExternalSessionId: () => string | undefined
+  getProviderTurnId: () => string | undefined
   canonicalLifecycle: boolean
   runtimeProvider: RuntimeProvider
   runState: ActiveRun
@@ -2370,7 +2368,20 @@ function boundedLiveRun(run: ActiveRun): ActiveRun {
   return { ...run, items: sanitizeToolEvents(run.items, LIVE_TOOL_CONTENT_POLICY, 'live_renderer') }
 }
 
-handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
+interface AppRunStartOptions {
+  origin?: 'local' | 'remote'
+  runId?: string
+  stopSignal?: AbortSignal
+  requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
+  permissionModeOverride?: AgentPermissionMode
+  providerPrompt?: string
+  onTraceEvent?: (event: TraceEvent) => void
+  onSession?: (externalSessionId: string) => void
+  ledgerRunId?: string
+}
+
+async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<{ runId: string } | RemoteRunCompletion> {
+  const isRemoteRun = options.origin === 'remote'
   const request = normalizeAgentStartRequest(payload)
   const providerId = request.providerId
   const agentProfileId = request.agentProfileId
@@ -2389,8 +2400,10 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   // Start one bounded acquisition for this explicit send. Discovery does not retry a
   // broken shell; the next send may recover without restarting Scry.
   const shellEnvReady = warmShellEnv({ retryFailed: true })
-  const cwd = request.cwd ? resolveKnownProjectDirectory(request.cwd) : currentCwd
-  if (request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
+  const cwd = request.cwd
+    ? (isRemoteRun ? resolveRemoteProjectDirectory(request.cwd) : resolveKnownProjectDirectory(request.cwd))
+    : currentCwd
+  if (!isRemoteRun && request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
     throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -2416,8 +2429,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   const lifecycleKey = providerOperationKey(providerId, agentProfileId)
-  const startLease = providerOperationGate.acquireOperation(lifecycleKey)
-  if (!startLease.ok) {
+  const startLease = isRemoteRun ? undefined : providerOperationGate.acquireOperation(lifecycleKey)
+  if (startLease && !startLease.ok) {
     throw new AgentRuntimeError('当前 Provider 正在认证 MCP，已拒绝启动新一轮', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -2426,8 +2439,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     })
   }
   const admissionKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
+  let remoteResult: Promise<RemoteRunCompletion> | undefined
   try {
-    return await contextAdmission.run(admissionKey, async () => {
+    const started = await contextAdmission.run(admissionKey, async () => {
     // Wait before freezing trust/MCP environments as well as before spawning the
     // Provider. Otherwise a cold send can retain fallback even after capture succeeds.
     await Promise.all([startupManagedRecovery, shellEnvReady])
@@ -2440,22 +2454,22 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     const contextKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
     const scopedSessionKey = (sessionId: string): string =>
       providerSessionKey(providerId, catalogCwd, sessionId, agentProfileId)
-    const expectedSessionId = request.expectedExternalSessionId
+    const expectedSessionId = isRemoteRun ? (request.expectedExternalSessionId ?? null) : request.expectedExternalSessionId
     // expectedExternalSessionId=null 是 renderer 对“必须新建会话”的显式要求。
     // 即使较早的 agent:newSession IPC 仍在路上，这里也先原子清空 main 的旧上下文，
     // 再捕获 revision/resume，避免把新提示词误判为要投递到旧会话。
-    if (expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
+    if (!isRemoteRun && expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
       resetSessionContext(contextKey)
     }
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-    let resume = sessionByContext.get(contextKey)
-    const forkSourceSessionId = request.forkLastTurn ? resume : undefined
-    const restartSourceSessionId = request.restartLastTurn && typeof expectedSessionId === 'string'
+    let resume = isRemoteRun ? request.expectedExternalSessionId ?? undefined : sessionByContext.get(contextKey)
+    const forkSourceSessionId = !isRemoteRun && request.forkLastTurn ? resume : undefined
+    const restartSourceSessionId = !isRemoteRun && request.restartLastTurn && typeof expectedSessionId === 'string'
       ? expectedSessionId
       : undefined
     const editSourceSessionId = forkSourceSessionId ?? restartSourceSessionId
     const contextRuns = runs.unsettledStates().filter((run) =>
-      run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
+      run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
     const catalogAliases = (): Array<{ runId: string; externalSessionId?: string; sessionId?: string }> => {
       const liveAliases = [...(sessionAliasesByContext.get(contextKey) ?? [])].map(([runId, externalSessionId]) => ({
@@ -2484,8 +2498,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         nextAction: '草稿已保留；确认当前会话后重新发送'
       }
     )
-    if (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
-      !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...catalogAliases()])) {
+    if (!isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+      !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...catalogAliases()]))) {
       throw contextChangedError()
     }
     if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
@@ -2515,12 +2529,12 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // Renderer 会在 turnDone 后立即投递队列下一条；此时 Provider 已结束，但 diff/archive
     // 仍可能在收口。等待真实 settled 后再继续，避免稳定拒绝并破坏 FIFO。
     contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-    resume = sessionByContext.get(contextKey)
+    if (!isRemoteRun) resume = sessionByContext.get(contextKey)
     const latestContextRuns = runs.unsettledStates().filter((run) =>
-      run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
+      run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
-    if (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
-      !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...latestContextRuns, ...catalogAliases()])) {
+    if (!isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+      !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...latestContextRuns, ...catalogAliases()]))) {
       throw contextChangedError()
     }
     if (cwd && resume && deletingSessions.has(scopedSessionKey(resume))) {
@@ -2543,8 +2557,18 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       })
     }
   // Still-owned runs finish on their original execution chain, not through crash recovery.
-  const isLiveManagedRun = (candidate: string | undefined): boolean =>
-    !!candidate && runs.unsettledStates().some((run) => run.runId === candidate)
+  const isLiveManagedRun = (candidate: string | undefined, nativeIdentity?: {
+    provider: ProviderId; sessionId: string; providerTurnId?: string
+  }): boolean => {
+    if (candidate) return runs.unsettledStates().some((run) => run.runId === candidate)
+    // Codex's native hook has no Scry run id. Only an exact live native turn
+    // match may exclude its open record from crash recovery; session alone is
+    // insufficient because an older unresolved turn can share that session.
+    return Boolean(nativeIdentity?.providerTurnId && runs.unsettledControls().some((control) =>
+      control.cwd === cwd && control.providerId === nativeIdentity.provider &&
+      control.runState.externalSessionId === nativeIdentity.sessionId &&
+      control.getProviderTurnId() === nativeIdentity.providerTurnId))
+  }
   const traceProgressRecovery = cwd
     ? await recoverTraceTurnProgress(app.getPath('userData'), {
         cwd,
@@ -2741,16 +2765,16 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     sessionByContext.delete(contextKey)
     sessionAliasesByContext.delete(contextKey)
   }
-  const committedResume = sessionByContext.get(contextKey)
+  const committedResume = isRemoteRun ? resume : sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) =>
-    run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
+    run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
   )
   const committedExpectedSessionId = request.forkLastTurn || request.restartLastTurn ? resume ?? null : expectedSessionId
-  if (
+  if (!isRemoteRun && (
     committedResume !== resume || committedRevision !== contextRevision ||
     !expectedSessionMatches(committedExpectedSessionId, committedResume, () => [...committedRuns, ...catalogAliases()])
-  ) throw contextChangedError()
+  )) throw contextChangedError()
   if (cwd && committedResume && deletingSessions.has(scopedSessionKey(committedResume))) {
     throw new AgentRuntimeError('这个会话正在删除，已拒绝启动新一轮', {
       provider: runtimeProvider,
@@ -2770,7 +2794,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       nextAction: '等待当前轮完成；草稿已保留'
     })
   }
-  const runId = `run-${Date.now().toString(36)}-${runSeq++}`
+  const runId = options.runId ?? `run-${Date.now().toString(36)}-${runSeq++}`
+  let diffContextKey = resume ? sessionBaselineKey(contextKey, resume) : JSON.stringify([contextKey, 'run', runId])
   const finishTurnWallTiming = createTurnWallTimer(runId)
   const llmPerformance = new LlmPerformanceObserver(request.networkLabel)
   // Start collection without delaying Provider startup. Freeze this run's configuration evidence.
@@ -2792,7 +2817,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const turnChangeJournal = cwd ? new TurnChangeJournal(cwd) : null
   let attachments: PreparedAttachment[] = []
   const displayPrompt = request.prompt
-  let runtimePrompt = displayPrompt
+  let runtimePrompt = options.providerPrompt ?? displayPrompt
   let observedSessionId = resume
   const runState: ActiveRun = {
     runId,
@@ -2868,6 +2893,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChange()
+    if (isRemoteRun) options.onTraceEvent?.(ev)
   }
   let performanceRecorded = false
   const persistLlmPerformance = async (failed: boolean, externalSessionId: string): Promise<void> => {
@@ -2900,7 +2926,8 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     input: {
       model: request.model,
       effort: request.effort,
-      permissionMode: request.permissionMode
+      permissionMode: request.permissionMode,
+      ...(options.permissionModeOverride ? { effectivePermissionMode: options.permissionModeOverride } : {})
     }
   })
   try {
@@ -2934,7 +2961,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       cwd ? { providerId, cwd, ...(resume ? { sessionId: resume } : {}) } : undefined
     )
     runState.attachments = attachments
-    runtimePrompt = providerAttachmentPrompt(providerId, displayPrompt, attachments)
+    runtimePrompt = providerAttachmentPrompt(providerId, runtimePrompt, attachments)
     if (resume) {
       win?.webContents.send('agent:session', {
         runId,
@@ -2978,14 +3005,16 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   let sessionBaselineReady: Promise<unknown> = Promise.resolve()
   let sessionBaselineOrigin: TurnDiffBaselineOrigin | undefined
   let sessionBaselineCapture: Promise<GitTurnDiffCapture> | null = null
+  let releaseSessionBaseline: (() => void) | undefined
   if (cwd && contextKey) {
     const baseline = sessionDiffBaselines.ensure({
-      key: contextKey,
-      revision: contextRevision,
+      key: diffContextKey,
+      revision: 0,
       cwd,
       ...(resume ? { sessionId: resume } : {}),
       initialCapture: initialDiffCapture
     })
+    releaseSessionBaseline = sessionDiffBaselines.retain(baseline)
     sessionBaselineOrigin = baseline.origin
     sessionBaselineCapture = baseline.capture
     sessionBaselineReady = baseline.capture.catch(() => undefined)
@@ -3126,7 +3155,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         const at = new Date().toISOString()
         return { version: 1, status: 'unavailable', reason, files: [], beforeAt: at, afterAt: at, captureMs: 0, cleanup: 'ok' }
       }
-      const entry = sessionDiffBaselines.get(contextKey, contextRevision, observedSessionId ?? resume)
+      const entry = sessionDiffBaselines.get(diffContextKey, 0, observedSessionId ?? resume)
       if (!entry) {
         console.warn('[scry] session diff baseline not found:', runId, {
           contextRevision,
@@ -3167,11 +3196,11 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const publishSessionId = (sessionId: string | undefined): void => {
     if (!sessionId) return
     observedSessionId = sessionId
-    if ((sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
+    if (isRemoteRun) options.onSession?.(sessionId)
+    diffContextKey = sessionDiffBaselines.promote(diffContextKey, sessionBaselineKey(contextKey, sessionId), sessionId)
+    if (!isRemoteRun && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
       sessionByContext.set(contextKey, sessionId)
       sessionAliasesByContext.set(contextKey, new Map([[runId, sessionId]]))
-      // 首轮建基线时还拿不到原生 session id；现在补上，之后别的会话认不走这份基线。
-      sessionDiffBaselines.bind(contextKey, contextRevision, sessionId)
     }
     const previousSessionKey = scopedSessionKey(runState.externalSessionId ?? runState.sessionId ?? runId)
     runState.sessionId = sessionId
@@ -3221,7 +3250,18 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       cwd ? { providerId, cwd, sessionId: runState.externalSessionId } : undefined, input.messageId),
     emit
   )
-  let interrupted = false
+  let interrupted = options.stopSignal?.aborted === true
+  const stopLatch = new AbortController()
+  const requestStop = (): void => {
+    interrupted = true
+    if (!stopLatch.signal.aborted) stopLatch.abort()
+    h?.interrupt()
+  }
+  const requestRemoteStop = (): void => {
+    if (runs.get(runId)) requestRunStop(runId)
+    else requestStop()
+  }
+  if (options.stopSignal && !options.stopSignal.aborted) options.stopSignal.addEventListener('abort', requestRemoteStop)
   let observedProviderStartedAt: string | undefined
   const runProvider = async (): Promise<{
     externalSessionId?: string
@@ -3247,7 +3287,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       attachments,
       model: request.model,
       effort: request.effort,
-      permissionMode: request.permissionMode,
+      permissionMode: options.permissionModeOverride ?? request.permissionMode,
       codexHookTrust,
       openCodePluginTrust,
       managedRecorder: managedRecorderEnabled,
@@ -3268,8 +3308,44 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         emit(event)
       },
       onExternalSessionId: publishSessionId,
-      requestUserInput: (question, signal) => userQuestionBroker.request({ ...question, providerId }, signal)
+      requestUserInput: async (question, signal) => {
+        if (!isRemoteRun) return userQuestionBroker.request({ ...question, providerId }, signal)
+        if (!options.requestUserInput) throw new Error('remote_interactive_input_unsupported')
+        const openedAtMs = Date.now()
+        const remoteQuestion = { ...question, providerId, runId }
+        publishQuestionOpened(remoteQuestion)
+        const questionAbort = new AbortController()
+        const relayAbort = (): void => questionAbort.abort()
+        const questionSources = [signal, stopLatch.signal, options.stopSignal].filter((source): source is AbortSignal => Boolean(source))
+        for (const source of questionSources) {
+          if (source.aborted) questionAbort.abort()
+          else source.addEventListener('abort', relayAbort, { once: true })
+        }
+        let response: AgentQuestionResponse
+        try {
+          response = await options.requestUserInput(remoteQuestion, questionAbort.signal)
+        } finally {
+          for (const source of questionSources) source.removeEventListener('abort', relayAbort)
+          publishQuestionClosed(runId, question.questionId)
+        }
+        const closedAtMs = Date.now()
+        emit({
+          id: `remote-intervention-${question.questionId}`,
+          ts: new Date(closedAtMs).toISOString(), runId, kind: 'human', stage: 'intervention',
+          toolUseId: question.questionId, providerId, agentId: question.agentId,
+          durationMs: Math.max(0, closedAtMs - openedAtMs),
+          intervention: {
+            kind: question.questionKind ?? 'clarification', source: question.source ?? 'unknown',
+            resolution: response.behavior === 'answered' ? 'answered' : signal.aborted ? 'provider_cancelled' : 'user_cancelled',
+            request: { ...question, providerId }, response,
+            openedAt: new Date(openedAtMs).toISOString(), closedAt: new Date(closedAtMs).toISOString(),
+            durationMs: Math.max(0, closedAtMs - openedAtMs)
+          }
+        })
+        return response
+      }
     })
+    if (options.stopSignal?.aborted) requestStop()
     if (!h.steer) emit({
       id: mainEventId('steer-capability', runId), ts: new Date().toISOString(), runId,
       kind: 'harness', stage: 'runtime:steer_capability',
@@ -3325,12 +3401,9 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   const control: RunControl = {
     runId,
     providerId,
-    interrupt: () => {
-      interrupted = true
-      h?.interrupt()
-    },
+    interrupt: requestStop,
     forceKill: () => {
-      interrupted = true
+      requestStop()
       h?.forceKill()
     },
     forceKillScope: () => h?.forceKillScope,
@@ -3339,6 +3412,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     cwd,
     resume,
     getExternalSessionId: () => h?.getExternalSessionId(),
+    getProviderTurnId: () => h?.getProviderTurnId?.(),
     canonicalLifecycle,
     runtimeProvider,
     runState,
@@ -3346,8 +3420,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       if (!contextKey) return
       bumpSessionRevision(contextKey)
       contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-      // 基线仍描述同一份工作树，跟着新 revision/session id 走，不重锚。
-      sessionDiffBaselines.rebind(contextKey, contextRevision, observedSessionId)
+      // Adoption changes only Mac selection. This run keeps its own baseline.
       if (observedSessionId) sessionByContext.set(contextKey, observedSessionId)
       else sessionByContext.delete(contextKey)
     },
@@ -3357,8 +3430,17 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
     settled
   }
   try {
-    runs.register(runState, control)
+    if (isRemoteRun) {
+      remoteRunIds.add(runId)
+      if (options.ledgerRunId) remoteRunLedgerIds.set(runId, options.ledgerRunId)
+    }
+    runs.register(runState, control, isRemoteRun ? { focus: false } : undefined)
   } catch (error) {
+    if (isRemoteRun) {
+      remoteRunIds.delete(runId)
+      remoteRunLedgerIds.delete(runId)
+    }
+    releaseSessionBaseline?.()
     try { cleanupProvisional() } catch { /* preserve the original registration error */ }
     deleteRunAttachments(app.getPath('userData'), runId)
     try { await cancelGitTurnDiff(await turnDiffCapture) } catch { /* preserve the original registration error */ }
@@ -3366,17 +3448,40 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
   }
   startPerf.mark('run_registered')
   firstTextPerf.mark('run_registered')
-  dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
+  if (!isRemoteRun) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
   // `agent:start` can also be invoked through the preload bridge (for example by
   // the regression runner), so publish the authoritative focused snapshot after
   // registration and before the Provider can emit trace or questions.
-  try {
-    win?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
-  } catch (error) {
-    console.warn('[scry] focused run renderer notification failed:', runId, error)
+  if (!isRemoteRun) {
+    try {
+      win?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
+    } catch (error) {
+      console.warn('[scry] focused run renderer notification failed:', runId, error)
+    }
   }
   let terminalArchiveArgs: ArchiveTraceTurnArgs | undefined
   let terminalArchiveCommitted = false
+  let remoteRecordingFailed = false
+  let remoteCompletion: RemoteRunCompletion | undefined
+  let resolveRemoteCompletion: ((completion: RemoteRunCompletion) => void) | undefined
+  remoteResult = isRemoteRun
+    ? new Promise<RemoteRunCompletion>((resolve) => { resolveRemoteCompletion = resolve })
+    : undefined
+  const finishRemote = (status: RemoteRunCompletion['status'], error?: string): void => {
+    if (!isRemoteRun || remoteCompletion) return
+    remoteCompletion = {
+      status,
+      recording: remoteRecordingFailed ? 'failed' : 'committed',
+      ...(observedSessionId ? { externalSessionId: observedSessionId } : {}),
+      ...(terminalArchiveArgs?.providerTurnId ? { providerTurnId: terminalArchiveArgs.providerTurnId } : {}),
+      ...(terminalArchiveArgs?.forkTurnId ? { forkTurnId: terminalArchiveArgs.forkTurnId } : {}),
+      ...(error ? { error } : {})
+    }
+    if (isRemoteRun) {
+      runState.done = true
+      if (error) runState.error = error
+    }
+  }
   const markTerminalAttention = (sessionId: string, needsAttention: boolean): void => {
     dockBadge.markAttention(scopedSessionKey(sessionId), {
       windowFocused: Boolean(win?.isFocused()),
@@ -3451,6 +3556,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
       const recordingPolicy = providerRecordingPolicy('completed', r.recordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
+        if (isRemoteRun) remoteRecordingFailed = true
         const { message, category } = recordingPolicy.rendererError
         runState.error = message
         runState.errorHint = recordingRecoveryHint
@@ -3468,6 +3574,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         terminalPerf.mark('diff_complete')
         persistRunData(storageSessionId)
         terminalPerf.finish({ events: runState.items.length, committed: 0 })
+        finishRemote(completionStatus, message)
         return
       }
       terminalArchiveArgs = completionArchiveArgs
@@ -3477,6 +3584,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         // 恢复 archive/CLI；diff 会明确记为 unavailable，而不是伪造零值。
         await persistTerminalProgress(completionArchiveArgs)
       } catch (error) {
+        if (isRemoteRun) remoteRecordingFailed = true
         const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录快照失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
@@ -3511,6 +3619,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
         terminalPerf.mark('archive_committed')
       } catch (error) {
+        if (isRemoteRun) remoteRecordingFailed = true
         const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录提交失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
@@ -3523,6 +3632,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
         terminalPerf.finish({ events: runState.items.length, committed: 0 })
+        finishRemote(completionStatus, message)
         return
       }
       // B2：把这一轮的 turn + tool_calls 结构化落 sqlite（runState 已缓冲全部事件）
@@ -3543,6 +3653,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         terminalPerf.mark('renderer_terminal')
       }
       terminalPerf.finish({ events: runState.items.length, committed: 1 })
+      finishRemote(completionStatus)
     }, async (err) => {
       emit(finishTurnWallTiming())
       const turnDiffDone = finalizeTurnDiff()
@@ -3670,6 +3781,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
       await ingestion.liveIdle()
       const recordingPolicy = providerRecordingPolicy(stopped ? 'interrupted' : 'failed', providerRecordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
+        if (isRemoteRun) remoteRecordingFailed = true
         const { message: recordingMessage, category } = recordingPolicy.rendererError
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
@@ -3687,11 +3799,13 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         markTerminalAttention(storageSessionId, !stopped)
         await turnDiffDone
         persistRunData(storageSessionId)
+        finishRemote(stopped ? 'interrupted' : 'failed', recordingMessage)
         return
       }
       try {
         await persistTerminalProgress(terminalArchiveArgs)
       } catch (progressError) {
+        if (isRemoteRun) remoteRecordingFailed = true
         const recordingMessage = `Provider 已结束，但 Scry 精确记录快照失败：${String((progressError as Error).message)}`
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
@@ -3727,6 +3841,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         terminalArchiveCommitted = true
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
       } catch (archiveError) {
+        if (isRemoteRun) remoteRecordingFailed = true
         exactRecorded = false
         recordingBlockedSessions.set(
           scopedSessionKey(storageSessionId),
@@ -3757,6 +3872,7 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
           ...(forkTurnId ? { forkTurnId } : {})
         })
       }
+      finishRemote(stopped ? 'interrupted' : 'failed', stopped ? undefined : message)
     })
     .catch(async (error) => {
       console.error('[scry] run completion handler failed:', error)
@@ -3784,26 +3900,54 @@ handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
         category: 'recording',
         hint: '保留 userData 与 workspace/.scry 后重启 Scry 检查归档'
       })
+      if (isRemoteRun) remoteRecordingFailed = true
       markTerminalAttention(
         terminalArchiveArgs?.sessionId ?? observedSessionId ?? resume ?? runId,
         !interrupted
       )
+      finishRemote(interrupted ? 'interrupted' : 'failed', String((error as Error).message ?? error))
+    })
+    .catch((error) => {
+      // Terminal enrichment must never strand a remote executor. The first
+      // rejection handler normally records the Provider failure; this guard
+      // covers failures inside that handler itself (including diff/archive).
+      if (isRemoteRun && !remoteCompletion) {
+        remoteRecordingFailed = true
+        finishRemote(interrupted ? 'interrupted' : 'failed', String((error as Error).message ?? error))
+      }
     })
     .finally(() => {
-      runState.providerSettled = true
-      // settle 是唯一的终止证据来源；它同时取消所有未触发的升级定时器。
-      runStopLifecycle.settle(runId)
-      userQuestionBroker.cancelRun(runId)
-      runs.remove(runId)
-      resolveSettled?.()
+      try {
+        options.stopSignal?.removeEventListener('abort', requestRemoteStop)
+        runState.providerSettled = true
+        // settle 是唯一的终止证据来源；它同时取消所有未触发的升级定时器。
+        runStopLifecycle.settle(runId)
+        userQuestionBroker.cancelRun(runId)
+        runs.remove(runId)
+        releaseSessionBaseline?.()
+        resolveSettled?.()
+      } finally {
+        if (isRemoteRun) {
+          if (!remoteCompletion) {
+            remoteRecordingFailed = true
+            finishRemote('failed', 'remote_run_terminal_outcome_unknown')
+          }
+          remoteRunIds.delete(runId)
+          remoteRunLedgerIds.delete(runId)
+          if (remoteCompletion) resolveRemoteCompletion?.(remoteCompletion)
+        }
+      }
     })
       startPerf.finish({ attachments: attachments.length })
       return { runId }
     })
+    return isRemoteRun ? await remoteResult! : started
   } finally {
-    startLease.release()
+    startLease?.release()
   }
-})
+}
+
+handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => startAppRun(payload))
 
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
 handleTrusted('agent:activeRun', (): ActiveRun | null => {
@@ -3923,123 +4067,11 @@ function requestRunStop(runId: string): boolean {
 // Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
 // remote-history reader sees one active-run truth: history while the first turn
 // is still running, the Mac sidebar/session view, stop, and same-session
-// conflicts. They are never auto-focused. Their questions stay on the device
-// broker and are mirrored here, so either side can answer them.
+// conflicts. They are never auto-focused. Their questions remain owned by the
+// remote broker, while the canonical RunRegistry state mirrors pending UI.
 const remoteRunIds = new Set<string>()
 // scry runId -> durable ledger runId, the key of the remote question broker.
 const remoteRunLedgerIds = new Map<string, string>()
-function observeRemoteRun(info: {
-  providerId: string
-  cwd: string
-  prompt: string
-  ledgerRunId: string
-  scryRunId: string
-  agentProfileId?: string
-  resume?: string
-  attachments: AgentInputAttachment[]
-}): RemoteRunObserver {
-  const runId = info.scryRunId
-  const providerId = info.providerId as ProviderId
-  // GatedExecutor already authorized this cwd through the same resolver; the
-  // canonical form is what Mac and remote-history readers match on.
-  const cwd = resolveRemoteProjectDirectory(info.cwd)
-  // Same adapter lookup providerRegistry.run uses, not the cached picker snapshot
-  // (empty until its first refresh, e.g. when dispatch recovers after a restart).
-  const runtimeProvider = providerRegistry.get(providerId).runtimeProvider
-  const runState: ActiveRun = {
-    runId,
-    providerId,
-    ...(info.agentProfileId ? { agentProfileId: info.agentProfileId } : {}),
-    cwd,
-    ...(info.resume ? { externalSessionId: info.resume, sessionId: info.resume } : {}),
-    userText: info.prompt,
-    attachments: info.attachments,
-    items: [],
-    done: false
-  }
-  let handle: ProviderRunHandle | undefined
-  let resolveSettled!: () => void
-  const settled = new Promise<void>((resolve) => { resolveSettled = resolve })
-  const unsupportedSteer: AgentSteerResult = { status: 'unavailable', message: '这轮由手机发起，当前 Provider 不支持运行中追加消息。' }
-  const control: RunControl = {
-    runId,
-    providerId,
-    interrupt: () => handle?.interrupt(),
-    forceKill: () => handle?.forceKill(),
-    forceKillScope: () => handle?.forceKillScope,
-    stopBackgroundTask: (taskId) => handle?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
-    steer: (input) => handle?.steer?.(input) ?? Promise.resolve(unsupportedSteer),
-    cwd,
-    ...(info.resume ? { resume: info.resume } : {}),
-    getExternalSessionId: () => handle?.getExternalSessionId() ?? runState.externalSessionId,
-    canonicalLifecycle: false,
-    runtimeProvider,
-    runState,
-    // The Mac adopts this run for display only. Resume binding for a Mac
-    // follow-up comes from the catalog row loadSession reads, like any session.
-    adoptSession: () => {},
-    // Remote runs create no provisional catalog row, turn diff or managed recorder.
-    cleanupProvisional: () => {},
-    finalizeTurnDiff: async () => {},
-    cancelTurnDiff: async () => {},
-    settled
-  }
-  remoteRunIds.add(runId)
-  remoteRunLedgerIds.set(runId, info.ledgerRunId)
-  runs.register(runState, control, { focus: false })
-  const announceSession = (sessionId: string, pending: boolean): void => {
-    win?.webContents.send('agent:session', {
-      runId, sessionId, providerId, agentProfileId: info.agentProfileId,
-      ...(pending ? { pending: true } : { externalSessionId: sessionId })
-    })
-  }
-  announceSession(info.resume ?? runId, !info.resume)
-  return {
-    attach: (value) => { handle = value },
-    event: (ev) => {
-      appendCoalescedTrace(runState.items, ev)
-      if (runs.isViewed(runId)) queueTrace(ev)
-    },
-    session: (externalSessionId) => {
-      runState.externalSessionId = externalSessionId
-      runState.sessionId = externalSessionId
-      announceSession(externalSessionId, false)
-    },
-    question: (request) => publishQuestionOpened(request),
-    questionClosed: (questionId) => publishQuestionClosed(runId, questionId),
-    done: ({ status, errorText }) => {
-      if (runState.done) return
-      runState.done = true
-      flushTraceSend()
-      const sessionId = runState.externalSessionId ?? runId
-      if (status === 'failed') {
-        runState.error = errorText ?? `${providerId} Provider 返回失败终态`
-        win?.webContents.send('agent:error', { runId, message: runState.error })
-        return
-      }
-      win?.webContents.send('agent:turnDone', {
-        runId, sessionId, externalSessionId: sessionId, providerId, agentProfileId: info.agentProfileId,
-        stopped: status === 'interrupted' || status === 'cancelled'
-      })
-    },
-    settled: () => {
-      if (!runState.done) {
-        // The Provider never reached a terminal result (it failed to start).
-        runState.done = true
-        runState.error = '手机发起的运行未能启动'
-        flushTraceSend()
-        win?.webContents.send('agent:error', { runId, message: runState.error })
-      }
-      runState.providerSettled = true
-      runStopLifecycle.settle(runId)
-      runs.remove(runId)
-      remoteRunIds.delete(runId)
-      remoteRunLedgerIds.delete(runId)
-      resolveSettled()
-    }
-  }
-}
-
 // B2-lite：累计用量统计（读 usage.jsonl 聚合）
 handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
   readUsageStats(app.getPath('userData'), context ? {
@@ -4053,6 +4085,17 @@ handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
 // the official public relay; development remains opt-in and SCRY_REMOTE_HOST=0
 // is an explicit kill switch. The relay only sees opaque inner-mTLS bytes.
 let remoteHostService: RemoteHostService | null = null
+let desktopRemoteClient: DesktopRemoteClient | null = null
+function requireDesktopRemoteClient(): DesktopRemoteClient {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法保存远程设备凭据')
+  desktopRemoteClient ??= new DesktopRemoteClient({
+    directory: join(app.getPath('userData'), 'desktop-connections'),
+    encrypt: (value) => safeStorage.encryptString(value),
+    decrypt: (value) => safeStorage.decryptString(value)
+  })
+  return desktopRemoteClient
+}
+registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient)
 // Explicit relay wiring remains available for private deployments. Without an
 // override, packaged builds use the official public WSS relay with a generated
 // per-host room credential; no app-wide bearer is embedded in the artifact.
@@ -4076,6 +4119,9 @@ function createRemoteWssResolution(endpoint: URL, token: string, enroll: boolean
 }
 
 async function resolveRemoteRelay(stateDirectory: string): Promise<RemoteRelayResolution> {
+  // An SSH-only host need not dial any public relay. This never disables the
+  // inner device authentication or changes the existing packaged default.
+  if (process.env.SCRY_REMOTE_RELAY_ENABLED === '0') return {}
   // An explicit Cloudflare-compatible relay takes precedence.
   //   SCRY_REMOTE_RELAY_WS = { "url": "wss://relay.example", "token": "..." }
   const wsRaw = process.env.SCRY_REMOTE_RELAY_WS
@@ -4186,82 +4232,41 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
     remoteHostService = await RemoteHostService.create({
       stateDirectory,
+      readDesktop: createDesktopHostReader({
+        userDataDir: app.getPath('userData'),
+        hostId: () => requireRemoteHost().hostId,
+        authorizeWorkspace: (cwd) => resolveRemoteProjectDirectory(cwd),
+        getRun: (runId) => {
+          const state = runs.get(runId)?.state
+          return state ? boundedLiveRun(state) : null
+        }
+      }),
       // Fail closed: a device may only target a directory already authorized
       // through Scry's own project picker.
       authorizeWorkspace: (cwd) => resolveRemoteProjectDirectory(cwd),
       gate: providerOperationGate,
       createTransport: relay.createTransport,
       relayAdvertisement: relay.relayAdvertisement,
-      // LIVE run seam: a routed device intent becomes a REAL Provider run via the
-      // same registry the local UI uses. Workspace authorization + provider gate
-      // are already enforced upstream (RemoteRunPolicy/GatedExecutor) before this
-      // runs; interactive approval is not yet wired and fails closed. Mac-side
-      // RunRegistry/UI visibility, attachments, hooks and managed recorder remain
-      // the interactive path's concern (see remote-run-binding.ts).
-      // routing.providerId is a validated non-empty string; the registry itself
-      // rejects an unknown provider, so the ProviderId narrowing is safe here.
-      // onRunStarted/onRunSession make the device-initiated run VISIBLE in the
-      // owner's Mac session catalog (the user's expectation: see the conversation
-      // on the Mac). We record a pending AppSession at start and bind the
-      // Provider's REAL externalSessionId when reported, so the owner can open and
-      // resume the exact conversation on their Mac. Best-effort: a catalog write
-      // never fails the run, and only real ids are recorded (nothing fabricated).
+      // Remote execution enters the same full lifecycle as agent:start. The
+      // binding only adapts the authenticated device intent and output stream;
+      // trust, attachments, diff, recorder, archive and DB settlement stay here.
       startRun: createRemoteRunBinding({
-        run: (providerId, request) => providerRegistry.run(providerId as ProviderId, remotePermissionMode ? { ...request, permissionMode: remotePermissionMode } : request),
-        onRunStarted: ({ providerId, cwd, prompt, scryRunId, agentProfileId }) => {
-          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
-          try {
-            appSessionStore().recordPending({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, cwd, prompt })
-            win?.webContents.send('remote:sessionRecorded', { cwd })
-          } catch { /* catalog visibility is best-effort */ }
-        },
-        onRunSession: ({ providerId, cwd, prompt, scryRunId, externalSessionId, agentProfileId }) => {
-          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
-          try {
-            appSessionStore().record({ providerId: providerId as ProviderId, agentProfileId, runtimeProvider, runId: scryRunId, externalSessionId, cwd, prompt })
-            win?.webContents.send('remote:sessionRecorded', { cwd })
-          } catch { /* catalog visibility is best-effort */ }
-        },
-        // Persist the run as a REAL Scry trace archive (same path a local,
-        // non-managed run uses) so the owner can OPEN the transcript on the Mac,
-        // not just see it listed. Managed recorder stays OFF for remote runs.
-        observe: observeRemoteRun,
-        onRunCheckpoint: async ({ providerId, cwd, prompt, scryRunId, externalSessionId, providerTurnId, forkTurnId, attachments, items }) => {
-          // Startup may still be cleaning/replaying the same progress directory.
-          await startupManagedRecovery
-          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
-          const { turn } = buildTraceArchiveTurn({
-            providerId: providerId as ProviderId, runtimeProvider, cwd,
-            sessionId: externalSessionId, runId: scryRunId, providerTurnId, forkTurnId, userText: prompt,
-            attachments, items, done: false, status: 'interrupted', managedRecorderEnabled: false
-          })
-          await persistTraceTurnCheckpoint({ userDataDir: app.getPath('userData'), cwd,
-            sessionId: externalSessionId, providerId: providerId as ProviderId, runtimeProvider, turn })
-        },
-        onRunArchive: async ({ providerId, cwd, prompt, scryRunId, externalSessionId, providerTurnId, forkTurnId, attachments, items, status, error }) => {
-          await startupManagedRecovery
-          // Registry identity is available even before the phone opens its Provider picker.
-          const runtimeProvider = providerRegistry.get(providerId as ProviderId).runtimeProvider
-          const args: ArchiveTraceTurnArgs = {
-            providerId: providerId as ProviderId,
-            runtimeProvider,
-            cwd,
-            sessionId: externalSessionId,
-            runId: scryRunId,
-            providerTurnId,
-            forkTurnId,
-            userText: prompt,
-            attachments,
-            items,
-            done: true,
-            status,
-            error,
-            managedRecorderEnabled: false
-          }
-          await persistTerminalProgress(args)
-          await archiveTraceTurn(args)
-          win?.webContents.send('remote:sessionRecorded', { cwd })
-        }
+        permissionModeOverride: remotePermissionMode,
+        startAppRun: (input) => startAppRun({
+          ...input.request,
+          backend: 'local',
+          runtimeProvider: undefined
+        }, {
+          origin: 'remote',
+          runId: input.runId,
+          stopSignal: input.stopSignal,
+          requestUserInput: input.requestUserInput,
+          ledgerRunId: input.ledgerRunId,
+          permissionModeOverride: input.permissionModeOverride,
+          providerPrompt: input.providerPrompt,
+          onTraceEvent: input.onTraceEvent,
+          onSession: input.onSession
+        }) as Promise<RemoteRunCompletion>
       }),
       // The phone's new-session picker chooses only among the host's already
       // directory-picker-authorized project dirs; it can never authorize a new
@@ -4442,6 +4447,9 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
   } catch (error) {
     console.warn('[scry] remote host subsystem failed to start:', error)
+    try { await remoteHostService?.dispose() } catch (cleanupError) {
+      console.warn('[scry] failed remote host cleanup:', cleanupError)
+    }
     remoteHostService = null
   }
 }
@@ -4455,6 +4463,9 @@ function requireRemoteHost(): RemoteHostService {
 // renderer (assertTrustedIpcEvent), never by a device; a device reaches only the
 // prove/status transport path, never confirm/cancel/revoke.
 handleTrusted('remote:status', (): RemoteStatus => remoteHostService ? remoteHostService.status() : { enabled: false })
+handleTrusted('remote:desktop:status', () => remoteHostService?.desktopStatus() ?? { enabled: false })
+handleTrusted('remote:desktop:invite', () => requireRemoteHost().beginDesktopPairing())
+handleTrusted('remote:desktop:disable', () => requireRemoteHost().disableDesktop())
 handleTrusted('remote:pairing:begin', () => requireRemoteHost().beginPairing())
 handleTrusted('remote:pairing:confirm', (_event, pairingId: unknown, expectedPublicKeySHA256: unknown) => {
   if (typeof pairingId !== 'string' || typeof expectedPublicKeySHA256 !== 'string') throw new Error('无效的配对确认参数')
@@ -4557,7 +4568,7 @@ app.on('before-quit', (event) => {
   quitCleanupStarted = true
   // Release the remote subsystem's durable leases; a restart re-acquires and
   // replays any recorded-but-undispatched intents.
-  void remoteHostService?.dispose()
+  const remoteCleanup = Promise.all([remoteHostService?.dispose(), desktopRemoteClient?.dispose()]).then(() => undefined)
   terminalOutput.close()
   const terminalCleanup = terminalManager?.shutdown().catch((error) => {
     console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
@@ -4573,7 +4584,7 @@ app.on('before-quit', (event) => {
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
     disposeProviders: () => providerRegistry.dispose()
   })
-  const cleanup = Promise.all([runCleanup, terminalCleanup]).then(() => undefined)
+  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup]).then(() => undefined)
   void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
     quitCleanupFinished = true
     app.quit()

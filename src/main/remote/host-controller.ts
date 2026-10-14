@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
+import type { DesktopHostRead, DesktopHostReadResult } from '../../shared/desktop-remote'
+import { parseDesktopHostRead } from './desktop-host-reader'
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
 import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
@@ -100,6 +102,7 @@ const LIVE_RUNS_TICK_MS = 1_000
 const LIVE_RUN_PROMPT_CHARS = 200
 
 export interface HostControllerDependencies {
+  readDesktop?(query: DesktopHostRead): Promise<DesktopHostReadResult>
   // Pairing adapters (CSR verification + certificate issuance + persistence).
   pairing: PairingDependencies
   // Durable ledger backing store (JSONL file store in production).
@@ -245,6 +248,7 @@ export class HostController {
   #live = new Map<string, { routing: RemoteIntentRouting; externalSessionId?: string }>()
   #workspace: WorkspaceAuthorizer
   #macRuns?: MacRunSource
+  #readDesktop?: HostControllerDependencies['readDesktop']
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
   #changeSeq = 0
@@ -254,6 +258,7 @@ export class HostController {
     this.authority = new PairingAuthority(deps.pairing)
     this.#workspace = deps.workspace
     this.#macRuns = deps.macRuns
+    this.#readDesktop = deps.readDesktop
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#output = new RunOutputLog({ store: deps.outputStore })
     this.#interactions = new RemoteInteractionBroker((runId, detail) => {
@@ -388,6 +393,14 @@ export class HostController {
       if (error instanceof RemoteInteractionError) return false
       throw error
     }
+  }
+
+  async readDesktop(peerCertSHA256: string, input: unknown): Promise<DesktopHostReadResult> {
+    this.authorizeDevice(peerCertSHA256)
+    if (!this.#readDesktop) throw new Error('desktop_protocol_unavailable')
+    const result = await this.#readDesktop(parseDesktopHostRead(input))
+    this.authorizeDevice(peerCertSHA256)
+    return result
   }
 
   private authorizeDevice(peerCertSHA256: string): void {

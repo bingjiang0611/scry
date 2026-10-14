@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.179",
+  "version": "0.2.180",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "private": true,
   "license": "MIT",
@@ -32,9 +32,10 @@
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:regressions": "vitest run src/renderer/session-archive-effects.test.ts src/main/app-store.test.ts src/renderer/skill-load-evidence.test.ts src/renderer/session-capability-contract.test.tsx src/renderer/session-capability-calls.test.ts src/renderer/components/PinnedSummary.test.tsx src/renderer/components/render.test.tsx src/renderer/dock-badge-permission.test.ts src/main/context-admission.test.ts src/main/trace-turn-progress.test.ts src/main/trace-turn-progress.regression.test.ts src/main/commit-hook-trust.test.ts src/main/commit-hook-trust.regression.test.ts src/main/managed-turn-notifications.test.ts && npm run test:renderer:ui",
-    "test:renderer:ui": "node scripts/session-capability-ui-smoke.mjs && node scripts/analytics-credits-ui-smoke.mjs && node scripts/chat-preview-ui-smoke.mjs && node scripts/session-performance-ui-smoke.mjs && npm run test:background-ui && npm run test:steer-ui",
+    "test:renderer:ui": "node scripts/session-capability-ui-smoke.mjs && node scripts/analytics-credits-ui-smoke.mjs && node scripts/chat-preview-ui-smoke.mjs && node scripts/session-performance-ui-smoke.mjs && npm run test:background-ui && npm run test:steer-ui && node scripts/desktop-remote-ui-smoke.mjs",
     "test:background-ui": "node scripts/background-work-ui-smoke.mjs",
     "test:steer-ui": "node scripts/steer-ui-smoke.mjs",
+    "test:desktop-remote": "npm run build && npm run build:cli && node scripts/desktop-remote-host-smoke.mjs --dev && node scripts/desktop-remote-ui-smoke.mjs",
     "test:shell": "sh scripts/setup-scry-workspace.test.sh",
     "test": "npm run test:unit && npm run test:shell",
     "bench:git-diff": "node scripts/git-turn-diff-bench.mjs",
@@ -46,7 +47,7 @@
     "pack:artifact": "npm run build && npm run build:cli && node scripts/run-electron-builder.mjs && npm run check:packaged-app && npm run smoke:electron",
     "pack:release": "SCRY_RELEASE_BUILD=1 npm run pack",
     "check:packaged-app": "node scripts/check-packaged-app.mjs",
-    "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/electron-security-smoke.mjs && node scripts/electron-security-smoke.mjs --files-only",
+    "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/electron-security-smoke.mjs && node scripts/electron-security-smoke.mjs --files-only && node scripts/desktop-remote-host-smoke.mjs",
     "install:mac": "npm run pack:release && node scripts/install-macos.mjs --require-release",
     "install:mac:dev": "npm run pack && node scripts/install-macos.mjs"
   },

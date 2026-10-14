@@ -152,13 +152,39 @@ describe('SessionDiffBaselineRegistry', () => {
     expect(registry.get('claude\0/repo', 0, 'ses_a')).toBeUndefined()
   })
 
-  it('rebind（adoptSession）跟着新 revision 走但不重锚', () => {
+  it('promotes a run-owned baseline without relabelling another selected session', () => {
     let seq = 0
     const registry = new SessionDiffBaselineRegistry(async () => fakeCapture(`c${seq++}`), async () => undefined)
-    const entry = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo' })
-    registry.rebind('claude\0/repo', 1, 'ses_adopted')
-    const same = registry.get('claude\0/repo', 1, 'ses_adopted')
-    expect(same?.capture).toBe(entry.capture)
+    const local = registry.ensure({ key: 'session-a', revision: 0, cwd: '/repo', sessionId: 'a' })
+    const remote = registry.ensure({ key: 'remote-first-run', revision: 0, cwd: '/repo' })
+    expect(registry.promote('remote-first-run', 'session-b', 'b')).toBe('session-b')
+    expect(registry.get('remote-first-run', 0)).toBeUndefined()
+    expect(registry.get('session-a', 0, 'a')).toBe(local)
+    expect(registry.get('session-b', 0, 'b')).toBe(remote)
+    expect(registry.ensure({ key: 'session-b', revision: 0, cwd: '/repo', sessionId: 'b' })).toBe(remote)
+    expect(remote.origin).toBe('session_start')
+    // An attempted promotion cannot steal or relabel session A's capture.
+    expect(registry.promote('session-b', 'session-a', 'a')).toBe('session-b')
+    expect(local.sessionId).toBe('a')
+    expect(remote.sessionId).toBe('b')
+  })
+
+  it('bounds inactive retention without evicting active captures', async () => {
+    const cancelled: GitTurnDiffCapture[] = []
+    const registry = new SessionDiffBaselineRegistry(async () => fakeCapture('capture'), async capture => { cancelled.push(capture) })
+    const active = registry.ensure({ key: 'active', revision: 0, cwd: '/repo' })
+    const release = registry.retain(active)
+    for (let index = 0; index < 65; index++) {
+      const entry = registry.ensure({ key: `session-${index}`, revision: 0, cwd: '/repo', sessionId: `${index}` })
+      registry.retain(entry)()
+    }
+    expect(registry.get('active', 0)).toBe(active)
+    expect(registry.get('session-0', 0)).toBeUndefined()
+    expect(registry.get('session-64', 0)).toBeDefined()
+    release()
+    await Promise.resolve()
+    expect(cancelled).toHaveLength(2)
+    expect(registry.ensure({ key: 'session-0', revision: 0, cwd: '/repo', sessionId: '0' }).origin).toBe('resumed')
   })
 
   it('loadSession 恢复同一条未收口 run 时保留 baseline，真正切会话才不匹配', () => {

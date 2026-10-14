@@ -308,7 +308,7 @@ function bytesFromBase64(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
-export function RecorderContentPager({ label, contentRef, source }: { label: string; contentRef: ContentRef; source?: string }) {
+export function RecorderContentPager({ label, contentRef, source, remote = false }: { label: string; contentRef: ContentRef; source?: string; remote?: boolean }) {
   const [pages, setPages] = useState<DisplayContentPage[]>([])
   const [cursor, setCursor] = useState(-1)
   const [loading, setLoading] = useState(false)
@@ -347,6 +347,7 @@ export function RecorderContentPager({ label, contentRef, source }: { label: str
   }, [contentRef, source])
 
   const page = pages[cursor]
+  if (remote) return <div className="recorder-content-page" role="note">远程正文引用不可在本机读取。</div>
   return (
     <div className="recorder-content-page">
       {!page ? (
@@ -386,7 +387,8 @@ function ToolItem({
   queuedQuestionCount = 0,
   onAnswerQuestion,
   onOpenFileDiff,
-  turnDone = false
+  turnDone = false,
+  remote = false
 }: {
   ev: TraceEvent
   selected: boolean
@@ -398,6 +400,7 @@ function ToolItem({
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onOpenFileDiff?: () => void
   turnDone?: boolean
+  remote?: boolean
 }) {
   const isAskUserQuestion = ev.tool === 'AskUserQuestion' || !!intervention
   const detailId = useId()
@@ -527,14 +530,14 @@ function ToolItem({
                 <pre>{JSON.stringify(ev.input, null, 2)}</pre>
               </>
             ) : null}
-            {ev.inputContent?.contentRef && <RecorderContentPager label="input" contentRef={ev.inputContent.contentRef} source={ev.inputContent.source} />}
+            {ev.inputContent?.contentRef && <RecorderContentPager label="input" contentRef={ev.inputContent.contentRef} source={ev.inputContent.source} remote={remote} />}
             {ev.output && (
               <>
                 <div className="lbl">output{ev.isError ? ' · error' : ''}{ev.outputContent?.storage === 'truncated' ? ' · preview' : ''}</div>
                 <pre>{ev.output.slice(0, 4000)}</pre>
               </>
             )}
-            {ev.outputContent?.contentRef && <RecorderContentPager label="output" contentRef={ev.outputContent.contentRef} source={ev.outputContent.source} />}
+            {ev.outputContent?.contentRef && <RecorderContentPager label="output" contentRef={ev.outputContent.contentRef} source={ev.outputContent.source} remote={remote} />}
           </div>
         )}
         </div>
@@ -617,7 +620,8 @@ function SubagentBlock({
   turnDone = false,
   liveText = '',
   liveThinking = '',
-  liveKey: liveTailKey = ''
+  liveKey: liveTailKey = '',
+  remote = false
 }: {
   items: TraceEvent[]
   selectedId: string | null
@@ -629,6 +633,7 @@ function SubagentBlock({
   liveText?: string
   liveThinking?: string
   liveKey?: string
+  remote?: boolean
 }) {
   const visibleItems = useMemo(
     () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
@@ -704,6 +709,7 @@ function SubagentBlock({
                   queuedQuestionCount={pendingQuestions.length}
                   onAnswerQuestion={onAnswerQuestion}
                   turnDone={turnDone}
+                  remote={remote}
                 />
               )
             }
@@ -1350,7 +1356,8 @@ function AssistantTurnImpl({
   onOpenDiff,
   onForkTurn,
   pendingQuestions = [],
-  onAnswerQuestion
+  onAnswerQuestion,
+  remote = false
 }: {
   turn: Turn
   selectedId: string | null
@@ -1359,6 +1366,7 @@ function AssistantTurnImpl({
   onForkTurn?: (turn: Turn) => Promise<void>
   pendingQuestions?: AgentQuestionRequest[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
+  remote?: boolean
 }) {
   const [forking, setForking] = useState(false)
   const [forkError, setForkError] = useState<string | null>(null)
@@ -1629,6 +1637,7 @@ function AssistantTurnImpl({
                 onAnswerQuestion={onAnswerQuestion}
                 onOpenFileDiff={openFileDiffFor(ev)}
                 turnDone={turn.done}
+                remote={remote}
               />
               {kids?.length || childLiveText || childLiveThinking ? (
                 <SubagentBlock
@@ -1642,6 +1651,7 @@ function AssistantTurnImpl({
                   liveText={childLiveText}
                   liveThinking={childLiveThinking}
                   liveKey={nestedLiveKey}
+                  remote={remote}
                 />
               ) : null}
             </div>
@@ -1666,6 +1676,7 @@ function AssistantTurnImpl({
     nestedLiveText,
     nestedLiveThinking,
     latestSteerEvents,
+    remote,
     projection.liveParentToolUseId,
     selectedId,
     turn.done,
@@ -1768,7 +1779,7 @@ function AssistantTurnImpl({
       )}
       {/* History/attachment evidence can be partial without a Provider failure. */}
       {!turn.error && turn.errorHint && <div className="errhint" role="note">{turn.errorHint}</div>}
-      {backgroundWork && <BackgroundWorkPanel key={turn.runId} runId={turn.runId} work={backgroundWork} />}
+      {backgroundWork && <BackgroundWorkPanel key={turn.runId} runId={turn.runId} work={remote ? { ...backgroundWork, taskStop: 'unavailable' } : backgroundWork} />}
       {!terminal && (
         <div className="skeleton" aria-label="运行中">
           <div className="sk-line" style={{ width: '70%' }} />

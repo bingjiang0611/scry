@@ -1,4 +1,7 @@
 import { join } from 'node:path'
+import { readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
+import { DesktopHostListeners, type DesktopHostListenerPorts } from './desktop-host-listeners'
+import type { DesktopHostAccess, DesktopHostInvitation } from '../../shared/desktop-remote'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding, type HostControllerFactoryDependencies } from './host-controller-factory'
 import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
@@ -26,6 +29,7 @@ import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatu
 // LOCAL Scry UI only; it is never reachable from a device.
 
 export interface RemoteHostServiceDependencies {
+  readDesktop?: HostControllerFactoryDependencies['readDesktop']
   // Directory under Scry userData; identity/pairing/ledger subdirs live here.
   stateDirectory: string
   // Maps a device-requested cwd to an already directory-picker-authorized
@@ -74,14 +78,21 @@ export class RemoteHostService {
   #pairing: PairingTransport
   #clients: RelayClient[]
   #relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
-  #started = false
+  #starting: Promise<void> | null = null
+  #disposing: Promise<void> | null = null
   #disposed = false
+  #desktopListeners: DesktopHostListeners | null = null
+  #desktopPorts: DesktopHostListenerPorts | null = null
+  #desktopRestoreError: string | undefined
+  #desktopChanging: Promise<unknown> | null = null
+  #desktopSettingsPath: string
   readonly anchorSHA256: string
   readonly caCertificatePEM: string
   readonly hostId: string
 
   private constructor(init: {
     binding: HostControllerBinding
+    stateDirectory: string
     host: InnerMtlsHost
     pairing: PairingTransport
     clients: RelayClient[]
@@ -91,6 +102,7 @@ export class RemoteHostService {
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
   }) {
     this.#binding = init.binding
+    this.#desktopSettingsPath = join(init.stateDirectory, 'desktop-listeners.json')
     this.#host = init.host
     this.#pairing = init.pairing
     this.#clients = init.clients
@@ -104,6 +116,7 @@ export class RemoteHostService {
     const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
     const binding = await createHostController({
       stateDirectory: deps.stateDirectory,
+      ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
       hostId: identity.hostId,
       anchorSHA256: identity.anchorSHA256,
       verifyCSR: identity.verifyCSR,
@@ -152,6 +165,7 @@ export class RemoteHostService {
     }
     return new RemoteHostService({
       binding, host, pairing, clients,
+      stateDirectory: deps.stateDirectory,
       anchorSHA256: identity.anchorSHA256,
       caCertificatePEM: identity.caCertificatePEM,
       hostId: identity.hostId,
@@ -172,6 +186,67 @@ export class RemoteHostService {
   // --- Trusted-LOCAL pairing UI operations (sanitized; renderer-facing) -------
   // These project only display-safe fields; the pairing secret verifier, private
   // keys, and certificate PEMs never cross to the renderer.
+
+  desktopStatus(): DesktopHostAccess {
+    return this.#desktopPorts ? { enabled: true, ...this.#desktopPorts } : {
+      enabled: false, ...(this.#desktopRestoreError ? { reason: this.#desktopRestoreError } : {})
+    }
+  }
+
+  async beginDesktopPairing(): Promise<string> {
+    await this.start()
+    return this.#changeDesktop(async () => {
+      if (!this.#desktopPorts) await this.#enableDesktop()
+      if (this.#disposed) throw new Error('remote_host_service_disposed')
+      const code = await this.authority.begin()
+      if (this.#disposed) throw new Error('remote_host_service_disposed')
+      const invitation: DesktopHostInvitation = {
+        version: 1, hostId: this.hostId, anchorPEM: this.caCertificatePEM,
+        ...this.#desktopPorts!, pairingId: code.pairingId, secret: code.secret, expiresAt: code.expiresAt
+      }
+      return `scry-desktop1:${Buffer.from(JSON.stringify(invitation)).toString('base64url')}`
+    })
+  }
+
+  async disableDesktop(): Promise<void> {
+    await this.start()
+    return this.#changeDesktop(async () => {
+      // Persist the user's off decision before acknowledging it. Do not revoke
+      // unrelated iOS grants or interrupt tasks already running on this host.
+      rmSync(this.#desktopSettingsPath, { force: true })
+      await this.#desktopListeners?.close()
+      this.#desktopListeners = null
+      this.#desktopPorts = null
+      this.#desktopRestoreError = undefined
+    })
+  }
+
+  async #changeDesktop<T>(action: () => Promise<T>): Promise<T> {
+    if (this.#disposed) throw new Error('remote_host_service_disposed')
+    if (this.#desktopChanging) throw new Error('desktop_access_busy')
+    const pending = action()
+    this.#desktopChanging = pending
+    try { return await pending } finally { this.#desktopChanging = null }
+  }
+
+  async #enableDesktop(ports?: DesktopHostListenerPorts): Promise<void> {
+    const listeners = new DesktopHostListeners({ pair: this.#pairing, run: this.#host, ...ports })
+    // Own the instance before awaiting bind, so dispose can close a pending start.
+    this.#desktopListeners = listeners
+    try {
+      const bound = await listeners.start()
+      if (this.#disposed) throw new Error('remote_host_service_disposed')
+      const temp = `${this.#desktopSettingsPath}.tmp`
+      writeFileSync(temp, JSON.stringify(bound), { mode: 0o600 })
+      renameSync(temp, this.#desktopSettingsPath)
+      this.#desktopPorts = bound
+      this.#desktopRestoreError = undefined
+    } catch (error) {
+      await listeners.close()
+      if (this.#desktopListeners === listeners) this.#desktopListeners = null
+      throw error
+    }
+  }
 
   async beginPairing(): Promise<RemotePairingCode> {
     const code = await this.authority.begin()
@@ -234,17 +309,52 @@ export class RemoteHostService {
   // a no-op when dormant.
   async start(): Promise<void> {
     if (this.#disposed) throw new Error('remote_host_service_disposed')
-    if (this.#started) return
-    this.#started = true
-    for (const client of this.#clients) await client.start()
+    return this.#starting ??= this.#start()
+  }
+
+  async #start(): Promise<void> {
+    try {
+      let saved: unknown
+      try { saved = JSON.parse(readFileSync(this.#desktopSettingsPath, 'utf8')) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      if (saved !== undefined) {
+        const ports = saved as Partial<DesktopHostListenerPorts> | null
+        if (!ports || !Number.isInteger(ports.pairPort) || !Number.isInteger(ports.runPort) ||
+            Number(ports.pairPort) < 1 || Number(ports.runPort) < 1 ||
+            Number(ports.pairPort) > 65535 || Number(ports.runPort) > 65535 || ports.pairPort === ports.runPort) {
+          throw new Error('desktop_listener_settings_invalid')
+        }
+        await this.#enableDesktop(ports as DesktopHostListenerPorts)
+      }
+    } catch (error) {
+      if (this.#disposed) throw error
+      // SSH restore is an independent optional transport. Keep it closed and
+      // expose the failure; a port collision must not disable existing phone grants.
+      this.#desktopRestoreError = `desktop_listener_restore_failed: ${String(error instanceof Error ? error.message : error).slice(0, 300)}`
+    }
+    for (const client of this.#clients) {
+      if (this.#disposed) throw new Error('remote_host_service_disposed')
+      await client.start()
+    }
   }
 
   async dispose(): Promise<void> {
-    if (this.#disposed) return
     this.#disposed = true
-    try { for (const client of this.#clients) await client.close() } finally {
-      try { await this.#host.close() } finally {
-        try { await this.#pairing.close() } finally { await this.#binding.close() }
+    return this.#disposing ??= this.#dispose()
+  }
+
+  async #dispose(): Promise<void> {
+    try { await this.#desktopListeners?.close() } finally {
+      this.#desktopListeners = null
+      this.#desktopPorts = null
+      try { await Promise.all(this.#clients.map(client => client.close())) } finally {
+        // Startup/enable callers receive their own failure. Drain them before
+        // releasing the authority leases; none may publish a listener afterward.
+        await this.#starting?.catch(() => undefined)
+        await this.#desktopChanging?.catch(() => undefined)
+        try { await this.#host.close() } finally {
+          try { await this.#pairing.close() } finally { await this.#binding.close() }
+        }
       }
     }
   }
