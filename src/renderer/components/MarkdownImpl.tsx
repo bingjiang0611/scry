@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { canOpenWorkspaceFileExternally } from '@shared/workspace'
-import { resolveWorkspaceFileTarget, type WorkspaceFileTarget } from '../workspace-links'
+import { remarkWorkspaceFileDirectories, resolveWorkspaceFileTarget, type WorkspaceFileTarget } from '../workspace-links'
 import { Icon } from './primitives/Icon'
 
 function safeExternalHref(href: string | undefined): string | undefined {
@@ -116,7 +116,7 @@ const baseComponents: Components = {
   )
 }
 
-const remarkPlugins = [remarkGfm]
+const remarkPlugins = [remarkGfm, remarkWorkspaceFileDirectories]
 export const STREAMING_MARKDOWN_LIGHTWEIGHT_THRESHOLD = 48_000
 const PROGRESSIVE_MARKDOWN_CHUNK_TARGET = 8_000
 
@@ -274,7 +274,7 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
         return <a {...props} href={safe} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{content}</a>
       }
       const target = workspaceFileLink && href
-        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, `@${href}`)
+        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, `@${node?.properties['data-scry-file-reference'] ?? href}`)
         : null
       if (!target) return <span>{content}</span>
       return <button type="button" className="md-file-ref" title={`${target.path} · 打开文件`}
@@ -282,7 +282,7 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
         <Icon name="file" className="md-file-ref-icon" />{content}
       </button>
     },
-    code: ({ node: _node, children: codeChildren, className, ...props }) => {
+    code: ({ node, children: codeChildren, className, ...props }) => {
       const reference = String(codeChildren)
       const externalHref = safeExternalHref(reference)
       if (externalHref && /^https?:\/\//i.test(externalHref)) {
@@ -293,11 +293,13 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
         )
       }
       const target = workspaceFileLink && !reference.includes('\n')
-        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces, reference)
+        ? resolveWorkspaceFileTarget(workspaceFileLink.workspaces,
+          typeof node?.properties['data-scry-file-reference'] === 'string'
+            ? `@${node.properties['data-scry-file-reference']}` : reference)
         : null
       if (!target) return <code {...props} className={className}>{codeChildren}</code>
 
-      const external = canOpenWorkspaceFileExternally(target.path)
+      const external = reference.endsWith('/') || canOpenWorkspaceFileExternally(target.path)
       const open = workspaceFileLink?.onOpen
       const title = external ? `${target.path} · 在外部应用打开` : `${target.path} · 在右侧文件面板打开`
       return (

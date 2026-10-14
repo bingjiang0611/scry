@@ -53,14 +53,17 @@ export class HomeFileAccess {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
       if (target !== null) {
-        if (!(await lstat(target)).isFile()) throw new Error('目标不是文件')
-        if (isInside(cwd, target) && request.cwd !== '~') return { cwd, path: relative(cwd, target) }
-        if (isInside(home, target)) return { cwd: '~', path: relative(home, target) }
-        // A clicked link can target any OS-readable file, but it exposes only
-        // this canonical file to read/open handlers, never a writable root.
+        const info = await lstat(target)
+        if (!info.isFile() && !info.isDirectory()) throw new Error('目标不是普通文件或文件夹')
+        if (info.isFile()) {
+          if (isInside(cwd, target) && request.cwd !== '~') return { cwd, path: relative(cwd, target) }
+          if (isInside(home, target)) return { cwd: '~', path: relative(home, target) }
+        }
+        // Directory links and outside-home files expose only this canonical
+        // target to read/open handlers, never a writable or browsable root.
         const reference = `scry-file:${randomUUID()}`
         this.fileReferences.set(reference, target)
-        return { cwd: reference, path: basename(target) }
+        return { cwd: reference, path: basename(target) || '.' }
       }
       if (!searchAncestors || base === home) break
       base = dirname(base)
@@ -71,10 +74,11 @@ export class HomeFileAccess {
   async authorize<T extends WorkspacePathRequest>(request: T): Promise<T> {
     if (request.cwd !== '~') {
       const file = this.fileReferences.get(request.cwd)
-      if (!file || request.path !== basename(file)) throw new Error('无效的用户目录文件请求或文件链接引用')
+      if (!file || request.path !== (basename(file) || '.')) throw new Error('无效的用户目录文件请求或文件链接引用')
       if (await realpath(file) !== file) throw new Error('文件链接目标已变化，请重新打开链接')
-      if (!(await lstat(file)).isFile()) throw new Error('目标不是文件')
-      return { ...request, cwd: dirname(file), path: basename(file) }
+      const info = await lstat(file)
+      if (!info.isFile() && !info.isDirectory()) throw new Error('目标不是普通文件或文件夹')
+      return { ...request, cwd: dirname(file), path: basename(file) || '.' }
     }
     const home = await realpath(resolve(this.homeDir))
     const parts = homeRelativeParts(request.path)

@@ -139,12 +139,13 @@ describe('HomeFileAccess', () => {
     await expect(access.authorize(target)).rejects.toThrow('文件链接目标已变化')
   })
 
-  it('rejects missing files, invalid paths and directories', async () => {
+  it('rejects missing files and invalid paths but resolves directory links', async () => {
     const cwd = join(home, 'project')
     await mkdir(cwd)
     await expect(access.resolveFile({ cwd, path: 'missing.md' })).rejects.toThrow('不存在')
     await expect(access.resolveFile({ cwd, path: 'bad\0.md' })).rejects.toThrow('无效')
-    await expect(access.resolveFile({ cwd, path: '.' })).rejects.toThrow('目标不是文件')
+    const directory = await access.resolveFile({ cwd, path: '.' })
+    expect(await access.authorize(directory)).toEqual({ cwd: await realpath(home), path: 'project' })
   })
 
   it('rejects absolute paths, invalid requests and missing files', async () => {

@@ -46,7 +46,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`。Renderer 只能通过 typed `window.scry` preload API 调用经过校验的 main handler。
 
 - 禁止任意命令、任意路径、任意 URL IPC。
-- 用户目录（`~/`）文件预览默认允许，不再逐目录弹窗授权或依赖持久化目录 grant；main 仍重验相对路径、canonical home containment 与文件类型。用户点击的文件链接也允许指向用户目录外，包括符号链接目标；main 为这类目标签发仅限单个 canonical 文件的内存只读引用，后续读取/外部打开重验引用与目标，不能将引用用于写入或换成同目录其他文件。此策略不授予工作区外写入权限，也不绕过操作系统权限、可执行文件打开限制或仓库配置 trust gate。
+- 用户目录（`~/`）文件预览默认允许，不再逐目录弹窗授权或依赖持久化目录 grant；main 仍重验相对路径、canonical home containment 与文件类型。用户点击的文件链接也允许指向用户目录外，包括符号链接目标；main 为这类目标签发仅限单个 canonical 文件的内存只读引用，后续读取/外部打开重验引用与目标，不能将引用用于写入或换成同目录其他文件。目录链接使用相同的单目标引用，只交给系统打开，不授予目录浏览或写入权限。维护者明确要求文件打开不按类型拦截：用户请求外部打开时，所有文件类型（包括可执行文件）均交给系统默认应用，可能执行程序。此策略不授予工作区外写入权限，也不绕过操作系统权限或仓库配置 trust gate。
 - 主进程验证 sender/frame/origin，并对 payload 再做 schema、cwd、path 和 operation authorization。
 - 阻止 webview、任意 navigation/window open 和非 allowlist 网络请求；合法 HTTP(S) 链接（包括 localhost/private URL）直接交给默认浏览器，不再二次确认。仍拒绝非 HTTP(S) 协议；不允许外部页面在特权 renderer 中加载。
 - 不为恢复 React HMR 或开发便利而放宽 CSP/sandbox。当前 dev 配置刻意牺牲 HMR 以保持生产安全边界一致。

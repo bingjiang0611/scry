@@ -1324,6 +1324,11 @@ handleTrusted('agent:clipboardImage', () => {
   } satisfies AgentInputAttachment
 })
 
+async function openLocalPath(path: string): Promise<void> {
+  const error = await shell.openPath(path)
+  if (error) throw new Error(error)
+}
+
 handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
   listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
 handleTrusted('workspace:resolveFile', async (_event, request: WorkspacePathRequest) =>
@@ -1345,7 +1350,7 @@ handleTrusted('workspace:readPageKnown', async (_event, request: WorkspaceFilePa
 handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
   openWorkspaceFileExternally(
     authorizedWorkspaceRequest(currentCwd, request),
-    (path) => shell.openExternal(pathToFileURL(path).href),
+    openLocalPath,
     {
       roots: [...knownProjectDirectories()],
       choose: async (candidates) => {
@@ -1375,7 +1380,7 @@ handleTrusted('workspace:openKnownExternal', async (_event, request: WorkspacePa
     homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
       : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
-    (path) => shell.openExternal(pathToFileURL(path).href)
+    openLocalPath
   ))
 handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
   writeWorkspaceFile(authorizedWorkspaceRequest(currentCwd, request)))
