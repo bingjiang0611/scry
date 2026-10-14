@@ -1,4 +1,5 @@
-// Isolated, visible GPU-enabled fixture. No Scry userData, preload or Provider runs.
+// Isolated, hidden GPU-enabled fixture. CPU samples do not represent foreground
+// compositing. No Scry userData, preload or Provider runs.
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, copyFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,10 +20,11 @@ try {
     <aside class="sidebar">${Array.from({ length: 8 }, (_, i) => `<div class="sb-sess ${i === 0 ? 'active' : ''}"><span class="sb-running" role="status" aria-label="正在运行"></span><span class="sb-sesstext">Synthetic session ${i + 1}</span></div>`).join('')}</aside>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
+    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     const { performance } = require('node:perf_hooks')
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
-    if (process.platform === 'darwin') app.setActivationPolicy('accessory')
+    if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
     const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
     const snapshot = () => app.getAppMetrics().map(p => ({ pid: p.pid, type: p.type, cpuSeconds: p.cpu.cumulativeCPUUsage }))
     app.whenReady().then(async () => {
@@ -31,7 +33,6 @@ try {
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
-        win.showInactive()
         const samples = []
         // ABBA reduces one-way warmup/drift bias. CPU is one-core %, not machine %.
         for (const legacy of [true, false, false, true]) {
@@ -52,7 +53,7 @@ try {
           if (!processes.some(p => p.type === 'GPU')) throw new Error('No GPU process evidence')
           samples.push({ legacy, animatedSpinners: style.animated, elapsedMs: Math.round(elapsedMs), processes })
         }
-        console.log('SCRY_ANIMATION_PERF=' + JSON.stringify({ electron: process.versions.electron, samples }))
+        console.log('SCRY_ANIMATION_PERF=' + JSON.stringify({ electron: process.versions.electron, windowVisibility: 'hidden', samples }))
         win.destroy()
         app.quit()
       } catch (error) { console.error(error); app.exit(1) }

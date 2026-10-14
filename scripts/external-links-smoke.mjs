@@ -13,20 +13,17 @@ const entry = join(root, 'out/main/index.js')
 await access(entry)
 const temp = await mkdtemp(join(tmpdir(), 'scry-external-links-'))
 
-async function exercise(window, shell, dialog, backgroundShowRequested) {
+async function exercise(window, shell, dialog) {
   const assert = require('node:assert/strict')
-  // SCRY_TEST_APP deliberately uses activationPolicy=prohibited on macOS.
-  // The OS may keep that window hidden even after showInactive. Still require
-  // the real production startup path, and keep the native-focus assertion below.
-  let startupTimer
-  try {
-    await Promise.race([
-      backgroundShowRequested,
-      new Promise((_resolve, reject) => { startupTimer = setTimeout(() => reject(new Error('Background show was not requested')), 5000) })
-    ])
-  } finally { clearTimeout(startupTimer) }
-  assert.equal(window.isFocused(), false, 'Test app must show without stealing native focus')
   const contents = window.webContents
+  // Exercise the production ready and second-instance handlers, then outlive the
+  // 2500 ms startup fallback. The guard rejects display calls before they reach
+  // the OS, even if activationPolicy happens to suppress native visibility.
+  contents.emit('ipc-message', {}, 'app:rendererReady')
+  require('electron').app.emit('second-instance')
+  await new Promise(resolve => setTimeout(resolve, 2600))
+  assert.equal(window.isVisible(), false, 'Test app must remain hidden')
+  assert.equal(window.isFocused(), false, 'Test app must not steal native focus')
   assert.equal(contents.getBackgroundThrottling(), false, 'Background test UI must keep rendering')
   let frameTimer
   try {
@@ -103,17 +100,14 @@ try {
   await mkdir(join(temp, 'home'))
   await writeFile(join(temp, 'main.cjs'), `
     const { app, shell, dialog, safeStorage } = require('electron')
+    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     safeStorage.isEncryptionAvailable = () => { throw new Error('Fresh-profile startup unexpectedly accessed Keychain') }
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.on('browser-window-focus', () => { console.error('Test app stole native window focus'); app.exit(1) })
     app.once('browser-window-created', (_event, window) => {
-      let acknowledgeShow
-      const backgroundShowRequested = new Promise(resolve => { acknowledgeShow = resolve })
-      const showInactive = window.showInactive.bind(window)
-      window.showInactive = () => { const result = showInactive(); acknowledgeShow(); return result }
       window.webContents.once('did-finish-load', async () => {
         try {
-          await (${exercise.toString()})(window, shell, dialog, backgroundShowRequested)
+          await (${exercise.toString()})(window, shell, dialog)
           app.exit(0)
         } catch (error) { console.error(error); app.exit(1) }
       })
@@ -141,7 +135,7 @@ try {
       if (cleanup) return
       if (code !== 0 || !output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) {
         reject(new Error(`External links fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
-      } else { console.log('Background startup: no native focus; external links: native clicks open directly; unsafe URLs and renderer navigation remain blocked'); resolve() }
+      } else { console.log('Background startup: no display or native focus (renderer ready, second instance, fallback); external links: native clicks open directly; unsafe URLs and renderer navigation remain blocked'); resolve() }
     })
   })
 } catch (error) {

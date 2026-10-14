@@ -214,6 +214,7 @@ try {
   await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron');
+    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);
     if (process.platform === 'darwin') app.setActivationPolicy('prohibited');
     app.on('browser-window-focus', () => { console.error('Performance fixture stole native window focus'); app.exit(1); });
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))});
@@ -226,7 +227,6 @@ try {
       win.webContents.on('console-message', event => console.error(event.message));
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))});
-        win.showInactive();
         win.webContents.focus();
         const result = await (${exercise.toString()})(win.webContents);
         console.log('SCRY_SESSION_PERFORMANCE=' + JSON.stringify(result));

@@ -82,7 +82,6 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   await wait(`document.querySelector('.mp-detail h2')?.textContent.includes('修订')`)
   if (screenshotPrefix) {
     await wait(`!document.querySelector('.mp-notice')`)
-    win.showInactive()
     for (const theme of ['dark', 'light']) {
       await read(`document.documentElement.dataset.theme = '${theme}'`)
       await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
