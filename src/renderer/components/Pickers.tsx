@@ -60,7 +60,6 @@ export function WorkdirPicker({
 } & PickerOpenProps) {
   const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
   const menuId = useId()
-  const otherRecent = recent.filter((dir) => dir !== cwd)
   const pickerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -116,78 +115,123 @@ export function WorkdirPicker({
           className="menu wdmenu"
           role="dialog"
           aria-label="选择工作目录"
-          onKeyDown={(event) => {
-            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-            const actions = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
-            if (actions.length === 0) return
-            event.preventDefault()
-            const current = actions.indexOf(document.activeElement as HTMLButtonElement)
-            const next = event.key === 'Home'
-              ? 0
-              : event.key === 'End'
-                ? actions.length - 1
-                : event.key === 'ArrowUp'
-                  ? (current <= 0 ? actions.length - 1 : current - 1)
-                  : (current + 1) % actions.length
-            actions[next]?.focus()
-          }}
+          onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
         >
-          <button
-            type="button"
-            className="mitem"
-            onClick={() => {
-              setOpen(false)
-              onUnbind()
-            }}
-          >
-            <Icon name="message" /> 不绑定项目
-            {!cwd && <span className="ck"><Icon name="check" /> 当前</span>}
-          </button>
-          <button
-            type="button"
-            className="mitem"
-            onClick={() => {
-              setOpen(false)
-              onChoose()
-            }}
-          >
-            <Icon name="folder" /> 选择文件夹
-          </button>
-          {otherRecent.length > 0 && <div className="mhdr">最近使用</div>}
-          <div className="wdrecent-list">
-            {otherRecent.map((d) => (
-              <div key={d} className="wdrecent-row">
-                <button
-                  type="button"
-                  className="mitem wdrecent-pick"
-                  title={d}
-                  onClick={() => {
-                    setOpen(false)
-                    onPick(d)
-                  }}
-                >
-                  <Icon name="clock" />
-                  <span className="wdrecent-copy">
-                    <b>{basename(d)}</b>
-                    <code>{d}</code>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="wdrecent-remove"
-                  title="Remove from recent folders"
-                  aria-label={`Remove ${d} from recent folders`}
-                  onClick={() => onRemove(d)}
-                >
-                  <Icon name="x" />
-                </button>
-              </div>
-            ))}
-          </div>
+          <WorkdirMenuItems
+            cwd={cwd}
+            recent={recent}
+            onClose={() => setOpen(false)}
+            onChoose={onChoose}
+            onUnbind={onUnbind}
+            onPick={onPick}
+            onRemove={onRemove}
+          />
         </div>
       )}
     </div>
   )
+}
+
+// Arrow/Home/End move between enabled menu buttons. Shared by composer context menus.
+export function moveMenuFocus(event: { key: string; preventDefault: () => void }, menu: HTMLElement | null): void {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const actions = Array.from(menu?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+  if (actions.length === 0) return
+  event.preventDefault()
+  const current = actions.indexOf(document.activeElement as HTMLButtonElement)
+  const next = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? actions.length - 1
+      : event.key === 'ArrowUp'
+        ? (current <= 0 ? actions.length - 1 : current - 1)
+        : (current + 1) % actions.length
+  actions[next]?.focus()
+}
+
+// Local workdir choices. `cwd` is the current local binding; pass `current={false}`
+// when the composer currently targets another machine so nothing is marked current.
+export function WorkdirMenuItems({
+  cwd,
+  recent,
+  current = true,
+  onClose,
+  onChoose,
+  onUnbind,
+  onPick,
+  onRemove
+}: {
+  cwd: string | null
+  recent: string[]
+  current?: boolean
+  onClose: () => void
+  onChoose: () => void
+  onUnbind: () => void
+  onPick: (d: string) => void
+  onRemove: (d: string) => void
+}) {
+  const listed = current ? recent.filter((dir) => dir !== cwd) : recent
+  return (
+    <>
+      <button
+        type="button"
+        className="mitem"
+        onClick={() => {
+          onClose()
+          onUnbind()
+        }}
+      >
+        <Icon name="message" /> 不绑定项目
+        {current && !cwd && <span className="ck"><Icon name="check" /> 当前</span>}
+      </button>
+      <button
+        type="button"
+        className="mitem"
+        onClick={() => {
+          onClose()
+          onChoose()
+        }}
+      >
+        <Icon name="folder" /> 选择文件夹
+      </button>
+      {listed.length > 0 && <div className="mhdr">最近使用</div>}
+      <div className="wdrecent-list">
+        {listed.map((d) => (
+          <div key={d} className="wdrecent-row">
+            <button
+              type="button"
+              className="mitem wdrecent-pick"
+              title={d}
+              onClick={() => {
+                onClose()
+                onPick(d)
+              }}
+            >
+              <Icon name="clock" />
+              <span className="wdrecent-copy">
+                <b>{basename(d)}</b>
+                <code>{d}</code>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="wdrecent-remove"
+              title="Remove from recent folders"
+              aria-label={`Remove ${d} from recent folders`}
+              onClick={() => onRemove(d)}
+            >
+              <Icon name="x" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+// Remote agents use `${providerId}:${profile}` ids; the prefix still names the Provider.
+function agentGlyphProvider(agentId: string) {
+  return providerIdForAgentId(agentId) ?? providerIdForAgentId(agentId.split(':')[0])
 }
 
 export function CliPicker({
@@ -197,6 +241,8 @@ export function CliPicker({
   onAddPi,
   onRemovePi,
   onRescan,
+  scopeLabel = '本机 Agent',
+  unavailableIds,
   disabled = false,
   open: controlledOpen,
   onOpenChange
@@ -204,15 +250,20 @@ export function CliPicker({
   agents: DetectedAgent[]
   selectedId: string
   onSelect: (id: string) => void
-  onAddPi: () => void
-  onRemovePi: (id: string) => void
-  onRescan: () => void
+  // Local-only management actions. A remote host owns its own Provider install,
+  // so the remote composer omits them instead of offering actions that cannot apply.
+  onAddPi?: () => void
+  onRemovePi?: (id: string) => void
+  onRescan?: () => void
+  scopeLabel?: string
+  // Listed but not selectable, e.g. a remote Provider the host reports unavailable.
+  unavailableIds?: ReadonlySet<string>
   disabled?: boolean
 } & PickerOpenProps) {
   const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
   const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
-  const selectedProvider = providerIdForAgentId(sel?.id ?? selectedId)
+  const selectedProvider = agentGlyphProvider(sel?.id ?? selectedId)
   const piAgents = agents.filter((agent) => providerIdForAgentId(agent.id) === 'pi')
   const codeAgents = agents.filter((agent) => providerIdForAgentId(agent.id) !== 'pi')
   useEffect(() => {
@@ -239,7 +290,7 @@ export function CliPicker({
       {open && !disabled && (
         <div id={menuId} className="menu climenu" onMouseLeave={() => setOpen(false)}>
           <div className="cltitle">
-            本机 Agent
+            {scopeLabel}
             <div className="dim">{sel?.name ?? '未检测到'}</div>
           </div>
           <div className="mhdr">Provider</div>
@@ -251,15 +302,16 @@ export function CliPicker({
               className="mitem"
               data-agent-id={a.id}
               title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
+              disabled={unavailableIds?.has(a.id)}
               onClick={() => {
                 onSelect(a.id)
                 setOpen(false)
               }}
             >
               <span className="agicon">
-                <ProviderGlyph provider={providerIdForAgentId(a.id) ?? 'claude'} />
+                <ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} />
               </span>{' '}
-              <span className="agent-option-name">{a.name}</span>
+              <span className="agent-option-name">{a.name}{unavailableIds?.has(a.id) && a.id !== selectedId ? ' · 不可用' : ''}</span>
               {a.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
             </button>
           ))}
@@ -271,6 +323,7 @@ export function CliPicker({
                 className="mitem agent-option-pick"
                 data-agent-id={agent.id}
                 title={agent.path}
+                disabled={unavailableIds?.has(agent.id)}
                 onClick={() => {
                   onSelect(agent.id)
                   setOpen(false)
@@ -279,11 +332,11 @@ export function CliPicker({
                 <span className="agicon"><ProviderGlyph provider="pi" /></span>
                 <span className="agent-option-copy">
                   <b>{piProfileName(agent)}</b>
-                  <small>{agent.id === 'pi:default' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
+                  <small>{agent.id === 'pi:default' || agent.id === 'pi' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
                 </span>
                 {agent.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
               </button>
-              {agent.id !== 'pi:default' && (
+              {agent.id !== 'pi:default' && onRemovePi && (
                 <button
                   type="button"
                   className="agent-option-remove"
@@ -296,13 +349,17 @@ export function CliPicker({
               )}
             </div>
           ))}
-          <div className="mdiv" />
-          <button type="button" className="mitem" onClick={() => { onAddPi(); setOpen(false) }}>
-            <Icon name="plus" /> 添加 Pi Agent…
-          </button>
-          <button type="button" className="mitem" onClick={() => onRescan()}>
-            <Icon name="refresh" /> 重新扫描 PATH
-          </button>
+          {(onAddPi || onRescan) && <div className="mdiv" />}
+          {onAddPi && (
+            <button type="button" className="mitem" onClick={() => { onAddPi(); setOpen(false) }}>
+              <Icon name="plus" /> 添加 Pi Agent…
+            </button>
+          )}
+          {onRescan && (
+            <button type="button" className="mitem" onClick={() => onRescan()}>
+              <Icon name="refresh" /> 重新扫描 PATH
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type {
   AgentModelRef,
@@ -96,7 +96,19 @@ interface ChatViewProps {
   onRunModel: (model: AgentModelRef | undefined) => void
   onRunEffort: (effort: string | undefined) => void
   onPermissionMode: (mode: AgentPermissionMode) => void
-  onRescan: () => void
+  onRescan?: () => void
+  unavailableAgentIds?: ReadonlySet<string>
+  agentScopeLabel?: string
+  // Replaces the local workdir picker with the machine + project location picker.
+  // ChatView keeps owning which composer menu is open.
+  renderLocationPicker?: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
+  // Remote sessions run on another Scry desktop. Their evidence comes from that
+  // host's archive, local file links and recorder content cannot be opened here,
+  // and a busy run cannot queue a follow-up prompt.
+  remoteHost?: string
+  // A location-level notice (offline host, unavailable Provider) that stays visible
+  // without a draft, unlike sendBlockedReason which explains a disabled send.
+  composerNotice?: { text: string; tone: 'blocked' | 'error'; action?: { label: string; onClick: () => void; disabled?: boolean } } | null
 }
 
 // Subscribe at the composer boundary, not App: ordinary typing must not render the sidebar,
@@ -111,7 +123,7 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
 }
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'>
+  'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
 
 // One/two history pages retain the existing DOM. Beyond 80 loaded turns, keep
 // lightweight jump targets and mount content within 1200px of the viewport.
@@ -129,7 +141,7 @@ export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, fo
 
 const TranscriptTurn = memo(function TranscriptTurn({
   turn, index, total, windowed, initiallyVisible, focused,
-  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, pendingQuestions = [], onAnswerQuestion
+  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, pendingQuestions = [], onAnswerQuestion, remote = false
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
 }) {
@@ -230,7 +242,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
     {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
       <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
-        onForkTurn={onForkTurn} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} />
+        onForkTurn={onForkTurn} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote} />
     </>}
   </div>
 })
@@ -422,13 +434,19 @@ export function ChatView({
   onRemoveDraftAttachment,
   onRemoveQueuedPrompt,
   onSelectAgent,
-  onAddPiAgent = () => {},
-  onRemovePiAgent = () => {},
+  onAddPiAgent,
+  onRemovePiAgent,
   onRunModel,
   onRunEffort,
   onPermissionMode,
-  onRescan
+  onRescan,
+  unavailableAgentIds,
+  agentScopeLabel,
+  renderLocationPicker,
+  remoteHost,
+  composerNotice = null
 }: ChatViewProps) {
+  const remote = remoteHost != null
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
   const selectedAgentName = selectedAgent?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
@@ -502,7 +520,8 @@ export function ChatView({
       description: option.description
     }))
   ]
-  const sendActionLabel = submitting ? '正在启动' : busy ? '加入队列' : '发送'
+  const queueing = busy && !remote
+  const sendActionLabel = submitting ? '正在启动' : queueing ? '加入队列' : '发送'
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
   const composerStatus = composerError ?? (hasDraft ? sendBlockedReason : null)
 
@@ -535,9 +554,9 @@ export function ChatView({
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
         {turns.length > 0 && !sessionLoading && (
           <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
-            <span><i aria-hidden="true" />本机真实会话</span>
+            <span><i aria-hidden="true" />{remote ? `${remoteHost} 真实会话` : '本机真实会话'}</span>
             <code title={cwd ?? '未绑定工作目录'}>{workspaceName ?? '不绑定项目'}</code>
-            <b>{selectedAgentName} · runtime / local archive · 未捕获字段保持未知</b>
+            <b>{selectedAgentName} · {remote ? 'runtime / host trace archive' : 'runtime / local archive'} · 未捕获字段保持未知</b>
           </div>
         )}
         <div
@@ -549,7 +568,7 @@ export function ChatView({
           {sessionLoading && hasSelectedSession && (
             <div className="chat-session-evidence-gap" role="status" data-status="loading">
               <b>正在加载会话历史</b>
-              <span>正在读取本机归档，请稍候。</span>
+              <span>{remote ? `正在读取 ${remoteHost} 的归档，请稍候。` : '正在读取本机归档，请稍候。'}</span>
             </div>
           )}
           {/* 选中的历史会话读不到证据时必须说实话，不能假装成“新会话”。 */}
@@ -557,7 +576,7 @@ export function ChatView({
             <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
               <b>{sessionEvidenceGap.status === 'error'
                 ? '会话历史加载失败'
-                : sessionEvidenceGap.status === 'unavailable' ? '这条会话没有可读的本机证据' : '这条会话的归档里没有轮次'}</b>
+                : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
               <span>{sessionEvidenceGap.detail}</span>
               <span>{sessionEvidenceGap.status === 'error'
                 ? '这不代表历史为空。请重新点击侧边栏中的会话加载。'
@@ -567,7 +586,7 @@ export function ChatView({
           {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
             <div className="chat-session-evidence-gap" role="status" data-status="empty">
               <b>这条会话暂时没有可显示的轮次</b>
-              <span>会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。</span>
+              <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
             </div>
           )}
           {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
@@ -584,10 +603,14 @@ export function ChatView({
           )}
           {!sessionLoading && historyWindow?.hasOlder && (
             <div className="history-window-note" role="note" aria-label="历史轮次范围">
-              <span>
-                时间线已加载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·
-                更早轮次仍在本机归档中，未丢弃
-              </span>
+              {remote ? (
+                <span>时间线已加载最近 <b>{turns.length}</b> 轮·更早轮次仍在 {remoteHost} 的归档中，未丢弃</span>
+              ) : (
+                <span>
+                  时间线已加载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·
+                  更早轮次仍在本机归档中，未丢弃
+                </span>
+              )}
               <button
                 type="button"
                 className="history-window-more"
@@ -602,7 +625,7 @@ export function ChatView({
             turns={turns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId}
             onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff}
             onForkTurn={!busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
-            pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion}
+            pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
           />}
           </div>
         </div>
@@ -740,17 +763,33 @@ export function ChatView({
           </div>
         )}
         {showWorkdirPicker && <div className="composer-context" role="group" aria-label="会话上下文">
-          <WorkdirPicker
-            cwd={cwd}
-            recent={recent}
-            onChoose={onChooseFolder}
-            onUnbind={onUnbindProject}
-            onPick={onPickRecent}
-            onRemove={onRemoveRecent}
-            open={composerMenu === 'workdir'}
-            onOpenChange={(open) => setComposerMenu(open ? 'workdir' : null)}
-          />
+          {renderLocationPicker ? renderLocationPicker({
+            open: composerMenu === 'workdir',
+            onOpenChange: (open) => setComposerMenu(open ? 'workdir' : null)
+          }) : (
+            <WorkdirPicker
+              cwd={cwd}
+              recent={recent}
+              onChoose={onChooseFolder}
+              onUnbind={onUnbindProject}
+              onPick={onPickRecent}
+              onRemove={onRemoveRecent}
+              open={composerMenu === 'workdir'}
+              onOpenChange={(open) => setComposerMenu(open ? 'workdir' : null)}
+            />
+          )}
         </div>}
+        {composerNotice && (
+          <div className={`composer-notice is-${composerNotice.tone}`} role={composerNotice.tone === 'error' ? 'alert' : 'status'}>
+            <Icon name={composerNotice.tone === 'error' ? 'alert' : 'info'} />
+            <span>{composerNotice.text}</span>
+            {composerNotice.action && (
+              <button type="button" onClick={composerNotice.action.onClick} disabled={composerNotice.action.disabled}>
+                {composerNotice.action.label}
+              </button>
+            )}
+          </div>
+        )}
         {busy && (
           <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone} data-background-waiting={backgroundStatus?.waiting || undefined}>
             <span className="run-status-left">
@@ -911,6 +950,8 @@ export function ChatView({
               onAddPi={onAddPiAgent}
               onRemovePi={onRemovePiAgent}
               onRescan={onRescan}
+              unavailableIds={unavailableAgentIds}
+              scopeLabel={agentScopeLabel}
               disabled={agentLocked}
               open={composerMenu === 'agent'}
               onOpenChange={(open) => setComposerMenu(open ? 'agent' : null)}
@@ -945,7 +986,7 @@ export function ChatView({
               title={composerStatus ?? sendActionLabel}
             >
               <Icon name="arrowUp" />
-              <span className="send-label">{submitting ? '启动中' : busy ? '加入队列' : '发送'}</span>
+              <span className="send-label">{submitting ? '启动中' : queueing ? '加入队列' : '发送'}</span>
             </button>
           </div>
         </div>

@@ -106,13 +106,13 @@ export function SettingsModal({
   onThemeChange,
   onClose,
   onSessionsChanged,
-  onOpenRemote
+  onOpenHosts
 }: {
   theme: AppTheme
   onThemeChange: (theme: AppTheme) => void
   onClose: () => void
   onSessionsChanged: () => void
-  onOpenRemote?: (connectionId?: string) => void
+  onOpenHosts?: () => void
 }) {
   const titleId = useId()
   const appearanceRef = useRef<HTMLButtonElement>(null)
@@ -218,7 +218,7 @@ export function SettingsModal({
               onSessionsChanged={onSessionsChanged}
             />
           ) : (
-            <div className="settings-body"><RemotePairing onOpenRemote={onOpenRemote} /></div>
+            <div className="settings-body"><RemotePairing onOpenHosts={onOpenHosts} /></div>
           )}
         </div>
       </div>

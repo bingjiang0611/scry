@@ -14,7 +14,9 @@ import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
 import { ProviderGlyph } from './ProviderGlyph'
-import { MachineNavigation } from './MachineNavigation'
+import type { RemoteSessionRef } from '@shared/desktop-remote'
+import { useDesktopConnections } from '../hooks/useDesktopConnections'
+import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocation } from './SidebarRemoteProjects'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -63,9 +65,11 @@ export const Sidebar = memo(function Sidebar({
   metaPromptsActive = false,
   catalogHealth,
   onSettings,
-  newChatTarget = 'local',
-  onNewChatTarget,
-  onOpenRemote
+  onHosts,
+  hostsActive = false,
+  activeRemote = null,
+  onPickRemoteSession,
+  onNewRemoteProjectChat
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -99,9 +103,11 @@ export const Sidebar = memo(function Sidebar({
   metaPromptsActive?: boolean
   catalogHealth?: CatalogHealth
   onSettings?: () => void
-  newChatTarget?: string
-  onNewChatTarget?: (id: string) => void
-  onOpenRemote?: (connectionId?: string) => void
+  onHosts?: () => void
+  hostsActive?: boolean
+  activeRemote?: ActiveRemoteLocation | null
+  onPickRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
+  onNewRemoteProjectChat?: (connectionId: string, cwd: string) => void
 }) {
   const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)
   const openSessionMenu = (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta): void => {
@@ -142,6 +148,8 @@ export const Sidebar = memo(function Sidebar({
     }
   }, [projectMenu])
   const ql = q.trim().toLowerCase()
+  const remoteGroups = useRemoteProjectGroups(q)
+  const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const { pinned, filtered } = useMemo(() => {
     const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
     // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名。
@@ -183,14 +191,12 @@ export const Sidebar = memo(function Sidebar({
       <button className="sb-new" onClick={onNewChat}>
         <Icon name="plus" /> 新建会话
       </button>
-      {onNewChatTarget && onOpenRemote && <MachineNavigation targetId={newChatTarget} onTarget={onNewChatTarget} onOpen={onOpenRemote} onManage={() => onOpenRemote()} />}
-      <div className="sb-local-sessions">本机会话</div>
       <div className="sb-search">
         <Icon name="search" />
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (
+      {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts || onHosts) && (
         <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
             <button
@@ -234,6 +240,7 @@ export const Sidebar = memo(function Sidebar({
               <Icon name="terminal" /> Meta Prompts
             </button>
           )}
+          {onHosts && <HostsNavItem active={hostsActive} onClick={onHosts} />}
         </nav>
       )}
 
@@ -277,7 +284,7 @@ export const Sidebar = memo(function Sidebar({
           </>
         )}
         <div className="sb-section sb-project-section">项目</div>
-        {filtered.length === 0 && pinned.length === 0 && (
+        {filtered.length === 0 && pinned.length === 0 && !showRemote && (
           <div className="sb-empty">{projects.length === 0 ? '暂无项目' : '无匹配项目或会话'}</div>
         )}
         {filtered.map((p) => {
@@ -355,6 +362,14 @@ export const Sidebar = memo(function Sidebar({
             </div>
           )
         })}
+        {showRemote && onPickRemoteSession && onNewRemoteProjectChat && (
+          <SidebarRemoteProjects
+            groups={remoteGroups}
+            active={activeRemote}
+            onPickSession={onPickRemoteSession}
+            onNewProjectChat={onNewRemoteProjectChat}
+          />
+        )}
       </div></SessionHoverProvider>
 
       {sessionMenu && onRenameSession && (
@@ -606,5 +621,25 @@ function SessionRow({
         </button>
       </span>
     </div>
+  )
+}
+
+// Saved hosts this Mac connects to. The count is a status read, not a reachability
+// proof; a failed read shows no count instead of 0.
+function HostsNavItem({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const { connections, error } = useDesktopConnections()
+  const connected = connections.filter((connection) => connection.state === 'connected').length
+  return (
+    <button
+      type="button"
+      className={`sb-navitem sb-hosts ${active ? 'active' : ''}`}
+      aria-current={active ? 'page' : undefined}
+      onClick={onClick}
+    >
+      <Icon name="server" /> 主机
+      {connections.length > 0 && !error && (
+        <span className="sb-nav-count" aria-label={`已连接 ${connected} / ${connections.length} 台`}>{connected}/{connections.length}</span>
+      )}
+    </button>
   )
 }
