@@ -64,3 +64,35 @@ node scripts/session-performance-ui-smoke.mjs
 开发失败记录不被最终通过抹掉：初始基准 fixture 使用旧 archive version 和错误的事件 kind，按生产合同修正后才建立基线；早期完整 UI gate 在 session-capability fixture 失败，包含缺失 remote handler 及 LLM 图表 tooltip 超时。冻结控制也出现 tooltip 超时，另一轮通过，原因未完全确定，本任务未改该 fixture。当前 App 一次重放还遇到并行流式投影改动的 `firstChanged` 渲染错误；确认旧构建与修正后的源码不同后重新构建，最终重放通过。日志保留在 `/tmp/scry-session-round1-*.log` 和 `/tmp/scry-session-round1-*.json`，源码快照位置记录在 `/tmp/scry-perf-round1-source-path.txt`。
 
 限制：这是离线合成历史的本地窗口化验收，不是线上 p75、真实 Provider 或已安装 App 的性能承诺。20 轮阈值、4 轮预挂载和 1200px overscan 是当前有界策略，不声称全局最优。若真实使用显示短而重的历史仍卡顿，或窗口化出现空白/锚点问题，先扩展相应数据集与原生交互回归，再调整挂载策略；若 shell/历史数据本身成为瓶颈，按上文升级页缓存，不能直接截断证据。
+
+## 第二轮：历史装载阶段拆分与幂等最近目录更新
+
+扩展入口，默认仍运行第一轮的 `markdown` 场景：
+
+```bash
+npm run build
+for scenario in short markdown short-heavy paged; do
+  node scripts/session-open-bench.mjs "$scenario"
+done
+```
+
+场景分别为 20 轮轻量 Markdown、40 轮重 Markdown、20 轮重 Markdown、120 轮分页历史。每条回答分别有 1、32、32、2 段 Markdown；仍使用生产支持的聚合 archive 文件，分页场景会原生点击“加载更早轮次”直至恢复全部 120 轮，不把完整读取的聚合文件误称为源级分页。每次重启隔离 App，保留两个会话的首次打开样本 `firstOpens`，随后统计 12 次交替打开；首次打开不代表 OS 文件缓存冷态。新增快速 A→B 选择隔离、实际历史总数/分页状态及跨选择草稿保留检查。禁用 Provider，真实运行中 Provider 切换仍未验收；现有 background/renderer fixture 的运行中相邻路径另通过 UI gate 验证。
+
+本轮冻结包含已有 renderer 会话缓存及其他 WIP 的源码，不新增第二套缓存。分阶段计时发现此前 `merge` 把项目记录更新也计算在内：典型归档读取约 5.6 ms、纯合并约 0.1 ms，`rememberProject` 则约 43–60 ms。新增 `native_history`、`selection`、`project_remember`、`merge_turns` 检查点，旧 `merge` 现在只覆盖 Provider enrichment 和 notice 处理。
+
+最小修复位于 `createRecentFoldersStore.push`：最近目录列表未变时，不再替换 primary；备份若不是当前 primary 的有效副本，仍先走原有原子写入/fsync 刷新备份。主文件恢复路径、实际顺序改变、去重和 8 项上限保持原行为。项目 `lastOpenedAt` 仍按每次打开持久化；不靠降低 durability 或删除 recency 语义换取收益。
+
+macOS arm64 / Node 24.18.0 / Electron 42.10.1 / App 0.2.186，以原实现 → 修复 → 修复 → 原实现（ABBA）运行四个场景；固定源码只替换这一处 recent-folder 实现。表内数字为两次执行各自的 warm-path 中位数：
+
+| 场景 | 打开耗时：原实现 → 修复（ms） | `project_remember`：原实现 → 修复（ms） |
+| --- | --- | --- |
+| short | 100.2 / 105.6 → 67.0 / 69.4 | 43.0 / 44.2 → 20.4 / 21.8 |
+| markdown | 140.2 / 153.6 → 141.8 / 112.5 | 60.5 / 45.5 → 27.6 / 25.6 |
+| short-heavy | 309.7 / 304.9 → 305.7 / 267.7 | 45.2 / 39.8 → 30.1 / 23.7 |
+| paged | 97.3 / 97.6 → 73.7 / 65.5 | 45.4 / 48.0 → 22.1 / 21.9 |
+
+最近目录的持久化阶段稳定减少；短历史和分页打开也改善。重 Markdown 的总耗时仍受 renderer 和调度波动影响，第一组 markdown 对照甚至略慢，不能声称所有场景统一加速。20 轮重 Markdown 仍有约 207–228 ms renderer 脚本耗时：它未超过当前窗口化阈值，是下一轮候选问题，本轮不混入另一处优化。
+
+验证：新增 3 个持久化场景，证明重复选择不替换文件、备份先刷新且可修复、坏 primary 可从 backup 恢复、双坏仍显式失败，以及同首目录的过长/重复列表仍规范化。关键回归在旧实现上因 primary inode 被替换而失败。最终 focused unit 5 文件 / 88 项、typecheck、build 和完整 renderer UI gate（含 Credits）通过。当前工作区构建期间源码摘要未变化，四个场景重放均通过；打开中位数分别为 74.2、112.2、286.6、65.3 ms，属于集成验证而不是冻结对照归因。
+
+原始样本、trace、失败对照和检查日志在 `/tmp/scry-round2-*.json`、`/tmp/scry-round2-*.log`；冻结源码位置在 `/tmp/scry-perf-round2-source-path.txt`。每次基准重验完整构建产物摘要，并确认测试 App 及已登记子进程退出后删除临时 HOME/workspace/userData。未安装、未发送真实 Provider 请求。

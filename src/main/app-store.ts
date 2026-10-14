@@ -218,7 +218,20 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
 export function createRecentFoldersStore(userDataDir: string) {
   const file = join(userDataDir, 'recent-folders.json')
   const load = (): string[] => readJsonRecoverable<string[]>(file, [], isStringArray).value
-  const push = (dir: string): void => writeJsonRecoverable(file, [dir, ...load().filter((d) => d !== dir)].slice(0, 8), isStringArray)
+  const push = (dir: string): void => {
+    const current = readJsonRecoverable<string[]>(file, [], isStringArray)
+    const next = [dir, ...current.value.filter((entry) => entry !== dir)].slice(0, 8)
+    if (current.health.source === 'primary' && JSON.stringify(next) === JSON.stringify(current.value)) {
+      // Repeated selections have no new primary state, but retain the previous
+      // write's backup-refresh semantics and repair a missing/corrupt backup.
+      const backup = parsedJson<string[]>(`${file}.bak`, isStringArray)
+      if (backup.status !== 'valid' || JSON.stringify(backup.value) !== JSON.stringify(current.value)) {
+        writeAtomic(`${file}.bak`, current.value)
+      }
+      return
+    }
+    writeJsonRecoverable(file, next, isStringArray)
+  }
   const remove = (dir: string): string[] => {
     const next = load().filter((d) => d !== dir)
     writeJsonRecoverable(file, next, isStringArray)

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -40,6 +40,70 @@ describe('app-store', () => {
       for (let i = 0; i < 10; i++) store.push(`/repo-${i}`)
       store.push('/repo-3')
       expect(store.load()).toEqual(['/repo-3', '/repo-9', '/repo-8', '/repo-7', '/repo-6', '/repo-5', '/repo-4', '/repo-2'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('repeated recent selection refreshes the backup once without replacing unchanged primary or backup files', () => {
+    const dir = tempDir()
+    try {
+      const store = createRecentFoldersStore(dir)
+      const primary = join(dir, 'recent-folders.json')
+      const backup = `${primary}.bak`
+      store.push('/repo-a')
+      store.push('/repo-b')
+      const primaryInode = statSync(primary).ino
+      expect(JSON.parse(readFileSync(backup, 'utf8'))).toEqual(['/repo-a'])
+      store.push('/repo-b')
+      expect(statSync(primary).ino).toBe(primaryInode)
+      expect(readFileSync(backup, 'utf8')).toBe(readFileSync(primary, 'utf8'))
+      const backupInode = statSync(backup).ino
+      // Construct a fresh store, as the production rememberProject path does.
+      createRecentFoldersStore(dir).push('/repo-b')
+      expect(statSync(primary).ino).toBe(primaryInode)
+      expect(statSync(backup).ino).toBe(backupInode)
+      expect(store.load()).toEqual(['/repo-b', '/repo-a'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('repeated recent selection still repairs missing or corrupt primary and backup files', () => {
+    const dir = tempDir()
+    try {
+      const store = createRecentFoldersStore(dir)
+      const primary = join(dir, 'recent-folders.json')
+      const backup = `${primary}.bak`
+      store.push('/repo-a')
+      store.push('/repo-a')
+      for (const file of [primary, backup]) {
+        for (const damage of ['missing', 'corrupt', 'schema']) {
+          if (damage === 'missing') unlinkSync(file)
+          else writeFileSync(file, damage === 'corrupt' ? '{broken' : '{"wrong":true}')
+          store.push('/repo-a')
+          expect(JSON.parse(readFileSync(primary, 'utf8'))).toEqual(['/repo-a'])
+          expect(JSON.parse(readFileSync(backup, 'utf8'))).toEqual(['/repo-a'])
+        }
+      }
+      writeFileSync(primary, '{broken')
+      writeFileSync(backup, '{broken')
+      expect(() => store.push('/repo-a')).toThrow('主索引与备份均不可用')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('normalizes an oversized recent list even when its first folder is reselected', () => {
+    const dir = tempDir()
+    try {
+      const original = ['/repo-a', '/repo-a', ...Array.from({ length: 9 }, (_, index) => `/repo-${index}`)]
+      const primary = join(dir, 'recent-folders.json')
+      writeFileSync(primary, JSON.stringify(original))
+      const store = createRecentFoldersStore(dir)
+      store.push('/repo-a')
+      expect(store.load()).toEqual(['/repo-a', ...Array.from({ length: 7 }, (_, index) => `/repo-${index}`)])
+      expect(JSON.parse(readFileSync(`${primary}.bak`, 'utf8'))).toEqual(original)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

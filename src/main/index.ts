@@ -1872,6 +1872,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     }
   }
   signal.throwIfAborted()
+  perf.mark('native_history', { nativeTurns: nativeTurns?.length ?? 0 })
   if (!fp && !archived && !nativeTurns) {
     perf.finish({ returnedTurns: 0 })
     return null
@@ -1896,11 +1897,15 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   }
   if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
   else sessionByContext.delete(key)
+  perf.mark('selection')
   if (cwd) rememberProject(cwd)
+  perf.mark('project_remember')
   const historyContext = { userDataDir }
+  const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
+  perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
   const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
     { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-    mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
+    mergedHistory
   )
   if (nativeReadNotice && merged.length) {
     const last = merged[merged.length - 1]
