@@ -65,13 +65,51 @@ node scripts/desktop-remote-ui-smoke.mjs --negative-control  # 预期失败：�
 - npm 12.2.0 的 `npm pack --json` 对象输出不符合现有 CLI smoke 的数组合同，首次 CLI gate 因此失败；没有放宽断言，改用上述 npm 10 完成检查。
 - 首次外链 smoke 等待原生 `show` 事件失败。测试 App 的 macOS `prohibited` activation policy 可使 `showInactive()` 后仍隐藏。fixture 改为观察真实生产 `showInactive()` 调用，保留全程不抢焦点、动画帧、原生坐标点击、外链分发及不安全导航断言；不修改生产可见性策略。
 
-### mac2：已安装，启动受阻，未完成跨机验收
+### mac2：首次 SSH 启动尝试（历史记录）
 
 - 隔离副本：`~/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app`，独立 HOME、userData 和新建 Git workspace，没有覆盖已有 App/项目或接管会话。
 - 外验阶段快照的 `app.asar` SHA-256：`db967f6297b0426788b02ca24ba3a830d5cb8e03370936d37f8c4de0724d2b2b`。SSH 传输后哈希一致，mac2 `codesign --verify --deep --strict` 通过。它是 Apple Development 签名的开发包，不是 notarized 发布包。
 - mac2 macOS 26.3.2 / arm64 上，两个启动进程均消失；第二次受控启动明确返回 `SIGKILL`。12:50:37 的端点安全日志针对 Scry PID 49656 记录 `mac_non_white_proc` 与 `ssh_reject`，疑似企业安全策略拦截。没有关闭安全软件、改名或重签绕过。
-- App 尚未初始化运行数据，因此未执行桌面配对、跨机意图提交或真实模型请求。只读取了独立 Pi SDK 的版本；没有使用 Herdr。
+- 当时 App 尚未初始化运行数据，未执行桌面配对、跨机意图提交或真实模型请求。只读取了独立 Pi SDK 的版本；没有使用 Herdr。
 - 已删除测试用 OpenAI Codex OAuth 凭据副本；原始凭据未由本任务改写。无该隔离 App 的残留进程。安装包、空运行数据配置和日志留在隔离目录供排查。
-- mac2 安装快照早于最后补充的 SSH 退出状态修复。后续应先由设备管理员批准最终开发包，再更新隔离副本并重新执行配对、最小模型任务和 archive/records 核对；当前本地门禁不能替代这一步。
+- mac2 安装快照早于最后补充的客户端 SSH 退出状态修复。用户随后正常启动该 App，并明确选择使用当前实例继续下列验收；此前 `SIGKILL` 的原因仍未查清，不能据此断言 SSH 后台启动已经恢复。
+
+### mac2：当前实例的最小真实双机流程通过
+
+用户明确允许使用当前宿主数据目录，并在宿主 UI 登记测试项目、核对设备指纹及批准配对。另行确认 Pi 的 `full_access`（无 Scry 沙箱），只授权一次不调用工具的计算请求。
+
+- 客户端：最终本地 `0.2.180` 开发包，独立 userData，所有本地 Provider 禁用；使用登录用户的系统 keychain 加密设备凭据，没有明文降级。首次给客户端设置空 HOME 时，系统查不到默认 keychain，安全存储按合同拒绝；改回登录 HOME 后加密存储正常，App 数据仍独立。
+- 宿主：上节 `db967f…` 快照，正常启动的 `~/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app`；实际数据目录为 `~/Library/Application Support/scry`，不是第一次尝试的隔离 userData。没有覆盖 App、替换宿主配置或接管已有会话。**这不是最新客户端和最新宿主使用同一产物的双机验收。**
+- 工作区：`~/scry-remote-acceptance-0.2.180-GqVCV3/workspace`，仅本次新建的 Git 仓库。宿主项目列表为空时没有发送请求，也没有手工改写授权文件；用户完成文件夹选择后才继续。
+- Provider：宿主已有 `Pi · Rotom`，profile `pi:rotom`，上游 `qoder` / `ultimate`，`effort=low`。宿主账本和 archive 的 `runtime:controls` 均保存了这些参数及 `full_access`。
+
+| 检查 | 结果与证据 |
+| --- | --- |
+| 真实 SSH 与设备授权 | 系统 SSH 转发两个宿主 loopback 端口；固定 CA 的 mTLS 配对，用户在宿主确认设备指纹后才取得证书并连接 |
+| 真实 UI 发送 | 本地完整 App 中用原生鼠标/键盘选控件并发送一次 `Do not call tools or read/write files. Compute 137 × 29 and reply with the integer only.`；本地显示远端回复 `3973` |
+| 规范执行与防重 | 宿主账本只有 1 个 `intent_recorded`、1 个对应的 `run_settled`；通过客户端 `runStatus` 再确认终态，未重发请求 |
+| archive 与 recorder | 经真实 SSH 读取 archive：1 轮、`done=true`、无 error、`hasOlder=false`；工作区只有 1 个 `completed` record，用户文本与助手 `3973` 一致 |
+| CLI 独立核对 | 宿主私有 CLI `0.2.49` 的 `turns list/summary/verify` 与 `doctor`：1 轮 completed、0 pending、verify 无错误、doctor healthy |
+| SQLite 投影与计费缺口 | 只读查询本轮 run ID：`spans` 中有 result，`model_usage` 中有正确的 10,937 input / 27 output tokens；但 `usage_ledger` 为 0 行，计费账本断言失败，不能记为通过 |
+| 工具与文件 | record 的工具列表为 `available + []`；测试仓库 `git status --porcelain=v1 --untracked-files=all` 为空。另在客户端原生点击 README，远端内容正确且没有编辑控件 |
+| 真实断线与重连 | 仅停止已核对身份、属于测试客户端的 SSH 子进程；连接 API 返回 disconnected，使用已保存配对重连成功，仍读到同一轮历史和同一个 record，没有新增模型请求 |
+
+关联标识：
+
+- 宿主账本 run：`418409b7-4876-4b02-a1e2-c83eb9a9d0d3`
+- 规范 Scry run：`remote-run-mv7q5x6r-0`
+- 原生 session：`01a13915-80c6-70b5-81d2-83dec3dfb462`
+- record：`99dfed93cf2571c038c23206e343430b`，文件 `.scry/records/00000000000000000001-99dfed93cf2571c038c23206e343430b.json`
+
+轮次耗时 15,090 ms；Provider 用量证据为 input 10,937、output 27、total 10,964 tokens。reasoning 19 已包含在 output 中，不再相加。`costUsd=0` 只是 SDK/记录给出的字段，**没有核实 Qoder 实际扣费，不能据此宣称免费**。模型耗时为 `partial/estimated`，危险操作分类为 unavailable；CLI 另有 model identity / turn role / task link 的 `legacy_unset` advisories，不能把它们当成完整身份或无风险证据。
+
+**未修复的计费问题**：首次 SQLite 验收要求 `usage_ledger` 有本轮 token 条目，实际断言失败。随后独立诊断确认 token 已进入 `spans/model_usage`，但计费账本确实为空，没有通过重跑改写这个失败。代码定位发现 `src/shared/billing.ts` 的 `billingProviderForUpstream()` 没有 `qoder` 分支，`src/main/billing-ledger.ts` 会跳过未识别计费 Provider 的条目；这些源码不是本次桌面远程改动引入的。此原因与观测一致，但尚未修复并做对照验证。不能将本次执行/记录成功扩大为完整计费治理验收成功。
+
+范围限制：本次只证明上述 Pi→Qoder、单轮无工具场景。其他 Provider、真实工具执行、问题回答、运行中取消等只保留各自既有本地/假 Provider 检查结论；没有用这次计算任务替代它们的双机验收，也没有验证 SSH 后台启动、LAN 直连或 notarized 发布。
+
+验收后断开并关闭本地测试 App（核对并收敛其 4 个进程），不停止用户的 mac2 App。配对仍保留，可在 mac2「远程访问」撤销 `mac2 acceptance` 设备。凭据仅在客户端独立 userData 中加密保存；没有从宿主复制 Provider 凭据。测试 session、record 和现场证据均保留：
+
+- 客户端：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-desktop-client-acceptance-Y7TGvk/`，含 history、回执、文件读取、断线重连及 cleanup JSON；这是临时验收目录，不是正式安装配置。
+- 宿主：`~/scry-remote-acceptance-0.2.180-GqVCV3/acceptance-*.json` 为 CLI 和只读 SQLite 核对结果；实际 archive / SQLite 留在当前宿主 userData，canonical records 留在上述 workspace。
 
 源方案与历史基线见 [调研记录](research/scry-desktop-remote-host-feasibility.md)。
