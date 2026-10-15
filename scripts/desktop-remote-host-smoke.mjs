@@ -269,7 +269,25 @@ async function main() {
   assert.equal(granted.kind, 'pair.granted')
   const deviceCertPEM = granted.certificatePEM
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
-  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical' })
+  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical', directorySelection: true })
+  const customDirectory = join(temp, 'custom project ')
+  mkdirSync(customDirectory)
+  const canonicalCustom = realpathSync(customDirectory)
+  const browse = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+    op: 'desktopDirectory', query: { action: 'list', path: canonicalCustom }
+  })
+  assert.equal(browse.directory.page.current.path, canonicalCustom)
+  assert.deepEqual(browse.directory.page.directories, [])
+  assert.deepEqual(JSON.parse(readFileSync(join(userDataDir, 'recent-folders.json'), 'utf8')), [canonicalWorkspace], 'browsing must not create a workspace grant')
+  const selected = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+    op: 'desktopDirectory', query: { action: 'select', path: canonicalCustom }
+  })
+  assert.deepEqual(selected.directory, { action: 'select', project: { path: canonicalCustom, label: 'custom project ' } })
+  assert.ok(JSON.parse(readFileSync(join(userDataDir, 'recent-folders.json'), 'utf8')).includes(canonicalCustom), 'explicit selection must persist the canonical workspace grant')
+  const projects = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'projects' })
+  assert.ok(projects.projects.some(project => project.path === canonicalCustom), 'selected project must be offered through the production catalog')
+  assert.deepEqual(await evaluate('window.scry.activeRuns()'), [], 'selecting a directory must not start an Agent')
+  assert.equal(existsSync(join(canonicalCustom, '.scry')), false, 'selection must not create a turn record')
 
   const context = { cwd: canonicalWorkspace, providerId: 'codex' }
   const submit = async (intentId, prompt, extra = {}) => tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
@@ -399,7 +417,13 @@ async function main() {
   await evaluate(`window.scry.remoteRevokeDevice(${JSON.stringify(localGrant.deviceId)})`)
   const revoked = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
   assert.equal(revoked.error, 'device_not_authorized')
+  for (const action of ['list', 'select']) {
+    const denied = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktopDirectory', query: { action, path: realpathSync(temp) } })
+    assert.equal(denied.error, 'device_not_authorized')
+  }
+  assert.ok(!JSON.parse(readFileSync(join(userDataDir, 'recent-folders.json'), 'utf8')).includes(realpathSync(temp)), 'revoked selection must not persist a grant')
   console.log(JSON.stringify({
+    directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
     appPath, rendererUrl: page.url, hostId: invitation.hostId, pairPort: invitation.pairPort, runPort: invitation.runPort,
     supportedScenarios: ['trusted-local invite/confirm', 'pinned TLS CSR pairing', 'canonical info', 'normal trace/archive', 'duplicate intent', 'unknown receipt intentStatus', 'question cancellation', 'independent same-workspace sessions', 'canonical failed run', 'revocation'],
     fixtureArgs: { provider: 'codex', normalPrompt: 'desktop remote write one', questionPrompt: 'dock badge question smoke', failurePrompt: 'remote provider failure smoke' },
