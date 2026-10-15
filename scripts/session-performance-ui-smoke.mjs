@@ -70,8 +70,13 @@ async function exercise(webContents) {
   if (streamRenders !== 0) throw new Error(`Streaming rerendered Sidebar ${streamRenders} times`)
   await click('.sb-sess')
   await wait(`document.body.dataset.pickedTick === '20'`)
+  // Exercise both motion modes explicitly rather than inheriting the runner's OS preference.
+  await webContents.debugger.attach('1.3')
+  await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+  await wait(`!matchMedia('(prefers-reduced-motion: reduce)').matches`)
   await click('#running')
   await wait(`document.querySelectorAll('.sb-sess.running .sb-running').length === 8`)
+  await wait(`document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect.target.matches('.sb-running')).length === 8`)
   const activeSpinners = await read(`document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect.target.matches('.sb-running')).length`)
   if (activeSpinners !== 8) throw new Error(`Expected 8 rotating running rings, got ${activeSpinners}`)
   const runningRingThemes = await read(`(() => {
@@ -116,7 +121,6 @@ async function exercise(webContents) {
   await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
   const ringTransform = await read(`getComputedStyle(document.querySelector('.sb-running')).transform`)
   await wait(`getComputedStyle(document.querySelector('.sb-running')).transform !== ${JSON.stringify(ringTransform)}`)
-  await webContents.debugger.attach('1.3')
   try {
     await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await wait(`matchMedia('(prefers-reduced-motion: reduce)').matches && Array.from(document.querySelectorAll('.sb-running')).every(ring => getComputedStyle(ring).animationName === 'none')`)
