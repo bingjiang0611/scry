@@ -1336,7 +1336,12 @@ try {
           sessionTerminals.push(await (${exerciseSessionTerminals.toString()})(win.webContents, scenario))
         }
         finish({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals })
-      } catch (error) { console.error(error); app.exit(1) }
+      } catch (error) {
+        console.error(error)
+        console.error('Failed fixture:', win.webContents.getURL())
+        console.error('Fixture DOM:', await win.webContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
+        app.exit(1)
+      }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
   await new Promise((resolve, reject) => {
