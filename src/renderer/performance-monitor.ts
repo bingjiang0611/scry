@@ -42,7 +42,7 @@ export class RendererPerformanceAccumulator {
   }
 }
 
-/** Install only after main confirms SCRY_PERF_LOG=1. The returned disposer owns every observer/timer. */
+/** Install only after main enables local diagnostics. Hidden/suspended windows are not frame stalls. */
 export function installRendererPerformanceMonitor(
   report: (sample: RendererPerformanceSample) => void,
   windowMs = 5_000
@@ -57,7 +57,7 @@ export function installRendererPerformanceMonitor(
 
   const frame = (now: number): void => {
     if (stopped) return
-    accumulator.recordFrame(now - lastFrame)
+    if (document.visibilityState === 'visible' && now - lastFrame <= 60_000) accumulator.recordFrame(now - lastFrame)
     lastFrame = now
     frameId = requestAnimationFrame(frame)
   }
@@ -65,16 +65,28 @@ export function installRendererPerformanceMonitor(
 
   try {
     observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) accumulator.recordLongTask(entry.duration)
+      if (document.visibilityState === 'visible') {
+        for (const entry of list.getEntries()) accumulator.recordLongTask(entry.duration)
+      }
     })
-    observer.observe({ type: 'longtask', buffered: true })
+    observer.observe({ type: 'longtask', buffered: false })
   } catch {
     observer = null
   }
 
+  const resetWindow = (): void => {
+    lastFrame = performance.now()
+    windowStarted = lastFrame
+    accumulator.snapshotAndReset(1)
+  }
+  document.addEventListener('visibilitychange', resetWindow)
   timerId = window.setInterval(() => {
     const now = performance.now()
-    report(accumulator.snapshotAndReset(Math.max(1, Math.round(now - windowStarted))))
+    const elapsed = Math.max(1, Math.round(now - windowStarted))
+    const sample = accumulator.snapshotAndReset(elapsed)
+    if (document.visibilityState === 'visible' && elapsed <= 60_000) {
+      report({ ...sample, longTaskSupported: observer !== null })
+    }
     windowStarted = now
   }, windowMs)
 
@@ -83,5 +95,6 @@ export function installRendererPerformanceMonitor(
     cancelAnimationFrame(frameId)
     window.clearInterval(timerId)
     observer?.disconnect()
+    document.removeEventListener('visibilitychange', resetWindow)
   }
 }

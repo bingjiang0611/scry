@@ -35,7 +35,7 @@ export class LiveTraceIngestion {
       } catch (error) {
         // Raw evidence remains owned by runState; the live projection makes no durable claim.
         this.options.onError(error)
-        timing.finish({ persisted: 0 })
+        timing.finish({ persisted: 0 }, 'error')
       }
     })
   }

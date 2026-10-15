@@ -21,6 +21,13 @@ describe('PerformanceTrace', () => {
     expect(trace.finish()).toBeNull()
   })
 
+  it('does not persist malformed provider values from rejected IPC requests', () => {
+    const samples: PerformanceSample[] = []
+    new PerformanceTrace('session_history.load', { provider: 'SECRET/path/or/prompt' }, sample => samples.push(sample)).finish(undefined, 'error')
+    expect(samples[0]).toMatchObject({ outcome: 'error', dimensions: { provider: 'unknown' } })
+    expect(JSON.stringify(samples)).not.toContain('SECRET')
+  })
+
   it('is a no-op without a sink when performance logging is disabled', () => {
     const previous = process.env.SCRY_PERF_LOG
     delete process.env.SCRY_PERF_LOG

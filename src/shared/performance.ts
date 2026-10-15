@@ -1,4 +1,6 @@
 export interface RendererPerformanceSample {
+  /** Absent in older clients; missing support must not be reported as zero long tasks. */
+  longTaskSupported?: boolean
   windowMs: number
   frameCount: number
   slowFrameCount: number
@@ -17,10 +19,11 @@ export function isRendererPerformanceSample(value: unknown): value is RendererPe
   const candidate = value as Partial<RendererPerformanceSample>
   const allowed = new Set([
     'windowMs', 'frameCount', 'slowFrameCount', 'maxFrameGapMs',
-    'longTaskCount', 'longTaskTotalMs', 'longestLongTaskMs'
+    'longTaskCount', 'longTaskTotalMs', 'longestLongTaskMs', 'longTaskSupported'
   ])
   if (Object.keys(candidate).some((key) => !allowed.has(key))) return false
-  return finiteNonNegative(candidate.windowMs) && candidate.windowMs >= 1 && candidate.windowMs <= 60_000 &&
+  return (candidate.longTaskSupported === undefined || typeof candidate.longTaskSupported === 'boolean') &&
+    finiteNonNegative(candidate.windowMs) && candidate.windowMs >= 1 && candidate.windowMs <= 60_000 &&
     finiteNonNegative(candidate.frameCount) && Number.isSafeInteger(candidate.frameCount) &&
     finiteNonNegative(candidate.slowFrameCount) && Number.isSafeInteger(candidate.slowFrameCount) &&
     candidate.slowFrameCount <= candidate.frameCount &&

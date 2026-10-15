@@ -103,7 +103,8 @@ import { appendCoalescedTrace, upsertTraceById } from './live-trace'
 import { LiveTraceIngestion } from './live-trace-ingestion'
 import { createTurnWallTimer } from './turn-wall-timing'
 import { CommandReceipts } from './command-receipts'
-import { PerformanceTrace } from './performance-timing'
+import { PerformanceTrace, performanceRecordingEnabled } from './performance-timing'
+import { startPerformanceRecording, stopPerformanceRecording, recordRendererPerformance, recordResourcePerformance, recordStartupPerformance, performanceRecordingHealth } from './performance-recording'
 import { configureProviderEventLog, openProviderEventWriter } from './provider-event-log'
 import { startPerformanceResourceMonitor, type PerformanceResourceMonitor } from './performance-resource-monitor'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
@@ -1213,15 +1214,11 @@ handleTrusted('app:setTheme', (_event, theme: unknown) => {
 })
 
 handleTrusted('app:copyText', (_event, text: unknown) => writeClipboardText(text, clipboard))
-handleTrusted('app:performanceDiagnosticsEnabled', () => process.env.SCRY_PERF_LOG === '1')
+handleTrusted('app:performanceDiagnosticsEnabled', () => performanceRecordingEnabled())
 handleTrusted('app:reportRendererPerformance', (_event, sample: unknown) => {
   if (!isRendererPerformanceSample(sample)) throw new Error('无效的 renderer 性能样本')
-  if (process.env.SCRY_PERF_LOG !== '1') return false
-  console.info(`[scry:renderer-perf] ${JSON.stringify({
-    name: 'renderer.resources',
-    sampledAt: new Date().toISOString(),
-    ...sample
-  })}`)
+  if (!performanceRecordingEnabled()) return false
+  recordRendererPerformance(sample)
   return true
 })
 
@@ -1784,200 +1781,207 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   const requestController = new AbortController()
   loadSessionAbortController = requestController
   const { signal } = requestController
-  const requestRevision = ++loadSessionRevision
-  const catalogMatches = appSessionStore().load().filter((session) =>
-    session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId &&
-    (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
-  )
-  const requestedCwd = payload.cwd?.trim()
-    ? resolveKnownProjectDirectory(payload.cwd)
-    : payload.cwd === '' ? '' : undefined
-  const catalogSession = catalogMatches.length === 1
-    ? catalogMatches[0]
-    : catalogMatches.find((session) => session.cwd === requestedCwd)
-  if (!catalogSession) throw new Error('会话不属于当前 Scry catalog 或身份不唯一')
-  perf.mark('catalog', { matches: catalogMatches.length })
-  const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
-  if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
-  const userDataDir = app.getPath('userData')
-  const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
-  const fp =
-    payload.providerId === 'claude' && cwd
-      ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
-      : null
-  // Pi's model-context enrichment is turn-local, so apply it to each archive page.
-  // Qoder's Provider-owned history reconciliation still requires the full source.
-  const archivePaged = sessionArchiveIsPageable(payload.providerId, fp)
-  let archivePage: Awaited<ReturnType<typeof readTraceArchivePageAsync>> | null
-  let archived: TraceArchive | null
-  const matchingRuns = runs.unsettledStates()
-    .filter((run) => sessionLoadMatchesRun(run, {
-      providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
-      externalSessionId: payload.externalSessionId
-    }))
-    .map((run) => ({ done: run.done, settled: runs.get(run.runId)!.control.settled }))
   try {
-    [archivePage, archived] = await readSessionHistoryAfterCompletedRuns(matchingRuns, signal, async () => {
-      const page = archivePaged
-        ? await readTraceArchivePageAsync(archiveArgs, { limit: request?.limit }, signal)
+    const requestRevision = ++loadSessionRevision
+    const catalogMatches = appSessionStore().load().filter((session) =>
+      session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId &&
+      (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
+    )
+    const requestedCwd = payload.cwd?.trim()
+      ? resolveKnownProjectDirectory(payload.cwd)
+      : payload.cwd === '' ? '' : undefined
+    const catalogSession = catalogMatches.length === 1
+      ? catalogMatches[0]
+      : catalogMatches.find((session) => session.cwd === requestedCwd)
+    if (!catalogSession) throw new Error('会话不属于当前 Scry catalog 或身份不唯一')
+    perf.mark('catalog', { matches: catalogMatches.length })
+    const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
+    if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
+    const userDataDir = app.getPath('userData')
+    const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
+    const fp =
+      payload.providerId === 'claude' && cwd
+        ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
         : null
-      const archive = page?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
-      return [page, archive] as const
+    // Pi's model-context enrichment is turn-local, so apply it to each archive page.
+    // Qoder's Provider-owned history reconciliation still requires the full source.
+    const archivePaged = sessionArchiveIsPageable(payload.providerId, fp)
+    let archivePage: Awaited<ReturnType<typeof readTraceArchivePageAsync>> | null
+    let archived: TraceArchive | null
+    const matchingRuns = runs.unsettledStates()
+      .filter((run) => sessionLoadMatchesRun(run, {
+        providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
+        externalSessionId: payload.externalSessionId
+      }))
+      .map((run) => ({ done: run.done, settled: runs.get(run.runId)!.control.settled }))
+    try {
+      [archivePage, archived] = await readSessionHistoryAfterCompletedRuns(matchingRuns, signal, async () => {
+        const page = archivePaged
+          ? await readTraceArchivePageAsync(archiveArgs, { limit: request?.limit }, signal)
+          : null
+        const archive = page?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
+        return [page, archive] as const
+      })
+    } catch (error) {
+      signal.throwIfAborted()
+      throw error
+    }
+    if (archived) {
+      for (const turn of archived.turns) {
+        turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
+        signal.throwIfAborted()
+      }
+    }
+    perf.mark('archive', {
+      archiveTurns: archived?.turns.length ?? 0,
+      archiveTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0,
+      archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0
     })
-  } catch (error) {
-    signal.throwIfAborted()
-    throw error
-  }
-  if (archived) {
-    for (const turn of archived.turns) {
+    let turns: ParsedTurn[] = []
+    let transcriptBytes = 0
+    let transcriptParsedBytes = 0
+    let transcriptCache = 'unavailable'
+    if (fp) {
+      try {
+        if (isShuttingDown) throw new Error('transcript parser disposed')
+        const parsed = await readCachedTranscript({
+          path: fp,
+          runId: payload.externalSessionId,
+          contextKey: providerContextKey(payload.providerId, cwd, payload.agentProfileId),
+          signal
+        })
+        turns = parsed.turns
+        transcriptBytes = parsed.bytes
+        transcriptParsedBytes = parsed.parsedBytes
+        transcriptCache = parsed.cache
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!archived) throw error
+      }
+    }
+    for (const turn of turns) {
       turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
       signal.throwIfAborted()
     }
-  }
-  perf.mark('archive', {
-    archiveTurns: archived?.turns.length ?? 0,
-    archiveTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0,
-    archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0
-  })
-  let turns: ParsedTurn[] = []
-  let transcriptBytes = 0
-  let transcriptParsedBytes = 0
-  let transcriptCache = 'unavailable'
-  if (fp) {
-    try {
-      if (isShuttingDown) throw new Error('transcript parser disposed')
-      const parsed = await readCachedTranscript({
-        path: fp,
-        runId: payload.externalSessionId,
-        contextKey: providerContextKey(payload.providerId, cwd, payload.agentProfileId),
-        signal
-      })
-      turns = parsed.turns
-      transcriptBytes = parsed.bytes
-      transcriptParsedBytes = parsed.parsedBytes
-      transcriptCache = parsed.cache
-    } catch (error) {
-      signal.throwIfAborted()
-      if (!archived) throw error
-    }
-  }
-  for (const turn of turns) {
-    turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
+    perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes, transcriptParsedBytes,
+      transcriptCacheHit: transcriptCache === 'hit' ? 1 : 0,
+      transcriptIncremental: transcriptCache === 'incremental' ? 1 : 0 })
+    // Cancellation is not evidence of an empty session. Reject it so the renderer
+    // cannot replace an existing timeline with an empty successful response.
     signal.throwIfAborted()
-  }
-  perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes, transcriptParsedBytes,
-    transcriptCacheHit: transcriptCache === 'hit' ? 1 : 0,
-    transcriptIncremental: transcriptCache === 'incremental' ? 1 : 0 })
-  // Cancellation is not evidence of an empty session. Reject it so the renderer
-  // cannot replace an existing timeline with an empty successful response.
-  signal.throwIfAborted()
-  // Older phone runs could lose their Scry archive if the host exited before
-  // the Provider returned. Pi's native session is independent durable evidence;
-  // read it offline rather than treating a missing Scry archive as no messages.
-  let nativeTurns: LoadedSessionTurn[] | null = null
-  let nativeReadNotice: string | undefined
-  // An in-flight native tail has no Scry run ID; the live RunRegistry owns that
-  // display. Do not add an unmatchable second copy while the Provider is running.
-  if (payload.providerId === 'pi' && matchingRuns.length === 0) {
-    let native: LoadedSessionTurn[] | null = null
-    try {
-      native = await readPiNativeHistory({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
-        cwd, sessionId: payload.externalSessionId, signal })
-    } catch (error) {
-      signal.throwIfAborted()
-      if (!archived) throw error
-      // A truncated/unsupported native file must not hide an intact Scry archive.
-      nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${error instanceof Error ? error.message : String(error)}`
-    }
-    if (native && !archived) nativeTurns = native
-    else if (native) {
-      // A successful continuation must not hide the previously recovered prefix.
-      // Reconcile only Provider-native turn IDs, never prompts or output text.
-      const completeArchive = await readTraceArchiveAsync(archiveArgs, signal)
-      nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
-        { userDataDir }, { hydrateAttachments: false }))
-    }
-  }
-  signal.throwIfAborted()
-  perf.mark('native_history', { nativeTurns: nativeTurns?.length ?? 0 })
-  if (!fp && !archived && !nativeTurns) {
-    perf.finish({ returnedTurns: 0 })
-    return null
-  }
-  dockBadge.view(
-    providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
-    Boolean(win?.isFocused())
-  )
-  setCurrentCwd(cwd || undefined)
-  const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
-  // 恢复当前仍在运行或收口的会话只是读取历史：它不能清掉该 run 正在使用的 session diff baseline。
-  // 真正切换到另一条历史会话时递增选择 revision；它不改变任何会话的 baseline。
-  const loadingUnsettledRun = runs.unsettledStates().some((run) => sessionLoadMatchesRun(run, {
-    providerId: payload.providerId,
-    agentProfileId: payload.agentProfileId,
-    cwd,
-    externalSessionId: payload.externalSessionId
-  }))
-  if (!loadingUnsettledRun) {
-    bumpSessionRevision(key)
-    sessionAliasesByContext.delete(key)
-  }
-  if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
-  else sessionByContext.delete(key)
-  perf.mark('selection')
-  if (cwd) rememberProject(cwd)
-  perf.mark('project_remember')
-  const historyContext = { userDataDir }
-  const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
-  perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
-  const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
-    { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-    mergedHistory
-  )
-  if (nativeReadNotice && merged.length) {
-    const last = merged[merged.length - 1]
-    last.errorHint = [last.errorHint, nativeReadNotice].filter(Boolean).join('\n')
-  }
-  perf.mark('merge', { mergedTurns: merged.length })
-  signal.throwIfAborted()
-  const hookConfig =
-    cwd && payload.providerId === 'claude'
-      ? loadClaudeHookConfig(cwd, homeDir)
-      : payload.providerId === 'codex'
-        ? cwd ? loadCodexHookConfig(cwd, homeDir) : null
-        : null
-  sessionHistoryCache = {
-    revision: requestRevision,
-    key: sessionHistoryCacheKey(payload, cwd),
-    turns: merged,
-    transcriptTurns: turns,
-    archive: archived,
-    context: historyContext,
-    ...(archivePaged && !nativeTurns ? {
-      archiveSource: archiveArgs,
-      archiveSnapshotTotalTurns: archivePage?.totalTurns ?? 0
-    } : {}),
-    hookConfig
-  }
-  const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
-    ? {
-        turns: merged,
-        offset: archivePage.offset,
-        totalTurns: archivePage.totalTurns,
-        hasOlder: archivePage.hasOlder,
-        completeness: archivePage.hasOlder ? 'partial' : 'complete'
+    // Older phone runs could lose their Scry archive if the host exited before
+    // the Provider returned. Pi's native session is independent durable evidence;
+    // read it offline rather than treating a missing Scry archive as no messages.
+    let nativeTurns: LoadedSessionTurn[] | null = null
+    let nativeReadNotice: string | undefined
+    // An in-flight native tail has no Scry run ID; the live RunRegistry owns that
+    // display. Do not add an unmatchable second copy while the Provider is running.
+    if (payload.providerId === 'pi' && matchingRuns.length === 0) {
+      let native: LoadedSessionTurn[] | null = null
+      try {
+        native = await readPiNativeHistory({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
+          cwd, sessionId: payload.externalSessionId, signal })
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!archived) throw error
+        // A truncated/unsupported native file must not hide an intact Scry archive.
+        nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${error instanceof Error ? error.message : String(error)}`
       }
-    : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
-  const page = hydrateSessionHistoryPage(
-    unhydratedPage,
-    turns,
-    archived,
-    historyContext
-  )
-  perf.mark('page_hydration', { returnedTurns: page.turns.length })
-  const result = pageWithHookCommands(page, hookConfig)
-  perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
-  return result
+      if (native && !archived) nativeTurns = native
+      else if (native) {
+        // A successful continuation must not hide the previously recovered prefix.
+        // Reconcile only Provider-native turn IDs, never prompts or output text.
+        const completeArchive = await readTraceArchiveAsync(archiveArgs, signal)
+        nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
+          { userDataDir }, { hydrateAttachments: false }))
+      }
+    }
+    signal.throwIfAborted()
+    perf.mark('native_history', { nativeTurns: nativeTurns?.length ?? 0 })
+    if (!fp && !archived && !nativeTurns) {
+      perf.finish({ returnedTurns: 0 })
+      return null
+    }
+    dockBadge.view(
+      providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
+      Boolean(win?.isFocused())
+    )
+    setCurrentCwd(cwd || undefined)
+    const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
+    // 恢复当前仍在运行或收口的会话只是读取历史：它不能清掉该 run 正在使用的 session diff baseline。
+    // 真正切换到另一条历史会话时递增选择 revision；它不改变任何会话的 baseline。
+    const loadingUnsettledRun = runs.unsettledStates().some((run) => sessionLoadMatchesRun(run, {
+      providerId: payload.providerId,
+      agentProfileId: payload.agentProfileId,
+      cwd,
+      externalSessionId: payload.externalSessionId
+    }))
+    if (!loadingUnsettledRun) {
+      bumpSessionRevision(key)
+      sessionAliasesByContext.delete(key)
+    }
+    if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
+    else sessionByContext.delete(key)
+    perf.mark('selection')
+    if (cwd) rememberProject(cwd)
+    perf.mark('project_remember')
+    const historyContext = { userDataDir }
+    const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
+    perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
+    const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
+      { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+      mergedHistory
+    )
+    if (nativeReadNotice && merged.length) {
+      const last = merged[merged.length - 1]
+      last.errorHint = [last.errorHint, nativeReadNotice].filter(Boolean).join('\n')
+    }
+    perf.mark('merge', { mergedTurns: merged.length })
+    signal.throwIfAborted()
+    const hookConfig =
+      cwd && payload.providerId === 'claude'
+        ? loadClaudeHookConfig(cwd, homeDir)
+        : payload.providerId === 'codex'
+          ? cwd ? loadCodexHookConfig(cwd, homeDir) : null
+          : null
+    sessionHistoryCache = {
+      revision: requestRevision,
+      key: sessionHistoryCacheKey(payload, cwd),
+      turns: merged,
+      transcriptTurns: turns,
+      archive: archived,
+      context: historyContext,
+      ...(archivePaged && !nativeTurns ? {
+        archiveSource: archiveArgs,
+        archiveSnapshotTotalTurns: archivePage?.totalTurns ?? 0
+      } : {}),
+      hookConfig
+    }
+    const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
+      ? {
+          turns: merged,
+          offset: archivePage.offset,
+          totalTurns: archivePage.totalTurns,
+          hasOlder: archivePage.hasOlder,
+          completeness: archivePage.hasOlder ? 'partial' : 'complete'
+        }
+      : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
+    const page = hydrateSessionHistoryPage(
+      unhydratedPage,
+      turns,
+      archived,
+      historyContext
+    )
+    perf.mark('page_hydration', { returnedTurns: page.turns.length })
+    const result = pageWithHookCommands(page, hookConfig)
+    perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+    return result
+  } catch (error) {
+    perf.finish(undefined, signal.aborted ? 'cancelled' : 'error')
+    throw error
+  } finally {
+    perf.finish(undefined, 'unavailable')
+  }
 })
 
 // 更早轮次的纯读取：不重做任何会话切换副作用（cwd / baseline / dock badge / resume）。
@@ -1985,53 +1989,60 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
 handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, request: SessionHistoryPageRequest) => {
   if (!payload.externalSessionId) return null
   const perf = new PerformanceTrace('session_history.load_older', { provider: payload.providerId })
-  const cache = sessionHistoryCache
-  if (!cache || cache.revision !== loadSessionRevision) return null
-  const cwd = payload.cwd?.trim() ? resolveKnownProjectDirectory(payload.cwd) : ''
-  if (cache.key !== sessionHistoryCacheKey(payload, cwd)) return null
-  if (request?.before == null || !Number.isFinite(request.before) || request.before <= 0) return null
-  if (cache.archiveSource) {
-    const sourcePage = await readTraceArchivePageAsync(cache.archiveSource, {
-      ...request,
-      snapshotTotalTurns: cache.archiveSnapshotTotalTurns
-    })
-    if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
-    if (sourcePage.archive) {
-      for (const turn of sourcePage.archive.turns) {
-        turn.items = await persistTraceToolEvents(cache.context.userDataDir, cwd, turn.items)
-      }
+  try {
+    const cache = sessionHistoryCache
+    if (!cache || cache.revision !== loadSessionRevision) return null
+    const cwd = payload.cwd?.trim() ? resolveKnownProjectDirectory(payload.cwd) : ''
+    if (cache.key !== sessionHistoryCacheKey(payload, cwd)) return null
+    if (request?.before == null || !Number.isFinite(request.before) || request.before <= 0) return null
+    if (cache.archiveSource) {
+      const sourcePage = await readTraceArchivePageAsync(cache.archiveSource, {
+        ...request,
+        snapshotTotalTurns: cache.archiveSnapshotTotalTurns
+      })
       if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+      if (sourcePage.archive) {
+        for (const turn of sourcePage.archive.turns) {
+          turn.items = await persistTraceToolEvents(cache.context.userDataDir, cwd, turn.items)
+        }
+        if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+      }
+      const turns = await providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+      )
+      if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+      const page = hydrateSessionHistoryPage({
+        turns,
+        offset: sourcePage.offset,
+        totalTurns: sourcePage.totalTurns,
+        hasOlder: sourcePage.hasOlder,
+        completeness: sourcePage.hasOlder ? 'partial' : 'complete'
+      }, [], sourcePage.archive, cache.context)
+      perf.mark('indexed_archive', {
+        returnedTurns: page.turns.length,
+        archiveTurnFilesRead: sourcePage.turnFilesRead
+      })
+      const result = pageWithHookCommands(page, cache.hookConfig)
+      perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+      return result
     }
-    const turns = await providerRegistry.enrichSession(
-      { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-      mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+    const page = hydrateSessionHistoryPage(
+      sessionHistoryPage(cache.turns, request),
+      cache.transcriptTurns,
+      cache.archive,
+      cache.context
     )
-    if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
-    const page = hydrateSessionHistoryPage({
-      turns,
-      offset: sourcePage.offset,
-      totalTurns: sourcePage.totalTurns,
-      hasOlder: sourcePage.hasOlder,
-      completeness: sourcePage.hasOlder ? 'partial' : 'complete'
-    }, [], sourcePage.archive, cache.context)
-    perf.mark('indexed_archive', {
-      returnedTurns: page.turns.length,
-      archiveTurnFilesRead: sourcePage.turnFilesRead
-    })
+    perf.mark('cached_history', { returnedTurns: page.turns.length })
     const result = pageWithHookCommands(page, cache.hookConfig)
     perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
     return result
+  } catch (error) {
+    perf.finish(undefined, 'error')
+    throw error
+  } finally {
+    perf.finish(undefined, 'unavailable')
   }
-  const page = hydrateSessionHistoryPage(
-    sessionHistoryPage(cache.turns, request),
-    cache.transcriptTurns,
-    cache.archive,
-    cache.context
-  )
-  perf.mark('cached_history', { returnedTurns: page.turns.length })
-  const result = pageWithHookCommands(page, cache.hookConfig)
-  perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
-  return result
 })
 
 type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }
@@ -3636,7 +3647,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         await turnDiffDone
         terminalPerf.mark('diff_complete')
         persistRunData(storageSessionId)
-        terminalPerf.finish({ events: runState.items.length, committed: 0 })
+        terminalPerf.finish({ events: runState.items.length, committed: 0 }, 'error')
         finishRemote(completionStatus, message)
         return
       }
@@ -3694,7 +3705,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
           hint: runState.errorHint
         })
         markTerminalAttention(storageSessionId, completionNeedsAttention)
-        terminalPerf.finish({ events: runState.items.length, committed: 0 })
+        terminalPerf.finish({ events: runState.items.length, committed: 0 }, 'error')
         finishRemote(completionStatus, message)
         return
       }
@@ -3983,6 +3994,8 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       try {
         options.stopSignal?.removeEventListener('abort', requestRemoteStop)
         runState.providerSettled = true
+        firstTracePerf.finish(undefined, interrupted ? 'cancelled' : 'unavailable')
+        firstTextPerf.finish(undefined, interrupted ? 'cancelled' : 'unavailable')
         // settle 是唯一的终止证据来源；它同时取消所有未触发的升级定时器。
         runStopLifecycle.settle(runId)
         userQuestionBroker.cancelRun(runId)
@@ -4006,6 +4019,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       return { runId }
     })
     return isRemoteRun ? await remoteResult! : started
+  } catch (error) {
+    startPerf.finish(undefined, 'error')
+    firstTracePerf.finish(undefined, 'error')
+    firstTextPerf.finish(undefined, 'error')
+    throw error
   } finally {
     startLease?.release()
   }
@@ -4572,9 +4590,11 @@ handleTrusted('remote:device:revoke', (_event, deviceId: unknown) => {
 
 let performanceResourceMonitor: PerformanceResourceMonitor | null = null
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!primaryInstance) return
-  const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform })
+  const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
+  await startPerformanceRecording(app.getPath('userData'), app.getVersion(), app.isPackaged, useDevelopmentRenderer)
+  startupPerf.mark('performance_recording_ready')
   // 双流事件日志按环境变量装配；未设置时 openProviderEventWriter() 返回 undefined。
   configureProviderEventLog(process.env, app.getPath('userData'))
   dockBadge.sync()
@@ -4585,6 +4605,9 @@ app.whenReady().then(() => {
   startupPerf.mark('database_ready')
   createWindow()
   performanceResourceMonitor = startPerformanceResourceMonitor({
+    enabled: performanceRecordingEnabled(),
+    intervalMs: 5_000,
+    sink: recordResourcePerformance,
     getAppMetrics: () => app.getAppMetrics(),
     counters: () => {
       const trace = traceOutput.snapshot()
@@ -4593,7 +4616,8 @@ app.whenReady().then(() => {
         traceBufferedBytes: trace.bufferedBytes,
         traceInFlightBytes: trace.inFlightBytes,
         traceSkippedEvents: trace.skippedEvents,
-        activeRuns: runs.activeStates().length
+        activeRuns: runs.activeStates().length,
+        ...performanceRecordingHealth()
       }
     }
   })
@@ -4676,7 +4700,7 @@ app.on('before-quit', (event) => {
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
     disposeProviders: () => providerRegistry.dispose()
   })
-  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser(), sourceControl.dispose()]).then(() => undefined)
+  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser(), sourceControl.dispose()]).then(() => stopPerformanceRecording())
   void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
     quitCleanupFinished = true
     app.quit()

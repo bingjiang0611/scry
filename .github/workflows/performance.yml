@@ -1,0 +1,98 @@
+name: Performance
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Baseline commit or ref (same frozen harness on both sources)
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      QODER_SKIP_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.baseline }}
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: candidate/package-lock.json
+      - name: Install each source's dependencies
+        run: |
+          (cd baseline && npm ci --ignore-scripts)
+          (cd candidate && npm ci --ignore-scripts)
+      - name: Check coverage map and feedback contracts
+        working-directory: candidate
+        run: |
+          mkdir -p ../performance-results
+          node scripts/performance-report.mjs inventory > ../performance-results/inventory.json
+          cp scripts/performance-budgets.json scripts/performance-paths.json ../performance-results/
+          npm run test:unit -- scripts/performance-feedback.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
+      - name: Freeze candidate harness for both source revisions
+        run: |
+          cp candidate/scripts/performance-baseline.test.ts baseline/scripts/
+          cp candidate/scripts/performance-bench.mjs baseline/scripts/
+          cp candidate/vitest.config.ts baseline/vitest.config.ts
+      - name: Measure baseline then candidate on the same runner (never parallel)
+        run: |
+          mkdir -p performance-results
+          (cd baseline && node scripts/performance-bench.mjs ../performance-results/baseline.json)
+          (cd candidate && node scripts/performance-bench.mjs ../performance-results/candidate.json)
+      - name: Compare fixed budgets and base-relative regressions
+        run: |
+          node candidate/scripts/performance-compare.mjs performance-results/baseline.json performance-results/candidate.json candidate/scripts/performance-budgets.json performance-results/report.md
+      - name: Retain measurements even when the gate fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: performance-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  comment:
+    # Fork PRs retain a read-only summary/artifact. Never run PR code with a write token.
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: compare
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: performance-results
+          path: performance-results
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs')
+            const file = 'performance-results/report.md'
+            const body = fs.existsSync(file)
+              ? fs.readFileSync(file, 'utf8').slice(0, 60000)
+              : '<!-- scry-performance -->\n## Scry performance impact\nNo valid comparison was produced. Check the Performance job logs; missing measurements are not a pass.'
+            const params = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number }
+            const comments = await github.paginate(github.rest.issues.listComments, params)
+            const previous = comments.find(comment => comment.user.type === 'Bot' && comment.body.startsWith('<!-- scry-performance -->'))
+            if (previous) await github.rest.issues.updateComment({ owner: params.owner, repo: params.repo, comment_id: previous.id, body })
+            else await github.rest.issues.createComment({ ...params, body })
