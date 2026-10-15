@@ -243,3 +243,79 @@
   font: inherit;
   line-height: 1.6;
 }
+
+/* The scrolling workspace is the query container, not the modal ancestor. */
+.sc-panel { font-size: 13px; }
+.sc-panel [hidden] { display: none !important; }
+.sc-header { padding: 18px; gap: 12px; }
+.sc-header strong { font-size: 15px; }
+.sc-branch { font-size: 12px; }
+.sc-header small { font-size: 11px; font-variant-numeric: tabular-nums; }
+.sc-header-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.sc-header-actions button { padding: 4px 8px; font-size: 11px; }
+.sc-tabs { padding: 0 18px; gap: 20px; }
+.sc-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 0; color: var(--dim); font-size: 12px; }
+.sc-tabs button[aria-pressed='true'] { color: var(--fg); border-bottom-color: var(--accent); }
+.sc-panel button:hover:not(:disabled) { background: var(--surface-hover); }
+.sc-panel button.sc-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+.sc-inline-notice { display: flex; align-items: center; justify-content: space-between; padding: 8px 18px; gap: 10px; border-bottom: 1px solid var(--sc-border); font-size: 11px; color: var(--dim); }
+.sc-inline-notice button { padding: 2px 6px; font-size: 11px; }
+.sc-global-blocker, .sc-error { margin: 8px 14px; }
+.sc-workspace-shell { flex: 1; min-height: 0; container-type: inline-size; container-name: scWorkspace; }
+.sc-workspace { display: flex; height: 100%; min-height: 0; }
+.sc-file-pane { flex: 1; min-width: 0; overflow: auto; padding: 16px 0; }
+.sc-file-pane > header { display: flex; justify-content: space-between; gap: 8px; padding: 0 16px; font-size: 12px; }
+.sc-file-pane > header span { color: var(--dim2); font-variant-numeric: tabular-nums; }
+.sc-selection-help, .sc-scope-note { color: var(--dim2); font-size: 11px; padding: 0 16px; line-height: 1.8; }
+.sc-selection-help { margin: 8px 0 16px; }
+.sc-scope-note { margin: 20px 0 0; }
+.sc-file-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-left: 2px solid transparent; }
+.sc-file-row.selected { background: var(--accent-soft); border-left-color: var(--accent); }
+.sc-file-row > input, .sc-commit-file > input { width: 15px; height: 15px; flex: 0 0 15px; margin: 0; padding: 0; accent-color: var(--accent); }
+.sc-file-row .sc-file-name { padding: 0; overflow: hidden; font-size: 12px; }
+.sc-file-name strong { display: block; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.sc-file-name small { color: var(--dim2); font-size: 10px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.sc-file-row .sc-file-name[aria-pressed='true'] { border-color: transparent; color: var(--fg); }
+.sc-file-row .sc-unstage { padding: 1px 6px; font-size: 12px; }
+.sc-diff-pane { display: none; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.sc-workspace.has-selection .sc-file-pane { display: none; }
+.sc-workspace.has-selection .sc-diff-pane { display: flex; }
+.sc-diff-pane > header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--sc-border); }
+.sc-diff-pane > header > div { min-width: 0; }
+.sc-diff-pane > header strong, .sc-diff-pane > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-diff-pane > header strong { font-size: 12px; }
+.sc-diff-pane > header small { color: var(--dim2); font-size: 10px; }
+.sc-back-files { flex-shrink: 0; }
+.sc-diff-scroll { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.sc-diff-scroll > p { padding: 12px 16px; }
+.sc-diff-scroll .sc-patch { flex: 1; min-height: 0; max-height: none; margin: 0; border: 0; border-radius: 0; }
+.sc-diff-switch { display: flex; flex-wrap: wrap; padding: 8px; gap: 6px; font-size: 11px; }
+.sc-diff-switch [aria-pressed='true'] { color: var(--accent); }
+.sc-action-dock { flex-shrink: 0; padding: 14px 18px 8px; border-top: 1px solid var(--sc-border); }
+.sc-next-summary { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.sc-next-summary > span { color: var(--dim2); font: 10px monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sc-next-summary strong { font-size: 12px; font-weight: 550; }
+.sc-next-summary small { display: block; color: var(--dim2); font-size: 11px; margin-top: 3px; }
+.sc-dock-buttons { display: flex; justify-content: space-between; gap: 8px; }
+.sc-dock-buttons .sc-primary { min-width: 165px; }
+.sc-operation-status { margin: 12px 0 0; padding-top: 6px; border-top: 1px solid var(--sc-border); color: var(--dim2); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-panel .modal { width: min(550px, 92vw); max-height: 90dvh; overflow: auto; padding: 22px; gap: 10px; }
+.sc-panel .modal h2 { margin: 0; font-size: 20px; }
+.sc-panel .modal .sc-actions { justify-content: flex-end; }
+.sc-panel .modal label { font-size: 12px; }
+.sc-panel .modal .sc-muted { font-size: 12px; }
+.sc-commit-files { flex-shrink: 0; max-height: 30dvh; overflow: auto; border: 1px solid var(--sc-border); border-radius: 8px; }
+.sc-panel label.sc-commit-file { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 0; border-bottom: 1px solid var(--sc-border); }
+.sc-commit-file:last-child { border-bottom: 0; }
+.sc-commit-file span { min-width: 0; }
+.sc-commit-file strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.sc-commit-file small { display: block; color: var(--dim2); font-size: 11px; }
+.sc-other-actions { display: grid; gap: 8px; }
+.sc-other-actions button { text-align: left; padding: 10px 12px; }
+@container scWorkspace (min-width: 680px) {
+  .sc-workspace { display: grid; grid-template-columns: 270px minmax(0, 1fr); }
+  .sc-workspace.has-selection .sc-file-pane { display: block; }
+  .sc-file-pane { border-right: 1px solid var(--sc-border); }
+  .sc-diff-pane { display: flex; }
+  .sc-back-files { display: none; }
+}

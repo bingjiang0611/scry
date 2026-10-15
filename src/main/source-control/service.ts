@@ -275,7 +275,9 @@ export class SourceControlService {
           }
         } else {
           const snapshot = await this.expected(identity, request)
-          if (request.action !== 'createPr' && snapshot.writeBlocker) throw new Error(snapshot.writeBlocker)
+          if (snapshot.writeBlocker) throw new Error(snapshot.writeBlocker)
+          if (request.action !== 'createPr' && snapshot.actionBlockers[request.action])
+            throw new Error(snapshot.actionBlockers[request.action])
           if (request.action === 'stage' || request.action === 'unstage') {
             const files = request.paths.map((path) => {
               const file = snapshot.files.find((file) => file.path === path)
@@ -293,21 +295,48 @@ export class SourceControlService {
             await this.git.stage(identity, files, request.action === 'unstage', snapshot.head)
             await this.git.status(identity)
           } else if (request.action === 'commit') {
-            if (!snapshot.files.some((file) => file.index !== '.' && !file.untracked))
-              throw new Error('没有已暂存内容；不会自动暂存其他文件')
+            const selected = (request.paths ?? []).map((path) => {
+              const file = snapshot.files.find((file) => file.path === path)
+              if (!file) throw new Error('提交范围不属于当前快照')
+              if (!file.untracked && file.index !== '.')
+                throw new Error('已有暂存内容会直接纳入提交，不能重新暂存并覆盖原有选择')
+              return file
+            })
+            if (!selected.length && !snapshot.files.some((file) => file.index !== '.' && !file.untracked))
+              throw new Error('没有已暂存内容；请选择本次要提交的文件')
+            let tree: string
+            if (selected.length) {
+              if (snapshot.actionBlockers.stage) throw new Error(snapshot.actionBlockers.stage)
+              const previousTree = (await this.git.run(identity.root, ['write-tree'])).trim()
+              record.intent = { parent: snapshot.head }
+              record.operation.message = '正在暂存明确选择的文件；尚未创建提交'
+              await this.store.save(record)
+              dispatched = true
+              const paths = await this.git.stage(identity, selected, false, snapshot.head)
+              tree = (await this.git.run(identity.root, ['write-tree'])).trim()
+              const changed = (await this.git.run(identity.root, [
+                'diff-tree', '--no-ext-diff', '--no-textconv', '--no-renames', '--no-commit-id',
+                '--name-only', '-z', '-r', previousTree, tree
+              ])).split('\0').filter(Boolean)
+              if (changed.some((path) => !paths.includes(path)))
+                throw new Error('暂存期间其他文件的 index 发生变化；请核查，不夹带提交或自动回滚')
+              const staged = await this.git.status(identity)
+              if (staged.head !== snapshot.head || staged.writeBlocker || staged.actionBlockers.commit)
+                throw new Error('暂存已执行，但仓库或提交授权已变化；请核查，不自动提交或回滚')
+            } else tree = (await this.git.run(identity.root, ['write-tree'])).trim()
             record.intent = {
               parent: snapshot.head,
-              tree: (await this.git.run(identity.root, ['write-tree'])).trim()
+              tree
             }
             await this.store.save(record)
             dispatched = true
             const sha = await this.git.commitIndex(identity, request.message)
-            const [tree, parents] = (
+            const [actualTree, parents] = (
               await this.git.run(identity.root, ['show', '--no-patch', '--format=%T%n%P', sha])
             )
               .trimEnd()
               .split('\n')
-            if (tree !== record.intent.tree || (parents ?? '') !== (snapshot.head ?? ''))
+            if (actualTree !== record.intent.tree || (parents ?? '') !== (snapshot.head ?? ''))
               throw new Error('提交已经执行，但实际 tree/parent 与预检不一致；请核查，不自动回滚')
             record.operation.evidence = { sha }
             try {
@@ -343,6 +372,8 @@ export class SourceControlService {
           } else {
             if (!snapshot.branch || snapshot.branch !== request.headBranch || !snapshot.head)
               throw new Error('创建 PR 的源分支必须是当前已确认分支')
+            if (request.headRepository.toLowerCase() === request.repository.toLowerCase() && request.headBranch === request.baseBranch)
+              throw new Error('PR 源分支与目标分支相同，请先创建功能分支')
             const session = await this.github.connect()
             if (session.account !== request.account) throw new Error('GitHub 账户已变化，请重新读取')
             await this.githubScope(identity, request.repository, session)

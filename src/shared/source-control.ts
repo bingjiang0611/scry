@@ -14,6 +14,8 @@ export interface ScRemote {
   fetchUrls: string[]
 }
 
+export type ScGitAction = 'stage' | 'unstage' | 'commit' | 'fetch' | 'push'
+
 export interface ScRepository {
   id: string
   root: string
@@ -26,7 +28,9 @@ export interface ScRepository {
   behind: number | null
   files: ScFile[]
   remotes: ScRemote[]
+  /** Repository-wide blockers (conflict, unfinished operation, active Agent, unknown result). */
   writeBlocker: string | null
+  actionBlockers: Partial<Record<ScGitAction, string>>
 }
 
 export type ScRead<T> =
@@ -76,7 +80,7 @@ export interface ScReviewDraft extends ScPrExpected {
 export type ScMutation =
   | (ScExpected & { action: 'stage'; paths: string[]; allowStagedOverwrite?: boolean })
   | (ScExpected & { action: 'unstage'; paths: string[] })
-  | (ScExpected & { action: 'commit'; message: string })
+  | (ScExpected & { action: 'commit'; message: string; paths?: string[] })
   | (ScExpected & { action: 'fetch'; remote: string })
   | (ScExpected & { action: 'push'; remote: string })
   | (ScExpected & {
@@ -203,7 +207,7 @@ export function scCanMerge(pr: ScPr): boolean {
 
 export function githubRepositoryFromUrl(value: string): string | null {
   const match =
-    /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(
+    /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@(?:github\.com|ssh\.github\.com:443)\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(
       value
     )
   return match ? `${match[1]}/${match[2]}` : null

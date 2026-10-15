@@ -106,6 +106,149 @@ describe('source control real temporary Git', () => {
     expect(git('rev-list', '--count', 'HEAD')).toBe('2')
   })
 
+  it('commits selected working files and existing partial index together without including other WIP', async () => {
+    await writeFile(join(cwd, 'base.txt'), 'already staged\n')
+    git('add', 'base.txt')
+    await writeFile(join(cwd, 'base.txt'), 'already staged\nkeep unstaged remainder\n')
+    await writeFile(join(cwd, 'selected.txt'), 'selected\n')
+    await writeFile(join(cwd, 'untouched.txt'), 'not selected\n')
+    const state = await snapshot()
+    const request = {
+      action: 'commit' as const,
+      repositoryId: state.id,
+      expectedRevision: state.revision,
+      paths: ['selected.txt'],
+      message: 'guided commit',
+      operationId: randomUUID()
+    }
+    const result = await service.mutate(request)
+    expect(result.status).toBe('succeeded')
+    expect(git('show', 'HEAD:selected.txt')).toBe('selected')
+    expect(git('show', 'HEAD:base.txt')).toBe('already staged')
+    expect(git('diff', '--', 'base.txt')).toContain('+keep unstaged remainder')
+    expect(git('status', '--porcelain')).toContain('?? untouched.txt')
+    expect(await service.mutate(request)).toEqual(result)
+    expect(git('rev-list', '--count', 'HEAD')).toBe('2')
+  })
+
+  it('rejects guided commit paths that would replace partial staging before any write', async () => {
+    await writeFile(join(cwd, 'base.txt'), 'staged\n')
+    git('add', 'base.txt')
+    await writeFile(join(cwd, 'base.txt'), 'staged\nnot approved\n')
+    const state = await snapshot()
+    const result = await service.mutate({
+      action: 'commit', repositoryId: state.id, expectedRevision: state.revision,
+      paths: ['base.txt'], message: 'must not overwrite', operationId: randomUUID()
+    })
+    expect(result.status).toBe('failed')
+    expect(git('show', ':base.txt')).toBe('staged')
+    expect(git('rev-list', '--count', 'HEAD')).toBe('1')
+  })
+
+  it('blocks pre-push only for push, without running it during selected local commit', async () => {
+    const hook = join(cwd, '.git/hooks/pre-push')
+    const marker = join(temp, 'push-hook-executed')
+    await writeFile(hook, `#!/bin/sh\ntouch '${marker}'\n`)
+    await chmod(hook, 0o755)
+    await writeFile(join(cwd, 'selected.txt'), 'selected\n')
+    let state = await snapshot()
+    expect(state.writeBlocker).toBeNull()
+    expect(state.actionBlockers.push).toContain('pre-push')
+    const committed = await service.mutate({
+      action: 'commit', repositoryId: state.id, expectedRevision: state.revision,
+      paths: ['selected.txt'], message: 'local only', operationId: randomUUID()
+    })
+    expect(committed.status).toBe('succeeded')
+    state = await snapshot()
+    const pushed = await service.mutate({
+      action: 'push', repositoryId: state.id, expectedRevision: state.revision,
+      remote: 'origin', operationId: randomUUID()
+    })
+    expect(pushed.status).toBe('failed')
+    expect(pushed.message).toContain('pre-push')
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not block a selected local commit for an unused post-checkout hook', async () => {
+    const marker = join(temp, 'checkout-hook-executed')
+    await writeFile(join(cwd, '.git/hooks/post-checkout'), `#!/bin/sh\ntouch '${marker}'\n`)
+    await chmod(join(cwd, '.git/hooks/post-checkout'), 0o755)
+    await writeFile(join(cwd, 'selected.txt'), 'selected\n')
+    const state = await snapshot()
+    expect(state.actionBlockers).toEqual({})
+    const result = await service.mutate({
+      action: 'commit', repositoryId: state.id, expectedRevision: state.revision,
+      paths: ['selected.txt'], message: 'no checkout performed', operationId: randomUUID()
+    })
+    expect(result.status).toBe('succeeded')
+    expect(git('show', 'HEAD:selected.txt')).toBe('selected')
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('limits index and reference transaction hooks to their native operations', async () => {
+    const marker = join(temp, 'hook-executed')
+    for (const name of ['post-index-change', 'reference-transaction']) {
+      const path = join(cwd, '.git/hooks', name)
+      await writeFile(path, `#!/bin/sh\ntouch '${marker}'\n`)
+      await chmod(path, 0o755)
+      const state = await snapshot()
+      expect(Object.keys(state.actionBlockers).sort()).toEqual(
+        name === 'post-index-change' ? ['commit', 'stage', 'unstage'] : ['commit', 'fetch', 'push']
+      )
+      await rm(path)
+    }
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('validates the complete selected range before staging any file', async () => {
+    await writeFile(join(cwd, 'selected.txt'), 'selected\n')
+    const state = await snapshot()
+    const result = await service.mutate({
+      action: 'commit', repositoryId: state.id, expectedRevision: state.revision,
+      paths: ['selected.txt', 'not-in-snapshot.txt'], message: 'invalid range', operationId: randomUUID()
+    })
+    expect(result.status).toBe('failed')
+    expect(git('diff', '--cached', '--name-only')).toBe('')
+    expect(git('rev-list', '--count', 'HEAD')).toBe('1')
+  })
+
+  it('keeps staged files and an unknown journal if commit fails after selected staging, without replay', async () => {
+    await writeFile(join(cwd, 'selected.txt'), 'selected\n')
+    const state = await snapshot()
+    const commit = vi.spyOn(service.git, 'commitIndex').mockRejectedValue(new Error('fixture commit response lost'))
+    const request = {
+      action: 'commit' as const, repositoryId: state.id, expectedRevision: state.revision,
+      paths: ['selected.txt'], message: 'commit interrupted', operationId: randomUUID()
+    }
+    const result = await service.mutate(request)
+    expect(result.status).toBe('unknown')
+    expect(git('diff', '--cached', '--name-only')).toBe('selected.txt')
+    expect(git('rev-list', '--count', 'HEAD')).toBe('1')
+    expect(await service.mutate(request)).toEqual(result)
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect((await snapshot()).writeBlocker).toContain('尚未核查')
+  })
+
+  it('does not commit unrelated index changes appearing during selected staging', async () => {
+    await writeFile(join(cwd, 'selected.txt'), 'selected\n')
+    await writeFile(join(cwd, 'other.txt'), 'not selected\n')
+    const state = await snapshot()
+    const stage = service.git.stage.bind(service.git)
+    vi.spyOn(service.git, 'stage').mockImplementationOnce(async (...args) => {
+      const paths = await stage(...args)
+      git('add', '--', 'other.txt')
+      return paths
+    })
+    const result = await service.mutate({
+      action: 'commit', repositoryId: state.id, expectedRevision: state.revision,
+      paths: ['selected.txt'], message: 'do not include drift', operationId: randomUUID()
+    })
+    expect(result.status).toBe('unknown')
+    expect(result.message).toContain('其他文件的 index')
+    expect(git('rev-list', '--count', 'HEAD')).toBe('1')
+    expect(git('diff', '--cached', '--name-only')).toBe('other.txt\nselected.txt')
+  })
+
   it('rejects stale snapshots without staging newly changed content', async () => {
     await writeFile(join(cwd, 'base.txt'), 'first\n')
     const state = await snapshot()
@@ -146,7 +289,7 @@ describe('source control real temporary Git', () => {
     await writeFile(join(cwd, 'base.txt'), 'change\n')
     git('add', 'base.txt')
     let state = await snapshot()
-    expect(state.writeBlocker).toContain('pre-commit')
+    expect(state.actionBlockers.commit).toContain('pre-commit')
     expect(
       (
         await service.mutate({
@@ -358,6 +501,20 @@ describe('source control real temporary Git', () => {
     expect(await service.loadDraft(draft)).toEqual(draft)
   })
 
+  it('rejects a same-repository same-branch PR before GitHub credential discovery', async () => {
+    git('remote', 'add', 'origin', 'ssh://git@ssh.github.com:443/owner/repo.git')
+    const state = await snapshot()
+    const connect = vi.spyOn(service.github, 'connect')
+    const result = await service.mutate({
+      action: 'createPr', repositoryId: state.id, expectedRevision: state.revision,
+      repository: 'owner/repo', headRepository: 'OWNER/REPO', headBranch: 'feature', baseBranch: 'feature',
+      account: 'fixture', title: 'invalid PR', body: '', draft: false, operationId: randomUUID()
+    })
+    expect(result.status).toBe('failed')
+    expect(result.message).toContain('源分支与目标分支相同')
+    expect(connect).not.toHaveBeenCalled()
+  })
+
   it('rechecks PR account, HEAD and base in main before any review write', async () => {
     git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
     const state = await snapshot()
@@ -421,7 +578,7 @@ describe('source control real temporary Git', () => {
   it('blocks signing and gitlinks before native extensions can run', async () => {
     git('config', 'push.gpgsign', 'if-asked')
     let state = await snapshot()
-    expect(state.writeBlocker).toContain('push.gpgsign')
+    expect(state.actionBlockers.push).toContain('push.gpgsign')
     const result = await service.mutate({
       action: 'push',
       repositoryId: state.id,

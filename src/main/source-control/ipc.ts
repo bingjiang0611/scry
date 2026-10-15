@@ -151,8 +151,14 @@ export function parseScMutation(value: unknown): ScMutation & { operationId: str
           : {})
       }
     }
-    case 'commit':
-      return { ...op, ...expected(input), action, message: text(input.message, 20_000) }
+    case 'commit': {
+      if (input.paths !== undefined && (!Array.isArray(input.paths) || input.paths.length > 1000))
+        throw new Error('提交范围最多 1,000 个文件')
+      return {
+        ...op, ...expected(input), action, message: text(input.message, 20_000),
+        ...(Array.isArray(input.paths) ? { paths: [...new Set(input.paths.map(path))] } : {})
+      }
+    }
     case 'fetch':
     case 'push':
       return { ...op, ...expected(input), action, remote: branch(input.remote) }

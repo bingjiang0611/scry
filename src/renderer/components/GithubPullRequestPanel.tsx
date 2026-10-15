@@ -17,12 +17,14 @@ export function GithubPullRequestPanel({
   repo,
   active,
   busy,
+  suggestedTitle,
   ask,
   report
 }: {
   repo: ScRepository
   active: boolean
   busy: boolean
+  suggestedTitle: string
   ask: (request: ScMutation, detail: string, afterSuccess?: () => Promise<void>) => void
   report: (error: unknown) => void
 }) {
@@ -30,10 +32,10 @@ export function GithubPullRequestPanel({
   const alive = useRef(true)
   const epoch = useRef(0)
   const lineInput = useRef<HTMLTextAreaElement>(null)
-  const github =
-    repo.remotes
-      .flatMap((remote) => [...remote.pushUrls, ...remote.fetchUrls].map(githubRepositoryFromUrl))
-      .find(Boolean) ?? ''
+  const repositories = [...new Set(repo.remotes
+    .flatMap((remote) => [...remote.pushUrls, ...remote.fetchUrls].map(githubRepositoryFromUrl))
+    .filter((value): value is string => value !== null))]
+  const github = repositories.length === 1 ? repositories[0] : ''
   const [repository, setRepository] = useState(github)
   const [list, setList] = useState<ScRead<ScPrList> | null>(null)
   const [pr, setPr] = useState<ScPr | null>(null)
@@ -47,7 +49,7 @@ export function GithubPullRequestPanel({
     null
   )
   const [lineBody, setLineBody] = useState('')
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(suggestedTitle)
   const [body, setBody] = useState('')
   const [baseBranch, setBaseBranch] = useState('')
   const [headRepository, setHeadRepository] = useState(github)
@@ -73,12 +75,16 @@ export function GithubPullRequestPanel({
     }
   }, [])
   useEffect(() => {
+    setTitle((value) => value || suggestedTitle)
+  }, [suggestedTitle])
+  useEffect(() => {
     if (lineTarget) lineInput.current?.focus()
   }, [lineTarget])
   useEffect(() => {
     if (!active) {
       epoch.current++
       setConfirmation(null)
+      setLoadingPr(false)
     }
   }, [active])
   const expected = { repositoryId: repo.id, expectedRevision: repo.revision }
@@ -117,25 +123,32 @@ export function GithubPullRequestPanel({
       )
       setDraftState(saved ? '草稿已恢复' : '仅保存在本机，提交后才发送 GitHub')
     } catch (caught) {
-      report(caught)
+      if (alive.current && ticket === epoch.current) report(caught)
     } finally {
-      if (alive.current) setLoadingPr(false)
+      if (alive.current && ticket === epoch.current) setLoadingPr(false)
     }
   }
   async function loadPrList(): Promise<void> {
+    const ticket = ++epoch.current
     setLoadingPr(true)
     report('')
     setPr(null)
     setDraft(null)
+    setList(null)
     try {
       const result = await api.pullRequests({ repositoryId: repo.id, repository })
-      if (!alive.current) return
+      if (!alive.current || ticket !== epoch.current) return
       setList(result)
-      if (result.status === 'available') setBaseBranch(result.data.defaultBranch)
+      if (result.status === 'available') {
+        setBaseBranch(result.data.defaultBranch)
+        const linked = result.data.items.filter((item) => item.headBranch === repo.branch &&
+          item.headRepository?.toLowerCase() === headRepository.toLowerCase())
+        if (linked.length === 1) await openPr(linked[0].number)
+      }
     } catch (caught) {
-      report(caught)
+      if (alive.current && ticket === epoch.current) report(caught)
     } finally {
-      if (alive.current) setLoadingPr(false)
+      if (alive.current && ticket === epoch.current) setLoadingPr(false)
     }
   }
   function updateDraft(next: ScReviewDraft): void {
@@ -172,10 +185,10 @@ export function GithubPullRequestPanel({
     <>
       <fieldset className="sc-form" disabled={busy || loadingPr} aria-label="GitHub Pull Request">
         <section className="sc-section">
-          <h3>GitHub.com</h3>
-          <p className="sc-muted">
-            使用本机 gh 当前账户。第一次点击读取才访问 GitHub。仅绑定当前仓库的 remote 或其 fork 上游。
-          </p>
+          <h3>{repository || '选择 GitHub 目标仓库'}</h3>
+          <p className="sc-muted">当前分支：{repo.branch ?? 'Detached HEAD'}。点击读取才访问 GitHub，使用本机 gh 当前账户。</p>
+          <details open={!github}>
+            <summary>{github ? '切换目标仓库 / fork 上游' : repositories.length > 1 ? '检测到多个仓库，请选择目标' : 'remote 无法识别，请填写已绑定的 GitHub 仓库'}</summary>
           <label>
             目标仓库
             <input
@@ -190,8 +203,9 @@ export function GithubPullRequestPanel({
               }}
             />
           </label>
-          <button disabled={loadingPr || busy || !repository} onClick={() => void loadPrList()}>
-            读取开放 PR
+          </details>
+          <button className="sc-primary" disabled={loadingPr || busy || !repository} onClick={() => void loadPrList()}>
+            读取当前分支 PR
           </button>
         </section>
         {list?.status !== 'available' && list && (
@@ -205,6 +219,7 @@ export function GithubPullRequestPanel({
               API 账户：{list.data.account} ·{' '}
               {list.data.complete ? '列表完整' : '只显示前 100 个，请在 GitHub 查看更多'}
             </p>
+            <details className="sc-section" open={!pr}><summary>开放 PR 列表（{list.data.items.length}）</summary>
             <div className="sc-pr-list">
               {list.data.items.map((item) => (
                 <button
@@ -221,13 +236,16 @@ export function GithubPullRequestPanel({
                 </button>
               ))}
             </div>
-            <details className="sc-section">
+            {!list.data.items.length && <p className="sc-muted">{list.data.complete ? '没有开放的 PR。' : '已读取范围内没有开放 PR，列表不完整。'}</p>}
+            </details>
+            <details className="sc-section" open={!pr}>
               <summary>创建 Pull Request</summary>
               <label>
                 源仓库
                 <input value={headRepository} onChange={(event) => setHeadRepository(event.target.value)} />
               </label>
-              <p>源分支：{repo.branch ?? '无分支'} · 必须先手动推送到 GitHub</p>
+              <p>源分支：{repo.branch ?? '无分支'} · 必须先推送，本操作不会夹带自动推送。</p>
+              {headRepository.toLowerCase() === repository.toLowerCase() && repo.branch === baseBranch && <p className="sc-notice">当前源分支与目标相同。请先在终端创建功能分支，不能创建同分支 PR。</p>}
               <label>
                 目标分支
                 <input value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)} />
@@ -249,7 +267,7 @@ export function GithubPullRequestPanel({
                 创建为 Draft
               </label>
               <button
-                disabled={busy || loadingPr || !title.trim() || !baseBranch || !repo.branch || !expected}
+                disabled={busy || loadingPr || !!repo.writeBlocker || !title.trim() || !baseBranch || !repo.branch || !repo.head || !expected || (headRepository.toLowerCase() === repository.toLowerCase() && repo.branch === baseBranch)}
                 onClick={() =>
                   expected &&
                   list.status === 'available' &&
