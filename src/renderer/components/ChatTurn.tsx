@@ -1577,12 +1577,14 @@ function AssistantTurnImpl({
         if (ev.kind === 'harness') {
           if (ev.providerId === 'pi' && ev.runtimeProvider === 'pi_rpc' && ev.text &&
             (ev.providerCommand || ev.stage === 'runtime:extension_message' ||
-              ev.stage === 'runtime:extension_ui' && ev.runtimeMetadata?.method === 'notify')) {
+              ev.stage === 'runtime:extension_ui' && ev.runtimeMetadata?.method === 'notify' && ev.runtimeMetadata.notifyType !== 'info')) {
+            const label = ev.providerCommand ? 'Pi 命令'
+              : ev.stage === 'runtime:extension_message' ? 'Pi 扩展消息' : 'Pi 扩展通知'
             flushLive()
             flushTools()
             out.push(
-              <div className="tool-card k-human" role="note" aria-label="Pi 命令反馈" key={ev.id}>
-                <div className="tool-detail"><div className="lbl">Pi 命令{ev.isError ? ' · 错误' : ''}</div><pre>{ev.text}</pre></div>
+              <div className="tool-card k-human" role="note" aria-label={ev.providerCommand ? 'Pi 命令反馈' : label} key={ev.id}>
+                <div className="tool-detail"><div className="lbl">{label}{ev.isError ? ' · 错误' : ''}</div><pre>{ev.text}</pre></div>
               </div>
             )
           }
