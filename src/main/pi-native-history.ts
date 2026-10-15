@@ -84,10 +84,22 @@ export function parsePiNativeHistory(content: string, identity: { sessionId: str
   return turns
 }
 
-// Pi's adapter uses the native user entry ID as providerTurnId. Prefer canonical
-// Scry evidence only at that exact boundary; same-text prompts prove nothing.
+// Pi's adapter uses the initial native user entry ID as providerTurnId. A steer
+// creates another native user entry inside that same run. Match those segments
+// through the anchored run's exact tool lifecycle IDs; equal prompts alone
+// never establish ownership.
 export function reconcilePiNativeHistory(native: LoadedSessionTurn[], archived: LoadedSessionTurn[]): LoadedSessionTurn[] {
   const byRunId = new Map(native.map((turn) => [turn.runId, [turn]]))
+  const toolKey = (event: TraceEvent): string => `${event.stage === 'tool_result' ? 'result' : 'call'}:${event.toolUseId}`
+  const toolOwners = new Map<string, LoadedSessionTurn | null>()
+  for (const turn of archived) {
+    for (const event of turn.items) {
+      if (!event.toolUseId) continue
+      const key = toolKey(event)
+      const owner = toolOwners.get(key)
+      toolOwners.set(key, owner === undefined || owner === turn ? turn : null)
+    }
+  }
   let unlinked: LoadedSessionTurn[] = []
   for (const turn of archived) {
     const key = turn.providerTurnId ? `pi-native-${turn.providerTurnId}` : undefined
@@ -100,7 +112,41 @@ export function reconcilePiNativeHistory(native: LoadedSessionTurn[], archived: 
     } else unlinked.push({ ...turn, errorHint: [turn.errorHint,
       '此归档缺少可对应的原生回合标识，单独保留；可能与恢复记录重叠，不能据提示词去重。'].filter(Boolean).join(' ') })
   }
-  return [...native.flatMap((turn) => byRunId.get(turn.runId)!), ...unlinked]
+  let anchor: LoadedSessionTurn | undefined
+  const remainingSteers = new Map<string, number>()
+  const reconciled = native.flatMap((turn) => {
+    const replacements = byRunId.get(turn.runId)!
+    const canonical = replacements.at(-1)!
+    if (canonical !== turn) {
+      anchor = canonical
+      remainingSteers.clear()
+      const seenSteers = new Set<string>()
+      for (const event of canonical.items) {
+        const steer = event.steer
+        if (event.stage !== 'steer' || steer?.status !== 'accepted' || seenSteers.has(steer.messageId)) continue
+        seenSteers.add(steer.messageId)
+        remainingSteers.set(steer.prompt, (remainingSteers.get(steer.prompt) ?? 0) + 1)
+      }
+      return replacements
+    }
+    // A settled, successful run owns its complete response. Interrupted/partial
+    // archives must not swallow a native tail that outlived Scry's capture.
+    if (!anchor?.done || !anchor.items.some((event) => event.stage === 'result' && event.isError === false)) return [turn]
+    const tools = turn.items.filter((event) => event.toolUseId)
+    // Require an invocation plus every observed call/result in this segment.
+    // Text-only steers remain unlinked until native steer entry IDs are archived;
+    // neither equal prompts nor timestamps establish ownership.
+    const covered = tools.some((event) => event.stage !== 'tool_result') &&
+      tools.every((event) => toolOwners.get(toolKey(event)) === anchor)
+    if (!covered) return [turn]
+    // Identity is already proven by tools. Also require the native input to be
+    // present in the archive, without reusing one receipt for repeated prompts.
+    const inputs = remainingSteers.get(turn.userText) ?? 0
+    if (inputs === 0) return [turn]
+    remainingSteers.set(turn.userText, inputs - 1)
+    return []
+  })
+  return [...reconciled, ...unlinked]
 }
 
 // Offline fallback for catalog-authorized Pi sessions only. No launcher/config

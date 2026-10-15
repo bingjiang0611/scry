@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parsePiNativeHistory, readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
 import { restoreTraceArchiveTurn, sessionHistoryPage } from './session-history'
+import type { TraceEvent } from '../shared/trace'
 
 const identity = { sessionId: '01a1338c-3d8b-775b-8645-fd964faa29a3', cwd: '/repo' }
 const header = { type: 'session', version: 3, id: identity.sessionId, cwd: identity.cwd }
@@ -15,6 +16,32 @@ const result = { type: 'message', id: 't', parentId: 'a', timestamp: time,
   message: { role: 'toolResult', toolCallId: 'call1', toolName: 'bash', content: [{ type: 'text', text: '/repo' }] } }
 const encode = (...entries: unknown[]): string => [header, ...entries].map((entry) => JSON.stringify(entry)).join('\n')
 const roots: string[] = []
+const completedResult: TraceEvent = { id: 'done', runId: 'scry-run', ts: time, kind: 'harness',
+  stage: 'result', tokensIn: 123, isError: false }
+const acceptedSteers: TraceEvent[] = [1, 2].map((index) => ({
+  id: `steer-${index}`, runId: 'scry-run', ts: time, kind: 'human', stage: 'steer',
+  steer: { messageId: `steer-${index}`, prompt: 'phone message', status: 'accepted', providerTurnId: 'u',
+    attachments: index === 1 ? [{ kind: 'image', name: 'steer.png', mimeType: 'image/png',
+      dataBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a46kAAAAASUVORK5CYII=' }] : [] }
+}))
+
+function nativeHistoryWithSteers() {
+  return parsePiNativeHistory(encode(user, assistant, result,
+    { ...user, id: 'u2', parentId: 't', message: { role: 'user', content: [
+      { type: 'text', text: 'phone message' }, { type: 'image' }
+    ] } },
+    { ...assistant, id: 'a2', parentId: 'u2', message: { role: 'assistant', content: [
+      { type: 'toolCall', id: 'call2', name: 'bash', arguments: { command: 'pwd' } }
+    ] } },
+    { ...result, id: 't2', parentId: 'a2', message: { ...result.message, toolCallId: 'call2' } },
+    { ...user, id: 'u3', parentId: 't2' },
+    { ...assistant, id: 'a3', parentId: 'u3', message: { role: 'assistant', content: [
+      { type: 'toolCall', id: 'call3', name: 'bash', arguments: { command: 'pwd' } }
+    ] } },
+    { ...result, id: 't3', parentId: 'a3', message: { ...result.message, toolCallId: 'call3' } },
+    { ...assistant, id: 'final', parentId: 't3', message: { role: 'assistant', content: 'finished' } }
+  ), identity)
+}
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true }) })
 
 describe('offline Pi native history recovery', () => {
@@ -74,6 +101,71 @@ describe('offline Pi native history recovery', () => {
     expect(turns[2].providerTurnId).toBe('abandoned-user')
     expect(turns[3]).toEqual(linked)
     expect(turns.filter((turn) => turn.errorHint?.includes('单独保留'))).toHaveLength(3)
+  })
+
+  it('keeps one canonical run when steers create extra native user boundaries', () => {
+    const native = nativeHistoryWithSteers()
+    const canonical = restoreTraceArchiveTurn({
+      runId: 'scry-run', providerTurnId: 'u', userText: 'phone message',
+      items: [...native.flatMap((turn) => turn.items), ...acceptedSteers, completedResult],
+      done: true, status: 'completed', ts: 1
+    })
+    expect(native[1].errorHint).toContain('原始图片未恢复')
+    const merged = reconcilePiNativeHistory(native, [canonical])
+    expect(merged).toEqual([canonical])
+    expect(merged[0]).toBe(canonical)
+    expect(merged[0].errorHint).toBeUndefined()
+    expect(merged[0].items.filter((event) => event.text === 'finished')).toHaveLength(1)
+    expect(merged[0].items.filter((event) => event.stage === 'result')).toHaveLength(1)
+    expect(merged[0].items.find((event) => event.stage === 'steer')?.steer?.attachments).toHaveLength(1)
+  })
+
+  it('retains an uncovered continuation even when its prompt repeats an archived steer', () => {
+    const native = nativeHistoryWithSteers()
+    const canonical = { runId: 'scry-run', providerTurnId: 'u', userText: 'phone message',
+      items: [...native.slice(0, 2).flatMap((turn) => turn.items), acceptedSteers[0], completedResult], done: true }
+    expect(reconcilePiNativeHistory(native, [canonical])).toEqual([canonical, native[2]])
+  })
+
+  it('does not hide partial tool evidence, text-only turns, or unanchored archives', () => {
+    const native = nativeHistoryWithSteers()
+    const canonical = { runId: 'scry-run', providerTurnId: 'u', userText: 'phone message',
+      items: [...native.flatMap((turn) => turn.items), ...acceptedSteers, completedResult], done: true }
+    const unfinished = { ...canonical, items: canonical.items.filter((event) => event.stage !== 'result') }
+    expect(reconcilePiNativeHistory(native, [unfinished])).toEqual([unfinished, ...native.slice(1)])
+    const partial = { ...canonical, items: canonical.items.filter((event) =>
+      !(event.toolUseId === 'call2' && event.stage === 'tool_result')) }
+    expect(reconcilePiNativeHistory(native, [partial])).toEqual([partial, native[1]])
+    const textOnly = { ...native[1], items: native[1].items.filter((event) => !event.toolUseId) }
+    expect(reconcilePiNativeHistory([native[0], textOnly], [canonical])).toEqual([canonical, textOnly])
+    const unanchored = reconcilePiNativeHistory(native, [{ ...canonical, providerTurnId: 'off-branch' }])
+    expect(unanchored.slice(0, native.length)).toEqual(native)
+    expect(unanchored.at(-1)?.errorHint).toContain('单独保留')
+  })
+
+  it('preserves native inputs absent from the archive and counts repeated accepted steers only once per message', () => {
+    const native = nativeHistoryWithSteers()
+    const canonical = { runId: 'scry-run', providerTurnId: 'u', userText: 'phone message',
+      items: [...native.flatMap((turn) => turn.items), completedResult], done: true }
+    expect(reconcilePiNativeHistory(native, [canonical])).toEqual([canonical, ...native.slice(1)])
+    const oneInput = { ...canonical, items: [...canonical.items, acceptedSteers[0], acceptedSteers[0]] }
+    expect(reconcilePiNativeHistory(native, [oneInput])).toEqual([oneInput, native[2]])
+    const rejected = { ...canonical, items: [...canonical.items, { ...acceptedSteers[0],
+      steer: { ...acceptedSteers[0].steer!, status: 'rejected' as const } }] }
+    expect(reconcilePiNativeHistory(native, [rejected])).toEqual([rejected, ...native.slice(1)])
+    const otherInput = { ...canonical, items: [...canonical.items, { ...acceptedSteers[0],
+      steer: { ...acceptedSteers[0].steer!, prompt: 'different input' } }] }
+    expect(reconcilePiNativeHistory(native, [otherInput])).toEqual([otherInput, ...native.slice(1)])
+  })
+
+  it('does not use another archive or a later anchor to absorb a native turn', () => {
+    const native = nativeHistoryWithSteers()
+    const first = { runId: 'first', providerTurnId: 'u', userText: 'phone message', items: native[0].items, done: true }
+    const later = { runId: 'later', providerTurnId: 'u3', userText: 'phone message',
+      items: native.slice(1).flatMap((turn) => turn.items), done: true }
+    expect(reconcilePiNativeHistory(native, [first, later])).toEqual([first, native[1], later])
+    const firstWithSteer = { ...first, items: [...native.slice(0, 2).flatMap((turn) => turn.items), acceptedSteers[0], completedResult] }
+    expect(reconcilePiNativeHistory(native, [firstWithSteer, later])).toEqual([firstWithSteer, native[1], later])
   })
 
   it('follows current leaf ancestry instead of showing abandoned branch messages', () => {
