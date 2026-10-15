@@ -35,6 +35,18 @@ describe('conversation right workbenches', () => {
     try { expect(restoreSurfaces()).toEqual(scopes) } finally { vi.unstubAllGlobals() }
   })
 
+  it('restores remote workbenches without reading the local storage namespace', () => {
+    const local = new Map([['local', surface('local-surface')]])
+    const remote = new Map([['remote', surface('remote-surface')]])
+    const getItem = vi.fn((key: string) => JSON.stringify([...(key === 'remote-workbenches' ? remote : local)]))
+    vi.stubGlobal('window', { sessionStorage: { getItem } })
+    try {
+      expect(restoreSurfaces('remote-workbenches')).toEqual(remote)
+      expect(getItem).toHaveBeenLastCalledWith('remote-workbenches')
+      expect(restoreSurfaces()).toEqual(local)
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('shows the actual exit code when node-pty reports signal zero', () => {
     expect(exitText({ id: 't', code: 1, signal: 0 })).toBe('Shell 已退出 · code 1')
     expect(exitText({ id: 't', code: 0, signal: null })).toBe('Shell 已退出 · code 0')

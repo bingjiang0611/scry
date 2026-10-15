@@ -32,9 +32,9 @@ export function migrateRightSurfaces(
   return next
 }
 
-export function restoreSurfaces(): ReadonlyMap<string, SessionRightSurface> {
+export function restoreSurfaces(storageKey = STORAGE_KEY): ReadonlyMap<string, SessionRightSurface> {
   try {
-    const rows: unknown = JSON.parse(window.sessionStorage.getItem(STORAGE_KEY) ?? '[]')
+    const rows: unknown = JSON.parse(window.sessionStorage.getItem(storageKey) ?? '[]')
     if (!Array.isArray(rows)) return new Map()
     return new Map(rows.filter((row): row is [string, SessionRightSurface] => {
       if (!Array.isArray(row) || row.length !== 2 || typeof row[0] !== 'string') return false
@@ -51,8 +51,8 @@ export function restoreSurfaces(): ReadonlyMap<string, SessionRightSurface> {
   }
 }
 
-export function useSessionRightSurfaces(key: string, cwd: string | null) {
-  const [surfaces, setSurfaces] = useState(restoreSurfaces)
+export function useSessionRightSurfaces(key: string, cwd: string | null, storageKey = STORAGE_KEY) {
+  const [surfaces, setSurfaces] = useState(() => restoreSurfaces(storageKey))
   const owner = useMemo<SessionRightSurface>(() => surfaces.get(key) ?? {
     id: crypto.randomUUID(), cwd, state: createRightSurfaceState({ visible: false })
   }, [surfaces, key, cwd])
@@ -76,9 +76,9 @@ export function useSessionRightSurfaces(key: string, cwd: string | null) {
     setSurfaces((previous) => migrateRightSurfaces(previous, from, to))
   }, [])
   useEffect(() => {
-    try { window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...surfaces])) } catch {
+    try { window.sessionStorage.setItem(storageKey, JSON.stringify([...surfaces])) } catch {
       // Navigation still works in memory; storage failure cannot terminate shells.
     }
-  }, [surfaces])
+  }, [surfaces, storageKey])
   return { current, choices, selectedIndex, selectNext, surfaces: [...surfaces.values()], dispatch, migrate }
 }

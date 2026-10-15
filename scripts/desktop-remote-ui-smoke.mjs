@@ -14,6 +14,7 @@ const negativeMachineControl = process.argv.includes('--negative-machine-control
 const negativeAddressControl = process.argv.includes('--negative-address-control')
 const negativeHoverControl = process.argv.includes('--negative-hover-control')
 const negativeActivityControl = process.argv.includes('--negative-activity-control')
+const negativeWorkspaceControl = process.argv.includes('--negative-workspace-control')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -36,6 +37,7 @@ const firstScryRun = 'remote-run-fixture-1'
 const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [],
+  fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
@@ -161,8 +163,21 @@ const api = {
   },
   async stop(_id, runId) { state.stopCalls.push(runId) },
   async answer(_id, runId, response) { state.answerCalls.push({ runId, response }); state.answerFailure = true; throw new Error('remote answer rejected') },
-  async files() { return { entries: [], truncated: false } },
-  async file() { throw new Error('no files in fixture') }
+  async files(id, context, path = '', cursor) {
+    state.fileLists.push({ id, context, path, cursor })
+    const entry = (name, kind, parent = '') => ({ name, kind, path: parent ? parent + '/' + name : name, mtimeMs: 1 })
+    return path === 'src'
+      ? { entries: [entry('nested.txt', 'file', 'src')], truncated: false }
+      : cursor ? { entries: [entry('image.png', 'file'), entry('small.md', 'file')], truncated: false }
+      : { entries: [entry('src', 'directory'), entry('README.md', 'file')], truncated: true, nextCursor: 'remote-next' }
+  },
+  async file(id, context, path, offset = 0, snapshot) {
+    state.fileReads.push({ id, context, path, offset, snapshot })
+    if (path === 'image.png') throw new Error('SCRY_FILE_PREVIEW_UNSUPPORTED')
+    if (path === 'small.md') return { name: path, path, content: '# Remote markdown', offset: 0, nextOffset: 17, totalBytes: 17, hasMore: false, snapshot: 'small-snapshot', language: 'markdown' }
+    return { name: path.split('/').pop(), path, content: offset ? 'second remote page' : 'first remote page',
+      offset, nextOffset: offset ? 34 : 17, totalBytes: 34, hasMore: !offset, snapshot: 'remote-snapshot', language: 'text' }
+  }
 }
 const noopSubscribe = () => () => {}
 window.scry = {
@@ -187,6 +202,9 @@ window.scry = {
   async remoteDesktopHostStatus() { return state.hostEnabled ? { enabled: true, pairPort: 10001, runPort: 10002 } : { enabled: false } },
   async remoteDesktopHostInvite() { state.hostInviteCalls++; state.hostEnabled = true; return 'scry-desktop1:fixture' },
   async remoteDesktopHostDisable() { state.hostDisableCalls++; state.hostEnabled = false }
+}
+for (const method of ['workspaceList', 'workspaceRead', 'workspaceReadKnown', 'workspaceReadPage', 'workspaceReadPageKnown', 'workspaceOpenExternal', 'workspaceOpenKnownExternal', 'workspaceWrite', 'workspaceCreate', 'workspaceRename', 'workspaceMove', 'workspaceTrash']) {
+  window.scry[method] = async () => { state.localWorkspaceCalls.push(method); throw new Error('Local workspace must not be reached: ' + method) }
 }
 window.desktopRemoteFixture = state
 window.refreshFixtureCatalog = () => refreshRemoteCatalog(connection.id)
@@ -215,8 +233,8 @@ async function exercise(contents, capture) {
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
-  const pointFor = async (selector) => read(`(() => {
-    const node = document.querySelector(${JSON.stringify(selector)})
+  const pointFor = async (selector, text) => read(`(() => {
+    const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node => ${JSON.stringify(text ?? '')} === '' || node.textContent.includes(${JSON.stringify(text ?? '')}))
     if (!node) throw new Error('Missing control: ' + ${JSON.stringify(selector)})
     node.scrollIntoView({ block: 'center', inline: 'nearest' })
     const rect = node.getBoundingClientRect()
@@ -225,8 +243,8 @@ async function exercise(contents, capture) {
     return point
   })()`)
   const send = (method, params) => contents.debugger.sendCommand(method, params)
-  const click = async (selector) => {
-    const point = await pointFor(selector)
+  const click = async (selector, text) => {
+    const point = await pointFor(selector, text)
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y })
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 })
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
@@ -293,7 +311,70 @@ async function exercise(contents, capture) {
   await wait(`document.querySelector(${JSON.stringify(projectAHead)}) != null`, 'remote project restored after search')
   check(await read(`document.querySelector(${JSON.stringify(projectAHead)}).getAttribute('aria-expanded') === 'false'`), 'Search reset remote project collapse state')
   await click(projectAHead)
+  // Remote workbenches must use the production shell, not an overlay drawer.
+  await click('[data-remote-session="old-native"]')
+  await wait(remoteShown, 'remote history selected for workspace checks')
+  await click('button[aria-label="右侧工作区"]')
+  const remotePanel = '#remote-right-surface-pane'
+  await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('纵览')`, 'remote uses normal overview tab')
+  const addSurface = async (label) => {
+    await click(remotePanel + ' button[aria-label="添加 Surface"]')
+    await click(remotePanel + ' [role=menuitem]', label)
+  }
+  await addSurface('文件')
+  await wait(`document.querySelector('${remotePanel} [data-workspace-path="README.md"]') != null`, 'remote shared file tree loaded')
+  check(!(await read('document.querySelector(".remote-files-drawer")')), 'Remote still uses its separate overlay drawer')
+  check(await read(`(() => { const chat = document.querySelector('.main-area').getBoundingClientRect(); const panel = document.querySelector('${remotePanel}').getBoundingClientRect(); return panel.width > 0 && chat.right <= panel.left })()`), 'Remote panel overlaps the conversation instead of sharing normal columns')
+  check(!(await read(`document.querySelector('${remotePanel} button[title="新建文件"]')`)), 'Remote read-only tree exposes local file creation')
+  await click(remotePanel + ' [data-workspace-path="src"]')
+  await wait(`document.querySelector('${remotePanel} [data-workspace-path="src/nested.txt"]') != null`, 'nested remote tree expansion')
+  await click(remotePanel + ' .workspace-load-more')
+  await wait(`document.querySelector('${remotePanel} [data-workspace-path="image.png"]') != null`, 'remote directory cursor pagination')
+  await click(remotePanel + ' [data-workspace-path="README.md"]')
+  await wait(`document.querySelector('${remotePanel} textarea')?.value === 'first remote page'`, 'remote file preview')
+  check(await read(`document.querySelector('${remotePanel} textarea').readOnly`), 'Remote file editor is writable')
+  await click(remotePanel + ' .workspace-editorbar button', '下一页')
+  await wait(`document.querySelector('${remotePanel} textarea')?.value === 'second remote page'`, 'remote snapshot file pagination')
+  check((await fixture()).fileReads.at(-1).snapshot === 'remote-snapshot', 'Remote file pagination lost its revision snapshot')
+  await capture('remote-shared-workbench')
+  await click(remotePanel + ' button[title="返回文件树"]')
+  await click(remotePanel + ' [data-workspace-path="image.png"]')
+  await wait(`document.querySelector('${remotePanel} [role=alert]')?.textContent.includes('SCRY_FILE_PREVIEW_UNSUPPORTED')`, 'unsupported remote preview stays remote')
+  await click(remotePanel + ' button[title="返回文件树"]')
+  await click(remotePanel + ' [data-workspace-path="small.md"]')
+  await wait(`document.querySelector('${remotePanel} .workspace-preview h1')?.textContent === 'Remote markdown'`, 'remote small Markdown uses the shared preview')
+  await click(remotePanel + ' .workspace-editorbar button', '展开源码')
+  check(await read(`document.querySelector('${remotePanel} textarea').readOnly && !document.querySelector('${remotePanel} .workspace-editorbar .primary')`), 'Remote Markdown exposes a local save action')
+  await click(remotePanel + ' button[title="返回文件树"]')
+  await click(remotePanel + ' [data-workspace-path="README.md"]')
+  await wait(`document.querySelector('${remotePanel} textarea')?.value === 'first remote page'`, 'remote file reopened')
+  const widthBefore = await read('document.querySelector(\'[aria-controls="remote-right-surface-pane"][role=separator]\').getAttribute("aria-valuenow")')
+  const splitterPoint = await pointFor('[aria-controls="remote-right-surface-pane"][role=separator]')
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...splitterPoint, button: 'left', clickCount: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: splitterPoint.x - 30, y: splitterPoint.y, buttons: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: splitterPoint.x - 30, y: splitterPoint.y, button: 'left', clickCount: 1 })
+  await wait(`document.querySelector('[aria-controls="remote-right-surface-pane"][role=separator]').getAttribute('aria-valuenow') !== ${JSON.stringify(widthBefore)}`, 'remote uses normal pointer panel resizing')
+  await addSurface('终端')
+  await wait(`document.querySelector('${remotePanel} .surface-unavailable')?.textContent.includes('不会改用本机工作区')`, 'unsupported remote terminal is explicit')
+  await click(remotePanel + ' button[aria-label="关闭 终端"]')
+  await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('文件')`, 'closing remote tab selects its neighbour')
+  await click(remotePanel + ' button[aria-label="最大化右侧工作区"]')
+  await wait('document.querySelector(".app").classList.contains("right-panel-maximized")', 'remote panel maximizes in normal shell')
+  await click(remotePanel + ' button[aria-label="恢复右侧工作区"]')
+  await wait('!document.querySelector(".app").classList.contains("right-panel-maximized")', 'remote panel restores')
+  await click('[data-remote-session="other-native"]')
+  await wait('document.querySelector(".app").classList.contains("right-panel-hidden")', 'other remote session has independent panel visibility')
+  await click('[data-remote-session="old-native"]')
+  await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('文件') && !document.querySelector('.app').classList.contains('right-panel-hidden')`, 'remote session restores its own tabs')
+  check((await fixture()).fileLists.every(call => call.id === 'fixture-connection' && call.context.cwd === '/fixture/project-a'), 'Remote tree read escaped its host/workspace')
+  check((await fixture()).localWorkspaceCalls.length === 0, 'Remote workbench called a local workspace API')
+  await click('.sb-new')
+  await click('.location-button')
+  await click('[data-machine-id="local"]')
+  await click('.location-projects .mitem', '不绑定项目')
+  await wait('document.querySelector(".execution-location.is-remote") == null', 'returned to local composer')
   const localBefore = (await fixture()).localNewSessions
+  const historyBeforeNewDraft = (await fixture()).historyCalls.length
   await click('textarea[aria-label="描述任务"]')
   await insert('carried draft')
   await click('.location-button')
@@ -387,7 +468,7 @@ async function exercise(contents, capture) {
   check(await read('document.querySelector(".execution-location.is-remote").textContent === "Fixture desktop"'), 'Topbar did not name the remote machine')
   check(await read(`${composerValue} === "carried draft"`), 'Location switch dropped the unsent draft')
   check((await fixture()).localNewSessions === localBefore, 'Remote location called local newSession')
-  check((await fixture()).historyCalls.length === 0, 'New remote draft queried history before a session existed')
+  check((await fixture()).historyCalls.length === historyBeforeNewDraft, 'New remote draft queried history before a session existed')
 
   await wait('document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Default · Fixture desktop"', 'host-named default permission')
   await click('.permission-mode-trigger')
@@ -627,6 +708,7 @@ async function exercise(contents, capture) {
     reconnectPreservesDraft: true,
     staleDispatchNoticeCleared: true,
     dispatchNoticeLifecycle: { unacknowledged: true, recorded: true, unknown: true, dispatchedBeforeTrace: true, resumedTurn: true, stopAcknowledgement: true, pollErrorRecovery: true, terminalHistoryRefresh: true, actionErrorPreserved: true },
+    remoteWorkbench: { sharedTabsAndColumns: true, resize: true, maximizeRestore: true, sessionScopedTabs: true, treePagination: true, snapshotFilePagination: true, markdownPreview: true, unsupportedPreviewNeverLocal: true, unavailableTerminal: true },
     remoteSidebarActivity: { backgroundStartStop: true, sharedSpinner: true, recentProjectOrder: true, localPinsPreserved: true, staleReadNotLive: true, collapseSurvivesSearch: true },
     hostEnableInviteDisable: true,
     providerProfileIdentity: true,
@@ -652,7 +734,10 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeWorkspaceControl && id.endsWith('/DesktopRemote.tsx')) {
+        return source.replace('api.file(connectionId, context, path, offset, snapshot)', 'window.scry.workspaceReadPage({ cwd: context.cwd, path, offset, snapshot })')
+      }
       if (negativeActivityControl && id.endsWith('/useRemoteCatalogs.ts')) {
         const poll = 'const timer = window.setInterval(refresh, 3000)'
         if (!source.includes(poll)) throw new Error('activity polling control not found')

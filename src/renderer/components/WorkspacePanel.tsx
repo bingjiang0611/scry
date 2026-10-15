@@ -27,6 +27,8 @@ export interface WorkspaceOpenRequest {
   path: string
 }
 
+export type ReadOnlyWorkspaceSource = Pick<typeof window.scry, 'workspaceList' | 'workspaceReadPage'>
+
 interface WorkspacePanelProps {
   cwd: string
   active?: boolean
@@ -35,6 +37,7 @@ interface WorkspacePanelProps {
   onClose: () => void
   onAddReference: (entry: WorkspaceEntry) => void
   onDirtyChange?: (dirty: boolean) => void
+  readOnlySource?: ReadOnlyWorkspaceSource
 }
 
 type ItemDialog =
@@ -42,7 +45,7 @@ type ItemDialog =
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
-export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange }: WorkspacePanelProps) {
+export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource }: WorkspacePanelProps) {
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -67,7 +70,8 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       setLoading((current) => new Set(current).add(path))
       setError(null)
       try {
-        const result = await window.scry.workspaceList({ cwd, path, ...(cursor ? { cursor } : {}) })
+        const list = readOnlySource?.workspaceList ?? window.scry.workspaceList
+        const result = await list({ cwd, path, ...(cursor ? { cursor } : {}) })
         if (loadSequence.current.get(path) !== sequence) return
         setChildren((current) => ({
           ...current,
@@ -87,7 +91,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         }
       }
     },
-    [cwd]
+    [cwd, readOnlySource]
   )
 
   const refresh = useCallback((): void => {
@@ -144,7 +148,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const openFile = (entry: WorkspaceEntry): void => {
     if (entry.kind !== 'file') return
     setContext(null)
-    if (canOpenWorkspaceFileExternally(entry.path)) {
+    if (!readOnlySource && canOpenWorkspaceFileExternally(entry.path)) {
       setError(null)
       void window.scry.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError)))
       return
@@ -261,7 +265,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
               onClick={() => (entry.kind === 'directory' ? void toggleDirectory(entry) : openFile(entry))}
               onContextMenu={(event) => openContext(event, entry)}
               onKeyDown={(event) => {
-                if (event.key === 'F2') {
+                if (!readOnlySource && event.key === 'F2') {
                   event.preventDefault()
                   setItemDialog({ kind: 'rename', entry, value: entry.name })
                 }
@@ -299,6 +303,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const openContext = (event: MouseEvent, entry?: WorkspaceEntry): void => {
     event.preventDefault()
     event.stopPropagation()
+    if (readOnlySource) return
     setContext({
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - 200)),
       y: Math.max(8, Math.min(event.clientY, window.innerHeight - 260)),
@@ -312,7 +317,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   }
 
   const selectedCwd = selected && openRequest?.path === selected.path ? openRequest.cwd : cwd
-  const selectedReadOnly = selectedCwd !== cwd
+  const selectedReadOnly = Boolean(readOnlySource) || selectedCwd !== cwd
 
   return (
     <section className="workspace-panel" aria-label="工作区文件">
@@ -332,9 +337,9 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         </div>
         {!selected && (
           <>
-            <button type="button" className="iconbtn" onClick={() => startCreate('file')} title="新建文件">
+            {!readOnlySource && <button type="button" className="iconbtn" onClick={() => startCreate('file')} title="新建文件">
               <Icon name="plus" />
-            </button>
+            </button>}
             <button type="button" className="iconbtn" onClick={refresh} title="刷新文件树">
               <Icon name="refresh" />
             </button>
@@ -361,6 +366,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
           entry={selected}
           refreshKey={active ? refreshKey : handledRefreshKey.current}
           readOnly={selectedReadOnly}
+          readPage={readOnlySource?.workspaceReadPage}
           onDirtyChange={setDirty}
           onError={setError}
         />
@@ -568,6 +574,7 @@ function FileEditor({
   entry,
   refreshKey,
   readOnly,
+  readPage,
   onDirtyChange,
   onError
 }: {
@@ -575,6 +582,7 @@ function FileEditor({
   entry: WorkspaceEntry
   refreshKey: number
   readOnly: boolean
+  readPage?: ReadOnlyWorkspaceSource['workspaceReadPage']
   onDirtyChange: (dirty: boolean) => void
   onError: (error: string | null) => void
 }) {
@@ -598,6 +606,15 @@ function FileEditor({
     setExternallyOpened(false)
     onError(null)
     try {
+      if (readPage) {
+        const first = await readPage({ cwd, path: entry.path, offset: 0 })
+        if (loadSequence.current !== sequence) return
+        setSnapshot(null)
+        setPage(first)
+        setPageBack([])
+        setContent(first.content)
+        return
+      }
       const read = readOnly ? window.scry.workspaceReadKnown : window.scry.workspaceRead
       const next = await read({ cwd, path: entry.path })
       if (loadSequence.current !== sequence) return
@@ -607,7 +624,9 @@ function FileEditor({
       setContent(next.content)
     } catch (loadError) {
       if (loadSequence.current !== sequence) return
-      if (errorMessage(loadError).includes(WORKSPACE_FILE_PREVIEW_UNSUPPORTED)) {
+      if (readPage) {
+        onError(errorMessage(loadError))
+      } else if (errorMessage(loadError).includes(WORKSPACE_FILE_PREVIEW_UNSUPPORTED)) {
         try {
           const open = readOnly ? window.scry.workspaceOpenKnownExternal : window.scry.workspaceOpenExternal
           const opened = await open({ cwd, path: entry.path })
@@ -642,7 +661,7 @@ function FileEditor({
     } finally {
       if (loadSequence.current === sequence) setLoading(false)
     }
-  }, [cwd, entry.path, onError, readOnly])
+  }, [cwd, entry.path, onError, readOnly, readPage])
 
   useEffect(() => {
     void load()
@@ -692,8 +711,8 @@ function FileEditor({
     setLoading(true)
     onError(null)
     try {
-      const readPage = readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage
-      const next = await readPage({ cwd, path: entry.path, offset, snapshot: page.snapshot })
+      const read = readPage ?? (readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage)
+      const next = await read({ cwd, path: entry.path, offset, snapshot: page.snapshot })
       setPage(next)
       setPageBack(back)
       setContent(next.content)
@@ -702,13 +721,13 @@ function FileEditor({
     } finally {
       setLoading(false)
     }
-  }, [cwd, entry.path, loading, onError, page, readOnly])
+  }, [cwd, entry.path, loading, onError, page, readOnly, readPage])
 
   const markdown = /\.(md|mdx)$/i.test(entry.name)
   if (loading && !snapshot && !page) return <div className="workspace-empty">读取文件…</div>
   if (externallyOpened) return <div className="workspace-empty">已使用系统默认应用打开 {entry.name}</div>
   if (!snapshot && !page) return <div className="workspace-empty">文件无法打开</div>
-  if (page) {
+  if (page && (!readPage || page.hasMore || page.offset > 0)) {
     const start = page.totalBytes === 0 ? 0 : page.offset + 1
     return (
       <div className="workspace-editor">
@@ -735,7 +754,7 @@ function FileEditor({
   return (
     <div className={`workspace-editor ${markdown ? 'markdown' : ''} ${sourceExpanded ? 'source-expanded' : ''}`}>
       <div className="workspace-editorbar">
-        <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round(snapshot!.size / 1024 * 10) / 10} KiB</span>
+        <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round((snapshot?.size ?? page!.totalBytes) / 1024 * 10) / 10} KiB</span>
         {markdown && (
           <button
             type="button"

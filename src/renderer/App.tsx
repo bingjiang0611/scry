@@ -1013,9 +1013,19 @@ export function App() {
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const [view, setView] = useState<AppView>('chat')
   const [remoteTarget, setRemoteTarget] = useState<RemoteTarget | null>(null)
-  // Native session id adopted by a new remote draft after its first run; sidebar highlight only.
+  // Native session id adopted after the first run; keeps sidebar and workbench ownership aligned.
   const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
-  const [remoteFilesOpen, setRemoteFilesOpen] = useState(false)
+  const remoteSurfaceKey = remoteTarget
+    ? remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, remoteAdoptedSession)
+    : 'remote:none'
+  const remoteSurfaces = useSessionRightSurfaces(remoteSurfaceKey, remoteTarget?.cwd ?? null, 'scry.remote-session-right-surfaces.v1')
+  const remoteSurface = remoteSurfaces.current.state
+  const [remoteSurfaceTarget, setRemoteSurfaceTarget] = useState<HTMLDivElement | null>(null)
+  const remotePanelVisible = view === 'remote' && remoteSurface.visible && !surfacePane.collapsed
+  const dispatchRemoteSurface = (action: RightSurfaceAction): void => {
+    if (action.type === 'open' || action.type === 'show') surfacePane.restore()
+    remoteSurfaces.dispatch(action)
+  }
   const desktopConnections = useDesktopConnections()
   useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -2000,6 +2010,9 @@ export function App() {
     ? rightSurfaces.surfaces : [...rightSurfaces.surfaces, currentSurface]
   const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen || rightSurfaces.surfaces.length > 0
   const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
+  const shellPanelMounted = rightPanelMounted || view === 'remote'
+  const shellPanelVisible = view === 'remote' ? remotePanelVisible : panelVisible
+  const shellPanelMaximized = shellPanelVisible && (view === 'remote' ? remoteSurface.maximized : rightSurface.maximized)
   const pinnedSummary = usePinnedSummaryVisibility(view === 'chat', panelVisible)
   const summaryPersistent = pinnedSummary.persistent
   const summaryVisible = pinnedSummary.visible
@@ -2052,7 +2065,6 @@ export function App() {
     closeOverlays()
     setRemoteTarget((current) => ({ connectionId, cwd: remoteCwd, session: remoteSession, generation: (current?.generation ?? 0) + 1 }))
     setRemoteAdoptedSession(remoteSession?.externalSessionId)
-    setRemoteFilesOpen(false)
     changeView('remote')
   }
   // Switching the location of an unsent new draft carries its text along; an
@@ -2382,7 +2394,7 @@ export function App() {
 
   return (
     <div
-      className={`app app-shell${rightPanelMounted ? ` has-right-panel right-panel-surface${panelVisible && rightSurface.maximized ? ' right-panel-maximized' : ''}${!panelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
+      className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`}
       style={appStyle}
     >
       <Sidebar
@@ -2431,9 +2443,13 @@ export function App() {
             scrollRef={scrollRef}
             textareaRef={taRef}
             renderLocationPicker={renderLocationPicker({ machineId: remoteTarget.connectionId, cwd: remoteTarget.cwd })}
-            onSessionAdopted={setRemoteAdoptedSession}
-            filesOpen={remoteFilesOpen}
-            onToggleFiles={() => setRemoteFilesOpen((open) => !open)}
+            onSessionAdopted={(externalSessionId) => {
+              remoteSurfaces.migrate(remoteSurfaceKey, remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, externalSessionId))
+              setRemoteAdoptedSession(externalSessionId)
+            }}
+            showPanel={remotePanelVisible}
+            onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
+            surface={{ target: remoteSurfaceTarget, state: remoteSurface, onAction: dispatchRemoteSurface }}
           />
         ) : view === 'analytics' ? (
           <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
@@ -2565,6 +2581,16 @@ export function App() {
         />
         </>
       </div>
+      {view === 'remote' && (
+        <>
+          {remotePanelVisible && !remoteSurface.maximized && (
+            <PaneSplitter className="panel-resizer" label="调整右侧面板宽度" controls="remote-right-surface-pane"
+              min={PANEL_MIN} max={PANEL_MAX} value={surfacePane.width} collapsed={surfacePane.collapsed}
+              active={surfacePane.resizing} onPointerDown={surfacePane.startResize} onKeyDown={surfacePane.onKeyDown} />
+          )}
+          <div className="right-panel-slot" id="remote-right-surface-pane" ref={setRemoteSurfaceTarget} />
+        </>
+      )}
       {rightPanelMounted && (
         <>
           {panelVisible && !rightSurface.maximized && (
@@ -2581,7 +2607,7 @@ export function App() {
             onKeyDown={surfacePane.onKeyDown}
             />
           )}
-          <div className="right-panel-slot" id="right-surface-pane">
+          <div className="right-panel-slot" id="right-surface-pane" style={view === 'remote' ? { display: 'none' } : undefined}>
             {mountedSurfaces.map((surface) => (
             <div key={surface.id} data-session-surface-current={surface.id === currentSurface.id} style={{ display: surface.id === currentSurface.id ? 'contents' : 'none' }}>
             <RightSurfacePanel
@@ -2717,24 +2743,23 @@ export function App() {
 function RemoteView({
   target,
   connections,
-  filesOpen,
-  onToggleFiles,
+  showPanel,
+  onTogglePanel,
   ...chat
 }: {
   target: RemoteTarget
   connections: ReturnType<typeof useDesktopConnections>
-  filesOpen: boolean
-  onToggleFiles: () => void
-} & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session' | 'onCloseFiles'>) {
+  showPanel: boolean
+  onTogglePanel: () => void
+} & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session'>) {
   const connection = connections.connections.find((item) => item.id === target.connectionId)
   return (
     <>
       <ViewChrome
         cwd={target.cwd}
         showSummary={false}
-        showPanel={filesOpen}
-        onTogglePanel={onToggleFiles}
-        panelLabel="只读文件"
+        showPanel={showPanel}
+        onTogglePanel={onTogglePanel}
         machine={{
           label: connection?.label ?? '远程主机不可用',
           remote: true,
@@ -2746,8 +2771,6 @@ function RemoteView({
         connectionId={target.connectionId}
         cwd={target.cwd}
         session={target.session}
-        filesOpen={filesOpen}
-        onCloseFiles={onToggleFiles}
         {...chat}
       />
     </>
