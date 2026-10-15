@@ -28,6 +28,7 @@ function Fixture() {
 }
 const assert = (ok: unknown, message: string): void => { if (!ok) throw new Error(message) }
 const wait = async (check: () => boolean, label = check.toString()): Promise<void> => {
+  console.log('Interaction condition:', label)
   const deadline = performance.now() + 4000
   while (!check()) {
     if (performance.now() > deadline) throw new Error(`UI condition timed out: ${label}`)

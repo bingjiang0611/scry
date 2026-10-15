@@ -126,6 +126,13 @@ export class CodexAppServerClient {
     child.stderr.on('data', (chunk) => {
       stderr = (stderr + String(chunk)).slice(-8_000)
     })
+    child.stdin.on('error', (error) => {
+      if (this.process !== child || this.processGeneration !== generation) return
+      // Writable errors are emitted separately from write callbacks. Reject the
+      // generation and close its owned process even if the child is still alive.
+      this.failGeneration(child, generation, error)
+      void this.stopGeneration(child, generation)
+    })
     createInterface({ input: child.stdout }).on('line', (line) => this.handleLine(line, generation))
     child.once('error', (error) => this.failGeneration(child, generation, error))
     child.once('exit', (code, signal) => {
