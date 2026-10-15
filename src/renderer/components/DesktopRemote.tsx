@@ -56,7 +56,7 @@ export function bridge(): DesktopRemoteAPI {
   return (window.scry as unknown as { desktopRemote: DesktopRemoteAPI }).desktopRemote
 }
 
-function errorText(error: unknown): string {
+export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 

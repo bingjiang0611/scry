@@ -4,6 +4,21 @@ import type { LoadedSessionTurn } from './session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from './workspace'
 
 export interface RemoteProjectRef { path: string; label: string }
+export interface DesktopDirectoryPage {
+  current: RemoteProjectRef
+  parent?: RemoteProjectRef
+  directories: RemoteProjectRef[]
+  cursor: number
+  total: number
+  hasMore: boolean
+  snapshot: string
+}
+export type DesktopDirectoryQuery =
+  | { action: 'list'; path?: string; cursor?: number; snapshot?: string }
+  | { action: 'select'; path: string }
+export type DesktopDirectoryResult =
+  | { action: 'list'; page: DesktopDirectoryPage }
+  | { action: 'select'; project: RemoteProjectRef }
 export interface RemoteControlOption { id: string; label: string; description?: string; isDefault?: boolean }
 export interface RemoteModelOption {
   id: string
@@ -77,6 +92,8 @@ export interface DesktopRemoteCatalog {
   sessions: RemoteSessionRef[]
   // A cached Provider picker is not a current authentication/capability proof.
   providerEvidence: 'host_snapshot'
+  // Absent on older hosts; never imply that arbitrary directory selection works.
+  directorySelection?: true
 }
 export interface DesktopRemoteHistory {
   turns: LoadedSessionTurn[]
@@ -92,7 +109,7 @@ export type DesktopHostRead =
   | { kind: 'history'; context: DesktopRemoteContext; before?: number; snapshot?: string }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical' }
+  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'trace'; run: ActiveRun | null }
 
@@ -129,6 +146,8 @@ export interface DesktopRemoteAPI {
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
   catalog(connectionId: string): Promise<DesktopRemoteCatalog>
+  directories(connectionId: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage>
+  selectDirectory(connectionId: string, path: string): Promise<RemoteProjectRef>
   history(connectionId: string, context: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory>
   trace(connectionId: string, context: DesktopRemoteContext, runId: string): Promise<ActiveRun | null>
   intents(connectionId: string): Promise<DesktopRemoteIntent[]>

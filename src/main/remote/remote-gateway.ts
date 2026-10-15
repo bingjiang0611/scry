@@ -31,9 +31,9 @@ export interface DeviceAuthorizer {
 }
 
 // One host-authorized project directory the device may target. `path` is a
-// canonical directory already authorized locally through Scry's directory
-// picker; `label` is a display-only basename. The device can never authorize a
-// new directory - it only chooses among these, and the workspace authorizer
+// canonical directory granted through the local or explicit authenticated
+// desktop picker; `label` is a display-only basename. Reading this catalog or
+// the project-scoped browser never creates a grant. The workspace authorizer
 // re-checks the cwd on submit regardless.
 export interface RemoteProjectSource {
   // Snapshot of the currently host-authorized project directories. Called per

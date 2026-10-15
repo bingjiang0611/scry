@@ -2,7 +2,7 @@ import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import type {
-  DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
+  DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
   DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopSshTarget, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
@@ -300,7 +300,25 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       cursor = response.cursor as number; snapshot = response.snapshot as string
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
-    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot' }
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...(info.directorySelection === true ? { directorySelection: true as const } : {}) }
+  }
+
+  async directories(connectionIdValue: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage> {
+    if (path !== undefined && !text(path, 4096) || cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0) || snapshot !== undefined && !HASH.test(snapshot) || Number(cursor) > 0 && snapshot === undefined) fail('invalid_directory_request')
+    const result = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'desktopDirectory', query: { action: 'list', ...(path === undefined ? {} : { path }), ...(cursor === undefined ? {} : { cursor }), ...(snapshot === undefined ? {} : { snapshot }) } }, 'directory')
+    if (!record(result)) fail('invalid_directory_response')
+    const page = result.page
+    if (result.action !== 'list' || !record(page) || !Array.isArray(page.directories) || page.directories.length > 100 || !Number.isSafeInteger(page.cursor) || !Number.isSafeInteger(page.total) || Number(page.cursor) < 0 || Number(page.total) < Number(page.cursor) || Number(page.total) > MAX_ITEMS || typeof page.hasMore !== 'boolean' || typeof page.snapshot !== 'string' || !HASH.test(page.snapshot)) fail('invalid_directory_response')
+    if (page.hasMore !== (Number(page.cursor) < Number(page.total)) || Number(page.cursor) !== (cursor ?? 0) + page.directories.length || snapshot !== undefined && snapshot !== page.snapshot) fail('invalid_directory_response')
+    return { current: this.#project(page.current), ...(page.parent === undefined ? {} : { parent: this.#project(page.parent) }), directories: page.directories.map(item => this.#project(item)), cursor: page.cursor as number, total: page.total as number, hasMore: page.hasMore, snapshot: page.snapshot }
+  }
+
+  async selectDirectory(connectionIdValue: string, path: string): Promise<RemoteProjectRef> {
+    if (!text(path, 4096)) fail('invalid_directory_path')
+    const result = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'desktopDirectory', query: { action: 'select', path } }, 'directory')
+    if (!record(result) || result.action !== 'select') fail('invalid_directory_response')
+    return this.#project(result.project)
   }
 
   async history(connectionIdValue: string, value: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory> {

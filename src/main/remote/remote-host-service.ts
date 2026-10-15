@@ -30,6 +30,7 @@ import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatu
 
 export interface RemoteHostServiceDependencies {
   readDesktop?: HostControllerFactoryDependencies['readDesktop']
+  desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']
   // Directory under Scry userData; identity/pairing/ledger subdirs live here.
   stateDirectory: string
   // Maps a device-requested cwd to an already directory-picker-authorized
@@ -117,6 +118,7 @@ export class RemoteHostService {
     const binding = await createHostController({
       stateDirectory: deps.stateDirectory,
       ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
+      ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
       hostId: identity.hostId,
       anchorSHA256: identity.anchorSHA256,
       verifyCSR: identity.verifyCSR,

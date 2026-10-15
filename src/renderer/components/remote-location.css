@@ -63,6 +63,22 @@
 .location-action:disabled { opacity: .55; cursor: default; }
 .location-error { margin: 6px 10px; color: var(--bad); font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
 
+/* Remote directory selection is a host-side grant, never a local folder dialog. */
+.remote-directory-modal { width: min(640px, 92vw); }
+.remote-directory-modal .modal-head { justify-content: space-between; }
+.remote-directory-body { display: grid; gap: 12px; }
+.remote-directory-body > p { margin: 0; }
+.remote-directory-path { display: flex; align-items: flex-end; gap: 8px; }
+.remote-directory-path label { flex: 1; min-width: 0; display: grid; gap: 6px; color: var(--dim); }
+.remote-directory-path input { width: 100%; box-sizing: border-box; border: 1px solid var(--border2); border-radius: 8px; background: var(--panel2); color: var(--fg); padding: 8px 10px; font: 12px var(--font-mono); }
+.remote-directory-path input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.remote-directory-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.remote-directory-navigation > span { margin-left: auto; }
+.remote-directory-list { height: min(240px, 28vh); min-height: 80px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.remote-directory-entry > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-directory-list > p { padding: 8px; }
+.remote-directory-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* Location notice stays visible without a draft (offline host, missing Provider). */
 .composer-notice {
   min-width: 0;

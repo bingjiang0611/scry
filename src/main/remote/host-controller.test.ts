@@ -60,6 +60,42 @@ const routing = (over: Partial<RemoteIntentRouting> = {}): string =>
   JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
 describe('HostController (composition root)', () => {
+  it('only grants an explicitly selected desktop directory to an authorized owner, without starting a run', async () => {
+    const known = new Set([AUTHORIZED])
+    const project = { path: '/new/project', label: 'project' }
+    const list = vi.fn(() => ({ current: project, directories: [], cursor: 0, total: 0, hasMore: false, snapshot: 'a'.repeat(64) }))
+    const select = vi.fn((path: string) => { known.add(path); return project })
+    const runProvider = vi.fn(async () => {})
+    const { controller, deviceId } = await grantedController(runProvider, undefined, {
+      workspace: { authorize: (path) => { if (!known.has(path)) throw new Error('not authorized'); return path } },
+      desktopDirectories: { list, select },
+      readDesktop: async () => ({ kind: 'info', protocol: 1, hostId: 'test', execution: 'canonical' })
+    })
+    expect(() => controller.desktopDirectory('0'.repeat(64), { action: 'select', path: project.path })).toThrow('device_not_authorized')
+    expect(list).not.toHaveBeenCalled()
+    expect(select).not.toHaveBeenCalled()
+    expect(controller.desktopDirectory(CERT, { action: 'list', path: project.path }).action).toBe('list')
+    expect(select).not.toHaveBeenCalled()
+    expect(known.has(project.path)).toBe(false)
+    await expect(controller.readDesktop(CERT, { kind: 'info' })).resolves.toMatchObject({ directorySelection: true })
+    const denied = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ cwd: project.path, prompt: 'not yet authorized' }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: denied.runId })).toBe('failed')
+    expect(runProvider).not.toHaveBeenCalled()
+    expect(controller.desktopDirectory(CERT, { action: 'select', path: project.path })).toEqual({ action: 'select', project })
+    expect(select).toHaveBeenCalledExactlyOnceWith(project.path)
+    expect(runProvider).not.toHaveBeenCalled()
+    const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ cwd: project.path, prompt: 'explicit send' }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(runProvider).toHaveBeenCalledTimes(1)
+    await controller.authority.revoke(deviceId)
+    expect(() => controller.desktopDirectory(CERT, { action: 'list' })).toThrow('device_not_authorized')
+    expect(() => controller.desktopDirectory(CERT, { action: 'select', path: '/other' })).toThrow('device_not_authorized')
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(select).toHaveBeenCalledTimes(1)
+  })
+
   it('runs a routed intent end-to-end through the real modules and reflects settlement', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting; progress(d?: string): void }) => { seen.push(routing) })

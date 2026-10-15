@@ -7,7 +7,7 @@
 1. 在执行端打开「远程访问」，选择「启用并生成 SSH 邀请」。宿主只监听两个 `127.0.0.1` 端口，不开放 LAN 通配监听。
 2. 在客户端侧栏打开「主机」页并选择「添加主机」（「设置 → 远程访问」只提供跳转），填写真实 SSH 主机名/IP、用户名、端口和 `scry-desktop1:` 邀请。
 3. 比较客户端与执行端显示的设备公钥指纹。**必须在执行端的待确认列表批准该指纹**；SSH 登录成功不等于设备获批。
-4. 客户端完成配对并连接主机。新建会话时在 composer 的执行位置选择器里选机器和该机器上的项目，再选 Provider/profile；已有远程会话从侧栏带主机标签的项目进入。项目必须已被执行端 Scry 识别；不会上传本地仓库或凭据。
+4. 客户端完成配对并连接主机。新建会话时在 composer 的执行位置选择器里选机器和该机器上的项目，再选 Provider/profile；已有远程会话从侧栏带主机标签的项目进入。默认列出执行端已识别的项目；支持目录选择的新版本还可点「选择其他目录…」，浏览或输入远程路径并明确授权。不会上传本地仓库或凭据。
 5. 撤销访问应在执行端撤销设备；客户端「移除主机」只删除本地连接。已有设备重新配对前，需要先撤销旧 grant。
 
 邀请有效期为两分钟；生成新邀请会取消之前未完成的手机或桌面邀请。获批证书的领取以宿主状态为准，不因邀请过期自行判定配对失败。客户端重开后可以继续领取待完成的配对。
@@ -51,12 +51,26 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **离线与缺失**：composer 上方提示条说明未连接、未知、待配对或主机已删除，并给出显式「连接」；不回退本机、不自动重发。远程运行中或回执未知时禁止发送，不提供排队。Provider/profile 消失时显示「原 Provider / profile 已不可用」占位，不代选。
 - **权限文案**：远程权限去掉「本机」并附主机名，例如「完全访问 · mac2」，说明为「Agent 以 mac2 上的用户权限运行」。
 - **能力缺口**：远程文件为顶栏按钮打开的只读抽屉；图片附件直接提示不支持；后台任务不暴露单项停止。
-- **catalog 读取**：共享 module store，每个连接在一次「已连接」期间读取一次，运行结束（settled/failed）后再刷新；不对侧栏持续轮询。远程目录只来自宿主 catalog 的项目，不浏览远端任意文件夹。
+- **catalog 读取**：共享 module store，每个连接在一次「已连接」期间读取一次，运行结束（settled/failed）后再刷新；不对侧栏持续轮询。当时远程目录只来自宿主 catalog；此限制已由下方 `D-20261015-custom-directory` 的明确用户授权扩展，catalog 刷新策略不变。
 - **实现入口**：`LocationPicker.tsx`、`RemoteChat.tsx`、`HostsView.tsx`、`SidebarRemoteProjects.tsx`、`hooks/useRemoteCatalogs.ts`、`remote-location.css`、`hosts-view.css`；`DesktopRemote.tsx` 只保留配对表单、只读文件、宿主面板等共享块。删除 `MachineNavigation.tsx` 及其测试/CSS。
 - **回归入口**：`RemoteLocation.test.tsx`（断线保留、乱序读取、无主机时与 `WorkdirPicker` 一致、已删除主机占位、读取失败标未知、离线连接按钮、主机名权限文案）。`node scripts/desktop-remote-ui-smoke.mjs --keep` 改为全程在生产 App 中验证：主机导航计数、位置选择器带草稿进入远程项目、双 Enter 只提交一次、原生 session 采用、停止/回答用账本 UUID、回答失败不显示成功、Provider/profile 隔离、新建会话留在同一机器、离线/读取失败/重连保留草稿且不重发、Provider 消失不代选、回到本机、设置跳转主机页、主机页项目入口、renderer 重载后侧栏远程会话及重连刷新 catalog。两个 mutation control 仍须失败。
 - **发现并修复**：(1) 侧栏远程项目名先于主机标签被截断，改为标签优先收缩并只预留一个操作按钮宽度；(2) 「已记录提交，等待远端派发…」在远端意图结束后仍残留，改为只在提交中或远程运行仍活跃时显示——首个 effect 版修复在 smoke 中仍失败，改为派生条件后通过；(3) 主机页入站区重复标题。三处均加了 smoke 断言，并在撤回修复时确认断言失败（前两处）。
 - **首轮失败记录**：完整 `test:renderer:ui` 首次在 desktop-remote smoke 的「remote Provider menu」超时：远程会话重挂载后 run controls 在 effect 中重置，测量坐标后布局移动，点击落到相邻的模型按钮。改为等待控件重置到 Provider 默认值后再点击（就绪条件，不是 sleep），随后连续 3 次通过。
 - **验收边界**：smoke 的连接与 Provider 是 fixture，不证明真实 SSH、mac2 或日常安装版；没有发真实模型请求，未重新打包或安装；用户视觉认可待确认。
+
+## D-20261015-custom-directory：远程自定义目录
+
+- **反馈 / 授权**：2026-10-15 用户指出 mac2 只有 workspace 可选，要求「要支持自定义选择」，并在明确权限问题后选择「任意可访问目录」：已配对 owner 可以浏览宿主当前用户可读取/遍历的目录，只有明确选择后才授权为可运行项目。原有项目内移动浏览接口仍受已授权根限制；新增专用操作不是把旧接口改为全盘文件代理。
+- **交互**：远程项目栏新增「选择其他目录…」。弹窗标题与说明明确执行主机；支持主目录、上一级、子文件夹、输入绝对路径或 `~/` 后按 Enter 浏览、分页和选择当前目录。浏览/取消不授权，不更改草稿；确认选择后只切换新草稿的位置，不启动 Provider、不自动发送、不迁移已有会话。选中的目录加入宿主已有项目授权体系，因此其他已配对 owner 也可访问；保留原 Provider 权限和仓库 trust/fingerprint 检查。
+- **边界**：固定 `desktopDirectory` RPC，先验证 mTLS peer 的当前 owner grant，再解析 list/select；不传 shell、命令、URL、CA 或本机文件路径。宿主用 canonical directory、R_OK/X_OK 检查和原有 `rememberProject` 持久化。`select` 单独授权，`list` 无写入；文件/缺失/不可读路径拒绝。符号链接目录返回宿主真实路径，可越出 HOME，这是用户明确授权的范围，不承诺沙箱。
+- **能力差异**：宿主 info 仅在真实接入目录授权后发布 `directorySelection: true`；新客户端连旧宿主保留 catalog 与会话功能，但禁用自定义入口并提示升级，不探测假能力或回落本机。
+- **上限**：每页 100 个目录、单目录最多 10,000 个可访问子目录，路径最多 4096 字符。按完整排序结果的 SHA-256 绑定分页快照，变动时报错而非混页；到达上限明确报错。只有实际超大目录需求超过上限时，再改为流式扫描与可恢复分页，不隐性截断。
+- **实现**：共享 typed API、preload/生产 IPC wrapper、DesktopRemoteClient、InnerMtlsHost、HostController/工厂/service、生产 main 授权接线；`desktop-directory-picker.ts` 复用 canonical 工作区能力；`RemoteDirectoryPicker.tsx` 复用 ModalFrame 与按钮/主题样式。目录弹窗 portal 到 document.body，避开 composer transform 对 fixed overlay 的包含块影响；关闭后恢复执行位置入口焦点。
+- **已验证**：focused 65 用例及 typecheck 通过。真实临时文件系统覆盖新目录、普通文件、缺失/不可读目录、目录/文件/失效符号链接、canonical 授权、分页与快照变动、持久化失败和旧项目浏览权限；真实 TLS 走新增读/选 RPC，并验证设备撤销后拒绝。生产 IPC wrapper 对 20 个方法逐一证明不可信 sender/frame/origin 不能执行特权 listener。移除目录操作的 owner check 后 focused 回归明确失败，恢复后通过。
+- **UI 回归**：生产 App 隔离 Electron 使用原生鼠标/Enter：旧宿主 capability unavailable、取消/焦点/草稿、浏览不授权、非法路径、分页、断线阻断、未确认授权提示、pending 双击不重复选择、确认后切换草稿但不发送；1000×600 及标准窗口验证 modal 位于文档 overlay 层且不超出视口。上一条 hover 稳定性断言保留。
+- **首轮发现**：关闭 modal 时在仍生效的焦点陷阱中聚焦入口会被覆盖，改为打开前把返回焦点交给 ModalFrame；渲染图发现 composer 的 transform 把 fixed modal 限制在输入框内，改用 portal 并增加真实布局断言。新增目录使旧 fixture 的「最后一个项目」不再是 Project B，改按完整路径定位，不弱化原断言。
+- **参考**：[WAI-ARIA APG Modal Dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) 原始规范用于初始焦点、Tab 包含和返回合理入口；复用已有 ModalFrame，不把 portal 或固定尺寸宣称为规范要求。短窗口渲染图已检查，用户视觉认可仍独立待确认。
+- **状态**：功能与 fixture 已验证；真实双机自定义目录选择、宿主升级与持久化结果完成后追加。没有新发送真实模型请求；用户视觉认可待确认。
 
 ## D-20261015-location-hover：执行位置菜单悬停稳定性
 

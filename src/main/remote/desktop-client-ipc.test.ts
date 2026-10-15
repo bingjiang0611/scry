@@ -18,7 +18,7 @@ describe('desktop client IPC production trust wrapper', () => {
     registerDesktopClientIpc<IpcMainInvokeEvent>(
       (channel, listener) => registerTrustedIpcHandler(ipc, channel, () => window as unknown as BrowserWindow, origin, listener), client
     )
-    expect(listeners.size).toBe(18)
+    expect(listeners.size).toBe(20)
     expect(listeners.has('desktopRemote:raw')).toBe(false)
     const invoke = async (channel: string, event: unknown, ...args: unknown[]) => listeners.get(channel)!(event as IpcMainInvokeEvent, ...args)
     for (const channel of listeners.keys()) {

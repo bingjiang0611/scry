@@ -7,6 +7,7 @@ import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDe
 import { refreshRemoteCatalog, useRemoteCatalogs, type RemoteCatalogEntry } from '../hooks/useRemoteCatalogs'
 import { Icon } from './primitives/Icon'
 import { bridge } from './DesktopRemote'
+import { RemoteDirectoryPicker } from './RemoteDirectoryPicker'
 import { moveMenuFocus, WorkdirMenuItems, WorkdirPicker } from './Pickers'
 import './remote-location.css'
 
@@ -81,6 +82,7 @@ function MachineLocationPicker({
     onOpenChange?.(value)
   }
   const [shown, setShown] = useState(current.machineId)
+  const [directoryHost, setDirectoryHost] = useState<DesktopRemoteConnection | null>(null)
   const catalogs = useRemoteCatalogs()
   const menuId = useId()
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -208,11 +210,24 @@ function MachineLocationPicker({
                 onConnect={() => connect(shown)}
                 onRetry={() => void refreshRemoteCatalog(shown)}
                 onPick={(cwd) => { setOpen(false); onPickRemote(shown, cwd) }}
+                onCustom={() => {
+                  if (!shownConnection) return
+                  buttonRef.current?.focus()
+                  setDirectoryHost(shownConnection)
+                  setOpen(false)
+                }}
               />
             )}
           </div>
         </div>
       )}
+      {directoryHost && <RemoteDirectoryPicker
+        key={directoryHost.id}
+        connection={directoryHost}
+        initialPath={current.machineId === directoryHost.id ? current.cwd ?? undefined : undefined}
+        onPick={(cwd) => onPickRemote(directoryHost.id, cwd)}
+        onClose={() => setDirectoryHost(null)}
+      />}
     </div>
   )
 }
@@ -224,7 +239,8 @@ function RemoteProjects({
   currentCwd,
   onConnect,
   onRetry,
-  onPick
+  onPick,
+  onCustom
 }: {
   connection: DesktopRemoteConnection | undefined
   state: HostState
@@ -233,6 +249,7 @@ function RemoteProjects({
   onConnect: () => Promise<void>
   onRetry: () => void
   onPick: (cwd: string) => void
+  onCustom: () => void
 }) {
   const [connectError, setConnectError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
@@ -260,7 +277,9 @@ function RemoteProjects({
   return (
     <>
       <div className="mhdr">{connection.label} 上的项目</div>
-      {projects.length === 0 && <p className="location-empty">这台主机还没有项目。请先在 {connection.label} 的 Scry 中打开一个项目。</p>}
+      <button type="button" className="mitem location-custom-directory" disabled={!entry.catalog.directorySelection} onClick={onCustom}><Icon name="folder" />选择其他目录…</button>
+      {!entry.catalog.directorySelection && <p className="location-empty">需要更新 {connection.label} 上的 Scry 才能选择其他目录。</p>}
+      {projects.length === 0 && <p className="location-empty">这台主机还没有项目。{entry.catalog.directorySelection ? '可选择一个远程目录开始。' : `请先在 ${connection.label} 的 Scry 中打开一个项目。`}</p>}
       <div className="wdrecent-list location-project-list">
         {projects.map((project) => (
           <button

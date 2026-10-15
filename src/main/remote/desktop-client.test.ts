@@ -12,6 +12,7 @@ import { InnerMtlsHost } from './inner-mtls-host'
 import { PairingTransport } from './pairing-transport'
 import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
+import { listDesktopDirectories, selectDesktopDirectory } from './desktop-directory-picker'
 
 const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
@@ -59,6 +60,31 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
 }
 
 describe('DesktopRemoteClient', () => {
+  it('validates bounded directory pages and forwards explicit selection without a run intent', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Directories', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const page = { current: { path: '/custom folder ', label: 'custom folder ' }, directories: [], cursor: 0, total: 0, hasMore: false, snapshot: 'a'.repeat(64) }
+      fixture.tlsRequest.mockResolvedValueOnce({ directory: { action: 'list', page } })
+      await expect(fixture.client.directories(id, '/custom folder ')).resolves.toEqual(page)
+      for (const invalid of [null, { action: 'list', page: null }, { action: 'list', page: { ...page, cursor: 1 } }, { action: 'list', page: { ...page, hasMore: true } }, { action: 'list', page: { ...page, snapshot: 'invalid' } }]) {
+        fixture.tlsRequest.mockResolvedValueOnce({ directory: invalid })
+        await expect(fixture.client.directories(id)).rejects.toThrow('invalid_directory_response')
+      }
+      const before = fixture.tlsRequest.mock.calls.length
+      await expect(fixture.client.directories(id, '/custom', 1)).rejects.toThrow('invalid_directory_request')
+      await expect(fixture.client.selectDirectory(id, 'a\0b')).rejects.toThrow('invalid_directory_path')
+      expect(fixture.tlsRequest.mock.calls).toHaveLength(before)
+      fixture.tlsRequest.mockResolvedValueOnce({ directory: { action: 'select', project: page.current } })
+      await expect(fixture.client.selectDirectory(id, page.current.path)).resolves.toEqual(page.current)
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktopDirectory', query: { action: 'select', path: page.current.path } } }))
+      expect(await fixture.client.intents(id)).toEqual([])
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('lists a fresh profile without touching secure storage, and fails pairing before networking when encryption fails', async () => {
     const unavailable = vi.fn(() => { throw new Error('secure_storage_unavailable') })
     const fixture = await setup({ encrypt: unavailable })
@@ -312,6 +338,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
   it('completes pairing, catalog, trace/history reads, submit lifecycle, and revocation on production wire', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-real-'))
     const identity = await ensureHostIdentity(join(directory, 'identity'))
+    const rememberDirectory = vi.fn()
     const binding = await createHostController({
       stateDirectory: directory,
       hostId: identity.hostId,
@@ -326,6 +353,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
       gate: new ProviderOperationGate(),
       createOutputStore: (path) => new RunOutputFileStore(path),
       listProjects: () => [{ path: '/workspace', label: 'workspace' }],
+      desktopDirectories: { list: listDesktopDirectories, select: path => selectDesktopDirectory(path, rememberDirectory) },
       listProviders: () => [{ id: 'claude', label: 'Claude', available: true }],
       listSessions: () => [{ sessionId: 'session-real', externalSessionId: 'session-real', providerId: 'claude', cwd: '/workspace', label: 'real', ts: Date.now() }],
       sessionCatalogRevision: () => 'revision-real',
@@ -362,6 +390,14 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const catalog = await client.catalog(pending.connection.id)
       expect(catalog.projects).toEqual([{ path: '/workspace', label: 'workspace' }])
       expect(catalog.sessions[0].externalSessionId).toBe('session-real')
+      expect(catalog.directorySelection).toBe(true)
+      const folders = await client.directories(pending.connection.id, directory)
+      expect(folders.current.path).toBe(await fs.realpath(directory))
+      expect(rememberDirectory).not.toHaveBeenCalled()
+      const selectedDirectory = await client.selectDirectory(pending.connection.id, directory)
+      expect(selectedDirectory.path).toBe(await fs.realpath(directory))
+      expect(rememberDirectory).toHaveBeenCalledExactlyOnceWith(selectedDirectory.path)
+      expect(wire.some(request => (request as { op?: string }).op === 'submit')).toBe(false)
       const pairingRequests = wire.filter((request) => (request as { operation?: string }).operation?.startsWith('pair.')).length
       await client.updateSsh(pending.connection.id, { ...ssh, hostname: 'changed.example' })
       await client.connect(pending.connection.id)
@@ -388,6 +424,9 @@ describe('DesktopRemoteClient over real host TLS', () => {
       await expect(client.pair({ label: 'wrong CA', ssh, invitation: wrongCaInvitation })).rejects.toThrow()
       const grant = binding.controller.authority.inspectLocal().grants[0]
       await binding.controller.authority.revoke(grant.deviceId)
+      await expect(client.directories(pending.connection.id, directory)).rejects.toThrow()
+      await expect(client.selectDirectory(pending.connection.id, directory)).rejects.toThrow()
+      expect(rememberDirectory).toHaveBeenCalledTimes(1)
       await expect(client.catalog(pending.connection.id)).rejects.toThrow('desktop_remote_device_not_authorized')
     } finally {
       await client.dispose()
