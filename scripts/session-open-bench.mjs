@@ -409,7 +409,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 4, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 5, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),

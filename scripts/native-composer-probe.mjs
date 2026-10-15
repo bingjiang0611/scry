@@ -1,9 +1,26 @@
 import assert from 'node:assert/strict'
 
+// Fixed cohorts, not retries: retain every observation, including the first.
+export const composerModes = Array.from({ length: 3 }, () => ['stop-immediate', 'complete', 'stop-visible', 'stop-immediate']).flat()
+
 // Runs inside the real renderer. Observe only: never invoke start/stop or fabricate DOM output.
 export function observeComposer(prompt, mode) {
   const state = { prompt, mode, inputTrusted: false, sendTrusted: false, stopTrusted: false, errors: [], visibleFrames: 0, settledFrames: 0 }
   window.__composerProbe = state
+  const waiters = new Set()
+  window.__waitForComposer = field => new Promise((resolve, reject) => {
+    const finish = error => {
+      clearTimeout(timer); waiters.delete(check)
+      if (error) reject(error)
+      else resolve()
+    }
+    const check = () => {
+      if (state.errors.length) finish(new Error(state.errors.join('; ')))
+      else if (state[field]) finish()
+    }
+    const timer = setTimeout(() => finish(new Error(`Composer condition timed out: ${field}; ${JSON.stringify(state)}`)), 15000)
+    waiters.add(check); check()
+  })
   const click = event => {
     if (event.target.closest('button.send')) { state.sendAt = performance.now(); state.sendTrusted = event.isTrusted }
     if (event.target.closest('button.run-status-stop')) { state.stopAt = performance.now(); state.stopTrusted = event.isTrusted }
@@ -53,9 +70,12 @@ export function observeComposer(prompt, mode) {
     state.visibleFrames = visible ? state.visibleFrames + 1 : 0
     if (visible) state.firstVisibleAt ??= performance.now()
     if (state.visibleFrames >= 2) state.visibleReadyAt ??= performance.now()
+    const stop = document.querySelector('button.run-status-stop')
+    if (stop && !stop.disabled && (mode === 'stop-visible' ? state.visibleReadyAt : state.nativeTurnPending)) state.stopReadyAt ??= performance.now()
     const settled = state.done && !document.querySelector('button.run-status-stop') && !document.querySelector('textarea').disabled
     state.settledFrames = settled ? state.settledFrames + 1 : 0
     if (state.settledFrames >= 2) state.settledVisibleAt ??= performance.now()
+    for (const check of waiters) check()
     frame = requestAnimationFrame(inspect)
   }
   frame = requestAnimationFrame(inspect)
@@ -67,10 +87,12 @@ export function observeComposer(prompt, mode) {
 
 export async function probeNativeComposer({ evaluate, wait, click, send }) {
   const samples = []
-  for (const [index, mode] of ['stop-immediate', 'complete', 'stop-visible', 'stop-immediate'].entries()) {
+  for (const [index, mode] of composerModes.entries()) {
     const prompt = `native composer ${mode} ${index}`
     await evaluate(`(${observeComposer.toString()})(${JSON.stringify(prompt)}, ${JSON.stringify(mode)})`)
-    const ready = field => wait(`(() => { const state = window.__composerProbe; if (state.errors.length) throw new Error(state.errors.join('; ')); return Boolean(state.${field}) })()`)
+    // The observer already requires two frames. The history driver's wait() adds
+    // two more frames per call, so do not use it between readiness and Stop.
+    const ready = field => evaluate(`window.__waitForComposer(${JSON.stringify(field)})`)
     try {
       await click(`document.querySelector('textarea')`)
       await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: process.platform === 'darwin' ? 4 : 2, commands: ['selectAll'] })
@@ -80,9 +102,7 @@ export async function probeNativeComposer({ evaluate, wait, click, send }) {
       await wait(`document.querySelector('button.send[aria-label="发送"]:not(:disabled)')`)
       await click(`document.querySelector('button.send[aria-label="发送"]')`)
       if (mode !== 'complete') {
-        if (mode === 'stop-immediate') await ready('nativeTurnPending')
-        if (mode === 'stop-visible') await ready('visibleReadyAt')
-        await wait(`document.querySelector('button.run-status-stop:not(:disabled)')`)
+        await ready('stopReadyAt')
         await click(`document.querySelector('button.run-status-stop')`)
       }
       await ready('settledVisibleAt')
@@ -98,7 +118,7 @@ export async function probeNativeComposer({ evaluate, wait, click, send }) {
         terminalConfirmed: true, stopped: Boolean(state.done.stopped), sendToTerminalMs: state.terminalAt - state.sendAt,
         sendToSettledVisibleMs: state.settledVisibleAt - state.sendAt,
         ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: state.firstOutputReceiptAt - state.sendAt, sendToFirstVisibleMs: state.firstVisibleAt - state.sendAt, sendToVisibleReadyMs: state.visibleReadyAt - state.sendAt } : {}),
-        ...(mode !== 'complete' ? { stopToTerminalMs: state.terminalAt - state.stopAt, stopToSettledVisibleMs: state.settledVisibleAt - state.stopAt } : {}) })
+        ...(mode !== 'complete' ? { driverStopDispatchMs: state.stopAt - state.stopReadyAt, stopToTerminalMs: state.terminalAt - state.stopAt, stopToSettledVisibleMs: state.settledVisibleAt - state.stopAt } : {}) })
     } finally { await evaluate('window.__disposeComposerProbe()') }
   }
   return samples

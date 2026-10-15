@@ -5,11 +5,12 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { cpus, release } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { composerModes } from './native-composer-probe.mjs'
+export { composerModes }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] }
 export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
-export const composerModes = ['stop-immediate', 'complete', 'stop-visible', 'stop-immediate']
 const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]
@@ -21,7 +22,7 @@ export function validateNative(report) {
   assert.equal(report.errors.length, 0, 'failed native lanes cannot pass')
   assert.deepEqual(Object.keys(report.results).sort(), Object.keys(nativeWorkloads).sort(), 'native lane coverage differs')
   for (const [name, result] of Object.entries(report.results)) {
-    assert.equal(result.measurementVersion, 4)
+    assert.equal(result.measurementVersion, 5)
     assert.deepEqual([result.turnCount, result.sections], nativeWorkloads[name], 'native workload differs')
     assert.equal(result.scenario, name)
     assert.equal(result.warmups, 2)
@@ -35,7 +36,7 @@ export function validateNative(report) {
     assert.ok(finite(result.nativeInput.frameReadyMs))
     assert.ok(finite(result.startupDriverReadyMs))
     assert.equal(result.sqliteStats.status, 'ready')
-    assert.equal(result.sqliteStats.turns, 10, 'all six IPC and four button runs must reach SQLite')
+    assert.equal(result.sqliteStats.turns, 18, 'all six IPC and twelve button runs must reach SQLite')
     assert.ok(finite(result.sqliteStats.readMs))
     for (const sample of result.samples) {
       assert.equal(sample.totalTurns, Math.min(40, result.turnCount))
@@ -44,7 +45,7 @@ export function validateNative(report) {
       assert.ok(sample.domNodes > 0)
     }
     assert.deepEqual(result.composerSamples.map(sample => sample.mode), composerModes, 'native button scenario coverage differs')
-    assert.equal(new Set(result.composerSamples.map(sample => sample.runId)).size, 4, 'native button runs must have distinct identities')
+    assert.equal(new Set(result.composerSamples.map(sample => sample.runId)).size, 12, 'native button runs must have distinct identities')
     for (const [index, sample] of result.composerSamples.entries()) {
       assert.equal(typeof sample.runId, 'string')
       assert.ok(sample.runId.length > 0)
@@ -62,7 +63,10 @@ export function validateNative(report) {
         assert.ok(sample.sendToFirstVisibleMs >= sample.sendToOutputReceiptMs)
         assert.ok(sample.sendToVisibleReadyMs >= sample.sendToFirstVisibleMs)
       }
-      if (sample.stopped) assert.ok(sample.stopToSettledVisibleMs >= sample.stopToTerminalMs)
+      if (sample.stopped) {
+        assert.ok(finite(sample.driverStopDispatchMs))
+        assert.ok(sample.stopToSettledVisibleMs >= sample.stopToTerminalMs)
+      }
     }
     assert.equal(result.lifecycleSamples.length, 6)
     for (const stopped of [false, true]) {
@@ -105,7 +109,7 @@ export function compareNative(base, head) {
     for (const mode of new Set(composerModes)) {
       for (const metric of composerMetrics(mode)) {
         const values = report => report.composerSamples.filter(sample => sample.mode === mode).map(sample => sample[metric])
-        add(`${name}.button.${mode}`, `${metric}.${mode === 'stop-immediate' ? 'twoRunMax' : 'single'}`, Math.max(...values(before)), Math.max(...values(after)), 1000, 100)
+        add(`${name}.button.${mode}`, `${metric}.${values(before).length}RunMax`, Math.max(...values(before)), Math.max(...values(after)), 1000, 100)
       }
     }
     for (const stopped of [false, true]) {
@@ -124,7 +128,7 @@ export function formatNative(report) {
     '| Scenario | Boundary | Base | Candidate | Ceiling | Result |', '|---|---|---:|---:|---:|---|',
     ...report.rows.map(row => `| ${row.scenario} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${row.ceiling.toFixed(2)} | ${row.status} |`), '',
     'Hidden real Electron main/preload/renderer; GPU disabled. History uses trusted native clicks and two stable frames. Input uses a trusted input event and two frames. Startup includes driver readiness polling. The separately labelled IPC lifecycle remains distinct. Button acceptance uses trusted Send/Stop clicks, real assistant text hit-tested in the viewport across two frames, terminal notification, idle composer across two frames, and independently readable output after App exit. The offline Provider waits for actual cancellation, without timed completion.',
-    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Four button runs: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all ten runs. Button maxima/single observations are acceptance guardrails, not statistical latency estimates. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
+    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Three fixed button cohorts each contain: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all eighteen runs. Every observation is retained; no failure-dependent retries or discarded warmups. Button maxima are acceptance guardrails, not statistical latency estimates. Send-to-terminal totals on interrupted runs include driver dispatch time, recorded separately as driverStopDispatchMs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
 }
 
 async function bench(output) {
