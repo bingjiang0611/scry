@@ -27,7 +27,8 @@ it('shows bounded session hover cards and renames via the real sidebar DOM with 
       app.on('browser-window-focus', () => { console.error('UI fixture stole native window focus'); app.exit(1) })
       app.setPath('userData', ${JSON.stringify(join(dir, 'userData'))})
       app.whenReady().then(() => {
-        const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } })
+        const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true, sandbox: true, nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } })
+        if (!win.webContents.isOffscreen()) { console.error('Offscreen rendering is required'); app.exit(1); return }
         win.webContents.on('did-finish-load', () => console.log('Interaction fixture loaded'))
         win.webContents.on('render-process-gone', (_event, details) => { console.error('Interaction renderer exited', details.reason); app.exit(2) })
         win.webContents.on('did-fail-load', (_event, code, description) => { console.error('Interaction load failed', code, description); app.exit(2) })
