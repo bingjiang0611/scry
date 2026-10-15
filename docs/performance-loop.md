@@ -117,6 +117,8 @@ node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/
 
 Native 比较器同时检查身份、环境、工作量、完整样本、真实输入和终态/归档证据，缺失 lane 或任一失败不能通过。初始绝对上限为历史两帧 500 ms、handler 延迟 100 ms、脚本 300 ms、输入两帧 250 ms、驱动启动 10 s、SQLite 统计查询 500 ms、各生命周期阶段 2 s，并保留相对上限；这是保守回退护栏，不是体验承诺。历史/输入底噪 50 ms，启动 500 ms，生命周期 100 ms。单次及三次最大值明确标注，不伪装成日常 p95。原始 JSON、失败日志、构建日志和双侧比较分别归档，不混入 Node 微基准。候选 fixture 或预算变更必须人工审查；不能靠缩小 workload 或提高预算消除失败。一次失败不能用无解释重跑抹掉。
 
+依赖安装沿用各自 lockfile 的版本和 integrity。项目 `.npmrc` 只将历史 `registry.anpm.alibaba-inc.com` 镜像 URL 映射到 npm 官方 registry，避免外部 runner 依赖企业网络；不会升级版本或跳过完整性校验。固定 baseline checkout 同样复制这份配置。安装输出和失败时的 npm 调试日志也归档，不能因为测量尚未启动就丢掉失败证据。
+
 同仓 PR 的独立 job 更新评论；写 token 的 job 不检出或执行 PR 代码。fork PR 只提供只读 Actions summary/artifact。评论同时汇总 Node/native 两个 job 的实际状态及报告；测量失败或缺失时明确没有有效比较。让它成为必需合并检查还需要仓库 branch protection 配置；提交本地文件不会自动改变远端设置。
 
 本地比较也必须隔离两个源码目录、使用同一 harness/config/Node 和各自 lockfile；不能拿历史文档中的其他硬件或不同 fixture 数字当 baseline。可以用临时 detached worktree，但不要在同机并发跑耗时基准。
