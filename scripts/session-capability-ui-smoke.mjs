@@ -746,7 +746,14 @@ async function exerciseSessionTerminals(contents, scenario) {
 }
 
 async function exerciseSessionModels(contents, screenshotPath) {
-  const read = (expression) => contents.executeJavaScript(expression)
+  const read = async (expression) => {
+    const result = await contents.executeJavaScript(`(async () => {
+      try { return { ok: true, value: await (${expression}) }; }
+      catch (error) { return { ok: false, error: String(error) }; }
+    })()`)
+    if (!result.ok) throw new Error(`Session model expression failed: ${expression.slice(0, 500)}; ${result.error}`)
+    return result.value
+  }
   const wait = async (expression) => {
     const deadline = Date.now() + 5000
     while (!await read(expression)) {
@@ -946,9 +953,9 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await click('[aria-label="存档会话：Provisional archive"]')
   await wait(`${state}.stoppedRuns.includes('run-5')`)
   await pickSession('Conversation two')
-  await wait(`document.querySelector('.sb-sess[aria-current="true"]').textContent.includes('Conversation two')`)
+  await wait(`document.querySelector('.sb-sess[aria-current="true"]')?.textContent.includes('Conversation two')`)
   await click('#release-archive')
-  await wait(`document.querySelector('.sb-undo').textContent.includes('Provisional archive')`)
+  await wait(`document.querySelector('.sb-undo')?.textContent.includes('Provisional archive')`)
   if (!await read(`${requests}.length === 5 && document.querySelector('.sb-sess[aria-current="true"]').textContent.includes('Conversation two')`)) throw new Error('Late archive acknowledgment reset the newer selection or drained a provisional queue')
   if (screenshotPath) for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
