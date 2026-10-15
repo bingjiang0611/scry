@@ -215,15 +215,21 @@ describe('mcp-config', () => {
           remote: { type: 'remote', url: 'https://remote.example.test', enabled: false }
         }
       }))
+      const env = {
+        CODEX_HOME: join(home, '.codex'),
+        QODER_CONFIG_DIR: join(home, '.qoder'),
+        XDG_CONFIG_HOME: join(home, '.config'),
+        OPENCODE_CONFIG: join(home, '.config', 'opencode', 'opencode.json')
+      }
 
-      expect(resolveProviderMcpConfigs('codex', cwd, home)).toEqual(expect.arrayContaining([
+      expect(resolveProviderMcpConfigs('codex', cwd, home, env)).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'codex-user', scope: 'user', transport: 'stdio', config: expect.objectContaining({ command: '/bin/echo' }) }),
         expect.objectContaining({ name: 'codex-project', scope: 'project', transport: 'http' })
       ]))
-      expect(resolveProviderMcpConfigs('qoder', cwd, home)).toContainEqual(expect.objectContaining({
+      expect(resolveProviderMcpConfigs('qoder', cwd, home, env)).toContainEqual(expect.objectContaining({
         name: 'qoder', config: expect.objectContaining({ args: ['qoder'], env: { TOKEN: 'configured' } })
       }))
-      expect(resolveProviderMcpConfigs('opencode', cwd, home)).toEqual(expect.arrayContaining([
+      expect(resolveProviderMcpConfigs('opencode', cwd, home, env)).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'local', enabled: true, config: expect.objectContaining({ command: '/bin/echo', args: ['open'], env: { LOCAL: '1' } }) }),
         expect.objectContaining({ name: 'remote', enabled: false, transport: 'http' })
       ]))

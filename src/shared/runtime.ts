@@ -718,41 +718,38 @@ export function decodedBase64ByteLength(value: string): number | null {
   const compact = value.replace(/\s+/g, '')
   if (!compact || compact.length % 4 !== 0) return null
   const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0
-  for (let index = 0; index < compact.length - padding; index++) {
-    const code = compact.charCodeAt(index)
-    const alphaNumeric = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
-    if (!alphaNumeric && code !== 43 && code !== 47) return null
-  }
-  for (let index = compact.length - padding; index < compact.length; index++) {
-    if (compact.charCodeAt(index) !== 61) return null
-  }
+  // An unquantified character-class search keeps validation linear without a
+  // per-byte JS loop or the backtracking stack of a whole-string Base64 regexp.
+  if (/[^A-Za-z0-9+/]/.test(compact.slice(0, compact.length - padding))) return null
   return (compact.length / 4) * 3 - padding
 }
 
 export function normalizeAgentAttachments(value: unknown): AgentInputAttachment[] {
   if (!Array.isArray(value)) return []
-  const attachments = value
-    .filter((item): item is AgentInputAttachment => {
-      if (!item || typeof item !== 'object') return false
-      const a = item as Partial<AgentInputAttachment>
-      return (
-        a.kind === 'image' &&
-        typeof a.name === 'string' &&
-        isSupportedImageMimeType(String(a.mimeType ?? '')) &&
-        typeof a.dataBase64 === 'string' &&
-        decodedBase64ByteLength(a.dataBase64) != null
-      )
-    })
-    .map<AgentInputAttachment>((a) => ({
+  const attachments: AgentInputAttachment[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const a = item as Partial<AgentInputAttachment>
+    const mimeType = String(a.mimeType ?? '')
+    if (
+      a.kind !== 'image' ||
+      typeof a.name !== 'string' ||
+      !isSupportedImageMimeType(mimeType) ||
+      typeof a.dataBase64 !== 'string'
+    ) continue
+    const size = decodedBase64ByteLength(a.dataBase64)
+    if (size == null) continue
+    attachments.push({
       kind: 'image',
       name: a.name || 'pasted-image',
-      mimeType: a.mimeType,
+      mimeType,
       dataBase64: a.dataBase64,
-      size: decodedBase64ByteLength(a.dataBase64)!,
+      size,
       width: typeof a.width === 'number' ? a.width : undefined,
       height: typeof a.height === 'number' ? a.height : undefined,
       path: typeof a.path === 'string' ? a.path : undefined
-    }))
+    })
+  }
   return attachments
 }
 

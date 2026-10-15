@@ -7,6 +7,7 @@ import {
   exactSessionPermissionSuggestions,
   MAX_AGENT_PERMISSION_SESSION_DESCRIPTION_LENGTH,
   classifyRunTermination,
+  decodedBase64ByteLength,
   normalizeAgentQuestionRequest,
   normalizeAgentQuestionResponse,
   normalizeAgentForkSessionRequest,
@@ -329,13 +330,38 @@ describe('runtime frontdoor mapping', () => {
     ).toEqual([{ kind: 'image', name: 'shot.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=', size: 5 }])
   })
 
+  it('preserves Base64 alphabet, padding and whitespace validation under byte mutations', () => {
+    // Independent grammar oracle uses tiny inputs only; quantified regexps are
+    // unsuitable for the large-image production path.
+    const reference = (value: string): number | null => {
+      const compact = value.replace(/\s+/g, '')
+      if (!compact || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) return null
+      return compact.length / 4 * 3 - (compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0)
+    }
+    for (const seed of ['QUJD', 'QUE=', 'QQ==', '====', 'A===', 'A=AA', 'Q U J D']) {
+      for (let index = 0; index < seed.length; index++) {
+        for (let code = 0; code < 256; code++) {
+          const value = seed.slice(0, index) + String.fromCharCode(code) + seed.slice(index + 1)
+          expect(decodedBase64ByteLength(value)).toBe(reference(value))
+        }
+      }
+    }
+    for (const value of ['', '\uFEFFQUJD\n', 'QU\u200bJD', 'QU\ud800JD']) {
+      expect(decodedBase64ByteLength(value)).toBe(reference(value))
+    }
+  })
+
   it('accepts images beyond the former per-image, aggregate and count limits', () => {
     const tenMiB = Buffer.alloc(10 * 1024 * 1024).toString('base64')
     const overTenMiB = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
-    expect(() => normalizeAgentStartRequest({
+    const large = normalizeAgentStartRequest({
       prompt: '',
       attachments: [{ kind: 'image', name: 'large.png', mimeType: 'image/png', dataBase64: overTenMiB }]
-    })).not.toThrow()
+    }).attachments
+    expect(large).toHaveLength(1)
+    expect(large[0].dataBase64).toBe(overTenMiB)
+    expect(large[0].size).toBe(10 * 1024 * 1024 + 1)
+    expect(decodedBase64ByteLength(overTenMiB.slice(0, -4) + 'AA!A')).toBeNull()
     expect(() => normalizeAgentStartRequest({
       prompt: '',
       attachments: Array.from({ length: 9 }, (_, index) => ({

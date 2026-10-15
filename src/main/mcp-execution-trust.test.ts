@@ -175,9 +175,14 @@ describe('MCP execution trust', () => {
       writeFileSync(join(homeDir, '.config', 'opencode', 'opencode.json'), JSON.stringify({
         mcp: { tracker: { type: 'local', command: ['/bin/echo', 'opencode'], environment: { SAFE: '1' } } }
       }))
+      const env = {
+        CODEX_HOME: join(homeDir, '.codex'),
+        XDG_CONFIG_HOME: join(homeDir, '.config'),
+        OPENCODE_CONFIG: join(homeDir, '.config', 'opencode', 'opencode.json')
+      }
 
-      const codex = buildMcpExecutionSnapshot({ providerId: 'codex', cwd, homeDir })
-      const opencode = buildMcpExecutionSnapshot({ providerId: 'opencode', cwd, homeDir })
+      const codex = buildMcpExecutionSnapshot({ providerId: 'codex', cwd, homeDir, env })
+      const opencode = buildMcpExecutionSnapshot({ providerId: 'opencode', cwd, homeDir, env })
       expect(codex.errors).toEqual([])
       expect(codex.targets).toContainEqual(expect.objectContaining({ name: 'tracker', config: expect.objectContaining({ args: ['codex'] }) }))
       expect(opencode.errors).toEqual([])
