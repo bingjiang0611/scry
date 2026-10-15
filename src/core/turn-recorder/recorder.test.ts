@@ -16,7 +16,93 @@ import { readRecorderContent } from './content-store'
 const roots: string[] = []
 const pexecFile = promisify(execFile)
 
+interface EarlyStopDiagnostic {
+  root?: string
+  currentPhase: string
+  phaseStartedAtMs: number
+  phases: Array<{ name: string; durationMs: number; outcome: 'passed' | 'failed' }>
+}
+
+let activeEarlyStopDiagnostic: EarlyStopDiagnostic | undefined
+
+function monotonicMs(): number {
+  return Number(process.hrtime.bigint()) / 1e6
+}
+
+async function earlyStopPhase<T>(diagnostic: EarlyStopDiagnostic, name: string, action: () => Promise<T>): Promise<T> {
+  diagnostic.currentPhase = name
+  diagnostic.phaseStartedAtMs = monotonicMs()
+  try {
+    const result = await action()
+    diagnostic.phases.push({ name, durationMs: Math.round(monotonicMs() - diagnostic.phaseStartedAtMs), outcome: 'passed' })
+    return result
+  } catch (error) {
+    diagnostic.phases.push({ name, durationMs: Math.round(monotonicMs() - diagnostic.phaseStartedAtMs), outcome: 'failed' })
+    throw error
+  }
+}
+
+async function earlyStopLockOwners(root: string): Promise<{ entries: unknown[]; truncated: boolean }> {
+  const locks = join(root, '.scry', 'locks')
+  const queue: Array<{ path: string; depth: number }> = [{ path: locks, depth: 0 }]
+  const found: unknown[] = []
+  let visited = 0
+  let truncated = false
+  while (queue.length > 0 && visited < 64) {
+    const current = queue.shift()!
+    let entries
+    try { entries = await readdir(current.path, { withFileTypes: true }) } catch (error) {
+      found.push({ path: current.path.slice(root.length + 1), state: 'unavailable', error: String(error) })
+      continue
+    }
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (visited++ >= 64) break
+      if (!entry.isDirectory()) continue
+      const lockPath = join(current.path, entry.name)
+      const ownerPath = join(lockPath, 'owner.json')
+      try {
+        const info = await stat(ownerPath)
+        if (info.size > 4_096) {
+          found.push({ path: lockPath.slice(root.length + 1), owner: 'metadata exceeds diagnostic bound' })
+        } else {
+          const parsed = JSON.parse(await readFile(ownerPath, 'utf8')) as Record<string, unknown>
+          found.push({
+            path: lockPath.slice(root.length + 1),
+            owner: {
+              ...(typeof parsed.pid === 'number' ? { pid: parsed.pid } : {}),
+              ...(typeof parsed.createdAt === 'number' ? { createdAt: parsed.createdAt } : {}),
+              ...(typeof parsed.token === 'string' ? { token: parsed.token } : {})
+            }
+          })
+        }
+      } catch (error) {
+        // Missing or changing owner metadata is not evidence that no lock exists.
+        found.push({ path: lockPath.slice(root.length + 1), state: 'unavailable', error: String(error) })
+      }
+      if (current.depth < 4) queue.push({ path: lockPath, depth: current.depth + 1 })
+      else truncated = true
+    }
+  }
+  return { entries: found, truncated: truncated || queue.length > 0 || visited >= 64 }
+}
+
+async function reportEarlyStopDiagnostic(diagnostic: EarlyStopDiagnostic): Promise<void> {
+  // The timed-out async test can still advance while lock metadata is read.
+  const snapshot = {
+    currentPhase: diagnostic.currentPhase,
+    currentPhaseElapsedMs: Math.round(monotonicMs() - diagnostic.phaseStartedAtMs),
+    phases: diagnostic.phases.map(phase => ({ ...phase }))
+  }
+  const locks = diagnostic.root
+    ? await earlyStopLockOwners(diagnostic.root)
+    : { state: 'unavailable', reason: 'workspace initialization has not returned' }
+  console.error('SCRY_EARLY_STOP_DIAGNOSTIC', JSON.stringify({ ...snapshot, locks }))
+}
+
 afterEach(async () => {
+  const diagnostic = activeEarlyStopDiagnostic
+  activeEarlyStopDiagnostic = undefined
+  if (diagnostic) await reportEarlyStopDiagnostic(diagnostic)
   vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
@@ -2294,7 +2380,14 @@ describe('Codex rollout recorder evidence', () => {
   })
 
   it('真实 Stop 早于 task_complete 时按完整 rollout 去重，且 Skill 路径引用不算执行', async () => {
-    const root = await workspace()
+    const diagnostic: EarlyStopDiagnostic = {
+      currentPhase: 'workspace/init',
+      phaseStartedAtMs: monotonicMs(),
+      phases: []
+    }
+    activeEarlyStopDiagnostic = diagnostic
+    const root = await earlyStopPhase(diagnostic, 'workspace/init', workspace)
+    diagnostic.root = root
     const rollout = join(root, 'early-stop-rollout.jsonl')
     const lines = [
       { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'early-turn' } },
@@ -2366,16 +2459,18 @@ rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
         }
       }
     ]
-    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await earlyStopPhase(diagnostic, 'rollout write', async () => {
+      await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    })
 
-    await handleRecorderHook({
+    await earlyStopPhase(diagnostic, 'start hook', () => handleRecorderHook({
       provider: 'codex',
       event: 'turn.started',
       workspace: root,
       payload: payload('early-session', { prompt: 'inspect', turn_id: 'early-turn', rollout_path: rollout })
-    })
+    }))
     for (const [index, timestamp] of ['2026-07-19T12:00:00.110Z', '2026-07-19T12:00:00.120Z', '2026-07-19T12:00:00.310Z'].entries()) {
-      await handleRecorderHook({
+      await earlyStopPhase(diagnostic, `pre hook ${index + 1}`, () => handleRecorderHook({
         provider: 'codex',
         event: 'PreToolUse:Bash',
         workspace: root,
@@ -2386,8 +2481,8 @@ rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
           tool_use_id: `exec-${index + 1}`,
           tool_input: {}
         })
-      })
-      await handleRecorderHook({
+      }))
+      await earlyStopPhase(diagnostic, `post hook ${index + 1}`, () => handleRecorderHook({
         provider: 'codex',
         event: 'PostToolUse:Bash',
         workspace: root,
@@ -2398,9 +2493,9 @@ rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
           tool_use_id: `exec-${index + 1}`,
           tool_response: 'ok'
         })
-      })
+      }))
     }
-    await handleRecorderHook({
+    await earlyStopPhase(diagnostic, 'completed hook', () => handleRecorderHook({
       provider: 'codex',
       event: 'turn/completed',
       workspace: root,
@@ -2409,9 +2504,11 @@ rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
         rollout_path: rollout,
         timestamp: '2026-07-19T12:00:00.600Z'
       })
-    })
+    }))
 
-    const [record] = await listRecords(join(root, '.scry'))
+    const [record] = await earlyStopPhase(diagnostic, 'final records', () => listRecords(join(root, '.scry')))
+    diagnostic.currentPhase = 'final assertions'
+    diagnostic.phaseStartedAtMs = monotonicMs()
     expect(record.tools.value).toEqual([
       expect.objectContaining({ name: 'Bash', status: 'failed' })
     ])
@@ -2427,6 +2524,7 @@ rs.forEach((r, i) => text(\`RESULT \${i + 1}\\n\${JSON.stringify(r)}\`));`
       cacheReadTokens: 200,
       reasoningTokens: 5
     })
+    activeEarlyStopDiagnostic = undefined
   })
 
   it('把异步 code-mode 的 wait 输出关联回原始逻辑调用', async () => {
