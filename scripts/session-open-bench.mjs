@@ -38,7 +38,7 @@ const traces = []
 
 function capture(chunk) {
   const text = String(chunk)
-  output = (output + text).slice(-12_000)
+  output += text
   lineBuffer += text
   const lines = lineBuffer.split('\n')
   lineBuffer = lines.pop() ?? ''
