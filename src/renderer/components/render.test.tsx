@@ -5610,12 +5610,13 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
   })
 
   it('Qoder 的模式名和未归因项在模型明细中合并为一个 Qoder 行', () => {
+    // 合并只针对可展示的已知成本；未知成本不显示的合同由 Credits 用例覆盖。
     const qoderAggregate = {
       ...aggregate,
-      costUsd: null,
-      costKnownRows: 0,
+      costUsd: 1.25,
+      costKnownRows: 2,
       exactCostRows: 0,
-      providerReportedCostRows: 0,
+      providerReportedCostRows: 2,
       estimatedCostRows: 0,
       inferredCostRows: 0
     }
