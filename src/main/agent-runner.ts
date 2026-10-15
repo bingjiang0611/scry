@@ -11,6 +11,7 @@ import {
   exactSessionPermissionDescription,
   exactSessionPermissionSuggestions,
   normalizeAgentQuestionRequest,
+  sanitizeApprovalWarning,
   type AgentInputAttachment,
   type AgentPermissionMode,
   type AgentQuestionRequest,
@@ -18,6 +19,7 @@ import {
 } from '../shared/runtime'
 import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
 import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
+import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from './process-diagnostics'
 
 let counter = 0
 const newId = (): string => `ev-${Date.now().toString(36)}-${(counter++).toString(36)}`
@@ -48,6 +50,8 @@ export interface RunOpts {
   effort?: string
   permissionMode?: AgentPermissionMode
   mcpServers?: Record<string, Record<string, unknown>>
+  /** 双流事件日志的原生侧入口；未启用日志时调用方不传。 */
+  recordNative?: (type: string, payload: unknown) => void
 }
 
 export interface RunHandle {
@@ -225,6 +229,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   let frozenTranscriptBaseline: TranscriptBaseline | undefined
   let stderrDiagnostic = ''
   let spawnedChild: ChildProcessWithoutNullStreams | undefined
+  let spawnedIdentity: ProcessIdentity | undefined
   const captureSessionId = (next: string | undefined): void => {
     if (!next || sessionId === next) return
     sessionId = next
@@ -272,6 +277,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     options.extraArgs = { 'dangerously-skip-permissions': null }
   } else if (permissionMode === 'auto_review') {
     options.permissionMode = 'auto'
+  } else if (permissionMode === 'auto_accept_edits') {
+    // Claude Agent SDK 的原生档位：文件编辑直接放行，其余工具仍走 canUseTool 审批。
+    options.permissionMode = 'acceptEdits'
   }
   if (opts.model) options.model = opts.model
   if (opts.effort) options.effort = opts.effort
@@ -297,6 +305,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       stdio: ['pipe', 'pipe', 'pipe']
     })
     spawnedChild = child
+    // 进程还活着时采集身份，强杀前用它核对，避免 PID/PGID 复用时误杀其他进程组。
+    spawnedIdentity = captureProcessIdentity(child.pid)
     return child
   }
   options.strictMcpConfig = true
@@ -312,6 +322,10 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         suggestions?: PermissionUpdate[]
         title?: string
         description?: string
+        /** SDK 给出的触发原因（例如 ask 规则、路径越界、可疑内容）。 */
+        decisionReason?: string
+        /** 触发这次审批的路径，例如 Bash 想访问允许目录之外的文件。 */
+        blockedPath?: string
       }
     ) => {
       if (toolName === 'AskUserQuestion') {
@@ -337,6 +351,11 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       const detail = permission.description ?? JSON.stringify(input).slice(0, 1_200)
       const sessionSuggestions = exactSessionPermissionSuggestions(permission.suggestions)
       const sessionDescription = exactSessionPermissionDescription(sessionSuggestions)
+      // Provider 说明了为什么要问就原样（脱敏后）转述；没说明就不编造风险理由。
+      const warning = [
+        sanitizeApprovalWarning(permission.decisionReason),
+        permission.blockedPath ? sanitizeApprovalWarning(`越界路径：${permission.blockedPath}`, 200) : undefined
+      ].filter(Boolean).join('；') || undefined
       const request = agentPermissionQuestion(
         runId,
         permission.toolUseID,
@@ -345,7 +364,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         detail,
         sessionDescription !== undefined,
         `claude:permission:${toolName}`,
-        sessionDescription
+        sessionDescription,
+        warning
       )
       const response = await opts.requestUserInput!(request, permission.signal)
       const decision = agentPermissionDecision(request, response)
@@ -383,10 +403,14 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     stopped = true
     const child = spawnedChild
     if (!child || child.exitCode !== null || child.signalCode !== null) return
-    try {
-      if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL')
-      else child.kill('SIGKILL')
-    } catch {
+    if (process.platform === 'win32' || !spawnedIdentity?.startedAt) {
+      // 没有进程组语义，或者身份没采集到：只能动 Node 自己持有的子进程句柄。
+      try { child.kill('SIGKILL') } catch { /* already gone */ }
+      return
+    }
+    const outcome = signalProcessTreeWithIdentity({ identity: spawnedIdentity, signal: 'SIGKILL' })
+    // 身份核对不过时不对进程组动手，但本进程持有的子进程句柄仍然是安全的（未被回收，PID 不会被复用）。
+    if (outcome.status !== 'signalled') {
       try { child.kill('SIGKILL') } catch { /* already gone */ }
     }
   }
@@ -428,6 +452,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         if (m.type === 'result' && (m.subtype !== 'success' || (msg as { is_error?: boolean }).is_error === true)) {
           providerStatus = 'failed'
         }
+        opts.recordNative?.(m.type ?? 'unknown', msg)
         const events = normalizeSdkMessage(msg, ctx)
         if (m.type === 'stream_event') {
           for (const event of events) {

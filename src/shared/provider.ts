@@ -1,4 +1,5 @@
-import type { RuntimeProvider } from './runtime.js'
+import type { ProviderCompatibilityAdvisory } from './provider-compatibility.js'
+import { runtimeProviderForProviderId, type RuntimeProvider } from './runtime.js'
 import type { McpLiveStatus } from './trace.js'
 
 export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
@@ -93,9 +94,64 @@ export interface ProviderDescriptor {
   path?: string
   version?: string
   disabledReason?: string
+  /**
+   * Provider 本身无法被描述时的原因（adapter 未注册、describe 抛错等）。
+   * 与 `disabledReason`（用户主动禁用）语义不同，不得合并。
+   */
+  unavailableReason?: string
   capabilities: Record<ProviderCapability, CapabilityMode>
   health?: ProviderHealth
+  /** CLI 版本兼容性建议（声明性策略，非实测）；缺省表示未评估。 */
+  compatibility?: ProviderCompatibilityAdvisory
 }
+
+export const PROVIDER_LABELS: Record<ProviderId, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  qoder: 'Qoder',
+  opencode: 'OpenCode',
+  pi: 'Pi'
+}
+
+export const PROVIDER_TRANSPORTS: Record<ProviderId, string> = {
+  claude: 'Claude Agent SDK',
+  codex: 'Codex CLI',
+  qoder: 'Qoder Agent SDK',
+  opencode: 'OpenCode server',
+  pi: 'JSONL RPC subprocess'
+}
+
+/**
+ * Provider 级的影子快照。
+ *
+ * 一个已配置却无法描述的 Provider 必须继续出现在列表里并带上原因：直接消失会
+ * 让用户以为自己没装过它，这是用沉默冒充事实。能力全部标 `none`、health 标
+ * `unavailable`，没有任何字段会被读成「正常但为空」。
+ */
+export function unavailableProviderDescriptor(args: {
+  id: ProviderId
+  reason: string
+  label?: string
+  runtimeProvider?: RuntimeProvider
+  transport?: string
+  path?: string
+  version?: string
+}): ProviderDescriptor {
+  const transport = args.transport ?? PROVIDER_TRANSPORTS[args.id]
+  return {
+    id: args.id,
+    label: args.label ?? PROVIDER_LABELS[args.id],
+    runtimeProvider: args.runtimeProvider ?? runtimeProviderForProviderId(args.id),
+    transport,
+    available: false,
+    unavailableReason: args.reason,
+    ...(args.path ? { path: args.path } : {}),
+    ...(args.version ? { version: args.version } : {}),
+    capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' },
+    health: { state: 'unavailable', transport, lastError: args.reason, lastErrorAt: Date.now() }
+  }
+}
+
 
 export interface SkillMeta {
   name: string

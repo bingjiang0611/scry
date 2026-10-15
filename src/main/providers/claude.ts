@@ -280,7 +280,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
               description: model.description,
               efforts: (model.supportedEffortLevels ?? []).map((effort) => effortOption(effort))
             })),
-            permissions: permissionOptions()
+            permissions: permissionOptions({ autoAcceptEdits: true, autoReview: true })
           }
         }
         if ((controlGenerations.get(key) ?? 0) === generation) controlCache.set(key, value)
@@ -394,7 +394,8 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           model: request.model?.id,
           effort: request.effort,
           permissionMode: request.permissionMode,
-          mcpServers: authorizedMcpServers(request.mcpExecution)
+          mcpServers: authorizedMcpServers(request.mcpExecution),
+          recordNative: request.recordNative
         }
       )
       return {
@@ -516,7 +517,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           return capabilityReady(context, 'read', controls.data, controls.observedAt)
         } catch (error) {
           return {
-            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions({ autoAcceptEdits: true, autoReview: true }) }),
             state: 'degraded' as const,
             reason: String((error as Error).message)
           }

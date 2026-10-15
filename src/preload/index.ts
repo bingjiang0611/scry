@@ -117,6 +117,10 @@ export type DetectedAgent = LocatedAgent & {
   transport?: string
   capabilities?: ProviderDescriptor['capabilities']
   health?: ProviderDescriptor['health']
+  /** Provider 已装但 adapter 不可用时的原因。 */
+  unavailableReason?: string
+  /** CLI 版本兼容性判定；它是提示，不阻断发送。 */
+  compatibility?: ProviderDescriptor['compatibility']
 }
 
 export type ParsedTurn = LoadedSessionTurn
@@ -220,7 +224,9 @@ const api = {
   setSessionArchived: (context: SessionRef, archived: boolean): Promise<boolean> =>
     ipcRenderer.invoke('agent:setSessionArchived', context, archived),
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
-  start: (request: AgentStartRequest): Promise<{ runId: string }> => ipcRenderer.invoke('agent:start', request),
+  /** commandStatus='duplicate' 表示这条 commandId 已被受理过，runId 是第一次的那个。 */
+  start: (request: AgentStartRequest): Promise<{ runId: string; commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
+    ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
   unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
   /** 权威事件快照（忽略 done）：live trace 降级后用它重新对齐，包含终态被跳过的事件。 */

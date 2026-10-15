@@ -266,6 +266,27 @@ describe('TraceOutputBridge bounded delivery', () => {
     expect(health.at(-1)).toMatchObject({ degraded: true, skippedEvents: 3 })
   })
 
+  it('条数预算同样会触发降级：海量小事件不能绕过字节预算', () => {
+    const { bridge, sent, health } = harness({
+      maxBatchEvents: 1,
+      highWaterBytes: 1,
+      maxBufferEvents: 3,
+      maxBufferBytes: 1024 * 1024
+    })
+    for (let index = 0; index < 6; index++) bridge.push(event(`e${index}`))
+
+    const state = bridge.snapshot()
+    expect(state.degraded).toBe(true)
+    // 1 在途 + 2 缓冲 = 3 条已到上限；其余 3 条如实计为跳过。
+    expect(state.skippedEvents).toBe(3)
+    expect(state.bufferedEvents).toBe(2)
+    expect(health.at(-1)).toMatchObject({ degraded: true, skippedEvents: 3 })
+    // ACK 释放额度后又能继续接收，证明条数计数器不会泄漏。
+    bridge.ack(sent[0])
+    bridge.push(event('e6'))
+    expect(bridge.snapshot().skippedEvents).toBe(3)
+  })
+
   it('asks for an authoritative resync after the backlog drains, then clears degradation', () => {
     const unit = sizeOf(event('probe'))
     const { bridge, health, sent } = harness({

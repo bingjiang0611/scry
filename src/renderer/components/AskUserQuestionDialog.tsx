@@ -222,6 +222,10 @@ export function AskUserQuestionInline({
                     <span>{display.question}</span>
                   </span>
                 </legend>
+                {/* Provider 自己给出的触发原因；它是待审阅的数据，不是 Scry 的风险结论。 */}
+                {question.warning && (
+                  <p className="question-warning" role="note">{question.warning}</p>
+                )}
                 {options.length === 0 && !closedChoice ? question.inputMode === 'multiline' ? (
                   <textarea
                     autoFocus={questionIndex === 0}

@@ -73,6 +73,7 @@ import {
   providerIdForAgentId,
   runTerminationHint,
   type AgentForceKillScope,
+  isAgentPermissionMode,
   type AgentForkSessionResult,
   type AgentPermissionMode,
   type AgentInputAttachment,
@@ -86,6 +87,7 @@ import {
 } from '../shared/runtime'
 import { capabilityUnavailable, type DeleteArchivedSessionsResult, type DeleteSessionResult, type ProviderContext, type ProviderId, type SessionProviderId } from '../shared/provider'
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
+import { ProviderCompatibilityStore } from './provider-compatibility-manifest'
 import type { AuthorizedMcpExecution, ProviderRunHandle } from './providers/types'
 import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
@@ -98,7 +100,9 @@ import { verifyForkArchiveBoundary } from './session-fork'
 import { appendCoalescedTrace, upsertTraceById } from './live-trace'
 import { LiveTraceIngestion } from './live-trace-ingestion'
 import { createTurnWallTimer } from './turn-wall-timing'
+import { CommandReceipts } from './command-receipts'
 import { PerformanceTrace } from './performance-timing'
+import { configureProviderEventLog, openProviderEventWriter } from './provider-event-log'
 import { startPerformanceResourceMonitor, type PerformanceResourceMonitor } from './performance-resource-monitor'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
@@ -515,11 +519,23 @@ const builtInProviderAdapters = smokeProviderEnabled ? [createSmokeProviderAdapt
   join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
   { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
 )
+/**
+ * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；
+ * 没配置就只用内置策略，不产生额外网络请求。拉取失败不影响 Provider 探测。
+ */
+const providerCompatibility = new ProviderCompatibilityStore({
+  scryVersion: app.getVersion(),
+  cachePath: join(app.getPath('userData'), 'provider-compatibility-v1.json'),
+  ...(process.env.SCRY_PROVIDER_MANIFEST_URL?.trim()
+    ? { remoteUrl: process.env.SCRY_PROVIDER_MANIFEST_URL.trim() }
+    : {})
+})
 const providerRegistry = new ProviderRegistry(
   builtInProviderAdapters,
   {
     disabledProviders: parseDisabledProviders(process.env.SCRY_DISABLED_PROVIDERS),
-    runControlsEnabled: process.env.SCRY_RUN_CONTROLS?.trim() !== '0'
+    runControlsEnabled: process.env.SCRY_RUN_CONTROLS?.trim() !== '0',
+    compatibility: (providerId, version) => providerCompatibility.advisory(providerId, version)
   }
 )
 const codexHookGrantStore = () => createCodexHookGrantStore(app.getPath('userData'))
@@ -1233,6 +1249,9 @@ handleTrusted('agent:detectFast', () => {
 })
 
 handleTrusted('agent:detect', async () => {
+  // 让这次描述用上最新策略；hydrate/refresh 自己吞掉所有失败，不会阻断探测。
+  await providerCompatibility.hydrate()
+  await providerCompatibility.refresh()
   // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
   // Capability disabling alone does not disable discovery's real --version subprocesses.
   const detected = smokeProviderEnabled ? smokeDetectedAgents : await detectInstalledAgents()
@@ -3273,6 +3292,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     emit
   )
   let interrupted = options.stopSignal?.aborted === true
+  // 双流事件日志：每个 run 一个 writer，native 与 canonical 共享同一文件和序号。
+  // 未通过环境变量启用时为 undefined，所有调用点直接跳过。
+  const eventLog = openProviderEventWriter(`${providerId}-${runId}`)
   const stopLatch = new AbortController()
   const requestStop = (): void => {
     interrupted = true
@@ -3320,7 +3342,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         }
       } : {}),
       mcpExecution,
+      recordNative: eventLog && ((type, payload) => eventLog.record('native', type, payload)),
       emit: (event) => {
+        eventLog?.record('canonical', `${event.kind}/${event.stage}`, event)
         firstTracePerf.finish({ bufferedEvents: runState.items.length })
         if (event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta') &&
           typeof event.text === 'string' && event.text.length > 0) {
@@ -3951,6 +3975,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         runs.remove(runId)
         releaseSessionBaseline?.()
         resolveSettled?.()
+        void eventLog?.close()
       } finally {
         if (isRemoteRun) {
           if (!remoteCompletion) {
@@ -3972,7 +3997,17 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
 }
 
-handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => startAppRun(payload))
+/**
+ * 带 commandId 的启动命令是幂等的：重投（连按发送、renderer 重放、远端重试）拿回
+ * 第一次的 runId，而不是起第二轮，也不是收到「同一会话已在运行」的误导性错误。
+ */
+const agentStartReceipts = new CommandReceipts<{ runId: string } | RemoteRunCompletion>()
+/** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
+const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
+handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
+  const receipt = await agentStartReceipts.submit(payload?.commandId?.trim() || undefined, () => startAppRun(payload))
+  return { ...receipt.result, commandStatus: receipt.status, commandSequence: receipt.sequence }
+})
 
 // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
 handleTrusted('agent:activeRun', (): ActiveRun | null => {
@@ -4209,7 +4244,7 @@ let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
   const raw = process.env.SCRY_REMOTE_PERMISSION_MODE
-  return raw === 'full_access' || raw === 'auto_review' || raw === 'default' ? raw : undefined
+  return isAgentPermissionMode(raw) ? raw : undefined
 }
 
 async function loadRemoteProviderSnapshot(): Promise<void> {
@@ -4282,7 +4317,9 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // trust, attachments, diff, recorder, archive and DB settlement stay here.
       startRun: createRemoteRunBinding({
         permissionModeOverride: remotePermissionMode,
-        startAppRun: (input) => startAppRun({
+        // 中继可能重投同一条已登记的 intent。收据按 ledgerRunId 去重：重投等待/返回
+        // 第一次的完成结果，不会在同一会话里起第二轮。
+        startAppRun: (input) => remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, () => startAppRun({
           ...input.request,
           backend: 'local',
           runtimeProvider: undefined
@@ -4296,7 +4333,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
           providerPrompt: input.providerPrompt,
           onTraceEvent: input.onTraceEvent,
           onSession: input.onSession
-        }) as Promise<RemoteRunCompletion>
+        }) as Promise<RemoteRunCompletion>).then((receipt) => receipt.result)
       }),
       // The phone's new-session picker chooses only among the host's already
       // directory-picker-authorized project dirs; it can never authorize a new
@@ -4517,6 +4554,8 @@ let performanceResourceMonitor: PerformanceResourceMonitor | null = null
 app.whenReady().then(() => {
   if (!primaryInstance) return
   const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform })
+  // 双流事件日志按环境变量装配；未设置时 openProviderEventWriter() 返回 undefined。
+  configureProviderEventLog(process.env, app.getPath('userData'))
   dockBadge.sync()
   void warmShellEnv()
   // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，

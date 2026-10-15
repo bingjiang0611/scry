@@ -79,7 +79,23 @@ export function isIncompleteRunTermination(reason: RunTerminationReason): boolea
   return reason === 'output_token_limit' || reason === 'model_context_window_exceeded'
 }
 
-export type AgentPermissionMode = 'default' | 'auto_review' | 'full_access'
+/**
+ * 审批档位。四档是语义栈升：默认全部问 → 只自动放行文件编辑 → 交给 Provider 原生
+ * 审查器 → 不再审批。没有原生等价语义的 Provider **不得静默降档**，必须不提供该
+ * 选项并在收到时显式报错（见各 adapter）。默认值永远是 `default`。
+ */
+export type AgentPermissionMode = 'default' | 'auto_accept_edits' | 'auto_review' | 'full_access'
+
+export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = [
+  'default',
+  'auto_accept_edits',
+  'auto_review',
+  'full_access'
+]
+
+export function isAgentPermissionMode(value: unknown): value is AgentPermissionMode {
+  return typeof value === 'string' && (AGENT_PERMISSION_MODES as readonly string[]).includes(value)
+}
 
 export interface AgentModelRef {
   id: string
@@ -193,6 +209,11 @@ export interface AgentForkSessionResult {
 
 export interface AgentStartRequest {
   prompt: string
+  /**
+   * 调用方自带的命令标识。给了它，这条启动命令就是幂等的：重投只会拿回同一个 runId，
+   * 不会起第二轮。不给表示调用方不要求幂等。
+   */
+  commandId?: string
   cwd?: string
   /** Manual comparison label; never changes network configuration. */
   networkLabel?: string
@@ -280,6 +301,12 @@ export interface AgentQuestionPrompt {
   header: string
   options: AgentQuestionOption[]
   multiSelect: boolean
+  /**
+   * Provider 自己给出的风险说明（例如 Claude 的 decisionReason、被拦下的路径）。
+   * 只有 Provider 真的给了理由才会出现：缺省表示「Provider 没说明原因」，
+   * 不得由 Scry 编造一条看起来像风险评估的文案。
+   */
+  warning?: string
   /** Optional input hint for provider-native free-text prompts. */
   placeholder?: string
   /** Native input/editor requests have no synthetic choice list. */
@@ -330,6 +357,7 @@ export interface AgentIntervention {
 
 export interface NormalizedAgentStartRequest {
   prompt: string
+  commandId?: string
   cwd?: string
   networkLabel?: string
   expectedExternalSessionId?: string | null
@@ -445,6 +473,13 @@ export function runtimeProviderForProviderId(providerId: ProviderId): RuntimePro
   return 'claude_sdk'
 }
 
+const COMMAND_ID_PATTERN = /^[A-Za-z0-9_:-]{8,128}$/
+
+/** 命令标识的合同：足够长以避免碰撞，字符集足够窄以安全地做 Map 键与日志字段。 */
+export function isCommandId(value: string): boolean {
+  return COMMAND_ID_PATTERN.test(value)
+}
+
 export function normalizeAgentStartRequest(payload: AgentStartRequest): NormalizedAgentStartRequest {
   const explicitAgentId = payload.agentId?.trim()
   const mappedProviderId = providerIdForAgentId(explicitAgentId)
@@ -469,8 +504,12 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
     throw new Error('网络标签必须是最多 80 个字符的文本')
   }
   const networkLabel = payload.networkLabel?.trim()
+  const commandId = payload.commandId?.trim()
+  if (commandId !== undefined && !isCommandId(commandId)) {
+    throw new Error('commandId 必须是 8-128 个字符的 [A-Za-z0-9_:-]')
+  }
   const permissionMode = payload.permissionMode ?? 'default'
-  if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
+  if (!isAgentPermissionMode(permissionMode)) {
     throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
   }
   const replaceRunId = boundedControlValue(payload.forkLastTurn?.replaceRunId)
@@ -490,6 +529,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   }
   return {
     prompt: payload.prompt,
+    ...(commandId ? { commandId } : {}),
     ...(networkLabel ? { networkLabel } : {}),
     ...(typeof payload.cwd === 'string' && payload.cwd.trim() ? { cwd: payload.cwd } : {}),
     ...(payload.expectedExternalSessionId === null
@@ -543,7 +583,7 @@ export function normalizeAgentForkSessionRequest(payload: unknown): AgentForkSes
   if (!sourceSessionId || !sourceRunId || !sourceProviderTurnId || !sourceForkTurnId) {
     throw new Error('创建分支缺少可信会话或轮次边界')
   }
-  if (!['default', 'auto_review', 'full_access'].includes(permissionMode)) {
+  if (!isAgentPermissionMode(permissionMode)) {
     throw new Error(`permissionMode=${String(permissionMode)} 不受支持`)
   }
   if (providerId === 'pi' && !agentProfileId) throw new Error('Pi 分支缺少 agentProfileId')
@@ -618,7 +658,8 @@ export function agentPermissionQuestion(
   description: string,
   allowSession = true,
   source = 'permission_request',
-  sessionDescription = '允许这类操作直到当前原生会话结束'
+  sessionDescription = '允许这类操作直到当前原生会话结束',
+  warning?: string
 ): AgentQuestionRequest {
   return {
     runId,
@@ -629,6 +670,7 @@ export function agentPermissionQuestion(
       header,
       question,
       multiSelect: false,
+      ...(warning ? { warning } : {}),
       options: [
         { label: '允许一次', description },
         ...(allowSession ? [{ label: '本次会话允许', description: sessionDescription }] : []),
@@ -646,6 +688,26 @@ export function agentPermissionDecision(
   const answer = response.answers[request.questions[0]?.question ?? '']
   if (answer === '本次会话允许') return 'session'
   return answer === '允许一次' ? 'once' : 'reject'
+}
+
+/**
+ * 把 Provider 给出的风险说明整理成可直接显示的一行文本。
+ *
+ * 这段文本来自 Provider，可能含控制字符、ANSI 序列或凭据；它是**数据**，不是指令。
+ * 这里只做脱敏、去控制字符和长度收敛，不解释也不执行其中的内容。
+ */
+export function sanitizeApprovalWarning(value: unknown, maxLength = 400): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const masked = maskSecrets(value) ?? ''
+  const flattened = masked
+    // CSI/OSC 等 ANSI 转义序列
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/g, '')
+    .replace(/[\u0000-\u001F\u007F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!flattened) return undefined
+  return flattened.length > maxLength ? `${flattened.slice(0, maxLength - 1)}…` : flattened
 }
 
 export function isSupportedImageMimeType(value: string): value is AgentImageMimeType {

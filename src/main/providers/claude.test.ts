@@ -664,6 +664,7 @@ describe('Claude provider adapter', () => {
         }],
         permissions: [
           { id: 'default' },
+          { id: 'auto_accept_edits' },
           { id: 'auto_review' },
           { id: 'full_access' }
         ]

@@ -12,7 +12,7 @@ import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthoriz
 import { readRemoteWorkspace, type RemoteSessionStatus, type RemoteSessionStatusQuery } from './remote-workspace'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { ProviderOperationGate } from '../provider-operation-gate'
-import { decodedBase64ByteLength, isSupportedImageMimeType, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
+import { decodedBase64ByteLength, isAgentPermissionMode, isSupportedImageMimeType, type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { RemoteInteractionBroker, RemoteInteractionError, type RemoteQuestionAnswerReceipt } from './remote-interaction-broker'
 
 // Trusted-local composition root for the remote subsystem. It wires the six
@@ -44,7 +44,7 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   modelId?: string
   modelProviderId?: string
   effort?: string
-  permissionMode?: 'default' | 'auto_review' | 'full_access'
+  permissionMode?: AgentPermissionMode
   // Bounded, encrypted attachment payloads from the paired device. Images are
   // forwarded as native Provider attachments; UTF-8 text/code files become
   // explicit context blocks. The parser below validates every byte before the
@@ -213,7 +213,7 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
   if (routing.effort !== undefined && (typeof routing.effort !== 'string' || routing.effort.length === 0 || routing.effort.length > 64)) {
     throw new RemoteRunDenied('invalid_target')
   }
-  if (routing.permissionMode !== undefined && !['default', 'auto_review', 'full_access'].includes(String(routing.permissionMode))) {
+  if (routing.permissionMode !== undefined && !isAgentPermissionMode(routing.permissionMode)) {
     throw new RemoteRunDenied('invalid_target')
   }
   const attachments = parseRemoteAttachments(routing.attachments)
@@ -225,7 +225,7 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
     ...(typeof routing.modelId === 'string' ? { modelId: routing.modelId } : {}),
     ...(typeof routing.modelProviderId === 'string' ? { modelProviderId: routing.modelProviderId } : {}),
     ...(typeof routing.effort === 'string' ? { effort: routing.effort } : {}),
-    ...(routing.permissionMode === 'default' || routing.permissionMode === 'auto_review' || routing.permissionMode === 'full_access' ? { permissionMode: routing.permissionMode } : {}),
+    ...(isAgentPermissionMode(routing.permissionMode) ? { permissionMode: routing.permissionMode } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {})
   }

@@ -776,6 +776,34 @@ describe('parseTranscriptToTurns', () => {
     expect(usage.map((event) => event.tokensIn)).toEqual([10, 10])
   })
 
+  it('fork 复制进来的历史 assistant 行不会被重复计用量，新一轮的用量正常计入', () => {
+    const assistant = (messageId: string, requestId: string, tokensIn: number) => JSON.stringify({
+      type: 'assistant',
+      requestId,
+      message: {
+        id: messageId,
+        role: 'assistant',
+        model: 'claude-sonnet-4-5',
+        usage: { input_tokens: tokensIn, output_tokens: 2 },
+        content: [{ type: 'text', text: messageId }]
+      }
+    })
+    const turns = parseTranscriptToTurns([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '第一轮' } }),
+      assistant('msg-1', 'req-1', 10),
+      // fork：Claude 把上一轮的 assistant 行原样复制进新分支的历史里。
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '第二轮' } }),
+      assistant('msg-1', 'req-1', 10),
+      assistant('msg-2', 'req-2', 30)
+    ].join('\n'), ctx())
+
+    const usage = turns.flatMap((turn) => turn.items.filter((event) => event.text === 'transcript assistant usage'))
+    expect(usage.map((event) => event.tokensIn)).toEqual([10, 30])
+    expect(turns).toHaveLength(2)
+    // 复制行仍然出现在第二轮的内容里：被丢弃的只有重复用量，不是整条证据。
+    expect(turns[1].items.some((event) => event.kind === 'model' && event.text === 'msg-1')).toBe(true)
+  })
+
   it('Claude task-notification 作为当前真实轮的 continuation，三条通知不制造新轮且不丢后续工具证据', () => {
     const user = (promptId: string, content: string, extra: Record<string, unknown> = {}) => JSON.stringify({
       type: 'user',

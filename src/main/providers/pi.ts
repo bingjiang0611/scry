@@ -1110,6 +1110,7 @@ async function runPiAgent(
     }))
   }
   const off = rpc.onEvent((event) => {
+    request.recordNative?.(typeof event.type === 'string' ? event.type : 'unknown', event)
     emitBackground(background.observe(event))
     // Owned follow-up/Goal work can begin another agent cycle before canonical settlement.
     // Rearm only on agent_start, never on a late message from an ended cycle.

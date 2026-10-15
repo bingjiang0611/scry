@@ -14,6 +14,8 @@ import {
   readTraceArchiveAsync,
   readTraceArchivePageAsync,
   resolveTranscriptPath,
+  scanTraceArchiveCatalogIndexAsync,
+  DEFAULT_TRACE_DISCOVERY_BUDGET,
   traceArchiveRunIds,
   traceArchivePath,
   traceArchiveTurnPath,
@@ -108,6 +110,34 @@ describe('transcript archive mirror', () => {
       runId: 'run-first',
       prompt: '保留的历史问题'
     })])
+  })
+
+  it('聚合读取预算耗尽时停下来，并把结果标为不完整而不写回缓存', async () => {
+    const userDataDir = tempRoot()
+    const args = { cwd: '/repo', providerId: 'qoder' as const, runtimeProvider: 'qoder_cli' as const, userDataDir }
+    for (const sessionId of ['s-1', 's-2', 's-3']) {
+      expect(upsertTraceArchiveTurn({ ...args, sessionId,
+        turn: { runId: `run-${sessionId}`, userText: `prompt ${sessionId}`, items: [], done: true } })).toBe(true)
+    }
+    const full = await scanTraceArchiveCatalogIndexAsync(userDataDir)
+    expect(full.complete).toBe(true)
+    expect(full.entries).toHaveLength(3)
+
+    // 预算只够读第一个文件：剩下的不得被当成「不存在」。
+    const budgeted = await scanTraceArchiveCatalogIndexAsync(userDataDir, {
+      ...DEFAULT_TRACE_DISCOVERY_BUDGET,
+      maxTotalBytes: full.entries[0].size
+    })
+    expect(budgeted.complete).toBe(false)
+    expect(budgeted.entries.length).toBeLessThan(3)
+
+    const exhausted = await scanTraceArchiveCatalogIndexAsync(userDataDir, {
+      ...DEFAULT_TRACE_DISCOVERY_BUDGET,
+      maxTotalBytes: 0
+    })
+    expect(exhausted.complete).toBe(false)
+    expect(exhausted.entries).toEqual([])
+    expect(DEFAULT_TRACE_DISCOVERY_BUDGET.maxTotalBytes).toBe(256 * 1024 * 1024)
   })
 
   it('keeps the catalog dirty when a new session is written during async discovery', async () => {

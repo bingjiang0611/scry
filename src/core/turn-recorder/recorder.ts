@@ -22,6 +22,7 @@ import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
+import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { turnChangeHints } from './change-journal.js'
@@ -1009,6 +1010,7 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
   }
   let usageObserved = false
   let usageFinished = false
+  let lastUsageFilter = new CodexUsageDeltaFilter()
   // Codex writes the model of every request into `turn_context` and the window plus the latest
   // request's input size into `token_count`. Both are host-authored facts, so they bind the
   // turn's usage to a model and its context occupancy without consulting any config default.
@@ -1206,6 +1208,8 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
       turnUsageBaseline = { ...cumulativeUsage }
       latestTurnCumulative = undefined
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
+      // 去重只在一轮之内成立：新一轮的第一帧即使和上一轮末帧相同，也是真实用量。
+      lastUsageFilter = new CodexUsageDeltaFilter()
       usageObserved = false
       usageFinished = false
       turnModels = new Set()
@@ -1326,7 +1330,9 @@ function parseCodexRollout(content: string, runId: string): { recognized: boolea
         cumulativeUsage = { ...latestTurnCumulative }
         usageObserved = true
       }
-      if (last) {
+      // `total_token_usage` 缺失时才会用到这些增量求和。Codex 可能把同一帧
+      // `last_token_usage` 连续广播多次，相邻同值帧必须丢掉，否则求和会高估。
+      if (last && lastUsageFilter.admit(last)) {
         const add = (key: string): number => typeof last[key] === 'number' && Number.isFinite(last[key]) ? last[key] as number : 0
         usage.tokensIn += add('input_tokens')
         usage.tokensOut += add('output_tokens')

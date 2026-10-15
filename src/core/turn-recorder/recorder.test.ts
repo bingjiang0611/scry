@@ -136,6 +136,25 @@ describe('turn recorder state machine', () => {
     expect(['last_observed_activity', 'turn_start']).toContain(record.termination?.value?.completedAtSource)
   })
 
+  it('早于本轮开始的终止时间同样不可信（时钟偏移是双向的）', async () => {
+    const root = await workspace()
+    const base = { provider: 'claude' as const, workspace: root }
+    const start = new Date(Date.now() - 60_000).toISOString()
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('backwards', { prompt: 'go', timestamp: start }) })
+    await handleRecorderHook({
+      ...base,
+      event: 'SessionEnd',
+      // Provider 时钟落后：结束时间比本轮开始还早，它不可能是真实结束点
+      payload: payload('backwards', { timestamp: new Date(Date.parse(start) - 10 * 60_000).toISOString() })
+    })
+    await recoverRecorder(root)
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(Date.parse(record.completedAt)).toBeGreaterThanOrEqual(Date.parse(start))
+    expect(record.termination?.status).toBe('partial')
+    expect(record.termination?.quality).not.toBe('exact')
+    expect(['last_observed_activity', 'turn_start']).toContain(record.termination?.value?.completedAtSource)
+  })
+
   it('Stop without an explicit clock keeps the observed terminal honest', async () => {
     const root = await workspace()
     await completeTurn(root, 'observed-stop')
@@ -2173,6 +2192,58 @@ describe('Codex rollout recorder evidence', () => {
       expect.objectContaining({ order: 1, kind: 'thinking', text: '定位文件', messageId: 'reasoning-1' }),
       expect.objectContaining({ order: 5, kind: 'text', text: '完成' })
     ])
+  })
+
+  it('连续重复的 last_token_usage 帧只计一次，真实的下一帧仍然累加', async () => {
+    const root = await workspace()
+    const rollout = join(root, 'repeat-usage.jsonl')
+    const frame = (timestamp: string, input: number, output: number): Record<string, unknown> => ({
+      timestamp,
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: input,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: output,
+            reasoning_output_tokens: 0
+          }
+        }
+      }
+    })
+    const lines = [
+      { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'repeat-turn' } },
+      { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'count tokens' } },
+      // 同一帧被连续广播三次：只能计一次。
+      frame('2026-07-19T12:00:00.100Z', 100, 10),
+      frame('2026-07-19T12:00:00.200Z', 100, 10),
+      frame('2026-07-19T12:00:00.300Z', 100, 10),
+      // 真实的第二次请求：必须累加。
+      frame('2026-07-19T12:00:00.400Z', 50, 5),
+      { timestamp: '2026-07-19T12:00:01.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'repeat-turn', last_agent_message: 'done' } }
+    ]
+    await writeFile(rollout, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn.started',
+      workspace: root,
+      payload: payload('repeat', { prompt: 'count tokens', turn_id: 'repeat-turn', rollout_path: rollout })
+    })
+    await handleRecorderHook({
+      provider: 'codex',
+      event: 'turn/completed',
+      workspace: root,
+      payload: payload('repeat', { turn_id: 'repeat-turn', rollout_path: rollout, timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.usage).toMatchObject({
+      status: 'available',
+      value: { inputTokens: 150, outputTokens: 15 }
+    })
   })
 
   it('rollout 里的 hook_started/hook_completed 按 Codex 事件名识别，status=stopped 记为 cancelled', async () => {

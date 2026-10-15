@@ -40,7 +40,7 @@ import { resolveTurnDiffReview, sessionNetDiffReview } from './turn-diff'
 import type { Turn } from './format'
 import { useResizablePane } from './hooks/useResizablePane'
 import { useWorkspaceState } from './hooks/useWorkspaceState'
-import { recordedSessionModel, runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
+import { providerCompatibilityNotice, recordedSessionModel, runControlSendBlockedReason, useIntegrations } from './hooks/useIntegrations'
 import { useAgentSession } from './hooks/useAgentSession'
 import { useEventCallback } from './hooks/useEventCallback'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
@@ -921,6 +921,8 @@ export function App() {
             integrations.runControls
           )
   const sendBlockedReason = providerSendBlockedReason
+  // 版本兼容性是提示而不是阻断：只有在没有真正阻断原因时才占用状态行。
+  const providerCompatibilityIssue = providerCompatibilityNotice(integrations.selectedAgent)
   const session = useAgentSession({
     onTurnDone: (event) => {
       const previousSessionId = activeSessionIdRef.current
@@ -2476,7 +2478,7 @@ export function App() {
               runControlsReason={integrations.runControlCapability?.reason}
               sendBlockedReason={sendBlockedReason}
               composerError={composerError}
-              detectionIssue={integrations.agentsScanError ?? providerSendBlockedReason}
+              detectionIssue={integrations.agentsScanError ?? providerSendBlockedReason ?? providerCompatibilityIssue}
               detectionRetrying={integrations.detectionRetrying}
               onRetryDetection={() => { setComposerError(null); integrations.retryDetection() }}
               submitting={composerSubmitting}

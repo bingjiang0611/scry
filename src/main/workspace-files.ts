@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
 import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { withWorkspaceLease } from './workspace-lease'
 import {
   canOpenWorkspaceFileExternally,
   WORKSPACE_FILE_PREVIEW_UNSUPPORTED,
@@ -299,15 +300,22 @@ export async function openWorkspaceFileExternally(
 }
 
 export async function writeWorkspaceFile(request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> {
-  const bytes = Buffer.from(request.content, 'utf8')
-  const current = await readWorkspaceFile(request)
-  if (current.revision !== request.expectedRevision) throw new Error('文件已在磁盘上发生变化，请重新载入后再编辑')
-  const target = await checkedPath(request.cwd, request.path)
-  await writeFile(target.realPath, bytes)
-  return readWorkspaceFile(request)
+  // revision 比对与写回必须在同一个租约内完成，否则并发写会互相覆盖。
+  return withWorkspaceLease(await canonicalRoot(request.cwd), async () => {
+    const bytes = Buffer.from(request.content, 'utf8')
+    const current = await readWorkspaceFile(request)
+    if (current.revision !== request.expectedRevision) throw new Error('文件已在磁盘上发生变化，请重新载入后再编辑')
+    const target = await checkedPath(request.cwd, request.path)
+    await writeFile(target.realPath, bytes)
+    return readWorkspaceFile(request)
+  })
 }
 
 export async function createWorkspaceEntry(request: WorkspaceCreateRequest): Promise<WorkspaceEntry> {
+  return withWorkspaceLease(await canonicalRoot(request.cwd), () => createWorkspaceEntryLocked(request))
+}
+
+async function createWorkspaceEntryLocked(request: WorkspaceCreateRequest): Promise<WorkspaceEntry> {
   const parent = await checkedPath(request.cwd, request.parentPath)
   if (!(await stat(parent.realPath)).isDirectory()) throw new Error('目标父路径不是文件夹')
   const name = entryName(request.name)

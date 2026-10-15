@@ -54,6 +54,32 @@ describe('AskUserQuestionInline', () => {
     expect(html).not.toContain('dangerouslySetInnerHTML')
   })
 
+  it('渲染 Provider 给出的审批风险说明，并且只在存在时渲染', () => {
+    const warned: AgentQuestionRequest = {
+      runId: 'run-1',
+      questionId: 'permission-1',
+      questionKind: 'permission',
+      questions: [{
+        question: '允许 Bash 执行这项操作吗？',
+        header: '权限请求',
+        multiSelect: false,
+        warning: 'ask rule matched；越界路径：/etc/hosts',
+        options: [
+          { label: '允许一次', description: 'curl https://example.invalid' },
+          { label: '拒绝', description: '拒绝本次操作并让 Agent 继续处理结果' }
+        ]
+      }]
+    }
+    const html = renderToStaticMarkup(<AskUserQuestionInline request={warned} queuedCount={1} onRespond={async () => {}} />)
+    expect(html).toContain('question-warning')
+    expect(html).toContain('ask rule matched')
+    expect(html).toContain('/etc/hosts')
+    expect(html).toContain('role="note"')
+
+    const plain = renderToStaticMarkup(<AskUserQuestionInline request={request} queuedCount={1} onRespond={async () => {}} />)
+    expect(plain).not.toContain('question-warning')
+  })
+
   it('shows the provider that owns the pending question', () => {
     const html = renderToStaticMarkup(
       <AskUserQuestionInline

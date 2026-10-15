@@ -18,14 +18,29 @@ export function effortOption(id: string, description?: string, isDefault = false
   }
 }
 
-export function permissionOptions(includeAutoReview = true): AgentPermissionOption[] {
+/**
+ * 生成某个 Provider **真正支持**的审批档位。
+ *
+ * 没有原生等价语义的档位不得出现在列表里，也不得被静默映射到别的档位：
+ * 用户选了什么，跑的就必须是什么。
+ */
+export function permissionOptions(
+  supported: { autoAcceptEdits?: boolean; autoReview?: boolean } = {}
+): AgentPermissionOption[] {
   return [
     {
       id: 'default',
       label: '默认审批',
       description: '危险操作会暂停并请求你的确认'
     },
-    ...(includeAutoReview
+    ...(supported.autoAcceptEdits
+      ? [{
+          id: 'auto_accept_edits' as const,
+          label: '自动接受编辑',
+          description: '文件编辑直接放行；命令执行等其他操作仍然请求确认'
+        }]
+      : []),
+    ...(supported.autoReview
       ? [{
           id: 'auto_review' as const,
           label: '自动审查',
@@ -38,4 +53,12 @@ export function permissionOptions(includeAutoReview = true): AgentPermissionOpti
       description: '跳过审批并允许 Agent 直接执行操作'
     }
   ]
+}
+
+/**
+ * Provider 不支持某个审批档位时的统一拒绝。宁可显式失败，也不静默换成更宽或
+ * 更窄的权限跑完一轮。
+ */
+export function unsupportedPermissionMode(provider: string, mode: string, detail: string): Error {
+  return new Error(`${provider} 不支持“${mode}”权限模式：${detail}`)
 }

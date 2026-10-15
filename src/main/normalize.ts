@@ -11,6 +11,7 @@ import {
   fileOpOf
 } from '../shared/trace.js'
 import { classifyRunTermination } from '../shared/runtime.js'
+import { claudeTranscriptUsageKey } from '../shared/usage-dedupe.js'
 import { classifyDanger } from './danger.js'
 
 export interface NormalizeCtx {
@@ -787,9 +788,10 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
         cur.items.push(...normalizeSdkMessage(o, lineCtx))
         const usageResult = transcriptUsageResult(msg, lineCtx)
         if (usageResult) {
-          const messageId = typeof msg?.id === 'string' ? msg.id : undefined
-          const requestId = typeof o.requestId === 'string' ? o.requestId : undefined
-          const usageKey = messageId || requestId ? JSON.stringify([messageId ?? '', requestId ?? '']) : undefined
+          const usageKey = claudeTranscriptUsageKey({
+            messageId: typeof msg?.id === 'string' ? msg.id : undefined,
+            requestId: typeof o.requestId === 'string' ? o.requestId : undefined
+          })
           if (!usageKey || !seenAssistantUsage.has(usageKey)) {
             if (usageKey) seenAssistantUsage.add(usageKey)
             cur.items.push(usageResult)

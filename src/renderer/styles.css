@@ -7993,6 +7993,19 @@ textarea:focus-visible,
   letter-spacing: 0.06em;
 }
 
+/* Provider 给出的审批触发原因。它是转述的证据，所以用警示色但不加结论性措辞。 */
+.question-warning {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--warn, #c08a2e) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn, #c08a2e) 38%, transparent);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .question-options {
   display: grid;
   gap: 8px;
