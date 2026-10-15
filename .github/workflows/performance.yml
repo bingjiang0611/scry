@@ -45,6 +45,57 @@ jobs:
           cp candidate/.npmrc baseline/.npmrc
           (cd baseline && npm ci --ignore-scripts) 2>&1 | tee performance-results/baseline-install.log
           (cd candidate && npm ci --ignore-scripts) 2>&1 | tee performance-results/candidate-install.log
+      - name: Diagnose loopback stages without changing measured workloads
+        run: |
+          node --experimental-strip-types --input-type=module > performance-results/relay-diagnostics.json <<'JS'
+          import assert from 'node:assert/strict'
+          import { createServer } from 'node:net'
+          import { once } from 'node:events'
+          const results = []
+          for (const side of ['baseline', 'candidate']) {
+            const { createRelayConnect } = await import(`./${side}/src/main/remote/relay-connect.ts`)
+            for (const peerNoDelay of [false, true]) {
+              const start = performance.now()
+              const marks = {}
+              const payload = Buffer.alloc(64 * 1024, 'r')
+              const request = Buffer.from('fixed-device-request')
+              const server = createServer(socket => {
+                socket.setNoDelay(peerNoDelay)
+                let input = Buffer.alloc(0)
+                let sent = false
+                socket.on('data', chunk => {
+                  input = Buffer.concat([input, chunk])
+                  const newline = input.indexOf(10)
+                  if (sent || newline < 0 || input.length < newline + 1 + request.length) return
+                  assert.deepEqual(JSON.parse(input.subarray(0, newline)), {hostId:'fixed-host',token:'isolated-fixture',mode:'run'})
+                  assert.deepEqual(input.subarray(newline + 1), request)
+                  sent = true
+                  marks.requestReceivedMs = performance.now() - start
+                  socket.end(payload)
+                })
+              })
+              server.listen(0, '127.0.0.1')
+              await once(server, 'listening')
+              const {connect, readyEvent} = createRelayConnect({host:'127.0.0.1',port:server.address().port,hostId:'fixed-host',token:'isolated-fixture',mode:'run'})
+              const leg = connect()
+              await once(leg, readyEvent)
+              marks.connectedMs = performance.now() - start
+              leg.write(request)
+              const chunks = []
+              for await (const chunk of leg) {
+                marks.firstByteMs ??= performance.now() - start
+                chunks.push(Buffer.from(chunk))
+              }
+              marks.eofMs = performance.now() - start
+              assert.deepEqual(Buffer.concat(chunks), payload)
+              leg.destroy()
+              await new Promise(resolve => server.close(resolve))
+              marks.closedMs = performance.now() - start
+              results.push({side,peerNoDelay,bytes:payload.length,...marks})
+            }
+          }
+          console.log(JSON.stringify(results, null, 2))
+          JS
       - name: Check coverage map and feedback contracts
         working-directory: candidate
         run: |
@@ -117,6 +168,8 @@ jobs:
           set -o pipefail
           (cd baseline && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/baseline-native-deps.log
           (cd candidate && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/candidate-native-deps.log
+          (cd baseline && node -e "require('node:fs').accessSync(require('electron'))") 2>&1 | tee native-results/baseline-electron-ready.log
+          (cd candidate && node -e "require('node:fs').accessSync(require('electron'))") 2>&1 | tee native-results/candidate-electron-ready.log
           (cd baseline && npm run build) 2>&1 | tee native-results/baseline-build.log
           (cd candidate && npm run build) 2>&1 | tee native-results/candidate-build.log
       - name: Measure baseline then candidate, retaining failures
