@@ -6,7 +6,7 @@
 - T3 固定在 [`7ac952c630ef8a60d14ca8f6a0c7adce33db4bae`](https://github.com/pingdotgg/t3code/tree/7ac952c630ef8a60d14ca8f6a0c7adce33db4bae)。沿用上一项的 main 快照，不把它当作稳定版 `0.0.45` 或当前最新版本。
 - Scry 核查基线：`1f932e0`，App `0.2.190`。本轮只读相关调用链，没有启动 Provider、运行 T3 测试或进行账号切换。
 - **跨 Provider 转交的是可观察的历史资料，不是原生 session、隐藏推理、工具执行状态或审批。**
-- 建议 Scry 第一版采用“保留源会话，交接到目标 Provider 的新会话”。T3 的统一 app thread 是另一种产品模型，不应通过解锁现有 Provider 下拉框假装实现。
+- 初始评估曾建议“保留源会话，交接到目标 Provider 的新会话”；**用户随后明确选择统一会话内切换**，当前技术方案已按该选择更新。统一 app thread 必须有真实身份和覆盖模型，不能仅解锁现有 Provider 下拉框。
 
 ## 1. T3 有哪些独立身份
 

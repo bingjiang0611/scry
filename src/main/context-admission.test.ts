@@ -31,6 +31,51 @@ describe('context admission', () => {
     await expect(admission.run('qoder\0/repo', async () => 'next')).resolves.toBe('next')
   })
 
+  it('atomically reserves overlapping identities without blocking an unrelated conversation', async () => {
+    const admission = new ContextAdmission()
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const order: string[] = []
+    const first = admission.runMany(['thread-a', 'native-b'], async () => {
+      order.push('first:start')
+      await blocked
+      order.push('first:end')
+    })
+    const reverse = admission.runMany(['native-b', 'thread-a'], async () => { order.push('reverse') })
+    const native = admission.run('native-b', async () => { order.push('native') })
+    await admission.run('unrelated', async () => { order.push('unrelated') })
+    expect(order).toEqual(['first:start', 'unrelated'])
+    release()
+    await Promise.all([first, reverse, native])
+    expect(order).toEqual(['first:start', 'unrelated', 'first:end', 'reverse', 'native'])
+  })
+
+  it('reserves the entire key set while waiting on an earlier single-key owner', async () => {
+    const admission = new ContextAdmission()
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const first = admission.run('a', () => blocked)
+    const combinedAction = vi.fn(async () => {})
+    const followerAction = vi.fn(async () => {})
+    const combined = admission.runMany(['b', 'a', 'b'], combinedAction)
+    const follower = admission.run('b', followerAction)
+    await admission.run('c', async () => {})
+    expect(combinedAction).not.toHaveBeenCalled()
+    expect(followerAction).not.toHaveBeenCalled()
+    release()
+    await Promise.all([first, combined, follower])
+    expect(combinedAction.mock.invocationCallOrder[0]).toBeLessThan(followerAction.mock.invocationCallOrder[0])
+  })
+
+  it('releases every identity after rejection and rejects an empty key set', async () => {
+    const admission = new ContextAdmission()
+    await expect(admission.runMany(['a', 'b'], async () => { throw new Error('denied') })).rejects.toThrow('denied')
+    await expect(admission.runMany(['b', 'a'], async () => 'next')).resolves.toBe('next')
+    const action = vi.fn(async () => {})
+    await expect(admission.runMany([], action)).rejects.toThrow('at least one')
+    expect(action).not.toHaveBeenCalled()
+  })
+
   it('waits for a UI-complete run to settle before admitting the queued turn', async () => {
     let releasePipeline!: () => void
     const settled = new Promise<void>((resolve) => { releasePipeline = resolve })
