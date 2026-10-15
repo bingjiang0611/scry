@@ -31,6 +31,7 @@ import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
+import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
 import { PinnedSummaryHost, usePinnedSummaryVisibility } from './components/PinnedSummary'
 import type { RightSurfaceAction } from './right-surface'
@@ -2620,6 +2621,11 @@ export function App() {
                 />
               ) : (
                 <EmptySessionOverview />
+              ),
+              'source-control': surface.cwd ? (
+                <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={surface.id === currentSurface.id && panelVisible && surface.state.activeId === 'source-control'} />
+              ) : (
+                <div className="surface-unavailable"><b>源代码管理不可用</b><span>先绑定本机 Git 工作区。</span></div>
               ),
               files: surface.cwd ? (
                 <WorkspacePanel

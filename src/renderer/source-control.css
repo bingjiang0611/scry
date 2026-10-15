@@ -1,0 +1,245 @@
+.sc-panel {
+  --sc-border: var(--border);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  color: var(--fg);
+  font-size: 12px;
+}
+.sc-header,
+.sc-tabs,
+.sc-actions,
+.sc-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-header {
+  justify-content: space-between;
+  padding: 14px;
+  border-bottom: 1px solid var(--sc-border);
+}
+.sc-header small,
+.sc-identity small,
+.sc-file small,
+.sc-operation small,
+.sc-pr-list small {
+  display: block;
+}
+.sc-header small,
+.sc-muted,
+.sc-identity small {
+  color: var(--dim2);
+  margin-top: 4px;
+}
+.sc-identity {
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.sc-identity small {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-tabs {
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--sc-border);
+}
+.sc-panel button,
+.sc-panel input,
+.sc-panel select,
+.sc-panel textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--panel, #fff);
+  border: 1px solid var(--sc-border);
+  border-radius: 6px;
+}
+.sc-panel button {
+  padding: 6px 9px;
+  cursor: pointer;
+}
+.sc-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.sc-panel button:focus-visible,
+.sc-panel input:focus-visible,
+.sc-panel select:focus-visible,
+.sc-panel textarea:focus-visible {
+  outline: 2px solid var(--accent, #356ae6);
+  outline-offset: 2px;
+}
+.sc-tabs button[aria-pressed='true'],
+.sc-file-name[aria-pressed='true'] {
+  color: var(--accent, #356ae6);
+  border-color: currentColor;
+}
+.sc-panel .sc-primary {
+  background: var(--accent, #356ae6);
+  color: var(--accent-fg);
+  border-color: transparent;
+}
+.sc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 14px 20px;
+  overscroll-behavior: contain;
+}
+.sc-form {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.sc-section {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--sc-border);
+}
+.sc-section h3 {
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+.sc-section h3 span {
+  color: var(--dim2);
+}
+.sc-panel label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+.sc-panel input,
+.sc-panel select,
+.sc-panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+}
+.sc-panel textarea {
+  min-height: 78px;
+  resize: vertical;
+  line-height: 1.6;
+}
+.sc-panel .sc-check {
+  display: flex;
+  align-items: center;
+}
+.sc-check input {
+  width: auto;
+}
+.sc-file {
+  padding: 3px 0;
+}
+.sc-file-status {
+  min-width: 16px;
+  color: var(--dim2);
+  font-family: monospace;
+}
+.sc-panel .sc-file-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+  background: transparent;
+  border-color: transparent;
+}
+.sc-notice {
+  padding: 10px;
+  margin: 10px 0;
+  border: 1px solid #b48739;
+  border-radius: 6px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.sc-notice button {
+  margin-left: 8px;
+}
+.sc-empty {
+  padding: 24px 12px;
+  color: var(--dim2);
+  line-height: 1.7;
+}
+.sc-actions {
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.sc-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sc-panel code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.sc-patch {
+  max-height: 420px;
+  overflow: auto;
+  margin: 10px 0;
+  border: 1px solid var(--sc-border);
+  border-radius: 6px;
+}
+.sc-code-line {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  line-height: 1.7;
+}
+.sc-code-line code {
+  padding: 0 6px;
+  white-space: pre;
+}
+.sc-code-line button {
+  font: 10px monospace;
+  padding: 2px;
+  min-width: 35px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.sc-code-add {
+  background: color-mix(in srgb, #2c9b66 12%, transparent);
+}
+.sc-code-del {
+  background: color-mix(in srgb, #ce5360 12%, transparent);
+}
+.sc-code-hunk {
+  color: var(--dim2);
+  background: color-mix(in srgb, #637898 10%, transparent);
+}
+.sc-line-comment,
+.sc-draft-comment,
+.sc-operation {
+  border: 1px solid var(--sc-border);
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.sc-pr-list {
+  display: grid;
+  gap: 6px;
+}
+.sc-pr-list button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.sc-section summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.sc-confirm-detail {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.6;
+}

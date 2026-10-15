@@ -8,7 +8,9 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
+import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 
+const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
@@ -24,7 +26,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -105,7 +107,7 @@ async function main() {
   const canonicalHome = realpathSync(home)
   const canonicalWorkspace = realpathSync(workspace)
   const secondWorkspace = join(home, 'performance-second-project')
-  if (performanceOnly) {
+  if (performanceOnly || sourceControlOnly) {
     mkdirSync(secondWorkspace, { recursive: true })
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([canonicalWorkspace, realpathSync(secondWorkspace)]))
   }
@@ -243,6 +245,12 @@ async function main() {
       throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
     }
     return response.result?.value
+  }
+  if (sourceControlOnly) {
+    const result = await exerciseSourceControlApp(cdp, evaluate, { workspace: canonicalWorkspace, remote: realpathSync(secondWorkspace), home })
+    cdp.close()
+    console.log(JSON.stringify(result))
+    return
   }
   if (devMetaPromptsOnly) {
     const result = await exerciseMetaPromptsApp(cdp, evaluate)
