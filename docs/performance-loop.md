@@ -105,3 +105,5 @@ npm run performance:compare -- /tmp/scry-baseline.json /tmp/scry-candidate.json 
 - 当工作量指标不再解释真实耗时时，升级为对应 native 用户路径基准；当分桶过粗造成混杂时，在相同隐私合同下增加具体 workload 维度，而不是扩大判断置信度。
 
 本次不安装、不发布、不上传历史数据，也不宣称所有路径已优化。闭环能提供可执行的反馈和明确的覆盖缺口；真实版本收益仍需后续发布与使用样本。
+
+实际检查、首轮失败、基线已有问题和未验证项见 [本次验收记录](performance-loop-verification.md)。
