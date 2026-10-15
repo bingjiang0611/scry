@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -14,6 +15,9 @@ import { createPiAdapter, probePiAgent } from './pi'
 async function withProbeFixture(run: (profile: PiAgentProfile, cwd: string, starts: () => string[]) => Promise<void>) {
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'scry-pi-lifecycle-')))
   const executable = join(cwd, 'fixture-pi')
+  const releasePipe = join(cwd, 'release-child')
+  const fifo = spawnSync('mkfifo', [releasePipe])
+  if (fifo.status !== 0) throw new Error(`mkfifo failed: ${fifo.stderr.toString()}`)
   const log = join(cwd, 'starts.jsonl')
   writeFileSync(log, '')
   writeFileSync(executable, `#!/usr/bin/env node
@@ -73,10 +77,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
       snapshot('running')
       send({ type: 'agent_end', messages: [] })
       send({ type: 'agent_settled' })
-      const watcher = fs.watch(process.cwd(), (_event, name) => {
-        if (name !== 'release-child' || !fs.existsSync(process.cwd() + '/release-child')) return
-        watcher.close()
-        if (fs.readFileSync(process.cwd() + '/release-child', 'utf8') === 'exit') process.exit(2)
+      require('node:readline').createInterface({ input: fs.createReadStream(${JSON.stringify(releasePipe)}) }).once('line', (line) => {
+        if (line === 'exit') process.exit(2)
         snapshot('complete')
         send({ type: 'agent_start' })
         send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'Child reviewed; parent continued' }], stopReason: 'stop' } })
@@ -130,7 +132,14 @@ describe('Pi startup and probe lifecycle', () => {
         })
         expect(events.some(event => event.stage === 'result')).toBe(false)
         if (action === 'interrupt') handle.interrupt()
-        else writeFileSync(join(cwd, 'release-child'), action === 'transport-exit' ? 'exit' : '')
+        else {
+          // A missing reader must fail the fixture, not block Vitest's event loop
+          // indefinitely inside writeFileSync on a FIFO.
+          const release = spawnSync('/bin/sh', ['-c', 'printf "%s\\n" "$1" > "$2"', 'release-child',
+            action === 'transport-exit' ? 'exit' : 'continue', join(cwd, 'release-child')], { timeout: 2_000 })
+          expect(release.error).toBeUndefined()
+          expect(release.status).toBe(0)
+        }
         if (action === 'transport-exit') {
           await expect(handle.promise).rejects.toThrow()
           expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({

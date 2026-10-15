@@ -28,6 +28,9 @@ it('shows bounded session hover cards and renames via the real sidebar DOM with 
       app.setPath('userData', ${JSON.stringify(join(dir, 'userData'))})
       app.whenReady().then(() => {
         const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } })
+        win.webContents.on('did-finish-load', () => console.log('Interaction fixture loaded'))
+        win.webContents.on('render-process-gone', (_event, details) => { console.error('Interaction renderer exited', details.reason); app.exit(2) })
+        win.webContents.on('did-fail-load', (_event, code, description) => { console.error('Interaction load failed', code, description); app.exit(2) })
         win.webContents.on('console-message', (event) => {
           const message = event.message || ''
           console.log(message)
@@ -43,7 +46,7 @@ it('shows bounded session hover cards and renames via the real sidebar DOM with 
     const executable = createRequire(import.meta.url)('electron') as string
     const { ELECTRON_RUN_AS_NODE: _ignored, ...env } = process.env
     const output = await new Promise<string>((resolveResult, reject) => {
-      const child = spawn(executable, [main], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(executable, [main, '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
       let text = ''
       child.stdout.on('data', (chunk) => { text += chunk })
       child.stderr.on('data', (chunk) => { text += chunk })
