@@ -27,13 +27,31 @@ function Fixture() {
     }} />
 }
 const assert = (ok: unknown, message: string): void => { if (!ok) throw new Error(message) }
-const wait = async (check: () => boolean, label = check.toString()): Promise<void> => {
-  console.log('Interaction condition:', label)
-  const deadline = performance.now() + 4000
-  while (!check()) {
-    if (performance.now() > deadline) throw new Error(`UI condition timed out: ${label}`)
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-  }
+const wait = (check: () => boolean, label = check.toString()): Promise<void> => {
+  console.log('Interaction condition:', label, 'at', Math.round(performance.now()))
+  if (check()) return Promise.resolve()
+  // These assertions await DOM state, not paint. Hidden Linux windows may deliver
+  // frames slowly; DOM mutations must wake the check without waiting for a frame.
+  return new Promise<void>((resolve, reject) => {
+    let frame: number
+    const finish = (error?: Error): void => {
+      observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const inspect = (): boolean => {
+      try {
+        if (!check()) return false
+        finish()
+      } catch (error) { finish(error as Error) }
+      return true
+    }
+    const observer = new MutationObserver(inspect)
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+    const nextFrame = (): void => { if (!inspect()) frame = requestAnimationFrame(nextFrame) }
+    const timer = setTimeout(() => finish(new Error(`UI condition timed out: ${label}`)), 4000)
+    frame = requestAnimationFrame(nextFrame)
+  })
 }
 function button(label: string): HTMLButtonElement {
   const found = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === label)
