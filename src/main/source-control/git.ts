@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, lstat, readFile, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import type { ScDiff, ScFile, ScRepository } from '../../shared/source-control'
+import type { ScDiff, ScFile, ScGitAction, ScRepository } from '../../shared/source-control'
 import { ScCommandError, ScProcess } from './process'
 
 const hash = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex')
@@ -16,24 +16,16 @@ const readConfig = [
   'maintenance.auto=false'
 ]
 const readOnly = ['-c', 'core.hooksPath=/dev/null']
-const activeHooks = new Set([
-  'applypatch-msg',
-  'pre-applypatch',
-  'post-applypatch',
-  'pre-commit',
-  'pre-merge-commit',
-  'prepare-commit-msg',
-  'commit-msg',
-  'post-commit',
-  'pre-rebase',
-  'post-checkout',
-  'post-merge',
-  'pre-push',
-  'post-rewrite',
-  'post-index-change',
-  'reference-transaction',
-  'proc-receive',
-  'pre-auto-gc'
+// Match the native commands below: no checkout/merge/rebase/am/receive or amend,
+// and automatic maintenance is disabled. Unused hooks do not block unrelated operations.
+const hookActions = new Map<string, readonly ScGitAction[]>([
+  ['pre-commit', ['commit']],
+  ['prepare-commit-msg', ['commit']],
+  ['commit-msg', ['commit']],
+  ['post-commit', ['commit']],
+  ['pre-push', ['push']],
+  ['post-index-change', ['stage', 'unstage', 'commit']],
+  ['reference-transaction', ['commit', 'fetch', 'push']]
 ])
 
 export interface GitIdentity {
@@ -172,15 +164,20 @@ export class ScGit {
     return hash(`${hash(index)}\0${config}\0${versions.join('\0')}`)
   }
 
-  private async executionBlocker(identity: GitIdentity): Promise<string | null> {
-    const config = (await this.config(identity.root)).split('\0')
+  private async actionBlockers(
+    identity: GitIdentity,
+    configText: string
+  ): Promise<ScRepository['actionBlockers']> {
+    const blockers: ScRepository['actionBlockers'] = {}
+    const config = configText.split('\0')
     for (const key of ['commit.gpgsign', 'push.gpgsign']) {
       const signing = config.filter((row) => row === key || row.startsWith(`${key}\n`)).at(-1)
       if (
         signing !== undefined &&
         (signing.indexOf('\n') < 0 || /\n(?:true|yes|on|1|if-asked)$/i.test(signing))
       ) {
-        return `此仓库配置了 ${key}；原生签名程序尚无独立执行授权，请在终端处理`
+        blockers[key === 'commit.gpgsign' ? 'commit' : 'push'] =
+          `此仓库配置了 ${key}；原生签名程序尚无独立执行授权，请在终端处理`
       }
     }
     const hooks = (await this.run(identity.root, ['rev-parse', '--git-path', 'hooks'], false)).trim()
@@ -192,16 +189,23 @@ export class ScGit {
       entries = []
     }
     for (const name of entries) {
-      if (!activeHooks.has(name)) continue
+      const actions = hookActions.get(name)
+      if (!actions) continue
       try {
         await access(resolve(identity.root, hooks, name), constants.X_OK)
-        return `原生 Git hook ${name} 尚未单独授权；不会继承 recorder 自动授权或绕过 hook`
+        for (const action of actions) {
+          blockers[action] ??= `原生 Git hook ${name} 尚未单独授权；不会继承 recorder 自动授权或绕过 hook`
+        }
       } catch (error) {
         if (isMissing(error)) continue
         if (error instanceof Error && 'code' in error && error.code === 'EACCES') continue
         throw error
       }
     }
+    return blockers
+  }
+
+  private async executionBlocker(identity: GitIdentity): Promise<string | null> {
     for (const name of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply']) {
       try {
         await lstat(join(identity.gitDir, name))
@@ -274,6 +278,7 @@ export class ScGit {
       const redact = (value: string): string => value.replace(/(https?:\/\/)[^\s/@]+@/g, '$1[redacted]@')
       remotes.push({ name, pushUrls: values.map(redact), fetchUrls: fetchUrls.map(redact) })
     }
+    const actionBlockers = await this.actionBlockers(identity, config)
     const writeBlocker = state.files.some((file) => file.conflict)
       ? '存在未解决的冲突，请在终端处理'
       : await this.executionBlocker(identity)
@@ -283,8 +288,9 @@ export class ScGit {
       root: identity.root,
       remotes,
       writeBlocker,
+      actionBlockers,
       revision: hash(
-        `${identity.id}\0${output}\0${await this.fingerprint(identity, state.files, config)}\0${writeBlocker}`
+        `${identity.id}\0${output}\0${await this.fingerprint(identity, state.files, config)}\0${writeBlocker}\0${JSON.stringify(actionBlockers)}`
       ),
       observedAt: Date.now()
     }
@@ -328,7 +334,7 @@ export class ScGit {
     }
   }
 
-  async stage(identity: GitIdentity, files: ScFile[], unstage: boolean, head: string | null): Promise<void> {
+  async stage(identity: GitIdentity, files: ScFile[], unstage: boolean, head: string | null): Promise<string[]> {
     const paths = [
       ...new Set(
         files.flatMap((file) => {
@@ -345,6 +351,7 @@ export class ScGit {
         : ['update-index', '--force-remove', '--', ...paths]
       : ['add', '-A', '--', ...paths]
     await this.run(identity.root, ['--literal-pathspecs', ...command], false)
+    return paths
   }
 
   async commitIndex(identity: GitIdentity, message: string): Promise<string> {

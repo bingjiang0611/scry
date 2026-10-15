@@ -64,9 +64,16 @@ describe('production source-control IPC boundary', () => {
     expect(() =>
       handlers.get('sourceControl:mutate')!(event, { ...expected, action: 'stage', paths: ['../outside'] })
     ).toThrow('相对')
+    expect(() => handlers.get('sourceControl:mutate')!(event, { ...expected, action: 'commit', message: 'commit', paths: ['../outside'] })).toThrow('相对')
     expect(privileged.mutate).not.toHaveBeenCalled()
     handlers.get('sourceControl:mutate')!(event, { ...expected, action: 'stage', paths: ['safe name.ts'] })
     expect(privileged.mutate).toHaveBeenCalledWith({ ...expected, action: 'stage', paths: ['safe name.ts'] })
+  })
+
+  it('validates and deduplicates guided commit paths without requiring new paths for existing index', () => {
+    expect(parseScMutation({ ...expected, action: 'commit', message: 'commit', paths: ['safe name.ts', 'safe name.ts'] }))
+      .toEqual({ ...expected, action: 'commit', message: 'commit', paths: ['safe name.ts'] })
+    expect(parseScMutation({ ...expected, action: 'commit', message: 'commit', paths: [] })).toMatchObject({ paths: [] })
   })
 
   it.each([
@@ -77,7 +84,10 @@ describe('production source-control IPC boundary', () => {
     { action: 'push', remote: '--receive-pack=evil' },
     { action: 'merge', repository: 'https://evil.invalid', number: 1 },
     { action: 'review', repository: 'owner/repo', number: Number.NaN },
-    { action: 'commit', message: 'bad\0message' }
+    { action: 'commit', message: 'bad\0message' },
+    { action: 'commit', message: 'commit', paths: ['.git/config'] },
+    { action: 'commit', message: 'commit', paths: 'not-an-array' },
+    { action: 'commit', message: 'commit', paths: Array(1001).fill('file.txt') }
   ])('rejects malformed privileged payload %#', (payload) => {
     expect(() => parseScMutation({ ...expected, ...payload })).toThrow()
   })
