@@ -373,6 +373,7 @@ export interface QoderCreditEvidence {
 
 export interface UsageAnalyticsAggregate {
   qoderCredits?: QoderCreditEvidence
+  officialApiCostRows?: number
   inputTokens: number | null
   outputTokens: number | null
   cacheReadTokens: number | null

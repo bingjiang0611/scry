@@ -22,17 +22,21 @@ async function exercise() {
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
   await waitFor(() => document.querySelector('.usage-cost-card')?.textContent.includes('15.41 Credits'))
-  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.40', 'Qoder USD equivalent missing from total')
+  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.41', 'Qoder and official API equivalents missing from total')
   const qoderRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'Qoder')
   check(qoderRow.querySelector('.usage-provider-main > span:last-child').textContent === '$0.15', 'Pi/native Qoder Credits not converted to USD')
   check(document.querySelector('.usage-table-wrap').textContent.includes('claude-opus-5'), 'Managed custom-provider Claude usage missing')
   const customRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'cc-switch')
-  check(customRow?.querySelector('.usage-provider-main > span:last-child').textContent === '—', 'Unpriced Claude catalogue zero presented as free')
+  check(customRow?.querySelector('.usage-provider-main > span:last-child').textContent === '<$0.01', 'Missing official Claude API estimate')
+  check(!document.querySelector('.usage-table-wrap').textContent.includes('—'), 'Unknown detail placeholder is visible')
+  check(document.querySelector('.usage-table-wrap [title*="官方 API 标准价换算"]'), 'Estimate provenance is missing')
+  check(!document.querySelector('.usage-table-wrap').textContent.includes('unpriced-model'), 'Unknown model cost row is visible')
   check(document.body.textContent.includes('Credits 已知下界'), 'Missing partial evidence')
   const groupButton = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
   groupButton('明细维度', '日期').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('日期'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.40'), 'Day breakdown lost Qoder USD equivalent')
+  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.41'), 'Day breakdown lost API/Qoder equivalents')
+  check(!document.querySelector('.usage-table-wrap').textContent.includes('—'), 'Unknown day placeholder is visible')
   groupButton('明细维度', '模型').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('模型'))
   check(document.querySelector('.usage-table-wrap').textContent.includes('$0.15'), 'Model breakdown lost Qoder USD equivalent')
@@ -115,7 +119,7 @@ try {
       // not the native Qoder archive layout or its zero-dollar placeholder.
       const piSession = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff'
       const piTurns = []
-      for (const [runId, provider, model] of [['pi-qoder', 'qoder', 'ultimate'], ['pi-claude', 'cc-switch', 'claude-opus-5']]) {
+      for (const [runId, provider, model] of [['pi-qoder', 'qoder', 'ultimate'], ['pi-claude', 'cc-switch', 'claude-opus-5'], ['pi-unknown', 'cc-switch', 'unpriced-model']]) {
         const turn = { runId, sessionId: piSession, cwd, userText: 'fixture', providerId: 'pi', runtimeProvider: 'pi_rpc',
           items: [{ id: runId + '-result', runId, kind: 'harness', stage: 'result', ts: new Date().toISOString(),
             runtimeProvider: 'pi_rpc', modelUsage: [{ model, upstreamProvider: provider, inputTokens: 100, outputTokens: 20 }] }] }

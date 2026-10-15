@@ -93,6 +93,7 @@ function costEvidence(row: UsageAnalyticsAggregate): string {
   if (row.exactCostRows > 0) qualities.push('精确成本')
   if (row.providerReportedCostRows > 0) qualities.push('Provider 报告成本')
   if (row.estimatedCostRows > 0) qualities.push('估算成本')
+  if (row.officialApiCostRows) qualities.push('官方 API 标准价换算 · 已知 Token 下界，缓存写入按 5 分钟；非实际账单')
   if (row.inferredCostRows > 0) qualities.push('推断成本')
   return qualities.length > 0 ? qualities.join(' + ') : '成本证据质量未知'
 }
@@ -132,9 +133,9 @@ function isApproximateCost(row: UsageAnalyticsAggregate): boolean {
 }
 
 function modelBreakdownRows(analytics: UsageAnalytics): UsageAnalyticsBreakdownRow[] {
-  const rows = analytics.byModel.filter((row) => row.provider !== 'qoder')
+  const rows = analytics.byModel.filter((row) => row.provider !== 'qoder' && row.model && row.costUsd != null)
   const qoder = analytics.byProvider.find((row) => row.provider === 'qoder')
-  if (qoder && (qoder.usageRows > 0 || qoder.costKnownRows > 0 || qoder.qoderCredits)) rows.push(qoder)
+  if (qoder?.costUsd != null) rows.push(qoder)
   return rows.sort((a, b) => {
     const rank = (row: UsageAnalyticsAggregate): number => row.costUsd || tokensOf(row) || 0
     return rank(b) - rank(a)
@@ -378,7 +379,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
   const qoderOnly = providers.length > 0 && providers.every((row) => row.provider === 'qoder')
   const providerScale = Math.max(0, ...providers.map((row) => row.costUsd ?? 0))
   const chartProviders = providers.filter((row) => metricValue(row, chartMetric) != null)
-  const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : [...analytics.byDay].reverse()
+  const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : analytics.byDay.filter((row) => row.costUsd != null).reverse()
   const activeDays = analytics.byDay.filter((row) => row.usageRows > 0 || row.costKnownRows > 0).length
 
   return (
@@ -496,8 +497,8 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                         </span>
                       </th>
                       <td title={displayCostEvidence(row, rowProvider)} className={isApproximateCost(row) ? 'is-approximate' : undefined}>{formatCost(row.costUsd)}</td>
-                      <td>{formatShare(row.costUsd, totals.costUsd)}</td>
-                      <td title={tokenEvidence(row)} className={!tokenComplete(row) && row.usageRows > 0 ? 'is-lower-bound' : undefined}>{formatAggregateTokens(row)}</td>
+                      <td>{totals.costUsd != null && totals.costUsd > 0 ? formatShare(row.costUsd, totals.costUsd) : null}</td>
+                      <td title={tokenEvidence(row)} className={!tokenComplete(row) && row.usageRows > 0 ? 'is-lower-bound' : undefined}>{tokensOf(row) != null ? formatAggregateTokens(row) : null}</td>
                     </tr>
                   )
                 })}
@@ -507,7 +508,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
         </section>
 
         <footer className="usage-footnote">
-          成本来源与 Token 覆盖状态见行内说明；部分覆盖只展示已知下界。Qoder 无美元成本时，已知 Credits 按基础套餐 1 Credit = $0.01 换算美元等值，计入总额、占比及成本趋势；这不是实际账单。缺失 Credits 不按 Token 猜价。趋势图为保持连续会将无记录日沿基线连接，悬停仍显示 —，不代表实际值为 0。
+          成本来源与 Token 覆盖状态见行内说明；部分覆盖只展示已知下界。缺失美元成本且有对应定价的 Claude 模型，按官方 API 标准价换算已知 Token（缓存写入按 5 分钟），不是实际账单；未知成本或未归因模型不展示在明细中。Qoder 无美元成本时，已知 Credits 按基础套餐 1 Credit = $0.01 换算美元等值，计入总额、占比及成本趋势；这不是实际账单。缺失 Credits 不按 Token 猜价。趋势图为保持连续会将无记录日沿基线连接，悬停仍显示 —，不代表实际值为 0。
         </footer>
       </div>
     </main>
