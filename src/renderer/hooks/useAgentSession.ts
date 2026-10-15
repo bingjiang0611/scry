@@ -489,6 +489,8 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const historyWindowRef = useRef<SessionHistoryWindow | null>(null)
   const clearedRuns = useRef<Set<string>>(new Set())
   const focusedRunIdRef = useRef<string | null>(null)
+  const cachedDisplayRef = useRef(false)
+  const cachedHistoryRef = useRef<{ sessionId: string; page: OlderSessionPage | null | undefined } | null>(null)
   const resyncGeneration = useRef(0)
   const focusLifecycleDeltasRef = useRef<{ runId: string; deltas: RunLifecycleDelta[] } | null>(null)
   const focusQuestionDeltasRef = useRef<{ runId: string; deltas: PendingQuestionDelta[] } | null>(null)
@@ -535,6 +537,8 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   }, [traceCommitVersion])
 
   const prepareRunFocus = useCallback((runId: string): void => {
+    cachedDisplayRef.current = false
+    cachedHistoryRef.current = null
     resyncGeneration.current++
     focusedRunIdRef.current = runId
     clearedRuns.current.delete(runId)
@@ -543,6 +547,9 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   }, [])
 
   const clearTurns = useCallback((_options: { preserveRunning?: boolean } = {}): void => {
+    flushTrace()
+    cachedDisplayRef.current = false
+    cachedHistoryRef.current = null
     resyncGeneration.current++
     setTurns((prev) => clearSessionTurns(prev, clearedRuns.current))
     focusedRunIdRef.current = null
@@ -554,7 +561,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     historyWindowRef.current = null
     setHistoryWindow(null)
     setRunning(false)
-  }, [])
+  }, [flushTrace])
 
   /**
    * 拼接更早一页历史。返回是否真的拼上了；过期或错位的响应返回 false 并保留现有时间线。
@@ -579,8 +586,14 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         preserveFocusDeltas?: boolean
         /** main 交付的分页窗口；缺省表示这一批就是完整历史。 */
         page?: OlderSessionPage | null
+        /** Display-only cache cannot adopt traces or prove live resynchronization. */
+        source?: 'cache' | 'authoritative'
       } = {}
     ): void => {
+      const cached = options.source === 'cache'
+      if (cached) flushTrace()
+      cachedDisplayRef.current = cached
+      cachedHistoryRef.current = cached ? { sessionId, page: options.page } : null
       const activeRun = options.activeRun && !options.activeRun.done ? options.activeRun : null
       resyncGeneration.current++
       focusedRunIdRef.current = activeRun?.runId ?? null
@@ -603,6 +616,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       historyWindowRef.current = nextWindow
       setHistoryWindow(nextWindow)
       setTurns((prev) => {
+        if (cached) clearSessionTurns(prev, clearedRuns.current)
         const snapshot = sessionTurnsWithActiveRun(sessionId, parsed, activeRun, options.page?.offset ?? 0)
         if (!activeRun) return snapshot
         const local = prev.find((turn) => turn.runId === activeRun.runId)
@@ -618,7 +632,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       // 用 main 交付的权威历史整体替换了可见时间线，就等于对齐已被证明：
       // 清除本地降级显示，并确认给 main，避免全局降级标记污染后续轮次。
       // 空替换（占位刷新）不算证据，此时只保留原状态。
-      if (options.page != null || parsed.length > 0) {
+      if (!cached && (options.page != null || parsed.length > 0)) {
         setTraceHealth(TRACE_LIVE_HEALTHY)
         acknowledgeTraceResync()
       }
@@ -628,8 +642,21 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         focusQuestionDeltasRef.current = null
       }
     },
-    []
+    [flushTrace]
   )
+
+  const confirmCachedSession = useCallback((sessionId: string, page: OlderSessionPage): boolean => {
+    const cached = cachedHistoryRef.current
+    // A focus/start/clear supersedes the cached installation. Only the exact
+    // authority-verified page can confirm it without replacing the timeline.
+    if (!cachedDisplayRef.current || cached?.sessionId !== sessionId || cached.page !== page) return false
+    cachedDisplayRef.current = false
+    cachedHistoryRef.current = null
+    resyncGeneration.current++
+    setTraceHealth(TRACE_LIVE_HEALTHY)
+    acknowledgeTraceResync()
+    return true
+  }, [])
 
   const send = useCallback(async (
     text: string,
@@ -637,6 +664,8 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   ): Promise<string | null> => {
     const request = buildAgentStartRequest(text, options)
     if (!request) return null
+    cachedDisplayRef.current = false
+    cachedHistoryRef.current = null
     resyncGeneration.current++
     focusedRunIdRef.current = null
     pendingStartLifecycleRef.current = []
@@ -683,6 +712,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     const questionDeltas: PendingQuestionDelta[] = []
     const lifecycleDeltas: RunLifecycleDelta[] = []
     const receiveQuestionDelta = (delta: PendingQuestionDelta): void => {
+      if (cachedDisplayRef.current) return
       const runId = delta.kind === 'open' ? delta.request.runId : delta.event.runId
       if (clearedRuns.current.has(runId)) return
       if (hydratingQuestions) {
@@ -697,6 +727,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       setPendingQuestions((prev) => replayPendingQuestionDeltas(prev, [delta]))
     }
     const receiveLifecycleDelta = (delta: RunLifecycleDelta): void => {
+      if (cachedDisplayRef.current) return
       const runId = delta.event.runId
       if (hydratingLifecycle) lifecycleDeltas.push(delta)
       if (pendingStartLifecycleRef.current) pendingStartLifecycleRef.current.push(delta)
@@ -716,7 +747,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     const offTrace = window.scry.onTrace((events, receipt) => {
       let accepted = 0
       for (const event of events) {
-        if (clearedRuns.current.has(event.runId)) continue
+        if (cachedDisplayRef.current || clearedRuns.current.has(event.runId)) continue
         if (focusedRunIdRef.current == null) focusedRunIdRef.current = event.runId
         if (focusedRunIdRef.current !== event.runId) continue
         traceBuf.current.push(event)
@@ -738,7 +769,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     const offStopState =
       typeof window.scry.onStopState === 'function'
         ? window.scry.onStopState((state) => {
-            if (clearedRuns.current.has(state.runId)) return
+            if (cachedDisplayRef.current || clearedRuns.current.has(state.runId)) return
             setStopStates((prev) => applyStopState(prev, state))
           })
         : () => {}
@@ -749,7 +780,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       typeof window.scry.onTraceHealth === 'function'
         ? window.scry.onTraceHealth((state) => {
             setTraceHealth(traceLiveHealthOf(state))
-            if (!state.resyncRequired) return
+            if (!state.resyncRequired || cachedDisplayRef.current) return
             const generation = ++resyncGeneration.current
             void resynchronizeLiveTrace(
               rendererTraceResyncBridge(),
@@ -858,6 +889,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     prepareRunFocus,
     clearTurns,
     replaceWithParsedSession,
+    confirmCachedSession,
     historyWindow,
     prependOlderTurns
   }

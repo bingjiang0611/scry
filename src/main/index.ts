@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, Menu, nativeTheme, shel
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
 import {
@@ -15,8 +14,8 @@ import {
   warmShellEnv
 } from './claude-locate'
 import { AgentRuntimeError } from './run-outcome'
-import { parseTranscriptToTurns, type ParsedTurn } from './normalize'
-import { parseTranscriptFileInWorker, TRANSCRIPT_WORKER_THRESHOLD_BYTES } from './transcript-parser'
+import type { ParsedTurn } from './normalize'
+import { readCachedTranscript, disposeTranscriptParser } from './transcript-parser'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, replayDatabaseTurnOutbox, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
@@ -1811,26 +1810,21 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
   })
   let turns: ParsedTurn[] = []
   let transcriptBytes = 0
+  let transcriptParsedBytes = 0
+  let transcriptCache = 'unavailable'
   if (fp) {
     try {
-      const transcriptStat = await stat(fp)
-      if (transcriptStat.size >= TRANSCRIPT_WORKER_THRESHOLD_BYTES) {
-        const parsed = await parseTranscriptFileInWorker({
-          path: fp,
-          runId: payload.externalSessionId,
-          signal
-        })
-        turns = parsed.turns
-        transcriptBytes = parsed.bytes
-      } else {
-        const content = await readFile(fp, { encoding: 'utf8', signal })
-        transcriptBytes = Buffer.byteLength(content)
-        turns = parseTranscriptToTurns(content, {
-          runId: payload.externalSessionId,
-          newId: () => mainEventId('history', payload.externalSessionId!),
-          now: () => new Date().toISOString()
-        })
-      }
+      if (isShuttingDown) throw new Error('transcript parser disposed')
+      const parsed = await readCachedTranscript({
+        path: fp,
+        runId: payload.externalSessionId,
+        contextKey: providerContextKey(payload.providerId, cwd, payload.agentProfileId),
+        signal
+      })
+      turns = parsed.turns
+      transcriptBytes = parsed.bytes
+      transcriptParsedBytes = parsed.parsedBytes
+      transcriptCache = parsed.cache
     } catch (error) {
       signal.throwIfAborted()
       if (!archived) throw error
@@ -1840,7 +1834,9 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
     signal.throwIfAborted()
   }
-  perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes })
+  perf.mark('transcript', { transcriptTurns: turns.length, transcriptBytes, transcriptParsedBytes,
+    transcriptCacheHit: transcriptCache === 'hit' ? 1 : 0,
+    transcriptIncremental: transcriptCache === 'incremental' ? 1 : 0 })
   // Cancellation is not evidence of an empty session. Reject it so the renderer
   // cannot replace an existing timeline with an empty successful response.
   signal.throwIfAborted()
@@ -4456,8 +4452,10 @@ async function startRemoteHostIfEnabled(): Promise<void> {
           const fp = resolveTranscriptPath({ cwd: canonical, sessionId: externalSessionId, userDataDir })
           if (fp) {
             try {
-              const content = await readFile(fp, 'utf8')
-              turns = parseTranscriptToTurns(content, { runId: externalSessionId, newId: () => mainEventId('history', externalSessionId), now: () => new Date().toISOString() })
+              if (isShuttingDown) throw new Error('transcript parser disposed')
+              const parsed = await readCachedTranscript({ path: fp, runId: externalSessionId,
+                contextKey: providerContextKey('claude', canonical) })
+              turns = parsed.turns
             } catch { /* transcript unreadable; fall back to archive */ }
           }
         }
@@ -4618,7 +4616,7 @@ app.on('before-quit', (event) => {
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
     disposeProviders: () => providerRegistry.dispose()
   })
-  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup]).then(() => undefined)
+  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser()]).then(() => undefined)
   void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
     quitCleanupFinished = true
     app.quit()

@@ -1,30 +1,22 @@
-import { readFile } from 'node:fs/promises'
-import { parentPort, workerData } from 'node:worker_threads'
-import { parseTranscriptToTurns } from './normalize'
+import { parentPort } from 'node:worker_threads'
+import { TranscriptFileCache } from './transcript-file-cache'
+import type { TranscriptWorkerReply, TranscriptWorkerRequest } from './transcript-parser'
 
-interface TranscriptWorkerInput {
-  path: string
-  runId: string
-  idPrefix: string
-  now: string
-}
+const port = parentPort
+if (!port) throw new Error('transcript_parser_worker_invalid_startup')
+const cache = new TranscriptFileCache()
+let queue = Promise.resolve()
 
-const input = workerData as Partial<TranscriptWorkerInput> | undefined
-if (!parentPort || !input || typeof input.path !== 'string' || typeof input.runId !== 'string' ||
-    typeof input.idPrefix !== 'string' || typeof input.now !== 'string') {
-  throw new Error('transcript_parser_worker_invalid_startup')
-}
-
-const { path, runId, idPrefix, now } = input as TranscriptWorkerInput
-try {
-  const content = await readFile(path, 'utf8')
-  let sequence = 0
-  const turns = parseTranscriptToTurns(content, {
-    runId,
-    newId: () => `${idPrefix}-${sequence++}`,
-    now: () => now
+// Serial requests keep checkpoints atomic. The parent owns cancellation and
+// the worker's five-minute idle lifetime; no provider or filesystem writes run here.
+port.on('message', (request: TranscriptWorkerRequest) => {
+  queue = queue.then(async () => {
+    try {
+      const result = await cache.read(request)
+      port.postMessage({ id: request.id, ok: true, result } satisfies TranscriptWorkerReply)
+    } catch (error) {
+      port.postMessage({ id: request.id, ok: false,
+        error: error instanceof Error ? error.message : String(error) } satisfies TranscriptWorkerReply)
+    }
   })
-  parentPort.postMessage({ ok: true, turns, bytes: Buffer.byteLength(content) })
-} catch (error) {
-  parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) })
-}
+})

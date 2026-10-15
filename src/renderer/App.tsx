@@ -47,6 +47,7 @@ import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type Ap
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
 import { selectedExternalSessionId, sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
+import { SessionHistorySnapshotCache } from './session-history-cache'
 import type { WorkspaceFileTarget } from './workspace-links'
 import type { SessionAttentionSnapshot } from '@shared/session-attention'
 import {
@@ -707,6 +708,9 @@ export function App() {
   const [composerError, setComposerError] = useState<string | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [sessionLoading, setSessionLoading] = useState(false)
+  const [sessionCacheVisible, setSessionCacheVisible] = useState(false)
+  const [sessionSnapshots] = useState(() => new SessionHistorySnapshotCache())
+  useEffect(() => () => sessionSnapshots.clear(), [sessionSnapshots])
   // 选中的历史会话读不到证据时保留原因；新会话、切会话与新轮次都会清空它。
   const [sessionEvidenceGap, setSessionEvidenceGap] = useState<SessionEvidenceGap | null>(null)
   const draftStartPendingRef = useRef(false)
@@ -808,9 +812,13 @@ export function App() {
     const subscribe = window.scry.onDataUpdated
     if (typeof subscribe !== 'function') return
     return subscribe((event) => {
+      // This event carries no session identity. Clear all eight bounded entries,
+      // and fence pending reads so deletion/recording cannot restore an old cache.
+      sessionSnapshots.clear()
+      setSessionCacheVisible(false)
       if (shouldReloadProjectsForDataUpdate(event)) loadProjects()
     })
-  }, [loadProjects])
+  }, [loadProjects, sessionSnapshots])
   const selectedProviderSessionId = useMemo(() => selectedExternalSessionId(projects, {
     cwd,
     sessionId: activeSessionId,
@@ -1161,6 +1169,7 @@ export function App() {
             void restoreFocusedRunSelection(run, {
               prepareRunFocus: session.prepareRunFocus,
               selectContext: ({ providerId, agentProfileId, cwd: nextCwd, sessionId }) => {
+                setSessionCacheVisible(false)
                 selectAgentRef.current(agentProfileId ?? providerId)
                 setCwd(nextCwd)
                 selectSessionId(sessionId)
@@ -1786,8 +1795,15 @@ export function App() {
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     setComposerError(null)
     setSessionEvidenceGap(null)
+    const historyContext: ProviderContext = { providerId, agentProfileId, cwd: projectCwd, externalSessionId }
+    const cacheRevision = sessionSnapshots.revision
+    const cachedPage = switchingSession ? sessionSnapshots.get(historyContext) : undefined
     setSessionLoading(switchingSession || session.turns.length === 0)
-    if (switchingSession) session.clearTurns()
+    setSessionCacheVisible(Boolean(cachedPage?.turns.length))
+    if (switchingSession) {
+      if (cachedPage) session.replaceWithParsedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
+      else session.clearTurns()
+    }
     resetPromptQueueControl()
     requestChatBottom(true)
     selectSessionId(sessionId)
@@ -1818,7 +1834,11 @@ export function App() {
             loadSession: (context) => window.scry.loadSession(context),
             replaceWithParsedSession: session.replaceWithParsedSession,
             onHistoryLoaded: (page, activeRun) => {
-              if (isCurrent()) setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page, activeRun))
+              if (!isCurrent()) return
+              setSessionCacheVisible(false)
+              if (page && activeRun?.done !== false) sessionSnapshots.put(historyContext, page, cacheRevision)
+              else sessionSnapshots.delete(historyContext)
+              setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page, activeRun))
             },
             isCurrent
           }
@@ -1833,12 +1853,18 @@ export function App() {
         if (isCurrent()) setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
         return
       }
-      const [page] = await Promise.all([
-        window.scry.loadSession({ providerId, agentProfileId, cwd: projectCwd, externalSessionId }),
+      const [loadedPage] = await Promise.all([
+        window.scry.loadSession(historyContext),
         focusRequest
       ])
       if (!isCurrent()) return
-      session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
+      setSessionCacheVisible(false)
+      const page = loadedPage ? sessionSnapshots.put(historyContext, loadedPage, cacheRevision) : null
+      if (!page) sessionSnapshots.delete(historyContext)
+      // Confirm only an unchanged display-only installation. A focus/start/clear
+      // supersedes it and must use the normal authoritative replacement.
+      const cacheConfirmed = page != null && page === cachedPage && session.confirmCachedSession(sessionId, page)
+      if (!cacheConfirmed) session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
         activeRun: null,
         page
       })
@@ -1850,6 +1876,9 @@ export function App() {
           status: 'error',
           detail: `无法加载会话历史：${error instanceof Error ? error.message : String(error)}`
         })
+        sessionSnapshots.delete(historyContext)
+        setSessionCacheVisible(false)
+        if (cachedPage) session.clearTurns()
         setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
       }
     } finally {
@@ -2452,6 +2481,7 @@ export function App() {
               onRetryDetection={() => { setComposerError(null); integrations.retryDetection() }}
               submitting={composerSubmitting}
               sessionLoading={sessionLoading}
+              sessionCacheVisible={sessionCacheVisible}
               sessionEvidenceGap={activeEvidenceGap}
               busy={session.busy}
               draftAttachments={draftAttachments}

@@ -12,6 +12,7 @@ import { logicalCallEventsForTurn as deduplicateCallEvents } from '@shared/logic
 import { projectRequestedSkillLoads } from './skill-load-evidence'
 import { resultWallTiming } from '@shared/result-timing'
 import { inferredReadPaths } from './file-evidence'
+import { recordTraceItemsChange } from './turn-stream-projection'
 export function logicalCallEventsForTurn(items: TraceEvent[], userText?: string): TraceEvent[] {
   return projectRequestedSkillLoads(deduplicateCallEvents(items), userText)
 }
@@ -1592,7 +1593,10 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
     traceTurnIndices.set(prev, turnIndices)
   }
   let turnIndicesMutable = false
-  const states = new Map<number, { items: TraceEvent[]; indices: Map<string, number>; mutable: boolean; indicesMutable: boolean }>()
+  const states = new Map<number, {
+    items: TraceEvent[]; indices: Map<string, number>; mutable: boolean; indicesMutable: boolean
+    previous: TraceEvent[]; firstChanged: number
+  }>()
   const stateFor = (index: number) => {
     let state = states.get(index)
     if (!state) {
@@ -1602,13 +1606,14 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
         indices = new Map(items.map((event, itemIndex) => [event.id, itemIndex]))
         traceEventIndices.set(items, indices)
       }
-      state = { items, indices, mutable: false, indicesMutable: false }
+      state = { items, indices, mutable: false, indicesMutable: false, previous: items, firstChanged: items.length }
       states.set(index, state)
     }
     return state
   }
-  const mutableStateFor = (index: number) => {
+  const mutableStateFor = (index: number, firstChanged: number) => {
     const state = stateFor(index)
+    state.firstChanged = Math.min(state.firstChanged, firstChanged)
     if (state.mutable) return state
     if (next === prev) next = [...prev]
     state.items = [...state.items]
@@ -1634,7 +1639,8 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
         turnIndicesMutable = true
       }
       turnIndices.set(ev.runId, index)
-      states.set(index, { items, indices: new Map([[ev.id, 0]]), mutable: true, indicesMutable: true })
+      states.set(index, { items, indices: new Map([[ev.id, 0]]), mutable: true, indicesMutable: true,
+        previous: items, firstChanged: 0 })
       continue
     }
 
@@ -1642,14 +1648,14 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
     const existingIndex = state.indices.get(ev.id)
     if (ev.kind === 'harness' && ev.stage === 'result_superseded') {
       if (existingIndex == null) continue
-      state = mutableStateFor(index)
+      state = mutableStateFor(index, existingIndex)
       state.items.splice(existingIndex, 1)
       rebuildIndices(state)
       continue
     }
     if (existingIndex != null) {
       if (state.items[existingIndex] === ev) continue
-      state = mutableStateFor(index)
+      state = mutableStateFor(index, existingIndex)
       state.items[existingIndex] = ev
       continue
     }
@@ -1665,7 +1671,7 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
         candidate.parentToolUseId === ev.parentToolUseId
       )
       if (first >= 0) {
-        state = mutableStateFor(index)
+        state = mutableStateFor(index, first)
         state.items = state.items.filter((candidate) => !(
           candidate.kind === 'model' &&
           (candidate.stage === 'text' || candidate.stage === 'text_delta') &&
@@ -1680,7 +1686,8 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
       }
     }
 
-    state = mutableStateFor(index)
+    // Conservatively include the last event: text/thinking may be coalesced into it.
+    state = mutableStateFor(index, Math.max(0, state.items.length - 1))
     const lastIndex = state.items.length - 1
     const last = state.items[lastIndex]
     const sameModelStream =
@@ -1702,7 +1709,10 @@ export function applyTraceBatch(prev: Turn[], events: TraceEvent[], cleared: Set
   }
   traceTurnIndices.set(next, turnIndices)
   for (const state of states.values()) {
-    if (state.mutable) traceEventIndices.set(state.items, state.indices)
+    if (state.mutable) {
+      traceEventIndices.set(state.items, state.indices)
+      if (state.items !== state.previous) recordTraceItemsChange(state.items, state.previous, state.firstChanged)
+    }
   }
   return next
 }

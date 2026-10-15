@@ -1,0 +1,95 @@
+// Adapted from T3 Code (7ac952c), Copyright (c) 2026 T3 Tools Inc., MIT.
+// The full license is retained in THIRD_PARTY_NOTICES.md.
+import type { Root, RootContent } from 'mdast'
+import type { Parser as UnifiedParser, Plugin } from 'unified'
+
+type Parser = UnifiedParser<Root>
+
+interface ParsedPrefix {
+  source: string
+  offset: number
+  line: number
+  children: RootContent[]
+}
+
+function hasDefinitions(node: Root | RootContent): boolean {
+  return node.type === 'definition' || node.type === 'footnoteDefinition' ||
+    ('children' in node && node.children.some(hasDefinitions))
+}
+
+function shiftPositions(node: Root | RootContent, offset: number, lines: number): void {
+  if (node.position) {
+    for (const point of [node.position.start, node.position.end]) {
+      if (point.offset !== undefined) point.offset += offset
+      point.line += lines
+    }
+  }
+  if ('children' in node) node.children.forEach(child => shiftPositions(child, offset, lines))
+}
+
+/** Cache only a closed top-level code fence followed by a blank line. Definitions
+ * depend on the whole document; CRLF/BOM can change meaning at a suffix boundary.
+ * Keep pristine nodes because remark transforms (including file links) mutate ASTs.
+ */
+function createIncrementalMarkdownParser(parse: Parser): Parser {
+  let cached: ParsedPrefix | undefined
+  return (source, file) => {
+    if (source.includes('\r') || source.includes('\uFEFF')) return parse(source, file)
+    const prefix = cached && source.startsWith(cached.source) ? cached : undefined
+    let root: Root
+    if (prefix) {
+      root = parse(source.slice(prefix.offset), file)
+      if (hasDefinitions(root)) return parse(source, file)
+      shiftPositions(root, prefix.offset, prefix.line - 1)
+      if (root.position) root.position.start = { line: 1, column: 1, offset: 0 }
+      root.children.unshift(...structuredClone(prefix.children))
+    } else {
+      root = parse(source, file)
+      if (hasDefinitions(root)) return root
+    }
+    for (let index = root.children.length - 1; index >= 0; index--) {
+      const node = root.children[index]
+      if (node?.type !== 'code') continue
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start === undefined || end === undefined) continue
+      if (prefix && end < prefix.offset) break
+      const value = source.slice(start, end)
+      const opening = /^ {0,3}(`{3,}|~{3,})[^\n]*\n/.exec(value)?.[1]
+      if (!opening) continue
+      const lastLine = value.slice(value.lastIndexOf('\n') + 1)
+      const closing = new RegExp(`^ {0,3}${opening[0]}{${opening.length},}[ \\t]*$`)
+      const separator = /^\n[ \t]*\n/.exec(source.slice(end))?.[0]
+      if (!closing.test(lastLine) || !separator) continue
+      const offset = end + separator.length
+      cached = {
+        source: source.slice(0, offset), offset,
+        line: node.position!.end.line + 2,
+        children: structuredClone(root.children.slice(0, index + 1))
+      }
+      break
+    }
+    return root
+  }
+}
+
+/** One cache per streaming renderer. Scry's GFM parser and paragraph-local file
+ * link transform are covered by equivalence tests; new syntax plugins must prove
+ * they have no document-wide dependency before joining this pipeline.
+ */
+export function createIncrementalMarkdownPlugin(): Plugin<[], Root> {
+  let parser: Parser | undefined
+  return function () {
+    const original = this.parser
+    if (!original) return
+    parser ??= createIncrementalMarkdownParser((source, file) => original(source, file) as Root)
+    const parseDocument = parser
+    // Synthetic recovery parses on the same processor must not replace the cache.
+    let documentParsed = false
+    this.parser = (source, file) => {
+      if (documentParsed) return original(source, file)
+      documentParsed = true
+      return parseDocument(source, file)
+    }
+  }
+}
