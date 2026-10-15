@@ -12,6 +12,7 @@ const temp = await mkdtemp(join(tmpdir(), 'scry-desktop-remote-ui-'))
 const negativeControl = process.argv.includes('--negative-control')
 const negativeMachineControl = process.argv.includes('--negative-machine-control')
 const negativeAddressControl = process.argv.includes('--negative-address-control')
+const negativeHoverControl = process.argv.includes('--negative-hover-control')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -123,7 +124,7 @@ window.scry = {
   // Same minimal full-App bridge contract as session-selection-smoke.tsx.
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
-  listProjects: async () => [], recentFolders: async () => [],
+  listProjects: async () => [], recentFolders: async () => Array.from({ length: 12 }, (_, index) => '/fixture/recent-' + index),
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
   detect: async () => [], listSkills: async () => ({ state: 'unavailable', data: null }),
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
@@ -211,6 +212,39 @@ async function exercise(contents, capture) {
   await insert('carried draft')
   await click('.location-button')
   await wait('document.querySelector(\'[data-machine-id="fixture-connection"]\') != null', 'location menu machines')
+  const pickerGeometry = () => read(`(() => {
+    const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height } }
+    return [document.querySelector('.location-menu'), ...document.querySelectorAll('.location-machine')].map(rect)
+  })()`)
+  const hoverMachine = async (id) => {
+    const selector = '[data-machine-id="' + id + '"]'
+    const point = await pointFor(selector)
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+    await wait('document.querySelector(' + JSON.stringify(selector) + ').classList.contains("is-shown")', 'hovered machine projects')
+    return point
+  }
+  const checkPickerHover = async () => {
+    await read('Promise.allSettled(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime < Infinity).map(animation => animation.finished))')
+    await hoverMachine('local')
+    const before = await pickerGeometry()
+    for (const id of ['fixture-connection', 'local', 'fixture-connection', 'local']) {
+      const point = await hoverMachine(id)
+      const after = await pickerGeometry()
+      check(after.every((rect, index) => Object.keys(rect).every(key => Math.abs(rect[key] - before[index][key]) < 0.5)), 'Hover moved the execution menu or machine rows: ' + JSON.stringify({ before, after }))
+      check(await read('document.elementFromPoint(' + point.x + ',' + point.y + ').closest("[data-machine-id]")?.dataset.machineId === ' + JSON.stringify(id)), 'Stationary pointer no longer hits the hovered machine')
+      check(await read('document.querySelector(\'[data-machine-id="local"]\').getAttribute("aria-checked") === "true"'), 'Hover changed the selected execution machine')
+    }
+    check((await fixture()).localNewSessions === localBefore && (await fixture()).submitInputs.length === 0, 'Hover started a session or submitted a draft')
+  }
+  await checkPickerHover()
+  await capture('location-hover-local')
+  await hoverMachine('fixture-connection')
+  await capture('location-hover-remote')
+  await send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false })
+  await checkPickerHover()
+  check(await read('document.querySelector(".location-menu").getBoundingClientRect().top >= 0'), 'Short-window picker is clipped above the viewport')
+  await capture('location-hover-short-window')
+  await send('Emulation.clearDeviceMetricsOverride')
   await click('[data-machine-id="fixture-connection"]')
   await wait('document.querySelector(\'[data-remote-project="/fixture/project-a"]\') != null', 'remote projects for selected machine')
   await click('[data-remote-project="/fixture/project-a"]')
@@ -421,6 +455,7 @@ async function exercise(contents, capture) {
   await wait('document.querySelector(".sb-remote-proj .pname")?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
 
   return {
+    locationHoverStable: { menu: true, machineRows: true, stationaryPointer: true, shortWindow: true, noImplicitSelection: true },
     hostAddressEdit: { cancel: true, focusRestored: true, validation: true, storageFailure: true, doubleEnterSingleSave: true, identityKept: true, explicitReconnect: true, noProviderStart: true },
     boundSessionReconnectRefreshesCatalog: true,
     savedHostsAfterRendererReload: true,
@@ -458,7 +493,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeHoverControl && id.endsWith('/remote-location.css')) {
+        const height = 'height: min(360px, 40vh);'
+        if (!source.includes(height)) throw new Error('hover height control not found')
+        return source.replace(height, 'height: auto;')
+      }
       if (negativeAddressControl && id.endsWith('/HostsView.tsx')) {
         const save = 'await bridge().updateSsh(connection.id, ssh)'
         if (!source.includes(save)) throw new Error('address negative control not found')
