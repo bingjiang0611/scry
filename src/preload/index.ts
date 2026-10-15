@@ -341,6 +341,7 @@ const api = {
     list: () => ipcRenderer.invoke('desktopRemote:list'),
     pair: (input) => ipcRenderer.invoke('desktopRemote:pair', input),
     finishPairing: (id) => ipcRenderer.invoke('desktopRemote:finishPairing', id),
+    updateSsh: (id, ssh) => ipcRenderer.invoke('desktopRemote:updateSsh', id, ssh),
     connect: (id) => ipcRenderer.invoke('desktopRemote:connect', id),
     disconnect: (id) => ipcRenderer.invoke('desktopRemote:disconnect', id),
     forget: (id) => ipcRenderer.invoke('desktopRemote:forget', id),

@@ -1,7 +1,7 @@
 // 主机页：管理“我连接的主机”（出站）与“允许其他设备访问本机”（入站）。两个方向
 // 分开呈现，不能合并成一个列表。会话交互不在这里，项目行只预填新会话的执行位置。
-import { useId, useState } from 'react'
-import type { DesktopRemoteConnection } from '@shared/desktop-remote'
+import { useId, useRef, useState, type FormEvent } from 'react'
+import type { DesktopRemoteConnection, DesktopSshTarget } from '@shared/desktop-remote'
 import { desktopConnectionLabel, refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { forgetRemoteCatalog, refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { bridge, ClientPairForm } from './DesktopRemote'
@@ -97,6 +97,7 @@ function HostRow({
   const state = hostState(connection, readError)
   const entry = useRemoteCatalogs().get(connection.id)
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const run = async (action: () => Promise<void>): Promise<void> => {
     setBusy(true); setError(null)
@@ -136,9 +137,12 @@ function HostRow({
       {error && <p className="hosts-error" role="alert">{error}</p>}
       {expanded && (
         <div className="hosts-row-details" id={detailsId}>
-          <dl>
-            <dt>主机指纹</dt><dd><code>{connection.anchorSHA256}</code></dd>
-          </dl>
+          <div className="hosts-address-summary">
+            <dl>
+              <dt>主机指纹</dt><dd><code>{connection.anchorSHA256}</code></dd>
+            </dl>
+            <button type="button" className="hosts-button" disabled={busy} onClick={() => setEditing(true)}>编辑连接地址</button>
+          </div>
           <h3>项目</h3>
           {state !== 'connected'
             ? <p className="hosts-muted">{entry?.catalog ? '以下是上次连接时读取的项目；连接后才能新建会话。' : '连接后可查看这台主机上的项目。'}</p>
@@ -164,6 +168,57 @@ function HostRow({
           </div>
         </div>
       )}
+      {editing && <HostAddressEditor connection={connection} onClose={() => setEditing(false)} />}
     </li>
+  )
+}
+
+function HostAddressEditor({ connection, onClose }: { connection: DesktopRemoteConnection; onClose: () => void }) {
+  const titleId = useId()
+  const noteId = useId()
+  const hostnameRef = useRef<HTMLInputElement>(null)
+  const [hostname, setHostname] = useState(connection.ssh.hostname)
+  const [username, setUsername] = useState(connection.ssh.username)
+  const [port, setPort] = useState(String(connection.ssh.port))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const ssh: DesktopSshTarget = { hostname: hostname.trim(), username: username.trim(), port: Number(port) }
+  const changed = ssh.hostname !== connection.ssh.hostname || ssh.username !== connection.ssh.username || ssh.port !== connection.ssh.port
+  const close = (): void => { if (!saving) onClose() }
+  const save = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    if (saving || !changed) return
+    setSaving(true); setError(null)
+    try {
+      await bridge().updateSsh(connection.id, ssh)
+      await refreshDesktopConnections()
+      onClose()
+    } catch (reason) {
+      setError(`保存失败：${errorText(reason)}`)
+      // A failed persistence step may still have closed the old tunnel.
+      await refreshDesktopConnections()
+    } finally { setSaving(false) }
+  }
+  return (
+    <ModalFrame labelledBy={titleId} initialFocusRef={hostnameRef} className="hosts-add-modal" onClose={close}>
+      <div className="modal-head">
+        <b id={titleId}>编辑连接地址</b>
+        <button type="button" className="modal-x" disabled={saving} onClick={close} aria-label="关闭编辑连接地址"><Icon name="x" /></button>
+      </div>
+      <form className="modal-body desktop-remote__card hosts-address-form" onSubmit={(event) => void save(event)} aria-describedby={noteId} aria-busy={saving}>
+        <p><strong>{connection.label}</strong></p>
+        <p className="hosts-muted" id={noteId}>保留原配对、主机指纹和会话。保存后断开当前连接，请手动重新连接；不会停止远端任务或自动发送草稿。</p>
+        <label>主机名 / IP<input ref={hostnameRef} name="hostname" value={hostname} onChange={(event) => setHostname(event.target.value)} required maxLength={253} autoComplete="off" spellCheck={false} readOnly={saving} /></label>
+        <div className="desktop-remote__form-grid">
+          <label>SSH 用户名<input name="username" value={username} onChange={(event) => setUsername(event.target.value)} required maxLength={253} autoComplete="off" spellCheck={false} readOnly={saving} /></label>
+          <label>SSH 端口<input name="port" type="number" value={port} onChange={(event) => setPort(event.target.value)} required min={1} max={65535} readOnly={saving} /></label>
+        </div>
+        {error && <p className="desktop-remote__error" role="alert">{error}</p>}
+        <div className="hosts-address-actions">
+          <button type="button" className="hosts-button" disabled={saving} onClick={close}>取消</button>
+          <button type="submit" className="hosts-button is-primary" disabled={saving || !changed}>{saving ? '正在保存…' : '保存地址'}</button>
+        </div>
+      </form>
+    </ModalFrame>
   )
 }

@@ -58,6 +58,27 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **首轮失败记录**：完整 `test:renderer:ui` 首次在 desktop-remote smoke 的「remote Provider menu」超时：远程会话重挂载后 run controls 在 effect 中重置，测量坐标后布局移动，点击落到相邻的模型按钮。改为等待控件重置到 Provider 默认值后再点击（就绪条件，不是 sleep），随后连续 3 次通过。
 - **验收边界**：smoke 的连接与 Provider 是 fixture，不证明真实 SSH、mac2 或日常安装版；没有发真实模型请求，未重新打包或安装；用户视觉认可待确认。
 
+## 2026-10-15：编辑连接地址，不重新配对
+
+- **用户反馈**：mac2 的 IP 从 `30.7.225.156` 变为 `30.7.226.226`。地址是 SSH 路由信息，不是 Scry 主机身份；用户确认直接优化现有主机页。
+- **交互**：展开已保存主机 →「编辑连接地址」。复用现有配对表单样式与 `ModalFrame`，预填主机名/IP、用户名和端口；未修改时不能保存。保存期间输入框只读、操作按钮禁用，保留键盘焦点。取消不写入并恢复入口焦点；失败留在弹窗并显示错误。
+- **保存合同**：只更新经过 main 验证的 `DesktopSshTarget`，保留 connection ID、主机 CA 指纹、客户端身份/证书、待完成配对、意图回执与会话关联。保存会关闭原 SSH 隧道，不停止远端任务，不自动重连、重发或重新配对；用户随后显式「连接」。新地址仍走原来的 SSH 校验和已固定的 mTLS 主机身份校验。
+- **实现**：`DesktopRemoteAPI.updateSsh` → typed preload → 生产 IPC trust wrapper → `DesktopRemoteClient.updateSsh`；renderer 不能传入新 CA、证书、任意 SSH 参数或命令。地址与 connect/disconnect 共用生命周期队列。
+- **并发回归**：复现了旧回执响应在地址保存期间返回，后续保存把旧地址写回的问题。最小测试先失败（磁盘 hostname 仍为 `desktop.example`），再把快照生成与连接替换发布放进现有保存队列，避免排队中的旧状态覆盖新路由。加密保存失败仍不发布新地址。
+- **检查**：focused 38 个用例通过，包含原始 TLS 连接在改地址后复用证书、不重新配对；生产 IPC wrapper 拒绝外部 sender/frame/origin。UI smoke 覆盖预填、取消/焦点、端口验证、保存错误、双 Enter 单次保存、只读字段保留焦点、主机身份保留、显式重连、不启动 Provider。`--negative-address-control` 故意自动重连，断言明确失败。
+- **首次失败**：新表单测试沿用了 composer 的 rawKeyDown 助手，缺少原生表单提交所需的 Enter keypress；补齐真实按键序列。随后发现所有输入框 disabled 会在保存失败后丢失焦点；改为 readOnly，按钮仍 disabled，增加焦点和不可修改断言。
+- **调研与取舍**：[VS Code Remote SSH 原文](https://code.visualstudio.com/docs/remote/ssh)，「Remember hosts and advanced settings / SSH Targets」：已保存 Host 与可编辑 HostName 分离。采用身份与路由分离、原位修改和显式重连；不引入自由文本 SSH 配置或任意参数入口。该任务是已有页面的同模式修复，不新增另一套机器导航。
+- **当前状态**：功能与 focused/UI fixture 已验证；安装版、真实改地址、重启持久化的结果在完成后追加，fixture 不代替双机验收。
+
+### 方向 B 的 0.2.184 双机验收（2026-10-14，历史现场）
+
+- 冻结源码 `acaee62e2a08f15c03ed670740a602fcbf6e6626`，构建目录 `/tmp/scry-unified-release-Nz6fgx`；本机与 mac2 均安装 0.2.184、私有 CLI 0.2.49，`app.asar` SHA-256 均为 `a0ce8fccd5a01ebdb6418e0a7477c7042b69095cdc725bb80ebb709ecf5a7e2f`。开发签名，非公证发布版。
+- 冻结目录的 typecheck、2740 单测/3 跳过、shell、CLI release 581 测试/package smoke、打包/资源/Electron security/宿主 fixture，以及完整 renderer UI gate 全通过。首次在共享工作区的安装 gate 遇到并行文件链接 WIP，3 个断言失败；未安装该版本，改为冻结源码独立构建，没有混入或修复无关改动。
+- 真实 App 经主机页连接、双栏位置选择进入原临时 workspace；Pi · Rotom / Qoder Ultimate 仅发送一次无工具算术请求 `151 × 37`，返回 `5587`。原生 session `01a13a7d-339c-741a-a1e2-5031ab3df8da`，Scry run `remote-run-mv8476or-0`，record `2a485cbdc8625200d71636cb09dff14e` / sequence 4。工具与文件操作均为空，duration 7170ms，input/output 10952/6，cost 未提供，不记作 0。
+- 远端 `.scry/records` 从 3 增至 4；`turns verify` 成功，`turns summary <session>` 为一轮 completed / 10958 tokens / 0 calls。身份扩展字段仍为 legacy_unset，危险操作分类 unavailable，不把覆盖缺失报告成无风险。
+- 客户端真实只读抽屉读取远端 README；已有会话位置隐藏、Provider 锁定。主机页主动断开后，返回侧栏会话，未发送草稿完整保留、发送禁用，按 Enter 不发送；显式重连后草稿仍在，远端 history 为 available/trace_archive/一轮 done，正文 5587，客户端 localRuns 始终为空。
+- 本地证据 `/tmp/scry-unified-real-Nz6fgx/`（gate 日志、after-send/reconnected/offline JSON、截图）；远端证据 `/Users/test/scry-unified-real-Nz6fgx/`。后续本机验收进程退出、旧 IP SSH 超时，未执行 App 重启后重开与最终 SQLite 数值核对。用户随后提供新 IP，本节不是这些剩余项已通过的声明。
+
 ## 0.2.183 安装准备（2026-10-14）
 
 - 新侧栏使主机列表成为启动读取路径。真实隔离 App 在 `safeStorage.isEncryptionAvailable()` 内阻塞；诊断日志显示 ready/window/renderer 均已完成，随后只有该方法的 start、没有 end。原外链 fixture 只向主进程发 SIGTERM，未可靠收敛其子进程，组合命令和独立 smoke 均曾超时；这些失败不计为通过。

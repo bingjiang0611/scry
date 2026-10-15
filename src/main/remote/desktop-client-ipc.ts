@@ -3,7 +3,7 @@ import type { DesktopRemoteAPI } from '../../shared/desktop-remote'
 // Deliberately enumerate business operations. Neither the renderer nor a
 // remote peer can choose a raw protocol op, URL, SSH option or shell command.
 const METHODS = [
-  'list', 'pair', 'finishPairing', 'connect', 'disconnect', 'forget',
+  'list', 'pair', 'finishPairing', 'updateSsh', 'connect', 'disconnect', 'forget',
   'catalog', 'history', 'trace', 'intents', 'submit', 'intentStatus',
   'runStatus', 'stop', 'answer', 'files', 'file'
 ] as const satisfies readonly (keyof DesktopRemoteAPI)[]

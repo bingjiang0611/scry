@@ -11,6 +11,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-desktop-remote-ui-'))
 const negativeControl = process.argv.includes('--negative-control')
 const negativeMachineControl = process.argv.includes('--negative-machine-control')
+const negativeAddressControl = process.argv.includes('--negative-address-control')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -33,7 +34,8 @@ const state = {
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
-  localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0
+  localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
+  updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
@@ -77,7 +79,14 @@ const api = {
   async list() { if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
   async pair() { throw new Error('pairing is outside this fixture') },
   async finishPairing() { throw new Error('pairing is outside this fixture') },
-  async connect() { state.connected = true },
+  async updateSsh(id, ssh) {
+    state.updateSshCalls.push({ id, ssh })
+    if (state.updateFailure) throw new Error('fixture secure storage failure')
+    if (state.holdAddressUpdate) await new Promise(resolve => { window.releaseAddressUpdate = resolve })
+    connection.ssh = { ...ssh }
+    state.connected = false
+  },
+  async connect() { state.connectCalls++; state.connected = true },
   async disconnect() { state.connected = false },
   async forget() {},
   async catalog() { return structuredClone({ ...catalog, projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })), providers: state.hideProvider ? [beta] : catalog.providers }) },
@@ -345,6 +354,54 @@ async function exercise(contents, capture) {
   await click('.hosts-row-toggle')
   await wait('document.querySelectorAll(".hosts-projects li").length === 2', 'host projects listed')
   await capture('remote-hosts')
+
+  // Native forms submit on Enter's keypress/default action, unlike the composer's keydown handler.
+  const formEnter = async () => {
+    const event = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: process.platform === 'darwin' ? 36 : 13 }
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event })
+    await send('Input.dispatchKeyEvent', { type: 'char', text: '\r', unmodifiedText: '\r', ...event })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
+  }
+  // Editing changes routing only. Cancel, validation, storage failure and double-submit use real DOM input.
+  await click('.hosts-address-summary button')
+  await wait('document.activeElement?.name === "hostname"', 'address editor initial focus')
+  check(await read('document.querySelector(\'input[name="hostname"]\').value === "fixture.invalid" && document.querySelector(\'input[name="username"]\').value === "fixture" && document.querySelector(\'input[name="port"]\').value === "22"'), 'Address editor did not prefill the saved target')
+  check(await read('document.querySelector(\'.hosts-address-actions button[type="submit"]\').disabled'), 'Unchanged address was saveable')
+  await read('document.querySelector(\'input[name="hostname"]\').select()'); await insert('cancelled.invalid')
+  await key('Escape')
+  await wait('!document.querySelector(".hosts-address-form")', 'cancel address editing')
+  check((await fixture()).updateSshCalls.length === 0, 'Cancel wrote an address')
+  check(await read('document.querySelector(".hosts-address-summary button") === document.activeElement'), 'Cancel did not restore focus')
+  await click('.hosts-address-summary button')
+  await wait('document.activeElement?.name === "hostname"', 'reopen address editor')
+  check(await read('document.querySelector(\'input[name="hostname"]\').value === "fixture.invalid"'), 'Cancelled address leaked into saved fields')
+  await read('document.querySelector(\'input[name="hostname"]\').select()'); await insert('30.7.226.226')
+  await click('input[name="port"]'); await read('document.querySelector(\'input[name="port"]\').select()'); await insert('0'); await formEnter()
+  check(await read('document.querySelector(\'input[name="port"]\').validity.rangeUnderflow'), 'Invalid port was not rejected by the form')
+  check((await fixture()).updateSshCalls.length === 0, 'Invalid port reached IPC')
+  await read('document.querySelector(\'input[name="port"]\').select()'); await insert('2222')
+  await read('window.desktopRemoteFixture.updateFailure = true')
+  await formEnter()
+  await wait('document.querySelector(".hosts-address-form [role=alert]")?.textContent.includes("fixture secure storage failure")', 'save failure stays visible')
+  check(await read('document.querySelector(".hosts-row-head code").textContent === "fixture@fixture.invalid:22"'), 'Failed save changed the saved address')
+  await capture('host-address-editor')
+  const connectsBeforeEdit = (await fixture()).connectCalls
+  await read('window.desktopRemoteFixture.updateFailure = false; window.desktopRemoteFixture.holdAddressUpdate = true')
+  await formEnter(); await formEnter()
+  await wait('document.querySelector(".hosts-address-form")?.getAttribute("aria-busy") === "true"', 'address save in flight')
+  check((await fixture()).updateSshCalls.length === 2, 'Double Enter duplicated address save')
+  check(await read('[...document.querySelectorAll(".hosts-address-form input")].every(node => node.readOnly) && [...document.querySelectorAll(".hosts-address-form button")].every(node => node.disabled)'), 'In-flight address editor allowed edits or another action')
+  check(await read('document.querySelector(".hosts-address-form").contains(document.activeElement)'), 'Address save lost keyboard focus')
+  await read('window.releaseAddressUpdate()')
+  await wait('!document.querySelector(".hosts-address-form") && document.querySelector(".hosts-row-head code")?.textContent === "fixture@30.7.226.226:2222"', 'new target saved')
+  const afterEdit = await fixture()
+  check(afterEdit.updateSshCalls[1].id === 'fixture-connection', 'Address edit changed connection identity')
+  check(afterEdit.connectCalls === connectsBeforeEdit && !afterEdit.connected, 'Address edit automatically reconnected')
+  check(afterEdit.submitInputs.length === 3 && afterEdit.localStarts === 0, 'Address edit started a Provider')
+  check(await read('document.querySelector(".hosts-row-details").textContent.includes("fixture-fingerprint")'), 'Address edit replaced the pinned identity')
+  check(await read('[...document.querySelectorAll(".hosts-projects button")].every(node => node.disabled)'), 'Disconnected projects allowed session creation')
+  await click('.hosts-row-actions button')
+  await wait('window.desktopRemoteFixture.connected && document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'explicit reconnect after editing')
   await click('.hosts-projects li:last-child .hosts-button')
   await wait(`${remoteShown} && document.querySelector(".location-button")?.getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-b"`, 'host project opens a remote draft')
 
@@ -364,6 +421,7 @@ async function exercise(contents, capture) {
   await wait('document.querySelector(".sb-remote-proj .pname")?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
 
   return {
+    hostAddressEdit: { cancel: true, focusRestored: true, validation: true, storageFailure: true, doubleEnterSingleSave: true, identityKept: true, explicitReconnect: true, noProviderStart: true },
     boundSessionReconnectRefreshesCatalog: true,
     savedHostsAfterRendererReload: true,
     hostsPageSeparatesConnectionDirections: true,
@@ -400,7 +458,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeAddressControl && id.endsWith('/HostsView.tsx')) {
+        const save = 'await bridge().updateSsh(connection.id, ssh)'
+        if (!source.includes(save)) throw new Error('address negative control not found')
+        return source.replace(save, save + '; await bridge().connect(connection.id)')
+      }
       if (negativeMachineControl && id.endsWith('/App.tsx')) {
         const route = 'onNewChat: useEventCallback(startNewConversation)'
         if (!source.includes(route)) throw new Error('machine routing negative control not found')

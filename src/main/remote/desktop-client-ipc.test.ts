@@ -13,11 +13,12 @@ describe('desktop client IPC production trust wrapper', () => {
     const sender = { mainFrame, isDestroyed: () => false }
     const window = { webContents: sender, isDestroyed: () => false }
     const list = vi.fn(async () => [])
-    const client = vi.fn(() => ({ list }) as unknown as DesktopRemoteAPI)
+    const updateSsh = vi.fn(async () => {})
+    const client = vi.fn(() => ({ list, updateSsh }) as unknown as DesktopRemoteAPI)
     registerDesktopClientIpc<IpcMainInvokeEvent>(
       (channel, listener) => registerTrustedIpcHandler(ipc, channel, () => window as unknown as BrowserWindow, origin, listener), client
     )
-    expect(listeners.size).toBe(17)
+    expect(listeners.size).toBe(18)
     expect(listeners.has('desktopRemote:raw')).toBe(false)
     const invoke = async (channel: string, event: unknown, ...args: unknown[]) => listeners.get(channel)!(event as IpcMainInvokeEvent, ...args)
     for (const channel of listeners.keys()) {
@@ -32,5 +33,9 @@ describe('desktop client IPC production trust wrapper', () => {
     await expect(invoke('desktopRemote:list', { sender, senderFrame: mainFrame })).resolves.toEqual([])
     expect(client).toHaveBeenCalledTimes(1)
     expect(list).toHaveBeenCalledTimes(1)
+    expect(updateSsh).not.toHaveBeenCalled()
+    const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
+    await expect(invoke('desktopRemote:updateSsh', { sender, senderFrame: mainFrame }, 'saved-id', ssh)).resolves.toBeUndefined()
+    expect(updateSsh).toHaveBeenCalledExactlyOnceWith('saved-id', ssh)
   })
 })
