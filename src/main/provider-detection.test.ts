@@ -213,4 +213,59 @@ describe('Provider 完整探测结果组装', () => {
       compatibility: { status: 'unsupported', reason: '未验证版本' }
     })
   })
+
+  // 真实实例回归：adapter 描述自己时往往还不知道版本，本机真实版本只有 CLI 探测这一步有。
+  // 用 descriptor 的空版本算出来的 advisory 永远是 unknown，等于这套判定在真机上从不生效。
+  it('用探测到的真实 CLI 版本重算兼容性，而不是沿用 descriptor 的空版本结论', async () => {
+    const base = descriptor('qoder', 'Qoder', 'qoder_cli', 'Qoder Agent SDK')
+    const compatibility = vi.fn((_providerId: ProviderDescriptor['id'], version: string | undefined) => ({
+      status: version === '1.1.60' ? ('unsupported' as const) : ('unknown' as const),
+      observedVersion: version ?? null,
+      recommendedRange: '>=1.1.60 <1.2.0',
+      matchedRange: version === '1.1.60' ? '<1.2.0' : null,
+      reason: version === '1.1.60' ? '这个版本只验证过版本探测' : '未探测到 CLI 版本',
+      source: 'bundled' as const,
+      manifestUpdatedAt: '2026-10-15T00:00:00.000Z'
+    }))
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/bin/qodercli', version: '1.1.60' }],
+      descriptors: [{
+        ...base,
+        version: undefined,
+        compatibility: {
+          status: 'unknown',
+          observedVersion: null,
+          recommendedRange: '>=1.1.60 <1.2.0',
+          matchedRange: null,
+          reason: '未探测到 CLI 版本',
+          source: 'bundled',
+          manifestUpdatedAt: '2026-10-15T00:00:00.000Z'
+        }
+      }],
+      storedPiProfiles: [],
+      probeStoredPiProfile: vi.fn(),
+      compatibility
+    })
+
+    expect(compatibility).toHaveBeenCalledWith('qoder', '1.1.60')
+    expect(result[0]).toMatchObject({
+      version: '1.1.60',
+      compatibility: { status: 'unsupported', observedVersion: '1.1.60', reason: '这个版本只验证过版本探测' }
+    })
+  })
+
+  it('没探到版本时不编造判定，沿用 descriptor 的结论', async () => {
+    const base = descriptor('qoder', 'Qoder', 'qoder_cli', 'Qoder Agent SDK')
+    const compatibility = vi.fn()
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/bin/qodercli' }],
+      descriptors: [{ ...base, version: undefined }],
+      storedPiProfiles: [],
+      probeStoredPiProfile: vi.fn(),
+      compatibility
+    })
+
+    expect(compatibility).not.toHaveBeenCalled()
+    expect(result[0].compatibility).toBeUndefined()
+  })
 })

@@ -1,5 +1,6 @@
 import { basename } from 'node:path'
-import { unavailableProviderDescriptor, type ProviderDescriptor, type ProviderHealth } from '../shared/provider'
+import { unavailableProviderDescriptor, type ProviderDescriptor, type ProviderHealth, type ProviderId } from '../shared/provider'
+import type { ProviderCompatibilityAdvisory } from '../shared/provider-compatibility'
 import { providerIdForAgentId } from '../shared/runtime'
 import type { DetectedAgent } from './claude-locate'
 import type { PiAgentProfile } from './pi-agent-profiles'
@@ -65,15 +66,31 @@ interface ComposeProviderDetectionOptions {
   descriptors: ProviderDescriptor[]
   storedPiProfiles: PiAgentProfile[]
   probeStoredPiProfile: (profile: PiAgentProfile) => Promise<VersionProbeResult>
+  /**
+   * 版本兼容性判定器。descriptor 上的 advisory 来自 adapter 自己知道的版本，而本机真实
+   * 版本往往只有 CLI 定位/探测这一步才有，所以这里用最终生效的版本重算一次；缺少判定器
+   * 时沿用 descriptor 的结论，不编造。
+   */
+  compatibility?: (providerId: ProviderId, version: string | undefined) => ProviderCompatibilityAdvisory
 }
 
 export async function composeProviderDetectionResults({
   detected,
   descriptors,
   storedPiProfiles,
-  probeStoredPiProfile
+  probeStoredPiProfile,
+  compatibility
 }: ComposeProviderDetectionOptions): Promise<ProviderDetectionResult[]> {
   const descriptorByProvider = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]))
+  const advisoryFor = (
+    providerId: ProviderId,
+    version: string | undefined,
+    descriptor: ProviderDescriptor | undefined
+  ): ProviderCompatibilityAdvisory | undefined => {
+    if (!compatibility) return descriptor?.compatibility
+    if (version === undefined) return descriptor?.compatibility
+    return compatibility(providerId, version)
+  }
   const agents = detected.flatMap((agent): ProviderDetectionResult[] => {
     const providerId = providerIdForAgentId(agent.id)
     const descriptor = providerId ? descriptorByProvider.get(providerId) : undefined
@@ -98,7 +115,11 @@ export async function composeProviderDetectionResults({
         transport: shadow.transport,
         capabilities: shadow.capabilities,
         health: shadow.health!,
-        unavailableReason: shadow.unavailableReason!
+        unavailableReason: shadow.unavailableReason!,
+        ...((): { compatibility?: ProviderCompatibilityAdvisory } => {
+          const advisory = advisoryFor(providerId, agent.version, undefined)
+          return advisory ? { compatibility: advisory } : {}
+        })()
       }]
     }
     return [{
@@ -118,7 +139,10 @@ export async function composeProviderDetectionResults({
           }
         : descriptor.health ?? agent.health,
       ...(descriptor.unavailableReason ? { unavailableReason: descriptor.unavailableReason } : {}),
-      ...(descriptor.compatibility ? { compatibility: descriptor.compatibility } : {}),
+      ...((): { compatibility?: ProviderCompatibilityAdvisory } => {
+        const advisory = advisoryFor(providerId, agent.version ?? descriptor.version, descriptor)
+        return advisory ? { compatibility: advisory } : {}
+      })(),
       ...(providerId === 'pi' ? { agentProfileId: agent.id } : {})
     }]
   })
@@ -141,7 +165,10 @@ export async function composeProviderDetectionResults({
         ? { ...descriptor.health, ...versionProbe.health, transport: descriptor.transport }
         : descriptor.health ?? versionProbe.health,
       ...(descriptor.unavailableReason ? { unavailableReason: descriptor.unavailableReason } : {}),
-      ...(descriptor.compatibility ? { compatibility: descriptor.compatibility } : {}),
+      ...((): { compatibility?: ProviderCompatibilityAdvisory } => {
+        const advisory = advisoryFor('pi', versionProbe.version ?? descriptor.version, descriptor)
+        return advisory ? { compatibility: advisory } : {}
+      })(),
       agentProfileId: profile.id
     })
   }
