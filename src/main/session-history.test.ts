@@ -9,6 +9,7 @@ import {
   hydrateSessionHistoryPage,
   mergeSessionTurns,
   readSessionHistoryAfterCompletedRuns,
+  restoreTraceArchiveTurn,
   sessionHistoryPage,
   sessionArchiveIsPageable,
   type LoadedSessionTurn
@@ -51,6 +52,23 @@ describe('archive source paging', () => {
 })
 
 describe('session history terminal convergence', () => {
+  it('restores an explicitly interrupted archive without losing its existing error or hint', () => {
+    const turn = restoreTraceArchiveTurn({
+      runId: 'stopped-before-native-entry', userText: '继续', items: [], done: true,
+      status: 'interrupted', error: 'existing error', errorHint: 'existing hint', ts: 1
+    })
+    expect(turn.errorHint).toContain('本轮已中断，不代表任务完成。')
+    expect(turn.errorHint).toContain('existing hint')
+    expect(turn.error).toBe('existing error')
+    expect(turn.items).toEqual([])
+    expect(turn.providerTurnId).toBeUndefined()
+  })
+
+  it.each(['completed', 'failed', undefined] as const)('does not infer interruption from an empty archive with status %s', (status) => {
+    const turn = restoreTraceArchiveTurn({ runId: 'empty', userText: '继续', items: [], done: true, status, ts: 1 })
+    expect(turn.errorHint).toBeUndefined()
+  })
+
   it.each([true, false])('reads the latest archived turn after terminal persistence (prior archive: %s)', async (hasPriorArchive) => {
     const root = mkdtempSync(join(tmpdir(), 'scry-history-settlement-'))
     roots.push(root)

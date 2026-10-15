@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parsePiNativeHistory, readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
+import { restoreTraceArchiveTurn, sessionHistoryPage } from './session-history'
 
 const identity = { sessionId: '01a1338c-3d8b-775b-8645-fd964faa29a3', cwd: '/repo' }
 const header = { type: 'session', version: 3, id: identity.sessionId, cwd: identity.cwd }
@@ -44,6 +45,35 @@ describe('offline Pi native history recovery', () => {
     const afterFailure = reconcilePiNativeHistory([native[0]], [failed])
     expect(afterFailure.map((turn) => turn.userText)).toEqual(['phone message', 'failed request'])
     expect(afterFailure[1].error).toBe('offline')
+  })
+
+  it('keeps an old interrupted attempt before its later linked continuation, not at the end of history', () => {
+    const native = parsePiNativeHistory(encode(user, assistant, result,
+      { ...user, id: 'u2', parentId: 't' },
+      { ...assistant, id: 'a2', parentId: 'u2' }), identity)
+    const first = restoreTraceArchiveTurn({ runId: 'first', providerTurnId: 'u', userText: 'phone message', items: [], done: true, ts: 1 })
+    const interrupted = restoreTraceArchiveTurn({ runId: 'interrupted', userText: '继续', items: [], done: true, status: 'interrupted', ts: 2 })
+    const latest = restoreTraceArchiveTurn({ runId: 'latest', providerTurnId: 'u2', userText: '继续', items: [], done: true, ts: 3 })
+    const turns = reconcilePiNativeHistory(native, [first, interrupted, latest])
+    expect(turns.map((turn) => turn.runId)).toEqual(['first', 'interrupted', 'latest'])
+    expect(turns[1].errorHint).toContain('已中断')
+    expect(turns[1].errorHint).toContain('单独保留')
+    expect(turns[1].providerTurnId).toBeUndefined()
+    expect(sessionHistoryPage(turns, { limit: 1 }).turns).toEqual([latest])
+  })
+
+  it('preserves unlinked groups around exact anchors and retains a native-only prefix', () => {
+    const native = parsePiNativeHistory(encode(user, assistant, result,
+      { ...user, id: 'u2', parentId: 't' }), identity)
+    const attempt = (runId: string) => ({ runId, userText: '继续', items: [], done: true })
+    const linked = { ...attempt('linked'), providerTurnId: 'u2' }
+    const offBranch = { ...attempt('before-2'), providerTurnId: 'abandoned-user' }
+    const turns = reconcilePiNativeHistory(native, [attempt('before-1'), offBranch, linked, attempt('after')])
+    expect(turns.map((turn) => turn.runId)).toEqual(['pi-native-u', 'before-1', 'before-2', 'linked', 'after'])
+    expect(turns[0]).toEqual(native[0])
+    expect(turns[2].providerTurnId).toBe('abandoned-user')
+    expect(turns[3]).toEqual(linked)
+    expect(turns.filter((turn) => turn.errorHint?.includes('单独保留'))).toHaveLength(3)
   })
 
   it('follows current leaf ancestry instead of showing abandoned branch messages', () => {

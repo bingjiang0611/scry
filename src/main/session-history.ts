@@ -171,6 +171,11 @@ export function restoreTraceArchiveTurn(
   const hydrated = options.hydrateAttachments === false
     ? { attachments: [] as AgentInputAttachment[], warnings: [] as string[] }
     : hydrateArchiveAttachments(turn, context, budget)
+  // done only means the run settled. An interrupted archive can have no model
+  // result or error (for example, a stop during startup), so retain its outcome.
+  const errorHint = turn.status === 'interrupted'
+    ? ['本轮已中断，不代表任务完成。', turn.errorHint].filter(Boolean).join('\n')
+    : turn.errorHint
   return {
     runId: turn.runId,
     providerTurnId: turn.providerTurnId,
@@ -180,7 +185,7 @@ export function restoreTraceArchiveTurn(
     items: turn.items,
     done: turn.done,
     error: turn.error,
-    errorHint: withAttachmentWarnings(turn.errorHint, hydrated.warnings)
+    errorHint: withAttachmentWarnings(errorHint, hydrated.warnings)
   }
 }
 

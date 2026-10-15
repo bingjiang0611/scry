@@ -87,15 +87,20 @@ export function parsePiNativeHistory(content: string, identity: { sessionId: str
 // Pi's adapter uses the native user entry ID as providerTurnId. Prefer canonical
 // Scry evidence only at that exact boundary; same-text prompts prove nothing.
 export function reconcilePiNativeHistory(native: LoadedSessionTurn[], archived: LoadedSessionTurn[]): LoadedSessionTurn[] {
-  const byRunId = new Map(native.map((turn) => [turn.runId, turn]))
-  const unlinked: LoadedSessionTurn[] = []
+  const byRunId = new Map(native.map((turn) => [turn.runId, [turn]]))
+  let unlinked: LoadedSessionTurn[] = []
   for (const turn of archived) {
     const key = turn.providerTurnId ? `pi-native-${turn.providerTurnId}` : undefined
-    if (key && byRunId.has(key)) byRunId.set(key, turn)
-    else unlinked.push({ ...turn, errorHint: [turn.errorHint,
+    if (key && byRunId.has(key)) {
+      // Archive order proves these attempts precede this exact native boundary.
+      // Appending every unlinked attempt at the end makes old interruptions look
+      // like the latest turn. Ordering is not identity: keep each attempt intact.
+      byRunId.set(key, [...unlinked, turn])
+      unlinked = []
+    } else unlinked.push({ ...turn, errorHint: [turn.errorHint,
       '此归档缺少可对应的原生回合标识，单独保留；可能与恢复记录重叠，不能据提示词去重。'].filter(Boolean).join(' ') })
   }
-  return [...native.map((turn) => byRunId.get(turn.runId)!), ...unlinked]
+  return [...native.flatMap((turn) => byRunId.get(turn.runId)!), ...unlinked]
 }
 
 // Offline fallback for catalog-authorized Pi sessions only. No launcher/config
