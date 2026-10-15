@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -7,7 +7,10 @@ import { archivedTranscriptPath, upsertTraceArchiveTurn } from '../transcript-ar
 import { readRemoteHistoryTurnsPage, readRemoteHistoryVersion } from './history-reader'
 
 const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+afterEach(() => {
+  vi.restoreAllMocks()
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
 
 function context(providerId: 'pi' | 'claude' = 'pi') {
   const cwd = mkdtempSync(join(tmpdir(), 'scry-remote-history-'))
@@ -25,9 +28,10 @@ function events(index: number): TraceEvent[] {
 
 function archive(args: ReturnType<typeof context>, count: number) {
   for (let index = 0; index < count; index++) {
+    const items = events(index)
     expect(upsertTraceArchiveTurn({ ...args,
       runtimeProvider: args.providerId === 'pi' ? 'pi_rpc' : 'claude_sdk',
-      turn: { runId: `run-${index}`, userText: `question-${index}`, items: events(index), done: true }
+      turn: { runId: `run-${index}`, ts: Date.parse(items[0].ts), userText: `question-${index}`, items, done: true }
     })).toBe(true)
   }
 }
@@ -78,6 +82,8 @@ describe('production remote history reader', () => {
   })
 
   it('keeps archived older pages readable while coalesced live text advances, but detects the new live version', async () => {
+    // Fast writes can share a millisecond; chronology must come from fixture turns.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 1))
     const args = context()
     archive(args, 5)
     const run = live()
