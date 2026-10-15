@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, readTranscriptWindow, recoverRecorder, resetTranscriptSnapshotCache, transcriptSnapshotCacheStats } from './recorder'
 import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, recordStoreIndexStats, redeliverLatestCommitNotification, resetRecordStoreIndex, safeKey, verifyStore } from './store'
@@ -17,6 +17,7 @@ const roots: string[] = []
 const pexecFile = promisify(execFile)
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -3255,33 +3256,69 @@ describe('nested Git turn diff', () => {
     await pexecFile('git', ['init'], { cwd: root })
     await pexecFile('git', ['config', 'user.name', 'Scry Test'], { cwd: root })
     await pexecFile('git', ['config', 'user.email', 'scry@example.invalid'], { cwd: root })
-    const filter = join(root, 'slow-clean.sh')
-    await writeFile(filter, '#!/bin/sh\nsleep 1\ncat\n')
-    await chmod(filter, 0o700)
-    await pexecFile('git', ['config', 'filter.slow.clean', filter], { cwd: root })
-    await pexecFile('git', ['config', 'filter.slow.smudge', 'cat'], { cwd: root })
-    await writeFile(join(root, '.gitattributes'), '*.slow filter=slow\n')
-    await writeFile(join(root, 'a.slow'), 'before\n')
-    await pexecFile('git', ['add', '.gitattributes', 'a.slow'], { cwd: root })
+    await writeFile(join(root, 'a.txt'), 'before\n')
+    await pexecFile('git', ['add', 'a.txt'], { cwd: root })
     await pexecFile('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'baseline'], { cwd: root })
-    await writeFile(join(root, 'a.slow'), 'after\n')
+    await writeFile(join(root, 'a.txt'), 'after\n')
     const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
     config.capture.diff = true
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
 
+    // Snapshots disable repository filters. Synchronize the real Git invocation,
+    // not a filter sleep that the production trust boundary deliberately bypasses.
+    const realGit = (await pexecFile('which', ['git'])).stdout.trim()
+    const syncDir = join(root, 'snapshot-sync')
+    const binDir = join(root, 'bin')
+    await mkdir(binDir)
+    await mkdir(syncDir)
+    const readyPipe = join(syncDir, 'snapshot-ready')
+    const releasePipe = join(syncDir, 'snapshot-release')
+    await pexecFile('mkfifo', [readyPipe])
+    await pexecFile('mkfifo', [releasePipe])
+    const gitWrapper = join(binDir, 'git')
+    await writeFile(gitWrapper, `#!/bin/sh
+has_add=0
+has_all=0
+for arg in "$@"; do
+  [ "$arg" = "add" ] && has_add=1
+  [ "$arg" = "-A" ] && has_all=1
+done
+if [ -n "$SCRY_TEST_SYNC_DIR" ] && [ "$has_add" = 1 ] && [ "$has_all" = 1 ]; then
+  printf 'ready\\n' > "$SCRY_TEST_READY_PIPE"
+  read _release < "$SCRY_TEST_RELEASE_PIPE"
+fi
+exec "$SCRY_TEST_REAL_GIT" "$@"
+`)
+    await chmod(gitWrapper, 0o700)
+    vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`)
+    vi.stubEnv('SCRY_TEST_REAL_GIT', realGit)
+    vi.stubEnv('SCRY_TEST_SYNC_DIR', syncDir)
+    vi.stubEnv('SCRY_TEST_READY_PIPE', readyPipe)
+    vi.stubEnv('SCRY_TEST_RELEASE_PIPE', releasePipe)
+    const ready = readFile(readyPipe, 'utf8')
     let settled = false
     const starting = handleRecorderHook({
       provider: 'qoder',
       event: 'UserPromptSubmit',
       workspace: root,
-      payload: payload('q1', { prompt: 'slow snapshot' })
+      payload: payload('q1', { prompt: 'synchronized snapshot' }),
+      env: { ...process.env }
     }).finally(() => { settled = true })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-
-    const open = JSON.parse(await readFile(join(root, '.scry', 'runtime', 'qoder', safeKey('q1'), 'open.json'), 'utf8'))
-    expect(open).toMatchObject({ status: 'open', captures: [] })
-    expect(settled).toBe(false)
+    await ready
+    try {
+      const open = JSON.parse(await readFile(join(root, '.scry', 'runtime', 'qoder', safeKey('q1'), 'open.json'), 'utf8'))
+      expect(open).toMatchObject({ status: 'open', captures: [] })
+      expect(settled).toBe(false)
+    } finally {
+      // An assertion failure must still release the owned Git process.
+      await writeFile(releasePipe, 'release\n')
+      await starting
+    }
     await expect(starting).resolves.toMatchObject({ status: 'started' })
+    const captured = JSON.parse(await readFile(join(root, '.scry', 'runtime', 'qoder', safeKey('q1'), 'open.json'), 'utf8'))
+    expect(captured.captures).toContainEqual(expect.objectContaining({
+      capture: expect.objectContaining({ status: 'ready', beforeTree: expect.any(String) })
+    }))
   }, 15_000)
 
   it('按真实子仓归属记录本轮净变化', async () => {
