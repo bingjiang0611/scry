@@ -77,6 +77,7 @@ export async function stopOwnedApp(child, { crash = false } = {}) {
     signalOwned(owned, 'SIGKILL')
     live = await waitForGone(owned, 2_000)
   }
-  if (live.length) throw new Error(`test process exit unconfirmed: ${live.map((row) => row.pid).join(',')}`)
+  if (live.length) throw new Error(`test process exit unconfirmed: ${JSON.stringify({ root: child.pid,
+    live: live.map(({ pid, parent, status, started, command }) => ({ pid, parent, status, started, command: command.slice(0, 512) })) })}`)
   return { tracked: owned.size }
 }

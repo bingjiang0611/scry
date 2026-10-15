@@ -806,7 +806,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await click('[aria-label="推理强度"]')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
-  await wait(`document.querySelector('.model-effort-effort').textContent === 'High'`)
+  await wait(`document.querySelector('.model-effort-effort')?.textContent === 'High'`)
   await click('[aria-label="选择 Model 与 Effort"]')
   await send('Conversation one')
   await wait(`${requests}.length === 1 && document.querySelector('.run-status') != null`)
@@ -843,7 +843,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await click('#legacy')
   await wait(`document.querySelectorAll('.sb-sess').length === 3`)
   await pickSession('Legacy conversation')
-  await wait(`${modelIs('model-1')} && document.querySelector('.model-effort-effort').textContent === 'High'`)
+  await wait(`${modelIs('model-1')} && document.querySelector('.model-effort-effort')?.textContent === 'High'`)
   await click('.sb-new')
   await wait(`document.querySelector('.run-status') == null && ${modelIs('model-2')}`)
   const capabilities = `JSON.parse(document.querySelector('#model-state').textContent).capabilityRequests`
