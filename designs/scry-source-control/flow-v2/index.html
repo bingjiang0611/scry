@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Scry · 更直接的 Git 工作流 / V2</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="previewbar">
+    <div class="preview-title"><strong>SCRY</strong><span>Git 工作流 / V2</span><span class="prototype-tag">交互原型 · 待确认</span></div>
+    <div class="preview-controls">
+      <label>场景 <select id="scenario"><option value="changes">待提交</option><option value="partial">已有部分暂存</option><option value="hook">pre-push 未授权</option><option value="pr">已有 PR</option><option value="unknown">推送结果未知</option><option value="main">主分支 · 待推送</option></select></label>
+      <button id="width">窄面板</button><button id="theme">浅色</button><button id="reset">重置演示</button>
+    </div>
+  </header>
+  <div class="shell" id="shell">
+    <aside class="app-sidebar" aria-label="应用背景示意">
+      <div class="wordmark">scry<span>⌘ K</span></div>
+      <div class="sidebar-item">◫　对话</div><div class="sidebar-item muted">◷　分析</div>
+      <p class="sidebar-label">项目</p><div class="project-name">⌄　scry</div>
+      <div class="session active"><span class="status-dot"></span>优化会话历史加载</div>
+      <div class="session muted">修复文件预览链接</div><div class="session muted">远程连接状态</div>
+      <div class="sidebar-foot">本地工作区<span>⌘ ,</span></div>
+    </aside>
+    <section class="chat" aria-label="对话背景示意">
+      <header class="chat-header"><strong>优化会话历史加载</strong><span class="muted">Claude</span></header>
+      <div class="chat-content">
+        <div class="user-message">切换会话时不要重复解析历史。<br>不要提交我的其他改动。</div>
+        <div class="agent-heading"><span class="agent-mark">s</span><strong>Claude</strong><span class="muted">已完成 · 演示</span></div>
+        <p>历史缓存已接入。文件变化时会重新读取，不会沿用旧结果。</p>
+        <div class="chat-files"><span>✓</span> 修改 2 个文件 <span class="muted">+38 −9</span></div>
+        <p>可以在右侧检查差异，再选择本次要提交的文件。</p>
+        <div class="chat-summary"><strong>检查已通过</strong><span>历史切换 · 缓存失效 · 读取失败</span></div>
+      </div>
+      <div class="composer"><span>继续提问…</span><div><span>Claude · 默认权限</span><span>↵</span></div></div>
+    </section>
+    <main class="workbench">
+      <header class="surface-tabs"><span>纵览</span><strong>⑂　源代码管理 <span>×</span></strong><span class="surface-end">工作台</span></header>
+      <div class="repo-header"><div><h1>scry <span class="muted">/</span> <span id="branch"></span></h1><p id="repo-summary"></p></div><button id="details" aria-label="查看仓库详情">详情</button></div>
+      <nav class="view-tabs" aria-label="源代码管理视图"><button id="changes-tab" aria-pressed="true">变更 <span id="file-count"></span></button><button id="pr-tab" aria-pressed="false">Pull Request <span id="pr-count"></span></button><button id="history-tab" aria-pressed="false">操作记录</button></nav>
+      <div id="notice" role="status"></div>
+      <div class="workspace" id="workspace"><section class="file-pane" aria-label="本次提交范围"><header><strong>文件</strong><span id="selection-count" class="muted"></span></header><p class="selection-help">勾选要提交的文件，点击文件查看差异</p><div id="file-list"></div><div class="scope-note" id="scope-note"></div></section><section class="diff-pane" aria-label="文件差异"><header class="diff-header"><button id="back-files">← 文件</button><div id="diff-title"></div><span id="diff-stat"></span></header><div class="diff-content" id="diff-content"></div></section></div>
+      <section id="secondary" class="secondary" hidden></section>
+      <footer class="action-dock"><div class="action-summary"><span class="step-label" id="step-label"></span><strong id="next-summary"></strong><span class="muted" id="next-detail"></span></div><div class="dock-buttons"><button id="other-actions" aria-label="选择其他 Git 操作">其他操作</button><button class="primary" id="primary"></button></div></footer>
+      <div class="live-status" id="live-status" role="status">演示数据 · 尚未执行操作</div>
+    </main>
+  </div>
+  <footer class="preview-footer"><span>仅演示交互，不执行 Git、不访问 GitHub；刷新或切换场景会重置。</span><a href="../index.html">查看上一版</a></footer>
+  <dialog id="dialog" aria-labelledby="dialog-title"><form id="dialog-form"><header><div><span class="eyebrow" id="dialog-eyebrow"></span><h2 id="dialog-title"></h2></div><button type="button" id="close-dialog" aria-label="关闭对话框">×</button></header><div id="dialog-content" class="dialog-content"></div><footer><button type="button" id="cancel-dialog">取消</button><button type="submit" class="primary" id="confirm-dialog"></button></footer></form></dialog>
+  <script type="module" src="prototype.mjs"></script>
+</body>
+</html>

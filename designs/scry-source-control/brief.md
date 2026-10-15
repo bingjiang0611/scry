@@ -3,7 +3,7 @@
 ## D-20261014-scry-source-control
 
 - Scope：`project:/Users/baobingjiang/IdeaProjects/vibecoding/scry`。
-- Status：用户已要求调研、技术方案和设计稿；**方案与成品待用户确认**。未接生产，未获得视觉认可。
+- Status：原始 A/B 稿的方案与成品待确认；下文原始验证是历史证据。当前已有生产源代码管理功能，本轮按新反馈制作 [V2 主流程原型](flow-v2/)，不修改生产功能，未获得视觉认可。
 - 原始要求（2026-10-14）：按功能表 2、4、6、7 顺序开展，“先认真调研 t3 code 是怎么做的，然后出技术方案，如果涉及到页面交互的，要出设计稿……先看2”。本次 #2 是 Git/PR 闭环。
 - [技术方案](../../docs/research/source-control-technical-plan.md) · [源码调研](../../docs/research/t3-source-control-implementation.md) · [交互稿](index.html)。
 
@@ -109,4 +109,43 @@ Craft 应用：动态数字用 tabular-nums；根背景随主题；高频 hover 
 python3 -m http.server 8876 --bind 127.0.0.1 --directory .
 ```
 
-打开 `http://127.0.0.1:8876/designs/scry-source-control/`。若端口已占用，不启动第二个服务；本轮已为预览启动该端口，日志 `/tmp/scry-source-control-preview.log`。
+打开 `http://127.0.0.1:8876/designs/scry-source-control/`。若端口已占用，不启动第二个服务。原版预览日志为历史路径；本轮 V2 服务日志见下节。
+
+## V2 · 更直接的 Git 工作流（本轮反馈）
+
+- 反馈：用户提供当前生产界面截图，表示“目前没懂怎么用，体验可以和 t3code 对齐吗”，随后明确选择“先看交互原型”。这是项目需求确认，不是对新稿的视觉认可。
+- 产物：[可点击 V2](flow-v2/)；保留原版完整 Review / Merge 原型。只新增独立 HTML/CSS/JS，不改 `src/`、IPC、Git service、权限合同或版本号。
+- 命题：聊天上下文保留在左侧；右侧先选文件、检查差异，再由固定底部主按钮引导提交 → 推送 → PR。没有暂存文件时，“提交改动…”仍可打开范围选择，不再陷入只看到禁用按钮的死路。
+- 与原方案的差异：勾选是**候选提交范围**，不是即时 `git add`。确认时才暂存所选工作区文件并提交完整 index；已有暂存内容锁定纳入，部分暂存文件不重新整文件暂存。此交互仍是候选，不表示生产合同已变更。
+- 保留：未选工作区改动、原有部分暂存选择、远端写入确认、默认分支风险提示、unknown 不重放、Git 与 GitHub 身份分离。`pre-push` 场景只限制推送，不把本地提交一起禁用；本稿不新增 hook 授权或绕过机制。
+- 信息减法：完整路径、SHA 放入详情；主区只留仓库、分支、待推送数量。取消长页面中的提交/推送表单，改为就地确认对话框。PR 带入演示仓库与分支，不要求先手填 `owner/repository`。
+
+### 来源与复用
+
+| 来源 / 区域 | V2 动作 / 检查 |
+| --- | --- |
+| 用户当前截图：零暂存禁用按钮、全局 hook 阻碍、空 PR 仓库输入 | 明确范围选择入口；按操作展示阻碍；先带入仓库和分支 |
+| T3 官方固定源码 `7ac952c` 的 `GitActionsControl.logic.ts`（本轮重新下载并定点阅读） | 采用按状态推荐下一步，不照搬自动组合写入；未运行 T3，不宣称与最新版像素一致 |
+| 已保存的 T3 surface 原图（本轮实看） | 用克制暗色表面、清晰主次校准工作台，不复制空态卡片 |
+| 项目现有右侧工作台与原型 `model.mjs` | 沿用 surface 结构及浅/深主题；V2 从原模型导入相同文件 fixture，不新造示例文件 |
+| 个人库：项目 `scry source control`、component `diff review`、page `workspace inspector` | 读回本项目已有记录；组件与页面检索未命中可直接导入的匹配项；不称为已导入个人组件 |
+
+Craft：计数与步骤使用等宽数字；根背景随主题；hover 即时、focus-visible 清楚。截图发现步骤 `01 / 03` 换行和窄面板重复上游信息挤占空间，已调整数字列宽并精简摘要。无纹理、外部字体或新依赖。
+
+### 本轮验证与限制
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `node --test designs/scry-source-control/flow-v2/model.test.mjs designs/scry-source-control/prototype.test.mjs` | Node v24.18.0；23/23（V2 12、旧版 11），无 skip；覆盖候选选择、未选 WIP、完整 index、部分暂存余量、pre-push 分操作阻碍、unknown 不重放、main 不建同分支 PR、空说明不伪造内容 |
+| V2 两个实现模块 `node --check` | 通过 |
+| 负向对照 | 临时副本移除部分暂存余量保护，对应测试 exit 1；源码不变；完整日志 `/tmp/scry-source-control-v2-negative.log` |
+| Chrome Relay 当前版本实点 | 部分暂存项锁定 → 写提交说明 → 仅提交该暂存项 → 三个未提交文件仍保留（含该文件余量）→ 独立推送确认 → 创建 PR → 空说明显示“未填写说明”，检查保持等待；均为演示状态 |
+| Chrome 相邻状态 | 无暂存入口可用；勾选两项不包含笔记；pre-push 原因对话框的推送按钮 disabled；窄面板文件 → 差异 → 返回，差异返回按钮取得焦点；Escape 关闭对话框 |
+| 渲染自查 | Chrome 1512×764 深色宽面板；1301×1232 深色窄面板与浅色宽面板。检查文字、层级、固定操作区与差异局部滚动；未验证所有视口或屏幕阅读器 |
+| 独立视觉评审 | 未执行：只读 reviewer 无浏览器工具，Relay 截图为加密 artifact，不能提供可读当前图；未以源码评审替代 |
+
+原型全用演示数据；CSP 禁止网络连接，不接真实 Git/GitHub、Provider 或凭据。没有执行 App 构建、安装、真实 Git 工作流或真实远端写入；本轮不修改生产 App，不能把原型验证当成生产修复验收。多 remote、fork、认证失败、分叉、冲突、分支创建和完整 Review / Merge 不在 V2 交互范围；进入生产实施前须补齐受影响状态及真实 App 回放。
+
+- 验收：**V2 成品待用户确认**；需求确认仅覆盖“先看原型”。原始 A/B 不被删除，也不被冒充为已认可版本。
+- 下次检查：遇到 Git 操作面板“能力齐全但不知道下一步”时，先看零选择入口、主动作状态、未选 WIP、部分暂存、分操作阻碍，再决定是否添加功能；不要先增加更多解释段落。
+- 本地预览：`http://127.0.0.1:8876/designs/scry-source-control/flow-v2/`。本轮服务只绑定 loopback；日志 `/tmp/scry-source-control-v2-preview.log`，保留供用户查看。更新原注册记录 `D-20261014-scry-source-control`，不升级为全局偏好或已获批组件。个人库索引已重新 build（45 条），检索“更直接的 Git 工作流”命中本文件；全库 check 仍因前述 5 个既有失效来源失败，未删除或修改那些条目。
