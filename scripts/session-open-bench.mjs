@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { measureNativeSessionOpen } from './session-open-timing.mjs'
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
 // This measures local history opening, not Provider latency or production p75.
@@ -26,6 +27,8 @@ const latestIndex = turnCount - 1
 const temp = mkdtempSync(join(tmpdir(), 'scry-session-open-'))
 const iterations = 12
 const hash = value => createHash('sha256').update(value).digest('hex')
+const benchmarkCodeHash = () => hash(`${readFileSync(fileURLToPath(import.meta.url), 'utf8')}\0${measureNativeSessionOpen.toString()}`)
+const benchmarkSha256 = benchmarkCodeHash()
 let child
 let cdp
 let output = ''
@@ -182,6 +185,20 @@ try {
   for (let index = 0; index < iterations + 2; index++) {
     const sessionId = sessions[index % sessions.length]
     const metricsBefore = await cdp.send('Performance.getMetrics')
+    await evaluate(`(() => {
+      window.__sessionNativeTiming = (${measureNativeSessionOpen.toString()})(
+        Array.from(document.querySelectorAll('button.sb-sess')).find(element => element.textContent.includes(${JSON.stringify(sessionId)})),
+        () => {
+          const scroller = document.querySelector('.chat-transcript[aria-busy="false"]')
+          const last = document.querySelector('[data-run-id="${sessionId}-turn-${latestIndex}"]')
+          const input = document.querySelector('textarea')
+          if (!scroller || !last?.textContent.includes('END ${sessionId} ${latestIndex}') || !input || input.disabled || input.readOnly) return false
+          const rect = last.getBoundingClientRect()
+          const viewport = scroller.getBoundingClientRect()
+          return rect.bottom >= viewport.top && rect.top <= viewport.bottom
+        }
+      )
+    })()`)
     await evaluate(`window.__sessionOpenStarted = performance.now()`)
     await click(`Array.from(document.querySelectorAll('button.sb-sess')).find(element => element.textContent.includes(${JSON.stringify(sessionId)}))`)
     await wait(`document.querySelector('.chat-transcript[aria-busy="false"]') &&
@@ -193,11 +210,23 @@ try {
       const rect = last.getBoundingClientRect()
       const viewport = scroller.getBoundingClientRect()
       if (rect.bottom < viewport.top || rect.top > viewport.bottom) throw new Error('Latest turn not in viewport')
-      return { openMs: performance.now() - window.__sessionOpenStarted,
+      const legacyEndAt = performance.now()
+      return { openMs: legacyEndAt - window.__sessionOpenStarted,
+        legacyStartAt: window.__sessionOpenStarted, legacyEndAt,
         mountedTurns: document.querySelectorAll('.transcript-turn:not([data-virtualized])').length,
         totalTurns: document.querySelectorAll('.transcript-turn').length,
         domNodes: scroller.querySelectorAll('*').length }
     })()`)
+    const native = await evaluate('window.__sessionNativeTiming')
+    assert.equal(native.trustedClick, true, 'measurement must originate from a native browser click')
+    assert.ok(native.nativeOpenMs >= 0 && native.handlerDelayMs >= 0, 'native timestamps must use the renderer clock')
+    sample.nativeOpenMs = native.nativeOpenMs
+    sample.handlerDelayMs = native.handlerDelayMs
+    sample.driverBeforeClickMs = native.clickAt - sample.legacyStartAt
+    // Signed: a negative value means the old readback preceded two stable visible frames.
+    sample.legacyReadbackLagMs = sample.legacyEndAt - native.readyAt
+    delete sample.legacyStartAt
+    delete sample.legacyEndAt
     assert.equal(sample.totalTurns, pageTurns, 'history must retain every turn in the initial page')
     const metricsAfter = await cdp.send('Performance.getMetrics')
     const metric = (snapshot, name) => snapshot.metrics.find(value => value.name === name).value
@@ -241,11 +270,13 @@ try {
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
-  console.log(JSON.stringify({ artifactSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
+  console.log(JSON.stringify({ measurementVersion: 2, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),
     medianScriptMs: percentile(samples.map(sample => sample.scriptMs), 0.5),
+    medianNativeOpenMs: percentile(samples.map(sample => sample.nativeOpenMs), 0.5),
     mainLoads: loads, correctness: ['full initial page', 'latest turn visible', 'native typing', 'older turn recovery',
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
     cleanup: await stopOwnedApp(child) }, null, 2))
