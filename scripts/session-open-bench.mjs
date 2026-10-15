@@ -38,7 +38,7 @@ const traces = []
 
 function capture(chunk) {
   const text = String(chunk)
-  output = (output + text).slice(-12_000)
+  output += text
   lineBuffer += text
   const lines = lineBuffer.split('\n')
   lineBuffer = lines.pop() ?? ''
@@ -135,10 +135,11 @@ try {
   }
   writeFileSync(join(userData, 'app-sessions.json'), JSON.stringify(catalog))
   const port = await freePort()
+  const launchStarted = performance.now()
   child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
-    env: { ...process.env, HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1',
-      SCRY_DISABLED_PROVIDERS: 'claude,codex,qoder,opencode,pi', SCRY_REMOTE_HOST: '0' },
+    env: { ...process.env, HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
+      SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi', SCRY_REMOTE_HOST: '0' },
     stdio: ['ignore', 'pipe', 'pipe']
   })
   child.stdout.on('data', capture)
@@ -179,8 +180,11 @@ try {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
   }
   await wait(`document.querySelectorAll('button.sb-sess').length === 2 && typeof window.scry === 'object'`)
+  assert.deepEqual(await evaluate('window.scry.detectFast().then(items => items.map(item => ({ id: item.id, name: item.name })))'),
+    [{ id: 'codex', name: 'Codex Smoke Fixture' }], 'refusing any lifecycle measurement without the offline fixture adapter')
   // Composer readiness plus two excluded opens separates startup from the warm path.
   await wait(`document.querySelector('textarea') != null`)
+  const startupDriverReadyMs = performance.now() - launchStarted
   const samples = []
   const firstOpens = []
   for (let index = 0; index < iterations + 2; index++) {
@@ -238,6 +242,7 @@ try {
         firstContentMs: window.__sessionFirstContent, cacheObserved: window.__sessionCacheObserved,
         mountedTurns: document.querySelectorAll('.transcript-turn:not([data-virtualized])').length,
         totalTurns: document.querySelectorAll('.transcript-turn').length,
+        completeParagraphs: (document.querySelector('[data-run-id="${sessionId}-turn-${latestIndex}"]').textContent.match(/A measured history paragraph with a link\\./g) || []).length,
         domNodes: scroller.querySelectorAll('*').length }
     })()`)
     const native = await evaluate('window.__sessionNativeTiming')
@@ -251,6 +256,7 @@ try {
     delete sample.legacyStartAt
     delete sample.legacyEndAt
     assert.equal(sample.totalTurns, pageTurns, 'history must retain every turn in the initial page')
+    assert.equal(sample.completeParagraphs, sections, 'renderer must not trade away fixed paragraph content for speed')
     const metricsAfter = await cdp.send('Performance.getMetrics')
     const metric = (snapshot, name) => snapshot.metrics.find(value => value.name === name).value
     sample.scriptMs = (metric(metricsAfter, 'ScriptDuration') - metric(metricsBefore, 'ScriptDuration')) * 1000
@@ -259,7 +265,15 @@ try {
   }
   // Adjacent paths: native typing, offscreen history recovery and scroll-back.
   await click(`document.querySelector('textarea')`)
+  await evaluate(`window.__nativeInputFrame = new Promise(resolve => {
+    document.querySelector('textarea').addEventListener('input', event => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve({ trusted: event.isTrusted, frameReadyMs: performance.now() - event.timeStamp })))
+    }, { once: true })
+  }); true`)
   await cdp.send('Input.insertText', { text: 'draft stays editable' })
+  const nativeInput = await evaluate('window.__nativeInputFrame')
+  assert.equal(nativeInput.trusted, true)
+  assert.ok(nativeInput.frameReadyMs >= 0)
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const currentSession = sessions[(iterations + 1) % 2]
   for (let loaded = pageTurns; loaded < turnCount; loaded += 40) {
@@ -293,8 +307,78 @@ try {
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const invalidHistory = await evaluate(`window.scry.loadSession(${JSON.stringify({ ...context, externalSessionId: 'missing-perf-fixture' })}).then(() => false, () => true)`)
   assert.equal(invalidHistory, true, 'fixture must exercise a real rejected history handler')
+  // Real main/preload/SQLite/archive lifecycle with an explicit offline Provider fixture.
+  // These are IPC/terminal/disk boundaries, NOT native send-button or visible-output timings.
+  const lifecycleSamples = []
+  for (const stopped of [false, true, false, true, false, true]) {
+    const result = await evaluate(`(async () => {
+      const cwd = ${JSON.stringify(cwd)}
+      const stopped = ${stopped}
+      const prompt = stopped ? 'performance long stream' : 'desktop remote performance'
+      let firstTextAt, resolveFirst, resolveDone, rejectFailure
+      const firstText = new Promise(resolve => { resolveFirst = resolve })
+      const terminal = new Promise(resolve => { resolveDone = resolve })
+      const failure = new Promise((_, reject) => { rejectFailure = reject })
+      const timer = setTimeout(() => rejectFailure(new Error('native lifecycle terminal deadline exceeded')), 15000)
+      const offTrace = window.scry.onTrace(events => {
+        if (firstTextAt === undefined && events.some(event => event.kind === 'model' && ['text', 'text_delta'].includes(event.stage))) {
+          firstTextAt = performance.now(); resolveFirst()
+        }
+      })
+      const offDone = window.scry.onTurnDone(event => resolveDone({ event, at: performance.now() }))
+      const offError = window.scry.onError(event => rejectFailure(new Error(event.message)))
+      try {
+        return await Promise.race([failure, (async () => {
+          const startedAt = performance.now()
+          const started = await window.scry.start({ providerId: 'codex', cwd, prompt })
+          const receiptAt = performance.now()
+          await window.scry.focusRun(started.runId)
+          await firstText
+          let stopRequestedAt, stopReceiptMs
+          if (stopped) {
+            stopRequestedAt = performance.now()
+            if (await window.scry.stop(started.runId) !== true) throw new Error('stop was not accepted')
+            stopReceiptMs = performance.now() - stopRequestedAt
+          }
+          const { event: done, at: terminalAt } = await terminal
+          if (done.runId !== started.runId || Boolean(done.stopped) !== stopped) throw new Error('wrong terminal identity/outcome')
+          const externalSessionId = done.externalSessionId || done.sessionId
+          const page = await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId })
+          const archiveReadableAt = performance.now()
+          const turn = page.turns.find(turn => turn.runId === started.runId)
+          if (!turn?.done || turn.userText !== prompt) throw new Error('terminal turn not durably readable')
+          if (!stopped && !turn.items.some(item => item.text === 'isolated remote assistant evidence')) throw new Error('archive lost full assistant output')
+          if ((await window.scry.activeRuns()).some(run => run.runId === started.runId)) throw new Error('run did not settle')
+          return { runId: started.runId, stopped, startReceiptMs: receiptAt - startedAt, firstOutputReceiptMs: firstTextAt - startedAt,
+            startToTerminalMs: terminalAt - startedAt, terminalToReadableArchiveMs: archiveReadableAt - terminalAt,
+            ...(stopped ? { stopReceiptMs, stopToTerminalMs: terminalAt - stopRequestedAt } : {}),
+            durableTurns: 1, terminalConfirmed: true }
+        })()])
+      } finally { clearTimeout(timer); offTrace(); offDone(); offError() }
+    })()`)
+    lifecycleSamples.push(result)
+  }
+  const sqliteStats = await evaluate(`(async () => {
+    const started = performance.now()
+    const stats = await window.scry.stats()
+    return { status: stats.status, turns: stats.totals.turns, readMs: performance.now() - started }
+  })()`)
+  assert.equal(sqliteStats.status, 'ready', 'SQLite analytics must be available, not silently degraded')
+  assert.ok(sqliteStats.turns >= 3, 'SQLite must contain the completed controlled turns')
   const cleanup = await stopOwnedApp(child)
   child = null
+  // Independent disk read after process exit: an in-memory/cached session cannot satisfy this proof.
+  const archiveRoot = join(userData, 'trace-archive-turns-v1')
+  const persistedTurns = readdirSync(archiveRoot, { recursive: true }).filter(path => path.endsWith('.json')).flatMap(path => {
+    const archive = JSON.parse(readFileSync(join(archiveRoot, path), 'utf8'))
+    return archive.version === 3 && Array.isArray(archive.turns) ? archive.turns.filter(turn => Array.isArray(turn.items)) : []
+  })
+  for (const sample of lifecycleSamples) {
+    const turn = persistedTurns.find(turn => turn.runId === sample.runId)
+    assert.equal(turn?.done, true, 'completed run must survive process exit on disk')
+    if (!sample.stopped) assert.ok(turn.items.some(item => item.text === 'isolated remote assistant evidence'), 'disk archive lost assistant output')
+    sample.diskVerified = true
+  }
   let localRecording = null
   if (process.env.SCRY_PERF_RECORD !== '0') {
     const { records, issues } = await readRecords(join(userData, 'performance'))
@@ -308,7 +392,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 2, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 3, startupDriverReadyMs, nativeInput, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),

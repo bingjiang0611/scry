@@ -27,7 +27,7 @@
 
 每项的 `operations` 是已接入的观测口径，`benchmarks` 是本次自动比较的固定场景，`sources` 是真实入口，`gap` 是明确待验收项。空 benchmarks 不是通过，也不是全路径基准覆盖。现有 native session-open、Git、历史归档和 soak 检查仍可单独运行，不能把这些历史结果冒充本次执行。
 
-目前覆盖所有经过 `registerTrustedIpcHandler` 的受信任请求的 **main handler 开始到 settle**，不覆盖 iframe/错误 sender（这些仍在测量前被拒绝），不检查/记录请求和响应内容。手机直连 host 请求、终端输入到回显、按键到绘制、外部应用打开、真实 Provider 和网络各跳尚不是完整动作链。它们在清单中保留独立验收任务，而不是硬编码为 0。
+本地固定 harness 覆盖清单中的全部 16 个用户路径组。它调用真实 production domain/file/process 实现，并在每个场景断言内容、计数和成功 outcome；`domain` 是计算/投影，`disk` 使用临时目录中的真实 catalog/archive/workspace，`process` 使用真实本地 Git 子进程。它不把标签贴到无关基准，也不把 mock 返回计时当作能力执行。手机直连 host 请求、终端输入到回显、按键到绘制、外部应用打开、真实 Provider 和网络各跳尚不是完整动作链；它们在清单中保留独立验收任务，而不是硬编码为 0。
 
 ## 日常记录
 
@@ -52,11 +52,18 @@
 # 列出 retained builds 和记录健康状态
 npm run performance:report -- '<userData>/performance'
 
+# 将轮转日志复制到一个尚不存在的目录（只在本机；每文件检查并保存 SHA-256）
+node scripts/performance-report.mjs snapshot '<userData>/performance' /tmp/scry-observation-snapshot
+# 只选择一个准确的 build ID，不能用版本号代替或混入其他构建
+node scripts/performance-report.mjs baseline /tmp/scry-observation-snapshot '<build-id>' /tmp/scry-baseline.json
+
 # 用上一步的完整 build ID，比较相同机器上的两个固定构建
 npm run performance:report -- '<userData>/performance' '<baseline-build>' '<candidate-build>'
 ```
 
-输出 JSON 给人和 Agent 使用，包含操作、阶段、Provider、环境、粗粒度 workload 分桶、样本数、session 数、结果分布、p50/p75/p95、差值及结论。
+单构建 baseline 包含全部路径组、操作/阶段、Provider、环境、workload、结果分布及带单位的 p50/p75/p95。资源和 renderer 窗口也纳入报告；一个窗口有多个指标，但只算一个记录。缺失路径为 unavailable，不支持的 long-task 指标单列，不能补零。路径被观测只表示出现过某项操作，可能只是后台轮询，不证明整个用户动作链已完成。
+
+快照不是文件系统不可变对象，也不保证多文件原子捕获；读取时校验保存的哈希，修改/缺文件会使报告带问题标记。单构建报告始终是 provisional 观测，不作为已成熟 SLO 或版本改善结论。双构建报告另外提供差值及以下保守结论。
 
 - 成功耗时至少每侧 30 样本、2 个 App session；不足为 `insufficient-data`。这不是统计显著性保证。
 - 环境/规模无匹配为 `unmatched-workload-or-environment`；未测规模显式 `workload-unmeasured`。
@@ -70,27 +77,52 @@ npm run performance:report -- '<userData>/performance' '<baseline-build>' '<cand
 ```bash
 npm run performance:bench -- /tmp/scry-candidate.json
 npm run performance:compare -- /tmp/scry-baseline.json /tmp/scry-candidate.json scripts/performance-budgets.json /tmp/scry-performance.md
+# macOS：真实隐藏 Electron + 离线 Provider 夹具；不使用付费 Provider/手机
+npm run build
+node scripts/performance-native.mjs bench /tmp/scry-native-candidate.json
+node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/scry-native-candidate.json /tmp/scry-native-report.md
 ```
 
-`performance-baseline.test.ts` 直接调用生产实现，当前 4 个场景：
+`performance-baseline.test.ts` 直接调用生产实现，固定场景与路径组一一对应：
 
-1. `trace.delivery`：1,000 个固定事件经过真实 TraceOutputBridge；测 JSON envelope bytes、消息数、事件数，验证顺序和全部内容。
-2. `history.page`：4,000 轮历史中取 40 轮；验证页内容、total、hasOlder，测页大小。
-3. `renderer.batch`：实际 applyTraceBatch 合并 1,000 个 delta；验证全部文本、run identity 和状态，测结果大小/计算耗时。
-4. `terminal.delivery`：实际 TerminalOutputBridge 合批 1,000 块 Unicode 输出；验证全部输出，测 JSON payload 和消息数。
+| 路径组 | 场景 | 实际测量 |
+|---|---|---|
+| startup | `startup.recovery` | 临时 userData 恢复清理与 usage 读取 |
+| providers | `providers.catalog` | 真实 skills/MCP 配置扫描 |
+| navigation | `navigation.catalog` | 500 条临时 app session catalog 读回 |
+| history | `history.page` | 4,000 轮中读取 40 轮 |
+| compose | `compose.drafts` | draft 校验、更新、序列化和恢复 |
+| send | `send.codex-fixture` | 受控本机 Codex app-server 的 thread/turn 请求与完整输出 |
+| stream | `trace.delivery`、`renderer.batch` | 1,000 个 trace delta 的原始交付与 renderer 批投影 |
+| controls | `controls.stop-lifecycle` | 受控本机 turn 上真实 interrupt/settle 生命周期 |
+| persistence | `persistence.archive` | 临时 archive 的真实写入与 40 轮分页读取 |
+| evidence | `evidence.projection` | 工具文件足迹与受限 evidence preview |
+| analytics | `analytics.stats` | 240 条结果的 30/90 日 analytics 聚合 |
+| workspace | `workspace.files` | 真实临时目录列表、文件读取、分页和写回 |
+| source-control | `source-control.diff` | 真实临时 Git worktree diff |
+| terminal | `terminal.delivery` | 1,000 块 Unicode 输出经过 TerminalOutputBridge |
+| remote | `remote.loopback` | 真实 loopback relay auth、64 KiB leg payload 与会话交付 |
+| resources-shell | `resources-shell.process` | 受控本机子进程 stdout、退出码和 resourceUsage 就绪 |
 
-这是本地计算和传输表示基准，不是 HTTP/WebSocket 压缩后字节、真实 Provider、浏览器 paint 或真机结果。测试不创建真实会话/DB，不运行真实 Agent。生产路径正确性断言必须先通过，删除内容带来的变快不能通过。
+这是本地计算、文件和本机进程基准，不是 HTTP/WebSocket 压缩后字节、真实 Provider、浏览器 paint 或真机结果。测试只创建临时文件/Git/archive，不写用户会话或用户 DB，不运行真实 Provider Agent。生产路径正确性断言必须先通过，删除内容带来的变快不能通过。
 
-每场景 3 批预热、15 批采样，每批固定执行 20 次，记录每批平均耗时；计时含固定正确性检查的开销。这是批均值的 p95，不是单次用户请求 p95。这样减少亚毫秒微操作被单次调度/GC 尖峰主导的情况，原始批均值仍全部保留。门禁同时检查：
+每个场景有显式 `lane`、`workload`、warmup、sample 和迭代数。原有 `trace.delivery`、`renderer.batch`、`history.page`、`terminal.delivery` 均保持 3 批预热、15 批采样、每批 20 次；磁盘/进程场景只运行 2 或 5 次并使用 1 批预热、7 批采样，不盲目重复大型 I/O。计时含固定正确性检查。这是批均值的 p95，不是单次用户请求 p95。门禁同时检查：
 
 - 两侧 fixture/config 指纹与运行环境一致，全部场景/指标存在且有效；缺指标失败，不能补 0。
-- 绝对预算防止逐次累积退化；相对主分支 bytes 最多 +5%，消息/事件/turn 计数不能增长。
-- 批均值 p95 不超过绝对 20 ms，且不超过基线加上 max(2 ms, 基线的 50%)。这是粗粒度计算回退门禁，不承诺拦住亚毫秒抖动。
+- 绝对预算防止逐次累积退化；相对基线序列化 bytes 最多 +5%，消息数不能增长；事件、turn、输出正文大小等工作量计数必须相等，减少内容也失败。
+- Relay 响应读取到 EOF，并用 `Buffer.equals` 校验完整字节与长度。避免把通用断言框架遍历 64 KiB Buffer 的 CPU 开销算作传输耗时；重复响应的负向实验必须失败，不能只校验预期前缀。
+- 原有四项批均值 p95 的绝对 20 ms 预算不变。新增磁盘/进程场景使用 `performance-budgets.json` 中显式上限。所有场景仍受基线加上 max(2 ms, 基线的 50%) 的相对门禁约束，不承诺拦住亚毫秒抖动。
 - 回退退出码为 1，写 Markdown/JSON 报告。真实重复发布和截断 renderer 输出有负对照测试。
 
-`.github/workflows/performance.yml` 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。候选 fixture 或预算变更必须人工审查；不能靠缩小 workload 或提高预算消除失败。一次失败不能用无解释重跑抹掉。
+`.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 串行运行四种固定历史负载。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出，要求 SQLite 统计为 ready 且包含受控完成轮次；这些 IPC 阶段不冒充 Send/Stop 按钮或文本可见时间。启动含驱动等待开销，不是 OS 冷启动。
 
-同仓 PR 的独立 job 更新评论；写 token 的 job 不检出或执行 PR 代码。fork PR 只提供只读 Actions summary/artifact。测量失败时评论明确没有有效比较。让它成为必需合并检查还需要仓库 branch protection 配置；提交本地文件不会自动改变远端设置。
+Native 测量前先用 `electron-builder install-app-deps` 准备 Electron ABI 的原生依赖，并解析 Electron 可执行文件，避免首次下载混入 JSON 输出。失败日志保留启动部分，不能只保留尾部而丢掉原生模块加载错误。
+
+Native 比较器同时检查身份、环境、工作量、完整样本、真实输入和终态/归档证据，缺失 lane 或任一失败不能通过。初始绝对上限为历史两帧 500 ms、handler 延迟 100 ms、脚本 300 ms、输入两帧 250 ms、驱动启动 10 s、SQLite 统计查询 500 ms、各生命周期阶段 2 s，并保留相对上限；这是保守回退护栏，不是体验承诺。历史/输入底噪 50 ms，启动 500 ms，生命周期 100 ms。单次及三次最大值明确标注，不伪装成日常 p95。原始 JSON、失败日志、构建日志和双侧比较分别归档，不混入 Node 微基准。候选 fixture 或预算变更必须人工审查；不能靠缩小 workload 或提高预算消除失败。一次失败不能用无解释重跑抹掉。
+
+依赖安装沿用各自 lockfile 的版本和 integrity。项目 `.npmrc` 只将历史 `registry.npmjs.org` 镜像 URL 映射到 npm 官方 registry，避免外部 runner 依赖企业网络；不会升级版本或跳过完整性校验。固定 baseline checkout 同样复制这份配置。安装输出和失败时的 npm 调试日志也归档，不能因为测量尚未启动就丢掉失败证据。
+
+同仓 PR 的独立 job 更新评论；写 token 的 job 不检出或执行 PR 代码。fork PR 只提供只读 Actions summary/artifact。评论同时汇总 Node/native 两个 job 的实际状态及报告；测量失败或缺失时明确没有有效比较。让它成为必需合并检查还需要仓库 branch protection 配置；提交本地文件不会自动改变远端设置。
 
 本地比较也必须隔离两个源码目录、使用同一 harness/config/Node 和各自 lockfile；不能拿历史文档中的其他硬件或不同 fixture 数字当 baseline。可以用临时 detached worktree，但不要在同机并发跑耗时基准。
 
@@ -104,6 +136,6 @@ npm run performance:compare -- /tmp/scry-baseline.json /tmp/scry-candidate.json 
 - 首屏/DOM/输入问题沿用隐藏 Electron native-input fixture；手机必须 iCTRL 真机，不用模拟器替代。没有授权的 Provider/网络/发布操作不因新增基准自动获得授权。
 - 当工作量指标不再解释真实耗时时，升级为对应 native 用户路径基准；当分桶过粗造成混杂时，在相同隐私合同下增加具体 workload 维度，而不是扩大判断置信度。
 
-本次不安装、不发布、不上传历史数据，也不宣称所有路径已优化。闭环能提供可执行的反馈和明确的覆盖缺口；真实版本收益仍需后续发布与使用样本。
+此框架不自动安装、发布或上传本机历史数据，也不宣称所有路径已优化。PR/远端 CI 和必需检查的实际启用须另行授权与核验。闭环能提供可执行的反馈和明确的覆盖缺口；真实版本收益仍需后续发布与使用样本。
 
-实际检查、首轮失败、基线已有问题和未验证项见 [本次验收记录](performance-loop-verification.md)。
+初期四基准的检查、首轮失败和限制见 [初期验收记录](performance-loop-verification.md)。本轮扩展门禁以对应 commit 的 Node/native Actions 结果及保留的原始 artifacts 为准，不能把初期结果当作扩展验收。
