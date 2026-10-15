@@ -5,14 +5,14 @@ function report() {
   return {
     schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors: [],
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 4, warmups: 2, iterations: 12,
+      scenario, turnCount, sections, measurementVersion: 5, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
-      sqliteStats: { status: 'ready', turns: 10, readMs: 2 },
+      sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
       composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`,
         inputTrusted: true, sendTrusted: true, stopTrusted: mode !== 'complete', terminalConfirmed: true, stopped: mode !== 'complete',
         nativeTurnKnown: mode !== 'stop-immediate', diskVerified: true, sendToTerminalMs: 50, sendToSettledVisibleMs: 60,
         ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: 10, sendToFirstVisibleMs: 20, sendToVisibleReadyMs: 30 } : {}),
-        ...(mode !== 'complete' ? { stopToTerminalMs: 10, stopToSettledVisibleMs: 20 } : {}) })),
+        ...(mode !== 'complete' ? { driverStopDispatchMs: 5, stopToTerminalMs: 10, stopToSettledVisibleMs: 20 } : {}) })),
       startupDriverReadyMs: 500, nativeInput: { trusted: true, frameReadyMs: 20 }, cleanup: { tracked: 3 }, firstOpens: [{}, {}],
       samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(40, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500 })),
       lifecycleSamples: [false, true, false, true, false, true].map(stopped => ({
@@ -25,6 +25,10 @@ function report() {
 
 describe('native performance evidence gate', () => {
   it('compares matching evidence and detects real latency regressions', () => {
+    expect(composerModes).toHaveLength(12)
+    expect(composerModes.filter(mode => mode === 'stop-immediate')).toHaveLength(6)
+    expect(composerModes.filter(mode => mode === 'complete')).toHaveLength(3)
+    expect(composerModes.filter(mode => mode === 'stop-visible')).toHaveLength(3)
     const base = report()
     expect(compareNative(base, structuredClone(base)).passed).toBe(true)
     const head = report()
