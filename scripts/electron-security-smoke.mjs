@@ -9,8 +9,10 @@ import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
+import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
 
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
+const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
@@ -26,7 +28,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -107,7 +109,7 @@ async function main() {
   const canonicalHome = realpathSync(home)
   const canonicalWorkspace = realpathSync(workspace)
   const secondWorkspace = join(home, 'performance-second-project')
-  if (performanceOnly || sourceControlOnly) {
+  if (performanceOnly || sourceControlOnly || conversationOwnershipOnly) {
     mkdirSync(secondWorkspace, { recursive: true })
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([canonicalWorkspace, realpathSync(secondWorkspace)]))
   }
@@ -156,6 +158,9 @@ async function main() {
     }]))
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
   }
+  const ownershipFixture = conversationOwnershipOnly ? seedConversationOwnership({
+    userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace)
+  }) : undefined
   const openReceipt = join(temp, 'opened-paths.json')
   const filesEntry = join(temp, 'files-main.mjs')
   if (devFilesOnly) {
@@ -221,6 +226,7 @@ async function main() {
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
         SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
+        ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         // The smoke adapter replaces Codex only. Never discover/start real Provider services.
         SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',
         SCRY_REMOTE_HOST: '0'
@@ -245,6 +251,24 @@ async function main() {
       throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
     }
     return response.result?.value
+  }
+  if (ownershipFixture) {
+    const result = await exerciseConversationOwnership(evaluate, ownershipFixture)
+    cdp.close()
+    await stopOwnedApp(child)
+    const restorePermissions = prepareOwnershipRecoveryFailure(ownershipFixture)
+    try {
+      launchApp()
+      const restarted = await waitForTarget(port)
+      cdp = connectCdp(restarted.page.webSocketDebuggerUrl)
+      await cdp.send('Runtime.enable')
+      result.startupFailure = await exerciseOwnershipRecoveryFailure(evaluate, ownershipFixture)
+      cdp.close()
+    } finally {
+      restorePermissions()
+    }
+    console.log(JSON.stringify(result))
+    return
   }
   if (sourceControlOnly) {
     const result = await exerciseSourceControlApp(cdp, evaluate, { workspace: canonicalWorkspace, remote: realpathSync(secondWorkspace), home })
