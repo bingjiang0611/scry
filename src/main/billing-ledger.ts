@@ -1,3 +1,4 @@
+import { billingProviderForUpstream } from '../shared/billing'
 import type {
   BillingConfidence,
   BillingCostSource,
@@ -163,7 +164,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
   }
   const result = results[0]
   if (!result) return []
-  const fallbackProvider = result.billingProvider ?? args.billingProvider
+  const fallbackProvider = result.billingProvider ?? args.billingProvider ??
+    billingProviderForUpstream(result.upstreamProvider) ?? 'unknown'
   const sourceFor = (provider: BillingProvider, usageSource?: string): string =>
     usageSource ??
     (provider === 'anthropic'
@@ -187,8 +189,11 @@ export function sdkUsageLedgerRowsFromItems(args: {
   const modelUsage = result.modelUsage ?? []
   if (modelUsage.length > 0) {
     for (const mu of modelUsage) {
-      const provider = mu.billingProvider ?? fallbackProvider
-      if (!provider) continue
+      // Native adapters may intentionally bill under the runtime (Codex), not
+      // the vendor named by model metadata (OpenAI). Pi can route each model to
+      // a different upstream, so only that runtime needs per-model resolution.
+      const piRuntime = (args.runtimeProvider ?? result.runtimeProvider) === 'pi_rpc' || result.usageSource === 'pi_rpc'
+      const provider = mu.billingProvider ?? (piRuntime ? billingProviderForUpstream(mu.upstreamProvider) : undefined) ?? fallbackProvider
       const usageSource = mu.usageSource ?? result.usageSource
       const costUnit = mu.costUnit ?? result.costUnit ?? 'usd'
       rows.push({
@@ -232,7 +237,6 @@ export function sdkUsageLedgerRowsFromItems(args: {
     return estimateRows(rows, args.priceVersions)
   }
   const provider = fallbackProvider
-  if (!provider) return []
   const costUnit = result.costUnit ?? 'usd'
   rows.push({
     id: `${provider}:${result.id}`,

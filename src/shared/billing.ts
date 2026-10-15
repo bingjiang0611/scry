@@ -1,4 +1,6 @@
-export type BillingProvider = 'anthropic' | 'openai' | 'openrouter' | 'gemini' | 'claude-code' | 'codex' | 'qoder' | 'opencode' | 'local'
+// Custom upstream identities are billing dimensions too. Do not infer a vendor
+// from a model name or discard usage merely because its provider is not built in.
+export type BillingProvider = 'anthropic' | 'openai' | 'openrouter' | 'gemini' | 'claude-code' | 'codex' | 'qoder' | 'opencode' | 'local' | (string & {})
 
 export function billingProviderForUpstream(providerId: string | undefined): BillingProvider | undefined {
   if (providerId === 'anthropic' || providerId === 'openai' || providerId === 'openrouter' || providerId === 'gemini') return providerId
@@ -6,7 +8,7 @@ export function billingProviderForUpstream(providerId: string | undefined): Bill
   if (providerId === 'openai-codex') return 'codex'
   if (providerId === 'opencode') return 'opencode'
   if (providerId === 'qoder') return 'qoder'
-  return undefined
+  return providerId?.trim() || undefined
 }
 
 export type BillingSourceKind =

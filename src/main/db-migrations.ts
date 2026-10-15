@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { repairMissingUsageLedger } from './usage-ledger-repair'
 import { DDL_V1, DDL_V2, DDL_V3, DDL_V4, DDL_V5, DDL_V6, DDL_V7, DDL_V8, DDL_V9, DDL_V10, DDL_V11, DDL_V12, DDL_V13, DDL_V14, DDL_V15 } from './span-ledger'
 
 export const DB_MIGRATIONS: readonly (readonly string[])[] = [
@@ -16,7 +17,8 @@ export const DB_MIGRATIONS: readonly (readonly string[])[] = [
   DDL_V12,
   DDL_V13,
   DDL_V14,
-  DDL_V15
+  DDL_V15,
+  [] // V16: insert-only repair from retained managed usage (below).
 ]
 
 const ADD_COLUMN = /^\s*ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+ADD\s+COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\b/i
@@ -41,6 +43,7 @@ export function migrateDatabase(
     const nextVersion = version + 1
     const apply = db.transaction(() => {
       for (const statement of migrations[version]) runMigrationStatement(db, statement)
+      if (nextVersion === 16) repairMissingUsageLedger(db)
       db.pragma(`user_version = ${nextVersion}`)
     })
     apply()

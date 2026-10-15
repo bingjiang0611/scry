@@ -32,6 +32,21 @@ function render(credits: number | null | undefined) {
 }
 
 describe('AnalyticsView Qoder Credits', () => {
+  it.each(['cc-switch', 'constructor', '__proto__'])('renders custom provider %s without treating it as a built-in vendor', (provider) => {
+    const data: UsageAnalytics = {
+      status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
+      days: ['2026-09-09'], totals: aggregate,
+      byProvider: [{ ...aggregate, provider, model: null }],
+      byModel: [{ ...aggregate, provider, model: 'claude-opus-5' }],
+      byDay: [{ ...aggregate, day: '2026-09-09' }], dailyByProvider: []
+    }
+    const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
+      error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
+    expect(html).toContain(`>${provider}</b>`)
+    expect(html).toContain('claude-opus-5')
+    expect(html).toContain('成本不可用')
+  })
+
   it('shows Qoder USD equivalent in total, breakdown, share and chart while retaining partial Credits evidence', () => {
     const html = render(12.5)
     expect(html).toContain('RAW TOKEN COST')

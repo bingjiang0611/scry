@@ -232,6 +232,21 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message === 'mixed-billing' || command.message === 'mixed-billing-crash') {
+        for (const [provider, model, stopReason, input, output, cost] of [
+          ['cc-switch', 'claude-opus-5', 'error', 10, 2, 0],
+          ['qoder', 'ultimate', 'toolUse', 20, 3, 0],
+          ['custom-vendor', 'private-model', 'stop', 30, 4, 0.25]
+        ]) send({ type: 'message_end', message: { role: 'assistant', provider, model, stopReason,
+          content: [], usage: { input, output, cacheRead: 0, cacheWrite: 0, cost: { total: cost } } } })
+        if (command.message === 'mixed-billing-crash') {
+          process.stdout.write('', () => process.exit(17))
+          continue
+        }
+        send({ type: 'agent_end' })
+        send({ type: 'agent_settled' })
+        continue
+      }
       if (command.message === 'qoder-billing') {
         send({ type: 'message_end', message: {
           role: 'assistant', provider: 'qoder', model: 'ultimate', stopReason: 'stop',
@@ -954,6 +969,40 @@ describe('Pi RPC Provider', () => {
       expect(terminal.costUsd).toBeUndefined()
       expect(terminal.modelUsage?.[0]).toMatchObject({ billingProvider: 'qoder', upstreamProvider: 'qoder' })
       expect(terminal.modelUsage?.[0].costUsd).toBeUndefined()
+    })
+  })
+
+  it('retains every upstream in a mixed run, including Claude retries with unpriced catalogue cost', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await adapter.run({ runId: 'mixed', prompt: 'mixed-billing', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => events.push(event) }).promise
+      const terminal = events.find(event => event.stage === 'result')!
+      const rows = billingRowsFromItems({ runId: 'mixed', items: events, nowMs: Date.now(), runtimeProvider: 'pi_rpc',
+        billingProvider: terminal.billingProvider }).usageLedger.map(row =>
+        Object.fromEntries(USAGE_LEDGER_COLS.map((column, index) => [column, row[index]])))
+      expect(rows).toMatchObject([
+        { provider: 'cc-switch', model: 'claude-opus-5', input_tokens: 10, output_tokens: 2, cost: null },
+        { provider: 'qoder', model: 'ultimate', input_tokens: 20, output_tokens: 3, cost: null },
+        { provider: 'custom-vendor', model: 'private-model', input_tokens: 30, output_tokens: 4,
+          cost: 0.25, cost_source: 'price_table', confidence: 'estimated' }
+      ])
+      expect(terminal.costUsd).toBeUndefined()
+      expect(rows.reduce((sum, row) => sum + Number(row.input_tokens), 0)).toBe(60)
+    })
+  })
+
+  it('preserves already observed usage once if the transport exits before settlement', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.run({ runId: 'crash', prompt: 'mixed-billing-crash', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => events.push(event) }).promise).rejects.toThrow()
+      const results = events.filter(event => event.stage === 'result')
+      expect(results).toHaveLength(1)
+      expect(results[0]).toMatchObject({ tokensIn: 60, tokensOut: 9, isError: true, runtimeMetadata: { usageCoverage: 'partial' } })
+      expect(billingRowsFromItems({ runId: 'crash', items: events, nowMs: 1, runtimeProvider: 'pi_rpc' }).usageLedger).toHaveLength(3)
     })
   })
 

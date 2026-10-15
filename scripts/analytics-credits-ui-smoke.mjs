@@ -21,20 +21,25 @@ async function exercise() {
     const timer = setTimeout(() => { observer.disconnect(); reject(new Error('DOM condition timed out')) }, 5000)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
-  await waitFor(() => document.querySelector('.usage-cost-card')?.textContent.includes('12.5 Credits'))
-  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.38', 'Qoder USD equivalent missing from total')
+  await waitFor(() => document.querySelector('.usage-cost-card')?.textContent.includes('15.41 Credits'))
+  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.40', 'Qoder USD equivalent missing from total')
   const qoderRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'Qoder')
-  check(qoderRow.querySelector('.usage-provider-main > span:last-child').textContent === '$0.13', 'Qoder Credits not converted to USD')
+  check(qoderRow.querySelector('.usage-provider-main > span:last-child').textContent === '$0.15', 'Pi/native Qoder Credits not converted to USD')
+  check(document.querySelector('.usage-table-wrap').textContent.includes('claude-opus-5'), 'Managed custom-provider Claude usage missing')
+  const customRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'cc-switch')
+  check(customRow?.querySelector('.usage-provider-main > span:last-child').textContent === '—', 'Unpriced Claude catalogue zero presented as free')
   check(document.body.textContent.includes('Credits 已知下界'), 'Missing partial evidence')
   const groupButton = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
   groupButton('明细维度', '日期').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('日期'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.38'), 'Day breakdown lost Qoder USD equivalent')
+  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.40'), 'Day breakdown lost Qoder USD equivalent')
   groupButton('明细维度', '模型').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('模型'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('$0.13'), 'Model breakdown lost Qoder USD equivalent')
+  check(document.querySelector('.usage-table-wrap').textContent.includes('$0.15'), 'Model breakdown lost Qoder USD equivalent')
   groupButton('趋势指标', 'TOKEN').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('Token'))
+  const customPath = document.querySelector('.usage-chart-line.is-cc-switch')
+  check(customPath && getComputedStyle(customPath).stroke !== 'none', 'Custom provider token series invisible')
   groupButton('趋势指标', '成本').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('成本'))
   check(document.querySelector('.usage-chart .is-qoder'), 'Qoder USD equivalent missing from cost chart')
@@ -45,7 +50,8 @@ async function exercise() {
   for (const node of document.querySelectorAll('.usage-provider-main')) {
     check(node.scrollWidth <= node.clientWidth + 1, 'Provider amount overflows')
   }
-  return { sqliteAndArchiveProjection: true, usdEquivalent: true, dayAndModel: true, chartSwitch: true, refresh: true, range: true }
+  return { sqliteAndArchiveProjection: true, piQoderMetering: true, customClaude: true, customSeriesVisible: true, replaySupersedesRepair: true,
+    usdEquivalent: true, dayAndModel: true, chartSwitch: true, refresh: true, range: true }
 }
 
 try {
@@ -105,6 +111,39 @@ try {
       analytics = await usageAnalyticsWithCreditsQuery(7)
       if (analytics.totals.qoderCredits?.credits !== 12.5 || analytics.totals.qoderCredits?.source !== 'qoder_recorded_usage') throw new Error('Recorded/native evidence was double counted')
       if (analytics.totals.usageRows !== 3 || analytics.totals.inputTokens !== 2000) throw new Error('Credits rows duplicated token counters or lost the result-less turn')
+      // Managed Pi sessions use custom-provider identities and separate metering,
+      // not the native Qoder archive layout or its zero-dollar placeholder.
+      const piSession = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff'
+      const piTurns = []
+      for (const [runId, provider, model] of [['pi-qoder', 'qoder', 'ultimate'], ['pi-claude', 'cc-switch', 'claude-opus-5']]) {
+        const turn = { runId, sessionId: piSession, cwd, userText: 'fixture', providerId: 'pi', runtimeProvider: 'pi_rpc',
+          items: [{ id: runId + '-result', runId, kind: 'harness', stage: 'result', ts: new Date().toISOString(),
+            runtimeProvider: 'pi_rpc', modelUsage: [{ model, upstreamProvider: provider, inputTokens: 100, outputTokens: 20 }] }] }
+        piTurns.push(turn)
+        if (!recordTurn(turn)) throw new Error('Pi usage write failed')
+      }
+      const sqlite = new (require('better-sqlite3'))(join(app.getPath('userData'), 'scry.db'))
+      sqlite.prepare("UPDATE usage_ledger SET source='scry_persisted_usage' WHERE span_id='pi-claude-result'").run()
+      sqlite.prepare("INSERT INTO usage_ledger (id,provider,source,source_kind,span_id,usage_kind,input_tokens,cost_unit,cost_source,confidence,attribution_method,created_ts) VALUES ('old-unknown','unknown','scry_persisted_usage','analytics_report','pi-claude-result','result',999,'usd','sdk_estimate','inferred','direct',1)").run()
+      if (!recordTurn(piTurns[1]) || sqlite.prepare("SELECT COUNT(*) n FROM usage_ledger WHERE span_id='pi-claude-result'").get().n !== 1) throw new Error('Canonical replay doubled reconstructed usage')
+      sqlite.close()
+      if (!upsertTraceArchiveTurn({ cwd, sessionId: piSession, userDataDir: app.getPath('userData'), providerId: 'pi', runtimeProvider: 'pi_rpc',
+        turn: { runId: 'pi-qoder', providerTurnId: 'pi-user', userText: 'fixture', items: [], done: true } })) throw new Error('Pi archive failed')
+      const piDirectory = join(root, 'home/.pi/agent/sessions', '--' + cwd.slice(1).replaceAll('/', '-') + '--')
+      require('node:fs').mkdirSync(piDirectory, { recursive: true })
+      writeFileSync(join(piDirectory, '2026-09-09_' + piSession + '.jsonl'), [
+        { type: 'session', version: 3, id: piSession, cwd },
+        { type: 'message', id: 'pi-user', parentId: null, message: { role: 'user' } },
+        { type: 'custom', id: 'pi-metering', parentId: 'pi-user', customType: 'qoder-credit-observation-v1',
+          data: { version: 1, sessionId: piSession, requestId: 'pi-request', modelId: 'ultimate', status: 'reported',
+            outcome: 'complete', credits: 2.909718812000001, billable: true } },
+        { type: 'message', id: 'pi-assistant', parentId: 'pi-metering', message: { role: 'assistant', provider: 'qoder' } }
+      ].map(row => JSON.stringify(row)).join('\\n'))
+      analytics = await usageAnalyticsWithCreditsQuery(7)
+      if (Math.abs(analytics.totals.qoderCredits?.credits - 15.409718812000001) > 1e-10 ||
+        !analytics.byModel.some(row => row.provider === 'cc-switch' && row.model === 'claude-opus-5')) throw new Error('Pi Qoder/Claude projection missing')
+      const again = await usageAnalyticsWithCreditsQuery(7)
+      if (JSON.stringify(again.totals) !== JSON.stringify(analytics.totals)) throw new Error('Pi refresh doubled usage')
       const win = new BrowserWindow({ width: 1100, height: 850, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

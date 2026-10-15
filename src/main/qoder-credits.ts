@@ -1,5 +1,8 @@
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { readPiNativeSession } from './pi-native-history'
+import { piCreditRequests } from './pi-credit-usage'
 import type { QoderCreditEvidence, UsageAnalytics, UsageAnalyticsAggregate } from '../shared/trace'
 import { QODER_USD_PER_CREDIT } from '../shared/qoder-pricing'
 import { dedupeCreditRequests, isCreditUsageEvidence, type CreditRequest } from '../shared/credit-usage'
@@ -9,6 +12,8 @@ import { readTraceArchiveAsync } from './transcript-archive'
 export { qoderCreditRequests } from '../shared/qoder-credit-requests'
 
 export interface QoderCreditScope {
+  providerId?: 'qoder' | 'pi'
+  hasUsdCost?: number
   runId: string
   sessionId: string
   cwd: string
@@ -25,7 +30,7 @@ const emptyEvidence = (): QoderCreditEvidence => ({
 })
 
 const scopeKey = (scope: QoderCreditScope): string =>
-  `${scope.runId}\0${scope.sessionId}\0${scope.cwd}\0${scope.tsStart}`
+  `${scope.providerId ?? 'qoder'}\0${scope.runId}\0${scope.sessionId}\0${scope.cwd}\0${scope.tsStart}`
 
 /** Reconcile an asynchronously read Credit snapshot with the latest SQLite scope.
  * Stable rows keep their lower-bound evidence, deleted/changed rows are dropped,
@@ -39,6 +44,61 @@ export function reconcileQoderCreditRows(scopes: QoderCreditScope[], rows: Qoder
  * are only a legacy fallback, never added on top of a recorded turn's credits.
  * Neither path mutates transcripts, archives, records or SQLite. */
 export async function readQoderCreditRows(args: {
+  scopes: QoderCreditScope[]
+  userDataDir: string
+  projectsDir: string
+  piSessionRoot?: string
+}): Promise<QoderCreditRow[]> {
+  const native = await readNativeQoderCreditRows({ ...args, scopes: args.scopes.filter((scope) => scope.providerId !== 'pi') })
+  const sessions = new Map<string, QoderCreditScope[]>()
+  for (const scope of args.scopes.filter((scope) => scope.providerId === 'pi')) {
+    const key = `${scope.cwd}\0${scope.sessionId}`
+    sessions.set(key, [...sessions.get(key) ?? [], scope])
+  }
+  const pi: QoderCreditRow[] = []
+  let scanned = 0
+  let bytes = 0
+  for (const scopes of sessions.values()) {
+    const rows: QoderCreditRow[] = scopes.map((scope) => ({ ...scope, evidence: { ...emptyEvidence(), source: 'pi_qoder_credit_observation' } }))
+    pi.push(...rows)
+    if (++scanned > 200) {
+      for (const row of rows) row.evidence.omissionReason = 'Pi 计量扫描达到 200 个会话上限；未扫描轮次保留为不可用。'
+      continue
+    }
+    try {
+      const identity = scopes[0]
+      const archive = await readTraceArchiveAsync({ ...identity, userDataDir: args.userDataDir, providerId: 'pi' })
+      if (!archive) continue
+      const content = await readPiNativeSession({ ...identity, sessionRoot: args.piSessionRoot ?? join(homedir(), '.pi', 'agent', 'sessions'),
+        maxBytes: 64 * 1024 * 1024 - bytes })
+      if (content == null) continue
+      bytes += Buffer.byteLength(content, 'utf8')
+      const turns = scopes.map((scope) => ({ runId: scope.runId,
+        providerTurnId: archive.turns.find((turn) => turn.runId === scope.runId)?.providerTurnId }))
+      const parsed = piCreditRequests(content, identity, turns)
+      for (const row of rows) {
+        if (parsed.incomplete) row.evidence.omissionReason = 'Pi 日志末尾尚未写完；仅计入完整记录前缀。'
+        const requests = parsed.requests.filter((request) => request.runId === row.runId)
+        row.evidence.matchedTurns = parsed.matched.has(row.runId) ? 1 : 0
+        for (const request of requests) {
+          if (request.credits == null) row.evidence.missingRequests++
+          else {
+            row.evidence.credits = (row.evidence.credits ?? 0) + request.credits
+            row.evidence.knownRequests++
+          }
+        }
+        if (row.evidence.credits != null && !Number.isFinite(row.evidence.credits)) row.evidence.credits = null
+      }
+    } catch (error) {
+      for (const row of rows) row.evidence.omissionReason = error instanceof Error && error.message === 'Pi metering aggregate byte budget reached'
+        ? 'Pi 计量扫描达到 64 MiB 总预算；此轮计量保留为不可用。'
+        : 'Pi 计量记录不可读取或身份未关联；不推断费用。'
+    }
+  }
+  return [...native, ...pi]
+}
+
+async function readNativeQoderCreditRows(args: {
   scopes: QoderCreditScope[]
   userDataDir: string
   projectsDir: string
@@ -152,10 +212,15 @@ function aggregateCredits(rows: QoderCreditRow[]): QoderCreditEvidence | undefin
     result.totalTurns += evidence.totalTurns
   }
   if (result.credits != null && !Number.isFinite(result.credits)) result.credits = null
+  const reasons = [...new Set(rows.map((row) => row.evidence.omissionReason).filter(Boolean))]
+  if (reasons.length) result.omissionReason = reasons.join(' ')
   return result
 }
 
 export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow[]): UsageAnalytics {
+  // A refresh starts from the bare SQLite snapshot. Do not project an already
+  // enriched snapshot twice, including mixed canonical-USD/Credits sessions.
+  if (analytics.totals.qoderCredits) return analytics
   const dayOf = (ts: number): string => {
     const date = new Date(ts)
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -166,14 +231,17 @@ export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow
   // A canonical USD cost takes precedence over the Credit equivalent. Never
   // add another estimate on top of Provider-reported dollars. This projection
   // is read-only; native Credits remain the metering evidence in the ledger.
-  const convert = qoder?.costUsd == null
+  const convertible = scoped.filter((row) => row.hasUsdCost === 0 || (row.hasUsdCost == null && qoder?.costUsd == null))
+  const converted = aggregateCredits(convertible)
+  const convert = converted?.credits != null
   const enrich = <T extends UsageAnalyticsAggregate>(row: T, credits: QoderCreditEvidence | undefined): T => {
-    if (!convert || credits?.credits == null) return { ...row, qoderCredits: credits }
-    const knownTurns = scoped.filter((item) => item.evidence.credits != null &&
-      (!('day' in row) || dayOf(item.tsStart) === row.day)).length
+    const eligible = convertible.filter((item) => !('day' in row) || dayOf(item.tsStart) === row.day)
+    const amount = aggregateCredits(eligible)?.credits
+    if (amount == null) return { ...row, qoderCredits: credits }
+    const knownTurns = eligible.filter((item) => item.evidence.credits != null).length
     return {
       ...row, qoderCredits: credits,
-      costUsd: (row.costUsd ?? 0) + credits.credits * QODER_USD_PER_CREDIT,
+      costUsd: (row.costUsd ?? 0) + amount * QODER_USD_PER_CREDIT,
       costKnownRows: row.costKnownRows + knownTurns,
       estimatedCostRows: row.estimatedCostRows + knownTurns
     }

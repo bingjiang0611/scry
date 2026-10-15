@@ -372,6 +372,8 @@ export function recordTurn(args: RecordTurnArgs, options: { queueOnFailure?: boo
     )
     const insIntervention = db.prepare(sqlInsert('human_interventions', HUMAN_INTERVENTION_COLS))
     const insLedger = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
+    const deleteReconstructed = db.prepare("DELETE FROM usage_ledger WHERE span_id=? AND source='scry_persisted_usage'")
+    const ledgerSpanIndex = USAGE_LEDGER_COLS.indexOf('span_id')
     const tx = db.transaction(() => {
       db!.prepare(
         `INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)
@@ -394,6 +396,11 @@ export function recordTurn(args: RecordTurnArgs, options: { queueOnFailure?: boo
       for (const r of rows.modelUsage) insMu.run(...(r as never[]))
       for (const r of rows.fileOps) insFo.run(...(r as never[]))
       for (const r of rows.interventions) insIntervention.run(...(r as never[]))
+      // A later canonical replay supersedes reconstruction for that exact result.
+      // In particular, do not retain an unknown aggregate beside new model rows.
+      for (const spanId of new Set(billing.usageLedger.map((row) => row[ledgerSpanIndex]))) {
+        if (spanId) deleteReconstructed.run(spanId)
+      }
       for (const r of billing.usageLedger) insLedger.run(...(r as never[]))
     })
     tx()
@@ -997,12 +1004,13 @@ export async function usageAnalyticsWithCreditsQuery(rangeDays: UsageAnalyticsRa
   const revision = dataRevision
   const readScopes = (value: UsageAnalytics): QoderCreditScope[] => {
     const bounds = usageAnalyticsBounds(value.observedAt, rangeDays)
-    return db!.prepare(`SELECT u.run_id runId, r.external_session_id sessionId, r.cwd,
+    return db!.prepare(`SELECT u.run_id runId, r.external_session_id sessionId, r.cwd, r.provider_id providerId,
+      MAX(CASE WHEN ${canonicalUsdCostWhere('u')} THEN 1 ELSE 0 END) hasUsdCost,
       MIN(u.bucket_start) tsStart FROM usage_ledger u
       JOIN session_refs r ON r.scry_session_id=u.session_id
-      WHERE u.provider='qoder' AND r.provider_id='qoder' AND u.run_id IS NOT NULL
+      WHERE u.provider='qoder' AND r.provider_id IN ('qoder','pi') AND u.run_id IS NOT NULL
         AND u.bucket_start>=? AND u.bucket_start<?
-      GROUP BY u.run_id, r.external_session_id, r.cwd ORDER BY tsStart DESC`).all(bounds.from, bounds.to) as QoderCreditScope[]
+      GROUP BY u.run_id, r.external_session_id, r.cwd, r.provider_id ORDER BY tsStart DESC`).all(bounds.from, bounds.to) as QoderCreditScope[]
   }
   try {
     const scopes = readScopes(analytics)

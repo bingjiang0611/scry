@@ -365,7 +365,8 @@ export interface QoderCreditEvidence {
   missingRequests: number
   matchedTurns: number
   totalTurns: number
-  source: 'qoder_native_transcript' | 'qoder_recorded_usage' | 'qoder_mixed_usage'
+  source: 'qoder_native_transcript' | 'qoder_recorded_usage' | 'pi_qoder_credit_observation' | 'qoder_mixed_usage'
+  omissionReason?: string
   // Only matched main-transcript requests; never a complete account bill.
   completeness: 'partial'
 }
