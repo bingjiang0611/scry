@@ -57,8 +57,9 @@ function creditEvidence(row: UsageAnalyticsAggregate): string {
   const evidence = row.qoderCredits
   if (!evidence) return ''
   const source = evidence.source === 'qoder_recorded_usage' ? '已记录 Credits'
-    : evidence.source === 'qoder_mixed_usage' ? '已记录 + 原生日志 Credits' : '原生 Credits'
-  return `${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量；${QODER_USD_BASIS}（${QODER_PRICING_URL}）`
+    : evidence.source === 'pi_qoder_credit_observation' ? 'Pi 请求计量 Credits'
+      : evidence.source === 'qoder_mixed_usage' ? '多来源 Credits' : '原生 Credits'
+  return `${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量；${evidence.omissionReason ? `${evidence.omissionReason}；` : ''}${QODER_USD_BASIS}（${QODER_PRICING_URL}）`
 }
 
 function displayCostEvidence(row: UsageAnalyticsAggregate, provider?: BillingProvider): string {
@@ -83,7 +84,7 @@ function formatDay(day: string): string {
 }
 
 function providerLabel(provider: BillingProvider): string {
-  return providerLabels[provider] ?? provider
+  return Object.hasOwn(providerLabels, provider) ? providerLabels[provider] : provider
 }
 
 function costEvidence(row: UsageAnalyticsAggregate): string {
@@ -167,7 +168,7 @@ const billingProviderGlyph: Partial<Record<BillingProvider, ProviderId>> = {
 }
 
 function ProviderMark({ provider }: { provider: BillingProvider }) {
-  const glyph = billingProviderGlyph[provider]
+  const glyph = Object.hasOwn(billingProviderGlyph, provider) ? billingProviderGlyph[provider] : undefined
   if (glyph) {
     return (
       <ProviderGlyph

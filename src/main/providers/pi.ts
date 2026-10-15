@@ -969,9 +969,11 @@ function addAssistantUsage(
   const reasoning = number(usage.reasoning)
   const model = typeof message.model === 'string' ? message.model : 'unknown'
   const provider = typeof message.provider === 'string' ? message.provider : undefined
-  // Qoder is credit-billed. Pi's USD catalogue total is not credit evidence;
-  // match the native Qoder adapter rather than treating its zero placeholder as free.
-  const cost = provider === 'qoder' ? undefined : number(record(usage.cost).total)
+  // Pi's catalogue cost is an estimate, not a reported charge. A zero can be
+  // an unpriced custom model (e.g. cc-switch), not evidence of free usage.
+  // Qoder uses separate request-level Credits, never its USD placeholder.
+  const catalogueCost = number(record(usage.cost).total)
+  const cost = provider === 'qoder' || catalogueCost === 0 ? undefined : catalogueCost
   const key = `${provider ?? ''}\0${model}`
   aggregate.input += input ?? 0
   aggregate.output += output ?? 0
@@ -1004,8 +1006,8 @@ function addAssistantUsage(
   existing.reasoningTokens = (existing.reasoningTokens ?? 0) + (reasoning ?? 0)
   if (cost != null) {
     existing.costUsd = (existing.costUsd ?? 0) + cost
-    existing.costSource = 'provider_reported'
-    existing.costConfidence = 'provider_reported'
+    existing.costSource = 'price_table'
+    existing.costConfidence = 'estimated'
     existing.costUnit = 'usd'
   }
   aggregate.byModel.set(key, existing)
@@ -1402,6 +1404,34 @@ async function runPiAgent(
     }
   }
   const startedAt = Date.now()
+  let resultEmitted = false
+  const emitUsageResult = (fields: Partial<Pick<TraceEvent, 'text' | 'isError' | 'terminationReason' | 'providerStopReason' | 'toolTermination'>>, partial = false): void => {
+    resultEmitted = true
+    request.emit(piEvent(request.runId, {
+      kind: 'harness', stage: 'result',
+      tokensIn: usage.input, tokensOut: usage.output,
+      cacheReadTokens: usage.cacheRead, cacheCreationTokens: usage.cacheWrite,
+      reasoningTokens: usage.reasoning,
+      contextTokens: usage.lastContextTokens, contextModel: usage.lastContextModel,
+      contextProvider: usage.lastContextProvider,
+      contextUsageSource: usage.contextUsageSource, contextUsageQuality: usage.contextUsageQuality,
+      costUsd: usage.allCostKnown && usage.byModel.size > 0 ? usage.cost : undefined,
+      costSource: usage.allCostKnown && usage.byModel.size > 0 ? 'price_table' : undefined,
+      costConfidence: usage.allCostKnown && usage.byModel.size > 0 ? 'estimated' : undefined,
+      costUnit: usage.allCostKnown && usage.byModel.size > 0 ? 'usd' : undefined,
+      billingProvider: billingProviderForUpstream(usage.upstreamProvider),
+      modelUsage: [...usage.byModel.values()], upstreamProvider: usage.upstreamProvider,
+      usageSource: 'pi_rpc', durationMs: Date.now() - startedAt,
+      runtimeMetadata: {
+        agentProfileId: profile.id, sessionFile: state.sessionFile ?? null,
+        model: usage.model ?? null, provider: usage.upstreamProvider ?? null,
+        stderrTail: rpc.stderrTail() || null, transportError: usage.lastTransportError ?? null,
+        shellEnvError: launchShellEnvError ?? null,
+        ...(partial ? { usageCoverage: 'partial' } : {})
+      },
+      ...fields
+    }))
+  }
   try {
     // Capability probes remain bounded; an explicitly started run stays cancellable while
     // large native history/extensions load, rather than being killed by a startup clock.
@@ -1619,43 +1649,13 @@ async function runPiAgent(
     // example Qoder aborting a long generation). Only an explicit Scry stop is an interruption;
     // an explicit tool termination is a separate execution boundary, not Goal approval.
     const failed = !state.stopped && !endedByTool && Boolean(usage.lastStopReason && usage.lastStopReason !== 'stop')
-    request.emit(piEvent(request.runId, {
-      kind: 'harness',
-      stage: 'result',
+    emitUsageResult({
       text: failureText,
-      tokensIn: usage.input,
-      tokensOut: usage.output,
-      cacheReadTokens: usage.cacheRead,
-      cacheCreationTokens: usage.cacheWrite,
-      reasoningTokens: usage.reasoning,
-      contextTokens: usage.lastContextTokens,
-      contextModel: usage.lastContextModel,
-      contextProvider: usage.lastContextProvider,
-      contextUsageSource: usage.contextUsageSource,
-      contextUsageQuality: usage.contextUsageQuality,
-      costUsd: usage.allCostKnown && usage.byModel.size > 0 ? usage.cost : undefined,
-      costSource: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
-      costConfidence: usage.allCostKnown && usage.byModel.size > 0 ? 'provider_reported' : undefined,
-      costUnit: usage.allCostKnown && usage.byModel.size > 0 ? 'usd' : undefined,
-      billingProvider: billingProviderForUpstream(usage.upstreamProvider),
-      modelUsage: [...usage.byModel.values()],
-      upstreamProvider: usage.upstreamProvider,
-      usageSource: 'pi_rpc',
-      durationMs: Date.now() - startedAt,
       isError: failed,
       ...(terminationReason ? { terminationReason } : {}),
       ...(usage.lastStopReason ? { providerStopReason: usage.lastStopReason } : {}),
-      ...(endedByTool ? { toolTermination } : {}),
-      runtimeMetadata: {
-        agentProfileId: profile.id,
-        sessionFile: finalState.sessionFile ?? null,
-        model: usage.model ?? null,
-        provider: usage.upstreamProvider ?? null,
-        stderrTail: rpc.stderrTail() || null,
-        transportError: usage.lastTransportError ?? null,
-        shellEnvError: launchShellEnvError ?? null
-      }
-    }))
+      ...(endedByTool ? { toolTermination } : {})
+    })
     if (failed) {
       const transportFailure = Boolean(
         usage.lastTransportError || usage.lastError?.toLowerCase().includes('fetch failed')
@@ -1680,6 +1680,12 @@ async function runPiAgent(
       status: state.stopped ? 'interrupted' : 'completed'
     }
   } catch (error) {
+    // Transport failure/stop can bypass agent_settled after completed requests
+    // already supplied metering. Keep that observed lower bound, once, without
+    // claiming a successful run or inventing unobserved in-flight usage.
+    if (!resultEmitted && usage.byModel.size > 0) emitUsageResult({
+      isError: !state.stopped, text: state.stopped ? 'Pi interrupted; observed usage only' : String((error as Error).message)
+    }, true)
     if (state.stopped && !(error instanceof PiRecorderError)) return {
       externalSessionId: state.persistedSessionId,
       providerTurnId: state.providerTurnId,

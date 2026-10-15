@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { qoderCreditRequests, readQoderCreditRows, reconcileQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
@@ -40,6 +40,59 @@ function fixture(nativeRows: unknown[], turnIds = ['u1']) {
 }
 
 describe('Qoder native Credits projection', () => {
+  it('reads Pi custom metering only for archived managed runs and converts on every refresh without doubling', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-pi-credits-'))
+    roots.push(root)
+    const piSessionRoot = join(root, 'sessions')
+    const directory = join(piSessionRoot, `--${root.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
+    const userDataDir = join(root, 'userData')
+    mkdirSync(directory, { recursive: true })
+    const scopes = [{ ...scope, cwd: root, providerId: 'pi' as const, hasUsdCost: 0 }]
+    expect(upsertTraceArchiveTurn({
+      ...scopes[0], userDataDir, providerId: 'pi', runtimeProvider: 'pi_rpc',
+      turn: { runId: 'run-1', providerTurnId: 'u1', userText: 'not used as identity', done: true, items: [] }
+    })).toBe(true)
+    const file = join(directory, `2026-09-09_${sessionId}.jsonl`)
+    writeFileSync(file, text([
+      { type: 'session', version: 3, id: sessionId, cwd: root },
+      { type: 'message', id: 'u1', parentId: null, message: { role: 'user' } },
+      { type: 'custom', id: 'c1', parentId: 'u1', customType: 'qoder-credit-observation-v1', data: {
+        version: 1, sessionId, requestId: 'r1', modelId: 'ultimate', status: 'reported',
+        outcome: 'complete', credits: 2.909718812000001, billable: true
+      } },
+      { type: 'message', id: 'a1', parentId: 'c1', message: { role: 'assistant', provider: 'qoder', usage: { cost: { total: 0 } } } },
+      { type: 'message', id: 'external-user', parentId: 'a1', message: { role: 'user' } }
+    ]))
+    const args = { scopes, userDataDir, piSessionRoot, projectsDir: join(root, 'unused-qoder') }
+    const first = await readQoderCreditRows(args)
+    expect(first[0].evidence).toMatchObject({ source: 'pi_qoder_credit_observation', credits: 2.909718812000001,
+      knownRequests: 1, missingRequests: 0, matchedTurns: 1, totalTurns: 1 })
+    expect(await readQoderCreditRows(args)).toEqual(first)
+    const analytics = buildUsageAnalytics({ nowMs: tsStart, rangeDays: 7, tokens: [{
+      tsStart, provider: 'qoder', model: 'ultimate', runId: 'run-1', inputTokens: 13819, outputTokens: 513,
+      cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 163
+    }], costs: [] })
+    expect(withQoderCredits(analytics, first).totals.costUsd).toBeCloseTo(0.02909718812)
+    expect(withQoderCredits(analytics, await readQoderCreditRows(args)).totals.costUsd).toBeCloseTo(0.02909718812)
+    writeFileSync(file, readFileSync(file, 'utf8') + '\n{"type":')
+    const partial = await readQoderCreditRows(args)
+    expect(partial[0].evidence.credits).toBe(2.909718812000001)
+    expect(partial[0].evidence.omissionReason).toContain('末尾尚未写完')
+    const wrongRuntime = await readQoderCreditRows({ ...args, scopes: [{ ...scopes[0], providerId: 'qoder' }] })
+    expect(wrongRuntime[0].evidence.credits).toBeNull()
+  })
+
+  it('retains unavailable coverage when a Pi scan reaches its session budget', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-pi-credit-budget-'))
+    roots.push(root)
+    const scopes = Array.from({ length: 201 }, (_, index) => ({ ...scope, providerId: 'pi' as const,
+      sessionId: `${index.toString(16).padStart(8, '0')}-bbbb-cccc-dddd-eeeeeeeeeeee`, runId: `r-${index}` }))
+    const rows = await readQoderCreditRows({ scopes, userDataDir: root, projectsDir: root, piSessionRoot: root })
+    expect(rows).toHaveLength(201)
+    expect(rows.every(row => row.evidence.credits == null)).toBe(true)
+    expect(rows.at(-1)?.evidence).toMatchObject({ totalTurns: 1, matchedTurns: 0, omissionReason: expect.stringContaining('200') })
+  })
+
   it('uses exact user identity/parent ancestry, not text, order or cumulative result totals', () => {
     const parsed = qoderCreditRequests(text([
       user(),
@@ -133,6 +186,18 @@ describe('Qoder native Credits projection', () => {
     }] })
     expect(withQoderCredits(reported, [creditRow(2000)]).totals).toMatchObject({ costUsd: 3, estimatedCostRows: 0, providerReportedCostRows: 1 })
     expect(analytics.totals.costUsd).toBeNull()
+  })
+
+  it('converts missing-dollar turns even when another Qoder turn has canonical USD', () => {
+    const analytics = buildUsageAnalytics({ nowMs: tsStart, rangeDays: 7, tokens: [], costs: [{
+      tsStart, provider: 'qoder', model: null, costUsd: 3, confidence: 'provider_reported', costSource: 'provider_reported'
+    }] })
+    const evidence = { credits: 200, knownRequests: 1, missingRequests: 0, matchedTurns: 1,
+      totalTurns: 1, source: 'pi_qoder_credit_observation' as const, completeness: 'partial' as const }
+    const rows = [{ ...scope, hasUsdCost: 1, evidence }, { ...scope, runId: 'r2', hasUsdCost: 0, evidence }]
+    const enriched = withQoderCredits(analytics, rows)
+    expect(enriched.totals).toMatchObject({ costUsd: 5, estimatedCostRows: 1, providerReportedCostRows: 1 })
+    expect(withQoderCredits(enriched, rows)).toEqual(enriched)
   })
 
   it('refreshes growing native logs and preserves unavailable, real zero and unmatched turns', async () => {

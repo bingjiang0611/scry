@@ -50,6 +50,24 @@ const resultEvent = (p: Partial<TraceEvent> = {}): TraceEvent =>
   }) as TraceEvent
 
 describe('Billing Guardian P1 ledger normalizer', () => {
+  it('keeps every custom and unknown upstream, including failed runs and same-named models', () => {
+    const rows = sdkUsageLedgerRowsFromItems({ runId: 'r', sessionId: 's', nowMs: 1, items: [resultEvent({
+      runtimeProvider: 'pi_rpc', isError: true, billingProvider: 'codex', modelUsage: [
+        { model: 'claude-opus', upstreamProvider: 'cc-switch', inputTokens: 10, outputTokens: 2 },
+        { model: 'shared', upstreamProvider: 'provider-a', inputTokens: 20, outputTokens: 3 },
+        { model: 'shared', upstreamProvider: 'provider-b', inputTokens: 30, outputTokens: 4 },
+        { model: 'ultimate', upstreamProvider: 'qoder', inputTokens: 40, outputTokens: 5 }
+      ]
+    })] })
+    expect(rows.map((row) => [row.provider, row.inputTokens, row.outputTokens])).toEqual([
+      ['cc-switch', 10, 2], ['provider-a', 20, 3], ['provider-b', 30, 4], ['qoder', 40, 5]
+    ])
+    expect(new Set(rows.map((row) => row.id)).size).toBe(4)
+    expect(sdkUsageLedgerRowsFromItems({ runId: 'r', nowMs: 1, items: [resultEvent({
+      modelUsage: undefined, billingProvider: undefined, upstreamProvider: undefined
+    })] })[0].provider).toBe('unknown')
+  })
+
   sqliteIt('DDL_V4 只新增表且可重复执行', () => {
     const db = new nodeSqlite!.DatabaseSync(':memory:')
     for (const stmt of DDL_V4) db.prepare(stmt).run()

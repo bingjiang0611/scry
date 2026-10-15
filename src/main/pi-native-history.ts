@@ -107,12 +107,13 @@ export function reconcilePiNativeHistory(native: LoadedSessionTurn[], archived: 
 // execution and no renderer-supplied path. Default Pi layout (session-manager).
 // Custom profile-owned session roots remain unavailable rather than guessed.
 // Bound full-file parsing at 64 MiB; larger histories require a streaming reader.
-export async function readPiNativeHistory(args: {
+export async function readPiNativeSession(args: {
   sessionRoot: string
   cwd: string
   sessionId: string
   signal?: AbortSignal
-}): Promise<LoadedSessionTurn[] | null> {
+  maxBytes?: number
+}): Promise<string | null> {
   if (!/^[a-f0-9-]{36}$/i.test(args.sessionId)) return null
   const directory = join(args.sessionRoot, `--${resolve(args.cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
   let names: string[]
@@ -130,6 +131,11 @@ export async function readPiNativeHistory(args: {
     throw new Error('Pi 原生会话路径越界或不是普通文件')
   }
   if (info.size > 64 * 1024 * 1024) throw new Error('Pi 原生会话超过 64 MiB，只读恢复需要流式读取')
-  const content = await readFile(canonical, { encoding: 'utf8', signal: args.signal })
-  return parsePiNativeHistory(content, args)
+  if (args.maxBytes != null && info.size > args.maxBytes) throw new Error('Pi metering aggregate byte budget reached')
+  return readFile(canonical, { encoding: 'utf8', signal: args.signal })
+}
+
+export async function readPiNativeHistory(args: Parameters<typeof readPiNativeSession>[0]): Promise<LoadedSessionTurn[] | null> {
+  const content = await readPiNativeSession(args)
+  return content == null ? null : parsePiNativeHistory(content, args)
 }

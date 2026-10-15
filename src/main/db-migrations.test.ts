@@ -182,6 +182,96 @@ describe('SQLite migrations', () => {
     }
   })
 
+  it('repairs every retained managed provider without overwriting canonical usage or guessing zero costs', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 15))
+      db.prepare(`INSERT INTO session_refs (scry_session_id, provider_id, runtime_provider, cwd,
+        external_session_id, created_ts, updated_ts) VALUES ('s', 'pi', 'pi_rpc', '/repo', 'native', 1, 1)`).run()
+      const span = db.prepare(`INSERT INTO spans (id, session_id, run_id, kind, stage, ts_start, is_error)
+        VALUES (?, ?, ?, 'harness', 'result', 1000, ?)`)
+      const model = db.prepare(`INSERT INTO model_usage
+        (span_id, model, upstream_provider, input_tokens, output_tokens, cache_read_tokens, cost_usd)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      span.run('claude', 's', 'r1', 0)
+      model.run('claude', 'claude-opus', 'cc-switch', 12, 3, null, 0)
+      span.run('qoder', 's', 'r2', 0)
+      model.run('qoder', 'ultimate', 'qoder', 20, 4, 0, 0)
+      span.run('failed', 's', 'r3', 1)
+      model.run('failed', 'shared', 'provider-a', 30, 5, 0, 1.25)
+      model.run('failed', 'shared', 'provider-b', null, 6, null, null)
+      span.run('orphan', 'not-managed', 'r4', 0)
+      model.run('orphan', 'm', 'external', 999, 999, 0, 1)
+      span.run('canonical', 's', 'r5', 0)
+      model.run('canonical', 'm', 'openai-codex', 40, 7, 0, 5)
+      db.prepare(`INSERT INTO usage_ledger
+        (id, provider, source, source_kind, span_id, usage_kind, cost, cost_unit, cost_source, confidence, attribution_method, created_ts)
+        VALUES ('codex:canonical:m', 'codex', 'canonical', 'provider_reported', 'canonical', 'model', 9,
+          'usd', 'provider_reported', 'exact', 'direct', 1)`).run()
+      span.run('aggregate', 's', 'r6', 0)
+      model.run('aggregate', 'm', 'cc-switch', 50, 8, null, 0)
+      db.prepare(`INSERT INTO usage_ledger
+        (id, provider, source, source_kind, span_id, usage_kind, cost_unit, cost_source, confidence, attribution_method, created_ts)
+        VALUES ('aggregate', 'cc-switch', 'canonical', 'provider_reported', 'aggregate', 'result',
+          'usd', 'provider_reported', 'exact', 'direct', 1)`).run()
+      span.run('old-pi', 's', 'r7', 0)
+      model.run('old-pi', 'gpt', '', 10, 1, 0, 1)
+      db.prepare(`INSERT INTO session_refs (scry_session_id, provider_id, runtime_provider, cwd,
+        external_session_id, created_ts, updated_ts) VALUES ('codex-session', 'codex', 'codex_cli', '/repo', 'codex-native', 1, 1)`).run()
+      span.run('native-codex', 'codex-session', 'r8', 0)
+      model.run('native-codex', 'gpt', 'openai', 10, 1, 0, 1)
+      for (const id of ['old-pi', 'native-codex']) db.prepare(`INSERT INTO usage_ledger
+        (id, provider, source, source_kind, span_id, model, usage_kind, cost_unit, cost_source, confidence, attribution_method, created_ts)
+        VALUES (?, 'codex', 'canonical', 'provider_reported', ?, 'gpt', 'model',
+          'usd', 'provider_reported', 'exact', 'direct', 1)`).run(`codex:${id}:gpt`, id)
+      const original = db.prepare("SELECT * FROM usage_ledger WHERE source='canonical' ORDER BY id").all()
+
+      migrateDatabase(db.asProductionDatabase())
+      expect(db.prepare("SELECT * FROM usage_ledger WHERE source='canonical' ORDER BY id").all()).toEqual(original)
+      expect(db.prepare(`SELECT id, provider, input_tokens input, output_tokens output, cost, confidence
+        FROM usage_ledger WHERE source='scry_persisted_usage' ORDER BY id`).all()).toEqual([
+        { id: 'cc-switch:claude:claude-opus', provider: 'cc-switch', input: 12, output: 3, cost: null, confidence: 'inferred' },
+        { id: 'provider-a:failed:shared', provider: 'provider-a', input: 30, output: 5, cost: 1.25, confidence: 'inferred' },
+        { id: 'provider-b:failed:shared', provider: 'provider-b', input: null, output: 6, cost: null, confidence: 'inferred' },
+        { id: 'qoder:qoder:ultimate', provider: 'qoder', input: 20, output: 4, cost: null, confidence: 'inferred' }
+      ])
+      expect(db.prepare("SELECT COUNT(*) n FROM usage_ledger WHERE span_id='aggregate'").get()).toEqual({ n: 1 })
+      const once = db.prepare('SELECT * FROM usage_ledger ORDER BY id').all()
+      migrateDatabase(db.asProductionDatabase())
+      expect(db.prepare('SELECT * FROM usage_ledger ORDER BY id').all()).toEqual(once)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('retains OpenCode same-model custom upstreams and does not double a legacy runtime-attributed row', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 15))
+      db.prepare(`INSERT INTO session_refs (scry_session_id, provider_id, runtime_provider, cwd,
+        external_session_id, created_ts, updated_ts) VALUES ('s', 'opencode', 'opencode_server', '/repo', 'native', 1, 1)`).run()
+      for (const spanId of ['empty', 'partial']) {
+        db.prepare(`INSERT INTO spans (id, session_id, run_id, kind, stage, ts_start)
+          VALUES (?, 's', ?, 'harness', 'result', 1000)`).run(spanId, spanId)
+        for (const [provider, input] of [['vendor-a', 10], ['vendor-b', 20]]) db.prepare(`INSERT INTO model_usage
+          (span_id, model, upstream_provider, input_tokens, output_tokens) VALUES (?, 'shared', ?, ?, 1)`)
+          .run(spanId, provider, input)
+      }
+      db.prepare(`INSERT INTO usage_ledger (id, provider, source, source_kind, span_id, model, usage_kind,
+        input_tokens, cost_unit, cost_source, confidence, attribution_method, metadata_json, created_ts)
+        VALUES ('opencode:partial:shared', 'opencode', 'canonical', 'provider_reported', 'partial', 'shared', 'model',
+          20, 'usd', 'provider_reported', 'exact', 'direct', '{"upstreamProvider":"vendor-b"}', 1)`).run()
+      migrateDatabase(db.asProductionDatabase())
+      expect(db.prepare('SELECT id FROM usage_ledger ORDER BY id').all()).toEqual([
+        { id: 'opencode:partial:shared' }, { id: 'vendor-a:empty:shared' },
+        { id: 'vendor-a:partial:shared' }, { id: 'vendor-b:empty:shared' }
+      ])
+      expect(db.prepare('SELECT SUM(input_tokens) n FROM usage_ledger').get()).toEqual({ n: 60 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps replayed file evidence idempotent', () => {
     const db = new MigrationTestDatabase()
     try {
@@ -213,6 +303,28 @@ describe('SQLite migrations', () => {
       expect(columns(db, 'spans').filter((name) => name === 'danger_level')).toHaveLength(1)
       expect(columns(db, 'spans')).toContain('danger_reason')
       expect(db.pragma('user_version', { simple: true })).toBe(3)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rolls back a partially applied usage repair together with its version', () => {
+    const db = new MigrationTestDatabase()
+    try {
+      migrateDatabase(db.asProductionDatabase(), DB_MIGRATIONS.slice(0, 15))
+      db.prepare(`INSERT INTO session_refs (scry_session_id, provider_id, runtime_provider, cwd,
+        external_session_id, created_ts, updated_ts) VALUES ('s', 'pi', 'pi_rpc', '/repo', 'native', 1, 1)`).run()
+      for (const [id, provider] of [['a', 'cc-switch'], ['b', 'qoder']]) {
+        db.prepare(`INSERT INTO spans (id, session_id, run_id, kind, stage, ts_start)
+          VALUES (?, 's', ?, 'harness', 'result', 1)`).run(id, id)
+        db.prepare(`INSERT INTO model_usage (span_id, model, upstream_provider, input_tokens)
+          VALUES (?, 'm', ?, 10)`).run(id, provider)
+      }
+      db.prepare(`CREATE TRIGGER fail_second_repair BEFORE INSERT ON usage_ledger WHEN NEW.provider='qoder'
+        BEGIN SELECT RAISE(ABORT, 'repair fixture failure'); END`).run()
+      expect(() => migrateDatabase(db.asProductionDatabase())).toThrow('repair fixture failure')
+      expect(db.pragma('user_version', { simple: true })).toBe(15)
+      expect(db.prepare('SELECT COUNT(*) n FROM usage_ledger').get()).toEqual({ n: 0 })
     } finally {
       db.close()
     }

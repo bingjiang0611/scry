@@ -102,6 +102,7 @@ describe('offline Pi native history recovery', () => {
     const path = join(dir, `2026-10-13_${identity.sessionId}.jsonl`)
     await writeFile(path, encode(user, assistant, result))
     expect((await readPiNativeHistory(args))?.[0].items).toHaveLength(3)
+    await expect(readPiNativeHistory({ ...args, maxBytes: 1 })).rejects.toThrow('aggregate byte budget')
     const second = join(dir, `duplicate_${identity.sessionId}.jsonl`)
     await writeFile(second, encode(user))
     await expect(readPiNativeHistory(args)).rejects.toThrow('不唯一')
