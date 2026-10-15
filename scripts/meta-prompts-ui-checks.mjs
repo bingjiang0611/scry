@@ -28,10 +28,19 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   }
   const type = async (selector, text) => {
     await click(selector)
-    contents.selectAll()
-    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
-    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+    const field = `document.querySelector(${JSON.stringify(selector)})`
+    await wait(`${field} === document.activeElement`)
+    // Native click/edit commands are asynchronous. Do not let a late Backspace
+    // erase newly inserted text, or send insertion to the previously focused field.
+    if (await read(`${field}.value.length > 0`)) {
+      contents.selectAll()
+      await wait(`${field}.selectionStart === 0 && ${field}.selectionEnd === ${field}.value.length`)
+      contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+      await wait(`${field}.value === ''`)
+    }
     await contents.insertText(text)
+    await wait(`${field}.value === ${JSON.stringify(text)}`)
   }
   const openNew = async () => {
     await click('.mp-header .mp-button:not(.mp-back)')
