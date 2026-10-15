@@ -45,6 +45,30 @@ describe('RunOutputLog (live output content cache)', () => {
     ])
   })
 
+  it('reads a durably marked overflow before terminal flush without hiding capture failure', async () => {
+    const store = new RecoveringStore()
+    store.fail = false
+    const log = new RunOutputLog({ store })
+    log.append('large-snapshot', { kind: 'tool_result', text: 'x'.repeat(512 * 1024 + 1) })
+    const page = await log.since('large-snapshot', 0)
+    expect(page.chunks.filter((chunk) => chunk.kind === 'truncated')).toHaveLength(1)
+    expect(page.chunks.at(-1)?.kind).toBe('truncated')
+    expect(page.chunks.filter((chunk) => chunk.kind === 'tool_result').reduce((bytes, chunk) => bytes + Buffer.byteLength(chunk.text), 0)).toBe(512 * 1024)
+    await expect(log.flush('large-snapshot')).rejects.toThrow('output_capture_queue_full')
+  })
+
+  it('rejects reads while the lost output has no durable gap marker', async () => {
+    const store = new RecoveringStore()
+    const log = new RunOutputLog({ store })
+    log.append('failed-marker', { kind: 'output', text: 'lost' })
+    await expect(log.since('failed-marker', 0)).rejects.toThrow('unavailable')
+    store.fail = false
+    log.append('failed-marker', { kind: 'output', text: 'after recovery' })
+    const page = await log.since('failed-marker', 0)
+    expect(page.chunks.map((chunk) => chunk.kind)).toEqual(['truncated', 'output'])
+    await expect(log.flush('failed-marker')).rejects.toThrow('unavailable')
+  })
+
   it('preserves a new overflow marker raised while an earlier batch is in flight', async () => {
     const store = new RecoveringStore()
     store.fail = false

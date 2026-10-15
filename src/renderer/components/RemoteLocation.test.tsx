@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRef } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { DesktopRemoteConnection, RemoteProviderRef } from '@shared/desktop-remote'
+import type { DesktopRemoteCatalog, DesktopRemoteConnection, RemoteProviderRef } from '@shared/desktop-remote'
 import { refreshDesktopConnections } from '../hooks/useDesktopConnections'
+import { forgetRemoteCatalog, refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
+import { SidebarRemoteProjects, useRemoteProjectGroups } from './SidebarRemoteProjects'
 import { createComposerDraftStore } from '../composer-drafts'
 import { HostsView } from './HostsView'
 import { LocationPicker, LOCAL_MACHINE } from './LocationPicker'
@@ -14,6 +16,11 @@ const host: DesktopRemoteConnection = {
   ssh: { hostname: 'mac2.example', username: 'test', port: 22 }, state: 'connected', expiresAt: 4102444800000
 }
 const list = vi.fn<() => Promise<DesktopRemoteConnection[]>>()
+const catalog = vi.fn<() => Promise<DesktopRemoteCatalog>>()
+function RemoteSidebar() {
+  const groups = useRemoteProjectGroups('')
+  return <SidebarRemoteProjects groups={groups} active={null} collapsed={new Set()} onToggle={() => {}} onPickSession={() => {}} onNewProjectChat={() => {}} />
+}
 const hosts = () => renderToStaticMarkup(<HostsView onNewSession={() => {}} />)
 const picker = (machineId = LOCAL_MACHINE) => renderToStaticMarkup(<LocationPicker
   current={{ machineId, cwd: machineId === LOCAL_MACHINE ? '/work/app' : '/remote/app' }}
@@ -31,7 +38,12 @@ const remoteChat = (connectionId: string, draft = '') => {
 }
 
 beforeEach(async () => {
-  vi.stubGlobal('window', { scry: { desktopRemote: { list } } })
+  vi.stubGlobal('window', { scry: { desktopRemote: { list, catalog } } })
+  forgetRemoteCatalog(host.id)
+  catalog.mockReset().mockResolvedValue({
+    projects: [{ path: '/remote/app', label: 'Remote app' }], providers: [], providerEvidence: 'host_snapshot',
+    sessions: [{ sessionId: 'remote-session', externalSessionId: 'native', providerId: 'pi', cwd: '/remote/app', label: 'Remote work', ts: 10, isActive: true }]
+  })
   list.mockReset().mockResolvedValue([])
   await refreshDesktopConnections()
 })
@@ -63,6 +75,34 @@ describe('saved host projection', () => {
     resolveOld([])
     await old
     expect(hosts()).toContain('mac2')
+  })
+})
+
+describe('remote sidebar activity evidence', () => {
+  it.each(['connected', 'disconnected', 'pairing'] as const)('only shows live activity on a connected host (%s)', async (state) => {
+    list.mockResolvedValue([{ ...host, state }])
+    await refreshDesktopConnections()
+    await refreshRemoteCatalog(host.id)
+    const html = renderToStaticMarkup(<RemoteSidebar />)
+    expect(html).toContain('Remote work')
+    expect(html.includes('class="sb-running"')).toBe(state === 'connected')
+  })
+
+  it('keeps cached history but not activity after a failed catalog read, including while refreshing', async () => {
+    list.mockResolvedValue([host])
+    await refreshDesktopConnections()
+    await refreshRemoteCatalog(host.id)
+    catalog.mockRejectedValueOnce(new Error('catalog unavailable'))
+    await refreshRemoteCatalog(host.id)
+    let resolve!: (value: DesktopRemoteCatalog) => void
+    catalog.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    const pending = refreshRemoteCatalog(host.id)
+    const html = renderToStaticMarkup(<RemoteSidebar />)
+    expect(html).toContain('Remote work')
+    expect(html).toContain('data-state="unknown"')
+    expect(html).not.toContain('class="sb-running"')
+    resolve({ projects: [], providers: [], sessions: [], providerEvidence: 'host_snapshot' })
+    await pending
   })
 })
 

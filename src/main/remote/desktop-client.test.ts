@@ -325,6 +325,25 @@ describe('DesktopRemoteClient', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('keeps missing lifecycle evidence unknown and rejects malformed state or event pages', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Status', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const runId = randomUUID()
+      for (const response of [null, {}, { state: 'running' }]) {
+        fixture.tlsRequest.mockResolvedValueOnce(response)
+        await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
+      }
+      fixture.tlsRequest.mockResolvedValueOnce({ state: 'settled' }).mockResolvedValueOnce({ poll: null })
+      await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
+      fixture.tlsRequest.mockResolvedValueOnce({ state: null }).mockResolvedValueOnce({ poll: { events: [], cursor: 0 } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown' })
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('rejects invitations with a changed or malformed anchor', async () => {
     const fixture = await setup()
     try {
@@ -335,10 +354,11 @@ describe('DesktopRemoteClient', () => {
 })
 
 describe('DesktopRemoteClient over real host TLS', () => {
-  it('completes pairing, catalog, trace/history reads, submit lifecycle, and revocation on production wire', async () => {
+  it.each([false, true])('completes production wire lifecycle independently of output capture failure (%s)', async (captureFailure) => {
     const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-real-'))
     const identity = await ensureHostIdentity(join(directory, 'identity'))
     const rememberDirectory = vi.fn()
+    let outputReads: MockInstance | undefined
     const binding = await createHostController({
       stateDirectory: directory,
       hostId: identity.hostId,
@@ -346,12 +366,21 @@ describe('DesktopRemoteClient over real host TLS', () => {
       verifyCSR: identity.verifyCSR,
       issue: identity.issue,
       authorizeWorkspace: (cwd) => cwd,
-      startRun: async ({ progress, runId }) => {
+      startRun: async ({ progress, runId, output }) => {
         progress(JSON.stringify({ event: 'bound', ledgerRunId: runId, scryRunId: 'run-real-1', providerId: 'claude', cwd: '/workspace' }))
         progress(JSON.stringify({ event: 'session', externalSessionId: 'session-real' }))
+        if (captureFailure) {
+          output({ kind: 'tool_result', text: 'x'.repeat(512 * 1024 + 1) })
+          throw new Error('403 model access restricted')
+        }
       },
       gate: new ProviderOperationGate(),
-      createOutputStore: (path) => new RunOutputFileStore(path),
+      createOutputStore: (path) => {
+        const store = new RunOutputFileStore(path)
+        outputReads = vi.spyOn(store, 'since')
+        if (captureFailure) outputReads.mockImplementation(() => { throw new Error('output_store_unavailable') })
+        return store
+      },
       listProjects: () => [{ path: '/workspace', label: 'workspace' }],
       desktopDirectories: { list: listDesktopDirectories, select: path => selectDesktopDirectory(path, rememberDirectory) },
       listProviders: () => [{ id: 'claude', label: 'Claude', available: true }],
@@ -410,11 +439,22 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(unknownIntent.status).toBe('unknown')
       const intent = await client.intentStatus(pending.connection.id, unknownIntent.intentId)
       expect(intent.status).toBe('recorded')
-      await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: 'settled', scryRunId: 'run-real-1', externalSessionId: 'session-real' })
-      await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: 'settled', scryRunId: 'run-real-1', externalSessionId: 'session-real' })
-      const watches = wire.filter((request): request is { op: string; cursor: number } => (request as { op?: string }).op === 'watch')
-      expect(watches[0]?.cursor).toBe(0)
-      expect(watches[1]?.cursor).toBeGreaterThan(0)
+      await binding.controller.idle()
+      const expectedState = captureFailure ? 'failed' : 'settled'
+      await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
+      await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
+      await expect(client.intents(pending.connection.id)).resolves.toEqual([])
+      expect(outputReads).not.toHaveBeenCalled()
+      expect(wire.some((request) => (request as { op?: string }).op === 'watch')).toBe(false)
+      const polls = wire.filter((request): request is { op: string; cursor: number } => (request as { op?: string }).op === 'poll')
+      expect(polls[0]?.cursor).toBe(0)
+      expect(polls[1]?.cursor).toBeGreaterThan(0)
+      const grant = binding.controller.authority.inspectLocal().grants[0]
+      if (captureFailure) {
+        const events = binding.controller.poll(grant.certificateSHA256, { cursor: 0 }).events
+        expect(events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)
+        expect(events.find((event) => event.kind === 'run_failed')?.detail).toBe('403 model access restricted')
+      }
       expect(wire.some((request) => (request as { op?: string }).op === 'desktop')).toBe(true)
       const wrongIdentity = await ensureHostIdentity(join(directory, 'wrong-anchor'))
       const changedInvitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: identity.hostId, anchorPEM: wrongIdentity.caCertificatePEM, pairPort: pairAddress.port, runPort: runAddress.port, pairingId: randomUUID(), secret: Buffer.from('changed-secret').toString('base64url'), expiresAt: Date.now() + 60_000 })).toString('base64url')}`
@@ -422,8 +462,8 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const wrongPairing = await ensureHostIdentity(join(directory, 'wrong-ca'))
       const wrongCaInvitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: wrongPairing.hostId, anchorPEM: wrongPairing.caCertificatePEM, pairPort: pairAddress.port, runPort: runAddress.port, pairingId: randomUUID(), secret: Buffer.from('wrong-secret').toString('base64url'), expiresAt: Date.now() + 60_000 })).toString('base64url')}`
       await expect(client.pair({ label: 'wrong CA', ssh, invitation: wrongCaInvitation })).rejects.toThrow()
-      const grant = binding.controller.authority.inspectLocal().grants[0]
       await binding.controller.authority.revoke(grant.deviceId)
+      await expect(client.runStatus(pending.connection.id, intent.runId!)).rejects.toThrow('desktop_remote_device_not_authorized')
       await expect(client.directories(pending.connection.id, directory)).rejects.toThrow()
       await expect(client.selectDirectory(pending.connection.id, directory)).rejects.toThrow()
       expect(rememberDirectory).toHaveBeenCalledTimes(1)

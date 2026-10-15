@@ -180,7 +180,9 @@ export class RunOutputLog {
     const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
     if (this.#store) {
       await this.#ensureDrain()
-      if (this.#persistenceErrors.has(runId) || this.#failedPersistentRuns.has(runId) || this.#pendingGapAfter.has(runId)) {
+      // A durable truncation marker makes partial output readable. Keep the
+      // historical capture error for terminal flush, not as a permanent read barrier.
+      if (this.#failedPersistentRuns.has(runId) || this.#pendingGapAfter.has(runId)) {
         throw this.#persistenceErrors.get(runId) ?? new Error('output_capture_gap_pending')
       }
       return this.#store.since(runId, start, pageSize)

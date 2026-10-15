@@ -1,7 +1,6 @@
-// 侧栏中的远程项目：与本机项目同一种行样式，只多一个主机标签。数据来自各主机的
-// catalog 快照（连接时读取，运行结束后刷新），不是实时运行状态，所以这里不显示
-// running/未读指示，也不提供本机才有的置顶、存档和重命名菜单。
-import { useState } from 'react'
+// Remote rows share local activity styling. The App refreshes host catalogs even
+// for background sessions; disconnected or failed reads are not live evidence.
+// Local-only pin, archive, rename and unread controls remain unavailable here.
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { providerIdForAgentId } from '@shared/runtime'
 import { basename, relTime } from '../format'
@@ -25,9 +24,10 @@ export function useRemoteProjectGroups(query: string) {
   const catalogs = useRemoteCatalogs()
   const ql = query.trim().toLowerCase()
   return connections.flatMap((connection) => {
-    const catalog = catalogs.get(connection.id)?.catalog
+    const entry = catalogs.get(connection.id)
+    const catalog = entry?.catalog
     if (!catalog) return []
-    const state = hostState(connection, readError)
+    const state = hostState(connection, readError ?? entry.error ?? null)
     const labels = new Map(catalog.projects.map((project) => [project.path, project.label]))
     const byProject = new Map<string, RemoteSessionRef[]>()
     for (const session of catalog.sessions) {
@@ -42,6 +42,7 @@ export function useRemoteProjectGroups(query: string) {
       state,
       cwd,
       name: labels.get(cwd) ?? basename(cwd),
+      mtime: Math.max(...sessions.map((session) => session.ts)),
       sessions: sessions.sort((left, right) => right.ts - left.ts)
     }))
   })
@@ -50,15 +51,18 @@ export function useRemoteProjectGroups(query: string) {
 export function SidebarRemoteProjects({
   groups,
   active,
+  collapsed,
+  onToggle,
   onPickSession,
   onNewProjectChat
 }: {
   groups: RemoteProjectGroup[]
   active: ActiveRemoteLocation | null
+  collapsed: ReadonlySet<string>
+  onToggle: (key: string) => void
   onPickSession: (connectionId: string, session: RemoteSessionRef) => void
   onNewProjectChat: (connectionId: string, cwd: string) => void
 }) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   return (
     <>
       {groups.map((group) => {
@@ -72,11 +76,7 @@ export function SidebarRemoteProjects({
                 className={`sb-proj-head ${projectSelected ? 'on' : ''}`}
                 aria-label={`${group.name} · ${group.connection.label} · ${group.cwd}`}
                 aria-expanded={open}
-                onClick={() => setCollapsed((current) => {
-                  const next = new Set(current)
-                  if (!next.delete(group.key)) next.add(group.key)
-                  return next
-                })}
+                onClick={() => onToggle(group.key)}
               >
                 <Icon name="folder" className="sb-project-folder" />
                 <span className="pname">{group.name}</span>
@@ -99,11 +99,12 @@ export function SidebarRemoteProjects({
                 {group.sessions.map((session) => {
                   const selected = active?.connectionId === group.connection.id && active.cwd === group.cwd && active.externalSessionId === session.externalSessionId
                   const provider = providerIdForAgentId(session.providerId)
+                  const running = group.state === 'connected' && session.isActive === true
                   return (
                     <div className="sb-sess-row" key={session.sessionId}>
                       <button
                         type="button"
-                        className={`sb-sess ${selected ? 'active' : ''}`}
+                        className={['sb-sess', selected && 'active', running && 'running'].filter(Boolean).join(' ')}
                         data-provider={session.providerId}
                         data-remote-session={session.externalSessionId}
                         aria-current={selected ? 'true' : undefined}
@@ -117,6 +118,7 @@ export function SidebarRemoteProjects({
                         <span className="sb-session-meta">
                           <span className="sb-sesstime">{relTime(session.ts)}</span>
                         </span>
+                        {running && <span className="sb-running" role="status" aria-label="正在运行" title="正在运行" />}
                       </button>
                     </div>
                   )

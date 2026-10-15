@@ -126,10 +126,10 @@ export const Sidebar = memo(function Sidebar({
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
   const [projectDialog, setProjectDialog] = useState<{ mode: 'rename' | 'remove'; project: ProjectMeta } | null>(null)
   const projectMenuRef = useRef<HTMLDivElement>(null)
-  const toggle = (cwd: string): void =>
+  const toggle = (key: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
-      next.has(cwd) ? next.delete(cwd) : next.add(cwd)
+      next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
   useEffect(() => {
@@ -168,6 +168,17 @@ export const Sidebar = memo(function Sidebar({
       .filter((project) => project.projectMatch || project.sessions.length > 0)
     return { pinned, filtered }
   }, [projects, ql])
+  // Match local project ordering: named roots, explicit pins, then recent activity.
+  // Remote projects must not live in a separate tail section below every local root.
+  const projectGroups = [
+    ...filtered.map((project) => ({ kind: 'local' as const, project, cwd: project.cwd, pinnedAt: project.pinnedAt, mtime: project.mtime })),
+    ...(showRemote ? remoteGroups.map((project) => ({ kind: 'remote' as const, project, cwd: project.cwd, pinnedAt: undefined, mtime: project.mtime })) : [])
+  ].sort((a, b) =>
+    Number(!a.cwd) - Number(!b.cwd) ||
+    Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)) ||
+    (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) ||
+    b.mtime - a.mtime
+  )
   const isActive = (cwd: string, session: SessionMeta): boolean => sessionMatchesSelection(cwd, session, {
     cwd: activeCwd,
     sessionId: activeSessionId,
@@ -287,7 +298,19 @@ export const Sidebar = memo(function Sidebar({
         {filtered.length === 0 && pinned.length === 0 && !showRemote && (
           <div className="sb-empty">{projects.length === 0 ? '暂无项目' : '无匹配项目或会话'}</div>
         )}
-        {filtered.map((p) => {
+        {projectGroups.map((group) => {
+          if (group.kind === 'remote') return (
+            <SidebarRemoteProjects
+              key={group.project.key}
+              groups={[group.project]}
+              active={activeRemote}
+              collapsed={collapsed}
+              onToggle={toggle}
+              onPickSession={onPickRemoteSession!}
+              onNewProjectChat={onNewRemoteProjectChat!}
+            />
+          )
+          const p = group.project
           const open = !collapsed.has(p.cwd)
           const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
           const projectSelected = active && activeSessionId == null
@@ -362,14 +385,6 @@ export const Sidebar = memo(function Sidebar({
             </div>
           )
         })}
-        {showRemote && onPickRemoteSession && onNewRemoteProjectChat && (
-          <SidebarRemoteProjects
-            groups={remoteGroups}
-            active={activeRemote}
-            onPickSession={onPickRemoteSession}
-            onNewProjectChat={onNewRemoteProjectChat}
-          />
-        )}
       </div></SessionHoverProvider>
 
       {sessionMenu && onRenameSession && (

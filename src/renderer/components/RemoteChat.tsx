@@ -110,17 +110,21 @@ export function RemoteChat({
   const connected = !readError && connection?.state === 'connected'
   const host = connection?.label ?? '远程主机'
   const catalog = useRemoteCatalogs().get(connectionId)?.catalog
+  const catalogReady = catalog !== undefined
   const [providerSelection, setProviderSelection] = useState(session ? desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId }) : '')
   const [sessionId, setSessionId] = useState<string | undefined>(session?.externalSessionId)
   const [controls, setControls] = useState<AgentRunControls>({ permissionMode: 'default' })
   const [turns, setTurns] = useState<Turn[]>([])
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
-  const [runStatus, setRunStatus] = useState<DesktopRemoteRunStatus | null>(null)
+  const [runStatus, setRunStatus] = useState<(DesktopRemoteRunStatus & { runId: string }) | null>(null)
   const [intents, setIntents] = useState<DesktopRemoteIntent[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [pollError, setPollError] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const generation = useRef(0)
@@ -159,7 +163,7 @@ export function RemoteChat({
     const preserveAdoptedRun = adoptingSession.current
     adoptingSession.current = false
     if (!preserveAdoptedRun) { adoptedIntent.current = undefined; setActiveRun(null); setRunStatus(null) }
-    setStatus(null); setError(null); setHistoryEvidence(null); setTurns([])
+    setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
   }, [contextKey])
   // Controls start from host defaults whenever the context changes or its Provider
   // first resolves from the catalog; later catalog refreshes keep the user's choice.
@@ -169,25 +173,25 @@ export function RemoteChat({
   }, [contextKey, providerResolved])
 
   useEffect(() => {
-    if (!connected || !catalog || !providerId || !sessionId) {
+    if (!connected || !catalogReady || !providerId || !sessionId) {
       if (!sessionId) { setTurns([]); setHistoryEvidence(null) }
       setHistoryLoading(false)
       return
     }
     const sequence = ++generation.current
-    setError(null)
+    setHistoryError(null)
     setHistoryLoading(true)
     void api.history(connectionId, context).then((history) => {
       if (sequence !== generation.current) return
       setTurns(historyTurns(history))
       setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
-    }).catch((reason) => { if (sequence === generation.current) setError(errorText(reason)) })
+    }).catch((reason) => { if (sequence === generation.current) setHistoryError(errorText(reason)) })
       .finally(() => { if (sequence === generation.current) setHistoryLoading(false) })
     return () => { generation.current += 1 }
-  }, [api, catalog, connectionId, connected, context, providerId, sessionId])
+  }, [api, catalogReady, connectionId, connected, context, historyRevision, providerId, sessionId])
 
   useEffect(() => {
-    if (!connected || !catalog || !providerId) return
+    if (!connected || !catalogReady || !providerId) return
     let cancelled = false
     const poll = async (): Promise<void> => {
       if (pollInFlight.current) return
@@ -199,10 +203,10 @@ export function RemoteChat({
         const activeIntent = pending.filter((intent) => intentMatches(intent, context) && intent.runId).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
           (adoptedIntent.current ? pending.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
         setIntents(pending)
-        if (!activeIntent?.runId) { setActiveRun(null); setRunStatus(null); return }
+        if (!activeIntent?.runId) { setActiveRun(null); setRunStatus(null); setPollError(null); return }
         const nextStatus = await api.runStatus(connectionId, activeIntent.runId)
         if (cancelled || sequence !== pollSequence.current) return
-        setRunStatus(nextStatus)
+        setRunStatus({ ...nextStatus, runId: activeIntent.runId })
         if (nextStatus.externalSessionId && !context.externalSessionId && !activeIntent.context.externalSessionId) {
           adoptedIntent.current = activeIntent
           adoptingSession.current = true
@@ -216,17 +220,24 @@ export function RemoteChat({
           setSessionId(nextStatus.externalSessionId)
           onSessionAdopted(nextStatus.externalSessionId)
         }
+        // Terminal status retires the main-process receipt. Refresh history even
+        // if the last trace read fails, before the next poll drops that receipt.
+        if (nextStatus.state === 'settled' || nextStatus.state === 'failed') {
+          setHistoryRevision((revision) => revision + 1)
+          void refreshRemoteCatalog(connectionId)
+        }
         if (nextStatus.scryRunId) {
           const run = await api.trace(connectionId, context, nextStatus.scryRunId)
-          if (!cancelled && sequence === pollSequence.current) setActiveRun(run)
+          if (cancelled || sequence !== pollSequence.current) return
+          setActiveRun(run)
         } else setActiveRun(null)
-        if (nextStatus.state === 'settled' || nextStatus.state === 'failed') await refreshRemoteCatalog(connectionId)
-      } catch (reason) { if (!cancelled && sequence === pollSequence.current) setError(errorText(reason)) }
+        setPollError(null)
+      } catch (reason) { if (!cancelled && sequence === pollSequence.current) setPollError(errorText(reason)) }
       finally { pollInFlight.current = false }
     }
     void poll(); const timer = window.setInterval(() => { void poll() }, 1500)
     return () => { cancelled = true; pollSequence.current += 1; window.clearInterval(timer) }
-  }, [api, catalog, connectionId, connected, context, providerId])
+  }, [api, catalogReady, connectionId, connected, context, providerId])
 
   const runControlCatalog = useMemo(() => remoteRunControlCatalog(provider, host), [host, provider])
   const chosenModel = provider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
@@ -252,6 +263,8 @@ export function RemoteChat({
   }, [activeRun, turns])
   const currentIntent = intents.filter((intent) => intentMatches(intent, context)).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
     (adoptedIntent.current ? intents.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
+  // A previous turn's status is not evidence for the newly submitted receipt.
+  const currentRunStatus = runStatus?.runId === currentIntent?.runId ? runStatus : null
   // Same gate as the host ledger: a listed run or an unknown receipt blocks another send.
   const runActive = Boolean(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
@@ -278,7 +291,7 @@ export function RemoteChat({
     if (!contextAvailable || !text || submitting || runActive) return
     const submittedGeneration = contextGeneration.current
     const submittedKey = draftKey
-    setSubmitting(true); setError(null); setStatus('已记录提交，等待远端派发…')
+    setSubmitting(true); setError(null); setStatus(null)
     try {
       const intent = await api.submit(connectionId, {
         context,
@@ -293,7 +306,7 @@ export function RemoteChat({
       if (shouldQueryUnknownIntent(intent)) {
         const queried = await api.intentStatus(connectionId, intent.intentId)
         if (submittedGeneration !== contextGeneration.current) return
-        setStatus(queried.status === 'unknown' ? '提交结果未知；未自动重试，请检查远端运行状态。' : `提交状态：${queried.status}`)
+        setIntents((current) => current.map((item) => item.intentId === queried.intentId ? queried : item))
       }
     } catch (reason) {
       if (submittedGeneration === contextGeneration.current) { setError(errorText(reason)); setStatus(null) }
@@ -305,7 +318,7 @@ export function RemoteChat({
       const checked = await api.intentStatus(connectionId, intent.intentId)
       if (checkedGeneration !== contextGeneration.current) return
       setIntents((current) => current.map((item) => item.intentId === checked.intentId ? checked : item))
-      setStatus(checked.status === 'unknown' ? '远端仍未确认此提交；不会自动重试。' : `提交状态：${checked.status}`)
+      setStatus(null)
     } catch (reason) { if (checkedGeneration === contextGeneration.current) setError(errorText(reason)) }
   }
   const stop = async (): Promise<void> => {
@@ -325,8 +338,9 @@ export function RemoteChat({
       const history = await api.history(connectionId, context, historyEvidence.before, historyEvidence.snapshot)
       if (sequence !== generation.current) return
       setTurns((current) => [...historyTurns(history), ...current])
+      setHistoryError(null)
       setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
-    } catch (reason) { if (sequence === generation.current) setError(errorText(reason)) }
+    } catch (reason) { if (sequence === generation.current) setHistoryError(errorText(reason)) }
   }
   const connect = useCallback(async (): Promise<void> => {
     setConnecting(true); setError(null)
@@ -354,6 +368,7 @@ export function RemoteChat({
   const selectedAgentId = provider ? remoteAgentId(provider) : missingAgentId ?? ''
 
   const unknownIntent = intents.find((intent) => intent.status === 'unknown' && intentMatches(intent, context))
+  const noticeError = error ?? pollError ?? historyError
   const notice = !connected
     ? {
         tone: 'blocked' as const,
@@ -368,16 +383,22 @@ export function RemoteChat({
           ? { action: { label: connecting ? '正在连接…' : '连接', onClick: () => void connect(), disabled: connecting } }
           : {})
       }
-    : error
-      ? { tone: 'error' as const, text: error }
+    : noticeError
+      ? { tone: 'error' as const, text: noticeError }
       : unknownIntent
         ? { tone: 'blocked' as const, text: '提交结果未知；Scry 不会盲目重发同一提示词。', action: { label: '检查远端状态', onClick: () => void checkUnknown(unknownIntent) } }
-      : runStatus?.state === 'unknown'
-        ? { tone: 'blocked' as const, text: `远程运行结果未知${runStatus.detail ? ` · ${runStatus.detail}` : ''}；不会自动重试。` }
-        // Submit/stop/answer notes describe the run in flight; once the host ledger drops it they are stale.
+      : currentRunStatus?.state === 'unknown'
+        ? { tone: 'blocked' as const, text: `远程运行结果未知${currentRunStatus.detail ? ` · ${currentRunStatus.detail}` : ''}；不会自动重试。` }
+        // Stop/answer notes remain relevant while the run is in flight.
         : status && (submitting || runActive)
           ? { tone: 'blocked' as const, text: status }
-          : null
+          // Receipt acknowledgement is not dispatch. Only this run's host state
+          // can retire the waiting notice, even before its first trace arrives.
+          : currentIntent?.status === 'recorded' && (!currentRunStatus || currentRunStatus.state === 'recorded')
+            ? { tone: 'blocked' as const, text: '已记录提交，等待远端派发…' }
+            : submitting && !currentIntent
+              ? { tone: 'blocked' as const, text: '正在提交到远端…' }
+              : null
 
   return (
     <>

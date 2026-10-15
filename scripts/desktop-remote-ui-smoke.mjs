@@ -13,6 +13,7 @@ const negativeControl = process.argv.includes('--negative-control')
 const negativeMachineControl = process.argv.includes('--negative-machine-control')
 const negativeAddressControl = process.argv.includes('--negative-address-control')
 const negativeHoverControl = process.argv.includes('--negative-hover-control')
+const negativeActivityControl = process.argv.includes('--negative-activity-control')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -36,8 +37,10 @@ const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
-  intent: null, connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
+  intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false,
+  connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
+  catalogFailure: false, sessionActive: false, sessionTs: 1700000000000,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false
 }
@@ -62,7 +65,10 @@ const catalog = {
   providers: [alpha, { ...alpha, agentProfileId: 'alternate', label: 'Profile Alternate', modelId: 'alpha-alternate',
     models: [{ id: 'alpha-alternate', label: 'Alternate model', isDefault: true }],
     permissions: [{ id: 'default', label: 'Default', isDefault: true }] }, beta],
-  sessions: [{ sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 }],
+  sessions: [
+    { sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 },
+    { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
+  ],
   providerEvidence: 'host_snapshot', directorySelection: true
 }
 const contextFor = (input) => ({ ...input.context })
@@ -93,7 +99,14 @@ const api = {
   async connect() { state.connectCalls++; state.connected = true },
   async disconnect() { state.connected = false },
   async forget() {},
-  async catalog() { return structuredClone({ ...catalog, projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })), providers: state.hideProvider ? [beta] : catalog.providers, directorySelection: state.oldDirectoryHost ? undefined : true }) },
+  async catalog() {
+    if (state.catalogFailure) throw new Error('fixture catalog unavailable')
+    return structuredClone({ ...catalog,
+      projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
+      sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs } : session),
+      providers: state.hideProvider ? [beta] : catalog.providers, directorySelection: state.oldDirectoryHost ? undefined : true
+    })
+  },
   async directories(id, path = '/fixture/home', cursor = 0, snapshot) {
     state.directoryReads.push({ id, path, cursor, snapshot })
     if (!['/fixture/home', '/fixture/home/custom', '/fixture/home/empty'].includes(path)) throw new Error('directory_unavailable')
@@ -110,26 +123,39 @@ const api = {
     if (!catalog.projects.some(item => item.path === path)) catalog.projects.push(project)
     return project
   },
-  async history(_id, context) { state.historyCalls.push(contextFor({ context })); return { turns: [], hasOlder: false, source: 'trace_archive', status: 'available' } },
+  async history(_id, context) {
+    state.historyCalls.push(contextFor({ context }))
+    const turns = state.firstIntentCleared && context.externalSessionId === 'native-session'
+      ? [{ runId: firstScryRun, userText: 'archived terminal turn', items: [], done: true }] : []
+    return { turns, hasOlder: false, source: 'trace_archive', status: 'available' }
+  },
   async trace(_id, context, runId) {
     state.traceCalls.push({ context: contextFor({ context }), runId })
+    if (context.cwd !== '/fixture/project-a') throw new Error('fixture trace context mismatch: ' + context.cwd)
+    if (runId === firstScryRun && state.firstIntentCleared) throw new Error('terminal trace unavailable')
     if (runId === firstScryRun) return activeRun(firstScryRun, 'native-session', 'first remote run', question)
     if (runId === secondScryRun) return activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
     return null
   },
   async intents() {
     state.intentsCalls++
-    if (state.answerFailure && state.intent?.runId === firstLedger) { state.firstIntentCleared = true; return [] }
     return state.intent ? [state.intent] : []
   },
   async submit(_id, input) {
     state.submitInputs.push(input)
+    if (state.holdSubmit) await new Promise(resolve => { window.releaseSubmit = resolve })
     const first = state.submitInputs.length === 1
     state.intent = { intentId: first ? 'intent-first' : 'intent-second', connectionId: connection.id, context: contextFor(input), createdAt: state.submitInputs.length, status: 'recorded', runId: first ? firstLedger : secondLedger }
     return state.intent
   },
   async intentStatus() { return state.intent },
   async runStatus(_id, runId) {
+    if (state.runStatusFailure) throw new Error('desktop_remote_output_capture_queue_full')
+    if (state.answerFailure && runId === firstLedger) {
+      state.firstIntentCleared = true; state.intent = null
+      return { state: 'failed', scryRunId: firstScryRun, externalSessionId: 'native-session' }
+    }
+    if (state.runState !== 'dispatched' || !state.exposeTrace) return { state: state.runState }
     if (runId === firstLedger) return { state: 'dispatched', scryRunId: firstScryRun, externalSessionId: 'native-session', detail: 'fixture dispatched' }
     return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', detail: 'fixture background work' }
   },
@@ -143,7 +169,12 @@ window.scry = {
   // Same minimal full-App bridge contract as session-selection-smoke.tsx.
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
-  listProjects: async () => [], recentFolders: async () => Array.from({ length: 12 }, (_, index) => '/fixture/recent-' + index),
+  listProjects: async () => [
+    { cwd: '/fixture/pinned', name: 'Pinned local', pinnedAt: 1, mtime: 1, sessions: [] },
+    { cwd: '/fixture/recent', name: 'Recent local', mtime: 1700000001000, sessions: [] },
+    { cwd: '/fixture/older', name: 'Older local', mtime: 1699999999000, sessions: [] }
+  ],
+  recentFolders: async () => Array.from({ length: 12 }, (_, index) => '/fixture/recent-' + index),
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
   detect: async () => [], listSkills: async () => ({ state: 'unavailable', data: null }),
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
@@ -201,9 +232,9 @@ async function exercise(contents, capture) {
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
   }
   const key = async (key, code = key, modifiers = 0) => {
-    const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'ArrowDown' ? 40 : key === 'ArrowUp' ? 38 : key.length === 1 ? (key.charCodeAt(0) < 128 ? key.toUpperCase().charCodeAt(0) : 0) : undefined
+    const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'Backspace' ? 8 : key === 'ArrowDown' ? 40 : key === 'ArrowUp' ? 38 : key.length === 1 ? (key.charCodeAt(0) < 128 ? key.toUpperCase().charCodeAt(0) : 0) : undefined
     const nativeVirtualKeyCode = process.platform === 'darwin'
-      ? { Enter: 36, Escape: 53, ArrowDown: 125, ArrowUp: 126, b: 11, f: 3 }[key]
+      ? { Enter: 36, Escape: 53, Backspace: 51, ArrowDown: 125, ArrowUp: 126, b: 11, f: 3 }[key]
       : virtualKey
     await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
     if (key.length === 1) await send('Input.dispatchKeyEvent', { type: 'char', key, text: key, unmodifiedText: key, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
@@ -236,6 +267,32 @@ async function exercise(contents, capture) {
   await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'hosts nav connected count')
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  const projectOrder = () => read('Array.from(document.querySelectorAll(".sb-proj .pname"), node => node.textContent)')
+  check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Recent local', 'Project A', 'Older local', 'Project B']), 'Remote project was appended instead of sorted by recent activity')
+  check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
+  // Host-side activity changes while the user stays in the local composer.
+  // No explicit refresh: the shared loader must observe starts and stops itself.
+  await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000')
+  await wait('document.querySelector(".sb-remote-proj .sb-sess.running .sb-running") != null', 'background remote session shows a running spinner')
+  check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')
+  check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "sb-running-spin"'), 'Remote activity did not reuse the local spinner animation')
+  await capture('remote-sidebar-running')
+  await read('window.desktopRemoteFixture.catalogFailure = true')
+  await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "unknown"', 'failed catalog read invalidates live activity')
+  check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Stale catalog still claimed a running remote session')
+  check(await read('document.querySelector(".sb-remote-proj [data-remote-session=old-native]") != null'), 'Catalog failure discarded remote history')
+  await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false')
+  await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog polling recovers')
+  check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
+  const projectAHead = '.sb-proj-head[aria-label="Project A · Fixture desktop · /fixture/project-a"]'
+  await click(projectAHead)
+  await wait(`document.querySelector(${JSON.stringify(projectAHead)}).getAttribute('aria-expanded') === 'false'`, 'remote project collapsed')
+  await click('.sb-search input'); await insert('Project B')
+  await wait('document.querySelectorAll(".sb-remote-proj").length === 1 && document.querySelector(".sb-remote-proj .pname")?.textContent === "Project B"', 'remote project filtered out')
+  await read('document.querySelector(".sb-search input").select()'); await key('Backspace')
+  await wait(`document.querySelector(${JSON.stringify(projectAHead)}) != null`, 'remote project restored after search')
+  check(await read(`document.querySelector(${JSON.stringify(projectAHead)}).getAttribute('aria-expanded') === 'false'`), 'Search reset remote project collapse state')
+  await click(projectAHead)
   const localBefore = (await fixture()).localNewSessions
   await click('textarea[aria-label="描述任务"]')
   await insert('carried draft')
@@ -341,21 +398,29 @@ async function exercise(contents, capture) {
   await click('textarea[aria-label="描述任务"]')
   await read(`(() => { const node = document.querySelector('textarea[aria-label="描述任务"]'); node.select() })()`)
   await insert('first prompt')
+  await read('window.desktopRemoteFixture.holdSubmit = true')
   await key('Enter')
   await key('Enter')
   await wait('window.desktopRemoteFixture.submitInputs.length === 1', 'double Enter submit')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("正在提交到远端")', 'submission without an acknowledgement')
+  check(!(await read('document.querySelector(".composer-notice")?.textContent.includes("已记录提交")')), 'Unacknowledged submission claimed a recorded receipt')
+  await read('window.desktopRemoteFixture.holdSubmit = false; window.releaseSubmit()')
   const afterFirstSubmit = await fixture()
   check(afterFirstSubmit.submitInputs.length === 1, 'Double Enter submitted more than once')
   check(afterFirstSubmit.submitInputs[0].prompt === 'first prompt', 'Remote submit did not send the composer text')
+  check(afterFirstSubmit.submitInputs[0].context.cwd === '/fixture/project-a', 'First submit used the wrong remote project: ' + afterFirstSubmit.submitInputs[0].context.cwd)
   check(afterFirstSubmit.submitInputs[0].permissionMode === 'full_access', 'Selected permission was not submitted')
   check(afterFirstSubmit.submitInputs[0].context.externalSessionId === undefined, 'First message unexpectedly had a native session')
   await wait('window.desktopRemoteFixture.traceCalls.some(call => call.runId === "remote-run-fixture-1")', 'canonical trace lookup')
   await wait('document.querySelector(".question-inline-form") != null', 'remote question')
+  check(!(await read('document.querySelector(".composer-notice")?.textContent.includes("等待远端派发")')), 'Adopted dispatched run still shows waiting for dispatch')
   check(await read('document.querySelector(".clibtn").disabled'), 'Adopted session must keep its Provider identity')
 
   await click('.run-status-stop')
   await wait('window.desktopRemoteFixture.stopCalls.length === 1', 'remote stop')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("已请求停止，等待远端确认")', 'stop acknowledgement remains visible on a dispatched run')
   check((await fixture()).stopCalls[0] === '11111111-1111-4111-8111-111111111111', 'Stop did not use the ledger intent UUID')
+  const historyBeforeTerminal = (await fixture()).historyCalls.length
   await click('.question-option input[type="radio"]')
   await click('.question-submit')
   await wait('document.querySelector(".question-error")?.textContent.includes("remote answer rejected")', 'stable answer failure')
@@ -363,26 +428,45 @@ async function exercise(contents, capture) {
   check(afterAnswer.answerCalls.length === 1 && afterAnswer.answerCalls[0].runId === '11111111-1111-4111-8111-111111111111', 'Answer did not use the ledger intent UUID')
   check(!(await bodyText()).includes('已发送回答'), 'Failed answer was rendered as success')
   await wait('window.desktopRemoteFixture.firstIntentCleared === true', 'clear first intent')
+  await wait(`window.desktopRemoteFixture.historyCalls.length > ${historyBeforeTerminal}`, 'terminal status refreshes canonical history')
+  check(await read('document.querySelector(".composer-notice")?.textContent.includes("remote answer rejected")'), 'Successful poll erased an unrelated action error')
 
   await wait('document.querySelector(".run-status") == null', 'first run no longer blocks the composer')
+  await wait('document.body.textContent.includes("archived terminal turn")', 'terminal history survives a failed final trace read')
   await click('textarea[aria-label="描述任务"]')
   await insert('next prompt after native adoption')
+  await read('window.desktopRemoteFixture.runState = "recorded"; window.desktopRemoteFixture.exposeTrace = false')
   await key('Enter')
   await wait('window.desktopRemoteFixture.submitInputs.length === 2', 'next message')
   check((await fixture()).submitInputs[1].context.externalSessionId === 'native-session', 'New native session was not adopted for the next message')
+  check((await fixture()).submitInputs[1].context.cwd === '/fixture/project-a', 'Resumed submit used the wrong remote project')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("等待远端派发")', 'recorded receipt waits for dispatch on the next turn')
+  await read('window.desktopRemoteFixture.runStatusFailure = true')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("desktop_remote_output_capture_queue_full")', 'poll failure remains visible while unconfirmed')
+  await read('window.desktopRemoteFixture.runStatusFailure = false; window.desktopRemoteFixture.runState = "unknown"')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("远程运行结果未知")', 'unknown run state is not hidden as dispatched')
+  await read('window.desktopRemoteFixture.runState = "dispatched"')
+  await wait('document.querySelector(".composer-notice") == null', 'dispatch retires waiting notice before trace arrives')
+  check(await read('document.querySelector(".run-status") != null'), 'Dispatched run no longer blocks the composer')
+  check(!(await fixture()).traceCalls.some(call => call.runId === 'remote-run-fixture-2'), 'Dispatch notice check unexpectedly relied on trace output')
+  await read('window.desktopRemoteFixture.exposeTrace = true')
   await wait('window.desktopRemoteFixture.traceCalls.some(call => call.runId === "remote-run-fixture-2")', 'second remote run trace')
   await wait('document.body.textContent.includes("second remote run")', 'second remote run displayed')
+  check(!(await read('document.querySelector(".composer-notice")?.textContent.includes("等待远端派发")')), 'Dispatched remote run still shows waiting for dispatch')
   check((await bodyText()).includes('remote background task'), 'Remote background task panel was not visible')
   check(!(await read('document.querySelector("[aria-label^=\\"停止任务\\"]")')), 'Remote background task exposed a task-stop control')
   check((await fixture()).backgroundStopCalls === 0, 'Remote background task reached stopBackgroundTask while visible')
   check(!(await read('document.querySelector(".location-button")')), 'Existing remote session exposed the location picker')
 
   // New conversation stays on the current machine and project.
+  const beforeNewProject = await read('document.querySelector(".execution-location.is-remote").closest(".tb-thread").getAttribute("title")')
+  check(beforeNewProject === '/fixture/project-a', 'Remote project changed before New conversation: ' + beforeNewProject)
   await click('.sb-new')
   // Controls reset in an effect after remount; wait for the settled default so coordinates stay valid.
   await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "Alpha Default"', 'new draft on same machine unlocks execution context')
   check(await read(remoteShown), 'New conversation left the remote machine')
-  check(await read('document.querySelector(".location-button").getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-a"'), 'New conversation changed the project')
+  const newConversationLocation = await read('document.querySelector(".location-button").getAttribute("aria-label")')
+  check(newConversationLocation === '执行位置：Fixture desktop / /fixture/project-a', 'New conversation changed the project: ' + newConversationLocation)
   const afterNew = await fixture()
   check(afterNew.localNewSessions === localBefore, 'Remote new conversation called local newSession')
   check(afterNew.stopCalls.length === 1, 'Context switch stopped the previous remote run')
@@ -542,6 +626,8 @@ async function exercise(contents, capture) {
     readFailureKeepsSavedHosts: true,
     reconnectPreservesDraft: true,
     staleDispatchNoticeCleared: true,
+    dispatchNoticeLifecycle: { unacknowledged: true, recorded: true, unknown: true, dispatchedBeforeTrace: true, resumedTurn: true, stopAcknowledgement: true, pollErrorRecovery: true, terminalHistoryRefresh: true, actionErrorPreserved: true },
+    remoteSidebarActivity: { backgroundStartStop: true, sharedSpinner: true, recentProjectOrder: true, localPinsPreserved: true, staleReadNotLive: true, collapseSurvivesSearch: true },
     hostEnableInviteDisable: true,
     providerProfileIdentity: true,
     nativeCoordinateInput: true,
@@ -566,7 +652,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeActivityControl && id.endsWith('/useRemoteCatalogs.ts')) {
+        const poll = 'const timer = window.setInterval(refresh, 3000)'
+        if (!source.includes(poll)) throw new Error('activity polling control not found')
+        return source.replace(poll, poll + '; window.clearInterval(timer)')
+      }
       if (negativeHoverControl && id.endsWith('/remote-location.css')) {
         const height = 'height: min(360px, 40vh);'
         if (!source.includes(height)) throw new Error('hover height control not found')
@@ -628,7 +719,9 @@ try {
       const failure = new Error(`DesktopRemote UI timed out (pid=${child.pid}, fixture=${temp}):\\n${output.slice(-8000)}`)
       console.error(failure.message)
       cleanupTimer = stopOwnedApp(child).then(() => reject(failure), (error) => { cleanupUnknown = true; reject(new Error(`DesktopRemote cleanup unknown; fixture preserved: ${temp}`, { cause: error })) })
-    }, 35_000)
+    // Includes three 3s background catalog transitions plus recorded/unknown/
+    // dispatched run polls. Per-condition deadlines stay unchanged at 7s.
+    }, 55_000)
     child.stdout.on('data', (chunk) => { output += chunk.toString() })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
     child.once('error', (error) => { clearTimeout(timer); failed = true; reject(error) })
