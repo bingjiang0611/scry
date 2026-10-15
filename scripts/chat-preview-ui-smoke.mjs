@@ -82,6 +82,15 @@ async function exercise() {
     await waitFor(() => !document.querySelector('.image-lightbox'))
     check(document.activeElement === thumb, 'Backdrop close did not restore focus')
   }
+  const piTurns = document.querySelectorAll('#pi-feedback-fixture .turn-assistant')
+  check(piTurns.length === 2, 'Pi live/history feedback fixtures did not mount')
+  for (const turn of piTurns) {
+    check(!turn.textContent.includes('TPS 25.7'), 'Pi info notification leaked into conversation')
+    check(turn.textContent.includes('已完成代码检查。'), 'Pi reply was hidden with notification')
+    check(turn.querySelector('[aria-label="Pi 扩展通知"]')?.textContent.includes('扩展警告内容'), 'Pi warning was hidden or mislabeled')
+    const commands = turn.querySelectorAll('[aria-label="Pi 命令反馈"]')
+    check(commands.length === 1 && commands[0].textContent.includes('/test-command 已执行'), 'Pi command feedback was hidden or mixed with notifications')
+  }
   const pausedGoal = document.querySelector('#goal-paused-fixture')
   pausedGoal.hidden = false
   const termination = pausedGoal.querySelector('[role="status"]')
@@ -148,7 +157,7 @@ async function exercise() {
   enter()
   check(input.dataset.sends === '2', 'Enter after Space confirmed the IME candidate was swallowed')
   await waitFor(() => input.value === '')
-  return { imeConfirmationProtected: true, immediateEnterSends: true, spaceConfirmationSends: true, viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, markdownDeferred: true, toolsDeferred: true, projectPickerLifecycle: true, promptHistoryNavigation: true }
+  return { imeConfirmationProtected: true, immediateEnterSends: true, spaceConfirmationSends: true, viewport: [innerWidth, innerHeight], portraitAndLandscape: true, attachmentFlow: true, viewportOverlay: true, zoomScroll: true, closePaths: true, focusRestore: true, markdownDeferred: true, toolsDeferred: true, projectPickerLifecycle: true, promptHistoryNavigation: true, piFeedbackSeparated: true }
 }
 
 async function exerciseNativeComposerEnter(contents) {

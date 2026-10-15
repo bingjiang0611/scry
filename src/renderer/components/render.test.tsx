@@ -1642,6 +1642,49 @@ describe('工作区文件面板', () => {
 })
 
 describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
+  it.each([false, true])('Pi 普通扩展通知不进入对话正文，保留回复与真实命令反馈（done=%s）', (done) => {
+    const piTurn: Turn = {
+      runId: 'pi-notifications', userText: '继续', done,
+      items: [
+        ev({ id: 'pi-reply', kind: 'model', stage: 'text', text: '已完成代码检查。' }),
+        ev({
+          id: 'pi-tps', kind: 'harness', stage: 'runtime:extension_ui', providerId: 'pi', runtimeProvider: 'pi_rpc',
+          text: 'TPS 25.7 tok/s. out 794, in 9,676, cache r/w 54,912/0, total 65,382, 30.9s',
+          runtimeMetadata: { method: 'notify', notifyType: 'info' }
+        }),
+        ev({
+          id: 'pi-command', kind: 'harness', stage: 'result', providerId: 'pi', runtimeProvider: 'pi_rpc',
+          text: '/test-command 已执行', providerCommand: { name: 'test-command', source: 'extension', modelTurn: 'unobserved' }
+        })
+      ]
+    }
+    const rendered = renderToStaticMarkup(<AssistantTurn turn={piTurn} selectedId={null} onSelect={() => {}} />)
+    expect(rendered).not.toContain('TPS 25.7')
+    expect(rendered).toContain('已完成代码检查。')
+    expect(rendered).toContain('aria-label="Pi 命令反馈"')
+    expect(rendered).toContain('/test-command 已执行')
+  })
+
+  it.each([
+    { stage: 'runtime:extension_ui', runtimeMetadata: { method: 'notify', notifyType: 'warning' }, isError: false, label: 'Pi 扩展通知' },
+    { stage: 'runtime:extension_ui', runtimeMetadata: { method: 'notify', notifyType: 'error' }, isError: true, label: 'Pi 扩展通知' },
+    { stage: 'runtime:extension_ui', runtimeMetadata: { method: 'notify' }, isError: false, label: 'Pi 扩展通知' },
+    { stage: 'runtime:extension_message', runtimeMetadata: { customType: 'review' }, isError: false, label: 'Pi 扩展消息' }
+  ])('Pi 扩展证据保留并正确标注：$stage $runtimeMetadata', ({ stage, runtimeMetadata, isError, label }) => {
+    const extensionTurn: Turn = {
+      runId: 'pi-extension', userText: '继续', done: true,
+      items: [ev({
+        id: 'extension', kind: 'harness', stage, providerId: 'pi', runtimeProvider: 'pi_rpc',
+        text: '扩展反馈内容', runtimeMetadata, isError
+      })]
+    }
+    const rendered = renderToStaticMarkup(<AssistantTurn turn={extensionTurn} selectedId={null} onSelect={() => {}} />)
+    expect(rendered).toContain(`aria-label="${label}"`)
+    expect(rendered).toContain('扩展反馈内容')
+    expect(rendered).not.toContain('Pi 命令')
+    if (isError) expect(rendered).toContain(`${label} · 错误`)
+  })
+
   it('routes abbreviated file links through their own turn evidence, not another turn or the active project', () => {
     const historyTurn: Turn = {
       runId: 'history-links', cwd: '/repo', userText: '设计原型', done: true,
