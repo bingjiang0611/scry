@@ -58,7 +58,7 @@ interface StoredConnection {
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
 interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void> }
-interface RunWatchCursor { cursor: number; outputCursor: number; scryRunId?: string; externalSessionId?: string }
+interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string }
 
 function fail(code: string): never { throw new Error(code) }
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
@@ -186,7 +186,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   readonly #controllers = new Set<AbortController>()
   readonly #requests = new Set<Promise<unknown>>()
   readonly #locks = new Map<string, Promise<void>>()
-  readonly #runWatch = new Map<string, RunWatchCursor>()
+  readonly #runWatch = new Map<string, RunStatusCursor>()
   readonly #answerIds = new Map<string, string>()
   #lifecycle: Promise<void> = Promise.resolve()
   #saveSerial: Promise<void> = Promise.resolve()
@@ -390,19 +390,21 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   async runStatus(connectionIdValue: string, runIdValue: string): Promise<DesktopRemoteRunStatus> {
     if (!validRunId(runIdValue)) fail('invalid_run_id')
     const key = `${connectionIdValue}:${runIdValue}`
-    const watch = this.#runWatch.get(key) ?? { cursor: 0, outputCursor: 0 }
-    let authoritativeState: string | null = null
+    const watch = this.#runWatch.get(key) ?? { cursor: 0 }
+    // Desktop content comes from canonical trace reads, not the shadow output
+    // spool. Its overflow or I/O failure must not block authoritative lifecycle.
+    // Read state before events so a terminal snapshot cannot retire the receipt
+    // before we have read its preceding bound/session markers.
+    const stateResponse = await this.#requestForConnection(connectionIdValue, { op: 'runState', runId: runIdValue })
+    if (!record(stateResponse) || (stateResponse.state !== null && !['recorded', 'dispatched', 'settled', 'failed', 'cancelled'].includes(String(stateResponse.state)))) fail('invalid_run_status_response')
+    const authoritativeState = stateResponse.state === null ? null : String(stateResponse.state)
     let observedState: DesktopRemoteRunStatus['state'] = 'unknown'
     for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await this.#requestForConnection(connectionIdValue, { op: 'watch', runId: runIdValue, cursor: watch.cursor, outputCursor: watch.outputCursor, waitMs: 0 })
-      if (!record(response) || !record(response.watch) || !record(response.watch.poll) || !Array.isArray(response.watch.poll.events) ||
-          !Number.isSafeInteger(response.watch.poll.cursor) || (response.watch.poll.reset !== undefined && !record(response.watch.poll.reset)) ||
-          !record(response.watch.output) || !Number.isSafeInteger(response.watch.output.cursor) ||
-          (response.watch.state !== null && !['recorded', 'dispatched', 'settled', 'failed', 'cancelled'].includes(String(response.watch.state)))) fail('invalid_run_status_response')
-      const poll = response.watch.poll as { events: unknown[]; cursor: number }
+      const response = await this.#requestForConnection(connectionIdValue, { op: 'poll', cursor: watch.cursor })
+      if (!record(response) || !record(response.poll) || !Array.isArray(response.poll.events) ||
+          !Number.isSafeInteger(response.poll.cursor) || (response.poll.reset !== undefined && !record(response.poll.reset))) fail('invalid_run_status_response')
+      const poll = response.poll as { events: unknown[]; cursor: number }
       watch.cursor = poll.cursor
-      watch.outputCursor = (response.watch.output as { cursor: number }).cursor
-      if (response.watch.state !== null) authoritativeState = String(response.watch.state)
       for (const event of poll.events) {
         if (!record(event) || event.runId !== runIdValue || !text(event.kind, 64)) continue
         if (event.kind === 'intent_recorded') observedState = 'recorded'

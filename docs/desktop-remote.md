@@ -20,6 +20,16 @@ ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -p 22 USER@HOST t
 
 TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化拒绝沿用连接。客户端私钥、证书和待核对回执由 Electron safeStorage 加密保存；加密不可用时不退回明文。
 
+## 2026-10-15：远端运行状态与侧栏一致性修复
+
+- **反馈 / 采用**：用户截图中已输出工具结果却仍提示「等待远端派发」，运行会话缺少转圈且项目总在本地项目之后。复用本地 `sb-running` 样式和项目的置顶优先、最近活动时间排序，不增加另一套视觉规则。远端仍不提供本机专属的置顶、重命名和未读操作。
+- **状态来源**：等待提示由当前 intent 与其对应的宿主运行状态派生；提交未确认、已记录、已派发、未知和终态分别处理。读取错误恢复后移除该读取错误，不清掉无关的回答/停止失败。终态单独刷新历史，目录轮询不反复重载全文。
+- **侧栏刷新**：App 对已连接主机每 3 秒刷新共享 catalog，慢请求不叠加定时读取；离开远程会话后仍可观察其开始/结束。仅连接正常且 catalog 读取成功时使用宿主 `isActive` 显示转圈。断连或读取失败保留历史，但不把缓存当作运行证据。刷新周期不是实时推送 SLA；大量会话使 catalog 读取持续超过周期时，应升级为专用活动增量接口，而不是缩短轮询间隔。
+- **输出缓存故障**：桌面 `runStatus` 复用已有的 `runState` 与 `poll` 接口，不再依赖包含 shadow output 的 `watch`。队列仍受原有上限约束；缺失内容写入 durable `truncated` 标记后可读取部分内容，terminal flush 仍报告 capture failure。未落盘的缺口和真正的读取失败继续报错，不伪造完整输出。模型服务的 403 访问限制仍是独立的 Provider 失败，Scry 不会解封账号或自动重发。
+- **回归入口**：`RemoteLocation.test.tsx`、`desktop-client.test.ts`、`run-output-log.test.ts`；`node scripts/desktop-remote-ui-smoke.mjs --keep` 覆盖续聊、派发先于 trace、后台侧栏刷新、排序、错误恢复及终态历史刷新。`--negative-activity-control` 禁用周期刷新后必须失败；大于 512 KiB 的单次输出用例在旧实现上因 queue-full 失败。UI smoke 新增多个真实轮询阶段后，总进程预算从 35 秒调整为 55 秒，单条件 7 秒期限未变。
+- **验证记录**：远程域与关联 renderer 单测共 319 项通过；typecheck/build 通过。UI fixture 覆盖终态 trace 读取失败时仍保留历史，以及筛选后保持远端项目折叠状态。初次并行扩大测试时，未改动的 Git diff 用例超过 5 秒；不加超时，单独检查和串行全域复测均通过。另有一次项目切换断言失败未能复现，不能据后续通过宣称根因已修复；已增加提交 cwd、切换前项目和切换后实际位置的诊断断言。原始等待提示与 queue-full 回归均在修复前失败，禁用侧栏周期刷新也按预期失败。
+- **验收边界**：生产 React/CSS 的隐藏 Electron fixture 与本机真实 mTLS/临时持久化测试，不等于 mac2 上真实 Provider 的验收。没有修改凭据、发送真实模型请求或升级安装包。
+
 ## D-20261014-machine-navigation：执行位置与会话归属
 
 - **范围 / 状态**：Scry 桌面端；需求已确认，成品视觉与日常配置验收待完成。2026-10-14 用户反馈重启后看不到 mac2，询问新建会话是否应该选择机器，随后要求“优化吧”。

@@ -27,7 +27,7 @@ export async function refreshRemoteCatalog(connectionId: string): Promise<void> 
   const revision = (revisions.get(connectionId) ?? 0) + 1
   revisions.set(connectionId, revision)
   const previous = snapshot.get(connectionId)
-  publish(connectionId, { catalog: previous?.catalog, loading: true })
+  publish(connectionId, { catalog: previous?.catalog, loading: true, error: previous?.error })
   try {
     const catalog = await window.scry.desktopRemote.catalog(connectionId)
     if (revisions.get(connectionId) !== revision) return
@@ -58,20 +58,21 @@ export function useRemoteCatalogs(): Snapshot {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-const readWhileConnected = new Set<string>()
-
-// Read each host once per connected period. A reconnect re-reads the catalog;
-// polling is left to the open conversation, which refreshes after a run settles.
-// Mount this loader once (App); several mounts would only share the same set.
+// Keep host session activity fresh even when its conversation is not open.
+// Catalog reads use host snapshots, not Provider discovery. One App-owned poll
+// per connected host, at most every 3s; slow reads are never stacked.
+// A failed read retains history, but its error invalidates live activity badges.
 export function useConnectedCatalogLoader(connections: readonly DesktopRemoteConnection[], readError: string | null): void {
   const connectedIds = readError ? '' : connections.filter(connection => connection.state === 'connected').map(connection => connection.id).join('\u0000')
   useEffect(() => {
     const connected = new Set(connectedIds ? connectedIds.split('\u0000') : [])
-    for (const id of readWhileConnected) if (!connected.has(id)) readWhileConnected.delete(id)
-    for (const id of connected) {
-      if (readWhileConnected.has(id)) continue
-      readWhileConnected.add(id)
-      void refreshRemoteCatalog(id)
+    const refresh = (): void => {
+      for (const id of connected) {
+        if (!snapshot.get(id)?.loading) void refreshRemoteCatalog(id)
+      }
     }
+    refresh()
+    const timer = window.setInterval(refresh, 3000)
+    return () => { window.clearInterval(timer) }
   }, [connectedIds])
 }
