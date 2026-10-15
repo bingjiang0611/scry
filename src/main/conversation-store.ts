@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { open, realpath, stat } from 'node:fs/promises'
+import { open, readdir, realpath, stat } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { ContextAdmission } from './context-admission'
 import { writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
@@ -157,9 +158,37 @@ export type BeginConversationTurnResult = {
 }
 
 /** Single main-process owner. No Provider calls, workspace writes or automatic retry occur here. */
+export type NativeSessionScope = Pick<ConversationTarget, 'providerId' | 'agentProfileId'> & {
+  cwd: string
+  nativeSessionId?: string
+}
+
+// Legacy callers cannot prove continuationKey. Keep their physical scope conservative:
+// changing compatibility configuration must not release an existing conversation's owner.
+function nativeOwnerKey(cwd: string, binding: ConversationBinding): string {
+  return JSON.stringify([binding.providerId, binding.agentProfileId ?? null, cwd, binding.nativeSessionId])
+}
+
+function checkNativeOwners(conversations: Iterable<Conversation>): void {
+  const owners = new Map<string, string>()
+  for (const conversation of conversations) {
+    for (const binding of conversation.bindings) {
+      if (!binding.nativeSessionId) continue
+      const key = nativeOwnerKey(conversation.cwd, binding)
+      const owner = owners.get(key)
+      requireValue(owner === undefined || owner === conversation.id, '原生会话已归属其他统一对话')
+      owners.set(key, conversation.id)
+    }
+  }
+}
+
 export class ConversationStore {
+  // Serialize ledger publication across conversations, not the lifetime of Provider runs.
   private readonly admission = new ContextAdmission()
   private readonly directory: string
+  /** Rebuildable projection of the canonical ledgers, never a second persisted authority. */
+  private ownership: Map<string, Conversation> | undefined
+  private recoveryFailure: Error | undefined
 
   constructor(private readonly userData: string) {
     requireValue(isAbsolute(userData), 'userData 必须是绝对路径')
@@ -202,6 +231,94 @@ export class ConversationStore {
     return conversation
   }
 
+  private async loadOwnership(): Promise<Map<string, Conversation>> {
+    if (this.ownership) return this.ownership
+    let entries: Dirent[]
+    try {
+      entries = await readdir(this.directory, { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      entries = []
+    }
+    const conversations = new Map<string, Conversation>()
+    for (const entry of entries) {
+      if (!entry.name.endsWith('.json')) continue
+      requireValue(entry.isFile(), '对话归属索引不是普通文件')
+      const id = entry.name.slice(0, -5)
+      conversations.set(id, await this.required(id))
+    }
+    checkNativeOwners(conversations.values())
+    this.ownership = conversations
+    return conversations
+  }
+
+  /** Called under the shared store admission: a new binding cannot race another owner. */
+  private async persist(conversation: Conversation, exclusive = false): Promise<void> {
+    if (this.recoveryFailure) throw this.recoveryFailure
+    const owners = await this.loadOwnership()
+    checkNativeOwners([...owners.values()].filter((owner) => owner.id !== conversation.id).concat(conversation))
+    try {
+      if (exclusive) {
+        await writeFileAtomicExclusive(this.path(conversation.id), Buffer.from(`${JSON.stringify(conversation)}\n`))
+      } else await writeJsonAtomic(this.path(conversation.id), conversation)
+      owners.set(conversation.id, structuredClone(conversation))
+    } catch (error) {
+      // Atomic publication may have succeeded before its acknowledgement was lost.
+      // The next check must read the ledgers, not trust the pre-write projection.
+      this.ownership = undefined
+      throw error
+    }
+  }
+
+  /** Main must hold its context admission through registration, and recheck before launch. */
+  async assertLegacyWriteAllowed(input: NativeSessionScope): Promise<void> {
+    const scope = { ...input }
+    return this.admission.run('ownership', async () => {
+      if (this.recoveryFailure) throw this.recoveryFailure
+      const conversations = await this.loadOwnership()
+      // Explicitly fresh legacy conversations do not resume an existing native writer.
+      if (!scope.nativeSessionId) return
+      for (const conversation of conversations.values()) {
+        if (conversation.cwd !== scope.cwd) continue
+        const matches = (binding: ConversationBinding): boolean => binding.providerId === scope.providerId &&
+          binding.agentProfileId === scope.agentProfileId
+        if (conversation.bindings.some((binding) => matches(binding) && binding.nativeSessionId === scope.nativeSessionId)) {
+          throw new Error(`原生会话已归属统一对话 ${conversation.id}，不能从旧入口写入或删除`)
+        }
+        for (const turn of conversation.turns) {
+          const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)!
+          // App archive/provisional aliases can address the same evidence through deletion.
+          if (matches(binding) && (turn.runId === scope.nativeSessionId || turn.archive?.sessionId === scope.nativeSessionId)) {
+            throw new Error(`会话归档已归属统一对话 ${conversation.id}，不能从旧入口写入或删除`)
+          }
+          if (turn.origin !== 'dispatch') continue
+          if (matches(binding) && (turn.delivery.status === 'unknown' ||
+            (turn.delivery.status === 'pending' && !binding.nativeSessionId))) {
+            throw new Error(`统一对话 ${conversation.id} 存在未确认投递，无法证明该原生会话可由旧入口写入或删除`)
+          }
+        }
+      }
+    })
+  }
+
+  /** Startup barrier only. No new Provider registration may run concurrently with this recovery. */
+  async recoverAll(liveRunIds: ReadonlySet<string>): Promise<void> {
+    const live = new Set(liveRunIds)
+    try {
+      const ids = await this.admission.run('ownership', async () => {
+        this.recoveryFailure = undefined
+        return [...(await this.loadOwnership()).keys()]
+      })
+      for (const id of ids) await this.recover(id, live)
+    } catch (error) {
+      // A failed pending→unknown publication must not let a cached, known binding
+      // disguise its orphan as a live run and allow another legacy writer through.
+      this.recoveryFailure = error as Error
+      throw error
+    }
+  }
+
+  /** Adoption must also hold main's context admission and verify that the native run has settled. */
   async create(cwd: string, seed?: ConversationSeed): Promise<Conversation> {
     const initial = seed ? structuredClone(seed) : undefined
     const canonical = await realpath(cwd)
@@ -213,7 +330,7 @@ export class ConversationStore {
       ...turn, ordinal: index + 1, bindingId: bindings[0].id, origin: 'imported'
     })) : []
     const conversation = this.checked({ version: 1, id: randomUUID(), cwd: canonical, revision: 0, bindings, turns })
-    await writeFileAtomicExclusive(this.path(conversation.id), Buffer.from(`${JSON.stringify(conversation)}\n`))
+    await this.admission.run('ownership', () => this.persist(conversation, true))
     return conversation
   }
 
@@ -227,7 +344,7 @@ export class ConversationStore {
   async begin(id: string, input: BeginConversationTurn): Promise<BeginConversationTurnResult> {
     // Freeze caller-owned objects before waiting in the queue.
     const request = structuredClone(input)
-    return this.admission.run(id, async () => {
+    return this.admission.run('ownership', async () => {
       target(request.target)
       requireValue(typeof request.payloadHash === 'string' && hashPattern.test(request.payloadHash), '输入指纹无效')
       requireValue(isCommandId(request.commandId), '对话命令 ID 无效')
@@ -277,7 +394,7 @@ export class ConversationStore {
       conversation.revision++
       const checked = this.checked(conversation)
       await loadConversationHistory(this.userData, checked, turn)
-      await writeJsonAtomic(this.path(id), checked)
+      await this.persist(checked)
       return { disposition: 'created', conversation: checked, turn: structuredClone(turn) }
     })
   }
@@ -292,7 +409,7 @@ export class ConversationStore {
     const delivery = structuredClone(result)
     const final = structuredClone(finalItems)
     const archiveRef = archive ? structuredClone(archive) : undefined
-    return this.admission.run(id, async () => {
+    return this.admission.run('ownership', async () => {
       const conversation = await this.required(id)
       const turn = conversation.turns.find((candidate) => candidate.runId === runId)
       requireValue(turn?.origin === 'dispatch', '找不到该投递尝试')
@@ -319,14 +436,14 @@ export class ConversationStore {
       if (archiveRef) turn.archive = archiveRef
       conversation.revision++
       const checked = this.checked(conversation)
-      await writeJsonAtomic(this.path(id), checked)
+      await this.persist(checked)
       return checked
     })
   }
 
   /** Main must first verify native ownership and obtain the user's explicit replacement choice. */
   async retireBinding(id: string, expectedRevision: number, bindingId: string, reason: string): Promise<Conversation> {
-    return this.admission.run(id, async () => {
+    return this.admission.run('ownership', async () => {
       requireValue(text(reason), '弃用原生绑定必须说明原因')
       const conversation = await this.required(id)
       requireValue(conversation.revision === expectedRevision, '对话已变化，请重新预览')
@@ -338,7 +455,7 @@ export class ConversationStore {
       binding.retiredReason = reason
       conversation.revision++
       const checked = this.checked(conversation)
-      await writeJsonAtomic(this.path(id), checked)
+      await this.persist(checked)
       return checked
     })
   }
@@ -346,7 +463,7 @@ export class ConversationStore {
   /** Startup barrier only: new begin/Provider registration must wait until recovery completes. */
   async recover(id: string, liveRunIds: ReadonlySet<string>): Promise<Conversation> {
     const live = new Set(liveRunIds)
-    return this.admission.run(id, async () => {
+    return this.admission.run('ownership', async () => {
       const conversation = await this.required(id)
       let changed = false
       for (const turn of conversation.turns) {
@@ -357,7 +474,7 @@ export class ConversationStore {
       if (!changed) return conversation
       conversation.revision++
       const checked = this.checked(conversation)
-      await writeJsonAtomic(this.path(id), checked)
+      await this.persist(checked)
       return checked
     })
   }

@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：身份/覆盖账本、Claude/Codex 输入回执，以及“权威归档 → 完整正文快照 → durable intent”的链路已实现并做定向测试。`startAppRun()` 已为 Claude/Codex 普通输入启用回执采集；统一 conversation 身份、原生 writer 准入、回执驱动结算和 UI 尚未接通，不是可用的完整接续功能。**
+**当前进度：身份/覆盖账本、Claude/Codex 输入回执，以及“权威归档 → 完整正文快照 → durable intent”的链路已实现并做定向测试。`startAppRun()` 已启用普通输入回执采集和旧入口归属检查；持久化原生归属与启动恢复已实现。统一 conversation 启动、执行期 writer 准入、回执驱动结算和 UI 尚未接通，不是可用的完整接续功能。**
 
 ## 1. 用户合同
 
@@ -112,7 +112,7 @@
 - Codex 在投递前核对恢复的原生 session；身份缺失或漂移不发送。Claude 在 query 后才取得身份，漂移只能保持 unknown，不能谎称未发出。
 - 等待 Codex Skill catalog 时取消，不再发送 `turn/start`，也不记录虚假的 Skill 调用。
 - 回执通过 `runtime:historical_input` 事件提供诊断；这些事件不自动更新覆盖。SDK 同步抛错也可能已尝试投递，不能因未返回 handle 就判断未发送。
-- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数。`startAppRun()` 目前仅接入普通输入回执采集（见下节），尚无统一 conversation 身份或原生 writer 准入。正文 artifact 已接入 conversation begin/读取，真实 input receipt 尚未接入 settle；不能仅看 run 的 completed 状态更新覆盖。
+- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数。`startAppRun()` 已接入普通输入回执采集和旧入口归属检查（见下节），尚无统一 conversation 启动或新旧模式共享的执行期 writer 准入。正文 artifact 已接入 conversation begin/读取，真实 input receipt 尚未接入 settle；不能仅看 run 的 completed 状态更新覆盖。
 - 引用包装不是安全沙箱，也不保证模型保存或遵从历史。真实 CLI/账号尚未验证；本阶段只验证生产 adapter/runner 与模拟 SDK/app-server 的协议边界。
 
 ### 4.5 主入口的普通输入回执（第四阶段前置）
@@ -127,6 +127,22 @@
 - 本步骤没有新增 conversation IPC，也没有启用 Provider 切换。不能仅在主入口加私有 conversation 参数：还须让旧模式与新模式共享原生 writer ownership，并确保 unknown 在重启后也不能被旧入口绕过。
 
 验证（App 0.2.191 / Node 24.18.0，`2c89b30` + 本轮改动）：11 文件、406 项定向测试通过，涵盖五个 Provider、真实 Claude runner / adapters 与模拟传输、registry、ledger 和准入。新增 12 项回归覆盖首轮/恢复的无历史回执、原文与 Skill/图片不改写、身份漂移、SDK 抛错、RPC 丢失响应、执行失败和 unsupported gate。负对照恢复旧的“没有历史就跳过”分支时，新增普通输入测试确实失败（receipt 为 undefined）；恢复后通过。`npm run typecheck`、`npm run build`、`git diff --check` 通过。本轮未重跑全量、未启动真实 App、未调用真实 Provider。检查日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-4f4e5b4d1263987e.log`。
+
+### 4.6 持久化归属与旧入口阻断
+
+- 原生归属仍由 conversation ledger 的 bindings 决定，不新增第二个持久化归属文件。`ConversationStore` 在首次访问扫描账本，维护可重建的内存投影；每次原子发布更新投影，发布结果未知时使其失效，下一次检查只读重建，不重放写入。
+- adoption 和首个 native binding 的发布共用 store 准入，拒绝两个 conversation 占用相同 provider/profile/canonical cwd/native ID。旧入口无法证明 continuationKey，因此更换该 key 不释放旧归属；退休绑定也仍属于原 conversation，不能用退休来绕过归属。不同 provider/profile/cwd 不混用身份。
+- 旧发送、最后一轮编辑/重发、原生 fork 和删除路径接入 `assertLegacyWriteAllowed()`；发送在准备前和真正 Provider 调用前检查，fork 在调用前复验，删除在预约与实际删除前检查。归属检查也识别源 archive session ID 与 run ID，防止用 App 别名删除证据。
+- pending 且尚无 native ID，或 unknown 时，对该 provider/profile/cwd 下旧入口的恢复操作保守阻断。已知绑定的 pending 不阻断其他独立 native session；显式新建不同 App 对话仍可继续，不重放原 unknown。未知实际目标核查完成前，可能暂时阻断同作用域的无关恢复操作，这是当前明确限制，不假装目标身份已知。
+- `recoverAll()` 只在启动 barrier 调用，把失主 pending 变成 unknown，不发送。损坏账本、重复归属、非普通索引文件均拒绝；若恢复写入失败，保留阻断状态，旧入口（包括 fresh）及新的账本发布均拒绝，直到启动 barrier 显式恢复成功，不能让缓存把失主 pending 当作仍在运行。启动诊断不会删除证据。归属投影是单 main owner 缓存，不支持另一个进程并行改写这些账本；不是系统级 native CLI 写入锁或安全沙箱。
+- **尚未完成执行期集成**：目前没有生产 caller 创建或接续 conversation。后续 adoption/新入口必须持有与旧入口相同的 context/native 准入，并核对 RunRegistry 中真实 run 已 settled，再发布归属/注册新 run；本步骤的存储层互斥不能替代进程生命周期独占。回执驱动 settle、逻辑 catalog 与 UI 仍未接通。
+
+验证（App 0.2.191 / Node 24.18.0，共享工作区含持续变化的并行 WIP）：最终新增归属测试 17 项，9 文件、99 项定向测试通过，node/web typecheck、build 与 diff check 通过。首轮类型检查发现新 `readdir` 局部变量的隐式 any，已改为 `Dirent[]`；新增恢复失败测试还曾误断言 seed 轮次，已改为按 run ID 检查新 pending 轮次，没有删除断言。两个负对照成立：保留写入回执丢失后的旧缓存会误阻断独立会话；未保留 startup failure 状态会放行旧入口，新增测试先失败，修复后通过。历史 artifact 跨对话 fixture 改用不同 native ID，以符合新归属合同，原隔离断言不变。
+
+- 中间版本 `npm test`：3164 通过、3 跳过，shell 通过。最终补强后再次全量：3166 通过、1 失败、3 跳过，因 unit 失败未执行该次 shell，不能报告最终全量通过。跳过的是既有 `billing-admin-real`、`p0-integration`、`p1-integration` 真实探针。
+- 最终失败来自并行新增的 `src/renderer/remote-workbench.test.ts` 的 Git 操作用例，超过原 5 秒；该调用链不引用本轮 conversation 模块。单项诊断运行 3.64 秒通过，其余 6 项未运行；并发超时根因仍未确认，没有加 timeout、改断言或用单项通过覆盖全量失败。最终全量日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7a526709fb1f4c87.log`。
+
+这些是存储合同/模拟调用和共享工作区的编译检查，不是生产 IPC wrapper 的拒绝验收；未启动真实 App、未调用真实 Provider、未做完整打包发布。全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/b4/b4b8f46f0f9dd9cf24a8c3430ee17d3d080f6ab39b210a0fffe70cc6b10edbce.txt`。
 
 ## 5. 历史选择与预算
 
