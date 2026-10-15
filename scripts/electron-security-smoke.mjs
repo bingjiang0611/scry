@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
@@ -493,6 +493,9 @@ async function main() {
     const docs = join(canonicalHome, 'projects', 'rotom-team', 'docs')
     mkdirSync(docs, { recursive: true })
     writeFileSync(join(docs, 'NATIVE-DELIVERY.md'), '# Actual sibling delivery\n')
+    const sourcePath = 'packages/coding-agent/src/modes/interactive/interactive-mode.ts'
+    mkdirSync(dirname(join(cwd, sourcePath)), { recursive: true })
+    writeFileSync(join(cwd, sourcePath), 'export const source = true\n')
     writeFileSync(join(canonicalHome, 'projects', 'LICENSE'), 'Actual license without an extension')
     writeFileSync(join(canonicalHome, 'projects', 'asset.custom'), Buffer.from([0, 1, 2, 3]))
     writeFileSync(join(canonicalHome, 'projects', 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
@@ -588,6 +591,13 @@ async function main() {
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="查看 NATIVE-DELIVERY.md"]').readOnly`), true)
     await clickFile('../LICENSE · 打开文件')
     await wait(`document.querySelector('textarea[aria-label="查看 LICENSE"]')?.value === 'Actual license without an extension'`)
+    for (const action of ['打开文件', '在右侧文件面板打开']) {
+      await clickFile(`${sourcePath} · ${action}`)
+      await wait(`document.querySelector('textarea[aria-label="编辑 interactive-mode.ts"]')?.value === 'export const source = true\\n'`)
+      assert.equal(await evaluate(`!!document.querySelector('.composer-status.is-error')`), false)
+      await clickFile('../LICENSE · 打开文件')
+      await wait(`document.querySelector('textarea[aria-label="查看 LICENSE"]')?.value === 'Actual license without an extension'`)
+    }
     await clickFile('escaped.md · 打开文件')
     await wait(`document.querySelector('.workspace-preview h1')?.textContent === 'Actual outside-home delivery' && document.querySelector('.workspace-editorbar')?.textContent.includes('只读预览')`)
     assert.equal(readFileSync(join(temp, 'outside.md'), 'utf8'), '# Actual outside-home delivery\n')
@@ -617,7 +627,7 @@ async function main() {
       assert.equal(JSON.parse(readFileSync(openReceipt, 'utf8')).filter(path => path.endsWith('/fail.custom')).length, 1)
     }
     console.log(JSON.stringify({ fileLinks: { siblingProject: true, actualContent: true, readOnlyOutsideWorkspace: true,
-      extensionlessLink: true, officeAndUnknownBinary: true, outsideHomeSymlink: true, fileScopedReads: true,
+      sourceLocationLinks: true, extensionlessLink: true, officeAndUnknownBinary: true, outsideHomeSymlink: true, fileScopedReads: true,
       missingFileReported: true, outsideWorkspaceWriteDenied: true,
       contextualScreenshotsAndDirectory: devFilesOnly, executableHandoff: devFilesOnly, systemErrorReportedWithoutRetry: devFilesOnly } }))
     cdp.close()

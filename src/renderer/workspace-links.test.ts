@@ -1,4 +1,9 @@
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
+import { HomeFileAccess } from '../main/home-file-access'
+import { readWorkspaceFile, resolveWorkspaceFileOpenTarget } from '../main/workspace-files'
 import { resolveWorkspaceFileReference, resolveWorkspaceFileTarget, resolveWorkspaceFileTargets } from './workspace-links'
 
 describe('workspace file references', () => {
@@ -9,6 +14,46 @@ describe('workspace file references', () => {
     expect(resolveWorkspaceFileReference(cwd, 'file:///Users/example/project/docs/report%20one.html')).toBe('docs/report one.html')
     expect(resolveWorkspaceFileReference(cwd, '@"docs/report one.md"')).toBe('docs/report one.md')
     expect(resolveWorkspaceFileReference(cwd, '@src/App.tsx')).toBe('src/App.tsx')
+  })
+
+  it('removes source locations before resolving paths and matching turn evidence', () => {
+    const path = 'packages/coding-agent/src/modes/interactive/interactive-mode.ts'
+    for (const suffix of ['#L1252', '#L1252-L1260', '#L1252C3-L1260C8', ':1252', ':1252:3', ':1252-1260']) {
+      expect(resolveWorkspaceFileReference(cwd, `${path}${suffix}`)).toBe(path)
+      expect(resolveWorkspaceFileReference(cwd, `@${cwd}/${path}${suffix}`)).toBe(path)
+      expect(resolveWorkspaceFileTarget([cwd], `~/${path}${suffix}`)).toEqual({ cwd: '~', path })
+      expect(resolveWorkspaceFileTargets([cwd], `interactive-mode.ts${suffix}`, [path])).toEqual([{ cwd, path }])
+    }
+    expect(resolveWorkspaceFileReference(cwd, `file://${cwd}/${path}#L1252`)).toBe(path)
+    expect(resolveWorkspaceFileReference(cwd, '@"docs/source file.ts:12:3"')).toBe('docs/source file.ts')
+  })
+
+  it('opens source links through the real filesystem resolver without location suffixes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-source-links-'))
+    try {
+      const path = 'packages/coding-agent/src/modes/interactive/interactive-mode.ts'
+      await mkdir(join(root, 'packages/coding-agent/src/modes/interactive'), { recursive: true })
+      await writeFile(join(root, path), 'export const source = true\n')
+      const access = new HomeFileAccess(root)
+      for (const suffix of ['#L1252', '#L1252-L1260', ':1252:3']) {
+        const request = resolveWorkspaceFileTarget([root], `${path}${suffix}`)!
+        const target = await resolveWorkspaceFileOpenTarget(request, access)
+        expect(target).toEqual({ cwd: await realpath(root), path, mode: 'text' })
+        expect((await readWorkspaceFile(target)).content).toBe('export const source = true\n')
+      }
+      await expect(resolveWorkspaceFileOpenTarget({ cwd: root, path: `${path}#L1252` }, access)).rejects.toThrow('不存在')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves literal hashes, colons and URL-encoded filenames instead of stripping arbitrary suffixes', () => {
+    for (const path of ['docs/report#draft.md', 'docs/report:final.txt', 'docs/a%20b.txt']) {
+      expect(resolveWorkspaceFileReference(cwd, path)).toBe(path)
+    }
+    // A file URL encodes literal filename punctuation separately from its location fragment.
+    expect(resolveWorkspaceFileReference(cwd, `file://${cwd}/docs/source.ts%23L12#L4`)).toBe('docs/source.ts#L12')
+    expect(resolveWorkspaceFileReference(cwd, `file://${cwd}/docs/source.ts%3A12`)).toBe('docs/source.ts:12')
   })
 
   it('accepts relative file paths of any extension while leaving plain identifiers alone', () => {
