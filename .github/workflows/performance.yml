@@ -112,9 +112,11 @@ jobs:
           for file in performance-native.mjs session-open-bench.mjs session-open-timing.mjs owned-app-processes.mjs performance-report.mjs performance-paths.json; do
             cp "candidate/scripts/$file" "baseline/scripts/$file"
           done
-      - name: Build both source revisions
+      - name: Prepare Electron ABI and build both source revisions
         run: |
           set -o pipefail
+          (cd baseline && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/baseline-native-deps.log
+          (cd candidate && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/candidate-native-deps.log
           (cd baseline && npm run build) 2>&1 | tee native-results/baseline-build.log
           (cd candidate && npm run build) 2>&1 | tee native-results/candidate-build.log
       - name: Measure baseline then candidate, retaining failures
