@@ -565,9 +565,12 @@ async function main() {
     })()`)
     const clickFile = async title => {
       await wait(`Array.from(document.querySelectorAll('.md-file-ref')).some(button => button.title === ${JSON.stringify(title)})`)
+      await evaluate(`Array.from(document.querySelectorAll('.md-file-ref')).find(button => button.title === ${JSON.stringify(title)}).scrollIntoView({ block: 'center' })`)
+      // DOM presence can precede the frame used by native input hit testing.
+      // Paint the scrolled result, then measure and hit-test that rendered frame.
+      await cdp.send('Page.captureScreenshot', { format: 'png' })
       const point = await evaluate(`(() => {
         const button = Array.from(document.querySelectorAll('.md-file-ref')).find(button => button.title === ${JSON.stringify(title)});
-        button.scrollIntoView({ block: 'center' });
         const box = button.getBoundingClientRect();
         const x = box.left + box.width / 2, y = box.top + box.height / 2;
         if (!button.contains(document.elementFromPoint(x, y))) throw new Error('File link obscured');
