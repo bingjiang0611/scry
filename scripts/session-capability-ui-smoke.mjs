@@ -1259,7 +1259,9 @@ try {
       const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility} } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
+      const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
+      win.webContents.on('console-message', logRendererError)
+      let fixtureContents = win.webContents
       try {
         let result = {}, piCommands = {}
         if (${fixtures.includes('session-cache')}) {
@@ -1270,6 +1272,8 @@ try {
         }
         if (${fixtures.includes('meta-prompts')}) {
           const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
+          fixtureContents = metaWin.webContents
+          metaWin.webContents.on('console-message', logRendererError)
           const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
           require(${JSON.stringify(join(temp, 'meta-prompts-ipc.cjs'))}).registerMetaPromptsFixtureIpc(metaWin, metaUrl)
           metaWin.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
@@ -1277,6 +1281,7 @@ try {
           await metaWin.loadFile(${JSON.stringify(join(temp, 'meta-prompts.html'))})
           result.metaPrompts = await (${exerciseMetaPrompts.toString()})(metaWin.webContents, metaWin, clipboard, ${JSON.stringify(process.env.SCRY_META_PROMPTS_SCREENSHOT ?? '')})
           metaWin.destroy()
+          fixtureContents = win.webContents
           ipcMain.removeHandler('app:copyText')
           if (${metaPromptsOnly}) {
             finish(result)
@@ -1347,8 +1352,8 @@ try {
         finish({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals })
       } catch (error) {
         console.error(error)
-        console.error('Failed fixture:', win.webContents.getURL())
-        console.error('Fixture DOM:', await win.webContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
+        console.error('Failed fixture:', fixtureContents.getURL())
+        console.error('Fixture DOM:', await fixtureContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
         app.exit(1)
       }
     }).catch(error => { console.error(error); app.exit(1) })
