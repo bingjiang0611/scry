@@ -35,6 +35,7 @@ import {
 import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { McpLiveStatus } from '../../shared/trace'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
+import { HistoricalInput } from './historical-input'
 import { effortOption, permissionOptions } from './run-controls'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 
@@ -301,6 +302,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
   return {
     id: 'claude',
     runtimeProvider: 'claude_sdk',
+    historicalContext: true,
     describe: async () => {
       const path = executable()
       return {
@@ -356,8 +358,10 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       }
     },
     run: (request) => {
+      const history = new HistoricalInput(request)
+      const prompt = history.text(request.prompt)
       const handle = runAgent(
-        request.prompt,
+        prompt,
         request.runId,
         (event) =>
           request.emit(
@@ -388,6 +392,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           ),
           settingSources: settingSourcesFromEnv(),
           onSessionId: request.onExternalSessionId,
+          onInputAttempt: () => history.attempting(prompt),
           captureProviderTurnId: true,
           attachments: request.attachments,
           requestUserInput: request.requestUserInput,
@@ -399,13 +404,21 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         }
       )
       return {
-        promise: handle.promise.then((result) => ({
-          externalSessionId: result.sessionId,
-          providerTurnId: result.providerTurnId,
-          stopped: result.stopped,
-          status: result.status,
-          mcp: result.mcpStatus ? { configured: listMcp(request.cwd, homeDir), runtime: result.mcpStatus } : undefined
-        })),
+        promise: handle.promise.then((result) => {
+          // A hook / session id is not acceptance. A successful SDK result belongs
+          // to this query; failed or interrupted queries remain unknown for now.
+          if (result.status === 'completed' && !result.stopped && result.sessionId) {
+            history.accepted(result.sessionId, 'claude_sdk_success_result', result.providerTurnId)
+          }
+          return {
+            externalSessionId: result.sessionId,
+            providerTurnId: result.providerTurnId,
+            stopped: result.stopped,
+            status: result.status,
+            mcp: result.mcpStatus ? { configured: listMcp(request.cwd, homeDir), runtime: result.mcpStatus } : undefined
+          }
+        }),
+        getInputReceipt: () => history.snapshot(),
         interrupt: handle.interrupt,
         forceKill: handle.forceKill,
         // SDK query 每轮自己 spawn 一个 CLI 子进程：SIGKILL 只作用于本 run 的进程组。

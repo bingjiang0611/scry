@@ -29,6 +29,28 @@ import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { CodexHookInspection, CodexHookTrustGrant } from '../codex-hook-trust'
 import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 
+/** Main-owned history body. This is not a renderer-supplied prompt override. */
+export interface ProviderHistoricalContext {
+  text: string
+  contentHash: string
+}
+
+/**
+ * Input acceptance is independent of execution success and conversation coverage.
+ * textHash covers outgoing text only, not images, Skill metadata, or run controls.
+ */
+export type ProviderInputReceipt = { contextHash: string } & (
+  | { status: 'not_sent'; reason: string }
+  | { status: 'unknown'; textHash: string; reason: string }
+  | {
+      status: 'accepted'
+      textHash: string
+      nativeSessionId: string
+      providerTurnId?: string
+      source: 'claude_sdk_success_result' | 'codex_turn_start_response'
+    }
+)
+
 export interface ProviderRunResult {
   externalSessionId?: string
   providerTurnId?: string
@@ -55,6 +77,11 @@ export interface ProviderRunHandle {
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
   getForkTurnId?: () => string | undefined
+  /**
+   * Live snapshot, not permission to settle a conversation before run/archive convergence.
+   * Remains readable after rejection; a rejected promise does not prove not_sent.
+   */
+  getInputReceipt?: () => ProviderInputReceipt | undefined
   getRecordingFailure?: () => { message: string } | undefined
 }
 
@@ -83,7 +110,9 @@ export interface McpAuthInteraction {
 
 export interface ProviderRunRequest {
   runId: string
+  /** Original input for native command / Skill dispatch, without historical context. */
   prompt: string
+  historicalContext?: ProviderHistoricalContext
   cwd?: string
   agentProfileId?: string
   resume?: string
@@ -177,6 +206,8 @@ export interface ProviderAdapter {
   readonly runtimeProvider: RuntimeProvider
   describe(): Promise<ProviderDescriptor>
   run(request: ProviderRunRequest): ProviderRunHandle
+  /** Opt in only after both wire input and acceptance evidence are implemented. */
+  readonly historicalContext?: true
   readonly forkLastTurn?: ForkLastTurnFacet
   readonly forkSession?: ForkSessionFacet
   readonly skills?: SkillsFacet

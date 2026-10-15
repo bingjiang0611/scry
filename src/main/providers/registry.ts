@@ -68,6 +68,9 @@ export class ProviderRegistry {
   run(providerId: ProviderId, request: ProviderRunRequest): ProviderRunHandle {
     if (this.disabledProviders.has(providerId)) throw new Error(`provider disabled by SCRY_DISABLED_PROVIDERS: ${providerId}`)
     const adapter = this.get(providerId)
+    if (request.historicalContext && !adapter.historicalContext) {
+      throw new Error(`${providerId} 尚未提供可验证的历史输入交接`)
+    }
     return adapter.run({
       ...request,
       ...(this.runControlsEnabled

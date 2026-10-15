@@ -43,6 +43,8 @@ export interface RunOpts {
   env?: Record<string, string>
   settingSources?: Array<'user' | 'project' | 'local'>
   onSessionId?: (sessionId: string) => void
+  /** Called at the SDK query boundary, after local option preparation. */
+  onInputAttempt?: () => void
   captureProviderTurnId?: boolean
   attachments?: AgentInputAttachment[]
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
@@ -387,6 +389,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   // 软指令实测压不住「列出全部 skill」，故弃用 appendSystemPrompt 改 allowlist。
   if (opts.skills?.length) options.skills = opts.skills
 
+  opts.onInputAttempt?.()
   const q = query({ prompt: sdkPrompt(prompt, opts.attachments ?? []), options: options as never })
 
   const interrupt = (): void => {

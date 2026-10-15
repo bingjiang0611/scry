@@ -72,6 +72,8 @@ App Thread：统一历史
 
 ## 5. Scry 的实际起点
 
+下表保留研究时的基线，不是当前实现清单。后续已加入多 key 准入及 Claude/Codex 历史输入合同；最新进度与未接通部分见[实施方案](provider-handoff-technical-plan.md)。
+
 | 入口 | 核查结果 | 对本项的影响 |
 | --- | --- | --- |
 | `src/renderer/App.tsx` → `ChatView` | 有 active session、busy 或 loading 时 `agentLocked` | 当前不支持直接在既有会话里改 Provider |

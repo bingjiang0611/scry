@@ -29,6 +29,19 @@ describe('ProviderRegistry', () => {
     expect(() => new ProviderRegistry([adapter('claude'), adapter('claude')])).toThrow('duplicate provider adapter')
   })
 
+  it('rejects historical input before invoking an adapter without explicit support', () => {
+    const base = adapter('codex')
+    const run = vi.spyOn(base, 'run')
+    const registry = new ProviderRegistry([base])
+    expect(() => registry.run('codex', {
+      runId: 'handoff', prompt: 'continue', attachments: [], emit: vi.fn(),
+      historicalContext: { text: 'history', contentHash: 'not-used-before-capability-check' }
+    })).toThrow('尚未提供可验证')
+    expect(run).not.toHaveBeenCalled()
+    registry.run('codex', { runId: 'ordinary', prompt: '/command', attachments: [], emit: vi.fn() })
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
   it('stamps provider identity on emitted trace events', () => {
     const base = adapter('codex')
     base.run = (request) => {

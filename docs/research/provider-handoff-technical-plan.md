@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：身份/覆盖账本与准入基础已实现并做定向测试；尚未接入实际发送和 UI，不是可用的完整接续功能。**
+**当前进度：身份/覆盖账本、准入基础，以及 Claude/Codex adapter 的历史输入与接收证据已实现并做定向测试。`startAppRun()`、账本结算和 UI 尚未接通，不是可用的完整接续功能。**
 
 ## 1. 用户合同
 
@@ -85,7 +85,7 @@
 - Pi 有原生 extension command 与 prompt 分流。
 - Qoder 有 `/plugins reload` 和项目命令展开。
 
-因此应在 `ProviderRunRequest` 中分开**原始用户输入**与**已确认历史上下文**。adapter 先按原始输入识别命令/Skill，再在支持接收历史的模型输入边界组合；不能让历史中的旧命令被再次执行，也不能破坏本轮真实命令的语义。
+`ProviderRunRequest` 已新增独立的 `historicalContext`，与**原始用户输入** `prompt` 分开。Claude/Codex adapter 在模型输入边界组合历史；Codex 仍先从原始 prompt 解析并核实 Skill。历史中的旧命令不参与本轮原生分派。其他 adapter 尚未接入此合同。
 
 不接收历史的控制命令在有待交接时明确拒绝或要求先完成普通轮次交接，不静默当成普通文字。第一版不假装所有 Provider 支持 native history injection；文本交接也必须标出来源与投递方式。
 
@@ -97,13 +97,30 @@
 - 现有 `CommandReceipts` 仍处理本进程重复请求；跨重启由 durable conversation intent 约束，不能让其“失败撤销收据”的行为触发第二次外部投递。
 - unknown 的普通恢复只读核查原 run/archive/native 证据。第一阶段不提供人工把 unknown 改成成功的入口；后续若提供“已停止后新建上下文继续”，必须分别记录执行已收敛、用户新决定与原投递仍未知，不能删除旧证据。
 
+### 4.4 已实现的 adapter 边界（第二阶段）
+
+`src/main/providers/historical-input.ts` 校验完整历史正文 SHA-256，冻结正文，添加引用包装并限制为 32 KiB UTF-8（含包装）。不截断本轮请求，不从历史提取或执行命令。尝试发送前还验证待发文字确实包含该历史；`textHash` 记录实际发出文字的 hash，不冒充包含图片、Skill 元数据及运行控制的完整请求指纹。
+
+| Provider | 本阶段输入边界 | 接收证据 |
+|---|---|---|
+| Claude | 普通请求在真实 `runAgent()` 的 SDK query 边界组合历史；交接时斜杠命令明确拒绝 | 当前 query 成功完成且返回匹配的 native session；hook、prompt ID、init、失败或中断均不单独证明接收 |
+| Codex | 从原始输入核实 `$skill` / `/skill`，保留 native skill input，再组合 text input；未识别的斜杠命令拒绝 | 归属于本次 `turn/start` 的响应及有效 turn ID；同 thread 的异步通知不能代替该回执 |
+| OpenCode / Pi / Qoder | 尚未实现此输入合同 | registry 在调用 adapter 前拒绝带历史的请求；原普通请求不受影响 |
+
+- `getInputReceipt()` 在 promise reject 后仍可读。尝试前为 `not_sent`，尝试后无回执为 `unknown`。Codex 接收后执行失败不撤销接收事实；Claude 失败轮次当前保守保留 `unknown`，需后续增加可归属的原生正文核查才能解除。
+- Codex 在投递前核对恢复的原生 session；身份缺失或漂移不发送。Claude 在 query 后才取得身份，漂移只能保持 unknown，不能谎称未发出。
+- 等待 Codex Skill catalog 时取消，不再发送 `turn/start`，也不记录虚假的 Skill 调用。
+- 回执通过 `runtime:historical_input` 事件提供诊断；这些事件不自动更新覆盖。SDK 同步抛错也可能已尝试投递，不能因未返回 handle 就判断未发送。
+- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数，也没有接入 `startAppRun()`、正文 artifact、conversation intent/settle。消费方必须先完成这些接线和原生 writer 准入，不能仅看 run 的 completed 状态更新覆盖。
+- 引用包装不是安全沙箱，也不保证模型保存或遵从历史。真实 CLI/账号尚未验证；本阶段只验证生产 adapter/runner 与模拟 SDK/app-server 的协议边界。
+
 ## 5. 历史选择与预算
 
 - 从 main 权威归档取得可见用户/助手文字、轮次状态及明确来源，不拿 renderer 最近 40 轮缓存冒充全部历史。
 - 不导出 reasoning、原生工具协议、approval、背景 task handles、Hook/MCP 配置或凭据。不默认转发旧图片、完整 diff 或原始工具输出。
 - 正文引用只有拿到全文才标完整；不能把 bounded preview 当成全文。delta 与 final shadow 要按真实投影去重。
 - 选择以完整条目为单位，保留代码空白、角色和顺序。实际正文、hash、字节数及省略项先持久化，再产生引用它的 intent；本阶段账本尚未实现正文 artifact。
-- 初始载荷建议上限 32 KiB UTF-8（含包装）；读取上限建议 2,000 轮或 4 MiB 提取文字。触顶显示未读/省略范围，不能伪造完整或精确 omitted 数量。
+- adapter 已限制历史载荷为 32 KiB UTF-8（含包装）；尚未实现的历史读取上限建议为 2,000 轮或 4 MiB 提取文字。触顶显示未读/省略范围，不能伪造完整或精确 omitted 数量。
 - 这是产品上限，不是 token 数或模型窗口保证。目标容量未知时不编造 128K；当前用户请求绝不为历史让路而被截断。
 - 源关键条目放不下时需要用户减少选择或明确补充说明。第一版不调用另一个模型自动“总结并补全”事实。
 - 引用 ID 和“打开源轮次”链接仅代表用户可查阅。没有真实 Provider-facing 检索工具时，不承诺 Agent 能找回省略全文。
@@ -120,7 +137,7 @@
 
 ## 7. 验证记录与后续 gate
 
-当前已执行：
+第一阶段已执行：
 
 - 新 conversation 测试覆盖：A→B→A、遗漏项再次补齐、Profile/兼容身份隔离、内容 hash、持久双击去重、陈旧预览、并发写入、重启 unknown、落盘后回执丢失、明确拒绝与已接收失败的区别、原生 ID 漂移、显式弃用与重建、损坏日志、调用方引用隔离。
 - 准入测试覆盖：反向多 key、单 key owner 与多 key waiter 的顺序、独立对话并行、拒绝后全部释放、重复 key、空 key 拒绝。
@@ -129,7 +146,11 @@
 
 最终定向检查：`npm run test:unit -- src/main/conversation-store.test.ts src/main/context-admission.test.ts src/main/session-fork.test.ts src/main/command-receipts.test.ts`，**4 文件、43 测试通过**；`npm run typecheck` 的 node/web 均通过，`npm run build` 通过。负对照曾使身份隔离用例按预期失败，恢复保护后重新通过。
 
-当前无 UI、真实 Provider 或真实用户数据验收。除现有单 key 准入共用新 primitive 外，conversation store 尚无生产调用方；build 不代表这些新模块已进入可用功能。以上检查只证明本阶段模块及相邻准入不回归，不证明整个跨 Provider 工作流。
+第二阶段新增检查：历史正文/hash/UTF-8 边界、真实 runner/adapter 的精确输入、原生 Skill 与附件、fresh/resume、身份漂移、原生回执丢失、同步 SDK 抛错、接收后执行失败、Skill 解析期间取消及未支持 adapter 零调用。定向范围包括上述两个新测试文件、registry、五个 Provider、agent-runner-options、conversation-store 和 context-admission；共 **11 文件、394 测试通过**。`npm run typecheck` 的 node/web 和 `npm run build` 通过。
+
+负对照：临时移除 Codex Skill 解析后的取消检查，取消回归确实失败（出现本不应发送的 `turn/start`）；恢复检查后重新通过。负对照单测筛选跳过了其余用例，不是放宽最终测试范围。
+
+当前无 UI、真实 Provider 或真实用户数据验收。conversation store 尚无生产调用方，新的历史输入也尚无业务入口；build 不代表跨 Provider 功能已经可用。以上检查只证明模块与 adapter 协议边界，不证明整个跨 Provider 工作流。
 
 后续至少要验证：
 

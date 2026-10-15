@@ -33,6 +33,7 @@ import {
   type CodexNotificationEnvelope
 } from './codex-app-server'
 import { createCodexIsolatedHome } from './codex-isolated-home'
+import { HistoricalInput } from './historical-input'
 import {
   authorizedMcpServers,
   isRemoteMcpConfig,
@@ -858,6 +859,7 @@ export function createCodexAdapter(
   return {
     id: 'codex',
     runtimeProvider: 'codex_cli',
+    historicalContext: true,
     describe: async () => {
       const path = executable()
       return {
@@ -909,6 +911,7 @@ export function createCodexAdapter(
       }
     },
     run: (runRequest: ProviderRunRequest) => {
+      const history = new HistoricalInput(runRequest)
       let externalSessionId = runRequest.resume
       let turnId: string | undefined
       let stopped = false
@@ -1539,6 +1542,7 @@ export function createCodexAdapter(
                 runRequest.mcpExecution
               )
           externalSessionId = thread.thread.id
+          history.verifySession(externalSessionId)
           model = thread.model
           modelProvider = thread.modelProvider
           serviceTier = thread.serviceTier
@@ -1563,6 +1567,7 @@ export function createCodexAdapter(
                 (item) => item.enabled && item.name === mention.name
               )
             : undefined
+          if (stopped) return { externalSessionId, stopped: true, status: 'interrupted' }
           if (skill) {
             input.push({ type: 'skill', name: skill.name, path: skill.dir })
             runRequest.emit(
@@ -1575,11 +1580,12 @@ export function createCodexAdapter(
               })
             )
           }
-          const text = skill && mention ? mention.text : runRequest.prompt
+          const text = history.text(skill && mention ? mention.text : runRequest.prompt, skill !== undefined)
           input = [
             ...input,
             ...codexInput(text, runRequest.attachments)
           ]
+          history.attempting(text)
           const turn = await request<CodexTurnResponse>('turn/start', {
             threadId: externalSessionId,
             input,
@@ -1590,6 +1596,7 @@ export function createCodexAdapter(
             ...(runRequest.effort ? { effort: runRequest.effort } : {})
           }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
           turnId = turn.turn.id
+          if (turnId) history.accepted(externalSessionId, 'codex_turn_start_response', turnId)
           runRequest.emit(newEvent(runRequest.runId, {
             kind: 'harness',
             stage: 'runtime:steer_capability',
@@ -1673,7 +1680,8 @@ export function createCodexAdapter(
         // 所有并发 run，所以不能当作 run-scoped 硬杀自动发出。
         forceKillScope: 'shared_transport',
         getExternalSessionId: () => externalSessionId,
-        getProviderTurnId: () => turnId
+        getProviderTurnId: () => turnId,
+        getInputReceipt: () => history.snapshot()
       }
     },
     invalidateContext(context) {
