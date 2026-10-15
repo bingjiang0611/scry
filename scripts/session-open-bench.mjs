@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
+import { readRecords } from './performance-report.mjs'
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
 // This measures local history opening, not Provider latency or production p75.
@@ -290,6 +291,20 @@ try {
   const displayedIds = await evaluate(`Array.from(document.querySelectorAll('.transcript-turn')).map(element => element.dataset.runId)`)
   assert.ok(displayedIds.every(id => id.startsWith(currentSession + '-turn-')), 'stale selection must not replace current history')
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
+  const invalidHistory = await evaluate(`window.scry.loadSession(${JSON.stringify({ ...context, externalSessionId: 'missing-perf-fixture' })}).then(() => false, () => true)`)
+  assert.equal(invalidHistory, true, 'fixture must exercise a real rejected history handler')
+  const cleanup = await stopOwnedApp(child)
+  child = null
+  let localRecording = null
+  if (process.env.SCRY_PERF_RECORD !== '0') {
+    const { records, issues } = await readRecords(join(userData, 'performance'))
+    assert.equal(issues.length, 0, 'journal must contain parseable records')
+    assert.ok(records.every(record => /^[a-f0-9]{64}$/.test(record.build)), 'records identify the compiled source snapshot')
+    assert.ok(records.some(record => record.observation.kind === 'trace' && record.observation.sample.name === 'ipc.agent:loadSession'), 'real App writes trusted-handler observations')
+    assert.ok(records.some(record => record.observation.kind === 'trace' && record.observation.sample.name === 'session_history.load' && record.observation.sample.outcome === 'error'), 'rejected history must not disappear from its named trace')
+    assert.ok(records.some(record => record.observation.kind === 'health'), 'normal shutdown flushes recording health')
+    localRecording = { records: records.length, builds: [...new Set(records.map(record => record.build))], rejectedHistoryRecorded: true }
+  }
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
@@ -303,8 +318,7 @@ try {
     cacheObservedOpens: samples.filter(sample => sample.cacheObserved).length,
     mainLoads: loads, correctness: ['full initial page', 'latest turn visible', 'native typing', 'older turn recovery',
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
-    cleanup: await stopOwnedApp(child) }, null, 2))
-  child = null
+    cleanup, localRecording }, null, 2))
 } catch (error) {
   console.error(output)
   throw error

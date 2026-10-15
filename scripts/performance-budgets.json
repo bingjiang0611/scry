@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "reason": "Initial fixed offline compute/transfer budgets, not UI or Provider latency SLOs. Counter ceilings prevent cumulative drift; same-runner base comparison catches new growth. Timing has a 2 ms noise floor and 50% relative allowance. Review changes to this file; never auto-ratchet a failing ceiling upward.",
+  "scenarios": {
+    "trace.delivery": { "counters": { "bytes": 175000, "messages": 2, "events": 1000 }, "p95Ms": 20 },
+    "history.page": { "counters": { "bytes": 11000, "turns": 40 }, "p95Ms": 20 },
+    "renderer.batch": { "counters": { "bytes": 23000, "turns": 1 }, "p95Ms": 20 },
+    "terminal.delivery": { "counters": { "bytes": 32000, "messages": 1, "outputBytes": 29000 }, "p95Ms": 20 }
+  }
+}

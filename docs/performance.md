@@ -2,6 +2,10 @@
 
 This document defines repeatable local performance checks. Performance data is local and content-free: timings may include Provider ID plus numeric counts/bytes, but never prompts, paths, tool output, credentials, or attachment contents.
 
+## Continuous performance loop
+
+See [持续性能闭环](performance-loop.md) for the current path inventory, default-on bounded local recording, build comparison, fixed production-path budgets and base/PR feedback. The measurements below are dated evidence, not a claim that every current user path has a native benchmark.
+
 ## Instrumented paths
 
 Set `SCRY_PERF_LOG=1` before starting Scry to emit one-line JSON samples prefixed with `[scry:perf]`.
@@ -27,7 +31,7 @@ The history benchmark compares the previous eager behavior against two bounded p
 1. merge 4,000 turns while hydrating only the 40 visible turns;
 2. read 40 indexed per-turn archives from a 500-turn session instead of parsing every file.
 
-Benchmarks are informational, not timing gates. Run them on the same machine and otherwise idle checkout; compare medians and inspect variance.
+These legacy benchmark commands are informational, not timing gates; the separate `performance:bench` / `performance:compare` workflow now enforces the fixed budgets described above. Run them on the same machine and otherwise idle checkout; compare medians and inspect variance.
 
 ## 2026-09-21 repeated legacy-history load
 

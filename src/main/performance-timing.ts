@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks'
+import type { SessionProviderId } from '../shared/provider'
 
 export interface PerformanceCheckpoint {
   stage: string
@@ -7,7 +8,10 @@ export interface PerformanceCheckpoint {
   counters?: Readonly<Record<string, number>>
 }
 
+export type PerformanceOutcome = 'completed' | 'error' | 'cancelled' | 'unavailable'
+
 export interface PerformanceSample {
+  outcome: PerformanceOutcome
   name: string
   startedAt: string
   durationMs: number
@@ -17,8 +21,28 @@ export interface PerformanceSample {
 }
 
 type PerformanceSink = (sample: PerformanceSample) => void
+let recordingSink: PerformanceSink | null = null
+
+export function setPerformanceRecordingSink(sink: PerformanceSink | null): void {
+  recordingSink = sink
+}
+
+export function performanceRecordingEnabled(): boolean {
+  return recordingSink !== null || enabledByEnvironment()
+}
+
+function defaultSink(): PerformanceSink | null {
+  if (!performanceRecordingEnabled()) return null
+  return (sample) => {
+    recordingSink?.(sample)
+    if (enabledByEnvironment()) console.info(`[scry:perf] ${JSON.stringify(sample)}`)
+  }
+}
 type PerformanceDimensions = Readonly<Partial<Record<'provider' | 'platform', string>>>
 
+const providerDimensions: Record<SessionProviderId, true> = {
+  claude: true, codex: true, qoder: true, opencode: true, pi: true, legacy_unknown: true
+}
 const enabledByEnvironment = (): boolean => process.env.SCRY_PERF_LOG === '1'
 const round = (value: number): number => Math.round(value * 10) / 10
 
@@ -37,10 +61,17 @@ export class PerformanceTrace {
   constructor(
     private readonly name: string,
     private readonly dimensions: PerformanceDimensions = {},
-    private readonly sink: PerformanceSink | null = enabledByEnvironment()
-      ? (sample) => console.info(`[scry:perf] ${JSON.stringify(sample)}`)
-      : null
-  ) {}
+    private readonly sink: PerformanceSink | null = defaultSink()
+  ) {
+    // Provider IDs can originate in untrusted IPC before the domain handler validates them.
+    // Do not turn a malformed provider field into a persistent free-text telemetry channel.
+    this.dimensions = {
+      ...(dimensions.provider !== undefined ? {
+        provider: Object.hasOwn(providerDimensions, dimensions.provider) ? dimensions.provider : 'unknown'
+      } : {}),
+      ...(dimensions.platform !== undefined ? { platform: dimensions.platform } : {})
+    }
+  }
 
   mark(stage: string, counters?: Readonly<Record<string, number>>): void {
     if (!this.sink || this.finished) return
@@ -54,10 +85,11 @@ export class PerformanceTrace {
     this.last = now
   }
 
-  finish(counters?: Readonly<Record<string, number>>): PerformanceSample | null {
+  finish(counters?: Readonly<Record<string, number>>, outcome: PerformanceOutcome = 'completed'): PerformanceSample | null {
     if (!this.sink || this.finished) return null
     this.finished = true
     const sample: PerformanceSample = {
+      outcome,
       name: this.name,
       startedAt: this.startedAt,
       durationMs: round(performance.now() - this.started),
