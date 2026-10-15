@@ -1,32 +1,41 @@
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkBenchmarkCoverage } from './performance-report.mjs'
 
 const p95 = values => [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
 const sameKeys = (left, right) => JSON.stringify(Object.keys(left).sort()) === JSON.stringify(Object.keys(right).sort())
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
 
 export function comparePerformance(base, head, policy) {
-  if (base.schema !== 1 || head.schema !== 1 || policy.schema !== 1) throw new Error('Unsupported benchmark schema')
+  if (base.schema !== 1 || head.schema !== 1 || policy.schema !== 2) throw new Error('Unsupported benchmark schema')
   if (base.harness !== head.harness || !base.harness) throw new Error('Harness differs: run the same frozen fixture/config on both source revisions')
   if (JSON.stringify(base.environment) !== JSON.stringify(head.environment)) throw new Error('Environment differs: timings require the same runner and runtime')
-  if (head.measurement?.kind !== 'batch-mean-ms' || head.measurement.iterationsPerSample !== 20 || JSON.stringify(base.measurement) !== JSON.stringify(head.measurement)) throw new Error('Timing methodology differs or is missing')
-  if (Object.keys(policy.scenarios).length === 0) throw new Error('No performance budgets')
+  if (JSON.stringify(base.measurement) !== JSON.stringify(head.measurement) || base.measurement?.kind !== 'batch-mean-ms' || base.measurement.warmups !== 3 || base.measurement.samples !== 15 || base.measurement.iterationsPerSample !== 20) throw new Error('Timing methodology differs or is missing')
+  checkBenchmarkCoverage(policy)
   if (!sameKeys(base.results, policy.scenarios) || !sameKeys(head.results, policy.scenarios)) throw new Error('Missing or unexpected benchmark scenarios')
   const rows = []
   for (const [scenario, budget] of Object.entries(policy.scenarios)) {
     const before = base.results[scenario]
     const after = head.results[scenario]
-    if (!sameKeys(before.counters, budget.counters) || !sameKeys(after.counters, budget.counters)) throw new Error(`Counter coverage differs: ${scenario}`)
+    for (const result of [before, after]) {
+      if (result.lane !== budget.lane || result.workload !== budget.workload || result.iterations !== budget.iterations || result.warmups !== budget.warmups || result.samples !== budget.samples) {
+        throw new Error(`Scenario methodology differs: ${scenario}`)
+      }
+      if (result.outcome !== 'completed') throw new Error(`Missing successful outcome: ${scenario}`)
+      if (!sameKeys(result.counters, budget.counters)) throw new Error(`Counter coverage differs: ${scenario}`)
+    }
     for (const [metric, ceiling] of Object.entries(budget.counters)) {
       const baseline = before.counters[metric]
       const candidate = after.counters[metric]
       if (![baseline, candidate, ceiling].every(finite)) throw new Error(`Invalid counter: ${scenario}.${metric}`)
-      // A 5% relative allowance for bytes only; event/message counts cannot silently grow.
+      // Bytes may vary slightly with serialization metadata; cardinality counters cannot grow.
       const relativeCeiling = metric === 'bytes' ? baseline * 1.05 : baseline
-      rows.push({ scenario, metric, baseline, candidate, ceiling: Math.min(ceiling, relativeCeiling), status: candidate <= ceiling && candidate <= relativeCeiling ? 'pass' : 'regressed' })
+      const preservesWork = ['bytes', 'messages'].includes(metric) || candidate === baseline
+      rows.push({ scenario, metric, baseline, candidate, ceiling: Math.min(ceiling, relativeCeiling), status: preservesWork && candidate <= ceiling && candidate <= relativeCeiling ? 'pass' : 'regressed' })
     }
-    if (![before, after].every(result => Array.isArray(result.durationMs) && result.durationMs.length >= 15 && result.durationMs.every(finite)) || !finite(budget.p95Ms)) throw new Error(`Missing/invalid timing samples: ${scenario}`)
+    const minSamples = budget.samples
+    if (!Number.isInteger(minSamples) || minSamples < 1 || ![before, after].every(result => Array.isArray(result.durationMs) && result.durationMs.length === minSamples && result.durationMs.every(finite)) || !finite(budget.p95Ms)) throw new Error(`Missing/invalid timing samples: ${scenario}`)
     const baseline = p95(before.durationMs)
     const candidate = p95(after.durationMs)
     const ceiling = Math.min(budget.p95Ms, baseline + Math.max(2, baseline * 0.5))
@@ -46,8 +55,8 @@ export function formatComparison(report) {
     '|---|---|---:|---:|---:|---:|---|',
     ...report.rows.map(row => `| ${row.scenario} | ${row.metric} | ${format(row.baseline)} | ${format(row.candidate)} | ${row.baseline === 0 ? 'n/a' : `${((row.candidate / row.baseline - 1) * 100).toFixed(1)}%`} | ${format(row.ceiling)} | ${row.status} |`),
     '',
-    'Fixed offline production-path compute/transfer workloads, **not** native UI paint, network wire bytes, real Provider latency or real-device acceptance. Both sources use the same harness; original per-run samples are in the artifact.',
-    'Counter ceilings plus base-relative checks prevent gradual drift. Timings use 15 fixed 20-iteration batch means after 3 warm batches, their p95, a 2 ms noise floor and 50% relative allowance (not individual-request p95). Never increase budgets just to make a failing PR green.',
+    'Fixed local production-path workloads across all 16 path groups. Domain lanes measure computation/projection; disk/process lanes use temporary files, archives and Git. This is not native UI paint, network wire bytes, real Provider latency or real-device acceptance.',
+    'Each scenario carries an explicit lane, workload, warmup, sample and iteration count. Domain trace scenarios use three warmups and fifteen measured samples; disk/process lanes use bounded local iterations and seven samples. Counter ceilings plus base-relative checks prevent gradual drift. Never increase budgets just to make a failing PR green.',
     ''
   ].join('\n')
 }
