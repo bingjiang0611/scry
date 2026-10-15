@@ -1,12 +1,26 @@
 import { dirname, join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
+import { appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
 export function createSmokeProviderAdapter(): ProviderAdapter {
+  // Test-only entry receipts prove that a rejected production IPC never reached the
+  // privileged adapter. This adapter itself requires the existing explicit smoke gate.
+  const callsFile = process.env.SCRY_ELECTRON_SMOKE_CALLS
+  const recordCall = (operation: string, identity: string): void => {
+    if (callsFile) appendFileSync(callsFile, `${JSON.stringify({ operation, identity })}\n`)
+  }
+  const forkSession: ProviderAdapter['forkSession'] = callsFile ? {
+    fork: async (request) => {
+      recordCall('fork', request.sourceSessionId)
+      return { externalSessionId: `smoke-fork-${request.sourceRunId}` }
+    }
+  } : undefined
   return {
+    forkSession,
     id: 'codex',
     runtimeProvider: 'codex_cli',
     describe: async () => ({
@@ -19,6 +33,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
       health: { state: 'ready', transport: 'packaged smoke fixture' }
     }),
     run: (request) => {
+      recordCall('run', request.runId)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       let stopped = false
       const questionAbort = new AbortController()

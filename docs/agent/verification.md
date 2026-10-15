@@ -56,6 +56,7 @@ npm run build
 git diff --check
 ```
 
+- 修改 conversation 原生归属、启动恢复或旧入口阻断时追加 `npm run test:conversation:ipc`：隐藏的隔离 Electron 通过生产 preload/main IPC 验证，使用测试 Provider 入口收据与正对照，不访问真实账号；该检查也纳入 macOS `test:renderer:ui`。
 - 修改 workspace Hook 时追加 `npm run test:shell`。
 - recorder Core、CLI、integration 或 npm 包的普通改动先运行受影响合同测试及必要的 `npm run build:cli`；跨公开合同的高风险改动或准备 CLI 分发时才运行 `npm run check:cli-release`。
 - 修改 packaging、preload、native dependency、resource allowlist 或 Electron security 时追加 `npm run pack:artifact`。

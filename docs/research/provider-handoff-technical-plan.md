@@ -142,7 +142,22 @@
 - 中间版本 `npm test`：3164 通过、3 跳过，shell 通过。最终补强后再次全量：3166 通过、1 失败、3 跳过，因 unit 失败未执行该次 shell，不能报告最终全量通过。跳过的是既有 `billing-admin-real`、`p0-integration`、`p1-integration` 真实探针。
 - 最终失败来自并行新增的 `src/renderer/remote-workbench.test.ts` 的 Git 操作用例，超过原 5 秒；该调用链不引用本轮 conversation 模块。单项诊断运行 3.64 秒通过，其余 6 项未运行；并发超时根因仍未确认，没有加 timeout、改断言或用单项通过覆盖全量失败。最终全量日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7a526709fb1f4c87.log`。
 
-这些是存储合同/模拟调用和共享工作区的编译检查，不是生产 IPC wrapper 的拒绝验收；未启动真实 App、未调用真实 Provider、未做完整打包发布。全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/b4/b4b8f46f0f9dd9cf24a8c3430ee17d3d080f6ab39b210a0fffe70cc6b10edbce.txt`。
+本阶段初次交付的上述检查仅覆盖存储合同/模拟调用和共享工作区编译；后续生产 IPC 验证见 4.7。真实 Provider 与完整打包发布仍未验收。中间全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/b4/b4b8f46f0f9dd9cf24a8c3430ee17d3d080f6ab39b210a0fffe70cc6b10edbce.txt`。
+
+### 4.7 隔离生产 IPC 验证
+
+新增 `npm run test:conversation:ipc`，复用现有隐藏 Electron fixture，并接入 `test:renderer:ui` 的 macOS gate。使用真实 renderer/preload、生产注册的 trusted IPC 与 `startAppRun()` / fork / delete handlers，仅 Provider 换成原有 smoke adapter。测试专用入口收据记录 adapter 是否真正进入；正常产品不启用此收据或测试 fork facet。没有放宽 renderer sandbox/CSP/IPC 权限。
+
+在 `/tmp/scry-conversation-verify-QaCCax` 冻结 `321b937` 源码并叠加本次验证脚本/fixture，排除共享目录的 remote WIP；复用已有 node_modules。环境为 macOS arm64、Node 24.18.0、Electron 42.10.1、App 0.2.191。验证结果：
+
+- **6 个拒绝场景通过**：已归属原生 resume、fork、按 native ID / run ID / archive ID 删除，以及启动恢复后的 unknown resume。错误来自预期的归属检查；这些请求的 Provider adapter 入口收据增量为 0，源 ledger/archive 文件 hash 不变。
+- **3 个正对照通过**：未归属的 fork、删除和普通 resume 均经过相同生产 IPC 成功；adapter 收据恰有 1 次 fork、1 次 run，排除接口未注册或 Provider 被全局禁用导致的假通过。
+- **真实启动恢复通过**：遗留 pending 在新进程中变成 unknown，revision 从 1 到 2，已确认归属保持 revision 0。第二次重启将隔离 conversation 目录设为只读，实际原子发布产生 EACCES；fresh start 被拒绝、Provider 调用数不变、磁盘仍为 pending，没有伪报恢复成功。测试结束恢复权限并关闭自有进程、清理临时 userData。
+- **两个负对照均失败**：仅在冻结副本中绕过归属 guard，已归属发送错误返回 executed/runId，测试失败；仅忽略 startup recovery failure，fresh start 错误返回 executed/runId，测试失败。恢复源码后重新 build / IPC smoke 通过，并逐文件核对与工作区验证代码 hash 一致。
+- `npm run typecheck`、`npm run build`、上述 IPC smoke 与独立 `npm run test:shell` 通过。
+- **冻结源码的默认全量仍未通过**：3157 通过、3 失败、3 跳过。失败均为原有 `source-control/service.test.ts` 的 5 秒超时（选定文件提交、push endpoint、PR account/HEAD/base 复核）；因此不能把先前超时仅归因于 remote WIP。该文件独立诊断 27/27 通过，耗时从全量期间约 96.5 秒降至 37.3 秒。结果符合资源争用特征，但具体瓶颈未定位；没有修改 timeout、断言、并发配置或把独立通过当作默认全量通过。
+
+最终类型/build/IPC 与全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/82/82fcecb14604aa51aa0796851c324d92681efe9a545c4e95e5dcc2c3775c4744.txt`。这验证的是归属保护，不是完整 A→B→A，也不是实账号 Provider、已安装 App 或打包发布验收。
 
 ## 5. 历史选择与预算
 
