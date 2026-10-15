@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi } from 'vitest'
-import { createServer, Socket, type Server } from 'node:net'
+import { describe, it, expect, afterEach } from 'vitest'
+import { createServer, type Socket, type Server } from 'node:net'
 import { once } from 'node:events'
 import type { Duplex } from 'node:stream'
 import { createRelayConnect } from './relay-connect'
@@ -43,16 +43,13 @@ async function until(check: () => boolean): Promise<void> {
 }
 
 describe('createRelayConnect (raw TCP relay leg)', () => {
-  it('disables Nagle, authenticates, then reports the device session and shuttles bytes both ways', async () => {
-    const noDelay = vi.spyOn(Socket.prototype, 'setNoDelay')
-    cleanups.push(() => { noDelay.mockRestore() })
+  it('authenticates, then reports the device session and shuttles bytes both ways', async () => {
     const relay = await tcpRelay()
     const { connect, readyEvent } = createRelayConnect({ host: '127.0.0.1', port: relay.port, hostId: HOST_ID, token: 't', mode: 'run' })
     const leg = connect()
     await once(leg, readyEvent)
     await until(() => relay.legs.length === 1)
     expect(JSON.parse(await relay.legs[0].auth)).toEqual({ hostId: HOST_ID, token: 't', mode: 'run' })
-    expect(noDelay.mock.contexts.some((socket, index) => socket instanceof Socket && socket.remotePort === relay.port && noDelay.mock.calls[index][0] === true)).toBe(true)
 
     const events: string[] = []
     leg.once('relaySession', () => events.push('relaySession'))

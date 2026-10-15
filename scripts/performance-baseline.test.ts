@@ -391,7 +391,8 @@ function scenariosFor(fixture: Fixture): Record<string, Scenario> {
           for await (const chunk of leg) chunks.push(Buffer.from(chunk))
           const output = Buffer.concat(chunks)
           expect(protocolError).toBeUndefined()
-          expect(output).toEqual(payload)
+          // Compare every byte natively; generic deep equality dominates this transport measurement.
+          expect(output.equals(payload)).toBe(true)
           expect(authLines).toBe(1)
           expect(relaySessions).toBe(1)
           return { authLines, payloadBytes: output.length, relaySessions }

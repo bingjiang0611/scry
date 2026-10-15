@@ -47,8 +47,6 @@ export function createRelayConnect(opts: RelayConnectOptions): RelayConnectFacto
     const socket = useTls
       ? tlsConnect({ host: opts.host, port: opts.port, ca: opts.tls!.ca, servername: opts.tls!.servername, rejectUnauthorized: opts.tls!.rejectUnauthorized ?? true })
       : netConnect({ host: opts.host, port: opts.port })
-    // Auth and interactive TLS frames must not wait for a delayed ACK of an earlier small write.
-    socket.setNoDelay(true)
     // The leg the transport sees is a JS Duplex over the socket, like the WSS
     // leg. A native socket handed to the inner TLS server is read through its
     // handle, so no JS 'data' event would ever reveal that a device took this
