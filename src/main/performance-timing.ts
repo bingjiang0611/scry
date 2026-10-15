@@ -1,4 +1,3 @@
-import { performance } from 'node:perf_hooks'
 import type { SessionProviderId } from '../shared/provider'
 
 export interface PerformanceCheckpoint {
@@ -43,7 +42,9 @@ type PerformanceDimensions = Readonly<Partial<Record<'provider' | 'platform', st
 const providerDimensions: Record<SessionProviderId, true> = {
   claude: true, codex: true, qoder: true, opencode: true, pi: true, legacy_unknown: true
 }
-const enabledByEnvironment = (): boolean => process.env.SCRY_PERF_LOG === '1'
+// The trusted-IPC browser fixture imports this module without Node globals. The Performance
+// API itself is native in both Node and Chromium; only main can enable environment diagnostics.
+const enabledByEnvironment = (): boolean => typeof process !== 'undefined' && process.env.SCRY_PERF_LOG === '1'
 const round = (value: number): number => Math.round(value * 10) / 10
 
 /**
