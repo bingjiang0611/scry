@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：身份/覆盖账本、Claude/Codex 输入回执，以及“权威归档 → 完整正文快照 → durable intent”的链路已实现并做定向测试。`startAppRun()`、真实回执驱动的账本结算和 UI 尚未接通，不是可用的完整接续功能。**
+**当前进度：身份/覆盖账本、Claude/Codex 输入回执，以及“权威归档 → 完整正文快照 → durable intent”的链路已实现并做定向测试。`startAppRun()` 已为 Claude/Codex 普通输入启用回执采集；统一 conversation 身份、原生 writer 准入、回执驱动结算和 UI 尚未接通，不是可用的完整接续功能。**
 
 ## 1. 用户合同
 
@@ -112,8 +112,21 @@
 - Codex 在投递前核对恢复的原生 session；身份缺失或漂移不发送。Claude 在 query 后才取得身份，漂移只能保持 unknown，不能谎称未发出。
 - 等待 Codex Skill catalog 时取消，不再发送 `turn/start`，也不记录虚假的 Skill 调用。
 - 回执通过 `runtime:historical_input` 事件提供诊断；这些事件不自动更新覆盖。SDK 同步抛错也可能已尝试投递，不能因未返回 handle 就判断未发送。
-- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数，也没有接入 `startAppRun()` 或原生 writer 准入。正文 artifact 已接入 conversation begin/读取，真实 input receipt 尚未接入 settle；不能仅看 run 的 completed 状态更新覆盖。
+- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数。`startAppRun()` 目前仅接入普通输入回执采集（见下节），尚无统一 conversation 身份或原生 writer 准入。正文 artifact 已接入 conversation begin/读取，真实 input receipt 尚未接入 settle；不能仅看 run 的 completed 状态更新覆盖。
 - 引用包装不是安全沙箱，也不保证模型保存或遵从历史。真实 CLI/账号尚未验证；本阶段只验证生产 adapter/runner 与模拟 SDK/app-server 的协议边界。
+
+### 4.5 主入口的普通输入回执（第四阶段前置）
+
+原回执只在存在历史时启用，导致首轮 A、以及同 Provider 没有新增历史的轮次缺少可归属接收证据。不能以 completed 单独填补这一缺口。
+
+- main-owned `trackInputReceipt: true` 显式启用无历史输入的回执。`contextHash: null` 表示没有历史正文，不编造空历史 hash，也不插入引用包装。原有历史输入仍使用真实正文 hash。
+- `startAppRun()` 为 Claude/Codex 非斜杠输入启用采集；原生斜杠命令维持旧分派，不把控制命令成功冒充模型输入接收。Codex `$skill` 保留原生 Skill/图片输入，`textHash` 仍只覆盖实际出站文字，不覆盖 Skill 元数据或图片。
+- 普通输入诊断使用 `runtime:input_receipt`；带历史仍使用 `runtime:historical_input`。尝试诊断发生在原生调用之前，main 不把这两类事件算作首个 Provider 响应。它们都不自动结算 coverage。
+- 无历史时仍检查 resumed native session 身份，并保留 not_sent / unknown / accepted 区别。SDK 同步抛错和 RPC 丢失响应不自动重试；Codex 输入确认后执行失败不撤销接收事实。
+- registry 对尚未实现合同的 adapter 同时拒绝历史输入和显式回执采集。未 opt-in 的旧 adapter 调用维持原行为。
+- 本步骤没有新增 conversation IPC，也没有启用 Provider 切换。不能仅在主入口加私有 conversation 参数：还须让旧模式与新模式共享原生 writer ownership，并确保 unknown 在重启后也不能被旧入口绕过。
+
+验证（App 0.2.191 / Node 24.18.0，`2c89b30` + 本轮改动）：11 文件、406 项定向测试通过，涵盖五个 Provider、真实 Claude runner / adapters 与模拟传输、registry、ledger 和准入。新增 12 项回归覆盖首轮/恢复的无历史回执、原文与 Skill/图片不改写、身份漂移、SDK 抛错、RPC 丢失响应、执行失败和 unsupported gate。负对照恢复旧的“没有历史就跳过”分支时，新增普通输入测试确实失败（receipt 为 undefined）；恢复后通过。`npm run typecheck`、`npm run build`、`git diff --check` 通过。本轮未重跑全量、未启动真实 App、未调用真实 Provider。检查日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-4f4e5b4d1263987e.log`。
 
 ## 5. 历史选择与预算
 

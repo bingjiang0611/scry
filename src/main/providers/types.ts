@@ -38,8 +38,9 @@ export interface ProviderHistoricalContext {
 /**
  * Input acceptance is independent of execution success and conversation coverage.
  * textHash covers outgoing text only, not images, Skill metadata, or run controls.
+ * contextHash=null means no imported history, not an empty-history hash.
  */
-export type ProviderInputReceipt = { contextHash: string } & (
+export type ProviderInputReceipt = { contextHash: string | null } & (
   | { status: 'not_sent'; reason: string }
   | { status: 'unknown'; textHash: string; reason: string }
   | {
@@ -113,6 +114,8 @@ export interface ProviderRunRequest {
   /** Original input for native command / Skill dispatch, without historical context. */
   prompt: string
   historicalContext?: ProviderHistoricalContext
+  /** Main opt-in for native receipts on first / history-free inputs as well. */
+  trackInputReceipt?: true
   cwd?: string
   agentProfileId?: string
   resume?: string
@@ -206,7 +209,7 @@ export interface ProviderAdapter {
   readonly runtimeProvider: RuntimeProvider
   describe(): Promise<ProviderDescriptor>
   run(request: ProviderRunRequest): ProviderRunHandle
-  /** Opt in only after both wire input and acceptance evidence are implemented. */
+  /** Opt in after history wire input and native receipts (including ordinary input) are implemented. */
   readonly historicalContext?: true
   readonly forkLastTurn?: ForkLastTurnFacet
   readonly forkSession?: ForkSessionFacet

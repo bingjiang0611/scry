@@ -3348,6 +3348,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     h = providerRegistry.run(providerId, {
       runId,
       prompt: runtimePrompt,
+      // First / same-provider turns need receipts too. Native slash commands retain
+      // their existing dispatch; a successful control command is not model-input evidence.
+      trackInputReceipt: adapter.historicalContext && !runtimePrompt.trimStart().startsWith('/') ? true : undefined,
       cwd,
       agentProfileId,
       resume,
@@ -3368,7 +3371,10 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       recordNative: eventLog && ((type, payload) => eventLog.record('native', type, payload)),
       emit: (event) => {
         eventLog?.record('canonical', `${event.kind}/${event.stage}`, event)
-        firstTracePerf.finish({ bufferedEvents: runState.items.length })
+        // The input-attempt diagnostic precedes the native call, not a Provider response.
+        if (event.stage !== 'runtime:input_receipt' && event.stage !== 'runtime:historical_input') {
+          firstTracePerf.finish({ bufferedEvents: runState.items.length })
+        }
         if (event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta') &&
           typeof event.text === 'string' && event.text.length > 0) {
           // This is the first provider text event, not a renderer paint or a UI display time.

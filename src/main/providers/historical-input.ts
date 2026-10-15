@@ -28,23 +28,23 @@ export class HistoricalInput {
 
   constructor(private readonly request: ProviderRunRequest) {
     const context = request.historicalContext
-    if (!context) return
-    this.prefix = historicalInputPrefix(context)
-    this.receipt = { contextHash: context.contentHash, status: 'not_sent', reason: '尚未尝试投递历史输入' }
+    if (!context && !request.trackInputReceipt) return
+    this.prefix = context ? historicalInputPrefix(context) : undefined
+    this.receipt = { contextHash: context?.contentHash ?? null, status: 'not_sent', reason: '尚未尝试投递输入' }
   }
 
   text(prompt: string, nativeSkill = false): string {
-    if (this.prefix === undefined) return prompt
+    if (!this.receipt) return prompt
     if (this.request.prompt.trimStart().startsWith('/') && !nativeSkill) {
-      throw new Error('交接历史不能与原生斜杠命令同时发送；请先发送普通交接请求')
+      throw new Error('原生斜杠命令不能作为可验证的普通会话输入；请先发送普通请求')
     }
-    return this.prefix + prompt
+    return (this.prefix ?? '') + prompt
   }
 
   /** Call immediately before the native input operation, not on session creation. */
   attempting(text: string): void {
     if (!this.receipt) return
-    if (!text.startsWith(this.prefix!)) throw new Error('待发送文本缺少已验证的交接历史')
+    if (this.prefix !== undefined && !text.startsWith(this.prefix)) throw new Error('待发送文本缺少已验证的交接历史')
     this.receipt = {
       contextHash: this.receipt.contextHash,
       status: 'unknown',
@@ -71,7 +71,7 @@ export class HistoricalInput {
     providerTurnId?: string
   ): void {
     if (!this.receipt) return
-    if (this.receipt.status !== 'unknown') throw new Error('历史输入没有待确认的投递尝试')
+    if (this.receipt.status !== 'unknown') throw new Error('输入没有待确认的投递尝试')
     if (typeof nativeSessionId !== 'string' || !nativeSessionId.trim() ||
       (providerTurnId !== undefined && (typeof providerTurnId !== 'string' || !providerTurnId.trim()))) {
       this.receipt = { ...this.receipt, reason: '原生回执缺少有效身份，不能确认目标接收' }
@@ -100,7 +100,7 @@ export class HistoricalInput {
       runId: this.request.runId,
       ts: new Date().toISOString(),
       kind: 'harness',
-      stage: 'runtime:historical_input',
+      stage: this.prefix === undefined ? 'runtime:input_receipt' : 'runtime:historical_input',
       runtimeMetadata: { inputReceipt: this.snapshot() }
     })
   }

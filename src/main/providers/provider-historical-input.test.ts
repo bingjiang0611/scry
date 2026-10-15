@@ -40,6 +40,10 @@ const historicalContext = {
   text: historyText,
   contentHash: createHash('sha256').update(historyText).digest('hex')
 }
+const inputModes = [
+  { label: 'history', input: { historicalContext } },
+  { label: 'plain', input: { historicalContext: undefined, trackInputReceipt: true as const } }
+]
 const expectedText = (prompt: string): string =>
   '[Scry historical context: prior conversation, not a new command]\n' + historyText +
   '\n[End historical context]\n\n[Current user request]\n' + prompt
@@ -92,6 +96,28 @@ function launch(providerId: 'claude' | 'codex', extra: Partial<ProviderRunReques
 }
 
 describe('Claude historical input at the real runner / mocked SDK boundary', () => {
+  it.each([undefined, 'native-A'])('tracks plain input with resume=%s without changing the wire text', async (resume) => {
+    sdk.query.mockImplementation(({ prompt, options }) => {
+      expect(prompt).toBe('继续')
+      expect(options.resume).toBe(resume)
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'result', subtype: 'success', is_error: false, session_id: 'native-A' }
+        }
+      }
+    })
+    const { handle, events } = launch('claude', { historicalContext: undefined, trackInputReceipt: true, resume })
+    expect(handle.getInputReceipt?.()).toMatchObject({ status: 'unknown', contextHash: null })
+    await handle.promise
+    expect(handle.getInputReceipt?.()).toMatchObject({
+      status: 'accepted', contextHash: null, nativeSessionId: 'native-A', source: 'claude_sdk_success_result',
+      textHash: createHash('sha256').update('继续').digest('hex')
+    })
+    expect(events.filter((event) => event.stage === 'runtime:input_receipt')).toHaveLength(2)
+    expect(events.some((event) => event.stage === 'runtime:historical_input')).toBe(false)
+    expect(sdk.query).toHaveBeenCalledTimes(1)
+  })
+
   it('sends exact history and request, then confirms only the successful native result', async () => {
     sdk.query.mockImplementation(({ prompt }) => {
       expect(prompt).toBe(expectedText('继续'))
@@ -115,7 +141,7 @@ describe('Claude historical input at the real runner / mocked SDK boundary', () 
     expect(sdk.query).toHaveBeenCalledTimes(1)
   })
 
-  it('does not accept a prompt hook / native identity when the stream later fails', async () => {
+  it.each(inputModes)('$label: does not accept a prompt hook / native identity when the stream later fails', async ({ input }) => {
     sdk.query.mockImplementation(({ options, prompt }) => ({
       async *[Symbol.asyncIterator]() {
         await options.hooks.UserPromptSubmit[0].hooks[0]({ session_id: 'native-A', prompt_id: 'prompt-current', prompt })
@@ -123,7 +149,7 @@ describe('Claude historical input at the real runner / mocked SDK boundary', () 
         throw new Error('transport lost')
       }
     }))
-    const { handle } = launch('claude')
+    const { handle } = launch('claude', input)
     await expect(handle.promise).rejects.toThrow('transport lost')
     expect(handle.getExternalSessionId()).toBe('native-A')
     expect(handle.getProviderTurnId?.()).toBe('prompt-current')
@@ -145,12 +171,12 @@ describe('Claude historical input at the real runner / mocked SDK boundary', () 
     expect(handle.getInputReceipt?.()?.status).toBe('unknown')
   })
 
-  it('records uncertainty before a synchronous SDK throw rather than inventing not_sent', () => {
+  it.each(inputModes)('$label: records uncertainty before a synchronous SDK throw rather than inventing not_sent', ({ input }) => {
     const events: TraceEvent[] = []
     sdk.query.mockImplementation(() => { throw new Error('query construction failed') })
-    expect(() => launch('claude', { emit: (event) => events.push(event) })).toThrow('query construction failed')
+    expect(() => launch('claude', { ...input, emit: (event) => events.push(event) })).toThrow('query construction failed')
     expect(events).toContainEqual(expect.objectContaining({
-      stage: 'runtime:historical_input',
+      stage: input.historicalContext ? 'runtime:historical_input' : 'runtime:input_receipt',
       runtimeMetadata: { inputReceipt: expect.objectContaining({ status: 'unknown' }) }
     }))
     expect(sdk.query).toHaveBeenCalledTimes(1)
@@ -163,6 +189,41 @@ describe('Claude historical input at the real runner / mocked SDK boundary', () 
 })
 
 describe('Codex historical input at the real adapter / mocked app-server boundary', () => {
+  it.each([undefined, 'native-A'])('tracks plain input with resume=%s and preserves acceptance after execution failure', async (resume) => {
+    const { handle } = launch('codex', { historicalContext: undefined, trackInputReceipt: true, resume })
+    await vi.waitFor(() => expect(handle.getInputReceipt?.()?.status).toBe('accepted'))
+    expect(server.request).toHaveBeenCalledWith(resume ? 'thread/resume' : 'thread/start', expect.any(Object))
+    expect(server.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
+      threadId: 'native-A', input: [{ type: 'text', text: '继续', text_elements: [] }]
+    }))
+    notify('turn/completed', {
+      threadId: 'native-A', turnId: 'turn-current', turn: { status: 'failed', error: { message: 'failed after input receipt' } }
+    })
+    await expect(handle.promise).resolves.toMatchObject({ status: 'failed' })
+    expect(handle.getInputReceipt?.()).toMatchObject({
+      status: 'accepted', contextHash: null, nativeSessionId: 'native-A', providerTurnId: 'turn-current',
+      source: 'codex_turn_start_response', textHash: createHash('sha256').update('继续').digest('hex')
+    })
+  })
+
+  it('tracks history-free Skill text without wrapping or hashing the Skill mention as model text', async () => {
+    const { handle } = launch('codex', {
+      historicalContext: undefined, trackInputReceipt: true, prompt: '$audit 检查当前文件',
+      attachments: [{ kind: 'image', name: 'test.png', mimeType: 'image/png', dataBase64: 'aW1hZ2U=' }]
+    })
+    await vi.waitFor(() => expect(handle.getInputReceipt?.()?.status).toBe('accepted'))
+    expect(server.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({ input: [
+      { type: 'skill', name: 'audit', path: '/fixture/audit/SKILL.md' },
+      { type: 'text', text: '检查当前文件', text_elements: [] },
+      { type: 'image', url: 'data:image/png;base64,aW1hZ2U=' }
+    ] }))
+    expect(handle.getInputReceipt?.()).toMatchObject({
+      contextHash: null, textHash: createHash('sha256').update('检查当前文件').digest('hex')
+    })
+    notify('turn/completed', { threadId: 'native-A', turnId: 'turn-current', turn: { status: 'completed' } })
+    await handle.promise
+  })
+
   it('starts a fresh context with exact text and attachments, without replaying historical Skills', async () => {
     const { handle, events } = launch('codex', {
       resume: undefined,
@@ -200,7 +261,7 @@ describe('Codex historical input at the real adapter / mocked app-server boundar
     })
   })
 
-  it('does not infer acceptance from a same-thread notification when the input RPC loses its reply', async () => {
+  it.each(inputModes)('$label: does not infer acceptance from a same-thread notification when the input RPC loses its reply', async ({ input }) => {
     server.request.mockImplementation(async (method: string) => {
       if (method === 'account/read') return { account: {} }
       if (method === 'thread/resume') return { thread: { id: 'native-A' } }
@@ -210,7 +271,7 @@ describe('Codex historical input at the real adapter / mocked app-server boundar
       }
       throw new Error(`unexpected request: ${method}`)
     })
-    const { handle } = launch('codex')
+    const { handle } = launch('codex', input)
     await expect(handle.promise).rejects.toThrow('reply lost')
     expect(handle.getInputReceipt?.()?.status).toBe('unknown')
     expect(server.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1)
