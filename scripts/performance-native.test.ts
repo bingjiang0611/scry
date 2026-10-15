@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { compareNative, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { compareNative, composerModes, nativeWorkloads, validateNative } from './performance-native.mjs'
 
 function report() {
   return {
     schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors: [],
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 3, warmups: 2, iterations: 12,
+      scenario, turnCount, sections, measurementVersion: 4, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
-      sqliteStats: { status: 'ready', turns: 6, readMs: 2 },
+      sqliteStats: { status: 'ready', turns: 10, readMs: 2 },
+      composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`,
+        inputTrusted: true, sendTrusted: true, stopTrusted: mode !== 'complete', terminalConfirmed: true, stopped: mode !== 'complete',
+        nativeTurnKnown: mode !== 'stop-immediate', diskVerified: true, sendToTerminalMs: 50, sendToSettledVisibleMs: 60,
+        ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: 10, sendToFirstVisibleMs: 20, sendToVisibleReadyMs: 30 } : {}),
+        ...(mode !== 'complete' ? { stopToTerminalMs: 10, stopToSettledVisibleMs: 20 } : {}) })),
       startupDriverReadyMs: 500, nativeInput: { trusted: true, frameReadyMs: 20 }, cleanup: { tracked: 3 }, firstOpens: [{}, {}],
       samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(40, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500 })),
       lifecycleSamples: [false, true, false, true, false, true].map(stopped => ({
@@ -46,6 +51,30 @@ describe('native performance evidence gate', () => {
     const failed = report()
     failed.errors.push({ scenario: 'paged', message: 'fixture failed' })
     expect(() => validateNative(failed)).toThrow('failed native lanes')
+  })
+
+  it('rejects button receipts without trusted clicks, visible frames, phase identity or durable output', () => {
+    const syntheticSend = report()
+    syntheticSend.results.short.composerSamples[0].sendTrusted = false
+    expect(() => validateNative(syntheticSend)).toThrow('trusted button click')
+    const ineffectiveStop = report()
+    ineffectiveStop.results.short.composerSamples[2].stopped = false
+    expect(() => validateNative(ineffectiveStop)).toThrow()
+    const invisible = report()
+    invisible.results.short.composerSamples[1].sendToFirstVisibleMs = NaN
+    expect(() => validateNative(invisible)).toThrow('missing button')
+    const wrongPhase = report()
+    wrongPhase.results.short.composerSamples[0].nativeTurnKnown = true
+    expect(() => validateNative(wrongPhase)).toThrow()
+    const lost = report()
+    lost.results.short.composerSamples[2].diskVerified = false
+    expect(() => validateNative(lost)).toThrow('after process exit')
+    const missedCycle = report()
+    missedCycle.results.short.composerSamples.pop()
+    expect(() => validateNative(missedCycle)).toThrow('scenario coverage')
+    const regression = report()
+    regression.results.short.composerSamples[2].stopToSettledVisibleMs = 1200
+    expect(compareNative(report(), regression).passed).toBe(false)
   })
 
   it('rejects changed workload, untrusted input, missing samples and incomparable runs', () => {
