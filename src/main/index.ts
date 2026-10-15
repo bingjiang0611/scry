@@ -250,6 +250,7 @@ import {
   type PreparedAttachment
 } from './attachment-store'
 import { deleteOwnedSessionData } from './session-deletion'
+import { ConversationStore } from './conversation-store'
 import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
 import {
@@ -512,6 +513,8 @@ const resolvePiProfile = async (id: string): Promise<PiAgentProfile | undefined>
 }
 let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
 const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
+let conversationStoreInstance: ConversationStore | undefined
+const conversationStore = () => conversationStoreInstance ??= new ConversationStore(app.getPath('userData'))
 const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
   process.env.ELECTRON_ENABLE_LOGGING === '1' &&
   process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
@@ -1549,6 +1552,8 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
   const contextKey = providerContextKey(providerId, catalogCwd, agentProfileId)
   try {
     return await contextAdmission.run(contextKey, async () => {
+      await startupManagedRecovery
+      await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
       const archive = await readTraceArchiveAsync({
         userDataDir: app.getPath('userData'),
         providerId,
@@ -1563,6 +1568,7 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
       const mcpExecutionSnapshot = providerId === 'pi'
         ? null
         : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
+      await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
       const forked = await forkSession.fork({
         ...request,
         cwd,
@@ -2074,6 +2080,7 @@ async function deleteOneSession(
     })
     const reserved = await contextAdmission.run(admissionKey, async () => {
       await startupManagedRecovery
+      await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
       if (hasActiveSession() || deletingSessions.has(deletionKey)) return false
       deletingSessions.add(deletionKey)
       return true
@@ -2102,6 +2109,7 @@ async function deleteOneSession(
         // only for the destructive phase so broad managed recovery in another session
         // cannot resurrect this session while unrelated work is deleted.
         if (hasActiveSession()) return { ok: false, reason: 'active_session', ...empty() }
+        await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
 
       const userDataDir = app.getPath('userData')
       const sessionStore = appSessionStore()
@@ -2619,6 +2627,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         nextAction: '等待目标会话完成后重试；草稿已保留'
       })
     }
+  await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
   // Still-owned runs finish on their original execution chain, not through crash recovery.
   const isLiveManagedRun = (candidate: string | undefined, nativeIdentity?: {
     provider: ProviderId; sessionId: string; providerTurnId?: string
@@ -3344,6 +3353,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     firstTextPerf.mark('provider_launch')
     // Re-hash executable bytes at the actual Provider launch boundary, after all
     // attachment/recorder/diff preparation that may have yielded to the event loop.
+    await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
     const mcpExecution = authorizedMcpExecution(mcpExecutionSnapshot)
     h = providerRegistry.run(providerId, {
       runId,
@@ -4640,6 +4650,13 @@ app.whenReady().then(async () => {
     cleanupTraceTurnProgressTemps(app.getPath('userData'))
     await cleanupTraceArchiveTemps(app.getPath('userData'))
     startupPerf.mark('recovery_temps_cleaned')
+    try {
+      await conversationStore().recoverAll(new Set(runs.unsettledStates().map((run) => run.runId)))
+    } catch (error) {
+      // Do not discard corrupt ownership. Every legacy write still checks the store
+      // and rejects unreadable/conflicting ledgers or pending/unknown ownership.
+      console.warn('[scry] conversation startup recovery failed:', error)
+    }
     try {
       const traceProgress = await recoverTraceTurnProgress(app.getPath('userData'), {
         isLiveManagedRun: (runId) => runs.unsettledStates().some((run) => run.runId === runId)

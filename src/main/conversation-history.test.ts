@@ -41,8 +41,8 @@ function publish(userText: string, items: TraceEvent[], done = true): void {
     turn: { runId: 'run-A', providerTurnId: source.providerTurnId, userText, items, done, status: 'completed', ts: Date.now() }
   })).toBe(true)
 }
-async function seed(user = 'hello', answer = 'answer'): Promise<Conversation> {
-  return store.create(cwd, { target: { providerId: 'claude', continuationKey: 'profile-A' }, nativeSessionId: 'native-not-the-archive-id',
+async function seed(user = 'hello', answer = 'answer', nativeSessionId = 'native-not-the-archive-id'): Promise<Conversation> {
+  return store.create(cwd, { target: { providerId: 'claude', continuationKey: 'profile-A' }, nativeSessionId,
     turns: [{ runId: 'run-A', items: [ref('user', user), ref('assistant', answer)], nativeItems: [], archive: source }]
   })
 }
@@ -176,7 +176,7 @@ describe('durable conversation history bodies', () => {
     publish('hello', [event('answer')])
     const conversation = await seed()
     const started = await store.begin(conversation.id, input(conversation))
-    const another = await seed()
+    const another = await seed('hello', 'answer', 'another-native-session')
     const other = await store.begin(another.id, input(another))
     const recordPath = join(userData, 'conversations', `${another.id}.json`)
     const record = JSON.parse(await readFile(recordPath, 'utf8'))
