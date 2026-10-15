@@ -1,17 +1,26 @@
 export class ContextAdmission {
   private readonly tails = new Map<string, Promise<void>>()
 
-  async run<T>(key: string, action: () => Promise<T>): Promise<T> {
-    const previous = this.tails.get(key) ?? Promise.resolve()
+  run<T>(key: string, action: () => Promise<T>): Promise<T> {
+    return this.runMany([key], action)
+  }
+
+  async runMany<T>(keys: readonly string[], action: () => Promise<T>): Promise<T> {
+    const ownedKeys = [...new Set(keys)]
+    if (ownedKeys.length === 0) throw new Error('Context admission requires at least one identity')
+    const previous = ownedKeys.map((key) => this.tails.get(key) ?? Promise.resolve())
     let release!: () => void
     const current = new Promise<void>((resolve) => { release = resolve })
-    this.tails.set(key, current)
-    await previous
+    // Reserve every tail before yielding. Nested per-key waits could deadlock A→B vs B→A.
+    for (const key of ownedKeys) this.tails.set(key, current)
+    await Promise.all(previous)
     try {
       return await action()
     } finally {
       release()
-      if (this.tails.get(key) === current) this.tails.delete(key)
+      for (const key of ownedKeys) {
+        if (this.tails.get(key) === current) this.tails.delete(key)
+      }
     }
   }
 }

@@ -1,144 +1,143 @@
-# Scry 跨 Provider 接续：技术方案
+# Scry 统一会话内跨 Provider 接续
 
-**状态：待确认产品范围，尚未实现。** 依据：[T3 源码核查](t3-provider-handoff-implementation.md)。本项不提前实施 Agent 编排或历史/文件回退。
+**用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-## 1. 先确定产品语义
+**当前进度：身份/覆盖账本与准入基础已实现并做定向测试；尚未接入实际发送和 UI，不是可用的完整接续功能。**
 
-| 方案 | 用户体验 | 底层影响 |
-| --- | --- | --- |
-| **新会话交接，推荐第一版** | 源会话保留；预览要转交的资料；进入目标 Provider 的新会话，并能回到来源 | 复用现有单 Provider session、真实启动、历史与计费；新增交接材料及来源关联 |
-| 同一会话内切换 Provider | 一个聊天里包含多 Provider；切回时寻找旧原生线程并补齐 delta | 需要 app-thread 身份、多条 native session、覆盖账本、混合历史与分支/恢复/删除/计费规则 |
-
-两者不是同一个功能的两种皮肤。后者不能通过去掉 `agentLocked` 完成，也不是推荐方案已经具备的能力。
-
-以下是推荐方案的完整第一版合同。若用户选择统一会话模型，应先另行设计底层身份迁移，不按本文偷换需求。
-
-## 2. 用户路径
+## 1. 用户合同
 
 ```text
-已结束的本机源会话
-  → 选择“交给其他 Provider”
-  → 选择目标 Provider / Profile / 模型
-  → main 读取归档并生成预览：实际正文、来源、状态、省略项、限制
-  → 用户确认，准备目标新会话草稿（不启动、不发送）
-  → 用户填写本轮请求并点击发送
-  → 重新验证源边界、目标能力、工作区与 trust
-  → 走正常 startAppRun；目标产生自己的原生 session
+统一对话 C（同一个侧边栏条目、稳定 conversationId）
+  ├─ 第 1–3 轮：Claude / 原生会话 A
+  ├─ 第 4–6 轮：Codex / 原生会话 B，接收选定历史
+  └─ 第 7 轮：恢复 A，补入 A 尚未收到的历史
 ```
 
-- 第一版只支持本机桌面、当前项目、App-owned 可验证归档，以及不同 Provider 的新会话。五种 Provider 各按现有 availability/实验性状态展示，不据此宣称能力一致。
-- 源会话保持原样；原草稿与待发队列不迁移、不静默删除或发送。需要用户先处理会阻碍安全离开的队列/运行。
-- 已失败或 interrupted 的轮次也可提供有明确状态的部分资料；前提是 Scry 管理范围内的执行已收敛，归档已稳定。缺少原生 session ID 不等于文字交接必然不可用。
-- 源 run、待审批、已知背景工作或停止结果不明时，不自动杀进程换 Provider。先等待/停止并核实；不承诺能发现逃逸到 Scry 观测之外的进程。
-- 原生-only、身份无法确认或尚未稳定归档的历史显示 unavailable，不暗中启动源 Provider 生成总结。
-- 不复制、回退或 checkout 文件。目标使用发送时的真实工作区；历史测试成功不代表当前文件仍通过。
-- 第一次交接发送后，后续轮次正常 resume **目标自己的** session，不重复注入旧交接材料。切回源 Provider仍是打开原会话；第一版不向旧 native session 补 delta。
+- 统一的是 App 对话，不是把 A 的 native session ID 交给 B。
+- 切回同 Provider、同 Profile、兼容原生上下文时优先恢复其原生会话。不能证明兼容、原生身份已失效或交接结果未知时，不偷偷新建/重发来伪装恢复成功。
+- 新建原生上下文需要明确说明和用户确认，但仍属于同一个 App 对话；旧原生绑定和历史不能覆盖掉。
+- 暂停、审批、背景工作与进程所有权按实际 Provider 保留。切换不意味着自动终止源任务，也不是安全沙箱。
+- 第一版目标为本机桌面、同一工作区。远端/手机、跨工作区迁移和多 Agent 编排不在本项范围。
 
-## 3. 材料合同：原文摘选，不伪装智能总结
+## 2. 身份与数据权威
 
-第一版采用本地确定性选择，不产生额外总结调用或费用：
+| 身份 | 用途 | 不得混用 |
+| --- | --- | --- |
+| conversationId | App 统一对话、侧边栏、草稿与轮次顺序 | 不作为 Provider resume 参数 |
+| bindingId | 某一 Provider/Profile/兼容身份下的一代原生上下文 | 同 Provider 的不同账号/Home 不能据名称合并 |
+| nativeSessionId | adapter 对应的真实恢复目标 | 重建后保留旧代，不原地替换其覆盖账本 |
+| runId / ordinal | 一次实际尝试 / 在统一对话中的顺序 | runId 保留现有 trace、recorder、计费关联 |
+| itemId + contentHash | 实际可见内容的不可变引用 | 同名但不同正文不是同一个已投递条目 |
 
-- 用户原文、可恢复的可见助手正文、轮次状态与错误，以及来源引用。
-- 保留消息角色、顺序、run ID 和来源 Provider；被选消息正文不截半、不折叠代码块空白。
-- 不迁移 thinking/reasoning、工具调用协议、未决 approvals、后台 task handles、原生会话文件、Hook/MCP 配置或凭据。
-- 不默认携带旧图片/附件、完整 diff 或原始工具输出。预览明确列出排除范围；新附件仍走目标 Provider 的正常附件入口。
-- 不拼接 `text_delta`、最终 text 与 result shadow 造成重复。实现时复用已核实的文本/内容存储投影，补“最终文本替代 delta”用例；不可直接套用 renderer 最近一页的字符串。
-- 若助手正文只有 bounded preview 或 content ref，先按现有授权读取完整正文；无法取得则标明 unavailable/partial，不能把预览称为原文全文。
-- “目标、决定、下一步”等推断不由本地算法编造。用户可补充独立的交接说明，并明确标成用户新增内容，不冒充归档事实。
+现有 Provider archive、原生 transcript、`.scry` records 和 usage ledger 继续保留各自权威性。新 conversation store 只持有绑定、轮次引用、选择与投递证据，不复制旧工具事件或用量成目标 Provider 的新工作。
 
-### 有界实现
+`nativeItems` 和 handoff 覆盖表示**有证据的历史投递/原生输出**。它们不保证模型在原生 compaction 后仍完整保留这些文字，也不保证模型遵循了它们。
 
-初始建议：交接正文及来源包装最多 **32 KiB UTF-8**；该值是产品载荷限制，不是模型 token 数或容量保证。当前用户请求、新附件与 Provider 自身指令另计，绝不截短当前请求来塞入历史。
+## 3. 已落地的第一阶段
 
-默认优先首个用户目标、最近用户请求和最近可见回复，再按近到远填入完整消息，最终保持原顺序。关键默认条目放不下时要求用户减少选择或填写明确的独立说明，不悄悄省掉目标后显示“完整”。
+### `src/shared/conversation.ts`
 
-归档读取同样有独立上限：优先利用 archive 版本/分页入口；扫描上限初定 2,000 轮或 4 MiB 提取文本。触顶时明确未遍历范围，不把未读取内容计成已检查。无法稳定计算的省略数量用 unknown，不显示 0。超大单条在完整读取前先判断存储长度。
+- 区分统一对话、原生绑定、已有历史引用与新投递尝试。
+- 原生复用必须同时匹配 provider、profile、main/adapter 提供的 continuationKey。
+- 规划 fresh/resume/blocked；不以“最近已见 ordinal”代替逐条覆盖。
+- 省略项不计入已接收覆盖；切回目标时仍能找出早期遗漏。只消费 confirmed acceptance，不从 pending/unknown 猜测成功。
+- 已明确弃用的原生绑定不再被选择为 resume 目标。
 
-已知的目标容量只能来自该目标模型的可信 capability/telemetry；估算与准确值分开显示。容量未知不虚构 128K，不保证 Provider 一定接受。若提供可靠的小窗口限制，应进一步缩小预算或拒绝；目标拒绝时保留草稿，不自动换模型或重发。
+### `src/main/conversation-store.ts`
 
-**升级触发条件**：真实会话经常超出上述范围、用户确需全历史，或目标需要自主找回省略项。届时先实现有 source/session/item 授权、分页及内容引用的 Provider-facing 检索能力，再增加预算；不在第一版声称内部 run ID 就是 Agent 可用的读取工具。
+- App userData 下的原子持久化；复用现有原子文件 helper，不使用新数据库或依赖。
+- 从已有权威历史接入时只导入引用，不调用 Provider，也不修改其原生历史。
+- 每次 begin 持久化 intent、预分配 runId、原生恢复目标、精确选择和省略引用。
+- commandId + 冻结请求指纹持久去重；同 ID 不接受不同请求。重复结果返回 `duplicate`，调用方不得再次启动 Provider。
+- revision 拒绝陈旧预览；每个对话内写入串行；读回验证身份、轮次、跨引用和状态。
+- 恢复只在 startup barrier 内、尚未开放新发送时执行；保留已登记 live run，没有 owner 的 pending 转 unknown，不重放。运行中的结果核查走明确的 settle 证据路径。
+- 终态失败也可能有明确 input acceptance：失败状态与已投递覆盖分开保存。反之，能证明未发出的失败不扩张覆盖。
+- Provider 返回与 resume 目标不同的 native ID 时拒绝继承覆盖。只有已收敛状态可显式弃用绑定；弃用不能抹掉 unknown 屏障。
 
-## 4. main-owned 身份与持久化
+**边界**：store 接受的 acceptance、nativeItems、source 身份必须由后续 main/adapter 权威调用方证明。当前测试中的证据输入是 fixture，不是真实 Provider 回执；store 自己不证明远端接受，不提供 workspace authorization，也不保证跨进程写锁。
 
-拟新增小型 `src/shared/provider-handoff.ts` 与 `src/main/provider-handoff.ts`，不建立通用编排平台或插件注册表。具体结构在实现时以现有类型可复用程度收敛。
+索引仅含元数据与引用，单文件上限 16 MiB，损坏/超限拒绝而非变成空历史。所有写入原子替换；仅支持单个 App main owner。若真实长会话触顶，再迁移为有 manifest 的分轮文件/索引，不自动截历史或仅调大限制。
 
-交接材料至少包含：
+### `src/main/context-admission.ts`
 
-- 版本、opaque handoff ID、创建时间。
-- source：canonical cwd、provider/profile、source session/run 边界、归档版本/指纹。
-- target：provider/profile/model 选择；不保存或复用源原生 session handle。
-- 实际冻结的历史正文、角色/来源引用、正文 hash、字节数、选择/省略/不可用说明。
-- 用户新增说明与归档正文分开；修改选择或目标后生成新确认版本。
-- 投递 attempt：请求 hash、commandId、预分配 runId、绑定的目标 session（取得后）、结果证据与 unknown 状态。
+增加 `runMany()`，一次性登记全部身份的等待链，再等待前序操作。现有 `run()` 共用此实现。反向 A→B / B→A 不采用嵌套单 key 锁，互不相关的会话不被全局锁阻塞。
 
-材料放 App userData，复用现有原子 JSON 写入模式。renderer 只提交身份、选择与确认 hash；不能提交任意文件路径、历史权威正文或私有 `providerPrompt`。
+这只是准入 primitive。后续主链路必须实际传入 conversation 和 native binding 身份，并与普通启动共用；尚不能宣称统一会话已经获得运行期互斥。
 
-不能用 `cloneForkArchiveTurns()` 把旧 Provider 的工具事件、用量、执行状态复制成目标的新事实。目标首轮只关联交接材料；历史区显示“来自何处、实际发送了什么”，旧工具记录仍归源 Provider，费用也不能双计。
+## 4. 下一步：接入正常执行，不建立第二个 runner
 
-`displayPrompt` 保持用户本轮请求；main 的私有 `providerPrompt` 拼入经过确认的参考上下文。归档必须能显示两者的区别与实际附加正文/hash，不能让用户误以为 Provider 只收到了短请求。`.scry` 的用户输入仍是用户请求；本阶段不改 recorder core 为 Electron 专用存储。
+### 4.1 显式目标替代全局“最近 session”
 
-### 删除与保留
+当前 `sessionByContext` 以 Provider/Profile/cwd 为 key。不同统一对话可能在同一工作区使用相同 Provider，不能从这里猜 resume。
 
-- 尚未发送的材料依附于源草稿，取消/删除按明确草稿规则清理。
-- 已尝试投递的材料依附于目标 attempt，源会话删除不能抹掉 unknown 标记。
-- 删除源会话不能撤回已发送给目标的历史副本；删除提示必须说明。来源删除后链接显示不可用，而不是自动重新扫描用户全部原生历史。
-- 删除目标会话时按现有活动执行/归档清理合同删除其交接副本；不能因此删除源会话或 Provider 原件。
+新增统一会话请求需要携带 conversationId 与预览 revision；main 从账本解析具体 binding/native ID。请求的 resume 目标与 Provider 返回身份都要重验。legacy 单 Provider 请求仍沿用现有合同，不通过清空全局 context 去偷偷抢占其他对话。
 
-## 5. 发送与竞态
+同一 conversation 只允许一个未收敛普通轮次；原生 writer 也须独占。采用 conversation + scoped native owner 的多 key admission，并复用现有 provider operation gate、run registry、Git 写互斥、shutdown 与 trust/fingerprint。
 
-1. 通过现有 trusted IPC 验证 sender/frame/origin；运行时校验 source、target、选择及 hash。
-2. main 从 App catalog/归档验证 source 身份和已稳定边界；不能信任 renderer 当前显示的轮次或最近 40 轮缓存。
-3. 用户发送时，在 source + target 的 admission 内重验归档版本、源执行状态、目标 runtime/profile/model 与 canonical workspace。源在预览后有新轮次或改写，要求重新预览。
-4. 现有 `ContextAdmission` 只有单 key。应在该共享层增加有序/原子多 key 准入，并让普通启动与之共用；不另建一套仅交接入口认识的锁，也不反序嵌套两个单 key 锁。
-5. 写入发送 intent 和预分配 runId，再走现有 `startAppRun()`。明确 `expectedExternalSessionId: null`，不得借用目标 context 中之前缓存的 session；源 resume ID 不进入目标请求。
-6. 目标自己的 permission/run controls 重新加载。源 `full_access`、approval 或 MCP/plugin 状态不迁移；目标现有 trust/fingerprint、operation gate、Git 写互斥与运行注册都照常执行。
-7. 历史以有来源标记的低优先级参考文字随正常 prompt 发送，不升级为 system/developer 指令。不宣称文字包装能彻底消除 prompt injection。
-8. return runId 只证明 App 已建立尝试，不证明 Provider 已接受或执行了交接。结合真实 native/terminal 证据更新状态，UI 文案区分“已准备”“已发起”“已关联目标会话”“结果未知”。
+仅释放 session transport 或收到 unsubscribe acknowledgment 不是原生 writer 已释放的证据。共享进程、后代任务与停止范围由 adapter 决定，不能粗暴杀掉同一 Provider 的其他对话。
 
-### 双击、失败与重启
+### 4.2 原始用户请求与历史上下文分开
 
-复用现有 `commandId` 入口处理本进程重复提交，但不能把 `CommandReceipts` 当作 durable exactly-once：它会丢弃失败收据，也会淘汰旧项。
+已检查到下列真实分派路径，不能统一在 prompt 前面拼历史就结束：
 
-交接 attempt 必须额外持久化，并绑定请求 hash。仅能证明尚未调用 Provider 的失败可以重新准备；已经尝试调用而结果未知时，重启后只读关联 run/archive/native session 证据，不自动重发。不能因外层 promise reject 就断言“对方没收到”。同一 ID 但内容不同应拒绝。
+- Codex 从原始 prompt 识别显式 Skill，再构造 native input。
+- OpenCode 将 `/command` 分派到 command API，普通文本走 prompt API。
+- Pi 有原生 extension command 与 prompt 分流。
+- Qoder 有 `/plugins reload` 和项目命令展开。
 
-不为这个功能偷偷改变全部普通发送的失败重试合同。相关持久记录首先约束交接自身；将来若统一普通发送账本，另列迁移。
+因此应在 `ProviderRunRequest` 中分开**原始用户输入**与**已确认历史上下文**。adapter 先按原始输入识别命令/Skill，再在支持接收历史的模型输入边界组合；不能让历史中的旧命令被再次执行，也不能破坏本轮真实命令的语义。
 
-## 6. 用户须看见的限制
+不接收历史的控制命令在有待交接时明确拒绝或要求先完成普通轮次交接，不静默当成普通文字。第一版不假装所有 Provider 支持 native history injection；文本交接也必须标出来源与投递方式。
 
-预览必须直接显示：
+### 4.3 真正的投递证据
 
-- 源/目标 Provider、Profile、项目与截止轮次。
-- 实际将发送的正文，而非另一份漂亮的概述。
-- 完整/部分/不可用、哪些内容没带、哪些内容只是源会话的历史报告。
-- **这些文字将发送给目标 Provider/账号，可能包含源码或用户曾粘贴的敏感内容。** 不主动收集凭据不等于能保证对话里没有秘密；不宣称自动脱敏。
-- 不包含原生记忆、隐藏推理、工具运行、审批和旧附件；源会话仍可打开。
-- 创建草稿不收费、不调用 Provider；用户点击发送后的真实输入可能增加目标 input token 用量。
+- 新建原生 session 返回 ID 不代表 prompt 已接收。
+- `return runId` 只代表 App 建立了尝试；不能据此清除 unknown 或更新覆盖。
+- 每个 adapter 必须区分已接收、明确未发出、未知，并与最终归档收敛关联。单纯超时或 promise reject 不代表未发送。
+- 现有 `CommandReceipts` 仍处理本进程重复请求；跨重启由 durable conversation intent 约束，不能让其“失败撤销收据”的行为触发第二次外部投递。
+- unknown 的普通恢复只读核查原 run/archive/native 证据。第一阶段不提供人工把 unknown 改成成功的入口；后续若提供“已停止后新建上下文继续”，必须分别记录执行已收敛、用户新决定与原投递仍未知，不能删除旧证据。
 
-仅有来源 ID 或“打开源会话”链接时，是用户可查阅，不是目标 Agent 已具有检索能力。
+## 5. 历史选择与预算
 
-## 7. 验收必须证明什么
+- 从 main 权威归档取得可见用户/助手文字、轮次状态及明确来源，不拿 renderer 最近 40 轮缓存冒充全部历史。
+- 不导出 reasoning、原生工具协议、approval、背景 task handles、Hook/MCP 配置或凭据。不默认转发旧图片、完整 diff 或原始工具输出。
+- 正文引用只有拿到全文才标完整；不能把 bounded preview 当成全文。delta 与 final shadow 要按真实投影去重。
+- 选择以完整条目为单位，保留代码空白、角色和顺序。实际正文、hash、字节数及省略项先持久化，再产生引用它的 intent；本阶段账本尚未实现正文 artifact。
+- 初始载荷建议上限 32 KiB UTF-8（含包装）；读取上限建议 2,000 轮或 4 MiB 提取文字。触顶显示未读/省略范围，不能伪造完整或精确 omitted 数量。
+- 这是产品上限，不是 token 数或模型窗口保证。目标容量未知时不编造 128K；当前用户请求绝不为历史让路而被截断。
+- 源关键条目放不下时需要用户减少选择或明确补充说明。第一版不调用另一个模型自动“总结并补全”事实。
+- 引用 ID 和“打开源轮次”链接仅代表用户可查阅。没有真实 Provider-facing 检索工具时，不承诺 Agent 能找回省略全文。
 
-| 场景 | 通过标准 |
-| --- | --- |
-| A→B 的首轮与第二轮 | 首轮目标 request 无 A 的 resume；第二轮只 resume B，历史交接不重复注入 |
-| 源失败/中断 | 稳定的部分回复和失败状态可转交；没有原生 ID 也不伪造；未收敛执行拒绝 |
-| 长历史和正文引用 | 不把最近 40 轮当全文；取不到全文明确提示；UTF-8 上限含包装；当前请求不截断 |
-| 负对照 | 移除 fresh-session 或 stale-boundary 保护时，对应回归必须失败；不能只断言提示文字存在 |
-| 预览竞态 | 源继续运行、归档变更、目标/profile/model 切换后，旧确认不可发送；跨 key 准入不死锁 |
-| 发送异常 | 双击只起一次；已调用后失联保留 unknown；重启不重复启动；相同 ID 不接受不同内容 |
-| 权限与 IPC | 跨工作区/伪造 source/错误 sender 或 frame 被生产 wrapper 拒绝，Provider listener 未执行 |
-| 证据与用量 | displayPrompt 与实际附加内容可检查；源事件不冒充目标事件；用量只计真实新 run |
-| 本地真实 App | 原生点击选择/预览/取消/准备草稿/显式发送/重新打开；隔离 Provider fixture 记录精确请求，取消路径零启动 |
-| 真实 Provider | 经明确账号/费用授权后验证 Claude→Codex 与反向，再扩展实验性 Provider；fixture 通过不替代此项 |
+## 6. 混合历史、迁移与现有动作
 
-实现跨 IPC、Provider admission、持久化边界，应按仓库完整 gate 执行 typecheck、unit/shell、build、CLI、renderer UI 和 packaged Electron 检查。测试使用临时 workspace/userData；未获授权不运行真实 Provider，不写用户真实会话。
+- legacy 单 Provider 对话惰性接入为一个 logical conversation + 一个 native binding，保留原 session/run ID。先写可恢复的接入记录，再切换 catalog 引用；失败保留原入口，不能消失或出现两个可独立写入同一 native session 的假副本。
+- conversationId 成为侧边栏与 composer draft 的稳定身份；切 Provider 不切到另一个侧边栏条目。
+- 每轮 provider/profile 来自该轮 binding，而不是顶部当前选择。分页按统一 ordinal，正文仍由各 Provider archive 加载。
+- stop、retry、fork、文件证据、后台任务和诊断均按真实 run/owner 路由。不能把旧 Claude 轮次的 fork 交给当前 Codex adapter。
+- 汇总以唯一 runId 连接现有 usage；不能为统一 UI 复制原生记录或再次记账。
+- 归档/删除统一对话必须涵盖它的全部绑定与尝试，遵守现有 active-run 和 partial deletion 合同；删除 App 副本不等于删除 Provider 原件。
+- rename/pin/archive 等会话级操作迁到 logical identity。未完成这些相邻路径前，不解锁 Provider 切换作为交付。
 
-## 8. 实施顺序
+## 7. 验证记录与后续 gate
 
-1. 确认采用新会话交接还是统一 app thread。
-2. 合同与 main 归档提取/预算/保存：先测原文、partial、边界和权限。
-3. 接入正常发送与跨 context admission，完成 unknown/重启恢复及来源关联。
-4. 现有会话入口、预览、目标草稿与首轮来源展示；做真实 App fixture。
-5. 扩大 gate 与授权范围内的真实 Provider 验收，分别报告结果。
+当前已执行：
 
-不加入 AI 总结服务、自动模型选择、跨设备传送、历史检索 MCP、自动权限迁移或多 Agent 编排。这些都不是当前方案的暗中预留能力。
+- 新 conversation 测试覆盖：A→B→A、遗漏项再次补齐、Profile/兼容身份隔离、内容 hash、持久双击去重、陈旧预览、并发写入、重启 unknown、落盘后回执丢失、明确拒绝与已接收失败的区别、原生 ID 漂移、显式弃用与重建、损坏日志、调用方引用隔离。
+- 准入测试覆盖：反向多 key、单 key owner 与多 key waiter 的顺序、独立对话并行、拒绝后全部释放、重复 key、空 key 拒绝。
+- 已做真实负对照：临时移除 provider/profile/continuation identity 中的后两项保护，身份隔离测试确实失败；随后恢复生产保护。
+- 第一轮另有一个测试 fixture 失败：`structuredClone` 保留 `items/nativeItems` 的共享引用，错误注入同时改了两处。已改为只替换 nativeItems 的引用，保留原拒绝断言；不是调整实现来接受坏证据。
+
+最终定向检查：`npm run test:unit -- src/main/conversation-store.test.ts src/main/context-admission.test.ts src/main/session-fork.test.ts src/main/command-receipts.test.ts`，**4 文件、43 测试通过**；`npm run typecheck` 的 node/web 均通过，`npm run build` 通过。负对照曾使身份隔离用例按预期失败，恢复保护后重新通过。
+
+当前无 UI、真实 Provider 或真实用户数据验收。除现有单 key 准入共用新 primitive 外，conversation store 尚无生产调用方；build 不代表这些新模块已进入可用功能。以上检查只证明本阶段模块及相邻准入不回归，不证明整个跨 Provider 工作流。
+
+后续至少要验证：
+
+1. 实际 main/preload 请求下，A→B→A 的 provider/resume/prompt/历史正文精确匹配，取消和预览零启动。
+2. slash/Skill 分派不被历史前缀改变，旧命令不重放。
+3. 双击、原生 ID 漂移、接收后失联、重启恢复、共享 writer 未释放及旧确认失效。
+4. 生产 IPC wrapper 拒绝跨项目/伪造身份/错误 sender/frame，特权 listener 未执行。
+5. 混合历史重开、分页、停止、fork、草稿、统计和删除使用真实 owner，来源与费用不双计。
+6. 隔离真实 App 原生输入 fixture；经账号/费用授权后再验证 Claude↔Codex 与实验性 Provider。不能以 mock transport 冒充真实外部能力。
+
+接入跨 IPC、Provider 与持久化主链路后运行仓库完整 gate；本阶段不构建安装包、不升版本、不启动真实 Provider。
