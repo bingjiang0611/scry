@@ -109,8 +109,8 @@ jobs:
           cp candidate/.npmrc baseline/.npmrc
           (cd baseline && npm ci) 2>&1 | tee native-results/baseline-install.log
           (cd candidate && npm ci) 2>&1 | tee native-results/candidate-install.log
-          for file in performance-native.mjs session-open-bench.mjs session-open-timing.mjs owned-app-processes.mjs performance-report.mjs performance-paths.json; do
-            cp "candidate/scripts/$file" "baseline/scripts/$file"
+          for file in $(node --input-type=module -e "import { nativeHarnessFiles } from './candidate/scripts/performance-native.mjs'; console.log(nativeHarnessFiles.join(' '))"); do
+            cp "candidate/$file" "baseline/$file"
           done
       - name: Prepare Electron ABI and build both source revisions
         run: |

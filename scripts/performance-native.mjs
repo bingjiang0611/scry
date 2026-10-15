@@ -8,7 +8,11 @@ import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] }
-export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs', 'scripts/owned-app-processes.mjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
+export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
+export const composerModes = ['stop-immediate', 'complete', 'stop-visible', 'stop-immediate']
+const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
+  ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
+  ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const p95 = values => [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
 
@@ -17,7 +21,7 @@ export function validateNative(report) {
   assert.equal(report.errors.length, 0, 'failed native lanes cannot pass')
   assert.deepEqual(Object.keys(report.results).sort(), Object.keys(nativeWorkloads).sort(), 'native lane coverage differs')
   for (const [name, result] of Object.entries(report.results)) {
-    assert.equal(result.measurementVersion, 3)
+    assert.equal(result.measurementVersion, 4)
     assert.deepEqual([result.turnCount, result.sections], nativeWorkloads[name], 'native workload differs')
     assert.equal(result.scenario, name)
     assert.equal(result.warmups, 2)
@@ -31,13 +35,34 @@ export function validateNative(report) {
     assert.ok(finite(result.nativeInput.frameReadyMs))
     assert.ok(finite(result.startupDriverReadyMs))
     assert.equal(result.sqliteStats.status, 'ready')
-    assert.ok(result.sqliteStats.turns >= 3)
+    assert.equal(result.sqliteStats.turns, 10, 'all six IPC and four button runs must reach SQLite')
     assert.ok(finite(result.sqliteStats.readMs))
     for (const sample of result.samples) {
       assert.equal(sample.totalTurns, Math.min(40, result.turnCount))
       assert.equal(sample.completeParagraphs, result.sections, 'renderer lost fixed paragraph content')
       for (const metric of ['nativeOpenMs', 'handlerDelayMs', 'scriptMs', 'domNodes']) assert.ok(finite(sample[metric]), `missing ${name}.${metric}`)
       assert.ok(sample.domNodes > 0)
+    }
+    assert.deepEqual(result.composerSamples.map(sample => sample.mode), composerModes, 'native button scenario coverage differs')
+    assert.equal(new Set(result.composerSamples.map(sample => sample.runId)).size, 4, 'native button runs must have distinct identities')
+    for (const [index, sample] of result.composerSamples.entries()) {
+      assert.equal(typeof sample.runId, 'string')
+      assert.ok(sample.runId.length > 0)
+      assert.equal(sample.prompt, `native composer ${sample.mode} ${index}`)
+      assert.equal(sample.inputTrusted, true)
+      assert.equal(sample.sendTrusted, true, 'Send must originate from a trusted button click')
+      assert.equal(sample.stopTrusted, sample.mode !== 'complete', 'Stop must originate from a trusted button click')
+      assert.equal(sample.terminalConfirmed, true)
+      assert.equal(sample.stopped, sample.mode !== 'complete')
+      assert.equal(sample.nativeTurnKnown, sample.mode !== 'stop-immediate')
+      assert.equal(sample.diskVerified, true, 'button output must be independently readable after process exit')
+      for (const metric of composerMetrics(sample.mode)) assert.ok(finite(sample[metric]), `missing button ${metric}`)
+      assert.ok(sample.sendToSettledVisibleMs >= sample.sendToTerminalMs)
+      if (sample.mode !== 'stop-immediate') {
+        assert.ok(sample.sendToFirstVisibleMs >= sample.sendToOutputReceiptMs)
+        assert.ok(sample.sendToVisibleReadyMs >= sample.sendToFirstVisibleMs)
+      }
+      if (sample.stopped) assert.ok(sample.stopToSettledVisibleMs >= sample.stopToTerminalMs)
     }
     assert.equal(result.lifecycleSamples.length, 6)
     for (const stopped of [false, true]) {
@@ -77,6 +102,12 @@ export function compareNative(base, head) {
     add(name, 'input.twoFrames.singleMs', before.nativeInput.frameReadyMs, after.nativeInput.frameReadyMs, 250)
     assert.equal(before.sqliteStats.turns, after.sqliteStats.turns, 'fixed SQLite turn count changed')
     add(name, 'sqlite.stats.singleMs', before.sqliteStats.readMs, after.sqliteStats.readMs, 500)
+    for (const mode of new Set(composerModes)) {
+      for (const metric of composerMetrics(mode)) {
+        const values = report => report.composerSamples.filter(sample => sample.mode === mode).map(sample => sample[metric])
+        add(`${name}.button.${mode}`, `${metric}.${mode === 'stop-immediate' ? 'twoRunMax' : 'single'}`, Math.max(...values(before)), Math.max(...values(after)), 1000, 100)
+      }
+    }
     for (const stopped of [false, true]) {
       const metrics = ['startReceiptMs', 'firstOutputReceiptMs', 'startToTerminalMs', 'terminalToReadableArchiveMs', ...(stopped ? ['stopReceiptMs', 'stopToTerminalMs'] : [])]
       for (const metric of metrics) {
@@ -92,8 +123,8 @@ export function formatNative(report) {
   return ['## Native App performance', `Baseline: \`${report.baseline}\` · candidate: \`${report.candidate}\``, '',
     '| Scenario | Boundary | Base | Candidate | Ceiling | Result |', '|---|---|---:|---:|---:|---|',
     ...report.rows.map(row => `| ${row.scenario} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${row.ceiling.toFixed(2)} | ${row.status} |`), '',
-    'Hidden real Electron main/preload/renderer; GPU disabled. History uses trusted native clicks and two stable frames. Input uses a trusted input event and two frames. Startup includes driver readiness polling. Lifecycle uses real IPC, offline Provider fixture, terminal notification and readable archive, independently checked on disk after App exit; NOT visible output or native Send/Stop buttons.',
-    'Twelve warm history samples, one restart/input observation per workload, three complete and three interrupted lifecycle runs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
+    'Hidden real Electron main/preload/renderer; GPU disabled. History uses trusted native clicks and two stable frames. Input uses a trusted input event and two frames. Startup includes driver readiness polling. The separately labelled IPC lifecycle remains distinct. Button acceptance uses trusted Send/Stop clicks, real assistant text hit-tested in the viewport across two frames, terminal notification, idle composer across two frames, and independently readable output after App exit. The offline Provider waits for actual cancellation, without timed completion.',
+    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Four button runs: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all ten runs. Button maxima/single observations are acceptance guardrails, not statistical latency estimates. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
 }
 
 async function bench(output) {

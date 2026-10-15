@@ -9,10 +9,11 @@ import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
+import { probeNativeComposer } from './native-composer-probe.mjs'
 import { readRecords } from './performance-report.mjs'
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
-// This measures local history opening, not Provider latency or production p75.
+// Measures local history plus button/render/settlement acceptance, not real Provider latency.
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const scenarios = {
   markdown: { turnCount: 40, sections: 32 },
@@ -28,7 +29,7 @@ const latestIndex = turnCount - 1
 const temp = mkdtempSync(join(tmpdir(), 'scry-session-open-'))
 const iterations = 12
 const hash = value => createHash('sha256').update(value).digest('hex')
-const benchmarkCodeHash = () => hash(`${readFileSync(fileURLToPath(import.meta.url), 'utf8')}\0${measureNativeSessionOpen.toString()}`)
+const benchmarkCodeHash = () => hash(`${readFileSync(fileURLToPath(import.meta.url), 'utf8')}\0${measureNativeSessionOpen.toString()}\0${readFileSync(join(root, 'scripts/native-composer-probe.mjs'), 'utf8')}`)
 const benchmarkSha256 = benchmarkCodeHash()
 let child
 let cdp
@@ -134,9 +135,14 @@ try {
       providerId: 'codex', runtimeProvider: 'codex_cli', cwd, preview: sessionId, ts: turns.at(-1).ts })
   }
   writeFileSync(join(userData, 'app-sessions.json'), JSON.stringify(catalog))
+  const bootstrap = join(temp, 'app')
+  mkdirSync(bootstrap)
+  const metadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  writeFileSync(join(bootstrap, 'package.json'), JSON.stringify({ name: metadata.name, version: metadata.version, main: 'main.cjs' }))
+  writeFileSync(join(bootstrap, 'main.cjs'), `const { app } = require('electron');\napp.setAppPath(${JSON.stringify(root)});\nrequire(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);\nrequire(${JSON.stringify(join(root, metadata.main))});\n`)
   const port = await freePort()
   const launchStarted = performance.now()
-  child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
+  child = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
     env: { ...process.env, HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi', SCRY_REMOTE_HOST: '0' },
@@ -307,6 +313,8 @@ try {
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const invalidHistory = await evaluate(`window.scry.loadSession(${JSON.stringify({ ...context, externalSessionId: 'missing-perf-fixture' })}).then(() => false, () => true)`)
   assert.equal(invalidHistory, true, 'fixture must exercise a real rejected history handler')
+  const composerSamples = await probeNativeComposer({ evaluate, wait, click, send: (method, params) => cdp.send(method, params) })
+
   // Real main/preload/SQLite/archive lifecycle with an explicit offline Provider fixture.
   // These are IPC/terminal/disk boundaries, NOT native send-button or visible-output timings.
   const lifecycleSamples = []
@@ -379,6 +387,15 @@ try {
     if (!sample.stopped) assert.ok(turn.items.some(item => item.text === 'isolated remote assistant evidence'), 'disk archive lost assistant output')
     sample.diskVerified = true
   }
+  for (const sample of composerSamples) {
+    const turn = persistedTurns.find(turn => turn.runId === sample.runId)
+    assert.equal(turn?.done, true, 'native button run must survive App exit')
+    assert.equal(turn.userText, sample.prompt)
+    if (sample.mode !== 'stop-immediate') assert.ok(turn.items.some(item => item.text === `Visible reply: ${sample.prompt}`), 'visible assistant output must also persist')
+    sample.nativeTurnKnown = typeof turn.providerTurnId === 'string'
+    assert.equal(sample.nativeTurnKnown, sample.mode !== 'stop-immediate', 'fixture native-turn phase must survive archiving')
+    sample.diskVerified = true
+  }
   let localRecording = null
   if (process.env.SCRY_PERF_RECORD !== '0') {
     const { records, issues } = await readRecords(join(userData, 'performance'))
@@ -392,7 +409,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 3, startupDriverReadyMs, nativeInput, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 4, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),

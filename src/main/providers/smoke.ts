@@ -21,13 +21,25 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
     run: (request) => {
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       let stopped = false
+      const composerProbe = request.prompt.startsWith('native composer ')
+      const deferredNativeTurn = request.prompt.startsWith('native composer stop-immediate ')
       const questionAbort = new AbortController()
       const promise = Promise.resolve().then(async () => {
         const startedAt = Date.now()
-        request.onExternalSessionId?.(sessionId)
+        if (!deferredNativeTurn) request.onExternalSessionId?.(sessionId)
         if (request.managedRecorder && request.cwd) {
           await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: request.cwd, managed: true,
-            payload: { session_id: sessionId, turn_id: `${request.runId}:provider-turn`, prompt: request.prompt, timestamp: new Date().toISOString() } })
+            payload: { session_id: sessionId, turn_id: deferredNativeTurn ? undefined : `${request.runId}:provider-turn`, prompt: request.prompt, timestamp: new Date().toISOString() } })
+        }
+        if (composerProbe) {
+          if (deferredNativeTurn) request.emit({ id: `${request.runId}:pending`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'harness', stage: 'init', text: `Awaiting native turn: ${request.prompt}` })
+          if (!deferredNativeTurn) request.emit({ id: `${request.runId}:composer`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'model', stage: 'text', text: `Visible reply: ${request.prompt}` })
+          // A controlled stop fixture waits for the actual interrupt, not a timing-dependent sleep.
+          if (!request.prompt.startsWith('native composer complete ') && !stopped) {
+            await new Promise<void>(resolve => questionAbort.signal.addEventListener('abort', () => resolve(), { once: true }))
+          }
         }
         if (request.prompt === 'dock badge question smoke' || request.prompt === 'remote provider failure smoke') {
           request.emit({ id: `${request.runId}:assistant`, runId: request.runId, ts: new Date().toISOString(),
@@ -66,7 +78,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
         if (stopped) {
           request.emit({ id: `${request.runId}:result`, runId: request.runId, ts: new Date().toISOString(),
             kind: 'harness', stage: 'result', text: 'fixture interrupted', durationMs: Date.now() - startedAt })
-          return { externalSessionId: sessionId, providerTurnId: `${request.runId}:provider-turn`, stopped, status: 'interrupted' as const }
+          return { externalSessionId: sessionId, providerTurnId: deferredNativeTurn ? undefined : `${request.runId}:provider-turn`, stopped, status: 'interrupted' as const }
         }
         if (request.prompt === 'desktop remote write one' || request.prompt === 'desktop remote write two') {
           if (!request.cwd) throw new Error('remote write fixture requires a workspace')
@@ -161,7 +173,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
         },
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => sessionId,
-        getProviderTurnId: () => `${request.runId}:provider-turn`
+        getProviderTurnId: () => deferredNativeTurn ? undefined : `${request.runId}:provider-turn`
       }
     },
     hookTrust: {
