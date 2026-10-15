@@ -64,8 +64,39 @@ export function prepareOwnershipRecoveryFailure(fixture) {
   return () => chmodSync(directory, 0o700)
 }
 
-export async function exerciseOwnershipRecoveryFailure(evaluate, fixture) {
+async function verifyCompletedControl(evaluate, fixture, runId) {
+  const providerTurnId = `${runId}:provider-turn`
+  const page = await evaluate(`window.scry.loadSession(${JSON.stringify({
+    providerId: 'codex', cwd: fixture.cwd, externalSessionId: 'control-native'
+  })})`)
+  const archived = json(archiveFile(fixture.userData, fixture.cwd, 'control-native', providerTurnId))
+  assert.equal(archived.turns.find(turn => turn.runId === runId)?.status, 'completed',
+    'persisted archive must confirm success, not merely that the run stopped')
+  for (const [source, turns] of [['production history IPC', page.turns], ['persisted archive', archived.turns]]) {
+    const turn = turns.find(item => item.runId === runId)
+    assert.ok(turn, `${source}: completed control turn missing`)
+    assert.equal(turn.providerTurnId, providerTurnId, `${source}: wrong native turn`)
+    // LoadedSessionTurn projects done/error/errorHint, not the archive status field.
+    assert.equal(turn.done, true, `${source}: turn is not terminal`)
+    assert.equal(turn.error, undefined, `${source}: run failed`)
+    assert.equal(turn.errorHint, undefined, `${source}: run has an interruption or error hint`)
+    assert.ok(turn.items.some(item => item.kind === 'harness' && item.stage === 'result' &&
+      item.text === 'smoke fixture completed' && !item.isError), `${source}: successful result evidence missing`)
+    assert.equal(turn.userText, 'desktop remote write one', `${source}: input changed`)
+    assert.ok(turn.items.some(item => item.kind === 'model' && item.text === 'isolated remote assistant evidence'),
+      `${source}: assistant evidence missing`)
+    assert.ok(turn.items.some(item => item.kind === 'tool' && item.fileOp === 'write' && item.filePath === 'remote-first.txt'),
+      `${source}: write evidence missing`)
+  }
+  assert.equal(readFileSync(join(fixture.cwd, 'remote-first.txt'), 'utf8'), 'remote-first.txt\n',
+    'test Provider must actually write the isolated workspace file')
+}
+
+export async function exerciseOwnershipRecoveryFailure(evaluate, fixture, { completedRunId, providerCalls }) {
   const before = readFileSync(fixture.callsFile, 'utf8')
+  assert.deepEqual(before.trim().split('\n').map(JSON.parse), providerCalls,
+    'restart must not replay the completed input')
+  await verifyCompletedControl(evaluate, fixture, completedRunId)
   await evaluate(`window.scry.setCwd(${JSON.stringify(fixture.otherCwd)})`)
   const result = await evaluate(`(async () => {
     try { return { value: await window.scry.start(${JSON.stringify({ providerId: 'codex', cwd: fixture.otherCwd,
@@ -76,7 +107,8 @@ export async function exerciseOwnershipRecoveryFailure(evaluate, fixture) {
   assert.equal(readFileSync(fixture.callsFile, 'utf8'), before, 'failed startup reached the Provider')
   assert.equal(json(fixture.orphanPath).turns[0].delivery.status, 'pending', 'failed publication must not claim unknown was persisted')
   assert.equal(json(fixture.orphanPath).revision, 1, 'failed publication must retain the original revision')
-  return { freshStartRejected: true, providerCallsUnchanged: true, failedPublicationRetained: true }
+  return { freshStartRejected: true, providerCallsUnchanged: true, failedPublicationRetained: true,
+    completedTurnReloadedAfterRestart: true }
 }
 
 export async function exerciseConversationOwnership(evaluate, fixture) {
@@ -102,9 +134,9 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
     assert.deepEqual(evidence(), originalEvidence, `${name}: owned source evidence changed`)
     blocked.push(name)
   }
-  const start = (sessionId, directory = cwd) => `window.scry.start(${JSON.stringify({
+  const start = (sessionId, directory = cwd, prompt = 'ownership IPC verification') => `window.scry.start(${JSON.stringify({
     providerId: 'codex', cwd: directory, expectedExternalSessionId: sessionId,
-    commandId: randomUUID(), prompt: 'ownership IPC verification'
+    commandId: randomUUID(), prompt
   })})`
   const fork = (sessionId, runId, turnId) => `window.scry.forkSession(${JSON.stringify({ providerId: 'codex', cwd,
     sourceSessionId: sessionId, sourceRunId: runId, sourceProviderTurnId: turnId, sourceForkTurnId: turnId })})`
@@ -134,7 +166,7 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   assert.equal(deleted.ok, true, `unowned deletion must still work: ${JSON.stringify(deleted)}`)
 
   await open('control-native')
-  const started = await evaluate(start('control-native'))
+  const started = await evaluate(start('control-native', cwd, 'desktop remote write one'))
   assert.ok(started.runId)
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
@@ -144,8 +176,10 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   }
   assert.deepEqual(calls(), [{ operation: 'fork', identity: 'control-native' }, { operation: 'run', identity: started.runId }])
   assert.equal(await evaluate('window.scry.focusedRunSnapshot()'), null, 'positive run must settle before fixture shutdown')
+  await verifyCompletedControl(evaluate, fixture, started.runId)
   assert.deepEqual(evidence(), originalEvidence, 'positive controls changed another conversation source')
   return { test: 'conversation ownership production IPC', blocked, providerCalls: calls(),
+    completedRunId: started.runId, completedArchiveAndWorkspaceWriteVerified: true,
     positiveControls: ['unowned fork', 'unowned deletion', 'unowned resume'],
     orphanRecovery: 'pending -> unknown, revision 1 -> 2', ownedEvidenceUnchanged: true }
 }
