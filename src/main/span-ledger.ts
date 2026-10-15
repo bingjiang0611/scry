@@ -11,6 +11,7 @@ import { providerDangerCoverage, type ProviderId } from '../shared/provider'
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
 import { providerUsageResultEvents } from '../shared/result-timing'
 import { logicalCallEventsForTurn } from '../shared/logical-calls'
+import { officialApiCost } from './official-api-cost'
 
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
@@ -563,7 +564,13 @@ export const USAGE_ANALYTICS_TOKENS_SQL = `SELECT
   bucket_start tsStart, provider, model,
   input_tokens inputTokens, output_tokens outputTokens,
   cache_read_tokens cacheReadTokens, cache_write_tokens cacheWriteTokens,
-  reasoning_tokens reasoningTokens, run_id runId
+  reasoning_tokens reasoningTokens, run_id runId,
+  (u.usage_kind='model' AND u.cost IS NULL AND u.run_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM usage_ledger b
+    WHERE b.session_id=u.session_id AND b.run_id=u.run_id AND b.provider=u.provider
+      AND b.cost IS NOT NULL AND b.cost_unit='usd'
+      AND (b.model IS NULL OR b.model=u.model)
+  )) officialCostEligible
   FROM usage_ledger u
   WHERE session_id IS NOT NULL AND bucket_start>=? AND bucket_start<?
     AND (u.usage_kind!='credits' OR NOT EXISTS (
@@ -578,6 +585,8 @@ export const USAGE_ANALYTICS_COSTS_SQL = `SELECT
     AND ${canonicalSessionUsdCostWhere('u')}`
 
 export interface UsageAnalyticsTokenRow {
+  // Query proves no existing model/whole-turn USD cost would be double counted.
+  officialCostEligible?: number
   tsStart: number
   provider: BillingProvider
   model: string | null
@@ -596,6 +605,7 @@ export interface UsageAnalyticsCostRow {
   costUsd: number
   costSource: BillingCostSource
   confidence: BillingConfidence
+  officialApiEstimate?: boolean
 }
 
 interface UsageAccumulator {
@@ -617,6 +627,7 @@ interface UsageAccumulator {
   providerReportedCostRows: number
   estimatedCostRows: number
   inferredCostRows: number
+  officialApiCostRows: number
   runs: Set<string>
 }
 
@@ -639,6 +650,7 @@ const emptyUsageAccumulator = (): UsageAccumulator => ({
   providerReportedCostRows: 0,
   estimatedCostRows: 0,
   inferredCostRows: 0,
+  officialApiCostRows: 0,
   runs: new Set<string>()
 })
 
@@ -671,6 +683,7 @@ const addUsageTokenRow = (target: UsageAccumulator, row: UsageAnalyticsTokenRow)
 const addUsageCostRow = (target: UsageAccumulator, row: UsageAnalyticsCostRow): void => {
   target.costUsd += row.costUsd
   target.costKnownRows++
+  if (row.officialApiEstimate) target.officialApiCostRows++
   if (row.confidence === 'exact') target.exactCostRows++
   else if (row.confidence === 'provider_reported') target.providerReportedCostRows++
   else if (row.confidence === 'estimated') target.estimatedCostRows++
@@ -696,7 +709,8 @@ const usageAggregate = (value: UsageAccumulator): UsageAnalyticsAggregate => ({
   exactCostRows: value.exactCostRows,
   providerReportedCostRows: value.providerReportedCostRows,
   estimatedCostRows: value.estimatedCostRows,
-  inferredCostRows: value.inferredCostRows
+  inferredCostRows: value.inferredCostRows,
+  ...(value.officialApiCostRows > 0 ? { officialApiCostRows: value.officialApiCostRows } : {})
 })
 
 export function usageAnalyticsBounds(nowMs: number, rangeDays: UsageAnalyticsRangeDays): { from: number; to: number; days: string[] } {
@@ -755,7 +769,14 @@ export function buildUsageAnalytics(args: {
     addUsageTokenRow(targetFor(days, day), row)
     addUsageTokenRow(dailyTarget(day, row.provider), row)
   }
-  for (const row of args.costs) {
+  // Estimate at read time so existing history benefits without rewriting ledger evidence.
+  const costs = [...args.costs]
+  for (const row of args.tokens) {
+    if (!row.officialCostEligible) continue
+    const costUsd = officialApiCost(row)
+    if (costUsd != null) costs.push({ ...row, costUsd, costSource: 'price_table', confidence: 'estimated', officialApiEstimate: true })
+  }
+  for (const row of costs) {
     const day = localDay(row.tsStart)
     addUsageCostRow(total, row)
     addUsageCostRow(targetFor(providers, row.provider), row)

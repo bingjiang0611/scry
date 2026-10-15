@@ -525,6 +525,36 @@ describe('Usage Analytics 范围聚合', () => {
     })
   })
 
+  sqliteIt('官方价只补缺失模型成本，不重复计入已有模型/整轮成本，也不受其他轮或账号账单影响', () => {
+    const db = new nodeSqlite!.DatabaseSync(':memory:')
+    try {
+      for (const stmt of [...DDL_V4, ...DDL_V15]) db.prepare(stmt).run()
+      const insert = db.prepare(sqlInsert('usage_ledger', USAGE_LEDGER_COLS))
+      const base: UsageLedgerObject = {
+        id: 'missing', provider: 'cc-switch', source: 'test', sourceKind: 'provider_reported',
+        sessionId: 'session', runId: 'run', model: 'claude-opus-5-5', usageKind: 'model',
+        inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheWriteTokens: 0,
+        cost: null, costUnit: 'usd', costSource: 'provider_reported', confidence: 'provider_reported',
+        attributionMethod: 'direct', bucketStart: at(0), bucketEnd: at(0), createdTs: at(0)
+      }
+      insert.run(...usageLedgerObjectToRow(base))
+      const eligible = (): number => (db.prepare(USAGE_ANALYTICS_TOKENS_SQL).all(at(2), at(-1)) as Array<{ officialCostEligible: number }>)[0].officialCostEligible
+      expect(eligible()).toBe(1)
+      for (const patch of [
+        { id: 'account', sessionId: null }, { id: 'other-run', runId: 'other' },
+        { id: 'other-model', model: 'claude-opus-5' }
+      ]) insert.run(...usageLedgerObjectToRow({ ...base, ...patch, cost: 2 }))
+      expect(eligible()).toBe(1)
+      insert.run(...usageLedgerObjectToRow({ ...base, id: 'model-cost', cost: 0 }))
+      expect(eligible()).toBe(0)
+      db.prepare('DELETE FROM usage_ledger WHERE id=?').run('model-cost')
+      insert.run(...usageLedgerObjectToRow({ ...base, id: 'turn-cost', model: null, usageKind: 'result', cost: 3 }))
+      expect(eligible()).toBe(0)
+    } finally {
+      db.close()
+    }
+  })
+
   sqliteIt('SQL 只读取本机会话范围，账号级账单不覆盖或混入本地成本', () => {
     const db = new nodeSqlite!.DatabaseSync(':memory:')
     try {

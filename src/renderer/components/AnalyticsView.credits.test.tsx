@@ -43,7 +43,8 @@ describe('AnalyticsView Qoder Credits', () => {
     const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
       error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
     expect(html).toContain(`>${provider}</b>`)
-    expect(html).toContain('claude-opus-5')
+    // Unknown-cost model rows are deliberately omitted; provider evidence remains.
+    expect(html).not.toContain('claude-opus-5')
     expect(html).toContain('成本不可用')
   })
 
@@ -65,6 +66,40 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(details).toContain('<th>成本（USD）</th>')
     expect(details).toContain('>$0.13</td><td>100.0%</td>')
     expect(details).not.toContain('ultimate')
+  })
+
+  it('hides unknown detail rows and never shows dash placeholders, while retaining known zero', () => {
+    for (const credits of [null, undefined, 0]) {
+      const html = render(credits)
+      const details = html.slice(html.indexOf('<section class="usage-breakdown">'), html.indexOf('<footer'))
+      expect(details).not.toContain('—')
+      if (credits == null) expect(details).toContain('当前范围没有可展示的明细')
+      else expect(details).toContain('>$0.00</td><td></td>')
+    }
+  })
+
+  it('renders official estimates and hides unpriced/unattributed models without hiding their aggregate evidence', () => {
+    const known = { ...aggregate, costUsd: 6.9, costKnownRows: 1, estimatedCostRows: 1, officialApiCostRows: 1 }
+    const data: UsageAnalytics = {
+      status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
+      days: ['2026-09-09'], totals: known,
+      byProvider: [{ ...known, provider: 'anthropic', model: null }],
+      byModel: [
+        { ...known, provider: 'anthropic', model: 'claude-opus-5-5' },
+        { ...aggregate, provider: 'anthropic', model: 'unpriced-model' },
+        { ...known, provider: 'anthropic', model: null }
+      ],
+      byDay: [{ ...known, day: '2026-09-09' }], dailyByProvider: []
+    }
+    const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
+      error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
+    const details = html.slice(html.indexOf('<section class="usage-breakdown">'), html.indexOf('<footer'))
+    expect(details).toContain('claude-opus-5-5')
+    expect(details).toContain('>$6.90</td><td>100.0%</td>')
+    expect(details).toContain('官方 API 标准价换算')
+    expect(details).not.toContain('unpriced-model')
+    expect(details).not.toContain('未归因')
+    expect(details).not.toContain('—')
   })
 
   it('distinguishes unknown, measured zero and tiny positive credits', () => {
