@@ -1,10 +1,220 @@
 {
-  "schema": 1,
-  "reason": "Initial fixed offline compute/transfer budgets, not UI or Provider latency SLOs. Counter ceilings prevent cumulative drift; same-runner base comparison catches new growth. Timing has a 2 ms noise floor and 50% relative allowance. Review changes to this file; never auto-ratchet a failing ceiling upward.",
+  "schema": 2,
+  "reason": "Fixed local production-path workloads. Domain lanes measure deterministic computation/serialization; disk lanes use temporary files/archives; process lanes run real local subprocesses. Native UI paint, Provider/network latency and phone/device hops are separate acceptance. New lane-specific ceilings are explicit rather than inherited from the old four-scenario microbench; source-control.diff is 1000 ms because it measures real isolated Git subprocesses and was observed near 0.6 s on the local runner. Timing ceilings must not be raised without workload evidence.",
   "scenarios": {
-    "trace.delivery": { "counters": { "bytes": 175000, "messages": 2, "events": 1000 }, "p95Ms": 20 },
-    "history.page": { "counters": { "bytes": 11000, "turns": 40 }, "p95Ms": 20 },
-    "renderer.batch": { "counters": { "bytes": 23000, "turns": 1 }, "p95Ms": 20 },
-    "terminal.delivery": { "counters": { "bytes": 32000, "messages": 1, "outputBytes": 29000 }, "p95Ms": 20 }
+    "startup.recovery": {
+      "lane": "disk",
+      "workload": "userData-temp-artifacts=4",
+      "iterations": 2,
+      "counters": {
+        "files": 4
+      },
+      "p95Ms": 250,
+      "warmups": 1,
+      "samples": 7
+    },
+    "providers.catalog": {
+      "lane": "disk",
+      "workload": "home-skills=1;project-mcp=1",
+      "iterations": 5,
+      "counters": {
+        "skills": 1,
+        "mcp": 1
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "navigation.catalog": {
+      "lane": "disk",
+      "workload": "catalog-sessions=500",
+      "iterations": 5,
+      "counters": {
+        "sessions": 500,
+        "bytes": 127171
+      },
+      "p95Ms": 150,
+      "warmups": 1,
+      "samples": 7
+    },
+    "history.page": {
+      "lane": "domain",
+      "workload": "history-turns=4000;page=40",
+      "iterations": 20,
+      "counters": {
+        "bytes": 11000,
+        "turns": 40
+      },
+      "p95Ms": 20,
+      "warmups": 3,
+      "samples": 15
+    },
+    "compose.drafts": {
+      "lane": "domain",
+      "workload": "drafts=32;input=4KiB;bytes=131072",
+      "iterations": 5,
+      "counters": {
+        "drafts": 32,
+        "inputBytes": 131072,
+        "bytes": 133015
+      },
+      "p95Ms": 20,
+      "warmups": 1,
+      "samples": 7
+    },
+    "persistence.archive": {
+      "lane": "disk",
+      "workload": "archive-turns=120;page=40",
+      "iterations": 2,
+      "counters": {
+        "turns": 40,
+        "writtenTurns": 1,
+        "bytes": 10555
+      },
+      "p95Ms": 250,
+      "warmups": 1,
+      "samples": 7
+    },
+    "evidence.projection": {
+      "lane": "domain",
+      "workload": "trace-events=1000;tool-events=2",
+      "iterations": 20,
+      "counters": {
+        "files": 1,
+        "previewItems": 2,
+        "bytes": 153
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "analytics.stats": {
+      "lane": "domain",
+      "workload": "analytics-results=240;days=90",
+      "iterations": 5,
+      "counters": {
+        "resultRows": 240,
+        "days": 30,
+        "providers": 5
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "workspace.files": {
+      "lane": "disk",
+      "workload": "directory=122;file=1MiB;page=64KiB",
+      "iterations": 2,
+      "counters": {
+        "entries": 122,
+        "bytes": 1048576,
+        "pageBytes": 65539
+      },
+      "p95Ms": 250,
+      "warmups": 1,
+      "samples": 7
+    },
+    "source-control.diff": {
+      "lane": "process",
+      "workload": "git-worktree=1;changed-files=1",
+      "iterations": 2,
+      "counters": {
+        "files": 1,
+        "bytes": 232
+      },
+      "p95Ms": 1000,
+      "warmups": 1,
+      "samples": 7
+    },
+    "terminal.delivery": {
+      "lane": "domain",
+      "workload": "terminal-chunks=1000;unicode=true",
+      "iterations": 20,
+      "counters": {
+        "bytes": 32000,
+        "messages": 1,
+        "outputBytes": 29000
+      },
+      "p95Ms": 20,
+      "warmups": 3,
+      "samples": 15
+    },
+    "send.codex-fixture": {
+      "lane": "process",
+      "workload": "provider=codex-fixture;thread=1;turn=1;output=hello",
+      "iterations": 2,
+      "counters": {
+        "providerTurns": 1,
+        "notifications": 2,
+        "outputBytes": 5
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "controls.stop-lifecycle": {
+      "lane": "process",
+      "workload": "provider=codex-fixture;turn=hangCompletion;stop=interrupt-settle",
+      "iterations": 2,
+      "counters": {
+        "interruptRequests": 1,
+        "terminalStates": 1,
+        "providerSettled": 1
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "remote.loopback": {
+      "lane": "process",
+      "workload": "loopback-relay=1;payload=64KiB;auth=1",
+      "iterations": 2,
+      "counters": {
+        "authLines": 1,
+        "payloadBytes": 65536,
+        "relaySessions": 1
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "resources-shell.process": {
+      "lane": "process",
+      "workload": "local-child=1;stdout=1;exit=0",
+      "iterations": 2,
+      "counters": {
+        "childExit": 1,
+        "outputBytes": 12,
+        "resourceUsageObserved": 1
+      },
+      "p95Ms": 100,
+      "warmups": 1,
+      "samples": 7
+    },
+    "trace.delivery": {
+      "lane": "domain",
+      "workload": "trace-events=1000;unicode=true",
+      "iterations": 20,
+      "warmups": 3,
+      "samples": 15,
+      "counters": {
+        "bytes": 175000,
+        "messages": 2,
+        "events": 1000
+      },
+      "p95Ms": 20
+    },
+    "renderer.batch": {
+      "lane": "domain",
+      "workload": "trace-events=1000;unicode=true",
+      "iterations": 20,
+      "warmups": 3,
+      "samples": 15,
+      "counters": {
+        "bytes": 23000,
+        "turns": 1
+      },
+      "p95Ms": 20
+    }
   }
 }
