@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { nativeUiPointer } from './native-ui-pointer.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-desktop-remote-ui-'))
@@ -174,7 +175,7 @@ function Fixture() {
 createRoot(document.getElementById('root')).render(<Fixture />)
 `
 
-async function exercise(contents, capture) {
+async function exercise(contents, pointer, capture) {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression, label = expression) => {
@@ -184,21 +185,16 @@ async function exercise(contents, capture) {
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
-  const pointFor = async (selector) => read(`(() => {
-    const node = document.querySelector(${JSON.stringify(selector)})
-    if (!node) throw new Error('Missing control: ' + ${JSON.stringify(selector)})
-    node.scrollIntoView({ block: 'center', inline: 'nearest' })
-    const rect = node.getBoundingClientRect()
-    const point = { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
-    if (rect.width <= 0 || rect.height <= 0 || document.elementFromPoint(point.x, point.y) !== node && !node.contains(document.elementFromPoint(point.x, point.y))) throw new Error('Control is not hit-testable: ' + ${JSON.stringify(selector)} + ' ' + JSON.stringify({ point, width: rect.width, height: rect.height, hit: document.elementFromPoint(point.x, point.y)?.outerHTML.slice(0, 300) }))
-    return point
-  })()`)
+  const pointFor = (selector, captureReceipt = false) => read(`(${pointer.toString()})(${JSON.stringify(selector)}, { timeoutMs: 7000, scroll: true, captureReceipt: ${captureReceipt} })`)
   const send = (method, params) => contents.debugger.sendCommand(method, params)
   const click = async (selector) => {
-    const point = await pointFor(selector)
+    const point = await pointFor(selector, true)
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y })
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 })
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+    await wait('window.__nativeUiPointerReceipt != null', 'native pointer receipt')
+    const receipt = await read('window.__nativeUiPointerReceipt')
+    check(receipt.trusted && receipt.targetMatched, `Native pointer missed ${selector}: ${JSON.stringify(receipt)}`)
   }
   const key = async (key, code = key, modifiers = 0) => {
     const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'ArrowDown' ? 40 : key === 'ArrowUp' ? 38 : key.length === 1 ? (key.charCodeAt(0) < 128 ? key.toUpperCase().charCodeAt(0) : 0) : undefined
@@ -608,7 +604,7 @@ try {
       try {
         await win.loadFile(join(root, 'index.html'))
         win.webContents.debugger.attach('1.3')
-        const result = await (${exercise.toString()})(win.webContents, async name => {
+        const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
         })

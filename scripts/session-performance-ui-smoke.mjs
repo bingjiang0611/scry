@@ -5,11 +5,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
+import { nativeUiPointer } from './native-ui-pointer.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-session-performance-'))
 
-async function exercise(webContents) {
+async function exercise(webContents, pointer) {
   const read = async (expression) => {
     const result = await webContents.executeJavaScript(`(async () => {
       try { return { value: await (${expression}) }; }
@@ -33,41 +34,12 @@ async function exercise(webContents) {
     }
   })()`)
   const click = async (selector) => {
-    // Virtualized rows can remeasure after their content first appears. Native
-    // coordinates need stable layout, not just a matching DOM node.
-    const point = await read(`new Promise((resolve, reject) => {
-      let frame, previous;
-      const timer = setTimeout(() => { cancelAnimationFrame(frame); reject(new Error('Click geometry did not settle: ' + ${JSON.stringify(selector)})); }, 8000);
-      const inspect = () => {
-        const element = document.querySelector(${JSON.stringify(selector)});
-        if (element) {
-          const box = element.getBoundingClientRect();
-          const x = Math.round(box.left + box.width / 2), y = Math.round(box.top + box.height / 2);
-          const geometry = JSON.stringify([box.x, box.y, box.width, box.height]);
-          const hit = element.contains(document.elementFromPoint(x, y));
-          if (hit && previous === geometry) {
-            clearTimeout(timer);
-            window.__sessionPerformanceClick = null;
-            document.addEventListener('click', event => {
-              window.__sessionPerformanceClick = {
-                trusted: event.isTrusted, targetMatched: element.contains(event.target),
-                target: event.target.outerHTML?.slice(0, 300)
-              };
-            }, { capture: true, once: true });
-            resolve({ x, y });
-            return;
-          }
-          previous = hit ? geometry : undefined;
-        } else previous = undefined;
-        frame = requestAnimationFrame(inspect);
-      };
-      frame = requestAnimationFrame(inspect);
-    })`)
+    const point = await read(`(${pointer.toString()})(${JSON.stringify(selector)}, { timeoutMs: 8000, scroll: false, captureReceipt: true })`)
     webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
     webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
-    await wait(`window.__sessionPerformanceClick != null`)
-    const receipt = await read('window.__sessionPerformanceClick')
-    if (!receipt.trusted || !receipt.targetMatched) throw new Error(`Native click missed ${selector}: ${JSON.stringify(receipt)}`)
+    await wait(`window.__nativeUiPointerReceipt != null`)
+    const receipt = await read('window.__nativeUiPointerReceipt')
+    if (!receipt.trusted || !receipt.targetMatched) throw new Error(`Native pointer missed ${selector}: ${JSON.stringify(receipt)}`)
   }
   await wait(`document.hasFocus()`)
   await wait(`document.querySelectorAll('[data-run-id]').length === 40 && document.querySelectorAll('[data-virtualized]').length > 20`)
@@ -272,7 +244,7 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))});
         win.webContents.focus();
-        const result = await (${exercise.toString()})(win.webContents);
+        const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()});
         console.log('SCRY_SESSION_PERFORMANCE=' + JSON.stringify(result));
         app.exit(0);
       } catch (error) { console.error(error); app.exit(1); }
