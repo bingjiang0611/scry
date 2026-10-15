@@ -1,5 +1,12 @@
 import type { ProviderId } from './provider'
 import type { AgentTurnRecord } from './turn-record'
+import type { ContentRef } from './tool-content'
+
+/** Explicit App archive location; not inferred from a Provider's native identity. */
+export interface ConversationArchiveRef {
+  sessionId: string
+  providerTurnId?: string
+}
 
 /** A Scry conversation is not a Provider's native session or a transport process. */
 export interface ConversationTarget {
@@ -41,6 +48,8 @@ interface ConversationTurnBase {
   bindingId: string
   /** Canonical content references; the archive remains the authority for bodies and usage. */
   items: ConversationItemRef[]
+  /** May be unavailable after an archive failure; such bodies cannot be handed off. */
+  archive?: ConversationArchiveRef
 }
 
 export interface ImportedConversationTurn extends ConversationTurnBase {
@@ -57,6 +66,8 @@ export interface DispatchedConversationTurn extends ConversationTurnBase {
   /** Exact selection, not a high-watermark pretending that omitted items were delivered. */
   importedItems: ConversationItemRef[]
   omittedItems: ConversationItemRef[]
+  /** Immutable body published before this intent; required for non-empty importedItems. */
+  history?: ContentRef
   delivery: ConversationDelivery
 }
 

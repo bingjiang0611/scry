@@ -5,10 +5,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as io from '../core/turn-recorder/io'
 import { ConversationStore, decodeConversation, type BeginConversationTurn } from './conversation-store'
+import { upsertTraceArchiveTurn } from './transcript-archive'
 import { planConversationContinuation, type Conversation, type ConversationItemRef, type ConversationTarget } from '../shared/conversation'
 
 const hash = (value: string): string => createHash('sha256').update(value).digest('hex')
-const item = (runId: string, itemId: string, body = itemId): ConversationItemRef => ({ runId, itemId, contentHash: hash(body) })
+const item = (runId: string, itemId: string, body = itemId): ConversationItemRef => ({
+  runId, itemId: itemId === 'answer' ? 'assistant' : itemId, contentHash: hash(body)
+})
 const claude: ConversationTarget = { providerId: 'claude', continuationKey: 'claude:home-a' }
 const codex: ConversationTarget = { providerId: 'codex', continuationKey: 'codex:home-b' }
 const a1 = [item('a1', 'user'), item('a1', 'answer')]
@@ -24,8 +27,10 @@ beforeEach(async () => {
   await mkdir(cwd)
   store = new ConversationStore(join(directory, 'userData'))
   initial = await store.create(cwd, { target: claude, nativeSessionId: 'native-a', turns: [
-    { runId: 'a1', items: a1, nativeItems: a1 }
+    { runId: 'a1', items: a1, nativeItems: a1, archive: { sessionId: 'native-a' } }
   ] })
+  cwd = initial.cwd
+  archive('a1', 'native-a', claude)
 })
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -41,11 +46,22 @@ function request(conversation = initial, target = codex, runId = 'b2'): BeginCon
   }
 }
 
+function archive(runId: string, sessionId: string, target: ConversationTarget, answer = 'answer'): void {
+  expect(upsertTraceArchiveTurn({
+    userDataDir: join(directory, 'userData'), cwd, sessionId, providerId: target.providerId,
+    turn: { runId, userText: 'user', done: true, status: 'completed', ts: Date.now(),
+      items: answer ? [{ id: `${runId}-answer`, runId, ts: new Date().toISOString(), kind: 'model', stage: 'text', text: answer }] : [] }
+  })).toBe(true)
+}
+
 async function accepted(conversation: Conversation, runId: string, nativeSessionId: string): Promise<Conversation> {
   const own = [item(runId, 'user'), item(runId, 'answer')]
-  return store.settle(conversation.id, runId, {
+  const state = await store.settle(conversation.id, runId, {
     status: 'accepted', nativeSessionId, outcome: 'completed', nativeItems: own
-  }, own)
+  }, own, { sessionId: nativeSessionId })
+  const turn = state.turns.find((candidate) => candidate.runId === runId)!
+  archive(runId, nativeSessionId, state.bindings.find((binding) => binding.id === turn.bindingId)!)
+  return state
 }
 
 function file(id = initial.id): string {
@@ -209,7 +225,8 @@ describe('unified conversation identity and durable coverage', () => {
       .rejects.toThrow('未收敛')
     const stopped = await store.settle(initial.id, 'a2', {
       status: 'not_sent', reason: 'adapter confirmed native resume refused before input'
-    }, [item('a2', 'user')])
+    }, [item('a2', 'user')], { sessionId: 'native-a' })
+    archive('a2', 'native-a', claude, '')
     const retired = await store.retireBinding(initial.id, stopped.revision, bindingId, 'user confirmed replacement')
     expect(retired.bindings[0]).toMatchObject({ nativeSessionId: 'native-a', retiredReason: 'user confirmed replacement' })
     expect(planConversationContinuation(retired, claude)).toEqual({ kind: 'fresh', missingItems: [...a1, item('a2', 'user')] })

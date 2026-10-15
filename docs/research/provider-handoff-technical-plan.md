@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：身份/覆盖账本、准入基础，以及 Claude/Codex adapter 的历史输入与接收证据已实现并做定向测试。`startAppRun()`、账本结算和 UI 尚未接通，不是可用的完整接续功能。**
+**当前进度：身份/覆盖账本、Claude/Codex 输入回执，以及“权威归档 → 完整正文快照 → durable intent”的链路已实现并做定向测试。`startAppRun()`、真实回执驱动的账本结算和 UI 尚未接通，不是可用的完整接续功能。**
 
 ## 1. 用户合同
 
@@ -27,6 +27,7 @@
 | bindingId | 某一 Provider/Profile/兼容身份下的一代原生上下文 | 同 Provider 的不同账号/Home 不能据名称合并 |
 | nativeSessionId | adapter 对应的真实恢复目标 | 重建后保留旧代，不原地替换其覆盖账本 |
 | runId / ordinal | 一次实际尝试 / 在统一对话中的顺序 | runId 保留现有 trace、recorder、计费关联 |
+| turn.archive | 明确的 App archive sessionId / providerTurnId | 不从 nativeSessionId 猜归档位置；缺少位置时拒绝交接 |
 | itemId + contentHash | 实际可见内容的不可变引用 | 同名但不同正文不是同一个已投递条目 |
 
 现有 Provider archive、原生 transcript、`.scry` records 和 usage ledger 继续保留各自权威性。新 conversation store 只持有绑定、轮次引用、选择与投递证据，不复制旧工具事件或用量成目标 Provider 的新工作。
@@ -47,7 +48,7 @@
 
 - App userData 下的原子持久化；复用现有原子文件 helper，不使用新数据库或依赖。
 - 从已有权威历史接入时只导入引用，不调用 Provider，也不修改其原生历史。
-- 每次 begin 持久化 intent、预分配 runId、原生恢复目标、精确选择和省略引用。
+- 每次 begin 先准备并完整读回校验非空交接正文，再持久化 intent、预分配 runId、原生恢复目标、精确选择、省略项和正文引用。正文失败不发布 intent。
 - commandId + 冻结请求指纹持久去重；同 ID 不接受不同请求。重复结果返回 `duplicate`，调用方不得再次启动 Provider。
 - revision 拒绝陈旧预览；每个对话内写入串行；读回验证身份、轮次、跨引用和状态。
 - 恢复只在 startup barrier 内、尚未开放新发送时执行；保留已登记 live run，没有 owner 的 pending 转 unknown，不重放。运行中的结果核查走明确的 settle 证据路径。
@@ -111,19 +112,31 @@
 - Codex 在投递前核对恢复的原生 session；身份缺失或漂移不发送。Claude 在 query 后才取得身份，漂移只能保持 unknown，不能谎称未发出。
 - 等待 Codex Skill catalog 时取消，不再发送 `turn/start`，也不记录虚假的 Skill 调用。
 - 回执通过 `runtime:historical_input` 事件提供诊断；这些事件不自动更新覆盖。SDK 同步抛错也可能已尝试投递，不能因未返回 handle 就判断未发送。
-- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数，也没有接入 `startAppRun()`、正文 artifact、conversation intent/settle。消费方必须先完成这些接线和原生 writer 准入，不能仅看 run 的 completed 状态更新覆盖。
+- **尚无生产业务调用方传入历史**：没有新增 renderer/IPC 参数，也没有接入 `startAppRun()` 或原生 writer 准入。正文 artifact 已接入 conversation begin/读取，真实 input receipt 尚未接入 settle；不能仅看 run 的 completed 状态更新覆盖。
 - 引用包装不是安全沙箱，也不保证模型保存或遵从历史。真实 CLI/账号尚未验证；本阶段只验证生产 adapter/runner 与模拟 SDK/app-server 的协议边界。
 
 ## 5. 历史选择与预算
 
 - 从 main 权威归档取得可见用户/助手文字、轮次状态及明确来源，不拿 renderer 最近 40 轮缓存冒充全部历史。
-- 不导出 reasoning、原生工具协议、approval、背景 task handles、Hook/MCP 配置或凭据。不默认转发旧图片、完整 diff 或原始工具输出。
+- 只提取用户和根助手可见文字，不导出 reasoning、子 Agent/工具协议、approval、背景 task handles、Hook/MCP 或凭据配置。不默认转发旧图片、完整 diff 或原始工具输出。可见文字本身仍可能含敏感信息；当前原始正文策略不提供自动脱敏承诺，发送前的正文预览/确认仍须接入。
 - 正文引用只有拿到全文才标完整；不能把 bounded preview 当成全文。delta 与 final shadow 要按真实投影去重。
-- 选择以完整条目为单位，保留代码空白、角色和顺序。实际正文、hash、字节数及省略项先持久化，再产生引用它的 intent；本阶段账本尚未实现正文 artifact。
-- adapter 已限制历史载荷为 32 KiB UTF-8（含包装）；尚未实现的历史读取上限建议为 2,000 轮或 4 MiB 提取文字。触顶显示未读/省略范围，不能伪造完整或精确 omitted 数量。
+- 选择以完整条目为单位，保留代码空白、角色和顺序。正文 artifact 已先于 intent 发布并校验；选择和省略项保留在账本。
+- 当前上限：选中源轮次 2,000 轮、累计归档文件读取 16 MiB、累计根助手/用户文字读取 4 MiB、实际交接历史 32 KiB UTF-8（含 JSON 和包装）、artifact 256 KiB。任一触顶明确拒绝，不静默截断；UI 的预算选择与省略范围展示尚未实现。
 - 这是产品上限，不是 token 数或模型窗口保证。目标容量未知时不编造 128K；当前用户请求绝不为历史让路而被截断。
 - 源关键条目放不下时需要用户减少选择或明确补充说明。第一版不调用另一个模型自动“总结并补全”事实。
 - 引用 ID 和“打开源轮次”链接仅代表用户可查阅。没有真实 Provider-facing 检索工具时，不承诺 Agent 能找回省略全文。
+
+### 5.1 已实现的正文链路（第三阶段）
+
+- `src/main/conversation-history.ts` 读取明确的 App 归档位置，按 canonical `runId`、可选 provider turn ID、Provider 和 cwd 校验归属。第一版条目为每轮 `user` 与 `assistant`，后者是根助手可见文字投影；不是 native message ID。
+- `readTraceArchiveTurnForHistory()` 优先精确分轮文件，只有文件不存在才读取旧 monolith；损坏、错误归属、符号链接、非 UTF-8、未收敛轮次或超限都不能回退成旧证据。相同打开句柄下有界读取，不做目录扫描或最近会话猜测。
+- `modelContent` 有引用时读取全部页面并验证内容；预览不能替代全文。不完整 envelope、缺失引用、尚未支持的非 App 内容存储明确拒绝。未选中的助手正文不会被读取，也不计覆盖。旧 inline 事件只表示 App 捕获的可见文字，不保证 Provider 全部原生历史。
+- 复用 `appendCoalescedTrace()` 的明确 snapshot replacement，以及从 recorder 抽出的纯 `modelEventBodies()`；保留 message/native item/agent 范围，去除 delta/final shadow，不另造 renderer 摘要解释。准备过程只写最终 artifact，不写无人引用的中间正文副本。
+- artifact 位于 `<userData>/conversation-history-v1/<conversation+cwd hash>/content/sha256/...`，复用现有内容寻址和原子发布 helper。保存确切文本、hash、角色、来源、轮次、源终态/投递状态与实际包装前缀，不写 `.scry`，不复制旧执行或计费事件。
+- `ConversationStore.begin()` 在对话准入内读取源、冻结正文、发布并校验 artifact，然后发布 pending intent。`history(id, runId)` 只读已封存正文；重启和 duplicate 不重新读取源或重建缺失 artifact。正文损坏/缺失也不能在 settle 时新增 accepted 覆盖。
+- 轮次通过 seed/settle 携带明确的 `archive` 位置。不存在归档时允许保留事实账本，但该轮不能被当成可交接的完整正文。旧内部原型的非空 intent 若没有 artifact，会明确拒绝读取，不自动补成“曾经发送过”的证据；这些原型尚无生产调用方，不作真实用户迁移承诺。
+- 本轮仍未接 App 历史选择 UI、legacy adoption、统一的源条目生成、运行期 native owner 或 Provider 回执结算。含 Steer（运行中追加用户输入）的源轮次明确拒绝交接，直到实现其用户/助手交错顺序与逐消息引用，不能静默丢掉这些可见用户消息。第一版仅支持 App archive/body；原生 transcript / recorder 内容源接入须增加各自权威解析，不做静默 fallback。
+- 上限触发后先要求缩小选择；真实需求需要大 monolith 或更大正文时，再增加有界索引/流式读取与明确部分覆盖合同，而不是默认调大内存上限。
 
 ## 6. 混合历史、迁移与现有动作
 
@@ -150,7 +163,18 @@
 
 负对照：临时移除 Codex Skill 解析后的取消检查，取消回归确实失败（出现本不应发送的 `turn/start`）；恢复检查后重新通过。负对照单测筛选跳过了其余用例，不是放宽最终测试范围。
 
-当前无 UI、真实 Provider 或真实用户数据验收。conversation store 尚无生产调用方，新的历史输入也尚无业务入口；build 不代表跨 Provider 功能已经可用。以上检查只证明模块与 adapter 协议边界，不证明整个跨 Provider 工作流。
+第三阶段验证：首轮基线为 `f65b1ff` / App 0.2.190；最终定向检查为并行提交后的 `585fae6` / App 0.2.191 + 本轮改动，Node 24.18.0 / Vitest 3.2.7。本轮未修改版本文件。
+
+- 最终定向 **11 文件、177 测试通过**：conversation history/store、historical input/Provider 边界、transcript archive、session history、live trace、trace content、managed commit、recorder tool/content store。新增 20 项回归，包括 Steer 不静默遗漏、全部 content-ref 页、UTF-8、真实临时归档、正文先于 intent、封存后源变化、blob 损坏/跨会话、拒绝不完整正文、message scope、无中间正文副本。
+- `npm run typecheck`、`npm run build`、`npm run build:cli`、独立 `npm run test:shell` 通过。
+- 负对照：移除 final shadow 去重后，纯投影测试得到 `abab` 而不是 `ab`，按预期失败；恢复后本次测试通过。
+- 首轮 9 项旧 store 测试因 fixture 使用 macOS `/var` 路径、而账本 canonical cwd 为 `/private/var` 导致归档定位失败。fixture 已改用创建后返回的 canonical cwd，未放宽路径校验或断言。
+- 全量 `npm test`：**3121 passed / 2 failed / 3 skipped**；因此不是全绿。3 个真实账号/费用探针保持关闭。unit 失败使复合命令未进入 shell，之后单独执行 shell 通过。全量检查在最终 UTF-8 严格读取及 Steer 拒绝补强前执行；最终版本重新跑上述 177 项、类型与构建，不声称全量门禁通过。
+- Qoder 明细渲染断言在不含本轮修改的 `git archive f65b1ff` 对照副本仍失败，属于当时的基线问题。随后并行提交 `585fae6` 修正了该 fixture，本轮对当前版本筛选复验该用例通过（其余 239 项未运行）。这不替代全量检查；本轮没有修改该断言或实现。
+- Git push-endpoint fixture 全量执行时超过原 5 秒上限。检查后测试进程已退出；同一用例在基线副本约 4.1 秒、本工作区单独执行约 3.0 秒通过。并发超时原因尚未确认，不用定向通过抹掉首轮失败，也不增加超时。
+- 全量日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-ea71f33dbe6d97a0.log`。基线副本保留于 `/tmp/scry-handoff-baseline-Ot6B8V`，只运行上述两项筛选检查（265 项未运行）；复用 node_modules，不是可分发安装包。
+
+当前无 UI、真实 Provider 或真实用户数据验收。conversation store 尚无生产业务入口；build 不代表跨 Provider 功能已经可用。以上检查只证明模块、正文/账本链路和 adapter 协议边界，不证明整个跨 Provider 工作流。
 
 后续至少要验证：
 

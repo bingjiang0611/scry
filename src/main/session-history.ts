@@ -92,10 +92,14 @@ export interface SessionHistoryContext {
   attachmentBudgetBytes?: number
 }
 
-function cleanAttachmentPrompt(userText: string): string {
+export function stripAttachmentMetadata(userText: string): string {
   const markerIndex = userText.indexOf(ATTACHMENT_MARKER)
-  if (markerIndex === -1) return userText
-  return userText.slice(0, markerIndex).trim()
+  return markerIndex === -1 ? userText : userText.slice(0, markerIndex)
+}
+
+function cleanAttachmentPrompt(userText: string): string {
+  const stripped = stripAttachmentMetadata(userText)
+  return stripped === userText ? userText : stripped.trim()
 }
 
 function imageAttachmentFromLine(
