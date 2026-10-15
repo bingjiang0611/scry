@@ -39,8 +39,12 @@ jobs:
           cache-dependency-path: candidate/package-lock.json
       - name: Install each source's dependencies
         run: |
-          (cd baseline && npm ci --ignore-scripts)
-          (cd candidate && npm ci --ignore-scripts)
+          set -o pipefail
+          mkdir -p performance-results
+          printf '%s\n' 'Dependency installation started; absent measurements are not a pass.' > performance-results/install-status.txt
+          cp candidate/.npmrc baseline/.npmrc
+          (cd baseline && npm ci --ignore-scripts) 2>&1 | tee performance-results/baseline-install.log
+          (cd candidate && npm ci --ignore-scripts) 2>&1 | tee performance-results/candidate-install.log
       - name: Check coverage map and feedback contracts
         working-directory: candidate
         run: |
@@ -62,6 +66,11 @@ jobs:
       - name: Compare fixed budgets and base-relative regressions
         run: |
           node candidate/scripts/performance-compare.mjs performance-results/baseline.json performance-results/candidate.json candidate/scripts/performance-budgets.json performance-results/report.md
+      - name: Preserve npm diagnostics on installation failure
+        if: failure()
+        run: |
+          mkdir -p performance-results
+          if [ -d "$HOME/.npm/_logs" ]; then cp -R "$HOME/.npm/_logs" performance-results/npm-logs; fi
       - name: Retain measurements even when the gate fails
         if: always()
         uses: actions/upload-artifact@v4
@@ -94,9 +103,12 @@ jobs:
           cache-dependency-path: candidate/package-lock.json
       - name: Install dependencies and freeze native harness
         run: |
+          set -o pipefail
           mkdir -p native-results
-          (cd baseline && npm ci)
-          (cd candidate && npm ci)
+          printf '%s\n' 'Dependency installation started; absent measurements are not a pass.' > native-results/install-status.txt
+          cp candidate/.npmrc baseline/.npmrc
+          (cd baseline && npm ci) 2>&1 | tee native-results/baseline-install.log
+          (cd candidate && npm ci) 2>&1 | tee native-results/candidate-install.log
           for file in performance-native.mjs session-open-bench.mjs session-open-timing.mjs owned-app-processes.mjs performance-report.mjs performance-paths.json; do
             cp "candidate/scripts/$file" "baseline/scripts/$file"
           done
@@ -114,6 +126,11 @@ jobs:
       - name: Compare native evidence and budgets
         if: always()
         run: node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md
+      - name: Preserve native npm diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p native-results
+          if [ -d "$HOME/.npm/_logs" ]; then cp -R "$HOME/.npm/_logs" native-results/npm-logs; fi
       - name: Retain native measurements, including failed lanes
         if: always()
         uses: actions/upload-artifact@v4
