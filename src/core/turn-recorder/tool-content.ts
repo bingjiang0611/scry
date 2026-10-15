@@ -123,6 +123,57 @@ export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPoli
   })
 }
 
+interface ModelEventBody {
+  events: TraceEvent[]
+  /** Absent for non-model events, empty bodies, or references that have not been hydrated. */
+  body?: { kind: 'text' | 'thinking'; text: string }
+}
+
+function modelRunBody(run: TraceEvent[]): ModelEventBody {
+  if (run.some((event) => event.modelContent?.contentRef)) return { events: run }
+  const thinking = run[0].stage === 'thinking'
+  const deltas = thinking ? '' : run.filter((event) => event.stage === 'text_delta').map((event) => event.text ?? '').join('')
+  const authoritative = thinking ? undefined : [...run].reverse().find((event) =>
+    event.stage === 'text' && event.runtimeMetadata?.replacesStreamedText === true
+  )
+  const text = thinking
+    ? run.map((event) => event.thinking ?? '').join('')
+    : authoritative?.text ?? run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
+  if (!text) return { events: run }
+  return { events: run, body: { kind: thinking ? 'thinking' : 'text', text } }
+}
+
+/** Shared, read-only projection. Callers must hydrate references before treating previews as bodies. */
+export function* modelEventBodies(events: readonly TraceEvent[]): Generator<ModelEventBody> {
+  let run: TraceEvent[] = []
+  let runKey: string | undefined
+  for (const event of events) {
+    const bodyKind = event.kind === 'model' && event.stage === 'thinking' && event.thinking != null
+      ? 'thinking'
+      : event.kind === 'model' && ['text', 'text_delta'].includes(event.stage) && event.text != null
+        ? 'text'
+        : undefined
+    if (!bodyKind) {
+      if (run.length) yield modelRunBody(run)
+      run = []
+      runKey = undefined
+      yield { events: [event] }
+      continue
+    }
+    const key = JSON.stringify([
+      bodyKind, event.messageId ?? null, event.runtimeMetadata?.codexItemId ?? null,
+      event.agentId ?? null, event.parentToolUseId ?? null
+    ])
+    if (runKey !== undefined && runKey !== key) {
+      yield modelRunBody(run)
+      run = []
+    }
+    runKey = key
+    run.push(event)
+  }
+  if (run.length) yield modelRunBody(run)
+}
+
 /** Persist coalesced assistant/reasoning bodies before applying a bounded record projection. */
 export async function persistModelEventContent(
   events: TraceEvent[],
@@ -131,68 +182,26 @@ export async function persistModelEventContent(
   previewBytes = 32 * 1024
 ): Promise<TraceEvent[]> {
   const output: TraceEvent[] = []
-  let run: TraceEvent[] = []
-  let runKey: string | undefined
-
-  const flush = async (): Promise<void> => {
-    if (!run.length) return
-    if (run.some((event) => event.modelContent?.contentRef)) {
-      output.push(...run)
-      run = []
-      runKey = undefined
-      return
-    }
-    const first = run[0]
-    const thinking = first.stage === 'thinking'
-    const deltas = thinking ? '' : run.filter((event) => event.stage === 'text_delta').map((event) => event.text ?? '').join('')
-    const authoritative = thinking ? undefined : [...run].reverse().find((event) =>
-      event.stage === 'text' && event.runtimeMetadata?.replacesStreamedText === true
-    )
-    const raw = thinking
-      ? run.map((event) => event.thinking ?? '').join('')
-      : authoritative?.text ?? run.map((event) => event.stage === 'text' && deltas && event.text === deltas ? '' : event.text ?? '').join('')
-    if (!raw) {
-      output.push(...run)
-    } else {
-      const full = captureToolContent(raw, { source, maxBytes: null, sourceCompleteness: 'complete' })
-      if (full.content === undefined) {
-        output.push(...run)
-      } else {
-        const contentRef = await persist(full.content, 'utf8')
-        const modelContent = { ...limitToolContent(full, previewBytes, 'field_budget'), contentRef }
-        const { text: _text, thinking: _thinking, modelContent: _content, ...metadata } = first
-        output.push({
-          ...metadata,
-          stage: thinking ? 'thinking' : 'text',
-          ...(thinking ? { thinking: modelContent.content } : { text: modelContent.content }),
-          modelContent
-        })
-      }
-    }
-    run = []
-    runKey = undefined
-  }
-
-  for (const event of events) {
-    const bodyKind = event.kind === 'model' && event.stage === 'thinking' && event.thinking != null
-      ? 'thinking'
-      : event.kind === 'model' && ['text', 'text_delta'].includes(event.stage) && event.text != null
-        ? 'text'
-        : undefined
-    if (!bodyKind) {
-      await flush()
-      output.push(event)
+  for (const group of modelEventBodies(events)) {
+    if (!group.body) {
+      output.push(...group.events)
       continue
     }
-    const key = JSON.stringify([
-      bodyKind, event.messageId ?? null, event.runtimeMetadata?.codexItemId ?? null,
-      event.agentId ?? null, event.parentToolUseId ?? null
-    ])
-    if (runKey !== undefined && runKey !== key) await flush()
-    runKey = key
-    run.push(event)
+    const full = captureToolContent(group.body.text, { source, maxBytes: null, sourceCompleteness: 'complete' })
+    if (full.content === undefined) {
+      output.push(...group.events)
+      continue
+    }
+    const contentRef = await persist(full.content, 'utf8')
+    const modelContent = { ...limitToolContent(full, previewBytes, 'field_budget'), contentRef }
+    const { text: _text, thinking: _thinking, modelContent: _content, ...metadata } = group.events[0]
+    output.push({
+      ...metadata,
+      stage: group.body.kind,
+      ...(group.body.kind === 'thinking' ? { thinking: modelContent.content } : { text: modelContent.content }),
+      modelContent
+    })
   }
-  await flush()
   return output
 }
 

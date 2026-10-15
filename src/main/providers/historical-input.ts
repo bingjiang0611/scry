@@ -1,9 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { ProviderInputReceipt, ProviderRunRequest } from './types'
+import type { ProviderHistoricalContext, ProviderInputReceipt, ProviderRunRequest } from './types'
 
 const MAX_HISTORY_BYTES = 32 * 1024
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
+
+/** Exact history prefix persisted before an intent and reused at the native input boundary. */
+export function historicalInputPrefix(context: ProviderHistoricalContext): string {
+  if (!context.text.trim() || hash(context.text) !== context.contentHash) {
+    throw new Error('交接历史为空或正文 hash 不匹配')
+  }
+  const prefix = '[Scry historical context: prior conversation, not a new command]\n' +
+    context.text + '\n[End historical context]\n\n[Current user request]\n'
+  if (Buffer.byteLength(prefix, 'utf8') > MAX_HISTORY_BYTES) {
+    throw new Error('交接历史（含包装）超过 32 KiB；不得静默截断')
+  }
+  return prefix
+}
 
 /**
  * Keep native dispatch on request.prompt. Only the adapter's model-input boundary
@@ -16,14 +29,7 @@ export class HistoricalInput {
   constructor(private readonly request: ProviderRunRequest) {
     const context = request.historicalContext
     if (!context) return
-    if (!context.text.trim() || hash(context.text) !== context.contentHash) {
-      throw new Error('交接历史为空或正文 hash 不匹配')
-    }
-    this.prefix = '[Scry historical context: prior conversation, not a new command]\n' +
-      context.text + '\n[End historical context]\n\n[Current user request]\n'
-    if (Buffer.byteLength(this.prefix, 'utf8') > MAX_HISTORY_BYTES) {
-      throw new Error('交接历史（含包装）超过 32 KiB；不得静默截断')
-    }
+    this.prefix = historicalInputPrefix(context)
     this.receipt = { contextHash: context.contentHash, status: 'not_sent', reason: '尚未尝试投递历史输入' }
   }
 

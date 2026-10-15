@@ -4,6 +4,9 @@ import { isAbsolute, join } from 'node:path'
 import { ContextAdmission } from './context-admission'
 import { writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
 import { isCommandId } from '../shared/runtime'
+import { isToolContentRef } from '../shared/tool-content'
+import { prepareConversationHistory, loadConversationHistory, MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history'
+import type { ProviderHistoricalContext } from './providers/types'
 import {
   conversationItemKey,
   planConversationContinuation,
@@ -14,6 +17,7 @@ import {
   type ConversationItemRef,
   type ConversationTarget,
   type ConversationTurn,
+  type ConversationArchiveRef,
   type DispatchedConversationTurn
 } from '../shared/conversation'
 
@@ -86,6 +90,10 @@ export function decodeConversation(value: unknown): Conversation {
     requireValue(turn.ordinal === index + 1 && text(turn.runId) && !runIds.has(turn.runId), '对话轮次顺序或 run 身份无效')
     requireValue(typeof turn.bindingId === 'string' && bindings.has(turn.bindingId), '轮次引用了未知原生绑定')
     const binding = bindings.get(turn.bindingId)!
+    if (turn.archive !== undefined) {
+      const archive = object(turn.archive)
+      requireValue(text(archive.sessionId) && (archive.providerTurnId === undefined || text(archive.providerTurnId)), 'App 归档位置无效')
+    }
     items(turn.items)
     requireValue(turn.items.every((item) => item.runId === turn.runId), '轮次包含其他 run 的内容')
     if (turn.origin === 'imported') {
@@ -99,6 +107,9 @@ export function decodeConversation(value: unknown): Conversation {
       requireValue(turn.resumeSessionId === null || (text(turn.resumeSessionId) && turn.resumeSessionId === binding.nativeSessionId), '原生恢复身份不一致')
       items(turn.importedItems)
       items(turn.omittedItems)
+      requireValue(turn.importedItems.length > 0
+        ? isToolContentRef(turn.history) && turn.history.encoding === 'json' && turn.history.bytes <= MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES
+        : turn.history === undefined, '交接 intent 缺少正文 artifact 或关联了多余正文')
       requireValue(subset(turn.importedItems, priorItems) && subset(turn.omittedItems, priorItems), '交接引用了不存在或未来的内容')
       const imported = new Set(turn.importedItems.map(conversationItemKey))
       requireValue(turn.omittedItems.every((item) => !imported.has(conversationItemKey(item))), '内容同时被标记为导入和省略')
@@ -125,7 +136,7 @@ export interface ConversationSeed {
   target: ConversationTarget
   nativeSessionId: string
   /** Authoritative existing turns only; this imports references, never clones trace/usage rows. */
-  turns: Array<{ runId: string; items: ConversationItemRef[]; nativeItems: ConversationItemRef[] }>
+  turns: Array<{ runId: string; items: ConversationItemRef[]; nativeItems: ConversationItemRef[]; archive?: ConversationArchiveRef }>
 }
 
 export interface BeginConversationTurn {
@@ -150,7 +161,7 @@ export class ConversationStore {
   private readonly admission = new ContextAdmission()
   private readonly directory: string
 
-  constructor(userData: string) {
+  constructor(private readonly userData: string) {
     requireValue(isAbsolute(userData), 'userData 必须是绝对路径')
     this.directory = join(userData, 'conversations')
   }
@@ -206,6 +217,13 @@ export class ConversationStore {
     return conversation
   }
 
+  async history(id: string, runId: string): Promise<ProviderHistoricalContext | undefined> {
+    const conversation = await this.required(id)
+    const turn = conversation.turns.find((candidate) => candidate.runId === runId)
+    requireValue(turn?.origin === 'dispatch', '找不到该投递尝试')
+    return loadConversationHistory(this.userData, conversation, turn)
+  }
+
   async begin(id: string, input: BeginConversationTurn): Promise<BeginConversationTurnResult> {
     // Freeze caller-owned objects before waiting in the queue.
     const request = structuredClone(input)
@@ -214,6 +232,7 @@ export class ConversationStore {
       requireValue(typeof request.payloadHash === 'string' && hashPattern.test(request.payloadHash), '输入指纹无效')
       requireValue(isCommandId(request.commandId), '对话命令 ID 无效')
       items(request.items)
+      requireValue(request.items.every((item) => item.runId === request.runId), '轮次包含其他 run 的内容')
       items(request.selectedItems)
       const intentHash = createHash('sha256').update(JSON.stringify({
         expectedRevision: request.expectedRevision, commandId: request.commandId, runId: request.runId,
@@ -225,6 +244,7 @@ export class ConversationStore {
       const existing = conversation.turns.find((turn) => turn.origin === 'dispatch' && turn.commandId === request.commandId)
       if (existing?.origin === 'dispatch') {
         requireValue(existing.intentHash === intentHash, '同一命令 ID 不能替换请求内容或目标')
+        await loadConversationHistory(this.userData, conversation, existing)
         return { disposition: 'duplicate', conversation, turn: existing }
       }
       requireValue(conversation.revision === request.expectedRevision, '对话已变化，请重新预览')
@@ -237,6 +257,10 @@ export class ConversationStore {
         requireValue(position !== undefined && position > previous, '交接选择不属于当前缺失历史，或顺序已变化')
         previous = position
       }
+      // Publish the exact body first. Failure leaves no dispatch intent and cannot start a Provider.
+      const history = request.selectedItems.length
+        ? await prepareConversationHistory(this.userData, conversation, request.selectedItems)
+        : undefined
       const bindingId = plan.kind === 'resume' ? plan.bindingId : randomUUID()
       if (plan.kind === 'fresh') conversation.bindings.push({ ...request.target, id: bindingId })
       const selected = new Set(request.selectedItems.map(conversationItemKey))
@@ -245,12 +269,14 @@ export class ConversationStore {
         items: request.items, commandId: request.commandId, intentHash,
         resumeSessionId: plan.kind === 'resume' ? plan.nativeSessionId : null,
         importedItems: request.selectedItems,
+        ...(history ? { history } : {}),
         omittedItems: plan.missingItems.filter((item) => !selected.has(conversationItemKey(item))),
         delivery: { status: 'pending' }
       }
       conversation.turns.push(turn)
       conversation.revision++
       const checked = this.checked(conversation)
+      await loadConversationHistory(this.userData, checked, turn)
       await writeJsonAtomic(this.path(id), checked)
       return { disposition: 'created', conversation: checked, turn: structuredClone(turn) }
     })
@@ -260,21 +286,25 @@ export class ConversationStore {
     id: string,
     runId: string,
     result: Exclude<ConversationDelivery, { status: 'pending' }>,
-    finalItems: ConversationItemRef[]
+    finalItems: ConversationItemRef[],
+    archive?: ConversationArchiveRef
   ): Promise<Conversation> {
     const delivery = structuredClone(result)
     const final = structuredClone(finalItems)
+    const archiveRef = archive ? structuredClone(archive) : undefined
     return this.admission.run(id, async () => {
       const conversation = await this.required(id)
       const turn = conversation.turns.find((candidate) => candidate.runId === runId)
       requireValue(turn?.origin === 'dispatch', '找不到该投递尝试')
-      if (JSON.stringify(turn.delivery) === JSON.stringify(delivery) && JSON.stringify(turn.items) === JSON.stringify(final)) {
+      if (JSON.stringify(turn.delivery) === JSON.stringify(delivery) && JSON.stringify(turn.items) === JSON.stringify(final) &&
+        (archiveRef === undefined || JSON.stringify(turn.archive) === JSON.stringify(archiveRef))) {
         return conversation
       }
       requireValue(turn.delivery.status === 'pending' || turn.delivery.status === 'unknown', '不能改写已经确认的投递结果')
       items(final)
       requireValue(subset(turn.items, final), '不能改写已冻结的本轮输入引用')
       if (delivery.status === 'accepted') {
+        await loadConversationHistory(this.userData, conversation, turn)
         const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)!
         requireValue(binding.nativeSessionId === undefined || binding.nativeSessionId === delivery.nativeSessionId, 'Provider 返回了不同的原生会话；拒绝沿用旧覆盖')
         if (turn.resumeSessionId === null) {
@@ -286,6 +316,7 @@ export class ConversationStore {
       }
       turn.items = final
       turn.delivery = delivery
+      if (archiveRef) turn.archive = archiveRef
       conversation.revision++
       const checked = this.checked(conversation)
       await writeJsonAtomic(this.path(id), checked)

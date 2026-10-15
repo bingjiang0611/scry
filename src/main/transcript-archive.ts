@@ -1374,6 +1374,58 @@ export function traceArchiveRunIds(args: {
   return [...ids]
 }
 
+/** Exact, bounded history read. A corrupt canonical turn never falls back to an older copy. */
+export async function readTraceArchiveTurnForHistory(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+  runId: string
+  providerTurnId?: string
+  maxBytes: number
+}): Promise<{ turn: TraceArchiveTurn; bytesRead: number }> {
+  const paths = [
+    traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, args),
+    traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  ]
+  for (const path of paths) {
+    let handle: Awaited<ReturnType<typeof openFile>>
+    try {
+      trustedOwnedParent(args.userDataDir, path, false)
+      const info = await lstat(path)
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('交接源归档不是受控普通文件')
+      handle = await openFile(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    try {
+      const info = await handle.stat()
+      if (!info.isFile() || info.size > args.maxBytes) throw new Error('交接源归档超出读取预算或不是普通文件')
+      // Published archives are atomically replaced. Bound allocation even if a file is edited in place.
+      const buffer = Buffer.alloc(info.size + 1)
+      let length = 0
+      while (length < buffer.length) {
+        const result = await handle.read(buffer, length, buffer.length - length, length)
+        if (!result.bytesRead) break
+        length += result.bytesRead
+      }
+      if (length !== info.size) throw new Error('读取交接源归档时文件发生变化')
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
+      const inspected = validateArchive(JSON.parse(text), args.cwd, args.sessionId, args.providerId)
+      if (inspected.status !== 'valid') throw new Error('交接源归档损坏或身份不匹配')
+      const turns = inspected.archive.turns.filter((turn) => turn.runId === args.runId)
+      if (turns.length !== 1 || (args.providerTurnId && turns[0].providerTurnId !== args.providerTurnId)) {
+        throw new Error('交接源归档缺少唯一匹配的原生轮次')
+      }
+      return { turn: turns[0], bytesRead: length }
+    } finally {
+      await handle.close()
+    }
+  }
+  throw new Error('交接源归档不存在')
+}
+
 export function findTraceArchiveTurnMatches(args: {
   cwd: string
   sessionId: string

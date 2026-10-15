@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseMcp, type TraceEvent } from '../../shared/trace.js'
 import { isToolContent } from '../../shared/tool-content.js'
 import { aggregateTurnEvidence } from './aggregate.js'
-import { captureToolContent, persistModelEventContent, sanitizeToolEvents } from './tool-content.js'
+import { captureToolContent, modelEventBodies, persistModelEventContent, sanitizeToolEvents } from './tool-content.js'
 
 const policy = { toolOutput: 'full' as const }
 function events(output?: string, input: unknown = { command: 'echo hello' }): TraceEvent[] {
@@ -120,6 +120,29 @@ describe('full raw tool content', () => {
     expect(bodies).toEqual(['前😀后'])
     expect(persisted).toHaveLength(1)
     expect(persisted[0]).toMatchObject({ stage: 'text', text: '前', modelContent: { storage: 'truncated', contentRef: { bytes: 10 } } })
+  })
+
+  it('projects message scopes and final shadows without mutating or materializing reference previews', () => {
+    const base: TraceEvent = { id: 'm', runId: 'r', ts: '2026-01-01T00:00:00Z', kind: 'model', stage: 'text' }
+    const reference = { ...captureToolContent('preview', { source: 'fixture' }),
+      contentRef: { storage: 'recorder-content-v1' as const, sha256: 'a'.repeat(64), bytes: 100, encoding: 'utf8' as const } }
+    const input: TraceEvent[] = [
+      { ...base, stage: 'text_delta', text: 'a', messageId: 'one' },
+      { ...base, stage: 'text_delta', text: 'b', messageId: 'one' },
+      { ...base, text: 'ab', messageId: 'one' },
+      { ...base, kind: 'harness', text: 'boundary' },
+      { ...base, text: 'child', agentId: 'child' },
+      { ...base, text: 'first', runtimeMetadata: { codexItemId: 'first' } },
+      { ...base, text: 'second', runtimeMetadata: { codexItemId: 'second' } },
+      { ...base, stage: 'thinking', thinking: '' },
+      { ...base, text: 'preview', modelContent: reference },
+      { ...base, stage: 'text_delta', text: 'cannot merge a preview' }
+    ]
+    const original = structuredClone(input)
+    const projected = [...modelEventBodies(input)]
+    expect(projected.map((group) => group.body?.text)).toEqual(['ab', undefined, 'child', 'first', 'second', undefined, undefined])
+    expect(projected.at(-1)?.events).toEqual(input.slice(-2))
+    expect(input).toEqual(original)
   })
 
   it('preserves empty output as actual content and legacy modes unchanged', () => {
