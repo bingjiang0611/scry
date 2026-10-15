@@ -991,7 +991,17 @@ async function main() {
     const surfaceAction = document.querySelector('[data-session-surface-current="true"] .surface-topbar button')
     const root = document.documentElement
     const previousTheme = root.dataset.theme
+    const previousBackground = inspect('.main-area')?.background
+    const waitForBackground = async (expected) => {
+      const deadline = Date.now() + 2000
+      while (inspect('.main-area')?.background !== expected) {
+        if (Date.now() > deadline) throw new Error('Theme background did not settle: ' + expected)
+        await new Promise(resolve => requestAnimationFrame(resolve))
+      }
+    }
     root.dataset.theme = 'light'
+    // Computed styles can initially report the old color during the theme transition.
+    await waitForBackground('rgb(255, 255, 255)')
     const lightBackgrounds = {
       sidebar: inspect('.sidebar')?.background,
       brand: inspect('.sb-brand')?.background,
@@ -1002,6 +1012,7 @@ async function main() {
     }
     if (previousTheme) root.dataset.theme = previousTheme
     else delete root.dataset.theme
+    await waitForBackground(previousBackground)
     return {
       platform: document.documentElement.dataset.platform,
       viewportWidth: document.documentElement.clientWidth,
