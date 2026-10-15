@@ -222,8 +222,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       : { id, label: input.label, hostId: invitation.hostId, anchorPEM: invitation.anchorPEM, anchorSHA256: invitation.anchorSHA256, ssh,
           pairPort: invitation.pairPort, runPort: invitation.runPort, pending: { pairingId: invitation.pairingId, secret: invitation.secret, expiresAt: invitation.expiresAt, publicKeySHA256: identity.publicKeySHA256 } }
     const connections = [...state.connections.filter((existing) => existing.id !== id), item]
-    await this.#save({ ...state, connections })
-    state.connections = connections
+    await this.#save(state, connections)
     const response = await this.#pairRequest(state, item, 'pair.prove')
     return await this.#consumePairingResponse(state, item, response)
   }
@@ -235,6 +234,19 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     // authority and may return a durable grant after the invitation's expiry.
     const response = await this.#pairRequest(state, item, 'pair.status')
     return await this.#consumePairingResponse(state, item, response)
+  }
+
+  async updateSsh(connectionIdValue: string, value: DesktopSshTarget): Promise<void> {
+    return this.#serializeLifecycle(async () => {
+      const ssh = validateSsh(value)
+      const state = await this.#state()
+      const item = this.#connection(state, connectionIdValue)
+      // An address is routing information, not a new host identity. Keep the pinned
+      // CA, device certificate and receipts; reconnect remains an explicit action.
+      await this.#disconnectActive(connectionIdValue)
+      const connections = state.connections.map((connection) => connection.id === item.id ? { ...connection, ssh } : connection)
+      await this.#save(state, connections)
+    })
   }
 
   async connect(connectionIdValue: string): Promise<void> {
@@ -462,10 +474,15 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       return { version: 1, identity, connections: [], intents: [] }
     }
   }
-  async #save(state: EncryptedState): Promise<void> {
-    const snapshot = structuredClone(validateState(state))
+  async #save(state: EncryptedState, connections?: StoredConnection[]): Promise<void> {
     const previous = this.#saveSerial.catch(() => {})
-    const next = previous.then(() => this.#writeState(snapshot))
+    const next = previous.then(async () => {
+      // Snapshot inside the queue, and publish a connection replacement before the
+      // next save starts. A late receipt refresh must not restore an old address.
+      const snapshot = structuredClone(validateState(connections ? { ...state, connections } : state))
+      await this.#writeState(snapshot)
+      if (connections) state.connections = connections
+    })
     this.#saveSerial = next
     await next
   }

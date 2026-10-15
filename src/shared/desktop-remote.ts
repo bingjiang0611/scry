@@ -124,6 +124,7 @@ export interface DesktopRemoteAPI {
   list(): Promise<DesktopRemoteConnection[]>
   pair(input: { label: string; ssh: DesktopSshTarget; invitation: string }): Promise<DesktopPairingResult>
   finishPairing(connectionId: string): Promise<DesktopPairingResult>
+  updateSsh(connectionId: string, ssh: DesktopSshTarget): Promise<void>
   connect(connectionId: string): Promise<void>
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
