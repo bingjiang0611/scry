@@ -22,6 +22,37 @@ describe('historical input boundary', () => {
     expect(input.emit).not.toHaveBeenCalled()
   })
 
+  it('tracks an explicitly opted-in plain input without inventing a history body or wrapper', () => {
+    const input = request({ trackInputReceipt: true, prompt: '  保留缩进\n代码\n' })
+    const observer = new HistoricalInput(input)
+    expect(observer.snapshot()).toMatchObject({ status: 'not_sent', contextHash: null })
+    expect(observer.text(input.prompt)).toBe(input.prompt)
+    observer.attempting(input.prompt)
+    expect(observer.snapshot()).toMatchObject({
+      status: 'unknown', contextHash: null,
+      textHash: createHash('sha256').update(input.prompt).digest('hex')
+    })
+    observer.accepted('fresh-native', 'claude_sdk_success_result')
+    expect(observer.snapshot()).toMatchObject({ status: 'accepted', contextHash: null, nativeSessionId: 'fresh-native' })
+    expect(input.emit).toHaveBeenCalledTimes(2)
+    expect(input.emit).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'runtime:input_receipt' }))
+  })
+
+  it('does not mistake a tracked control command for ordinary model input', () => {
+    const observer = new HistoricalInput(request({ trackInputReceipt: true, prompt: ' /clear' }))
+    expect(() => observer.text(' /clear')).toThrow('斜杠命令')
+    expect(observer.snapshot()?.status).toBe('not_sent')
+    expect(observer.text('skill args', true)).toBe('skill args')
+  })
+
+  it('keeps native identity checks on history-free input', () => {
+    const observer = new HistoricalInput(request({ trackInputReceipt: true, resume: 'expected' }))
+    expect(() => observer.verifySession('different')).toThrow('不一致')
+    observer.attempting('继续')
+    observer.accepted('different', 'claude_sdk_success_result')
+    expect(observer.snapshot()).toMatchObject({ status: 'unknown', contextHash: null })
+  })
+
   it('freezes the body and distinguishes body hash from exact outgoing text hash', () => {
     const body = context('用户：/clear\n助手：历史 $old-skill')
     const input = request({ historicalContext: body })

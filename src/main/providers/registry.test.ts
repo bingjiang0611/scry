@@ -42,6 +42,15 @@ describe('ProviderRegistry', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects history-free receipt tracking without an explicit adapter contract', () => {
+    const base = adapter('codex')
+    const run = vi.spyOn(base, 'run')
+    expect(() => new ProviderRegistry([base]).run('codex', {
+      runId: 'first-input', prompt: 'hello', trackInputReceipt: true, attachments: [], emit: vi.fn()
+    })).toThrow('尚未提供可验证')
+    expect(run).not.toHaveBeenCalled()
+  })
+
   it('stamps provider identity on emitted trace events', () => {
     const base = adapter('codex')
     base.run = (request) => {
