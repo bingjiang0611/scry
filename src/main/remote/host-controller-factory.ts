@@ -37,6 +37,7 @@ export interface HostControllerBinding {
 
 export interface HostControllerFactoryDependencies {
   readDesktop?: HostControllerDependencies['readDesktop']
+  desktopDirectories?: HostControllerDependencies['desktopDirectories']
   // Directory under Scry's userData; pairing, ledger and output subdirs are created.
   stateDirectory: string
   // A STABLE host identity across restarts. The persisted pairing state fails
@@ -143,6 +144,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   const workspace: WorkspaceAuthorizer = { authorize: (cwd) => deps.authorizeWorkspace(cwd) }
   const controllerDeps: HostControllerDependencies = {
     ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
+    ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
     pairing: {
       store: pairingStore,
       hostId: deps.hostId,

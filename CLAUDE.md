@@ -35,6 +35,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 `full_access` 表示用户明确选择让 Provider 以本机权限运行；它不是 Scry 提供了更强隔离。仓库控制的 MCP、Hook、plugin、executable 仍必须经过独立 trust/fingerprint 检查。
 
 - 默认模式保留 Provider 原生/映射后的审批语义。
+- **维护者 2026-10-15 明确确认**：已配对 owner 可通过桌面端专用目录选择接口浏览宿主当前用户可读取/遍历的任意目录，包括用户目录外与目录符号链接的 canonical 目标。浏览不授权；明确选择后，宿主校验真实目录并通过与本机目录选择器相同的项目 authority 持久化，其他已配对 owner 随后也可访问该项目。发送时仍重验工作区授权及仓库 trust/fingerprint；不自动运行或发送。原有项目根内的手机目录浏览接口不因此放宽；旧宿主未声明该能力时显示 unavailable，不绕过校验。
 - `full_access` 必须在 UI 和 adapter 中用 Provider-specific 文案说明真实效果。
 - **维护者 2026-09-21 明确确认**：项目 MCP、Codex Hook、OpenCode plugin 与 recorder commit callback 自动授权，不再弹确认窗；首次执行及指纹变化仍重验 canonical cwd + 内容/executable fingerprint，校验失败必须拒绝执行。
 - 真实后果是打开不可信仓库可能直接以本机用户权限执行其配置的代码。Recorder 自动授权仍标 `source: auto`，不得把自动放行显示成用户批准；`SCRY_COMMIT_HOOK_TRUST=prompt` 不再恢复询问。App 与独立 CLI 的 recorder commit callback 均按此策略执行。改动这一策略要显式征得维护者同意。

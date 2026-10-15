@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { DesktopHostRead, DesktopHostReadResult } from '../../shared/desktop-remote'
+import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult } from '../../shared/desktop-remote'
+import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
 import { parseDesktopHostRead } from './desktop-host-reader'
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
@@ -103,6 +104,10 @@ const LIVE_RUN_PROMPT_CHARS = 200
 
 export interface HostControllerDependencies {
   readDesktop?(query: DesktopHostRead): Promise<DesktopHostReadResult>
+  desktopDirectories?: {
+    list(query: Extract<DesktopDirectoryQuery, { action: 'list' }>): DesktopDirectoryPage
+    select(path: string): RemoteProjectRef
+  }
   // Pairing adapters (CSR verification + certificate issuance + persistence).
   pairing: PairingDependencies
   // Durable ledger backing store (JSONL file store in production).
@@ -249,6 +254,7 @@ export class HostController {
   #workspace: WorkspaceAuthorizer
   #macRuns?: MacRunSource
   #readDesktop?: HostControllerDependencies['readDesktop']
+  #desktopDirectories?: HostControllerDependencies['desktopDirectories']
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
   #changeSeq = 0
@@ -259,6 +265,7 @@ export class HostController {
     this.#workspace = deps.workspace
     this.#macRuns = deps.macRuns
     this.#readDesktop = deps.readDesktop
+    this.#desktopDirectories = deps.desktopDirectories
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#output = new RunOutputLog({ store: deps.outputStore })
     this.#interactions = new RemoteInteractionBroker((runId, detail) => {
@@ -400,7 +407,18 @@ export class HostController {
     if (!this.#readDesktop) throw new Error('desktop_protocol_unavailable')
     const result = await this.#readDesktop(parseDesktopHostRead(input))
     this.authorizeDevice(peerCertSHA256)
-    return result
+    return result.kind === 'info' && this.#desktopDirectories ? { ...result, directorySelection: true } : result
+  }
+
+  // Separate from the project-scoped mobile browser. Selecting is an explicit
+  // workspace grant by an authenticated owner, never a browse side effect.
+  desktopDirectory(peerCertSHA256: string, input: unknown): DesktopDirectoryResult {
+    this.authorizeDevice(peerCertSHA256)
+    if (!this.#desktopDirectories) throw new Error('desktop_directory_selection_unavailable')
+    const query = parseDesktopDirectoryQuery(input)
+    return query.action === 'list'
+      ? { action: 'list', page: this.#desktopDirectories.list(query) }
+      : { action: 'select', project: this.#desktopDirectories.select(query.path) }
   }
 
   private authorizeDevice(peerCertSHA256: string): void {

@@ -250,6 +250,9 @@ export class InnerMtlsHost {
       if (request.op === 'desktop') {
         return { desktop: await controller.readDesktop(fingerprint, request.query) }
       }
+      if (request.op === 'desktopDirectory') {
+        return { directory: controller.desktopDirectory(fingerprint, request.query) }
+      }
       if (request.op === 'historyPreview') {
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
         return { historyPreview: await controller.readHistoryPreview(fingerprint, { providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }

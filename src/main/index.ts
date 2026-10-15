@@ -127,6 +127,7 @@ import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/
 import { DesktopRemoteClient } from './remote/desktop-client'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
 import { createDesktopHostReader } from './remote/desktop-host-reader'
+import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
@@ -4319,8 +4320,15 @@ async function startRemoteHostIfEnabled(): Promise<void> {
           return state ? boundedLiveRun(state) : null
         }
       }),
-      // Fail closed: a device may only target a directory already authorized
-      // through Scry's own project picker.
+      // Maintainer-approved: a paired owner may explicitly select any readable
+      // host directory. Browsing grants nothing; selection uses the local picker
+      // authority. Submit still revalidates the grant and repository trust.
+      desktopDirectories: {
+        list: listDesktopDirectories,
+        select: (path) => selectDesktopDirectory(path, rememberProject)
+      },
+      // Fail closed: only directories selected through a local or authenticated
+      // desktop picker (or descendants) may enter the run lifecycle.
       authorizeWorkspace: (cwd) => resolveRemoteProjectDirectory(cwd),
       gate: providerOperationGate,
       createTransport: relay.createTransport,

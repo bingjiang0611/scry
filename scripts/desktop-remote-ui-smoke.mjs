@@ -24,6 +24,8 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
+import { refreshRemoteCatalog } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
+import { refreshDesktopConnections } from ${JSON.stringify(join(root, 'src/renderer/hooks/useDesktopConnections.ts'))}
 import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
 import ${JSON.stringify(join(root, 'src/renderer/codex-alignment.css'))}
 
@@ -36,7 +38,8 @@ const state = {
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
-  updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false
+  updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
+  directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
@@ -60,7 +63,7 @@ const catalog = {
     models: [{ id: 'alpha-alternate', label: 'Alternate model', isDefault: true }],
     permissions: [{ id: 'default', label: 'Default', isDefault: true }] }, beta],
   sessions: [{ sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 }],
-  providerEvidence: 'host_snapshot'
+  providerEvidence: 'host_snapshot', directorySelection: true
 }
 const contextFor = (input) => ({ ...input.context })
 const activeRun = (runId, externalSessionId, text, question, background = false) => ({
@@ -90,7 +93,23 @@ const api = {
   async connect() { state.connectCalls++; state.connected = true },
   async disconnect() { state.connected = false },
   async forget() {},
-  async catalog() { return structuredClone({ ...catalog, projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })), providers: state.hideProvider ? [beta] : catalog.providers }) },
+  async catalog() { return structuredClone({ ...catalog, projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })), providers: state.hideProvider ? [beta] : catalog.providers, directorySelection: state.oldDirectoryHost ? undefined : true }) },
+  async directories(id, path = '/fixture/home', cursor = 0, snapshot) {
+    state.directoryReads.push({ id, path, cursor, snapshot })
+    if (!['/fixture/home', '/fixture/home/custom', '/fixture/home/empty'].includes(path)) throw new Error('directory_unavailable')
+    const directories = path === '/fixture/home' ? [{ path: '/fixture/home/custom', label: 'custom' }, { path: '/fixture/home/empty', label: 'empty' }, { path: '/fixture/home/other', label: 'other' }] : []
+    const end = Math.min(cursor + 2, directories.length)
+    return { current: { path, label: path.split('/').pop() }, parent: { path: '/fixture/home', label: 'home' }, directories: directories.slice(cursor, end), cursor: end, total: directories.length, hasMore: end < directories.length, snapshot: 'a'.repeat(64) }
+  },
+  async selectDirectory(id, path) {
+    state.directorySelectCalls.push({ id, path })
+    if (state.selectDirectoryFailure) throw new Error('fixture directory grant not confirmed')
+    if (state.holdDirectorySelection) await new Promise(resolve => { window.releaseDirectorySelection = resolve })
+    const project = { path, label: path.split('/').pop() }
+    state.directoryGrants.push(project)
+    if (!catalog.projects.some(item => item.path === path)) catalog.projects.push(project)
+    return project
+  },
   async history(_id, context) { state.historyCalls.push(contextFor({ context })); return { turns: [], hasOlder: false, source: 'trace_archive', status: 'available' } },
   async trace(_id, context, runId) {
     state.traceCalls.push({ context: contextFor({ context }), runId })
@@ -139,6 +158,8 @@ window.scry = {
   async remoteDesktopHostDisable() { state.hostDisableCalls++; state.hostEnabled = false }
 }
 window.desktopRemoteFixture = state
+window.refreshFixtureCatalog = () => refreshRemoteCatalog(connection.id)
+window.refreshFixtureConnections = refreshDesktopConnections
 for (const type of ['keydown', 'change']) document.addEventListener(type, event => {
   state.uiEvents.push({ type, key: event.key, value: event.target.value, tag: event.target.tagName })
   if (state.uiEvents.length > 24) state.uiEvents.shift()
@@ -189,6 +210,14 @@ async function exercise(contents, capture) {
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
   }
   const insert = (text) => send('Input.insertText', { text })
+  // Native forms submit on Enter's keypress/default action, not keydown alone.
+  const formEnter = async () => {
+    const event = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: process.platform === 'darwin' ? 36 : 13 }
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event })
+    await send('Input.dispatchKeyEvent', { type: 'char', text: '\r', unmodifiedText: '\r', ...event })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
+  }
+
   const fixture = () => read('window.desktopRemoteFixture')
   const bodyText = () => read('document.body.textContent')
 
@@ -246,6 +275,55 @@ async function exercise(contents, capture) {
   await capture('location-hover-short-window')
   await send('Emulation.clearDeviceMetricsOverride')
   await click('[data-machine-id="fixture-connection"]')
+  await read('window.desktopRemoteFixture.oldDirectoryHost = true; window.refreshFixtureCatalog()')
+  await wait('document.querySelector(".location-custom-directory")?.disabled', 'old host capability is unavailable')
+  check((await fixture()).directoryReads.length === 0, 'Old host was probed for unsupported directories')
+  await read('window.desktopRemoteFixture.oldDirectoryHost = false; window.refreshFixtureCatalog()')
+  await wait('document.querySelector(".location-custom-directory")?.disabled === false', 'new host directory selection capability')
+  await click('.location-custom-directory')
+  await wait('document.querySelector("input[name=remotePath]")?.value === "/fixture/home" && document.querySelector(".remote-directory-body")?.getAttribute("aria-busy") === "false"', 'host home directory loaded')
+  check((await fixture()).directoryGrants.length === 0, 'Browsing authorized a project')
+  const directoryModalInViewport = () => read('(() => { const modal = document.querySelector(".remote-directory-modal"); const r = modal.getBoundingClientRect(); return modal.parentElement.parentElement === document.body && r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth })()')
+  check(await directoryModalInViewport(), 'Remote directory modal is clipped by the composer containing block')
+  await capture('remote-directory-browse')
+  await send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false })
+  check(await directoryModalInViewport(), 'Remote directory modal is outside the short-window viewport')
+  await capture('remote-directory-short-window')
+  await send('Emulation.clearDeviceMetricsOverride')
+  await key('Escape')
+  await wait('!document.querySelector(".remote-directory-modal") && document.activeElement?.classList.contains("location-button")', 'directory cancel restores composer context focus')
+  check((await fixture()).directorySelectCalls.length === 0 && await read(composerValue) === 'carried draft', 'Cancel changed a draft or granted a directory')
+  await click('.location-button'); await click('[data-machine-id="fixture-connection"]'); await click('.location-custom-directory')
+  await wait('document.querySelector("input[name=remotePath]")?.value === "/fixture/home" && document.querySelector(".remote-directory-body")?.getAttribute("aria-busy") === "false"', 'directory browser reopened')
+  await click('input[name=remotePath]'); await read('document.querySelector("input[name=remotePath]").select()'); await insert('/missing-directory'); await formEnter()
+  await wait('document.querySelector(".remote-directory-body [role=alert]")?.textContent.includes("directory_unavailable")', 'invalid remote path error')
+  check(await read('document.querySelector(".remote-directory-actions .is-primary").disabled'), 'Failed path was selectable')
+  await click('.remote-directory-navigation button:first-child')
+  await wait('document.querySelector("input[name=remotePath]")?.value === "/fixture/home" && document.querySelector(".remote-directory-body")?.getAttribute("aria-busy") === "false"', 'return to host home')
+  await click('.remote-directory-list > button.hosts-button')
+  await wait('document.querySelectorAll(".remote-directory-entry").length === 3', 'paged directory list')
+  await click('[data-remote-directory="/fixture/home/custom"]')
+  await wait('document.querySelector("input[name=remotePath]")?.value === "/fixture/home/custom" && document.querySelector(".remote-directory-body")?.getAttribute("aria-busy") === "false"', 'custom remote directory browsed')
+  check((await fixture()).directorySelectCalls.length === 0, 'Entering a directory granted it')
+  await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
+  await wait('document.querySelector(".remote-directory-actions .is-primary").disabled', 'offline directory selection blocked')
+  await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+  await wait('!document.querySelector(".remote-directory-actions .is-primary").disabled', 'directory selection explicitly available after reconnect')
+  await read('window.desktopRemoteFixture.selectDirectoryFailure = true')
+  await click('.remote-directory-actions .is-primary')
+  await wait('document.querySelector(".remote-directory-body [role=alert]")?.textContent.includes("未能确认")', 'grant result failure stays visible')
+  check((await fixture()).directoryGrants.length === 0 && (await fixture()).localStarts === 0, 'Unconfirmed selection granted or executed a project')
+  await read('window.desktopRemoteFixture.selectDirectoryFailure = false; window.desktopRemoteFixture.holdDirectorySelection = true')
+  await click('.remote-directory-actions .is-primary')
+  await wait('typeof window.releaseDirectorySelection === "function"', 'directory selection pending')
+  await click('.remote-directory-actions .is-primary'); await key('Escape')
+  check((await fixture()).directorySelectCalls.length === 2 && await read('!!document.querySelector(".remote-directory-modal")'), 'Pending selection was duplicated or dismissed')
+  await capture('remote-custom-directory')
+  await read('window.releaseDirectorySelection()')
+  await wait('!document.querySelector(".remote-directory-modal") && document.querySelector(".execution-location.is-remote") != null', 'custom selection changes only draft execution location')
+  check((await fixture()).directoryGrants.length === 1 && (await fixture()).submitInputs.length === 0 && (await fixture()).localStarts === 0, 'Custom directory selection implicitly submitted or fell back locally')
+  check(await read(composerValue) === 'carried draft', 'Custom selection lost the draft')
+  await click('.location-button'); await click('[data-machine-id="fixture-connection"]')
   await wait('document.querySelector(\'[data-remote-project="/fixture/project-a"]\') != null', 'remote projects for selected machine')
   await click('[data-remote-project="/fixture/project-a"]')
   await wait(remoteShown, 'remote location opens the shared conversation')
@@ -386,16 +464,9 @@ async function exercise(contents, capture) {
   check(!(await read('document.querySelector(\'.hosts-section[aria-label="我连接的主机"]\').textContent.includes("Fixture iPhone")')), 'Hosts page mixed inbound devices into outbound hosts')
   await wait('document.querySelector(\'.hosts-section[aria-label="允许其他设备访问本机"]\')?.textContent.includes("Fixture iPhone")', 'hosts page inbound section')
   await click('.hosts-row-toggle')
-  await wait('document.querySelectorAll(".hosts-projects li").length === 2', 'host projects listed')
+  await wait('document.querySelectorAll(".hosts-projects li").length === 3', 'host projects listed')
   await capture('remote-hosts')
 
-  // Native forms submit on Enter's keypress/default action, unlike the composer's keydown handler.
-  const formEnter = async () => {
-    const event = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: process.platform === 'darwin' ? 36 : 13 }
-    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event })
-    await send('Input.dispatchKeyEvent', { type: 'char', text: '\r', unmodifiedText: '\r', ...event })
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
-  }
   // Editing changes routing only. Cancel, validation, storage failure and double-submit use real DOM input.
   await click('.hosts-address-summary button')
   await wait('document.activeElement?.name === "hostname"', 'address editor initial focus')
@@ -436,7 +507,8 @@ async function exercise(contents, capture) {
   check(await read('[...document.querySelectorAll(".hosts-projects button")].every(node => node.disabled)'), 'Disconnected projects allowed session creation')
   await click('.hosts-row-actions button')
   await wait('window.desktopRemoteFixture.connected && document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'explicit reconnect after editing')
-  await click('.hosts-projects li:last-child .hosts-button')
+  await read('[...document.querySelectorAll(".hosts-projects li")].find(node => node.querySelector("code")?.textContent === "/fixture/project-b").querySelector("button").setAttribute("data-host-project-b", "")')
+  await click('[data-host-project-b]')
   await wait(`${remoteShown} && document.querySelector(".location-button")?.getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-b"`, 'host project opens a remote draft')
 
   await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
@@ -455,6 +527,7 @@ async function exercise(contents, capture) {
   await wait('document.querySelector(".sb-remote-proj .pname")?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
 
   return {
+    remoteDirectoryPicker: { oldHostUnavailable: true, cancelFocusAndDraft: true, browseDoesNotGrant: true, invalidPath: true, pagination: true, offlineBlocked: true, uncertainGrantVisible: true, explicitSelectionOnly: true, noImplicitSend: true },
     locationHoverStable: { menu: true, machineRows: true, stationaryPointer: true, shortWindow: true, noImplicitSelection: true },
     hostAddressEdit: { cancel: true, focusRestored: true, validation: true, storageFailure: true, doubleEnterSingleSave: true, identityKept: true, explicitReconnect: true, noProviderStart: true },
     boundSessionReconnectRefreshesCatalog: true,
