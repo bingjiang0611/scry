@@ -53,7 +53,7 @@ export const BUNDLED_PROVIDER_COMPATIBILITY: ProviderCompatibilityManifest = {
       provider: 'qoder',
       recommendedRange: '>=1.1.60 <1.2.0',
       rules: [
-        { range: '>=1.1.60 <1.2.0', status: 'unsupported', note: 'qodercli 1.1.60：仅验证过版本探测，未验证完整轮次证据' },
+        { range: '>=1.1.60 <1.2.0', status: 'supported', note: 'qodercli 1.1.60：已在本机真实轮次中验证 native/canonical 双流、工具写入与 hook 证据采集' },
         { range: '>=1.2.0', status: 'unsupported', note: '高于已探测版本线；未验证证据完整性' }
       ]
     },

@@ -1263,7 +1263,9 @@ handleTrusted('agent:detect', async () => {
     probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
       env: await piRpcEnvironment(profile),
       timeout: PI_VERSION_PROBE_TIMEOUT_MS
-    })
+    }),
+    // adapter 自述的版本经常是空，本机真实版本来自 CLI 探测；用最终生效的版本重算判定。
+    compatibility: (providerId, version) => providerCompatibility.advisory(providerId, version)
   })
 })
 
