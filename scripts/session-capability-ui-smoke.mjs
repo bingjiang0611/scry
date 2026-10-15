@@ -384,7 +384,16 @@ async function exercisePiCommands(contents) {
   await click('#pi-command .question-option')
   await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
   await click('#pi-command .question-submit')
-  await wait(`document.querySelectorAll('#pi-command [aria-label="Pi 命令反馈"]').length === 3`)
+  // Command results and extension messages/notifications have distinct evidence
+  // roles since 3caef80; require all three, not three mislabeled command results.
+  for (const [label, text] of [
+    ['Pi 命令反馈', 'Command interaction ended; model turn unobserved'],
+    ['Pi 扩展消息', 'Custom command status'],
+    ['Pi 扩展通知', 'Pi extension notification']
+  ]) {
+    const selector = `#pi-command [aria-label="${label}"]`
+    await wait(`document.querySelectorAll(${JSON.stringify(selector)}).length === 1 && document.querySelector(${JSON.stringify(selector)}).textContent.includes(${JSON.stringify(text)})`)
+  }
   const answers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
   if (answers.length !== 3 || answers[1].answers['Edit objective'] !== 'Updated objective\nSecond line') throw new Error(`Pi chained answers lost their identity or edited content: ${JSON.stringify(answers)}`)
   await click('#pi-command-restart')
