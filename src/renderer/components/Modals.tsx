@@ -38,15 +38,22 @@ export function ModalFrame({
     const focusable = (): HTMLElement[] => [...(dialogRef.current?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     ) ?? [])]
+    let initialTarget: HTMLElement | null = null
     const focusInitial = (): void => {
       const requested = initialFocusRef?.current
       const target = requested && !requested.matches(':disabled') ? requested : focusable()[0] ?? dialogRef.current
+      if (!initialTarget) initialTarget = target ?? null
       target?.focus({ preventScroll: true })
     }
     // effect 执行时 DOM 已提交，先同步聚焦；rAF 只用于覆盖随后完成的布局/控件挂载。
-    // modal 存续期间也不允许外部 composer 或 inactive-window 恢复逻辑把焦点抢走。
+    // If the user selected another control inside the modal before that frame, keep that
+    // selection. External focus is still redirected by the focus trap below.
     focusInitial()
-    const frame = window.requestAnimationFrame(focusInitial)
+    const frame = window.requestAnimationFrame(() => {
+      const active = document.activeElement
+      if (dialogRef.current?.contains(active) && active !== initialTarget) return
+      focusInitial()
+    })
     const onFocusIn = (): void => {
       if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) focusInitial()
     }

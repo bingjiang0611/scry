@@ -42,9 +42,16 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
     await contents.insertText(text)
     await wait(`${field}.value === ${JSON.stringify(text)}`)
   }
+  // Regression: a native click may select the textarea before ModalFrame's first
+  // animation frame. That frame must not steal focus back to the title input.
   const openNew = async () => {
+    await read('window.__holdModalFrame()')
     await click('.mp-header .mp-button:not(.mp-back)')
     await wait(`document.querySelector('.mp-editor-modal input') === document.activeElement`)
+    await click('.mp-editor-modal textarea')
+    await wait(`document.querySelector('.mp-editor-modal textarea') === document.activeElement`)
+    await read('window.__releaseModalFrame()')
+    check(await read(`document.activeElement === document.querySelector('.mp-editor-modal textarea')`), 'Modal frame stole native textarea focus after its first frame')
   }
   const save = async () => {
     await click('.mp-editor-modal button[type="submit"]')
