@@ -89,7 +89,9 @@ export function resolveWorkspaceFileTarget(
   const fileUrl = token.startsWith('file:')
   const fromFileUrl = fileUrl ? fileUrlPath(token) : null
   if (fileUrl && !fromFileUrl) return null
-  const candidate = fromFileUrl ?? token
+  // Model-authored source locations are not part of the filesystem path.
+  // File URLs already separate fragments; preserve their decoded literal filenames.
+  const candidate = fromFileUrl ?? token.replace(/(?:#L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?|:\d+(?::\d+|[-–]\d+)?)$/, '')
   if (candidate.startsWith('#') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) return null
   const normalizedCandidate = candidate.replaceAll('\\', '/')
 
