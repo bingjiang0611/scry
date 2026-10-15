@@ -1,5 +1,5 @@
 // Remote building blocks shared by the hosts page and remote conversations.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { TraceEvent } from '@shared/trace'
 import type { Turn } from '../format'
 import type {
@@ -10,7 +10,7 @@ import type {
   RemoteControlOption,
   RemoteProviderRef
 } from '@shared/desktop-remote'
-import type { WorkspaceEntry, WorkspaceFilePage } from '@shared/workspace'
+import { WorkspacePanel, type ReadOnlyWorkspaceSource } from './WorkspacePanel'
 import './desktop-remote.css'
 
 export function desktopRemoteStateKey(connectionId: string, context: DesktopRemoteContext): string {
@@ -112,49 +112,21 @@ export function ClientPairForm({ onPaired }: { onPaired: (id: string) => Promise
 export function RemoteFiles({
   api,
   connectionId,
-  context
+  context,
+  onClose
 }: {
   api: DesktopRemoteAPI
   connectionId: string
   context: DesktopRemoteContext
+  onClose: () => void
 }): JSX.Element {
-  const [path, setPath] = useState('')
-  const [entries, setEntries] = useState<WorkspaceEntry[]>([])
-  const [nextCursor, setNextCursor] = useState<string | undefined>()
-  const [file, setFile] = useState<WorkspaceFilePage | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const generation = useRef(0)
-  const load = useCallback(async (nextPath: string, cursor?: string) => {
-    const sequence = ++generation.current
-    setError(null); if (!cursor) setFile(null)
-    try {
-      const result = await api.files(connectionId, context, nextPath, cursor)
-      if (sequence !== generation.current) return
-      setEntries((current) => cursor ? [...current, ...result.entries] : result.entries)
-      setNextCursor(result.nextCursor)
-      setPath(nextPath)
-    } catch (reason) { if (sequence === generation.current) { setError(errorText(reason)); if (!cursor) setEntries([]) } }
-  }, [api, connectionId, context])
-  const openFile = async (entryPath: string, offset?: number, snapshot?: string): Promise<void> => {
-    const sequence = ++generation.current
-    setError(null)
-    try {
-      const result = await api.file(connectionId, context, entryPath, offset, snapshot)
-      if (sequence !== generation.current) return
-      setFile((current) => offset !== undefined && current?.path === result.path ? { ...result, content: current.content + result.content } : result)
-    } catch (reason) { if (sequence === generation.current) setError(errorText(reason)) }
-  }
-  useEffect(() => { void load('') }, [load])
-  return <section className="desktop-remote__files">
-    <div className="desktop-remote__section-head"><b>只读文件</b><button type="button" onClick={() => void load(path)}>刷新</button></div>
-    <code className="desktop-remote__path">{path || '.'}</code>
-    {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-    <ul>{path && <li><button type="button" onClick={() => void load(path.split('/').slice(0, -1).join('/'))}>..</button></li>}
-      {entries.map((entry) => <li key={entry.path}><button type="button" onClick={() => entry.kind === 'directory' ? void load(entry.path) : void openFile(entry.path)}>{entry.kind === 'directory' ? '▸ ' : '□ '}{entry.name}</button></li>)}
-    </ul>
-    {nextCursor && <button type="button" onClick={() => void load(path, nextCursor)}>加载更多（列表有上限）</button>}
-    {file && <div className="desktop-remote__file-preview"><div><b>{file.path}</b><button type="button" onClick={() => setFile(null)}>关闭</button></div><pre>{file.content}</pre>{file.hasMore && <><small>内容已截断；文件读取上限为 512 KiB。</small><button type="button" onClick={() => void openFile(file.path, file.nextOffset, file.snapshot)}>继续读取</button></>}</div>}
-  </section>
+  // Keep remote reads on the authenticated host transport. Never interpret a host
+  // path as a local workspace, including when remote preview is unavailable.
+  const source = useMemo<ReadOnlyWorkspaceSource>(() => ({
+    workspaceList: ({ path = '', cursor }) => api.files(connectionId, context, path, cursor),
+    workspaceReadPage: ({ path, offset, snapshot }) => api.file(connectionId, context, path, offset, snapshot)
+  }), [api, connectionId, context])
+  return <WorkspacePanel cwd={context.cwd} readOnlySource={source} onClose={onClose} onAddReference={() => {}} />
 }
 
 export function RemoteHostPanel(): JSX.Element {

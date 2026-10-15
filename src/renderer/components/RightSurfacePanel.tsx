@@ -8,6 +8,7 @@ export interface RightSurfacePanelProps {
   openIds: readonly RightSurfaceKind[]
   activeId: RightSurfaceKind | null
   contents: RightSurfaceContents
+  unavailable?: Readonly<Partial<Record<RightSurfaceKind, string>>>
   retainTerminal?: boolean
   workbenchPicker?: ReactNode
   maximized: boolean
@@ -33,6 +34,7 @@ export function RightSurfacePanel({
   openIds,
   activeId,
   contents,
+  unavailable,
   retainTerminal = false,
   workbenchPicker,
   maximized,
@@ -244,6 +246,7 @@ export function RightSurfacePanel({
                       role="menuitem"
                       key={definition.kind}
                       aria-current={activeKind === definition.kind ? 'page' : undefined}
+                      title={unavailable?.[definition.kind]}
                       onClick={() => {
                         onOpen(definition.kind)
                         closeMenu(true)
@@ -251,7 +254,7 @@ export function RightSurfacePanel({
                     >
                       <Icon name={definition.icon} />
                       <span>{definition.label}</span>
-                      {isOpen && <small>已打开</small>}
+                      {unavailable?.[definition.kind] ? <small>不可用</small> : isOpen && <small>已打开</small>}
                     </button>
                   )
                 })}
@@ -298,7 +301,7 @@ export function RightSurfacePanel({
                   >
                     <span className="card-icon"><Icon name={definition.icon} /></span>
                     <strong>{definition.label}</strong>
-                    <p>{definition.description}</p>
+                    <p>{unavailable?.[definition.kind] ?? definition.description}</p>
                   </button>
                 ))}
               </div>

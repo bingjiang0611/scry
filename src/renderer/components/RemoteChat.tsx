@@ -3,8 +3,13 @@
 // install, credentials, files and archive, so this view never falls back to local
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
+import { runtimeProviderForAgentId } from '@shared/runtime'
 import type { AgentModelRef, AgentPermissionMode, AgentQuestionResponse, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
-import type { ActiveRun } from '@shared/trace'
+import type { ActiveRun, TraceEvent } from '@shared/trace'
+import { createPortal } from 'react-dom'
+import { RightSurfacePanel } from './RightSurfacePanel'
+import { OverviewPanel } from './OverviewPanel'
+import type { RightSurfaceAction, RightSurfaceKind, RightSurfaceState } from '../right-surface'
 import type {
   DesktopRemoteContext,
   DesktopRemoteHistory,
@@ -87,8 +92,11 @@ export interface RemoteChatProps {
   textareaRef: RefObject<HTMLTextAreaElement>
   renderLocationPicker: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
   onSessionAdopted: (externalSessionId: string) => void
-  filesOpen: boolean
-  onCloseFiles: () => void
+  surface: {
+    target: HTMLElement | null
+    state: RightSurfaceState
+    onAction: (action: RightSurfaceAction) => void
+  }
 }
 
 export function RemoteChat({
@@ -101,8 +109,7 @@ export function RemoteChat({
   textareaRef,
   renderLocationPicker,
   onSessionAdopted,
-  filesOpen,
-  onCloseFiles
+  surface
 }: RemoteChatProps) {
   const api = bridge()
   const { connections, error: readError } = useDesktopConnections()
@@ -115,6 +122,7 @@ export function RemoteChat({
   const [sessionId, setSessionId] = useState<string | undefined>(session?.externalSessionId)
   const [controls, setControls] = useState<AgentRunControls>({ permissionMode: 'default' })
   const [turns, setTurns] = useState<Turn[]>([])
+  const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyRevision, setHistoryRevision] = useState(0)
@@ -400,11 +408,17 @@ export function RemoteChat({
               ? { tone: 'blocked' as const, text: '正在提交到远端…' }
               : null
 
+  const unavailable: Partial<Record<RightSurfaceKind, string>> = Object.fromEntries(
+    (['source-control', 'diff', 'terminal', 'agents'] satisfies RightSurfaceKind[]).map((kind) => [
+      kind, `${host} 暂未提供此工作区能力；不会改用本机工作区。`
+    ])
+  )
+
   return (
     <>
       <ChatView
         turns={displayTurns}
-        selectedId={null}
+        selectedId={selected?.id ?? null}
         scrollRef={scrollRef}
         textareaRef={textareaRef}
         cwd={cwd}
@@ -436,7 +450,7 @@ export function RemoteChat({
           ? { sessionId, offset: 0, totalTurns: displayTurns.length, hasOlder: true, completeness: 'partial' }
           : null}
         onLoadOlderTurns={connected ? () => { void loadOlderHistory() } : undefined}
-        onSelect={() => {}}
+        onSelect={setSelected}
         onAnswerQuestion={answer}
         onInput={(value) => onDraftInput(draftKey, value)}
         onChooseFolder={() => {}}
@@ -468,17 +482,33 @@ export function RemoteChat({
         remoteHost={host}
         composerNotice={notice}
       />
-      {filesOpen && (
-        <aside className="remote-files-drawer" aria-label={`${host} 只读文件`}>
-          <header>
-            <b>{host} · 只读文件</b>
-            <button type="button" onClick={onCloseFiles} aria-label="关闭文件面板">关闭</button>
-          </header>
-          {contextAvailable
-            ? <RemoteFiles api={api} connectionId={connectionId} context={context} />
-            : <p className="desktop-remote__muted">{sendBlockedReason ?? '当前上下文不可读取文件。'}</p>}
-          <p className="desktop-remote__muted">远程首版只读：不支持编辑、终端和附件。</p>
-        </aside>
+      {surface.target && createPortal(
+        <RightSurfacePanel
+          openIds={surface.state.openIds}
+          activeId={surface.state.activeId}
+          maximized={surface.state.maximized}
+          unavailable={unavailable}
+          onOpen={(kind) => surface.onAction({ type: 'open', kind })}
+          onActivate={(kind) => surface.onAction({ type: 'activate', kind })}
+          onClose={(kind) => surface.onAction({ type: 'close', kind })}
+          onHide={() => surface.onAction({ type: 'hide' })}
+          onToggleMaximized={() => surface.onAction({ type: 'toggle-maximized' })}
+          contents={{
+            overview: sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
+              ? <div className="surface-unavailable"><b>会话证据不可用</b><span>{historyEvidence.reason ?? `${host} 未提供这条会话的归档`}</span></div>
+              : <OverviewPanel
+                  turns={displayTurns} sessionId={sessionId} selected={selected}
+                  runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}
+                  busy={runActive} onSelect={setSelected}
+                />,
+            files: contextAvailable
+              ? <RemoteFiles api={api} connectionId={connectionId} context={context} onClose={() => surface.onAction({ type: 'close', kind: 'files' })} />
+              : <div className="surface-unavailable"><b>文件不可用</b><span>{sendBlockedReason ?? '当前上下文不可读取文件。'}</span></div>,
+            ...Object.fromEntries(Object.entries(unavailable).map(([kind, reason]) => [kind,
+              <div className="surface-unavailable" key={kind}><b>远程能力不可用</b><span>{reason}</span></div>
+            ]))
+          }}
+        />, surface.target
       )}
     </>
   )

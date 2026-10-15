@@ -10,6 +10,8 @@ import { HostsView } from './HostsView'
 import { LocationPicker, LOCAL_MACHINE } from './LocationPicker'
 import { WorkdirPicker } from './Pickers'
 import { RemoteChat, remoteDraftKey, remotePermissionOption, remoteRunControlCatalog } from './RemoteChat'
+import { createRightSurfaceState } from '../right-surface'
+import { RightSurfacePanel } from './RightSurfacePanel'
 
 const host: DesktopRemoteConnection = {
   id: 'mac2', label: 'mac2', hostId: 'host', anchorSHA256: 'anchor',
@@ -33,7 +35,7 @@ const remoteChat = (connectionId: string, draft = '') => {
   return renderToStaticMarkup(<RemoteChat
     connectionId={connectionId} cwd="/remote/app" draftStore={draftStore} onDraftInput={() => {}}
     scrollRef={createRef()} textareaRef={createRef()} renderLocationPicker={() => null}
-    onSessionAdopted={() => {}} filesOpen={false} onCloseFiles={() => {}}
+    onSessionAdopted={() => {}} surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }}
   />)
 }
 
@@ -151,6 +153,16 @@ describe('remote conversation guards', () => {
     const html = remoteChat('mac2')
     expect(html).toContain('mac2 未连接。草稿会保留，连接后不会自动发送。')
     expect(html).toContain('>连接</button>')
+  })
+
+  it('does not advertise a local Shell for an unavailable remote terminal', () => {
+    const html = renderToStaticMarkup(<RightSurfacePanel
+      openIds={[]} activeId={null} contents={{}} maximized={false}
+      unavailable={{ terminal: 'mac2 暂未提供终端；不会启动本机 Shell。' }}
+      onOpen={() => {}} onActivate={() => {}} onClose={() => {}} onHide={() => {}} onToggleMaximized={() => {}}
+    />)
+    expect(html).toContain('mac2 暂未提供终端；不会启动本机 Shell。')
+    expect(html).not.toContain('启动本机 Shell；未绑定时从用户主目录开始。')
   })
 
   it('names the executing host in permission copy instead of this Mac', () => {

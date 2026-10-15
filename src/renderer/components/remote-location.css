@@ -130,26 +130,6 @@
 .sb-host-tag[data-state='unknown'] { border-color: var(--border3); color: var(--dim2); }
 .sb-nav-count { margin-left: auto; color: var(--dim2); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-/* Read-only remote files: a drawer over the transcript, not the local right panel. */
-.main-area:has(> .remote-files-drawer) { position: relative; }
-.remote-files-drawer {
-  position: absolute;
-  top: var(--topbar-h, 44px);
-  right: 0;
-  bottom: 0;
-  z-index: 15;
-  width: min(380px, 70%);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  overflow: auto;
-  border-left: 1px solid var(--border3);
-  background: var(--overview-surface);
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
-}
-.remote-files-drawer > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.remote-files-drawer > header button { border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
 .remote-client-settings { display: grid; gap: 12px; margin-bottom: 24px; }
 .remote-client-settings h3, .remote-client-settings p { margin: 0; }
 .remote-client-settings p { color: var(--dim); }

@@ -1,9 +1,9 @@
-/* Remote building blocks: pairing form, SSH host panel and read-only files. */
+/* Remote building blocks: pairing form and SSH host panel. */
 .desktop-remote__card button, .desktop-remote__card input, .desktop-remote__card textarea,
-.desktop-remote__host button, .desktop-remote__files button { font: inherit; cursor: pointer; }
-.desktop-remote__card button:disabled, .desktop-remote__host button:disabled, .desktop-remote__files button:disabled { opacity: .5; cursor: default; }
+.desktop-remote__host button { font: inherit; cursor: pointer; }
+.desktop-remote__card button:disabled, .desktop-remote__host button:disabled { opacity: .5; cursor: default; }
 .desktop-remote__section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.desktop-remote__section-head button, .desktop-remote__files button { border: 0; background: transparent; color: var(--accent); padding: 5px 0; }
+.desktop-remote__section-head button { border: 0; background: transparent; color: var(--accent); padding: 5px 0; }
 .desktop-remote__card h2 { margin: 0 0 8px; font-size: 15px; }
 .desktop-remote__card p, .desktop-remote__host p { margin: 8px 0; font-size: 12px; }
 .desktop-remote__host { border: 1px solid var(--border2); border-radius: 9px; background: var(--panel2); padding: 16px; margin: 12px 0; }
@@ -15,15 +15,8 @@
 .desktop-remote__card textarea { resize: vertical; }
 .desktop-remote__card > button, .desktop-remote__host > button, .desktop-remote__pairing-result button { border: 1px solid var(--border2); border-radius: 7px; background: var(--surface-strong); color: var(--fg); padding: 7px 12px; margin-right: 8px; }
 .desktop-remote__pairing-result { border-top: 1px solid var(--border3); margin-top: 14px; padding-top: 10px; }
-.desktop-remote__card code, .desktop-remote__host code, .desktop-remote__files code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.desktop-remote__card code, .desktop-remote__host code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .desktop-remote__invite { margin: 10px 0; border: 1px solid var(--border2); border-radius: 7px; padding: 8px; }
-.desktop-remote__files ul { list-style: none; margin: 6px 0; padding: 0; max-height: 360px; overflow: auto; }
-.desktop-remote__files li button { display: block; width: 100%; color: var(--fg); text-align: left; overflow-wrap: anywhere; }
-.desktop-remote__files li button:hover { color: var(--accent); }
-.desktop-remote__path { color: var(--dim); }
-.desktop-remote__file-preview { border: 1px solid var(--border2); border-radius: 7px; margin-top: 8px; padding: 8px; }
-.desktop-remote__file-preview > div { display: flex; justify-content: space-between; gap: 8px; }
-.desktop-remote__file-preview pre { max-height: 320px; overflow: auto; white-space: pre-wrap; font: 11px/1.5 var(--font-mono); }
 @media (max-width: 800px) {
   .desktop-remote__form-grid { grid-template-columns: 1fr; }
 }
