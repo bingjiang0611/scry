@@ -40,7 +40,10 @@ input.on('line', (line) => {
     // Deliberately leave turn/start pending.
   } else if (message.method === 'turn/start' && message.params?.hangCompletion) {
     send({ id: message.id, result: { turn: { id: 'turn-1' } } })
-    // Deliberately omit turn/completed while another request tears down this generation.
+    // Deliberately omit turn/completed until teardown or an explicit interrupt.
+  } else if (message.method === 'turn/interrupt') {
+    send({ id: message.id, result: {} })
+    send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'interrupted' } } })
   } else if (message.method === 'turn/start') {
     send({ id: message.id, result: { turn: { id: 'turn-1' } } })
     send({ method: 'item/agentMessage/delta', emittedAtMs: 1_234, params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'hello' } })

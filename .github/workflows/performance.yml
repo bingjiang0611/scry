@@ -47,12 +47,13 @@ jobs:
           mkdir -p ../performance-results
           node scripts/performance-report.mjs inventory > ../performance-results/inventory.json
           cp scripts/performance-budgets.json scripts/performance-paths.json ../performance-results/
-          npm run test:unit -- scripts/performance-feedback.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
+          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-native.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
       - name: Freeze candidate harness for both source revisions
         run: |
           cp candidate/scripts/performance-baseline.test.ts baseline/scripts/
           cp candidate/scripts/performance-bench.mjs baseline/scripts/
           cp candidate/vitest.config.ts baseline/vitest.config.ts
+          cp candidate/src/main/providers/fixtures/codex-app-server.mjs baseline/src/main/providers/fixtures/codex-app-server.mjs
       - name: Measure baseline then candidate on the same runner (never parallel)
         run: |
           mkdir -p performance-results
@@ -70,27 +71,84 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  native:
+    # Same frozen driver, two real source builds, one runner, serial measurements.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      QODER_SKIP_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.baseline }}
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: candidate/package-lock.json
+      - name: Install dependencies and freeze native harness
+        run: |
+          mkdir -p native-results
+          (cd baseline && npm ci)
+          (cd candidate && npm ci)
+          for file in performance-native.mjs session-open-bench.mjs session-open-timing.mjs owned-app-processes.mjs performance-report.mjs performance-paths.json; do
+            cp "candidate/scripts/$file" "baseline/scripts/$file"
+          done
+      - name: Build both source revisions
+        run: |
+          set -o pipefail
+          (cd baseline && npm run build) 2>&1 | tee native-results/baseline-build.log
+          (cd candidate && npm run build) 2>&1 | tee native-results/candidate-build.log
+      - name: Measure baseline then candidate, retaining failures
+        run: |
+          status=0
+          (cd baseline && node scripts/performance-native.mjs bench ../native-results/baseline.json) || status=$?
+          (cd candidate && node scripts/performance-native.mjs bench ../native-results/candidate.json) || status=$?
+          exit "$status"
+      - name: Compare native evidence and budgets
+        if: always()
+        run: node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md
+      - name: Retain native measurements, including failed lanes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-native-results
+          path: native-results/
+          if-no-files-found: error
+          retention-days: 30
+
   comment:
     # Fork PRs retain a read-only summary/artifact. Never run PR code with a write token.
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: compare
+    needs: [compare, native]
     runs-on: ubuntu-latest
     permissions:
       actions: read
       pull-requests: write
     steps:
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
-          name: performance-results
-          path: performance-results
+          pattern: performance-*
+          path: reports
       - uses: actions/github-script@v7
+        env:
+          NODE_RESULT: ${{ needs.compare.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
         with:
           script: |
             const fs = require('node:fs')
-            const file = 'performance-results/report.md'
-            const body = fs.existsSync(file)
-              ? fs.readFileSync(file, 'utf8').slice(0, 60000)
-              : '<!-- scry-performance -->\n## Scry performance impact\nNo valid comparison was produced. Check the Performance job logs; missing measurements are not a pass.'
+            const sections = [['Node', 'performance-results'], ['Native', 'performance-native-results']].map(([label, artifact]) => {
+              const file = `reports/${artifact}/report.md`
+              return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `## ${label}\nNo valid comparison was produced. Missing measurements are not a pass.`
+            })
+            const body = (`<!-- scry-performance -->\nNode job: ${process.env.NODE_RESULT} · Native job: ${process.env.NATIVE_RESULT}\n\n` + sections.join('\n\n')).slice(0, 60000)
             const params = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number }
             const comments = await github.paginate(github.rest.issues.listComments, params)
             const previous = comments.find(comment => comment.user.type === 'Bot' && comment.body.startsWith('<!-- scry-performance -->'))
