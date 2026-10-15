@@ -262,7 +262,7 @@ async function main() {
       const restarted = await waitForTarget(port)
       cdp = connectCdp(restarted.page.webSocketDebuggerUrl)
       await cdp.send('Runtime.enable')
-      result.startupFailure = await exerciseOwnershipRecoveryFailure(evaluate, ownershipFixture)
+      result.startupFailure = await exerciseOwnershipRecoveryFailure(evaluate, ownershipFixture, result)
       cdp.close()
     } finally {
       restorePermissions()

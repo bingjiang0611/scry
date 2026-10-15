@@ -159,6 +159,12 @@
 
 最终类型/build/IPC 与全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/82/82fcecb14604aa51aa0796851c324d92681efe9a545c4e95e5dcc2c3775c4744.txt`。这验证的是归属保护，不是完整 A→B→A，也不是实账号 Provider、已安装 App 或打包发布验收。
 
+### 4.8 超时诊断与真实执行补验
+
+后续诊断及原始资料位置见 [Git 集成测试超时诊断](source-control-timeout-diagnosis.md)。已把超时定位到大量串行原生 Git 调用的启动等待累积，单文件也能触发；未发现单条命令挂死。正式 5 秒时限、并发配置和生产复验均未修改，不把诊断参数下通过当全量门禁通过；宿主启动长尾的更底层归因仍未完成。
+
+在包含当前工作区 WIP 的独立源码副本中，测试 Provider 已走真实 Electron 生产链路：实际写入临时工作区，核对 completed 归档、生产历史投影的输入/模型/工具/result，再重启回读并确认没有重新发送。保留成功事件却去掉真实文件写入的负对照按预期失败，恢复后类型检查、构建及 IPC smoke 通过。首次新增测试误读投影的 status 字段，已按既有合同改为从 archive 核对 status，并从历史投影核对 done/error/errorHint 与成功 result。生产功能没有因此改变，完整 A→B→A 仍未接通。
+
 ## 5. 历史选择与预算
 
 - 从 main 权威归档取得可见用户/助手文字、轮次状态及明确来源，不拿 renderer 最近 40 轮缓存冒充全部历史。
