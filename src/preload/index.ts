@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { SourceControlApi } from '../shared/source-control'
 import type { BackgroundTaskStopResult, BackgroundWork } from '../shared/background-work'
 import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/tool-content'
 import type {
@@ -127,6 +128,21 @@ export type ParsedTurn = LoadedSessionTurn
 export type { SessionHistoryPage, SessionHistoryPageRequest }
 export type { TraceBacklogState, TraceBatchReceipt }
 
+const sourceControl: SourceControlApi = {
+  read: cwd => ipcRenderer.invoke('sourceControl:read', cwd),
+  diff: request => ipcRenderer.invoke('sourceControl:diff', request),
+  mutate: request => ipcRenderer.invoke('sourceControl:mutate', request),
+  operations: request => ipcRenderer.invoke('sourceControl:operations', request),
+  reconcile: request => ipcRenderer.invoke('sourceControl:reconcile', request),
+  acknowledge: request => ipcRenderer.invoke('sourceControl:acknowledge', request),
+  pullRequests: request => ipcRenderer.invoke('sourceControl:pullRequests', request),
+  pullRequest: request => ipcRenderer.invoke('sourceControl:pullRequest', request),
+  saveCommitDraft: request => ipcRenderer.invoke('sourceControl:saveCommitDraft', request),
+  loadCommitDraft: request => ipcRenderer.invoke('sourceControl:loadCommitDraft', request),
+  saveDraft: request => ipcRenderer.invoke('sourceControl:saveDraft', request),
+  loadDraft: request => ipcRenderer.invoke('sourceControl:loadDraft', request)
+}
+
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
   setTheme: (theme: 'dark' | 'light'): Promise<true> => ipcRenderer.invoke('app:setTheme', theme),
@@ -143,6 +159,7 @@ const api = {
   removeRecentFolder: (dir: string): Promise<string[]> => ipcRenderer.invoke('agent:removeRecentFolder', dir),
   chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:chooseFolder'),
   clipboardImage: (): Promise<AgentInputAttachment | null> => ipcRenderer.invoke('agent:clipboardImage'),
+  sourceControl,
   workspaceList: (request: WorkspaceListRequest): Promise<WorkspaceListResult> => ipcRenderer.invoke('workspace:list', request),
   workspaceResolveFile: (request: WorkspacePathRequest): Promise<WorkspaceFileOpenTarget> => ipcRenderer.invoke('workspace:resolveFile', request),
   workspaceRead: (request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:read', request),

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { TurnDiffBaselineOrigin, TurnDiffSnapshot } from '@shared/trace'
 import type { TurnDiffReview } from '../turn-diff'
-import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
+import { parseUnifiedDiff, TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 
 function snapshot(baseline?: TurnDiffBaselineOrigin): TurnDiffSnapshot {
   return {
@@ -29,6 +29,19 @@ function markup(review: Partial<TurnDiffReview> & { turnDiff: TurnDiffSnapshot }
     />
   )
 }
+
+it('does not mistake +++/--- code inside a hunk for file headers', () => {
+  const lines = parseUnifiedDiff('--- a/file\n+++ b/file\n@@ -4 +4 @@\n---old\n+++new')
+  expect(lines[0].kind).toBe('meta')
+  expect(lines[1].kind).toBe('meta')
+  expect(lines[3]).toMatchObject({ kind: 'del', oldLine: 4 })
+  expect(lines[4]).toMatchObject({ kind: 'add', newLine: 4 })
+})
+
+it('resets line provenance at the next file boundary', () => {
+  const lines = parseUnifiedDiff('@@ -1 +1 @@\n-a\n+b\ndiff --git a/next b/next\n--- a/next\n+++ b/next')
+  expect(lines.slice(-2).map(line => line.kind)).toEqual(['meta', 'meta'])
+})
 
 describe('TurnDiffReviewPanel 会话基线文案', () => {
   it('baseline=resumed 终态：说「自恢复以来」，不说「第一轮前基线」', () => {

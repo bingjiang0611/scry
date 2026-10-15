@@ -168,6 +168,7 @@ describe('preload IPC boundary', () => {
     expect(Object.keys(api).sort()).toEqual([
       'rendererReady',
       'desktopRemote',
+      'sourceControl',
       ...Object.keys(invokeChannels),
       ...Object.keys(listenerChannels)
     ].sort())
@@ -180,6 +181,18 @@ describe('preload IPC boundary', () => {
       await callableApi[method]()
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
+    }
+  })
+
+  it('exposes only fixed source-control business operations and forwards one typed request', async () => {
+    const methods = ['read', 'diff', 'mutate', 'operations', 'reconcile', 'acknowledge', 'pullRequests', 'pullRequest', 'saveDraft', 'loadDraft', 'saveCommitDraft', 'loadCommitDraft']
+    expect(Object.keys(api.sourceControl).sort()).toEqual([...methods].sort())
+    const namespace = api.sourceControl as unknown as Record<string, (request: unknown) => Promise<unknown>>
+    for (const method of methods) {
+      electron.invoke.mockClear()
+      const request = { fixture: method }
+      await namespace[method](request)
+      expect(electron.invoke).toHaveBeenCalledExactlyOnceWith(`sourceControl:${method}`, request)
     }
   })
 

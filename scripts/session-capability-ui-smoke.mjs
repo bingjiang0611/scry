@@ -593,6 +593,14 @@ async function exerciseSessionTerminals(contents, scenario) {
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
+  const clickTerminalSurface = async () => {
+    await wait(`document.querySelector('.surface-menu') != null`)
+    // New surfaces can change menu positions. Keep the terminal contract name-bound,
+    // while still using native coordinate input and the existing hit-test assertions.
+    const index = await read(`[...document.querySelectorAll('.surface-menu [role="menuitem"]')].findIndex(node => node.textContent.trim().startsWith('终端'))`)
+    if (index < 0) throw new Error('Terminal surface is missing from the menu')
+    await click(`.surface-menu [role="menuitem"]:nth-child(${index + 1})`)
+  }
   const state = `JSON.parse(document.querySelector('#terminal-state').textContent)`
   const originalStarts = scenario === 'restored' ? 0 : 1
   const select = async (selector, id) => {
@@ -606,8 +614,7 @@ async function exerciseSessionTerminals(contents, scenario) {
   await click('[aria-label="右侧工作区"]')
   await wait(`document.querySelector('[aria-label="添加 Surface"]') != null`)
   await click('[aria-label="添加 Surface"]')
-  await wait(`document.querySelector('.surface-menu') != null`)
-  await click('.surface-menu [role="menuitem"]:nth-child(4)')
+  await clickTerminalSurface()
   await wait(`document.querySelector('.terminal-xterm .xterm') != null`)
   await read(`globalThis.originalXterm = document.querySelector('.terminal-xterm .xterm')`)
   if (scenario === 'pending') await wait(`${state}.pending`)
@@ -669,13 +676,13 @@ async function exerciseSessionTerminals(contents, scenario) {
   await select(session('old', 2), 'two')
   await click('[aria-label="右侧工作区"]')
   await click('[aria-label="添加 Surface"]')
-  await click('.surface-menu [role="menuitem"]:nth-child(4)')
+  await clickTerminalSurface()
   await wait(`${state}.starts.length === ${originalStarts + 3}`)
   if (!await read(`${state}.attaches.length === ${scenario === 'restored' ? 1 : 0} && ${state}.starts.at(-1).scopeId !== ${state}.starts.at(-2).scopeId`)) throw new Error('Same-workspace terminal adopted another conversation shell')
   await select(session('new', 1), 'three')
   await click('[aria-label="右侧工作区"]')
   await click('[aria-label="添加 Surface"]')
-  await click('.surface-menu [role="menuitem"]:nth-child(4)')
+  await clickTerminalSurface()
   await wait(`${state}.starts.length === ${originalStarts + 4}`)
   if (!await read(`${state}.starts.at(-1).cwd === '/fixture/new' && ${state}.closes.length === 1`)) throw new Error('New conversation terminal changed old shells')
   await select(session('old', 1), 'one')

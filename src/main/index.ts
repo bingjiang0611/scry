@@ -20,6 +20,8 @@ import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, replayDatabaseTurnOutbox, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
 import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
+import { SourceControlService } from './source-control/service'
+import { registerSourceControlIpc } from './source-control/ipc'
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
@@ -1348,6 +1350,13 @@ async function openLocalPath(path: string): Promise<void> {
   const error = await shell.openPath(path)
   if (error) throw new Error(error)
 }
+
+const sourceControl = new SourceControlService({
+  userData: app.getPath('userData'),
+  authorizeDirectory: resolveKnownProjectDirectory,
+  unsettledDirectories: () => runs.unsettledStates().map(run => run.cwd)
+})
+registerSourceControlIpc(handleTrusted, sourceControl)
 
 handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
   listWorkspace(authorizedWorkspaceRequest(currentCwd, request)))
@@ -3484,8 +3493,10 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     }
     // Archive may land during async startup checks. Fence again immediately before
     // registration so it either rejects this start or can stop the registered run.
-    assertSessionNotArchived([request.expectedExternalSessionId, resume, runId])
-    runs.register(runState, control, isRemoteRun ? { focus: false } : undefined)
+    await sourceControl.admitRun(cwd, () => {
+      assertSessionNotArchived([request.expectedExternalSessionId, resume, runId])
+      runs.register(runState, control, isRemoteRun ? { focus: false } : undefined)
+    })
   } catch (error) {
     if (isRemoteRun) {
       remoteRunIds.delete(runId)
@@ -4657,7 +4668,7 @@ app.on('before-quit', (event) => {
     mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
     disposeProviders: () => providerRegistry.dispose()
   })
-  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser()]).then(() => undefined)
+  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser(), sourceControl.dispose()]).then(() => undefined)
   void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
     quitCleanupFinished = true
     app.quit()

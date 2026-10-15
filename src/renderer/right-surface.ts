@@ -1,4 +1,4 @@
-export const RIGHT_SURFACE_KINDS = ['overview', 'files', 'diff', 'terminal', 'agents'] as const
+export const RIGHT_SURFACE_KINDS = ['overview', 'files', 'diff', 'source-control', 'terminal', 'agents'] as const
 
 export type RightSurfaceKind = (typeof RIGHT_SURFACE_KINDS)[number]
 
@@ -26,6 +26,12 @@ export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
     kind: 'diff',
     label: 'Diff',
     description: '审阅当前任务产生的代码改动。',
+    icon: 'diff'
+  },
+  {
+    kind: 'source-control',
+    label: '源代码管理',
+    description: '查看真实 Git 暂存区，提交、推送并审查 GitHub PR。',
     icon: 'diff'
   },
   {
