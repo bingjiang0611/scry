@@ -104,16 +104,19 @@ node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/
 | remote | `remote.loopback` | 真实 loopback relay auth、64 KiB leg payload 与会话交付 |
 | resources-shell | `resources-shell.process` | 受控本机子进程 stdout、退出码和 resourceUsage 就绪 |
 
-这是本地计算、文件和本机进程基准，不是 HTTP/WebSocket 压缩后字节、真实 Provider、浏览器 paint 或真机结果。测试只创建临时文件/Git/archive，不创建真实会话、真实 DB 或运行真实 Agent。生产路径正确性断言必须先通过，删除内容带来的变快不能通过。
+这是本地计算、文件和本机进程基准，不是 HTTP/WebSocket 压缩后字节、真实 Provider、浏览器 paint 或真机结果。测试只创建临时文件/Git/archive，不写用户会话或用户 DB，不运行真实 Provider Agent。生产路径正确性断言必须先通过，删除内容带来的变快不能通过。
 
 每个场景有显式 `lane`、`workload`、warmup、sample 和迭代数。原有 `trace.delivery`、`renderer.batch`、`history.page`、`terminal.delivery` 均保持 3 批预热、15 批采样、每批 20 次；磁盘/进程场景只运行 2 或 5 次并使用 1 批预热、7 批采样，不盲目重复大型 I/O。计时含固定正确性检查。这是批均值的 p95，不是单次用户请求 p95。门禁同时检查：
 
 - 两侧 fixture/config 指纹与运行环境一致，全部场景/指标存在且有效；缺指标失败，不能补 0。
 - 绝对预算防止逐次累积退化；相对基线序列化 bytes 最多 +5%，消息数不能增长；事件、turn、输出正文大小等工作量计数必须相等，减少内容也失败。
+- Relay 响应读取到 EOF，并用 `Buffer.equals` 校验完整字节与长度。避免把通用断言框架遍历 64 KiB Buffer 的 CPU 开销算作传输耗时；重复响应的负向实验必须失败，不能只校验预期前缀。
 - 原有四项批均值 p95 的绝对 20 ms 预算不变。新增磁盘/进程场景使用 `performance-budgets.json` 中显式上限。所有场景仍受基线加上 max(2 ms, 基线的 50%) 的相对门禁约束，不承诺拦住亚毫秒抖动。
 - 回退退出码为 1，写 Markdown/JSON 报告。真实重复发布和截断 renderer 输出有负对照测试。
 
 `.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 串行运行四种固定历史负载。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出，要求 SQLite 统计为 ready 且包含受控完成轮次；这些 IPC 阶段不冒充 Send/Stop 按钮或文本可见时间。启动含驱动等待开销，不是 OS 冷启动。
+
+Native 测量前先用 `electron-builder install-app-deps` 准备 Electron ABI 的原生依赖，并解析 Electron 可执行文件，避免首次下载混入 JSON 输出。失败日志保留启动部分，不能只保留尾部而丢掉原生模块加载错误。
 
 Native 比较器同时检查身份、环境、工作量、完整样本、真实输入和终态/归档证据，缺失 lane 或任一失败不能通过。初始绝对上限为历史两帧 500 ms、handler 延迟 100 ms、脚本 300 ms、输入两帧 250 ms、驱动启动 10 s、SQLite 统计查询 500 ms、各生命周期阶段 2 s，并保留相对上限；这是保守回退护栏，不是体验承诺。历史/输入底噪 50 ms，启动 500 ms，生命周期 100 ms。单次及三次最大值明确标注，不伪装成日常 p95。原始 JSON、失败日志、构建日志和双侧比较分别归档，不混入 Node 微基准。候选 fixture 或预算变更必须人工审查；不能靠缩小 workload 或提高预算消除失败。一次失败不能用无解释重跑抹掉。
 
