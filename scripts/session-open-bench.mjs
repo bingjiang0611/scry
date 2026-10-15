@@ -373,8 +373,11 @@ try {
   })()`)
   assert.equal(sqliteStats.status, 'ready', 'SQLite analytics must be available, not silently degraded')
   assert.ok(sqliteStats.turns >= 3, 'SQLite must contain the completed controlled turns')
-  const cleanup = await stopOwnedApp(child)
+  const closing = child
   child = null
+  // Cleanup owns its TERM/KILL sequence. An unknown result must not trigger a
+  // second signal sequence in finally or mask the first failure's evidence.
+  const cleanup = await stopOwnedApp(closing)
   // Independent disk read after process exit: an in-memory/cached session cannot satisfy this proof.
   const archiveRoot = join(userData, 'trace-archive-turns-v1')
   const persistedTurns = readdirSync(archiveRoot, { recursive: true }).filter(path => path.endsWith('.json')).flatMap(path => {
