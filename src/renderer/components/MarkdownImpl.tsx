@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { canOpenWorkspaceFileExternally } from '@shared/workspace'
 import { remarkWorkspaceFileDirectories, resolveWorkspaceFileTargets, type WorkspaceFileTarget } from '../workspace-links'
 import { Icon } from './primitives/Icon'
+import { createIncrementalMarkdownPlugin } from '../markdown-incremental'
 
 function safeExternalHref(href: string | undefined): string | undefined {
   if (!href) return undefined
@@ -244,14 +245,20 @@ function useSampledMarkdownSource(source: string, streaming: boolean): string {
 
 const MarkdownChunk = memo(function MarkdownChunk({
   source,
-  components
+  components,
+  streaming = false
 }: {
   source: string
   components: Components
+  streaming?: boolean
 }) {
+  const incremental = streaming && /(?:^|\n) {0,3}(?:`{3}|~{3})/.test(source)
+  const plugins = useMemo(() => incremental
+    ? [...remarkPlugins, createIncrementalMarkdownPlugin()]
+    : remarkPlugins, [incremental])
   return (
     <ReactMarkdown
-      remarkPlugins={remarkPlugins}
+      remarkPlugins={plugins}
       components={components}
       urlTransform={(url, key) => key === 'src' ? (safeImageSrc(url) ?? '') : url}
     >
@@ -361,7 +368,7 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
       </>
     )
   }
-  return <MarkdownChunk source={normalizedChildren} components={components} />
+  return <MarkdownChunk source={normalizedChildren} components={components} streaming={streaming} />
 })
 
 export default MarkdownImpl

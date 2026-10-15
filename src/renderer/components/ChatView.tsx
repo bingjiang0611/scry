@@ -52,6 +52,8 @@ interface ChatViewProps {
   onRetryDetection?: () => void
   submitting?: boolean
   sessionLoading?: boolean
+  /** Last-known recent page; never enables sending or session controls before main refresh. */
+  sessionCacheVisible?: boolean
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
   busy: boolean
   draftAttachments: DraftAttachment[]
@@ -414,6 +416,7 @@ export function ChatView({
   onRetryDetection,
   submitting = false,
   sessionLoading = false,
+  sessionCacheVisible = false,
   sessionEvidenceGap = null,
   busy,
   draftAttachments,
@@ -574,11 +577,13 @@ export function ChatView({
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-        {turns.length > 0 && !sessionLoading && (
+        {turns.length > 0 && (!sessionLoading || sessionCacheVisible) && (
           <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
-            <span><i aria-hidden="true" />{remote ? `${remoteHost} 真实会话` : '本机真实会话'}</span>
+            <span><i aria-hidden="true" />{sessionLoading && sessionCacheVisible
+              ? '最近会话缓存 · 待核对' : remote ? `${remoteHost} 真实会话` : '本机真实会话'}</span>
             <code title={cwd ?? '未绑定工作目录'}>{workspaceName ?? '不绑定项目'}</code>
-            <b>{selectedAgentName} · {remote ? 'runtime / host trace archive' : 'runtime / local archive'} · 未捕获字段保持未知</b>
+            <b>{selectedAgentName} · {sessionLoading && sessionCacheVisible
+              ? '正在核对本机归档；缓存不代表当前运行状态' : remote ? 'runtime / host trace archive' : 'runtime / local archive'} · 未捕获字段保持未知</b>
           </div>
         )}
         <div
@@ -589,8 +594,9 @@ export function ChatView({
         >
           {sessionLoading && hasSelectedSession && (
             <div className="chat-session-evidence-gap" role="status" data-status="loading">
-              <b>正在加载会话历史</b>
-              <span>{remote ? `正在读取 ${remoteHost} 的归档，请稍候。` : '正在读取本机归档，请稍候。'}</span>
+              <b>{sessionCacheVisible ? '正在更新最近会话缓存' : '正在加载会话历史'}</b>
+              <span>{sessionCacheVisible ? '先展示上次读取的最近一页；核对完成前不能发送或分叉。'
+                : remote ? `正在读取 ${remoteHost} 的归档，请稍候。` : '正在读取本机归档，请稍候。'}</span>
             </div>
           )}
           {/* 选中的历史会话读不到证据时必须说实话，不能假装成“新会话”。 */}
@@ -643,10 +649,10 @@ export function ChatView({
               </button>
             </div>
           )}
-          {!sessionLoading && <ChatTranscriptTurns
+          {(!sessionLoading || sessionCacheVisible) && <ChatTranscriptTurns
             turns={turns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId}
             onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff}
-            onForkTurn={!busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
+            onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
             pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
           />}
           </div>

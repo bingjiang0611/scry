@@ -709,13 +709,25 @@ function syncTranscriptContext(ctx: NormalizeCtx, lineCtx: NormalizeCtx): void {
   ctx.agentTaskToolUseById = lineCtx.agentTaskToolUseById
 }
 
-// 把整个 transcript jsonl 解析成对话轮次（加载历史会话用）
-export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): ParsedTurn[] {
-  const turns: ParsedTurn[] = []
-  let cur: ParsedTurn | null = null
-  let pendingBeforeFirstTurn: TraceEvent[] = []
-  let suppressMetaAssistant = false
-  const seenAssistantUsage = new Set<string>()
+export interface TranscriptParseState {
+  turns: ParsedTurn[]
+  cur: ParsedTurn | null
+  pendingBeforeFirstTurn: TraceEvent[]
+  suppressMetaAssistant: boolean
+  seenAssistantUsage: Set<string>
+}
+
+export function createTranscriptParseState(): TranscriptParseState {
+  return { turns: [], cur: null, pendingBeforeFirstTurn: [], suppressMetaAssistant: false,
+    seenAssistantUsage: new Set() }
+}
+
+// The whole-document and incremental readers share this exact reducer. Only
+// newline-complete records are committed by the file cache; a tail is previewed
+// on a fork so subsequent writes cannot duplicate usage or tool lifecycles.
+export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, state: TranscriptParseState): ParsedTurn[] {
+  const { turns, seenAssistantUsage } = state
+  let { cur, pendingBeforeFirstTurn, suppressMetaAssistant } = state
   for (const line of content.split('\n')) {
     if (!line.trim()) continue
     let o: Record<string, unknown>
@@ -788,5 +800,13 @@ export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): Pars
       syncTranscriptContext(ctx, lineCtx)
     }
   }
+  state.cur = cur
+  state.pendingBeforeFirstTurn = pendingBeforeFirstTurn
+  state.suppressMetaAssistant = suppressMetaAssistant
   return turns
+}
+
+// 把整个 transcript jsonl 解析成对话轮次（加载历史会话用）
+export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): ParsedTurn[] {
+  return appendTranscriptToTurns(content, ctx, createTranscriptParseState())
 }

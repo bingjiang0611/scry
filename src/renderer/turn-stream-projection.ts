@@ -10,6 +10,17 @@ export function isStreamTextFragment(event: TraceEvent): boolean {
   return event.stage === 'text' && (event.providerId === 'codex' || event.runtimeProvider === 'codex_cli')
 }
 
+// applyTraceBatch knows exactly which immutable prefix it preserved. WeakRef avoids
+// retaining every earlier array through a chain of update provenance.
+const traceItemsChanges = new WeakMap<readonly TraceEvent[], {
+  previous: WeakRef<readonly TraceEvent[]>
+  firstChanged: number
+}>()
+
+export function recordTraceItemsChange(items: readonly TraceEvent[], previous: readonly TraceEvent[], firstChanged: number): void {
+  traceItemsChanges.set(items, { previous: new WeakRef(previous), firstChanged })
+}
+
 type LiveTailKind = 'text' | 'thinking'
 
 interface LiveTailDescriptor {
@@ -57,17 +68,28 @@ export interface TurnStreamProjection {
   structuralRecomputed: boolean
 }
 
-function liveTailStart(items: readonly TraceEvent[]): { index: number; tail?: LiveTailDescriptor } {
+function liveTailStart(
+  items: readonly TraceEvent[],
+  unchanged?: { end: number; tailStart: number; tail?: LiveTailDescriptor }
+): { index: number; tail?: LiveTailDescriptor } {
   const tail = items.length > 0 ? liveTailDescriptor(items[items.length - 1]) : undefined
   if (!tail) return { index: items.length }
-  if (tail.scope !== null && !items.some((event) =>
+  const continuesTail = unchanged?.tail && sameTailDescriptor(unchanged.tail, tail)
+  if (tail.scope !== null && !continuesTail && !items.some((event) =>
     event.toolUseId === tail.scope && event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind)
   )) {
     return { index: items.length }
   }
   let index = items.length
-  while (index > 0 && sameLiveTail(items[index - 1], tail)) index -= 1
+  const floor = unchanged?.end ?? 0
+  while (index > floor && sameLiveTail(items[index - 1], tail)) index -= 1
+  if (index === floor && continuesTail) index = unchanged!.tailStart
   return { index, tail }
+}
+
+function sameTailDescriptor(left: LiveTailDescriptor, right: LiveTailDescriptor): boolean {
+  return left.kind === right.kind && left.scope === right.scope &&
+    left.messageId === right.messageId && left.agentId === right.agentId
 }
 
 function samePrefix(previous: readonly TraceEvent[], next: readonly TraceEvent[], length: number): boolean {
@@ -88,23 +110,42 @@ function samePrefix(previous: readonly TraceEvent[], next: readonly TraceEvent[]
 export class TurnStreamProjectionCache {
   private structuralItems: readonly TraceEvent[] = []
   private initialized = false
+  private previousItems?: readonly TraceEvent[]
+  private previousProjection?: TurnStreamProjection
+  private tail?: LiveTailDescriptor
+  private tailIndex = 0
+  private tailOffsets = [0]
 
   project(items: readonly TraceEvent[]): TurnStreamProjection {
-    const { index: tailIndex, tail } = liveTailStart(items)
-    let liveText = ''
-    let liveThinking = ''
-    let liveKey = ''
-    for (let index = tailIndex; index < items.length; index++) {
-      if (!liveKey) liveKey = items[index].id
+    if (items === this.previousItems && this.previousProjection) {
+      return { ...this.previousProjection, structuralRecomputed: false }
+    }
+    const change = traceItemsChanges.get(items)
+    const unchangedEnd = change && change.previous.deref() === this.previousItems &&
+      change.firstChanged >= this.tailIndex ? change.firstChanged : undefined
+    const { index: tailIndex, tail } = liveTailStart(items, unchangedEnd === undefined ? undefined : {
+      end: unchangedEnd, tailStart: this.tailIndex, tail: this.tail
+    })
+    const retainedCount = unchangedEnd !== undefined && tail && this.tail &&
+      sameTailDescriptor(tail, this.tail) && tailIndex === this.tailIndex
+      ? Math.min(unchangedEnd - tailIndex, this.tailOffsets.length - 1) : 0
+    const retainedLength = this.tailOffsets[retainedCount]
+    let liveText = retainedCount ? this.previousProjection!.liveText.slice(0, retainedLength) : ''
+    let liveThinking = retainedCount ? this.previousProjection!.liveThinking.slice(0, retainedLength) : ''
+    const liveKey = tailIndex < items.length ? items[tailIndex].id : ''
+    this.tailOffsets.length = retainedCount + 1
+    for (let index = tailIndex + retainedCount; index < items.length; index++) {
       if (tail?.kind === 'thinking') liveThinking += items[index].thinking ?? ''
       else liveText += items[index].text ?? ''
+      this.tailOffsets.push(liveText.length + liveThinking.length)
     }
-    const reusable = this.initialized && samePrefix(this.structuralItems, items, tailIndex)
+    const reusable = this.initialized && tailIndex === this.structuralItems.length &&
+      (unchangedEnd !== undefined || samePrefix(this.structuralItems, items, tailIndex))
     if (!reusable) {
       this.structuralItems = items.slice(0, tailIndex)
       this.initialized = true
     }
-    return {
+    const projection: TurnStreamProjection = {
       structuralItems: this.structuralItems,
       liveText,
       liveThinking,
@@ -112,5 +153,10 @@ export class TurnStreamProjectionCache {
       ...(tail ? { liveParentToolUseId: tail.scope } : {}),
       structuralRecomputed: !reusable
     }
+    this.previousItems = items
+    this.previousProjection = projection
+    this.tail = tail
+    this.tailIndex = tailIndex
+    return projection
   }
 }

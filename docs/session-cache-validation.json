@@ -1,0 +1,1021 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "version": "0.2.186",
+    "platform": "darwin/arm64",
+    "node": "v24.18.0",
+    "electron": "42.10.1"
+  },
+  "baseHead": "5b8bd0c4ec7cb14a14da3cd317e4697ab34e4bfd",
+  "scope": "Task-only HEAD archive plus explicit task file overlay; no unrelated remote changes, native timing helper or unused usage-dedupe helper. Original source artifact retained in local evidence directory. Main/preload/renderer measured outputs match task-only production src. No installed/real-Provider claim.",
+  "taskOnlyBenchmarkSha256": "c6d2eabfb147755c36d33ab26bd3cae567f5c34bc6bd43a89ec682dc39b8453f",
+  "productionCandidateMatchesTaskOnlySource": true,
+  "unit": {
+    "passedFiles": 225,
+    "passedTests": 2812,
+    "skippedFiles": 3,
+    "skippedTests": 3,
+    "disabledOptInProbes": [
+      "P0_PROBE",
+      "P1_PROBE",
+      "BILLING_ADMIN_REAL"
+    ]
+  },
+  "commandsPassed": [
+    "P0_PROBE=0 P1_PROBE=0 BILLING_ADMIN_REAL=0 npm run test:unit -- src scripts",
+    "npm run typecheck",
+    "npm run build",
+    "npm run test:renderer:ui",
+    "node scripts/transcript-cache-worker-smoke.mjs",
+    "node scripts/cache-compute-bench.mjs"
+  ],
+  "nativeClientWorker": {
+    "artifactSha256": "4bdba49768300f63bc15c8f643f74b8d5658d927162a2149e27d7e00de4b941e",
+    "clientSourceSha256": "a7aa5aed2a3b8214d58beb6c368aed0d74bc442df14e416446a5a4861923c231",
+    "node": "v24.18.0",
+    "platform": "darwin/arm64",
+    "sourceBytes": 6412360,
+    "samples": [
+      {
+        "cache": "cold",
+        "bytes": 6412360,
+        "parsedBytes": 6412360,
+        "elapsedMs": 53.583
+      },
+      {
+        "cache": "hit",
+        "bytes": 6412360,
+        "parsedBytes": 0,
+        "elapsedMs": 8.376
+      },
+      {
+        "cache": "hit",
+        "bytes": 6412360,
+        "parsedBytes": 0,
+        "elapsedMs": 8.763
+      },
+      {
+        "cache": "hit",
+        "bytes": 6412360,
+        "parsedBytes": 0,
+        "elapsedMs": 8.384
+      },
+      {
+        "cache": "hit",
+        "bytes": 6412360,
+        "parsedBytes": 0,
+        "elapsedMs": 9.989
+      },
+      {
+        "cache": "hit",
+        "bytes": 6412360,
+        "parsedBytes": 0,
+        "elapsedMs": 7.226
+      },
+      {
+        "cache": "incremental",
+        "bytes": 6412690,
+        "parsedBytes": 330,
+        "elapsedMs": 13.791
+      },
+      {
+        "cache": "incremental",
+        "bytes": 6412910,
+        "parsedBytes": 440,
+        "elapsedMs": 12.691
+      },
+      {
+        "cache": "cold",
+        "bytes": 6412711,
+        "parsedBytes": 6412711,
+        "elapsedMs": 18.265
+      }
+    ],
+    "correctness": [
+      "production client and native Worker",
+      "stable hit without JSON parsing",
+      "append-only parsing",
+      "immutable prior turns",
+      "non-newline tail",
+      "usage deduplication across appends",
+      "interior rewrite detected",
+      "deleted source rejected",
+      "profile/run namespace",
+      "one consumer canceled without canceling another",
+      "one persistent Worker",
+      "in-flight disposal rejects and terminates",
+      "preflight disposal cannot resurrect Worker",
+      "idle process exits naturally"
+    ],
+    "cleanup": {
+      "workersTerminated": true,
+      "workerCount": 1,
+      "exitCodes": [
+        1
+      ],
+      "idleUnrefs": 11,
+      "idleProcessExited": true
+    }
+  },
+  "compute": {
+    "node": "v24.18.0",
+    "platform": "darwin/arm64",
+    "sourceSha256": {
+      "../src/renderer/markdown-incremental.ts": "6fd96429a008b311c8f1cfe980aafb9f25ef3d2646ed0f88298e7f314a32ffcb",
+      "../src/renderer/turn-stream-projection.ts": "c9ab4f24cd44951690b274f90040b9774f74ae55f204de363f9b6498ee77acee"
+    },
+    "scope": "Parse and projection only; not real App latency",
+    "equivalentTrees": 120,
+    "equivalentProjections": 500,
+    "results": [
+      {
+        "name": "closed-code-prefix",
+        "controlMedianMs": 256.75,
+        "candidateMedianMs": 14.452,
+        "ratio": 17.77,
+        "controlTrialsMs": [
+          242.45,
+          245.743,
+          256.75,
+          260.623,
+          279.797,
+          256.233,
+          268.409
+        ],
+        "candidateTrialsMs": [
+          14.173,
+          14.117,
+          14.456,
+          14.23,
+          14.79,
+          14.582,
+          14.452
+        ],
+        "prefixChars": 39221,
+        "updates": 60
+      },
+      {
+        "name": "ordinary-prose-control",
+        "controlMedianMs": 1051.251,
+        "candidateMedianMs": 1131.684,
+        "ratio": 0.93,
+        "controlTrialsMs": [
+          1092.736,
+          1044.73,
+          1051.251,
+          1018.563,
+          1028.422,
+          1107.307,
+          1065.719
+        ],
+        "candidateTrialsMs": [
+          1322.343,
+          1071.876,
+          1102.171,
+          1176.576,
+          1074.143,
+          1159.065,
+          1131.684
+        ],
+        "prefixChars": 39100,
+        "updates": 60
+      },
+      {
+        "name": "production-provenance-vs-full-prefix-scan",
+        "controlMedianMs": 6.26,
+        "candidateMedianMs": 0.225,
+        "ratio": 27.86,
+        "controlTrialsMs": [
+          6.26,
+          6.361,
+          6.336,
+          6.468,
+          6.165,
+          6.044,
+          6.062
+        ],
+        "candidateTrialsMs": [
+          0.239,
+          0.157,
+          0.226,
+          0.13,
+          0.284,
+          0.164,
+          0.225
+        ],
+        "structuralEvents": 10000,
+        "updates": 500
+      }
+    ]
+  },
+  "appWarmDisplay": {
+    "short-heavy": {
+      "control": {
+        "artifactSha256": "682aa40045abd5bfc38accb1a75632260e30dce3fa48ad90da2ae166b32a970a",
+        "iterations": 24,
+        "medianFirstContentMs": 96.45,
+        "medianAuthorityReadyMs": 113.25,
+        "cacheObservedOpens": 0,
+        "samples": [
+          [
+            122,
+            140.10000000149012,
+            38.665000000000006
+          ],
+          [
+            100.60000000149012,
+            115.70000000298023,
+            34.904999999999994
+          ],
+          [
+            109.70000000298023,
+            121.10000000149012,
+            43.280000000000015
+          ],
+          [
+            121.80000000447035,
+            139,
+            39.17999999999999
+          ],
+          [
+            95.59999999403954,
+            112.79999999701977,
+            33.07899999999997
+          ],
+          [
+            112.20000000298023,
+            123.60000000149012,
+            40.05900000000001
+          ],
+          [
+            97.30000000447035,
+            113.70000000298023,
+            37.704000000000015
+          ],
+          [
+            85.60000000149012,
+            106.89999999850988,
+            31.362999999999975
+          ],
+          [
+            73.70000000298023,
+            86.89999999850988,
+            30.286000000000037
+          ],
+          [
+            76.79999999701977,
+            89,
+            28.915999999999997
+          ],
+          [
+            85.20000000298023,
+            99.20000000298023,
+            32.48099999999998
+          ],
+          [
+            76.10000000149012,
+            90,
+            29.131000000000018
+          ],
+          [
+            112.10000000149012,
+            119.70000000298023,
+            35.53200000000001
+          ],
+          [
+            144.60000000149012,
+            153.70000000298023,
+            42.088999999999984
+          ],
+          [
+            104.10000000149012,
+            116.60000000149012,
+            31.301999999999996
+          ],
+          [
+            141.69999999552965,
+            163.69999999552965,
+            41.48700000000002
+          ],
+          [
+            92.40000000596046,
+            104,
+            31.91499999999997
+          ],
+          [
+            106.39999999850988,
+            115.79999999701977,
+            31.245000000000022
+          ],
+          [
+            88.20000000298023,
+            108.10000000149012,
+            29.464999999999964
+          ],
+          [
+            88.39999999850988,
+            100.89999999850988,
+            39.314000000000014
+          ],
+          [
+            80.09999999403954,
+            96.89999999850988,
+            35.223000000000006
+          ],
+          [
+            80.10000000149012,
+            94.80000000447035,
+            30.704000000000008
+          ],
+          [
+            108.10000000149012,
+            116.10000000149012,
+            29.867000000000033
+          ],
+          [
+            95,
+            108.79999999701977,
+            30.544000000000015
+          ]
+        ],
+        "correctness": [
+          "full initial page",
+          "latest turn visible",
+          "native typing",
+          "older turn recovery",
+          "pagination preserves total",
+          "rapid selection isolates history",
+          "draft retained across selections"
+        ],
+        "cleanup": [
+          {
+            "tracked": 10
+          },
+          {
+            "tracked": 9
+          }
+        ],
+        "sampleColumns": [
+          "firstContentMs",
+          "authorityReadyMs",
+          "scriptMs"
+        ]
+      },
+      "candidate": {
+        "artifactSha256": "10def6bd68629d19f7d904a226f1b29ffbb41060faa74be17eed5a130fc0d428",
+        "iterations": 24,
+        "medianFirstContentMs": 43.6,
+        "medianAuthorityReadyMs": 108.05,
+        "cacheObservedOpens": 24,
+        "samples": [
+          [
+            56.69999999552965,
+            154.5,
+            44.52
+          ],
+          [
+            56,
+            123.70000000298023,
+            34.03600000000001
+          ],
+          [
+            40.5,
+            108.30000000447035,
+            29.658999999999992
+          ],
+          [
+            50.19999999552965,
+            121.79999999701977,
+            40.28199999999998
+          ],
+          [
+            42.600000001490116,
+            105.30000000447035,
+            32.350000000000044
+          ],
+          [
+            39.20000000298023,
+            107.79999999701977,
+            28.86799999999995
+          ],
+          [
+            46.399999998509884,
+            118.39999999850988,
+            37.209000000000046
+          ],
+          [
+            42.29999999701977,
+            111.39999999850988,
+            31.685999999999993
+          ],
+          [
+            38.100000001490116,
+            123.10000000149012,
+            27.996999999999993
+          ],
+          [
+            40.100000001490116,
+            89.89999999850988,
+            30.51100000000001
+          ],
+          [
+            46.400000005960464,
+            116.20000000298023,
+            31.754999999999978
+          ],
+          [
+            51.20000000298023,
+            225.29999999701977,
+            40.25599999999996
+          ],
+          [
+            54.20000000298023,
+            157.10000000149012,
+            42.83799999999999
+          ],
+          [
+            43.399999998509884,
+            99,
+            33.19
+          ],
+          [
+            56.5,
+            103.19999999552965,
+            39.551
+          ],
+          [
+            54.19999999552965,
+            104.19999999552965,
+            42.099
+          ],
+          [
+            44.20000000298023,
+            97.90000000596046,
+            34.281000000000006
+          ],
+          [
+            43.100000001490116,
+            128.89999999850988,
+            31.72200000000003
+          ],
+          [
+            40.600000001490116,
+            90.70000000298023,
+            29.862
+          ],
+          [
+            39.69999999552965,
+            107,
+            29.005999999999975
+          ],
+          [
+            49.599999994039536,
+            96.79999999701977,
+            38.57300000000002
+          ],
+          [
+            43.79999999701977,
+            114.59999999403954,
+            34.33200000000003
+          ],
+          [
+            39.5,
+            107.10000000149012,
+            28.952999999999896
+          ],
+          [
+            37.20000000298023,
+            86.70000000298023,
+            27.595000000000034
+          ]
+        ],
+        "correctness": [
+          "full initial page",
+          "latest turn visible",
+          "native typing",
+          "older turn recovery",
+          "pagination preserves total",
+          "rapid selection isolates history",
+          "draft retained across selections"
+        ],
+        "cleanup": [
+          {
+            "tracked": 9
+          },
+          {
+            "tracked": 10
+          }
+        ],
+        "sampleColumns": [
+          "firstContentMs",
+          "authorityReadyMs",
+          "scriptMs"
+        ]
+      }
+    },
+    "paged": {
+      "control": {
+        "artifactSha256": "682aa40045abd5bfc38accb1a75632260e30dce3fa48ad90da2ae166b32a970a",
+        "iterations": 12,
+        "medianFirstContentMs": 50.9,
+        "medianAuthorityReadyMs": 70.0,
+        "cacheObservedOpens": 0,
+        "samples": [
+          [
+            46.5,
+            56.79999999701977,
+            11.511000000000001
+          ],
+          [
+            48.79999999701977,
+            57.100000001490116,
+            10.857000000000006
+          ],
+          [
+            44.29999999701977,
+            65.5,
+            11.236999999999997
+          ],
+          [
+            48.19999999552965,
+            61.5,
+            10.146000000000003
+          ],
+          [
+            60.70000000298023,
+            81.10000000149012,
+            10.537000000000004
+          ],
+          [
+            53.70000000298023,
+            75.89999999850988,
+            10.733999999999993
+          ],
+          [
+            53,
+            75.10000000149012,
+            9.443000000000007
+          ],
+          [
+            57.79999999701977,
+            79.70000000298023,
+            10.811999999999989
+          ],
+          [
+            77.80000000447035,
+            97.30000000447035,
+            12.367000000000017
+          ],
+          [
+            46.600000001490116,
+            63.399999998509884,
+            10.678999999999995
+          ],
+          [
+            48.80000000447035,
+            64.60000000149012,
+            10.34199999999999
+          ],
+          [
+            54.20000000298023,
+            74.5,
+            10.182999999999998
+          ]
+        ],
+        "correctness": [
+          "full initial page",
+          "latest turn visible",
+          "native typing",
+          "older turn recovery",
+          "pagination preserves total",
+          "rapid selection isolates history",
+          "draft retained across selections"
+        ],
+        "cleanup": [
+          {
+            "tracked": 10
+          }
+        ],
+        "sampleColumns": [
+          "firstContentMs",
+          "authorityReadyMs",
+          "scriptMs"
+        ]
+      },
+      "candidate": {
+        "artifactSha256": "10def6bd68629d19f7d904a226f1b29ffbb41060faa74be17eed5a130fc0d428",
+        "iterations": 12,
+        "medianFirstContentMs": 13.95,
+        "medianAuthorityReadyMs": 65.75,
+        "cacheObservedOpens": 12,
+        "samples": [
+          [
+            16.69999999552965,
+            63.899999998509884,
+            13.687999999999992
+          ],
+          [
+            16.399999998509884,
+            65,
+            11.923000000000004
+          ],
+          [
+            13.5,
+            68,
+            9.813000000000017
+          ],
+          [
+            17.5,
+            70.79999999701977,
+            12.448999999999987
+          ],
+          [
+            13.299999997019768,
+            64.79999999701977,
+            9.625999999999996
+          ],
+          [
+            12.899999998509884,
+            64.70000000298023,
+            9.171000000000012
+          ],
+          [
+            14.399999998509884,
+            66,
+            10.596999999999996
+          ],
+          [
+            12.599999994039536,
+            65.89999999850988,
+            8.928999999999993
+          ],
+          [
+            12.399999998509884,
+            64.70000000298023,
+            8.356000000000002
+          ],
+          [
+            16.5,
+            82.80000000447035,
+            11.743000000000004
+          ],
+          [
+            16.700000002980232,
+            81.10000000149012,
+            11.980999999999991
+          ],
+          [
+            13.400000005960464,
+            65.60000000149012,
+            9.652999999999995
+          ]
+        ],
+        "correctness": [
+          "full initial page",
+          "latest turn visible",
+          "native typing",
+          "older turn recovery",
+          "pagination preserves total",
+          "rapid selection isolates history",
+          "draft retained across selections"
+        ],
+        "cleanup": [
+          {
+            "tracked": 8
+          }
+        ],
+        "sampleColumns": [
+          "firstContentMs",
+          "authorityReadyMs",
+          "scriptMs"
+        ]
+      }
+    }
+  },
+  "negativeControls": [
+    {
+      "protectionRemoved": "authority",
+      "exitCode": 1,
+      "observedFailure": "Display-only cache acknowledged authoritative trace recovery"
+    },
+    {
+      "protectionRemoved": "trace-gate",
+      "exitCode": 1,
+      "observedFailure": "Late previous-focused traces entered cached history"
+    },
+    {
+      "protectionRemoved": "buffer",
+      "exitCode": 1,
+      "observedFailure": "Buffered previous-run trace survived cache installation"
+    }
+  ],
+  "sourceRegressions": {
+    "nativeWorkerPreflightDispose": "Old implementation failed expected rejection; generation fence passes real/native and focused unit regression.",
+    "liveFocusSupersession": "Old implementation retained cached source label; focus context clears it and late history cannot overwrite live focus."
+  },
+  "limitations": [
+    "Synthetic offline data, not real Provider/installed App validation.",
+    "Microbenchmarks exclude React/DOM/array copying; ordinary prose plugin-forced control has no benefit (production no-fence path does not enable plugin).",
+    "Every transcript read still reads/hashes complete source; serialized cache budgets are not exact heap caps.",
+    "Authority-ready speed is not guaranteed by a display-only cache.",
+    "All initial development failures retained in local logs; successful final gates do not erase them."
+  ],
+  "logsSha256": {
+    "unit-task-only.log": "b0d0fb40c960913b8480e4338160e6cf384382c79fc2eabaf42ed46e69ca26f2",
+    "typecheck-task-only.log": "27d8fdfa5267cea092e06eed8efc29aead2f7b5711c4c9e1e99fcff7f829f373",
+    "build-task-only.log": "ca937ca62128abd1552e68baf600671055db3c970b59567133786966fc3e64ad",
+    "renderer-ui-task-only.log": "81676d8d9f4e787390cbab28a3687c4fbcb051cad3425657bc65d5af92a39456",
+    "native-client-task-only.json": "f1c7f70624a25cc30cceea469e1ed067d26215a3e87933a25c95d54fc5a6cde2",
+    "compute-delivery.json": "a84c175b43deebeff75219435c0e5f0f6fef9040e1bd6b1854f4d025909f0baf",
+    "cache-negative-controls.json": "4cc456d532a0a0d54e86822bdf7e118ea28383e524d121ba45df51750ced282c",
+    "cache-live-focus-first.log": "37408404aba95369021001b365afb7ee1c30ddb5ddc626503ed356e760e578af",
+    "transcript-native-preflight-control-fail.log": "3c509cc827f9d991811472b081b7a64666ad8701579413ecb2a6ec6a840e19c9"
+  },
+  "integratedRevalidation": {
+    "baseHead": "1805fe75656be05810cf983a27d81c827e5bd86a",
+    "scope": "Latest committed native-timing and remote changes plus task overlay; unrelated unstaged/untracked work excluded.",
+    "checksPassed": [
+      "unit-integration-focused.log",
+      "typecheck-integration.log",
+      "build-integration.log",
+      "renderer-ui-integration.log",
+      "native-client-integration.json",
+      "session-open-integrated.json"
+    ],
+    "logSha256": {
+      "unit-integration-focused.log": "77720e222931493ab5ec55ac7bc0a9ca59ef906ce2660adf629acc03dca2a985",
+      "typecheck-integration.log": "a60561fe25f38cbdbe10197edfc28de665d7d64ad85a05a4dc61acfab415223f",
+      "build-integration.log": "e8ca136ed1e865bbcccdeb16efda11aa557befc2db52e97811ef865b278a8765",
+      "renderer-ui-integration.log": "cb3f493f29981342fbf2ee33d17e11bc6186264699db5ff537035de81860a9b0",
+      "native-client-integration.json": "0889b403fda66432170a86ab09b2938030b662f8914f51b68fbf3c80bbf20426",
+      "session-open-integrated.json": "16ae11d9ea7579d19f2f11eeaefda4d9877208a8e92c03a44b063d7bbe5a4254"
+    },
+    "nativeWorker": {
+      "artifactSha256": "4bdba49768300f63bc15c8f643f74b8d5658d927162a2149e27d7e00de4b941e",
+      "clientSourceSha256": "a7aa5aed2a3b8214d58beb6c368aed0d74bc442df14e416446a5a4861923c231",
+      "node": "v24.18.0",
+      "platform": "darwin/arm64",
+      "sourceBytes": 6412360,
+      "samples": [
+        {
+          "cache": "cold",
+          "bytes": 6412360,
+          "parsedBytes": 6412360,
+          "elapsedMs": 56.537
+        },
+        {
+          "cache": "hit",
+          "bytes": 6412360,
+          "parsedBytes": 0,
+          "elapsedMs": 9.296
+        },
+        {
+          "cache": "hit",
+          "bytes": 6412360,
+          "parsedBytes": 0,
+          "elapsedMs": 9.817
+        },
+        {
+          "cache": "hit",
+          "bytes": 6412360,
+          "parsedBytes": 0,
+          "elapsedMs": 7.515
+        },
+        {
+          "cache": "hit",
+          "bytes": 6412360,
+          "parsedBytes": 0,
+          "elapsedMs": 7.427
+        },
+        {
+          "cache": "hit",
+          "bytes": 6412360,
+          "parsedBytes": 0,
+          "elapsedMs": 8.07
+        },
+        {
+          "cache": "incremental",
+          "bytes": 6412690,
+          "parsedBytes": 330,
+          "elapsedMs": 13.744
+        },
+        {
+          "cache": "incremental",
+          "bytes": 6412910,
+          "parsedBytes": 440,
+          "elapsedMs": 14.675
+        },
+        {
+          "cache": "cold",
+          "bytes": 6412711,
+          "parsedBytes": 6412711,
+          "elapsedMs": 18.643
+        }
+      ],
+      "correctness": [
+        "production client and native Worker",
+        "stable hit without JSON parsing",
+        "append-only parsing",
+        "immutable prior turns",
+        "non-newline tail",
+        "usage deduplication across appends",
+        "interior rewrite detected",
+        "deleted source rejected",
+        "profile/run namespace",
+        "one consumer canceled without canceling another",
+        "one persistent Worker",
+        "in-flight disposal rejects and terminates",
+        "preflight disposal cannot resurrect Worker",
+        "idle process exits naturally"
+      ],
+      "cleanup": {
+        "workersTerminated": true,
+        "workerCount": 1,
+        "exitCodes": [
+          1
+        ],
+        "idleUnrefs": 11,
+        "idleProcessExited": true
+      }
+    },
+    "productionAppReplayed": {
+      "artifactSha256": "dab5fd0a12c2fc15c21e92468a5b38a91c7ab4c7de8220bcf788666cdf65ab9b",
+      "benchmarkSha256": "11b10ce42e1a7ace7344dbb7024ac157e2d41576ebc0d5fec48c75b0f0257245",
+      "scenario": "short-heavy",
+      "iterations": 12,
+      "medianFirstContentMs": 42.600000001490116,
+      "medianOpenMs": 90.20000000298023,
+      "correctness": [
+        "full initial page",
+        "latest turn visible",
+        "native typing",
+        "older turn recovery",
+        "pagination preserves total",
+        "rapid selection isolates history",
+        "draft retained across selections"
+      ],
+      "cleanup": {
+        "tracked": 9
+      }
+    }
+  },
+  "rendererUiSuiteKeys": [
+    [
+      "sessionCache",
+      "metaPrompts",
+      "llmPerformance",
+      "summarySampling",
+      "compactContextCopy",
+      "contextEvidenceTooltip",
+      "liveContext",
+      "compactionInvalidation",
+      "contextSessionReset",
+      "normalizedWire",
+      "summaryHiddenByDefault",
+      "hooksAutoExpand",
+      "originalEvidenceClicks",
+      "collapse",
+      "thinkingDisclosure",
+      "modelEffortPicker",
+      "newSession",
+      "lateSuccess",
+      "failedRead",
+      "multipleTurns",
+      "sidebarCoordinates",
+      "sidebarCascade",
+      "archiveWhileCatalogPending",
+      "archiveAfterCatalogFailure",
+      "archiveUndo",
+      "backgroundArchive",
+      "overviewDensity",
+      "piMenuChain",
+      "piEditorPrefill",
+      "piInlineCustomInput",
+      "piCancelAndReopen",
+      "piCommandFeedback",
+      "piCustomAnswerChain",
+      "piCustomInputCancel",
+      "piCustomChoiceReversible",
+      "customAnswerEnter",
+      "emptyEnterIgnored",
+      "compositionEnterIgnored",
+      "multilineEnterPreserved",
+      "controlEnterSubmit",
+      "selection",
+      "piPermissions",
+      "sessionModels",
+      "sessionTerminals"
+    ],
+    [
+      "sqliteAndArchiveProjection",
+      "usdEquivalent",
+      "dayAndModel",
+      "chartSwitch",
+      "refresh",
+      "range"
+    ],
+    [
+      "wide",
+      "narrow"
+    ],
+    [
+      "historicalSessions",
+      "streamCommits",
+      "sidebarStreamRenders",
+      "latestCallbackState",
+      "runningIndicators",
+      "animatedSpinners",
+      "runningRingThemes",
+      "rotatingTransform",
+      "reducedMotion",
+      "completedIndicatorsRemoved",
+      "neutralBackgroundWaiting",
+      "viewport",
+      "initialPageMounted",
+      "shortHeavyMounted",
+      "shortHeavyHistoryRecovered",
+      "historyPages",
+      "loadedTurns",
+      "mountedAtTop",
+      "mountedAtEnd",
+      "viewportAnchorPreserved",
+      "selectedEvidenceRetained",
+      "shellHeightPreserved",
+      "keyboardFocusRestoresContent",
+      "blurredContentReleased",
+      "batchedFocusReleased",
+      "nativeSelectionPreserved",
+      "expandedToolStatePreserved",
+      "imagePreviewPreserved",
+      "boundedPlaceholderLabel"
+    ],
+    [
+      "wide",
+      "narrow",
+      "recovery",
+      "clock"
+    ],
+    [
+      "coordinateHit",
+      "selectedRowOnly",
+      "pendingActionsDisabled",
+      "fullAcceptedEvidence",
+      "unknownBarrier",
+      "unsupportedReason",
+      "attachmentReachable",
+      "nativeKeyboardEnter",
+      "manualStopKeepsUncertain"
+    ],
+    [
+      "boundSessionReconnectRefreshesCatalog",
+      "savedHostsAfterRendererReload",
+      "hostsPageSeparatesConnectionDirections",
+      "removedProviderNeverSubstituted",
+      "sharedChatViewForRemote",
+      "locationPickerCarriesDraft",
+      "hostNamedPermissionCopy",
+      "existingSessionIdentityLocked",
+      "offlineNeverFallsBack",
+      "readFailureKeepsSavedHosts",
+      "reconnectPreservesDraft",
+      "staleDispatchNoticeCleared",
+      "hostEnableInviteDisable",
+      "providerProfileIdentity",
+      "nativeCoordinateInput",
+      "newSessionHistoryGuard",
+      "doubleEnterSingleSubmit",
+      "canonicalScryRunTrace",
+      "ledgerUuidStopAndAnswer",
+      "failedAnswerNotSuccess",
+      "nativeSessionAdoption",
+      "providerControlReset",
+      "fullAccessSelection",
+      "contextSwitchIsolation",
+      "remoteBackgroundCannotStopLocal",
+      "calls"
+    ]
+  ],
+  "cacheUi": {
+    "cachedBeforeAuthority": true,
+    "controlsRemainLocked": true,
+    "refreshedAuthority": true,
+    "supersededResponseIgnored": true,
+    "failureHonest": true,
+    "retryNoResurrection": true,
+    "deletionAndPendingReadFenced": true,
+    "draftPreserved": true,
+    "nativeInput": true,
+    "staleTraceIsolation": true,
+    "bufferedTraceCleared": true,
+    "cacheCannotAcknowledgeRecovery": true,
+    "exactAuthorityConfirmation": true,
+    "liveFocusSupersedesCache": true,
+    "reads": 13,
+    "starts": 0,
+    "forks": 0,
+    "traceAcknowledgements": 3,
+    "traceRecoveries": 10,
+    "recoveryReads": 1,
+    "pending": []
+  }
+}

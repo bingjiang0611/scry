@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '@shared/trace'
-import { TurnStreamProjectionCache, isStreamTextFragment } from './turn-stream-projection'
+import { TurnStreamProjectionCache, isStreamTextFragment, recordTraceItemsChange } from './turn-stream-projection'
+import { applyTraceBatch, type Turn } from './format'
 
 const tool = (id: string): TraceEvent => ({
   id,
@@ -55,6 +56,71 @@ describe('turn stream fragment classification', () => {
 })
 
 describe('TurnStreamProjectionCache bounded structural updates', () => {
+  it('does not revisit the structural prefix for a production coalesced text update', () => {
+    const structural = Array.from({ length: 10_000 }, (_, index) => tool(`tool-${index}`))
+    const turns: Turn[] = [{ runId: 'r1', userText: '', items: [...structural, delta('d0', 'a')], done: false }]
+    const cache = new TurnStreamProjectionCache()
+    const first = cache.project(turns[0].items)
+    const next = applyTraceBatch(turns, [delta('d1', 'b')], new Set())
+    let prefixReads = 0
+    for (let index = 0; index < structural.length; index++) {
+      const value = next[0].items[index]
+      Object.defineProperty(next[0].items, index, { configurable: true, get: () => {
+        prefixReads += 1
+        return value
+      } })
+    }
+    const projection = cache.project(next[0].items)
+    expect(prefixReads).toBe(0)
+    expect(projection.structuralItems).toBe(first.structuralItems)
+    expect(projection.liveText).toBe('ab')
+    expect(turns[0].items.at(-1)?.text).toBe('a')
+    // Control: an unrelated history array has no trusted prefix provenance.
+    cache.project([...structural, delta('other', 'replacement')])
+    expect(cache.project(next[0].items).liveText).toBe('ab')
+    expect(prefixReads).toBeGreaterThan(0)
+  })
+
+  it('matches a cold full projection through corrections, removals, terminal and history branches', () => {
+    const cache = new TurnStreamProjectionCache()
+    let turns: Turn[] = [{ runId: 'r1', userText: '', items: [tool('t-1')], done: false }]
+    const batches: TraceEvent[][] = [
+      [delta('d-1', 'a')], [delta('d-2', 'b')],
+      [{ ...tool('t-1'), output: 'corrected' }, delta('d-3', 'c')],
+      [thinking('think', 'reason')], [thinking('think-next', 'more')],
+      [delta('child', 'child text', { parentToolUseId: 't-1' })],
+      [delta('child-next', ' more', { parentToolUseId: 't-1' })],
+      [{ ...fullText('canonical', 'final'), runtimeMetadata: { replacesStreamedText: true } }],
+      [{ id: 'res', runId: 'r1', ts: '', kind: 'harness', stage: 'result' }],
+      [{ id: 'res', runId: 'r1', ts: '', kind: 'harness', stage: 'result_superseded' }]
+    ]
+    const initial = turns
+    for (const batch of batches) {
+      cache.project(turns[0].items)
+      turns = applyTraceBatch(turns, batch, new Set())
+      const warm = cache.project(turns[0].items)
+      const cold = new TurnStreamProjectionCache().project(turns[0].items)
+      expect({ ...warm, structuralRecomputed: false }).toEqual({ ...cold, structuralRecomputed: false })
+    }
+    const branch = applyTraceBatch(initial, [delta('branch', 'branch')], new Set())
+    expect(cache.project(branch[0].items).liveText).toBe('branch')
+  })
+
+  it('reuses only unchanged tail fragments and invalidates an earlier correction', () => {
+    const cache = new TurnStreamProjectionCache()
+    const base = [tool('t-1'), delta('d1', 'hello '), delta('d2', 'world')]
+    cache.project(base)
+    const appended = [...base, delta('d3', '!')]
+    recordTraceItemsChange(appended, base, base.length)
+    expect(cache.project(appended).liveText).toBe('hello world!')
+    const corrected = [base[0], delta('d1', 'bye '), base[2], appended[3]]
+    recordTraceItemsChange(corrected, appended, 1)
+    expect(cache.project(corrected).liveText).toBe('bye world!')
+    const appendedAgain = [...corrected, delta('d4', ' next')]
+    recordTraceItemsChange(appendedAgain, corrected, corrected.length)
+    expect(cache.project(appendedAgain).liveText).toBe('bye world! next')
+  })
+
   it('keeps one structural projection across a long streaming tail', () => {
     const cache = new TurnStreamProjectionCache()
     const base = [tool('t-1'), tool('t-2'), tool('t-3')]

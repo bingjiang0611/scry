@@ -199,7 +199,26 @@ try {
         }
       )
     })()`)
-    await evaluate(`window.__sessionOpenStarted = performance.now()`)
+    await evaluate(`(() => {
+      window.__sessionOpenStarted = performance.now();
+      window.__sessionFirstContent = null;
+      window.__sessionCacheObserved = false;
+      const inspect = () => {
+        const last = document.querySelector('[data-run-id="${sessionId}-turn-${latestIndex}"]');
+        if (!last?.textContent.includes('END ${sessionId} ${latestIndex}')) return;
+        window.__sessionCacheObserved ||= document.querySelector('.chat-transcript')?.getAttribute('aria-busy') === 'true';
+        requestAnimationFrame(() => {
+          if (window.__sessionFirstContent != null || !last.isConnected) return;
+          const rect = last.getBoundingClientRect();
+          const viewport = document.querySelector('.chat-transcript').getBoundingClientRect();
+          if (rect.bottom >= viewport.top && rect.top <= viewport.bottom) {
+            window.__sessionFirstContent = performance.now() - window.__sessionOpenStarted;
+          }
+        });
+      };
+      window.__sessionOpenObserver = new MutationObserver(inspect);
+      window.__sessionOpenObserver.observe(document.querySelector('.chat-transcript'), { childList: true, characterData: true, subtree: true });
+    })()`)
     await click(`Array.from(document.querySelectorAll('button.sb-sess')).find(element => element.textContent.includes(${JSON.stringify(sessionId)}))`)
     await wait(`document.querySelector('.chat-transcript[aria-busy="false"]') &&
       document.querySelector('[data-run-id="${sessionId}-turn-${latestIndex}"]')?.textContent.includes('END ${sessionId} ${latestIndex}') &&
@@ -210,9 +229,12 @@ try {
       const rect = last.getBoundingClientRect()
       const viewport = scroller.getBoundingClientRect()
       if (rect.bottom < viewport.top || rect.top > viewport.bottom) throw new Error('Latest turn not in viewport')
+      window.__sessionOpenObserver.disconnect();
+      if (window.__sessionFirstContent == null) throw new Error('First matching timeline layout was not observed');
       const legacyEndAt = performance.now()
       return { openMs: legacyEndAt - window.__sessionOpenStarted,
         legacyStartAt: window.__sessionOpenStarted, legacyEndAt,
+        firstContentMs: window.__sessionFirstContent, cacheObserved: window.__sessionCacheObserved,
         mountedTurns: document.querySelectorAll('.transcript-turn:not([data-virtualized])').length,
         totalTurns: document.querySelectorAll('.transcript-turn').length,
         domNodes: scroller.querySelectorAll('*').length }
@@ -277,6 +299,8 @@ try {
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),
     medianScriptMs: percentile(samples.map(sample => sample.scriptMs), 0.5),
     medianNativeOpenMs: percentile(samples.map(sample => sample.nativeOpenMs), 0.5),
+    medianFirstContentMs: percentile(samples.map(sample => sample.firstContentMs), 0.5),
+    cacheObservedOpens: samples.filter(sample => sample.cacheObserved).length,
     mainLoads: loads, correctness: ['full initial page', 'latest turn visible', 'native typing', 'older turn recovery',
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
     cleanup: await stopOwnedApp(child) }, null, 2))
