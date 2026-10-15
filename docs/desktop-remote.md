@@ -68,7 +68,14 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **检查**：focused 38 个用例通过，包含原始 TLS 连接在改地址后复用证书、不重新配对；生产 IPC wrapper 拒绝外部 sender/frame/origin。UI smoke 覆盖预填、取消/焦点、端口验证、保存错误、双 Enter 单次保存、只读字段保留焦点、主机身份保留、显式重连、不启动 Provider。`--negative-address-control` 故意自动重连，断言明确失败。
 - **首次失败**：新表单测试沿用了 composer 的 rawKeyDown 助手，缺少原生表单提交所需的 Enter keypress；补齐真实按键序列。随后发现所有输入框 disabled 会在保存失败后丢失焦点；改为 readOnly，按钮仍 disabled，增加焦点和不可修改断言。
 - **调研与取舍**：[VS Code Remote SSH 原文](https://code.visualstudio.com/docs/remote/ssh)，「Remember hosts and advanced settings / SSH Targets」：已保存 Host 与可编辑 HostName 分离。采用身份与路由分离、原位修改和显式重连；不引入自由文本 SSH 配置或任意参数入口。该任务是已有页面的同模式修复，不新增另一套机器导航。
-- **当前状态**：功能与 focused/UI fixture 已验证；安装版、真实改地址、重启持久化的结果在完成后追加，fixture 不代替双机验收。
+- **交付产物**：冻结源码 `20e7693e2a3505f404e49f137e74516b31d3b8c2`，App **0.2.187**、私有 CLI **0.2.49**，已原子安装 `/Applications/Scry.app`，旧包保留 `/Applications/.Scry.app.backup`。`app.asar` SHA-256 `35c899954931e70d877a89c6314865f7d385c4fbb8af99fa2d40f30dd99c0637`，签名验证通过；mac2 保持此前已验收的 0.2.184，不需要升级宿主协议。
+- **冻结检查**：Node 22.22.1；typecheck、222 文件 / 2790 单测通过（另 3 文件 / 3 真实探针跳过）、shell、CLI release 581 测试/package smoke、build、打包资源/security/文件/远程宿主 fixture 全通过。完整 renderer UI 首轮在 Meta Prompts 原生输入测试超时；0.2.186 基线单项与不改源码的完整复查均通过，首轮日志保留，原因未证实，不能把重跑说成已修复。并发测试首轮 typecheck 还发现泛型 spy 类型过宽，改为 `MockInstance<typeof fs.rename>` 后通过。
+- **真实改地址**：当前客户端配置已有 `mac2`，与原验收连接的 ID、host ID 和 CA SHA-256 完全一致。直接在该已保存主机的编辑表单中，用原生输入改为 `test@30.7.226.226:22` 并保存；公开连接字段除 hostname 外逐项相同，意图列表不变且状态为 disconnected。随后手动「连接」，原有 SSH 校验和已固定 CA 的 mTLS 均通过，catalog 返回 1 项目 / 4 会话，没有新配对、迁移凭据或本机 run。
+- **重启后**：使用同一已安装 hash、同一 userData 重启，地址/连接 ID/CA 指纹/证书有效期保持一致，仍是 disconnected，不自动重连。手动连接后从侧栏重开原生 session `01a13a7d-339c-741a-a1e2-5031ab3df8da`，真实界面显示 5587；history 为 available / trace_archive / 1 轮，Provider 锁定且不显示位置切换。本次未再次发送模型请求。
+- **最终持久化核对**：远端 JSONL 账本完整解析 36 个事件，原意图 `ae934709-dd4e-4414-a040-fc453843ffbc` 只派发/结束各一次；ledger run UUID `91172fec-5407-4b8a-bd8f-0fbeef66564a` 映射 Scry run `remote-run-mv8476or-0`，最后事件仍是原请求的 run_settled。SQLite `usage_ledger` 恰有 1 条对应行，input/output 10952/6、cost NULL，与归档一致；其 session_id 是 Scry 聚合键，不冒充 Provider 原生 session。旧式 `sessions/turns` 表为空，不作为远程账本或 canonical record 的替代证据。`turns verify` 再次通过（4 records / 0 errors / 0 open turns），远端 Git 仍 clean，记录文件仍只有原先 3 个加已授权的第 4 个。
+- **验收记录与边界**：私有证据保存在 `/Users/baobingjiang/Downloads/Scry-0.2.187-remote-acceptance/`，含 manifest、gate 原始日志、实际表单/重开会话截图、公开状态读回、账本/SQLite/CLI 收据。旧临时客户端目录已不存在，因此没有伪称复用旧临时 profile；本次原位修改当前已保存且同身份的 mac2。首次重启调试进程在检查前退出，最终另一次已完整验证，不用旧端点失败推断业务结果。验收助手曾因输入选择与 DOM selector 假设错误超时，读回确认未保存/已打开后才修正检查，没有重发业务请求。已断开并退出本次调试 App，未停止 mac2 宿主，临时密文备份已删除。用户视觉验收仍待确认；开发签名版本，不是公证发布版。
+- **下次复用**：已配对主机仅网络位置变化 → 原位编辑路由、保存后显式连接 → 检查身份/回执不变、重启地址保留、无自动重发。身份或证书确实改变时不套用此流程，仍按配对/trust 合同处理。本条是项目级需求确认与实现证据，不提升为全局审美偏好。
+- **设计库回执**：原有 `P-SCRY-DESKTOP-REMOTE` 来源已更新；`library.py build` 与 `search '编辑连接地址'` 均退出 0，命中本文件的新内容。全库 `check` 仍退出 1：5 个既有缺失来源（`P-PI-MODEL-SELECTOR`、`D-20260912-scry-ios-remote`、`D-20261008-scry-ios-continuity`、`P-SCRY-SESSION-HISTORY`、`D-20261010-scry-llm-sidebar`），未为凑通过删除来源。
 
 ### 方向 B 的 0.2.184 双机验收（2026-10-14，历史现场）
 
