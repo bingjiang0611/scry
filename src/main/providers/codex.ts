@@ -46,15 +46,20 @@ import type {
   ProviderRunRequest,
   ProviderRunResult
 } from './types'
-import { effortOption, permissionOptions } from './run-controls'
+import { effortOption, permissionOptions, unsupportedPermissionMode } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 
-function codexAccess(mode: AgentPermissionMode | undefined): {
+export function codexAccess(mode: AgentPermissionMode | undefined): {
   approvalPolicy: 'never' | 'on-request'
   approvalsReviewer?: 'user' | 'auto_review'
   sandbox: 'workspace-write' | 'danger-full-access'
 } {
+  if (mode === 'auto_accept_edits') {
+    // Codex 的 workspace-write 沙箱本就让工作区内编辑免审批，与 default 完全同义；
+    // 再提供一个同义档位只会让用户以为选到了不同的权限，所以显式拒绝而不是静默等同。
+    throw unsupportedPermissionMode('Codex', '自动接受编辑', 'workspace-write 沙箱下的默认审批已经等价，Codex 没有独立的编辑放行档位')
+  }
   if (mode === 'full_access') {
     return { approvalPolicy: 'never', sandbox: 'danger-full-access' }
   }
@@ -1167,6 +1172,8 @@ export function createCodexAdapter(
             const isRoot = notificationThreadId === externalSessionId
             if (!isRoot && !child) return
             if (isRoot && turnId && params.turnId && params.turnId !== turnId) return
+            // 归属判定之后才落盘：日志里的原生记录与本 thread 的 canonical 记录一一对应。
+            runRequest.recordNative?.(method, value)
             const traceContext: ItemTraceContext = !isRoot && child
               ? { agentId: notificationThreadId, parentToolUseId: child.parentToolUseId }
               : {}
@@ -1872,7 +1879,7 @@ export function createCodexAdapter(
               }
             }).filter((model) => model.model.id)
             value = {
-              data: { models, permissions: permissionOptions() },
+              data: { models, permissions: permissionOptions({ autoReview: true }) },
               observedAt: Date.now()
             }
             modelCache.delete(key)
@@ -1886,7 +1893,7 @@ export function createCodexAdapter(
           return capabilityReady(context, 'read', value.data, value.observedAt)
         } catch (error) {
           return {
-            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions({ autoReview: true }) }),
             state: 'degraded' as const,
             reason: String((error as Error).message)
           }

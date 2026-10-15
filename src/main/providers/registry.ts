@@ -9,8 +9,10 @@ import {
   type ProviderContext,
   type ProviderDescriptor,
   type ProviderId,
-  type SkillMeta
+  type SkillMeta,
+  unavailableProviderDescriptor
 } from '../../shared/provider'
+import type { ProviderCompatibilityAdvisory } from '../../shared/provider-compatibility'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { ParsedTurn } from '../normalize'
 import type {
@@ -27,12 +29,20 @@ export class ProviderRegistry {
   private readonly disabledProviders: ReadonlySet<ProviderId>
   private readonly runControlsEnabled: boolean
 
+  private readonly compatibility?: (providerId: ProviderId, version: string | undefined) => ProviderCompatibilityAdvisory
+
   constructor(
     adapters: ProviderAdapter[],
-    options: { disabledProviders?: ReadonlySet<ProviderId>; runControlsEnabled?: boolean } = {}
+    options: {
+      disabledProviders?: ReadonlySet<ProviderId>
+      runControlsEnabled?: boolean
+      /** 版本兼容性建议源；缺省表示不附带建议。 */
+      compatibility?: (providerId: ProviderId, version: string | undefined) => ProviderCompatibilityAdvisory
+    } = {}
   ) {
     this.disabledProviders = options.disabledProviders ?? new Set()
     this.runControlsEnabled = options.runControlsEnabled ?? true
+    if (options.compatibility) this.compatibility = options.compatibility
     for (const adapter of adapters) {
       if (this.adapters.has(adapter.id)) throw new Error(`duplicate provider adapter: ${adapter.id}`)
       this.adapters.set(adapter.id, adapter)
@@ -93,10 +103,24 @@ export class ProviderRegistry {
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的运行控制接口'))
   }
 
+  /**
+   * 描述全部已注册 Provider。单个 adapter 的 describe 失败只能让**它自己**降为
+   * unavailable 影子快照；以前一个异常会让整个 Provider 列表报错，用户看到的是
+   * 「一个 Provider 都没有」，这比少一个 Provider 更容易被误读。
+   */
   async describe(): Promise<ProviderDescriptor[]> {
     return Promise.all([...this.adapters.values()].map(async (adapter) => {
-      const descriptor = await adapter.describe()
-      return this.disabledProviders.has(adapter.id)
+      let descriptor: ProviderDescriptor
+      try {
+        descriptor = await adapter.describe()
+      } catch (error) {
+        descriptor = unavailableProviderDescriptor({
+          id: adapter.id,
+          runtimeProvider: adapter.runtimeProvider,
+          reason: `Provider 描述失败：${error instanceof Error ? error.message : String(error)}`
+        })
+      }
+      const described = this.disabledProviders.has(adapter.id)
         ? {
             ...descriptor,
             available: false,
@@ -104,7 +128,21 @@ export class ProviderRegistry {
             health: { ...descriptor.health, state: 'unavailable' as const, transport: descriptor.health?.transport ?? descriptor.transport }
           }
         : descriptor
+      const advisory = this.compatibility?.(adapter.id, described.version)
+      return advisory ? { ...described, compatibility: advisory } : described
     }))
+  }
+
+  /**
+   * 已配置但未注册的 Provider 的影子快照。让调用方能在不抛错的前提下如实说出
+   * 「这个 Provider 在本构建里不可用」。
+   */
+  describeUnavailable(providerId: ProviderId, reason: string): ProviderDescriptor {
+    return unavailableProviderDescriptor({ id: providerId, reason })
+  }
+
+  isRegistered(providerId: ProviderId): boolean {
+    return this.adapters.has(providerId)
   }
 
   listSkills(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> {

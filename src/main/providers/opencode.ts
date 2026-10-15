@@ -40,7 +40,7 @@ import {
   type OpenCodeHookTraceRecord,
   type OpenCodeServerState
 } from './opencode-server'
-import { effortOption, permissionOptions } from './run-controls'
+import { effortOption, permissionOptions, unsupportedPermissionMode } from './run-controls'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest, ProviderRunResult } from './types'
 import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
@@ -639,6 +639,11 @@ export function openCodePermissionRules(mode: AgentPermissionMode | undefined): 
 }> {
   if (mode === 'full_access') return [{ permission: '*', pattern: '*', action: 'allow' }]
   if (mode === 'auto_review') throw new Error('OpenCode 不支持自动审查权限模式')
+  if (mode === 'auto_accept_edits') {
+    // OpenCode 的 permission.edit 看起来可以只放行编辑，但 Scry 现在传的是规则数组形态，
+    // 尚未在真实 OpenCode 上验证过它与 SDK 对象形态的等价性。未验证就不声明支持。
+    throw unsupportedPermissionMode('OpenCode', '自动接受编辑', 'Scry 尚未验证 OpenCode 的编辑级放行规则')
+  }
   return [{ permission: '*', pattern: '*', action: 'ask' }]
 }
 
@@ -786,8 +791,14 @@ export function openCodeRunControlCatalog(data: unknown[]): AgentRunControlCatal
         efforts
       }
     }).filter((model) => model.model.id && model.model.providerId),
-    permissions: permissionOptions(false)
+    permissions: permissionOptions()
   }
+}
+
+/** SSE 事件的类型名；取不到就记为 unknown，不猜。 */
+function openCodeEventType(raw: unknown): string {
+  const type = record(raw).type
+  return typeof type === 'string' && type ? type : 'unknown'
 }
 
 export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, sessionId: string): void {
@@ -1320,6 +1331,7 @@ export function createOpenCodeAdapter(
           const events = (async () => {
             try {
               for await (const event of stream) {
+                request.recordNative?.(openCodeEventType(event), event)
                 if (await handleOpenCodePermission(request, client!, event, externalSessionId!, permissionController.signal)) continue
                 if (await handleOpenCodeQuestion(request, client!, event, externalSessionId!, permissionController.signal)) continue
                 emitOpenCodeEvent(request, event, externalSessionId!)
@@ -1697,7 +1709,7 @@ export function createOpenCodeAdapter(
         } catch (error) {
           rememberFailure(error)
           return {
-            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions(false) }),
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
             state: 'degraded' as const,
             reason: String((error as Error).message)
           }

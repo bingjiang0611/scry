@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,6 +8,8 @@ const sdk = vi.hoisted(() => ({ query: vi.fn() }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
 
 import { runAgent } from './agent-runner'
+import { ProviderEventLog } from './provider-event-log'
+import type { AgentQuestionRequest } from '../shared/runtime'
 
 const successResult = (sessionId = 'claude-session') => ({
   type: 'result',
@@ -60,6 +62,16 @@ describe('Claude Agent SDK launch options', () => {
         effort: 'high',
         permissionMode: 'auto'
       })
+    })
+    expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('allowDangerouslySkipPermissions')
+  })
+
+  it('maps auto_accept_edits to the SDK acceptEdits mode without dangerous-skip flags', async () => {
+    sdk.query.mockReturnValue(completedQuery())
+    await runAgent('probe', 'run-probe', () => {}, { permissionMode: 'auto_accept_edits' }).promise
+    expect(sdk.query).toHaveBeenCalledWith({
+      prompt: 'probe',
+      options: expect.objectContaining({ permissionMode: 'acceptEdits' })
     })
     expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('allowDangerouslySkipPermissions')
   })
@@ -561,5 +573,82 @@ describe('Claude Agent SDK launch options', () => {
     )
 
     expect(result).toMatchObject({ behavior: 'deny', interrupt: false, decisionClassification: 'user_reject' })
+  })
+})
+
+describe('双流事件日志与审批 warning', () => {
+  beforeEach(() => sdk.query.mockReset())
+
+  it('原生 SDK 消息与归一化事件落进同一个 writer，逐 token 增量不落盘', async () => {
+    const logRoot = await mkdtemp(join(tmpdir(), 'scry-dual-stream-'))
+    const log = new ProviderEventLog({ root: logRoot })
+    const writer = log.writer('claude-run-dual')
+    sdk.query.mockReturnValue(completedQuery(
+      { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '部' } }, session_id: 'claude-session' },
+      { type: 'assistant', message: { id: 'msg-1', role: 'assistant', model: 'claude-test', content: [{ type: 'text', text: '部分答案' }] }, session_id: 'claude-session' }
+    ))
+
+    const emitted: Array<{ kind: string; stage: string }> = []
+    await runAgent('probe', 'run-dual', (event) => {
+      emitted.push({ kind: event.kind, stage: event.stage })
+      writer.record('canonical', `${event.kind}/${event.stage}`, event)
+    }, {
+      recordNative: (type, payload) => writer.record('native', type, payload)
+    }).promise
+    const summary = await writer.close()
+
+    const content = await readFile(join(logRoot, 'claude-run-dual', 'events-000.ndjson'), 'utf8')
+    const lines = content.split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
+    const native = lines.filter((line) => line.stream === 'native').map((line) => line.type)
+    const canonical = lines.filter((line) => line.stream === 'canonical').map((line) => line.type)
+
+    // 原生侧保留 assistant 与 result；stream_event 是瞬时白名单，被计数但不落盘。
+    expect(native).toEqual(['assistant', 'result'])
+    expect(canonical).toContain('model/text')
+    expect(canonical).not.toContain('model/text_delta')
+    expect(summary.transientSkipped).toBeGreaterThan(0)
+    expect(summary.failed).toBe(false)
+    // 序号单调递增，可据此判断某条 canonical 记录由哪条 native 记录派生。
+    expect(lines.map((line) => line.seq)).toEqual(lines.map((_, index) => index + 1))
+    // 真实流里确实产生过 text_delta，只是没有写进日志。
+    expect(emitted.some((event) => event.stage === 'text_delta')).toBe(true)
+    await rm(logRoot, { recursive: true, force: true })
+  })
+
+  it('SDK 给出 decisionReason 与 blockedPath 时转述进审批问题', async () => {
+    sdk.query.mockReturnValue(completedQuery())
+    const requests: AgentQuestionRequest[] = []
+    await runAgent('probe', 'run-warning', () => {}, {
+      requestUserInput: async (request) => {
+        requests.push(request)
+        return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+      }
+    }).promise
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+    await canUseTool('Bash', { command: 'cat /etc/hosts' }, {
+      signal: new AbortController().signal,
+      toolUseID: 'tool-warn',
+      decisionReason: '\u001B[31mask rule: Bash(cat:*)\u001B[0m',
+      blockedPath: '/etc/hosts'
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0].questions[0].warning).toBe('ask rule: Bash(cat:*)；越界路径：/etc/hosts')
+  })
+
+  it('没有 decisionReason 时不编造风险说明', async () => {
+    sdk.query.mockReturnValue(completedQuery())
+    const requests: AgentQuestionRequest[] = []
+    await runAgent('probe', 'run-no-warning', () => {}, {
+      requestUserInput: async (request) => {
+        requests.push(request)
+        return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+      }
+    }).promise
+    const canUseTool = sdk.query.mock.calls[0][0].options.canUseTool
+    await canUseTool('Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'tool-plain' })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0].questions[0].warning).toBeUndefined()
   })
 })

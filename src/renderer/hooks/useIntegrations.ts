@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BillingGuardianState } from '@shared/billing'
 import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } from '@shared/provider'
+import type { ProviderCompatibilityAdvisory } from '@shared/provider-compatibility'
 import type {
   DbStats,
   DiffFile,
@@ -11,6 +12,7 @@ import type {
   TraceEvent
 } from '@shared/trace'
 import {
+  isAgentPermissionMode,
   providerIdForAgentId,
   runtimeProviderForAgentId,
   type AgentModelRef,
@@ -52,9 +54,7 @@ const parseStoredRunControls = (value: unknown): AgentRunControls | undefined =>
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const permissionMode: AgentPermissionMode =
-    record.permissionMode === 'auto_review' || record.permissionMode === 'full_access'
-      ? record.permissionMode
-      : 'default'
+    isAgentPermissionMode(record.permissionMode) ? record.permissionMode : 'default'
   const storedModel = record.model
   const modelId = storedModel && typeof storedModel === 'object' && !Array.isArray(storedModel)
     ? boundedPreferenceValue((storedModel as Record<string, unknown>).id)
@@ -169,7 +169,7 @@ const parsePermissionOption = (value: unknown): AgentRunControlCatalog['permissi
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const id = record.id
-  if (id !== 'default' && id !== 'auto_review' && id !== 'full_access') return undefined
+  if (!isAgentPermissionMode(id)) return undefined
   const label = boundedPreferenceValue(record.label)
   const description = boundedPreferenceValue(record.description)
   return label && description ? { id, label, description } : undefined
@@ -377,6 +377,19 @@ export function mcpAuthVerificationError(snapshot: McpSnapshot, targetId: string
 
 export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId: string): boolean {
   return currentAgentId !== nextAgentId
+}
+
+/**
+ * Provider CLI 版本兼容性提示。它是 advisory：只解释判定依据，不阻断发送，也不改写
+ * Provider 的真实能力。status 为 supported 或 unknown 时不提示——unknown 表示没有
+ * 可用判定依据，编一句警告会把「不知道」伪装成「有问题」。
+ */
+export function providerCompatibilityNotice(agent: { name: string; compatibility?: ProviderCompatibilityAdvisory } | null | undefined): string | null {
+  const advisory = agent?.compatibility
+  if (!advisory || advisory.status === 'supported' || advisory.status === 'unknown') return null
+  const version = advisory.observedVersion ? ` ${advisory.observedVersion}` : ''
+  const recommended = advisory.recommendedRange ? `；推荐版本 ${advisory.recommendedRange}` : ''
+  return `${agent?.name ?? 'Provider'}${version}：${advisory.reason}${recommended}`
 }
 
 export function runControlSendBlockedReason(

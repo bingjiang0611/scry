@@ -106,6 +106,24 @@ export interface TraceArchiveSessionSummary {
 const DISCOVERABLE_PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 const TRACE_DISCOVERY_MAX_FILES = 10_000
 const TRACE_DISCOVERY_MAX_FILE_BYTES = 32 * 1024 * 1024
+/**
+ * 文件数与单文件大小各自有上限，但两者相乘仍是无界的读取量。聚合预算让一次发现扫描
+ * 的读取总量有硬上限：超出就带着 `complete: false` 停下，于是结果不会被当成完整索引
+ * 写回缓存，也不会在启动时无限期占用磁盘 IO。
+ */
+const TRACE_DISCOVERY_MAX_TOTAL_BYTES = 256 * 1024 * 1024
+
+export interface TraceDiscoveryBudget {
+  maxFiles: number
+  maxFileBytes: number
+  maxTotalBytes: number
+}
+
+export const DEFAULT_TRACE_DISCOVERY_BUDGET: TraceDiscoveryBudget = {
+  maxFiles: TRACE_DISCOVERY_MAX_FILES,
+  maxFileBytes: TRACE_DISCOVERY_MAX_FILE_BYTES,
+  maxTotalBytes: TRACE_DISCOVERY_MAX_TOTAL_BYTES
+}
 const TRACE_INDEX_MAX_BYTES = 32 * 1024 * 1024
 const TRACE_INDEX_FILE = 'trace-archive-index-v1.json'
 const TRACE_INDEX_DIRTY_FILE = 'trace-archive-index-v1.dirty'
@@ -243,10 +261,14 @@ async function parseTraceArchiveCatalogIndexAsync(userDataDir: string): Promise<
   }
 }
 
-function scanTraceArchiveCatalogIndex(userDataDir: string): { entries: TraceArchiveCatalogIndexEntry[]; complete: boolean } {
+function scanTraceArchiveCatalogIndex(
+  userDataDir: string,
+  budget: TraceDiscoveryBudget = DEFAULT_TRACE_DISCOVERY_BUDGET
+): { entries: TraceArchiveCatalogIndexEntry[]; complete: boolean } {
   const root = join(userDataDir, 'trace-archive-turns-v1')
   const entries: TraceArchiveCatalogIndexEntry[] = []
   let inspectedFiles = 0
+  let inspectedBytes = 0
   try {
     for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
       if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink() ||
@@ -261,10 +283,12 @@ function scanTraceArchiveCatalogIndex(userDataDir: string): { entries: TraceArch
           const sessionDir = join(cwdDir, sessionEntry.name)
           for (const fileEntry of readdirSync(sessionDir, { withFileTypes: true })) {
             if (!fileEntry.isFile() || fileEntry.isSymbolicLink() || !/^turn-[a-f0-9]{64}\.json$/.test(fileEntry.name)) continue
-            if (++inspectedFiles > TRACE_DISCOVERY_MAX_FILES) return { entries, complete: false }
+            if (++inspectedFiles > budget.maxFiles) return { entries, complete: false }
             const path = join(sessionDir, fileEntry.name)
             const stat = lstatSync(path)
-            if (stat.size <= 0 || stat.size > TRACE_DISCOVERY_MAX_FILE_BYTES) continue
+            if (stat.size <= 0 || stat.size > budget.maxFileBytes) continue
+            if (inspectedBytes + stat.size > budget.maxTotalBytes) return { entries, complete: false }
+            inspectedBytes += stat.size
             let archive: TraceArchive
             try {
               archive = JSON.parse(readFileSync(path, 'utf8')) as TraceArchive
@@ -308,10 +332,14 @@ function scanTraceArchiveCatalogIndex(userDataDir: string): { entries: TraceArch
   }
 }
 
-async function scanTraceArchiveCatalogIndexAsync(userDataDir: string): Promise<{ entries: TraceArchiveCatalogIndexEntry[]; complete: boolean }> {
+export async function scanTraceArchiveCatalogIndexAsync(
+  userDataDir: string,
+  budget: TraceDiscoveryBudget = DEFAULT_TRACE_DISCOVERY_BUDGET
+): Promise<{ entries: TraceArchiveCatalogIndexEntry[]; complete: boolean }> {
   const root = join(userDataDir, 'trace-archive-turns-v1')
   const entries: TraceArchiveCatalogIndexEntry[] = []
   let inspectedFiles = 0
+  let inspectedBytes = 0
   try {
     for (const providerEntry of await readdir(root, { withFileTypes: true })) {
       if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink() ||
@@ -326,11 +354,13 @@ async function scanTraceArchiveCatalogIndexAsync(userDataDir: string): Promise<{
           const sessionDir = join(cwdDir, sessionEntry.name)
           for (const fileEntry of await readdir(sessionDir, { withFileTypes: true })) {
             if (!fileEntry.isFile() || fileEntry.isSymbolicLink() || !TRACE_ARCHIVE_TURN_FILE.test(fileEntry.name)) continue
-            if (++inspectedFiles > TRACE_DISCOVERY_MAX_FILES) return { entries, complete: false }
+            if (++inspectedFiles > budget.maxFiles) return { entries, complete: false }
             const path = join(sessionDir, fileEntry.name)
             if (!trustedOwnedFile(userDataDir, path)) continue
             const stat = await lstat(path)
-            if (stat.size <= 0 || stat.size > TRACE_DISCOVERY_MAX_FILE_BYTES) continue
+            if (stat.size <= 0 || stat.size > budget.maxFileBytes) continue
+            if (inspectedBytes + stat.size > budget.maxTotalBytes) return { entries, complete: false }
+            inspectedBytes += stat.size
             let archive: TraceArchive
             try { archive = JSON.parse(await readFile(path, 'utf8')) as TraceArchive } catch { continue }
             if (!archive || !Array.isArray(archive.turns) || archive.providerId !== providerId ||

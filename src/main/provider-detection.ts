@@ -1,5 +1,5 @@
 import { basename } from 'node:path'
-import type { ProviderDescriptor, ProviderHealth } from '../shared/provider'
+import { unavailableProviderDescriptor, type ProviderDescriptor, type ProviderHealth } from '../shared/provider'
 import { providerIdForAgentId } from '../shared/runtime'
 import type { DetectedAgent } from './claude-locate'
 import type { PiAgentProfile } from './pi-agent-profiles'
@@ -10,6 +10,9 @@ export type ProviderDetectionResult = DetectedAgent & {
   transport?: string
   capabilities?: ProviderDescriptor['capabilities']
   health?: ProviderHealth
+  /** Provider 已装但不可用时的原因，与 descriptor 语义一致。 */
+  unavailableReason?: string
+  compatibility?: ProviderDescriptor['compatibility']
 }
 
 interface VersionProbeResult {
@@ -74,7 +77,30 @@ export async function composeProviderDetectionResults({
   const agents = detected.flatMap((agent): ProviderDetectionResult[] => {
     const providerId = providerIdForAgentId(agent.id)
     const descriptor = providerId ? descriptorByProvider.get(providerId) : undefined
-    if (!descriptor) return []
+    if (!providerId) return []
+    if (!descriptor) {
+      // 本机确实装了这个 Agent，却没有对应的 Provider adapter（构建裁剪、注册失败等）。
+      // 从列表里静默丢掉它等于告诉用户「没装」，所以改成带原因的影子快照。
+      const shadow = unavailableProviderDescriptor({
+        id: providerId,
+        label: agent.name,
+        path: agent.path,
+        ...(agent.version ? { version: agent.version } : {}),
+        reason: `本构建未注册 ${providerId} Provider adapter`
+      })
+      return [{
+        id: agent.id,
+        name: shadow.label,
+        bin: agent.bin,
+        path: agent.path,
+        ...(agent.version ? { version: agent.version } : {}),
+        runtimeProvider: shadow.runtimeProvider,
+        transport: shadow.transport,
+        capabilities: shadow.capabilities,
+        health: shadow.health!,
+        unavailableReason: shadow.unavailableReason!
+      }]
+    }
     return [{
       id: agent.id,
       name: providerId === 'pi' ? agent.name : descriptor.label,
@@ -91,6 +117,8 @@ export async function composeProviderDetectionResults({
             transport: descriptor.transport
           }
         : descriptor.health ?? agent.health,
+      ...(descriptor.unavailableReason ? { unavailableReason: descriptor.unavailableReason } : {}),
+      ...(descriptor.compatibility ? { compatibility: descriptor.compatibility } : {}),
       ...(providerId === 'pi' ? { agentProfileId: agent.id } : {})
     }]
   })
@@ -112,6 +140,8 @@ export async function composeProviderDetectionResults({
       health: versionProbe.health.state === 'unavailable'
         ? { ...descriptor.health, ...versionProbe.health, transport: descriptor.transport }
         : descriptor.health ?? versionProbe.health,
+      ...(descriptor.unavailableReason ? { unavailableReason: descriptor.unavailableReason } : {}),
+      ...(descriptor.compatibility ? { compatibility: descriptor.compatibility } : {}),
       agentProfileId: profile.id
     })
   }

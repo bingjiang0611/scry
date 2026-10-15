@@ -401,7 +401,13 @@ export function buildAgentStartRequest(text: string, options: Omit<AgentStartReq
   const prompt = text.trim()
   const attachments = options.attachments ?? []
   if (!prompt && attachments.length === 0) return null
-  return { ...options, prompt, attachments: attachments.map((attachment) => ({ ...attachment })) as AgentInputAttachment[] }
+  return {
+    ...options,
+    prompt,
+    // 每次提交一个命令标识：重投（连按发送、重放）由主进程按收据去重，而不是起第二轮。
+    commandId: options.commandId ?? `cmd-${crypto.randomUUID()}`,
+    attachments: attachments.map((attachment) => ({ ...attachment })) as AgentInputAttachment[]
+  }
 }
 
 export function visibleTurnsBeforeReplacement(

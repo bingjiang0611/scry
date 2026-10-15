@@ -181,4 +181,61 @@ describe('ProviderRegistry', () => {
   it('parses only known disabled provider ids', () => {
     expect([...parseDisabledProviders('codex, opencode,unknown')]).toEqual(['codex', 'opencode'])
   })
+
+  it('单个 adapter 描述失败只降为影子快照，不让整个列表消失', async () => {
+    const broken: ProviderAdapter = {
+      ...adapter('codex'),
+      describe: async () => { throw new Error('codex home 不可读') }
+    }
+    const registry = new ProviderRegistry([adapter('claude'), broken])
+    const descriptors = await registry.describe()
+    expect(descriptors).toHaveLength(2)
+    expect(descriptors.find((entry) => entry.id === 'claude')).toMatchObject({ available: true })
+    expect(descriptors.find((entry) => entry.id === 'codex')).toMatchObject({
+      id: 'codex',
+      label: 'Codex',
+      runtimeProvider: 'codex_cli',
+      available: false,
+      unavailableReason: 'Provider 描述失败：codex home 不可读',
+      capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' },
+      health: expect.objectContaining({ state: 'unavailable', lastError: expect.stringContaining('codex home 不可读') })
+    })
+    // 影子快照不得被读成「用户主动禁用」
+    expect(descriptors.find((entry) => entry.id === 'codex')?.disabledReason).toBeUndefined()
+  })
+
+  it('把兼容性建议附在 descriptor 上，并传入实际版本', async () => {
+    const versioned: ProviderAdapter = {
+      ...adapter('codex'),
+      describe: async () => ({
+        id: 'codex' as const,
+        label: 'Codex',
+        runtimeProvider: 'codex_cli' as const,
+        transport: 'test',
+        available: true,
+        version: 'codex-cli 0.160.1',
+        capabilities: { skills: 'none' as const, mcp: 'none' as const, commands: 'none' as const, account: 'none' as const }
+      })
+    }
+    const seen: Array<[string, string | undefined]> = []
+    const registry = new ProviderRegistry([versioned], {
+      compatibility: (providerId, version) => {
+        seen.push([providerId, version])
+        return {
+          status: 'supported',
+          observedVersion: '0.160.1',
+          recommendedRange: '>=0.160.1',
+          matchedRange: '>=0.160.1',
+          reason: '已验证',
+          source: 'bundled',
+          manifestUpdatedAt: '2026-10-15T00:00:00.000Z'
+        }
+      }
+    })
+    const [descriptor] = await registry.describe()
+    expect(seen).toEqual([['codex', 'codex-cli 0.160.1']])
+    expect(descriptor.compatibility).toMatchObject({ status: 'supported', observedVersion: '0.160.1' })
+    // 默认不配置时不凭空附加字段
+    expect((await new ProviderRegistry([versioned]).describe())[0].compatibility).toBeUndefined()
+  })
 })

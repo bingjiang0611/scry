@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   agentPermissionDecision,
+  sanitizeApprovalWarning,
   agentPermissionQuestion,
   exactSessionPermissionDescription,
   exactSessionPermissionSuggestions,
@@ -210,6 +211,22 @@ describe('runtime frontdoor mapping', () => {
       questionId: 'permission-1',
       behavior: 'cancelled'
     })).toBe('reject')
+  })
+
+  it('只在 Provider 真的给出理由时附带审批风险说明，并做脱敏与单行化', () => {
+    const plain = agentPermissionQuestion('run-1', 'permission-1', '权限请求', '允许执行命令？', 'git status')
+    expect(plain.questions[0].warning).toBeUndefined()
+
+    const warned = agentPermissionQuestion(
+      'run-1', 'permission-2', '权限请求', '允许执行命令？', 'curl ...',
+      true, 'claude:permission:Bash', '允许这类操作直到当前原生会话结束',
+      sanitizeApprovalWarning('\u001B[31mask rule matched\u001B[0m\n  api_key="sk-live-123"')
+    )
+    expect(warned.questions[0].warning).toBe('ask rule matched api_key=«REDACTED»')
+
+    expect(sanitizeApprovalWarning(undefined)).toBeUndefined()
+    expect(sanitizeApprovalWarning('   ')).toBeUndefined()
+    expect(sanitizeApprovalWarning('a'.repeat(500))).toHaveLength(400)
   })
 
   it('only offers session permission when requested and explains its exact scope', () => {

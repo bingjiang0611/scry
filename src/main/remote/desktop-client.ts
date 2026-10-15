@@ -6,7 +6,7 @@ import type {
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
   DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopSshTarget, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
-import type { AgentQuestionResponse } from '../../shared/runtime'
+import { isAgentPermissionMode, type AgentQuestionResponse } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { LoadedSessionTurn } from '../../shared/session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from '../../shared/workspace'
@@ -576,7 +576,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     return /^(?:desktop_remote_(?:device_not_authorized|invalid_request|invalid_intent_id|intent_payload_conflict|unknown_op|ledger_capacity_exceeded)|desktop_not_connected|desktop_client_disposed)$/i.test(error.message)
   }
   #isExplicitUnknownIntent(error: unknown): boolean { return error instanceof Error && /desktop_remote_unknown_intent$/i.test(error.message) }
-  #assertSubmit(input: DesktopRemoteSubmit): void { if (!record(input) || !text(input.prompt, 128_000)) fail('invalid_submit'); context(input.context); for (const key of ['modelId', 'modelProviderId', 'effort'] as const) if (input[key] !== undefined && !text(input[key], 256)) fail('invalid_submit'); if (input.permissionMode !== undefined && !['default', 'auto_review', 'full_access'].includes(input.permissionMode)) fail('invalid_submit') }
+  #assertSubmit(input: DesktopRemoteSubmit): void { if (!record(input) || !text(input.prompt, 128_000)) fail('invalid_submit'); context(input.context); for (const key of ['modelId', 'modelProviderId', 'effort'] as const) if (input[key] !== undefined && !text(input[key], 256)) fail('invalid_submit'); if (input.permissionMode !== undefined && !isAgentPermissionMode(input.permissionMode)) fail('invalid_submit') }
   #traceEvent(value: unknown): TraceEvent { if (!record(value) || !text(value.id, 256) || !text(value.ts, 128) || !text(value.runId, 128) || !text(value.kind, 128) || !text(value.stage, 256)) fail('invalid_trace_response'); return value as unknown as TraceEvent }
   #turn(value: unknown): LoadedSessionTurn {
     if (!record(value) || !text(value.userText, 128_000) || !Array.isArray(value.items) || value.items.length > MAX_ITEMS) fail('invalid_history_response')

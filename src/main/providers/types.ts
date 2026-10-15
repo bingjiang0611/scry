@@ -98,6 +98,11 @@ export interface ProviderRunRequest {
   managedRecorderIdentity?: { runId: string; promptHash: string }
   mcpExecution?: AuthorizedMcpExecution
   emit: (event: TraceEvent) => void
+  /**
+   * 把 Provider 原样发来的消息写进双流事件日志。只有真正拥有原生事件流的 adapter 才会
+   * 调用它；没有调用就表示该 Provider 这一轮没有可观测的原生流，而不是流是空的。
+   */
+  recordNative?: (type: string, payload: unknown) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
 }

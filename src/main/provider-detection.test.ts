@@ -157,4 +157,60 @@ describe('Provider 完整探测结果组装', () => {
     expect(result).toEqual([])
     expect(probeStoredPiProfile).toHaveBeenCalledOnce()
   })
+
+  it('已装但未注册的 Provider 以带原因的影子快照出现，而不是静默消失', async () => {
+    const result = await composeProviderDetectionResults({
+      detected: [{
+        id: 'codex',
+        name: 'Codex',
+        bin: 'codex',
+        path: '/Users/example/.local/bin/codex',
+        version: '0.160.1',
+        health: { state: 'ready', transport: 'CLI version probe' }
+      }],
+      descriptors: [],
+      storedPiProfiles: [],
+      probeStoredPiProfile: vi.fn()
+    })
+
+    expect(result).toEqual([expect.objectContaining({
+      id: 'codex',
+      name: 'Codex',
+      path: '/Users/example/.local/bin/codex',
+      version: '0.160.1',
+      runtimeProvider: 'codex_cli',
+      unavailableReason: '本构建未注册 codex Provider adapter',
+      capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }
+    })])
+    // renderer 按 health.state 判定可选与否，影子快照必须是 unavailable
+    expect(result[0].health).toMatchObject({ state: 'unavailable', lastError: expect.stringContaining('未注册') })
+  })
+
+  it('descriptor 上的兼容性建议与不可用原因会传到探测结果', async () => {
+    const base = descriptor('codex', 'Codex', 'codex_cli', 'Codex CLI')
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'codex', name: 'Codex', bin: 'codex', path: '/bin/codex', version: '0.160.1' }],
+      descriptors: [{
+        ...base,
+        available: false,
+        unavailableReason: 'Provider 描述失败：boom',
+        compatibility: {
+          status: 'unsupported',
+          observedVersion: '0.160.1',
+          recommendedRange: '>=0.161.0',
+          matchedRange: '>=0.160.0',
+          reason: '未验证版本',
+          source: 'bundled',
+          manifestUpdatedAt: '2026-10-15T00:00:00.000Z'
+        }
+      }],
+      storedPiProfiles: [],
+      probeStoredPiProfile: vi.fn()
+    })
+
+    expect(result[0]).toMatchObject({
+      unavailableReason: 'Provider 描述失败：boom',
+      compatibility: { status: 'unsupported', reason: '未验证版本' }
+    })
+  })
 })

@@ -83,13 +83,21 @@ describe('useAgentSession state reducers', () => {
       agentId: 'qoder',
       backend: 'local',
       runtimeProvider: 'qoder_cli',
-      attachments: [image]
+      attachments: [image],
+      // 每次提交自带命令标识，主进程据此对重投去重。
+      commandId: expect.stringMatching(/^cmd-[0-9a-f-]{36}$/)
     })
     expect(buildAgentStartRequest('   ', { agentId: 'claude', attachments: [image] })).toEqual({
       prompt: '',
       agentId: 'claude',
-      attachments: [image]
+      attachments: [image],
+      commandId: expect.stringMatching(/^cmd-[0-9a-f-]{36}$/)
     })
+    // 调用方显式给出的 commandId 必须被保留：重试要落在同一张收据上。
+    expect(buildAgentStartRequest('retry', { agentId: 'claude', commandId: 'cmd-keep-this-one' })?.commandId)
+      .toBe('cmd-keep-this-one')
+    // 两次提交是两条命令，不能共用同一个标识。
+    expect(buildAgentStartRequest('a', {})?.commandId).not.toBe(buildAgentStartRequest('a', {})?.commandId)
     expect(buildAgentStartRequest('   ', { agentId: 'codex', runtimeProvider: 'codex_cli' })).toBeNull()
     expect(buildAgentStartRequest(' edited ', {
       agentId: 'qoder',

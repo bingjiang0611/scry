@@ -68,6 +68,8 @@ export interface TraceOutputBridgeOptions {
   maxBatchBytes?: number
   highWaterBytes?: number
   maxBufferBytes?: number
+  /** 未交付事件条数上限。字节预算挡不住海量小事件积压。 */
+  maxBufferEvents?: number
   schedule?: (fn: () => void, ms: number) => () => void
   warn?: (message: string, state: TraceBacklogState) => void
 }
@@ -95,7 +97,7 @@ export class TraceOutputBridge {
   private buffer: TraceEvent[] = []
   private bufferedBytes = 0
   private inFlightBytes = 0
-  private readonly inFlightBatches = new Map<number, { generation: number; bytes: number }>()
+  private readonly inFlightBatches = new Map<number, { generation: number; bytes: number; events: number }>()
   private generation = 0
   private nextBatchId = 0
   private skippedEvents = 0
@@ -107,6 +109,9 @@ export class TraceOutputBridge {
   private readonly maxBatchBytes: number
   private readonly highWaterBytes: number
   private readonly maxBufferBytes: number
+  private readonly maxBufferEvents: number
+  /** 已发出但未 ACK 的事件条数。 */
+  private inFlightEvents = 0
   private readonly schedule: (fn: () => void, ms: number) => () => void
 
   constructor(private readonly options: TraceOutputBridgeOptions) {
@@ -115,12 +120,15 @@ export class TraceOutputBridge {
     this.maxBatchBytes = options.maxBatchBytes ?? 1024 * 1024
     this.highWaterBytes = options.highWaterBytes ?? 8 * 1024 * 1024
     this.maxBufferBytes = options.maxBufferBytes ?? 32 * 1024 * 1024
+    this.maxBufferEvents = options.maxBufferEvents ?? 20_000
     this.schedule = options.schedule ?? defaultSchedule
   }
 
   push(event: TraceEvent): void {
     const bytes = traceEventByteSize(event)
-    if (this.bufferedBytes + this.inFlightBytes + bytes > this.maxBufferBytes) {
+    const overBudget = this.bufferedBytes + this.inFlightBytes + bytes > this.maxBufferBytes ||
+      this.buffer.length + this.inFlightEvents >= this.maxBufferEvents
+    if (overBudget) {
       // 只放弃镜像最新事件：live 视图保持连续前缀，缺口条数如实上报。
       this.skippedEvents += 1
       if (!this.degraded) {
@@ -181,6 +189,7 @@ export class TraceOutputBridge {
     if (expected.bytes !== receipt.bytes) throw new Error('trace 输出确认字节不匹配')
     this.inFlightBatches.delete(receipt.batchId)
     this.inFlightBytes = Math.max(0, this.inFlightBytes - expected.bytes)
+    this.inFlightEvents = Math.max(0, this.inFlightEvents - expected.events)
     this.flush()
     if (this.buffer.length === 0 && this.inFlightBytes === 0 && this.degraded && !this.resyncRequired) {
       // 积压排空：要求 renderer 用权威快照对齐，之后才允许清除降级标记。
@@ -209,6 +218,7 @@ export class TraceOutputBridge {
     this.buffer = []
     this.bufferedBytes = 0
     this.inFlightBytes = 0
+    this.inFlightEvents = 0
     this.inFlightBatches.clear()
     this.generation += 1
     if (this.degraded || discarded) {
@@ -222,6 +232,7 @@ export class TraceOutputBridge {
     this.buffer = []
     this.bufferedBytes = 0
     this.inFlightBytes = 0
+    this.inFlightEvents = 0
     this.inFlightBatches.clear()
     this.generation += 1
     this.degraded = false
@@ -262,8 +273,9 @@ export class TraceOutputBridge {
     const events = this.buffer.splice(0, count)
     this.bufferedBytes = Math.max(0, this.bufferedBytes - bytes)
     this.inFlightBytes += bytes
+    this.inFlightEvents += events.length
     const batchId = this.nextBatchId++
-    this.inFlightBatches.set(batchId, { generation: this.generation, bytes })
+    this.inFlightBatches.set(batchId, { generation: this.generation, bytes, events: events.length })
     this.options.send({ events, bytes, generation: this.generation, batchId })
     return true
   }

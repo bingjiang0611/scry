@@ -17,6 +17,7 @@ import {
 import { contextUsageEvidence, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
 import { authorizedMcpServers, isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
+import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from '../process-diagnostics'
 import { extractUserText, normalizeAgentTaskStatus, type NormalizeCtx, type ParsedTurn } from '../normalize'
 import { normalizeQoderMessage, QoderBackgroundTasks } from './qoder-messages'
 import { QoderCreditCollector } from '../../shared/credit-usage'
@@ -255,14 +256,20 @@ function livePrompt(text: string): { stream: AsyncIterable<SDKUserMessage>; rele
   }
 }
 
-function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
-  if (!pid) return
-  try {
-    if (process.platform !== 'win32') process.kill(-pid, signal)
-    else process.kill(pid, signal)
-  } catch {
-    try { process.kill(pid, signal) } catch { /* already gone */ }
+/**
+ * 按身份给 Qoder CLI 进程树发信号。
+ *
+ * 这里只有一个裸 PID（SDK 回调给出，不是活的 child 句柄），进程可能已经退出并被
+ * 别人复用。所以 spawn 时采集 `(pid, 启动时间, 命令行)`，发信号前重新核对；
+ * 核对不上就不发，win32 上没有进程组语义时自动退化为单进程信号。
+ */
+function signalProcessTree(identity: ProcessIdentity | undefined, signal: NodeJS.Signals): void {
+  if (!identity) return
+  if (process.platform === 'win32') {
+    try { process.kill(identity.pid, signal) } catch { /* already gone */ }
+    return
   }
+  signalProcessTreeWithIdentity({ identity, signal })
 }
 
 export function resolveQoderSdkExecutable(executable: string): string {
@@ -276,7 +283,7 @@ export function resolveQoderSdkExecutable(executable: string): string {
 function qoderOptions(
   cwd: string | undefined,
   resume?: string,
-  onPid?: (pid: number) => void,
+  onPid?: (pid: number, identity: ProcessIdentity | undefined) => void,
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
@@ -297,7 +304,12 @@ function qoderOptions(
   delete runtimeEnv.SCRY_MANAGED_PROMPT_HASH
   const permissions = permissionMode === 'full_access'
     ? { permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true }
-    : { permissionMode: permissionMode === 'auto_review' ? 'auto' : 'default' }
+    : {
+        permissionMode: permissionMode === 'auto_review'
+          ? 'auto'
+          // Qoder SDK 与 Claude 同源，acceptEdits 是原生档位。
+          : permissionMode === 'auto_accept_edits' ? 'acceptEdits' : 'default'
+      }
   return {
     auth: qodercliAuth(),
     cwd,
@@ -334,9 +346,11 @@ function qoderOptions(
               detached: process.platform !== 'win32',
               stdio: ['pipe', 'pipe', 'pipe']
             })
-            if (child.pid) onPid(child.pid)
+            // 立刻采集身份：进程还活着时采到的启动时间才能作为后续核对基准。
+            const identity = captureProcessIdentity(child.pid)
+            if (child.pid) onPid(child.pid, identity)
             child.once('exit', (code, signal) => onExit?.(code, signal))
-            options.signal.addEventListener('abort', () => signalProcessTree(child.pid, 'SIGTERM'), { once: true })
+            options.signal.addEventListener('abort', () => signalProcessTree(identity, 'SIGTERM'), { once: true })
             return child
           }
         }
@@ -936,7 +950,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         let stopped = false
         let externalSessionId = request.resume
         let q: Query | undefined
-        let qoderPid: number | undefined
+        let qoderIdentity: ProcessIdentity | undefined
         const ctx: NormalizeCtx = {
           runId: request.runId,
           cwd: request.cwd,
@@ -951,7 +965,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               ...qoderOptions(
                 request.cwd,
                 request.resume,
-                (pid) => { qoderPid = pid },
+                (_pid, identity) => { qoderIdentity = identity },
                 undefined,
                 request.permissionMode,
                 request.managedRecorder === true,
@@ -964,6 +978,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const events = (async () => {
             for await (const message of q!) {
               const raw = message as unknown as Record<string, unknown>
+              request.recordNative?.(typeof raw.type === 'string' ? raw.type : 'unknown', raw)
               if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
                 externalSessionId = raw.session_id
                 request.onExternalSessionId?.(raw.session_id)
@@ -1011,7 +1026,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             controller.abort()
             void q?.interrupt().catch(() => {})
           },
-          forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
+          forceKill: () => signalProcessTree(qoderIdentity, 'SIGKILL'),
           // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
           forceKillScope: 'run_scoped',
           getExternalSessionId: () => externalSessionId,
@@ -1033,6 +1048,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const currentProviderTurnId = (): string | undefined => providerTurnIdAmbiguous ? undefined : providerTurnId
       let q: Query | undefined
       let qoderPid: number | undefined
+      let qoderIdentity: ProcessIdentity | undefined
       let streamSettled = false
       let exitTimer: ReturnType<typeof setTimeout> | undefined
       let rejectUnexpectedExit: (error: Error) => void = () => {}
@@ -1132,7 +1148,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             ...qoderOptions(
               request.cwd,
               request.resume,
-              (pid) => { qoderPid = pid },
+              (pid, identity) => { qoderPid = pid; qoderIdentity = identity },
               (code, signal) => {
                 if (stopped || streamSettled) return
                 exitTimer = setTimeout(() => {
@@ -1238,6 +1254,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               (async () => {
                 for await (const message of q!) {
                   const raw = message as unknown as Record<string, unknown>
+                  request.recordNative?.(typeof raw.type === 'string' ? raw.type : 'unknown', raw)
                   credits.observe(raw)
                   backgroundTasks.observe(raw)
                   observeProviderTurnId(qoderProviderTurnId(raw))
@@ -1406,7 +1423,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           return result
         },
         interrupt,
-        forceKill: () => signalProcessTree(qoderPid, 'SIGKILL'),
+        forceKill: () => signalProcessTree(qoderIdentity, 'SIGKILL'),
         // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => externalSessionId,
@@ -1679,7 +1696,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                       effortOption(effort, undefined, effort === model.defaultEffort)
                     )
                   })),
-                permissions: permissionOptions()
+                permissions: permissionOptions({ autoAcceptEdits: true, autoReview: true })
               }
             }
             if ((contextGenerations.get(key) ?? 0) === generation) {
@@ -1695,7 +1712,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           return capabilityReady(context, 'read', value.data, value.observedAt)
         } catch (error) {
           return {
-            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions() }),
+            ...capabilityReady(context, 'read', { models: [], permissions: permissionOptions({ autoAcceptEdits: true, autoReview: true }) }),
             state: 'degraded' as const,
             reason: String((error as Error).message)
           }
