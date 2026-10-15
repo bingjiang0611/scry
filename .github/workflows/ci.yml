@@ -83,6 +83,8 @@ jobs:
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
+      - name: Prepare Electron native dependencies
+        run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Isolated renderer DOM smoke tests
         run: npm run test:renderer:ui
       - run: npm run pack:artifact
