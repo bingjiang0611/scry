@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type MockInstance } from 'vitest'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity, desktopTlsRequest, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
@@ -148,7 +148,7 @@ describe('DesktopRemoteClient', () => {
     const requested = new Promise<void>((resolve) => { requestStarted = resolve })
     const rename = fs.rename.bind(fs)
     const pending: Array<Promise<unknown>> = []
-    let renameSpy: ReturnType<typeof vi.spyOn> | undefined
+    let renameSpy: MockInstance<typeof fs.rename> | undefined
     try {
       const pairing = await fixture.client.pair({ label: 'Concurrent refresh', ssh, invitation: fixture.invitation })
       const id = pairing.connection.id
