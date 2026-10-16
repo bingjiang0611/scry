@@ -292,3 +292,82 @@ SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，�
 - 完整门禁日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13631-477e-74cf-8324-a004d6063f2c/evidence-preserving-reducer/objects/1f/1f225c55e143f1993934b20edd22118bc664da23b3c3a4d645aa06e158e02f1c.txt`。
 
 源方案与历史基线见 [调研记录](research/scry-desktop-remote-host-feasibility.md)。
+
+## 0.2.192 日常 App 更新准备与安装状态（2026-10-16）
+
+- 发布工作区：本机 `/private/tmp/scry-release-0.2.192.TFUyJY/source`，分支 `release/desktop-0.2.192`；mac2 `/Users/test/scry-release-0.2.192.lELi5B/source`。未带入原工作区未提交的 Provider/conversation 改动。运行时代码冻结在 `60394ce`，包含 `bd60826` 的远程工作区与 `1c30b76` 的 Chromium 辅助功能崩溃恢复修复；后续仅改发布检查、安装错误诊断和本记录。
+- 最终开发签名 App **0.2.192**、私有 CLI **0.2.49**；`app.asar` SHA-256 为 `d848a439178ab4f75e7a124d0d89036544110539b970a0903afb85a81ca9b1df`。未公证。两端最终候选 App 的签名、SHA、311 项必需运行时依赖及 `smoke:electron` 均通过，包含真实文件/Git/PTY、录制追赶、旧 writer 拒绝、renderer crash recovery；没有付费 Provider、GitHub push 或 PR 验收。
+- 首次隔离发布目录链接到原工作区 `node_modules`，打包只收集直接依赖，漏掉 `cross-spawn`、`stream-chain`、`@peculiar/asn1-*` 等必需依赖。该包未安装；改用独立实体依赖后重建。新增 archive 依赖完整性检查：缺依赖包以非零退出，完整旧包与最终包均通过；不以源码依赖目录存在替代安装包证据。
+- 验证范围：添加窗口修复前，mac2 Node 22.22.1 的全量 unit 为 **3167 passed / 3 skipped**（252 passed / 3 skipped 文件），CLI 发布检查 **586 passed**，shell 与分段 renderer UI 均通过。窗口修复后重新 typecheck、运行 renderer-security/window-chrome **21 passed**，并在两端重跑最终 build、打包/安全/远程宿主 smoke。真实 Git 场景沿用既有同类的 15 秒预算；原 5 秒超时与缓存 UI 等待失败日志保留，没有删除断言。安装器核心另有 **7 passed**；最初误用 `node --test` 导致 Vitest runner 错误，随后使用项目 `npm run test:unit -- scripts/install-macos-core.test.mjs`，两份日志均保留。
+- **本机安装成功、尚未重启**：官方 `scripts/install-macos.mjs` 将最终包原子安装到 `/Applications/Scry.app`，安装后的版本、SHA 和签名通过。当前会话所在旧主进程 PID 52364 未结束；不能据磁盘版本宣称当前窗口已运行新代码。原 0.2.191 自动备份保留于 `/Applications/.Scry.app.backup`；原有 0.2.190 备份另存 `/Applications/.Scry.app.backup-preserved-before-0.2.192-5db01e7c-f133-4250-9e42-cf80ab64ecf7`。
+- **历史尝试：另装到 mac2 `/Applications` 失败、已回滚**：同一包在暂存目录通过全部打包检查，但安装到 `/Applications/Scry.app` 后，私有 CLI `--version` 收到 `SIGKILL`。诊断期间目标副本 `codesign --verify --deep --strict` 返回 0，SHA 与冻结包相同；两次只读版本检查都被终止。安装器每次回滚，目标 App 不再存在，原日常 PID 4020 与其 `/Users/test/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app` 保持运行（App 0.2.189，不能从目录名推断版本）；原日常 userData 未切换。
+- 安全日志在对应执行时间记录 `com.alibaba.endpoint.aliedr.ne` 给 Scry 进程标记 `mac_non_white_proc`、`ssh_reject`。这些标签也出现在通过检查的暂存实例，因此不能单靠标签归因，尚无直接证据确定发送 `SIGKILL` 的调用者。若未来改装至 `/Applications`，需要宿主维护者核对该路径及 SSH 启动策略；准确追踪终止者需要管理员级 Endpoint Security 信号审计，普通账号运行 `eslogger signal` 已返回 `ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED`。未关闭安全软件、未改签名、未换安装路径绕过。临时重复读取和复制签名诊断已从安装器移除，只保留退出信号与 PID 说明。
+- **日常界面验收未执行**：不能用隔离 smoke 代替日常操作。mac2 随后已按维护者要求直接替换原安装（见下）；待重启本机 Scry 后，再按日常配对重放文件编辑/保存、Git、终端切换/重连/追赶、未保存确认和侧栏排序。真实写入仍限新建临时验证目录，不修改用户项目。
+- 证据目录：`/private/tmp/scry-release-0.2.192.TFUyJY/logs/`。关键文件：`local-final-192-packaged.log`、`mac2-final-192-packaged.log`、`local-install.log`、`mac2-install-signature-diagnostic.log`、`mac2-endpoint-policy.log`、`incomplete-package-control.log`、`previous-package-dependencies-control.log`。失败包归档与 mac2 的 `Scry.incomplete-deps.app` 保留供复盘，不作为可安装候选。
+
+### 同日追加：直接替换 mac2 当前安装成功
+
+- 维护者明确要求不再创建隔离环境，直接替换当前安装。实际日常 App 是 `/Users/test/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app`；目录名来自历史验收，安装前真实版本为 0.2.189。后续未新建 App/HOME/userData 测试环境，直接更新原路径，保持安装器全部校验。
+- 正常退出旧 PID 4020 后，完整备份原 userData 到 `/Users/test/scry-upgrade-backups/0.2.192-direct-4088e06f-ccd4-4518-9123-5c3311c4ee42/userData`（备份根目录权限 0700）。使用标准安装器和 `SCRY_INSTALL_DIR=/Users/test/scry-remote-acceptance-0.2.180-GqVCV3` 原子替换该 App；CLI 版本校验通过，未跳过发布验证。旧 0.2.189 App 留在该目录 `.Scry.app.backup`，此前备份另存 `.Scry.app.backup-preserved-before-0.2.192-afe0aa44-7a61-4bbb-8b7e-cf17be79cc57`。
+- 当前安装版本 **0.2.192**，SHA 与冻结包相同，严格深层签名验证通过。通过正常 LaunchServices 启动，新主进程 **PID 32276** 使用原 `/Users/test/Library/Application Support/scry`；原 hostId、CA 指纹保留，pairing-state.json 与停机备份逐字节相同，原桌面端口 **64050/64051** 均由新 PID 监听。
+- 直接替换原路径成功，因此 `/Applications` 的历史终止问题不再阻塞当前升级，也未获得或使用管理员审计权限。没有关闭安全软件、重签或改变原安装路径。
+- 本机 `/Applications/Scry.app` 也已替换为同一 **0.2.192**，但当前会话仍由旧 PID 52364 承载；为避免中断本次操作，尚未重启。**剩余动作：维护者退出并重开本机 Scry，然后继续日常远程界面验收。**
+- 实际安装日志：`logs/mac2-direct-install.log`；启动/版本/签名日志：`logs/mac2-direct-start.log`；实际 PID、原 userData、配对和端口回执：`logs/mac2-direct-upgrade-state.json`。以上日志均在本机 `/private/tmp/scry-release-0.2.192.TFUyJY/` 下。
+
+### 日常界面首次重放：部分完成，不作整体验收通过
+
+- 本机已重启，实际日常主进程为 PID **21554**；版本 0.2.192，安装包 SHA 与上述冻结值一致。mac2 原路径的 PID 32276 仍运行。直接使用原日常 App、userData 和已保存配对，没有新建测试 App 或隔离 userData。
+- 原 mac2 配对复连已确认：最初 20 秒等待未满足，随后实际界面显示 `主机 已连接 1 / 1 台`。远程目录浏览、输入路径、明确选择已确认，执行位置显示 `mac2 / /Users/test/scry-daily-ui.THymIn`。右侧 Surface 工作区及纵览曾打开；最大化/隐藏按钮可见，但未据此宣称所有面板交互已通过。
+- 侧栏语义树当前顺序包含本机 `pi` → mac2 `rotom-team` → 本机 `myNote` → mac2 `workspace` → 本机 `Nib`。这证明该次列表中本机与远程项目混排；没有完整重放视觉滚动排序或受控活动时间变化。
+- 自动化多次返回 `stale_ref`、`unknown` 或后置条件失败；窗口也出现未由本轮预期动作选择的本机会话/新会话。并行操作、自动聚焦或自动化定位问题尚未完成归因，不直接认定是用户操作或产品故障。发现 Terminal 曾在前台，后由用户将 Scry 置前；搜狗拼音也曾把 ASCII `mac2` 转成中文。后续原生 setText 验证过字面值 `mac2`，结束时读取到的输入法与原先相同，仍为搜狗拼音。
+- 为避免向错误工作区发送写操作，**编辑保存、未保存确认、Git 暂存提交、终端输入输出/分离重连、面板恢复与尺寸交互均未验收**。只通过 SSH 创建数据专用临时 Git 目录 `/Users/test/scry-daily-ui.THymIn` 和基线提交 `56b469b`；停止时仍 clean，`alpha.txt` 为 `daily acceptance baseline`。该初始化不算 UI 保存或提交证据；未发送验收用 Provider 请求，未改用户项目。
+- 证据摘录：`logs/daily-ui-evidence.txt`；范围与状态：`logs/daily-ui-acceptance.json`，均位于上述发布目录。下一步需先建立稳定、可归因的桌面控制，或由维护者操作真实界面、助手独立核对 mac2 落盘/Git/终端证据；不以 CLI 代做写入替代日常 UI 验收。
+
+## 0.2.193 后台实例对真实 mac2 验收（2026-10-16）
+
+维护者随后明确改为“起一个 test 实例在后台操作”。本轮使用独立、隐藏的正式打包 App 测试客户端，连接仍在运行的真实 mac2 0.2.192 宿主，不操作共享前台窗口；不是新的日常窗口验收通过声明。只复制原配对的**加密**连接文件到权限 0700 的临时 userData，由原安全存储代码解密；不导出明文设备密钥、不复制 Provider 凭据、不替换 `window.scry`，也不启用测试 Provider。UI 动作通过已有 Electron fixture 相同的 CDP 原生指针/输入路径执行，SSH 只准备临时数据和独立读回结果，不代做 UI 保存或提交。
+
+### 发现与修复
+
+- 后台真实客户端稳定复现菜单问题：当前机器为 mac2 时，`querySelector('button[aria-checked="true"], button:not(:disabled)')` 仍按 DOM 顺序命中第一个可用的本机按钮。其 focus handler 将右侧项目列切成本机。修复为先找 checked 按钮，再单独回退到首个可用按钮；未放宽授权或引入本机 API fallback。该问题不等于已经证明远程文件写到了本机，也不能据此把此前全部桌面定位异常归为同一原因。
+- 远程终端的无障碍标签原来固定为“本机终端”，现复用现有 `machineLabel`，真实 UI 验证为 `mac2终端`；本机默认标签不变。
+- 源码修复提交 `d7e6a8e`，分支 `fix/remote-picker-focus-0.2.193`。开发签名候选 App **0.2.193**、私有 CLI **0.2.49**，`app.asar` SHA-256 **`98a13c298f4c249b1640d038d859da517c7b1e1aec8db750933ecfbf71049b83`**。未公证；候选位于 `/private/tmp/scry-release-0.2.192.TFUyJY/source/dist/mac-arm64/Scry.app`；验收当时尚未替换日常 App，随后的两端安装见下文。
+
+### 实际通过范围
+
+| 场景 | 结果与独立证据 |
+| --- | --- |
+| 原配对、远程选目录 | 原 pinned mTLS 身份复连，UI 明确选择 `/Users/test/scry-background-ui.iYz1An` |
+| 文件编辑、保存 | UI 保存 `alpha.txt`，SSH 精确读回 `daily UI saved on real mac2\n` |
+| 未保存确认 | 改动后切主机页，取消确认保留编辑器草稿；磁盘仍是已保存内容 |
+| 面板交互 | 原生坐标拖拽改变宽度，最大化/恢复均验证实际状态 |
+| Git 暂存、提交 | UI 确认时暂存并提交；宿主提交 `939e1dc52e6d1290d3e3d3363eae75e678970516` 仅含 `alpha.txt`，最终 clean；重连 UI 从宿主操作历史显示“提交 · 已确认” |
+| 真实 PTY | UI 输入命令后显示临时 cwd 和经 SSH 对照的宿主名；输出标记由 printf 参数拼接产生，不能用输入回显冒充执行结果 |
+| 标签分离、追赶 | 切到文件再回终端，后续输出可见 |
+| 断开、重连 | 测试客户端未连接时，独立读宿主该终端的 UTF-16LE 录制确认后续输出已产生；重连 UI 追赶同一 terminal ID，无替代 Shell |
+| 退出、录制回放 | Shell 退出后清屏再回放可见实际标记；回放前后无新活动 Shell |
+
+这些检查分阶段完成，未隐去首轮脚本失败。目录加载只读期间的输入、旧选择器、窄面板隐藏复选框、提交状态文案匹配等自动化错误均保留日志。尤其一次确认提交后过早把“正在执行已确认的操作”当作完成：随后先独立查明提交已落地，再从 UI 操作历史核对，**没有重发提交**。
+
+### 回归与清理
+
+- 新菜单焦点回归在旧实现上明确失败 `Remote picker initial focus moved to local machine`；修复后完整 `desktop-remote-ui-smoke.mjs` 通过，覆盖本机/远程菜单、目录选择、hover、旧宿主 unavailable、共享面板和受控侧栏活动排序。首次修复后 suite 曾在 Markdown 展开源码前超时；新增鼠标事件收据证明当时坐标实际命中标题，随后在滚动后等待绘制同步，不增加原超时、不删断言，最终完整 suite 通过。
+- Node 22.22.1 驱动下，typecheck、受影响 unit **23 passed**、`pack:artifact`（311 项必需依赖、安全、文件、PTY、宿主协议等）和严格深层签名检查通过。0.2.192 的历史全量单测数字不冒充 0.2.193 全量重跑。
+- 后台实例已退出，PID 79684 已不存在；该 userData 没有存活进程。验证其新建的远程终端剩余 **0** 后，删除了临时 userData 及加密连接副本；原前台 App、原配对和真实宿主未停止。临时 Git 目录、宿主录制与截图保留供复盘。验收未发起 Provider 对话、GitHub push 或 PR。
+- 通过回执：`logs/background-live-verified.json`；原始分阶段日志：`logs/background-live-final-193.log`、`logs/background-live-final-reconnect-193-api.log`；截图：`logs/background-live-ui/remote-file-saved.png`、`git-confirmed-after-reconnect.png`、`reconnected-same-pty.png`、`terminal-replayed.png`；清理回执：`logs/background-live-cleanup.json`。以上均相对于 `/private/tmp/scry-release-0.2.192.TFUyJY/`。
+- 后台验收时日常客户端/宿主为 0.2.192，验证的是修复客户端 0.2.193 与宿主 0.2.192 的兼容路径；日常新主进程启动后的验收尚未执行。
+
+### 随后按明确选择更新两端（不重启）
+
+维护者选择“两端都更新”，并保留“不立即重启或停止当前任务”的约束。标准 `install-macos.mjs` 已在两端原安装路径原子替换为 **0.2.193**；未停止原进程，未改 userData、签名或安全策略。
+
+| 项目 | 已验证状态 | 证据 |
+| --- | --- | --- |
+| 本机安装 | `/Applications/Scry.app` 为 0.2.193，CLI 0.2.49，311 项依赖检查、严格深层签名检查通过 | `logs/local-install-193.log`、`logs/local-193-installed-verify.log` |
+| mac2 安装 | 原 `/Users/test/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app` 为 0.2.193，相同 ASAR SHA-256，CLI/311 项/签名检查通过 | `logs/mac2-install-193.log`、`logs/mac2-193-installed-verify.log` |
+| 原进程与配对 | 本机 PID 21554、mac2 PID 32276 未改变；mac2 配对文件安装前后 SHA-256 同为 `86e51dc75521564afd145b97396f01d7953eaa4ad0ae0adb7c67371b4d7981fb`；原进程仍监听 64050/64051 | `logs/mac2-193-before-install.log`、`logs/mac2-193-installed-verify.log`、`logs/mac2-193-process-and-backup.log` |
+| 回滚包 | 两端 `.Scry.app.backup` 均为刚替换的 0.2.192；此前的备份先独立改名保留，未删除 | `logs/local-193-backup-preservation.json`、`logs/mac2-193-backup-preservation.json` |
+
+mac2 新暂存目录的内置 CLI 检查收到 `SIGKILL`（PID 82944），完整首轮失败保存在 `logs/mac2-193-preinstall-verify.log`。没有在该路径循环重试；沿用原路径的标准安装器及其最终目标 CLI 校验成功，随后完整 packaged 检查亦通过。信号来源仍未知，不能据此归因特定安全软件；若需归因，须由管理员开展信号审计。目前不是安装阻碍。
+
+**当前是“安装包已更新、原进程未重启”，不是两端新主进程都已运行验收通过。下一步由维护者在空闲时退出并重开两端；本机重启会中断当前会话，不自动执行。** 最新安装状态：发布目录的 `deployment-state.json`；后台验收回执保留其安装前的历史范围。

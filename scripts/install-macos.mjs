@@ -22,7 +22,9 @@ const expectedCliVersion = JSON.parse(readFileSync(join(process.cwd(), 'packages
 function run(command, args, capture = false) {
   const result = spawnSync(command, args, capture ? { encoding: 'utf8' } : { stdio: 'inherit' })
   if (result.error) throw result.error
-  if (result.status !== 0) throw new Error(`${command} 执行失败：exit ${result.status}`)
+  if (result.status !== 0) {
+    throw new Error(`${command} 执行失败：exit ${result.status ?? 'unknown'}${result.signal ? `, signal ${result.signal}, pid ${result.pid}` : ''}`)
+  }
   return capture ? String(result.stdout).trim() : ''
 }
 
