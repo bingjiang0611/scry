@@ -1,0 +1,26 @@
+{
+  "negative_patterns": ["账单", "runner", "发布", "release", "翻译", "总结一下", "登录", "UI 配色"],
+  "should_trigger": [
+    {"text": "看看 Scry 最近哪里慢", "family": "analysis"},
+    {"text": "分析一下日常性能记录，找出最值得优化的地方", "family": "analysis"},
+    {"text": "打开会话感觉卡，帮我查查性能瓶颈", "family": "analysis"},
+    {"text": "此刻最大的性能机会在哪里？", "family": "climb"},
+    {"text": "做一轮性能爬坡，把 git diff 的耗时降下来", "family": "climb"},
+    {"text": "还有哪些没探索过的性能优化方向，大胆一点", "family": "climb"},
+    {"text": "把台账里 git 调用次数的上限降一下", "family": "maintain"},
+    {"text": "这个工作量计数能不能升为门禁", "family": "maintain"},
+    {"text": "performance:measure 报了 worse，帮我处理", "family": "maintain"},
+    {"text": "补一下 Linux 的性能基线", "family": "maintain"}
+  ],
+  "should_not_trigger": [
+    {"text": "GitHub Actions 因为账单问题跑不起来，怎么办", "family": "ci"},
+    {"text": "帮我发布 0.2.193 版本", "family": "release"},
+    {"text": "修一下 Codex 登录失败的 bug", "family": "feature"},
+    {"text": "把这段英文翻译成中文", "family": "other"},
+    {"text": "改一下侧边栏的配色", "family": "feature"}
+  ],
+  "near_neighbor": [
+    {"text": "用真实 Claude 跑一次 rate-workflow 验收", "family": "provider-acceptance"},
+    {"text": "给 Scry 新增一个导出会话功能", "family": "feature"}
+  ]
+}

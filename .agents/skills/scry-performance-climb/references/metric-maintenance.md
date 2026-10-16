@@ -25,7 +25,7 @@ npm run performance:measure -- --out /tmp/perf         # 只测当前版本
 4. 台账登记 `candidate`（`ceiling: null`），再运行 `performance:propose --write` 记录当前平台基线。
 5. 负载、单位或层级变化 = 新 key，不能改旧 key 的定义（guard 会拒绝）。
 
-## 升为门禁（三项证据缺一不可）
+## 升为门禁（三项证据缺一不可，并需用户确认）
 
 | 证据 | 做法 |
 |---|---|
@@ -40,13 +40,17 @@ npm run performance:measure -- --out /tmp/perf         # 只测当前版本
 - **相关性复核**：代码路径变化后，比例可能下降（例如 git 调用变便宜后，瓶颈换到别处）。比例明显下降的门禁要重新评估。
 - **Linux 基线**：CI 可用后，在 Linux 上运行 `performance:propose` 补 `linux-x64` 基线；门禁值若与 macOS 不同，按放宽流程或直接收紧处理。
 - **CPU 指令数**：只在 Linux 可测，确认不是长期 `unavailable`。
-- **日常记录保留**：确认归档目录持续有快照（日志本身只保留数小时）。
+- **日常记录保留**：确认 `performance/` 下归档在增长、没有 `onError` 告警（`[scry:performance] local recording unavailable`），最旧归档的时间是否满足需要。
 - **覆盖盲区**：对照 `docs/performance-opportunities.md` 的“覆盖缺口”，每次至少消除一项或说明为何暂不处理。
 
 ## 偶尔运行（串行、记录 `uptime`）
 
 | 检查 | 命令 | 时机 |
 |---|---|---|
-| 真实 App 基准 | `npm run build && node scripts/performance-native.mjs bench <out.json>` | 改了界面、会话、发送/停止 |
-| 内存泄漏 | `node scripts/run-electron-builder.mjs && SCRY_SOAK_CYCLES=8 node scripts/performance-soak.mjs` | 改了长时间运行路径；加 `SCRY_SOAK_LEAK_FIXTURE=1` 做敏感性对照 |
+以下命令都经 `node .agents/skills/scry-performance-climb/scripts/timing-run.mjs <标签> -- <命令>` 运行。
+
+| 检查 | 命令 | 时机 |
+|---|---|---|
+| 真实 App 基准 | 先 `npm run build`，再 `node scripts/performance-native.mjs bench <out.json>` | 改了界面、会话、发送/停止 |
+| 内存泄漏（先问用户） | 先 `node scripts/run-electron-builder.mjs`，再 `SCRY_SOAK_CYCLES=8 node scripts/performance-soak.mjs` | 改了长时间运行路径；加 `SCRY_SOAK_LEAK_FIXTURE=1` 做敏感性对照 |
 | 受控毫秒基准 | `npm run performance:bench -- <out.json>`，再 `performance:compare` | 宣称 L2 之前 |

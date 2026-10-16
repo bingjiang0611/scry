@@ -1,6 +1,6 @@
 # 性能机会日志
 
-由 `.agents/skills/scry-performance-climb` 维护。记录慢点、想法、实验（含失败）和覆盖缺口，避免重复劳动。数据结论必须注明来源与成熟度。
+由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
 ## 当前机会排名（2026-10-16，日常记录首次分析）
 
@@ -33,7 +33,7 @@
 
 | 缺口 | 影响 | 建议 |
 |---|---|---|
-| 日志只保留约 5 小时（4 × 5 MB 轮转） | “日常”分析只能看到最近几小时 | 每次分析先快照归档到 `~/scry-performance-archive/`；考虑提高轮转上限或按天汇总 |
+| ~~日志只保留约 5 小时~~ | 已改为 gzip 归档 + 64 MiB 上限（估算约 340 小时使用），新版安装后生效 | 发布后确认归档实际增长 |
 | 日志不记录系统负载 | 毫秒数无法区分“代码慢”和“机器忙” | 在 resource 样本中记录 `os.loadavg()` |
 | IPC 工作量维度为 `unmeasured` | 无法按仓库大小、会话长度分层 | 给 gitDiff/loadSession/listCommands 记录规模维度 |
 | 未观测路径：startup、compose、evidence、terminal（因 build 而异） | 启动速度、输入框响应完全无真实数据 | 补观测点 |
@@ -44,12 +44,4 @@
 
 ## 实验记录
 
-### 2026-10-16 git 子进程数升为门禁
-- 假设：git 子进程数可代表 source-control 操作耗时。
-- 结果：受控测量中 git 子进程占操作耗时 98.2%–98.9%（2 轮 × 15 次）；注入一次多余 git 调用，计数 8→9，`check` 判 `regressed`。
-- 结论：成立（L1 门禁）。注意：门禁守的是次数，真实仓库中单次 git 成本随规模增长，次数不变也可能变慢。
-- 锁定：`source-control.diff/subprocess.git` ≤ 8，`source-control.service.status-diff/subprocess.git` ≤ 11。
-
-### 2026-10-16 归档页 JSON 解析次数
-- 结果：JSON.parse 只占操作耗时 1.1%–1.2%。
-- 结论：不值得按此计数爬坡，保持 candidate。
+每个实验一个文件，见 [performance-experiments/](performance-experiments/)。
