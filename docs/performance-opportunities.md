@@ -2,7 +2,22 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
-## 当前机会排名（2026-10-16，日常记录首次分析）
+## 最新爬坡进展（2026-10-16）
+
+用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；本轮只完成两个有独立计数证据的前置优化，不代表两套架构已经交付。
+
+| 实验 | 固定负载 L1 | L2 / L3 | 减少的工作 |
+|---|---|---|---|
+| [Pi Node 版本复用](performance-experiments/20261016-pi-node-version-reuse.md) | 五次环境解析的版本探针 5→1，五轮一致 | 配对计时 highLoad=true，L2未验证；未安装，L3未验证 | 四个子进程不再启动；仍重验二进制元数据/环境，不缓存能力或trust |
+| [遥测追加保留用量聚合](performance-experiments/20261016-usage-telemetry-incremental.md) | 10000行暖账本+五次遥测追加/查询，重读 5→0 / 4757290→0 bytes，五轮一致 | 配对计时 highLoad=true，L2未验证；L3未验证 | 不再重读/parse整文件；性能记录仍完整保留 |
+
+冻结 collector 提交 `cafc418`，生产提交 `7ac7fcb`。全量性能计数为3项better、25项unchanged、2项gating pass、3项macOS CPU指令candidate缺失，无worse。只收紧三个candidate平台基线，没有升级门禁或放宽。
+
+**独立已知失败**：全量unit曾3260通过/4 opt-in跳过；随后feedback专项触发原有同毫秒归档顺序缺陷（22通过/1失败），已在与`1c3cf63`相同的journal/report代码上确定性复现。未改断言或采集格式，诊断留存，需单独修复，不能把本轮描述为所有检查最终全绿。
+
+**后续优先顺序**：先做 capability RPC 启动/响应/关闭分段实验，确认12秒目录查询的主体；再给真实 turn+session finalization 增加端到端计数和大仓库负载，验证共享 after-tree。已有同名 source-control collector未覆盖真实Service.diff的两次revision检查，新增场景不能静默替换旧workload。保持trust、证据收敛与崩溃恢复合同。原生客户端路线不在本轮实现范围。
+
+## 原始机会排名（2026-10-16，日常记录首次分析）
 
 来源：本机日常记录快照，两个 packaged build（0.2.192）：`d1464a62`（03:03–06:11 UTC，11181 条）与 `cafee00e`（06:11–08:11 UTC，14633 条）。成熟度：`single-session`，几乎全为 Pi，机器负载高且日志不记录负载。以下全部是**线索**，未经受控复现。
 
