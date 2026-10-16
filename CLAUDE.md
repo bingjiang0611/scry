@@ -75,6 +75,31 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 | 术语、架构、代码定位或首次安装 | [架构与地图](docs/agent/architecture.md) |
 | 修改对应领域/边界 | [检查清单](docs/agent/change-checklists.md)，只展开受影响领域 |
 | 普通代码、UI、跨边界或发布验证 | [验证与交付](docs/agent/verification.md)，按下述范围选择小节 |
+| 性能分析、优化、指标/门禁维护 | [持续性能闭环](docs/performance-loop.md)、`scry-performance-climb` skill |
+
+## 性能是默认要求
+
+用户每天在等：启动、打开会话、发送/停止、流式输出、轮次结束 diff、source-control 刷新、远程目录与终端。新代码默认按下面写；确实做不到时，在注释或提交说明里写明原因。
+
+### 写代码时的护栏
+
+- **不阻塞用户路径**：新代码在 main 的 IPC handler、trace 投递和 renderer 交互路径中不用同步 I/O 或同步子进程（`*Sync`、`execSync`）。非必需工作（diff、用量、指纹、目录扫描）移出关键路径，但不能因此提前提交证据：结果到达前显示“刷新中/来源时间”，recorder 仍等证据收敛。
+- **不重复做**：一次刷新内不重复调用同一 git/文件/SQLite 查询；能一条命令拿到的不拆成多条；相同的并发请求合并为一个进行中的请求；大对象只 parse/stringify 一次。
+- **有上限**：列表、历史、日志、IPC payload、DOM 节点和内存缓存都分页或设上限。IPC 只传本次渲染需要的数据或增量，不传整份 transcript/归档。
+- **事件优先于轮询**：确需轮询时要退避、窗口不可见时暂停、同一时刻只有一个请求。
+- **缓存要诚实**：缓存键包含所有影响结果的输入（cwd、revision、provider/profile、mtime 等），能失效、有上限；可能过期的数据要标出来源时间，不能当作当前事实。
+- **renderer**：长列表虚拟化；流式更新按帧合并；不交替读写布局造成强制 layout；卸载时清理 listener、timer、observer 和订阅。
+- **可观测**：特权 IPC 用 `handleTrusted` 注册（自动记录 `ipc.<channel>` 耗时），并在 `scripts/performance-paths.json` 映射到用户路径或列入 `excludedChannels`；`scripts/performance-feedback.test.ts` 会拒绝未分类的 channel。多阶段操作用 `new PerformanceTrace('<name>')` 记录阶段。
+
+### 遵守性能闭环
+
+- **指标诚实**：测不到写 `unavailable` + 原因，不记 0。毫秒结论注明机器负载。
+- **只降不升**：不手改 `scripts/performance-ratchet.json` 来放宽；门限或基线升高、删除指标都需要 `raise` 记录和 `performance-raise-approved` 批准。收紧用 `npm run performance:propose`。candidate 升为门禁需要稳定、敏感、相关三项证据，并经维护者确认。
+- **改热路径要测**：改动上述路径或 `performance-paths.json` 中 `sources` 列出的文件后，运行 `npm run performance:measure`（可加 `--scenario`）。报告里每个 `worse` 都要说明：是有意新增的必要工作，还是回归；回归先修。
+- **不骗计数**：测量代码（collector、`scripts/performance-*.mjs`、workload）与优化代码分开提交；不缩小 workload、不换调用方式、不把工作挪到不计数的地方来让数字变小。
+- **如实宣称**：说“更快”要写明级别——L1 计数下降、L2 受控或真实 App 毫秒下降、L3 发布后日常记录（同场景 ≥30 样本、≥2 会话）——并说明减少的工作去了哪里。不用 L1 冒充 L2/L3。
+- **测速纪律**：毫秒测量串行，经 `.agents/skills/scry-performance-climb/scripts/timing-run.mjs` 加锁；计数可并行。不为性能测试加 sleep、重试或扩大超时来变绿。
+- **日常记录**：`userData/performance` 只读、先快照再分析、不上传、不粘贴会话内容。改记录格式、保留策略或采集内容需维护者同意。
 
 ## 测试维护纪律
 
