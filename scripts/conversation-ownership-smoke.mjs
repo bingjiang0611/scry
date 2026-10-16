@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const json = path => JSON.parse(readFileSync(path, 'utf8'))
-const archiveFile = (userData, cwd, sessionId, providerTurnId) => join(userData, 'trace-archive-turns-v1', 'codex',
+const archiveFile = (userData, cwd, sessionId, providerTurnId, providerId = 'codex') => join(userData, 'trace-archive-turns-v1', providerId,
   `cwd-${hash(cwd)}`, `sid-${hash(sessionId)}`, `turn-${hash(`provider\0${providerTurnId}`)}.json`)
 
 export { archiveFile as conversationFixtureArchivePath }

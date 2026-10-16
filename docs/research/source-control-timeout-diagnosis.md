@@ -64,3 +64,19 @@ SCRY_SC_DIAGNOSTICS="$PWD/diagnostics/alone.jsonl" npm run test:unit -- \
 - 全量 unit/首轮 UI 日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`。
 - 最终 UI/CLI/artifact 日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7de9e98b4acfcb81.log`。首轮 UI cache fixture 有一次未定位的泛化执行异常；补充异常透传后定向与完整运行通过，不把它算作 Git 超时或已修复问题。
 - 若还需消除宿主启动长尾，由维护者安排可控负载的宿主测量，继续分离调度/装载/安全检查阶段；不删除执行前权限或 fingerprint 校验来降低进程次数。
+
+## 统一会话删除期间的 remote-workbench 复现（2026-10-16）
+
+`src/renderer/remote-workbench.test.ts` 的真实 Git stage/draft/跨工作区拒绝用例也曾使用默认 5 秒预算。原始无探针全量失败见 `pi-bash-f9915b62d783d653.log`（完整路径见统一会话计划第 10 节）。不是根据重跑通过推断原因：这次继续在隔离副本使用上述相同 ScProcess + Git Trace2 探针，未修改产品 process.ts。
+
+| 范围 | 实测 | 证据 |
+| --- | --- | --- |
+| focused，原 5 秒预算 | 通过，2637 ms；61 次 ScProcess Git 调用，另有 fixture 直接 Git 初始化/读回 | `/tmp/scry-delete-control-1DKj3Z/remote-timing.log` 与 `remote-timing-summary.json`；61 次共 2179 ms，Git Trace2 自报阶段合计 228 ms |
+| 完整隔离 suite，原 5 秒预算 | 同一用例再次超时；3216 通过、1 失败、3 跳过 | `/tmp/scry-delete-full-diagnostic-654NUf/full-unit.log`；identity 初始化竞态修复在此运行中通过 |
+| 失败 workspace 的已归属采样 | 34 次 Git 共 3532 ms，其中 child wait 3489 ms、同步 spawn 31 ms、环境准备 7 ms、close 等待 3 ms；Git Trace2 自报阶段 475 ms | `remote-groups.json` 的 `scry-desktop-workbench-Skz6YZ` 组；其他同前缀 workspace 分组单列，没有混算 |
+
+失败采样已执行实际 `git add -A -- file.txt`，随后仍在读回；不是跨工作区拒绝断言被跳过，也不是单条 Git 永久挂死。总体时间还包含未进入上述采样的 fixture 同步 Git、文件持久化及测试逻辑。Git Trace2 与 Node 时间指标并非互斥分段，不能简单相加；证据支持子进程启动/等待成本累积，但不能进一步确定宿主调度、装载或安全检查中的具体原因。
+
+据此可采用与原 source-control integration suite 相同的 15 秒预算，仅限这一条真实 Git 集成测试；不改默认 workers、生产进程 timeout、断言或自动重试。并行工作合入的 `18d8471` 已包含此预算，本次删除提交不重复修改该测试。最新该文件 7 项 focused 通过；若以后 15 秒仍失败，应重新采集时序，而不是继续加时限。
+
+这项诊断不能代替另一个 `src/main/remote/remote-workspace.test.ts` 的 Git diff 超时、Pi RPC 超时或 Vitest worker `onTaskUpdate` 超时分析。新基线最新全量仍有该 remote-workspace 用例失败及 worker error；详见 [统一会话计划第 10 节](provider-handoff-technical-plan.md#10-独占副本删除与部分失败恢复2026-10-16)。这些问题保留为后续专项，不用本次 focused 通过抹掉。

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
+import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
 
 const json = JSON.stringify
 const inputs = (fixture) => existsSync(fixture.inputsFile) ? readFileSync(fixture.inputsFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : []
@@ -249,6 +250,8 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
 
   const management = await exerciseConversationManagement({ cdp, evaluate, fixture, id, click, button, key, wait, read, inputs, ledger, capture, captureNarrow })
 
+  const deletion = await exerciseConversationDeletion({ cdp, evaluate, fixture, click, button, key, wait, read, preview, settled, sendRequest, inputs, ledger, capture, captureNarrow })
+
   // Exercise the actual registered legacy/adoption/Steer handlers while a
   // managed Provider is waiting for an answer, not just a store/controller mock.
   const liveConversation = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
@@ -322,7 +325,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   assert.equal(inputs(fixture).length, invocationCount)
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
-    duplicate, management, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
+    duplicate, management, deletion, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
 }
 
 export async function verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity) {
@@ -349,5 +352,6 @@ export async function verifyUnifiedConversationRestart(evaluate, fixture, result
   const next = await preview(evaluate, result.id, 'claude')
   assert.equal(next.continuation.kind, changedIdentity ? 'fresh' : 'resume')
   assert.equal(next.missingItems.length, changedIdentity ? 6 : 0)
+  await verifyConversationDeletionRestart(evaluate, fixture, result.deletion, inputs)
   assert.deepEqual(inputs(fixture), result.receipts, 'restart/read/preview/duplicate must not execute the Provider again')
 }

@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：Claude/Codex 统一会话的生产 main/preload/UI 主链路已接通，隔离 Electron 已验证 A→B→A、完整正文预览、实际文件效果、归档故障和两次重启不重发。身份验证仍是合成配置/transport；没有真实账号验收。已补受限旧会话迁入和 logical rename/pin/archive/restore；第 6 节的 delete/fork 与其余相邻动作仍未完成，因此不能宣称整个第 4 项已完整交付。最新证据与限制见第 8、9 节；此前各阶段记录保留当时的验收范围。**
+**当前进度：Claude/Codex 统一会话的生产 main/preload/UI 主链路已接通，隔离 Electron 已验证 A→B→A、完整正文预览、实际文件效果、归档故障和两次重启不重发。身份验证仍是合成配置/transport；没有真实账号验收。已补受限旧会话迁入、logical rename/pin/archive/restore，以及独占 App 副本删除和部分失败恢复；共享副本保守保留整组。第 6 节的原生 fork、共享副本显式回收及其余相邻动作仍未完成，因此不能宣称整个第 4 项已完整交付。最新证据与限制见第 8–10 节；此前各阶段记录保留当时的验收范围。**
 
 ## 1. 用户合同
 
@@ -314,4 +314,52 @@
 
 ### 下一责任动作
 
-本任务继续实现 logical delete/fork 的全 binding/attempt 范围、共享归档保留、活动运行阻断与部分删除恢复；不能把当前 rename/pin/archive/restore 当成完整管理闭环。真实账号仍等待维护者明确授权；本轮不推送、不安装、不发布。
+本任务继续实现 logical delete/fork 的全 binding/attempt 范围、共享归档保留、活动运行阻断与部分删除恢复；不能把当前 rename/pin/archive/restore 当成完整管理闭环。真实账号仍等待维护者明确授权；本轮不推送、不安装、不发布。后续删除进度见第 10 节。
+
+## 10. 独占副本删除与部分失败恢复（2026-10-16）
+
+### 本次实现和明确保留
+
+- 新增 `conversation:previewDeletion/delete`，renderer 只提交 logical ID 和确认指纹。main 从全部 bindings/attempts、catalog、SQLite 真实归属生成范围；在原 context admission 内复验 revision、共享引用和运行收敛，先原子发布 pending 删除围栏，再复用 `deleteOneSession/deleteOwnedSessionData`。没有旁路删除器或 Provider 调用。
+- 仅允许已存档、投递已收敛的会话。未知投递、活跃运行和未完成证据保存仍阻断。物理存储不按 profile 分隔：旧删除入口不能通过伪造另一 profile 绕过逻辑归属；普通 Native 运行身份仍按 profile 隔离。
+- Native ID、archive alias 与 run ID 分开。SQLite 的实际归属决定哪个目标清理 run 附件/恢复记录；未能确定或跨 scope 冲突时拒绝，不把别名当作权威。
+- 部分失败保留可重新预览的入口和回执。已开始删除不能恢复发送；旧 fingerprint 不自动继续，也不声称此前没有副作用。完成后隐藏条目、移除标题，并保留 ID/hash/归属及删除回执，防止旧命令、旧 Native 入口或重新迁入复活。
+- 私有交接正文只清理当前 conversation 的受控普通目录，拒绝目录符号链接。工作区文件、`.scry/`、Provider 原生历史、未归属计费聚合和未发送草稿保留；当前已删除页面仍可复制草稿。
+- **共享限制**：发现任一共享引用时，保留该逻辑会话整组原生 App 副本，只清理它独占的交接正文与逻辑入口。之后引用消失也不自动回收，目前没有单独回收入口；确认框明确说明。需要精确回收时，随 fork 引入显式引用回收计划，不能把本阶段算作共享数据的彻底物理删除。
+- UI 复用 ModalFrame。默认聚焦取消；结果聚焦关闭；删除触发按钮移除后回到“刷新证据”。部分失败显示“继续清理”，不把不可用正文显示为空历史。
+
+### 实际验证与版本
+
+开发从 `934e22c` 开始；期间并行工作合入 `eb67c3d` / App **0.2.194**，保留 `bd60826` 及其后续 remote/performance 成果。本次没有改版本。最终检查使用 macOS arm64、Node 24.18.0、Electron 42.10.1、CLI 0.2.49。
+
+| 检查 | 结果 | 证据与边界 |
+| --- | --- | --- |
+| typecheck / build | 通过 | 最终 node/web 检查及生产构建；8 个产物 hash 与最终 UI 证据匹配 |
+| focused unit | 12 文件 / 128 测试通过 | 含 14 项删除测试、真实临时 SQLite 别名路由、归属、迁入、历史、preload、identity 和 remote 边界 |
+| 隐藏生产 IPC/UI | 通过 | 全部场景共 10 次合成 Provider 调用、2 次重启；删除自身不调用 Provider。真实清理 Claude/Codex 两份归档、SQLite 恰少 2 轮；工作区文件及 `.scry` 哨兵不变 |
+| 部分失败和拒绝 | 通过 | 真实私有目录换为符号链接后拒绝删除其目标、保留 pending；显式修复后重新预览并完成。取消、陈旧指纹、伪造 profile、旧命令和旧删除入口均受检验 |
+| 重启 | 通过 | 完成状态、回执、归属阻断与不重发通过两次完整 App 重启；pending 删除冷加载恢复另由 store 单测验证，不冒充完整 App 中途崩溃恢复 |
+| 负对照 | 按预期失败 | 隔离副本去掉目录校验后两项拒绝断言失败；错误按 Native 别名分配 run 后真实 SQLite 路由断言失败 |
+| 完整 renderer UI | 最终通过 | 含 Credits、remote workbench、source control 与统一会话；仍不是前台 OS、手机或真实账号验收 |
+| 最新全量 unit | **未全绿** | 新基线 3252 通过、1 失败、4 跳过，另有 Vitest `onTaskUpdate` worker 超时。失败为未改动的 `remote-workspace` 5 秒 Git diff 用例；focused 通过不抹掉此结果 |
+| CLI / shell / 开发包 | 通过 | CLI 32 文件 / 587 测试、临时 tarball smoke、shell；开发包 298718180 bytes，packaged security/crash/remote smoke 通过；无正式签名、公证、安装或发布 |
+
+### 保留的失败与诊断
+
+- 首次新增删除 smoke 误读不存在的 `remote-effect.txt`；真实 fixture 写 `remote-first.txt`。改为先读取已存在的工作区文件，再比较删除前后内容，没有删减文件副作用断言。
+- identity 测试同时 `mkdir(home)` 与递归创建 `home/.claude`，实测触发 `EEXIST`。只移除冗余父目录创建；在隔离副本强制子目录先完成，旧设置失败、修复后同序通过，所有认证断言不变。
+- `remote-workbench` 5 秒失败在隔离全量中复现，并采集真实 Git 时序；详见 [Git 超时诊断](source-control-timeout-diagnosis.md#统一会话删除期间的-remote-workbench-复现2026-10-16)。当前合入的 `18d8471` 已给同一用例采用既有 15 秒真实 Git 预算；本次不重复修改该文件，不宣称宿主启动长尾消失。
+- 较早全量的 Pi `unrelated/later-toolUse` 两项 5 秒超时保留；4 项相关 focused 场景通过，未改 Pi 生产代码、断言或预算，不宣称已定位其时序根因。
+- Meta Prompts 曾在搜索 `not found` 时得到空搜索值而非零结果。随后未重现；保留现有焦点/值读回，补充最近 40 条原生搜索事件和焦点诊断。最终 full UI 通过，不证明首轮或更早泛化异常的根因已解决。
+
+### 可读证据
+
+- 最终 focused / CLI / shell / package：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-c92f7408de647099.log`
+- 最终 UI 与 hash：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-YHv4A1/verification.json`；人工检查窄浅色确认框及深色部分失败截图，不冒充逐张检查。
+- 最新全量失败：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-0b5fc4fe9c60d02b.log`
+- 原始 identity / remote 失败：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-f9915b62d783d653.log`；Pi 失败：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-b15f0139690eb51b.log`；Meta Prompts 失败：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-eff2a7fbfec8dabf.log`
+- 负对照、identity 可控顺序及 focused Git 时序：`/tmp/scry-delete-control-1DKj3Z/`；完整 Git 诊断副本：`/tmp/scry-delete-full-diagnostic-654NUf/`。副本与日志保留；测试执行已结束，破坏性场景只使用临时数据。
+
+### 下一责任动作
+
+本任务接着实现按被选轮次的真实 owner/provider 路由的原生 fork、外部结果 unknown 围栏及共享引用显式回收；不能用纯 App 历史复制冒充原生 fork。维护者/本任务后续在可复现负载下补采 `remote-workspace`、Pi 和 worker 超时的时序；Meta Prompts 若再失败，使用本次事件记录定位。真实账号、手机及前台系统验收仍需授权。第 4 项尚未完整交付，本次不推送、不安装、不发布。

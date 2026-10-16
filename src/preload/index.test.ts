@@ -186,7 +186,7 @@ describe('preload IPC boundary', () => {
   })
 
   it('exposes only fixed conversation operations with their scoped arguments', async () => {
-    expect(Object.keys(api.conversations).sort()).toEqual(['adopt', 'create', 'list', 'preview', 'previewAdoption', 'read', 'readItem', 'send', 'update'])
+    expect(Object.keys(api.conversations).sort()).toEqual(['adopt', 'create', 'delete', 'list', 'preview', 'previewAdoption', 'previewDeletion', 'read', 'readItem', 'send', 'update'])
     await api.conversations.create('/workspace')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:create', '/workspace')
     await api.conversations.list('/workspace')
@@ -209,7 +209,11 @@ describe('preload IPC boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:adopt', source, 'fingerprint')
     await api.conversations.update('conversation-id', 2, { kind: 'pin', pinned: true })
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:update', 'conversation-id', 2, { kind: 'pin', pinned: true })
-    expect(electron.invoke).toHaveBeenCalledTimes(9)
+    await api.conversations.previewDeletion('conversation-id')
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewDeletion', 'conversation-id')
+    await api.conversations.delete('conversation-id', 'fingerprint')
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:delete', 'conversation-id', 'fingerprint')
+    expect(electron.invoke).toHaveBeenCalledTimes(11)
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

@@ -125,7 +125,7 @@ describe('provider continuation identity', () => {
     roots.push(root)
     const home = join(root, 'home')
     const project = join(root, 'project')
-    await Promise.all([mkdir(home), mkdir(join(project, '.claude'), { recursive: true }), mkdir(join(home, '.claude'), { recursive: true })])
+    await Promise.all([mkdir(join(project, '.claude'), { recursive: true }), mkdir(join(home, '.claude'), { recursive: true })])
     const binary = await executable(root)
     const settings = join(project, '.claude', 'settings.json')
     await writeFile(settings, JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://a.example', TELEMETRY: 'one' } }))
