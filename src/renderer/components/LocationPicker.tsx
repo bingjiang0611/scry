@@ -95,7 +95,12 @@ function MachineLocationPicker({
   useEffect(() => {
     if (!open) return
     setShown(current.machineId)
-    const focusTimer = window.setTimeout(() => menuRef.current?.querySelector<HTMLButtonElement>('button[aria-checked="true"], button:not(:disabled)')?.focus(), 0)
+    const focusTimer = window.setTimeout(() => {
+      const menu = menuRef.current
+      const target = menu?.querySelector<HTMLButtonElement>('button[aria-checked="true"]') ??
+        menu?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+      target?.focus()
+    }, 0)
     const dismissOnOutsidePointer = (event: PointerEvent): void => {
       if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setOpen(false)
     }

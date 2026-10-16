@@ -209,8 +209,8 @@ for (const method of ['workspaceList', 'workspaceRead', 'workspaceReadKnown', 'w
 window.desktopRemoteFixture = state
 window.refreshFixtureCatalog = () => refreshRemoteCatalog(connection.id)
 window.refreshFixtureConnections = refreshDesktopConnections
-for (const type of ['keydown', 'change']) document.addEventListener(type, event => {
-  state.uiEvents.push({ type, key: event.key, value: event.target.value, tag: event.target.tagName })
+for (const type of ['keydown', 'change', 'mousedown', 'click']) document.addEventListener(type, event => {
+  state.uiEvents.push({ type, key: event.key, value: event.target.value, tag: event.target.tagName, text: event.target.textContent?.slice(0, 100) })
   if (state.uiEvents.length > 24) state.uiEvents.shift()
 }, true)
 function Fixture() {
@@ -233,10 +233,13 @@ async function exercise(contents, capture) {
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
-  const pointFor = async (selector, text) => read(`(() => {
+  const pointFor = async (selector, text) => read(`(async () => {
     const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node => ${JSON.stringify(text ?? '')} === '' || node.textContent.includes(${JSON.stringify(text ?? '')}))
     if (!node) throw new Error('Missing control: ' + ${JSON.stringify(selector)})
     node.scrollIntoView({ block: 'center', inline: 'nearest' })
+    // Input hit testing uses the compositor's last frame, not a synchronous
+    // layout read immediately after scrolling.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     const rect = node.getBoundingClientRect()
     const point = { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
     if (rect.width <= 0 || rect.height <= 0 || document.elementFromPoint(point.x, point.y) !== node && !node.contains(document.elementFromPoint(point.x, point.y))) throw new Error('Control is not hit-testable: ' + ${JSON.stringify(selector)} + ' ' + JSON.stringify({ point, width: rect.width, height: rect.height, hit: document.elementFromPoint(point.x, point.y)?.outerHTML.slice(0, 300) }))
@@ -548,6 +551,14 @@ async function exercise(contents, capture) {
   check(await read(remoteShown), 'New conversation left the remote machine')
   const newConversationLocation = await read('document.querySelector(".location-button").getAttribute("aria-label")')
   check(newConversationLocation === '执行位置：Fixture desktop / /fixture/project-a', 'New conversation changed the project: ' + newConversationLocation)
+  // Opening on a remote draft must focus the checked machine, not the first
+  // enabled (local) machine and silently replace the project's column.
+  await click('.location-button')
+  await wait('document.querySelector(".location-menu") != null', 'remote draft picker reopened')
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  check(await read('document.activeElement?.getAttribute("data-machine-id") === "fixture-connection"'), 'Remote picker initial focus moved to local machine')
+  check(await read('document.querySelector(".location-custom-directory") != null'), 'Remote picker initial focus replaced remote projects with local folders')
+  await key('Escape')
   const afterNew = await fixture()
   check(afterNew.localNewSessions === localBefore, 'Remote new conversation called local newSession')
   check(afterNew.stopCalls.length === 1, 'Context switch stopped the previous remote run')
