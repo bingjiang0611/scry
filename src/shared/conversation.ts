@@ -78,6 +78,11 @@ export interface Conversation {
   id: string
   cwd: string
   revision: number
+  title?: string
+  pinnedAt?: number
+  archivedAt?: number
+  /** Fingerprint of the explicitly confirmed legacy capture; original binding stays retired. */
+  adoptionFingerprint?: string
   bindings: ConversationBinding[]
   turns: ConversationTurn[]
 }

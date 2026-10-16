@@ -34,11 +34,14 @@ export class HistoricalInput {
   }
 
   text(prompt: string, nativeSkill = false): string {
-    if (!this.receipt) return prompt
-    if (this.request.prompt.trimStart().startsWith('/') && !nativeSkill) {
+    if (this.receipt && this.request.prompt.trimStart().startsWith('/') && !nativeSkill) {
       throw new Error('原生斜杠命令不能作为可验证的普通会话输入；请先发送普通请求')
     }
-    return (this.prefix ?? '') + prompt
+    const text = (this.prefix ?? '') + prompt
+    if (this.request.expectedInputTextHash && hash(text) !== this.request.expectedInputTextHash) {
+      throw new Error('原生输入需要改写原文；统一对话暂不支持此原生命令（如 Codex $skill），输入未投递')
+    }
+    return text
   }
 
   /** Call immediately before the native input operation, not on session creation. */

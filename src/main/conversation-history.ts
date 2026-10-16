@@ -81,7 +81,7 @@ async function fullText(userData: string, cwd: string, event: TraceEvent, budget
   return body.content
 }
 
-async function assistantText(userData: string, conversation: Conversation, turn: TraceArchiveTurn, budget: ReadBudget): Promise<string> {
+async function assistantText(userData: string, conversation: Pick<Conversation, 'cwd'>, turn: TraceArchiveTurn, budget: ReadBudget): Promise<string> {
   const projected: TraceEvent[] = []
   for (const event of turn.items) {
     if (visibleText(event)) {
@@ -101,18 +101,41 @@ async function assistantText(userData: string, conversation: Conversation, turn:
   return bodies.join('\n\n')
 }
 
+/** Build immutable App-visible refs from the same complete-body extractor used for handoff. */
+export async function conversationItemsFromTrace(input: {
+  userData: string
+  conversation: Pick<Conversation, 'cwd'>
+  runId: string
+  userText: string
+  items: TraceEvent[]
+}): Promise<ConversationItemRef[]> {
+  const budget: ReadBudget = { textBytes: 0 }
+  const user = stripAttachmentMetadata(input.userText)
+  const refs: ConversationItemRef[] = [{ runId: input.runId, itemId: 'user', contentHash: hash(user) }]
+  const assistant = await assistantText(input.userData, input.conversation, {
+    ts: Date.now(),
+    runId: input.runId,
+    userText: input.userText,
+    items: input.items,
+    done: true,
+    status: 'completed'
+  }, budget)
+  if (assistant.length > 0) refs.push({ runId: input.runId, itemId: 'assistant', contentHash: hash(assistant) })
+  return refs
+}
+
 function contextFor(messages: HistoryMessage[]): ProviderHistoricalContext {
   // JSON preserves role boundaries and code whitespace; metadata is main-owned, never parsed from prose.
   const text = JSON.stringify({ source: 'scry_archive_captured_text', messages })
   return { text, contentHash: hash(text) }
 }
 
-/** Main supplies a decoded conversation and an ordered, already-authorized selection. */
-export async function prepareConversationHistory(
+/** Read-only projection shared by preview and sealing; never substitutes excerpts. */
+async function readConversationHistoryMessages(
   userData: string,
   conversation: Conversation,
   selectedItems: ConversationItemRef[]
-): Promise<ContentRef> {
+): Promise<HistoryMessage[]> {
   if (!selectedItems.length) throw new Error('空历史不需要交接正文 artifact')
   const runIds = [...new Set(selectedItems.map((item) => item.runId))]
   if (runIds.length > MAX_TURNS) throw new Error('交接源超过 2000 轮读取预算')
@@ -152,6 +175,17 @@ export async function prepareConversationHistory(
   if (JSON.stringify(messages.map((message) => conversationItemKey(message.ref))) !== JSON.stringify(selectedItems.map(conversationItemKey))) {
     throw new Error('交接正文顺序与选择不一致')
   }
+  return messages
+}
+
+export async function readConversationHistoryItem(userData: string, conversation: Conversation, ref: ConversationItemRef): Promise<string> {
+  const [message] = await readConversationHistoryMessages(userData, conversation, [ref])
+  return message.text
+}
+
+/** Main supplies a decoded conversation and an ordered, already-authorized selection. */
+export async function prepareConversationHistory(userData: string, conversation: Conversation, selectedItems: ConversationItemRef[]): Promise<ContentRef> {
+  const messages = await readConversationHistoryMessages(userData, conversation, selectedItems)
   const context = contextFor(messages)
   const artifact: HistoryArtifact = {
     version: 1, conversationId: conversation.id, cwd: conversation.cwd, messages, context,

@@ -62,6 +62,23 @@ describe('durable native ownership shared with legacy writers', () => {
     await expect(store.assertLegacyWriteAllowed({ ...scope('native-A'), agentProfileId: 'another-profile' })).rejects.toThrow('归属')
   })
 
+  it('allows a separate fresh managed conversation without resolving or replaying another unknown delivery', async () => {
+    const unresolved = await store.create(cwd)
+    await begin(unresolved, 'unresolved-run')
+    await store.settle(unresolved.id, 'unresolved-run', { status: 'unknown', reason: 'lost receipt' }, [])
+    const another = await store.create(cwd)
+    await begin(another, 'another-run')
+    await expect(store.assertManagedWriteAllowed({ conversationId: another.id, cwd, target, runId: 'another-run' })).resolves.toBeUndefined()
+    expect((await store.read(unresolved.id))?.turns[0]).toMatchObject({ delivery: { status: 'unknown', reason: 'lost receipt' } })
+    expect((await store.read(another.id))?.bindings[0].nativeSessionId).toBeUndefined()
+    await store.settle(another.id, 'another-run', { status: 'not_sent', reason: 'test ended before dispatch' }, [])
+    const separate = await store.create(cwd)
+    const codex = { providerId: 'codex' as const, continuationKey: 'codex-home' }
+    await store.begin(separate.id, { expectedRevision: separate.revision, commandId: 'codex-command', runId: 'codex-run', target: codex,
+      payloadHash: createHash('sha256').update('codex').digest('hex'), items: [], selectedItems: [] })
+    await expect(store.assertManagedWriteAllowed({ conversationId: separate.id, cwd, target: codex, runId: 'codex-run' })).resolves.toBeUndefined()
+  })
+
   it('refuses duplicate adoption even when a caller changes continuationKey', async () => {
     await adopt()
     await expect(adopt('native-A', { ...target, continuationKey: 'changed-home' })).rejects.toThrow('其他统一对话')

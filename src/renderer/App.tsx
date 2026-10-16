@@ -14,6 +14,9 @@ import {
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
 import type { WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
+import { ConversationView } from './components/ConversationView'
+import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded, type ChatScrollBox } from './chat-scroll'
+import type { ConversationSummary } from '@shared/conversation-api'
 import { PaneSplitter } from './components/PaneSplitter'
 import { SessionChatView } from './components/ChatView'
 import { MetaPromptsView } from './components/MetaPromptsView'
@@ -75,7 +78,7 @@ import {
 const AnalyticsView = lazy(() => import('./components/AnalyticsView').then((module) => ({ default: module.AnalyticsView })))
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
-type AppView = 'chat' | 'analytics' | 'meta-prompts' | 'remote' | 'hosts'
+type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote' | 'hosts'
 
 // A conversation on a saved remote desktop. `generation` remounts the remote
 // controller for every opened location, so no run/session state leaks between them.
@@ -95,7 +98,6 @@ const SIDEBAR_MIN = 190
 const SIDEBAR_MAX = 260
 const PANEL_MIN = 360
 const PANEL_MAX = 960
-const CHAT_BOTTOM_STICKY_PX = 32
 const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 
 export function providerContextCacheKey(context: ProviderContext): string {
@@ -168,43 +170,8 @@ export function failedSlashCatalog<T, V>(
   return { commands: [], reason: error instanceof Error ? error.message : String(error) }
 }
 
-interface ChatScrollBox {
-  scrollHeight: number
-  scrollTop: number
-  clientHeight: number
-  scrollTo: (options: { top: number; behavior?: ScrollBehavior }) => void
-}
-
 interface ChatScrollTarget {
   getBoundingClientRect: () => { top: number; height?: number }
-}
-
-export function chatBottomDistance(el: Pick<ChatScrollBox, 'scrollHeight' | 'scrollTop' | 'clientHeight'>): number {
-  return el.scrollHeight - el.scrollTop - el.clientHeight
-}
-
-export function isChatNearBottom(
-  el: Pick<ChatScrollBox, 'scrollHeight' | 'scrollTop' | 'clientHeight'>,
-  threshold = CHAT_BOTTOM_STICKY_PX
-): boolean {
-  return chatBottomDistance(el) <= threshold
-}
-
-export function scrollChatToBottomIfNeeded(
-  el: ChatScrollBox | null,
-  shouldStick: boolean,
-  behavior: ScrollBehavior = 'auto'
-): boolean {
-  if (!el || !shouldStick) return false
-  el.scrollTo({ top: el.scrollHeight, behavior })
-  return true
-}
-
-export function chatBottomStickinessAfterScroll(
-  el: Pick<ChatScrollBox, 'scrollHeight' | 'scrollTop' | 'clientHeight'>,
-  openingSession: boolean
-): boolean {
-  return openingSession || isChatNearBottom(el)
 }
 
 export function scrollChatTargetIntoView(
@@ -701,7 +668,7 @@ export function addRunningRunId(previous: ReadonlySet<string>, runId: string, te
 }
 
 export function shouldReloadProjectsForDataUpdate(event: { kind?: string }): boolean {
-  return event.kind === 'session_deleted'
+  return event.kind === 'session_deleted' || event.kind === 'conversation_changed'
 }
 
 export function App() {
@@ -1012,6 +979,25 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const [view, setView] = useState<AppView>('chat')
+  const [logicalConversation, setLogicalConversation] = useState<ConversationSummary>()
+  const [conversationError, setConversationError] = useState<string>()
+  const creatingConversation = useRef(false)
+  const logicalWorkspaceSelected = useRef(false)
+  useEffect(() => {
+    const selectingLogical = view === 'conversation' && logicalConversation !== undefined
+    if (!selectingLogical && !logicalWorkspaceSelected.current) return
+    logicalWorkspaceSelected.current = selectingLogical
+    let disposed = false
+    // File/content viewers use main's selected workspace, not the hidden native
+    // composer's cached cwd. Selection never adopts a native session or starts it.
+    void window.scry.setCwd(selectingLogical ? logicalConversation.cwd : cwd).catch((error) => {
+      if (disposed) return
+      const detail = error instanceof Error ? error.message : String(error)
+      if (selectingLogical) setConversationError(detail)
+      else setComposerError(detail)
+    })
+    return () => { disposed = true }
+  }, [view, logicalConversation, cwd])
   const [remoteTarget, setRemoteTarget] = useState<RemoteTarget | null>(null)
   // Native session id adopted after the first run; keeps sidebar and workbench ownership aligned.
   const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
@@ -1335,39 +1321,8 @@ export function App() {
 
   useEffect(() => {
     const el = scrollRef.current
-    if (!el || typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') return
-
-    // A restored transcript does not finish laying out when React commits it:
-    // async markdown images, expanded evidence blocks and fonts can all increase
-    // a turn afterwards. Browser scroll anchoring may then leave the viewport in
-    // the middle. Observe the mounted turn boxes and keep following their bottom
-    // only while the user has not deliberately scrolled away.
-    let frame: number | null = null
-    const pinAfterLayout = (): void => {
-      if (!openingSessionBottomRef.current && !shouldStickToBottomRef.current) return
-      if (frame != null) return
-      frame = requestAnimationFrame(() => {
-        frame = null
-        scrollChatToBottomIfNeeded(scrollRef.current, true)
-      })
-    }
-    const resizeObserver = new ResizeObserver(pinAfterLayout)
-    const observeChildren = (): void => {
-      resizeObserver.observe(el)
-      for (const child of el.children) resizeObserver.observe(child)
-    }
-    const mutationObserver = new MutationObserver(() => {
-      observeChildren()
-      pinAfterLayout()
-    })
-    observeChildren()
-    mutationObserver.observe(el, { childList: true })
-
-    return () => {
-      mutationObserver.disconnect()
-      resizeObserver.disconnect()
-      if (frame != null) cancelAnimationFrame(frame)
-    }
+    if (!el) return
+    return observeChatBottomLayout(el, () => openingSessionBottomRef.current || shouldStickToBottomRef.current)
   }, [cwd, selectedProviderSessionId, view])
 
   useLayoutEffect(() => {
@@ -2040,11 +1995,30 @@ export function App() {
     }
     dispatchRightSurface({ type: 'hide' })
   }
-  const changeView = (next: AppView): void => {
-    if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return
+  const changeView = (next: AppView): boolean => {
+    if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return false
     setRemoteWorkspaceDirty(false)
     setView(next)
     if (next === 'analytics') integrations.loadAnalytics()
+    return true
+  }
+  const pickConversation = (conversation: ConversationSummary): void => {
+    if (!changeView('conversation')) return
+    setConversationError(undefined)
+    setLogicalConversation(conversation)
+  }
+  const createConversation = async (projectCwd: string): Promise<void> => {
+    if (creatingConversation.current || !changeView('conversation')) return
+    creatingConversation.current = true
+    setLogicalConversation(undefined)
+    setConversationError(undefined)
+    try {
+      const conversation = await window.scry.conversations.create(projectCwd)
+      setLogicalConversation(conversation)
+      await loadProjects()
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : String(error))
+    } finally { creatingConversation.current = false }
   }
   const closeOverlays = (): void => {
     setShowSettings(false)
@@ -2384,6 +2358,8 @@ export function App() {
     onArchive: useEventCallback(archiveSession),
     onRenameSession: useEventCallback(renameSession),
     onNewProjectChat: useEventCallback(newConversationInProject),
+    onNewConversation: useEventCallback(createConversation),
+    onPickConversation: useEventCallback(pickConversation),
     onToggleProjectPin: useEventCallback(toggleProjectPin),
     onRenameProject: useEventCallback(renameProject),
     onRemoveProject: useEventCallback(removeProject),
@@ -2406,8 +2382,9 @@ export function App() {
           id="sidebar-pane"
           version={packageJson.version}
           projects={projects}
-          activeCwd={view === 'remote' ? null : cwd}
-          activeSessionId={view === 'remote' ? null : activeSessionId}
+          activeCwd={view === 'conversation' ? logicalConversation?.cwd ?? null : view === 'remote' ? null : cwd}
+          activeSessionId={view === 'remote' || view === 'conversation' ? null : activeSessionId}
+          activeConversationId={view === 'conversation' ? logicalConversation?.id : undefined}
           hostsActive={view === 'hosts'}
           activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
           activeProviderId={integrations.selectedProviderId}
@@ -2437,7 +2414,13 @@ export function App() {
       <div className="main-area" id="main-pane">
         <>
         {view !== 'chat' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
-        {view === 'hosts' ? (
+        {view === 'conversation' ? (
+          <>
+            {conversationError && <p role="alert">{conversationError}</p>}
+            {logicalConversation ? <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} onChanged={() => { void loadProjects() }} />
+              : !conversationError && <p role="status">正在创建统一对话…</p>}
+          </>
+        ) : view === 'hosts' ? (
           <HostsView onNewSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} />
         ) : view === 'remote' && remoteTarget ? (
           <RemoteView

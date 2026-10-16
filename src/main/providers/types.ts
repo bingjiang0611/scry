@@ -128,6 +128,10 @@ export interface ProviderRunRequest {
   openCodePluginTrust?: OpenCodeProjectPluginAuthorization
   managedRecorder?: boolean
   managedRecorderIdentity?: { runId: string; promptHash: string }
+  /** Frozen by preview and revalidated at the adapter's actual transport boundary. */
+  expectedContinuationKey?: string
+  /** Frozen plain-text input contract; reject native rewrites before dispatch. */
+  expectedInputTextHash?: string
   mcpExecution?: AuthorizedMcpExecution
   emit: (event: TraceEvent) => void
   /**
@@ -207,6 +211,12 @@ export interface SessionEvidenceFacet {
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
+  /**
+   * Stable identity of the actual transport/auth home used by run(). The key is
+   * opaque and may be conservative (a credential refresh can require fresh
+   * confirmation); it must never be inferred from a display label or model.
+   */
+  continuationKey?(context: ProviderContext): Promise<string> | string
   describe(): Promise<ProviderDescriptor>
   run(request: ProviderRunRequest): ProviderRunHandle
   /** Opt in after history wire input and native receipts (including ordinary input) are implemented. */

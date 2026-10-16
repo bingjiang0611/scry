@@ -25,8 +25,6 @@ import {
   sessionEvidenceGapAfterLoad,
   applySessionCapturedEffects,
   applyTurnDoneEffects,
-  chatBottomDistance,
-  chatBottomStickinessAfterScroll,
   commitDraftOnDispatch,
   dequeueStartedPrompt,
   enqueuePrompt,
@@ -35,7 +33,6 @@ import {
   hasSessionOverviewContext,
   inputAfterFailedSubmit,
   inputAfterSuccessfulSubmit,
-  isChatNearBottom,
   migrateSessionComposerDraft,
   migrateSessionPromptQueue,
   providerContextCacheKey,
@@ -48,12 +45,12 @@ import {
   dequeueStartedPromptFromSessions,
   type SessionComposerDraft,
   type SessionEvidenceGap,
-  scrollChatToBottomIfNeeded,
   scrollChatTargetIntoView,
   shouldQueuePrompt,
   shouldReloadProjectsForDataUpdate,
   takeNextQueuedPrompt
 } from '../App'
+import { chatBottomDistance, chatBottomStickinessAfterScroll, isChatNearBottom, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, RecorderContentPager, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
@@ -80,8 +77,9 @@ const ev = (e: Partial<TraceEvent> & { id: string; kind: TraceEvent['kind']; sta
 })
 
 describe('catalog data update policy', () => {
-  it('reloads projects only after a session deletion', () => {
+  it('reloads projects after session deletion or logical metadata changes', () => {
     expect(shouldReloadProjectsForDataUpdate({ kind: 'session_deleted' })).toBe(true)
+    expect(shouldReloadProjectsForDataUpdate({ kind: 'conversation_changed' })).toBe(true)
     expect(shouldReloadProjectsForDataUpdate({ kind: 'turn_recorded' })).toBe(false)
     expect(shouldReloadProjectsForDataUpdate({})).toBe(false)
   })

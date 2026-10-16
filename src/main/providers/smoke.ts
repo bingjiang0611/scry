@@ -3,10 +3,12 @@ import { writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
+import type { AgentSteerInput } from '../../shared/runtime'
+import { HistoricalInput } from './historical-input'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
-export function createSmokeProviderAdapter(): ProviderAdapter {
+export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' = 'codex'): ProviderAdapter {
   // Test-only entry receipts prove that a rejected production IPC never reached the
   // privileged adapter. This adapter itself requires the existing explicit smoke gate.
   const callsFile = process.env.SCRY_ELECTRON_SMOKE_CALLS
@@ -21,12 +23,14 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
   } : undefined
   return {
     forkSession,
-    id: 'codex',
-    runtimeProvider: 'codex_cli',
+    id: providerId,
+    runtimeProvider: providerId === 'claude' ? 'claude_sdk' : 'codex_cli',
+    historicalContext: true,
+    continuationKey: () => `${providerId}:smoke:${process.env.SCRY_ELECTRON_SMOKE_IDENTITY?.trim() || 'default'}`,
     describe: async () => ({
-      id: 'codex',
-      label: 'Codex Smoke Fixture',
-      runtimeProvider: 'codex_cli',
+      id: providerId,
+      label: `${providerId} Smoke Fixture`,
+      runtimeProvider: providerId === 'claude' ? 'claude_sdk' : 'codex_cli',
       transport: 'packaged smoke fixture',
       available: true,
       capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' },
@@ -34,7 +38,12 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
     }),
     run: (request) => {
       recordCall('run', request.runId)
+      const history = new HistoricalInput(request)
+      const outgoingPrompt = history.text(request.prompt)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
+      const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
+      if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, runId: request.runId, prompt: request.prompt,
+        resume: request.resume ?? null, sessionId, historicalContext: request.historicalContext ?? null, outgoingPrompt })}\n`)
       let stopped = false
       const composerProbe = request.prompt.startsWith('native composer ')
       const deferredNativeTurn = request.prompt.startsWith('native composer stop-immediate ')
@@ -42,8 +51,14 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
       const promise = Promise.resolve().then(async () => {
         const startedAt = Date.now()
         if (!deferredNativeTurn) request.onExternalSessionId?.(sessionId)
+        if (inputsFile) request.emit({ id: `${request.runId}:steer-capability`, runId: request.runId, ts: new Date().toISOString(),
+          kind: 'harness', stage: 'runtime:steer_capability', steerCapability: { status: 'available', attachments: false } })
+        if (request.trackInputReceipt) {
+          history.attempting(outgoingPrompt)
+          if (providerId === 'codex' && request.prompt !== 'conversation unknown input') history.accepted(sessionId, 'codex_turn_start_response', `${request.runId}:provider-turn`)
+        }
         if (request.managedRecorder && request.cwd) {
-          await handleRecorderHook({ provider: 'codex', event: 'UserPromptSubmit', workspace: request.cwd, managed: true,
+          await handleRecorderHook({ provider: providerId, event: 'UserPromptSubmit', workspace: request.cwd, managed: true,
             payload: { session_id: sessionId, turn_id: deferredNativeTurn ? undefined : `${request.runId}:provider-turn`, prompt: request.prompt, timestamp: new Date().toISOString() } })
         }
         if (composerProbe) {
@@ -69,7 +84,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           request.emit({ id: `${request.runId}:performance-text`, runId: request.runId, ts: new Date().toISOString(),
             kind: 'model', stage: 'text_delta', text: 'main observer performance fixture' })
           if (!request.requestUserInput) throw new Error('Performance smoke requires requestUserInput')
-          await request.requestUserInput({ runId: request.runId, questionId: `${request.runId}:performance`, providerId: 'codex',
+          await request.requestUserInput({ runId: request.runId, questionId: `${request.runId}:performance`, providerId,
             questions: [{ header: 'Performance fixture', question: 'Keep this isolated run open?', options: [], multiSelect: false }]
           }, questionAbort.signal)
         }
@@ -80,7 +95,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
             await request.requestUserInput({
               runId: request.runId,
               questionId: `${request.runId}:question:${step}`,
-              providerId: 'codex',
+              providerId,
               questions: [{
                 header: 'Dock badge',
                 question: 'Continue the isolated badge smoke?',
@@ -95,9 +110,9 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
             kind: 'harness', stage: 'result', text: 'fixture interrupted', durationMs: Date.now() - startedAt })
           return { externalSessionId: sessionId, providerTurnId: deferredNativeTurn ? undefined : `${request.runId}:provider-turn`, stopped, status: 'interrupted' as const }
         }
-        if (request.prompt === 'desktop remote write one' || request.prompt === 'desktop remote write two') {
+        if (['desktop remote write one', 'desktop remote write two', 'desktop remote write three'].includes(request.prompt)) {
           if (!request.cwd) throw new Error('remote write fixture requires a workspace')
-          const path = request.prompt.endsWith('one') ? 'remote-first.txt' : 'remote-second.txt'
+          const path = request.prompt.endsWith('one') ? 'remote-first.txt' : request.prompt.endsWith('two') ? 'remote-second.txt' : 'remote-third.txt'
           await writeFile(join(request.cwd, path), `${path}\n`)
           request.emit({ id: `${request.runId}:write`, runId: request.runId, ts: new Date().toISOString(),
             kind: 'tool', stage: 'tool_result', tool: 'Write', toolUseId: `${request.runId}:write`,
@@ -169,6 +184,7 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
           tokensOut: 4,
           durationMs: 5
         })
+        if (request.trackInputReceipt && providerId === 'claude' && !stopped) history.accepted(sessionId, 'claude_sdk_success_result', `${request.runId}:provider-turn`)
         return {
           externalSessionId: sessionId,
           providerTurnId: `${request.runId}:provider-turn`,
@@ -188,7 +204,12 @@ export function createSmokeProviderAdapter(): ProviderAdapter {
         },
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => sessionId,
-        getProviderTurnId: () => deferredNativeTurn ? undefined : `${request.runId}:provider-turn`
+        getProviderTurnId: () => deferredNativeTurn ? undefined : `${request.runId}:provider-turn`,
+        getInputReceipt: () => history.snapshot(),
+        ...(inputsFile ? { steer: async (input: AgentSteerInput) => {
+          appendFileSync(inputsFile, `${JSON.stringify({ operation: 'steer', providerId, runId: request.runId, prompt: input.prompt })}\n`)
+          return { status: 'accepted' as const }
+        } } : {})
       }
     },
     hookTrust: {

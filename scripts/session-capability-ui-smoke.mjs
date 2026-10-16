@@ -617,7 +617,7 @@ async function exerciseSessionTerminals(contents, scenario) {
     await wait(`document.querySelector('.chat').textContent.includes('History for ${id}')`)
   }
   // Use data-project-path so Sidebar grouping/header layout cannot flatten identity.
-  const session = (project, index) => `.sb-proj:has([data-project-path="/fixture/${project}"]) .sb-sess-row:nth-child(${index}) .sb-sess`
+  const session = (project, index) => `.sb-proj:has([data-project-path="/fixture/${project}"]) .sb-sess-row:nth-child(${index} of .sb-sess-row) .sb-sess`
   await wait(`document.querySelectorAll('.sb-sess').length === 3`)
   await select(session('old', 1), 'one')
   await click('[aria-label="右侧工作区"]')
@@ -782,7 +782,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   const pickSession = async (text) => {
     const index = await read(`[...document.querySelectorAll('.sb-sess')].findIndex(node => node.textContent.includes(${JSON.stringify(text)}))`)
     if (index < 0) throw new Error(`Missing session ${text}`)
-    await click(`.sb-sess-row:nth-child(${index + 1}) .sb-sess`)
+    await click(`.sb-sess-row:nth-child(${index + 1} of .sb-sess-row) .sb-sess`)
   }
   const modelIs = (id) => `document.querySelector('.model-effort-model')?.textContent === ${JSON.stringify(id)}`
   const chooseModel = async (id) => {
@@ -1268,7 +1268,7 @@ try {
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
       win.webContents.on('console-message', logRendererError)
-      let fixtureContents = win.webContents
+      let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
         if (${fixtures.includes('session-cache')}) {
@@ -1279,16 +1279,16 @@ try {
         }
         if (${fixtures.includes('meta-prompts')}) {
           const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
-          fixtureContents = metaWin.webContents
           metaWin.webContents.on('console-message', logRendererError)
           const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
           require(${JSON.stringify(join(temp, 'meta-prompts-ipc.cjs'))}).registerMetaPromptsFixtureIpc(metaWin, metaUrl)
           metaWin.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
           metaWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+          diagnosticContents = metaWin.webContents
           await metaWin.loadFile(${JSON.stringify(join(temp, 'meta-prompts.html'))})
           result.metaPrompts = await (${exerciseMetaPrompts.toString()})(metaWin.webContents, metaWin, clipboard, ${JSON.stringify(process.env.SCRY_META_PROMPTS_SCREENSHOT ?? '')})
           metaWin.destroy()
-          fixtureContents = win.webContents
+          diagnosticContents = win.webContents
           ipcMain.removeHandler('app:copyText')
           if (${metaPromptsOnly}) {
             finish(result)
@@ -1359,8 +1359,8 @@ try {
         finish({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals })
       } catch (error) {
         console.error(error)
-        console.error('Failed fixture:', fixtureContents.getURL())
-        console.error('Fixture DOM:', await fixtureContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
+        console.error('Failed fixture:', diagnosticContents.getURL())
+        console.error('Fixture DOM:', await diagnosticContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
         app.exit(1)
       }
     }).catch(error => { console.error(error); app.exit(1) })

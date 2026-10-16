@@ -2,8 +2,12 @@
 export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPrefix) {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const read = async expression => {
-    const result = await contents.executeJavaScript(expression)
-    return result
+    const result = await contents.executeJavaScript(`(async () => {
+      try { return { ok: true, value: await (${expression}) } }
+      catch (error) { return { ok: false, error: String(error.stack ?? error) } }
+    })()`)
+    if (!result.ok) throw new Error(`Meta Prompts: ${result.error}`)
+    return result.value
   }
   const wait = async expression => {
     const deadline = Date.now() + 5000
