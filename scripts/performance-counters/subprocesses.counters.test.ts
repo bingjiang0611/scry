@@ -191,7 +191,8 @@ describe('fixed production subprocess work counters', () => {
             expect(sessionDiff.files.map(file => basename(file.path)).sort()).toEqual(['created.txt', 'file-1.txt'])
             expect(turnDiff.files.find(file => basename(file.path) === 'file-0.txt')?.patch).toContain('-round-one\n+base')
             expect(sessionDiff.files.find(file => basename(file.path) === 'file-1.txt')?.patch).toContain('+round-two')
-            expect(await readFile(join(repo, '.git/index'))).toEqual(indexBefore)
+            // Compare every byte without timing Vitest's per-byte object traversal.
+            expect((await readFile(join(repo, '.git/index'))).equals(indexBefore)).toBe(true)
             await expect(stat(turnDir)).rejects.toMatchObject({ code: 'ENOENT' })
             expect((await stat(baselineDir)).isDirectory()).toBe(true)
             samples.push({ totalMs: performance.now() - started, turnReadyMs })
@@ -213,7 +214,7 @@ describe('fixed production subprocess work counters', () => {
       ])
       if (process.env.SCRY_TERMINAL_PAIR_TIMINGS) {
         const { writeFileSync } = await import('node:fs')
-        writeFileSync(process.env.SCRY_TERMINAL_PAIR_TIMINGS, JSON.stringify({ workload: meta.workload, samples }, null, 2))
+        writeFileSync(process.env.SCRY_TERMINAL_PAIR_TIMINGS, JSON.stringify({ measurementVersion: 2, workload: meta.workload, samples }, null, 2))
       }
     } finally { vi.unstubAllEnvs() }
   }, 120_000)
