@@ -91,6 +91,23 @@ describe('Pi startup and probe lifecycle', () => {
     })
   })
 
+  it('keeps a completed read-only probe owned until exit when TERM is ignored', async () => {
+    await withProbeFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'stubborn'), '')
+      const kill = vi.spyOn(process, 'kill')
+      try {
+        const result = await probePiAgent(profile, cwd)
+        expect(result.commands).toEqual([{ name: 'fixture-menu', source: 'extension' }])
+        const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
+        const ownedSignals = kill.mock.calls.filter(([target]) => Math.abs(target) === pid).map(([, signal]) => signal)
+        expect(ownedSignals).toContain('SIGTERM')
+        expect(ownedSignals).toContain('SIGKILL')
+        expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
+        expect(readFileSync(join(cwd, 'commands'), 'utf8').trim().split('\n')).toHaveLength(4)
+      } finally { kill.mockRestore() }
+    })
+  })
+
   it('releases a failed flight so a later probe can recover', async () => {
     await withProbeFixture(async (profile, cwd, starts) => {
       writeFileSync(join(cwd, 'fail-probe'), '')

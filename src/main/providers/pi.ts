@@ -719,7 +719,7 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
     const modelRows = record(models.data).models
     const thinkingLevels = record(levels.data).levels
     const commandRows = record(commands.data).commands
-    return {
+    const snapshot: PiProbe = {
       state: record(state.data),
       models: Array.isArray(modelRows) ? modelRows.map(record) : [],
       levels: Array.isArray(thinkingLevels)
@@ -727,6 +727,11 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
         : [],
       commands: Array.isArray(commandRows) ? commandRows.map(record) : []
     }
+    // This offline/no-session process has finished all four reads, with no session writer to
+    // drain. Request TERM now instead of waiting for EOF grace; withPiRpc still confirms exit.
+    // Run/fork RPCs keep their existing graceful-close path and evidence convergence.
+    rpc.terminate()
+    return snapshot
   }).finally(() => { piProbesInFlight.delete(key) })
   piProbesInFlight.set(key, probe)
   return probe
