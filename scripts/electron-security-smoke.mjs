@@ -50,10 +50,12 @@ async function freePort() {
 }
 
 async function waitForTarget(port, timeoutMs = 30_000) {
+  let lastTargets = []
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
       const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
+      lastTargets = targets.map(({ type, title, url }) => ({ type, title, url }))
       // A file: target is published before Electron finishes creating its sandbox/preload
       // context. Do not enable Runtime/evaluate in that startup window. The static document
       // title is parsed after preload initialization; missing/broken preload still fails the
@@ -65,7 +67,7 @@ async function waitForTarget(port, timeoutMs = 30_000) {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100))
   }
-  throw new Error(`等待 Electron CDP target 超时\n${stderr.slice(-4000)}`)
+  throw new Error(`等待 Electron CDP target 超时；targets=${JSON.stringify(lastTargets)}；child=${JSON.stringify({ pid: child?.pid, exitCode: child?.exitCode, signalCode: child?.signalCode })}\n${stderr.slice(-4000)}`)
 }
 
 function connectCdp(url) {
@@ -240,8 +242,8 @@ async function main() {
     })
     child.stdout.on('data', (chunk) => { stderr += String(chunk) })
     child.stderr.on('data', (chunk) => { stderr += String(chunk) })
-    child.once('exit', (code) => {
-      if (code && code !== 0) stderr += `\nElectron exited ${code}`
+    child.once('exit', (code, signal) => {
+      stderr += `\nElectron exited code=${code} signal=${signal}`
     })
   }
   launchApp()

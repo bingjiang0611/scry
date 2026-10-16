@@ -68,7 +68,9 @@ describe('authenticated desktop workspace operations', () => {
     await expect(request('workspace', 'workspaceCreate', [{ cwd, name: 'bad', kind: 'file' }])).rejects.toThrow('not_authorized')
     expect(await readFile(join(other, 'protected.txt'), 'utf8')).toBe('unchanged')
   })
-  it('uses canonical source-control operations and rejects a repository reference from another workspace', async () => {
+  // This crosses the transport, repository authority and real Git service,
+  // so use the existing native-Git integration budget rather than the unit default.
+  it('uses canonical source-control operations and rejects a repository reference from another workspace', { timeout: 15_000 }, async () => {
     git('init', '-b', 'feature'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid'); git('config', 'commit.gpgsign', 'false')
     await writeFile(join(cwd, 'file.txt'), 'content')
     const snapshot = await service.read(cwd)
