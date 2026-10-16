@@ -81,7 +81,7 @@ async function fullText(userData: string, cwd: string, event: TraceEvent, budget
   return body.content
 }
 
-async function assistantText(userData: string, conversation: Pick<Conversation, 'id' | 'cwd'>, turn: TraceArchiveTurn, budget: ReadBudget): Promise<string> {
+async function assistantText(userData: string, conversation: Pick<Conversation, 'cwd'>, turn: TraceArchiveTurn, budget: ReadBudget): Promise<string> {
   const projected: TraceEvent[] = []
   for (const event of turn.items) {
     if (visibleText(event)) {
@@ -104,7 +104,7 @@ async function assistantText(userData: string, conversation: Pick<Conversation, 
 /** Build immutable App-visible refs from the same complete-body extractor used for handoff. */
 export async function conversationItemsFromTrace(input: {
   userData: string
-  conversation: Pick<Conversation, 'id' | 'cwd'>
+  conversation: Pick<Conversation, 'cwd'>
   runId: string
   userText: string
   items: TraceEvent[]

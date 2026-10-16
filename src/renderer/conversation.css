@@ -3,7 +3,7 @@
 .unified-header h1 { margin: 0 0 5px; font-size: 16px; }
 .unified-header small, .unified-header code, .unified-scope, .unified-pagination, .unified-turn > header { color: var(--dim); }
 .unified-header code { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.unified-pagination { display: flex; align-items: center; gap: 12px; padding: 10px 24px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.unified-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 24px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .unified-history { flex: 1; min-height: 0; overflow: auto; }
 .unified-empty { margin: 32px auto; max-width: 55ch; line-height: 1.8; }
 .unified-turn { margin-bottom: 28px; }
@@ -28,3 +28,5 @@
 .unified-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 .unified-conversation :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .unified-new { margin: 6px 0; width: 100%; }
+.unified-management { display: flex; flex-wrap: wrap; gap: 8px; }
+.unified-archived > summary { padding: 8px; color: var(--dim); cursor: pointer; }

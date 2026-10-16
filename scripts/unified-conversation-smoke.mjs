@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
+import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
 
 const json = JSON.stringify
 const inputs = (fixture) => existsSync(fixture.inputsFile) ? readFileSync(fixture.inputsFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : []
@@ -56,7 +57,8 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     await evaluate(`document.querySelector('button[data-unified-test-target]')?.removeAttribute('data-unified-test-target')`)
   }
   const key = async (key, code, windowsVirtualKeyCode) => {
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode,
+      ...(key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode })
   }
   const compose = async (prompt, direction) => {
@@ -175,11 +177,11 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     }
   }
   await capture('preview')
-  const captureNarrow = async (name) => {
+  const captureNarrow = async (name, selectors = ['.unified-conversation','.unified-header','.unified-pagination','.unified-composer','textarea[aria-label="统一对话消息"]','.unified-provider','.unified-scope']) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 800, deviceScaleFactor: 1, mobile: false })
     try {
       await capture(`${name}-narrow`)
-      const bounds = await evaluate(`['.unified-conversation','.unified-header','.unified-pagination','.unified-composer','textarea[aria-label="统一对话消息"]','.unified-provider','.unified-scope'].map(selector=>{const rect=document.querySelector(selector).getBoundingClientRect();return {selector,left:rect.left,right:rect.right,viewport:innerWidth}})`)
+      const bounds = await evaluate(`${json(selectors)}.map(selector=>{const rect=document.querySelector(selector).getBoundingClientRect();return {selector,left:rect.left,right:rect.right,viewport:innerWidth}})`)
       for (const rect of bounds) assert.ok(rect.left >= 0 && rect.right <= rect.viewport + 1,
         `desktop control clipped by an overflow-hidden ancestor: ${JSON.stringify(rect)}`)
     } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
@@ -245,6 +247,8 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     assert.ok(turn.history.items.some((item) => item.kind === 'model' && item.text === 'isolated remote assistant evidence'))
   }
 
+  const management = await exerciseConversationManagement({ cdp, evaluate, fixture, id, click, button, key, wait, read, inputs, ledger, capture, captureNarrow })
+
   // Exercise the actual registered legacy/adoption/Steer handlers while a
   // managed Provider is waiting for an answer, not just a store/controller mock.
   const liveConversation = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
@@ -252,6 +256,8 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const liveRequest = sendRequest(livePreview, 'live-guard-command', 'dock badge question smoke')
   const liveStart = await evaluate(`window.scry.conversations.send(${json(liveRequest)})`)
   const live = await wait(() => evaluate(`window.scry.activeRuns().then(runs=>runs.find(run=>run.runId===${json(liveStart.runId)} && run.pendingQuestions?.length))`), 'live managed question')
+  const liveRevision = (await read(evaluate, liveConversation.id)).summary.revision
+  assert.match(await evaluate(`window.scry.conversations.update(${json(liveConversation.id)},${liveRevision},{kind:'archive',archived:true}).then(()=>'',error=>String(error))`), /运行|投递未收敛/)
   const callsBefore = inputs(fixture)
   const bypass = await evaluate(`window.scry.start({providerId:'codex',cwd:${json(fixture.workspace)},prompt:'legacy bypass must not run',expectedExternalSessionId:null}).then(()=>null,error=>String(error))`)
   assert.match(bypass ?? '', /统一对话仍在执行或保存证据/)
@@ -316,7 +322,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   assert.equal(inputs(fixture).length, invocationCount)
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
-    duplicate, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
+    duplicate, management, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
 }
 
 export async function verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity) {
@@ -331,6 +337,15 @@ export async function verifyUnifiedConversationRestart(evaluate, fixture, result
   assert.equal(archiveFailure.turns[0].history, undefined)
   assert.ok(archiveFailure.summary.blockedReason)
   assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(result.duplicate)})`), { runId: result.runIds[2], disposition: 'duplicate' })
+  assert.equal(page.summary.title, result.management.originalTitle)
+  assert.ok(page.summary.pinnedAt)
+  const adopted = await read(evaluate, result.management.id)
+  assert.equal(adopted.turns[0].runId, result.management.runId)
+  assert.equal(adopted.turns[0].delivery.status, 'imported')
+  assert.equal(adopted.turns[1].runId, result.management.nextRunId)
+  assert.equal(adopted.turns[1].delivery.status, 'accepted')
+  assert.equal(adopted.bindings.length, 2)
+  assert.equal((await evaluate(`window.scry.conversations.adopt(${json(result.management.source)},${json(result.management.fingerprint)})`)).id, result.management.id)
   const next = await preview(evaluate, result.id, 'claude')
   assert.equal(next.continuation.kind, changedIdentity ? 'fresh' : 'resume')
   assert.equal(next.missingItems.length, changedIdentity ? 6 : 0)

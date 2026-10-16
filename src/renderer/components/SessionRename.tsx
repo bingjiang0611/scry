@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '@shared/session-title'
+import type { ConversationSummary } from '@shared/conversation-api'
+import { ConversationAdoptionDialog } from './ConversationAdoptionDialog'
 import type { SessionMeta } from '../env'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
@@ -12,12 +14,15 @@ export interface SessionMenuTarget {
   trigger: HTMLElement
 }
 
-export function SessionRenameMenu({ target, onRename, onClose }: {
+export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
   target: SessionMenuTarget
   onRename: (cwd: string, session: SessionMeta, title: string) => Promise<void>
+  onAdopted?: (conversation: ConversationSummary) => void
   onClose: () => void
 }) {
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState<'rename' | 'adopt'>()
+  const provider = target.session.providerId
+  const canAdopt = Boolean(onAdopted && !target.session.agentProfileId && (provider === 'claude' || provider === 'codex'))
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (editing) return
@@ -26,6 +31,12 @@ export function SessionRenameMenu({ target, onRename, onClose }: {
       if (event.target instanceof Node && !menuRef.current?.contains(event.target)) onClose()
     }
     const key = (event: KeyboardEvent): void => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+        buttons[(index + (event.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length]?.focus()
+      }
       if (event.key === 'Escape' || event.key === 'Tab') {
         event.preventDefault()
         onClose()
@@ -38,14 +49,18 @@ export function SessionRenameMenu({ target, onRename, onClose }: {
       document.removeEventListener('keydown', key)
     }
   }, [editing, onClose])
-  if (editing) return <SessionRenameDialog title={target.session.preview}
+  if (editing === 'adopt' && onAdopted && (provider === 'claude' || provider === 'codex')) return <ConversationAdoptionDialog
+    source={{ providerId: provider, cwd: target.cwd, externalSessionId: target.session.externalSessionId ?? target.session.sessionId }}
+    onAdopted={onAdopted} onClose={onClose} />
+  if (editing === 'rename') return <SessionRenameDialog title={target.session.preview}
     onSave={(title) => onRename(target.cwd, target.session, title)} onClose={onClose} />
   return (
     <div ref={menuRef} role="menu" aria-label="会话操作" className="menu sb-session-menu"
-      style={{ left: target.left, top: target.top }}>
-      <button type="button" role="menuitem" className="mitem" onClick={() => setEditing(true)}>
+      style={{ left: target.left, top: Math.min(target.top, window.innerHeight - (canAdopt ? 96 : 48)) }}>
+      <button type="button" role="menuitem" className="mitem" onClick={() => setEditing('rename')}>
         <Icon name="edit" /> 重命名
       </button>
+      {canAdopt && <button type="button" role="menuitem" className="mitem" disabled={target.session.pending} onClick={() => setEditing('adopt')}>迁入已捕获历史…</button>}
     </div>
   )
 }

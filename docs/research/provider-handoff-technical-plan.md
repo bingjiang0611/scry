@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：Claude/Codex 统一会话的生产 main/preload/UI 主链路已接通，隔离 Electron 已验证 A→B→A、完整正文预览、实际文件效果、归档故障和两次重启不重发。身份验证仍是合成配置/transport；没有真实账号验收。第 6 节的旧会话迁移、会话级管理与全部相邻动作尚未完成，因此不能宣称整个第 4 项已完整交付。最新证据与限制见第 8 节；此前各阶段记录保留当时的验收范围。**
+**当前进度：Claude/Codex 统一会话的生产 main/preload/UI 主链路已接通，隔离 Electron 已验证 A→B→A、完整正文预览、实际文件效果、归档故障和两次重启不重发。身份验证仍是合成配置/transport；没有真实账号验收。已补受限旧会话迁入和 logical rename/pin/archive/restore；第 6 节的 delete/fork 与其余相邻动作仍未完成，因此不能宣称整个第 4 项已完整交付。最新证据与限制见第 8、9 节；此前各阶段记录保留当时的验收范围。**
 
 ## 1. 用户合同
 
@@ -272,6 +272,46 @@
 ### 仍未完成与下一责任动作
 
 1. **维护者授权后再执行**真实 Claude/Codex OAuth/API-key 三轮验收，使用临时工作区与最小凭据范围，不输出凭据。当前 Claude OAuth 依据稳定 account/org 配置，不等于已核验 keychain 或实时登录账户；动态 helper/cloud 不能证明时 fail closed。
-2. **本任务后续实现**第 6 节的 legacy 迁移、logical rename/pin/archive/delete/fork 与相邻动作；当前只有新建统一会话主链路，不用本次绿灯替代完整交付条件。
+2. **本任务后续实现**第 6 节的 delete/fork 与相邻动作；受限 legacy 迁入及 logical rename/pin/archive/restore 的后续进度见第 9 节，不用局部绿灯替代完整交付条件。
 3. 当前 UI 限 Claude/Codex 默认 profile、纯文本、默认模型/审批；附件、原生命令、Steer、其他 Provider 和长会话性能尚未接入完整合同。扩展时先补逐 Provider 的输入、receipt、身份和历史顺序证明，不静默放宽。
 4. 远端/手机接续、真实前台交互、Node 20/22 兼容矩阵、正式签名公证与用户安装未验证。packaged remote/workbench 本地 fixture 通过不等于手机或远端接续通过。
+
+## 9. 受限旧会话迁入与逻辑元数据（2026-10-16）
+
+### 本轮实现
+
+- 旧 Claude/Codex 默认 profile 的会话操作菜单增加“迁入已捕获历史”。只读预览核对 App 完整归档，明确不代表全部原生历史；没有可证明的原生接续身份时，旧绑定退休、`nativeItems: []`，后续必须明确新建原生上下文。
+- `conversation-adoption.ts` 复用权威全文投影，保留原 run/native/archive 身份和源文件。只接收 completed、纯文本、无 Steer 的捕获；预算为 2000 轮、16 MiB 归档，超限或损坏拒绝，不静默截断。需要扩大范围时，先实现对应 Provider 的完整读取和身份合同，再扩展预算或输入类型。
+- 来源、归档正文和源元数据参与确认指纹；迁入前在原 context admission 内阻断活跃/未收敛运行及删除，且在异步读取前预留源别名。先原子发布 ledger，再派生 catalog 隐藏旧别名；失败保留旧入口。同指纹只返回已发布的原 logical ID，不能借该指纹接入另一个 native binding。
+- 统一对话支持重命名、跨项目置顶、存档和恢复；使用 revision 和现有名称校验。存档保留草稿、历史、归属与用量，侧边栏提供已存档分组；禁止存档未收敛/unknown 投递，main 同时检查 RunRegistry 尚未完成的证据保存。旧 native/run 别名不能绕过逻辑管理入口。
+- 修正新管理通知缺少 payload 的问题，增加 `conversation_changed` typed envelope，不伪造 runId；全局 catalog 和会话缓存按正确事件更新。
+
+### 验证与失败记录
+
+| 检查 | 实际结果与范围 |
+| --- | --- |
+| typecheck / build | 最终源码通过；无升版本，App 0.2.191 / CLI 0.2.49，macOS arm64、Node 24.18.0 |
+| 新增 unit | `conversation-management.test.ts` 9 项：原子迁入/失败保留、指纹变化、重复提交、损坏归档、读取预算、unsupported/未收敛源、元数据与持久化、pending/unknown 存档阻断、严格 API 字段 |
+| 负对照 | 移除损坏分段拒绝条件后，`-t 'corrupt sibling'` 必须失败；恢复后 7 文件 / 327 测试通过。不是仅证明有效源可读取 |
+| 生产 IPC / 隐藏 UI | `npm run test:conversation:ipc` 最终通过。迁入真实 fixture 运行产生的归档，核对源字节、SQLite totals 不变、旧别名阻断、原生点击/Enter/菜单键盘导航、取消、草稿、存档恢复，以及迁入后明确新上下文发送和两次重启无重发。共 8 次合成 Provider 调用，无真实账号 |
+| 全量 unit | 本轮前一轮 255 文件 / 3202 测试通过、3 跳过；后续全量出现 Pi fork 与 remote workspace Git diff 两项 5 秒超时（3200 通过、3 跳过）。相关实现/测试未改；focused 连同本次相关检查 9 文件 / 420 测试通过。保留首轮失败，未证明 OS/资源长尾根因解决 |
+| 完整 renderer UI | 最终 `npm run test:renderer:ui` 通过，包含 Credits、remote/workbench、ownership 和 unified；随后最后一处 migration fingerprint/绑定核对加固再次通过 production IPC/UI。不是前台 OS/真实账号验收 |
+| CLI / shell | `check:cli-release` 32 文件 / 586 测试、本地 tarball 临时安装 smoke 通过；`test:shell` PASS |
+| 开发目录包 | 最终 `pack:artifact` 通过，298689930 bytes；包含 packaged security / crash recovery / remote workbench。关闭签名自动发现并清除发布凭据，未正式签名、公证或安装 |
+
+- 新 UI fixture 首轮重命名/菜单 Enter 未触发：输入驱动缺少 Enter 的 `text: '\r'`。补真实字符事件后验证 Enter 保存及菜单操作；悬浮菜单先发送原生 mouseMoved 并检查 hit target，未用程序化 click 绕过命中。迁移读预览等待实际 runtime settlement，而非只看 `activeRuns` 消失；未重试写请求。
+- 缓存 fixture 再现 `Deletion invalidation left a pending cached page visible`：native input dispatch 尚未等待 React commit，而失败后的 DOM 已是无缓存加载状态。改为等待既有加载状态再执行原无轮次断言，仍使用原 5 秒上限。故意移除 `setSessionCacheVisible(false)` 时，测试在原预算内失败并保留旧正文；恢复后 targeted/full 通过。未删除后续 stale-response 断言。
+- 通用 `Script failed to execute` 不应再一律归因到 cache：runner 在 Meta Prompts 独立窗口失败时原来仍打印 cache 窗口。已修正诊断窗口并透传 Meta Prompts renderer stack。单项及完整 suite 随后通过，但通用异常未重新取得具体栈，根因仍未知；如复现，由本任务后续使用新诊断继续定位，不用重跑通过宣称已修复。
+
+证据（本地临时目录，不是发布产物）：
+
+- 前一轮全量通过：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-32a90fb7d4f66427.log`
+- 后续全量两项超时：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-5c7619c47a4e2769.log`
+- focused 420 项与缓存断言失败现场：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-5f38fcb042b8210a.log`
+- 最终完整 UI、CLI、shell：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-43d7abf01dfdae82.log`
+- 最终 migration/ownership UI：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-6qytPj/verification.json`，16 张深浅色截图，包含窄窗口迁入和存档界面；hash 覆盖 8 个 main/preload/renderer 构建文件，并与最终开发包构建后的文件复核一致。人工检查了窄浅色迁入与窄深色存档图，文字和主操作可见；其余截图不冒充逐张人工验收。
+- 最终开发包检查：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-07900a6d6686e193.log`
+
+### 下一责任动作
+
+本任务继续实现 logical delete/fork 的全 binding/attempt 范围、共享归档保留、活动运行阻断与部分删除恢复；不能把当前 rename/pin/archive/restore 当成完整管理闭环。真实账号仍等待维护者明确授权；本轮不推送、不安装、不发布。

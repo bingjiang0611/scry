@@ -70,7 +70,10 @@
         "ipc.agent:unreadSessions",
         "ipc.agent:catalogHealth",
         "ipc.conversation:create",
-        "ipc.conversation:list"
+        "ipc.conversation:list",
+        "ipc.conversation:previewAdoption",
+        "ipc.conversation:adopt",
+        "ipc.conversation:update"
       ],
       "sources": [
         "src/renderer/App.tsx",
@@ -135,6 +138,8 @@
         "src/main/index.ts",
         "src/main/llm-performance.ts",
         "src/main/conversation-service.ts",
+        "src/main/conversation-adoption.ts",
+        "src/renderer/components/ConversationAdoptionDialog.tsx",
         "src/renderer/components/ConversationView.tsx"
       ],
       "benchmarks": [

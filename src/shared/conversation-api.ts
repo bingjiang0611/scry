@@ -9,6 +9,8 @@ export interface ConversationSummary {
   title: string
   revision: number
   turnCount: number
+  pinnedAt?: number
+  archivedAt?: number
   activeRunId?: string
   blockedReason?: string
 }
@@ -56,9 +58,30 @@ export interface ConversationSendRequest extends ConversationTargetRequest {
   confirmFresh: boolean
 }
 
+export type ConversationMetadataChange =
+  | { kind: 'rename'; title: string }
+  | { kind: 'pin'; pinned: boolean }
+  | { kind: 'archive'; archived: boolean }
+
+export interface ConversationLegacySource {
+  providerId: 'claude' | 'codex'
+  cwd: string
+  externalSessionId: string
+}
+
+export interface ConversationAdoptionPreview {
+  source: ConversationLegacySource
+  fingerprint: string
+  title: string
+  turnCount: number
+}
+
 /** Only these typed operations cross the preload boundary; runtime callbacks stay in main. */
 export interface ConversationApi {
   create(cwd: string): Promise<ConversationSummary>
+  previewAdoption(source: ConversationLegacySource): Promise<ConversationAdoptionPreview>
+  adopt(source: ConversationLegacySource, fingerprint: string): Promise<ConversationSummary>
+  update(id: string, expectedRevision: number, change: ConversationMetadataChange): Promise<ConversationSummary>
   list(cwd: string): Promise<ConversationSummary[]>
   read(id: string, beforeOrdinal?: number): Promise<ConversationPage>
   readItem(id: string, ref: ConversationItemRef): Promise<string>

@@ -12,6 +12,7 @@ import type {
 } from '../shared/conversation'
 import { conversationItemKey, planConversationContinuation } from '../shared/conversation'
 import type {
+  ConversationMetadataChange,
   ConversationPage,
   ConversationPreview,
   ConversationSendRequest,
@@ -108,7 +109,9 @@ function summary(conversation: Conversation, activeRunIds: ReadonlySet<string>):
   return {
     id: conversation.id,
     cwd: conversation.cwd,
-    title: `对话 ${conversation.id.slice(0, 8)}`,
+    title: conversation.title ?? `对话 ${conversation.id.slice(0, 8)}`,
+    ...(conversation.pinnedAt ? { pinnedAt: conversation.pinnedAt } : {}),
+    ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
     revision: conversation.revision,
     turnCount: conversation.turns.length,
     ...(activeRunIds.has(pending?.runId ?? '') ? { activeRunId: pending?.runId } : {}),
@@ -218,6 +221,24 @@ export class ConversationService {
     }
   }
 
+  async update(id: string, expectedRevision: number, input: unknown): Promise<ConversationSummary> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error('对话 revision 无效')
+    const value = requestObject(input, ['kind', 'title', 'pinned', 'archived'])
+    let change: ConversationMetadataChange
+    if (value.kind === 'rename') {
+      requestObject(value, ['kind', 'title'])
+      if (typeof value.title !== 'string') throw new Error('对话名称无效')
+      change = { kind: 'rename', title: value.title }
+    } else if (value.kind === 'pin' && typeof value.pinned === 'boolean') {
+      requestObject(value, ['kind', 'pinned'])
+      change = { kind: 'pin', pinned: value.pinned }
+    } else if (value.kind === 'archive' && typeof value.archived === 'boolean') {
+      requestObject(value, ['kind', 'archived'])
+      change = { kind: 'archive', archived: value.archived }
+    } else throw new Error('对话管理操作无效')
+    return summary(await this.deps.store.updateMetadata(id, expectedRevision, change), this.active)
+  }
+
   async readItem(id: string, input: unknown): Promise<string> {
     requestObject(input, ['runId', 'itemId', 'contentHash'])
     const refs = [input]
@@ -235,6 +256,7 @@ export class ConversationService {
     const request = parseTarget(requestObject(input, targetFields))
     const conversation = await this.deps.store.read(id)
     if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
+    if (conversation.archivedAt) throw new Error('对话已存档，请先恢复')
     const target = await this.target(conversation.cwd, request)
     const continuation = planConversationContinuation(conversation, target)
     if (continuation.kind === 'blocked') throw new Error(continuation.reason)
@@ -289,6 +311,7 @@ export class ConversationService {
       if (duplicate.disposition === 'duplicate') return { runId: duplicate.turn.runId, disposition: 'duplicate' }
       throw new Error('重复命令状态发生变化，请重新预览')
     }
+    if (conversation.archivedAt) throw new Error('对话已存档，请先恢复')
     if (!this.deps.supportsHistoricalInput(request.providerId)) throw new Error(`${request.providerId} 尚未提供可验证的历史输入交接`)
     const target = await this.target(conversation.cwd, request)
     if (target.continuationKey !== request.expectedContinuationKey) throw new Error('Provider 接续身份已变化，请重新预览')

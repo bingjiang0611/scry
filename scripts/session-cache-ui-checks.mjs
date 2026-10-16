@@ -107,6 +107,9 @@ export async function exerciseSessionCache(contents) {
   await select('cache-b'); await pending('cache-b')
   check(await cached('cache-b'), 'Invalidation control requires a real B cache hit')
   await control('invalidate-cache')
+  // Native input dispatch does not await React's commit. Observe the existing
+  // uncached-loading state first; keep the no-turns and stale-response checks.
+  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]')?.textContent.includes('正在加载会话历史')`)
   check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
   await control('resolve-b'); await ready('cache-b')
   await select('cache-a'); await pending('cache-a')

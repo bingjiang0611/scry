@@ -186,7 +186,7 @@ describe('preload IPC boundary', () => {
   })
 
   it('exposes only fixed conversation operations with their scoped arguments', async () => {
-    expect(Object.keys(api.conversations).sort()).toEqual(['create', 'list', 'preview', 'read', 'readItem', 'send'])
+    expect(Object.keys(api.conversations).sort()).toEqual(['adopt', 'create', 'list', 'preview', 'previewAdoption', 'read', 'readItem', 'send', 'update'])
     await api.conversations.create('/workspace')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:create', '/workspace')
     await api.conversations.list('/workspace')
@@ -202,7 +202,14 @@ describe('preload IPC boundary', () => {
       expectedContinuationKey: 'frozen-identity', commandId: 'command-id', prompt: 'hello', selectedItems: [], confirmFresh: true }
     await api.conversations.send(request)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:send', request)
-    expect(electron.invoke).toHaveBeenCalledTimes(6)
+    const source = { providerId: 'claude' as const, cwd: '/workspace', externalSessionId: 'source-session' }
+    await api.conversations.previewAdoption(source)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewAdoption', source)
+    await api.conversations.adopt(source, 'fingerprint')
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:adopt', source, 'fingerprint')
+    await api.conversations.update('conversation-id', 2, { kind: 'pin', pinned: true })
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:update', 'conversation-id', 2, { kind: 'pin', pinned: true })
+    expect(electron.invoke).toHaveBeenCalledTimes(9)
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

@@ -253,6 +253,7 @@ import {
 import { deleteOwnedSessionData } from './session-deletion'
 import { ConversationStore, type NativeSessionScope } from './conversation-store'
 import { ConversationService, type ManagedConversationStart } from './conversation-service'
+import { parseConversationLegacySource, prepareConversationAdoption } from './conversation-adoption'
 import { conversationItemsFromTrace, readConversationHistoryItem } from './conversation-history'
 import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
@@ -549,6 +550,7 @@ async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope): 
   }
   await conversationStore().assertLegacyWriteAllowed(scope)
 }
+const adoptingSessionKeys = new Set<string>()
 let conversationServiceInstance: ConversationService | undefined
 const conversationService = (): ConversationService => conversationServiceInstance ??= new ConversationService({
   store: conversationStore(),
@@ -1817,6 +1819,63 @@ handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
 // 左侧栏项目目录独立于会话保留；老数据从 recent folders 与 app 会话 catalog 一次性补齐。
 handleTrusted('agent:listProjects', () => listProjectCatalog())
 handleTrusted('agent:catalogHealth', () => appSessionStore().health())
+async function adoptLegacyConversation(input: unknown, fingerprint?: string) {
+  const source = parseConversationLegacySource(input)
+  source.cwd = resolveKnownProjectDirectory(source.cwd)
+  return contextAdmission.run(providerContextKey(source.providerId, source.cwd), async () => {
+    await startupManagedRecovery
+    const catalog = appSessionStore().load().find(session => session.providerId === source.providerId &&
+      session.agentProfileId === undefined && session.cwd === source.cwd &&
+      (session.externalSessionId === source.externalSessionId || session.sessionId === source.externalSessionId))
+    if (!catalog) throw new Error('迁移源不属于已登记的 App 会话')
+    source.externalSessionId = catalog.externalSessionId ?? catalog.sessionId
+    const reservations = [source.externalSessionId, catalog.sessionId, catalog.runId].filter((id): id is string => Boolean(id))
+      .map(id => providerSessionKey(source.providerId, source.cwd, id))
+    // Reserve before the first asynchronous read so legacy metadata cannot change
+    // between the catalog snapshot and durable ownership publication.
+    for (const key of reservations) adoptingSessionKeys.add(key)
+    try {
+      const existing = (await conversationStore().list(source.cwd)).find(conversation => conversation.bindings.some(binding =>
+        binding.providerId === source.providerId && binding.agentProfileId === undefined && binding.nativeSessionId === source.externalSessionId))
+      if (existing) {
+        const original = existing.bindings[0]
+        if (!fingerprint || existing.adoptionFingerprint !== fingerprint || original.providerId !== source.providerId ||
+          original.nativeSessionId !== source.externalSessionId) throw new Error('旧会话已归属统一对话，请打开其稳定条目')
+        return (await conversationService().list(source.cwd)).find(conversation => conversation.id === existing.id)!
+      }
+      await assertLegacyConversationWriteAllowed({ ...source, nativeSessionId: source.externalSessionId })
+      if (runs.unsettledStates().some(run => run.providerId === source.providerId && run.agentProfileId === undefined && run.cwd === source.cwd) ||
+        [source.externalSessionId, catalog.sessionId, catalog.runId].some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id)))) {
+        throw new Error('源 Provider 仍在执行、保存证据或删除；请等待收敛后迁移')
+      }
+      const prepared = await prepareConversationAdoption(app.getPath('userData'), source, catalog)
+      if (fingerprint === undefined) return prepared.preview
+      if (prepared.preview.fingerprint !== fingerprint) throw new Error('迁移源已变化，请重新预览；旧入口保留')
+      const conversation = await conversationStore().create(source.cwd, prepared.seed)
+      invalidateSessionHistoryLoad('session adopted into logical conversation')
+      win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
+      return (await conversationService().list(source.cwd)).find(item => item.id === conversation.id)!
+    } finally { for (const key of reservations) adoptingSessionKeys.delete(key) }
+  })
+}
+handleTrusted('conversation:previewAdoption', (_event, source: unknown) => adoptLegacyConversation(source))
+handleTrusted('conversation:adopt', (_event, source: unknown, fingerprint: unknown) => {
+  if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
+  return adoptLegacyConversation(source, fingerprint)
+})
+handleTrusted('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
+  if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')
+  if (change && typeof change === 'object' && 'kind' in change && change.kind === 'archive') {
+    const conversation = await conversationStore().read(id)
+    const unsettled = new Set(runs.unsettledStates().map(run => run.runId))
+    if (conversation?.turns.some(turn => unsettled.has(turn.runId))) {
+      throw new Error('对话仍有运行或证据保存未收敛，不能存档或恢复')
+    }
+  }
+  const result = await conversationService().update(id, revision, change)
+  win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
+  return result
+})
 handleTrusted('conversation:create', (_event, cwd: unknown) => {
   if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')
   const resolved = resolveKnownProjectDirectory(cwd)
@@ -2335,25 +2394,37 @@ function sessionRefFromRequest(p: unknown): AppSessionRef | null {
   }
 }
 
+async function changeLegacySessionMetadata(ref: AppSessionRef, change: () => boolean): Promise<boolean> {
+  if (ref.providerId === 'legacy_unknown') return change()
+  await startupManagedRecovery
+  await conversationStore().assertLegacyWriteAllowed({ ...ref, providerId: ref.providerId, nativeSessionId: ref.externalSessionId })
+  if (adoptingSessionKeys.has(providerSessionKey(ref.providerId, ref.cwd, ref.externalSessionId, ref.agentProfileId))) {
+    throw new Error('会话已归属统一对话或正在迁移，请从统一对话管理')
+  }
+  // Do not queue ordinary legacy archiving behind start preparation: it must
+  // retain the existing persist-first fence and stop its registered owner.
+  return change()
+}
+
 // 名称、置顶与存档只改 catalog，不动 Provider transcript 或 turn/usage/trace 数据。
 handleTrusted('agent:renameSession', (_e, p: unknown, title: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof (p as AppSessionRef).cwd !== 'string') throw new Error('无效的会话重命名请求')
-  return appSessionStore().rename(ref, title)
+  return changeLegacySessionMetadata(ref, () => appSessionStore().rename(ref, title))
 })
 
 handleTrusted('agent:setSessionPinned', (_e, p: unknown, pinned: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof pinned !== 'boolean') throw new Error('无效的置顶请求')
-  return appSessionStore().setPinned(ref, pinned)
+  return changeLegacySessionMetadata(ref, () => appSessionStore().setPinned(ref, pinned))
 })
 
 handleTrusted('agent:setSessionArchived', (_e, p: unknown, archived: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof archived !== 'boolean') throw new Error('无效的存档请求')
-  return archived
+  return changeLegacySessionMetadata(ref, () => archived
     ? archiveSessionAndStop(appSessionStore(), ref, runs.activeStates(), requestRunStop)
-    : appSessionStore().setArchived(ref, false)
+    : appSessionStore().setArchived(ref, false))
 })
 
 handleTrusted('agent:listArchivedSessions', () => appSessionStore().listArchivedProjects())
@@ -3745,7 +3816,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       if (terminalArchiveCommitted && terminalArchiveArgs?.sessionId && cwd) {
         const finalItems = await conversationItemsFromTrace({
           userData: app.getPath('userData'),
-          conversation: { id: managedConversation.conversationId, cwd },
+          conversation: { cwd },
           runId,
           userText: displayPrompt,
           items: runState.items
