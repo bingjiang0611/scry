@@ -1,6 +1,42 @@
 {
   "schema": 1,
   "metrics": {
+    "providers.pi-probe/subprocess.rpc": {
+      "scenario": "providers.pi-probe",
+      "metric": "subprocess.rpc",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 1 }
+    },
+    "providers.pi-probe/rpc.responses": {
+      "scenario": "providers.pi-probe",
+      "metric": "rpc.responses",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 4 }
+    },
+    "providers.pi-probe/shutdown.grace-expiries": {
+      "scenario": "providers.pi-probe",
+      "metric": "shutdown.grace-expiries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 1 }
+    },
     "providers.pi-environment/subprocess.node": {
       "scenario": "providers.pi-environment",
       "metric": "subprocess.node",
