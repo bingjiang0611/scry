@@ -1,6 +1,42 @@
 {
   "schema": 1,
   "metrics": {
+    "source-control.terminal-pair/subprocess.git": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 24 }
+    },
+    "source-control.terminal-pair/snapshot.write-tree": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "snapshot.write-tree",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 2 }
+    },
+    "source-control.terminal-pair/subprocess.total": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 24 }
+    },
     "providers.pi-probe/subprocess.rpc": {
       "scenario": "providers.pi-probe",
       "metric": "subprocess.rpc",

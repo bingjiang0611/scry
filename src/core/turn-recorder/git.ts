@@ -829,6 +829,19 @@ export function finishGitTurnDiff(
   return capture.finishPromise
 }
 
+/** Terminal turn/session collection; keep each result independently observable and the session baseline reusable. */
+export function finishGitTurnAndSessionDiff(
+  capture: GitTurnDiffCapture,
+  baseline: GitTurnDiffCapture,
+  deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
+  turnOptions: GitTurnDiffFinishOptions = {},
+  sessionOptions: GitTurnDiffFinishOptions = {}
+): { turn: Promise<TurnDiffSnapshot>; session: Promise<TurnDiffSnapshot> } {
+  const turn = finishGitTurnDiff(capture, deadlineMs, turnOptions)
+  const session = turn.then(() => snapshotSessionNetDiff(baseline, deadlineMs, sessionOptions))
+  return { turn, session }
+}
+
 // 会话级净改动：拿一个「会话第一轮开始前」捕获、且贯穿整个会话存活的 baseline capture，
 // 把当前工作树快照进它自己的 object store，再 diff baseline.beforeTree → 当前树。
 // 与逐轮 finishGitTurnDiff 的关键区别：非消费式——不清理 baseline，可跨轮多次调用，
