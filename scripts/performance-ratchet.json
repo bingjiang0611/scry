@@ -1,4 +1,27 @@
 {
   "schema": 1,
-  "metrics": {}
+  "metrics": {
+    "trace.delivery/ipc.messages": {
+      "scenario": "trace.delivery",
+      "metric": "ipc.messages",
+      "layer": "ipc",
+      "unit": "count",
+      "workload": "trace-events=1000;unicode=true",
+      "source": "TraceOutputBridge send() wrapper; JSON UTF-8 bytes, not structured-clone wire bytes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0
+    },
+    "trace.delivery/ipc.bytes": {
+      "scenario": "trace.delivery",
+      "metric": "ipc.bytes",
+      "layer": "ipc",
+      "unit": "bytes",
+      "workload": "trace-events=1000;unicode=true",
+      "source": "TraceOutputBridge send() wrapper; JSON UTF-8 bytes, not structured-clone wire bytes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0
+    }
+  }
 }
