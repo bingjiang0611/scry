@@ -5,8 +5,9 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { cpus, release } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { composerModes } from './native-composer-probe.mjs'
-export { composerModes }
+import { validateObservations } from './performance-ratchet.mjs'
+import { composerModes, nativeCounterMetrics } from './native-composer-probe.mjs'
+export { composerModes, nativeCounterMetrics }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] }
@@ -15,6 +16,28 @@ const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
+const integerCounter = value => Number.isSafeInteger(value) && value >= 0
+const assertCounters = (counters, label) => {
+  assert.ok(counters && nativeCounterMetrics.every(metric => integerCounter(counters[metric])), `missing ${label} work counters`)
+}
+
+export function exportNativeCounters(report) {
+  const observations = []
+  const add = (scenario, operation, workload, runsByMetric) => {
+    for (const [index, metric] of nativeCounterMetrics.entries()) {
+      observations.push({ scenario: `${scenario}.${operation}`, metric: `ui.${metric}`, layer: 'ui', unit: 'count', workload,
+        source: 'hidden Electron CDP Performance.getMetrics deltas plus MutationObserver record count', availability: 'measured', runs: runsByMetric[index] })
+    }
+  }
+  for (const [scenario, result] of Object.entries(report.results ?? {})) {
+    const workload = `native-${scenario};turns=${result.turnCount};sections=${result.sections}`
+    add(scenario, 'history-open', workload, nativeCounterMetrics.map(metric => result.samples.map(sample => sample.workCounters[metric])))
+    add(scenario, 'send-settled', `${workload};modes=${composerModes.join(',')}`, nativeCounterMetrics.map(metric => result.composerSamples.map(sample => sample.sendWorkCounters[metric])))
+    const stopped = result.composerSamples.filter(sample => sample.stopped)
+    add(scenario, 'stop-settled', `${workload};modes=stop-immediate,stop-visible`, nativeCounterMetrics.map(metric => stopped.map(sample => sample.stopWorkCounters[metric])))
+  }
+  return validateObservations({ schema: 1, revision: report.revision, observations })
+}
 const p95 = values => [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
 
 export function validateNative(report) {
@@ -38,11 +61,16 @@ export function validateNative(report) {
     assert.equal(result.sqliteStats.status, 'ready')
     assert.equal(result.sqliteStats.turns, 18, 'all six IPC and twelve button runs must reach SQLite')
     assert.ok(finite(result.sqliteStats.readMs))
+    assert.equal(result.counterSensitivity?.passed, true, 'native work counter sensitivity control must pass')
+    assertCounters(result.counterSensitivity?.baseline, `${name} sensitivity baseline`)
+    assertCounters(result.counterSensitivity?.extra, `${name} sensitivity extra`)
+    assert.ok(nativeCounterMetrics.some(metric => result.counterSensitivity.extra[metric] > result.counterSensitivity.baseline[metric]), 'sensitivity control must raise a work counter')
     for (const sample of result.samples) {
       assert.equal(sample.totalTurns, Math.min(40, result.turnCount))
       assert.equal(sample.completeParagraphs, result.sections, 'renderer lost fixed paragraph content')
       for (const metric of ['nativeOpenMs', 'handlerDelayMs', 'scriptMs', 'domNodes']) assert.ok(finite(sample[metric]), `missing ${name}.${metric}`)
       assert.ok(sample.domNodes > 0)
+      assertCounters(sample.workCounters, `${name} history open`)
     }
     assert.deepEqual(result.composerSamples.map(sample => sample.mode), composerModes, 'native button scenario coverage differs')
     assert.equal(new Set(result.composerSamples.map(sample => sample.runId)).size, 12, 'native button runs must have distinct identities')
@@ -57,6 +85,8 @@ export function validateNative(report) {
       assert.equal(sample.stopped, sample.mode !== 'complete')
       assert.equal(sample.nativeTurnKnown, sample.mode !== 'stop-immediate')
       assert.equal(sample.diskVerified, true, 'button output must be independently readable after process exit')
+      assertCounters(sample.sendWorkCounters, `${name} send settled`)
+      if (sample.stopped) assertCounters(sample.stopWorkCounters, `${name} stop settled`)
       for (const metric of composerMetrics(sample.mode)) assert.ok(finite(sample[metric]), `missing button ${metric}`)
       assert.ok(sample.sendToSettledVisibleMs >= sample.sendToTerminalMs)
       if (sample.mode !== 'stop-immediate') {
@@ -145,9 +175,14 @@ async function bench(output) {
       assert.equal(run.status, 0, `native ${scenario} failed (${run.error?.message ?? run.signal ?? run.status}); see retained log`)
       report.results[scenario] = JSON.parse(run.stdout)
     } catch (error) { report.errors.push({ scenario, message: error.message }) }
+    report.counters = exportNativeCounters(report)
     writeFileSync(output, JSON.stringify(report, null, 2))
   }
   validateNative(report)
+  report.counters = exportNativeCounters(report)
+  writeFileSync(output, JSON.stringify(report, null, 2))
+  const counterOutput = output.endsWith('.json') ? `${output.slice(0, -'.json'.length)}.counters.json` : `${output}.counters.json`
+  writeFileSync(counterOutput, `${JSON.stringify(report.counters, null, 2)}\n`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
-import { probeNativeComposer } from './native-composer-probe.mjs'
+import { nativeCounterMetrics, probeNativeComposer } from './native-composer-probe.mjs'
 import { readRecords } from './performance-report.mjs'
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
@@ -185,6 +185,26 @@ try {
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text)
     return response.result.value
   }
+  const metricValues = snapshot => Object.fromEntries((snapshot.metrics ?? []).map(entry => [entry.name, entry.value]))
+  let lastCounterMetrics
+  const beginCounters = async () => {
+    const mutationMark = await evaluate('window.__nativeWorkCounterMark()')
+    const metrics = await cdp.send('Performance.getMetrics')
+    return { mutationMark, metrics }
+  }
+  const endCounters = async start => {
+    const mutationMark = await evaluate('window.__nativeWorkCounterMark()')
+    const metrics = await cdp.send('Performance.getMetrics')
+    const before = metricValues(start.metrics)
+    const after = metricValues(metrics)
+    lastCounterMetrics = after
+    return Object.fromEntries(nativeCounterMetrics.map(name => {
+      if (name === 'DOMMutations') return [name, mutationMark - start.mutationMark]
+      assert.ok(Object.hasOwn(before, name) && Object.hasOwn(after, name), `CDP Performance metric unavailable: ${name}`)
+      const delta = Math.round(after[name] - before[name])
+      return [name, Math.max(0, delta)]
+    }))
+  }
   const wait = expression => evaluate(`(async () => {
     const deadline = performance.now() + 15000
     while (!(${expression})) {
@@ -212,7 +232,29 @@ try {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
   }
+  await evaluate(`(() => {
+    let mutationCount = 0
+    const observer = new MutationObserver(records => { mutationCount += records.length })
+    observer.observe(document, { childList: true, attributes: true, characterData: true, subtree: true })
+    window.__nativeWorkCounterMark = () => {
+      mutationCount += observer.takeRecords().length
+      return mutationCount
+    }
+  })()`)
   await wait(`document.querySelectorAll('button.sb-sess').length === 2 && typeof window.scry === 'object'`)
+  const sensitivityBaseStart = await beginCounters()
+  const sensitivityBase = await endCounters(sensitivityBaseStart)
+  const sensitivityExtraStart = await beginCounters()
+  await evaluate(`(() => {
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position: fixed; width: 13px; height: 11px; contain: layout;'
+    document.body.append(probe)
+    probe.getBoundingClientRect()
+    probe.remove()
+  })()`)
+  const sensitivityExtra = await endCounters(sensitivityExtraStart)
+  const sensitivityRaised = nativeCounterMetrics.some(metric => sensitivityExtra[metric] > sensitivityBase[metric])
+  assert.equal(sensitivityRaised, true, 'native work counter sensitivity control did not detect extra layout work')
   assert.deepEqual(await evaluate('window.scry.detectFast().then(items => items.map(item => ({ id: item.id, name: item.name })))'),
     [{ id: 'codex', name: 'Codex Smoke Fixture' }], 'refusing any lifecycle measurement without the offline fixture adapter')
   // Composer readiness plus two excluded opens separates startup from the warm path.
@@ -222,7 +264,7 @@ try {
   const firstOpens = []
   for (let index = 0; index < iterations + 2; index++) {
     const sessionId = sessions[index % sessions.length]
-    const metricsBefore = await cdp.send('Performance.getMetrics')
+    const counterStart = await beginCounters()
     await evaluate(`(() => {
       window.__sessionNativeTiming = (${measureNativeSessionOpen.toString()})(
         Array.from(document.querySelectorAll('button.sb-sess')).find(element => element.textContent.includes(${JSON.stringify(sessionId)})),
@@ -290,9 +332,10 @@ try {
     delete sample.legacyEndAt
     assert.equal(sample.totalTurns, pageTurns, 'history must retain every turn in the initial page')
     assert.equal(sample.completeParagraphs, sections, 'renderer must not trade away fixed paragraph content for speed')
-    const metricsAfter = await cdp.send('Performance.getMetrics')
-    const metric = (snapshot, name) => snapshot.metrics.find(value => value.name === name).value
-    sample.scriptMs = (metric(metricsAfter, 'ScriptDuration') - metric(metricsBefore, 'ScriptDuration')) * 1000
+    const workCounters = await endCounters(counterStart)
+    sample.workCounters = workCounters
+    const metricsBefore = metricValues(counterStart.metrics)
+    sample.scriptMs = (lastCounterMetrics.ScriptDuration - metricsBefore.ScriptDuration) * 1000
     if (index >= 2) samples.push(sample)
     else firstOpens.push(sample)
   }
@@ -340,7 +383,7 @@ try {
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const invalidHistory = await evaluate(`window.scry.loadSession(${JSON.stringify({ ...context, externalSessionId: 'missing-perf-fixture' })}).then(() => false, () => true)`)
   assert.equal(invalidHistory, true, 'fixture must exercise a real rejected history handler')
-  const composerSamples = await probeNativeComposer({ evaluate, wait, click, send: (method, params) => cdp.send(method, params) })
+  const composerSamples = await probeNativeComposer({ evaluate, wait, click, beginCounters, endCounters, send: (method, params) => cdp.send(method, params) })
 
   // Real main/preload/SQLite/archive lifecycle with an explicit offline Provider fixture.
   // These are IPC/terminal/disk boundaries, NOT native send-button or visible-output timings.
@@ -443,6 +486,7 @@ try {
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
   console.log(JSON.stringify({ measurementVersion: 5, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+    counterSensitivity: { baseline: sensitivityBase, extra: sensitivityExtra, passed: sensitivityRaised },
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),
