@@ -15,7 +15,7 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
       if (await read(expression)) return
       await new Promise(resolve => setTimeout(resolve, 16))
     }
-    const state = await read(`({ body: document.querySelector('.mp-body')?.textContent, editorBody: document.querySelector('.mp-editor-modal textarea')?.value, search: document.querySelector('.mp-search input')?.value, storage: localStorage.getItem('scry.meta-prompts.v1'), notice: document.querySelector('.mp-notice')?.textContent })`)
+    const state = await read(`({ body: document.querySelector('.mp-body')?.textContent, editorBody: document.querySelector('.mp-editor-modal textarea')?.value, search: document.querySelector('.mp-search input')?.value, storage: localStorage.getItem('scry.meta-prompts.v1'), notice: document.querySelector('.mp-notice')?.textContent, inputEvents: window.__metaInputEvents, focused: document.activeElement?.outerHTML.slice(0, 180) })`)
     throw new Error(`Meta Prompts DOM condition timed out: ${expression.slice(0, 160)}; state=${JSON.stringify(state)}`)
   }
   const click = async selector => {
@@ -79,6 +79,14 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
   await wait(`document.querySelector('.mp-body')?.textContent === ${JSON.stringify(body)}`)
 
+  await read(`(() => {
+    window.__metaInputEvents = [];
+    for (const type of ['focusin', 'keydown', 'keyup', 'beforeinput', 'input']) document.addEventListener(type, event => {
+      if (!event.target.matches?.('.mp-search input')) return;
+      window.__metaInputEvents.push({ type, key: event.key, inputType: event.inputType, data: event.data, value: event.target.value });
+      if (window.__metaInputEvents.length > 40) window.__metaInputEvents.shift();
+    }, true);
+  })()`)
   await type('.mp-search input', 'literal')
   await wait(`document.querySelectorAll('.mp-row').length === 1`)
   await type('.mp-search input', 'not found')

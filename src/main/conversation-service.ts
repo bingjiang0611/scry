@@ -109,6 +109,7 @@ function summary(conversation: Conversation, activeRunIds: ReadonlySet<string>):
   return {
     id: conversation.id,
     cwd: conversation.cwd,
+    ...(conversation.deletion ? { deletion: structuredClone(conversation.deletion), blockedReason: '统一对话正在删除或已删除，不能执行' } : {}),
     title: conversation.title ?? `对话 ${conversation.id.slice(0, 8)}`,
     ...(conversation.pinnedAt ? { pinnedAt: conversation.pinnedAt } : {}),
     ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
@@ -184,7 +185,7 @@ export class ConversationService {
 
   async list(cwd: string): Promise<ConversationSummary[]> {
     const conversations = await this.deps.store.list(cwd)
-    return conversations.map((conversation) => summary(conversation, this.active))
+    return conversations.filter(conversation => conversation.deletion?.status !== 'complete').map((conversation) => summary(conversation, this.active))
   }
 
   async nativeSessionAliases(cwd: string): Promise<Set<string>> {
@@ -198,6 +199,7 @@ export class ConversationService {
   async read(id: string, beforeOrdinal?: number): Promise<ConversationPage> {
     const conversation = await this.deps.store.read(id)
     if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
+    if (conversation.deletion) return { summary: summary(conversation, this.active), bindings: structuredClone(conversation.bindings), turns: [] }
     const end = beforeOrdinal === undefined ? conversation.turns.length : Math.max(0, Math.min(beforeOrdinal, conversation.turns.length))
     const start = Math.max(0, end - 40)
     const turns = await Promise.all(conversation.turns.slice(start, end).map(async (turn) => {
@@ -245,6 +247,7 @@ export class ConversationService {
     assertConversationItems(refs)
     const ref = refs[0]
     const conversation = await this.deps.store.read(id)
+    if (conversation?.deletion) throw new Error('统一对话正在删除或已删除，正文不可用')
     if (!conversation || !conversation.turns.some(turn => turn.items.some(item => conversationItemKey(item) === conversationItemKey(ref)))) {
       throw new Error('正文引用不属于当前对话')
     }
@@ -276,6 +279,7 @@ export class ConversationService {
     if (/^\s*\//.test(prompt)) throw new Error('统一对话仅支持普通文本，不支持 slash 命令')
     const conversation = await this.deps.store.read(request.conversationId)
     if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
+    if (conversation.deletion) throw new Error('统一对话正在删除或已删除，不能发送')
     // Resolve an existing command from its immutable binding before checking
     // current continuation state. A pending/unknown retry must return its
     // original attempt, not be blocked by the current plan.

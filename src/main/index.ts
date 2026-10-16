@@ -253,8 +253,10 @@ import {
 import { deleteOwnedSessionData } from './session-deletion'
 import { ConversationStore, type NativeSessionScope } from './conversation-store'
 import { ConversationService, type ManagedConversationStart } from './conversation-service'
+import type { Conversation, ConversationDeletionResult } from '../shared/conversation'
+import { planConversationDeletion, resolveConversationDeletionRuns } from './conversation-deletion'
 import { parseConversationLegacySource, prepareConversationAdoption } from './conversation-adoption'
-import { conversationItemsFromTrace, readConversationHistoryItem } from './conversation-history'
+import { conversationItemsFromTrace, deleteConversationHistory, readConversationHistoryItem } from './conversation-history'
 import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
 import {
@@ -541,14 +543,14 @@ let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefine
 const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
 let conversationStoreInstance: ConversationStore | undefined
 const conversationStore = () => conversationStoreInstance ??= new ConversationStore(app.getPath('userData'))
-async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope): Promise<void> {
+async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope, deletion?: { ownerId?: string }): Promise<void> {
   const activeIds = new Set(runs.unsettledStates().filter((run) => run.providerId === scope.providerId &&
     run.agentProfileId === scope.agentProfileId && (run.cwd ?? '') === scope.cwd).map((run) => run.runId))
   if (activeIds.size && (await conversationStore().list(scope.cwd)).some((conversation) =>
     conversation.turns.some((turn) => activeIds.has(turn.runId)))) {
     throw new Error('统一对话仍在执行或保存证据，不能从旧入口写入；请等待本轮收敛')
   }
-  await conversationStore().assertLegacyWriteAllowed(scope)
+  await conversationStore().assertLegacyWriteAllowed(scope, deletion)
 }
 const adoptingSessionKeys = new Set<string>()
 let conversationServiceInstance: ConversationService | undefined
@@ -1838,6 +1840,7 @@ async function adoptLegacyConversation(input: unknown, fingerprint?: string) {
       const existing = (await conversationStore().list(source.cwd)).find(conversation => conversation.bindings.some(binding =>
         binding.providerId === source.providerId && binding.agentProfileId === undefined && binding.nativeSessionId === source.externalSessionId))
       if (existing) {
+        if (existing.deletion) throw new Error('旧会话正在删除或已删除，不能重新迁入')
         const original = existing.bindings[0]
         if (!fingerprint || existing.adoptionFingerprint !== fingerprint || original.providerId !== source.providerId ||
           original.nativeSessionId !== source.externalSessionId) throw new Error('旧会话已归属统一对话，请打开其稳定条目')
@@ -1862,6 +1865,78 @@ handleTrusted('conversation:previewAdoption', (_event, source: unknown) => adopt
 handleTrusted('conversation:adopt', (_event, source: unknown, fingerprint: unknown) => {
   if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
   return adoptLegacyConversation(source, fingerprint)
+})
+function assertConversationDeletionIdle(conversation: Conversation): void {
+  const runIds = new Set(conversation.turns.map(turn => turn.runId))
+  if (runs.unsettledStates().some(run => runIds.has(run.runId))) throw new Error('对话仍有运行或证据保存未收敛，不能删除')
+}
+
+async function prepareConversationDeletion(conversation: Conversation) {
+  const others = await conversationStore().list(conversation.cwd)
+  const catalog = appSessionStore().load().filter(session => session.cwd === conversation.cwd)
+  return resolveConversationDeletionRuns(planConversationDeletion(conversation, others, catalog), target =>
+    resolveSessionRunIds({ providerId: target.providerId, cwd: conversation.cwd, externalSessionId: target.externalSessionId, runIds: new Set() }), others, catalog)
+}
+
+handleTrusted('conversation:previewDeletion', async (_event, id: unknown) => {
+  if (typeof id !== 'string') throw new Error('对话删除请求无效')
+  await startupManagedRecovery
+  const conversation = await conversationStore().read(id)
+  if (!conversation || conversation.deletion?.status === 'complete') throw new Error('对话不存在或已经删除')
+  assertConversationDeletionIdle(conversation)
+  return prepareConversationDeletion(conversation)
+})
+handleTrusted('conversation:delete', async (_event, id: unknown, fingerprint: unknown): Promise<ConversationDeletionResult> => {
+  if (typeof id !== 'string' || typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('对话删除确认无效')
+  return contextAdmission.run(`conversation-delete:${id}`, async () => {
+    await startupManagedRecovery
+    const original = await conversationStore().read(id)
+    if (!original) throw new Error('找不到统一对话')
+    if (original.deletion?.status === 'complete') {
+      if (original.deletion.fingerprint !== fingerprint) throw new Error('对话已删除，确认指纹不匹配')
+      return original.deletion.result!
+    }
+    const { conversation, plan } = await contextAdmission.runMany(original.bindings.map(binding => providerContextKey(binding.providerId, original.cwd, binding.agentProfileId)), async () => {
+      const conversation = (await conversationStore().read(id))!
+      assertConversationDeletionIdle(conversation)
+      const plan = await prepareConversationDeletion(conversation)
+      if (plan.fingerprint !== fingerprint) throw new Error('删除范围已变化，请重新预览；本次请求未执行清理')
+      await conversationStore().beginDeletion(id, plan.revision, fingerprint)
+      return { conversation, plan }
+    })
+    const result: ConversationDeletionResult = { ok: false, deleted: [], retained: [
+      'workspace .scry/ canonical turn evidence', 'Provider-native session transcript/history',
+      'unattributed provider billing aggregates', 'unsent renderer composer drafts',
+      'logical ownership tombstone (IDs, hashes and deletion receipt)'
+    ], failed: [] }
+    for (const target of plan.targets) {
+      const scope = `${target.providerId}/${target.agentProfileId ?? 'default'}/${target.externalSessionId}`
+      if (target.sharedWith.length) {
+        result.retained.push(`shared Scry copies: ${scope} (${target.sharedWith.join(', ')})`)
+        continue
+      }
+      try {
+        const receipt = await deleteOneSession({ ...target, cwd: conversation.cwd }, {
+          confirm: false, notifyFailure: false, conversationId: id, runIds: target.runIds
+        })
+        result.deleted.push(...receipt.deleted.map(store => `${scope}: ${store}`))
+        result.retained.push(...receipt.retained)
+        result.failed.push(...receipt.failed.map(failure => ({ ...failure, store: `${scope}: ${failure.store}` })))
+        if (!receipt.ok && !receipt.failed.length) result.failed.push({ store: scope, error: receipt.reason ?? '删除结果未确认' })
+      } catch (error) { result.failed.push({ store: scope, error: error instanceof Error ? error.message : String(error) }) }
+    }
+    try {
+      await deleteConversationHistory(app.getPath('userData'), conversation)
+      result.deleted.push('frozen handoff bodies')
+    } catch (error) { result.failed.push({ store: 'frozen handoff bodies', error: error instanceof Error ? error.message : String(error) }) }
+    result.retained = [...new Set(result.retained)]
+    result.ok = result.failed.length === 0
+    if (!result.ok) result.reason = 'partial_failure'
+    await conversationStore().finishDeletion(id, fingerprint, result)
+    invalidateSessionHistoryLoad('logical conversation deletion')
+    win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
+    return result
+  })
 })
 handleTrusted('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
   if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')
@@ -2231,7 +2306,7 @@ type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { providerId
 // confirm / notifyFailure 由调用方决定：单条删除各弹一次系统弹窗，批量删除只在批次首尾各弹一次。
 async function deleteOneSession(
   p: SessionDeletionRequest,
-  options: { confirm: boolean; notifyFailure: boolean }
+  options: { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[] }
 ): Promise<DeleteSessionResult> {
     const empty = (): Pick<DeleteSessionResult, 'deleted' | 'retained' | 'failed'> => ({
       deleted: [],
@@ -2247,14 +2322,25 @@ async function deleteOneSession(
     const agentProfileId = p.agentProfileId
     const admissionKey = providerContextKey(providerId, cwd, agentProfileId)
     const deletionKey = providerSessionKey(providerId, cwd, externalSessionId, agentProfileId)
+    let otherOwnedRunIds = new Set<string>()
+    const assertDeletionAllowed = async (): Promise<void> => {
+      if (!options.conversationId) return assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId }, {})
+      const owner = await conversationStore().read(options.conversationId)
+      if (!owner || owner.cwd !== cwd || owner.deletion?.status !== 'pending') throw new Error('没有已持久化的统一对话删除授权')
+      const plan = await prepareConversationDeletion(owner)
+      const target = plan.targets.find(target => target.providerId === providerId && target.agentProfileId === agentProfileId && target.externalSessionId === externalSessionId)
+      if (!target || target.sharedWith.length) throw new Error('删除目标未归属该操作或仍被其他会话引用')
+      otherOwnedRunIds = new Set(plan.targets.filter(other => other !== target).flatMap(other => other.runIds))
+      await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId }, { ownerId: options.conversationId })
+    }
     const hasActiveSession = (): boolean => runs.unsettledStates().some((run) => {
       const sessionId = run.externalSessionId ?? run.sessionId
-      return run.providerId === providerId && run.agentProfileId === agentProfileId && (run.cwd ?? '') === cwd &&
-        (run.runId === externalSessionId || sessionId === externalSessionId)
+      return run.providerId === providerId && (run.cwd ?? '') === cwd &&
+        (run.runId === externalSessionId || sessionId === externalSessionId || Boolean(options.runIds?.includes(run.runId)))
     })
     const reserved = await contextAdmission.run(admissionKey, async () => {
       await startupManagedRecovery
-      await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
+      await assertDeletionAllowed()
       if (hasActiveSession() || deletingSessions.has(deletionKey)) return false
       deletingSessions.add(deletionKey)
       return true
@@ -2283,7 +2369,7 @@ async function deleteOneSession(
         // only for the destructive phase so broad managed recovery in another session
         // cannot resurrect this session while unrelated work is deleted.
         if (hasActiveSession()) return { ok: false, reason: 'active_session', ...empty() }
-        await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
+        await assertDeletionAllowed()
 
       const userDataDir = app.getPath('userData')
       const sessionStore = appSessionStore()
@@ -2302,6 +2388,7 @@ async function deleteOneSession(
         }
       }
       const initialRunIds = new Set(traceArchiveRunIds({ cwd, sessionId: externalSessionId, providerId, userDataDir }))
+      for (const runId of options.runIds ?? []) initialRunIds.add(runId)
       if (catalogRunId) initialRunIds.add(catalogRunId)
       for (const runId of usageSessionRunIds({ userDataDir, providerId, agentProfileId, cwd, externalSessionId })) {
         initialRunIds.add(runId)
@@ -2322,6 +2409,9 @@ async function deleteOneSession(
       for (const runId of turnOutboxSessionRunIds(userDataDir, { providerId, cwd, externalSessionId })) {
         initialRunIds.add(runId)
       }
+      // A catalog/native alias can reference a run whose SQLite identity is a
+      // different scope in this same deletion. Its own target cleans run artifacts.
+      for (const runId of otherOwnedRunIds) initialRunIds.delete(runId)
       const result = await deleteOwnedSessionData(initialRunIds, {
         resolveRunIds: (runIds) => resolveSessionRunIds({ providerId, cwd, externalSessionId, runIds }),
         deleteDatabase: (runIds) => deleteSessionData({ providerId, cwd, externalSessionId, runIds }),

@@ -21,6 +21,8 @@
 .unified-preview h2 { margin: 0 0 12px; font-size: 18px; line-height: 1.4; }
 .unified-preview details { margin-top: 14px; }
 .unified-preview p { line-height: 1.6; }
+.unified-delete ul { max-height: min(200px, 25vh); overflow: auto; overflow-wrap: anywhere; }
+.unified-history details { overflow-wrap: anywhere; }
 .unified-preview fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
 .unified-history-selection { display: flex; flex-direction: column; gap: 10px; max-height: 240px; overflow: auto; }
 .unified-preview input[type='checkbox'] { margin-right: 8px; }

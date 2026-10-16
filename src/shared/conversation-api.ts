@@ -1,4 +1,4 @@
-import type { ConversationBinding, ConversationContinuation, ConversationDelivery, ConversationItemRef, ConversationTarget } from './conversation'
+import type { Conversation, ConversationBinding, ConversationDeletionResult, ConversationContinuation, ConversationDelivery, ConversationItemRef, ConversationTarget } from './conversation'
 import type { LoadedSessionTurn } from './session-history'
 import type { AgentStartRequest } from './runtime'
 import type { ProviderId } from './provider'
@@ -11,6 +11,7 @@ export interface ConversationSummary {
   turnCount: number
   pinnedAt?: number
   archivedAt?: number
+  deletion?: Conversation['deletion']
   activeRunId?: string
   blockedReason?: string
 }
@@ -76,11 +77,28 @@ export interface ConversationAdoptionPreview {
   turnCount: number
 }
 
+export interface ConversationDeletionTarget {
+  providerId: ProviderId
+  agentProfileId?: string
+  externalSessionId: string
+  runIds: string[]
+  sharedWith: string[]
+}
+
+export interface ConversationDeletionPreview {
+  conversationId: string
+  revision: number
+  fingerprint: string
+  targets: ConversationDeletionTarget[]
+}
+
 /** Only these typed operations cross the preload boundary; runtime callbacks stay in main. */
 export interface ConversationApi {
   create(cwd: string): Promise<ConversationSummary>
   previewAdoption(source: ConversationLegacySource): Promise<ConversationAdoptionPreview>
   adopt(source: ConversationLegacySource, fingerprint: string): Promise<ConversationSummary>
+  previewDeletion(id: string): Promise<ConversationDeletionPreview>
+  delete(id: string, fingerprint: string): Promise<ConversationDeletionResult>
   update(id: string, expectedRevision: number, change: ConversationMetadataChange): Promise<ConversationSummary>
   list(cwd: string): Promise<ConversationSummary[]>
   read(id: string, beforeOrdinal?: number): Promise<ConversationPage>

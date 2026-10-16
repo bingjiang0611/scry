@@ -1,4 +1,4 @@
-import type { ProviderId } from './provider'
+import type { DeleteSessionResult, ProviderId } from './provider'
 import type { AgentTurnRecord } from './turn-record'
 import type { ContentRef } from './tool-content'
 
@@ -73,6 +73,11 @@ export interface DispatchedConversationTurn extends ConversationTurnBase {
 
 export type ConversationTurn = ImportedConversationTurn | DispatchedConversationTurn
 
+export interface ConversationDeletionResult extends Omit<DeleteSessionResult, 'deleted'> {
+  /** Scoped store names across multiple native bindings, plus the private handoff cache. */
+  deleted: string[]
+}
+
 export interface Conversation {
   version: 1
   id: string
@@ -83,12 +88,14 @@ export interface Conversation {
   archivedAt?: number
   /** Fingerprint of the explicitly confirmed legacy capture; original binding stays retired. */
   adoptionFingerprint?: string
+  /** Durable write fence; completed tombstones retain IDs/hashes, never historical bodies. */
+  deletion?: { status: 'pending' | 'complete'; fingerprint: string; result?: ConversationDeletionResult }
   bindings: ConversationBinding[]
   turns: ConversationTurn[]
 }
 
 export type ConversationContinuation =
-  | { kind: 'blocked'; runId: string; reason: string }
+  | { kind: 'blocked'; runId?: string; reason: string }
   | { kind: 'fresh'; missingItems: ConversationItemRef[] }
   | { kind: 'resume'; bindingId: string; nativeSessionId: string; missingItems: ConversationItemRef[] }
 
@@ -105,6 +112,7 @@ export function planConversationContinuation(
   conversation: Conversation,
   target: ConversationTarget
 ): ConversationContinuation {
+  if (conversation.deletion) return { kind: 'blocked', reason: '统一对话正在删除或已删除，不能恢复执行' }
   const unsettled = conversation.turns.find((turn) => turn.origin === 'dispatch' &&
     (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown'))
   if (unsettled) return {

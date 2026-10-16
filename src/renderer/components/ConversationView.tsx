@@ -8,6 +8,7 @@ import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToB
 import { UserMessage, AssistantTurn } from './ChatTurn'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { ModalFrame } from './Modals'
+import { ConversationDeleteDialog } from './ConversationDeleteDialog'
 import { SessionRenameDialog } from './SessionRename'
 import '../conversation.css'
 
@@ -58,6 +59,7 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
   const [notice, setNotice] = useState<string>()
   const [working, setWorking] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [managing, setManaging] = useState(false)
   const managementPending = useRef(false)
   const [event, setEvent] = useState<TraceEvent>()
@@ -232,20 +234,26 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
     </header>
     <div className="unified-pagination">
       <button className="btn" disabled={page?.nextBeforeOrdinal === undefined} onClick={() => setBefore(page?.nextBeforeOrdinal)}>更早记录</button>
-      <span>{page?.turns.length ? `第 ${page.turns[0].ordinal}–${page.turns.at(-1)!.ordinal} 轮` : '尚无记录'} · 每页最多 40 轮</span>
+      <span>{page?.summary.deletion ? `${page.summary.deletion.status === 'complete' ? '已删除' : '删除未完成'} · 正文不可用` : page?.turns.length ? `第 ${page.turns[0].ordinal}–${page.turns.at(-1)!.ordinal} 轮` : '尚无记录'} · 每页最多 40 轮</span>
       <button className="btn" disabled={before === undefined} onClick={showLatest}>最近记录</button>
       <button ref={refreshButton} className="btn" onClick={() => { setError(undefined); setReload((value) => value + 1) }}>刷新证据</button>
       <div className="unified-management">
-        <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(preview)} onClick={() => setRenaming(true)}>重命名</button>
-        <button className="btn" aria-label="置顶统一对话" aria-pressed={Boolean(page?.summary.pinnedAt)} disabled={!page || managing || working || Boolean(preview)} onClick={() => { void updateMetadata({ kind: 'pin', pinned: !page?.summary.pinnedAt }).catch(error => setError(message(error))) }}>{page?.summary.pinnedAt ? '取消置顶' : '置顶'}</button>
+        <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(preview) || Boolean(page.summary.deletion)} onClick={() => setRenaming(true)}>重命名</button>
+        <button className="btn" aria-label="置顶统一对话" aria-pressed={Boolean(page?.summary.pinnedAt)} disabled={!page || managing || working || Boolean(preview) || Boolean(page.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'pin', pinned: !page?.summary.pinnedAt }).catch(error => setError(message(error))) }}>{page?.summary.pinnedAt ? '取消置顶' : '置顶'}</button>
         <button className="btn" aria-label={page?.summary.archivedAt ? '恢复统一对话' : '存档统一对话'} disabled={!page || managing || working || Boolean(preview) || Boolean(page.summary.activeRunId || page.summary.blockedReason)} onClick={() => { void updateMetadata({ kind: 'archive', archived: !page?.summary.archivedAt }).catch(error => setError(message(error))) }}>{page?.summary.archivedAt ? '恢复' : '存档'}</button>
+        {page?.summary.archivedAt && page.summary.deletion?.status !== 'complete' && <button className="btn" aria-label="删除统一对话" disabled={managing || working || Boolean(preview) || Boolean(page.summary.activeRunId) || Boolean(page.summary.blockedReason && !page.summary.deletion)} onClick={() => setDeleting(true)}>{page.summary.deletion ? '继续清理…' : '删除副本…'}</button>}
       </div>
     </div>
     <section ref={historyRef} className="chat chat-transcript unified-history" aria-label="统一对话历史" onScroll={(event) => {
       followLatest.current = chatBottomStickinessAfterScroll(event.currentTarget, openingLatest.current)
     }}>
       {!page && <p role="status">{error ? '读取失败；请刷新证据重试。' : '正在读取对话…'}</p>}
-      {page?.turns.length === 0 && <p className="unified-empty">从 Claude 或 Codex 开始。切换时会先展示缺失的历史，再由你确认发送。</p>}
+      {page?.summary.deletion && <p role="status">{page.summary.deletion.status === 'complete' ? '删除操作已完成。保留范围见下方回执，可选择其他对话；不会重新执行旧命令。' : '删除未完整收敛。部分副本可能已移除，请重新预览后继续清理；不将缺失正文显示成空历史。'}</p>}
+      {page?.summary.deletion?.result && <details><summary>删除回执与保留范围</summary>
+        <ul>{page.summary.deletion.result.retained.map(item => <li key={item}>{item}</li>)}</ul>
+        {page.summary.deletion.result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
+      </details>}
+      {page?.turns.length === 0 && !page.summary.deletion && <p className="unified-empty">从 Claude 或 Codex 开始。切换时会先展示缺失的历史，再由你确认发送。</p>}
       {page?.turns.map((turn) => {
         const active = live?.runId === turn.runId ? live : undefined
         const history = active ?? turn.history
@@ -270,10 +278,13 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
       })}
     </section>
     <footer className="composer runtime-composer unified-composer">
-      {page?.summary.archivedAt && <p role="status">统一对话已存档；草稿保留，恢复后可继续发送。</p>}
+      {page?.summary.archivedAt && !page.summary.deletion && <p role="status">统一对话已存档；草稿保留，恢复后可继续发送。</p>}
       {page?.summary.blockedReason && <p role="status">{page.summary.blockedReason}</p>}
       {!preview && error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
+      {page?.summary.deletion && input && <button className="btn" onClick={() => {
+        void window.scry.copyText(input).then(() => setNotice('已复制保留的草稿。')).catch(error => setError(message(error)))
+      }}>复制保留的草稿</button>}
       {Boolean(live?.pendingQuestions?.length) && <p role="status">本轮等待你的回答。 <button className="btn unified-question-jump" onClick={showLatest}>查看待回答问题</button></p>}
       <div className="composer-shell evidence-composer-shell">
         <textarea aria-label="统一对话消息" value={input} onChange={(event) => setInput(event.target.value)} disabled={working || Boolean(attempt) || Boolean(preview) || Boolean(page?.summary.archivedAt)} placeholder="输入当前请求；历史由单独的确认步骤补齐" rows={3} />
@@ -292,6 +303,15 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
       </div>
       {attempt && !preview && <button className="btn" disabled={working} onClick={() => { void send(attempt) }}>核对原发送</button>}
     </footer>
+    {deleting && <ConversationDeleteDialog id={conversation.id} onClose={(attempted) => {
+      setDeleting(false)
+      // Deletion can remove the trigger, including after a lost reply. Keep a
+      // stable keyboard destination without changing ModalFrame's cancel path.
+      if (attempted) window.requestAnimationFrame(() => refreshButton.current?.focus())
+    }} onChanged={() => {
+      changedRef.current()
+      void refresh().catch(error => setError(message(error)))
+    }} />}
     {renaming && <SessionRenameDialog title={page?.summary.title ?? conversation.title} onSave={title => updateMetadata({ kind: 'rename', title })} onClose={() => setRenaming(false)} />}
     {preview && <ModalFrame labelledBy="conversation-preview-title" className="unified-preview" onClose={closePreview}>
       <h2 id="conversation-preview-title">确认发送给 {providerNames[preview.target.providerId]}</h2>

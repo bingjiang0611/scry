@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { DB_MIGRATIONS } from './db-migrations'
 import { scrySessionId } from './session-id'
+import { resolveConversationDeletionRuns } from './conversation-deletion'
 import { deleteSessionDataRows, resolveSessionDataRunIds, type SessionDeleteDatabase } from './session-data-delete'
 
 function database(): { native: DatabaseSync; adapter: SessionDeleteDatabase } {
@@ -25,6 +26,30 @@ function database(): { native: DatabaseSync; adapter: SessionDeleteDatabase } {
 }
 
 describe('session data deletion', () => {
+  it('routes a logical native/display alias to its real SQLite scope before deleting', () => {
+    const { native, adapter } = database()
+    try {
+      native.prepare('INSERT INTO projects (cwd, name, last_seen_at) VALUES (?, ?, ?)').run('/repo', 'repo', 1)
+      for (const scope of ['native', 'archive-alias', 'keep']) {
+        const id = scrySessionId('codex', '/repo', scope)
+        native.prepare('INSERT INTO session_refs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, 'codex', 'codex_cli', '/repo', scope, '', 1, 1)
+        if (scope !== 'native') native.prepare('INSERT INTO spans (id, session_id, run_id, kind, stage, cwd) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(`span-${scope}`, id, `run-${scope}`, 'harness', 'result', '/repo')
+      }
+      const plan = resolveConversationDeletionRuns({ conversationId: 'conversation', revision: 0, fingerprint: '', targets: [
+        { providerId: 'codex', externalSessionId: 'native', runIds: ['run-archive-alias'], sharedWith: [] },
+        { providerId: 'codex', externalSessionId: 'archive-alias', runIds: [], sharedWith: [] }
+      ] }, target => ({ status: 'ready', ...resolveSessionDataRunIds(adapter, { providerId: target.providerId, cwd: '/repo', externalSessionId: target.externalSessionId }) }))
+      expect(plan.targets.map(target => target.runIds)).toEqual([[], ['run-archive-alias']])
+      for (const target of plan.targets) {
+        const args = { ...target, cwd: '/repo' }
+        expect(resolveSessionDataRunIds(adapter, args).conflicts).toEqual([])
+        deleteSessionDataRows(adapter, args)
+      }
+      expect(native.prepare('SELECT id FROM spans').all()).toEqual([{ id: 'span-keep' }])
+    } finally { native.close() }
+  })
+
   it('deletes only rows attributable to the target session and discovered run ids', () => {
     const { native, adapter } = database()
     try {

@@ -17,6 +17,7 @@ import {
   type Conversation,
   type ConversationBinding,
   type ConversationDelivery,
+  type ConversationDeletionResult,
   type ConversationItemRef,
   type ConversationTarget,
   type ConversationTurn,
@@ -74,6 +75,17 @@ export function decodeConversation(value: unknown): Conversation {
   if (data.title !== undefined) requireValue(normalizeSessionTitle(data.title) === data.title, '对话名称无效')
   for (const field of ['pinnedAt', 'archivedAt']) requireValue(data[field] === undefined || (Number.isSafeInteger(data[field]) && Number(data[field]) > 0), '对话元数据时间无效')
   requireValue(data.adoptionFingerprint === undefined || (typeof data.adoptionFingerprint === 'string' && hashPattern.test(data.adoptionFingerprint)), '迁移指纹无效')
+  if (data.deletion !== undefined) {
+    requireValue(data.archivedAt !== undefined, '删除记录必须保留存档状态')
+    const deletion = object(data.deletion)
+    requireValue((deletion.status === 'pending' || deletion.status === 'complete') && typeof deletion.fingerprint === 'string' && hashPattern.test(deletion.fingerprint), '删除记录无效')
+    if (deletion.result !== undefined) {
+      const result = object(deletion.result)
+      requireValue(typeof result.ok === 'boolean' && ['deleted', 'retained'].every(key => Array.isArray(result[key]) && (result[key] as unknown[]).every(item => typeof item === 'string')) &&
+        Array.isArray(result.failed) && result.failed.every(item => typeof object(item).store === 'string' && typeof object(item).error === 'string'), '删除结果无效')
+    }
+    requireValue(deletion.status !== 'complete' || (object(deletion.result).ok === true && (object(deletion.result).failed as unknown[]).length === 0), '删除未完成，不能标为成功')
+  }
   requireValue(Array.isArray(data.bindings) && Array.isArray(data.turns), '对话绑定或轮次无效')
   const bindings = new Map<string, ConversationBinding>()
   const activeTargets = new Set<string>()
@@ -306,19 +318,29 @@ export class ConversationStore {
     }
   }
 
-  /** Main must hold its context admission through registration, and recheck before launch. */
-  async assertLegacyWriteAllowed(input: NativeSessionScope): Promise<void> {
+  /** Main holds context admission and rechecks before effects. Deletion uses the
+   * profile-independent physical scope; ownerId authorizes only pending cleanup. */
+  async assertLegacyWriteAllowed(input: NativeSessionScope, deletion?: { ownerId?: string }): Promise<void> {
     const scope = { ...input }
     return this.admission.run('ownership', async () => {
       if (this.recoveryFailure) throw this.recoveryFailure
       const conversations = await this.loadOwnership()
       // A separate, explicitly fresh conversation does not resume the unknown writer.
       // Main separately fences live managed writers until runtime settlement.
+      const deletionOwnerId = deletion?.ownerId
+      if (deletionOwnerId !== undefined) {
+        const owner = conversations.get(deletionOwnerId)
+        requireValue(owner?.deletion?.status === 'pending' && owner.cwd === scope.cwd, '缺少持久化删除授权')
+        const bindings = owner.bindings.filter(binding => binding.providerId === scope.providerId && binding.agentProfileId === scope.agentProfileId)
+        requireValue(Boolean(scope.nativeSessionId) && (bindings.some(binding => binding.nativeSessionId === scope.nativeSessionId) ||
+          owner.turns.some(turn => bindings.some(binding => binding.id === turn.bindingId) && (turn.runId === scope.nativeSessionId || turn.archive?.sessionId === scope.nativeSessionId))), '删除目标不属于该对话')
+      }
       if (!scope.nativeSessionId) return
       for (const conversation of conversations.values()) {
-        if (conversation.cwd !== scope.cwd) continue
+        if (conversation.cwd !== scope.cwd || conversation.id === deletionOwnerId || (deletionOwnerId && conversation.deletion?.status === 'complete')) continue
+        // Runtime identity is profile-scoped; physical App copies are not.
         const matches = (binding: ConversationBinding): boolean => binding.providerId === scope.providerId &&
-          binding.agentProfileId === scope.agentProfileId
+          (deletion !== undefined || binding.agentProfileId === scope.agentProfileId)
         if (conversation.bindings.some((binding) => matches(binding) && binding.nativeSessionId === scope.nativeSessionId)) {
           throw new Error(`原生会话已归属统一对话 ${conversation.id}，不能从旧入口写入或删除`)
         }
@@ -375,6 +397,7 @@ export class ConversationStore {
       if (initial?.adoptionFingerprint) {
         for (const owner of (await this.loadOwnership()).values()) {
           if (owner.cwd !== canonical || !owner.bindings.some(binding => nativeOwnerKey(canonical, binding) === nativeOwnerKey(canonical, bindings[0]))) continue
+          requireValue(!owner.deletion, '旧会话正在删除或已删除，不能重新迁入')
           requireValue(owner.adoptionFingerprint === initial.adoptionFingerprint, '旧会话已归属统一对话，不能替换迁移内容')
           return structuredClone(owner)
         }
@@ -390,10 +413,43 @@ export class ConversationStore {
     return structuredClone(cwd === undefined ? values : values.filter((conversation) => conversation.cwd === cwd))
   }
 
+  async beginDeletion(id: string, revision: number, fingerprint: string): Promise<Conversation> {
+    return this.admission.run('ownership', async () => {
+      const conversation = await this.required(id)
+      requireValue(conversation.revision === revision && conversation.deletion?.status !== 'complete', '对话已变化，请重新预览删除')
+      requireValue(Boolean(conversation.archivedAt), '请先存档统一对话')
+      requireValue(!conversation.turns.some(turn => turn.origin === 'dispatch' && ['pending', 'unknown'].includes(turn.delivery.status)), '投递未收敛，不能删除')
+      conversation.deletion = { status: 'pending', fingerprint }
+      conversation.revision++
+      await this.persist(this.checked(conversation))
+      return conversation
+    })
+  }
+
+  async finishDeletion(id: string, fingerprint: string, result: ConversationDeletionResult): Promise<void> {
+    const receipt = structuredClone(result)
+    return this.admission.run('ownership', async () => {
+      const conversation = await this.required(id)
+      requireValue(conversation.deletion?.status === 'pending' && conversation.deletion.fingerprint === fingerprint, '删除操作已变化')
+      conversation.deletion = { status: receipt.ok ? 'complete' : 'pending', fingerprint, result: receipt }
+      if (receipt.ok) {
+        delete conversation.title
+        delete conversation.pinnedAt
+        for (const binding of conversation.bindings) binding.retiredReason = '已删除的统一对话'
+        for (const turn of conversation.turns) {
+          if (turn.origin === 'dispatch' && turn.delivery.status === 'not_sent') turn.delivery.reason = '已删除的统一对话'
+        }
+      }
+      conversation.revision++
+      await this.persist(this.checked(conversation))
+    })
+  }
+
   async updateMetadata(id: string, expectedRevision: number, change: ConversationMetadataChange): Promise<Conversation> {
     const request = structuredClone(change)
     return this.admission.run('ownership', async () => {
       const conversation = await this.required(id)
+      requireValue(!conversation.deletion, '统一对话正在删除或已删除，不能修改')
       requireValue(conversation.revision === expectedRevision, '对话已变化，请刷新后重试')
       if (request.kind === 'rename') conversation.title = normalizeSessionTitle(request.title)
       else if (request.kind === 'pin') {
@@ -427,6 +483,7 @@ export class ConversationStore {
     await this.admission.run('ownership', async () => {
       if (this.recoveryFailure) throw this.recoveryFailure
       const conversation = await this.required(input.conversationId)
+      requireValue(!conversation.deletion, '统一对话正在删除或已删除，不能执行')
       requireValue(conversation.cwd === input.cwd, '统一对话工作区不一致')
       const binding = conversation.bindings.find((candidate) =>
         sameConversationTarget(candidate, input.target) &&
@@ -463,6 +520,7 @@ export class ConversationStore {
         selectedItems: request.selectedItems
       })
       const conversation = await this.required(id)
+      requireValue(!conversation.deletion, '统一对话正在删除或已删除，不能执行')
       const existing = conversation.turns.find((turn) => turn.origin === 'dispatch' && turn.commandId === request.commandId)
       if (existing?.origin === 'dispatch') {
         requireValue(existing.intentHash === intentHash, '同一命令 ID 不能替换请求内容或目标')
