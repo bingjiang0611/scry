@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
-import { stopOwnedApp } from './owned-app-processes.mjs'
+import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
 import { probeNativeComposer } from './native-composer-probe.mjs'
 import { readRecords } from './performance-report.mjs'
@@ -35,6 +35,7 @@ let child
 let cdp
 let output = ''
 let lineBuffer = ''
+let startupProbe = { phase: 'not-started', attempts: 0 }
 const traces = []
 
 function capture(chunk) {
@@ -60,18 +61,30 @@ async function connect(port) {
   const deadline = Date.now() + 30_000
   let page
   while (!page && Date.now() < deadline) {
+    startupProbe = { phase: 'http-request', attempts: startupProbe.attempts + 1, port }
     try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then(response => response.json())
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+      startupProbe.httpStatus = response.status
+      const targets = await response.json()
+      startupProbe.targets = targets.slice(0, 8).map(({ type, title, url }) => ({ type, title, url: url?.slice(0, 512) }))
+      startupProbe.targetsTruncated = targets.length > 8
       page = targets.find(target => target.type === 'page' && target.title === 'Scry' && target.webSocketDebuggerUrl)
-    } catch { /* Startup has not exposed the local debug endpoint yet. */ }
+      startupProbe.phase = page ? 'page-found' : 'waiting-for-page'
+    } catch (error) {
+      startupProbe.phase = 'probe-failed'
+      startupProbe.error = String(error)
+      startupProbe.cause = error.cause ? String(error.cause) : undefined
+    }
     if (!page) await new Promise(resolveWait => setTimeout(resolveWait, 50))
   }
-  assert.ok(page, `App startup timed out\n${output}`)
+  assert.ok(page, 'App startup timed out')
   assert.match(page.url, /^file:/)
+  startupProbe.phase = 'websocket-connect'
   const socket = new WebSocket(page.webSocketDebuggerUrl)
   const pending = new Map()
   let nextId = 1
   await new Promise((resolveReady, reject) => { socket.onopen = resolveReady; socket.onerror = reject })
+  startupProbe.phase = 'debug-connected'
   socket.onmessage = message => {
     const payload = JSON.parse(String(message.data))
     const request = pending.get(payload.id)
@@ -139,7 +152,21 @@ try {
   mkdirSync(bootstrap)
   const metadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   writeFileSync(join(bootstrap, 'package.json'), JSON.stringify({ name: metadata.name, version: metadata.version, main: 'main.cjs' }))
-  writeFileSync(join(bootstrap, 'main.cjs'), `const { app } = require('electron');\napp.setAppPath(${JSON.stringify(root)});\nrequire(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);\nrequire(${JSON.stringify(join(root, metadata.main))});\n`)
+  writeFileSync(join(bootstrap, 'main.cjs'), `
+    const { app } = require('electron');
+    const mark = (phase, detail = {}) => process.stderr.write('[scry:native-startup] ' + JSON.stringify({ phase, pid: process.pid, atMs: performance.now(), ...detail }) + '\\n');
+    mark('bootstrap', { ready: app.isReady() });
+    app.once('ready', () => mark('app-ready'));
+    app.on('browser-window-created', (_event, win) => {
+      mark('window-created', { windowId: win.id });
+      win.webContents.once('did-finish-load', () => mark('renderer-loaded', { windowId: win.id }));
+      win.webContents.on('did-fail-load', (_event, code, description) => mark('renderer-load-failed', { code, description }));
+    });
+    app.setAppPath(${JSON.stringify(root)});
+    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);
+    require(${JSON.stringify(join(root, metadata.main))});
+    mark('main-loaded');
+  `)
   const port = await freePort()
   const launchStarted = performance.now()
   child = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
@@ -424,6 +451,8 @@ try {
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
     cleanup, localRecording }, null, 2))
 } catch (error) {
+  // Preserve the original failure before cleanup; a cleanup error must not erase it.
+  console.error('SCRY_NATIVE_FAILURE', JSON.stringify({ failure: String(error).slice(0, 500), startup: startupProbe, app: inspectOwnedApp(child) }))
   console.error(output)
   throw error
 } finally {
