@@ -1,7 +1,10 @@
 // Serialized into the isolated Electron runner. All clicks and keyboard input
 // go through Chromium's native event path, not HTMLElement.click().
 export async function exerciseSessionCache(contents) {
-  const read = async expression => contents.executeJavaScript(expression)
+  const read = async expression => {
+    try { return await contents.executeJavaScript(expression) }
+    catch (error) { throw new Error('Cache UI expression failed: ' + expression + '\n' + String(error)) }
+  }
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const wait = expression => read(`(async () => {
     const deadline = Date.now() + 5000;
@@ -9,7 +12,7 @@ export async function exerciseSessionCache(contents) {
       if (Date.now() > deadline) throw new Error('Cache UI timeout: ' + ${JSON.stringify(expression)} + '\\n' + document.body.innerText.slice(-1800));
       await new Promise(resolve => setTimeout(resolve, 16));
     }
-  })()`)
+  })().catch(error => { console.error('Cache UI wait rejected:', error.stack); throw error; })`)
   const click = async expression => {
     const point = await read(`(() => {
       const element = ${expression};
@@ -100,7 +103,9 @@ export async function exerciseSessionCache(contents) {
   await select('cache-b'); await pending('cache-b')
   check(await cached('cache-b'), 'Invalidation control requires a real B cache hit')
   await control('invalidate-cache')
-  check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
+  // Native dispatch can return before React commits the invalidation. Keep the
+  // authority request pending and require the visible cache to clear before resolving it.
+  await wait(`document.querySelectorAll('.transcript-turn').length === 0`)
   await control('resolve-b'); await ready('cache-b')
   await select('cache-a'); await pending('cache-a')
   check(await noTurns(), 'Data invalidation did not clear A cache')
