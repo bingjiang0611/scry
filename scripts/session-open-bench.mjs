@@ -384,7 +384,10 @@ try {
           if (!turn?.done || turn.userText !== prompt) throw new Error('terminal turn not durably readable')
           if (!stopped && !turn.items.some(item => item.text === 'isolated remote assistant evidence')) throw new Error('archive lost full assistant output')
           if ((await window.scry.activeRuns()).some(run => run.runId === started.runId)) throw new Error('run did not settle')
-          return { runId: started.runId, stopped, startReceiptMs: receiptAt - startedAt, firstOutputReceiptMs: firstTextAt - startedAt,
+          return { runId: started.runId, stopped, startedAtEpochMs: performance.timeOrigin + startedAt,
+            terminalAtEpochMs: performance.timeOrigin + terminalAt,
+            ...(stopped ? { stopRequestedAtEpochMs: performance.timeOrigin + stopRequestedAt } : {}),
+            startReceiptMs: receiptAt - startedAt, firstOutputReceiptMs: firstTextAt - startedAt,
             startToTerminalMs: terminalAt - startedAt, terminalToReadableArchiveMs: archiveReadableAt - terminalAt,
             ...(stopped ? { stopReceiptMs, stopToTerminalMs: terminalAt - stopRequestedAt } : {}),
             durableTurns: 1, terminalConfirmed: true }
@@ -449,6 +452,9 @@ try {
     cacheObservedOpens: samples.filter(sample => sample.cacheObserved).length,
     mainLoads: loads, correctness: ['full initial page', 'latest turn visible', 'native typing', 'older turn recovery',
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
+    // Existing main-process traces distinguish finalization work from renderer receipt delays.
+    // Preserve them on successful runs too; failed comparisons previously lost this evidence.
+    lifecycleTraces: traces.filter(sample => sample.name.startsWith('agent.') || sample.name === 'ipc.agent:stop'),
     cleanup, localRecording }, null, 2))
 } catch (error) {
   // Preserve the original failure before cleanup; a cleanup error must not erase it.
