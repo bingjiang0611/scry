@@ -10,7 +10,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 6
+      }
     },
     "files.fixed-operations/io.read": {
       "scenario": "files.fixed-operations",
@@ -21,7 +24,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 336
+      }
     },
     "files.fixed-operations/io.stat": {
       "scenario": "files.fixed-operations",
@@ -32,7 +38,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1065
+      }
     },
     "files.fixed-operations/io.readdir": {
       "scenario": "files.fixed-operations",
@@ -43,7 +52,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 18
+      }
     },
     "files.fixed-operations/io.read.bytes": {
       "scenario": "files.fixed-operations",
@@ -54,7 +66,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 4
+      "tolerance": 4,
+      "baselines": {
+        "darwin-arm64": 1183197
+      }
     },
     "files.fixed-operations/io.write": {
       "scenario": "files.fixed-operations",
@@ -65,7 +80,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
     },
     "files.fixed-operations/io.rename": {
       "scenario": "files.fixed-operations",
@@ -76,7 +94,10 @@
       "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 3
+      }
     },
     "history.page/ipc.messages": {
       "scenario": "history.page",
@@ -87,7 +108,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
     },
     "history.page/ipc.bytes": {
       "scenario": "history.page",
@@ -98,7 +122,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 10020
+      }
     },
     "history.page/json.stringify.calls": {
       "scenario": "history.page",
@@ -109,7 +136,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
     },
     "persistence.archive/ipc.messages": {
       "scenario": "persistence.archive",
@@ -120,7 +150,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
     },
     "persistence.archive/ipc.bytes": {
       "scenario": "persistence.archive",
@@ -131,7 +164,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 10536
+      }
     },
     "persistence.archive/json.parse.calls": {
       "scenario": "persistence.archive",
@@ -142,7 +178,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 41
+      }
     },
     "terminal.delivery/ipc.messages": {
       "scenario": "terminal.delivery",
@@ -153,7 +192,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2
+      }
     },
     "terminal.delivery/ipc.bytes": {
       "scenario": "terminal.delivery",
@@ -164,7 +206,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 30109
+      }
     },
     "remote.trace.preview/ipc.messages": {
       "scenario": "remote.trace.preview",
@@ -175,7 +220,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
     },
     "remote.trace.preview/ipc.bytes": {
       "scenario": "remote.trace.preview",
@@ -186,7 +234,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2778
+      }
     },
     "analytics.stats/json.stringify.calls": {
       "scenario": "analytics.stats",
@@ -197,7 +248,10 @@
       "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
     },
     "analytics.sqlite/sqlite.prepare": {
       "scenario": "analytics.sqlite",
@@ -208,7 +262,10 @@
       "source": "better-sqlite3 Database.prepare/exec and statement all/get/run/iterate pass-through wrappers; cold statsQuery",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 11
+      }
     },
     "analytics.sqlite/sqlite.queries": {
       "scenario": "analytics.sqlite",
@@ -219,7 +276,10 @@
       "source": "better-sqlite3 Database.prepare/exec and statement all/get/run/iterate pass-through wrappers; cold statsQuery",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 11
+      }
     },
     "analytics.sqlite/sqlite.exec": {
       "scenario": "analytics.sqlite",
@@ -230,7 +290,10 @@
       "source": "better-sqlite3 Database.prepare/exec and statement all/get/run/iterate pass-through wrappers; cold statsQuery",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
     },
     "source-control.diff/subprocess.git": {
       "scenario": "source-control.diff",
@@ -273,7 +336,10 @@
       "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
     },
     "source-control.service.status-diff/subprocess.total": {
       "scenario": "source-control.service.status-diff",
@@ -284,7 +350,10 @@
       "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 11
+      }
     },
     "trace.delivery/ipc.messages": {
       "scenario": "trace.delivery",
@@ -295,7 +364,10 @@
       "source": "TraceOutputBridge send() wrapper; JSON UTF-8 bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2
+      }
     },
     "trace.delivery/ipc.bytes": {
       "scenario": "trace.delivery",
@@ -306,7 +378,10 @@
       "source": "TraceOutputBridge send() wrapper; JSON UTF-8 bytes, not structured-clone wire bytes",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 0
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 165996
+      }
     },
     "history.page/cpu.instructions": {
       "scenario": "history.page",

@@ -158,7 +158,8 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 - 当前 gating：`source-control.diff/subprocess.git`（8）与 `source-control.service.status-diff/subprocess.git`（11）。负向对照：在 `readWorkspaceGitDiff` 中多调用一次 git，计数 8→9，`check` 判 `regressed` 并失败。其余均为 candidate：IPC 字节/消息的真实开销发生在 Electron structured clone，需在 native 路径证明相关性；文件计数尚未测相关性；SQLite 在 Node CI 不可用；CPU 指令数未在 Linux 实测。门限值来自 macOS，Linux CI 值未观测；若首次 Linux 运行不同，按放宽流程处理，不能直接改数。
 - 状态：`candidate` 只报告；`gating` 必须写明三项证据：**稳定**（同版本重复结果一致或误差已知）、**敏感**（注入多余工作后指标变差）、**相关**（指标下降时用户耗时也下降）。
 - 判定（`performance-ratchet.mjs check`）：每项单独判定，不能互相抵消。gating 项超过门限加误差、重复测量差异超过误差、缺失或 unavailable 都失败；低于门限报告 `tightenable`。
-- 收紧（`propose`）：只把 gating 门限降到新观测值，不提升、不升级 candidate、不删除。CI 不用 PR 代码回写仓库；更新由人工审查或受信任任务提交。
+- 基线（candidate）：每个 candidate 在 `baselines` 中按平台（如 `darwin-arm64`、`linux-x64`）记录最近接受的值。`check` 用同平台基线把它标为 `worse`/`unchanged`/`better`，报告顶部列出所有 `worse`，但**不让 CI 失败**；没有同平台基线时只显示数值，不跨平台下结论。CPU 指令数只在 Linux 可测，macOS 不记基线。2026-10-16 已用 `d26ddb1` 在 macOS 记录 25 项基线；负向对照：在 `sessionHistoryPage` 中多调用一次 `JSON.stringify`，`history.page/json.stringify.calls` 1→2 被标为 `worse`，其余 24 项 `unchanged`，`check` 仍通过。
+- 收紧（`propose`）：把 gating 门限降到新观测值；为当前平台补记缺失的 candidate 基线，或把基线降到更低的新值。不提升、不升级 candidate、不删除。基线升高或删除会掩盖 `worse`，`guard` 视同放宽，需要批准。CI 不用 PR 代码回写仓库；更新由人工审查或受信任任务提交。
 - 放宽（`guard`）：提高门限、扩大误差、降级或删除 gating 项，必须写 `raise: { from, to, reason }`，并由维护者给 PR 加 `performance-raise-approved` 标签后重新运行。改变 workload、单位或层就是新指标，必须使用新键。
 
 ## 并行优化任务合同

@@ -8,8 +8,8 @@ const gating = (ceiling: number, extra: Record<string, unknown> = {}) => ({
   evidence: { stability: '5/5 identical', sensitivity: 'duplicate send +1', correlation: 'fewer messages, lower p95' }, ...extra
 })
 const ledger = (entry: object) => ({ schema: 1, metrics: { 'history.page/ipc.messages': entry } })
-const observed = (runs: number[] | null, extra: Record<string, unknown> = {}) => ({
-  schema: 1, revision: 'candidate', observations: [{
+const observed = (runs: number[] | null, extra: Record<string, unknown> = {}, platform?: string) => ({
+  schema: 1, revision: 'candidate', ...(platform ? { platform } : {}), observations: [{
     scenario: 'history.page', metric: 'ipc.messages', layer: 'ipc', unit: 'count', workload: 'history-turns=4000;page=40', source: 'fixture IPC sender wrapper',
     ...(runs ? { availability: 'measured', runs } : { availability: 'unavailable', reason: 'collector not supported on this runner' }), ...extra
   }]
@@ -41,6 +41,32 @@ describe('work-counter ratchet', () => {
     const candidate = { ...gating(0), status: 'candidate', ceiling: null, evidence: undefined }
     expect(resultOf(candidate, [99])).toMatchObject({ result: 'candidate', gateFailed: false })
     expect(() => checkRatchet(ledger(candidate), observed(null, { runs: [0] }))).toThrow(/Unavailable observation/)
+  })
+
+  it('flags candidates worse than the same-platform baseline without failing the gate', () => {
+    const candidate = { ...gating(0), status: 'candidate', ceiling: null, evidence: undefined, tolerance: 1, baselines: { 'darwin-arm64': 10 } }
+    const check = (runs: number[], platform?: string) => checkRatchet(ledger(candidate), observed(runs, {}, platform)).rows[0]
+    expect(check([12], 'darwin-arm64')).toMatchObject({ result: 'worse', baseline: 10, gateFailed: false })
+    expect(check([11], 'darwin-arm64')).toMatchObject({ result: 'unchanged', baseline: 10 })
+    expect(check([9], 'darwin-arm64')).toMatchObject({ result: 'better', baseline: 10 })
+    // Another OS may legitimately count differently; no cross-platform verdict is invented.
+    expect(check([50], 'linux-x64')).toMatchObject({ result: 'candidate' })
+    expect(check([50])).toMatchObject({ result: 'candidate' })
+    expect(checkRatchet(ledger(candidate), observed([12], {}, 'darwin-arm64')).passed).toBe(true)
+    expect(() => validateLedger(ledger({ ...candidate, baselines: { 'darwin-arm64': -1 } }))).toThrow(/Baselines/)
+  })
+
+  it('records missing baselines and only lowers existing ones when proposing', () => {
+    const candidate = { ...gating(0), status: 'candidate', ceiling: null, evidence: undefined, baselines: { 'darwin-arm64': 10 } }
+    const baselines = (runs: number[], platform: string) => proposeTightening(ledger(candidate), observed(runs, {}, platform)).ledger.metrics['history.page/ipc.messages'].baselines
+    expect(baselines([8], 'darwin-arm64')).toEqual({ 'darwin-arm64': 8 })
+    expect(baselines([12], 'darwin-arm64')).toEqual({ 'darwin-arm64': 10 })
+    expect(baselines([30], 'linux-x64')).toEqual({ 'darwin-arm64': 10, 'linux-x64': 30 })
+    expect(proposeTightening(ledger(candidate), observed([8])).changes).toEqual([])
+    expect(checkLedgerChange(ledger(candidate), ledger({ ...candidate, baselines: { 'darwin-arm64': 9 } })).passed).toBe(true)
+    expect(checkLedgerChange(ledger(candidate), ledger({ ...candidate, baselines: { 'darwin-arm64': 11 } })).violations).toEqual([expect.objectContaining({ kind: 'needs-approval' })])
+    expect(checkLedgerChange(ledger(candidate), ledger({ ...candidate, baselines: {} })).passed).toBe(false)
+    expect(checkLedgerChange(ledger(candidate), ledger({ ...candidate, baselines: { 'darwin-arm64': 11 } }), { raiseApproved: true }).passed).toBe(true)
   })
 
   it('refuses gating without the three promotion checks or with a changed workload', () => {
