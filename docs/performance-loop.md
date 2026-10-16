@@ -175,3 +175,5 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 此框架不自动安装、发布或上传本机历史数据，也不宣称所有路径已优化。PR/远端 CI 和必需检查的实际启用须另行授权与核验。闭环能提供可执行的反馈和明确的覆盖缺口；真实版本收益仍需后续发布与使用样本。
 
 初期四基准的检查、首轮失败和限制见 [初期验收记录](performance-loop-verification.md)。本轮扩展门禁以对应 commit 的 Node/native Actions 结果及保留的原始 artifacts 为准，不能把初期结果当作扩展验收。
+
+日常维护（分析日常记录、性能爬坡、维护台账）使用 `.agents/skills/scry-performance-climb`；慢点、想法、实验结果与覆盖缺口记录在 [性能机会日志](performance-opportunities.md)。
