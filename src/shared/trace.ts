@@ -158,6 +158,8 @@ export interface TurnDiffCollection {
   targetedMs?: number
   fallbackMs?: number
   fallbackReason?: TurnDiffFallbackReason
+  /** The collection timings/path count belong to the turn's same-afterAt capture, not another scan. */
+  sharedAfter?: 'turn'
 }
 
 export interface TurnDiffSnapshot {
@@ -170,6 +172,7 @@ export interface TurnDiffSnapshot {
   beforeAt: string
   afterAt: string
   captureMs: number
+  /** Releases this capture's ownership; a referenced shared store lives until its last peer releases it. */
   cleanup: 'ok' | 'failed'
   collection?: TurnDiffCollection
   /** 仅 session_diff / session_diff_preview 携带：净 diff 的基线是会话首轮前还是恢复后重锚。 */
@@ -249,7 +252,8 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
           discoveryMs,
           ...(targetedMs != null ? { targetedMs } : {}),
           ...(fallbackMs != null ? { fallbackMs } : {}),
-          ...(fallbackReason ? { fallbackReason } : {})
+          ...(fallbackReason ? { fallbackReason } : {}),
+          ...(collectionRaw.sharedAfter === 'turn' ? { sharedAfter: 'turn' as const } : {})
         }
       : undefined
   const baseline = raw.baseline === 'session_start' || raw.baseline === 'resumed'

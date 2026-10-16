@@ -264,7 +264,28 @@ function terminalSnapshot(
   }
 }
 
+const retainedCaptureStorage = new WeakMap<GitTurnDiffCapture, () => Promise<TurnDiffSnapshot['cleanup']>>()
+
+/** A terminal peer owns one reference to the complete source store, including clone-only objects. */
+function retainAfterStorage(capture: GitTurnDiffCapture): () => Promise<TurnDiffSnapshot['cleanup']> {
+  const owner: GitTurnDiffCapture = { ...capture, finishPromise: undefined, opChain: undefined }
+  let references = 2
+  const release = async (): Promise<TurnDiffSnapshot['cleanup']> => {
+    references--
+    return references === 0 ? cleanupCapture(owner) : 'ok'
+  }
+  retainedCaptureStorage.set(capture, release)
+  return release
+}
+
 async function cleanupCapture(capture: GitTurnDiffCapture): Promise<TurnDiffSnapshot['cleanup']> {
+  const release = retainedCaptureStorage.get(capture)
+  if (release) {
+    retainedCaptureStorage.delete(capture)
+    capture.tempDir = undefined
+    capture.sharedStorage = undefined
+    return release()
+  }
   if (!capture.tempDir) return 'ok'
   const dir = capture.tempDir
   const sharedStorage = capture.sharedStorage
@@ -493,14 +514,26 @@ async function writeTargetedSnapshotTree(options: {
   return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
 }
 
+interface GitAfterTree {
+  tree: string
+  afterAt: string
+  indexFile: string
+  objectDir: string
+  alternateObjectDirs?: string
+  filterOverrides: string[]
+  collection?: TurnDiffCollection
+}
+
 async function computeGitTurnDiff(
   capture: GitTurnDiffCapture,
   deadlineMs: number,
   options: GitTurnDiffFinishOptions,
-  consume: boolean
+  consume: boolean,
+  sharedAfter?: GitAfterTree,
+  onAfter?: (after: GitAfterTree) => void
 ): Promise<TurnDiffSnapshot> {
   const started = Date.now()
-  const afterAt = new Date(started).toISOString()
+  let afterAt = new Date(started).toISOString()
   if (capture.status !== 'ready' || !capture.repoRoot || !capture.scope || !capture.beforeTree || !capture.tempDir || !capture.objectDir) {
     return terminalSnapshot(
       capture,
@@ -525,127 +558,145 @@ async function computeGitTurnDiff(
       GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs
     }
     const fullPathspec = capture.pathspec ?? [capture.scope]
-    // 配置可能在本轮中变化；finish 前重扫，避免新加入的 clean/process filter 执行副作用命令。
-    const filterOverrides = await loadSnapshotOverrides(capture.repoRoot, capture.tempDir, deadline)
-    capture.filterOverrides = filterOverrides
-    const afterIndex = join(capture.tempDir, 'after.index')
-    const forceFull =
-      options.forceFull === true ||
-      process.env.SCRY_TURN_DIFF_STRATEGY?.trim().toLowerCase() === 'full'
-    const preFallbackBudget = Math.min(TURN_DIFF_TARGETED_DEADLINE_MS, Math.max(500, Math.floor(deadlineMs / 4)))
-    const preFallbackDeadline = Math.min(deadline, started + preFallbackBudget)
-    let discoveryMs = 0
-    let targetedMs: number | undefined
-    let fallbackMs: number | undefined
-    let fallbackReason: TurnDiffFallbackReason | undefined = forceFull ? 'forced' : undefined
-    let candidates = [...(options.structuredPaths ?? [])]
-    let targetPathspec: string[] = []
-    const hasStructuredEvidence = targetedPathspec(capture, options.structuredPaths ?? []).length > 0
-
-    if (!fallbackReason) {
-      const discoveryStarted = Date.now()
-      try {
-        const discoveryDeadline = Math.min(
-          preFallbackDeadline,
-          discoveryStarted + Math.max(250, Math.floor(preFallbackBudget / 2))
-        )
-        const discoveryIndex = join(capture.tempDir, 'discovery.index')
-        const discoveryEnv: NodeJS.ProcessEnv = { ...env, GIT_INDEX_FILE: discoveryIndex }
-        await rm(discoveryIndex, { force: true })
-        await rm(`${discoveryIndex}.lock`, { force: true })
-        const discoverySource = capture.baselineClean
-          ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
-          : join(capture.tempDir, 'before.index')
-        await copyIndexWithTimestamps(discoverySource, discoveryIndex).catch(() => undefined)
-        // 在 beforeTree 上保留可复用的 stat cache；really-refresh 同时清掉
-        // assume-unchanged 对候选发现的遮蔽，不必像 git add -A 那样重写整个 scope。
-        await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', '--reset', capture.beforeTree]), {
-          cwd: capture.repoRoot,
-          env: discoveryEnv,
-          deadline: discoveryDeadline
-        })
-        await gitCommand(snapshotGitArgs(filterOverrides, ['update-index', '--really-refresh']), {
-          cwd: capture.repoRoot,
-          env: discoveryEnv,
-          deadline: discoveryDeadline,
-          allowExitOne: true
-        })
-        const porcelain = await gitCommand(
-          snapshotGitArgs(filterOverrides, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...fullPathspec]),
-          { cwd: capture.repoRoot, env: discoveryEnv, deadline: discoveryDeadline }
-        )
-        candidates = [...new Set([...candidates, ...parsePorcelainPaths(porcelain, capture.repoRoot)])]
-      } catch {
-        fallbackReason = 'discovery_failed'
-      } finally {
-        discoveryMs = Date.now() - discoveryStarted
-      }
-    }
-
-    if (!fallbackReason) {
-      targetPathspec = targetedPathspec(capture, candidates)
-      if (targetPathspec.length > TURN_DIFF_CANDIDATE_LIMIT) fallbackReason = 'candidate_limit'
-      else if (changesGitSemantics(targetPathspec)) fallbackReason = 'git_semantics'
-    }
-
     let afterTree: string | undefined
-    if (!fallbackReason) {
-      const targetedStarted = Date.now()
-      try {
-        afterTree = await writeTargetedSnapshotTree({
-          cwd: capture.repoRoot,
-          baseTree: capture.beforeTree,
-          pathspec: targetPathspec,
-          env,
-          deadline: preFallbackDeadline,
-          filterOverrides,
-          targetIndex: afterIndex
-        })
-      } catch {
-        fallbackReason = 'targeted_failed'
-      } finally {
-        targetedMs = Date.now() - targetedStarted
-      }
-    }
+    let filterOverrides: string[]
+    if (sharedAfter) {
+      afterAt = sharedAfter.afterAt
+      afterTree = sharedAfter.tree
+      filterOverrides = sharedAfter.filterOverrides
+      collection = sharedAfter.collection ? { ...sharedAfter.collection, sharedAfter: 'turn' } : undefined
+      env.GIT_INDEX_FILE = sharedAfter.indexFile
+      env.GIT_ALTERNATE_OBJECT_DIRECTORIES = [...new Set([
+        sharedAfter.objectDir,
+        sharedAfter.alternateObjectDirs,
+        capture.alternateObjectDirs
+      ].flatMap(value => value?.split(delimiter) ?? []).filter(value => value && value !== capture.objectDir))].join(delimiter)
+    } else {
+      // 配置可能在本轮中变化；finish 前重扫，避免新加入的 clean/process filter 执行副作用命令。
+      filterOverrides = await loadSnapshotOverrides(capture.repoRoot, capture.tempDir, deadline)
+      capture.filterOverrides = filterOverrides
+      const afterIndex = join(capture.tempDir, 'after.index')
+      const forceFull =
+        options.forceFull === true ||
+        process.env.SCRY_TURN_DIFF_STRATEGY?.trim().toLowerCase() === 'full'
+      const preFallbackBudget = Math.min(TURN_DIFF_TARGETED_DEADLINE_MS, Math.max(500, Math.floor(deadlineMs / 4)))
+      const preFallbackDeadline = Math.min(deadline, started + preFallbackBudget)
+      let discoveryMs = 0
+      let targetedMs: number | undefined
+      let fallbackMs: number | undefined
+      let fallbackReason: TurnDiffFallbackReason | undefined = forceFull ? 'forced' : undefined
+      let candidates = [...(options.structuredPaths ?? [])]
+      let targetPathspec: string[] = []
+      const hasStructuredEvidence = targetedPathspec(capture, options.structuredPaths ?? []).length > 0
 
-    if (fallbackReason) {
-      const fallbackStarted = Date.now()
-      try {
-        await rm(afterIndex, { force: true })
-        await rm(`${afterIndex}.lock`, { force: true })
-        afterTree = await writeSnapshotTree({
-          cwd: capture.repoRoot,
-          pathspec: fullPathspec,
-          env,
-          deadline,
-          filterOverrides,
-          sourceIndex: capture.baselineClean
+      if (!fallbackReason) {
+        const discoveryStarted = Date.now()
+        try {
+          const discoveryDeadline = Math.min(
+            preFallbackDeadline,
+            discoveryStarted + Math.max(250, Math.floor(preFallbackBudget / 2))
+          )
+          const discoveryIndex = join(capture.tempDir, 'discovery.index')
+          const discoveryEnv: NodeJS.ProcessEnv = { ...env, GIT_INDEX_FILE: discoveryIndex }
+          await rm(discoveryIndex, { force: true })
+          await rm(`${discoveryIndex}.lock`, { force: true })
+          const discoverySource = capture.baselineClean
             ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
-            : join(capture.tempDir, 'before.index'),
-          targetIndex: afterIndex
-        })
-      } finally {
-        fallbackMs = Date.now() - fallbackStarted
-        collection = {
-          strategy: 'full_fallback',
-          evidence: 'fallback',
-          candidatePathCount: targetPathspec.length,
-          discoveryMs,
-          ...(targetedMs != null ? { targetedMs } : {}),
-          fallbackMs,
-          fallbackReason
+            : join(capture.tempDir, 'before.index')
+          await copyIndexWithTimestamps(discoverySource, discoveryIndex).catch(() => undefined)
+          // 在 beforeTree 上保留可复用的 stat cache；really-refresh 同时清掉
+          // assume-unchanged 对候选发现的遮蔽，不必像 git add -A 那样重写整个 scope。
+          await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', '--reset', capture.beforeTree]), {
+            cwd: capture.repoRoot,
+            env: discoveryEnv,
+            deadline: discoveryDeadline
+          })
+          await gitCommand(snapshotGitArgs(filterOverrides, ['update-index', '--really-refresh']), {
+            cwd: capture.repoRoot,
+            env: discoveryEnv,
+            deadline: discoveryDeadline,
+            allowExitOne: true
+          })
+          const porcelain = await gitCommand(
+            snapshotGitArgs(filterOverrides, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...fullPathspec]),
+            { cwd: capture.repoRoot, env: discoveryEnv, deadline: discoveryDeadline }
+          )
+          candidates = [...new Set([...candidates, ...parsePorcelainPaths(porcelain, capture.repoRoot)])]
+        } catch {
+          fallbackReason = 'discovery_failed'
+        } finally {
+          discoveryMs = Date.now() - discoveryStarted
         }
       }
-    } else {
-      collection = {
-        strategy: 'targeted',
-        evidence: hasStructuredEvidence ? 'git_status+structured' : 'git_status',
-        candidatePathCount: targetPathspec.length,
-        discoveryMs,
-        ...(targetedMs != null ? { targetedMs } : {})
+
+      if (!fallbackReason) {
+        targetPathspec = targetedPathspec(capture, candidates)
+        if (targetPathspec.length > TURN_DIFF_CANDIDATE_LIMIT) fallbackReason = 'candidate_limit'
+        else if (changesGitSemantics(targetPathspec)) fallbackReason = 'git_semantics'
+      }
+
+      if (!fallbackReason) {
+        const targetedStarted = Date.now()
+        try {
+          afterTree = await writeTargetedSnapshotTree({
+            cwd: capture.repoRoot,
+            baseTree: capture.beforeTree,
+            pathspec: targetPathspec,
+            env,
+            deadline: preFallbackDeadline,
+            filterOverrides,
+            targetIndex: afterIndex
+          })
+        } catch {
+          fallbackReason = 'targeted_failed'
+        } finally {
+          targetedMs = Date.now() - targetedStarted
+        }
+      }
+
+      if (fallbackReason) {
+        const fallbackStarted = Date.now()
+        try {
+          await rm(afterIndex, { force: true })
+          await rm(`${afterIndex}.lock`, { force: true })
+          afterTree = await writeSnapshotTree({
+            cwd: capture.repoRoot,
+            pathspec: fullPathspec,
+            env,
+            deadline,
+            filterOverrides,
+            sourceIndex: capture.baselineClean
+              ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
+              : join(capture.tempDir, 'before.index'),
+            targetIndex: afterIndex
+          })
+        } finally {
+          fallbackMs = Date.now() - fallbackStarted
+          collection = {
+            strategy: 'full_fallback',
+            evidence: 'fallback',
+            candidatePathCount: targetPathspec.length,
+            discoveryMs,
+            ...(targetedMs != null ? { targetedMs } : {}),
+            fallbackMs,
+            fallbackReason
+          }
+        }
+      } else {
+        collection = {
+          strategy: 'targeted',
+          evidence: hasStructuredEvidence ? 'git_status+structured' : 'git_status',
+          candidatePathCount: targetPathspec.length,
+          discoveryMs,
+          ...(targetedMs != null ? { targetedMs } : {})
+        }
       }
     }
     if (!afterTree) throw new Error('Git after tree was not created')
+    if (!sharedAfter) onAfter?.({
+      tree: afterTree, afterAt, indexFile: env.GIT_INDEX_FILE!, objectDir: capture.objectDir,
+      alternateObjectDirs: capture.alternateObjectDirs, filterOverrides, collection
+    })
 
     const [numstat, nameStatus] = await Promise.all([
       gitCommand(
@@ -829,7 +880,25 @@ export function finishGitTurnDiff(
   return capture.finishPromise
 }
 
-/** Terminal turn/session collection; keep each result independently observable and the session baseline reusable. */
+function sameSnapshotScope(capture: GitTurnDiffCapture, baseline: GitTurnDiffCapture): boolean {
+  const ready = (value: GitTurnDiffCapture): boolean => value.status === 'ready' &&
+    !!value.repoRoot && !!value.scope && !!value.beforeTree && !!value.tempDir && !!value.objectDir
+  const samePaths = (left: string[], right: string[]): boolean => {
+    const a = new Set(left)
+    const b = new Set(right)
+    return a.size === b.size && [...a].every(path => b.has(path))
+  }
+  return ready(capture) && ready(baseline) && capture.repoRoot === baseline.repoRoot &&
+    capture.scope === baseline.scope &&
+    samePaths(capture.pathspec ?? [capture.scope!], baseline.pathspec ?? [baseline.scope!]) &&
+    samePaths(capture.excludedPaths ?? [], baseline.excludedPaths ?? [])
+}
+
+/**
+ * A compatible terminal pair owns one immutable endpoint. The turn releases its reference and
+ * becomes observable first; the session owns the remaining reference until its projection and
+ * cleanup finish. This is the same ownership rule as baseline clones, not deferred unowned work.
+ */
 export function finishGitTurnAndSessionDiff(
   capture: GitTurnDiffCapture,
   baseline: GitTurnDiffCapture,
@@ -837,8 +906,70 @@ export function finishGitTurnAndSessionDiff(
   turnOptions: GitTurnDiffFinishOptions = {},
   sessionOptions: GitTurnDiffFinishOptions = {}
 ): { turn: Promise<TurnDiffSnapshot>; session: Promise<TurnDiffSnapshot> } {
-  const turn = finishGitTurnDiff(capture, deadlineMs, turnOptions)
-  const session = turn.then(() => snapshotSessionNetDiff(baseline, deadlineMs, sessionOptions))
+  if (capture.finishPromise || capture === baseline || !sameSnapshotScope(capture, baseline)) {
+    const turn = finishGitTurnDiff(capture, deadlineMs, turnOptions)
+    return { turn, session: turn.then(() => snapshotSessionNetDiff(baseline, deadlineMs, sessionOptions)) }
+  }
+  const previous = Promise.all([capture.opChain, baseline.opChain])
+  let shared = false
+  let after: GitAfterTree | undefined
+  let captureStarted = Date.now()
+  let releasePeer: (() => Promise<TurnDiffSnapshot['cleanup']>) | undefined
+  const turn = previous.then(async () => {
+    captureStarted = Date.now()
+    shared = sameSnapshotScope(capture, baseline)
+    let snapshot: TurnDiffSnapshot
+    let cleanup: TurnDiffSnapshot['cleanup'] = 'ok'
+    let cleanupMs = 0
+    try {
+      snapshot = await computeGitTurnDiff(capture, deadlineMs, shared ? {
+        ...turnOptions,
+        forceFull: turnOptions.forceFull === true || sessionOptions.forceFull === true,
+        structuredPaths: [...(turnOptions.structuredPaths ?? []), ...(sessionOptions.structuredPaths ?? [])]
+      } : turnOptions, false, undefined, shared ? value => {
+        after = value
+        releasePeer = retainAfterStorage(capture)
+      } : undefined)
+    } finally {
+      const cleanupStarted = Date.now()
+      cleanup = await cleanupCapture(capture)
+      cleanupMs = Date.now() - cleanupStarted
+    }
+    return { ...snapshot, captureMs: snapshot.captureMs + cleanupMs, cleanup }
+  })
+  const session = turn.then(async turnSnapshot => {
+    let snapshot: TurnDiffSnapshot
+    let cleanup: TurnDiffSnapshot['cleanup'] = 'ok'
+    let cleanupMs = 0
+    try {
+      snapshot = !shared
+        ? await computeGitTurnDiff(baseline, deadlineMs, sessionOptions, false)
+        : after
+          ? await computeGitTurnDiff(baseline, deadlineMs, sessionOptions, false, after)
+          : terminalSnapshot(
+              baseline, turnSnapshot.status === 'timeout' ? 'timeout' : 'failed',
+              turnSnapshot.reason ?? 'git_error', [], turnSnapshot.afterAt, Date.now() - captureStarted, 'ok',
+              turnSnapshot.collection ? { ...turnSnapshot.collection, sharedAfter: 'turn' } : undefined
+            )
+    } finally {
+      if (releasePeer) {
+        const cleanupStarted = Date.now()
+        cleanup = await releasePeer()
+        cleanupMs = Date.now() - cleanupStarted
+      }
+    }
+    return { ...snapshot, captureMs: snapshot.captureMs + cleanupMs, ...(cleanup === 'failed' ? { cleanup } : {}) }
+  }, async error => {
+    if (releasePeer) await releasePeer()
+    throw error
+  })
+  // Reserving both queues synchronously also serializes registry cancellation. The turn's
+  // finishPromise is independent, but neither capture may be disposed by a queued operation
+  // until the session has released the last dependency on the turn's objects.
+  const settled = session.then(() => undefined, () => undefined)
+  capture.opChain = settled
+  baseline.opChain = settled
+  capture.finishPromise = turn
   return { turn, session }
 }
 
@@ -872,8 +1003,8 @@ export function previewGitTurnDiff(
   })
 }
 
-export async function cancelGitTurnDiff(capture: GitTurnDiffCapture): Promise<void> {
-  await cleanupCapture(capture)
+export function cancelGitTurnDiff(capture: GitTurnDiffCapture): Promise<void> {
+  return serializeCaptureOp(capture, async () => { await cleanupCapture(capture) })
 }
 
 // `git diff --numstat -z` 的输出：每条 `added\tdeleted\tpath\0`（二进制文件增删为 `-`）。
