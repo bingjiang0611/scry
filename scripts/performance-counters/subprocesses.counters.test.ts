@@ -7,33 +7,42 @@ function resetProcessCounters(): void {
   processCounters.commands = new Map()
 }
 
-function countCommand(value: unknown): void {
+// `exec`/`execSync` take a shell command line; the others take the executable path.
+function countCommand(value: unknown, shell = false): void {
   if (!processCounters.active) return
-  const command = typeof value === 'string' ? value.split('/').at(-1) ?? value : 'unknown'
+  const executable = typeof value === 'string' ? (shell ? value.trim().split(/\s+/)[0] : value) : 'unknown'
+  const command = executable.split('/').at(-1) ?? executable
   processCounters.commands.set(command, (processCounters.commands.get(command) ?? 0) + 1)
 }
 
+// Every node:child_process entry point that starts a process is counted, so switching a call
+// to a sync or shell variant cannot make subprocess work disappear from the counter.
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process')
-  const execFile = ((...args: Parameters<typeof actual.execFile>) => {
-    countCommand(args[0])
-    return actual.execFile(...args)
-  }) as typeof actual.execFile
   const promisifySymbol = Symbol.for('nodejs.util.promisify.custom')
-  const custom = (actual.execFile as unknown as Record<symbol, unknown>)[promisifySymbol]
-  if (typeof custom === 'function') {
-    Object.defineProperty(execFile, promisifySymbol, {
-      value: (...args: unknown[]) => {
-        countCommand(args[0])
-        return Reflect.apply(custom, actual, args)
-      }
-    })
+  const wrap = <T extends (...args: never[]) => unknown>(name: keyof typeof actual, shell = false): T => {
+    const original = actual[name] as unknown as T
+    const wrapped = ((...args: unknown[]) => {
+      countCommand(args[0], shell)
+      return Reflect.apply(original, actual, args)
+    }) as unknown as T
+    const custom = (original as unknown as Record<symbol, unknown>)[promisifySymbol]
+    if (typeof custom === 'function') {
+      Object.defineProperty(wrapped, promisifySymbol, {
+        value: (...args: unknown[]) => {
+          countCommand(args[0], shell)
+          return Reflect.apply(custom, actual, args)
+        }
+      })
+    }
+    return wrapped
   }
-  const spawn = ((...args: Parameters<typeof actual.spawn>) => {
-    countCommand(args[0])
-    return actual.spawn(...args)
-  }) as typeof actual.spawn
-  return { ...actual, execFile, spawn }
+  return {
+    ...actual,
+    execFile: wrap('execFile'), execFileSync: wrap('execFileSync'),
+    spawn: wrap('spawn'), spawnSync: wrap('spawnSync'), fork: wrap('fork'),
+    exec: wrap('exec', true), execSync: wrap('execSync', true)
+  }
 })
 
 async function measure(operation: () => unknown | Promise<unknown>): Promise<Record<string, number>> {
@@ -135,6 +144,20 @@ describe('fixed production subprocess work counters', () => {
     expect(doubled.total).toBeGreaterThan(single.total)
     const { rm } = await import('node:fs/promises')
     await rm(fixture.root, { recursive: true, force: true })
+  }, 120_000)
+
+  it('counts every child_process entry point, so changing the call style cannot hide work', async () => {
+    const childProcess = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const counts = await measure(async () => {
+      childProcess.execFileSync('git', ['--version'])
+      childProcess.spawnSync('git', ['--version'])
+      childProcess.execSync('git --version')
+      await promisify(childProcess.exec)('git --version')
+      await promisify(childProcess.execFile)('git', ['--version'])
+      await new Promise((resolve, reject) => childProcess.spawn('git', ['--version']).once('close', resolve).once('error', reject))
+    })
+    expect(counts).toMatchObject({ git: 6, total: 6 })
   }, 120_000)
 
   it('is sensitive to one redundant source-control status refresh', async () => {
