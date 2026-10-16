@@ -48,13 +48,16 @@
 
 真实规模问题（如大仓库）要在 collector 里建对应规模的固定负载，并作为**新 key**（负载变了就是另一个指标）。
 
-## 4. 实验记录模板（写入 docs/performance-opportunities.md）
+## 4. 实验记录（每个实验一个文件：`docs/performance-experiments/<YYYYMMDD>-<短标题>.md`）
+
+一个实验一个文件，多个 agent 并行也不会冲突。`docs/performance-opportunities.md` 只维护排名和覆盖缺口；排名表注明分析日期，超过 14 天或跨过一次发布就重新分析。
 
 ```markdown
 ### <日期> <短标题>
 - 假设：改 X → 指标 M 从 a 降到 ≤ b；预期用户耗时降 c（依据：…）
-- 基线：<提交>，<命令>，负载 <uptime>
+- 基线：<提交>，<命令>，`SCRY_TIMING_RUN` 负载
 - 结果：M a→b'；毫秒 p50/p95 前后；真实 App/日常记录（若有）
+- 减少的工作去了哪里：不做了 / 缓存命中 / 移出关键路径 / 合并
 - 结论：成立 / 不成立 / 未验证（原因）
 - 锁定：台账变更（或无）；提交 <hash>
 - 下一步：…

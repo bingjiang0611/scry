@@ -12,6 +12,7 @@ packages/turn-recorder-cli/dist/
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/validate-scry-rate-workflow/
+!.claude/skills/scry-performance-climb/
 .local/
 .pi/
 .vite/
