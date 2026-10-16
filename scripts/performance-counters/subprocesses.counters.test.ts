@@ -1,18 +1,24 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
 
-const processCounters = vi.hoisted(() => ({ active: false, commands: new Map<string, number>() }))
+const processCounters = vi.hoisted(() => ({ active: false, commands: new Map<string, number>(), snapshotTrees: 0 }))
 
 function resetProcessCounters(): void {
   processCounters.commands = new Map()
+  processCounters.snapshotTrees = 0
 }
 
 // `exec`/`execSync` take a shell command line; the others take the executable path.
-function countCommand(value: unknown, shell = false): void {
+function countCommand(value: unknown, shell = false, args?: unknown): void {
   if (!processCounters.active) return
   const executable = typeof value === 'string' ? (shell ? value.trim().split(/\s+/)[0] : value) : 'unknown'
   const command = executable.split('/').at(-1) ?? executable
   processCounters.commands.set(command, (processCounters.commands.get(command) ?? 0) + 1)
+  if (command === 'git' && Array.isArray(args)) {
+    const tree = args.indexOf('write-tree')
+    const paths = args.indexOf('--')
+    if (tree >= 0 && (paths < 0 || tree < paths)) processCounters.snapshotTrees++
+  }
 }
 
 // Every node:child_process entry point that starts a process is counted, so switching a call
@@ -23,14 +29,14 @@ vi.mock('node:child_process', async () => {
   const wrap = <T extends (...args: never[]) => unknown>(name: keyof typeof actual, shell = false): T => {
     const original = actual[name] as unknown as T
     const wrapped = ((...args: unknown[]) => {
-      countCommand(args[0], shell)
+      countCommand(args[0], shell, args[1])
       return Reflect.apply(original, actual, args)
     }) as unknown as T
     const custom = (original as unknown as Record<symbol, unknown>)[promisifySymbol]
     if (typeof custom === 'function') {
       Object.defineProperty(wrapped, promisifySymbol, {
         value: (...args: unknown[]) => {
-          countCommand(args[0], shell)
+          countCommand(args[0], shell, args[1])
           return Reflect.apply(custom, actual, args)
         }
       })
@@ -49,7 +55,7 @@ async function measure(operation: () => unknown | Promise<unknown>): Promise<Rec
   resetProcessCounters()
   processCounters.active = true
   try { await operation() } finally { processCounters.active = false }
-  const result: Record<string, number> = { total: 0 }
+  const result: Record<string, number> = { total: 0, snapshotTrees: processCounters.snapshotTrees }
   for (const [command, count] of processCounters.commands) {
     result[command === 'git' ? 'git' : command] = count
     result.total += count
@@ -126,6 +132,90 @@ describe('fixed production subprocess work counters', () => {
       measured({ scenario: 'source-control.diff', metric: 'subprocess.total', ...meta }, recorderRuns.total),
       measured({ scenario: 'source-control.service.status-diff', metric: 'subprocess.total', ...meta }, sourceControlRuns.total)
     ])
+  }, 120_000)
+
+  it('counts paired terminal diffs on 5000 files with distinct dirty anchors and retained user changes', async () => {
+    const { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnAndSessionDiff } = await import('../../src/core/turn-recorder/git')
+    const { writeFile, rm, realpath, readFile, stat } = await import('node:fs/promises')
+    const { join, basename } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+    const { performance } = await import('node:perf_hooks')
+    const samples: Array<{ totalMs: number; turnReadyMs: number }> = []
+    vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null')
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+    vi.stubEnv('GIT_CONFIG_COUNT', '0')
+    for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) vi.stubEnv(key, undefined)
+    try {
+      const runs = await repeatCounters(defaultRepeats, async () => {
+        const fixture = await gitFixture()
+        const repo = await realpath(join(fixture.root, 'repo'))
+        const env = { ...process.env, HOME: fixture.home }
+        const git = (args: string[]) => execFileSync('git', args, { cwd: repo, env })
+        let turn: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+        let session: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+        try {
+          for (let start = 0; start < 4999; start += 64) await Promise.all(
+            Array.from({ length: Math.min(64, 4999 - start) }, (_, offset) => writeFile(join(repo, `file-${start + offset}.txt`), 'base\n'))
+          )
+          git(['add', '.'])
+          git(['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', '-c', 'user.email=bench@scry.local', '-c', 'user.name=bench', 'commit', '-q', '-m', '5000 files'])
+          await writeFile(join(repo, 'changed.ts'), 'user dirt before session\n')
+          session = await beginGitTurnDiff(repo)
+          await writeFile(join(repo, 'file-0.txt'), 'round-one\n')
+          await writeFile(join(repo, 'previous.txt'), 'previous turn\n')
+          turn = await beginGitTurnDiff(repo)
+          expect(turn.status).toBe('ready')
+          expect(session.status).toBe('ready')
+          expect(turn.beforeTree).not.toBe(session.beforeTree)
+          await writeFile(join(repo, 'file-0.txt'), 'base\n')
+          await writeFile(join(repo, 'file-1.txt'), 'round-two\n')
+          await rm(join(repo, 'previous.txt'))
+          await writeFile(join(repo, 'created.txt'), 'created this turn\n')
+          const indexBefore = await readFile(join(repo, '.git/index'))
+          const turnDir = turn.tempDir!
+          const baselineDir = session.tempDir!
+          const capture = turn
+          const baseline = session
+          const counts = await measure(async () => {
+            const started = performance.now()
+            const pair = finishGitTurnAndSessionDiff(capture, baseline)
+            let turnReadyMs = 0
+            const observedTurn = pair.turn.then(snapshot => {
+              turnReadyMs = performance.now() - started
+              return snapshot
+            })
+            const [turnDiff, sessionDiff] = await Promise.all([observedTurn, pair.session])
+            expect(turnDiff.status).toBe('captured')
+            expect(sessionDiff.status).toBe('captured')
+            expect(turnDiff.files.map(file => basename(file.path)).sort()).toEqual(['created.txt', 'file-0.txt', 'file-1.txt', 'previous.txt'])
+            expect(sessionDiff.files.map(file => basename(file.path)).sort()).toEqual(['created.txt', 'file-1.txt'])
+            expect(turnDiff.files.find(file => basename(file.path) === 'file-0.txt')?.patch).toContain('-round-one\n+base')
+            expect(sessionDiff.files.find(file => basename(file.path) === 'file-1.txt')?.patch).toContain('+round-two')
+            expect(await readFile(join(repo, '.git/index'))).toEqual(indexBefore)
+            await expect(stat(turnDir)).rejects.toMatchObject({ code: 'ENOENT' })
+            expect((await stat(baselineDir)).isDirectory()).toBe(true)
+            samples.push({ totalMs: performance.now() - started, turnReadyMs })
+          })
+          return { git: counts.git ?? 0, trees: counts.snapshotTrees, total: counts.total }
+        } finally {
+          if (turn) await cancelGitTurnDiff(turn)
+          if (session) await cancelGitTurnDiff(session)
+          await rm(fixture.root, { recursive: true, force: true })
+        }
+      })
+      const meta = { scenario: 'source-control.terminal-pair', layer: 'main' as const, unit: 'count' as const,
+        workload: 'tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2',
+        source: 'pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions' }
+      writeCollector('terminal-pair', [
+        measured({ ...meta, metric: 'subprocess.git' }, runs.git),
+        measured({ ...meta, metric: 'snapshot.write-tree' }, runs.trees),
+        measured({ ...meta, metric: 'subprocess.total' }, runs.total)
+      ])
+      if (process.env.SCRY_TERMINAL_PAIR_TIMINGS) {
+        const { writeFileSync } = await import('node:fs')
+        writeFileSync(process.env.SCRY_TERMINAL_PAIR_TIMINGS, JSON.stringify({ workload: meta.workload, samples }, null, 2))
+      }
+    } finally { vi.unstubAllEnvs() }
   }, 120_000)
 
   it('is sensitive to duplicated recorder diff work', async () => {
