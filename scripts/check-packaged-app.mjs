@@ -37,7 +37,10 @@ for (const packageFile of packageFiles) {
     let directory = posix.dirname(packageFile)
     let found = false
     while (true) {
-      if (entrySet.has(posix.join(directory, 'node_modules', name, 'package.json'))) { found = true; break }
+      if (entrySet.has(posix.join(directory, 'node_modules', name, 'package.json'))) {
+        found = true
+        break
+      }
       if (directory === '/') break
       directory = posix.dirname(directory)
     }
