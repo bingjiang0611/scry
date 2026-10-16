@@ -294,6 +294,13 @@ let win: BrowserWindow | null = null
 let runSeq = 0
 let isShuttingDown = false
 const isOwnedTestApp = process.env.SCRY_TEST_APP === '1'
+// Chromium 148 (Electron 42) 在辅助功能客户端接入后会走 AXBlockFlowIterator 计算行内邻居，
+// ax_block_flow_iterator.cc:169 的 CHECK_DEREF(box_fragment->Items()) 会把 renderer 直接打死（SIGTRAP），
+// 窗口只剩背景色。关闭该特性让 Blink 回到 AbstractInlineTextBox 路径，绕开崩溃点。
+// 升级 Electron 时复核：上游修复该 CHECK 或移除此特性开关后应删除这里。
+const disabledChromiumFeatures = app.commandLine.getSwitchValue('disable-features')
+app.commandLine.appendSwitch('disable-features',
+  [disabledChromiumFeatures, 'AccessibilityBlockFlowIterator'].filter(Boolean).join(','))
 // Isolated automation stays hidden: showInactive still displays a native window.
 if (isOwnedTestApp && process.platform === 'darwin') app.setActivationPolicy('prohibited')
 const mainEventId = (prefix: string, runId: string): string => `${prefix}-${runId}-${randomUUID()}`
@@ -1090,6 +1097,8 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
 // 注：原来扫 ~/.claude/projects 列举 transcript 的逻辑（readHeadPreview/readCwd/collectSessions）
 // 已移除——app 只列自己起过的会话（见 app-sessions），不采集 terminal 裸跑的 claude。
 
+const rendererAutoReloadCooldownMs = 60_000
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -1126,9 +1135,36 @@ function createWindow(): void {
     terminalOutput.detachRenderer()
     traceOutput.reset()
   })
-  createdWindow.webContents.on('render-process-gone', () => {
+  // Renderer 崩溃后窗口不会自己恢复，只剩背景色（黑屏）。自动重载一次；冷却期内再次崩溃说明
+  // 可能是确定性崩溃，改为询问用户，避免无限重载循环。重载后 app:rendererReady 会重新驱动 trace 投递。
+  let lastRendererAutoReloadAt = Number.NEGATIVE_INFINITY
+  createdWindow.webContents.on('render-process-gone', (_event, details) => {
     terminalOutput.detachRenderer()
     traceOutput.reset()
+    console.error(`[scry] renderer process gone: reason=${details.reason} exitCode=${details.exitCode}`)
+    if (details.reason === 'clean-exit' || isShuttingDown || createdWindow.isDestroyed()) return
+    const now = Date.now()
+    if (now - lastRendererAutoReloadAt >= rendererAutoReloadCooldownMs) {
+      lastRendererAutoReloadAt = now
+      createdWindow.webContents.reload()
+      return
+    }
+    void dialog.showMessageBox(createdWindow, {
+      type: 'error',
+      message: '界面进程反复崩溃',
+      detail: `原因：${details.reason}（exit ${details.exitCode}）。`,
+      buttons: ['重新加载', '关闭窗口'],
+      defaultId: 0,
+      cancelId: 1
+    }).then(({ response }) => {
+      if (createdWindow.isDestroyed()) return
+      if (response === 0) {
+        lastRendererAutoReloadAt = Date.now()
+        createdWindow.webContents.reload()
+      } else {
+        createdWindow.close()
+      }
+    })
   })
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error(`[scry] preload failed: ${preloadPath}`, error)
