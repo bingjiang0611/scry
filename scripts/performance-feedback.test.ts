@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { comparePerformance, formatComparison } from './performance-compare.mjs'
 import { checkCatalogue, pathForOperation, snapshotPerformanceDirectory, summarize as summarizeRecords, summarizeBaseline, observations, readRecords } from './performance-report.mjs'
+import { PerformanceJournal } from '../src/main/performance-journal'
 
 const summarize = (records, baseline, candidate) => summarizeRecords([
   ...records,
@@ -120,6 +121,25 @@ describe('performance feedback contract', () => {
       expect(result.status).toBe(0)
       expect(JSON.parse(result.stdout)).toMatchObject({ kind: 'single-build-baseline', build: 'hash', maturity: { status: 'provisional' } })
     } finally { rmSync(directory, { recursive: true, force: true }) }
+  })
+
+  it('snapshots and reads a real rotated journal, including compressed archives, oldest first', async () => {
+    const source = mkdtempSync(join(tmpdir(), 'scry-performance-archive-'))
+    const target = join(source, 'snapshot')
+    try {
+      const environment = { version: 'test', build: 'archived', mode: 'development' as const, platform: 'test', osRelease: 'test', arch: 'test', cpu: 'test', runtime: 'test' }
+      const journal = new PerformanceJournal({ directory: source, environment, maxFileBytes: 900, onError: () => { throw new Error('journal failed') } })
+      await journal.open()
+      for (let index = 0; index < 12; index++) journal.record({ kind: 'trace', sample: { name: 'ipc.agent:loadSession', durationMs: index, outcome: 'completed', startedAt: '2026-01-01T00:00:00.000Z', dimensions: {}, checkpoints: [] } })
+      await journal.close()
+      snapshotPerformanceDirectory(source, target)
+      const { records, issues } = await readRecords(target)
+      expect(issues).toEqual([])
+      expect(JSON.parse(readFileSync(join(target, 'snapshot-manifest.json'), 'utf8')).files.some((file: { name: string }) => file.name.endsWith('.jsonl.gz'))).toBe(true)
+      const durations = records.filter(item => item.observation.kind === 'trace').map(item => item.observation.sample.durationMs)
+      expect(durations).toEqual(Array.from({ length: 12 }, (_, index) => index))
+      expect(records.at(-1).observation.kind).toBe('health')
+    } finally { rmSync(source, { recursive: true, force: true }) }
   })
 
   it('creates hashed bounded snapshots, detects modification and refuses overwrite', async () => {
