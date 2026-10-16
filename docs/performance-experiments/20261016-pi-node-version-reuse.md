@@ -18,6 +18,8 @@
 
 **L1 成立；L2 未验证。** 配对计时经 host-wide timing lock 串行执行，但 `SCRY_TIMING_RUN` 为 `loadBefore=8.66, loadAfter=10.44, cores=10, highLoad=true`，只能写“高负载下测得，不可信”，不能把数字作为收益证明。初次基线同样 highLoad=true（10.04→10.11），单独候选为 false（9.24→9.30），没有可用的双侧低负载比较；不继续重复测量来挑绿结果。
 
+**后续L2补证（2026-10-17）**：用户授权在mac2进行同机固定负载比较，中位批耗时557.70→400.39ms，减少28.2%；8核负载7.95→7.12，highLoad=false，各5个fixture。负载接近阈值，结果只适用于该受控场景，不代表App/真实Provider收益。详见[mac2原始样本与方法](20261017-mac2-runtime-evidence.md)，本日高负载结果不删除，L3仍未验证。
+
 减少的工作：四次版本探针进程真正不再启动；没有延后到首次使用之外，没有把 Provider 启动移到计数外。每次仍异步校验 canonical runtime 的 dev/ino/size/mtimeNs/ctimeNs；完整 sanitized environment 的摘要进入键，不在键中保留明文凭据。
 
 ## 边界与失效

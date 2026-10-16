@@ -2,20 +2,20 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
-## 最新爬坡进展（2026-10-16）
+## 最新爬坡进展（2026-10-17）
 
 用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；本轮只完成两个有独立计数证据的前置优化，不代表两套架构已经交付。
 
 | 实验 | 固定负载 L1 | L2 / L3 | 减少的工作 |
 |---|---|---|---|
-| [Pi Node 版本复用](performance-experiments/20261016-pi-node-version-reuse.md) | 五次环境解析的版本探针 5→1，五轮一致 | 配对计时 highLoad=true，L2未验证；未安装，L3未验证 | 四个子进程不再启动；仍重验二进制元数据/环境，不缓存能力或trust |
-| [遥测追加保留用量聚合](performance-experiments/20261016-usage-telemetry-incremental.md) | 10000行暖账本+五次遥测追加/查询，重读 5→0 / 4757290→0 bytes，五轮一致 | 配对计时 highLoad=true，L2未验证；L3未验证 | 不再重读/parse整文件；性能记录仍完整保留 |
+| [Pi Node 版本复用](performance-experiments/20261016-pi-node-version-reuse.md) | 五次环境解析的版本探针 5→1，五轮一致 | mac2 L2：中位批耗时557.70→400.39ms，减少28.2%；L3未验证 | 四个子进程不再启动；仍重验二进制元数据/环境，不缓存能力或trust |
+| [遥测追加保留用量聚合](performance-experiments/20261016-usage-telemetry-incremental.md) | 10000行暖账本+五次遥测追加/查询，重读 5→0 / 4757290→0 bytes，五轮一致 | mac2 L2：中位批耗时26.26→1.43ms，减少94.6%；L3未验证 | 不再重读/parse整文件；性能记录仍完整保留 |
 
 冻结 collector 提交 `cafc418`，生产提交 `7ac7fcb`。全量性能计数为3项better、25项unchanged、2项gating pass、3项macOS CPU指令candidate缺失，无worse。只收紧三个candidate平台基线，没有升级门禁或放宽。
 
 **日志顺序缺陷后续已修复**：[同毫秒归档排序实验](performance-experiments/20261016-journal-order.md)。保留原专项22通过/1失败和基线负对照；新归档使用可跨重启恢复的单调排序时钟，不改文件格式或recordedAt。新增冻结时钟/重启/回拨回归在旧实现确定性失败，修复后全量3261通过/4 opt-in跳过；无法恢复已有同毫秒旧归档的歧义顺序。
 
-**L2复测仍受阻**：同负载锁内配对观测为Pi五次环境解析541.87→382.85ms、账本五次追加/查询25.17→1.95ms；10核负载10.36→9.39，highLoad=true，高负载下测得，不可信。停止继续重跑挑样，等待低负载窗口；计数维持1/0/0且无worse，不能升级为用户收益结论。
+**L2已在mac2补证**：[原始样本与方法](performance-experiments/20261017-mac2-runtime-evidence.md)。Apple M1/8核，Node24.18.0，同机同lockfile/collector、各5个fixture、串行锁内测量；负载7.95→7.12，highLoad=false，但接近8核阈值，不能称完全空闲。仅证明上述两个固定生产路径变快，不是整个App或12秒目录查询的收益证明。原本机10核负载10.36→9.39的highLoad=true结果保留，不用mac2结果冒充本机低负载结果；尚未安装或收集L3。
 
 **后续优先顺序**：先做 capability RPC 启动/响应/关闭分段实验，确认12秒目录查询的主体；再给真实 turn+session finalization 增加端到端计数和大仓库负载，验证共享 after-tree。已有同名 source-control collector未覆盖真实Service.diff的两次revision检查，新增场景不能静默替换旧workload。保持trust、证据收敛与崩溃恢复合同。原生客户端路线不在本轮实现范围。
 

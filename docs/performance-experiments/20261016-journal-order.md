@@ -43,5 +43,5 @@
 
 - 原始失败、通过日志、配对脚本、全部计时样本和性能报告保留在本机`/tmp/scry-perf-followup-results/`，不上传。
 - worktree：`/tmp/scry-perf-climb-runtime-evidence-20261016`；无打包、安装、push或合入main，未修改真实userData记录。
-- 当前阻碍：缺少机器低负载窗口。需维护者安排/暂停其他重负载工作，再执行一次锁内配对测量；不擅自停止别的进程。
+- 当日阻碍：缺少机器低负载窗口，未擅自停止别的进程。2026-10-17用户改为授权在mac2比较，两个固定负载已取得L2证据，见[mac2方法与原始样本](20261017-mac2-runtime-evidence.md)；不将新结果冒充当日本机结果。
 - 下一项授权范围内工作是capability RPC启动/响应/关闭分段，再是turn+session共享after-tree；本轮因持续高负载按skill收尾，不把这两项写成已完成。
