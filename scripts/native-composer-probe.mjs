@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 
 // Fixed cohorts, not retries: retain every observation, including the first.
 export const composerModes = Array.from({ length: 3 }, () => ['stop-immediate', 'complete', 'stop-visible', 'stop-immediate']).flat()
+export const nativeCounterMetrics = ['LayoutCount', 'RecalcStyleCount', 'Nodes', 'JSEventListeners', 'DocumentCount', 'DOMMutations']
 
 // Runs inside the real renderer. Observe only: never invoke start/stop or fabricate DOM output.
 export function observeComposer(prompt, mode) {
@@ -85,7 +86,7 @@ export function observeComposer(prompt, mode) {
   }
 }
 
-export async function probeNativeComposer({ evaluate, wait, click, send }) {
+export async function probeNativeComposer({ evaluate, wait, click, send, beginCounters, endCounters }) {
   const samples = []
   for (const [index, mode] of composerModes.entries()) {
     const prompt = `native composer ${mode} ${index}`
@@ -100,13 +101,18 @@ export async function probeNativeComposer({ evaluate, wait, click, send }) {
       await send('Input.insertText', { text: prompt })
       assert.equal(await evaluate(`document.querySelector('textarea').value`), prompt)
       await wait(`document.querySelector('button.send[aria-label="发送"]:not(:disabled)')`)
+      const sendCounterStart = await beginCounters()
       await click(`document.querySelector('button.send[aria-label="发送"]')`)
+      let stopCounterStart
       if (mode !== 'complete') {
         await ready('stopReadyAt')
+        stopCounterStart = await beginCounters()
         await click(`document.querySelector('button.run-status-stop')`)
       }
       await ready('settledVisibleAt')
       if (mode !== 'stop-immediate') await ready('visibleReadyAt')
+      const stopWorkCounters = stopCounterStart ? await endCounters(stopCounterStart) : undefined
+      const sendWorkCounters = await endCounters(sendCounterStart)
       const state = await evaluate('window.__composerProbe')
       assert.equal(state.inputTrusted, true)
       assert.equal(state.sendTrusted, true)
@@ -116,9 +122,9 @@ export async function probeNativeComposer({ evaluate, wait, click, send }) {
       assert.equal(await evaluate(`window.scry.activeRuns().then(runs => runs.some(run => run.runId === ${JSON.stringify(state.runId)}))`), false)
       samples.push({ mode, prompt, runId: state.runId, inputTrusted: state.inputTrusted, sendTrusted: state.sendTrusted, stopTrusted: state.stopTrusted,
         terminalConfirmed: true, stopped: Boolean(state.done.stopped), sendToTerminalMs: state.terminalAt - state.sendAt,
-        sendToSettledVisibleMs: state.settledVisibleAt - state.sendAt,
+        sendToSettledVisibleMs: state.settledVisibleAt - state.sendAt, sendWorkCounters,
         ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: state.firstOutputReceiptAt - state.sendAt, sendToFirstVisibleMs: state.firstVisibleAt - state.sendAt, sendToVisibleReadyMs: state.visibleReadyAt - state.sendAt } : {}),
-        ...(mode !== 'complete' ? { driverStopDispatchMs: state.stopAt - state.stopReadyAt, stopToTerminalMs: state.terminalAt - state.stopAt, stopToSettledVisibleMs: state.settledVisibleAt - state.stopAt } : {}) })
+        ...(mode !== 'complete' ? { driverStopDispatchMs: state.stopAt - state.stopReadyAt, stopToTerminalMs: state.terminalAt - state.stopAt, stopToSettledVisibleMs: state.settledVisibleAt - state.stopAt, stopWorkCounters } : {}) })
     } finally { await evaluate('window.__disposeComposerProbe()') }
   }
   return samples
