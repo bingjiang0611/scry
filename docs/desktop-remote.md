@@ -331,7 +331,7 @@ SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，�
 
 - 后台真实客户端稳定复现菜单问题：当前机器为 mac2 时，`querySelector('button[aria-checked="true"], button:not(:disabled)')` 仍按 DOM 顺序命中第一个可用的本机按钮。其 focus handler 将右侧项目列切成本机。修复为先找 checked 按钮，再单独回退到首个可用按钮；未放宽授权或引入本机 API fallback。该问题不等于已经证明远程文件写到了本机，也不能据此把此前全部桌面定位异常归为同一原因。
 - 远程终端的无障碍标签原来固定为“本机终端”，现复用现有 `machineLabel`，真实 UI 验证为 `mac2终端`；本机默认标签不变。
-- 源码修复提交 `d7e6a8e`，分支 `fix/remote-picker-focus-0.2.193`。开发签名候选 App **0.2.193**、私有 CLI **0.2.49**，`app.asar` SHA-256 **`98a13c298f4c249b1640d038d859da517c7b1e1aec8db750933ecfbf71049b83`**。未公证；候选位于 `/private/tmp/scry-release-0.2.192.TFUyJY/source/dist/mac-arm64/Scry.app`，尚未替换日常 App。
+- 源码修复提交 `d7e6a8e`，分支 `fix/remote-picker-focus-0.2.193`。开发签名候选 App **0.2.193**、私有 CLI **0.2.49**，`app.asar` SHA-256 **`98a13c298f4c249b1640d038d859da517c7b1e1aec8db750933ecfbf71049b83`**。未公证；候选位于 `/private/tmp/scry-release-0.2.192.TFUyJY/source/dist/mac-arm64/Scry.app`；验收当时尚未替换日常 App，随后的两端安装见下文。
 
 ### 实际通过范围
 
@@ -355,4 +355,19 @@ SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，�
 - Node 22.22.1 驱动下，typecheck、受影响 unit **23 passed**、`pack:artifact`（311 项必需依赖、安全、文件、PTY、宿主协议等）和严格深层签名检查通过。0.2.192 的历史全量单测数字不冒充 0.2.193 全量重跑。
 - 后台实例已退出，PID 79684 已不存在；该 userData 没有存活进程。验证其新建的远程终端剩余 **0** 后，删除了临时 userData 及加密连接副本；原前台 App、原配对和真实宿主未停止。临时 Git 目录、宿主录制与截图保留供复盘。验收未发起 Provider 对话、GitHub push 或 PR。
 - 通过回执：`logs/background-live-verified.json`；原始分阶段日志：`logs/background-live-final-193.log`、`logs/background-live-final-reconnect-193-api.log`；截图：`logs/background-live-ui/remote-file-saved.png`、`git-confirmed-after-reconnect.png`、`reconnected-same-pty.png`、`terminal-replayed.png`；清理回执：`logs/background-live-cleanup.json`。以上均相对于 `/private/tmp/scry-release-0.2.192.TFUyJY/`。
-- 日常客户端/宿主仍为 0.2.192，后台验证的是修复候选客户端 0.2.193 与宿主 0.2.192 的兼容路径。**下一步：决定是否将 0.2.193 修复版替换本机日常 App；本机重启会中断当前会话，不自动执行。**
+- 后台验收时日常客户端/宿主为 0.2.192，验证的是修复客户端 0.2.193 与宿主 0.2.192 的兼容路径；日常新主进程启动后的验收尚未执行。
+
+### 随后按明确选择更新两端（不重启）
+
+维护者选择“两端都更新”，并保留“不立即重启或停止当前任务”的约束。标准 `install-macos.mjs` 已在两端原安装路径原子替换为 **0.2.193**；未停止原进程，未改 userData、签名或安全策略。
+
+| 项目 | 已验证状态 | 证据 |
+| --- | --- | --- |
+| 本机安装 | `/Applications/Scry.app` 为 0.2.193，CLI 0.2.49，311 项依赖检查、严格深层签名检查通过 | `logs/local-install-193.log`、`logs/local-193-installed-verify.log` |
+| mac2 安装 | 原 `/Users/test/scry-remote-acceptance-0.2.180-GqVCV3/Scry.app` 为 0.2.193，相同 ASAR SHA-256，CLI/311 项/签名检查通过 | `logs/mac2-install-193.log`、`logs/mac2-193-installed-verify.log` |
+| 原进程与配对 | 本机 PID 21554、mac2 PID 32276 未改变；mac2 配对文件安装前后 SHA-256 同为 `86e51dc75521564afd145b97396f01d7953eaa4ad0ae0adb7c67371b4d7981fb`；原进程仍监听 64050/64051 | `logs/mac2-193-before-install.log`、`logs/mac2-193-installed-verify.log`、`logs/mac2-193-process-and-backup.log` |
+| 回滚包 | 两端 `.Scry.app.backup` 均为刚替换的 0.2.192；此前的备份先独立改名保留，未删除 | `logs/local-193-backup-preservation.json`、`logs/mac2-193-backup-preservation.json` |
+
+mac2 新暂存目录的内置 CLI 检查收到 `SIGKILL`（PID 82944），完整首轮失败保存在 `logs/mac2-193-preinstall-verify.log`。没有在该路径循环重试；沿用原路径的标准安装器及其最终目标 CLI 校验成功，随后完整 packaged 检查亦通过。信号来源仍未知，不能据此归因特定安全软件；若需归因，须由管理员开展信号审计。目前不是安装阻碍。
+
+**当前是“安装包已更新、原进程未重启”，不是两端新主进程都已运行验收通过。下一步由维护者在空闲时退出并重开两端；本机重启会中断当前会话，不自动执行。** 最新安装状态：发布目录的 `deployment-state.json`；后台验收回执保留其安装前的历史范围。
