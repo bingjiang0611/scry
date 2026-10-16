@@ -56,6 +56,8 @@ function items(value: unknown): asserts value is ConversationItemRef[] {
     keys.add(key)
   }
 }
+export { items as assertConversationItems }
+
 function subset(selected: ConversationItemRef[], available: ConversationItemRef[]): boolean {
   const keys = new Set(available.map(conversationItemKey))
   return selected.every((item) => keys.has(conversationItemKey(item)))
@@ -155,6 +157,26 @@ export type BeginConversationTurnResult = {
   disposition: 'created' | 'duplicate'
   conversation: Conversation
   turn: DispatchedConversationTurn
+}
+
+export interface ConversationIntentInput {
+  commandId: string
+  target: ConversationTarget
+  payloadHash: string
+  items: ConversationItemRef[]
+  selectedItems: ConversationItemRef[]
+}
+
+/** Durable command identity excludes revision/run allocation; retries must find the same attempt. */
+export function conversationIntentHash(input: ConversationIntentInput): string {
+  return createHash('sha256').update(JSON.stringify({
+    commandId: input.commandId,
+    target: { providerId: input.target.providerId, agentProfileId: input.target.agentProfileId,
+      continuationKey: input.target.continuationKey },
+    payloadHash: input.payloadHash,
+    items: input.items.map((item) => ({ itemId: item.itemId, contentHash: item.contentHash })),
+    selectedItems: input.selectedItems
+  })).digest('hex')
 }
 
 /** Single main-process owner. No Provider calls, workspace writes or automatic retry occur here. */
@@ -276,7 +298,8 @@ export class ConversationStore {
     return this.admission.run('ownership', async () => {
       if (this.recoveryFailure) throw this.recoveryFailure
       const conversations = await this.loadOwnership()
-      // Explicitly fresh legacy conversations do not resume an existing native writer.
+      // A separate, explicitly fresh conversation does not resume the unknown writer.
+      // Main separately fences live managed writers until runtime settlement.
       if (!scope.nativeSessionId) return
       for (const conversation of conversations.values()) {
         if (conversation.cwd !== scope.cwd) continue
@@ -334,6 +357,39 @@ export class ConversationStore {
     return conversation
   }
 
+  async list(cwd?: string): Promise<Conversation[]> {
+    const conversations = await this.loadOwnership()
+    const values = [...conversations.values()]
+    return structuredClone(cwd === undefined ? values : values.filter((conversation) => conversation.cwd === cwd))
+  }
+
+  async findDispatch(id: string, commandId: string): Promise<DispatchedConversationTurn | undefined> {
+    const conversation = await this.required(id)
+    const turn = conversation.turns.find((candidate) => candidate.origin === 'dispatch' && candidate.commandId === commandId)
+    return turn?.origin === 'dispatch' ? structuredClone(turn) : undefined
+  }
+
+  async assertManagedWriteAllowed(input: {
+    conversationId: string
+    cwd: string
+    target: ConversationTarget
+    nativeSessionId?: string
+    runId?: string
+  }): Promise<void> {
+    await this.admission.run('ownership', async () => {
+      if (this.recoveryFailure) throw this.recoveryFailure
+      const conversation = await this.required(input.conversationId)
+      requireValue(conversation.cwd === input.cwd, '统一对话工作区不一致')
+      const binding = conversation.bindings.find((candidate) =>
+        sameConversationTarget(candidate, input.target) &&
+        (input.nativeSessionId === undefined || candidate.nativeSessionId === input.nativeSessionId))
+      requireValue(binding !== undefined, '统一对话原生绑定不匹配')
+      const blocked = conversation.turns.find((turn) => turn.origin === 'dispatch' && turn.runId !== input.runId &&
+        (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown'))
+      requireValue(blocked === undefined, '统一对话存在未收敛投递')
+    })
+  }
+
   async history(id: string, runId: string): Promise<ProviderHistoricalContext | undefined> {
     const conversation = await this.required(id)
     const turn = conversation.turns.find((candidate) => candidate.runId === runId)
@@ -351,12 +407,13 @@ export class ConversationStore {
       items(request.items)
       requireValue(request.items.every((item) => item.runId === request.runId), '轮次包含其他 run 的内容')
       items(request.selectedItems)
-      const intentHash = createHash('sha256').update(JSON.stringify({
-        expectedRevision: request.expectedRevision, commandId: request.commandId, runId: request.runId,
-        target: { providerId: request.target.providerId, agentProfileId: request.target.agentProfileId,
-          continuationKey: request.target.continuationKey },
-        payloadHash: request.payloadHash, items: request.items, selectedItems: request.selectedItems
-      })).digest('hex')
+      const intentHash = conversationIntentHash({
+        commandId: request.commandId,
+        target: request.target,
+        payloadHash: request.payloadHash,
+        items: request.items,
+        selectedItems: request.selectedItems
+      })
       const conversation = await this.required(id)
       const existing = conversation.turns.find((turn) => turn.origin === 'dispatch' && turn.commandId === request.commandId)
       if (existing?.origin === 'dispatch') {

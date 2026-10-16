@@ -4,7 +4,7 @@
 
 已定位直接触发链：**多步真实 Git 流程 → 每条多操作用例仅经 ScProcess 就串行调用 55 / 78 / 60 次 Git → 启动阶段的耗时波动累加 → 超过 Vitest 默认 5 秒墙钟预算**。不是只有文件间并发才会触发；单文件定向运行也复现了超时。采样未发现单条 Git 卡住、非零退出、Node close 回调积压或 conversation 保护导致的阻塞。
 
-这不是“重跑通过即修复”。当前正式 timeout、并发配置、生产 Git 代码与权限复验均未修改，默认全量仍不能宣称通过。启动之前的宿主调度、装载和安全检查成本没有进一步分离，不能归因到某一个后台进程；本次没有停止其他任务或调整系统设置。
+这不是“重跑通过即修复”。诊断阶段未修改正式 timeout；后续依据上述调用次数和计时证据，将 `source control real temporary Git` 集成 suite 单独设为 15 秒，与仓库既有真实 Git 测试预算一致。没有改变默认 workers、生产 Git 命令时限、权限复验或断言，也未加入重试。当前全量结果见文末。启动之前的宿主调度、装载和安全检查成本仍未进一步分离，不能归因到某一个后台进程；没有停止其他任务或调整系统设置。
 
 ## 范围和方法
 
@@ -33,7 +33,7 @@ SCRY_SC_DIAGNOSTICS="$PWD/diagnostics/alone.jsonl" npm run test:unit -- \
   -t 'preserves the existing index|uses the push endpoint|rechecks PR account'
 ```
 
-其中 `SCRY_SC_DIAGNOSTICS` **仅为保存的诊断 patch 所识别**，不是产品配置。完整采样那次额外传入 `--testTimeout=15000`，仅用于诊断，不作为正式门禁通过的证据。没有新增 skip、重试、修改原断言或提交测试时限变化。
+其中 `SCRY_SC_DIAGNOSTICS` **仅为保存的诊断 patch 所识别**，不是产品配置。完整采样那次额外传入 `--testTimeout=15000`，仅用于诊断，不作为正式门禁通过的证据。该诊断试验没有新增 skip、重试、修改原断言或提交测试时限变化；后续正式 suite 的 15 秒预算与理由另记于文末。
 
 宿主同期观察到 10 个逻辑 CPU、load average 13.32 / 17.11 / 22.77、约 18.9 GiB swap 使用（sysctl 原始值 19347.19M）。它们支持“环境有压力”，但不足以证明某项资源或某个进程是具体原因。后续若要求消除这类门禁波动，应在可控宿主上测启动长尾，再为真实 Git 集成测试制定独立预算；不要为了省进程数删除执行前权限/指纹复验。
 
@@ -54,4 +54,13 @@ SCRY_SC_DIAGNOSTICS="$PWD/diagnostics/alone.jsonl" npm run test:unit -- \
 
 首轮新增断言失败来自测试误把 `LoadedSessionTurn` 当作 archive，读取不存在的 `status` 字段。按 `src/shared/session-history.ts` 与 `restoreTraceArchiveTurn()` 的合同修正：archive 保留严格 `status === completed` 检查，历史投影核对 `done/error/errorHint` 及成功 result；没有把 done 当作成功的唯一证据。
 
-这是实际 App 执行/持久化链路配合测试 Provider 的验证，不是手工点击 UI、真实账号、远端/手机、已安装发行包或尚未完成的 A→B→A 验收。测试子进程与临时用户数据已清理，两个源码副本和诊断资料保留。
+这是当时实际 App 执行/持久化链路配合测试 Provider 的验证，不是手工点击 UI、真实账号、远端/手机或已安装发行包。后续 A→B→A 的生产 UI/IPC 验收见 [统一会话计划第 8 节](provider-handoff-technical-plan.md#8-生产入口与隔离桌面验收2026-10-16)。测试子进程与临时用户数据已清理，两个源码副本和诊断资料保留。
+
+## 后续预算修正与当前结果（2026-10-16）
+
+- 仅修改 `src/main/source-control/service.test.ts` 的真实 Git suite 为 `{ timeout: 15_000 }`。原因是单用例串行 55–78 次实际 Git 启动，5 秒单位测试预算与真实集成流程不匹配；不是因为某条失败断言需要跳过。
+- 当前源码 `npm test`：**254 文件通过、3 跳过；3193 测试通过、3 跳过；shell PASS**。未改变生产 `ScProcess`、信任复验、默认并发或增加自动重试。早先失败保留为诊断证据，不由此宣称 OS 启动长尾根因解决。
+- 当前完整 `test:renderer:ui`、`check:cli-release`（32 文件 / 586 测试）及无发布凭据的 `pack:artifact` 最终通过。开发 artifact 没有正式签名、公证或安装。
+- 全量 unit/首轮 UI 日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`。
+- 最终 UI/CLI/artifact 日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7de9e98b4acfcb81.log`。首轮 UI cache fixture 有一次未定位的泛化执行异常；补充异常透传后定向与完整运行通过，不把它算作 Git 超时或已修复问题。
+- 若还需消除宿主启动长尾，由维护者安排可控负载的宿主测量，继续分离调度/装载/安全检查阶段；不删除执行前权限或 fingerprint 校验来降低进程次数。

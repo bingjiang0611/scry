@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { SourceControlApi } from '../shared/source-control'
+import type { ConversationApi, ConversationSummary } from '../shared/conversation-api'
 import type { BackgroundTaskStopResult, BackgroundWork } from '../shared/background-work'
 import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/tool-content'
 import type {
@@ -101,6 +102,8 @@ export interface ProjectMeta {
   name: string
   mtime: number
   sessions: SessionMeta[]
+  /** Logical conversations group native aliases without changing raw catalogs. */
+  conversations?: ConversationSummary[]
   pinnedAt?: number
 }
 
@@ -160,6 +163,14 @@ const api = {
   chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:chooseFolder'),
   clipboardImage: (): Promise<AgentInputAttachment | null> => ipcRenderer.invoke('agent:clipboardImage'),
   sourceControl,
+  conversations: {
+    create: (cwd: string): ReturnType<ConversationApi['create']> => ipcRenderer.invoke('conversation:create', cwd),
+    list: (cwd: string): ReturnType<ConversationApi['list']> => ipcRenderer.invoke('conversation:list', cwd),
+    read: (id: string, beforeOrdinal?: number): ReturnType<ConversationApi['read']> => ipcRenderer.invoke('conversation:read', id, beforeOrdinal),
+    readItem: (id: string, ref: Parameters<ConversationApi['readItem']>[1]): ReturnType<ConversationApi['readItem']> => ipcRenderer.invoke('conversation:readItem', id, ref),
+    preview: (id: string, request: Parameters<ConversationApi['preview']>[1]): ReturnType<ConversationApi['preview']> => ipcRenderer.invoke('conversation:preview', id, request),
+    send: (request: Parameters<ConversationApi['send']>[0]): ReturnType<ConversationApi['send']> => ipcRenderer.invoke('conversation:send', request)
+  } satisfies ConversationApi,
   workspaceList: (request: WorkspaceListRequest): Promise<WorkspaceListResult> => ipcRenderer.invoke('workspace:list', request),
   workspaceResolveFile: (request: WorkspacePathRequest): Promise<WorkspaceFileOpenTarget> => ipcRenderer.invoke('workspace:resolveFile', request),
   workspaceRead: (request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot> => ipcRenderer.invoke('workspace:read', request),

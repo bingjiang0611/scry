@@ -19,8 +19,10 @@ import {
   type AgentSteerResult
 } from '../../shared/runtime'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
+import { codexContinuationKey, ContinuationIdentityUnavailable } from './continuation-identity'
 import type {
   CodexHookInspection,
   CodexHookMetadata,
@@ -650,8 +652,32 @@ export function createCodexAdapter(
   let restarts = 0
   const MODEL_TTL_MS = 30_000
   let isolatedHome: ReturnType<typeof createCodexIsolatedHome> | undefined
+  let isolatedSourceHome: string | undefined
 
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
+  const runtimeEnvironment = (): Record<string, string> => {
+    const env = runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'codex' })
+    // runtimeCliEnv may be a deliberately minimal test/launcher environment; keep the
+    // adapter's configured home explicit so source-home derivation uses the same env key.
+    return { ...env, HOME: env.HOME ?? homeDir }
+  }
+  const sourceHomeFor = (env: Readonly<Record<string, string>>): string => {
+    const configured = process.env.SCRY_CODEX_SOURCE_HOME?.trim() || env.CODEX_HOME?.trim()
+    if (configured) return configured
+    if (env.HOME?.trim()) return join(env.HOME, '.codex')
+    throw new ContinuationIdentityUnavailable('Codex runtime HOME 不可用')
+  }
+  const ensureIsolatedHome = (sourceHome: string): ReturnType<typeof createCodexIsolatedHome> => {
+    if (isolatedHome) {
+      if (isolatedSourceHome !== sourceHome) {
+        throw new ContinuationIdentityUnavailable('Codex source home 已变化；请重启 Provider 后再继续')
+      }
+      return isolatedHome
+    }
+    isolatedHome = createCodexIsolatedHome(sourceHome, isolatedHomePath)
+    isolatedSourceHome = sourceHome
+    return isolatedHome
+  }
   const evictIdleClients = (protectedClient?: CodexAppServerClient): void => {
     const unique = [...new Set(clients.values())]
     if (unique.length <= 3) return
@@ -677,11 +703,29 @@ export function createCodexAdapter(
   const getClient = (
     cwd?: string,
     hookTrust: CodexHookTrustGrant[] = [],
-    mcpExecution?: AuthorizedMcpExecution
+    mcpExecution?: AuthorizedMcpExecution,
+    expectedContinuationKey?: string
   ): CodexAppServerClient => {
     const trustedHooks = [...hookTrust].sort((left, right) => left.key.localeCompare(right.key))
     const trustKey = trustedHooks.map((hook) => `${hook.key}\0${hook.currentHash}`).join('\n')
-    const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}`
+    const env = runtimeEnvironment()
+    const sourceHome = sourceHomeFor(env)
+    const privateHome = ensureIsolatedHome(sourceHome)
+    let identity = ''
+    if (expectedContinuationKey) {
+      identity = codexContinuationKey(
+        { providerId: 'codex', ...(cwd ? { cwd } : {}) },
+        sourceHome,
+        privateHome.path,
+        executable(),
+        env,
+        'materialized'
+      )
+      if (identity !== expectedContinuationKey) {
+        throw new ContinuationIdentityUnavailable('Codex 接续身份已变化，请重新预览')
+      }
+    }
+    const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}\0${identity}`
     const existing = clients.get(key)
     if (existing) {
       const timer = clientIdleTimers.get(existing)
@@ -694,10 +738,7 @@ export function createCodexAdapter(
     const path = executable()
     if (!path) throw new Error('Codex CLI 未找到')
     if (lastErrorAt) restarts++
-    const env = runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'codex' })
-    const sourceHome = process.env.SCRY_CODEX_SOURCE_HOME?.trim() || env.CODEX_HOME?.trim() || undefined
     delete env.SCRY_CODEX_SOURCE_HOME
-    isolatedHome ??= createCodexIsolatedHome(sourceHome, isolatedHomePath)
     const appServerArgs = [
       'app-server',
       '--strict-config',
@@ -729,7 +770,7 @@ export function createCodexAdapter(
       command: path,
       args,
       cwd,
-      env: { ...env, CODEX_HOME: isolatedHome.path }
+      env: { ...env, CODEX_HOME: privateHome.path }
     })
     clients.set(key, client)
     clientLastUsed.set(client, Date.now())
@@ -759,9 +800,10 @@ export function createCodexAdapter(
     params?: unknown,
     cwd?: string,
     hookTrust: CodexHookTrustGrant[] = [],
-    mcpExecution?: AuthorizedMcpExecution
+    mcpExecution?: AuthorizedMcpExecution,
+    expectedContinuationKey?: string
   ): Promise<T> => {
-    const client = getClient(cwd, hookTrust, mcpExecution)
+    const client = getClient(cwd, hookTrust, mcpExecution, expectedContinuationKey)
     clientActivity.set(client, (clientActivity.get(client) ?? 0) + 1)
     try {
       const result = await client.request<T>(method, params)
@@ -822,7 +864,7 @@ export function createCodexAdapter(
     return root < 0 || normalized.slice(root + 8).split('/').length <= 2
   }
   const skills = {
-    list: async (context: ProviderContext, forceReload = false) => {
+    list: async (context: ProviderContext, forceReload = false, expectedContinuationKey?: string) => {
       const key = context.cwd ?? ''
       const reloadGeneration = forcedSkillReloads.get(key)
       const reload = forceReload || reloadGeneration != null
@@ -830,7 +872,7 @@ export function createCodexAdapter(
         const response = await request<{ data?: Array<{ cwd?: string; skills?: unknown[]; errors?: unknown[] }> }>('skills/list', {
           cwds: context.cwd ? [context.cwd] : [],
           forceReload: reload
-        }, context.cwd)
+        }, context.cwd, [], undefined, expectedContinuationKey)
         const group = response.data?.find((item) => !context.cwd || item.cwd === context.cwd) ?? response.data?.[0]
         const data: SkillMeta[] = (group?.skills ?? []).map((raw) => {
           const item = record(raw)
@@ -860,6 +902,18 @@ export function createCodexAdapter(
     id: 'codex',
     runtimeProvider: 'codex_cli',
     historicalContext: true,
+    continuationKey: (context) => {
+      const env = runtimeEnvironment()
+      const sourceHome = sourceHomeFor(env)
+      if (isolatedHome && isolatedSourceHome !== sourceHome) {
+        throw new ContinuationIdentityUnavailable('Codex source home 已变化；请重启 Provider 后再继续')
+      }
+      const intendedHome = isolatedHome?.path ?? isolatedHomePath
+      if (!intendedHome) {
+        throw new ContinuationIdentityUnavailable('Codex 临时 isolated home 尚未初始化，无法建立稳定接续身份；请重启 Provider 或配置持久化运行目录')
+      }
+      return codexContinuationKey(context, sourceHome, intendedHome, executable(), env, isolatedHome ? 'materialized' : 'planned')
+    },
     describe: async () => {
       const path = executable()
       return {
@@ -974,12 +1028,11 @@ export function createCodexAdapter(
       const dispatchInterrupt = (): void => {
         if (interruptDispatched || !externalSessionId || !turnId) return
         interruptDispatched = true
-        void request(
+        // This native turn belongs to the retained client. A credential refresh
+        // must not redirect or prevent stopping that already-owned operation.
+        void activeClient!.request(
           'turn/interrupt',
-          { threadId: externalSessionId, turnId },
-          runRequest.cwd,
-          runRequest.codexHookTrust,
-          runRequest.mcpExecution
+          { threadId: externalSessionId, turnId }
         ).catch((error) => {
           runRequest.emit(newEvent(runRequest.runId, {
             kind: 'harness', stage: 'runtime:error', isError: true,
@@ -1155,7 +1208,12 @@ export function createCodexAdapter(
 
       const promise = (async (): Promise<ProviderRunResult> => {
         try {
-          const appServer = getClient(runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
+          const appServer = getClient(
+            runRequest.cwd,
+            runRequest.codexHookTrust,
+            runRequest.mcpExecution,
+            runRequest.expectedContinuationKey
+          )
           activeClient = appServer
           clientActivity.set(appServer, (clientActivity.get(appServer) ?? 0) + 1)
           await appServer.start()
@@ -1528,7 +1586,8 @@ export function createCodexAdapter(
                 },
                 runRequest.cwd,
                 runRequest.codexHookTrust,
-                runRequest.mcpExecution
+                runRequest.mcpExecution,
+                runRequest.expectedContinuationKey
               )
             : await request<CodexThreadResponse>(
                 'thread/start',
@@ -1539,7 +1598,8 @@ export function createCodexAdapter(
                 },
                 runRequest.cwd,
                 runRequest.codexHookTrust,
-                runRequest.mcpExecution
+                runRequest.mcpExecution,
+                runRequest.expectedContinuationKey
               )
           externalSessionId = thread.thread.id
           history.verifySession(externalSessionId)
@@ -1563,11 +1623,12 @@ export function createCodexAdapter(
           let input: unknown[] = []
           const mention = explicitSkillMention(runRequest.prompt)
           const skill = mention
-            ? (await skills.list({ providerId: 'codex', cwd: runRequest.cwd })).data?.find(
+            ? (await skills.list({ providerId: 'codex', cwd: runRequest.cwd }, false, runRequest.expectedContinuationKey)).data?.find(
                 (item) => item.enabled && item.name === mention.name
               )
             : undefined
           if (stopped) return { externalSessionId, stopped: true, status: 'interrupted' }
+          const text = history.text(skill && mention ? mention.text : runRequest.prompt, skill !== undefined)
           if (skill) {
             input.push({ type: 'skill', name: skill.name, path: skill.dir })
             runRequest.emit(
@@ -1580,7 +1641,6 @@ export function createCodexAdapter(
               })
             )
           }
-          const text = history.text(skill && mention ? mention.text : runRequest.prompt, skill !== undefined)
           input = [
             ...input,
             ...codexInput(text, runRequest.attachments)
@@ -1594,7 +1654,7 @@ export function createCodexAdapter(
             ...(access.approvalsReviewer ? { approvalsReviewer: access.approvalsReviewer } : {}),
             ...(runRequest.model ? { model: runRequest.model.id } : {}),
             ...(runRequest.effort ? { effort: runRequest.effort } : {})
-          }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution)
+          }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution, runRequest.expectedContinuationKey)
           turnId = turn.turn.id
           if (turnId) history.accepted(externalSessionId, 'codex_turn_start_response', turnId)
           runRequest.emit(newEvent(runRequest.runId, {
