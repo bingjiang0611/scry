@@ -60,6 +60,21 @@ function signalOwned(owned, signal) {
   }
 }
 
+/** Read-only failure evidence. A process snapshot does not establish cleanup. */
+export function inspectOwnedApp(child) {
+  if (!child) return { state: 'not-started' }
+  const root = { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode }
+  if (child.exitCode !== null || child.signalCode !== null) return { state: 'exited', root, descendants: 'unknown' }
+  try {
+    const rows = [...descendants(processes(), child.pid).values()]
+    return { state: rows.length ? 'observed' : 'unavailable', root, truncated: rows.length > 32,
+      processes: rows.slice(0, 32).map(({ pid, parent, status, started, command }) =>
+        ({ pid, parent, status, started, command: command.slice(0, 512) })) }
+  } catch (error) {
+    return { state: 'unavailable', root, error: String(error) }
+  }
+}
+
 /** Test-only cleanup, outside Electron so the intentional SIGKILL cannot erase ownership. */
 export async function stopOwnedApp(child, { crash = false } = {}) {
   if (!child) return { tracked: 0 }
