@@ -3301,7 +3301,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       : result?.modelUsage?.length ? '多模型'
         : result?.contextModel ?? (request.model ? `所选：${request.model.id}` : '未知模型')
     try {
-      appendLlmPerformance(app.getPath('userData'), { cwd: catalogCwd, externalSessionId }, {
+      await appendLlmPerformance(app.getPath('userData'), { cwd: catalogCwd, externalSessionId }, {
         runId, ts: performance.observedAt, providerId, agentProfileId,
         model,
         upstreamProvider: result?.modelUsage?.length === 1 ? result.modelUsage[0].upstreamProvider : result?.upstreamProvider,

@@ -1,4 +1,5 @@
 import { appendFileSync, chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { LlmPerformanceHistoryRow } from '../shared/llm-performance'
@@ -43,6 +44,10 @@ let usageScanCache: {
   file: string
   size: number
   mtimeMs: number
+  ctimeMs: number
+  dev: number
+  ino: number
+  endsWithNewline: boolean
   aggregates: Map<string, UsageAggregate>
   invalidLines: number
 } | null = null
@@ -77,12 +82,14 @@ function addAggregate(aggregates: Map<string, UsageAggregate>, row: ParsedUsageR
 
 function scanUsage(file: string): { aggregates: Map<string, UsageAggregate>; invalidLines: number; sourceBytes: number } {
   const stat = statSync(file)
-  if (usageScanCache?.file === file && usageScanCache.size === stat.size && usageScanCache.mtimeMs === stat.mtimeMs) {
+  if (usageScanCache?.file === file && usageScanCache.size === stat.size && usageScanCache.mtimeMs === stat.mtimeMs &&
+    usageScanCache.ctimeMs === stat.ctimeMs && usageScanCache.dev === stat.dev && usageScanCache.ino === stat.ino) {
     return { aggregates: usageScanCache.aggregates, invalidLines: usageScanCache.invalidLines, sourceBytes: stat.size }
   }
   const aggregates = new Map<string, UsageAggregate>()
   let invalidLines = 0
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
+  const source = readFileSync(file, 'utf8')
+  for (const line of source.split('\n')) {
     if (!line.trim()) continue
     try {
       const parsed = JSON.parse(line) as Omit<ParsedUsageRow, 'providerId'> & { providerId?: SessionProviderId; kind?: string }
@@ -92,7 +99,8 @@ function scanUsage(file: string): { aggregates: Map<string, UsageAggregate>; inv
       invalidLines++
     }
   }
-  usageScanCache = { file, size: stat.size, mtimeMs: stat.mtimeMs, aggregates, invalidLines }
+  usageScanCache = { file, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
+    dev: stat.dev, ino: stat.ino, endsWithNewline: source.length === 0 || source.endsWith('\n'), aggregates, invalidLines }
   return { aggregates, invalidLines, sourceBytes: stat.size }
 }
 
@@ -170,10 +178,13 @@ export function appendUsage(
     appendFileSync(file, line, { mode: 0o600 })
     chmodSync(file, 0o600)
     const stat = statSync(file)
-    if (usageScanCache?.file === file && previousSize != null && previousSize + Buffer.byteLength(line) === stat.size) {
+    if (usageScanCache?.file === file && usageScanCache.endsWithNewline && previousSize != null && previousSize + Buffer.byteLength(line) === stat.size) {
       addAggregate(usageScanCache.aggregates, row)
       usageScanCache.size = stat.size
       usageScanCache.mtimeMs = stat.mtimeMs
+      usageScanCache.ctimeMs = stat.ctimeMs
+      usageScanCache.dev = stat.dev
+      usageScanCache.ino = stat.ino
     } else invalidateUsageScan(file)
   } catch {
     /* usage.jsonl is best-effort; sqlite remains the structured source */
@@ -181,19 +192,36 @@ export function appendUsage(
 }
 
 /** Telemetry shares usage ownership/deletion, but must never count as a billing turn. */
-export function appendLlmPerformance(
+export async function appendLlmPerformance(
   userDataDir: string,
   context: { cwd: string; externalSessionId?: string },
   sample: LlmPerformanceHistoryRow
-): void {
+): Promise<void> {
   const file = usageJsonlPath(userDataDir)
-  appendFileSync(file, `${JSON.stringify({
+  const line = `${JSON.stringify({
     kind: 'llm_performance', providerId: sample.providerId, agentProfileId: sample.agentProfileId ?? null,
     cwd: context.cwd, externalSessionId: context.externalSessionId ?? null, runId: sample.runId,
     ts: sample.ts, performanceSample: sample
-  })}\n`, { mode: 0o600 })
-  chmodSync(file, 0o600)
-  invalidateUsageScan(file)
+  })}\n`
+  const handle = await open(file, 'a', 0o600)
+  try {
+    const before = await handle.stat()
+    await handle.appendFile(line, 'utf8')
+    await handle.chmod(0o600)
+    const after = await handle.stat()
+    const cache = usageScanCache
+    // Telemetry has no billing contribution. Advance only a cache matching the exact pre-append
+    // file; external edits/replacements or concurrent writers force the ordinary authoritative scan.
+    if (cache?.file === file && cache.endsWithNewline && cache.dev === before.dev && cache.ino === before.ino &&
+      cache.size === before.size && cache.mtimeMs === before.mtimeMs && cache.ctimeMs === before.ctimeMs &&
+      after.dev === before.dev && after.ino === before.ino && after.size === before.size + Buffer.byteLength(line)) {
+      cache.size = after.size
+      cache.mtimeMs = after.mtimeMs
+      cache.ctimeMs = after.ctimeMs
+    } else invalidateUsageScan(file)
+  } finally {
+    await handle.close()
+  }
 }
 
 export function readUsageStats(

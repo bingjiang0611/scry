@@ -1,8 +1,17 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { piRpcEnvironment } from './pi'
+
+const probes = vi.hoisted(() => ({ count: 0 }))
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => {
+    if (args[1]?.[0] === '-p') probes.count++
+    return actual.spawn(...args)
+  } }
+})
 
 async function withNodes(run: (cwd: string, path: string) => Promise<void>) {
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'scry-pi-env-')))
@@ -11,7 +20,7 @@ async function withNodes(run: (cwd: string, path: string) => Promise<void>) {
       const directory = join(cwd, String(index))
       mkdirSync(directory)
       const node = join(directory, 'node')
-      writeFileSync(node, `#!/bin/sh\nprintf '${version}\\n'\n`)
+      writeFileSync(node, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify([node, version])}'\n`)
       chmodSync(node, 0o755)
       return directory
     })
@@ -22,6 +31,50 @@ async function withNodes(run: (cwd: string, path: string) => Promise<void>) {
 }
 
 describe('Pi launcher environment', () => {
+  it('shares direct-runtime probes and invalidates on environment, symlink target and binary changes', async () => {
+    await withNodes(async (cwd, path) => {
+      const node = join(cwd, '0/node')
+      rmSync(node)
+      symlinkSync(process.execPath, node)
+      const profile = { id: 'pi:rotom', label: 'Rotom', executable: join(cwd, 'rotom') }
+      const base = { PATH: path, HOME: cwd }
+      probes.count = 0
+      const first = await Promise.all([piRpcEnvironment(profile, base), piRpcEnvironment(profile, base)])
+      expect(first[0].ROTOM_NODE).toBe(realpathSync(process.execPath))
+      expect(probes.count).toBe(1)
+      await piRpcEnvironment(profile, base)
+      expect(probes.count).toBe(1)
+      await piRpcEnvironment(profile, { ...base, PROBE_ENVIRONMENT: 'changed' })
+      expect(probes.count).toBe(2)
+      const replacement = join(cwd, 'replacement-node')
+      copyFileSync(process.execPath, replacement, constants.COPYFILE_FICLONE)
+      rmSync(node)
+      symlinkSync(replacement, node)
+      expect((await piRpcEnvironment(profile, base)).ROTOM_NODE).toBe(replacement)
+      expect(probes.count).toBe(3)
+      utimesSync(replacement, new Date(0), new Date(0))
+      await piRpcEnvironment(profile, base)
+      expect(probes.count).toBe(4)
+    })
+  })
+
+  it('does not retain version-manager shim responses or failed probes', async () => {
+    await withNodes(async (cwd) => {
+      const node = join(cwd, '0/node')
+      const profile = { id: 'pi:rotom', label: 'Rotom', executable: join(cwd, 'rotom') }
+      const base = { PATH: join(cwd, '0'), HOME: cwd }
+      writeFileSync(node, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`)
+      probes.count = 0
+      await piRpcEnvironment(profile, base)
+      await piRpcEnvironment(profile, base)
+      expect(probes.count).toBe(2)
+      writeFileSync(node, '#!/bin/sh\nexit 1\n')
+      expect((await piRpcEnvironment(profile, base)).ROTOM_NODE).toBeUndefined()
+      expect((await piRpcEnvironment(profile, base)).ROTOM_NODE).toBeUndefined()
+      expect(probes.count).toBe(4)
+    })
+  })
+
   it('keeps the Pi and Rotom Node requirements and overrides distinct', async () => {
     await withNodes(async (cwd, path) => {
       const pi = { id: 'pi:default', label: 'Pi', executable: join(cwd, 'pi') }
@@ -68,7 +121,7 @@ require('node:fs').writeFileSync(${JSON.stringify(output)}, JSON.stringify({
   nested: 'CLAUDECODE' in process.env,
   home: process.env.HOME
 }))
-process.stdout.write('24.18.0')
+process.stdout.write(JSON.stringify([${JSON.stringify(node)}, '24.18.0']))
 `)
       vi.stubEnv('OPENAI_ADMIN_API_KEY', 'inherited-admin-sentinel')
       try {

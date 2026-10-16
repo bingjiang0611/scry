@@ -29,12 +29,12 @@ describe('performance history shares usage deletion but not billing totals', () 
     try {
       appendUsage(dir, { providerId: 'claude', runtimeProvider: 'claude_sdk', cwd: '/repo', externalSessionId: 'session', runId: 'run' }, { ts: new Date(now).toISOString(), tokensOut: 20 })
       const before = readUsageStats(dir)
-      appendLlmPerformance(dir, { cwd: '/repo', externalSessionId: 'session' }, sample())
+      await appendLlmPerformance(dir, { cwd: '/repo', externalSessionId: 'session' }, sample())
       expect(readUsageStats(dir)).toMatchObject({ turns: before.turns, tout: 20, tin: null, cost: null })
       const cached = await readLlmPerformanceHistory(dir, now)
       expect(cached).toEqual({ rows: [sample()], truncated: false, invalidLines: 0 })
       expect(await readLlmPerformanceHistory(dir, now)).toBe(cached)
-      appendLlmPerformance(dir, { cwd: '/repo', externalSessionId: 'session' }, sample('second'))
+      await appendLlmPerformance(dir, { cwd: '/repo', externalSessionId: 'session' }, sample('second'))
       expect((await readLlmPerformanceHistory(dir, now)).rows).toHaveLength(2)
       deleteUsageSessionRows({ userDataDir: dir, providerId: 'claude', cwd: '/repo', externalSessionId: 'session', runIds: new Set(['run']) })
       expect((await readLlmPerformanceHistory(dir, now)).rows).toEqual([])
@@ -45,7 +45,7 @@ describe('performance history shares usage deletion but not billing totals', () 
   it('expires cached records at the 30 day boundary and rejects unsanitized network evidence', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-llm-history-expiry-'))
     try {
-      appendLlmPerformance(dir, { cwd: '/repo' }, sample())
+      await appendLlmPerformance(dir, { cwd: '/repo' }, sample())
       expect((await readLlmPerformanceHistory(dir, now)).rows).toHaveLength(1)
       expect((await readLlmPerformanceHistory(dir, now + 30 * 86400_000 + 1)).rows).toEqual([])
       appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...sample('unsafe'), performance: {
@@ -61,9 +61,9 @@ describe('performance history shares usage deletion but not billing totals', () 
     try {
       appendFileSync(usageJsonlPath(dir), '{bad json}\n' + JSON.stringify({ ts: new Date(now).toISOString(), tout: 99 }) + '\n')
       appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...sample(), performance: { ...sample().performance, averageCharactersPerSecond: -1 } } }) + '\n')
-      appendLlmPerformance(dir, { cwd: '/repo' }, { ...sample('old'), ts: new Date(now - 31 * 86400_000).toISOString() })
-      for (let index = 0; index <= LLM_HISTORY_LIMIT; index++) appendLlmPerformance(dir, { cwd: '/repo' }, sample(`run-${index}`))
-      appendLlmPerformance(dir, { cwd: '/repo' }, sample(`run-${LLM_HISTORY_LIMIT}`))
+      await appendLlmPerformance(dir, { cwd: '/repo' }, { ...sample('old'), ts: new Date(now - 31 * 86400_000).toISOString() })
+      for (let index = 0; index <= LLM_HISTORY_LIMIT; index++) await appendLlmPerformance(dir, { cwd: '/repo' }, sample(`run-${index}`))
+      await appendLlmPerformance(dir, { cwd: '/repo' }, sample(`run-${LLM_HISTORY_LIMIT}`))
       const history = await readLlmPerformanceHistory(dir, now)
       expect(history.rows).toHaveLength(LLM_HISTORY_LIMIT)
       expect(history).toMatchObject({ invalidLines: 2, truncated: true })
@@ -78,7 +78,7 @@ describe('performance history shares usage deletion but not billing totals', () 
       const observed = { ...sample('observed'), providerId: 'pi' as const, performance: { ...sample().performance,
         outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, tokenTimingSource: 'observed_calls' as const, llmCalls: 2,
         firstTokenMs: 1500, firstTokenCalls: 2, model: 'ultimate' } }
-      appendLlmPerformance(dir, { cwd: '/repo' }, observed)
+      await appendLlmPerformance(dir, { cwd: '/repo' }, observed)
       appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...observed, runId: 'forged',
         performance: { ...observed.performance, tokenTimingSource: 'guessed' } } }) + '\n')
       appendFileSync(usageJsonlPath(dir), JSON.stringify({ performanceSample: { ...observed, runId: 'negative-wait',
