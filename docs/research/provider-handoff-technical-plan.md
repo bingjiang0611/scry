@@ -414,6 +414,8 @@
 
 日志排序缺陷独立复现：原有 `archiveStamp()` 使用毫秒时间戳加随机 UUID 后缀，reader 按文件名排序；同一毫秒轮转会按随机后缀排列，而不是写入顺序。固定一毫秒、使用未修改的 journal/reader，得到 `[6,7,4,5,10,11,8,9,2,3,0,1]`。证据 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-journal-order-control-PaEyJF/diagnosis.json`；本次没有顺带修改采集/排序格式，建议单独修复并补确定性回归。
 
+后续经用户授权的[独立排查](performance-journal-order-diagnosis.md)已修复归档顺序；旧实现的负对照失败，新实现全量 **3274 通过 / 4 跳过**，shell、typecheck、build 通过。前次失败和超时记录保留，不据此宣称所有历史偶发超时已解决。
+
 ### 尚未覆盖
 
 - 真实 Claude/Codex/Pi 账号的端到端接续、真实付费调用、前台焦点行为、正式签名/公证和安装均未执行，需另行授权。

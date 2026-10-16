@@ -15,6 +15,7 @@ const journals: PerformanceJournal[] = []
 afterEach(async () => {
   for (const journal of journals.splice(0)) await journal.close()
   for (const path of temporary.splice(0)) await rm(path, { recursive: true, force: true })
+  vi.useRealTimers()
 })
 const archiveName = /^performance-\d{8}T\d{9}Z-[0-9a-f]{8}\.jsonl\.gz$/
 const fileText = async (path: string): Promise<string> => {
@@ -57,6 +58,53 @@ describe('local performance journal', () => {
     const records = (await readFile(join(path, 'performance-0.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     expect(records.at(-1).build).toBe('next')
     expect(records.at(-1).session).not.toBe(first.session)
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('preserves append order across same-millisecond rotation, clock rollback and restart', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const path = await directory()
+    const onError = vi.fn()
+    for (const [batch, time] of ['2026-03-02T00:00:00.000Z', '2026-03-01T00:00:00.000Z'].entries()) {
+      vi.setSystemTime(new Date(time))
+      const journal = new PerformanceJournal({ directory: path, environment, maxFileBytes: 900, onError })
+      journals.push(journal)
+      await journal.open()
+      for (let index = 0; index < 12; index++) {
+        journal.record({ kind: 'trace', sample: { ...observation.sample, durationMs: batch * 12 + index } })
+      }
+      await journal.close()
+    }
+    const archives = (await readdir(path)).filter(name => archiveName.test(name)).sort()
+    const records = (await Promise.all([...archives, 'performance-0.jsonl'].map(name => fileText(join(path, name)))))
+      .join('').trim().split('\n').map(line => JSON.parse(line))
+    const traces = records.filter(record => record.observation.kind === 'trace')
+    expect(traces.map(record => record.observation.sample.durationMs)).toEqual(Array.from({ length: 24 }, (_, index) => index))
+    // Filename ordering must not falsify the actual observation timestamps.
+    expect(traces.slice(0, 12).every(record => record.recordedAt === '2026-03-02T00:00:00.000Z')).toBe(true)
+    expect(traces.slice(12).every(record => record.recordedAt === '2026-03-01T00:00:00.000Z')).toBe(true)
+    expect(records.at(-1).observation.kind).toBe('health')
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('retains the newest records, not random same-millisecond archives, under the byte cap', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'))
+    const path = await directory()
+    const onError = vi.fn()
+    const journal = new PerformanceJournal({ directory: path, environment, maxFileBytes: 900, maxArchiveBytes: 900, onError })
+    journals.push(journal)
+    await journal.open()
+    for (let index = 0; index < 24; index++) journal.record({ kind: 'trace', sample: { ...observation.sample, durationMs: index } })
+    await journal.close()
+    const archives = (await readdir(path)).filter(name => archiveName.test(name)).sort()
+    expect((await Promise.all(archives.map(async name => (await stat(join(path, name))).size))).reduce((sum, size) => sum + size, 0)).toBeLessThanOrEqual(900)
+    const records = (await Promise.all([...archives, 'performance-0.jsonl'].map(name => fileText(join(path, name)))))
+      .join('').trim().split('\n').map(line => JSON.parse(line))
+    const durations = records.filter(record => record.observation.kind === 'trace').map(record => record.observation.sample.durationMs)
+    expect(durations.length).toBeGreaterThan(0)
+    expect(durations.length).toBeLessThan(24)
+    expect(durations).toEqual(Array.from({ length: durations.length }, (_, index) => 24 - durations.length + index))
     expect(onError).not.toHaveBeenCalled()
   })
 
@@ -112,6 +160,22 @@ describe('local performance journal', () => {
     expect(records[0].observation).toEqual(observation)
   })
 
+  it('restores the watermark from an uncompressed archive before rotating a crash-truncated tail', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    const path = await directory()
+    await writeFile(join(path, 'performance-20260301T000000000Z-ffffffff.jsonl'), '{"older":true}\n')
+    await writeFile(join(path, 'performance-0.jsonl'), '{"truncated":')
+    const onError = vi.fn()
+    const journal = new PerformanceJournal({ directory: path, environment, onError })
+    journals.push(journal)
+    await journal.open()
+    await journal.close()
+    const archives = (await readdir(path)).filter(name => archiveName.test(name)).sort()
+    expect(await Promise.all(archives.map(name => fileText(join(path, name))))).toEqual(['{"older":true}\n', '{"truncated":'])
+    expect(onError).not.toHaveBeenCalled()
+  })
+
   it('keeps compressed archives within the byte cap by deleting the oldest first', async () => {
     const path = await directory()
     const old = ['performance-20260101T000000000Z-00000001.jsonl.gz', 'performance-20260102T000000000Z-00000002.jsonl.gz', 'performance-20260103T000000000Z-00000003.jsonl.gz']
@@ -125,13 +189,16 @@ describe('local performance journal', () => {
     expect((await readdir(path)).sort()).toEqual([...old.slice(1), 'performance-0.jsonl'].sort())
   })
 
-  it('migrates the pre-archive layout and finishes an interrupted compression', async () => {
+  it.each(['distinct', 'tied', 'interrupted-migration'])('migrates the pre-archive layout and finishes interrupted compression (%s)', async mode => {
     const path = await directory()
     await writeFile(join(path, 'performance-0.jsonl'), '{"active":true}\n')
-    for (const index of [1, 2, 3]) {
+    if (mode === 'interrupted-migration') {
+      await writeFile(join(path, 'performance-20260107T000000000Z-ffffffff.jsonl'), '{"legacy":3}\n')
+    }
+    for (const index of mode === 'interrupted-migration' ? [1, 2] : [1, 2, 3]) {
       await writeFile(join(path, `performance-${index}.jsonl`), `{"legacy":${index}}\n`)
-      // Older rotated files stopped growing earlier, so their archive stamps sort first.
-      const time = new Date(Date.UTC(2026, 0, 10 - index))
+      // Equal mtimes must still preserve the known legacy order 3 → 2 → 1.
+      const time = new Date(Date.UTC(2026, 0, mode === 'distinct' ? 10 - index : 7))
       await utimes(join(path, `performance-${index}.jsonl`), time, time)
     }
     // A crash after rename but before compression leaves a plain stamped archive and a partial gzip.

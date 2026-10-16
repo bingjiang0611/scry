@@ -61,6 +61,7 @@ export class PerformanceJournal {
   private readonly pending: string[] = []
   private pendingBytes = 0
   private size = 0
+  private lastArchiveTime = 0
   private writing: Promise<void> | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private closed = false
@@ -81,6 +82,7 @@ export class PerformanceJournal {
 
   async open(): Promise<void> {
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
+    await this.restoreArchiveOrder()
     try {
       this.size = (await stat(this.activeFile)).size
       if (this.size > 0) {
@@ -93,7 +95,7 @@ export class PerformanceJournal {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    // Finishes archives left by a crash mid-compression and migrates the old layout.
+    // Finishes archives left by a crash mid-compression, including renamed legacy files.
     this.scheduleArchiving()
     this.timer = setInterval(() => { void this.flush() }, this.options.intervalMs ?? 5_000)
     this.timer.unref()
@@ -126,9 +128,35 @@ export class PerformanceJournal {
   private get maxArchiveBytes(): number { return this.options.maxArchiveBytes ?? 64 * 1024 * 1024 }
   private get activeFile(): string { return join(this.options.directory, ACTIVE_FILE) }
 
+  private async restoreArchiveOrder(): Promise<void> {
+    const directory = this.options.directory
+    const names = await readdir(directory)
+    const legacy = await Promise.all(names.filter(name => /^performance-[1-3]\.jsonl$/.test(name)).sort().reverse()
+      .map(async name => ({ name, time: Math.floor((await stat(join(directory, name))).mtimeMs) })))
+    const legacyBase = Math.min(...legacy.map(file => file.time))
+    for (const { name } of legacy) {
+      // The old layout's index, not tied/rewound mtimes, proves 3 → 2 → 1.
+      // Fixed slots also preserve order after a crash between these renames:
+      // the minimum remaining mtime can only move forward on the next open.
+      const time = legacyBase + 3 - Number(name.slice('performance-'.length, -'.jsonl'.length))
+      const target = `performance-${archiveStamp(new Date(time))}.jsonl`
+      await rename(join(directory, name), join(directory, target))
+      names.push(target)
+    }
+    for (const name of names.filter(name => ARCHIVE_RE.test(name))) {
+      const stamp = /^performance-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z-/.exec(name)
+      if (!stamp) continue
+      const [, year, month, day, hour, minute, second, millisecond] = stamp
+      this.lastArchiveTime = Math.max(this.lastArchiveTime, Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}.${millisecond}Z`))
+    }
+  }
+
   private async rotate(): Promise<void> {
+    // Filenames are ordering watermarks. recordedAt remains the real wall clock.
+    // UUIDs avoid name collisions; they must never determine append order.
+    this.lastArchiveTime = Math.max(Date.now(), this.lastArchiveTime + 1)
     try {
-      await rename(this.activeFile, join(this.options.directory, `performance-${archiveStamp(new Date())}.jsonl`))
+      await rename(this.activeFile, join(this.options.directory, `performance-${archiveStamp(new Date(this.lastArchiveTime))}.jsonl`))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
@@ -146,15 +174,13 @@ export class PerformanceJournal {
     for (const name of names) if (name.startsWith('performance-') && name.endsWith('.gz.partial')) await rm(join(directory, name), { force: true })
     for (const name of names.filter(name => ARCHIVE_RE.test(name) && name.endsWith('.jsonl'))) {
       const source = join(directory, name)
-      // Legacy rotated files have no timestamp in their name; their mtime is when they stopped growing.
-      const base = /^performance-[1-3]\.jsonl$/.test(name) ? `performance-${archiveStamp((await stat(source)).mtime)}.jsonl` : name
-      const target = join(directory, `${base}.gz`)
+      const target = join(directory, `${name}.gz`)
       const partial = `${target}.partial`
       await pipeline(createReadStream(source), createGzip(), createWriteStream(partial, { mode: 0o600 }))
       await rename(partial, target)
       await rm(source, { force: true })
     }
-    // Oldest archives go first; the stamp sorts chronologically and legacy names are migrated above.
+    // Oldest archives go first; the ordering watermark is monotonic across restarts.
     const archives = (await readdir(directory)).filter(name => ARCHIVE_RE.test(name)).sort()
     const sizes = await Promise.all(archives.map(async name => (await stat(join(directory, name))).size))
     let total = sizes.reduce((sum, size) => sum + size, 0)
