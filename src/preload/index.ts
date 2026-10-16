@@ -16,6 +16,7 @@ import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResul
 import type { RendererPerformanceSample } from '../shared/performance'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../shared/llm-performance'
 import type {
+  AgentDataUpdated,
   AgentForkSessionRequest,
   AgentForkSessionResult,
   AgentInputAttachment,
@@ -165,6 +166,9 @@ const api = {
   sourceControl,
   conversations: {
     create: (cwd: string): ReturnType<ConversationApi['create']> => ipcRenderer.invoke('conversation:create', cwd),
+    previewAdoption: (source: Parameters<ConversationApi['previewAdoption']>[0]): ReturnType<ConversationApi['previewAdoption']> => ipcRenderer.invoke('conversation:previewAdoption', source),
+    adopt: (source: Parameters<ConversationApi['adopt']>[0], fingerprint: string): ReturnType<ConversationApi['adopt']> => ipcRenderer.invoke('conversation:adopt', source, fingerprint),
+    update: (id: string, revision: number, change: Parameters<ConversationApi['update']>[2]): ReturnType<ConversationApi['update']> => ipcRenderer.invoke('conversation:update', id, revision, change),
     list: (cwd: string): ReturnType<ConversationApi['list']> => ipcRenderer.invoke('conversation:list', cwd),
     read: (id: string, beforeOrdinal?: number): ReturnType<ConversationApi['read']> => ipcRenderer.invoke('conversation:read', id, beforeOrdinal),
     readItem: (id: string, ref: Parameters<ConversationApi['readItem']>[1]): ReturnType<ConversationApi['readItem']> => ipcRenderer.invoke('conversation:readItem', id, ref),
@@ -328,8 +332,8 @@ const api = {
     ipcRenderer.on('agent:stopState', l)
     return () => ipcRenderer.removeListener('agent:stopState', l)
   },
-  onDataUpdated: (cb: (e: { runId: string; kind?: 'turn_recorded' | 'session_deleted' }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string; kind?: 'turn_recorded' | 'session_deleted' }): void => cb(e)
+  onDataUpdated: (cb: (e: AgentDataUpdated) => void): (() => void) => {
+    const l = (_: unknown, e: AgentDataUpdated): void => cb(e)
     ipcRenderer.on('agent:dataUpdated', l)
     return () => ipcRenderer.removeListener('agent:dataUpdated', l)
   },

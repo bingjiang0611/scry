@@ -1,6 +1,10 @@
 import type { ProviderId } from './provider.js'
 import { maskSecrets } from './trace.js'
 
+export type AgentDataUpdated =
+  | { runId: string; kind?: 'turn_recorded' | 'session_deleted' }
+  | { kind: 'conversation_changed'; conversationId: string }
+
 export type RuntimeBackend = 'local' | 'api'
 export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc'
 

@@ -4,6 +4,8 @@ import type { Dirent } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { ContextAdmission } from './context-admission'
 import { writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
+import { normalizeSessionTitle } from '../shared/session-title'
+import type { ConversationMetadataChange } from '../shared/conversation-api'
 import { isCommandId } from '../shared/runtime'
 import { isToolContentRef } from '../shared/tool-content'
 import { prepareConversationHistory, loadConversationHistory, MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history'
@@ -69,6 +71,9 @@ export function decodeConversation(value: unknown): Conversation {
   requireValue(data.version === 1 && typeof data.id === 'string' && idPattern.test(data.id), '对话版本或 ID 无效')
   requireValue(typeof data.cwd === 'string' && isAbsolute(data.cwd), '对话工作区必须是绝对路径')
   requireValue(Number.isSafeInteger(data.revision) && Number(data.revision) >= 0, '对话 revision 无效')
+  if (data.title !== undefined) requireValue(normalizeSessionTitle(data.title) === data.title, '对话名称无效')
+  for (const field of ['pinnedAt', 'archivedAt']) requireValue(data[field] === undefined || (Number.isSafeInteger(data[field]) && Number(data[field]) > 0), '对话元数据时间无效')
+  requireValue(data.adoptionFingerprint === undefined || (typeof data.adoptionFingerprint === 'string' && hashPattern.test(data.adoptionFingerprint)), '迁移指纹无效')
   requireValue(Array.isArray(data.bindings) && Array.isArray(data.turns), '对话绑定或轮次无效')
   const bindings = new Map<string, ConversationBinding>()
   const activeTargets = new Set<string>()
@@ -84,6 +89,10 @@ export function decodeConversation(value: unknown): Conversation {
       activeTargets.add(identity)
     }
     bindings.set(binding.id, raw as ConversationBinding)
+  }
+  if (data.adoptionFingerprint !== undefined) {
+    const original = data.bindings[0] as ConversationBinding | undefined
+    requireValue(original?.nativeSessionId && original.retiredReason, '迁入源必须保留已弃用的原生归属')
   }
   const runIds = new Set<string>()
   const commandIds = new Set<string>()
@@ -138,6 +147,11 @@ export function decodeConversation(value: unknown): Conversation {
 export interface ConversationSeed {
   target: ConversationTarget
   nativeSessionId: string
+  retiredReason?: string
+  adoptionFingerprint?: string
+  title?: string
+  pinnedAt?: number
+  archivedAt?: number
   /** Authoritative existing turns only; this imports references, never clones trace/usage rows. */
   turns: Array<{ runId: string; items: ConversationItemRef[]; nativeItems: ConversationItemRef[]; archive?: ConversationArchiveRef }>
 }
@@ -347,20 +361,54 @@ export class ConversationStore {
     const canonical = await realpath(cwd)
     requireValue((await stat(canonical)).isDirectory(), '对话工作区不是目录')
     const bindings: ConversationBinding[] = initial
-      ? [{ ...initial.target, id: randomUUID(), nativeSessionId: initial.nativeSessionId }]
+      ? [{ ...initial.target, id: randomUUID(), nativeSessionId: initial.nativeSessionId, ...(initial.retiredReason ? { retiredReason: initial.retiredReason } : {}) }]
       : []
     const turns: ConversationTurn[] = initial ? initial.turns.map((turn, index) => ({
       ...turn, ordinal: index + 1, bindingId: bindings[0].id, origin: 'imported'
     })) : []
-    const conversation = this.checked({ version: 1, id: randomUUID(), cwd: canonical, revision: 0, bindings, turns })
-    await this.admission.run('ownership', () => this.persist(conversation, true))
-    return conversation
+    const conversation = this.checked({ version: 1, id: randomUUID(), cwd: canonical, revision: 0, bindings, turns,
+      ...(initial?.title ? { title: normalizeSessionTitle(initial.title) } : {}),
+      ...(initial?.pinnedAt ? { pinnedAt: initial.pinnedAt } : {}),
+      ...(initial?.archivedAt ? { archivedAt: initial.archivedAt } : {}),
+      ...(initial?.adoptionFingerprint ? { adoptionFingerprint: initial.adoptionFingerprint } : {}) })
+    return this.admission.run('ownership', async () => {
+      if (initial?.adoptionFingerprint) {
+        for (const owner of (await this.loadOwnership()).values()) {
+          if (owner.cwd !== canonical || !owner.bindings.some(binding => nativeOwnerKey(canonical, binding) === nativeOwnerKey(canonical, bindings[0]))) continue
+          requireValue(owner.adoptionFingerprint === initial.adoptionFingerprint, '旧会话已归属统一对话，不能替换迁移内容')
+          return structuredClone(owner)
+        }
+      }
+      await this.persist(conversation, true)
+      return conversation
+    })
   }
 
   async list(cwd?: string): Promise<Conversation[]> {
     const conversations = await this.loadOwnership()
     const values = [...conversations.values()]
     return structuredClone(cwd === undefined ? values : values.filter((conversation) => conversation.cwd === cwd))
+  }
+
+  async updateMetadata(id: string, expectedRevision: number, change: ConversationMetadataChange): Promise<Conversation> {
+    const request = structuredClone(change)
+    return this.admission.run('ownership', async () => {
+      const conversation = await this.required(id)
+      requireValue(conversation.revision === expectedRevision, '对话已变化，请刷新后重试')
+      if (request.kind === 'rename') conversation.title = normalizeSessionTitle(request.title)
+      else if (request.kind === 'pin') {
+        if (request.pinned) conversation.pinnedAt ??= Date.now()
+        else delete conversation.pinnedAt
+      } else {
+        requireValue(!conversation.turns.some(turn => turn.origin === 'dispatch' && (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown')), '投递未收敛，先停止或核查后再存档')
+        if (request.archived) conversation.archivedAt ??= Date.now()
+        else delete conversation.archivedAt
+      }
+      conversation.revision++
+      const checked = this.checked(conversation)
+      await this.persist(checked)
+      return checked
+    })
   }
 
   async findDispatch(id: string, commandId: string): Promise<DispatchedConversationTurn | undefined> {
@@ -421,6 +469,7 @@ export class ConversationStore {
         await loadConversationHistory(this.userData, conversation, existing)
         return { disposition: 'duplicate', conversation, turn: existing }
       }
+      requireValue(!conversation.archivedAt, '对话已存档，请先恢复')
       requireValue(conversation.revision === request.expectedRevision, '对话已变化，请重新预览')
       const plan = planConversationContinuation(conversation, request.target)
       if (plan.kind === 'blocked') throw new Error(plan.reason)

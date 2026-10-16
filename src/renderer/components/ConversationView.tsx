@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
-import type { ConversationPage, ConversationPreview, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
+import type { ConversationMetadataChange, ConversationPage, ConversationPreview, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
 import { conversationItemKey } from '@shared/conversation'
 import type { ProviderId } from '@shared/provider'
 import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
@@ -8,6 +8,7 @@ import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToB
 import { UserMessage, AssistantTurn } from './ChatTurn'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { ModalFrame } from './Modals'
+import { SessionRenameDialog } from './SessionRename'
 import '../conversation.css'
 
 const deliveryLabels = { pending: '投递中', unknown: '投递结果未知', not_sent: '未投递', accepted: '已确认接收', imported: '导入记录' }
@@ -56,6 +57,9 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
   const [working, setWorking] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [managing, setManaging] = useState(false)
+  const managementPending = useRef(false)
   const [event, setEvent] = useState<TraceEvent>()
   const historyRef = useRef<HTMLElement>(null)
   const followLatest = useRef(true)
@@ -146,7 +150,17 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
   const setInput = (value: string): void => {
     draftStore.update((current) => new Map(current).set(draftKey, { input: value, attachments: [] }))
   }
-  const blocked = Boolean(page?.summary.activeRunId || page?.summary.blockedReason)
+  const updateMetadata = async (change: ConversationMetadataChange): Promise<void> => {
+    if (!page || managementPending.current) return
+    managementPending.current = true
+    setManaging(true)
+    try {
+      await window.scry.conversations.update(conversation.id, page.summary.revision, change)
+      changedRef.current()
+      await refresh()
+    } finally { managementPending.current = false; setManaging(false) }
+  }
+  const blocked = Boolean(page?.summary.activeRunId || page?.summary.blockedReason || page?.summary.archivedAt)
   const prepare = async (): Promise<void> => {
     if (busyRef.current || blocked || attempt || !input.trim()) return
     busyRef.current = true
@@ -221,6 +235,11 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
       <span>{page?.turns.length ? `第 ${page.turns[0].ordinal}–${page.turns.at(-1)!.ordinal} 轮` : '尚无记录'} · 每页最多 40 轮</span>
       <button className="btn" disabled={before === undefined} onClick={showLatest}>最近记录</button>
       <button ref={refreshButton} className="btn" onClick={() => { setError(undefined); setReload((value) => value + 1) }}>刷新证据</button>
+      <div className="unified-management">
+        <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(preview)} onClick={() => setRenaming(true)}>重命名</button>
+        <button className="btn" aria-label="置顶统一对话" aria-pressed={Boolean(page?.summary.pinnedAt)} disabled={!page || managing || working || Boolean(preview)} onClick={() => { void updateMetadata({ kind: 'pin', pinned: !page?.summary.pinnedAt }).catch(error => setError(message(error))) }}>{page?.summary.pinnedAt ? '取消置顶' : '置顶'}</button>
+        <button className="btn" aria-label={page?.summary.archivedAt ? '恢复统一对话' : '存档统一对话'} disabled={!page || managing || working || Boolean(preview) || Boolean(page.summary.activeRunId || page.summary.blockedReason)} onClick={() => { void updateMetadata({ kind: 'archive', archived: !page?.summary.archivedAt }).catch(error => setError(message(error))) }}>{page?.summary.archivedAt ? '恢复' : '存档'}</button>
+      </div>
     </div>
     <section ref={historyRef} className="chat chat-transcript unified-history" aria-label="统一对话历史" onScroll={(event) => {
       followLatest.current = chatBottomStickinessAfterScroll(event.currentTarget, openingLatest.current)
@@ -251,12 +270,13 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
       })}
     </section>
     <footer className="composer runtime-composer unified-composer">
+      {page?.summary.archivedAt && <p role="status">统一对话已存档；草稿保留，恢复后可继续发送。</p>}
       {page?.summary.blockedReason && <p role="status">{page.summary.blockedReason}</p>}
       {!preview && error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {Boolean(live?.pendingQuestions?.length) && <p role="status">本轮等待你的回答。 <button className="btn unified-question-jump" onClick={showLatest}>查看待回答问题</button></p>}
       <div className="composer-shell evidence-composer-shell">
-        <textarea aria-label="统一对话消息" value={input} onChange={(event) => setInput(event.target.value)} disabled={working || Boolean(attempt) || Boolean(preview)} placeholder="输入当前请求；历史由单独的确认步骤补齐" rows={3} />
+        <textarea aria-label="统一对话消息" value={input} onChange={(event) => setInput(event.target.value)} disabled={working || Boolean(attempt) || Boolean(preview) || Boolean(page?.summary.archivedAt)} placeholder="输入当前请求；历史由单独的确认步骤补齐" rows={3} />
       </div>
       <div className="composer-bottom">
         <fieldset className="unified-provider" disabled={blocked || working || Boolean(attempt) || Boolean(preview)}>
@@ -272,6 +292,7 @@ export function ConversationView({ conversation, draftStore, onChanged }: {
       </div>
       {attempt && !preview && <button className="btn" disabled={working} onClick={() => { void send(attempt) }}>核对原发送</button>}
     </footer>
+    {renaming && <SessionRenameDialog title={page?.summary.title ?? conversation.title} onSave={title => updateMetadata({ kind: 'rename', title })} onClose={() => setRenaming(false)} />}
     {preview && <ModalFrame labelledBy="conversation-preview-title" className="unified-preview" onClose={closePreview}>
       <h2 id="conversation-preview-title">确认发送给 {providerNames[preview.target.providerId]}</h2>
       <p>{preview.continuation.kind === 'resume' ? '恢复兼容的原生上下文，仅补齐你选择的缺失内容。' : '没有兼容的原生上下文；需要新建。不会伪装成原生恢复。'}</p>
