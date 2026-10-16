@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { appendFile, mkdir, open, rename, rm, stat } from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { appendFile, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises'
 import { cpus, release } from 'node:os'
 import { join } from 'node:path'
+import { pipeline } from 'node:stream/promises'
+import { createGzip } from 'node:zlib'
 import type { RendererPerformanceSample } from '../shared/performance'
 import type { PerformanceResourceSample } from './performance-resource-monitor'
 import type { PerformanceSample } from './performance-timing'
@@ -44,7 +47,15 @@ export function performanceEnvironment(version: string, build: string, packaged:
   }
 }
 
-/** Local diagnostics only: bounded queue + four bounded files, no DB, content or network. */
+// Active records append to performance-0.jsonl. A full (or crash-truncated) active file is
+// renamed to a timestamped archive and gzip-compressed off the write path; JSONL journals
+// compress ~20x, so a small byte cap keeps weeks of daily use instead of a few hours.
+// performance-[1-3].jsonl are the pre-archive layout and are compressed on the next open.
+const ACTIVE_FILE = 'performance-0.jsonl'
+const ARCHIVE_RE = /^performance-(?:[1-3]|\d{8}T\d{9}Z-[0-9a-f]{8})\.jsonl(?:\.gz)?$/
+const archiveStamp = (date: Date): string => `${date.toISOString().replace(/[-:.]/g, '')}-${randomUUID().slice(0, 8)}`
+
+/** Local diagnostics only: bounded queue + one active file + byte-capped compressed archives; no DB, content or network. */
 export class PerformanceJournal {
   private readonly session = randomUUID()
   private readonly pending: string[] = []
@@ -55,11 +66,14 @@ export class PerformanceJournal {
   private closed = false
   private failed = false
   private dropped = 0
+  // Archive compression/pruning runs serially and never blocks appends to the active file.
+  private archiving: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: {
     directory: string
     environment: PerformanceEnvironment
     maxFileBytes?: number
+    maxArchiveBytes?: number
     maxQueueBytes?: number
     intervalMs?: number
     onError: () => void
@@ -68,9 +82,9 @@ export class PerformanceJournal {
   async open(): Promise<void> {
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
     try {
-      this.size = (await stat(this.file(0))).size
+      this.size = (await stat(this.activeFile)).size
       if (this.size > 0) {
-        const file = await open(this.file(0), 'r')
+        const file = await open(this.activeFile, 'r')
         const last = Buffer.alloc(1)
         try { await file.read(last, 0, 1, this.size - 1) } finally { await file.close() }
         // Preserve a crash-truncated tail for reporting, but never concatenate a new record to it.
@@ -79,6 +93,8 @@ export class PerformanceJournal {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
+    // Finishes archives left by a crash mid-compression and migrates the old layout.
+    this.scheduleArchiving()
     this.timer = setInterval(() => { void this.flush() }, this.options.intervalMs ?? 5_000)
     this.timer.unref()
   }
@@ -107,18 +123,53 @@ export class PerformanceJournal {
   }
 
   private get maxFileBytes(): number { return this.options.maxFileBytes ?? 5 * 1024 * 1024 }
-  private file(index: number): string { return join(this.options.directory, `performance-${index}.jsonl`) }
+  private get maxArchiveBytes(): number { return this.options.maxArchiveBytes ?? 64 * 1024 * 1024 }
+  private get activeFile(): string { return join(this.options.directory, ACTIVE_FILE) }
 
   private async rotate(): Promise<void> {
-    await rm(this.file(3), { force: true })
-    for (let index = 2; index >= 0; index--) {
-      try {
-        await rename(this.file(index), this.file(index + 1))
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
+    try {
+      await rename(this.activeFile, join(this.options.directory, `performance-${archiveStamp(new Date())}.jsonl`))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
     this.size = 0
+    this.scheduleArchiving()
+  }
+
+  private scheduleArchiving(): void {
+    this.archiving = this.archiving.then(() => this.archive()).catch(() => this.fail())
+  }
+
+  private async archive(): Promise<void> {
+    const directory = this.options.directory
+    const names = await readdir(directory)
+    for (const name of names) if (name.startsWith('performance-') && name.endsWith('.gz.partial')) await rm(join(directory, name), { force: true })
+    for (const name of names.filter(name => ARCHIVE_RE.test(name) && name.endsWith('.jsonl'))) {
+      const source = join(directory, name)
+      // Legacy rotated files have no timestamp in their name; their mtime is when they stopped growing.
+      const base = /^performance-[1-3]\.jsonl$/.test(name) ? `performance-${archiveStamp((await stat(source)).mtime)}.jsonl` : name
+      const target = join(directory, `${base}.gz`)
+      const partial = `${target}.partial`
+      await pipeline(createReadStream(source), createGzip(), createWriteStream(partial, { mode: 0o600 }))
+      await rename(partial, target)
+      await rm(source, { force: true })
+    }
+    // Oldest archives go first; the stamp sorts chronologically and legacy names are migrated above.
+    const archives = (await readdir(directory)).filter(name => ARCHIVE_RE.test(name)).sort()
+    const sizes = await Promise.all(archives.map(async name => (await stat(join(directory, name))).size))
+    let total = sizes.reduce((sum, size) => sum + size, 0)
+    for (let index = 0; index < archives.length && total > this.maxArchiveBytes; index++) {
+      await rm(join(directory, archives[index]), { force: true })
+      total -= sizes[index]
+    }
+  }
+
+  private fail(): void {
+    if (this.failed) return
+    this.failed = true
+    this.pending.length = 0
+    this.pendingBytes = 0
+    this.options.onError()
   }
 
   flush(): Promise<void> {
@@ -131,15 +182,10 @@ export class PerformanceJournal {
       for (const line of lines) {
         const bytes = Buffer.byteLength(line)
         if (this.size + bytes > this.maxFileBytes) await this.rotate()
-        await appendFile(this.file(0), line, { mode: 0o600 })
+        await appendFile(this.activeFile, line, { mode: 0o600 })
         this.size += bytes
       }
-    })().catch(() => {
-      this.failed = true
-      this.pending.length = 0
-      this.pendingBytes = 0
-      this.options.onError()
-    }).finally(() => { this.writing = null })
+    })().catch(() => this.fail()).finally(() => { this.writing = null })
     return this.writing
   }
 
@@ -155,5 +201,6 @@ export class PerformanceJournal {
     this.record({ kind: 'health', sample: { droppedRecords: this.dropped, closed: true } })
     this.closed = true
     await this.flush()
+    await this.archiving
   }
 }

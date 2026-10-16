@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PerformanceJournal, performanceEnvironment, type PerformanceEnvironment, type PerformanceObservation } from './performance-journal'
 import { performanceBuildId } from './performance-build-id'
@@ -15,6 +16,11 @@ afterEach(async () => {
   for (const journal of journals.splice(0)) await journal.close()
   for (const path of temporary.splice(0)) await rm(path, { recursive: true, force: true })
 })
+const archiveName = /^performance-\d{8}T\d{9}Z-[0-9a-f]{8}\.jsonl\.gz$/
+const fileText = async (path: string): Promise<string> => {
+  const bytes = await readFile(path)
+  return path.endsWith('.gz') ? gunzipSync(bytes).toString('utf8') : bytes.toString('utf8')
+}
 const directory = async (): Promise<string> => {
   const path = await mkdtemp(join(tmpdir(), 'scry-performance-test-'))
   temporary.push(path)
@@ -31,10 +37,15 @@ describe('local performance journal', () => {
     for (let index = 0; index < 20; index++) journal.record(observation)
     await journal.close()
     const files = await readdir(path)
-    expect(files).toHaveLength(4)
-    for (const file of files) expect((await stat(join(path, file))).size).toBeLessThanOrEqual(900)
-    const retained = (await Promise.all(files.map(file => readFile(join(path, file), 'utf8')))).join('').trim().split('\n').map(line => JSON.parse(line))
-    expect(retained.some(record => JSON.stringify(record.observation) === JSON.stringify(observation))).toBe(true)
+    // One active file plus compressed archives; nothing rotated away within the archive cap.
+    expect(files).toContain('performance-0.jsonl')
+    const archives = files.filter(file => file !== 'performance-0.jsonl')
+    expect(archives.length).toBeGreaterThan(1)
+    for (const file of archives) expect(file).toMatch(archiveName)
+    for (const file of files) expect(Buffer.byteLength(await fileText(join(path, file)))).toBeLessThanOrEqual(900)
+    for (const file of files) expect((await stat(join(path, file))).mode & 0o777).toBe(0o600)
+    const retained = (await Promise.all(files.map(file => fileText(join(path, file))))).join('').trim().split('\n').map(line => JSON.parse(line))
+    expect(retained.filter(record => JSON.stringify(record.observation) === JSON.stringify(observation))).toHaveLength(20)
     const first = JSON.parse((await readFile(join(path, 'performance-0.jsonl'), 'utf8')).trim().split('\n')[0])
     expect(first).toMatchObject({ schema: 1, version: 'test', build: 'fixture' })
     expect(JSON.stringify(first)).not.toContain(path)
@@ -94,9 +105,50 @@ describe('local performance journal', () => {
     await journal.open()
     journal.record(observation)
     await journal.close()
-    expect(await readFile(join(path, 'performance-1.jsonl'), 'utf8')).toBe('{"schema":1,')
+    const archives = (await readdir(path)).filter(file => file !== 'performance-0.jsonl')
+    expect(archives).toHaveLength(1)
+    expect(await fileText(join(path, archives[0]))).toBe('{"schema":1,')
     const records = (await readFile(join(path, 'performance-0.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     expect(records[0].observation).toEqual(observation)
+  })
+
+  it('keeps compressed archives within the byte cap by deleting the oldest first', async () => {
+    const path = await directory()
+    const old = ['performance-20260101T000000000Z-00000001.jsonl.gz', 'performance-20260102T000000000Z-00000002.jsonl.gz', 'performance-20260103T000000000Z-00000003.jsonl.gz']
+    for (const [index, name] of old.entries()) await writeFile(join(path, name), gzipSync(`${JSON.stringify({ archive: index })}\n`.repeat(200)))
+    const sizes = await Promise.all(old.map(async name => (await stat(join(path, name))).size))
+    const cap = sizes[1] + sizes[2]
+    const journal = new PerformanceJournal({ directory: path, environment, maxArchiveBytes: cap, onError: vi.fn() })
+    journals.push(journal)
+    await journal.open()
+    await journal.close()
+    expect((await readdir(path)).sort()).toEqual([...old.slice(1), 'performance-0.jsonl'].sort())
+  })
+
+  it('migrates the pre-archive layout and finishes an interrupted compression', async () => {
+    const path = await directory()
+    await writeFile(join(path, 'performance-0.jsonl'), '{"active":true}\n')
+    for (const index of [1, 2, 3]) {
+      await writeFile(join(path, `performance-${index}.jsonl`), `{"legacy":${index}}\n`)
+      // Older rotated files stopped growing earlier, so their archive stamps sort first.
+      const time = new Date(Date.UTC(2026, 0, 10 - index))
+      await utimes(join(path, `performance-${index}.jsonl`), time, time)
+    }
+    // A crash after rename but before compression leaves a plain stamped archive and a partial gzip.
+    await writeFile(join(path, 'performance-20260120T000000000Z-0000000a.jsonl'), '{"interrupted":true}\n')
+    await writeFile(join(path, 'performance-20260120T000000000Z-0000000a.jsonl.gz.partial'), 'broken')
+    const onError = vi.fn()
+    const journal = new PerformanceJournal({ directory: path, environment, onError })
+    journals.push(journal)
+    await journal.open()
+    await journal.close()
+    const files = (await readdir(path)).sort()
+    const archives = files.filter(file => file !== 'performance-0.jsonl')
+    expect(archives).toHaveLength(4)
+    for (const file of archives) expect(file).toMatch(archiveName)
+    expect(await Promise.all(archives.map(file => fileText(join(path, file))))).toEqual(['{"legacy":3}\n', '{"legacy":2}\n', '{"legacy":1}\n', '{"interrupted":true}\n'])
+    expect((await fileText(join(path, 'performance-0.jsonl'))).startsWith('{"active":true}\n')).toBe(true)
+    expect(onError).not.toHaveBeenCalled()
   })
 
   it('fingerprints all build source surfaces, not just the unchanged package version', async () => {

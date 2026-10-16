@@ -1,6 +1,7 @@
 import { copyFileSync, createReadStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createInterface } from 'node:readline'
+import { createGunzip } from 'node:zlib'
 import { resolve, join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,9 +13,18 @@ export const pathForOperation = name => catalogue.paths.find(path =>
 )?.id ?? 'unmapped'
 const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * q) - 1] ?? null
 const bucket = value => value === 0 ? '0' : `2^${Math.floor(Math.log2(value))}`
-const PERFORMANCE_FILE_RE = /^performance-[0-3]\.jsonl$/
-const MAX_SNAPSHOT_FILE_BYTES = 5 * 1024 * 1024
-const MAX_SNAPSHOT_BYTES = 20 * 1024 * 1024
+// Active file, pre-archive rotated files ([1-3]) and timestamped archives (gzip once finished).
+const PERFORMANCE_FILE_RE = /^performance-(?:[0-3]|\d{8}T\d{9}Z-[0-9a-f]{8})\.jsonl(?:\.gz)?$/
+// One 5 MiB active file plus the journal's 64 MiB compressed-archive cap, with room for one
+// archive that is still being compressed.
+const MAX_SNAPSHOT_FILE_BYTES = 6 * 1024 * 1024
+const MAX_SNAPSHOT_BYTES = 80 * 1024 * 1024
+// Oldest first: timestamped archives by stamp, then legacy 3..1, then the active file.
+const journalOrder = name => {
+  const legacy = /^performance-([0-3])\.jsonl$/.exec(name)
+  return legacy ? `~${3 - Number(legacy[1])}` : name
+}
+const byJournalOrder = (left, right) => journalOrder(left) < journalOrder(right) ? -1 : 1
 const PATH_IDS = new Set(catalogue.paths.map(path => path.id))
 
 export function observations(record) {
@@ -182,8 +192,8 @@ export function snapshotPerformanceDirectory(source, target) {
   if (!source || !target) throw new Error('Usage: snapshot <performance-directory> <new-output-directory>')
   if (!existsSync(source)) throw new Error(`Performance directory does not exist: ${source}`)
   if (existsSync(target)) throw new Error(`Refusing to overwrite existing snapshot directory: ${target}`)
-  const files = readdirSync(source).filter(name => PERFORMANCE_FILE_RE.test(name)).sort()
-  if (!files.length) throw new Error('No retained performance-[0-3].jsonl files to snapshot')
+  const files = readdirSync(source).filter(name => PERFORMANCE_FILE_RE.test(name)).sort(byJournalOrder)
+  if (!files.length) throw new Error('No retained performance journal files to snapshot')
   let total = 0
   // Cleanup is authorized only after this invocation successfully creates the directory.
   mkdirSync(target, { recursive: false })
@@ -192,9 +202,9 @@ export function snapshotPerformanceDirectory(source, target) {
       const from = join(source, name)
       const info = lstatSync(from)
       if (!info.isFile()) throw new Error(`Snapshot source is not a regular file: ${name}`)
-      if (info.size > MAX_SNAPSHOT_FILE_BYTES) throw new Error(`Snapshot file exceeds 5 MiB bound: ${name}`)
+      if (info.size > MAX_SNAPSHOT_FILE_BYTES) throw new Error(`Snapshot file exceeds 6 MiB bound: ${name}`)
       total += info.size
-      if (total > MAX_SNAPSHOT_BYTES) throw new Error('Snapshot exceeds 20 MiB bound')
+      if (total > MAX_SNAPSHOT_BYTES) throw new Error('Snapshot exceeds 80 MiB bound')
       copyFileSync(from, join(target, name))
       const after = lstatSync(from)
       if (after.ino !== info.ino || after.dev !== info.dev || after.size !== info.size || after.mtimeMs !== info.mtimeMs) throw new Error(`Snapshot source changed while copying: ${name}`)
@@ -297,7 +307,7 @@ export function summarize(records, baseline, candidate, issues = []) {
 export async function readRecords(directory) {
   const records = []
   const issues = []
-  const files = readdirSync(directory).filter(name => /^performance-[0-3]\.jsonl$/.test(name)).sort().reverse()
+  const files = readdirSync(directory).filter(name => PERFORMANCE_FILE_RE.test(name)).sort(byJournalOrder)
   const manifestPath = join(directory, 'snapshot-manifest.json')
   const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null
   if (manifest && JSON.stringify([...manifest.files.map(file => file.name)].sort()) !== JSON.stringify([...files].sort())) {
@@ -306,8 +316,9 @@ export async function readRecords(directory) {
   for (const name of files) {
     const input = createReadStream(join(directory, name))
     const hash = createHash('sha256')
+    // The manifest hashes the file bytes as copied; gzip archives are decoded only for parsing.
     input.on('data', chunk => hash.update(chunk))
-    const lines = createInterface({ input, crlfDelay: Infinity })
+    const lines = createInterface({ input: name.endsWith('.gz') ? input.pipe(createGunzip()) : input, crlfDelay: Infinity })
     let pending
     for await (const line of lines) {
       if (pending?.trim()) {
