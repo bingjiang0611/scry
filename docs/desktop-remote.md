@@ -313,3 +313,12 @@ SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，�
 - 直接替换原路径成功，因此 `/Applications` 的历史终止问题不再阻塞当前升级，也未获得或使用管理员审计权限。没有关闭安全软件、重签或改变原安装路径。
 - 本机 `/Applications/Scry.app` 也已替换为同一 **0.2.192**，但当前会话仍由旧 PID 52364 承载；为避免中断本次操作，尚未重启。**剩余动作：维护者退出并重开本机 Scry，然后继续日常远程界面验收。**
 - 实际安装日志：`logs/mac2-direct-install.log`；启动/版本/签名日志：`logs/mac2-direct-start.log`；实际 PID、原 userData、配对和端口回执：`logs/mac2-direct-upgrade-state.json`。以上日志均在本机 `/private/tmp/scry-release-0.2.192.TFUyJY/` 下。
+
+### 日常界面首次重放：部分完成，不作整体验收通过
+
+- 本机已重启，实际日常主进程为 PID **21554**；版本 0.2.192，安装包 SHA 与上述冻结值一致。mac2 原路径的 PID 32276 仍运行。直接使用原日常 App、userData 和已保存配对，没有新建测试 App 或隔离 userData。
+- 原 mac2 配对复连已确认：最初 20 秒等待未满足，随后实际界面显示 `主机 已连接 1 / 1 台`。远程目录浏览、输入路径、明确选择已确认，执行位置显示 `mac2 / /Users/test/scry-daily-ui.THymIn`。右侧 Surface 工作区及纵览曾打开；最大化/隐藏按钮可见，但未据此宣称所有面板交互已通过。
+- 侧栏语义树当前顺序包含本机 `pi` → mac2 `rotom-team` → 本机 `myNote` → mac2 `workspace` → 本机 `Nib`。这证明该次列表中本机与远程项目混排；没有完整重放视觉滚动排序或受控活动时间变化。
+- 自动化多次返回 `stale_ref`、`unknown` 或后置条件失败；窗口也出现未由本轮预期动作选择的本机会话/新会话。并行操作、自动聚焦或自动化定位问题尚未完成归因，不直接认定是用户操作或产品故障。发现 Terminal 曾在前台，后由用户将 Scry 置前；搜狗拼音也曾把 ASCII `mac2` 转成中文。后续原生 setText 验证过字面值 `mac2`，结束时读取到的输入法与原先相同，仍为搜狗拼音。
+- 为避免向错误工作区发送写操作，**编辑保存、未保存确认、Git 暂存提交、终端输入输出/分离重连、面板恢复与尺寸交互均未验收**。只通过 SSH 创建数据专用临时 Git 目录 `/Users/test/scry-daily-ui.THymIn` 和基线提交 `56b469b`；停止时仍 clean，`alpha.txt` 为 `daily acceptance baseline`。该初始化不算 UI 保存或提交证据；未发送验收用 Provider 请求，未改用户项目。
+- 证据摘录：`logs/daily-ui-evidence.txt`；范围与状态：`logs/daily-ui-acceptance.json`，均位于上述发布目录。下一步需先建立稳定、可归因的桌面控制，或由维护者操作真实界面、助手独立核对 mac2 落盘/Git/终端证据；不以 CLI 代做写入替代日常 UI 验收。
