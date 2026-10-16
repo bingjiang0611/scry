@@ -73,6 +73,12 @@ jobs:
           mkdir -p performance-results
           (cd baseline && node scripts/performance-bench.mjs ../performance-results/baseline.json)
           (cd candidate && node scripts/performance-bench.mjs ../performance-results/candidate.json)
+      - name: Collect candidate work counters and check the ratchet ledger
+        # Runs after timing measurement so counters never share the runner with timed batches.
+        run: |
+          set -o pipefail
+          (cd candidate && node scripts/performance-counters.mjs collect ../performance-results/counters.json) 2>&1 | tee performance-results/counters.log
+          node candidate/scripts/performance-ratchet.mjs check candidate/scripts/performance-ratchet.json performance-results/counters.json performance-results/ratchet.md
       - name: Compare fixed budgets and base-relative regressions
         run: |
           node candidate/scripts/performance-compare.mjs performance-results/baseline.json performance-results/candidate.json candidate/scripts/performance-budgets.json performance-results/report.md

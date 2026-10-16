@@ -145,6 +145,7 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 
 - 事实源：`scripts/performance-ratchet.json`（ledger）。键为 `scenario/metric`，记录层（`main`/`ipc`/`io`/`ui`/`memory`）、单位、固定 workload、测量来源、状态、门限和允许误差。
 - 观测格式：`{ schema: 1, revision, observations: [...] }`。每项为 `measured` 加同一版本重复测量的整数 `runs`，或 `unavailable` 加原因。测不到不能写成 0。
+- 采集：每个 collector 是 `scripts/performance-counters/*.counters.test.ts`，驱动生产实现、断言功能结果、重复同一操作（默认 5 次），并用 `writeCollector` 输出。`node scripts/performance-counters.mjs collect <out.json>` 串行运行全部 collector 并合并结果；CI 在计时测量结束后再采集。非采集运行时它们就是普通正确性测试。
 - 状态：`candidate` 只报告；`gating` 必须写明三项证据：**稳定**（同版本重复结果一致或误差已知）、**敏感**（注入多余工作后指标变差）、**相关**（指标下降时用户耗时也下降）。
 - 判定（`performance-ratchet.mjs check`）：每项单独判定，不能互相抵消。gating 项超过门限加误差、重复测量差异超过误差、缺失或 unavailable 都失败；低于门限报告 `tightenable`。
 - 收紧（`propose`）：只把 gating 门限降到新观测值，不提升、不升级 candidate、不删除。CI 不用 PR 代码回写仓库；更新由人工审查或受信任任务提交。
