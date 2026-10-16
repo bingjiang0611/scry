@@ -48,6 +48,8 @@
     "performance:report": "node scripts/performance-report.mjs report",
     "performance:bench": "node scripts/performance-bench.mjs",
     "performance:compare": "node scripts/performance-compare.mjs",
+    "performance:measure": "node scripts/performance-measure.mjs",
+    "performance:propose": "node scripts/performance-propose.mjs",
     "smoke:cli-package": "node scripts/cli-package-smoke.mjs",
     "pack": "npm run typecheck && npm test && npm run pack:artifact",
     "pack:artifact": "npm run build && npm run build:cli && node scripts/run-electron-builder.mjs && npm run check:packaged-app && npm run smoke:electron",
