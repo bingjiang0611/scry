@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { compareNative, composerModes, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { compareNative, composerModes, exportNativeCounters, nativeCounterMetrics, nativeWorkloads, validateNative } from './performance-native.mjs'
+
+const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
 
 function report() {
   return {
@@ -8,13 +10,14 @@ function report() {
       scenario, turnCount, sections, measurementVersion: 5, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
       sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
-      composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`,
+      counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), passed: true },
+      composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`, sendWorkCounters: workCounters(1),
         inputTrusted: true, sendTrusted: true, stopTrusted: mode !== 'complete', terminalConfirmed: true, stopped: mode !== 'complete',
         nativeTurnKnown: mode !== 'stop-immediate', diskVerified: true, sendToTerminalMs: 50, sendToSettledVisibleMs: 60,
         ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: 10, sendToFirstVisibleMs: 20, sendToVisibleReadyMs: 30 } : {}),
-        ...(mode !== 'complete' ? { driverStopDispatchMs: 5, stopToTerminalMs: 10, stopToSettledVisibleMs: 20 } : {}) })),
+        ...(mode !== 'complete' ? { driverStopDispatchMs: 5, stopToTerminalMs: 10, stopToSettledVisibleMs: 20, stopWorkCounters: workCounters(1) } : {}) })),
       startupDriverReadyMs: 500, nativeInput: { trusted: true, frameReadyMs: 20 }, cleanup: { tracked: 3 }, firstOpens: [{}, {}],
-      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(40, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500 })),
+      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(40, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500, workCounters: workCounters(1) })),
       lifecycleSamples: [false, true, false, true, false, true].map(stopped => ({
         stopped, terminalConfirmed: true, durableTurns: 1, diskVerified: true, startReceiptMs: 5, firstOutputReceiptMs: 10,
         startToTerminalMs: 30, terminalToReadableArchiveMs: 5, ...(stopped ? { stopReceiptMs: 2, stopToTerminalMs: 10 } : {})
@@ -30,6 +33,9 @@ describe('native performance evidence gate', () => {
     expect(composerModes.filter(mode => mode === 'complete')).toHaveLength(3)
     expect(composerModes.filter(mode => mode === 'stop-visible')).toHaveLength(3)
     const base = report()
+    const counters = exportNativeCounters(base)
+    expect(counters.observations).toHaveLength(72)
+    expect(counters.observations.every(observation => observation.availability === 'measured')).toBe(true)
     expect(compareNative(base, structuredClone(base)).passed).toBe(true)
     const head = report()
     head.results.markdown.samples[0].nativeOpenMs = 900
