@@ -73,8 +73,13 @@ export function useSessionRightSurfaces(key: string, cwd: string | null, storage
     })
   }, [key, current])
   const migrate = useCallback((from: string, to: string): void => {
-    setSurfaces((previous) => migrateRightSurfaces(previous, from, to))
-  }, [])
+    // An untouched surface is already mounted but is not in the saved map yet.
+    // Promote that same tree too, rather than minting a new identity on switch.
+    setSurfaces(previous => migrateRightSurfaces(
+      from === key && !previous.has(from) ? new Map(previous).set(from, owner) : previous,
+      from, to
+    ))
+  }, [key, owner])
   useEffect(() => {
     try { window.sessionStorage.setItem(storageKey, JSON.stringify([...surfaces])) } catch {
       // Navigation still works in memory; storage failure cannot terminate shells.

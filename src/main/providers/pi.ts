@@ -1,7 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { accessSync, constants, createReadStream, readFileSync, realpathSync, statSync } from 'node:fs'
+import { access as accessAsync, lstat, readFile as readFileAsync, realpath as realpathAsync, stat as statAsync } from 'node:fs/promises'
+import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
-import { basename, delimiter, dirname, join } from 'node:path'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { createPiRpcDecoder } from './pi-rpc-decoder'
 import { PiBackgroundWork } from './pi-background-work'
@@ -40,6 +43,7 @@ import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { effortOption } from './run-controls'
 import { completedPiTurnForkTarget } from './session-fork-boundary'
+import { HistoricalInput } from './historical-input'
 import type { ProviderAdapter, ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
 
 type JsonRecord = Record<string, unknown>
@@ -112,6 +116,210 @@ function piRuntimeFromBootstrap(bootstrap: string): string | undefined {
   }
 }
 
+interface PiPackageIdentity {
+  name: string
+  version: string
+  root: string
+  executable: string
+}
+
+async function piPackageIdentity(executable: string, expectedName: string): Promise<PiPackageIdentity | undefined> {
+  let canonical: string
+  try {
+    canonical = await realpathAsync(executable)
+    const info = await statAsync(canonical)
+    if (!info.isFile()) return undefined
+    await accessAsync(canonical, constants.X_OK)
+  } catch {
+    return undefined
+  }
+  let directory = dirname(canonical)
+  for (;;) {
+    try {
+      const packagePath = join(directory, 'package.json')
+      const packageJson = JSON.parse(await readFileAsync(packagePath, 'utf8')) as {
+        name?: unknown
+        version?: unknown
+        bin?: { pi?: unknown; rotom?: unknown }
+      }
+      if (packageJson.name === expectedName && typeof packageJson.version === 'string') {
+        const declared = packageJson.bin?.pi ?? packageJson.bin?.rotom
+        if (typeof declared === 'string' && await realpathAsync(join(directory, declared)) === canonical) {
+          return { name: packageJson.name, version: packageJson.version, root: directory, executable: canonical }
+        }
+        if (expectedName === '@bingjiang0611/rotom' && canonical === resolve(directory, 'bin', 'rotom-launcher')) {
+          return { name: packageJson.name, version: packageJson.version, root: directory, executable: canonical }
+        }
+      }
+    } catch {
+      // Continue toward the filesystem root; an arbitrary wrapper must not become trusted.
+    }
+    const parent = dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
+  }
+}
+
+const ROTOM_HANDOFF_RESOURCES = ['bin/rotom-launcher', 'runtime/launch-runtime.mjs', 'runtime/verify-pi-runtime.mjs', 'runtime/resolve-installed-pi.mjs', 'runtime/product-config.mjs']
+const isRotomLauncher = (profile: PiAgentProfile): boolean => ['rotom', 'rotom-launcher'].includes(basename(profile.executable))
+// Reviewed public delegation and product launcher contracts from Rotom 0.1.25.
+// A changed shell launcher needs a new contract review, not marker-based trust.
+const ROTOM_PUBLIC_ENTRY_HASH = 'c9f1dd3df66d995540c006e8f8cd930ab7bb9a8f0741aaf71e44c1bd56f15e80'
+const ROTOM_PRODUCT_LAUNCHER_HASH = '89c5d505468726df13ebc87232b56e3d506a5c1c1d2cd989bc122d7e0bcb8bcd'
+
+async function verifyRotomLauncher(profile: PiAgentProfile): Promise<PiPackageIdentity> {
+  const launcher = await piPackageIdentity(profile.executable, '@bingjiang0611/rotom')
+  if (!launcher || !['rotom', 'rotom-launcher'].some(name => launcher.executable === resolve(launcher.root, 'bin', name))) {
+    throw new Error('Rotom launcher 不是已验证的产品 launcher')
+  }
+  try {
+    const manifest = JSON.parse(await readFileAsync(join(launcher.root, 'package.json'), 'utf8')) as { bin?: { rotom?: unknown } }
+    if (manifest.bin?.rotom !== 'bin/rotom') throw new Error('Rotom package bin contract 无效')
+    if (basename(launcher.executable) === 'rotom' && await fileDigest(launcher.executable) !== ROTOM_PUBLIC_ENTRY_HASH) {
+      throw new Error('Rotom public entry contract 未验证')
+    }
+    if (await fileDigest(join(launcher.root, 'bin/rotom-launcher')) !== ROTOM_PRODUCT_LAUNCHER_HASH) {
+      throw new Error('Rotom product launcher contract 未验证')
+    }
+    for (const relativePath of ROTOM_HANDOFF_RESOURCES) {
+      const resource = join(launcher.root, relativePath)
+      const info = await lstat(resource)
+      if (!info.isFile() || info.isSymbolicLink() || await realpathAsync(resource) !== resource) throw new Error('Rotom runtime resource contract 无效')
+    }
+  } catch (error) {
+    throw new Error(`Rotom launcher contract 不可验证：${String((error as Error).message)}`)
+  }
+  return launcher
+}
+
+async function bundledPiIdentity(root: string): Promise<PiPackageIdentity | undefined> {
+  const packageRoot = join(root, 'runtime', 'pi', 'node_modules', '@earendil-works', 'pi-coding-agent')
+  try {
+    const packageJson = JSON.parse(await readFileAsync(join(packageRoot, 'package.json'), 'utf8')) as {
+      name?: unknown
+      version?: unknown
+      bin?: { pi?: unknown }
+    }
+    if (packageJson.name !== '@earendil-works/pi-coding-agent' || typeof packageJson.version !== 'string' || typeof packageJson.bin?.pi !== 'string') return undefined
+    const executable = await realpathAsync(join(packageRoot, packageJson.bin.pi))
+    const stat = await statAsync(executable)
+    if (!stat.isFile()) return undefined
+    await accessAsync(executable, constants.X_OK)
+    return { name: packageJson.name, version: packageJson.version, root: packageRoot, executable }
+  } catch {
+    return undefined
+  }
+}
+
+async function nodeIdentity(env: Record<string, string>, rotom: boolean): Promise<string | undefined> {
+  const candidate = env[rotom ? 'ROTOM_NODE' : 'PI_AGENT_NODE']
+  if (!candidate) return undefined
+  try {
+    const canonical = await realpathAsync(candidate)
+    const info = await statAsync(canonical)
+    if (!info.isFile()) return undefined
+    await accessAsync(canonical, constants.X_OK)
+    return canonical
+  } catch {
+    return undefined
+  }
+}
+
+// Runtime binaries are large. Coalesce hashing and retain at most 32 stat-bound
+// digests; auth/config bytes are always read afresh at the input boundary.
+const piBinaryDigests = new Map<string, { stamp: string; digest: Promise<string> }>()
+async function fileDigest(path: string): Promise<string> {
+  const info = await lstat(path)
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 512 * 1024 * 1024) throw new Error('Pi runtime 不是受支持的普通文件')
+  const stamp = JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])
+  const cached = piBinaryDigests.get(path)
+  if (cached?.stamp === stamp) return cached.digest
+  const digest = (async () => {
+    const hash = createHash('sha256')
+    let bytes = 0
+    for await (const chunk of createReadStream(path)) {
+      bytes += chunk.length
+      if (bytes > 512 * 1024 * 1024) throw new Error('Pi runtime 超过 512 MiB')
+      hash.update(chunk)
+    }
+    return hash.digest('hex')
+  })()
+  if (piBinaryDigests.size >= 32) piBinaryDigests.delete(piBinaryDigests.keys().next().value!)
+  piBinaryDigests.set(path, { stamp, digest })
+  try { return await digest } catch (error) { piBinaryDigests.delete(path); throw error }
+}
+
+async function piConfigDigest(path: string): Promise<string | undefined> {
+  let info
+  try { info = await lstat(path) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) throw new Error('Pi 配置不是受支持的普通文件或超过 4 MiB')
+  const bytes = await readFileAsync(path)
+  let value: unknown
+  try { value = JSON.parse(bytes.toString('utf8')) } catch { throw new Error('Pi 配置 JSON 无效，接续身份不可用') }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Pi 配置必须是对象')
+  // Pi resolveConfigValue executes !commands for auth keys and model headers.
+  // Their future output cannot be proved by hashing their source command.
+  const dynamic = (value: unknown): boolean => typeof value === 'string' ? value.startsWith('!') :
+    Boolean(value && typeof value === 'object' && Object.values(value).some(dynamic))
+  if (basename(path) !== 'settings.json' && dynamic(value)) throw new Error('Pi 动态配置 helper 的接续身份不可验证')
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+/** Identity for managed handoff only; secret bytes are hashed, never returned or logged. */
+export async function piContinuationKey(
+  profile: PiAgentProfile,
+  cwd: string | undefined,
+  env: Record<string, string>
+): Promise<string> {
+  const rotom = isRotomLauncher(profile)
+  const launcher = rotom
+    ? await verifyRotomLauncher(profile)
+    : await piPackageIdentity(profile.executable, '@earendil-works/pi-coding-agent')
+  if (!launcher) throw new Error('Pi launcher 不是已知且可验证的 Pi/Rotom runtime；接续身份不可用')
+  const runtime = rotom
+    ? (env.ROTOM_PI !== undefined
+        ? await piPackageIdentity(env.ROTOM_PI, '@earendil-works/pi-coding-agent')
+        : await bundledPiIdentity(launcher.root))
+    : launcher
+  const node = await nodeIdentity(env, rotom)
+  const configuredNamespace = env.PI_CODING_AGENT_DIR || (env.HOME ? join(env.HOME, '.pi', 'agent') : undefined)
+  const configNamespace = configuredNamespace && resolve(cwd ?? process.cwd(),
+    configuredNamespace === '~' && env.HOME ? env.HOME :
+      configuredNamespace.startsWith('~/') && env.HOME ? join(env.HOME, configuredNamespace.slice(2)) : configuredNamespace)
+  if (!runtime || !node || !configNamespace) throw new Error('Pi runtime、Node 或 config/auth namespace 不可验证；接续身份不可用')
+  const namespaceInfo = await lstat(configNamespace).catch(() => undefined)
+  if (!namespaceInfo?.isDirectory() || namespaceInfo.isSymbolicLink()) {
+    throw new Error('Pi config/auth namespace 不是可验证的本地目录；接续身份不可用')
+  }
+  const canonicalConfigNamespace = await realpathAsync(configNamespace)
+  const [nodeHash, launcherHash, runtimeHash, authHash, settingsHash, modelsHash, projectSettingsHash] = await Promise.all([
+    fileDigest(node), fileDigest(launcher.executable), fileDigest(runtime.executable),
+    piConfigDigest(join(canonicalConfigNamespace, 'auth.json')),
+    piConfigDigest(join(canonicalConfigNamespace, 'settings.json')),
+    piConfigDigest(join(canonicalConfigNamespace, 'models.json')),
+    cwd ? piConfigDigest(join(cwd, '.pi', 'settings.json')) : undefined
+  ])
+  // models.json supports arbitrary named environment references, not only a
+  // fixed list of known providers. Hash the actual sanitized launch environment.
+  const authEnv = Object.keys(env).sort().map(name => `${name}=${createHash('sha256').update(env[name], 'utf8').digest('hex')}`)
+  if (!authHash && !env.OPENAI_API_KEY && !env.ANTHROPIC_API_KEY) {
+    throw new Error('Pi 缺少可验证的 auth namespace 或认证环境身份；接续身份不可用')
+  }
+  const resources = rotom ? await Promise.all(ROTOM_HANDOFF_RESOURCES.map(path => fileDigest(join(launcher.root, path)))) : []
+  const identity = [
+    ...resources,
+    'scry-pi-continuation-v2', profile.id, cwd ?? '',
+    `launcher:${launcher.executable}:${launcher.version}:${launcherHash}`,
+    `runtime:${runtime.executable}:${runtime.version}:${runtimeHash}`, `node:${node}:${nodeHash}`,
+    `config:${canonicalConfigNamespace}`, `auth:${authHash ?? 'env'}`, `settings:${settingsHash ?? 'missing'}`,
+    `models:${modelsHash ?? 'missing'}`, `projectSettings:${projectSettingsHash ?? 'missing'}`, ...authEnv
+  ]
+  return `pi:${createHash('sha256').update(identity.join('\n'), 'utf8').digest('hex')}`
+}
+
 function compatibleNodeVersion(raw: string, rotom: boolean): boolean {
   const [major, minor] = raw.trim().split('.').map(Number)
   return major >= 24 || (!rotom && major === 23 && minor >= 6)
@@ -145,7 +353,7 @@ function pinPiLauncherNode(
   compatibleNode: string | undefined
 ): void {
   if (!compatibleNode) return
-  if (basename(profile.executable) === 'rotom') {
+  if (isRotomLauncher(profile)) {
     if (!env.ROTOM_NODE) env.ROTOM_NODE = compatibleNode
     return
   }
@@ -157,7 +365,7 @@ const PROXY_ENV_NAMES = [
 ] as const
 
 function enableRotomNodeEnvProxy(profile: PiAgentProfile, env: Record<string, string>): void {
-  if (basename(profile.executable) !== 'rotom' || Object.hasOwn(env, 'NODE_USE_ENV_PROXY')) return
+  if (!isRotomLauncher(profile) || Object.hasOwn(env, 'NODE_USE_ENV_PROXY')) return
   // Node's built-in fetch/WebSocket stack does not consume HTTP(S)_PROXY merely because the
   // variables exist. Rotom's OpenAI Codex transport falls back from WebSocket to fetch/SSE, so
   // opt its Node >=24 runtime into the env-proxy dispatcher whenever a usable proxy is present.
@@ -171,7 +379,7 @@ export async function piRpcEnvironment(
   const env = sanitizeProviderEnv(baseEnv, 'pi')
   // Discovery, profile validation and runs must use the same non-blocking launcher resolution.
   // Rotom requires Node >=24 and owns ROTOM_NODE; PI_AGENT_NODE belongs to the legacy launcher.
-  const rotom = basename(profile.executable) === 'rotom'
+  const rotom = isRotomLauncher(profile)
   const configuredNode = rotom ? env.ROTOM_NODE : env.PI_AGENT_NODE
   const compatibleNode = configuredNode ?? await compatiblePiNode(env, rotom)
   pinPiLauncherNode(profile, env, compatibleNode)
@@ -383,13 +591,13 @@ interface IdleRotomRpc {
 class RotomRpcPool {
   private readonly idle = new Map<string, IdleRotomRpc>()
 
-  private key(profile: PiAgentProfile, cwd: string | undefined, sessionId: string): string {
-    return `${profile.id}\0${profile.executable}\0${cwd ?? ''}\0${sessionId}`
+  private key(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, continuationKey?: string): string {
+    return `${profile.id}\0${profile.executable}\0${cwd ?? ''}\0${sessionId}\0${continuationKey ?? ''}`
   }
 
-  async take(profile: PiAgentProfile, cwd: string | undefined, sessionId: string | undefined, env: Record<string, string>): Promise<PiRpcProcess | undefined> {
+  async take(profile: PiAgentProfile, cwd: string | undefined, sessionId: string | undefined, env: Record<string, string>, continuationKey?: string): Promise<PiRpcProcess | undefined> {
     if (!sessionId) return undefined
-    const key = this.key(profile, cwd, sessionId)
+    const key = this.key(profile, cwd, sessionId, continuationKey)
     const entry = this.idle.get(key)
     if (!entry) return undefined
     this.idle.delete(key)
@@ -402,12 +610,12 @@ class RotomRpcPool {
     return undefined
   }
 
-  keep(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, rpc: PiRpcProcess, env: Record<string, string>): void {
+  keep(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, rpc: PiRpcProcess, env: Record<string, string>, continuationKey?: string): void {
     if (!rpc.reusable()) {
       void rpc.close().catch(() => undefined)
       return
     }
-    const key = this.key(profile, cwd, sessionId)
+    const key = this.key(profile, cwd, sessionId, continuationKey)
     const previous = this.idle.get(key)
     if (previous) {
       clearTimeout(previous.timer)
@@ -569,11 +777,58 @@ async function piEntryBaseline(rpc: PiRpcProcess): Promise<PiEntrySnapshot> {
   return piEntrySnapshot(await rpc.send({ type: 'get_entries' }))
 }
 
+const PI_PERSISTED_SCAN_MAX_BYTES = 128 * 1024 * 1024
+
+function exactPiUserText(content: unknown, expectedText: string): boolean {
+  if (content === expectedText) return true
+  if (!Array.isArray(content)) return false
+  const text = content.map(record)
+  return text.every((block) => block.type === 'text' && typeof block.text === 'string') &&
+    text.map((block) => block.text as string).join('') === expectedText
+}
+
+async function persistedPiUserEntryMatches(
+  sessionFile: string,
+  sessionId: string,
+  entryId: string,
+  expectedText: string
+): Promise<boolean> {
+  let input: ReturnType<typeof createReadStream> | undefined
+  let lines: ReturnType<typeof createInterface> | undefined
+  try {
+    const info = await lstat(sessionFile)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > PI_PERSISTED_SCAN_MAX_BYTES) return false
+    input = createReadStream(sessionFile)
+    lines = createInterface({ input, crlfDelay: Infinity })
+    let headerMatches = false
+    let entryMatches = false
+    for await (const line of lines) {
+      if (!line.trim()) continue
+      let value: JsonRecord
+      try { value = record(JSON.parse(line)) } catch { return false }
+      if (value.type === 'session') {
+        headerMatches = value.id === sessionId
+        continue
+      }
+      if (value.id !== entryId) continue
+      const message = record(value.message)
+      entryMatches = value.type === 'message' && message.role === 'user' && exactPiUserText(message.content, expectedText)
+    }
+    return headerMatches && entryMatches
+  } catch {
+    return false
+  } finally {
+    lines?.close()
+    input?.destroy()
+  }
+}
+
 async function waitForPiUserEntryId(
   rpc: PiRpcProcess,
   baseline: PiEntrySnapshot,
   isSettled: () => boolean,
-  hasSteerInput: () => boolean
+  hasSteerInput: () => boolean,
+  exact?: { sessionId: string; sessionFile: string; text: string }
 ): Promise<string> {
   for (;;) {
     let changed!: () => void
@@ -596,7 +851,9 @@ async function waitForPiUserEntryId(
         rows.map(record),
         hasSteerInput()
       )
-      if (id) return id
+      if (id) {
+        if (!exact || await persistedPiUserEntryMatches(exact.sessionFile, exact.sessionId, id, exact.text)) return id
+      }
       // Only a post-settlement snapshot proves missing identity. Do not kill a running
       // Provider because its prompt entry has not appeared within an arbitrary five seconds.
       if (terminalSnapshot) throw new Error('Pi RPC prompt 已接受，但未出现 authoritative user session entry')
@@ -1033,7 +1290,8 @@ async function runPiAgent(
   request: ProviderRunRequest,
   state: PiRunState,
   maxFrameBytes = PI_RPC_MAX_FRAME_BYTES,
-  rotomPool?: RotomRpcPool
+  rotomPool?: RotomRpcPool,
+  history = new HistoricalInput(request)
 ): Promise<ProviderRunResult> {
   if (request.permissionMode !== 'full_access') {
     throw new AgentRuntimeError('Pi 只支持显式选择“本机完全访问”后运行', {
@@ -1047,11 +1305,16 @@ async function runPiAgent(
   const baseEnv = shellEnv()
   const launchShellEnvError = shellEnvError()
   const env = await piRpcEnvironment(profile, baseEnv)
+  const continuationKey = request.expectedContinuationKey
+    ? await piContinuationKey(profile, request.cwd, env) : undefined
+  if (request.expectedContinuationKey && continuationKey !== request.expectedContinuationKey) {
+    throw new Error('Pi 接续身份已变化，请重新预览')
+  }
   // Stop may arrive while resolving the profile or probing Node. Do not spawn after that stop.
   if (state.stopped) return { stopped: true, status: 'interrupted' }
   const args = piRpcArgs({ session: request.resume })
-  const mayReuse = basename(profile.executable) === 'rotom'
-  const pooledRpc = mayReuse ? await rotomPool?.take(profile, request.cwd, request.resume, env) : undefined
+  const mayReuse = isRotomLauncher(profile)
+  const pooledRpc = mayReuse ? await rotomPool?.take(profile, request.cwd, request.resume, env, continuationKey) : undefined
   if (state.stopped) {
     await pooledRpc?.close()
     return { stopped: true, status: 'interrupted' }
@@ -1439,6 +1702,7 @@ async function runPiAgent(
     if (typeof initialState.sessionId === 'string' && initialState.sessionId) {
       state.sessionId = initialState.sessionId
       state.sessionFile = typeof initialState.sessionFile === 'string' ? initialState.sessionFile : undefined
+      history.verifySession(state.sessionId)
       publishPersistedPiSession(request, state)
     }
     request.emit(piEvent(request.runId, {
@@ -1522,12 +1786,21 @@ async function runPiAgent(
       data: attachment.dataBase64,
       mimeType: attachment.mimeType
     }))
+    const outgoingPrompt = history.text(request.prompt)
+    const exactHandoff = history.snapshot() !== undefined || request.expectedContinuationKey !== undefined
     let promptDispatched = false
     try {
       if (state.stopped) throw new Error('Pi prompt 发送前已停止')
+      // This is intentionally adjacent to the native RPC call. A receipt is an input
+      // admission attempt, not proof that the process was merely initialized.
+      if (request.expectedContinuationKey && await piContinuationKey(profile, request.cwd, env) !== request.expectedContinuationKey) {
+        throw new Error('Pi 接续身份在输入前已变化；本次请求未发送')
+      }
+      if (state.stopped) return { stopped: true, status: 'interrupted' }
+      history.attempting(outgoingPrompt)
       promptDispatched = true
       // Accepted execution stays owned until Pi acknowledges it or the user stops this process.
-      await rpc.send({ type: 'prompt', message: request.prompt, ...(images.length > 0 ? { images } : {}) }, null)
+      await rpc.send({ type: 'prompt', message: outgoingPrompt, ...(images.length > 0 ? { images } : {}) }, null)
     } catch (error) {
       const identity = request.managedRecorderIdentity
       if (
@@ -1597,12 +1870,17 @@ async function runPiAgent(
         }
       }
     }
+    if (exactHandoff && (!state.sessionId || !state.sessionFile)) {
+      throw new Error('Pi native session 未提供可验证的 persisted session 文件')
+    }
     state.providerTurnId = await waitForPiUserEntryId(
       rpc,
       entryBaseline,
       () => agentSettled,
-      () => state.steerDispatched === true
+      () => state.steerDispatched === true,
+      exactHandoff ? { sessionId: state.sessionId!, sessionFile: state.sessionFile!, text: outgoingPrompt } : undefined
     )
+    if (exactHandoff) history.accepted(state.sessionId!, 'pi_persisted_session_entry', state.providerTurnId)
     publishPersistedPiSession(request, state)
     // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity
     // deadline here: transport/process failures reject rpcFailure, and users retain stop controls.
@@ -1707,7 +1985,7 @@ async function runPiAgent(
     offFailure()
     emitBackground(background.end())
     abortController.abort()
-    if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc, env)
+    if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc, env, continuationKey)
     else await rpc.close()
     if (state.rpc === rpc) state.rpc = undefined
   }
@@ -1729,6 +2007,12 @@ export function createPiAdapter(options: {
   return {
     id: 'pi',
     runtimeProvider: 'pi_rpc',
+    historicalContext: true,
+    async continuationKey(context: ProviderContext): Promise<string> {
+      const profile = await profileForContext(context)
+      const env = await piRpcEnvironment(profile)
+      return piContinuationKey(profile, context.cwd, env)
+    },
     async describe(): Promise<ProviderDescriptor> {
       const profiles = await options.listProfiles().catch(() => [])
       return {
@@ -1804,13 +2088,16 @@ export function createPiAdapter(options: {
     },
     run(request: ProviderRunRequest): ProviderRunHandle {
       const state: PiRunState = { stopped: false }
+      const history = new HistoricalInput(request.expectedContinuationKey
+        ? { ...request, trackInputReceipt: true }
+        : request)
       const promise = (async () => {
         if (!request.agentProfileId) throw new Error('Pi Provider run 缺少 agentProfileId')
         const profile = await options.resolveProfile(request.agentProfileId)
         if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
         let result: ProviderRunResult
         try {
-          result = await runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool)
+          result = await runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool, history)
         } finally {
           // Prompt admission can race a stop/transport exit. Recheck after transport
           // cleanup, including failures, so persisted history remains resumable.
@@ -1835,7 +2122,8 @@ export function createPiAdapter(options: {
         // 每轮 run 自己 spawn 一个 Pi RPC 子进程：SIGKILL 不会波及其他 run。
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => state.persistedSessionId,
-        getProviderTurnId: () => state.providerTurnId
+        getProviderTurnId: () => state.providerTurnId,
+        getInputReceipt: () => history.snapshot()
       }
     },
     invalidateContext(context) {

@@ -205,6 +205,9 @@ describe('preload IPC boundary', () => {
     const source = { providerId: 'claude' as const, cwd: '/workspace', externalSessionId: 'source-session' }
     await api.conversations.previewAdoption(source)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewAdoption', source)
+    const target = { providerId: 'pi' as const, agentProfileId: 'pi:0123456789abcdef' }
+    await api.conversations.previewAdoption(source, target)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewAdoption', source, target)
     await api.conversations.adopt(source, 'fingerprint')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:adopt', source, 'fingerprint')
     await api.conversations.update('conversation-id', 2, { kind: 'pin', pinned: true })
@@ -213,7 +216,7 @@ describe('preload IPC boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewDeletion', 'conversation-id')
     await api.conversations.delete('conversation-id', 'fingerprint')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:delete', 'conversation-id', 'fingerprint')
-    expect(electron.invoke).toHaveBeenCalledTimes(11)
+    expect(electron.invoke).toHaveBeenCalledTimes(12)
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

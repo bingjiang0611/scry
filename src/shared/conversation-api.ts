@@ -65,12 +65,15 @@ export type ConversationMetadataChange =
   | { kind: 'archive'; archived: boolean }
 
 export interface ConversationLegacySource {
-  providerId: 'claude' | 'codex'
+  providerId: 'claude' | 'codex' | 'pi'
+  agentProfileId?: string
   cwd: string
   externalSessionId: string
 }
 
 export interface ConversationAdoptionPreview {
+  /** Read-only recovery after a committed adoption whose IPC reply was lost. */
+  adoptedConversation?: ConversationSummary
   source: ConversationLegacySource
   fingerprint: string
   title: string
@@ -95,7 +98,7 @@ export interface ConversationDeletionPreview {
 /** Only these typed operations cross the preload boundary; runtime callbacks stay in main. */
 export interface ConversationApi {
   create(cwd: string): Promise<ConversationSummary>
-  previewAdoption(source: ConversationLegacySource): Promise<ConversationAdoptionPreview>
+  previewAdoption(source: ConversationLegacySource, target?: ConversationTargetRequest): Promise<ConversationAdoptionPreview>
   adopt(source: ConversationLegacySource, fingerprint: string): Promise<ConversationSummary>
   previewDeletion(id: string): Promise<ConversationDeletionPreview>
   delete(id: string, fingerprint: string): Promise<ConversationDeletionResult>

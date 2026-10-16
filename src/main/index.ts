@@ -252,7 +252,7 @@ import {
 } from './attachment-store'
 import { deleteOwnedSessionData } from './session-deletion'
 import { ConversationStore, type NativeSessionScope } from './conversation-store'
-import { ConversationService, type ManagedConversationStart } from './conversation-service'
+import { ConversationService, parseConversationTarget, type ManagedConversationStart } from './conversation-service'
 import type { Conversation, ConversationDeletionResult } from '../shared/conversation'
 import { planConversationDeletion, resolveConversationDeletionRuns } from './conversation-deletion'
 import { parseConversationLegacySource, prepareConversationAdoption } from './conversation-adoption'
@@ -578,8 +578,11 @@ const conversationService = (): ConversationService => conversationServiceInstan
 const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
   process.env.ELECTRON_ENABLE_LOGGING === '1' &&
   process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
-const smokeProviderIds: Array<'claude' | 'codex'> = process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS === '1' ? ['codex', 'claude'] : ['codex']
-const smokeDetectedAgents = smokeProviderIds.map((id) => ({ id, name: `${id} Smoke Fixture`, bin: id, path: process.execPath }))
+const smokeProviderIds: Array<'claude' | 'codex' | 'pi'> = process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS === '1' ? ['codex', 'claude', 'pi'] : ['codex']
+const smokeDetectedAgents = smokeProviderIds.map(id => ({
+  id: id === 'pi' ? 'pi:0123456789abcdef' : id,
+  name: id === 'pi' ? 'Pi · Rotom Smoke Fixture' : `${id} Smoke Fixture`, bin: id, path: process.execPath
+}))
 const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id) => createSmokeProviderAdapter(id)) : createBuiltInProviderAdapters(
   homeDir,
   join(app.getPath('userData'), 'codex-home-v1'),
@@ -1821,13 +1824,13 @@ handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
 // 左侧栏项目目录独立于会话保留；老数据从 recent folders 与 app 会话 catalog 一次性补齐。
 handleTrusted('agent:listProjects', () => listProjectCatalog())
 handleTrusted('agent:catalogHealth', () => appSessionStore().health())
-async function adoptLegacyConversation(input: unknown, fingerprint?: string) {
+async function adoptLegacyConversation(input: unknown, fingerprint?: string, requireHandoff = false) {
   const source = parseConversationLegacySource(input)
   source.cwd = resolveKnownProjectDirectory(source.cwd)
-  return contextAdmission.run(providerContextKey(source.providerId, source.cwd), async () => {
+  return contextAdmission.run(providerContextKey(source.providerId, source.cwd, source.agentProfileId), async () => {
     await startupManagedRecovery
     const catalog = appSessionStore().load().find(session => session.providerId === source.providerId &&
-      session.agentProfileId === undefined && session.cwd === source.cwd &&
+      session.agentProfileId === source.agentProfileId && session.cwd === source.cwd &&
       (session.externalSessionId === source.externalSessionId || session.sessionId === source.externalSessionId))
     if (!catalog) throw new Error('迁移源不属于已登记的 App 会话')
     source.externalSessionId = catalog.externalSessionId ?? catalog.sessionId
@@ -1838,20 +1841,23 @@ async function adoptLegacyConversation(input: unknown, fingerprint?: string) {
     for (const key of reservations) adoptingSessionKeys.add(key)
     try {
       const existing = (await conversationStore().list(source.cwd)).find(conversation => conversation.bindings.some(binding =>
-        binding.providerId === source.providerId && binding.agentProfileId === undefined && binding.nativeSessionId === source.externalSessionId))
+        binding.providerId === source.providerId && binding.agentProfileId === source.agentProfileId && binding.nativeSessionId === source.externalSessionId))
       if (existing) {
         if (existing.deletion) throw new Error('旧会话正在删除或已删除，不能重新迁入')
         const original = existing.bindings[0]
-        if (!fingerprint || existing.adoptionFingerprint !== fingerprint || original.providerId !== source.providerId ||
-          original.nativeSessionId !== source.externalSessionId) throw new Error('旧会话已归属统一对话，请打开其稳定条目')
-        return (await conversationService().list(source.cwd)).find(conversation => conversation.id === existing.id)!
+        if (!existing.adoptionFingerprint || (fingerprint !== undefined && existing.adoptionFingerprint !== fingerprint) || original.providerId !== source.providerId ||
+          original.agentProfileId !== source.agentProfileId || original.nativeSessionId !== source.externalSessionId) throw new Error('旧会话已归属统一对话，请打开其稳定条目')
+        const adopted = (await conversationService().list(source.cwd)).find(conversation => conversation.id === existing.id)!
+        if (fingerprint === undefined) return { source, fingerprint: existing.adoptionFingerprint, title: adopted.title,
+          turnCount: adopted.turnCount, adoptedConversation: adopted }
+        return adopted
       }
       await assertLegacyConversationWriteAllowed({ ...source, nativeSessionId: source.externalSessionId })
-      if (runs.unsettledStates().some(run => run.providerId === source.providerId && run.agentProfileId === undefined && run.cwd === source.cwd) ||
+      if (runs.unsettledStates().some(run => run.providerId === source.providerId && run.agentProfileId === source.agentProfileId && run.cwd === source.cwd) ||
         [source.externalSessionId, catalog.sessionId, catalog.runId].some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id)))) {
         throw new Error('源 Provider 仍在执行、保存证据或删除；请等待收敛后迁移')
       }
-      const prepared = await prepareConversationAdoption(app.getPath('userData'), source, catalog)
+      const prepared = await prepareConversationAdoption(app.getPath('userData'), source, catalog, requireHandoff)
       if (fingerprint === undefined) return prepared.preview
       if (prepared.preview.fingerprint !== fingerprint) throw new Error('迁移源已变化，请重新预览；旧入口保留')
       const conversation = await conversationStore().create(source.cwd, prepared.seed)
@@ -1861,7 +1867,20 @@ async function adoptLegacyConversation(input: unknown, fingerprint?: string) {
     } finally { for (const key of reservations) adoptingSessionKeys.delete(key) }
   })
 }
-handleTrusted('conversation:previewAdoption', (_event, source: unknown) => adoptLegacyConversation(source))
+handleTrusted('conversation:previewAdoption', async (_event, input: unknown, target?: unknown) => {
+  const source = parseConversationLegacySource(input)
+  source.cwd = resolveKnownProjectDirectory(source.cwd)
+  if (target !== undefined) {
+    const request = parseConversationTarget(target)
+    // Both directions must remain usable before retiring the legacy entry.
+    // These are read-only identity checks, never Provider launches.
+    await providerRegistry.continuationKey(source)
+    if (request.providerId !== source.providerId || request.agentProfileId !== source.agentProfileId) {
+      await providerRegistry.continuationKey({ ...request, cwd: source.cwd })
+    }
+  }
+  return adoptLegacyConversation(source, undefined, target !== undefined)
+})
 handleTrusted('conversation:adopt', (_event, source: unknown, fingerprint: unknown) => {
   if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
   return adoptLegacyConversation(source, fingerprint)
@@ -1951,11 +1970,13 @@ handleTrusted('conversation:update', async (_event, id: unknown, revision: unkno
   win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
   return result
 })
-handleTrusted('conversation:create', (_event, cwd: unknown) => {
+handleTrusted('conversation:create', async (_event, cwd: unknown) => {
   if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')
   const resolved = resolveKnownProjectDirectory(cwd)
   rememberProject(resolved)
-  return conversationService().create(resolved)
+  const conversation = await conversationService().create(resolved)
+  win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
+  return conversation
 })
 handleTrusted('conversation:list', (_event, cwd: unknown) => {
   if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')

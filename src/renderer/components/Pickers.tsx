@@ -276,7 +276,7 @@ export function CliPicker({
         data-agent-id={selectedId}
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
-        title={disabled ? '同一会话不能切换 Agent；请新建会话后重新选择' : undefined}
+        title={disabled ? '当前状态暂不能切换 Agent' : '选择下一条消息使用的 Agent'}
         aria-expanded={open}
         aria-controls={menuId}
         aria-haspopup="menu"

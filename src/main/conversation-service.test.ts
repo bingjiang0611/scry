@@ -63,6 +63,39 @@ describe('conversation backend lane', () => {
     expect(starts).toBe(1)
   })
 
+  it('admits Pi only with an explicit profile and keeps profile identity isolated from legacy adoption', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-conversation-pi-'))
+    roots.push(root)
+    const cwd = join(root, 'project')
+    await mkdir(cwd)
+    const profileA = 'pi:0123456789abcdef'
+    const profileB = 'pi:fedcba9876543210'
+    const service = new ConversationService({
+      store: new ConversationStore(join(root, 'user-data')),
+      resolveContinuationKey: async ({ agentProfileId }) => `${agentProfileId}-identity`,
+      supportsHistoricalInput: () => true,
+      startAppRun: async (_request, { managedConversation }) => {
+        await managedConversation.onTerminal({ status: 'cancelled', finalItems: [] })
+        return { runId: managedConversation.runId }
+      }
+    })
+    const created = await service.create(cwd)
+    await expect(service.preview(created.id, { providerId: 'pi' })).rejects.toThrow('Agent Profile')
+    await expect(service.preview(created.id, { providerId: 'claude', agentProfileId: profileA })).rejects.toThrow('默认配置')
+    const preview = await service.preview(created.id, { providerId: 'pi', agentProfileId: profileA })
+    expect(preview.target).toEqual({ providerId: 'pi', agentProfileId: profileA, continuationKey: `${profileA}-identity` })
+    const started = await service.send({
+      ...request(created.id, created.revision, 'pi-profile-a'), providerId: 'pi', agentProfileId: profileA,
+      expectedContinuationKey: `${profileA}-identity`
+    })
+    expect(started.disposition).toBe('created')
+    const after = await service.read(created.id)
+    await expect(service.send({
+      ...request(created.id, after.summary.revision, 'pi-profile-b'), providerId: 'pi', agentProfileId: profileB,
+      expectedContinuationKey: `${profileB}-identity`
+    })).resolves.toMatchObject({ disposition: 'created' })
+  })
+
   it('writes intent before dispatch and settles accepted input through the canonical runner seam', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-conversation-service-'))
     roots.push(root)

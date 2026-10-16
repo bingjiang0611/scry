@@ -2,22 +2,26 @@ import { createHash } from 'node:crypto'
 import type { AppSession } from './app-store'
 import type { ConversationAdoptionPreview, ConversationLegacySource } from '../shared/conversation-api'
 import type { ConversationSeed } from './conversation-store'
-import { conversationItemsFromTrace } from './conversation-history'
+import { assertConversationHistoryFits, conversationItemsFromTrace } from './conversation-history'
+import { SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
 import { readTraceArchiveForMigration } from './transcript-archive'
+import { parseConversationTarget } from './conversation-service'
 
 export function parseConversationLegacySource(value: unknown): ConversationLegacySource {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('迁移源请求无效')
   const source = value as Record<string, unknown>
-  if (Object.keys(source).some(key => !['providerId', 'cwd', 'externalSessionId'].includes(key)) ||
-    (source.providerId !== 'claude' && source.providerId !== 'codex') ||
+  if (Object.keys(source).some(key => !['providerId', 'agentProfileId', 'cwd', 'externalSessionId'].includes(key)) ||
     typeof source.cwd !== 'string' || !source.cwd || typeof source.externalSessionId !== 'string' || !source.externalSessionId) {
-    throw new Error('迁移仅支持 Claude/Codex 默认配置及已登记的源会话')
+    throw new Error('迁移仅支持已登记的本机会话和工作区')
   }
-  return { providerId: source.providerId, cwd: source.cwd, externalSessionId: source.externalSessionId }
+  const target = parseConversationTarget({ providerId: source.providerId, agentProfileId: source.agentProfileId })
+  return { providerId: target.providerId as ConversationLegacySource['providerId'],
+    ...(target.agentProfileId ? { agentProfileId: target.agentProfileId } : {}),
+    cwd: source.cwd, externalSessionId: source.externalSessionId }
 }
 
 /** Pure archive read. Caller holds the existing provider/cwd admission and checks live writers. */
-export async function prepareConversationAdoption(userData: string, source: ConversationLegacySource, catalog: AppSession): Promise<{
+export async function prepareConversationAdoption(userData: string, source: ConversationLegacySource, catalog: AppSession, requireHandoff = false): Promise<{
   preview: ConversationAdoptionPreview
   seed: ConversationSeed
 }> {
@@ -35,12 +39,22 @@ export async function prepareConversationAdoption(userData: string, source: Conv
       nativeItems: [],
       archive: { sessionId: source.externalSessionId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}) } })
   }
-  const title = catalog.title ?? `迁入会话 ${source.externalSessionId.slice(0, 8)}`
+  if (requireHandoff) {
+    // The switcher transfers every visible item automatically. Prove the exact
+    // payload fits before retiring the source; never strand a long native chat.
+    await assertConversationHistoryFits(userData, {
+      cwd: source.cwd,
+      bindings: [{ id: source.externalSessionId, providerId: source.providerId, agentProfileId: source.agentProfileId,
+        continuationKey: 'unverified-legacy', nativeSessionId: source.externalSessionId }],
+      turns: turns.map((turn, index) => ({ ...turn, ordinal: index + 1, bindingId: source.externalSessionId, origin: 'imported' as const }))
+    }, turns.flatMap(turn => turn.items))
+  }
+  const title = catalog.title ?? (catalog.preview.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, SESSION_TITLE_MAX_LENGTH) || '对话')
   const fingerprint = createHash('sha256').update(JSON.stringify({ source, archive, turns, title,
     pinnedAt: catalog.pinnedAt, archivedAt: catalog.archivedAt })).digest('hex')
   return {
     preview: { source, fingerprint, title, turnCount: turns.length },
-    seed: { target: { providerId: source.providerId, continuationKey: `unverified-legacy:${fingerprint}` },
+    seed: { target: { providerId: source.providerId, ...(source.agentProfileId ? { agentProfileId: source.agentProfileId } : {}), continuationKey: `unverified-legacy:${fingerprint}` },
       nativeSessionId: source.externalSessionId, retiredReason: '旧捕获未记录可证明的接续身份；后续需明确新建原生上下文',
       adoptionFingerprint: fingerprint, title, pinnedAt: catalog.pinnedAt, archivedAt: catalog.archivedAt, turns }
   }

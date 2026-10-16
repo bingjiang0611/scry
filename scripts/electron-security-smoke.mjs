@@ -235,7 +235,7 @@ async function main() {
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
         // Only explicit smoke adapters may run. Never discover/start real Provider services.
-        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode,pi' : 'claude,qoder,opencode,pi',
+        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode' : 'claude,qoder,opencode,pi',
         SCRY_REMOTE_HOST: '0'
       },
       stdio: ['ignore', 'pipe', 'pipe']
