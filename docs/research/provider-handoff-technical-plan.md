@@ -421,3 +421,14 @@
 - 真实 Claude/Codex/Pi 账号的端到端接续、真实付费调用、前台焦点行为、正式签名/公证和安装均未执行，需另行授权。
 - 当前接续仍限纯文本；附件、slash 命令、Steer、原生 fork、共享副本显式回收不在本轮交付内。第 4 项完整路线图仍未全部完成。
 - 32 KiB 超限不会隐式总结。若需支持长会话，下一步须单独定义可审阅的压缩/附件交接合同及验收；不能删除上限或静默丢内容。
+
+## 13. 用户授权安装 0.2.196（2026-10-17）
+
+用户明确要求“构建并安装，我来重启”。以 `07b624d`（含 `f21b5b2` 的 composer Agent 切换和日志排序修复）冻结源码，仅将桌面 package/lockfile 升至 **0.2.196**；CLI 仍为 **0.2.49**。
+
+- `check:cli-release`：32 文件 / 587 测试、CLI tarball smoke 通过。日志 `/tmp/scry-install-0.2.196-cli.log`。
+- `test:renderer:ui`：隐藏窗口 UI、生产 ownership/统一对话 IPC 等完整通过。日志 `/tmp/scry-install-0.2.196-ui.log`；UI evidence 位于 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-q75i2D/verification.json`，8 个 artifact hash 均与最终构建一致。
+- `install:mac:dev` 完整执行：node/web typecheck、全量 unit **3274 通过 / 4 个原有检查跳过**、shell、App/CLI build、包检查、packaged security/crash/remote smoke 及原子安装通过。日志 `/tmp/scry-install-0.2.196-install.log`。
+- 安装后独立读回 `/Applications/Scry.app` 版本 **0.2.196**、内置 CLI **0.2.49**；已安装 `app.asar` 与验证后的开发包逐字节 hash 一致：`144096b49c29713319ca636808833574365ebe91ad45cb740d620d76213a7270`。读回证据 `/tmp/scry-install-0.2.196-verification.json`。
+- 原 **0.2.195** 保留在 `/Applications/.Scry.app.backup`，其 `app.asar` hash 与安装前快照一致。
+- 清除发布凭据并关闭签名身份自动发现；这是开发安装，不是正式 Developer ID 签名、公证或发布。没有主动退出或重启用户正在使用的 App，重启由用户执行；未调用真实账号、未推送。
