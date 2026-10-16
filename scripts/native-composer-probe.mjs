@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 
 // Fixed cohorts, not retries: retain every observation, including the first.
 export const composerModes = Array.from({ length: 3 }, () => ['stop-immediate', 'complete', 'stop-visible', 'stop-immediate']).flat()
-export const nativeCounterMetrics = ['LayoutCount', 'RecalcStyleCount', 'Nodes', 'JSEventListeners', 'DocumentCount', 'DOMMutations']
+// Per-operation work counters must be monotonic: CDP LayoutCount/RecalcStyleCount and the
+// renderer MutationObserver record count only grow, so a delta is work done by the operation.
+// Gauges such as Nodes/JSEventListeners/Documents move with GC timing; they are measured after
+// a forced GC by scripts/performance-soak.mjs instead of as per-operation deltas.
+export const nativeCounterMetrics = ['LayoutCount', 'RecalcStyleCount', 'DOMMutations']
 
 // Runs inside the real renderer. Observe only: never invoke start/stop or fabricate DOM output.
 export function observeComposer(prompt, mode) {

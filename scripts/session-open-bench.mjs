@@ -202,7 +202,10 @@ try {
       if (name === 'DOMMutations') return [name, mutationMark - start.mutationMark]
       assert.ok(Object.hasOwn(before, name) && Object.hasOwn(after, name), `CDP Performance metric unavailable: ${name}`)
       const delta = Math.round(after[name] - before[name])
-      return [name, Math.max(0, delta)]
+      // Monotonic counters cannot shrink; a negative delta means the counter reset (e.g. a new
+      // document), which would make this sample meaningless rather than zero work.
+      assert.ok(delta >= 0, `CDP Performance metric decreased: ${name} ${before[name]} -> ${after[name]}`)
+      return [name, delta]
     }))
   }
   const wait = expression => evaluate(`(async () => {

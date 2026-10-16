@@ -17,7 +17,10 @@ describe('CPU instruction probe', () => {
       expect(result.status, `${operation}: ${result.stderr}`).toBe(0)
     }
     expect(runOperation(bundle, 'missing').status).not.toBe(0)
-  })
+    // Spawns esbuild plus six interpreter-only (--jitless) Node processes: ~1 s alone, but the
+    // 5 s in-process default timed out under full-suite contention (load ~18). Subprocess tests
+    // in this repo carry explicit timeouts; assertions and workload are unchanged.
+  }, 60_000)
 
   it.runIf(process.platform !== 'linux')('reports unavailable instead of zero without a Linux counter', async () => {
     const observations = await measureInstructions()
