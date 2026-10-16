@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { join, resolve } from 'node:path'
-import { listPackage } from '@electron/asar'
+import { join, resolve, posix } from 'node:path'
+import { extractFile, listPackage } from '@electron/asar'
 
 const appPath = resolve(process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const resources = join(appPath, 'Contents', 'Resources')
@@ -25,6 +25,26 @@ function directoryBytes(path) {
 
 if (!existsSync(asarPath)) throw new Error(`packaged app 缺少 app.asar：${asarPath}`)
 const entries = listPackage(asarPath)
+const entrySet = new Set(entries)
+// A linked node_modules can make the packager collect direct dependencies but
+// omit their required children. Check the actual archive, not the checkout.
+const packageFiles = ['/package.json', ...entries.filter(entry => /\/node_modules\/(?:@[^/]+\/)?[^/]+\/package\.json$/.test(entry))]
+let runtimeDependencies = 0
+for (const packageFile of packageFiles) {
+  const metadata = JSON.parse(extractFile(asarPath, packageFile.slice(1)).toString('utf8'))
+  for (const name of Object.keys(metadata.dependencies ?? {})) {
+    if (Object.hasOwn(metadata.optionalDependencies ?? {}, name)) continue
+    let directory = posix.dirname(packageFile)
+    let found = false
+    while (true) {
+      if (entrySet.has(posix.join(directory, 'node_modules', name, 'package.json'))) { found = true; break }
+      if (directory === '/') break
+      directory = posix.dirname(directory)
+    }
+    if (!found) throw new Error(`packaged app 缺少运行时传递依赖：${metadata.name ?? packageFile} → ${name}`)
+    runtimeDependencies += 1
+  }
+}
 const exactRuntimeFiles = new Set([
   '/package.json',
   '/LICENSE',
@@ -104,6 +124,7 @@ console.log(JSON.stringify({
   preload: 'cjs',
   qoderBundledCli: false,
   qoderSdk: true,
+  runtimeDependencies,
   nodePty: true,
   scryCliBundled: true,
   scryCliVersion: actualCliVersion
