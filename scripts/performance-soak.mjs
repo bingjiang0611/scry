@@ -5,8 +5,12 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
+const cycleLimit = requestedCycles !== null && Number.isSafeInteger(requestedCycles) && requestedCycles > 0 ? requestedCycles : null
 const durationMs = Math.max(10_000, Number(process.env.SCRY_SOAK_DURATION_MS ?? 60_000))
 const cycleDelayMs = Math.max(25, Number(process.env.SCRY_SOAK_CYCLE_DELAY_MS ?? 250))
+// SCRY_SOAK_CYCLES makes short counter runs possible; SCRY_SOAK_LEAK_FIXTURE=1 is sensitivity-only.
+const leakFixture = process.env.SCRY_SOAK_LEAK_FIXTURE === '1'
 const appPath = resolve(process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', 'Scry')
 const temp = mkdtempSync(join(tmpdir(), 'scry-performance-soak-'))
@@ -159,13 +163,14 @@ async function main() {
   const cycleMeasurements = []
   const startedAt = Date.now()
   let cycles = 0
-  let nextSampleAt = startedAt
+  let previousSessionId = null
   let nextCheckpointAt = startedAt + 2 * 60 * 60 * 1_000
   const checkpoints = []
-  while (Date.now() - startedAt < durationMs) {
+  while (cycleLimit === null ? Date.now() - startedAt < durationMs : cycles < cycleLimit) {
     const prompt = cycles % 20 === 19 ? 'performance long stream' : 'bounded performance soak'
     const result = await evaluate(`(async () => {
       const cwd = ${JSON.stringify(canonicalWorkspace)}
+      const previousSessionId = ${JSON.stringify(previousSessionId)}
       const cycleStarted = performance.now()
       let offDone = () => {}
       let offError = () => {}
@@ -180,6 +185,9 @@ async function main() {
       const terminalAt = performance.now()
       const externalSessionId = done.externalSessionId || done.sessionId
       const historyStarted = performance.now()
+      if (previousSessionId) {
+        await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId: previousSessionId }, { limit: 40 })
+      }
       await window.scry.loadSession({ providerId: 'codex', cwd, externalSessionId }, { limit: 40 })
       const historyLoadedAt = performance.now()
       const newConversationStarted = performance.now()
@@ -190,45 +198,78 @@ async function main() {
       }
       if (document.querySelectorAll('.transcript-turn').length > 0) throw new Error('renderer did not return to an empty conversation')
       const newConversationFeedbackMs = performance.now() - newConversationStarted
-      const deletion = await window.scry.deleteSession({ providerId: 'codex', cwd, externalSessionId })
-      if (deletion.ok !== true) throw new Error('soak session cleanup failed: ' + (deletion.reason || 'unknown'))
-      const catalogDeadline = Date.now() + 5_000
-      while (document.querySelectorAll('button.sb-sess').length > ${baselineSessionRows} && Date.now() < catalogDeadline) {
+      const panelToggle = document.querySelector('button[aria-label="右侧工作区"]')
+      if (!panelToggle) throw new Error('right surface toggle was not rendered')
+      const initiallyOpen = panelToggle.getAttribute('aria-pressed') === 'true'
+      panelToggle.click()
+      const firstToggleDeadline = Date.now() + 5_000
+      while ((panelToggle.getAttribute('aria-pressed') === 'true') === initiallyOpen && Date.now() < firstToggleDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 25))
       }
-      if (document.querySelectorAll('button.sb-sess').length > ${baselineSessionRows}) {
-        throw new Error('renderer session catalog did not release deleted rows')
+      if ((panelToggle.getAttribute('aria-pressed') === 'true') === initiallyOpen) throw new Error('right surface did not toggle closed/open')
+      panelToggle.click()
+      const secondToggleDeadline = Date.now() + 5_000
+      while ((panelToggle.getAttribute('aria-pressed') === 'true') !== initiallyOpen && Date.now() < secondToggleDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
       }
+      if ((panelToggle.getAttribute('aria-pressed') === 'true') !== initiallyOpen) throw new Error('right surface did not restore its state')
+      if (previousSessionId) {
+        const deletion = await window.scry.deleteSession({ providerId: 'codex', cwd, externalSessionId: previousSessionId })
+        if (deletion.ok !== true) throw new Error('soak session cleanup failed: ' + (deletion.reason || 'unknown'))
+      }
+      const catalogDeadline = Date.now() + 5_000
+      while (document.querySelectorAll('button.sb-sess').length > ${baselineSessionRows + 1} && Date.now() < catalogDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      if (document.querySelectorAll('button.sb-sess').length > ${baselineSessionRows + 1}) {
+        throw new Error('renderer session catalog did not release the previous row')
+      }
+      let leakInjected = false
+      // Explicitly test-gated: this retained node/listener is never part of a normal soak.
+      if (${JSON.stringify(leakFixture)}) {
+        const retained = globalThis.__scryMemorySoakLeak ??= []
+        const node = document.createElement('span')
+        node.hidden = true
+        node.textContent = 'memory-soak leak fixture'
+        const listener = () => node.textContent
+        window.addEventListener('scry-memory-soak-leak', listener)
+        document.body.append(node)
+        retained.push({ node, listener })
+        leakInjected = true
+      }
+      const mainActiveRuns = (await window.scry.activeRuns()).length
       return {
         externalSessionId,
         startToTerminalMs: terminalAt - startRequested,
         historyLoadMs: historyLoadedAt - historyStarted,
         newConversationFeedbackMs,
-        cycleMs: performance.now() - cycleStarted
+        cycleMs: performance.now() - cycleStarted,
+        mainActiveRuns,
+        leakInjected
       }
     })()`)
     assert.ok(result?.externalSessionId, 'smoke run did not expose a session id')
     cycleMeasurements.push(result)
     if (cycleMeasurements.length > 1_000) cycleMeasurements.shift()
+    previousSessionId = result.externalSessionId
     cycles += 1
-    if (Date.now() >= nextSampleAt) {
-      await cdp.send('HeapProfiler.collectGarbage').catch(() => {})
-      const [metrics, dom] = await Promise.all([
-        cdp.send('Performance.getMetrics'),
-        cdp.send('Memory.getDOMCounters')
-      ])
-      const values = Object.fromEntries((metrics.metrics ?? []).map((entry) => [entry.name, entry.value]))
-      samples.push({
-        elapsedMs: Date.now() - startedAt,
-        cycles,
-        jsHeapUsedBytes: values.JSHeapUsedSize ?? 0,
-        taskDurationSeconds: values.TaskDuration ?? 0,
-        nodes: dom.nodes,
-        documents: dom.documents,
-        listeners: dom.jsEventListeners
-      })
-      nextSampleAt = Date.now() + Math.min(60_000, Math.max(2_000, Math.floor(durationMs / 20)))
-    }
+    await cdp.send('HeapProfiler.collectGarbage')
+    const [heap, metrics, dom] = await Promise.all([
+      cdp.send('Runtime.getHeapUsage'),
+      cdp.send('Performance.getMetrics'),
+      cdp.send('Memory.getDOMCounters')
+    ])
+    const values = Object.fromEntries((metrics.metrics ?? []).map((entry) => [entry.name, entry.value]))
+    samples.push({
+      elapsedMs: Date.now() - startedAt,
+      cycles,
+      jsHeapUsedBytes: heap.usedSize,
+      taskDurationSeconds: values.TaskDuration ?? 0,
+      nodes: dom.nodes,
+      documents: dom.documents,
+      listeners: dom.jsEventListeners,
+      mainActiveRuns: result.mainActiveRuns
+    })
     if (Date.now() >= nextCheckpointAt) {
       const checkpoint = {
         elapsedMs: Date.now() - startedAt,
@@ -246,9 +287,42 @@ async function main() {
 
   assert.ok(cycles > 0, 'soak completed no cycles')
   assert.ok(samples.length >= 2, 'soak produced too few samples')
+  const finalDeletion = await evaluate(`window.scry.deleteSession({ providerId: 'codex', cwd: ${JSON.stringify(canonicalWorkspace)}, externalSessionId: ${JSON.stringify(previousSessionId)} })`)
+  assert.equal(finalDeletion?.ok, true, 'soak final session cleanup failed')
+  const firstSample = samples[0]
+  const lastSample = samples.at(-1)
+  // Each run is the remaining growth from cycle k to cycle N. A steady-state
+  // counter therefore stays at zero; the leak fixture leaves a positive tail.
+  const growthRuns = (field) => samples.map((sample) => Math.max(0, Math.round(lastSample[field] - sample[field])))
+  const growthCounters = Object.fromEntries(['jsHeapUsedBytes', 'documents', 'nodes', 'listeners', 'mainActiveRuns']
+    .map((field) => [field, growthRuns(field)]))
+  const cumulativeGrowthCounters = Object.fromEntries(['jsHeapUsedBytes', 'documents', 'nodes', 'listeners', 'mainActiveRuns']
+    .map((field) => [field, Math.max(0, Math.round(lastSample[field] - firstSample[field]))]))
+  const workload = `cycles=${cycles};history=two-session-switch;turn=codex-smoke;surface=right-open-close;gc=HeapProfiler.collectGarbage`
+  const observationMeta = {
+    scenario: 'memory.soak',
+    layer: 'memory',
+    workload,
+    source: 'hidden Electron App CDP Runtime.getHeapUsage and Memory.getDOMCounters; window.scry.activeRuns() for the safe main-process run counter'
+  }
+  const observations = [
+    ['js.heap.used.growth', 'bytes', 'jsHeapUsedBytes'],
+    ['dom.documents.growth', 'count', 'documents'],
+    ['dom.nodes.growth', 'count', 'nodes'],
+    ['dom.listeners.growth', 'count', 'listeners'],
+    ['main.active-runs.growth', 'count', 'mainActiveRuns']
+  ].map(([metric, unit, field]) => ({ ...observationMeta, metric, unit, availability: 'measured', runs: growthCounters[field] }))
+  const sensitivityControl = {
+    enabled: leakFixture,
+    passed: leakFixture ? lastSample.nodes > firstSample.nodes && lastSample.listeners > firstSample.listeners : null,
+    expected: 'one retained hidden DOM node and one window listener per cycle'
+  }
+  if (leakFixture) {
+    assert.ok(sensitivityControl.passed, 'leak fixture did not increase DOM node and listener growth')
+  }
   // End in the same idle state and allow the 2 s main-process resource window to observe it.
   await new Promise((resolveWait) => setTimeout(resolveWait, 2_200))
-  await cdp.send('HeapProfiler.collectGarbage').catch(() => {})
+  await cdp.send('HeapProfiler.collectGarbage')
   const tailSize = Math.max(1, Math.floor(samples.length / 5))
   const early = samples.slice(0, tailSize)
   const late = samples.slice(-tailSize)
@@ -259,9 +333,12 @@ async function main() {
   assert.ok(heapDeltaBytes <= heapPlateauBudgetBytes,
     `renderer heap did not plateau: delta=${heapDeltaBytes} budget=${heapPlateauBudgetBytes}`)
   const lastResource = resourceSamples.at(-1)
-  assert.equal(lastResource?.counters?.traceBufferedBytes ?? 0, 0, 'trace buffer did not drain')
-  assert.equal(lastResource?.counters?.traceInFlightBytes ?? 0, 0, 'trace ACK credit did not settle')
-  assert.equal(lastResource?.counters?.activeRuns ?? 0, 0, 'run registry did not settle')
+  if (lastResource) {
+    assert.equal(lastResource.counters?.traceBufferedBytes, 0, 'trace buffer did not drain')
+    assert.equal(lastResource.counters?.traceInFlightBytes, 0, 'trace ACK credit did not settle')
+    assert.equal(lastResource.counters?.activeRuns, 0, 'run registry did not settle')
+  }
+  assert.equal(lastSample.mainActiveRuns, 0, 'safe main-process active run counter did not settle')
 
   const latencySummary = Object.fromEntries([
     'startToTerminalMs', 'historyLoadMs', 'newConversationFeedbackMs', 'cycleMs'
@@ -294,8 +371,23 @@ async function main() {
     sampleCount: samples.length,
     heapDeltaBytes,
     heapPlateauBudgetBytes,
-    first: samples[0],
-    last: samples.at(-1),
+    first: firstSample,
+    last: lastSample,
+    growthCounters,
+    cumulativeGrowthCounters,
+    observations,
+    counterReport: { schema: 1, revision: 'real-app-soak', observations },
+    sensitivityControl,
+    pathGroups: {
+      exercised: ['navigation', 'history', 'send', 'stream', 'persistence', 'resources-shell'],
+      notExercised: ['startup', 'providers', 'compose', 'controls', 'evidence', 'analytics', 'workspace', 'source-control', 'terminal', 'remote'],
+      unavailableInOfflineCycle: {
+        compose: 'API start is used; native text entry and draft/attachment operations are not represented',
+        evidence: 'Tool evidence is produced by the smoke Provider but no evidence detail surface is opened',
+        terminal: 'No PTY is started; terminal surface operations are not part of the fixed cycle'
+      }
+    },
+    workload,
     resourceSamples: resourceSamples.length,
     latencySummary,
     mainTimingSummary,
