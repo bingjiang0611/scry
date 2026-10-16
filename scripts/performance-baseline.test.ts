@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { once } from 'node:events'
 import { createServer } from 'node:net'
 import { cpus, tmpdir } from 'node:os'
-import { performance } from 'node:perf_hooks'
+import { performance, PerformanceObserver, type PerformanceEntry } from 'node:perf_hooks'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -418,6 +418,16 @@ export const scenarioCatalogue = scenariosFor
 describe('fixed production-path performance harness', () => {
   it('covers every user-path group with correct, measured local work', async () => {
     const fixture = makeFixture()
+    const garbageCollections: Array<{ startedAtMs: number; durationMs: number }> = []
+    const collectGarbageCollections = (entries: PerformanceEntry[]): void => {
+      for (const entry of entries) garbageCollections.push({ startedAtMs: entry.startTime, durationMs: entry.duration })
+    }
+    const observer = new PerformanceObserver(list => collectGarbageCollections(list.getEntries()))
+    observer.observe({ entryTypes: ['gc'] })
+    const batches: Array<{
+      scenario: string; sample: number; startedAtMs: number; endedAtMs: number
+      cpuUserMs: number; cpuSystemMs: number; eventLoopActiveMs: number; eventLoopIdleMs: number
+    }> = []
     try {
       const scenarios = scenariosFor(fixture)
       expect(Object.keys(scenarios)).toHaveLength(17)
@@ -429,10 +439,20 @@ describe('fixed production-path performance harness', () => {
         const durationMs: number[] = []
         let counters: Counters | undefined
         for (let sample = 0; sample < samples; sample++) {
+          // Read counters outside the timed batch. These are approximate process diagnostics,
+          // not child-process CPU measurements, and are never subtracted from gate durations.
+          const cpuBefore = process.cpuUsage()
+          const loopBefore = performance.eventLoopUtilization()
           const started = performance.now()
           let next: Counters | undefined
           for (let iteration = 0; iteration < scenario.iterations; iteration++) next = await scenario.run()
-          durationMs.push((performance.now() - started) / scenario.iterations)
+          const ended = performance.now()
+          durationMs.push((ended - started) / scenario.iterations)
+          const cpu = process.cpuUsage(cpuBefore)
+          const loop = performance.eventLoopUtilization(loopBefore)
+          batches.push({ scenario: name, sample, startedAtMs: started, endedAtMs: ended,
+            cpuUserMs: cpu.user / 1000, cpuSystemMs: cpu.system / 1000,
+            eventLoopActiveMs: loop.active, eventLoopIdleMs: loop.idle })
           if (counters) expect(next).toEqual(counters)
           counters = next
         }
@@ -442,6 +462,13 @@ describe('fixed production-path performance harness', () => {
       expect(results['renderer.batch'].counters.turns).toBe(1)
       expect(results['history.page'].counters.turns).toBe(40)
       expect(results['terminal.delivery'].counters.outputBytes).toBeGreaterThan(0)
+      collectGarbageCollections(observer.takeRecords())
+      expect(batches).toHaveLength(Object.values(results).reduce((count, result) => count + result.samples, 0))
+      for (const batch of batches) {
+        const result = results[batch.scenario]
+        expect((batch.endedAtMs - batch.startedAtMs) / result.iterations).toBe(result.durationMs[batch.sample])
+        expect(batch.cpuUserMs + batch.cpuSystemMs).toBeGreaterThanOrEqual(0)
+      }
       const output = process.env.SCRY_PERFORMANCE_OUTPUT
       if (output) writeFileSync(output, JSON.stringify({
         schema: 1,
@@ -449,9 +476,11 @@ describe('fixed production-path performance harness', () => {
         harness: createHash('sha256').update(readFileSync('scripts/performance-baseline.test.ts')).update(readFileSync('vitest.config.ts')).update(readFileSync('src/main/providers/fixtures/codex-app-server.mjs')).digest('hex'),
         revision: process.env.SCRY_PERFORMANCE_REVISION ?? 'working-tree',
         environment: { node: process.versions.node, platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model },
-        results
+        results,
+        diagnostics: { timeOriginEpochMs: performance.timeOrigin, batches, garbageCollections }
       }, null, 2))
     } finally {
+      observer.disconnect()
       rmSync(fixture.root, { recursive: true, force: true })
     }
   }, 120_000)

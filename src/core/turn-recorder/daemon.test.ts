@@ -33,7 +33,7 @@ async function workspace(): Promise<string> {
 }
 
 function socketPath(root: string): string {
-  return join('/private/tmp', `${basename(root)}.sock`)
+  return join(tmpdir(), `${basename(root)}.sock`)
 }
 
 function manualRecoveryTimeouts(): {
@@ -59,7 +59,7 @@ function manualRecoveryTimeouts(): {
 
 /** 独立目录，让 daemon.log 断言只看到本条测试写下的内容。 */
 async function isolatedSocketDir(root: string): Promise<string> {
-  const dir = join('/private/tmp', `${basename(root)}-d`)
+  const dir = join(tmpdir(), `${basename(root)}-d`)
   await rm(dir, { recursive: true, force: true })
   socketDirs.push(dir)
   return dir

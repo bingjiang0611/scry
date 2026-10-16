@@ -132,7 +132,7 @@
       "benchmarks": [
         "send.codex-fixture"
       ],
-      "gap": "首段文本是 main 收到，不是 UI 可见；不产出文本的 run 单列 unavailable/cancelled。外部等待与本机阶段分开分析。"
+      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 不伪造可见时间。外部 Provider 等待仍需独立验收。"
     },
     {
       "id": "stream",
@@ -176,7 +176,7 @@
       "benchmarks": [
         "controls.stop-lifecycle"
       ],
-      "gap": "已测受控 Provider 的中断命令到终态通知，以及真实 App 的停止回执/终态分离；真实 Provider、强杀、steer、审批、并发争用和焦点切换不由该固定场景证明。"
+      "gap": "已测受控 Provider 中断与真实 App 的 Stop 按钮到终态、两帧空闲界面；覆盖 native turn ID 前及正文可见后停止，并独立核对退出后的归档。真实 Provider、强杀、steer、审批、并发争用和焦点切换不由该固定场景证明。"
     },
     {
       "id": "persistence",

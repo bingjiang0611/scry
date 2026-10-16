@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
-import { stopOwnedApp } from './owned-app-processes.mjs'
+import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
+import { probeNativeComposer } from './native-composer-probe.mjs'
 import { readRecords } from './performance-report.mjs'
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
-// This measures local history opening, not Provider latency or production p75.
+// Measures local history plus button/render/settlement acceptance, not real Provider latency.
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const scenarios = {
   markdown: { turnCount: 40, sections: 32 },
@@ -28,12 +29,13 @@ const latestIndex = turnCount - 1
 const temp = mkdtempSync(join(tmpdir(), 'scry-session-open-'))
 const iterations = 12
 const hash = value => createHash('sha256').update(value).digest('hex')
-const benchmarkCodeHash = () => hash(`${readFileSync(fileURLToPath(import.meta.url), 'utf8')}\0${measureNativeSessionOpen.toString()}`)
+const benchmarkCodeHash = () => hash(`${readFileSync(fileURLToPath(import.meta.url), 'utf8')}\0${measureNativeSessionOpen.toString()}\0${readFileSync(join(root, 'scripts/native-composer-probe.mjs'), 'utf8')}`)
 const benchmarkSha256 = benchmarkCodeHash()
 let child
 let cdp
 let output = ''
 let lineBuffer = ''
+let startupProbe = { phase: 'not-started', attempts: 0 }
 const traces = []
 
 function capture(chunk) {
@@ -59,18 +61,30 @@ async function connect(port) {
   const deadline = Date.now() + 30_000
   let page
   while (!page && Date.now() < deadline) {
+    startupProbe = { phase: 'http-request', attempts: startupProbe.attempts + 1, port }
     try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then(response => response.json())
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+      startupProbe.httpStatus = response.status
+      const targets = await response.json()
+      startupProbe.targets = targets.slice(0, 8).map(({ type, title, url }) => ({ type, title, url: url?.slice(0, 512) }))
+      startupProbe.targetsTruncated = targets.length > 8
       page = targets.find(target => target.type === 'page' && target.title === 'Scry' && target.webSocketDebuggerUrl)
-    } catch { /* Startup has not exposed the local debug endpoint yet. */ }
+      startupProbe.phase = page ? 'page-found' : 'waiting-for-page'
+    } catch (error) {
+      startupProbe.phase = 'probe-failed'
+      startupProbe.error = String(error)
+      startupProbe.cause = error.cause ? String(error.cause) : undefined
+    }
     if (!page) await new Promise(resolveWait => setTimeout(resolveWait, 50))
   }
-  assert.ok(page, `App startup timed out\n${output}`)
+  assert.ok(page, 'App startup timed out')
   assert.match(page.url, /^file:/)
+  startupProbe.phase = 'websocket-connect'
   const socket = new WebSocket(page.webSocketDebuggerUrl)
   const pending = new Map()
   let nextId = 1
   await new Promise((resolveReady, reject) => { socket.onopen = resolveReady; socket.onerror = reject })
+  startupProbe.phase = 'debug-connected'
   socket.onmessage = message => {
     const payload = JSON.parse(String(message.data))
     const request = pending.get(payload.id)
@@ -134,9 +148,28 @@ try {
       providerId: 'codex', runtimeProvider: 'codex_cli', cwd, preview: sessionId, ts: turns.at(-1).ts })
   }
   writeFileSync(join(userData, 'app-sessions.json'), JSON.stringify(catalog))
+  const bootstrap = join(temp, 'app')
+  mkdirSync(bootstrap)
+  const metadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  writeFileSync(join(bootstrap, 'package.json'), JSON.stringify({ name: metadata.name, version: metadata.version, main: 'main.cjs' }))
+  writeFileSync(join(bootstrap, 'main.cjs'), `
+    const { app } = require('electron');
+    const mark = (phase, detail = {}) => process.stderr.write('[scry:native-startup] ' + JSON.stringify({ phase, pid: process.pid, atMs: performance.now(), ...detail }) + '\\n');
+    mark('bootstrap', { ready: app.isReady() });
+    app.once('ready', () => mark('app-ready'));
+    app.on('browser-window-created', (_event, win) => {
+      mark('window-created', { windowId: win.id });
+      win.webContents.once('did-finish-load', () => mark('renderer-loaded', { windowId: win.id }));
+      win.webContents.on('did-fail-load', (_event, code, description) => mark('renderer-load-failed', { code, description }));
+    });
+    app.setAppPath(${JSON.stringify(root)});
+    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);
+    require(${JSON.stringify(join(root, metadata.main))});
+    mark('main-loaded');
+  `)
   const port = await freePort()
   const launchStarted = performance.now()
-  child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
+  child = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
     env: { ...process.env, HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi', SCRY_REMOTE_HOST: '0' },
@@ -307,6 +340,8 @@ try {
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const invalidHistory = await evaluate(`window.scry.loadSession(${JSON.stringify({ ...context, externalSessionId: 'missing-perf-fixture' })}).then(() => false, () => true)`)
   assert.equal(invalidHistory, true, 'fixture must exercise a real rejected history handler')
+  const composerSamples = await probeNativeComposer({ evaluate, wait, click, send: (method, params) => cdp.send(method, params) })
+
   // Real main/preload/SQLite/archive lifecycle with an explicit offline Provider fixture.
   // These are IPC/terminal/disk boundaries, NOT native send-button or visible-output timings.
   const lifecycleSamples = []
@@ -349,7 +384,10 @@ try {
           if (!turn?.done || turn.userText !== prompt) throw new Error('terminal turn not durably readable')
           if (!stopped && !turn.items.some(item => item.text === 'isolated remote assistant evidence')) throw new Error('archive lost full assistant output')
           if ((await window.scry.activeRuns()).some(run => run.runId === started.runId)) throw new Error('run did not settle')
-          return { runId: started.runId, stopped, startReceiptMs: receiptAt - startedAt, firstOutputReceiptMs: firstTextAt - startedAt,
+          return { runId: started.runId, stopped, startedAtEpochMs: performance.timeOrigin + startedAt,
+            terminalAtEpochMs: performance.timeOrigin + terminalAt,
+            ...(stopped ? { stopRequestedAtEpochMs: performance.timeOrigin + stopRequestedAt } : {}),
+            startReceiptMs: receiptAt - startedAt, firstOutputReceiptMs: firstTextAt - startedAt,
             startToTerminalMs: terminalAt - startedAt, terminalToReadableArchiveMs: archiveReadableAt - terminalAt,
             ...(stopped ? { stopReceiptMs, stopToTerminalMs: terminalAt - stopRequestedAt } : {}),
             durableTurns: 1, terminalConfirmed: true }
@@ -365,8 +403,11 @@ try {
   })()`)
   assert.equal(sqliteStats.status, 'ready', 'SQLite analytics must be available, not silently degraded')
   assert.ok(sqliteStats.turns >= 3, 'SQLite must contain the completed controlled turns')
-  const cleanup = await stopOwnedApp(child)
+  const closing = child
   child = null
+  // Cleanup owns its TERM/KILL sequence. An unknown result must not trigger a
+  // second signal sequence in finally or mask the first failure's evidence.
+  const cleanup = await stopOwnedApp(closing)
   // Independent disk read after process exit: an in-memory/cached session cannot satisfy this proof.
   const archiveRoot = join(userData, 'trace-archive-turns-v1')
   const persistedTurns = readdirSync(archiveRoot, { recursive: true }).filter(path => path.endsWith('.json')).flatMap(path => {
@@ -377,6 +418,15 @@ try {
     const turn = persistedTurns.find(turn => turn.runId === sample.runId)
     assert.equal(turn?.done, true, 'completed run must survive process exit on disk')
     if (!sample.stopped) assert.ok(turn.items.some(item => item.text === 'isolated remote assistant evidence'), 'disk archive lost assistant output')
+    sample.diskVerified = true
+  }
+  for (const sample of composerSamples) {
+    const turn = persistedTurns.find(turn => turn.runId === sample.runId)
+    assert.equal(turn?.done, true, 'native button run must survive App exit')
+    assert.equal(turn.userText, sample.prompt)
+    if (sample.mode !== 'stop-immediate') assert.ok(turn.items.some(item => item.text === `Visible reply: ${sample.prompt}`), 'visible assistant output must also persist')
+    sample.nativeTurnKnown = typeof turn.providerTurnId === 'string'
+    assert.equal(sample.nativeTurnKnown, sample.mode !== 'stop-immediate', 'fixture native-turn phase must survive archiving')
     sample.diskVerified = true
   }
   let localRecording = null
@@ -392,7 +442,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 3, startupDriverReadyMs, nativeInput, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 5, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),
@@ -402,8 +452,13 @@ try {
     cacheObservedOpens: samples.filter(sample => sample.cacheObserved).length,
     mainLoads: loads, correctness: ['full initial page', 'latest turn visible', 'native typing', 'older turn recovery',
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
+    // Existing main-process traces distinguish finalization work from renderer receipt delays.
+    // Preserve them on successful runs too; failed comparisons previously lost this evidence.
+    lifecycleTraces: traces.filter(sample => sample.name.startsWith('agent.') || sample.name === 'ipc.agent:stop'),
     cleanup, localRecording }, null, 2))
 } catch (error) {
+  // Preserve the original failure before cleanup; a cleanup error must not erase it.
+  console.error('SCRY_NATIVE_FAILURE', JSON.stringify({ failure: String(error).slice(0, 500), startup: startupProbe, app: inspectOwnedApp(child) }))
   console.error(output)
   throw error
 } finally {

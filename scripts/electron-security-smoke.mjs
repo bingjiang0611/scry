@@ -1015,7 +1015,17 @@ async function main() {
     const surfaceAction = document.querySelector('[data-session-surface-current="true"] .surface-topbar button')
     const root = document.documentElement
     const previousTheme = root.dataset.theme
+    const previousBackground = inspect('.main-area')?.background
+    const waitForBackground = async (expected) => {
+      const deadline = Date.now() + 2000
+      while (inspect('.main-area')?.background !== expected) {
+        if (Date.now() > deadline) throw new Error('Theme background did not settle: ' + expected)
+        await new Promise(resolve => requestAnimationFrame(resolve))
+      }
+    }
     root.dataset.theme = 'light'
+    // Computed styles can initially report the old color during the theme transition.
+    await waitForBackground('rgb(255, 255, 255)')
     const lightBackgrounds = {
       sidebar: inspect('.sidebar')?.background,
       brand: inspect('.sb-brand')?.background,
@@ -1026,6 +1036,7 @@ async function main() {
     }
     if (previousTheme) root.dataset.theme = previousTheme
     else delete root.dataset.theme
+    await waitForBackground(previousBackground)
     return {
       platform: document.documentElement.dataset.platform,
       viewportWidth: document.documentElement.clientWidth,
@@ -1120,7 +1131,22 @@ async function main() {
     const chatRestored = await waitFor(() => !!document.querySelector('.topbar'))
 
     document.querySelector('[data-session-surface-current="true"] button[aria-label="最大化右侧工作区"]')?.click()
-    const maximized = await waitFor(() => document.querySelector('.app')?.classList.contains('right-panel-maximized') === true)
+    let initialSurfaceChrome, surfaceChromeState
+    const maximized = await waitFor(() => {
+      if (!document.querySelector('.app')?.classList.contains('right-panel-maximized')) return false
+      const topbar = document.querySelector('[data-session-surface-current="true"] .surface-topbar')
+      surfaceChromeState = {
+        appClass: document.querySelector('.app')?.className,
+        platform: document.documentElement.dataset.platform,
+        paddingLeft: topbar ? getComputedStyle(topbar).paddingLeft : null,
+        tabsScrollLeft: topbar?.querySelector('.surface-tabs')?.scrollLeft,
+        surfaceLeft: document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1,
+        actionLeft: topbar?.querySelector('button')?.getBoundingClientRect().left ?? -1
+      }
+      initialSurfaceChrome ??= surfaceChromeState
+      // A committed class does not prove that the scroll/layout geometry has settled.
+      return surfaceChromeState.surfaceLeft >= 0 && surfaceChromeState.surfaceLeft < 16 && surfaceChromeState.actionLeft >= 80
+    })
     const surfaceLeft = Math.round(document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1)
     const surfaceActionLeft = Math.round(document.querySelector('[data-session-surface-current="true"] .surface-topbar button')?.getBoundingClientRect().left ?? -1)
 
@@ -1142,6 +1168,8 @@ async function main() {
       maximized,
       surfaceLeft,
       surfaceActionLeft,
+      initialSurfaceChrome,
+      surfaceChromeState,
       restored
     }
   })()`)
@@ -1156,7 +1184,7 @@ async function main() {
   )
   assert.ok(collapsedChrome.analyticsTop >= 52, `Analytics overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.chatRestored, true)
-  assert.equal(collapsedChrome.maximized, true)
+  assert.equal(collapsedChrome.maximized, true, `maximized Surface chrome did not reach the traffic-light safe area: ${JSON.stringify(collapsedChrome)}`)
   assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
   assert.ok(collapsedChrome.surfaceActionLeft >= 80, `collapsed Surface chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.restored, true)

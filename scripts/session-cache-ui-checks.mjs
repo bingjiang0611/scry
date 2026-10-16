@@ -1,12 +1,26 @@
 // Serialized into the isolated Electron runner. All clicks and keyboard input
 // go through Chromium's native event path, not HTMLElement.click().
 export async function exerciseSessionCache(contents) {
-  const read = async expression => contents.executeJavaScript(expression)
+  const read = async expression => {
+    // Electron can replace renderer rejections with a generic execution error.
+    // Return diagnostics as data, then fail in the driver with the original predicate.
+    const result = await contents.executeJavaScript(`(async () => {
+      try { return { ok: true, value: await (${expression}) }; }
+      catch (error) { return { ok: false, message: String(error?.message ?? error), state: {
+        busy: document.querySelector('.chat-transcript')?.getAttribute('aria-busy'),
+        source: document.querySelector('.chat-evidence-source')?.textContent,
+        fixture: document.getElementById('cache-state')?.textContent,
+        body: document.body.innerText.slice(-1800)
+      } }; }
+    })()`)
+    if (!result.ok) throw new Error(`Cache UI expression failed: ${expression.slice(0, 500)}\n${result.message}\n${JSON.stringify(result.state)}`)
+    return result.value
+  }
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const wait = expression => read(`(async () => {
     const deadline = Date.now() + 5000;
     while (!(${expression})) {
-      if (Date.now() > deadline) throw new Error('Cache UI timeout: ' + ${JSON.stringify(expression)} + '\\n' + document.body.innerText.slice(-1800));
+      if (Date.now() > deadline) throw new Error('Cache UI timeout: ' + ${JSON.stringify(expression)});
       await new Promise(resolve => setTimeout(resolve, 16));
     }
   })()`)
@@ -26,11 +40,21 @@ export async function exerciseSessionCache(contents) {
   const control = id => click(`document.getElementById(${JSON.stringify(id)})`)
   const pending = id => wait(`JSON.parse(document.getElementById('cache-state').textContent).pending.includes(${JSON.stringify(id)})`)
   const ready = (id, version = 1) => wait(`document.querySelector('.chat-transcript[aria-busy="false"]') && document.querySelector('.chat-transcript').textContent.includes(${JSON.stringify(`Authoritative ${id} v${version}`)})`)
-  const cached = id => read(`document.querySelector('.chat-transcript[aria-busy="true"]') != null &&
-    document.querySelector('.chat-transcript').textContent.includes(${JSON.stringify(`Authoritative ${id}`)}) &&
-    document.querySelector('.chat-evidence-source').textContent.includes('待核对')`)
+  // Bridge pending/resolution is not a React commit. Wait for the exact DOM
+  // state while the fixture still holds authority replies, then assert it again.
+  const cached = async id => {
+    const condition = `document.querySelector('.chat-transcript[aria-busy="true"]') != null &&
+      document.querySelector('.chat-transcript')?.textContent.includes(${JSON.stringify(`Authoritative ${id}`)}) &&
+      document.querySelector('.chat-evidence-source')?.textContent.includes('待核对')`
+    await wait(condition)
+    return read(condition)
+  }
   const stateOf = () => read(`JSON.parse(document.getElementById('cache-state').textContent)`)
-  const noTurns = () => read(`document.querySelectorAll('.transcript-turn').length === 0`)
+  const noTurns = async () => {
+    const condition = `document.querySelectorAll('.transcript-turn').length === 0`
+    await wait(condition)
+    return read(condition)
+  }
   await wait(`document.querySelectorAll('button.sb-sess').length === 2`)
 
   await select('cache-a'); await pending('cache-a')
