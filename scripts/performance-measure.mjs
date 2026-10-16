@@ -67,7 +67,9 @@ function mergeReports(reports, repeats) {
     ? { ...observation, runs: observation.runs.slice(0, repeats) }
     : observation)
   for (const observation of merged) if (observation.availability === 'measured' && observation.runs.length !== repeats) fail(`Counter did not produce ${repeats} repeats: ${metricKey(observation.scenario, observation.metric)}`)
-  return { schema: 1, revision: reports[reports.length - 1].revision, observations: merged }
+  const platforms = new Set(reports.map(report => report.platform))
+  if (platforms.size !== 1) fail('Counter collections came from different platforms')
+  return { schema: 1, revision: reports[reports.length - 1].revision, platform: reports[0].platform, observations: merged }
 }
 
 function profileEnvironment(profileDir) {

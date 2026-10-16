@@ -15,6 +15,9 @@ const statuses = ['gating', 'candidate']
 const nonNegativeInteger = value => Number.isSafeInteger(value) && value >= 0
 const text = value => typeof value === 'string' && value.trim().length > 0
 export const metricKey = (scenario, metric) => `${scenario}/${metric}`
+// Counts can legitimately differ between OSes (e.g. stat calls, git internals), so a
+// candidate baseline is only compared with observations from the same platform.
+export const counterPlatform = () => `${process.platform}-${process.arch}`
 
 function fail(message) { throw new Error(message) }
 
@@ -32,6 +35,9 @@ export function validateLedger(ledger) {
       // Promotion evidence is a human-reviewed record; empty fields mean the three checks never ran.
       for (const check of ['stability', 'sensitivity', 'correlation']) if (!text(entry.evidence?.[check])) fail(`Gating metric lacks ${check} evidence: ${key}`)
     } else if (entry.ceiling !== null) fail(`Candidate metric must not carry a ceiling: ${key}`)
+    // Candidate baselines: last accepted value per platform, reported but never gating.
+    if (entry.baselines !== undefined && (typeof entry.baselines !== 'object' || entry.baselines === null || Array.isArray(entry.baselines)
+      || !Object.entries(entry.baselines).every(([platform, value]) => text(platform) && nonNegativeInteger(value)))) fail(`Baselines must map platform to a non-negative integer: ${key}`)
     if (entry.raise !== undefined && !(nonNegativeInteger(entry.raise.from) && nonNegativeInteger(entry.raise.to) && entry.raise.to > entry.raise.from && text(entry.raise.reason))) fail(`Invalid raise record: ${key}`)
   }
   return ledger
@@ -39,6 +45,7 @@ export function validateLedger(ledger) {
 
 export function validateObservations(report) {
   if (report?.schema !== 1 || !Array.isArray(report.observations) || !text(report.revision)) fail('Unsupported work-counter observation schema')
+  if (report.platform !== undefined && !text(report.platform)) fail('Observation platform must be text when present')
   const seen = new Set()
   for (const observation of report.observations) {
     const key = metricKey(observation.scenario, observation.metric)
@@ -72,7 +79,7 @@ export function checkRatchet(ledger, report) {
     const value = Math.max(...observation.runs)
     const spread = value - min
     const measured = { ...row, value, min, runs: observation.runs.length, spread }
-    if (entry.status === 'candidate') { rows.push({ ...measured, result: 'candidate', gateFailed: false }); continue }
+    if (entry.status === 'candidate') { rows.push({ ...measured, ...compareBaseline(entry, report.platform, value), gateFailed: false }); continue }
     // Same-revision repeats must agree within the reviewed tolerance; otherwise the
     // counter is not deterministic enough to block a PR, so the gate fails closed.
     if (spread > entry.tolerance) rows.push({ ...measured, result: 'unstable', gateFailed: true })
@@ -81,10 +88,23 @@ export function checkRatchet(ledger, report) {
     else rows.push({ ...measured, result: 'pass', gateFailed: false })
   }
   for (const [key, observation] of observations) rows.push({ key, layer: observation.layer, unit: observation.unit, status: 'unregistered', result: observation.availability === 'measured' ? 'unregistered' : 'unavailable', value: observation.runs ? Math.max(...observation.runs) : undefined, reason: observation.reason, gateFailed: false })
-  return { schema: 1, revision: report.revision, passed: rows.every(row => !row.gateFailed), rows }
+  return { schema: 1, revision: report.revision, platform: report.platform ?? null, passed: rows.every(row => !row.gateFailed), rows }
 }
 
-/** Lower gating ceilings to newly observed values. Never raises, promotes or removes. */
+// Candidates never fail CI. A baseline turns "a number" into "worse/better than last
+// accepted", so silent regressions in not-yet-gating counters become visible in reports.
+function compareBaseline(entry, platform, value) {
+  const baseline = platform === undefined ? undefined : entry.baselines?.[platform]
+  if (baseline === undefined) return { result: 'candidate' }
+  if (value > baseline + entry.tolerance) return { result: 'worse', baseline }
+  if (value < baseline) return { result: 'better', baseline }
+  return { result: 'unchanged', baseline }
+}
+
+/**
+ * Lower gating ceilings to newly observed values and record or lower candidate baselines
+ * for the report's platform. Never raises, promotes or removes.
+ */
 export function proposeTightening(ledger, report) {
   const result = checkRatchet(ledger, report)
   if (!result.passed) fail('Refusing to tighten from a failing ratchet report')
@@ -94,6 +114,11 @@ export function proposeTightening(ledger, report) {
     changes.push({ key: row.key, from: next.metrics[row.key].ceiling, to: row.proposedCeiling })
     next.metrics[row.key].ceiling = row.proposedCeiling
     delete next.metrics[row.key].raise
+  }
+  for (const row of result.rows) if (row.status === 'candidate' && row.value !== undefined && report.platform !== undefined && (row.result === 'candidate' || row.result === 'better')) {
+    const entry = next.metrics[row.key]
+    changes.push({ key: row.key, platform: report.platform, baseline: { from: entry.baselines?.[report.platform] ?? null, to: row.value } })
+    entry.baselines = { ...entry.baselines, [report.platform]: row.value }
   }
   return { ledger: next, changes, revision: report.revision }
 }
@@ -125,6 +150,12 @@ export function checkLedgerChange(base, head, { raiseApproved = false } = {}) {
         violations.push({ key, kind: 'raise-record', reason: 'raise record without a ceiling increase' })
       }
     }
+    // Raising or dropping a candidate baseline would hide a `worse` report, so it is loosening too.
+    for (const [platform, value] of Object.entries(before.baselines ?? {})) {
+      const next = after.baselines?.[platform]
+      if (next === undefined) loosened(key, `${platform} baseline removed`)
+      else if (next > value) loosened(key, `${platform} baseline ${value} -> ${next}`)
+    }
   }
   for (const [key, after] of Object.entries(head.metrics)) if (!base.metrics[key] && after.raise !== undefined) violations.push({ key, kind: 'raise-record', reason: 'new metric cannot carry a raise record' })
   return { passed: violations.length === 0, violations }
@@ -133,16 +164,19 @@ export function checkLedgerChange(base, head, { raiseApproved = false } = {}) {
 export function formatRatchet(report) {
   const value = row => row.value === undefined ? 'n/a' : String(row.value)
   const ceiling = row => row.ceiling === null || row.ceiling === undefined ? 'n/a' : `${row.ceiling}${row.tolerance ? ` (+${row.tolerance})` : ''}`
+  const baseline = row => row.baseline === undefined ? 'n/a' : String(row.baseline)
+  const worse = report.rows.filter(row => row.result === 'worse')
   return [
     '<!-- scry-performance-ratchet -->',
     '## Scry work-counter ratchet',
-    `Candidate: \`${report.revision}\` · ${report.passed ? 'passed' : 'failed'}`,
+    `Candidate: \`${report.revision}\` · ${report.platform ?? 'platform unknown'} · ${report.passed ? 'passed' : 'failed'}`,
+    ...(worse.length ? ['', `**${worse.length} candidate counter(s) worse than baseline (not gating):** ${worse.map(row => `${row.key} ${row.baseline} → ${row.value}`).join(', ')}`] : []),
     '',
-    '| Metric | Layer | Status | Value | Ceiling | Result |',
-    '|---|---|---|---:|---:|---|',
-    ...report.rows.map(row => `| ${row.key} | ${row.layer} | ${row.status} | ${value(row)} | ${ceiling(row)} | ${row.result}${row.proposedCeiling !== undefined ? ` → ${row.proposedCeiling}` : ''}${row.reason ? ` (${row.reason})` : ''} |`),
+    '| Metric | Layer | Status | Value | Baseline | Ceiling | Result |',
+    '|---|---|---|---:|---:|---:|---|',
+    ...report.rows.map(row => `| ${row.key} | ${row.layer} | ${row.status} | ${value(row)} | ${baseline(row)} | ${ceiling(row)} | ${row.result}${row.proposedCeiling !== undefined ? ` → ${row.proposedCeiling}` : ''}${row.reason ? ` (${row.reason})` : ''} |`),
     '',
-    'Gating counters fail on regression, instability, or missing/unavailable evidence. Candidate counters are reported only until stability, sensitivity and correlation evidence is reviewed. `tightenable` rows can lower the ceiling; ceilings never rise without an approved raise record.',
+    'Gating counters fail on regression, instability, or missing/unavailable evidence. Candidate counters are reported only until stability, sensitivity and correlation evidence is reviewed; `worse`/`better` compare them with the same-platform baseline. `tightenable` rows can lower the ceiling; ceilings never rise without an approved raise record.',
     ''
   ].join('\n')
 }

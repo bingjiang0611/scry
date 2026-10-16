@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { validateObservations } from './performance-ratchet.mjs'
+import { validateObservations, counterPlatform } from './performance-ratchet.mjs'
 
 // Shared collection contract for work-counter lanes. A collector is a Vitest file named
 // `scripts/performance-counters/*.counters.test.ts`. It drives a production implementation
@@ -36,7 +36,7 @@ export function writeCollector(name, observations) {
 }
 
 export function mergeObservations(revision, groups) {
-  const report = { schema: 1, revision, observations: groups.flat() }
+  const report = { schema: 1, revision, platform: counterPlatform(), observations: groups.flat() }
   return validateObservations(report)
 }
 
