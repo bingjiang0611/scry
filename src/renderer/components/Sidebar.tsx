@@ -39,7 +39,6 @@ export const Sidebar = memo(function Sidebar({
   activeCwd,
   activeSessionId = null,
   activeConversationId,
-  onNewConversation,
   onPickConversation,
   activeProviderId,
   activeAgentProfileId,
@@ -80,7 +79,6 @@ export const Sidebar = memo(function Sidebar({
   activeCwd: string | null
   activeSessionId?: string | null
   activeConversationId?: string
-  onNewConversation?: (cwd: string) => Promise<void>
   onPickConversation?: (conversation: ConversationSummary) => void
   activeProviderId?: SessionProviderId
   activeAgentProfileId?: string
@@ -377,10 +375,9 @@ export const Sidebar = memo(function Sidebar({
               </div>
               {open && (
                 <div className="sb-sess-list">
-                  {p.cwd && onNewConversation && <button className="btn unified-new" onClick={() => { void onNewConversation(p.cwd) }} aria-label={`在 ${p.name} 中新建统一对话`}>＋ 统一对话 · 可切换 Provider</button>}
                   {p.conversations.filter(item => !item.archivedAt).sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
                   {p.conversations.some(item => item.archivedAt) && <details className="unified-archived">
-                    <summary>已存档统一对话</summary>
+                    <summary>已存档对话</summary>
                     {p.conversations.filter(item => item.archivedAt).map(renderConversation)}
                   </details>}
                   {p.sessions.map((s) => (

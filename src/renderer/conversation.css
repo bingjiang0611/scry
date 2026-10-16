@@ -1,34 +1,24 @@
-.unified-conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.unified-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 24px 12px; border-bottom: 1px solid var(--border); }
-.unified-header h1 { margin: 0 0 5px; font-size: 16px; }
-.unified-header small, .unified-header code, .unified-scope, .unified-pagination, .unified-turn > header { color: var(--dim); }
-.unified-header code { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.unified-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 24px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.unified-history { flex: 1; min-height: 0; overflow: auto; }
-.unified-empty { margin: 32px auto; max-width: 55ch; line-height: 1.8; }
-.unified-turn { margin-bottom: 28px; }
-.unified-turn > header { display: flex; gap: 10px; align-items: center; font-size: 12px; margin-bottom: 12px; font-variant-numeric: tabular-nums; }
-.unified-turn > header b { color: var(--fg); }
-.unified-composer { flex: none; }
-.unified-composer textarea { width: 100%; resize: vertical; min-height: 72px; max-height: 240px; }
-.unified-composer .composer-bottom { flex-wrap: wrap; gap: 12px; }
-.unified-composer label, .unified-scope { font-size: 12px; }
-.unified-provider { display: flex; align-items: center; gap: 12px; border: 0; margin: 0; padding: 0; min-width: 0; }
-.unified-provider legend { float: left; margin-right: 12px; font-size: 12px; color: var(--dim); }
-.unified-provider label { display: inline-flex; align-items: center; gap: 4px; }
-.unified-composer [role='alert'], .unified-preview [role='alert'] { color: var(--bad); overflow-wrap: anywhere; }
+.unified-conversation { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.conversation-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 24px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.conversation-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-toolbar .btn { padding: 4px 8px; font-size: 12px; }
+.conversation-options { position: relative; }
+.conversation-options > summary { cursor: pointer; padding: 6px; color: var(--dim); }
+.conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0003; }
+.conversation-options p { margin: 4px 0; color: var(--dim); line-height: 1.5; }
+.conversation-history-notice, .conversation-recovery { margin: 0; padding: 8px 24px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.conversation-recovery { display: flex; gap: 8px; flex-wrap: wrap; }
+.conversation-history-notice details { max-height: 180px; overflow: auto; }
+.unified-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 24px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); }
+.unified-scope { color: var(--dim); font-size: 12px; }
+.unified-preview [role='alert'] { color: var(--bad); overflow-wrap: anywhere; }
 .modal.unified-preview { width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding: 24px; box-sizing: border-box; overflow: auto; gap: 0; }
 .unified-preview h2 { margin: 0 0 12px; font-size: 18px; line-height: 1.4; }
 .unified-preview details { margin-top: 14px; }
 .unified-preview p { line-height: 1.6; }
 .unified-delete ul { max-height: min(200px, 25vh); overflow: auto; overflow-wrap: anywhere; }
-.unified-history details { overflow-wrap: anywhere; }
-.unified-preview fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-.unified-history-selection { display: flex; flex-direction: column; gap: 10px; max-height: 240px; overflow: auto; }
 .unified-preview input[type='checkbox'] { margin-right: 8px; }
-.unified-preview pre, .unified-event { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
 .unified-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 .unified-conversation :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.unified-new { margin: 6px 0; width: 100%; }
 .unified-management { display: flex; flex-wrap: wrap; gap: 8px; }
 .unified-archived > summary { padding: 8px; color: var(--dim); cursor: pointer; }

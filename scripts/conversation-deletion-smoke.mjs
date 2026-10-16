@@ -84,7 +84,7 @@ export async function exerciseConversationDeletion({ cdp, evaluate, fixture, cli
   assert.match(await evaluate(`window.scry.conversations.delete(${json(id)},${json(oldPreview.fingerprint)}).then(()=>'',error=>String(error))`), /本次请求未执行清理/, 'a stale retry must not claim that earlier partial effects never happened')
   await capture('deletion-partial')
   await button('关闭')
-  await wait(() => evaluate("document.activeElement?.textContent === '刷新证据'"), 'partial result returns focus to evidence refresh')
+  await wait(() => evaluate("document.activeElement?.textContent === '刷新状态'"), 'partial result returns focus to status refresh')
   unlinkSync(cache)
   renameSync(saved, cache)
   await wait(() => evaluate("document.querySelector('[aria-label=\"删除统一对话\"]')?.textContent==='继续清理…'"), 'partial deletion keeps a retry entry')
@@ -108,7 +108,7 @@ export async function exerciseConversationDeletion({ cdp, evaluate, fixture, cli
   assert.deepEqual(inputs(fixture), calls, 'deletion/cancellation/partial retry/duplicate never invoke a Provider')
   await button('关闭')
   await wait(() => evaluate(`!document.querySelector(${json(entry)})`), 'completed tombstone is hidden from the catalog')
-  await wait(() => evaluate("document.activeElement?.textContent === '刷新证据'"), 'deleted trigger has a stable keyboard successor')
+  await wait(() => evaluate("document.activeElement?.textContent === '刷新状态'"), 'deleted trigger has a stable keyboard successor')
   const catalog = (await evaluate('window.scry.listProjects()')).find(project => project.cwd === fixture.workspace)
   assert.ok(catalog.sessions.every(session => !original.bindings.some(binding => binding.nativeSessionId === session.externalSessionId)))
   return { id, fingerprint: completed.deletion.fingerprint, receipt: completed.deletion.result, first, marker, archives }

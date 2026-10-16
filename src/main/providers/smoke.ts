@@ -3,12 +3,12 @@ import { writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
-import type { AgentSteerInput } from '../../shared/runtime'
+import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
 import { HistoricalInput } from './historical-input'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
-export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' = 'codex'): ProviderAdapter {
+export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi' = 'codex'): ProviderAdapter {
   // Test-only entry receipts prove that a rejected production IPC never reached the
   // privileged adapter. This adapter itself requires the existing explicit smoke gate.
   const callsFile = process.env.SCRY_ELECTRON_SMOKE_CALLS
@@ -24,13 +24,13 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' = 'cod
   return {
     forkSession,
     id: providerId,
-    runtimeProvider: providerId === 'claude' ? 'claude_sdk' : 'codex_cli',
+    runtimeProvider: runtimeProviderForProviderId(providerId),
     historicalContext: true,
-    continuationKey: () => `${providerId}:smoke:${process.env.SCRY_ELECTRON_SMOKE_IDENTITY?.trim() || 'default'}`,
+    continuationKey: context => `${providerId}:${context.agentProfileId ?? 'default'}:smoke:${process.env.SCRY_ELECTRON_SMOKE_IDENTITY?.trim() || 'default'}`,
     describe: async () => ({
       id: providerId,
       label: `${providerId} Smoke Fixture`,
-      runtimeProvider: providerId === 'claude' ? 'claude_sdk' : 'codex_cli',
+      runtimeProvider: runtimeProviderForProviderId(providerId),
       transport: 'packaged smoke fixture',
       available: true,
       capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' },
@@ -42,7 +42,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' = 'cod
       const outgoingPrompt = history.text(request.prompt)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
-      if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, runId: request.runId, prompt: request.prompt,
+      if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, runId: request.runId, prompt: request.prompt,
         resume: request.resume ?? null, sessionId, historicalContext: request.historicalContext ?? null, outgoingPrompt })}\n`)
       let stopped = false
       const composerProbe = request.prompt.startsWith('native composer ')
@@ -56,6 +56,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' = 'cod
         if (request.trackInputReceipt) {
           history.attempting(outgoingPrompt)
           if (providerId === 'codex' && request.prompt !== 'conversation unknown input') history.accepted(sessionId, 'codex_turn_start_response', `${request.runId}:provider-turn`)
+          if (providerId === 'pi') history.accepted(sessionId, 'pi_persisted_session_entry', `${request.runId}:provider-turn`)
         }
         if (request.managedRecorder && request.cwd) {
           await handleRecorderHook({ provider: providerId, event: 'UserPromptSubmit', workspace: request.cwd, managed: true,
@@ -220,7 +221,9 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' = 'cod
         ...context,
         mode: 'read',
         state: 'ready',
-        data: { models: [], permissions: [{ id: 'default', label: '默认审批', description: 'smoke fixture' }] },
+        data: { models: [], permissions: providerId === 'pi'
+          ? [{ id: 'full_access', label: '本机完全访问', description: 'synthetic Pi fixture; no sandbox' }]
+          : [{ id: 'default', label: '默认审批', description: 'smoke fixture' }] },
         observedAt: Date.now()
       })
     }

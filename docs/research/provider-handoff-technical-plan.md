@@ -373,3 +373,49 @@
 - 已安装 `/Applications/Scry.app`，读回版本为 0.2.195；`app.asar` 与本次已验证构建逐字节一致。旧 0.2.194 保留于 `/Applications/.Scry.app.backup`。
 - 构建移除发布凭据并关闭签名身份自动发现，是开发安装，不是正式 Developer ID 签名、公证或发布。未主动退出或启动用户的 Scry，重启留给用户；未推送。
 - 安装日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-b2db0b77e2b2d703.log`。
+
+## 12. 普通聊天 Agent 菜单接续（0.2.195 开发代码，未安装）
+
+本节更新前述独立统一对话页面的交互，不改变 ledger、ownership、回执和删除合同。
+
+### 用户路径与实现
+
+- 在正常 composer 的 Agent 菜单切换 Claude、Codex、已登记的 Pi Profile。选择只改变下一条消息的目标，不提交消息、不启动 Agent 任务（能力/模型查询沿用原菜单）。新建会话仍走原生路径；已有会话首次切换时迁入稳定的逻辑对话。
+- `ConversationView` 只负责逻辑状态，复用 `SessionChatView`、Agent/model/permission 控件、草稿和右侧工作台。移除侧栏独立的“新建统一对话”入口；迁入保留原标题和未保存的 surface DOM，不重新挂载终端/文件面板。
+- 发送时自动规划并补齐目标 binding 缺失的全部可见文字；不再要求逐项勾选和逐次预览确认。仍不转发工具协议、reasoning、usage 或子代理执行。切换后沿用目标 Provider 的权限合同，Pi 仍必须明确选择本机完全访问。
+- 迁入前只读核验源与目标的接续能力及完整历史包装预算。超出 **32 KiB** 时拒绝切换并保留原生入口；不先退役源会话再让用户卡在无法发送的逻辑对话中。不静默截断历史。
+- 迁入不冒充恢复：旧原生 binding 仍 retired。第一次接续说明将从文字历史建立新上下文。后续 A→B→A 使用各 binding 自身的已接收覆盖，避免重复导入。
+- 迁入 IPC 回包丢失后，只读 `previewAdoption` 返回已存在的原始 ownership 和 fingerprint；匹配才迁移草稿/面板，不重发写操作。未知投递即使 composer 为空也持续显示，不能被 completed 的表面状态掩盖。读取也失败时显示 unknown，保留草稿，由用户恢复连接后核对。发送失败不自动重发；显式“核对 / 继续原发送”复用同一不可变命令，宿主尚未收到时可能首次发送。
+
+### Pi / Rotom 边界
+
+- Pi Profile 必须精确匹配 `pi:<16 hex>`，不能用显示名、默认别名或另一个 Profile 的覆盖记录。
+- 接续 key 包含已知 launcher、实际 Node/runtime、配置/认证 namespace、项目配置及清洗后的启动环境；配置每次重读，二进制摘要采用有界 stat-key 缓存。投递 prompt 前再核对，pool 也按该身份隔离。
+- Rotom 公开 `bin/rotom` 与直接 `bin/rotom-launcher` 均支持；采用已审阅 **0.1.25** 的两个 shell 入口内容 hash，而非仅信文件名或字符串 marker。入口内容变化时明确 unavailable：升级路径是重新审阅启动/环境/配置合同并更新 hash 与回归证据，不自动放宽。
+- 在本机已安装的 Rotom 0.1.25 **源码**上做过只读验证：临时 HOME/config、合成 auth，两个入口均解析出 identity，未启动 Provider、未读取真实凭据。证据：`/tmp/scry-agent-switch-rotom-contract.json`。真实账号的模型调用仍未验收。
+- accepted 要求实际持久化 JSONL 的 session header、native session ID 与完整 user 文本匹配；RPC ack 或启动成功不算输入回执。错误 session、改写输入、缺失持久化记录都不能扩展覆盖。
+
+### 验证与证据
+
+所有 Electron 操作使用隐藏窗口、临时 userData/workspace 和合成 Provider；没有安装、版本提升、真实账号调用或发布。
+
+| 检查 | 结果 / 范围 | 证据 |
+|---|---|---|
+| `npm run typecheck` | node / web 通过 | `/tmp/scry-agent-switch-typecheck-delivery.log` |
+| focused unit | 15 文件、499 测试通过；涵盖 Pi 输入/身份、adoption、ledger、preload、草稿/面板及共享 composer。最后补充发送准备期锁定与空草稿 unknown 提示后，另跑 renderer/handoff 244 测试及完整 UI gate 通过 | `/tmp/scry-agent-switch-related-delivery.log` |
+| 负对照 | 故意禁用迁入回包丢失后的只读恢复，新增测试失败；恢复实现后 4/4 通过 | `/tmp/scry-agent-switch-readback-negative.log`、`/tmp/scry-agent-switch-readback-positive.log` |
+| `npm run test:renderer:ui` | 正常菜单迁入、切换不发送、草稿/右侧 DOM 保留、Claude↔Codex、合成 Pi Profile↔Claude、多轮返回原 binding、重启/身份变化、管理/删除与 ownership 拒绝均通过 | `/tmp/scry-agent-switch-renderer-delivery.log` |
+| 当前 UI/IPC artifact | 8 个构建文件 hash 与最终构建一致；浅/深色、窄屏及迁入状态截图留存 | `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-3YQbjP/verification.json` |
+| shell / CLI | shell 通过；CLI 32 文件、587 测试及 tarball smoke 通过，后续没有修改对应源码 | `/tmp/scry-agent-switch-shell.log`、`/tmp/scry-agent-switch-cli.log` |
+| `npm run pack:artifact` | 开发包及 packaged security/crash/remote smoke 通过；298,729,000 bytes，未安装 | `/tmp/scry-agent-switch-package-delivery.log` |
+| `npm run performance:measure` | L1 ratchet 通过；25 项 unchanged、2 项 pass；3 个 CPU instruction candidate 缺失，没有 worse。不代表切换延迟或真实日常 L2/L3 结论 | `/tmp/scry-agent-switch-performance-final/measure.json` |
+
+全量不能标绿：早期一轮旧 Agent 锁定提示断言失败，已按新的交互合同更新。其后一轮 **3265 通过 / 1 失败 / 4 跳过**，失败为未修改的 `performance-feedback.test.ts` 归档顺序断言。最终全量命令在 240 秒后超时，仍出现同一归档排序失败，没有完整统计，保留日志 `/tmp/scry-agent-switch-full-unit-current.log`。超时后本次 Vitest 进程已退出，没有盲目扩大测试超时重跑。
+
+日志排序缺陷独立复现：原有 `archiveStamp()` 使用毫秒时间戳加随机 UUID 后缀，reader 按文件名排序；同一毫秒轮转会按随机后缀排列，而不是写入顺序。固定一毫秒、使用未修改的 journal/reader，得到 `[6,7,4,5,10,11,8,9,2,3,0,1]`。证据 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-journal-order-control-PaEyJF/diagnosis.json`；本次没有顺带修改采集/排序格式，建议单独修复并补确定性回归。
+
+### 尚未覆盖
+
+- 真实 Claude/Codex/Pi 账号的端到端接续、真实付费调用、前台焦点行为、正式签名/公证和安装均未执行，需另行授权。
+- 当前接续仍限纯文本；附件、slash 命令、Steer、原生 fork、共享副本显式回收不在本轮交付内。第 4 项完整路线图仍未全部完成。
+- 32 KiB 超限不会隐式总结。若需支持长会话，下一步须单独定义可审阅的压缩/附件交接合同及验收；不能删除上限或静默丢内容。

@@ -3104,7 +3104,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('aria-label="移除队列第 1 条消息"')
     expect(chatHtml).toContain('↳')
     expect(chatHtml).toContain('不中断模型，将这条消息补充给当前任务')
-    expect(chatHtml).toContain('title="同一会话不能切换 Agent；请新建会话后重新选择"')
+    expect(chatHtml).toContain('title="当前状态暂不能切换 Agent"')
     expect(chatHtml).toMatch(/class="clibtn"[^>]*disabled=""/)
     expect(chatHtml).toMatch(/aria-label="选择 Model 与 Effort"(?![^>]*disabled)/)
     expect(chatHtml).toMatch(/aria-label="权限"(?![^>]*disabled)/)

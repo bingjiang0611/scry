@@ -41,8 +41,12 @@ function optionalControl(value: unknown): string | undefined {
 }
 
 function parseTarget(value: Record<string, unknown>): ConversationTargetRequest {
-  if (value.providerId !== 'claude' && value.providerId !== 'codex') throw new Error('统一对话目前仅支持 Claude 和 Codex')
-  if (value.agentProfileId !== undefined) throw new Error('统一对话目前仅支持 Claude/Codex 默认配置，不支持命名 Profile')
+  if (value.providerId !== 'claude' && value.providerId !== 'codex' && value.providerId !== 'pi') throw new Error('统一对话 Provider 不受支持')
+  if (value.providerId === 'pi') {
+    if (typeof value.agentProfileId !== 'string' || !/^pi:[a-f0-9]{16}$/.test(value.agentProfileId)) {
+      throw new Error('统一对话 Pi 必须选择已登记的 Agent Profile')
+    }
+  } else if (value.agentProfileId !== undefined) throw new Error('统一对话仅支持 Pi 命名 Profile；Claude/Codex 仅支持默认配置')
   if (value.permissionMode !== undefined && !isAgentPermissionMode(value.permissionMode)) throw new Error('统一对话权限模式无效')
   let model: ConversationTargetRequest['model']
   if (value.model !== undefined) {
@@ -51,7 +55,15 @@ function parseTarget(value: Record<string, unknown>): ConversationTargetRequest 
     if (!id) throw new Error('统一对话模型 ID 无效')
     model = { id, ...(candidate.providerId !== undefined ? { providerId: optionalControl(candidate.providerId) } : {}) }
   }
-  return { providerId: value.providerId, model, effort: optionalControl(value.effort), permissionMode: value.permissionMode }
+  return {
+    providerId: value.providerId,
+    ...(typeof value.agentProfileId === 'string' ? { agentProfileId: value.agentProfileId } : {}),
+    model, effort: optionalControl(value.effort), permissionMode: value.permissionMode
+  }
+}
+
+export function parseConversationTarget(input: unknown): ConversationTargetRequest {
+  return parseTarget(requestObject(input, targetFields))
 }
 
 function parseSend(input: unknown): ConversationSendRequest {

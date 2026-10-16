@@ -14,7 +14,8 @@ import {
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
 import type { WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
-import { ConversationView } from './components/ConversationView'
+import { ConversationView, type ConversationProjection } from './components/ConversationView'
+import { adoptConversationWithReadback, conversationTarget } from './conversation-handoff'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded, type ChatScrollBox } from './chat-scroll'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -56,6 +57,7 @@ import type { WorkspaceFileTarget } from './workspace-links'
 import type { SessionAttentionSnapshot } from '@shared/session-attention'
 import {
   createComposerDraftStore,
+  composerDraftKey,
   persistComposerDraftStore,
   readComposerDrafts,
   writeComposerDrafts,
@@ -775,6 +777,15 @@ export function App() {
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showLlmPerformance, setShowLlmPerformance] = useState(false)
+  const [view, setView] = useState<AppView>('chat')
+  const [logicalConversation, setLogicalConversation] = useState<ConversationSummary>()
+  const [conversationError, setConversationError] = useState<string>()
+  const [conversationAgent, setConversationAgent] = useState<string>()
+  const [conversationProjection, setConversationProjection] = useState<ConversationProjection>()
+  const [switchingAgent, setSwitchingAgent] = useState(false)
+  const switchingAgentRef = useRef<string>()
+  const viewRef = useRef(view)
+  viewRef.current = view
   const integrations = useIntegrations(cwd, activeSessionId, projects, showMcp ? 'mcp' : showSkills ? 'skills' : null)
   useEffect(() => {
     const subscribe = window.scry.onDataUpdated
@@ -807,7 +818,11 @@ export function App() {
     }
   })
   const setSessionDrafts = draftStore.update
-  const draftKey = useMemo(() => sessionComposerDraftKey({
+  const draftKey = useMemo(() => view === 'chat' && switchingAgent && switchingAgentRef.current
+    ? switchingAgentRef.current
+    : view === 'conversation' && logicalConversation
+    ? composerDraftKey({ providerId: 'conversation', cwd: logicalConversation.cwd, sessionId: logicalConversation.id })
+    : sessionComposerDraftKey({
     providerId: integrations.selectedProviderId,
     agentProfileId: integrations.providerContext.agentProfileId,
     cwd,
@@ -817,7 +832,11 @@ export function App() {
     cwd,
     integrations.providerContext.agentProfileId,
     integrations.selectedProviderId,
-    selectedProviderSessionId
+    selectedProviderSessionId,
+    view,
+    switchingAgent,
+    logicalConversation?.id,
+    logicalConversation?.cwd
   ])
   const rightSurfaces = useSessionRightSurfaces(draftKey, cwd)
   const { current: currentSurface, dispatch: dispatchRightSurface, migrate: migrateRightSurface } = rightSurfaces
@@ -978,10 +997,6 @@ export function App() {
   }, [currentSurface.id])
   const [showSettings, setShowSettings] = useState(false)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
-  const [view, setView] = useState<AppView>('chat')
-  const [logicalConversation, setLogicalConversation] = useState<ConversationSummary>()
-  const [conversationError, setConversationError] = useState<string>()
-  const creatingConversation = useRef(false)
   const logicalWorkspaceSelected = useRef(false)
   useEffect(() => {
     const selectingLogical = view === 'conversation' && logicalConversation !== undefined
@@ -1307,6 +1322,7 @@ export function App() {
   }
 
   useEffect(() => {
+    if (view === 'conversation') return
     const el = scrollRef.current
     if (!el) return
     const onScroll = (): void => {
@@ -1320,12 +1336,14 @@ export function App() {
   }, [cwd, view])
 
   useEffect(() => {
+    if (view === 'conversation') return
     const el = scrollRef.current
     if (!el) return
     return observeChatBottomLayout(el, () => openingSessionBottomRef.current || shouldStickToBottomRef.current)
   }, [cwd, selectedProviderSessionId, view])
 
   useLayoutEffect(() => {
+    if (view === 'conversation') return
     const openingSession = openingSessionBottomRef.current
     scrollChatToBottomIfNeeded(
       scrollRef.current,
@@ -1342,7 +1360,7 @@ export function App() {
       shouldStickToBottomRef.current = true
     })
     return () => cancelAnimationFrame(frame)
-  }, [selectedProviderSessionId, session.turns, sessionLoading])
+  }, [selectedProviderSessionId, session.turns, sessionLoading, view])
 
   const setTurnRef = useCallback((runId: string, el: HTMLDivElement | null): void => {
     if (el) {
@@ -1355,7 +1373,7 @@ export function App() {
   const openTurnInChat = useCallback(
     (runId: string, ev?: TraceEvent | null, target: 'turn' | 'event' = 'turn'): void => {
       if (ev) session.setSelected(ev)
-      setView('chat')
+      if (viewRef.current !== 'conversation') setView('chat')
       if (target === 'event' && ev) {
         setFocusedTurnRunId(null)
         setPendingChatEvent({ eventId: ev.id, runId })
@@ -1368,7 +1386,7 @@ export function App() {
   )
 
   useEffect(() => {
-    if (!pendingChatEvent || view !== 'chat') return
+    if (!pendingChatEvent || (view !== 'chat' && view !== 'conversation')) return
     const { eventId, runId } = pendingChatEvent
     const frame = requestAnimationFrame(() => {
       const eventTarget = [...document.querySelectorAll<HTMLElement>('[data-trace-event-id]')].find(
@@ -1386,7 +1404,7 @@ export function App() {
   }, [pendingChatEvent, session.turns.length, view])
 
   useEffect(() => {
-    if (!focusedTurnRunId || view !== 'chat') return
+    if (!focusedTurnRunId || (view !== 'chat' && view !== 'conversation')) return
     const runId = focusedTurnRunId
     const frame = requestAnimationFrame(() => {
       const target =
@@ -1576,6 +1594,7 @@ export function App() {
   }, [setDraftAttachments])
 
   const send = async (): Promise<void> => {
+    if (switchingAgentRef.current) return
     const draft = draftStore.getSnapshot().get(draftKey)
     const input = draft?.input ?? ''
     const draftAttachments = draft?.attachments ?? EMPTY_DRAFT_ATTACHMENTS
@@ -1965,16 +1984,20 @@ export function App() {
   const mountedSurfaces = rightSurfaces.surfaces.some((surface) => surface.id === currentSurface.id)
     ? rightSurfaces.surfaces : [...rightSurfaces.surfaces, currentSurface]
   const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen || rightSurfaces.surfaces.length > 0
-  const panelVisible = rightPanelMounted && view === 'chat' && rightSurface.visible && !surfacePane.collapsed
+  const panelVisible = rightPanelMounted && (view === 'chat' || view === 'conversation') && rightSurface.visible && !surfacePane.collapsed
   const shellPanelMounted = rightPanelMounted || view === 'remote'
   const shellPanelVisible = view === 'remote' ? remotePanelVisible : panelVisible
   const shellPanelMaximized = shellPanelVisible && (view === 'remote' ? remoteSurface.maximized : rightSurface.maximized)
-  const pinnedSummary = usePinnedSummaryVisibility(view === 'chat', panelVisible)
+  const pinnedSummary = usePinnedSummaryVisibility(view === 'chat' || view === 'conversation', panelVisible)
   const summaryPersistent = pinnedSummary.persistent
   const summaryVisible = pinnedSummary.visible
+  const displayedTurns = view === 'conversation'
+    ? conversationProjection?.conversationId === logicalConversation?.id ? conversationProjection?.turns ?? [] : []
+    : session.turns
+  const displayedBusy = view === 'conversation' ? conversationProjection?.conversationId === logicalConversation?.id && conversationProjection?.busy === true : session.busy
   const panelRuntimeProvider = useMemo(
-    () => latestSessionRuntimeProvider(session.turns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
-    [integrations.selectedId, session.turns]
+    () => latestSessionRuntimeProvider(displayedTurns) ?? runtimeProviderForAgentId(integrations.selectedId) ?? 'claude_sdk',
+    [integrations.selectedId, displayedTurns]
   )
   // 只对当前选中且真的没有轮次的会话报证据缺失：新轮次一开始或切回新会话就自动消失。
   const activeEvidenceGap = session.turns.length === 0 && !session.busy &&
@@ -1987,7 +2010,7 @@ export function App() {
     session.busy
   )
   const toggleOverviewPanel = (): void => {
-    if (view !== 'chat') return
+    if (view !== 'chat' && view !== 'conversation') return
     if (!rightSurface.visible || surfacePane.collapsed) {
       surfacePane.restore()
       dispatchRightSurface({ type: 'show' })
@@ -2003,22 +2026,62 @@ export function App() {
     return true
   }
   const pickConversation = (conversation: ConversationSummary): void => {
-    if (!changeView('conversation')) return
+    if (!confirmWorkspaceTransition() || !changeView('conversation')) return
+    sessionSelectionSeqRef.current += 1
+    selectSessionId(null)
+    setCwd(conversation.cwd)
     setConversationError(undefined)
+    setConversationAgent(undefined)
     setLogicalConversation(conversation)
   }
-  const createConversation = async (projectCwd: string): Promise<void> => {
-    if (creatingConversation.current || !changeView('conversation')) return
-    creatingConversation.current = true
-    setLogicalConversation(undefined)
-    setConversationError(undefined)
-    try {
-      const conversation = await window.scry.conversations.create(projectCwd)
-      setLogicalConversation(conversation)
-      await loadProjects()
-    } catch (error) {
-      setConversationError(error instanceof Error ? error.message : String(error))
-    } finally { creatingConversation.current = false }
+  const selectChatAgent = (agentId: string): void => {
+    if (switchingAgentRef.current) return
+    if (view === 'conversation') { integrations.setSelectedId(agentId); return }
+    if (composerSubmitting || session.busy || sessionLoading) return
+    if (!activeSessionId && session.turns.length === 0) { integrations.setSelectedId(agentId); return }
+    if (agentId === integrations.selectedId) return
+    if (!cwd || !activeSessionId) { setComposerError('此轮缺少原生会话标识，无法安全交接；请先新建对话'); return }
+    if (draftAttachments.length || queuedPrompts.length) { setComposerError('请先处理附件或待发送队列；切换不会丢弃它们'); return }
+    const sourceKey = draftKey
+    const sourceSessionId = activeSessionId
+    const sourceCwd = cwd
+    const sequence = sessionSelectionSeqRef.current
+    switchingAgentRef.current = sourceKey
+    setSwitchingAgent(true)
+    setComposerError(null)
+    void (async () => {
+      try {
+        const sourceTarget = conversationTarget(integrations.selectedId)
+        const destination = conversationTarget(agentId)
+        const source = { providerId: sourceTarget.providerId as 'claude' | 'codex' | 'pi',
+          ...(sourceTarget.agentProfileId ? { agentProfileId: sourceTarget.agentProfileId } : {}),
+          cwd: sourceCwd, externalSessionId: selectedProviderSessionId ?? sourceSessionId }
+        const preview = await window.scry.conversations.previewAdoption(source, destination)
+        // Navigation while planning cancels before any ownership write.
+        if (viewRef.current !== 'chat' || sequence !== sessionSelectionSeqRef.current || activeSessionIdRef.current !== sourceSessionId || cwdRef.current !== sourceCwd) return
+        const adopted = await adoptConversationWithReadback(window.scry.conversations, preview)
+        const targetKey = composerDraftKey({ providerId: 'conversation', cwd: adopted.cwd, sessionId: adopted.id })
+        setSessionDrafts(current => migrateSessionComposerDraft(current, sourceKey, targetKey))
+        migrateRightSurface(sourceKey, targetKey)
+        if (viewRef.current === 'chat' && sequence === sessionSelectionSeqRef.current && activeSessionIdRef.current === sourceSessionId && cwdRef.current === sourceCwd) {
+          sessionSelectionSeqRef.current += 1
+          selectSessionId(null)
+          session.clearTurns()
+          setConversationAgent(agentId)
+          setConversationError(undefined)
+          setLogicalConversation(adopted)
+          setView('conversation')
+          integrations.setSelectedId(agentId)
+          requestAnimationFrame(() => taRef.current?.focus())
+        }
+        await loadProjects()
+      } catch (error) {
+        setComposerError(error instanceof Error ? error.message : String(error))
+        // An IPC error may follow a committed adoption. Refresh the stable entry;
+        // never repeat adoption or start a Provider automatically.
+        void loadProjects()
+      } finally { switchingAgentRef.current = undefined; setSwitchingAgent(false) }
+    })()
   }
   const closeOverlays = (): void => {
     setShowSettings(false)
@@ -2121,8 +2184,8 @@ export function App() {
     },
     [surfacePane.restore, dispatchRightSurface, setTurnDiffSelection]
   )
-  const sessionTurnsRef = useRef(session.turns)
-  sessionTurnsRef.current = session.turns
+  const sessionTurnsRef = useRef(displayedTurns)
+  sessionTurnsRef.current = displayedTurns
   // 顶栏 Diff 直接打开、结束摘要、Overview 会话改动共用：默认展示会话净 diff（第一轮前基线 → 当前）；
   // 显式选中某轮/某文件时才回到单轮。隐藏且无摘要消费者时不扫描流式会话。
   const needsDiffReview = Boolean(
@@ -2133,14 +2196,14 @@ export function App() {
   const diffReview = useMemo(() => {
     if (!needsDiffReview) return null
     if (turnDiffSelection?.session) {
-      return sessionNetDiffReview(session.turns, turnDiffSelection.initialPath)
-        ?? resolveTurnDiffReview(session.turns, turnDiffSelection.initialPath)
+      return sessionNetDiffReview(displayedTurns, turnDiffSelection.initialPath)
+        ?? resolveTurnDiffReview(displayedTurns, turnDiffSelection.initialPath)
     }
     const selected = turnDiffSelection
-      ? resolveTurnDiffReview(session.turns, turnDiffSelection.initialPath, turnDiffSelection.runId)
+      ? resolveTurnDiffReview(displayedTurns, turnDiffSelection.initialPath, turnDiffSelection.runId)
       : null
-    return selected ?? sessionNetDiffReview(session.turns) ?? resolveTurnDiffReview(session.turns)
-  }, [needsDiffReview, session.turns, turnDiffSelection])
+    return selected ?? sessionNetDiffReview(displayedTurns) ?? resolveTurnDiffReview(displayedTurns)
+  }, [needsDiffReview, displayedTurns, turnDiffSelection])
   const openSessionNetDiff = useCallback(
     (path?: string): void => {
       const turns = sessionTurnsRef.current
@@ -2348,6 +2411,87 @@ export function App() {
 
   // Stream commits must not invalidate the history navigator. These handlers keep
   // their identity while reading the latest session/provider state when invoked.
+  const chatProps: ComponentProps<typeof SessionChatView> = {
+    draftStore,
+    draftKey,
+    turns: session.turns,
+    selectedId: session.selected?.id ?? null,
+    scrollRef,
+    textareaRef: taRef,
+    cwd,
+    workspaceRoots,
+    recent,
+    agents: integrations.agents,
+    selectedAgentId: integrations.selectedId,
+    agentLocked: switchingAgent || composerSubmitting || session.busy || sessionLoading,
+    hasSelectedSession: activeSessionId != null,
+    runControls: integrations.runControls,
+    runControlCatalog: integrations.runControlCatalog,
+    runControlsLoading: integrations.runControlsLoading,
+    runControlsReason: integrations.runControlCapability?.reason,
+    sendBlockedReason,
+    composerError,
+    detectionIssue: integrations.agentsScanError ?? providerSendBlockedReason ?? providerCompatibilityIssue,
+    detectionRetrying: integrations.detectionRetrying,
+    onRetryDetection: () => { setComposerError(null); integrations.retryDetection() },
+    submitting: composerSubmitting || switchingAgent,
+    sessionLoading,
+    sessionCacheVisible,
+    sessionEvidenceGap: activeEvidenceGap,
+    busy: session.busy,
+    draftAttachments,
+    queuedPrompts,
+    steerCapability,
+    steerEvidenceByMessageId,
+    steerInFlightMessageIds: steerInFlightRef.current,
+    onSteerQueuedPrompt: steerQueuedPrompt,
+    slashOpen,
+    slashLoading,
+    slashCmds,
+    slashReason,
+    slashSel,
+    pendingQuestions: session.pendingQuestions,
+    stopStates: session.stopStates,
+    historyWindow: session.historyWindow,
+    historyOlderLoading,
+    onLoadOlderTurns: () => { void loadOlderTurns() },
+    traceHealth: session.traceHealth,
+    focusedTurnRunId,
+    onTurnRef: setTurnRef,
+    onSelect: session.setSelected,
+    onOpenDiff: openTurnDiffReview,
+    onForkTurn: forkConversationTurn,
+    onOpenFile: openWorkspaceFile,
+    onAnswerQuestion: session.answerQuestion,
+    onInput: value => {
+      setInput(value)
+      if (composerError !== null) setComposerError(null)
+      if (slashHidden) setSlashHidden(false)
+    },
+    onChooseFolder: chooseFolder,
+    onUnbindProject: unbindProject,
+    onPickRecent: pickRecent,
+    onRemoveRecent: removeRecentFolder,
+    renderLocationPicker: renderLocationPicker({ machineId: LOCAL_MACHINE, cwd }),
+    onRetrySlash: retrySlash,
+    onPickSlash: pickSlash,
+    onSlashSel: setSlashSel,
+    onHideSlash: () => setSlashHidden(true),
+    onSend: send,
+    onStop: stopRun,
+    onPasteImages: addPastedImages,
+    onPasteClipboardImage: addClipboardImage,
+    onRemoveDraftAttachment: removeDraftAttachment,
+    onRemoveQueuedPrompt: removeQueuedPrompt,
+    onSelectAgent: selectChatAgent,
+    onAddPiAgent: integrations.addPiProfile,
+    onRemovePiAgent: integrations.removePiProfile,
+    onRunModel: integrations.setRunModel,
+    onRunEffort: integrations.setRunEffort,
+    onPermissionMode: integrations.setPermissionMode,
+    onRescan: integrations.rescan
+  }
+
   const sidebarActions = {
     onNewChat: useEventCallback(startNewConversation),
     onHosts: useEventCallback(openHosts),
@@ -2358,7 +2502,6 @@ export function App() {
     onArchive: useEventCallback(archiveSession),
     onRenameSession: useEventCallback(renameSession),
     onNewProjectChat: useEventCallback(newConversationInProject),
-    onNewConversation: useEventCallback(createConversation),
     onPickConversation: useEventCallback(pickConversation),
     onToggleProjectPin: useEventCallback(toggleProjectPin),
     onRenameProject: useEventCallback(renameProject),
@@ -2413,12 +2556,15 @@ export function App() {
       />
       <div className="main-area" id="main-pane">
         <>
-        {view !== 'chat' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
+        {view !== 'chat' && view !== 'conversation' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
         {view === 'conversation' ? (
           <>
             {conversationError && <p role="alert">{conversationError}</p>}
-            {logicalConversation ? <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} onChanged={() => { void loadProjects() }} />
-              : !conversationError && <p role="status">正在创建统一对话…</p>}
+            {logicalConversation ? <>
+              <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={pinnedSummary.toggle} onTogglePanel={toggleOverviewPanel} />
+              <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} />
+            </>
+              : !conversationError && <p role="status">正在打开对话…</p>}
           </>
         ) : view === 'hosts' ? (
           <HostsView onNewSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} />
@@ -2463,94 +2609,15 @@ export function App() {
               onTogglePanel={toggleOverviewPanel}
             />
 
-            <SessionChatView
-              draftStore={draftStore}
-              draftKey={draftKey}
-              turns={session.turns}
-              selectedId={session.selected?.id ?? null}
-              scrollRef={scrollRef}
-              textareaRef={taRef}
-              cwd={cwd}
-              workspaceRoots={workspaceRoots}
-              recent={recent}
-              agents={integrations.agents}
-              selectedAgentId={integrations.selectedId}
-              agentLocked={activeSessionId != null || session.busy || sessionLoading}
-              hasSelectedSession={activeSessionId != null}
-              runControls={integrations.runControls}
-              runControlCatalog={integrations.runControlCatalog}
-              runControlsLoading={integrations.runControlsLoading}
-              runControlsReason={integrations.runControlCapability?.reason}
-              sendBlockedReason={sendBlockedReason}
-              composerError={composerError}
-              detectionIssue={integrations.agentsScanError ?? providerSendBlockedReason ?? providerCompatibilityIssue}
-              detectionRetrying={integrations.detectionRetrying}
-              onRetryDetection={() => { setComposerError(null); integrations.retryDetection() }}
-              submitting={composerSubmitting}
-              sessionLoading={sessionLoading}
-              sessionCacheVisible={sessionCacheVisible}
-              sessionEvidenceGap={activeEvidenceGap}
-              busy={session.busy}
-              draftAttachments={draftAttachments}
-              queuedPrompts={queuedPrompts}
-              steerCapability={steerCapability}
-              steerEvidenceByMessageId={steerEvidenceByMessageId}
-              steerInFlightMessageIds={steerInFlightRef.current}
-              onSteerQueuedPrompt={steerQueuedPrompt}
-              slashOpen={slashOpen}
-              slashLoading={slashLoading}
-              slashCmds={slashCmds}
-              slashReason={slashReason}
-              slashSel={slashSel}
-              pendingQuestions={session.pendingQuestions}
-              stopStates={session.stopStates}
-              historyWindow={session.historyWindow}
-              historyOlderLoading={historyOlderLoading}
-              onLoadOlderTurns={() => { void loadOlderTurns() }}
-              traceHealth={session.traceHealth}
-              focusedTurnRunId={focusedTurnRunId}
-              onTurnRef={setTurnRef}
-              onSelect={session.setSelected}
-              onOpenDiff={openTurnDiffReview}
-              onForkTurn={forkConversationTurn}
-              onOpenFile={openWorkspaceFile}
-              onAnswerQuestion={session.answerQuestion}
-              onInput={(value) => {
-                setInput(value)
-                if (composerError !== null) setComposerError(null)
-                if (slashHidden) setSlashHidden(false)
-              }}
-              onChooseFolder={chooseFolder}
-              onUnbindProject={unbindProject}
-              onPickRecent={pickRecent}
-              onRemoveRecent={removeRecentFolder}
-              renderLocationPicker={renderLocationPicker({ machineId: LOCAL_MACHINE, cwd })}
-              onRetrySlash={retrySlash}
-              onPickSlash={pickSlash}
-              onSlashSel={setSlashSel}
-              onHideSlash={() => setSlashHidden(true)}
-              onSend={send}
-              onStop={stopRun}
-              onPasteImages={addPastedImages}
-              onPasteClipboardImage={addClipboardImage}
-              onRemoveDraftAttachment={removeDraftAttachment}
-              onRemoveQueuedPrompt={removeQueuedPrompt}
-              onSelectAgent={integrations.setSelectedId}
-              onAddPiAgent={integrations.addPiProfile}
-              onRemovePiAgent={integrations.removePiProfile}
-              onRunModel={integrations.setRunModel}
-              onRunEffort={integrations.setRunEffort}
-              onPermissionMode={integrations.setPermissionMode}
-              onRescan={integrations.rescan}
-            />
+            <SessionChatView {...chatProps} />
           </>
         )}
         <PinnedSummaryHost
-          visible={view === 'chat' && summaryVisible}
+          visible={(view === 'chat' || view === 'conversation') && summaryVisible}
           cwd={cwd}
           gitDiff={integrations.gitDiff}
-          turns={session.turns}
-          busy={session.busy}
+          turns={displayedTurns}
+          busy={displayedBusy}
           temporary={!summaryPersistent}
           onDismiss={pinnedSummary.dismiss}
           onOpenChanges={diffReview ? () => {
@@ -2621,7 +2688,7 @@ export function App() {
             contents={{
               overview: surface.id !== currentSurface.id ? null : showSessionOverview ? (
                 <OverviewPanel
-                  turns={session.turns}
+                  turns={displayedTurns}
                   sessionId={selectedProviderSessionId}
                   selected={session.selected}
                   usage={integrations.usage}
@@ -2670,7 +2737,7 @@ export function App() {
                   <TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={surface.id === currentSurface.id && panelVisible && surface.state.activeId === 'terminal'} />
                 </Suspense>
               ),
-              agents: surface.id === currentSurface.id ? <AgentsSurface turns={session.turns} busy={session.busy} /> : null
+              agents: surface.id === currentSurface.id ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null
             }}
             />
             </div>

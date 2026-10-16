@@ -56,6 +56,7 @@ interface ChatViewProps {
   sessionCacheVisible?: boolean
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
   busy: boolean
+  queueWhileBusy?: boolean
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
   steerCapability?: AgentSteerCapability | null
@@ -419,6 +420,7 @@ export function ChatView({
   sessionCacheVisible = false,
   sessionEvidenceGap = null,
   busy,
+  queueWhileBusy = true,
   draftAttachments,
   queuedPrompts,
   steerCapability = null,
@@ -545,7 +547,7 @@ export function ChatView({
       description: option.description
     }))
   ]
-  const queueing = busy && !remote
+  const queueing = busy && !remote && queueWhileBusy
   const sendActionLabel = submitting ? '正在启动' : queueing ? '加入队列' : '发送'
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
   const composerStatus = composerError ?? detectionIssue ?? (hasDraft ? sendBlockedReason : null)

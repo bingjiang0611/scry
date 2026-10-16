@@ -80,6 +80,15 @@ describe('logical conversation migration and metadata', () => {
     expect(await store.list()).toEqual([])
   })
 
+  it('keeps the native chat writable when automatic handoff would exceed its byte budget', async () => {
+    publish('x'.repeat(33 * 1024))
+    await expect(prepareConversationAdoption(userData, source, catalog(), true)).rejects.toThrow('32 KiB')
+    expect(await store.list()).toEqual([])
+    await expect(store.assertLegacyWriteAllowed({ ...source, nativeSessionId: source.externalSessionId })).resolves.toBeUndefined()
+    const manual = await prepareConversationAdoption(userData, source, { ...catalog(), title: undefined })
+    expect(manual.preview.title).toBe('old preview')
+  })
+
   it('bounds archive reads before parsing large files', async () => {
     await truncate(path(), 17 * 1024 * 1024)
     await expect(prepareConversationAdoption(userData, source, catalog())).rejects.toThrow('16 MiB')
@@ -88,9 +97,25 @@ describe('logical conversation migration and metadata', () => {
   it('rejects unsettled captures, unsupported providers, named profiles and injected fields', async () => {
     publish('unfinished', false)
     await expect(prepareConversationAdoption(userData, source, catalog())).rejects.toThrow('未收敛')
-    for (const value of [{ ...source, providerId: 'pi' }, { ...source, agentProfileId: 'named' }, { ...source, nativeItems: [] }]) {
-      expect(() => parseConversationLegacySource(value)).toThrow('迁移仅支持')
-    }
+    expect(() => parseConversationLegacySource({ ...source, providerId: 'pi' })).toThrow('Pi 必须选择')
+    expect(() => parseConversationLegacySource({ ...source, agentProfileId: 'named' })).toThrow('Claude/Codex 仅支持默认配置')
+    expect(() => parseConversationLegacySource({ ...source, nativeItems: [] })).toThrow('迁移仅支持')
+    expect(() => parseConversationLegacySource({ ...source, providerId: 'qoder' })).toThrow('Provider 不受支持')
+  })
+
+  it('retains Pi profile ownership without inventing legacy native coverage', async () => {
+    source = { ...source, providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' }
+    publish()
+    expect(parseConversationLegacySource(source)).toEqual(source)
+    const prepared = await prepareConversationAdoption(userData, source, catalog())
+    const conversation = await store.create(source.cwd, prepared.seed)
+    expect(conversation.bindings[0]).toMatchObject({ providerId: 'pi', agentProfileId: source.agentProfileId, nativeSessionId: source.externalSessionId })
+    expect(conversation.bindings[0].retiredReason).toBeTruthy()
+    expect(conversation.turns[0]).toMatchObject({ origin: 'imported', nativeItems: [] })
+    await expect(store.assertLegacyWriteAllowed({ ...source, nativeSessionId: source.externalSessionId })).rejects.toThrow('归属')
+    await expect(store.assertLegacyWriteAllowed({ ...source, agentProfileId: 'pi:fedcba9876543210', nativeSessionId: source.externalSessionId })).resolves.toBeUndefined()
+    const other = await prepareConversationAdoption(userData, { ...source, agentProfileId: 'pi:fedcba9876543210' }, catalog())
+    expect(other.preview.fingerprint).not.toBe(prepared.preview.fingerprint)
   })
 
   it('persists names, pins and archive state, preserving IDs, evidence, and ownership', async () => {

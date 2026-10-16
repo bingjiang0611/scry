@@ -151,7 +151,7 @@ function contextFor(messages: HistoryMessage[]): ProviderHistoricalContext {
 /** Read-only projection shared by preview and sealing; never substitutes excerpts. */
 async function readConversationHistoryMessages(
   userData: string,
-  conversation: Conversation,
+  conversation: Pick<Conversation, 'cwd' | 'turns' | 'bindings'>,
   selectedItems: ConversationItemRef[]
 ): Promise<HistoryMessage[]> {
   if (!selectedItems.length) throw new Error('空历史不需要交接正文 artifact')
@@ -194,6 +194,11 @@ async function readConversationHistoryMessages(
     throw new Error('交接正文顺序与选择不一致')
   }
   return messages
+}
+
+/** Read-only preflight before converting a native conversation's ownership. */
+export async function assertConversationHistoryFits(userData: string, conversation: Pick<Conversation, 'cwd' | 'turns' | 'bindings'>, selectedItems: ConversationItemRef[]): Promise<void> {
+  if (selectedItems.length) historicalInputPrefix(contextFor(await readConversationHistoryMessages(userData, conversation, selectedItems)))
 }
 
 export async function readConversationHistoryItem(userData: string, conversation: Conversation, ref: ConversationItemRef): Promise<string> {

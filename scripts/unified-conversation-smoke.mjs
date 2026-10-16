@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
+import { exercisePiAgentSwitch } from './conversation-agent-switch-smoke.mjs'
 import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
 
 const json = JSON.stringify
@@ -34,6 +35,9 @@ const sendRequest = (view, commandId, prompt, selectedItems = view.missingItems.
 export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   await wait(() => evaluate(`Boolean(window.scry?.conversations && document.querySelector('.sidebar'))`), 'production App ready')
   const click = async (selector) => {
+    if (await evaluate(`Boolean(document.querySelector(${json(selector)})?.closest('.conversation-options:not([open]) .unified-management'))`)) {
+      await click('.conversation-options > summary')
+    }
     const point = await evaluate(`(() => {
       const node = document.querySelector(${json(selector)});
       if (!node || node.disabled) throw new Error('Missing/enabled UI target: ' + ${json(selector)});
@@ -62,49 +66,51 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
       ...(key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode })
   }
-  const compose = async (prompt, direction) => {
-    await click('textarea[aria-label="统一对话消息"]')
-    await cdp.send('Input.insertText', { text: prompt })
-    if (direction) {
-      const label = direction === 'ArrowDown' ? 'Codex 默认配置' : 'Claude 默认配置'
-      const selector = `input[type="radio"][aria-label=${json(label)}]`
-      await wait(() => evaluate(`!document.querySelector(${json(selector)})?.disabled && !document.querySelector('.unified-provider')?.disabled`), 'Provider controls settle')
-      await click(selector)
-      assert.equal(await evaluate(`document.querySelector(${json(selector)}).checked`), true)
-    }
-    await button('预览并发送')
-    await wait(() => evaluate(`Boolean(document.querySelector('.unified-preview'))`), 'history preview opens')
+  const selectAgent = async agentId => {
+    await wait(() => evaluate("document.querySelector('.unified-conversation .clibtn')?.disabled === false"), 'Agent picker available')
+    await click('.unified-conversation .clibtn')
+    await click(`.climenu .mitem[data-agent-id="${agentId}"]`)
+    await wait(() => evaluate(`document.querySelector('.unified-conversation .clibtn')?.dataset.agentId === ${json(agentId)}`), 'next Agent selected')
   }
-  const confirm = async (fresh) => {
-    if (fresh) await click('.unified-preview fieldset > label input[type="checkbox"]')
-    await button('确认发送')
-    await wait(() => evaluate(`!document.querySelector('.unified-preview')`), 'send accepted by production IPC')
+  const compose = async (prompt, direction) => {
+    await click('textarea[aria-label="描述任务"]')
+    await cdp.send('Input.insertText', { text: prompt })
+    if (direction) await selectAgent(direction === 'ArrowDown' ? 'codex' : 'claude')
+  }
+  const confirm = async () => {
+    await wait(() => evaluate("document.querySelector('.unified-conversation .send')?.disabled === false"), 'send ready')
+    await button('发送')
+    await wait(() => evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value === ''`), 'send registered by production IPC')
+    assert.equal(await evaluate("Boolean(document.querySelector('.unified-preview:not(.unified-delete):not(.unified-adoption)'))"), false, 'normal sends never open a history confirmation dialog')
   }
   const rootSelector = `.sb-proj-head[data-project-path=${json(fixture.workspace)}]`
   await wait(() => evaluate(`Boolean(document.querySelector(${json(rootSelector)}))`), 'workspace in sidebar')
   if (!await evaluate(`document.querySelector(${json(rootSelector)}).getAttribute('aria-expanded') === 'true'`)) await click(rootSelector)
-  await click('.sb-proj.open .unified-new')
-  const id = await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId`), 'logical conversation created through UI')
-  await wait(() => evaluate(`!document.querySelector('.unified-composer .btn.primary')?.disabled`)
-    .then((enabled) => enabled || evaluate(`document.querySelector('.unified-history')?.textContent.includes('从 Claude')`)), 'conversation loaded')
-
+  // Seed blank managed drafts through the production API. User-facing entry is
+  // the ordinary Agent picker, exercised below with real legacy captures.
+  const openDraft = async () => {
+    const created = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
+    const entry = `.sidebar [data-conversation-id=${json(created.id)}]`
+    await wait(() => evaluate(`Boolean(document.querySelector(${json(entry)}))`), 'seeded draft in sidebar')
+    await click(entry)
+    await wait(() => evaluate(`document.querySelector('.conversation-chat')?.dataset.conversationId === ${json(created.id)}`), 'draft opens in normal chat')
+    return created.id
+  }
+  const id = await openDraft()
+  assert.equal(await evaluate("Boolean(document.querySelector('.unified-new'))"), false, 'no separate unified-chat creation entry')
+  await wait(() => evaluate("document.querySelector('.unified-conversation .clibtn')?.disabled === false"), 'conversation loaded')
   await compose('desktop remote write one')
-  assert.equal(await evaluate(`document.querySelector('.unified-preview .btn.primary').disabled`), true, 'fresh native context needs explicit confirmation')
-  await key('Escape', 'Escape', 27)
-  await wait(() => evaluate(`!document.querySelector('.unified-preview')`), 'Escape cancels preview')
-  await wait(() => evaluate('document.activeElement?.textContent.trim() === "预览并发送"'), 'cancel restores preview trigger focus')
-  await button('预览并发送')
-  await wait(() => evaluate(`Boolean(document.querySelector('.unified-preview'))`), 'preview reopened for button cancellation')
-  await button('取消，不发送')
-  assert.equal(inputs(fixture).length, 0, 'cancelled preview must not enter either Provider')
-  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="统一对话消息"]').value`), 'desktop remote write one')
-  await click('.sb-proj.open .unified-new')
+  await selectAgent('codex')
+  await selectAgent('claude')
+  assert.equal(inputs(fixture).length, 0, 'changing Agents must not enter either Provider')
+  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value`), 'desktop remote write one')
+  await openDraft()
   await wait(() => evaluate(`(() => { const selected = document.querySelector('.unified-conversation')?.dataset.conversationId; return selected && selected !== ${json(id)} })()`), 'switch to an independent draft')
-  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="统一对话消息"]').value`), '')
+  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value`), '')
   const originalEntry = `.sidebar [data-conversation-id=${json(id)}]`
   await click(originalEntry)
   await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId === ${json(id)}`), 'return to original draft')
-  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="统一对话消息"]').value`), 'desktop remote write one')
+  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value`), 'desktop remote write one')
   const documentEpoch = await evaluate('performance.timeOrigin')
   await cdp.send('Page.enable')
   await cdp.send('Page.reload', { ignoreCache: true })
@@ -120,13 +126,10 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   await wait(() => evaluate(`Boolean(document.querySelector(${json(originalEntry)}))`), 'logical entry after reload')
   await click(originalEntry)
   await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId === ${json(id)}`), 'draft restored after reload')
-  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="统一对话消息"]').value`), 'desktop remote write one')
+  assert.equal(await evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value`), 'desktop remote write one')
   assert.equal(inputs(fixture).length, 0, 'switching and reloading drafts must not send')
   await evaluate(`window.__unifiedLegacyFocus = []; window.scry.onFocusedRun(run => window.__unifiedLegacyFocus.push(run.runId))`)
-  await wait(() => evaluate(`!document.querySelector('.unified-composer .btn.primary')?.disabled`), 'restored conversation ready')
-  await button('预览并发送')
-  await wait(() => evaluate(`Boolean(document.querySelector('.unified-preview'))`), 'preview reopened')
-  await confirm(true)
+  await confirm()
   const first = await settled(evaluate, id, 1)
   assert.equal(first.turns[0].providerId, 'claude')
   assert.equal(readFileSync(join(fixture.workspace, 'remote-first.txt'), 'utf8'), 'remote-first.txt\n')
@@ -134,36 +137,34 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const bPreview = await preview(evaluate, id, 'codex')
   assert.equal(bPreview.missingItems.length, 2)
   await compose('desktop remote write two', 'ArrowDown')
-  assert.equal(await evaluate(`document.querySelector('input[aria-label="Codex 默认配置"]').checked`), true)
-  await click('.unified-history-selection > div:nth-child(2) summary')
-  await wait(() => evaluate(`document.querySelector('.unified-history-body')?.textContent === 'isolated remote assistant evidence'`), 'full authoritative assistant text is previewed')
+  assert.equal(await evaluate("document.querySelector('.clibtn').dataset.agentId"), 'codex')
+  assert.equal(await evaluate(`window.scry.conversations.readItem(${json(id)},${json(bPreview.missingItems[1].ref)})`), 'isolated remote assistant evidence')
   assert.equal(await evaluate(`window.scry.conversations.readItem(${json(id)},${json(bPreview.missingItems[0].ref)})`), 'desktop remote write one')
   const forgedRef = { ...bPreview.missingItems[0].ref, contentHash: '0'.repeat(64) }
   assert.match(await evaluate(`window.scry.conversations.readItem(${json(id)},${json(forgedRef)}).then(()=>null,error=>String(error))`), /不属于当前对话/)
   assert.match(await evaluate(`window.scry.conversations.readItem(${json(id)},${json({ ...bPreview.missingItems[0].ref, path: '/etc/passwd' })}).then(()=>null,error=>String(error))`), /格式或字段/)
   assert.equal(inputs(fixture).length, 1, 'reading preview bodies must not invoke a Provider')
-  await click('.unified-history-selection > div:nth-child(2) input')
   await confirm(true)
   const second = await settled(evaluate, id, 2)
   assert.equal(second.turns[1].providerId, 'codex')
   assert.equal(readFileSync(join(fixture.workspace, 'remote-second.txt'), 'utf8'), 'remote-second.txt\n')
 
-  const atLatest = `(() => { const el=document.querySelector('.unified-history'); return el && el.scrollHeight-el.clientHeight-el.scrollTop < 2 })()`
-  await wait(() => evaluate(`document.querySelectorAll('.unified-turn').length === 2 && ${atLatest}`), 'new output follows the transcript bottom')
-  const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.unified-history').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
+  const atLatest = `(() => { const el=document.querySelector('.conversation-chat .chat'); return el && el.scrollHeight-el.clientHeight-el.scrollTop < 2 })()`
+  await wait(() => evaluate(`document.querySelectorAll('.conversation-chat .turn').length === 2 && ${atLatest}`), 'new output follows the transcript bottom')
+  const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.conversation-chat .chat').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelPoint, deltaX: 0, deltaY: -10000 })
-  await wait(() => evaluate(`document.querySelector('.unified-history').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
+  await wait(() => evaluate(`document.querySelector('.conversation-chat .chat').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 760, deviceScaleFactor: 1, mobile: false })
   try {
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-    assert.equal(await evaluate("document.querySelector('.unified-history').scrollTop"), 0, 'layout changes must preserve the user reading older output')
+    assert.equal(await evaluate("document.querySelector('.conversation-chat .chat').scrollTop"), 0, 'layout changes must preserve the user reading older output')
   } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
 
   const aPreview = await preview(evaluate, id, 'claude')
   assert.equal(aPreview.continuation.kind, 'resume')
   assert.deepEqual(aPreview.missingItems.map((item) => item.ref.runId), [second.turns[1].runId, second.turns[1].runId])
   await compose('desktop remote write three', 'ArrowUp')
-  assert.equal(await evaluate(`document.querySelector('.unified-preview').textContent.includes('恢复兼容的原生上下文')`), true)
+  assert.equal(inputs(fixture).length, 2, 'returning to Claude only changes the next destination')
   const screenshots = mkdtempSync(join(tmpdir(), 'scry-unified-rendering-'))
   const capture = async (name) => {
     for (const theme of ['dark', 'light']) {
@@ -178,7 +179,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     }
   }
   await capture('preview')
-  const captureNarrow = async (name, selectors = ['.unified-conversation','.unified-header','.unified-pagination','.unified-composer','textarea[aria-label="统一对话消息"]','.unified-provider','.unified-scope']) => {
+  const captureNarrow = async (name, selectors = ['.unified-conversation','.conversation-toolbar','.conversation-chat .composer','textarea[aria-label="描述任务"]','.conversation-chat .clibtn']) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 800, deviceScaleFactor: 1, mobile: false })
     try {
       await capture(`${name}-narrow`)
@@ -188,10 +189,9 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
   }
   await captureNarrow('preview')
-  const padding = await evaluate(`parseFloat(getComputedStyle(document.querySelector('.unified-preview')).paddingLeft)`)
-  assert.ok(padding >= 20, 'real CSS cascade must retain dialog content padding')
+  assert.equal(await evaluate("Boolean(document.querySelector('.unified-conversation .composer-shell'))"), true, 'uses the normal composer')
   await evaluate(`(() => {
-    const el=document.querySelector('.unified-history');
+    const el=document.querySelector('.conversation-chat .chat');
     window.__scrollEvidence=[];
     const sample=kind=>{if(window.__scrollEvidence.length<80) window.__scrollEvidence.push({kind,top:el.scrollTop,height:el.scrollHeight,client:el.clientHeight,turns:el.children.length,focus:document.activeElement?.className})};
     const resize=new ResizeObserver(()=>sample('resize'));
@@ -204,7 +204,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const final = await settled(evaluate, id, 3)
   assert.equal(readFileSync(join(fixture.workspace, 'remote-third.txt'), 'utf8'), 'remote-third.txt\n')
   assert.equal(final.summary.id, id)
-  await wait(() => evaluate(`document.querySelectorAll('.unified-turn').length === 3 && !document.querySelector('.unified-composer').textContent.includes('当前轮仍在投递')`), 'final rendered timeline')
+  await wait(() => evaluate(`document.querySelectorAll('.conversation-chat .turn').length === 3 && !document.querySelector('.conversation-chat .composer').textContent.includes('当前轮仍在投递')`), 'final rendered timeline')
   try { await wait(() => evaluate(atLatest), 'sending explicitly returns to latest output') }
   catch (error) { throw new Error(`${error.message}: ${JSON.stringify(await evaluate('window.__scrollEvidence'))}`) }
   finally { await evaluate('window.__stopScrollEvidence()') }
@@ -226,12 +226,12 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     } else assert.equal(receipt.outgoingPrompt, receipt.prompt)
   }
   const stored = ledger(fixture, id)
-  assert.deepEqual(stored.turns[1].importedItems, [bPreview.missingItems[0].ref])
+  assert.deepEqual(stored.turns[1].importedItems, bPreview.missingItems.map(item => item.ref))
   assert.deepEqual(stored.turns[2].importedItems, aPreview.missingItems.map((item) => item.ref))
   const omitted = await preview(evaluate, id, 'codex')
-  assert.equal(omitted.missingItems.length, 3)
-  assert.ok(omitted.missingItems.some((item) => item.ref.runId === first.turns[0].runId && item.role === 'assistant'), 'early omission must survive later native coverage')
-  const duplicate = sendRequest(aPreview, stored.turns[2].commandId, 'desktop remote write three')
+  assert.equal(omitted.missingItems.length, 2)
+  assert.ok(omitted.missingItems.every(item => item.ref.runId === final.turns[2].runId), 'confirmed history is never resent')
+  const duplicate = { ...sendRequest(aPreview, stored.turns[2].commandId, 'desktop remote write three'), permissionMode: 'default' }
   assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(duplicate)})`), { runId: final.turns[2].runId, disposition: 'duplicate' })
   const stale = { ...duplicate, commandId: 'stale-ui-preview', expectedRevision: 0 }
   const error = await evaluate(`window.scry.conversations.send(${json(stale)}).then(()=>null,error=>String(error))`)
@@ -251,6 +251,8 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const management = await exerciseConversationManagement({ cdp, evaluate, fixture, id, click, button, key, wait, read, inputs, ledger, capture, captureNarrow })
 
   const deletion = await exerciseConversationDeletion({ cdp, evaluate, fixture, click, button, key, wait, read, preview, settled, sendRequest, inputs, ledger, capture, captureNarrow })
+
+  const piSwitch = await exercisePiAgentSwitch({ cdp, evaluate, fixture, click, wait, inputs, read, settled, ledger })
 
   // Exercise the actual registered legacy/adoption/Steer handlers while a
   // managed Provider is waiting for an answer, not just a store/controller mock.
@@ -274,8 +276,8 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const liveEntry = `.sidebar [data-conversation-id=${json(liveConversation.id)}]`
   await wait(() => evaluate(`Boolean(document.querySelector(${json(liveEntry)}))`), 'live logical entry')
   await click(liveEntry)
-  await wait(() => evaluate("Boolean(document.querySelector('.unified-question-jump'))"), 'pending question has a visible composer entry')
-  await click('.unified-question-jump')
+  await wait(() => evaluate("Boolean(document.querySelector('.conversation-chat .run-status'))"), 'pending question has a visible composer entry')
+  await click('.conversation-chat .run-status')
   for (let step = 1; step <= 2; step++) {
     const question = await wait(() => evaluate(`window.scry.activeRuns().then(runs=>runs.find(run=>run.runId===${json(liveStart.runId)})?.pendingQuestions?.find(question=>question.questionId===${json(`${liveStart.runId}:question:`)}+${step}))`), 'next live question')
     const choice = `.unified-conversation .question-option:not(.question-other):has(input[name=${json(`question-${question.questionId}-0`)}])`
@@ -294,6 +296,12 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const unknownRun = await evaluate(`window.scry.conversations.send(${json(unknownRequest)})`)
   const unknownPage = await settled(evaluate, unknown.id, 1, 'unknown')
   assert.ok(unknownPage.summary.blockedReason)
+  const unknownEntry = `.sidebar [data-conversation-id=${json(unknown.id)}]`
+  await wait(() => evaluate(`Boolean(document.querySelector(${json(unknownEntry)}))`), 'unknown logical entry')
+  await click(unknownEntry)
+  await wait(() => evaluate(`document.querySelector('.conversation-chat .composer-notice')?.textContent.includes(${json(unknownPage.summary.blockedReason)})`), 'unknown delivery remains visible even without a draft')
+  assert.equal(await evaluate("document.querySelector('.conversation-chat textarea').value"), '')
+  assert.equal(await evaluate("document.querySelector('.conversation-chat .send').disabled"), true)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(unknown.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
   assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(unknownRequest)})`), { runId: unknownRun.runId, disposition: 'duplicate' })
   // Block the real per-session archive directory with a fixture file while the
@@ -325,7 +333,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   assert.equal(inputs(fixture).length, invocationCount)
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
-    duplicate, management, deletion, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
+    duplicate, management, deletion, piSwitch, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
 }
 
 export async function verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity) {
@@ -335,6 +343,11 @@ export async function verifyUnifiedConversationRestart(evaluate, fixture, result
   assert.equal(page.bindings.length, 2)
   assert.ok(page.turns.every((turn) => turn.delivery.status === 'accepted' && turn.history?.done === true))
   assert.equal((await read(evaluate, result.unknownId)).turns[0].delivery.status, 'unknown')
+  const pi = await read(evaluate, result.piSwitch.id)
+  assert.deepEqual(pi.turns.map(turn => turn.runId), result.piSwitch.runIds)
+  const piPlan = await evaluate(`window.scry.conversations.preview(${json(result.piSwitch.id)}, {providerId:'pi',agentProfileId:${json(result.piSwitch.profile)}})`)
+  assert.equal(piPlan.continuation.kind, changedIdentity ? 'fresh' : 'resume')
+  assert.equal(piPlan.missingItems.length, changedIdentity ? 10 : 0)
   const archiveFailure = await read(evaluate, result.archiveFailure.id)
   assert.equal(archiveFailure.turns[0].delivery.status, 'unknown')
   assert.equal(archiveFailure.turns[0].history, undefined)

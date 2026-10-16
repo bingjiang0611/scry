@@ -17,8 +17,10 @@ import {
   recoverManagedRecorderTurns
 } from '../../core/turn-recorder/managed'
 import { listRecords, stableHash } from '../../core/turn-recorder/store'
+import { historicalInputPrefix } from './historical-input'
 import {
   createPiAdapter,
+  piContinuationKey,
   PI_RPC_COMMAND_TIMEOUT_MS,
   PI_RPC_STARTUP_TIMEOUT_MS,
   piRpcEnvironment,
@@ -47,10 +49,11 @@ const entries = [
   { type: 'message', id: 'abandoned-user', parentId: 'active-leaf', timestamp: new Date().toISOString(), message: { role: 'user' } }
 ]
 const sessionFile = process.cwd() + '/pi-session-1.jsonl'
-// This fixture starts with native conversation entries, so its session is already on disk.
-require('node:fs').writeFileSync(sessionFile, [
-  { type: 'session', id: sessionId, cwd: process.cwd() }, ...entries
+const persistEntries = () => require('node:fs').writeFileSync(sessionFile, [
+  { type: 'session', id: promptMessage === 'mismatched-header' ? 'wrong-native-session' : sessionId, cwd: process.cwd() }, ...entries
 ].map((entry) => JSON.stringify(entry)).join('\\n') + '\\n')
+// This fixture starts with native conversation entries, so its session is already on disk.
+persistEntries()
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => {
@@ -155,6 +158,7 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'message_start', message })
         send({ type: 'message_end', message })
         entries.push({ type: 'custom_message', id: 'custom-' + (++entrySeq), parentId: leafId, ...message })
+        persistEntries()
         leafId = entries.at(-1).id
         response()
         continue
@@ -173,13 +177,15 @@ process.stdin.on('data', (chunk) => {
         if (command.message === 'with-compact') {
           const compact = { type: 'compaction', id: 'compact-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString() }
           entries.push(compact)
+          persistEntries()
           leafId = compact.id
         }
         const entry = {
           type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString(),
-          message: { role: 'user', content: command.message.startsWith('/skill:') ? 'expanded skill content' : command.message }
+          message: { role: 'user', content: [{ type: 'text', text: command.message === 'mismatched-entry' ? 'rewritten input' : command.message.startsWith('/skill:') ? 'expanded skill content' : command.message }] }
         }
         entries.push(entry)
+        persistEntries()
         leafId = entry.id
       }
       if (command.message === 'late-prompt-ack' || command.message === 'late-entry') {
@@ -385,9 +391,10 @@ process.stdin.on('data', (chunk) => {
       } else {
         const entry = {
           type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId,
-          message: { role: 'user', content: command.message }
+          message: { role: 'user', content: [{ type: 'text', text: command.message }] }
         }
         entries.push(entry)
+        persistEntries()
         leafId = entry.id
         if (command.message === 'steer-end-race') send({ type: 'agent_end' })
         response()
@@ -422,6 +429,7 @@ process.stdin.on('data', (chunk) => {
       if (promptMessage === 'late-entry') {
         const entry = { type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, message: { role: 'user' } }
         entries.push(entry)
+        persistEntries()
         leafId = entry.id
       } else acknowledgePrompt()
       send({ type: 'agent_settled' })
@@ -1782,6 +1790,138 @@ describe('Pi RPC Provider', () => {
       ])
       await expect(recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' }))
         .resolves.toEqual({ recovered: 0, pending: 0 })
+    })
+  }, 15_000)
+
+  it('accepts only exact persisted Pi text and exposes the native receipt', async () => {
+    await withFixture(async (profile, cwd) => {
+      const context = { text: 'prior answer', contentHash: createHash('sha256').update('prior answer').digest('hex') }
+      const prompt = 'continue exactly'
+      const outgoing = historicalInputPrefix(context) + prompt
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-pi-receipt', prompt, cwd, agentProfileId: profile.id, resume: 'pi-session-1',
+        historicalContext: context, expectedInputTextHash: createHash('sha256').update(outgoing).digest('hex'),
+        trackInputReceipt: true, attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      })
+      await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'pi-user-1' })
+      expect(handle.getInputReceipt?.()).toMatchObject({
+        status: 'accepted', contextHash: context.contentHash,
+        textHash: createHash('sha256').update(outgoing).digest('hex'),
+        nativeSessionId: 'pi-session-1', source: 'pi_persisted_session_entry'
+      })
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+      expect(commands.find((command: { type?: string }) => command.type === 'prompt').message).toBe(outgoing)
+    })
+  }, 15_000)
+
+  it.each(['mismatched-entry', 'mismatched-header'])('does not turn a completed run with %s into accepted coverage', async prompt => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({ runId: `run-${prompt}`, prompt, cwd, agentProfileId: profile.id,
+        trackInputReceipt: true, attachments: [], permissionMode: 'full_access', emit: vi.fn() })
+      await expect(handle.promise).rejects.toThrow('未出现 authoritative user session entry')
+      expect(handle.getInputReceipt?.()).toMatchObject({ status: 'unknown' })
+    })
+  }, 15_000)
+
+  it('rejects a resumed native session mismatch before sending the prompt', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({ runId: 'wrong-native', prompt: 'must not send', cwd, agentProfileId: profile.id,
+        resume: 'different-session', trackInputReceipt: true, attachments: [], permissionMode: 'full_access', emit: vi.fn() })
+      await expect(handle.promise).rejects.toThrow('交接目标与 Provider 返回的原生 session 不一致')
+      expect(handle.getInputReceipt?.()).toMatchObject({ status: 'not_sent' })
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+      expect(commands.some(command => command.type === 'prompt')).toBe(false)
+    })
+  }, 15_000)
+
+  it('rejects marker-only Rotom launchers and pins both supported entry names to ROTOM_NODE', async () => {
+    await withFixture(async (_profile, cwd) => {
+      mkdirSync(join(cwd, 'bin'))
+      writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: '@bingjiang0611/rotom', version: '0.1.25', bin: { rotom: 'bin/rotom' } }))
+      for (const name of ['rotom', 'rotom-launcher']) {
+        const path = join(cwd, 'bin', name)
+        writeFileSync(path, '#!/bin/sh\n# runtime/launch-runtime.mjs runtime/verify-pi-runtime.mjs ROTOM_NODE ROTOM_PI\nexit 1\n')
+        chmodSync(path, 0o755)
+        const profile = piProfileForExecutable(path)
+        const env = await piRpcEnvironment(profile, { HOME: cwd, PATH: dirname(process.execPath),
+          ROTOM_NODE: process.execPath, PI_AGENT_NODE: '/not-the-rotom-node', HTTPS_PROXY: 'http://127.0.0.1:1' })
+        expect(env.ROTOM_NODE).toBe(process.execPath)
+        expect(env.NODE_USE_ENV_PROXY).toBe('1')
+        await expect(piContinuationKey(profile, cwd, env)).rejects.toThrow(name === 'rotom' ? 'public entry contract 未验证' : 'product launcher contract 未验证')
+      }
+      expect(existsSync(join(cwd, 'fixture-starts'))).toBe(false)
+    })
+  })
+
+  it('changes identity when synthetic auth or transport state changes and rejects a stale key', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', version: '1.0.0', bin: { pi: 'fixture-pi' } }))
+      mkdirSync(join(cwd, '.pi', 'agent'), { recursive: true })
+      writeFileSync(join(cwd, '.pi', 'agent', 'auth.json'), JSON.stringify({ openai: { type: 'api_key', key: 'synthetic-auth-a' } }))
+      const env = { HOME: cwd, PATH: dirname(process.execPath), PI_AGENT_NODE: process.execPath }
+      const first = await piContinuationKey(profile, cwd, env)
+      writeFileSync(join(cwd, '.pi', 'agent', 'auth.json'), JSON.stringify({ openai: { type: 'api_key', key: 'synthetic-auth-b' } }))
+      const second = await piContinuationKey(profile, cwd, { ...env, HTTPS_PROXY: 'http://127.0.0.1:1' })
+      expect(second).not.toBe(first)
+      const current = await piContinuationKey(profile, cwd, env)
+      expect(current).not.toBe(first)
+      const shell = vi.spyOn(shellEnvironment, 'shellEnv').mockReturnValue(env)
+      try {
+        const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+        const handle = adapter.run({
+          runId: 'run-pi-stale-key', prompt: 'hello', cwd, agentProfileId: profile.id,
+          expectedContinuationKey: first, attachments: [], permissionMode: 'full_access', emit: vi.fn()
+        })
+        await expect(handle.promise).rejects.toThrow('接续身份已变化')
+        expect(handle.getInputReceipt?.()).toMatchObject({ status: 'not_sent' })
+      } finally { shell.mockRestore() }
+    })
+  }, 15_000)
+
+  it('includes custom auth environment and project config, and rejects dynamic helpers', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', version: '1.0.0', bin: { pi: 'fixture-pi' } }))
+      mkdirSync(join(cwd, '.pi', 'agent'), { recursive: true })
+      const auth = join(cwd, '.pi', 'agent', 'auth.json')
+      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '$CUSTOM_AUTH' } }))
+      const env = { HOME: cwd, PATH: dirname(process.execPath), PI_AGENT_NODE: process.execPath, CUSTOM_AUTH: 'synthetic-a' }
+      const first = await piContinuationKey(profile, cwd, env)
+      expect(await piContinuationKey(profile, cwd, { ...env, CUSTOM_AUTH: 'synthetic-b' })).not.toBe(first)
+      writeFileSync(join(cwd, '.pi', 'settings.json'), JSON.stringify({ defaultProvider: 'custom' }))
+      expect(await piContinuationKey(profile, cwd, env)).not.toBe(first)
+      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!echo must-not-execute' } }))
+      await expect(piContinuationKey(profile, cwd, env)).rejects.toThrow('动态配置 helper')
+      writeFileSync(auth, '{broken')
+      await expect(piContinuationKey(profile, cwd, env)).rejects.toThrow('JSON 无效')
+    })
+  }, 15_000)
+
+  it('keeps failed Pi dispatch unknown and rejects unavailable or mismatched identity before spawn', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      await expect(adapter.continuationKey!({ providerId: 'pi', agentProfileId: profile.id, cwd })).rejects.toThrow(/身份不可用|已知/)
+      const handle = adapter.run({
+        runId: 'run-pi-dispatch-failed', prompt: 'preflight-reject', cwd, agentProfileId: profile.id,
+        expectedContinuationKey: 'pi:expected-known-identity', trackInputReceipt: true,
+        attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      })
+      await expect(handle.promise).rejects.toThrow(/身份不可用|已知|变化/)
+      expect(handle.getInputReceipt?.()).toMatchObject({ status: 'not_sent' })
+    })
+  }, 15_000)
+
+  it('fails a native prompt admission as unknown after dispatch was attempted', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-pi-preflight-failed', prompt: 'preflight-reject', cwd, agentProfileId: profile.id,
+        trackInputReceipt: true, attachments: [], permissionMode: 'full_access', emit: vi.fn()
+      })
+      await expect(handle.promise).rejects.toThrow('preflight rejected')
+      expect(handle.getInputReceipt?.()).toMatchObject({ status: 'unknown', reason: expect.stringContaining('尚无') })
     })
   }, 15_000)
 
