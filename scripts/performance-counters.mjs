@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,16 +40,37 @@ export function mergeObservations(revision, groups) {
   return validateObservations(report)
 }
 
+const electronSuffix = '.electron.counters.test.ts'
+
+// Electron's own Node runtime is the ABI that native modules such as better-sqlite3 are
+// built for. Without an installed Electron binary those collectors run under plain Node
+// and report their metrics unavailable themselves.
+function electronBinary() {
+  try {
+    const binary = createRequire(import.meta.url)('electron')
+    return typeof binary === 'string' && existsSync(binary) ? binary : null
+  } catch { return null }
+}
+
+function runCollectors(executable, files, extraArgs, env) {
+  if (files.length === 0) return
+  const result = spawnSync(executable, [resolve(root, 'node_modules/vitest/vitest.mjs'), 'run', ...files, '--maxWorkers=1', ...extraArgs], { cwd: root, stdio: 'inherit', env })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`Counter collectors failed with status ${result.status}`)
+}
+
 function collect(output, filter) {
   const directory = mkdtempSync(join(tmpdir(), 'scry-counters-'))
   try {
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
     const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8' }).trim().length > 0
-    const result = spawnSync(process.execPath, [resolve(root, 'node_modules/vitest/vitest.mjs'), 'run', filter ?? 'scripts/performance-counters/', '--maxWorkers=1'], {
-      cwd: root, stdio: 'inherit', env: { ...process.env, SCRY_PERFORMANCE_COUNTERS_DIR: directory }
-    })
-    if (result.error) throw result.error
-    if (result.status !== 0) throw new Error(`Counter collectors failed with status ${result.status}`)
+    const files = readdirSync(join(root, 'scripts/performance-counters')).filter(file => file.endsWith('.counters.test.ts')).sort()
+      .map(file => `scripts/performance-counters/${file}`).filter(file => !filter || file.includes(filter) || filter.includes(file))
+    if (files.length === 0) throw new Error(`No counter collector matches ${filter}`)
+    const env = { ...process.env, SCRY_PERFORMANCE_COUNTERS_DIR: directory }
+    const electron = electronBinary()
+    runCollectors(process.execPath, files.filter(file => !file.endsWith(electronSuffix) || !electron), [], env)
+    if (electron) runCollectors(electron, files.filter(file => file.endsWith(electronSuffix)), [], { ...env, ELECTRON_RUN_AS_NODE: '1' })
     const groups = readdirSync(directory).filter(file => file.endsWith('.json')).sort().map(file => JSON.parse(readFileSync(join(directory, file), 'utf8')))
     if (groups.length === 0) throw new Error('No counter collector produced observations')
     const report = mergeObservations(`${revision}${dirty ? '-dirty' : ''}`, groups)

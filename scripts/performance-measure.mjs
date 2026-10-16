@@ -151,6 +151,8 @@ function freezeCounterHarness(candidate, baseline) {
     'vitest.config.ts'
   ]
   for (const relative of files) cpSync(join(candidate, relative), join(baseline, relative), { force: true })
+  // Replace, not overlay: a collector the candidate removed or renamed must not keep running on the baseline side.
+  rmSync(join(baseline, 'scripts/performance-counters'), { recursive: true, force: true })
   cpSync(join(candidate, 'scripts/performance-counters'), join(baseline, 'scripts/performance-counters'), { recursive: true, force: true })
 }
 

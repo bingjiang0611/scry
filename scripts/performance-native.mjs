@@ -32,9 +32,13 @@ export function exportNativeCounters(report) {
   for (const [scenario, result] of Object.entries(report.results ?? {})) {
     const workload = `native-${scenario};turns=${result.turnCount};sections=${result.sections}`
     add(scenario, 'history-open', workload, nativeCounterMetrics.map(metric => result.samples.map(sample => sample.workCounters[metric])))
-    add(scenario, 'send-settled', `${workload};modes=${composerModes.join(',')}`, nativeCounterMetrics.map(metric => result.composerSamples.map(sample => sample.sendWorkCounters[metric])))
-    const stopped = result.composerSamples.filter(sample => sample.stopped)
-    add(scenario, 'stop-settled', `${workload};modes=stop-immediate,stop-visible`, nativeCounterMetrics.map(metric => stopped.map(sample => sample.stopWorkCounters[metric])))
+    // One metric per button mode: completion, immediate stop and visible stop do different work,
+    // so mixing them would turn mode differences into apparent run-to-run instability.
+    for (const mode of new Set(composerModes)) {
+      const samples = result.composerSamples.filter(sample => sample.mode === mode)
+      add(scenario, `send-settled.${mode}`, workload, nativeCounterMetrics.map(metric => samples.map(sample => sample.sendWorkCounters[metric])))
+      if (mode !== 'complete') add(scenario, `stop-settled.${mode}`, workload, nativeCounterMetrics.map(metric => samples.map(sample => sample.stopWorkCounters[metric])))
+    }
   }
   return validateObservations({ schema: 1, revision: report.revision, observations })
 }
