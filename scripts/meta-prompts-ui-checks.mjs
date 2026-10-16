@@ -15,6 +15,7 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
     throw new Error(`Meta Prompts DOM condition timed out: ${expression.slice(0, 160)}; state=${JSON.stringify(state)}`)
   }
   const click = async selector => {
+    await wait(`document.querySelector(${JSON.stringify(selector)}) != null`)
     const point = await read(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
       if (!node) throw new Error('Missing control: ' + ${JSON.stringify(selector)});
@@ -28,14 +29,30 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   }
   const type = async (selector, text) => {
     await click(selector)
-    contents.selectAll()
-    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
-    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+    const field = `document.querySelector(${JSON.stringify(selector)})`
+    await wait(`${field} === document.activeElement`)
+    // Native click/edit commands are asynchronous. Do not let a late Backspace
+    // erase newly inserted text, or send insertion to the previously focused field.
+    if (await read(`${field}.value.length > 0`)) {
+      contents.selectAll()
+      await wait(`${field}.selectionStart === 0 && ${field}.selectionEnd === ${field}.value.length`)
+      contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+      await wait(`${field}.value === ''`)
+    }
     await contents.insertText(text)
+    await wait(`${field}.value === ${JSON.stringify(text)}`)
   }
+  // Regression: a native click may select the textarea before ModalFrame's first
+  // animation frame. That frame must not steal focus back to the title input.
   const openNew = async () => {
+    await read('window.__holdModalFrame()')
     await click('.mp-header .mp-button:not(.mp-back)')
     await wait(`document.querySelector('.mp-editor-modal input') === document.activeElement`)
+    await click('.mp-editor-modal textarea')
+    await wait(`document.querySelector('.mp-editor-modal textarea') === document.activeElement`)
+    await read('window.__releaseModalFrame()')
+    check(await read(`document.activeElement === document.querySelector('.mp-editor-modal textarea')`), 'Modal frame stole native textarea focus after its first frame')
   }
   const save = async () => {
     await click('.mp-editor-modal button[type="submit"]')

@@ -21,10 +21,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare Electron executable
+        run: |
+          node -e "require('node:fs').accessSync(require('electron'))"
+          electron_bin="$(node -e "process.stdout.write(require('electron'))")"
+          echo "Electron executable: ${electron_bin}"
+          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            sudo chown root:root "${sandbox}"
+            sudo chmod 4755 "${sandbox}"
+          fi
       - name: Typecheck
         run: npm run typecheck
       - name: Unit, contract tests and coverage
-        run: npm run test:coverage
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage
       - name: Coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -71,6 +81,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare Electron executable
+        run: node -e "require('node:fs').accessSync(require('electron'))"
+      - name: Prepare Electron native dependencies
+        run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Isolated renderer DOM smoke tests
         run: npm run test:renderer:ui
       - run: npm run pack:artifact

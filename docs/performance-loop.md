@@ -114,7 +114,20 @@ node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/
 - 原有四项批均值 p95 的绝对 20 ms 预算不变。新增磁盘/进程场景使用 `performance-budgets.json` 中显式上限。所有场景仍受基线加上 max(2 ms, 基线的 50%) 的相对门禁约束，不承诺拦住亚毫秒抖动。
 - 回退退出码为 1，写 Markdown/JSON 报告。真实重复发布和截断 renderer 输出有负对照测试。
 
-`.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 串行运行四种固定历史负载。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出，要求 SQLite 统计为 ready 且包含受控完成轮次；这些 IPC 阶段不冒充 Send/Stop 按钮或文本可见时间。启动含驱动等待开销，不是 OS 冷启动。
+`.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 串行运行四种固定历史负载。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出；这些 IPC 阶段继续独立列出，不冒充按钮时间。启动含驱动等待开销，不是 OS 冷启动。
+
+`measurementVersion: 5` 另增每负载三组、每组四次真实按钮验收：Provider 已进入夹具但尚无 native turn ID 时停止、正常完成、正文可见后停止、再次在 native turn ID 前停止。使用 Chromium 原生输入和可信 Send/Stop 点击；不调用 `window.scry.start/stop` 替代按钮。停止夹具等待实际 interrupt，不靠延时自然结束。早停先等待夹具的 pending 通知，避免把 Provider 启动前的前门取消混作 Provider 中断。
+
+- 正文必须属于当前 run，DOM 包含完整预期文本，且其文本矩形在视口中可命中、CSS 可见，并跨两帧保持可见。分别报告按钮到 Provider 输出接收、首次可见和两帧就绪；这不是物理显示器扫描输出时间。
+- 停止必须得到正确 run 的终态、退出 activeRuns，且停止按钮消失、输入框恢复可编辑并跨两帧。终态回执与界面恢复分别计时。
+- 十二次按钮与六次 IPC run 均在退出后独立核对归档；原生 turn ID 阶段及完整正文不能丢失。SQLite 必须 ready 且有十八条 result。旧四负载、12 次历史点击和六次 IPC 样本不变。
+- 两侧按 `nativeHarnessFiles` 冻结同一脚本、隐藏窗口防护和 offline smoke Provider，再各自构建；不是对真实 Provider 性能的比较。禁止显示/聚焦窗口的防护在生产 main 创建窗口前安装。
+- 按钮每场景固定三或六次观测，保留全部样本并取 max，不宣称日常 p95，不按失败重试或丢弃首轮。新增绝对上限 1000 ms，加既有相对回归判定；它是初始验收护栏，不是用户 SLO。原有预算不变。
+- 停止场景的 Send→终态总耗时含驱动发起 Stop 的间隔，另记录 `driverStopDispatchMs`，不称作纯 App 阶段。原生观察器完成两帧后直接唤醒驱动，不再叠加历史加载 helper 的额外两帧等待。
+
+首版按钮比较（version 4）正确性全部通过，但单次总耗时有两项超限；这不能被称为性能通过。version 5 固定增加采样并去掉重复驱动等待，不调整预算、不删除旧历史/IPC 样本。旧结果保留供复盘，只有新版本双侧实测能证明新门禁状态。version 5 首次 Actions（38772624533）仍有 1/132 项失败：paged 正常完成的 Send→空闲界面最大值为 181.2 ms，上限 181.0 ms；其他两次候选值为 81.3/83.2 ms。该次失败不能被后续绿灯抹去，耗时波动的来源尚未确定，也不以四舍五入或提高上限放行。
+
+负向验证：阻断 Send 的 click 传播会缺少 pending 通知；阻断 Stop 会缺少终态/界面恢复；将正文设为不可见，即使终态已到也不能通过可见帧检查。三种破坏均须失败，恢复后再运行正常验收。
 
 Native 测量前先用 `electron-builder install-app-deps` 准备 Electron ABI 的原生依赖，并解析 Electron 可执行文件，避免首次下载混入 JSON 输出。失败日志保留启动部分，不能只保留尾部而丢掉原生模块加载错误。
 

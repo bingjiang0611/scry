@@ -6,6 +6,28 @@ import { appendMetaPrompt } from '../../src/renderer/meta-prompts'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
+const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window)
+const heldFrames: FrameRequestCallback[] = []
+let holdModalFrame = false
+window.requestAnimationFrame = (callback) => {
+  if (holdModalFrame) {
+    heldFrames.push(callback)
+    return heldFrames.length
+  }
+  return nativeRequestAnimationFrame(callback)
+}
+Object.assign(window, {
+  __holdModalFrame: () => { holdModalFrame = true },
+  __releaseModalFrame: () => new Promise<void>((resolve) => {
+    holdModalFrame = false
+    const callbacks = heldFrames.splice(0)
+    nativeRequestAnimationFrame((timestamp) => {
+      for (const callback of callbacks) callback(timestamp)
+      resolve()
+    })
+  })
+})
+
 function Fixture() {
   const [view, setView] = useState<'chat' | 'prompts'>('prompts')
   const [draft, setDraft] = useState('原有任务，不要覆盖')

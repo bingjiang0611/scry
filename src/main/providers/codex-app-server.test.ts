@@ -218,6 +218,31 @@ describe('CodexAppServerClient', () => {
     }
   })
 
+  it('propagates stdin errors, closes the owned child and fences late errors from the replacement', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
+    const client = new CodexAppServerClient({ command: process.execPath, args: [fixture] })
+    await client.start()
+    const child = client['process']!
+    try {
+      const failure = client.failureForCurrentGeneration()
+      const error = Object.assign(new Error('fixture broken stdin'), { code: 'EPIPE' })
+      expect(() => child.stdin.emit('error', error)).not.toThrow()
+      await expect(failure).resolves.toBe(error)
+      await expect.poll(() => child.exitCode !== null || child.signalCode !== null).toBe(true)
+      await expect(client.request('skills/list', { cwds: ['/repo'] })).resolves.toMatchObject({ data: [{ cwd: '/repo' }] })
+      const replacement = client.pid
+      expect(replacement).not.toBe(child.pid)
+      expect(() => child.stdin.emit('error', new Error('late stale pipe error'))).not.toThrow()
+      expect(client.pid).toBe(replacement)
+    } finally {
+      // Also owns cleanup when the regression deliberately omits stream teardown.
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => { child.once('exit', () => resolve()); child.kill('SIGKILL') })
+      }
+      await client.shutdown()
+    }
+  })
+
   it('tears down a generation when the initialized notification cannot be written', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
     const root = mkdtempSync(join(tmpdir(), 'scry-codex-init-write-'))

@@ -34,7 +34,8 @@ it('keeps task text horizontal and routes file and browser links in real Chromiu
       app.on('browser-window-focus', () => { console.error('UI fixture stole native window focus'); app.exit(1) })
       app.setPath('userData', ${JSON.stringify(join(dir, 'userData'))})
       app.whenReady().then(() => {
-        const win = new BrowserWindow({ show: false, width: 800, height: 600, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } })
+        const win = new BrowserWindow({ show: false, width: 800, height: 600, webPreferences: { offscreen: true, sandbox: true, nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } })
+        if (!win.webContents.isOffscreen()) { console.error('Offscreen rendering is required'); app.exit(1); return }
         win.webContents.on('console-message', (event) => {
           const message = event.message || ''
           console.log(message)

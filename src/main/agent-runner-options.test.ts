@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -280,13 +280,15 @@ describe('Claude Agent SDK launch options', () => {
         transcript_path: transcript,
         prompt: 'same prompt'
       })
-      await rm(transcript)
-      await writeFile(transcript, `${JSON.stringify({
+      const replacement = `${transcript}.replacement`
+      await writeFile(replacement, `${JSON.stringify({
         type: 'user',
         sessionId: 'claude-session',
         promptId: 'replacement-prompt-id',
         message: { role: 'user', content: 'same prompt' }
       })}\n`)
+      await rm(transcript)
+      await rename(replacement, transcript)
       release()
 
       await expect(handle.promise).resolves.toMatchObject({ providerTurnId: undefined })

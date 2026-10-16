@@ -746,7 +746,14 @@ async function exerciseSessionTerminals(contents, scenario) {
 }
 
 async function exerciseSessionModels(contents, screenshotPath) {
-  const read = (expression) => contents.executeJavaScript(expression)
+  const read = async (expression) => {
+    const result = await contents.executeJavaScript(`(async () => {
+      try { return { ok: true, value: await (${expression}) }; }
+      catch (error) { return { ok: false, error: String(error) }; }
+    })()`)
+    if (!result.ok) throw new Error(`Session model expression failed: ${expression.slice(0, 500)}; ${result.error}`)
+    return result.value
+  }
   const wait = async (expression) => {
     const deadline = Date.now() + 5000
     while (!await read(expression)) {
@@ -806,7 +813,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await click('[aria-label="推理强度"]')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
-  await wait(`document.querySelector('.model-effort-effort').textContent === 'High'`)
+  await wait(`document.querySelector('.model-effort-effort')?.textContent === 'High'`)
   await click('[aria-label="选择 Model 与 Effort"]')
   await send('Conversation one')
   await wait(`${requests}.length === 1 && document.querySelector('.run-status') != null`)
@@ -843,7 +850,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await click('#legacy')
   await wait(`document.querySelectorAll('.sb-sess').length === 3`)
   await pickSession('Legacy conversation')
-  await wait(`${modelIs('model-1')} && document.querySelector('.model-effort-effort').textContent === 'High'`)
+  await wait(`${modelIs('model-1')} && document.querySelector('.model-effort-effort')?.textContent === 'High'`)
   await click('.sb-new')
   await wait(`document.querySelector('.run-status') == null && ${modelIs('model-2')}`)
   const capabilities = `JSON.parse(document.querySelector('#model-state').textContent).capabilityRequests`
@@ -946,9 +953,9 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await click('[aria-label="存档会话：Provisional archive"]')
   await wait(`${state}.stoppedRuns.includes('run-5')`)
   await pickSession('Conversation two')
-  await wait(`document.querySelector('.sb-sess[aria-current="true"]').textContent.includes('Conversation two')`)
+  await wait(`document.querySelector('.sb-sess[aria-current="true"]')?.textContent.includes('Conversation two')`)
   await click('#release-archive')
-  await wait(`document.querySelector('.sb-undo').textContent.includes('Provisional archive')`)
+  await wait(`document.querySelector('.sb-undo')?.textContent.includes('Provisional archive')`)
   if (!await read(`${requests}.length === 5 && document.querySelector('.sb-sess[aria-current="true"]').textContent.includes('Conversation two')`)) throw new Error('Late archive acknowledgment reset the newer selection or drained a provisional queue')
   if (screenshotPath) for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
@@ -1259,7 +1266,9 @@ try {
       const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility} } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
+      const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
+      win.webContents.on('console-message', logRendererError)
+      let fixtureContents = win.webContents
       try {
         let result = {}, piCommands = {}
         if (${fixtures.includes('session-cache')}) {
@@ -1270,6 +1279,8 @@ try {
         }
         if (${fixtures.includes('meta-prompts')}) {
           const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
+          fixtureContents = metaWin.webContents
+          metaWin.webContents.on('console-message', logRendererError)
           const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
           require(${JSON.stringify(join(temp, 'meta-prompts-ipc.cjs'))}).registerMetaPromptsFixtureIpc(metaWin, metaUrl)
           metaWin.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
@@ -1277,6 +1288,7 @@ try {
           await metaWin.loadFile(${JSON.stringify(join(temp, 'meta-prompts.html'))})
           result.metaPrompts = await (${exerciseMetaPrompts.toString()})(metaWin.webContents, metaWin, clipboard, ${JSON.stringify(process.env.SCRY_META_PROMPTS_SCREENSHOT ?? '')})
           metaWin.destroy()
+          fixtureContents = win.webContents
           ipcMain.removeHandler('app:copyText')
           if (${metaPromptsOnly}) {
             finish(result)
@@ -1347,8 +1359,8 @@ try {
         finish({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals })
       } catch (error) {
         console.error(error)
-        console.error('Failed fixture:', win.webContents.getURL())
-        console.error('Fixture DOM:', await win.webContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
+        console.error('Failed fixture:', fixtureContents.getURL())
+        console.error('Fixture DOM:', await fixtureContents.executeJavaScript('document.body?.textContent.slice(-3000)').catch(error => error.message))
         app.exit(1)
       }
     }).catch(error => { console.error(error); app.exit(1) })

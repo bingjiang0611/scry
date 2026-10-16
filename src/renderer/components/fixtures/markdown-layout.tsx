@@ -11,12 +11,31 @@ const browserUrl = 'http://localhost:8791/index.html'
 const source = `- [ ] ${taskLabel}\n\n- [ ] 第二条待读任务用于保持与真实清单相同的 loose list 结构\n\n\`待读清单.md\`\n\n\`~/Papers/reading/report.md\`\n\n\`${browserUrl}\``
 
 const assert = (ok: unknown, message: string): void => { if (!ok) throw new Error(message) }
-const wait = async (check: () => boolean, label: string): Promise<void> => {
+const wait = (check: () => boolean, label: string): Promise<void> => {
+  if (check()) return Promise.resolve()
   const deadline = performance.now() + 4_000
-  while (!check()) {
-    if (performance.now() > deadline) throw new Error(`UI condition timed out: ${label}`)
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-  }
+  return new Promise<void>((resolve, reject) => {
+    let settled = false
+    const observer = new MutationObserver(() => inspect())
+    const finish = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      observer.disconnect()
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const inspect = (): void => {
+      try {
+        if (check()) finish()
+      } catch (error) {
+        finish(error as Error)
+      }
+    }
+    const timer = setTimeout(() => finish(new Error(`UI condition timed out: ${label}`)), Math.max(0, deadline - performance.now()))
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+    inspect()
+  })
 }
 
 async function run(): Promise<void> {

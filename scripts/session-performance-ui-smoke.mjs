@@ -5,11 +5,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
+import { nativeUiPointer } from './native-ui-pointer.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-session-performance-'))
 
-async function exercise(webContents) {
+async function exercise(webContents, pointer) {
   const read = async (expression) => {
     const result = await webContents.executeJavaScript(`(async () => {
       try { return { value: await (${expression}) }; }
@@ -33,15 +34,12 @@ async function exercise(webContents) {
     }
   })()`)
   const click = async (selector) => {
-    const point = await read(`(() => {
-      const element = document.querySelector(${JSON.stringify(selector)});
-      const box = element.getBoundingClientRect();
-      const x = Math.round(box.left + box.width / 2), y = Math.round(box.top + box.height / 2);
-      if (!element.contains(document.elementFromPoint(x, y))) throw new Error('Click target obscured');
-      return { x, y };
-    })()`)
+    const point = await read(`(${pointer.toString()})(${JSON.stringify(selector)}, { timeoutMs: 8000, scroll: false, captureReceipt: true })`)
     webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
     webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
+    await wait(`window.__nativeUiPointerReceipt != null`)
+    const receipt = await read('window.__nativeUiPointerReceipt')
+    if (!receipt.trusted || !receipt.targetMatched) throw new Error(`Native pointer missed ${selector}: ${JSON.stringify(receipt)}`)
   }
   await wait(`document.hasFocus()`)
   await wait(`document.querySelectorAll('[data-run-id]').length === 40 && document.querySelectorAll('[data-virtualized]').length > 20`)
@@ -70,8 +68,13 @@ async function exercise(webContents) {
   if (streamRenders !== 0) throw new Error(`Streaming rerendered Sidebar ${streamRenders} times`)
   await click('.sb-sess')
   await wait(`document.body.dataset.pickedTick === '20'`)
+  // Exercise both motion modes explicitly rather than inheriting the runner's OS preference.
+  await webContents.debugger.attach('1.3')
+  await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+  await wait(`!matchMedia('(prefers-reduced-motion: reduce)').matches`)
   await click('#running')
   await wait(`document.querySelectorAll('.sb-sess.running .sb-running').length === 8`)
+  await wait(`document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect.target.matches('.sb-running')).length === 8`)
   const activeSpinners = await read(`document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect.target.matches('.sb-running')).length`)
   if (activeSpinners !== 8) throw new Error(`Expected 8 rotating running rings, got ${activeSpinners}`)
   const runningRingThemes = await read(`(() => {
@@ -116,7 +119,6 @@ async function exercise(webContents) {
   await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
   const ringTransform = await read(`getComputedStyle(document.querySelector('.sb-running')).transform`)
   await wait(`getComputedStyle(document.querySelector('.sb-running')).transform !== ${JSON.stringify(ringTransform)}`)
-  await webContents.debugger.attach('1.3')
   try {
     await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await wait(`matchMedia('(prefers-reduced-motion: reduce)').matches && Array.from(document.querySelectorAll('.sb-running')).every(ring => getComputedStyle(ring).animationName === 'none')`)
@@ -242,7 +244,7 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))});
         win.webContents.focus();
-        const result = await (${exercise.toString()})(win.webContents);
+        const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()});
         console.log('SCRY_SESSION_PERFORMANCE=' + JSON.stringify(result));
         app.exit(0);
       } catch (error) { console.error(error); app.exit(1); }
