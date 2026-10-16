@@ -51,7 +51,17 @@ jobs:
           mkdir -p ../performance-results
           node scripts/performance-report.mjs inventory > ../performance-results/inventory.json
           cp scripts/performance-budgets.json scripts/performance-paths.json ../performance-results/
-          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-native.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
+          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-native.test.ts scripts/performance-ratchet.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
+      - name: Guard work-counter ceilings (only tightening is free)
+        env:
+          # A maintainer-applied label is the explicit approval for loosening; re-run after labelling.
+          SCRY_PERF_RAISE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'performance-raise-approved') && '1' || '0' }}
+        run: |
+          set -o pipefail
+          base=baseline/scripts/performance-ratchet.json
+          # The ledger's first introduction has no base ledger; every entry is then new protection.
+          [ -f "$base" ] || { printf '%s\n' '{"schema":1,"metrics":{}}' > performance-results/empty-ratchet.json; base=performance-results/empty-ratchet.json; }
+          node candidate/scripts/performance-ratchet.mjs guard "$base" candidate/scripts/performance-ratchet.json | tee performance-results/ratchet-guard.json
       - name: Freeze candidate harness for both source revisions
         run: |
           cp candidate/scripts/performance-baseline.test.ts baseline/scripts/

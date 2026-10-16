@@ -139,6 +139,17 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 
 本地比较也必须隔离两个源码目录、使用同一 harness/config/Node 和各自 lockfile；不能拿历史文档中的其他硬件或不同 fixture 数字当 baseline。可以用临时 detached worktree，但不要在同机并发跑耗时基准。
 
+## 工作量计数与只降不升门限
+
+毫秒耗时受 runner 负载影响，多次出现无法解释的偶发超限。工作量计数测量一次固定操作做了多少工作，例如 IPC 消息数和字节数、文件读取、子进程、SQLite 查询、React 提交、样式重算/布局次数和 CPU 指令数。计数用于 CI 门禁；“操作到内容可见”的毫秒耗时仍是最终用户验收。
+
+- 事实源：`scripts/performance-ratchet.json`（ledger）。键为 `scenario/metric`，记录层（`main`/`ipc`/`io`/`ui`/`memory`）、单位、固定 workload、测量来源、状态、门限和允许误差。
+- 观测格式：`{ schema: 1, revision, observations: [...] }`。每项为 `measured` 加同一版本重复测量的整数 `runs`，或 `unavailable` 加原因。测不到不能写成 0。
+- 状态：`candidate` 只报告；`gating` 必须写明三项证据：**稳定**（同版本重复结果一致或误差已知）、**敏感**（注入多余工作后指标变差）、**相关**（指标下降时用户耗时也下降）。
+- 判定（`performance-ratchet.mjs check`）：每项单独判定，不能互相抵消。gating 项超过门限加误差、重复测量差异超过误差、缺失或 unavailable 都失败；低于门限报告 `tightenable`。
+- 收紧（`propose`）：只把 gating 门限降到新观测值，不提升、不升级 candidate、不删除。CI 不用 PR 代码回写仓库；更新由人工审查或受信任任务提交。
+- 放宽（`guard`）：提高门限、扩大误差、降级或删除 gating 项，必须写 `raise: { from, to, reason }`，并由维护者给 PR 加 `performance-raise-approved` 标签后重新运行。改变 workload、单位或层就是新指标，必须使用新键。
+
 ## 并行优化任务合同
 
 每项任务必须写清：路径 ID、允许改动模块、当前慢点证据、优化假设、固定 workload、预算、功能/权限/证据护栏、修改前后结果、发布版本和真实使用待验证指标。
