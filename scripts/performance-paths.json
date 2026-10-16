@@ -68,7 +68,12 @@
         "ipc.agent:setSessionArchived",
         "ipc.agent:setSessionPinned",
         "ipc.agent:unreadSessions",
-        "ipc.agent:catalogHealth"
+        "ipc.agent:catalogHealth",
+        "ipc.conversation:create",
+        "ipc.conversation:list",
+        "ipc.conversation:previewAdoption",
+        "ipc.conversation:adopt",
+        "ipc.conversation:update"
       ],
       "sources": [
         "src/renderer/App.tsx",
@@ -87,7 +92,9 @@
         "session_history.load",
         "session_history.load_older",
         "ipc.agent:loadSession",
-        "ipc.agent:loadSessionOlder"
+        "ipc.agent:loadSessionOlder",
+        "ipc.conversation:read",
+        "ipc.conversation:readItem"
       ],
       "sources": [
         "src/main/session-history.ts",
@@ -121,18 +128,24 @@
       "owner": "compose-live-control",
       "operations": [
         "ipc.agent:start",
+        "ipc.conversation:preview",
+        "ipc.conversation:send",
         "agent.start",
         "agent.first_provider_trace",
         "agent.first_text"
       ],
       "sources": [
         "src/main/index.ts",
-        "src/main/llm-performance.ts"
+        "src/main/llm-performance.ts",
+        "src/main/conversation-service.ts",
+        "src/main/conversation-adoption.ts",
+        "src/renderer/components/ConversationAdoptionDialog.tsx",
+        "src/renderer/components/ConversationView.tsx"
       ],
       "benchmarks": [
         "send.codex-fixture"
       ],
-      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 不伪造可见时间。外部 Provider 等待仍需独立验收。"
+      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 单列 unavailable/cancelled，不伪造可见时间。外部 Provider 等待与本机阶段分开分析，仍需独立验收。统一对话已有功能 smoke，尚无独立的长会话/并发性能基准。"
     },
     {
       "id": "stream",
@@ -145,6 +158,7 @@
       "sources": [
         "src/main/trace-output.ts",
         "src/renderer/format.ts",
+        "src/renderer/chat-scroll.ts",
         "src/renderer/performance.bench.tsx"
       ],
       "benchmarks": [

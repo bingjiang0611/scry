@@ -259,7 +259,7 @@ try {
   const sensitivityRaised = nativeCounterMetrics.some(metric => sensitivityExtra[metric] > sensitivityBase[metric])
   assert.equal(sensitivityRaised, true, 'native work counter sensitivity control did not detect extra layout work')
   assert.deepEqual(await evaluate('window.scry.detectFast().then(items => items.map(item => ({ id: item.id, name: item.name })))'),
-    [{ id: 'codex', name: 'Codex Smoke Fixture' }], 'refusing any lifecycle measurement without the offline fixture adapter')
+    [{ id: 'codex', name: 'codex Smoke Fixture' }], 'refusing any lifecycle measurement without the offline fixture adapter')
   // Composer readiness plus two excluded opens separates startup from the warm path.
   await wait(`document.querySelector('textarea') != null`)
   const startupDriverReadyMs = performance.now() - launchStarted

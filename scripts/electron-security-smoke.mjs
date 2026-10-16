@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -9,10 +9,12 @@ import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
+import { exerciseUnifiedConversation, verifyUnifiedConversationRestart } from './unified-conversation-smoke.mjs'
 import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
 
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
+const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
@@ -28,13 +30,15 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
 let stderr = ''
+let smokeIdentity = 'default'
+const conversationInputs = join(temp, 'conversation-inputs.jsonl')
 
 async function freePort() {
   const server = createServer()
@@ -109,7 +113,7 @@ async function main() {
   const canonicalHome = realpathSync(home)
   const canonicalWorkspace = realpathSync(workspace)
   const secondWorkspace = join(home, 'performance-second-project')
-  if (performanceOnly || sourceControlOnly || conversationOwnershipOnly) {
+  if (performanceOnly || sourceControlOnly || conversationOwnershipOnly || unifiedConversationOnly) {
     mkdirSync(secondWorkspace, { recursive: true })
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([canonicalWorkspace, realpathSync(secondWorkspace)]))
   }
@@ -227,8 +231,9 @@ async function main() {
         SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
-        // The smoke adapter replaces Codex only. Never discover/start real Provider services.
-        SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',
+        ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
+        // Only explicit smoke adapters may run. Never discover/start real Provider services.
+        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode,pi' : 'claude,qoder,opencode,pi',
         SCRY_REMOTE_HOST: '0'
       },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -251,6 +256,29 @@ async function main() {
       throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
     }
     return response.result?.value
+  }
+  if (unifiedConversationOnly) {
+    const fixture = { workspace: canonicalWorkspace, userData: userDataDir, inputsFile: conversationInputs }
+    const result = await exerciseUnifiedConversation(cdp, evaluate, fixture)
+    for (const changedIdentity of [false, true]) {
+      cdp.close()
+      await stopOwnedApp(child)
+      if (changedIdentity) smokeIdentity = 'changed'
+      launchApp()
+      const restarted = await waitForTarget(port)
+      cdp = connectCdp(restarted.page.webSocketDebuggerUrl)
+      await cdp.send('Runtime.enable')
+      await verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity)
+    }
+    cdp.close()
+    const artifactPaths = ['out/main/index.js', 'out/preload/index.cjs', 'out/renderer/index.html',
+      ...readdirSync(resolve('out/renderer/assets')).filter(name => /\.(js|css)$/.test(name)).map(name => `out/renderer/assets/${name}`)]
+    const artifactHashes = Object.fromEntries(artifactPaths.map((path) =>
+      [path, createHash('sha256').update(readFileSync(resolve(path))).digest('hex')]))
+    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
+    console.log(JSON.stringify({ test: result.test, conversationId: result.id, turns: result.runIds.length,
+      providerInvocations: result.receipts.length, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
+    return
   }
   if (ownershipFixture) {
     const result = await exerciseConversationOwnership(evaluate, ownershipFixture)

@@ -1,6 +1,10 @@
 import type { ProviderId } from './provider.js'
 import { maskSecrets } from './trace.js'
 
+export type AgentDataUpdated =
+  | { runId: string; kind?: 'turn_recorded' | 'session_deleted' }
+  | { kind: 'conversation_changed'; conversationId: string }
+
 export type RuntimeBackend = 'local' | 'api'
 export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc'
 
@@ -559,7 +563,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   }
 }
 
-function boundedControlValue(value: unknown): string | undefined {
+export function boundedControlValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.trim()
   return text && text.length <= 240 ? text : undefined

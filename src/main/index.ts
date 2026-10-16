@@ -251,7 +251,10 @@ import {
   type PreparedAttachment
 } from './attachment-store'
 import { deleteOwnedSessionData } from './session-deletion'
-import { ConversationStore } from './conversation-store'
+import { ConversationStore, type NativeSessionScope } from './conversation-store'
+import { ConversationService, type ManagedConversationStart } from './conversation-service'
+import { parseConversationLegacySource, prepareConversationAdoption } from './conversation-adoption'
+import { conversationItemsFromTrace, readConversationHistoryItem } from './conversation-history'
 import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
 import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
 import {
@@ -475,7 +478,22 @@ const listProjectCatalog = async (): Promise<ProjectMeta[]> => {
   }
   const store = projectStore()
   store.seed([...observed].map(([cwd, lastOpenedAt]) => ({ cwd, lastOpenedAt })))
-  return mergeProjectMetas(store.load(), sessionProjects)
+  const projects = mergeProjectMetas(store.load(), sessionProjects)
+  return Promise.all(projects.map(async (project) => {
+    const conversations = await conversationService().list(project.cwd)
+    const ownedNativeAliases = await conversationService().nativeSessionAliases(project.cwd)
+    return {
+      ...project,
+      // Only the local sidebar projection hides aliases. Raw app/provider
+      // catalogs remain unchanged and retain their native evidence.
+      sessions: project.sessions.filter((session) => {
+        const nativeId = session.externalSessionId ?? session.sessionId
+        const alias = `${session.providerId}\0${session.agentProfileId ?? ''}\0${project.cwd}\0${nativeId}`
+        return !ownedNativeAliases.has(alias)
+      }),
+      conversations
+    }
+  }))
 }
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
 const fullAgentDetection = createCachedAsyncLoader(() => detectAgents({
@@ -523,11 +541,44 @@ let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefine
 const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
 let conversationStoreInstance: ConversationStore | undefined
 const conversationStore = () => conversationStoreInstance ??= new ConversationStore(app.getPath('userData'))
+async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope): Promise<void> {
+  const activeIds = new Set(runs.unsettledStates().filter((run) => run.providerId === scope.providerId &&
+    run.agentProfileId === scope.agentProfileId && (run.cwd ?? '') === scope.cwd).map((run) => run.runId))
+  if (activeIds.size && (await conversationStore().list(scope.cwd)).some((conversation) =>
+    conversation.turns.some((turn) => activeIds.has(turn.runId)))) {
+    throw new Error('统一对话仍在执行或保存证据，不能从旧入口写入；请等待本轮收敛')
+  }
+  await conversationStore().assertLegacyWriteAllowed(scope)
+}
+const adoptingSessionKeys = new Set<string>()
+let conversationServiceInstance: ConversationService | undefined
+const conversationService = (): ConversationService => conversationServiceInstance ??= new ConversationService({
+  store: conversationStore(),
+  resolveContinuationKey: (context) => providerRegistry.continuationKey(context),
+  supportsHistoricalInput: (providerId) => providerRegistry.get(providerId).historicalContext === true,
+  startAppRun: async (request, options) => {
+    const result = await startAppRun(request, options)
+    if (!('runId' in result)) throw new Error('统一对话不能使用远程执行结果')
+    return result
+  },
+  loadItemText: (conversation, ref) => readConversationHistoryItem(app.getPath('userData'), conversation, ref),
+  loadTurn: async (conversation, turn) => {
+    if (!turn.archive) return undefined
+    const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)
+    if (!binding) return undefined
+    const archive = await readTraceArchiveAsync({
+      userDataDir: app.getPath('userData'), cwd: conversation.cwd,
+      sessionId: turn.archive.sessionId, providerId: binding.providerId
+    })
+    return archive ? mergeSessionTurns([], archive, { userDataDir: app.getPath('userData') }).find((candidate) => candidate.runId === turn.runId) : undefined
+  }
+})
 const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
   process.env.ELECTRON_ENABLE_LOGGING === '1' &&
   process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
-const smokeDetectedAgents = [{ id: 'codex', name: 'Codex Smoke Fixture', bin: 'codex', path: process.execPath }]
-const builtInProviderAdapters = smokeProviderEnabled ? [createSmokeProviderAdapter()] : createBuiltInProviderAdapters(
+const smokeProviderIds: Array<'claude' | 'codex'> = process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS === '1' ? ['codex', 'claude'] : ['codex']
+const smokeDetectedAgents = smokeProviderIds.map((id) => ({ id, name: `${id} Smoke Fixture`, bin: id, path: process.execPath }))
+const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id) => createSmokeProviderAdapter(id)) : createBuiltInProviderAdapters(
   homeDir,
   join(app.getPath('userData'), 'codex-home-v1'),
   join(app.getPath('userData'), 'provider-auth', 'opencode'),
@@ -1590,7 +1641,7 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
   try {
     return await contextAdmission.run(contextKey, async () => {
       await startupManagedRecovery
-      await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
+      await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
       const archive = await readTraceArchiveAsync({
         userDataDir: app.getPath('userData'),
         providerId,
@@ -1605,7 +1656,7 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
       const mcpExecutionSnapshot = providerId === 'pi'
         ? null
         : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
-      await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
+      await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
       const forked = await forkSession.fork({
         ...request,
         cwd,
@@ -1768,6 +1819,92 @@ handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
 // 左侧栏项目目录独立于会话保留；老数据从 recent folders 与 app 会话 catalog 一次性补齐。
 handleTrusted('agent:listProjects', () => listProjectCatalog())
 handleTrusted('agent:catalogHealth', () => appSessionStore().health())
+async function adoptLegacyConversation(input: unknown, fingerprint?: string) {
+  const source = parseConversationLegacySource(input)
+  source.cwd = resolveKnownProjectDirectory(source.cwd)
+  return contextAdmission.run(providerContextKey(source.providerId, source.cwd), async () => {
+    await startupManagedRecovery
+    const catalog = appSessionStore().load().find(session => session.providerId === source.providerId &&
+      session.agentProfileId === undefined && session.cwd === source.cwd &&
+      (session.externalSessionId === source.externalSessionId || session.sessionId === source.externalSessionId))
+    if (!catalog) throw new Error('迁移源不属于已登记的 App 会话')
+    source.externalSessionId = catalog.externalSessionId ?? catalog.sessionId
+    const reservations = [source.externalSessionId, catalog.sessionId, catalog.runId].filter((id): id is string => Boolean(id))
+      .map(id => providerSessionKey(source.providerId, source.cwd, id))
+    // Reserve before the first asynchronous read so legacy metadata cannot change
+    // between the catalog snapshot and durable ownership publication.
+    for (const key of reservations) adoptingSessionKeys.add(key)
+    try {
+      const existing = (await conversationStore().list(source.cwd)).find(conversation => conversation.bindings.some(binding =>
+        binding.providerId === source.providerId && binding.agentProfileId === undefined && binding.nativeSessionId === source.externalSessionId))
+      if (existing) {
+        const original = existing.bindings[0]
+        if (!fingerprint || existing.adoptionFingerprint !== fingerprint || original.providerId !== source.providerId ||
+          original.nativeSessionId !== source.externalSessionId) throw new Error('旧会话已归属统一对话，请打开其稳定条目')
+        return (await conversationService().list(source.cwd)).find(conversation => conversation.id === existing.id)!
+      }
+      await assertLegacyConversationWriteAllowed({ ...source, nativeSessionId: source.externalSessionId })
+      if (runs.unsettledStates().some(run => run.providerId === source.providerId && run.agentProfileId === undefined && run.cwd === source.cwd) ||
+        [source.externalSessionId, catalog.sessionId, catalog.runId].some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id)))) {
+        throw new Error('源 Provider 仍在执行、保存证据或删除；请等待收敛后迁移')
+      }
+      const prepared = await prepareConversationAdoption(app.getPath('userData'), source, catalog)
+      if (fingerprint === undefined) return prepared.preview
+      if (prepared.preview.fingerprint !== fingerprint) throw new Error('迁移源已变化，请重新预览；旧入口保留')
+      const conversation = await conversationStore().create(source.cwd, prepared.seed)
+      invalidateSessionHistoryLoad('session adopted into logical conversation')
+      win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
+      return (await conversationService().list(source.cwd)).find(item => item.id === conversation.id)!
+    } finally { for (const key of reservations) adoptingSessionKeys.delete(key) }
+  })
+}
+handleTrusted('conversation:previewAdoption', (_event, source: unknown) => adoptLegacyConversation(source))
+handleTrusted('conversation:adopt', (_event, source: unknown, fingerprint: unknown) => {
+  if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
+  return adoptLegacyConversation(source, fingerprint)
+})
+handleTrusted('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
+  if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')
+  if (change && typeof change === 'object' && 'kind' in change && change.kind === 'archive') {
+    const conversation = await conversationStore().read(id)
+    const unsettled = new Set(runs.unsettledStates().map(run => run.runId))
+    if (conversation?.turns.some(turn => unsettled.has(turn.runId))) {
+      throw new Error('对话仍有运行或证据保存未收敛，不能存档或恢复')
+    }
+  }
+  const result = await conversationService().update(id, revision, change)
+  win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
+  return result
+})
+handleTrusted('conversation:create', (_event, cwd: unknown) => {
+  if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')
+  const resolved = resolveKnownProjectDirectory(cwd)
+  rememberProject(resolved)
+  return conversationService().create(resolved)
+})
+handleTrusted('conversation:list', (_event, cwd: unknown) => {
+  if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')
+  return conversationService().list(resolveKnownProjectDirectory(cwd))
+})
+handleTrusted('conversation:read', (_event, id: unknown, beforeOrdinal?: unknown) => {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('统一对话 ID 无效')
+  if (beforeOrdinal !== undefined && (!Number.isSafeInteger(beforeOrdinal) || Number(beforeOrdinal) < 0)) {
+    throw new Error('统一对话分页游标无效')
+  }
+  return conversationService().read(id, beforeOrdinal as number | undefined)
+})
+handleTrusted('conversation:readItem', (_event, id: unknown, ref: unknown) => {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('统一对话 ID 无效')
+  return conversationService().readItem(id, ref)
+})
+handleTrusted('conversation:preview', (_event, id: unknown, request: unknown) => {
+  if (typeof id !== 'string' || !id.trim() || !request || typeof request !== 'object') throw new Error('统一对话预览请求无效')
+  return conversationService().preview(id, request)
+})
+handleTrusted('conversation:send', (_event, request: unknown) => {
+  if (!request || typeof request !== 'object') throw new Error('统一对话发送请求无效')
+  return conversationService().send(request)
+})
 
 const projectCwdFromRequest = (value: unknown): string => {
   if (typeof value !== 'string' || !isAbsolute(value) || value.length > 4_096) throw new Error('无效的项目目录')
@@ -2117,7 +2254,7 @@ async function deleteOneSession(
     })
     const reserved = await contextAdmission.run(admissionKey, async () => {
       await startupManagedRecovery
-      await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
+      await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
       if (hasActiveSession() || deletingSessions.has(deletionKey)) return false
       deletingSessions.add(deletionKey)
       return true
@@ -2146,7 +2283,7 @@ async function deleteOneSession(
         // only for the destructive phase so broad managed recovery in another session
         // cannot resurrect this session while unrelated work is deleted.
         if (hasActiveSession()) return { ok: false, reason: 'active_session', ...empty() }
-        await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
+        await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId })
 
       const userDataDir = app.getPath('userData')
       const sessionStore = appSessionStore()
@@ -2257,25 +2394,37 @@ function sessionRefFromRequest(p: unknown): AppSessionRef | null {
   }
 }
 
+async function changeLegacySessionMetadata(ref: AppSessionRef, change: () => boolean): Promise<boolean> {
+  if (ref.providerId === 'legacy_unknown') return change()
+  await startupManagedRecovery
+  await conversationStore().assertLegacyWriteAllowed({ ...ref, providerId: ref.providerId, nativeSessionId: ref.externalSessionId })
+  if (adoptingSessionKeys.has(providerSessionKey(ref.providerId, ref.cwd, ref.externalSessionId, ref.agentProfileId))) {
+    throw new Error('会话已归属统一对话或正在迁移，请从统一对话管理')
+  }
+  // Do not queue ordinary legacy archiving behind start preparation: it must
+  // retain the existing persist-first fence and stop its registered owner.
+  return change()
+}
+
 // 名称、置顶与存档只改 catalog，不动 Provider transcript 或 turn/usage/trace 数据。
 handleTrusted('agent:renameSession', (_e, p: unknown, title: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof (p as AppSessionRef).cwd !== 'string') throw new Error('无效的会话重命名请求')
-  return appSessionStore().rename(ref, title)
+  return changeLegacySessionMetadata(ref, () => appSessionStore().rename(ref, title))
 })
 
 handleTrusted('agent:setSessionPinned', (_e, p: unknown, pinned: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof pinned !== 'boolean') throw new Error('无效的置顶请求')
-  return appSessionStore().setPinned(ref, pinned)
+  return changeLegacySessionMetadata(ref, () => appSessionStore().setPinned(ref, pinned))
 })
 
 handleTrusted('agent:setSessionArchived', (_e, p: unknown, archived: unknown) => {
   const ref = sessionRefFromRequest(p)
   if (!ref || typeof archived !== 'boolean') throw new Error('无效的存档请求')
-  return archived
+  return changeLegacySessionMetadata(ref, () => archived
     ? archiveSessionAndStop(appSessionStore(), ref, runs.activeStates(), requestRunStop)
-    : appSessionStore().setArchived(ref, false)
+    : appSessionStore().setArchived(ref, false))
 })
 
 handleTrusted('agent:listArchivedSessions', () => appSessionStore().listArchivedProjects())
@@ -2475,6 +2624,7 @@ interface AppRunStartOptions {
   onTraceEvent?: (event: TraceEvent) => void
   onSession?: (externalSessionId: string) => void
   ledgerRunId?: string
+  managedConversation?: ManagedConversationStart
 }
 
 async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<{ runId: string } | RemoteRunCompletion> {
@@ -2547,9 +2697,13 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     })
   }
   const admissionKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
+  const managedConversation = options.managedConversation
+  const admissionKeys = managedConversation
+    ? [admissionKey, `conversation:${managedConversation.conversationId}`]
+    : [admissionKey]
   let remoteResult: Promise<RemoteRunCompletion> | undefined
   try {
-    const started = await contextAdmission.run(admissionKey, async () => {
+    const started = await contextAdmission.runMany(admissionKeys, async () => {
     // Wait before freezing trust/MCP environments as well as before spawning the
     // Provider. Otherwise a cold send can retain fallback even after capture succeeds.
     await Promise.all([startupManagedRecovery, shellEnvReady])
@@ -2566,11 +2720,13 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     // expectedExternalSessionId=null 是 renderer 对“必须新建会话”的显式要求。
     // 即使较早的 agent:newSession IPC 仍在路上，这里也先原子清空 main 的旧上下文，
     // 再捕获 revision/resume，避免把新提示词误判为要投递到旧会话。
-    if (!isRemoteRun && expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
+    if (!managedConversation && !isRemoteRun && expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
       resetSessionContext(contextKey)
     }
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-    let resume = isRemoteRun ? request.expectedExternalSessionId ?? undefined : sessionByContext.get(contextKey)
+    let resume = managedConversation
+      ? (managedConversation.resumeSessionId ?? undefined)
+      : isRemoteRun ? request.expectedExternalSessionId ?? undefined : sessionByContext.get(contextKey)
     const forkSourceSessionId = !isRemoteRun && request.forkLastTurn ? resume : undefined
     const restartSourceSessionId = !isRemoteRun && request.restartLastTurn && typeof expectedSessionId === 'string'
       ? expectedSessionId
@@ -2579,6 +2735,14 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     const contextRuns = runs.unsettledStates().filter((run) =>
       run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
+    if (managedConversation && contextRuns.length > 0) {
+      throw new AgentRuntimeError('Provider 工作区仍有未收口轮次，已拒绝统一对话启动', {
+        provider: runtimeProvider,
+        stage: 'frontdoor',
+        cwd,
+        nextAction: '等待现有轮次完成后重新预览并发送'
+      })
+    }
     const catalogAliases = (): Array<{ runId: string; externalSessionId?: string; sessionId?: string }> => {
       const liveAliases = [...(sessionAliasesByContext.get(contextKey) ?? [])].map(([runId, externalSessionId]) => ({
         runId,
@@ -2606,7 +2770,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         nextAction: '草稿已保留；确认当前会话后重新发送'
       }
     )
-    if (!isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+    if (!managedConversation && !isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
       !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...catalogAliases()]))) {
       throw contextChangedError()
     }
@@ -2637,11 +2801,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     // Renderer 会在 turnDone 后立即投递队列下一条；此时 Provider 已结束，但 diff/archive
     // 仍可能在收口。等待真实 settled 后再继续，避免稳定拒绝并破坏 FIFO。
     contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-    if (!isRemoteRun) resume = sessionByContext.get(contextKey)
+    if (!managedConversation && !isRemoteRun) resume = sessionByContext.get(contextKey)
     const latestContextRuns = runs.unsettledStates().filter((run) =>
       run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
-    if (!isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+    if (!managedConversation && !isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
       !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...latestContextRuns, ...catalogAliases()]))) {
       throw contextChangedError()
     }
@@ -2664,7 +2828,15 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         nextAction: '等待目标会话完成后重试；草稿已保留'
       })
     }
-  await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
+  if (managedConversation) {
+    await conversationStore().assertManagedWriteAllowed({
+      conversationId: managedConversation.conversationId,
+      cwd: catalogCwd,
+      target: managedConversation.target,
+      nativeSessionId: resume,
+      runId: managedConversation.runId
+    })
+  } else await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
   // Still-owned runs finish on their original execution chain, not through crash recovery.
   const isLiveManagedRun = (candidate: string | undefined, nativeIdentity?: {
     provider: ProviderId; sessionId: string; providerTurnId?: string
@@ -2874,13 +3046,13 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     sessionByContext.delete(contextKey)
     sessionAliasesByContext.delete(contextKey)
   }
-  const committedResume = isRemoteRun ? resume : sessionByContext.get(contextKey)
+  const committedResume = managedConversation ? resume : isRemoteRun ? resume : sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) =>
     run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
   )
   const committedExpectedSessionId = request.forkLastTurn || request.restartLastTurn ? resume ?? null : expectedSessionId
-  if (!isRemoteRun && (
+  if (!managedConversation && !isRemoteRun && (
     committedResume !== resume || committedRevision !== contextRevision ||
     !expectedSessionMatches(committedExpectedSessionId, committedResume, () => [...committedRuns, ...catalogAliases()])
   )) throw contextChangedError()
@@ -2903,7 +3075,30 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       nextAction: '等待当前轮完成；草稿已保留'
     })
   }
-  const runId = options.runId ?? `run-${Date.now().toString(36)}-${runSeq++}`
+  const runId = managedConversation?.runId ?? options.runId ?? `run-${Date.now().toString(36)}-${runSeq++}`
+  if (managedConversation) {
+    if (options.runId !== undefined && options.runId !== managedConversation.runId) {
+      throw new AgentRuntimeError('统一对话 runId 与 runner 选项不一致', {
+        provider: runtimeProvider,
+        stage: 'frontdoor',
+        cwd,
+        nextAction: '丢弃本次启动并重新发送；不会自动重试'
+      })
+    }
+    const actualRequestHash = createHash('sha256').update(JSON.stringify({
+      scope: 'plain-text-local-managed-v1',
+      payloadHash: managedConversation.payloadHash,
+      historyHash: managedConversation.historicalContext?.contentHash ?? null
+    })).digest('hex')
+    if (actualRequestHash !== managedConversation.requestHash) {
+      throw new AgentRuntimeError('统一对话请求指纹在 runner 边界发生变化', {
+        provider: runtimeProvider,
+        stage: 'frontdoor',
+        cwd,
+        nextAction: '保留 durable intent 并阻止原生投递'
+      })
+    }
+  }
   let diffContextKey = resume ? sessionBaselineKey(contextKey, resume) : JSON.stringify([contextKey, 'run', runId])
   const finishTurnWallTiming = createTurnWallTimer(runId)
   const llmPerformance = new LlmPerformanceObserver(request.networkLabel)
@@ -3308,7 +3503,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     observedSessionId = sessionId
     if (isRemoteRun) options.onSession?.(sessionId)
     diffContextKey = sessionDiffBaselines.promote(diffContextKey, sessionBaselineKey(contextKey, sessionId), sessionId)
-    if (!isRemoteRun && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
+    if (!managedConversation && !isRemoteRun && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
       sessionByContext.set(contextKey, sessionId)
       sessionAliasesByContext.set(contextKey, new Map([[runId, sessionId]]))
     }
@@ -3390,11 +3585,30 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     firstTextPerf.mark('provider_launch')
     // Re-hash executable bytes at the actual Provider launch boundary, after all
     // attachment/recorder/diff preparation that may have yielded to the event loop.
-    await conversationStore().assertLegacyWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
+    if (managedConversation) {
+      await conversationStore().assertManagedWriteAllowed({
+        conversationId: managedConversation.conversationId,
+        cwd: catalogCwd,
+        target: managedConversation.target,
+        nativeSessionId: resume,
+        runId: managedConversation.runId
+      })
+      const identity = await providerRegistry.continuationKey({ providerId, cwd: catalogCwd, agentProfileId })
+      if (identity !== managedConversation.target.continuationKey) throw new Error('Provider 接续身份在启动准备期间变化，未发送；请重新预览')
+    } else await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
     const mcpExecution = authorizedMcpExecution(mcpExecutionSnapshot)
+    if (managedConversation && runId !== managedConversation.runId) {
+      throw new Error('统一对话 runId 与 Provider 投递 runId 不一致')
+    }
+    managedConversation?.onProviderDispatchAttempt?.()
     h = providerRegistry.run(providerId, {
       runId,
       prompt: runtimePrompt,
+      ...(managedConversation?.historicalContext ? { historicalContext: managedConversation.historicalContext } : {}),
+      ...(managedConversation ? {
+        expectedContinuationKey: managedConversation.target.continuationKey,
+        expectedInputTextHash: managedConversation.inputTextHash
+      } : {}),
       // First / same-provider turns need receipts too. Native slash commands retain
       // their existing dispatch; a successful control command is not model-input evidence.
       trackInputReceipt: adapter.historicalContext && !runtimePrompt.trimStart().startsWith('/') ? true : undefined,
@@ -3530,7 +3744,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     },
     forceKillScope: () => h?.forceKillScope,
     stopBackgroundTask: (taskId) => h?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
-    steer: (input) => steering.submit(input),
+    steer: (input) => managedConversation
+      ? Promise.resolve({ status: 'unavailable', message: '统一对话暂不支持 Steer；追加输入尚无完整的顺序投影，未发送。' })
+      : steering.submit(input),
     cwd,
     resume,
     getExternalSessionId: () => h?.getExternalSessionId(),
@@ -3539,6 +3755,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     runtimeProvider,
     runState,
     adoptSession: () => {
+      if (managedConversation) throw new Error('统一对话不能由旧会话入口接管，请打开其稳定对话条目')
       if (!contextKey) return
       bumpSessionRevision(contextKey)
       contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
@@ -3560,7 +3777,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     // registration so it either rejects this start or can stop the registered run.
     await sourceControl.admitRun(cwd, () => {
       assertSessionNotArchived([request.expectedExternalSessionId, resume, runId])
-      runs.register(runState, control, isRemoteRun ? { focus: false } : undefined)
+      runs.register(runState, control, isRemoteRun || managedConversation ? { focus: false } : undefined)
     })
   } catch (error) {
     if (isRemoteRun) {
@@ -3575,11 +3792,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
   startPerf.mark('run_registered')
   firstTextPerf.mark('run_registered')
-  if (!isRemoteRun) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
+  if (!isRemoteRun && !managedConversation) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
   // `agent:start` can also be invoked through the preload bridge (for example by
   // the regression runner), so publish the authoritative focused snapshot after
   // registration and before the Provider can emit trace or questions.
-  if (!isRemoteRun) {
+  if (!isRemoteRun && !managedConversation) {
     try {
       win?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
     } catch (error) {
@@ -3588,7 +3805,47 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
   let terminalArchiveArgs: ArchiveTraceTurnArgs | undefined
   let terminalArchiveCommitted = false
+  let managedSettlementAttempted = false
+  let terminalStatus: 'completed' | 'failed' | 'cancelled' | 'interrupted' | undefined
   let remoteRecordingFailed = false
+  const settleManagedConversation = async (status: 'completed' | 'failed' | 'cancelled' | 'interrupted'): Promise<void> => {
+    if (!managedConversation || managedSettlementAttempted) return
+    managedSettlementAttempted = true
+    const receipt = h?.getInputReceipt?.()
+    try {
+      if (terminalArchiveCommitted && terminalArchiveArgs?.sessionId && cwd) {
+        const finalItems = await conversationItemsFromTrace({
+          userData: app.getPath('userData'),
+          conversation: { cwd },
+          runId,
+          userText: displayPrompt,
+          items: runState.items
+        })
+        await managedConversation.onTerminal({
+          status,
+          finalItems,
+          archive: {
+            sessionId: terminalArchiveArgs.sessionId,
+            ...(terminalArchiveArgs.providerTurnId ? { providerTurnId: terminalArchiveArgs.providerTurnId } : {})
+          },
+          receipt
+        })
+      } else {
+        // A Provider terminal without an authoritative archive is still an
+        // attempted delivery. Settle it as unknown; never leave active state
+        // or a pending ledger that could be mistaken for a live owner.
+        await managedConversation.onTerminal({ status, finalItems: [], receipt })
+      }
+    } catch (error) {
+      // Even archive extraction/receipt validation failures need a durable
+      // terminal outcome. Omit archive evidence so the service records unknown.
+      try {
+        await managedConversation.onTerminal({ status, finalItems: [], receipt })
+      } catch (fallbackError) {
+        console.error('[scry] managed conversation settlement failed:', runId, error, fallbackError)
+      }
+    }
+  }
   let remoteCompletion: RemoteRunCompletion | undefined
   let resolveRemoteCompletion: ((completion: RemoteRunCompletion) => void) | undefined
   remoteResult = isRemoteRun
@@ -3630,6 +3887,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       const nativeSessionId = r.externalSessionId ?? observedSessionId ?? resume
       const storageSessionId = nativeSessionId ?? runId
       const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
+      terminalStatus = completionStatus
       await persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
       const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
       const completionArchiveArgs: ArchiveTraceTurnArgs = {
@@ -3745,6 +4003,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         terminalArchiveCommitted = true
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
         terminalPerf.mark('archive_committed')
+        await settleManagedConversation(completionStatus)
       } catch (error) {
         if (isRemoteRun) remoteRecordingFailed = true
         const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录提交失败：${String((error as Error).message)}`
@@ -3787,6 +4046,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       const observedTiming = observedTurnTiming(observedProviderStartedAt, new Date().toISOString())
       const alreadyDone = runState.done
       const stopped = interrupted
+      terminalStatus = stopped ? 'interrupted' : 'failed'
       let nativeSessionId = observedSessionId ?? resume
       try {
         nativeSessionId = h?.getExternalSessionId() ?? nativeSessionId
@@ -3967,6 +4227,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         await archiveTraceTurn(terminalArchiveArgs)
         terminalArchiveCommitted = true
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
+        await settleManagedConversation(stopped ? 'interrupted' : 'failed')
       } catch (archiveError) {
         if (isRemoteRun) remoteRecordingFailed = true
         exactRecorded = false
@@ -4043,8 +4304,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         finishRemote(interrupted ? 'interrupted' : 'failed', String((error as Error).message ?? error))
       }
     })
-    .finally(() => {
+    .finally(async () => {
       try {
+        await settleManagedConversation(terminalStatus ?? (interrupted ? 'interrupted' : 'failed'))
         options.stopSignal?.removeEventListener('abort', requestRemoteStop)
         runState.providerSettled = true
         firstTracePerf.finish(undefined, interrupted ? 'cancelled' : 'unavailable')

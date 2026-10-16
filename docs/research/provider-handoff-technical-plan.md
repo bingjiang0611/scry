@@ -2,7 +2,7 @@
 
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
-**当前进度：身份/覆盖账本、Claude/Codex 输入回执，以及“权威归档 → 完整正文快照 → durable intent”的链路已实现并做定向测试。`startAppRun()` 已启用普通输入回执采集和旧入口归属检查；持久化原生归属与启动恢复已实现。统一 conversation 启动、执行期 writer 准入、回执驱动结算和 UI 尚未接通，不是可用的完整接续功能。**
+**当前进度：Claude/Codex 统一会话的生产 main/preload/UI 主链路已接通，隔离 Electron 已验证 A→B→A、完整正文预览、实际文件效果、归档故障和两次重启不重发。身份验证仍是合成配置/transport；没有真实账号验收。已补受限旧会话迁入和 logical rename/pin/archive/restore；第 6 节的 delete/fork 与其余相邻动作仍未完成，因此不能宣称整个第 4 项已完整交付。最新证据与限制见第 8、9 节；此前各阶段记录保留当时的验收范围。**
 
 ## 1. 用户合同
 
@@ -63,9 +63,9 @@
 
 增加 `runMany()`，一次性登记全部身份的等待链，再等待前序操作。现有 `run()` 共用此实现。反向 A→B / B→A 不采用嵌套单 key 锁，互不相关的会话不被全局锁阻塞。
 
-这只是准入 primitive。后续主链路必须实际传入 conversation 和 native binding 身份，并与普通启动共用；尚不能宣称统一会话已经获得运行期互斥。
+第一阶段这里只实现了准入 primitive。第 8 节的主链路已实际传入 conversation 与 native owner 身份，并与普通启动共用；它不是跨进程安全沙箱。
 
-## 4. 下一步：接入正常执行，不建立第二个 runner
+## 4. 分阶段接入正常执行，不建立第二个 runner
 
 ### 4.1 显式目标替代全局“最近 session”
 
@@ -224,7 +224,7 @@
 - Git push-endpoint fixture 全量执行时超过原 5 秒上限。检查后测试进程已退出；同一用例在基线副本约 4.1 秒、本工作区单独执行约 3.0 秒通过。并发超时原因尚未确认，不用定向通过抹掉首轮失败，也不增加超时。
 - 全量日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-ea71f33dbe6d97a0.log`。基线副本保留于 `/tmp/scry-handoff-baseline-Ot6B8V`，只运行上述两项筛选检查（265 项未运行）；复用 node_modules，不是可分发安装包。
 
-当前无 UI、真实 Provider 或真实用户数据验收。conversation store 尚无生产业务入口；build 不代表跨 Provider 功能已经可用。以上检查只证明模块、正文/账本链路和 adapter 协议边界，不证明整个跨 Provider 工作流。
+截至第三阶段，尚无 UI 或生产业务入口验收。该阶段检查只证明模块、正文/账本链路和 adapter 协议边界。生产入口与 UI 的后续证据见第 8 节；真实 Provider 和真实用户数据仍未验收。
 
 后续至少要验证：
 
@@ -235,4 +235,83 @@
 5. 混合历史重开、分页、停止、fork、草稿、统计和删除使用真实 owner，来源与费用不双计。
 6. 隔离真实 App 原生输入 fixture；经账号/费用授权后再验证 Claude↔Codex 与实验性 Provider。不能以 mock transport 冒充真实外部能力。
 
-接入跨 IPC、Provider 与持久化主链路后运行仓库完整 gate；本阶段不构建安装包、不升版本、不启动真实 Provider。
+接入跨 IPC、Provider 与持久化主链路后运行仓库完整 gate。第三阶段没有构建安装包、升版本或启动真实 Provider；第 8 节只增加开发目录包验证，不授权安装或发行。
+
+## 8. 生产入口与隔离桌面验收（2026-10-16）
+
+### 已实现
+
+- `conversation-service.ts`、`conversation-api.ts` 与固定 preload IPC 复用 `startAppRun()`、RunRegistry、workspace/trust gate 和原子账本。renderer 不提供 native ID 或历史正文；重复命令先返回原 run，不因身份变化而再启动。
+- 同一 conversationId、侧边栏条目和独立草稿支持 Claude→Codex→Claude；按引用精确补齐，省略项继续保持缺失。取消、切换与重载不发送。每页最多 40 轮，不复制工具事件或用量为新工作。
+- 预览可按需读取每项完整 user/root assistant 正文。`readItem` 只接受当前账本拥有的 run/item/hash，复用封存时的全文投影与预算；不接受路径或任意字段，不调用 Provider，不在预览时写正文 artifact。读取失败显示错误，不以摘要冒充全文。
+- main 准备后及 adapter 输入边界复验 continuation identity；冻结实际纯文本 hash，Codex `$skill` 等改写在 `turn/start` 前拒绝。Claude 使用实际 execution env/HOME/config root；Codex 区分 planned 与已物化 private home，缺失实际 auth 不回退借用 source。interrupt 仍指向原 transport。
+- 只有相互匹配的接收回执与已提交权威 archive 才更新 coverage。归档失败后持久化 unknown，不能跨 Provider/key 绕过，也不自动重发。live managed writer 阻断 legacy start/adopt/Steer。
+- 时间线复用原生聊天滚动 helper：跟随新输出；原生滚轮离开底部后保留阅读位置；显式发送回到最新输出。待回答问题在 composer 留有入口，仍走正式 question IPC。
+
+### 实际验证
+
+环境：macOS arm64、Node 24.18.0、npm 12.2.0、Electron 42.10.1、App 0.2.191、CLI 0.2.49；在 `1c30b76` 加本任务工作区改动上执行，保留 `bd60826` 的 remote/workbench 成果。
+
+| 检查 | 结果与范围 |
+| --- | --- |
+| `npm run typecheck`、`npm run build` | node/web 与当前 main/preload/renderer 通过 |
+| `npm test` | 254 文件通过、3 文件跳过；3193 测试通过、3 跳过；shell PASS。真实账号/费用探针保持关闭 |
+| `npm run test:renderer:ui` | 最终完整运行通过，包含 Credits、原生会话缓存/控制、remote/workbench、ownership 与 unified smoke |
+| unified 生产 UI/IPC | 主对话 3 轮、总计 6 次测试 Provider 调用、两次 App 重启；精确输入/coverage、真实文件、身份变化 fresh、草稿、问题回答与归档故障均有断言 |
+| UI 负对照 | 860px 桌面宽度下旧布局右边界为 994.22px，检查失败；增加 grid item `min-width: 0` 后通过。不能只检查 document.scrollWidth，因为祖先会裁切溢出 |
+| 滚动回归 | 发送后的 composer 高度变化使历史 viewport 490→440px，旧程序化滚动被误认成用户离开底部；保持 opening intent 到 React 布局提交后修复。原生滚轮退出跟随、缩放布局和再次发送均通过 |
+| `npm run check:cli-release` | 32 文件、586 测试通过；本地 tarball 临时安装 smoke 通过。修复 npm 12 `pack --json` 对象格式，仍核对唯一包及包名 |
+| `npm run pack:artifact` | 开发目录包及 packaged security/workbench/crash-recovery smoke 通过；298667927 bytes。没有 Developer ID 签名、公证、安装或发布 |
+
+首轮完整 UI gate 的 `session-cache` 曾返回泛化的 `Script failed to execute`。没有扩大时限、删除断言或增加自动重试；仅补充 renderer 异常透传。随后 cache-only 和完整 gate 通过，**不能据此宣称首轮异常根因已修复**。若复现，由本任务维护者使用新增 stack 和首轮日志继续定位。
+
+- unit 首轮日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`
+- 最终完整 UI、CLI、artifact 日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7de9e98b4acfcb81.log`
+- UI 证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-c4Bzai/verification.json`，包含当前 main/preload/renderer JS/CSS hashes；同目录保存深浅色、1280px 与 860px 桌面视口的 8 张截图。人工检查了宽浅色/窄深色预览、窄浅色/宽深色时间线：主操作可见、文字可读、无横向裁切；不据此宣称完整无障碍验收。
+
+### 仍未完成与下一责任动作
+
+1. **维护者授权后再执行**真实 Claude/Codex OAuth/API-key 三轮验收，使用临时工作区与最小凭据范围，不输出凭据。当前 Claude OAuth 依据稳定 account/org 配置，不等于已核验 keychain 或实时登录账户；动态 helper/cloud 不能证明时 fail closed。
+2. **本任务后续实现**第 6 节的 delete/fork 与相邻动作；受限 legacy 迁入及 logical rename/pin/archive/restore 的后续进度见第 9 节，不用局部绿灯替代完整交付条件。
+3. 当前 UI 限 Claude/Codex 默认 profile、纯文本、默认模型/审批；附件、原生命令、Steer、其他 Provider 和长会话性能尚未接入完整合同。扩展时先补逐 Provider 的输入、receipt、身份和历史顺序证明，不静默放宽。
+4. 远端/手机接续、真实前台交互、Node 20/22 兼容矩阵、正式签名公证与用户安装未验证。packaged remote/workbench 本地 fixture 通过不等于手机或远端接续通过。
+
+## 9. 受限旧会话迁入与逻辑元数据（2026-10-16）
+
+### 本轮实现
+
+- 旧 Claude/Codex 默认 profile 的会话操作菜单增加“迁入已捕获历史”。只读预览核对 App 完整归档，明确不代表全部原生历史；没有可证明的原生接续身份时，旧绑定退休、`nativeItems: []`，后续必须明确新建原生上下文。
+- `conversation-adoption.ts` 复用权威全文投影，保留原 run/native/archive 身份和源文件。只接收 completed、纯文本、无 Steer 的捕获；预算为 2000 轮、16 MiB 归档，超限或损坏拒绝，不静默截断。需要扩大范围时，先实现对应 Provider 的完整读取和身份合同，再扩展预算或输入类型。
+- 来源、归档正文和源元数据参与确认指纹；迁入前在原 context admission 内阻断活跃/未收敛运行及删除，且在异步读取前预留源别名。先原子发布 ledger，再派生 catalog 隐藏旧别名；失败保留旧入口。同指纹只返回已发布的原 logical ID，不能借该指纹接入另一个 native binding。
+- 统一对话支持重命名、跨项目置顶、存档和恢复；使用 revision 和现有名称校验。存档保留草稿、历史、归属与用量，侧边栏提供已存档分组；禁止存档未收敛/unknown 投递，main 同时检查 RunRegistry 尚未完成的证据保存。旧 native/run 别名不能绕过逻辑管理入口。
+- 修正新管理通知缺少 payload 的问题，增加 `conversation_changed` typed envelope，不伪造 runId；全局 catalog 和会话缓存按正确事件更新。
+
+### 验证与失败记录
+
+| 检查 | 实际结果与范围 |
+| --- | --- |
+| typecheck / build | 最终源码通过；无升版本，App 0.2.191 / CLI 0.2.49，macOS arm64、Node 24.18.0 |
+| 新增 unit | `conversation-management.test.ts` 9 项：原子迁入/失败保留、指纹变化、重复提交、损坏归档、读取预算、unsupported/未收敛源、元数据与持久化、pending/unknown 存档阻断、严格 API 字段 |
+| 负对照 | 移除损坏分段拒绝条件后，`-t 'corrupt sibling'` 必须失败；恢复后 7 文件 / 327 测试通过。不是仅证明有效源可读取 |
+| 生产 IPC / 隐藏 UI | `npm run test:conversation:ipc` 最终通过。迁入真实 fixture 运行产生的归档，核对源字节、SQLite totals 不变、旧别名阻断、原生点击/Enter/菜单键盘导航、取消、草稿、存档恢复，以及迁入后明确新上下文发送和两次重启无重发。共 8 次合成 Provider 调用，无真实账号 |
+| 全量 unit | 本轮前一轮 255 文件 / 3202 测试通过、3 跳过；后续全量出现 Pi fork 与 remote workspace Git diff 两项 5 秒超时（3200 通过、3 跳过）。相关实现/测试未改；focused 连同本次相关检查 9 文件 / 420 测试通过。保留首轮失败，未证明 OS/资源长尾根因解决 |
+| 完整 renderer UI | 最终 `npm run test:renderer:ui` 通过，包含 Credits、remote/workbench、ownership 和 unified；随后最后一处 migration fingerprint/绑定核对加固再次通过 production IPC/UI。不是前台 OS/真实账号验收 |
+| CLI / shell | `check:cli-release` 32 文件 / 586 测试、本地 tarball 临时安装 smoke 通过；`test:shell` PASS |
+| 开发目录包 | 最终 `pack:artifact` 通过，298689930 bytes；包含 packaged security / crash recovery / remote workbench。关闭签名自动发现并清除发布凭据，未正式签名、公证或安装 |
+
+- 新 UI fixture 首轮重命名/菜单 Enter 未触发：输入驱动缺少 Enter 的 `text: '\r'`。补真实字符事件后验证 Enter 保存及菜单操作；悬浮菜单先发送原生 mouseMoved 并检查 hit target，未用程序化 click 绕过命中。迁移读预览等待实际 runtime settlement，而非只看 `activeRuns` 消失；未重试写请求。
+- 缓存 fixture 再现 `Deletion invalidation left a pending cached page visible`：native input dispatch 尚未等待 React commit，而失败后的 DOM 已是无缓存加载状态。改为等待既有加载状态再执行原无轮次断言，仍使用原 5 秒上限。故意移除 `setSessionCacheVisible(false)` 时，测试在原预算内失败并保留旧正文；恢复后 targeted/full 通过。未删除后续 stale-response 断言。
+- 通用 `Script failed to execute` 不应再一律归因到 cache：runner 在 Meta Prompts 独立窗口失败时原来仍打印 cache 窗口。已修正诊断窗口并透传 Meta Prompts renderer stack。单项及完整 suite 随后通过，但通用异常未重新取得具体栈，根因仍未知；如复现，由本任务后续使用新诊断继续定位，不用重跑通过宣称已修复。
+
+证据（本地临时目录，不是发布产物）：
+
+- 前一轮全量通过：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-32a90fb7d4f66427.log`
+- 后续全量两项超时：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-5c7619c47a4e2769.log`
+- focused 420 项与缓存断言失败现场：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-5f38fcb042b8210a.log`
+- 最终完整 UI、CLI、shell：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-43d7abf01dfdae82.log`
+- 最终 migration/ownership UI：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-6qytPj/verification.json`，16 张深浅色截图，包含窄窗口迁入和存档界面；hash 覆盖 8 个 main/preload/renderer 构建文件，并与最终开发包构建后的文件复核一致。人工检查了窄浅色迁入与窄深色存档图，文字和主操作可见；其余截图不冒充逐张人工验收。
+- 最终开发包检查：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-07900a6d6686e193.log`
+
+### 下一责任动作
+
+本任务继续实现 logical delete/fork 的全 binding/attempt 范围、共享归档保留、活动运行阻断与部分删除恢复；不能把当前 rename/pin/archive/restore 当成完整管理闭环。真实账号仍等待维护者明确授权；本轮不推送、不安装、不发布。

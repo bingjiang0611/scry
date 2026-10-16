@@ -23,13 +23,16 @@ try {
   mkdirSync(installRoot)
   writeFileSync(join(installRoot, 'package.json'), '{"private":true}\n')
 
-  const packed = JSON.parse(run(npm, [
+  const packResult = JSON.parse(run(npm, [
     'pack', packageRoot,
     '--ignore-scripts',
     '--json',
     '--pack-destination', temporaryRoot
   ]))
+  // npm 12 keys JSON results by package name; earlier npm versions use an array.
+  const packed = Array.isArray(packResult) ? packResult : Object.values(packResult)
   assert.equal(packed.length, 1, 'npm pack should create exactly one tarball')
+  assert.equal(packed[0].name, packageJson.name, 'npm pack must describe the requested package')
   const tarball = join(temporaryRoot, packed[0].filename)
   assert.ok(existsSync(tarball), `missing npm tarball: ${tarball}`)
 

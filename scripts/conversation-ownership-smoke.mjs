@@ -9,6 +9,8 @@ const json = path => JSON.parse(readFileSync(path, 'utf8'))
 const archiveFile = (userData, cwd, sessionId, providerTurnId) => join(userData, 'trace-archive-turns-v1', 'codex',
   `cwd-${hash(cwd)}`, `sid-${hash(sessionId)}`, `turn-${hash(`provider\0${providerTurnId}`)}.json`)
 
+export { archiveFile as conversationFixtureArchivePath }
+
 export function seedConversationOwnership({ userData, cwd, otherCwd }) {
   const sessions = [
     { cwd, sessionId: 'owned-native', runId: 'owned-run', providerTurnId: 'owned-turn' },

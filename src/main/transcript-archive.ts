@@ -1195,6 +1195,41 @@ export async function readTraceArchiveAsync(args: {
   return mergeArchives((current.status === 'valid' ? [current.archive] : []).concat(segmented.valid))
 }
 
+/** Migration must not silently omit corrupt capture files or read an unbounded session. */
+export async function readTraceArchiveForMigration(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+}): Promise<TraceArchive | null> {
+  const mono = traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  const directory = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  let names: string[] = []
+  try {
+    trustedOwnedParent(args.userDataDir, join(directory, '.identity'), false)
+    names = (await readdir(directory)).filter(name => /^turn-[a-f0-9]{64}\.json$/.test(name))
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  if (names.length > 2000) throw new Error('迁移超过 2000 轮读取预算')
+  let bytes = 0
+  for (const path of [mono, ...names.map(name => join(directory, name))]) {
+    try {
+      trustedOwnedParent(args.userDataDir, path, false)
+      const info = await lstat(path)
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('迁移源不是受控普通文件')
+      bytes += info.size
+      if (bytes > 16 * 1024 * 1024) throw new Error('迁移归档超过 16 MiB 读取预算')
+    } catch (error) {
+      if (path !== mono || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  const current = await inspectArchiveFileAsync(args.userDataDir, mono, args.cwd, args.sessionId, args.providerId)
+  const segmented = await inspectSegmentedArchivesAsync(args)
+  if (current.status === 'invalid' || segmented.invalid.length) throw new Error('迁移源归档损坏或身份不匹配；旧入口保留')
+  const archive = mergeArchives((current.status === 'valid' ? [current.archive] : []).concat(segmented.valid))
+  if (archive && archive.turns.length > 2000) throw new Error('迁移超过 2000 轮读取预算')
+  return archive
+}
+
 export interface TraceArchiveVersion {
   version: string
   readMode: 'monolithic' | 'indexed' | 'index_rebuild'

@@ -71,7 +71,10 @@ afterEach(async () => {
   await rm(temp, { recursive: true, force: true })
 })
 
-describe('source control real temporary Git', () => {
+// These multi-operation integrations launch 55–78 real Git commands per scenario.
+// Measured startup waits alone can exhaust Vitest's 5s unit budget. Match the
+// existing real-Git 15s allowance without changing command limits or trust checks.
+describe('source control real temporary Git', { timeout: 15_000 }, () => {
   it('preserves the existing index, stages only selected paths, and commits the full confirmed index', async () => {
     await writeFile(join(cwd, 'base.txt'), 'already staged\n')
     git('add', 'base.txt')

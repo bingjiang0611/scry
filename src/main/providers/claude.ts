@@ -14,6 +14,7 @@ import {
 import { getClaudeVersion, runAgent } from '../agent-runner'
 import { extractUserText } from '../normalize'
 import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
+import { claudeContinuationKey } from './continuation-identity'
 import { completedTranscriptTurnBoundary } from './session-fork-boundary'
 import {
   authorizedMcpRuntimeEnv,
@@ -303,6 +304,13 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     id: 'claude',
     runtimeProvider: 'claude_sdk',
     historicalContext: true,
+    continuationKey: (context) => {
+      const env = claudeRuntimeEnv()
+      if (!env.HOME) throw new Error('Claude runtime HOME 不可用，无法确认接续身份')
+      return claudeContinuationKey(context, env.HOME, executable(), {
+        ...env, SCRY_CLAUDE_SETTING_SOURCES: JSON.stringify(settingSourcesFromEnv())
+      })
+    },
     describe: async () => {
       const path = executable()
       return {
@@ -358,8 +366,30 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       }
     },
     run: (request) => {
+      const env = claudeRuntimeEnvForExecution(request.mcpExecution, request.managedRecorder === true, request.managedRecorderIdentity)
+      const settingSources = settingSourcesFromEnv()
+      const claudePath = executable()
       const history = new HistoricalInput(request)
       const prompt = history.text(request.prompt)
+      if (request.expectedContinuationKey) {
+        try {
+          if (!env.HOME) throw new Error('Claude runtime HOME 不可用，输入未投递')
+          const identity = claudeContinuationKey({ providerId: 'claude', cwd: request.cwd, agentProfileId: request.agentProfileId },
+            env.HOME, claudePath, { ...env, SCRY_CLAUDE_SETTING_SOURCES: JSON.stringify(settingSources) })
+          if (identity !== request.expectedContinuationKey) throw new Error('Claude 接续身份已变化，请重新预览')
+        } catch (error) {
+          // No SDK or child exists yet. Return a failed handle so the caller can
+          // retain not_sent evidence; SDK exceptions below remain unknown.
+          return {
+            promise: Promise.reject(error),
+            interrupt: () => {},
+            forceKill: () => {},
+            forceKillScope: 'run_scoped',
+            getExternalSessionId: () => undefined,
+            getInputReceipt: () => history.snapshot()
+          }
+        }
+      }
       const handle = runAgent(
         prompt,
         request.runId,
@@ -383,14 +413,10 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         {
           resume: request.resume,
           cwd: request.mcpExecution?.cwd ?? request.cwd,
-          skills: computeEnabledSkills(request.cwd, homeDir),
-          claudePath: executable(),
-          env: claudeRuntimeEnvForExecution(
-            request.mcpExecution,
-            request.managedRecorder === true,
-            request.managedRecorderIdentity
-          ),
-          settingSources: settingSourcesFromEnv(),
+          skills: computeEnabledSkills(request.cwd, env.HOME ?? homeDir),
+          claudePath,
+          env,
+          settingSources,
           onSessionId: request.onExternalSessionId,
           onInputAttempt: () => history.attempting(prompt),
           captureProviderTurnId: true,
