@@ -4,13 +4,14 @@
 
 ## 最新爬坡进展（2026-10-17）
 
-用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成三个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
+用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成四个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
 
 | 实验 | 固定负载 L1 | L2 / L3 | 减少的工作 |
 |---|---|---|---|
 | [Pi Node 版本复用](performance-experiments/20261016-pi-node-version-reuse.md) | 五次环境解析的版本探针 5→1，五轮一致 | mac2 L2：中位批耗时557.70→400.39ms，减少28.2%；L3未验证 | 四个子进程不再启动；仍重验二进制元数据/环境，不缓存能力或trust |
 | [遥测追加保留用量聚合](performance-experiments/20261016-usage-telemetry-incremental.md) | 10000行暖账本+五次遥测追加/查询，重读 5→0 / 4757290→0 bytes，五轮一致 | mac2 L2：中位批耗时26.26→1.43ms，减少94.6%；L3未验证 | 不再重读/parse整文件；性能记录仍完整保留 |
 | [Pi只读probe关闭](performance-experiments/20261017-pi-probe-close.md) | EOF后有空闲handle：关闭grace到期1→0；4响应、1进程保持，五轮一致 | mac2 L2：总耗时1630.84→870.19ms；关闭761.07→2.26ms；L3未验证 | 成功只读探测立即TERM并仍确认退出，不把关闭移到返回后 |
+| [终态共享 after-tree](performance-experiments/20261017-terminal-shared-after.md) | 5000文件、不同脏基线：Git 24→17，写树2→1，五轮一致 | mac2 L2：整体777.59→540.32ms（30.5%）；首个turn结果约424ms不变；L3未验证 | 两个before锚点共用一个不可变终点；最后一个持有者负责清理，完整完成边界仍等待清理 |
 
 前两个实验冻结collector `cafc418`、生产 `7ac7fcb`；第三个冻结测量 `1456e35`、生产 `afd8f03`。第三轮全量33个obs：1 better、30 unchanged、2 gating pass、3 macOS CPU指令candidate缺失，无worse。只收紧candidate平台基线，没有升级门禁或放宽。
 
@@ -20,7 +21,9 @@
 
 **第三轮RPC分段结果**：离线夹具确认了一项750ms EOF等待，mac2负载2.24→2.13、highLoad=false；启动到首响应约0.87s未变，不能声称真实12秒目录延迟已解决。mac2全量3263通过/4 opt-in跳过；首轮空HEAD与metadata fixture超时的修正、以及本机worker RPC通信超时未定位的限制均记录在实验中，不用后续通过抹去失败。
 
-**后续优先顺序**：已达到本次会话3个优化实验上限，下一轮由agent先给真实turn+session finalization增加端到端计数和大仓库负载，验证共享after-tree。已有同名source-control collector未覆盖真实Service.diff的两次revision检查，新增场景不能静默替换旧workload。真实Provider启动/扩展/模型目录成本另验，不把离线结果当真实12秒根因。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
+**第四步共享终点已验证**：冻结测量 `7ad8957` / `67a8252`，生产 `aff6006`。首版因首个turn结果晚34ms被用户拒绝；引用持有版保留首次可用边界，清理仍在整体测量窗口与诊断耗时内。隐藏真实App离线UI/IPC流程独立核对7对归档快照（3对含文件改动），两次重启通过。本轮mac2全量首次3273断言通过但worker RPC超时，改为异步等待测量CLI（`8987f46`），保留原断言、负载和120秒上限；最终3274通过/4既有opt-in跳过。旧本机worker失败的完整归因仍不追认。36个obs在收紧前为3 better、31 unchanged、2 gating pass，另3个macOS CPU指令candidate缺失，无worse；只降低三个candidate平台基线。
+
+**后续优先顺序**：下一轮由agent先冻结真实Service.diff（含两次revision检查）的独立负载，再判断可减少的重复工作；已有同名collector仍保留，不静默替换。真实Provider启动/扩展/模型目录成本另验，不把离线结果当真实12秒根因。合入、安装及L3日常采样需用户确认；当前不执行。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
 
 ## 原始机会排名（2026-10-16，日常记录首次分析）
 

@@ -11,7 +11,9 @@
       "status": "candidate",
       "ceiling": null,
       "tolerance": 0,
-      "baselines": { "darwin-arm64": 24 }
+      "baselines": {
+        "darwin-arm64": 17
+      }
     },
     "source-control.terminal-pair/snapshot.write-tree": {
       "scenario": "source-control.terminal-pair",
@@ -23,7 +25,9 @@
       "status": "candidate",
       "ceiling": null,
       "tolerance": 0,
-      "baselines": { "darwin-arm64": 2 }
+      "baselines": {
+        "darwin-arm64": 1
+      }
     },
     "source-control.terminal-pair/subprocess.total": {
       "scenario": "source-control.terminal-pair",
@@ -35,7 +39,9 @@
       "status": "candidate",
       "ceiling": null,
       "tolerance": 0,
-      "baselines": { "darwin-arm64": 24 }
+      "baselines": {
+        "darwin-arm64": 17
+      }
     },
     "providers.pi-probe/subprocess.rpc": {
       "scenario": "providers.pi-probe",
