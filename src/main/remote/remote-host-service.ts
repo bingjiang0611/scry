@@ -30,6 +30,7 @@ import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatu
 
 export interface RemoteHostServiceDependencies {
   readDesktop?: HostControllerFactoryDependencies['readDesktop']
+  desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']
   // Directory under Scry userData; identity/pairing/ledger subdirs live here.
   stateDirectory: string
@@ -118,6 +119,7 @@ export class RemoteHostService {
     const binding = await createHostController({
       stateDirectory: deps.stateDirectory,
       ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
+      ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
       ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
       hostId: identity.hostId,
       anchorSHA256: identity.anchorSHA256,
@@ -291,8 +293,10 @@ export class RemoteHostService {
     return this.authority.cancel(pairingId)
   }
 
-  revokeDevice(deviceId: string): Promise<void> {
-    return this.authority.revoke(deviceId)
+  async revokeDevice(deviceId: string): Promise<void> {
+    const peers = this.authority.inspectLocal().grants.filter((grant) => grant.deviceId === deviceId).map((grant) => grant.certificateSHA256)
+    await this.authority.revoke(deviceId)
+    await Promise.all(peers.map((peer) => this.#binding.controller.releaseDesktopPeer(peer)))
   }
 
   // Display-safe snapshot for the pairing screen.

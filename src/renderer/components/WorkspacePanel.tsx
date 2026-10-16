@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { canOpenWorkspaceFileExternally, WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFilePage, type WorkspaceFileSnapshot } from '@shared/workspace'
+import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } from '../workbench-api'
+export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 
@@ -27,8 +29,6 @@ export interface WorkspaceOpenRequest {
   path: string
 }
 
-export type ReadOnlyWorkspaceSource = Pick<typeof window.scry, 'workspaceList' | 'workspaceReadPage'>
-
 interface WorkspacePanelProps {
   cwd: string
   active?: boolean
@@ -38,6 +38,7 @@ interface WorkspacePanelProps {
   onAddReference: (entry: WorkspaceEntry) => void
   onDirtyChange?: (dirty: boolean) => void
   readOnlySource?: ReadOnlyWorkspaceSource
+  api?: WorkspaceApi
 }
 
 type ItemDialog =
@@ -45,7 +46,8 @@ type ItemDialog =
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
-export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource }: WorkspacePanelProps) {
+export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi }: WorkspacePanelProps) {
+  const api = useMemo<WorkspaceApi>(() => injectedApi ?? defaultWorkspaceApi, [injectedApi])
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -70,7 +72,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       setLoading((current) => new Set(current).add(path))
       setError(null)
       try {
-        const list = readOnlySource?.workspaceList ?? window.scry.workspaceList
+        const list = readOnlySource?.workspaceList ?? api.workspaceList
         const result = await list({ cwd, path, ...(cursor ? { cursor } : {}) })
         if (loadSequence.current.get(path) !== sequence) return
         setChildren((current) => ({
@@ -91,7 +93,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         }
       }
     },
-    [cwd, readOnlySource]
+    [api, cwd, readOnlySource]
   )
 
   const refresh = useCallback((): void => {
@@ -150,7 +152,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     setContext(null)
     if (!readOnlySource && canOpenWorkspaceFileExternally(entry.path)) {
       setError(null)
-      void window.scry.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError)))
+      void api.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError)))
       return
     }
     if (selected?.path !== entry.path && !confirmLeave()) return
@@ -177,7 +179,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     setError(null)
     try {
       if (itemDialog.kind === 'create') {
-        const created = await window.scry.workspaceCreate({
+        const created = await api.workspaceCreate({
           cwd,
           parentPath: itemDialog.parentPath,
           name: itemDialog.value,
@@ -187,7 +189,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         if (created.kind === 'file') setSelected(created)
       } else if (itemDialog.kind === 'rename') {
         if (selected && pathContains(itemDialog.entry.path, selected.path) && !confirmLeave()) return
-        const renamed = await window.scry.workspaceRename({
+        const renamed = await api.workspaceRename({
           cwd,
           path: itemDialog.entry.path,
           name: itemDialog.value
@@ -200,7 +202,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       } else {
         if (selected && pathContains(itemDialog.entry.path, selected.path) && !confirmLeave()) return
         const previousParent = parentPath(itemDialog.entry.path)
-        const moved = await window.scry.workspaceMove({
+        const moved = await api.workspaceMove({
           cwd,
           path: itemDialog.entry.path,
           parentPath: itemDialog.value === '.' ? '' : itemDialog.value
@@ -225,7 +227,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     setMutating(true)
     setError(null)
     try {
-      await window.scry.workspaceTrash({ cwd, path: deleteTarget.path })
+      await api.workspaceTrash({ cwd, path: deleteTarget.path })
       if (selected && pathContains(deleteTarget.path, selected.path)) setSelected(null)
       await loadDirectory(parentPath(deleteTarget.path))
       setDeleteTarget(null)
@@ -367,6 +369,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
           refreshKey={active ? refreshKey : handledRefreshKey.current}
           readOnly={selectedReadOnly}
           readPage={readOnlySource?.workspaceReadPage}
+          api={api}
           onDirtyChange={setDirty}
           onError={setError}
         />
@@ -575,6 +578,7 @@ function FileEditor({
   refreshKey,
   readOnly,
   readPage,
+  api,
   onDirtyChange,
   onError
 }: {
@@ -583,6 +587,7 @@ function FileEditor({
   refreshKey: number
   readOnly: boolean
   readPage?: ReadOnlyWorkspaceSource['workspaceReadPage']
+  api: WorkspaceApi
   onDirtyChange: (dirty: boolean) => void
   onError: (error: string | null) => void
 }) {
@@ -615,7 +620,7 @@ function FileEditor({
         setContent(first.content)
         return
       }
-      const read = readOnly ? window.scry.workspaceReadKnown : window.scry.workspaceRead
+      const read = readOnly ? api.workspaceReadKnown : api.workspaceRead
       const next = await read({ cwd, path: entry.path })
       if (loadSequence.current !== sequence) return
       setPage(null)
@@ -628,7 +633,7 @@ function FileEditor({
         onError(errorMessage(loadError))
       } else if (errorMessage(loadError).includes(WORKSPACE_FILE_PREVIEW_UNSUPPORTED)) {
         try {
-          const open = readOnly ? window.scry.workspaceOpenKnownExternal : window.scry.workspaceOpenExternal
+          const open = readOnly ? api.workspaceOpenKnownExternal : api.workspaceOpenExternal
           const opened = await open({ cwd, path: entry.path })
           if (loadSequence.current !== sequence) return
           setExternallyOpened(opened)
@@ -639,7 +644,7 @@ function FileEditor({
         }
       } else if (errorMessage(loadError).includes('分页只读视图')) {
         try {
-          const readPage = readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage
+          const readPage = readOnly ? api.workspaceReadPageKnown : api.workspaceReadPage
           const first = await readPage({ cwd, path: entry.path, offset: 0 })
           if (loadSequence.current !== sequence) return
           setSnapshot(null)
@@ -661,7 +666,7 @@ function FileEditor({
     } finally {
       if (loadSequence.current === sequence) setLoading(false)
     }
-  }, [cwd, entry.path, onError, readOnly, readPage])
+  }, [api, cwd, entry.path, onError, readOnly, readPage])
 
   useEffect(() => {
     void load()
@@ -684,7 +689,7 @@ function FileEditor({
     setSaving(true)
     onError(null)
     try {
-      const next = await window.scry.workspaceWrite({
+      const next = await api.workspaceWrite({
         cwd,
         path: entry.path,
         content,
@@ -697,7 +702,7 @@ function FileEditor({
     } finally {
       setSaving(false)
     }
-  }, [content, cwd, dirty, entry.path, onError, readOnly, saving, snapshot])
+  }, [api, content, cwd, dirty, entry.path, onError, readOnly, saving, snapshot])
 
   const onEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
@@ -711,7 +716,7 @@ function FileEditor({
     setLoading(true)
     onError(null)
     try {
-      const read = readPage ?? (readOnly ? window.scry.workspaceReadPageKnown : window.scry.workspaceReadPage)
+      const read = readPage ?? (readOnly ? api.workspaceReadPageKnown : api.workspaceReadPage)
       const next = await read({ cwd, path: entry.path, offset, snapshot: page.snapshot })
       setPage(next)
       setPageBack(back)
@@ -721,7 +726,7 @@ function FileEditor({
     } finally {
       setLoading(false)
     }
-  }, [cwd, entry.path, loading, onError, page, readOnly, readPage])
+  }, [api, cwd, entry.path, loading, onError, page, readOnly, readPage])
 
   const markdown = /\.(md|mdx)$/i.test(entry.name)
   if (loading && !snapshot && !page) return <div className="workspace-empty">读取文件…</div>

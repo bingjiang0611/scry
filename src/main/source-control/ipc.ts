@@ -7,7 +7,8 @@ import type {
   ScPrExpected,
   ScPrRef,
   ScRef,
-  ScReviewDraft
+  ScReviewDraft,
+  SourceControlApi
 } from '../../shared/source-control'
 import { validGithubRepository } from './github'
 import { operationIdPattern } from './store'
@@ -192,45 +193,51 @@ export function parseScMutation(value: unknown): ScMutation & { operationId: str
   }
 }
 
+// Both trusted local IPC and authenticated desktop requests use these parsers.
+export function sourceControlHandlers(service: SourceControlService, authorize?: () => void) {
+  return {
+    read: (request: unknown) => service.read(text(request)),
+    diff: (request: unknown) => {
+      const input = object(request)
+      return service.diff({ ...expected(input), path: path(input.path), staged: bool(input.staged) })
+    },
+    mutate: (request: unknown) => {
+      const mutation = parseScMutation(request)
+      return authorize ? service.mutate(mutation, authorize) : service.mutate(mutation)
+    },
+    operations: (request: unknown) => service.operations(ref(object(request))),
+    reconcile: (request: unknown) => service.reconcile(operation(object(request))),
+    acknowledge: (request: unknown) => service.acknowledge(operation(object(request))),
+    pullRequests: (request: unknown) => {
+      const input = object(request)
+      return service.pullRequests({ ...ref(input), repository: repository(input.repository) })
+    },
+    pullRequest: (request: unknown) => service.pullRequest(prRef(object(request))),
+    saveCommitDraft: (request: unknown) => service.saveCommitDraft(parseCommitDraft(request)),
+    loadCommitDraft: async (request: unknown) => {
+      const requestRef = ref(object(request))
+      const value = await service.loadCommitDraft(requestRef)
+      if (value === null) return null
+      const draft = parseCommitDraft(value)
+      if (draft.repositoryId !== requestRef.repositoryId) throw new Error('提交消息草稿不属于此仓库')
+      return draft
+    },
+    saveDraft: (request: unknown) => service.saveDraft(parseReviewDraft(request)),
+    loadDraft: async (request: unknown) => {
+      const target = prRef(object(request))
+      const draft = await service.loadDraft(target)
+      if (draft === null) return null
+      const parsed = parseReviewDraft(draft)
+      if (parsed.repositoryId !== target.repositoryId || parsed.repository !== target.repository || parsed.number !== target.number)
+        throw new Error('持久化草稿的目标不匹配')
+      return parsed
+    }
+  } satisfies Record<keyof SourceControlApi, (request: unknown) => unknown>
+}
+
 type Register = (channel: string, listener: (event: IpcMainInvokeEvent, request: unknown) => unknown) => void
 export function registerSourceControlIpc(register: Register, service: SourceControlService): void {
-  register('sourceControl:read', (_event, request) => service.read(text(request)))
-  register('sourceControl:diff', (_event, request) => {
-    const input = object(request)
-    return service.diff({ ...expected(input), path: path(input.path), staged: bool(input.staged) })
-  })
-  register('sourceControl:mutate', (_event, request) => service.mutate(parseScMutation(request)))
-  register('sourceControl:operations', (_event, request) => service.operations(ref(object(request))))
-  register('sourceControl:reconcile', (_event, request) => service.reconcile(operation(object(request))))
-  register('sourceControl:acknowledge', (_event, request) => service.acknowledge(operation(object(request))))
-  register('sourceControl:pullRequests', (_event, request) => {
-    const input = object(request)
-    return service.pullRequests({ ...ref(input), repository: repository(input.repository) })
-  })
-  register('sourceControl:pullRequest', (_event, request) => service.pullRequest(prRef(object(request))))
-  register('sourceControl:saveCommitDraft', (_event, request) =>
-    service.saveCommitDraft(parseCommitDraft(request))
-  )
-  register('sourceControl:loadCommitDraft', async (_event, request) => {
-    const requestRef = ref(object(request))
-    const value = await service.loadCommitDraft(requestRef)
-    if (value === null) return null
-    const draft = parseCommitDraft(value)
-    if (draft.repositoryId !== requestRef.repositoryId) throw new Error('提交消息草稿不属于此仓库')
-    return draft
-  })
-  register('sourceControl:saveDraft', (_event, request) => service.saveDraft(parseReviewDraft(request)))
-  register('sourceControl:loadDraft', async (_event, request) => {
-    const ref = prRef(object(request))
-    const draft = await service.loadDraft(ref)
-    if (draft === null) return null
-    const parsed = parseReviewDraft(draft)
-    if (
-      parsed.repositoryId !== ref.repositoryId ||
-      parsed.repository !== ref.repository ||
-      parsed.number !== ref.number
-    )
-      throw new Error('持久化草稿的目标不匹配')
-    return parsed
-  })
+  for (const [method, handler] of Object.entries(sourceControlHandlers(service))) {
+    register(`sourceControl:${method}`, (_event, request) => handler(request))
+  }
 }

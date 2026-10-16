@@ -60,7 +60,7 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **执行位置选择器**：双栏，左栏本机 / 已保存主机及状态 / 管理主机，右栏为本机目录或该主机 catalog 里的项目。只在未绑定会话的新草稿上出现；已有会话锁定机器、项目与 Provider/profile。切换位置只把草稿文本带到空目标，不带附件；不迁移会话。
 - **离线与缺失**：composer 上方提示条说明未连接、未知、待配对或主机已删除，并给出显式「连接」；不回退本机、不自动重发。远程运行中或回执未知时禁止发送，不提供排队。Provider/profile 消失时显示「原 Provider / profile 已不可用」占位，不代选。
 - **权限文案**：远程权限去掉「本机」并附主机名，例如「完全访问 · mac2」，说明为「Agent 以 mac2 上的用户权限运行」。
-- **能力缺口**：远程文件为顶栏按钮打开的只读抽屉；图片附件直接提示不支持；后台任务不暴露单项停止。
+- **当时的能力缺口**：文件只读抽屉与终端缺口已由下方「远程右侧工作区能力」替代；图片附件和后台任务单项停止仍未扩展。
 - **catalog 读取**：共享 module store，每个连接在一次「已连接」期间读取一次，运行结束（settled/failed）后再刷新；不对侧栏持续轮询。当时远程目录只来自宿主 catalog；此限制已由下方 `D-20261015-custom-directory` 的明确用户授权扩展，catalog 刷新策略不变。
 - **实现入口**：`LocationPicker.tsx`、`RemoteChat.tsx`、`HostsView.tsx`、`SidebarRemoteProjects.tsx`、`hooks/useRemoteCatalogs.ts`、`remote-location.css`、`hosts-view.css`；`DesktopRemote.tsx` 只保留配对表单、只读文件、宿主面板等共享块。删除 `MachineNavigation.tsx` 及其测试/CSS。
 - **回归入口**：`RemoteLocation.test.tsx`（断线保留、乱序读取、无主机时与 `WorkdirPicker` 一致、已删除主机占位、读取失败标未知、离线连接按钮、主机名权限文案）。`node scripts/desktop-remote-ui-smoke.mjs --keep` 改为全程在生产 App 中验证：主机导航计数、位置选择器带草稿进入远程项目、双 Enter 只提交一次、原生 session 采用、停止/回答用账本 UUID、回答失败不显示成功、Provider/profile 隔离、新建会话留在同一机器、离线/读取失败/重连保留草稿且不重发、Provider 消失不代选、回到本机、设置跳转主机页、主机页项目入口、renderer 重载后侧栏远程会话及重连刷新 catalog。两个 mutation control 仍须失败。
@@ -138,6 +138,19 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **安装更新**：用户随后明确要求“直接帮我安装好，我负责重启”。2026-10-14 18:55 已通过仓库 `scripts/install-macos.mjs` 原子安装到 `/Applications/Scry.app`，未退出、停止或启动 App。安装后版本 0.2.183、签名及上述 hash 核对通过；旧进程 PID 56237 仍在运行，重启后的运行版本尚未验收。
 - **安装回执与备份**：实际回执是上述目录的 `install-only-result.json`，日志 `install-only.log`；不再运行旧的安装入口。0.2.182 备份在 `/Applications/.Scry.app.backup`，此前已有备份另存为 `/Applications/.Scry.app.backup-preserved-61334a9d-9515-45d6-b57a-4d62ffdec45c`。mac2 的 0.2.182 宿主未改动；日常客户端正式配对仍待完成。
 
+## 远程右侧工作区能力（2026-10-15）
+
+- 远程会话复用本地右侧标签、文件编辑器、源代码管理、终端、Agents 与会话 Diff。文件支持编辑、创建、重命名、移动和移到废纸篓；源代码管理复用同一业务校验、快照和操作日志。外部打开作用于**宿主**默认应用，不会将宿主路径交给客户端文件接口。
+- `info.workbench: 1` 声明真实协议能力。旧宿主缺失声明时保留只读文件兼容入口，终端和源代码管理要求更新宿主；不能仅删掉提示后调用客户端 API。
+- 桌面专用 `desktopWorkbench` 只接受枚举的 typed 操作；不会放宽手机工作区接口。每次请求绑定已授权 canonical cwd，并校验证书、文件修订或仓库身份。异步预检后、文件/Git 写入前再次检查授权。终端按证书及 canonical cwd 隔离，`scopeId` 只分组，不授权；旧 epoch 不能输入、调整或关闭。
+- 文件、Git、终端输入都不自动重试。终端输出使用带 stream 身份的读取游标和累计 ACK，只有累计 ACK 可安全重复；丢失最终确认仍能交付退出事件。离开页面会分离输出消费者，不终止 Shell，也不会因未读输出耗尽内存而长期卡住；重开后从宿主录制追赶。
+- 工作区 RPC 继续遵守现有 TLS 帧与响应上限。完整文本响应序列化后超过 3 MiB 转入分页只读视图，单次写入还受请求帧上限约束；若需要编辑超限文件，须先扩展带修订校验的分块传输合同，不能静默截断或放宽任意路径访问。
+- 新回归 `src/renderer/remote-workbench.test.ts` 使用真实临时文件和 Git、实际终端管理器配合 PTY fixture，覆盖跨工作区/证书拒绝、修订冲突、撤权后的写入拒绝，以及丢失最终 ACK 后不重放输入仍交付退出。`desktop-client-ipc.test.ts` 通过生产注册 wrapper 拒绝非可信 sender/frame/origin。
+- mac2 真机：在隔离目录运行同一 **0.2.191 开发构建**，`app.asar` SHA-256 为 `5830c9a0b8bd928d86e66cedc210a7a7b0b30fcb171731050fe441e934fb8b49`。真实文件写入/修订冲突/创建重命名、Git 暂存提交、原生 PTY cwd/输入、累计 ACK 重复、分离后超过 1 MiB 输出继续完成、录制追赶和旧 writer 拒绝均通过。现有 mac2 App 未替换，测试实例已收敛；没有真实付费 Provider 请求，Agent 生命周期使用打包 Codex fixture。未执行 GitHub 推送、PR 或远程用户界面逐项坐标验收，不把协议/宿主验收写成这些路径已通过。
+- 本地检查：Node 22.22.1 下 typecheck、88 项当前定向测试、完整 renderer UI、CLI release（993 测试及 package smoke）、打包/资源/安全 smoke 通过。全量以 `npm run test:unit -- --maxWorkers=1 && npm run test:shell` 完成：252 文件 / 3167 测试通过，3 个真实探针保持跳过，shell 通过；日志 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-1fbf3dcba62fe1cc.log`。此前并行全量出现工作区 Git 用例 5 秒超时，随后默认双 worker 的复测又出现既有 Git push 用例超时并触及命令期限；当时机器 load average 为 39.72。本次未删除断言、扩大测试超时或跳过 Git 用例，最后将 worker 降为 1。最终全量运行还包含另一并行任务对 `source-control/service.test.ts` 的 15 秒真实 Git allowance 调整，该文件不纳入本次提交，因此不能把 3167 通过宣称为原 5 秒预算已恢复绿色。通过临时 Vitest transform、保持仓库文件不变的对照中，HEAD 原始测试定义配当前实现得到 26 通过 / 1 个 push 用例 5.44 秒超时；再用 HEAD 的 service/GitHub 实现单独运行该项，3.74 秒通过（其余 26 项未运行）。这些结果支持继续单列 Git fixture/负载问题，不证明所有环境下的原预算都稳定；原始失败不被最终通过抹去。npm 12 的 CLI package smoke 还曾因 `npm pack --json` 返回对象而失败；使用仓库已有 Node 22/npm 10 后原断言通过，没有为此修改 CLI。
+- mac2 前两次启动收到 `SIGKILL`，未进入测试；签名和传输 hash 一致，系统日志显示允许执行，终止来源未查明。用户确认环境限制应已解除后，同一目录、同一签名与 hash 的构建通过；没有通过改签名、停用安全软件或替换旧 App 绕过。
+- 复验入口：先构建 `npm run pack:artifact`，再显式运行 `node scripts/validate-mac2-workbench.mjs --host=user@hostname`。只创建临时 App、HOME、userData 和工作区，不安装到 `/Applications`，不停止现有实例；保留隔离构建路径供复盘。
+
 ## 行为与边界
 
 - 远程发送复用 App 的规范执行入口、权限/trust 检查、停止升级、归档和 managed recorder 两阶段提交，不走另一套简化执行器。
@@ -147,7 +160,7 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - SSH 进程退出后，连接列表返回 `disconnected`；发送前已知离线的请求直接拒绝，不制造未知回执。仍在运行的 SSH 进程不等于每次宿主请求都成功，网络错误仍须按具体回执核对。
 - SSH 端口在宿主重启后复用。端口占用或配置损坏会显示桌面监听恢复失败；不会撤销设备，也不会因此停用手机配对/中继。释放占用后重启宿主可恢复原端口。
 - 关闭桌面监听会断开其通道，但不撤销手机设备或停止已有 Agent。监听存续期间，配对仍受短时邀请约束；不是只有邀请有效期内才监听。
-- 远程文件只读。远程工具正文引用和后台任务不能调用客户端的本地文件/Provider 接口；首版不提供单个远程后台任务停止、终端、附件上传或本地文件写入。
+- 支持上述工作区协议的远端可编辑文件并运行宿主终端。远程工具正文引用和后台任务不能调用客户端的本地文件/Provider 接口；单个远程后台任务停止、附件上传及客户端本地文件写入不在此扩展范围。
 - Scry 不是沙箱。Provider 最终以执行端本机用户权限运行；仓库 MCP/Hook/plugin/recorder callback 仍按既有 fingerprint/trust 合同执行。
 - 生产包默认启用远程宿主组装；开发环境需 `SCRY_REMOTE_HOST=1`。设置 `SCRY_REMOTE_RELAY_ENABLED=0` 可只用 SSH、不拨公网 relay；不要用于仍需手机中继的进程。
 

@@ -128,6 +128,7 @@ import { RemoteHostService, type RemoteHostServiceDependencies } from './remote/
 import { DesktopRemoteClient } from './remote/desktop-client'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
 import { createDesktopHostReader } from './remote/desktop-host-reader'
+import { createDesktopWorkbench } from './remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { ReverseTunnelTransport } from './remote/relay-client'
@@ -4345,6 +4346,12 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
     remoteHostService = await RemoteHostService.create({
       stateDirectory,
+      desktopWorkbench: createDesktopWorkbench({
+        directory: join(app.getPath('userData'), 'desktop-terminal-recordings'),
+        authorizeWorkspace: resolveRemoteProjectDirectory,
+        sourceControl, environment: warmShellEnv, openPath: openLocalPath,
+        trashItem: (path) => shell.trashItem(path)
+      }),
       readDesktop: createDesktopHostReader({
         userDataDir: app.getPath('userData'),
         hostId: () => requireRemoteHost().hostId,

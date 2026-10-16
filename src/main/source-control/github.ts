@@ -369,7 +369,7 @@ export class GithubSession {
     title: string
     body: string
     draft: boolean
-  }): Promise<{ number: number; url: string }> {
+  }, authorize?: () => void): Promise<{ number: number; url: string }> {
     const path = this.repositoryPath(input.repository)
     const head = `${input.headRepository.split('/')[0]}:${input.headBranch}`
     const existing = await this.request<GhPr[]>(
@@ -379,6 +379,7 @@ export class GithubSession {
     if (!Array.isArray(existing)) throw new ScGithubError('无法确认既有 PR', false)
     if (existing.length)
       throw new ScGithubError('此 head/base 已有开放 PR，请从列表选择；不会重复创建', false)
+    authorize?.()
     const result = await this.request<GhPr>('POST', `${path}/pulls`, {
       title: input.title,
       body: input.body,

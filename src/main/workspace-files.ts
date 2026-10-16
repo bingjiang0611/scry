@@ -299,28 +299,30 @@ export async function openWorkspaceFileExternally(
   return true
 }
 
-export async function writeWorkspaceFile(request: WorkspaceWriteRequest): Promise<WorkspaceFileSnapshot> {
+export async function writeWorkspaceFile(request: WorkspaceWriteRequest, authorize?: () => void): Promise<WorkspaceFileSnapshot> {
   // revision 比对与写回必须在同一个租约内完成，否则并发写会互相覆盖。
   return withWorkspaceLease(await canonicalRoot(request.cwd), async () => {
     const bytes = Buffer.from(request.content, 'utf8')
     const current = await readWorkspaceFile(request)
     if (current.revision !== request.expectedRevision) throw new Error('文件已在磁盘上发生变化，请重新载入后再编辑')
     const target = await checkedPath(request.cwd, request.path)
+    authorize?.()
     await writeFile(target.realPath, bytes)
     return readWorkspaceFile(request)
   })
 }
 
-export async function createWorkspaceEntry(request: WorkspaceCreateRequest): Promise<WorkspaceEntry> {
-  return withWorkspaceLease(await canonicalRoot(request.cwd), () => createWorkspaceEntryLocked(request))
+export async function createWorkspaceEntry(request: WorkspaceCreateRequest, authorize?: () => void): Promise<WorkspaceEntry> {
+  return withWorkspaceLease(await canonicalRoot(request.cwd), () => createWorkspaceEntryLocked(request, authorize))
 }
 
-async function createWorkspaceEntryLocked(request: WorkspaceCreateRequest): Promise<WorkspaceEntry> {
+async function createWorkspaceEntryLocked(request: WorkspaceCreateRequest, authorize?: () => void): Promise<WorkspaceEntry> {
   const parent = await checkedPath(request.cwd, request.parentPath)
   if (!(await stat(parent.realPath)).isDirectory()) throw new Error('目标父路径不是文件夹')
   const name = entryName(request.name)
   const path = join(parent.realPath, name)
   if (await exists(path)) throw new Error('同名文件或文件夹已存在')
+  authorize?.()
   if (request.kind === 'directory') await mkdir(path)
   else await writeFile(path, '', { flag: 'wx' })
   const info = await lstat(path)
@@ -333,13 +335,14 @@ async function createWorkspaceEntryLocked(request: WorkspaceCreateRequest): Prom
   }
 }
 
-export async function renameWorkspaceEntry(request: WorkspaceRenameRequest): Promise<WorkspaceEntry> {
+export async function renameWorkspaceEntry(request: WorkspaceRenameRequest, authorize?: () => void): Promise<WorkspaceEntry> {
   const source = await checkedPath(request.cwd, request.path)
   const sourceInfo = await lstat(source.path)
   const name = entryName(request.name)
   const targetPath = join(dirname(source.path), name)
   if (!isInside(source.root, targetPath)) throw new Error('重命名目标不能越过工作区')
   if (await exists(targetPath)) throw new Error('同名文件或文件夹已存在')
+  authorize?.()
   await rename(source.path, targetPath)
   const path = portablePath([...pathParts(dirname(source.portable)), name])
   const info = await lstat(targetPath)
@@ -352,7 +355,7 @@ export async function renameWorkspaceEntry(request: WorkspaceRenameRequest): Pro
   }
 }
 
-export async function moveWorkspaceEntry(request: WorkspaceMoveRequest): Promise<WorkspaceEntry> {
+export async function moveWorkspaceEntry(request: WorkspaceMoveRequest, authorize?: () => void): Promise<WorkspaceEntry> {
   const source = await checkedPath(request.cwd, request.path)
   if (!source.portable) throw new Error('不能移动工作区根目录')
   const sourceInfo = await lstat(source.path)
@@ -365,6 +368,7 @@ export async function moveWorkspaceEntry(request: WorkspaceMoveRequest): Promise
     throw new Error('文件夹不能移动到自身内部')
   }
   if (await exists(targetPath)) throw new Error('目标目录中已有同名文件或文件夹')
+  authorize?.()
   await rename(source.path, targetPath)
   const info = await lstat(targetPath)
   return {

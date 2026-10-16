@@ -202,7 +202,7 @@ export class SourceControlService {
     }
   }
 
-  async mutate(request: ScMutation & { operationId: string }): Promise<ScOperation> {
+  async mutate(request: ScMutation & { operationId: string }, authorize?: () => void): Promise<ScOperation> {
     const identity = await this.identity(request)
     return this.exclusive(identity, async () => {
       const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex')
@@ -251,6 +251,7 @@ export class SourceControlService {
             head: request.head
           }
           await this.store.save(record)
+          authorize?.()
           dispatched = true
           record.operation.evidence =
             request.action === 'review'
@@ -291,6 +292,7 @@ export class SourceControlService {
             ) {
               throw new Error('此文件已有部分暂存；必须另行确认用完整工作区版本替换该文件的 index 选择')
             }
+            authorize?.()
             dispatched = true
             await this.git.stage(identity, files, request.action === 'unstage', snapshot.head)
             await this.git.status(identity)
@@ -311,6 +313,7 @@ export class SourceControlService {
               record.intent = { parent: snapshot.head }
               record.operation.message = '正在暂存明确选择的文件；尚未创建提交'
               await this.store.save(record)
+              authorize?.()
               dispatched = true
               const paths = await this.git.stage(identity, selected, false, snapshot.head)
               tree = (await this.git.run(identity.root, ['write-tree'])).trim()
@@ -329,6 +332,7 @@ export class SourceControlService {
               tree
             }
             await this.store.save(record)
+            authorize?.()
             dispatched = true
             const sha = await this.git.commitIndex(identity, request.message)
             const [actualTree, parents] = (
@@ -358,6 +362,7 @@ export class SourceControlService {
               record.intent = { target, branch: snapshot.branch, head: snapshot.head }
               await this.store.save(record)
               await this.expected(identity, request)
+              authorize?.()
               dispatched = true
               await this.git.push(identity, target, snapshot.branch, snapshot.head)
               if ((await this.git.remoteHead(identity, target, snapshot.branch)) !== snapshot.head)
@@ -366,6 +371,7 @@ export class SourceControlService {
             } else {
               record.intent = { target }
               await this.store.save(record)
+              authorize?.()
               dispatched = true
               await this.git.fetch(identity, target, request.remote)
             }
@@ -391,8 +397,9 @@ export class SourceControlService {
               account: session.account
             }
             await this.store.save(record)
+            authorize?.()
             dispatched = true
-            record.operation.evidence = await session.create(request)
+            record.operation.evidence = await session.create(request, authorize)
           }
         }
         record.operation.status = 'succeeded'

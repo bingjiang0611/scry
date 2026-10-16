@@ -37,6 +37,7 @@ export interface HostControllerBinding {
 
 export interface HostControllerFactoryDependencies {
   readDesktop?: HostControllerDependencies['readDesktop']
+  desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerDependencies['desktopDirectories']
   // Directory under Scry's userData; pairing, ledger and output subdirs are created.
   stateDirectory: string
@@ -144,6 +145,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   const workspace: WorkspaceAuthorizer = { authorize: (cwd) => deps.authorizeWorkspace(cwd) }
   const controllerDeps: HostControllerDependencies = {
     ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
+    ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
     ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
     pairing: {
       store: pairingStore,
@@ -189,9 +191,11 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     close: async () => {
       if (closed) return
       closed = true
-      // Release content and lifecycle leases before pairing authority state.
-      try { await outputStore.close() } finally {
-        try { ledgerStore.close() } finally { pairingStore.close() }
+      // End only desktop-owned shells before releasing host lifecycle leases.
+      try { await deps.desktopWorkbench?.dispose() } finally {
+        try { await outputStore.close() } finally {
+          try { ledgerStore.close() } finally { pairingStore.close() }
+        }
       }
     }
   }

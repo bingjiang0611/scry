@@ -1,3 +1,6 @@
+import type { DesktopWorkbenchRequest, DesktopWorkbenchResult } from '../../shared/desktop-workbench'
+import { parseDesktopWorkbenchQuery } from './desktop-workbench'
+import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
@@ -301,7 +304,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
     const info = await this.#desktop(connectionIdValue, { kind: 'info' })
-    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...(info.directorySelection === true ? { directorySelection: true as const } : {}) }
+    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...(info.directorySelection === true ? { directorySelection: true as const } : {}), ...(info.workbench === 1 ? { workbench: 1 as const } : {}) }
   }
 
   async directories(connectionIdValue: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage> {
@@ -444,6 +447,17 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     const wireResponse = { ...responseValue, runId } as AgentQuestionResponse
     const response = await this.#write(connectionIdValue, { op: 'answerQuestion', runId, answerId, response: wireResponse })
     if (!record(response) || !record(response.answer) || response.answer.status !== 'answered') fail('answer_not_confirmed')
+  }
+
+  async workbench<Request extends DesktopWorkbenchRequest>(connectionIdValue: string, request: Request): Promise<DesktopWorkbenchResult<Request>> {
+    const query = parseDesktopWorkbenchQuery(request)
+    const wire = { op: 'desktopWorkbench', query }
+    const read = ['workspaceList', 'workspaceRead', 'workspaceReadKnown', 'workspaceReadPage', 'workspaceReadPageKnown', 'terminalActive', 'terminalEvents', 'terminalRecordingList', 'terminalRecordingRead', 'read', 'diff', 'operations', 'pullRequests', 'pullRequest', 'loadCommitDraft', 'loadDraft'].includes(query.method)
+    // Writes are serialized and never automatically retried, including PTY input.
+    const response = read ? await this.#requestForConnection(connectionIdValue, wire) : await this.#write(connectionIdValue, wire)
+    if (!record(response) || !Object.hasOwn(response, 'workbench')) fail('invalid_desktop_workbench_response')
+    validateDesktopWorkbenchResponse(request, response.workbench)
+    return response.workbench as DesktopWorkbenchResult<Request>
   }
 
   async files(connectionIdValue: string, value: DesktopRemoteContext, path: string, cursor?: string): Promise<WorkspaceListResult> {

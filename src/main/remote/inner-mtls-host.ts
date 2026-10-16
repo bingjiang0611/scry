@@ -250,6 +250,9 @@ export class InnerMtlsHost {
       if (request.op === 'desktop') {
         return { desktop: await controller.readDesktop(fingerprint, request.query) }
       }
+      if (request.op === 'desktopWorkbench') {
+        return { workbench: await controller.desktopWorkbench(fingerprint, request.query) }
+      }
       if (request.op === 'desktopDirectory') {
         return { directory: controller.desktopDirectory(fingerprint, request.query) }
       }

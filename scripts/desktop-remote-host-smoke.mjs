@@ -3,7 +3,6 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import { randomUUID } from 'node:crypto'
-import { build } from 'esbuild'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -80,6 +79,9 @@ function connectCdp(url) {
 }
 
 async function buildTransportClient() {
+  const prepared = process.argv.find(value => value.startsWith('--transport-client='))?.slice('--transport-client='.length)
+  if (prepared) return await import(resolve(prepared))
+  const { build } = await import('esbuild')
   const entry = join(temp, 'desktop-transport-entry.mjs')
   const output = join(temp, 'desktop-transport-client.mjs')
   writeFileSync(entry, `export { generateDesktopDeviceIdentity, desktopTlsRequest } from ${JSON.stringify(join(root, 'src/main/remote/desktop-transport.ts'))}\n`)
@@ -269,7 +271,7 @@ async function main() {
   assert.equal(granted.kind, 'pair.granted')
   const deviceCertPEM = granted.certificatePEM
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
-  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical', directorySelection: true })
+  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical', directorySelection: true, workbench: 1 })
   const customDirectory = join(temp, 'custom project ')
   mkdirSync(customDirectory)
   const canonicalCustom = realpathSync(customDirectory)
@@ -289,6 +291,58 @@ async function main() {
   assert.deepEqual(await evaluate('window.scry.activeRuns()'), [], 'selecting a directory must not start an Agent')
   assert.equal(existsSync(join(canonicalCustom, '.scry')), false, 'selection must not create a turn record')
 
+  // Real production desktop operations: temporary host filesystem, Git and PTY.
+  const workbench = async (surface, method, args, cwd = canonicalWorkspace) => {
+    const result = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktopWorkbench', query: { surface, cwd, method, args } })
+    assert.equal(result.error, undefined, JSON.stringify(result))
+    return result.workbench
+  }
+  const originalFile = await workbench('workspace', 'workspaceRead', [{ cwd: canonicalWorkspace, path: 'README.md' }])
+  await workbench('workspace', 'workspaceWrite', [{ cwd: canonicalWorkspace, path: 'README.md', content: '# remote workbench verified\n', expectedRevision: originalFile.revision }])
+  assert.equal(readFileSync(join(workspace, 'README.md'), 'utf8'), '# remote workbench verified\n')
+  const stale = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktopWorkbench', query: { surface: 'workspace', cwd: canonicalWorkspace, method: 'workspaceWrite', args: [{ cwd: canonicalWorkspace, path: 'README.md', content: 'must not write', expectedRevision: originalFile.revision }] } })
+  assert.ok(stale.error, 'stale file revision must reject')
+  await workbench('workspace', 'workspaceCreate', [{ cwd: canonicalWorkspace, name: 'created.txt', kind: 'file' }])
+  await workbench('workspace', 'workspaceRename', [{ cwd: canonicalWorkspace, path: 'created.txt', name: 'renamed.txt' }])
+  assert.ok(existsSync(join(workspace, 'renamed.txt')))
+  git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid'); git('config', 'commit.gpgsign', 'false')
+  const scm = await workbench('sourceControl', 'read', [canonicalWorkspace])
+  assert.equal(scm.status, 'available')
+  const staged = await workbench('sourceControl', 'mutate', [{ repositoryId: scm.data.id, expectedRevision: scm.data.revision, action: 'stage', paths: ['README.md'], operationId: randomUUID() }])
+  assert.equal(staged.status, 'succeeded', JSON.stringify(staged))
+  const stagedSnapshot = await workbench('sourceControl', 'read', [canonicalWorkspace])
+  const committed = await workbench('sourceControl', 'mutate', [{ repositoryId: scm.data.id, expectedRevision: stagedSnapshot.data.revision, action: 'commit', message: 'Verify remote workbench', operationId: randomUUID() }])
+  assert.equal(committed.status, 'succeeded', JSON.stringify(committed))
+  assert.equal(git('log', '-1', '--format=%s').toString().trim(), 'Verify remote workbench')
+  const shell = await workbench('terminal', 'terminalStart', [{ cwd: canonicalWorkspace, cols: 100, rows: 30, scopeId: 'real-remote-workbench' }])
+  assert.equal(shell.cwd, canonicalWorkspace)
+  await workbench('terminal', 'terminalReady', [shell.id, shell.ownershipEpoch])
+  await workbench('terminal', 'terminalWrite', [shell.id, shell.ownershipEpoch, "printf 'remote-native-terminal\\n' > terminal-marker.txt; pwd\r"])
+  let cursor, output = '', acknowledged = 0
+  const terminalDeadline = Date.now() + 15000
+  while (Date.now() < terminalDeadline && (!existsSync(join(workspace, 'terminal-marker.txt')) || !output.includes(canonicalWorkspace))) {
+    const events = await workbench('terminal', 'terminalEvents', cursor ? [cursor] : [])
+    cursor = events.cursor
+    for (const event of events.events) if (event.kind === 'data') for (const data of event.events) {
+      output += data.data; acknowledged += Buffer.byteLength(data.data)
+      await workbench('terminal', 'terminalAck', [shell.id, shell.ownershipEpoch, acknowledged])
+      await workbench('terminal', 'terminalAck', [shell.id, shell.ownershipEpoch, acknowledged])
+    }
+    if (!existsSync(join(workspace, 'terminal-marker.txt'))) await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  assert.equal(readFileSync(join(workspace, 'terminal-marker.txt'), 'utf8'), 'remote-native-terminal\n')
+  assert.ok(output.includes(canonicalWorkspace), 'PTY must execute pwd in the host workspace')
+  await workbench('terminal', 'terminalWrite', [shell.id, shell.ownershipEpoch, "/usr/bin/yes remote-output | /usr/bin/head -c 1100000; printf detached > detached-marker.txt\r"])
+  await workbench('terminal', 'terminalDetach', [shell.id, shell.ownershipEpoch])
+  const detachedDeadline = Date.now() + 15000
+  while (Date.now() < detachedDeadline && !existsSync(join(workspace, 'detached-marker.txt'))) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(readFileSync(join(workspace, 'detached-marker.txt'), 'utf8'), 'detached', 'background PTY must not stall after detaching its consumer')
+  const attached = await workbench('terminal', 'terminalAttach', [shell.id])
+  assert.ok(attached.ownershipEpoch > shell.ownershipEpoch)
+  assert.ok(attached.catchUp.endOffset > 0)
+  const staleInput = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktopWorkbench', query: { surface: 'terminal', cwd: canonicalWorkspace, method: 'terminalWrite', args: [shell.id, shell.ownershipEpoch, 'must-not-execute\r'] } })
+  assert.equal(staleInput.error, 'stale_terminal_owner')
+  await workbench('terminal', 'terminalClose', [shell.id, attached.ownershipEpoch])
   const context = { cwd: canonicalWorkspace, providerId: 'codex' }
   const submit = async (intentId, prompt, extra = {}) => tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'submit', intentId, detail: detail(canonicalWorkspace, prompt, extra)
@@ -423,6 +477,7 @@ async function main() {
   }
   assert.ok(!JSON.parse(readFileSync(join(userDataDir, 'recent-folders.json'), 'utf8')).includes(realpathSync(temp)), 'revoked selection must not persist a grant')
   console.log(JSON.stringify({
+    workbench: { realFileWrite: true, staleRevisionDenied: true, createRename: true, realGitStageCommit: true, realPtyCwdAndInput: true, cumulativeAckDuplicateSafe: true, detachedLargeOutputContinues: true, recordingCatchUp: true, staleWriterDenied: true },
     directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
     appPath, rendererUrl: page.url, hostId: invitation.hostId, pairPort: invitation.pairPort, runPort: invitation.runPort,
     supportedScenarios: ['trusted-local invite/confirm', 'pinned TLS CSR pairing', 'canonical info', 'normal trace/archive', 'duplicate intent', 'unknown receipt intentStatus', 'question cancellation', 'independent same-workspace sessions', 'canonical failed run', 'revocation'],

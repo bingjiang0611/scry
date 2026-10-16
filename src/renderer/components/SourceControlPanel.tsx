@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ScDiff, ScMutation, ScOperation, ScRead, ScRepository } from '@shared/source-control'
 import { basename } from '../format'
 import { commitFiles, isStaged, nextGitAction, type ScDelivery } from '../source-control-workflow'
 import { ModalFrame } from './Modals'
 import { Patch } from './SourceControlPatch'
 import { GithubPullRequestPanel } from './GithubPullRequestPanel'
+import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api'
 import { SourceControlCommitDialog } from './SourceControlCommitDialog'
 import '../source-control.css'
 
@@ -14,8 +15,8 @@ const actionNames = {
 }
 const statusNames = { running: '执行中', succeeded: '已确认', failed: '失败', unknown: '结果未知' }
 
-export function SourceControlPanel({ cwd, active }: { cwd: string; active: boolean }) {
-  const api = window.scry.sourceControl
+export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: string; active: boolean; api?: SourceControlApi }) {
+  const api = useMemo(() => injectedApi ?? defaultSourceControlApi, [injectedApi])
   const [state, setState] = useState<ScRead<ScRepository> | null>(null)
   const [tab, setTab] = useState<'changes' | 'pr' | 'operations'>('changes')
   const [error, setError] = useState('')
@@ -270,7 +271,7 @@ export function SourceControlPanel({ cwd, active }: { cwd: string; active: boole
           </div>
         </div>
         <div className="sc-scroll" hidden={tab !== 'pr'}>
-          <GithubPullRequestPanel key={`${repo.id}:${repo.branch}`} repo={repo} active={active && tab === 'pr'} busy={busy} suggestedTitle={delivery?.head === repo.head ? commitTitle : ''} ask={confirm} report={report} />
+          <GithubPullRequestPanel key={`${repo.id}:${repo.branch}`} repo={repo} active={active && tab === 'pr'} busy={busy} suggestedTitle={delivery?.head === repo.head ? commitTitle : ''} ask={confirm} report={report} api={api} />
         </div>
         {tab === 'operations' && <div className="sc-scroll"><section className="sc-section"><h3>操作证据 · 不自动重放</h3>
           {!operations.length && <p>本仓库没有本机操作记录。</p>}
