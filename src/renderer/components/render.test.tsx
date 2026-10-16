@@ -25,8 +25,6 @@ import {
   sessionEvidenceGapAfterLoad,
   applySessionCapturedEffects,
   applyTurnDoneEffects,
-  chatBottomDistance,
-  chatBottomStickinessAfterScroll,
   commitDraftOnDispatch,
   dequeueStartedPrompt,
   enqueuePrompt,
@@ -35,7 +33,6 @@ import {
   hasSessionOverviewContext,
   inputAfterFailedSubmit,
   inputAfterSuccessfulSubmit,
-  isChatNearBottom,
   migrateSessionComposerDraft,
   migrateSessionPromptQueue,
   providerContextCacheKey,
@@ -48,12 +45,12 @@ import {
   dequeueStartedPromptFromSessions,
   type SessionComposerDraft,
   type SessionEvidenceGap,
-  scrollChatToBottomIfNeeded,
   scrollChatTargetIntoView,
   shouldQueuePrompt,
   shouldReloadProjectsForDataUpdate,
   takeNextQueuedPrompt
 } from '../App'
+import { chatBottomDistance, chatBottomStickinessAfterScroll, isChatNearBottom, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
 import { AssistantTurn, RecorderContentPager, UserMessage, attachmentSrc, coalesceAdjacentThinking } from './ChatTurn'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'

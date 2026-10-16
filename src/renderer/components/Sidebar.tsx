@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import type { BackgroundWork } from '@shared/background-work'
+import type { ConversationSummary } from '@shared/conversation-api'
 import { sessionAttentionKey } from '@shared/session-attention'
 import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
@@ -37,6 +38,9 @@ export const Sidebar = memo(function Sidebar({
   projects,
   activeCwd,
   activeSessionId = null,
+  activeConversationId,
+  onNewConversation,
+  onPickConversation,
   activeProviderId,
   activeAgentProfileId,
   runningRunIds = new Set<string>(),
@@ -75,6 +79,9 @@ export const Sidebar = memo(function Sidebar({
   projects: ProjectMeta[]
   activeCwd: string | null
   activeSessionId?: string | null
+  activeConversationId?: string
+  onNewConversation?: (cwd: string) => Promise<void>
+  onPickConversation?: (conversation: ConversationSummary) => void
   activeProviderId?: SessionProviderId
   activeAgentProfileId?: string
   runningRunIds?: ReadonlySet<string>
@@ -161,11 +168,12 @@ export const Sidebar = memo(function Sidebar({
     const filtered = projects
       .map((project) => ({
         ...project,
-        totalSessions: project.sessions.length,
+        totalSessions: project.sessions.length + (project.conversations?.length ?? 0),
+        conversations: (project.conversations ?? []).filter((conversation) => !ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql)),
         projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
         sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
       }))
-      .filter((project) => project.projectMatch || project.sessions.length > 0)
+      .filter((project) => project.projectMatch || project.sessions.length > 0 || project.conversations.length > 0)
     return { pinned, filtered }
   }, [projects, ql])
   // Match local project ordering: named roots, explicit pins, then recent activity.
@@ -355,6 +363,13 @@ export const Sidebar = memo(function Sidebar({
               </div>
               {open && (
                 <div className="sb-sess-list">
+                  {p.cwd && onNewConversation && <button className="btn unified-new" onClick={() => { void onNewConversation(p.cwd) }} aria-label={`在 ${p.name} 中新建统一对话`}>＋ 统一对话 · 可切换 Provider</button>}
+                  {p.conversations.map((conversation) => <div className="sb-sess-row" key={conversation.id}>
+                    <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
+                      <span className="sb-session-main"><Icon name="message" /><span className="sb-sesstext">{conversation.title}</span></span>
+                      <span className="sb-session-meta">{conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}</span>
+                    </button>
+                  </div>)}
                   {p.sessions.map((s) => (
                     <SessionRow
                       key={sessionKey(p.cwd, s)}
@@ -377,7 +392,7 @@ export const Sidebar = memo(function Sidebar({
                       onMenu={onRenameSession ? openSessionMenu : undefined}
                     />
                   ))}
-                  {p.sessions.length === 0 && (
+                  {p.sessions.length === 0 && p.conversations.length === 0 && (
                     <div className="sb-project-empty">{emptyLabel}</div>
                   )}
                 </div>

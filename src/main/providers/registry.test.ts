@@ -42,11 +42,11 @@ describe('ProviderRegistry', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects history-free receipt tracking without an explicit adapter contract', () => {
+  it.each([{ trackInputReceipt: true as const }, { expectedInputTextHash: 'frozen-input' }])('rejects history-free input contracts without explicit adapter support: %j', (contract) => {
     const base = adapter('codex')
     const run = vi.spyOn(base, 'run')
     expect(() => new ProviderRegistry([base]).run('codex', {
-      runId: 'first-input', prompt: 'hello', trackInputReceipt: true, attachments: [], emit: vi.fn()
+      runId: 'first-input', prompt: 'hello', ...contract, attachments: [], emit: vi.fn()
     })).toThrow('尚未提供可验证')
     expect(run).not.toHaveBeenCalled()
   })

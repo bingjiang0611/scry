@@ -169,6 +169,7 @@ describe('preload IPC boundary', () => {
       'rendererReady',
       'desktopRemote',
       'sourceControl',
+      'conversations',
       ...Object.keys(invokeChannels),
       ...Object.keys(listenerChannels)
     ].sort())
@@ -182,6 +183,26 @@ describe('preload IPC boundary', () => {
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
     }
+  })
+
+  it('exposes only fixed conversation operations with their scoped arguments', async () => {
+    expect(Object.keys(api.conversations).sort()).toEqual(['create', 'list', 'preview', 'read', 'readItem', 'send'])
+    await api.conversations.create('/workspace')
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:create', '/workspace')
+    await api.conversations.list('/workspace')
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:list', '/workspace')
+    await api.conversations.read('conversation-id', 40)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:read', 'conversation-id', 40)
+    const ref = { runId: 'run-id', itemId: 'assistant', contentHash: 'a'.repeat(64) }
+    await api.conversations.readItem('conversation-id', ref)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:readItem', 'conversation-id', ref)
+    await api.conversations.preview('conversation-id', { providerId: 'codex' })
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:preview', 'conversation-id', { providerId: 'codex' })
+    const request = { conversationId: 'conversation-id', providerId: 'codex' as const, expectedRevision: 0,
+      expectedContinuationKey: 'frozen-identity', commandId: 'command-id', prompt: 'hello', selectedItems: [], confirmFresh: true }
+    await api.conversations.send(request)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:send', request)
+    expect(electron.invoke).toHaveBeenCalledTimes(6)
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

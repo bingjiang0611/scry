@@ -617,7 +617,7 @@ async function exerciseSessionTerminals(contents, scenario) {
     await wait(`document.querySelector('.chat').textContent.includes('History for ${id}')`)
   }
   // Use data-project-path so Sidebar grouping/header layout cannot flatten identity.
-  const session = (project, index) => `.sb-proj:has([data-project-path="/fixture/${project}"]) .sb-sess-row:nth-child(${index}) .sb-sess`
+  const session = (project, index) => `.sb-proj:has([data-project-path="/fixture/${project}"]) .sb-sess-row:nth-child(${index} of .sb-sess-row) .sb-sess`
   await wait(`document.querySelectorAll('.sb-sess').length === 3`)
   await select(session('old', 1), 'one')
   await click('[aria-label="右侧工作区"]')
@@ -775,7 +775,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   const pickSession = async (text) => {
     const index = await read(`[...document.querySelectorAll('.sb-sess')].findIndex(node => node.textContent.includes(${JSON.stringify(text)}))`)
     if (index < 0) throw new Error(`Missing session ${text}`)
-    await click(`.sb-sess-row:nth-child(${index + 1}) .sb-sess`)
+    await click(`.sb-sess-row:nth-child(${index + 1} of .sb-sess-row) .sb-sess`)
   }
   const modelIs = (id) => `document.querySelector('.model-effort-model')?.textContent === ${JSON.stringify(id)}`
   const chooseModel = async (id) => {

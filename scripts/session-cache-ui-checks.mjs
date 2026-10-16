@@ -1,7 +1,14 @@
 // Serialized into the isolated Electron runner. All clicks and keyboard input
 // go through Chromium's native event path, not HTMLElement.click().
 export async function exerciseSessionCache(contents) {
-  const read = async expression => contents.executeJavaScript(expression)
+  const read = async expression => {
+    const result = await contents.executeJavaScript(`(async () => {
+      try { return { ok: true, value: await (${expression}) } }
+      catch (error) { return { ok: false, error: String(error.stack ?? error) } }
+    })()`)
+    if (!result.ok) throw new Error(result.error)
+    return result.value
+  }
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const wait = expression => read(`(async () => {
     const deadline = Date.now() + 5000;

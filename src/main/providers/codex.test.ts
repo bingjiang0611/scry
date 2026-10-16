@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
@@ -467,6 +467,66 @@ describe('Codex provider adapter', () => {
       else process.env.SCRY_CODEX_SOURCE_HOME = previous
       rmSync(explicit, { recursive: true, force: true })
       rmSync(shell, { recursive: true, force: true })
+    }
+  })
+
+  it('previews a persistent Codex namespace without materializing it, then reuses it for the first transport', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-codex-identity-'))
+    const home = join(root, 'home')
+    const source = join(home, '.codex')
+    const stable = join(root, 'runtime', 'isolated')
+    const executable = join(root, 'codex')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'auth.json'), '{}')
+    writeFileSync(executable, '#!/bin/sh\n')
+    chmodSync(executable, 0o755)
+    const previousExecutable = process.env.SCRY_CODEX_PATH
+    process.env.SCRY_CODEX_PATH = executable
+    runtime.env = { HOME: home }
+    const adapter = createCodexAdapter(stable, home)
+    const context = { providerId: 'codex' as const, cwd: '/repo' }
+    try {
+      const key = await adapter.continuationKey!(context)
+      expect(existsSync(stable)).toBe(false)
+      appServer.request.mockResolvedValue({ data: [] })
+      await adapter.skills!.list(context)
+      expect(existsSync(stable)).toBe(true)
+      expect(await adapter.continuationKey!(context)).toBe(key)
+      expect(appServer.options.at(-1)?.env).toMatchObject({ CODEX_HOME: stable })
+    } finally {
+      await adapter.dispose?.()
+      if (previousExecutable === undefined) delete process.env.SCRY_CODEX_PATH
+      else process.env.SCRY_CODEX_PATH = previousExecutable
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a changed frozen Codex identity before starting a transport', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-codex-identity-'))
+    const home = join(root, 'home')
+    const source = join(home, '.codex')
+    const stable = join(root, 'runtime', 'isolated')
+    const executable = join(root, 'codex')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'auth.json'), '{}')
+    writeFileSync(executable, '#!/bin/sh\n')
+    chmodSync(executable, 0o755)
+    const previousExecutable = process.env.SCRY_CODEX_PATH
+    process.env.SCRY_CODEX_PATH = executable
+    runtime.env = { HOME: home }
+    const adapter = createCodexAdapter(stable, home)
+    const context = { providerId: 'codex' as const, cwd: '/repo' }
+    try {
+      const key = await adapter.continuationKey!(context)
+      writeFileSync(join(source, 'auth.json'), '{"changed":true}')
+      const handle = adapter.run({ runId: 'identity-mismatch', prompt: 'test', cwd: '/repo', attachments: [], expectedContinuationKey: key, emit: () => {} })
+      await expect(handle.promise).rejects.toThrow(/接续身份已变化/)
+      expect(appServer.start).not.toHaveBeenCalled()
+    } finally {
+      await adapter.dispose?.()
+      if (previousExecutable === undefined) delete process.env.SCRY_CODEX_PATH
+      else process.env.SCRY_CODEX_PATH = previousExecutable
+      rmSync(root, { recursive: true, force: true })
     }
   })
 
@@ -1040,6 +1100,43 @@ describe('Codex provider adapter', () => {
     })
     await expect(handle.promise).resolves.toMatchObject({ status: 'interrupted', providerTurnId: 'turn-delayed' })
     expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('interrupts the owned client without reopening a changed runtime source', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-codex-stop-identity-'))
+    const source = join(root, 'source')
+    const changedSource = join(root, 'changed-source')
+    mkdirSync(source)
+    mkdirSync(changedSource)
+    const previousSource = process.env.SCRY_CODEX_SOURCE_HOME
+    process.env.SCRY_CODEX_SOURCE_HOME = source
+    let notify: ((method: string, params: unknown) => void) | undefined
+    appServer.onNotification.mockImplementation((listener) => { notify = listener; return () => {} })
+    appServer.request.mockImplementation(async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } }
+      if (method === 'thread/start') return { thread: { id: 'owned-thread' } }
+      if (method === 'turn/start') return { turn: { id: 'owned-turn' } }
+      if (method === 'turn/interrupt') return {}
+      throw new Error(`unexpected request: ${method}`)
+    })
+    const adapter = createCodexAdapter(join(root, 'private'), root)
+    const handle = adapter.run({ runId: 'stop-owned-client', prompt: 'inspect', cwd: root, attachments: [], emit: () => {} })
+    try {
+      await vi.waitFor(() => expect(handle.getProviderTurnId?.()).toBe('owned-turn'))
+      const clients = appServer.options.length
+      process.env.SCRY_CODEX_SOURCE_HOME = changedSource
+      handle.interrupt()
+      await vi.waitFor(() => expect(appServer.request).toHaveBeenCalledWith('turn/interrupt', { threadId: 'owned-thread', turnId: 'owned-turn' }))
+      expect(appServer.options).toHaveLength(clients)
+    } finally {
+      if (previousSource === undefined) delete process.env.SCRY_CODEX_SOURCE_HOME
+      else process.env.SCRY_CODEX_SOURCE_HOME = previousSource
+      notify?.('turn/completed', { threadId: 'owned-thread', turn: { id: 'owned-turn', status: 'interrupted' } })
+      try { await handle.promise } finally {
+        await adapter.dispose?.()
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
   })
 
   it.each(['native interrupt rejected', 'turn/interrupt timed out'])('retains native ownership after %s', async (message) => {

@@ -559,7 +559,7 @@ export function normalizeAgentStartRequest(payload: AgentStartRequest): Normaliz
   }
 }
 
-function boundedControlValue(value: unknown): string | undefined {
+export function boundedControlValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.trim()
   return text && text.length <= 240 ? text : undefined

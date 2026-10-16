@@ -96,6 +96,13 @@ function launch(providerId: 'claude' | 'codex', extra: Partial<ProviderRunReques
 }
 
 describe('Claude historical input at the real runner / mocked SDK boundary', () => {
+  it('retains a not_sent receipt when frozen runtime identity cannot be proved before SDK input', async () => {
+    const { handle } = launch('claude', { historicalContext: undefined, trackInputReceipt: true, expectedContinuationKey: 'frozen-identity' })
+    await expect(handle.promise).rejects.toThrow(/runtime HOME/)
+    expect(sdk.query).not.toHaveBeenCalled()
+    expect(handle.getInputReceipt?.()).toMatchObject({ status: 'not_sent', contextHash: null })
+  })
+
   it.each([undefined, 'native-A'])('tracks plain input with resume=%s without changing the wire text', async (resume) => {
     sdk.query.mockImplementation(({ prompt, options }) => {
       expect(prompt).toBe('继续')
@@ -189,6 +196,15 @@ describe('Claude historical input at the real runner / mocked SDK boundary', () 
 })
 
 describe('Codex historical input at the real adapter / mocked app-server boundary', () => {
+  it('rejects a native Skill rewrite before model input when the caller freezes plain text', async () => {
+    const prompt = '$audit 检查当前文件'
+    const { handle, events } = launch('codex', { prompt, expectedInputTextHash: createHash('sha256').update(expectedText(prompt)).digest('hex') })
+    await expect(handle.promise).rejects.toThrow(/原生输入需要改写原文/)
+    expect(server.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false)
+    expect(events.some((event) => event.kind === 'skill')).toBe(false)
+    expect(handle.getInputReceipt?.()).toMatchObject({ status: 'not_sent' })
+  })
+
   it.each([undefined, 'native-A'])('tracks plain input with resume=%s and preserves acceptance after execution failure', async (resume) => {
     const { handle } = launch('codex', { historicalContext: undefined, trackInputReceipt: true, resume })
     await vi.waitFor(() => expect(handle.getInputReceipt?.()?.status).toBe('accepted'))

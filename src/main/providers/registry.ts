@@ -65,10 +65,19 @@ export class ProviderRegistry {
       : null
   }
 
+  async continuationKey(context: ProviderContext): Promise<string> {
+    if (this.disabledProviders.has(context.providerId)) throw new Error(`provider disabled by SCRY_DISABLED_PROVIDERS: ${context.providerId}`)
+    const adapter = this.get(context.providerId)
+    if (!adapter.continuationKey) throw new Error(`${context.providerId} 尚未提供可验证的接续身份`)
+    const key = await adapter.continuationKey(context)
+    if (typeof key !== 'string' || key.length === 0) throw new Error(`${context.providerId} 返回了无效的接续身份`)
+    return key
+  }
+
   run(providerId: ProviderId, request: ProviderRunRequest): ProviderRunHandle {
     if (this.disabledProviders.has(providerId)) throw new Error(`provider disabled by SCRY_DISABLED_PROVIDERS: ${providerId}`)
     const adapter = this.get(providerId)
-    if ((request.historicalContext || request.trackInputReceipt) && !adapter.historicalContext) {
+    if ((request.historicalContext || request.trackInputReceipt || request.expectedInputTextHash) && !adapter.historicalContext) {
       throw new Error(`${providerId} 尚未提供可验证的历史输入交接`)
     }
     return adapter.run({
