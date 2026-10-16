@@ -52,8 +52,11 @@ export function performanceEnvironment(version: string, build: string, packaged:
 // compress ~20x, so a small byte cap keeps weeks of daily use instead of a few hours.
 // performance-[1-3].jsonl are the pre-archive layout and are compressed on the next open.
 const ACTIVE_FILE = 'performance-0.jsonl'
-const ARCHIVE_RE = /^performance-(?:[1-3]|\d{8}T\d{9}Z-[0-9a-f]{8})\.jsonl(?:\.gz)?$/
+const ARCHIVE_RE = /^performance-(?:[1-3]|(\d{8}T\d{9}Z)-[0-9a-f]{8})\.jsonl(?:\.gz)?$/
 const archiveStamp = (date: Date): string => `${date.toISOString().replace(/[-:.]/g, '')}-${randomUUID().slice(0, 8)}`
+const archiveTime = (stamp: string): number => Date.parse(stamp.replace(
+  /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z$/, '$1-$2-$3T$4:$5:$6.$7Z'
+))
 
 /** Local diagnostics only: bounded queue + one active file + byte-capped compressed archives; no DB, content or network. */
 export class PerformanceJournal {
@@ -61,6 +64,7 @@ export class PerformanceJournal {
   private readonly pending: string[] = []
   private pendingBytes = 0
   private size = 0
+  private lastArchiveTime = Number.NEGATIVE_INFINITY
   private writing: Promise<void> | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private closed = false
@@ -81,6 +85,12 @@ export class PerformanceJournal {
 
   async open(): Promise<void> {
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
+    let latestStamp = ''
+    for (const name of await readdir(this.options.directory)) {
+      const stamp = ARCHIVE_RE.exec(name)?.[1]
+      if (stamp && stamp > latestStamp) latestStamp = stamp
+    }
+    if (latestStamp) this.lastArchiveTime = archiveTime(latestStamp)
     try {
       this.size = (await stat(this.activeFile)).size
       if (this.size > 0) {
@@ -127,8 +137,12 @@ export class PerformanceJournal {
   private get activeFile(): string { return join(this.options.directory, ACTIVE_FILE) }
 
   private async rotate(): Promise<void> {
+    // File stamps are an ordering clock, not observation timestamps. Random suffixes must never
+    // decide chronology when rotations share a millisecond or the wall clock moves backwards.
+    // Seeded from retained archives on open, this also survives restart without a new file format.
+    this.lastArchiveTime = Math.max(Date.now(), this.lastArchiveTime + 1)
     try {
-      await rename(this.activeFile, join(this.options.directory, `performance-${archiveStamp(new Date())}.jsonl`))
+      await rename(this.activeFile, join(this.options.directory, `performance-${archiveStamp(new Date(this.lastArchiveTime))}.jsonl`))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }

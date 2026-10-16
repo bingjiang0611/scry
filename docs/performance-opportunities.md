@@ -13,7 +13,9 @@
 
 冻结 collector 提交 `cafc418`，生产提交 `7ac7fcb`。全量性能计数为3项better、25项unchanged、2项gating pass、3项macOS CPU指令candidate缺失，无worse。只收紧三个candidate平台基线，没有升级门禁或放宽。
 
-**独立已知失败**：全量unit曾3260通过/4 opt-in跳过；随后feedback专项触发原有同毫秒归档顺序缺陷（22通过/1失败），已在与`1c3cf63`相同的journal/report代码上确定性复现。未改断言或采集格式，诊断留存，需单独修复，不能把本轮描述为所有检查最终全绿。
+**日志顺序缺陷后续已修复**：[同毫秒归档排序实验](performance-experiments/20261016-journal-order.md)。保留原专项22通过/1失败和基线负对照；新归档使用可跨重启恢复的单调排序时钟，不改文件格式或recordedAt。新增冻结时钟/重启/回拨回归在旧实现确定性失败，修复后全量3261通过/4 opt-in跳过；无法恢复已有同毫秒旧归档的歧义顺序。
+
+**L2复测仍受阻**：同负载锁内配对观测为Pi五次环境解析541.87→382.85ms、账本五次追加/查询25.17→1.95ms；10核负载10.36→9.39，highLoad=true，高负载下测得，不可信。停止继续重跑挑样，等待低负载窗口；计数维持1/0/0且无worse，不能升级为用户收益结论。
 
 **后续优先顺序**：先做 capability RPC 启动/响应/关闭分段实验，确认12秒目录查询的主体；再给真实 turn+session finalization 增加端到端计数和大仓库负载，验证共享 after-tree。已有同名 source-control collector未覆盖真实Service.diff的两次revision检查，新增场景不能静默替换旧workload。保持trust、证据收敛与崩溃恢复合同。原生客户端路线不在本轮实现范围。
 
