@@ -71,7 +71,9 @@ afterEach(async () => {
   await rm(temp, { recursive: true, force: true })
 })
 
-describe('source control real temporary Git', () => {
+// These integrations run many real Git preflight and mutation processes.
+// Match git.test.ts's native-Git budget; command deadlines and assertions stay unchanged.
+describe('source control real temporary Git', { timeout: 15_000 }, () => {
   it('preserves the existing index, stages only selected paths, and commits the full confirmed index', async () => {
     await writeFile(join(cwd, 'base.txt'), 'already staged\n')
     git('add', 'base.txt')
