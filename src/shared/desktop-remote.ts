@@ -1,3 +1,4 @@
+import type { DesktopWorkbenchRequest, DesktopWorkbenchResult } from './desktop-workbench'
 import type { AgentPermissionMode, AgentQuestionResponse } from './runtime'
 import type { ActiveRun } from './trace'
 import type { LoadedSessionTurn } from './session-history'
@@ -94,6 +95,7 @@ export interface DesktopRemoteCatalog {
   providerEvidence: 'host_snapshot'
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
+  workbench?: 1
 }
 export interface DesktopRemoteHistory {
   turns: LoadedSessionTurn[]
@@ -109,7 +111,7 @@ export type DesktopHostRead =
   | { kind: 'history'; context: DesktopRemoteContext; before?: number; snapshot?: string }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true }
+  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true; workbench?: 1 }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'trace'; run: ActiveRun | null }
 
@@ -138,6 +140,7 @@ export interface DesktopRemoteRunStatus {
   detail?: string
 }
 export interface DesktopRemoteAPI {
+  workbench<Request extends DesktopWorkbenchRequest>(connectionId: string, request: Request): Promise<DesktopWorkbenchResult<Request>>
   list(): Promise<DesktopRemoteConnection[]>
   pair(input: { label: string; ssh: DesktopSshTarget; invitation: string }): Promise<DesktopPairingResult>
   finishPairing(connectionId: string): Promise<DesktopPairingResult>

@@ -1020,6 +1020,7 @@ export function App() {
     : 'remote:none'
   const remoteSurfaces = useSessionRightSurfaces(remoteSurfaceKey, remoteTarget?.cwd ?? null, 'scry.remote-session-right-surfaces.v1')
   const remoteSurface = remoteSurfaces.current.state
+  const [remoteWorkspaceDirty, setRemoteWorkspaceDirty] = useState(false)
   const [remoteSurfaceTarget, setRemoteSurfaceTarget] = useState<HTMLDivElement | null>(null)
   const remotePanelVisible = view === 'remote' && remoteSurface.visible && !surfacePane.collapsed
   const dispatchRemoteSurface = (action: RightSurfaceAction): void => {
@@ -2040,6 +2041,8 @@ export function App() {
     dispatchRightSurface({ type: 'hide' })
   }
   const changeView = (next: AppView): void => {
+    if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return
+    setRemoteWorkspaceDirty(false)
     setView(next)
     if (next === 'analytics') integrations.loadAnalytics()
   }
@@ -2058,6 +2061,8 @@ export function App() {
   }
   const draftText = (key: string): string => draftStore.getSnapshot().get(key)?.input ?? ''
   const openRemoteLocation = (connectionId: string, remoteCwd: string, remoteSession?: RemoteSessionRef): void => {
+    if (view === 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return
+    setRemoteWorkspaceDirty(false)
     // Fence pending local history/new-session reads before changing execution location.
     // The local session keeps running in the background; it is not migrated.
     sessionSelectionSeqRef.current += 1
@@ -2449,7 +2454,7 @@ export function App() {
             }}
             showPanel={remotePanelVisible}
             onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
-            surface={{ target: remoteSurfaceTarget, state: remoteSurface, onAction: dispatchRemoteSurface }}
+            surface={{ target: remoteSurfaceTarget, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }}
           />
         ) : view === 'analytics' ? (
           <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>

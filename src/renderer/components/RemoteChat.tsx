@@ -2,14 +2,20 @@
 // ChatView as local sessions; only the controller differs. The host owns Provider
 // install, credentials, files and archive, so this view never falls back to local
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
 import { runtimeProviderForAgentId } from '@shared/runtime'
 import type { AgentModelRef, AgentPermissionMode, AgentQuestionResponse, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import { createPortal } from 'react-dom'
 import { RightSurfacePanel } from './RightSurfacePanel'
 import { OverviewPanel } from './OverviewPanel'
-import type { RightSurfaceAction, RightSurfaceKind, RightSurfaceState } from '../right-surface'
+import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './WorkspacePanel'
+import { SourceControlPanel } from './SourceControlPanel'
+import { AgentsSurface } from './AgentsSurface'
+import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
+import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
+import { createRemoteWorkbench } from '../remote-workbench'
+import type { RightSurfaceAction, RightSurfaceState } from '../right-surface'
 import type {
   DesktopRemoteContext,
   DesktopRemoteHistory,
@@ -27,6 +33,8 @@ import { ChatView } from './ChatView'
 import { bridge, defaultOption, desktopProviderKey, historyTurns, RemoteFiles, shouldQueryUnknownIntent } from './DesktopRemote'
 import './desktop-remote.css'
 import './remote-location.css'
+
+const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
 const NO_ATTACHMENTS: never[] = []
 const NO_QUEUE: never[] = []
@@ -95,6 +103,9 @@ export interface RemoteChatProps {
   surface: {
     target: HTMLElement | null
     state: RightSurfaceState
+    scopeId?: string
+    retainTerminal?: boolean
+    onDirtyChange?: (dirty: boolean) => void
     onAction: (action: RightSurfaceAction) => void
   }
 }
@@ -112,6 +123,14 @@ export function RemoteChat({
   surface
 }: RemoteChatProps) {
   const api = bridge()
+  const workbench = useMemo(() => createRemoteWorkbench(api, connectionId, cwd), [api, connectionId, cwd])
+  useEffect(() => () => workbench.dispose(), [workbench])
+  const [fileRequest, setFileRequest] = useState<WorkspaceOpenRequest | null>(null)
+  const [workspaceDirty, setWorkspaceDirty] = useState(false)
+  const dispatchSurface = (action: RightSurfaceAction): void => {
+    if (action.type === 'close' && action.kind === 'files' && workspaceDirty && !window.confirm('当前文件有未保存修改。放弃修改并继续吗？')) return
+    surface.onAction(action)
+  }
   const { connections, error: readError } = useDesktopConnections()
   const connection = connections.find((item) => item.id === connectionId)
   const connected = !readError && connection?.state === 'connected'
@@ -408,11 +427,10 @@ export function RemoteChat({
               ? { tone: 'blocked' as const, text: '正在提交到远端…' }
               : null
 
-  const unavailable: Partial<Record<RightSurfaceKind, string>> = Object.fromEntries(
-    (['source-control', 'diff', 'terminal', 'agents'] satisfies RightSurfaceKind[]).map((kind) => [
-      kind, `${host} 暂未提供此工作区能力；不会改用本机工作区。`
-    ])
-  )
+  const diffReview = sessionNetDiffReview(displayTurns) ?? resolveTurnDiffReview(displayTurns)
+  // Keep an open editor mounted while offline, so a disconnect cannot discard edits.
+  const workspaceAvailable = projectAvailable
+  const upgradeWorkbench = <div className="surface-unavailable"><b>需要更新远端 Scry</b><span>请更新 {host}，以启用文件编辑、源代码管理和终端。</span></div>
 
   return (
     <>
@@ -422,7 +440,7 @@ export function RemoteChat({
         scrollRef={scrollRef}
         textareaRef={textareaRef}
         cwd={cwd}
-        workspaceRoots={[]}
+        workspaceRoots={[cwd]}
         recent={[]}
         agents={agents}
         selectedAgentId={selectedAgentId}
@@ -451,6 +469,11 @@ export function RemoteChat({
           : null}
         onLoadOlderTurns={connected ? () => { void loadOlderHistory() } : undefined}
         onSelect={setSelected}
+        onOpenDiff={() => dispatchSurface({ type: 'open', kind: 'diff' })}
+        onOpenFile={(target) => {
+          setFileRequest({ ...target, id: Date.now() })
+          dispatchSurface({ type: 'open', kind: 'files' })
+        }}
         onAnswerQuestion={answer}
         onInput={(value) => onDraftInput(draftKey, value)}
         onChooseFolder={() => {}}
@@ -487,10 +510,10 @@ export function RemoteChat({
           openIds={surface.state.openIds}
           activeId={surface.state.activeId}
           maximized={surface.state.maximized}
-          unavailable={unavailable}
-          onOpen={(kind) => surface.onAction({ type: 'open', kind })}
-          onActivate={(kind) => surface.onAction({ type: 'activate', kind })}
-          onClose={(kind) => surface.onAction({ type: 'close', kind })}
+          retainTerminal={surface.retainTerminal}
+          onOpen={(kind) => dispatchSurface({ type: 'open', kind })}
+          onActivate={(kind) => dispatchSurface({ type: 'activate', kind })}
+          onClose={(kind) => dispatchSurface({ type: 'close', kind })}
           onHide={() => surface.onAction({ type: 'hide' })}
           onToggleMaximized={() => surface.onAction({ type: 'toggle-maximized' })}
           contents={{
@@ -501,12 +524,19 @@ export function RemoteChat({
                   runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}
                   busy={runActive} onSelect={setSelected}
                 />,
-            files: contextAvailable
-              ? <RemoteFiles api={api} connectionId={connectionId} context={context} onClose={() => surface.onAction({ type: 'close', kind: 'files' })} />
+            files: workspaceAvailable
+              ? catalog?.workbench === 1
+                ? <WorkspacePanel cwd={cwd} api={workbench.workspace} openRequest={fileRequest}
+                    onClose={() => dispatchSurface({ type: 'close', kind: 'files' })}
+                    onDirtyChange={(dirty) => { setWorkspaceDirty(dirty); surface.onDirtyChange?.(dirty) }}
+                    onAddReference={(entry) => onDraftInput(draftKey, `${input}${input && !input.endsWith(' ') ? ' ' : ''}${workspaceReferenceToken(entry)} `)} />
+                : <RemoteFiles api={api} connectionId={connectionId} context={context} onClose={() => dispatchSurface({ type: 'close', kind: 'files' })} />
               : <div className="surface-unavailable"><b>文件不可用</b><span>{sendBlockedReason ?? '当前上下文不可读取文件。'}</span></div>,
-            ...Object.fromEntries(Object.entries(unavailable).map(([kind, reason]) => [kind,
-              <div className="surface-unavailable" key={kind}><b>远程能力不可用</b><span>{reason}</span></div>
-            ]))
+            'source-control': catalog?.workbench === 1 ? <SourceControlPanel cwd={cwd} api={workbench.sourceControl} active={surface.state.visible && surface.state.activeId === 'source-control'} /> : upgradeWorkbench,
+            terminal: catalog?.workbench === 1 ? <Suspense fallback={<div className="surface-unavailable">正在加载终端…</div>}><TerminalSurface cwd={cwd} scopeId={surface.scopeId} api={workbench.terminal} machineLabel={host} active={surface.state.visible && surface.state.activeId === 'terminal'} /></Suspense> : upgradeWorkbench,
+            agents: <AgentsSurface turns={displayTurns} busy={runActive} />,
+            diff: diffReview ? <TurnDiffReviewPanel review={diffReview} onClose={() => dispatchSurface({ type: 'close', kind: 'diff' })} />
+              : <div className="surface-unavailable"><b>本会话还没有可审阅的改动</b><span>某一轮产生 Git 净改动后，这里会显示真实会话改动。</span></div>
           }}
         />, surface.target
       )}

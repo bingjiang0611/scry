@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   githubRepositoryFromUrl,
   scCanMerge,
@@ -11,6 +11,7 @@ import {
   type ScReviewDraft
 } from '@shared/source-control'
 import { ModalFrame } from './Modals'
+import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api'
 import { Patch } from './SourceControlPatch'
 
 export function GithubPullRequestPanel({
@@ -19,7 +20,8 @@ export function GithubPullRequestPanel({
   busy,
   suggestedTitle,
   ask,
-  report
+  report,
+  api: injectedApi
 }: {
   repo: ScRepository
   active: boolean
@@ -27,8 +29,9 @@ export function GithubPullRequestPanel({
   suggestedTitle: string
   ask: (request: ScMutation, detail: string, afterSuccess?: () => Promise<void>) => void
   report: (error: unknown) => void
+  api?: SourceControlApi
 }) {
-  const api = window.scry.sourceControl
+  const api = useMemo(() => injectedApi ?? defaultSourceControlApi, [injectedApi])
   const alive = useRef(true)
   const epoch = useRef(0)
   const lineInput = useRef<HTMLTextAreaElement>(null)

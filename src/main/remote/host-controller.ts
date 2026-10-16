@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult } from '../../shared/desktop-remote'
 import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
 import { parseDesktopHostRead } from './desktop-host-reader'
+import { parseDesktopWorkbenchQuery } from './desktop-workbench'
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
 import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
@@ -104,6 +105,7 @@ const LIVE_RUN_PROMPT_CHARS = 200
 
 export interface HostControllerDependencies {
   readDesktop?(query: DesktopHostRead): Promise<DesktopHostReadResult>
+  desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: {
     list(query: Extract<DesktopDirectoryQuery, { action: 'list' }>): DesktopDirectoryPage
     select(path: string): RemoteProjectRef
@@ -254,6 +256,7 @@ export class HostController {
   #workspace: WorkspaceAuthorizer
   #macRuns?: MacRunSource
   #readDesktop?: HostControllerDependencies['readDesktop']
+  #desktopWorkbench?: HostControllerDependencies['desktopWorkbench']
   #desktopDirectories?: HostControllerDependencies['desktopDirectories']
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
@@ -265,6 +268,7 @@ export class HostController {
     this.#workspace = deps.workspace
     this.#macRuns = deps.macRuns
     this.#readDesktop = deps.readDesktop
+    this.#desktopWorkbench = deps.desktopWorkbench
     this.#desktopDirectories = deps.desktopDirectories
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#output = new RunOutputLog({ store: deps.outputStore })
@@ -407,7 +411,20 @@ export class HostController {
     if (!this.#readDesktop) throw new Error('desktop_protocol_unavailable')
     const result = await this.#readDesktop(parseDesktopHostRead(input))
     this.authorizeDevice(peerCertSHA256)
-    return result.kind === 'info' && this.#desktopDirectories ? { ...result, directorySelection: true } : result
+    return result.kind === 'info' ? { ...result, ...(this.#desktopDirectories ? { directorySelection: true as const } : {}), ...(this.#desktopWorkbench ? { workbench: 1 as const } : {}) } : result
+  }
+
+  releaseDesktopPeer(peer: string): Promise<void> { return this.#desktopWorkbench?.release(peer) ?? Promise.resolve() }
+
+  async desktopWorkbench(peer: string, input: unknown): Promise<unknown> {
+    this.authorizeDevice(peer)
+    if (!this.#desktopWorkbench) throw new Error('desktop_workbench_unavailable')
+    const result = await this.#desktopWorkbench.request(peer, parseDesktopWorkbenchQuery(input), () => this.authorizeDevice(peer))
+    try { this.authorizeDevice(peer) } catch (error) {
+      await this.#desktopWorkbench.release(peer)
+      throw error
+    }
+    return result
   }
 
   // Separate from the project-scoped mobile browser. Selecting is an explicit

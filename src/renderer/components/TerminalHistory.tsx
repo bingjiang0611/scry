@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { TerminalRecordingListPage, TerminalRecordingSummary } from '@shared/terminal'
+import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
 
@@ -10,13 +11,15 @@ export function terminalRecordingLabel(item: TerminalRecordingSummary): string {
   return '终态未确认 · 仅已存前缀'
 }
 
-export function TerminalHistory({ cwd, canOpen, onOpen, onClose }: {
+export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedApi }: {
   cwd: string | null
   canOpen: boolean
   onOpen: (item: TerminalRecordingSummary) => void
   onClose: () => void
+  api?: TerminalApi
 }) {
   const titleId = useId()
+  const api = useMemo(() => injectedApi ?? defaultTerminalApi, [injectedApi])
   const [after, setAfter] = useState<string>()
   const [revision, setRevision] = useState(0)
   const [page, setPage] = useState<TerminalRecordingListPage | null>(null)
@@ -27,13 +30,13 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose }: {
     setBusy(true)
     setPage(null)
     setError(null)
-    void window.scry.terminalRecordingList({ after, limit: 20 }).then((value) => {
+    void api.terminalRecordingList({ after, limit: 20 }).then((value) => {
       if (current) setPage(value)
     }).catch((cause) => {
       if (current) setError(cause instanceof Error ? cause.message : String(cause))
     }).finally(() => { if (current) setBusy(false) })
     return () => { current = false }
-  }, [after, revision])
+  }, [after, api, revision])
   return (
     <ModalFrame labelledBy={titleId} onClose={onClose}>
       <header className="modal-head">
