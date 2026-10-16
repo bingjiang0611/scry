@@ -245,6 +245,7 @@ async function exerciseNativeWorkspace(contents) {
   await click(source)
   await wait(`document.activeElement === document.querySelector('${source}')`)
   contents.selectAll()
+  await wait(`document.querySelector('${source}').selectionStart === 0 && document.querySelector('${source}').selectionEnd === document.querySelector('${source}').value.length`)
   await contents.insertText('# Edited preview')
   await wait(`document.querySelector('#workspace-fixture h1')?.textContent === 'Edited preview' && document.querySelector('#workspace-fixture').dataset.dirty === 'true'`)
   await click(toggle)
