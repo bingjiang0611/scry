@@ -1,8 +1,10 @@
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { LlmPerformanceHistoryRow } from '../shared/llm-performance'
 import {
+  appendLlmPerformance,
   appendUsage,
   cleanupUsageAtomicTemps,
   deleteUsageSessionRows,
@@ -13,7 +15,67 @@ import {
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-usage-'))
 
+const performanceRow: LlmPerformanceHistoryRow = {
+  runId: 'timing', ts: '2026-10-16T00:00:00.000Z', providerId: 'pi', model: 'offline', networkLabel: '', failed: false,
+  performance: { state: 'complete', observedAt: '2026-10-16T00:00:00.000Z', networkLabel: '',
+    streamCharacters: 0, recentOutput: [], windowMs: 1000, streamDurationMs: 0 }
+}
+
 describe('usage-jsonl', () => {
+  it('keeps telemetry out of aggregates while retaining corrupt rows and external appends', async () => {
+    const dir = tempDir()
+    try {
+      const file = usageJsonlPath(dir)
+      appendUsage(dir, { providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: '/repo' }, { tokensIn: 4, ts: performanceRow.ts })
+      appendFileSync(file, '{broken}\n')
+      expect(readUsageStats(dir)).toMatchObject({ status: 'partial', tin: 4, turns: 1, invalidLines: 1 })
+      await appendLlmPerformance(dir, { cwd: '/repo' }, performanceRow)
+      expect(readUsageStats(dir, { providerId: 'pi', cwd: '/repo' })).toMatchObject({ status: 'partial', tin: 4, turns: 1, invalidLines: 1 })
+      appendFileSync(file, JSON.stringify({ providerId: 'pi', cwd: '/repo', tin: 7 }) + '\n')
+      await appendLlmPerformance(dir, { cwd: '/repo' }, performanceRow)
+      expect(readUsageStats(dir)).toMatchObject({ status: 'partial', tin: 11, turns: 2, invalidLines: 1 })
+      expect(readFileSync(file, 'utf8').split('\n').filter(line => line.includes('llm_performance'))).toHaveLength(2)
+      expect(statSync(file).mode & 0o777).toBe(0o600)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('revalidates replacement, truncation and missing-newline tails before advancing the cache', async () => {
+    const dir = tempDir()
+    try {
+      const file = usageJsonlPath(dir)
+      const row = JSON.stringify({ providerId: 'pi', tin: 4 })
+      writeFileSync(file, row + '\n')
+      expect(readUsageStats(dir).tin).toBe(4)
+      const before = statSync(file)
+      writeFileSync(file + '.replacement', row.replace('4', '9') + '\n')
+      utimesSync(file + '.replacement', before.atime, before.mtime)
+      renameSync(file + '.replacement', file)
+      await appendLlmPerformance(dir, { cwd: '/repo' }, performanceRow)
+      expect(readUsageStats(dir).tin).toBe(9)
+      writeFileSync(file, '')
+      await appendLlmPerformance(dir, { cwd: '/repo' }, performanceRow)
+      expect(readUsageStats(dir)).toMatchObject({ status: 'ready', turns: 0, tin: null })
+      writeFileSync(file, row)
+      expect(readUsageStats(dir).tin).toBe(4)
+      await appendLlmPerformance(dir, { cwd: '/repo' }, performanceRow)
+      expect(readUsageStats(dir)).toMatchObject({ status: 'query_error', turns: 0, tin: null, invalidLines: 1 })
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('retains concurrent telemetry and billing appends, and surfaces async write failures', async () => {
+    const dir = tempDir()
+    try {
+      appendUsage(dir, { providerId: 'pi', runtimeProvider: 'pi_rpc' }, { tokensOut: 3, ts: performanceRow.ts })
+      readUsageStats(dir)
+      const writes = Array.from({ length: 8 }, (_, index) => appendLlmPerformance(dir, { cwd: '/repo' }, { ...performanceRow, runId: `timing-${index}` }))
+      appendUsage(dir, { providerId: 'pi', runtimeProvider: 'pi_rpc' }, { tokensOut: 5, ts: performanceRow.ts })
+      await Promise.all(writes)
+      expect(readUsageStats(dir)).toMatchObject({ status: 'ready', turns: 2, tout: 8, invalidLines: 0 })
+      expect(readFileSync(usageJsonlPath(dir), 'utf8').trim().split('\n')).toHaveLength(10)
+      await expect(appendLlmPerformance(join(dir, 'missing'), { cwd: '/repo' }, performanceRow)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('聚合 usage.jsonl 并跳过损坏行', () => {
     const dir = tempDir()
     try {
