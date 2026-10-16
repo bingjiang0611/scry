@@ -1,6 +1,42 @@
 {
   "schema": 1,
   "metrics": {
+    "providers.pi-environment/subprocess.node": {
+      "scenario": "providers.pi-environment",
+      "metric": "subprocess.node",
+      "layer": "main",
+      "unit": "count",
+      "workload": "native-node=1;environment-resolutions=5;cold-first=1",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 5 }
+    },
+    "analytics.usage-mixed-append/io.read.calls": {
+      "scenario": "analytics.usage-mixed-append",
+      "metric": "io.read.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "usage-rows=10000;warm-cache=1;performance-append-and-stats=5",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 5 }
+    },
+    "analytics.usage-mixed-append/io.read.bytes": {
+      "scenario": "analytics.usage-mixed-append",
+      "metric": "io.read.bytes",
+      "layer": "io",
+      "unit": "bytes",
+      "workload": "usage-rows=10000;warm-cache=1;performance-append-and-stats=5",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": { "darwin-arm64": 4757290 }
+    },
     "files.fixed-operations/io.open": {
       "scenario": "files.fixed-operations",
       "metric": "io.open",
