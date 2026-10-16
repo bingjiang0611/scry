@@ -136,4 +136,28 @@ describe('fixed production subprocess work counters', () => {
     const { rm } = await import('node:fs/promises')
     await rm(fixture.root, { recursive: true, force: true })
   }, 120_000)
+
+  it('is sensitive to one redundant source-control status refresh', async () => {
+    const { ScGit, ScProcess } = await productionImports()
+    const fixture = await gitFixture()
+    const { join } = await import('node:path')
+    const scProcess = new ScProcess(() => ({ ...process.env, HOME: fixture.home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_COUNT: '0', PATH: process.env.PATH ?? '' }))
+    const git = new ScGit(scProcess, (path: string) => path)
+    const statusDiff = async (redundantStatus: boolean) => measure(async () => {
+      const identity = await git.identity(join(fixture.root, 'repo'))
+      const snapshot = await git.status(identity)
+      if (redundantStatus) expect((await git.status(identity)).files).toEqual(snapshot.files)
+      const file = snapshot.files.find((entry) => entry.path === 'changed.ts')
+      expect((await git.diff(identity, file!, false)).patch).toContain('changed = true')
+    })
+    try {
+      const single = await statusDiff(false)
+      const extra = await statusDiff(true)
+      expect(extra.git).toBeGreaterThan(single.git)
+    } finally {
+      scProcess.dispose()
+      const { rm } = await import('node:fs/promises')
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  }, 120_000)
 })
