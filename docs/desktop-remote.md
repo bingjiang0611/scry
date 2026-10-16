@@ -322,3 +322,37 @@ SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，�
 - 自动化多次返回 `stale_ref`、`unknown` 或后置条件失败；窗口也出现未由本轮预期动作选择的本机会话/新会话。并行操作、自动聚焦或自动化定位问题尚未完成归因，不直接认定是用户操作或产品故障。发现 Terminal 曾在前台，后由用户将 Scry 置前；搜狗拼音也曾把 ASCII `mac2` 转成中文。后续原生 setText 验证过字面值 `mac2`，结束时读取到的输入法与原先相同，仍为搜狗拼音。
 - 为避免向错误工作区发送写操作，**编辑保存、未保存确认、Git 暂存提交、终端输入输出/分离重连、面板恢复与尺寸交互均未验收**。只通过 SSH 创建数据专用临时 Git 目录 `/Users/test/scry-daily-ui.THymIn` 和基线提交 `56b469b`；停止时仍 clean，`alpha.txt` 为 `daily acceptance baseline`。该初始化不算 UI 保存或提交证据；未发送验收用 Provider 请求，未改用户项目。
 - 证据摘录：`logs/daily-ui-evidence.txt`；范围与状态：`logs/daily-ui-acceptance.json`，均位于上述发布目录。下一步需先建立稳定、可归因的桌面控制，或由维护者操作真实界面、助手独立核对 mac2 落盘/Git/终端证据；不以 CLI 代做写入替代日常 UI 验收。
+
+## 0.2.193 后台实例对真实 mac2 验收（2026-10-16）
+
+维护者随后明确改为“起一个 test 实例在后台操作”。本轮使用独立、隐藏的正式打包 App 测试客户端，连接仍在运行的真实 mac2 0.2.192 宿主，不操作共享前台窗口；不是新的日常窗口验收通过声明。只复制原配对的**加密**连接文件到权限 0700 的临时 userData，由原安全存储代码解密；不导出明文设备密钥、不复制 Provider 凭据、不替换 `window.scry`，也不启用测试 Provider。UI 动作通过已有 Electron fixture 相同的 CDP 原生指针/输入路径执行，SSH 只准备临时数据和独立读回结果，不代做 UI 保存或提交。
+
+### 发现与修复
+
+- 后台真实客户端稳定复现菜单问题：当前机器为 mac2 时，`querySelector('button[aria-checked="true"], button:not(:disabled)')` 仍按 DOM 顺序命中第一个可用的本机按钮。其 focus handler 将右侧项目列切成本机。修复为先找 checked 按钮，再单独回退到首个可用按钮；未放宽授权或引入本机 API fallback。该问题不等于已经证明远程文件写到了本机，也不能据此把此前全部桌面定位异常归为同一原因。
+- 远程终端的无障碍标签原来固定为“本机终端”，现复用现有 `machineLabel`，真实 UI 验证为 `mac2终端`；本机默认标签不变。
+- 源码修复提交 `d7e6a8e`，分支 `fix/remote-picker-focus-0.2.193`。开发签名候选 App **0.2.193**、私有 CLI **0.2.49**，`app.asar` SHA-256 **`98a13c298f4c249b1640d038d859da517c7b1e1aec8db750933ecfbf71049b83`**。未公证；候选位于 `/private/tmp/scry-release-0.2.192.TFUyJY/source/dist/mac-arm64/Scry.app`，尚未替换日常 App。
+
+### 实际通过范围
+
+| 场景 | 结果与独立证据 |
+| --- | --- |
+| 原配对、远程选目录 | 原 pinned mTLS 身份复连，UI 明确选择 `/Users/test/scry-background-ui.iYz1An` |
+| 文件编辑、保存 | UI 保存 `alpha.txt`，SSH 精确读回 `daily UI saved on real mac2\n` |
+| 未保存确认 | 改动后切主机页，取消确认保留编辑器草稿；磁盘仍是已保存内容 |
+| 面板交互 | 原生坐标拖拽改变宽度，最大化/恢复均验证实际状态 |
+| Git 暂存、提交 | UI 确认时暂存并提交；宿主提交 `939e1dc52e6d1290d3e3d3363eae75e678970516` 仅含 `alpha.txt`，最终 clean；重连 UI 从宿主操作历史显示“提交 · 已确认” |
+| 真实 PTY | UI 输入命令后显示临时 cwd 和经 SSH 对照的宿主名；输出标记由 printf 参数拼接产生，不能用输入回显冒充执行结果 |
+| 标签分离、追赶 | 切到文件再回终端，后续输出可见 |
+| 断开、重连 | 测试客户端未连接时，独立读宿主该终端的 UTF-16LE 录制确认后续输出已产生；重连 UI 追赶同一 terminal ID，无替代 Shell |
+| 退出、录制回放 | Shell 退出后清屏再回放可见实际标记；回放前后无新活动 Shell |
+
+这些检查分阶段完成，未隐去首轮脚本失败。目录加载只读期间的输入、旧选择器、窄面板隐藏复选框、提交状态文案匹配等自动化错误均保留日志。尤其一次确认提交后过早把“正在执行已确认的操作”当作完成：随后先独立查明提交已落地，再从 UI 操作历史核对，**没有重发提交**。
+
+### 回归与清理
+
+- 新菜单焦点回归在旧实现上明确失败 `Remote picker initial focus moved to local machine`；修复后完整 `desktop-remote-ui-smoke.mjs` 通过，覆盖本机/远程菜单、目录选择、hover、旧宿主 unavailable、共享面板和受控侧栏活动排序。首次修复后 suite 曾在 Markdown 展开源码前超时；新增鼠标事件收据证明当时坐标实际命中标题，随后在滚动后等待绘制同步，不增加原超时、不删断言，最终完整 suite 通过。
+- Node 22.22.1 驱动下，typecheck、受影响 unit **23 passed**、`pack:artifact`（311 项必需依赖、安全、文件、PTY、宿主协议等）和严格深层签名检查通过。0.2.192 的历史全量单测数字不冒充 0.2.193 全量重跑。
+- 后台实例已退出，PID 79684 已不存在；该 userData 没有存活进程。验证其新建的远程终端剩余 **0** 后，删除了临时 userData 及加密连接副本；原前台 App、原配对和真实宿主未停止。临时 Git 目录、宿主录制与截图保留供复盘。验收未发起 Provider 对话、GitHub push 或 PR。
+- 通过回执：`logs/background-live-verified.json`；原始分阶段日志：`logs/background-live-final-193.log`、`logs/background-live-final-reconnect-193-api.log`；截图：`logs/background-live-ui/remote-file-saved.png`、`git-confirmed-after-reconnect.png`、`reconnected-same-pty.png`、`terminal-replayed.png`；清理回执：`logs/background-live-cleanup.json`。以上均相对于 `/private/tmp/scry-release-0.2.192.TFUyJY/`。
+- 日常客户端/宿主仍为 0.2.192，后台验证的是修复候选客户端 0.2.193 与宿主 0.2.192 的兼容路径。**下一步：决定是否将 0.2.193 修复版替换本机日常 App；本机重启会中断当前会话，不自动执行。**
