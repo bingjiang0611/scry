@@ -363,3 +363,13 @@
 ### 下一责任动作
 
 本任务接着实现按被选轮次的真实 owner/provider 路由的原生 fork、外部结果 unknown 围栏及共享引用显式回收；不能用纯 App 历史复制冒充原生 fork。维护者/本任务后续在可复现负载下补采 `remote-workspace`、Pi 和 worker 超时的时序；Meta Prompts 若再失败，使用本次事件记录定位。真实账号、手机及前台系统验收仍需授权。第 4 项尚未完整交付，本次不推送、不安装、不发布。
+
+## 11. 用户授权重新构建并安装（2026-10-16）
+
+用户随后明确要求重新构建、安装，并自行重启。仅桌面版本升为 **0.2.195**，CLI 保持 0.2.49；没有追加功能变更。
+
+- `check:cli-release`：32 文件 / 587 测试、CLI tarball smoke 通过。
+- `install:mac:dev` 完整执行：typecheck、全量 unit **3253 通过 / 4 跳过**、shell、重新打包、packaged security/crash/remote smoke 及原子安装通过。此次没有 worker error，但不以本次通过宣称前述偶发超时根因已解决。
+- 已安装 `/Applications/Scry.app`，读回版本为 0.2.195；`app.asar` 与本次已验证构建逐字节一致。旧 0.2.194 保留于 `/Applications/.Scry.app.backup`。
+- 构建移除发布凭据并关闭签名身份自动发现，是开发安装，不是正式 Developer ID 签名、公证或发布。未主动退出或启动用户的 Scry，重启留给用户；未推送。
+- 安装日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-b2db0b77e2b2d703.log`。
