@@ -1,4 +1,4 @@
-import { chmodSync, constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -47,7 +47,10 @@ describe('Pi launcher environment', () => {
       await piRpcEnvironment(profile, { ...base, PROBE_ENVIRONMENT: 'changed' })
       expect(probes.count).toBe(2)
       const replacement = join(cwd, 'replacement-node')
-      copyFileSync(process.execPath, replacement, constants.COPYFILE_FICLONE)
+      // Replacement invalidation needs a real file and Node's response protocol, not a copied
+      // full Node binary whose first launch may dominate this test on another macOS host.
+      writeFileSync(replacement, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify([replacement, '24.18.0'])}'\n`)
+      chmodSync(replacement, 0o755)
       rmSync(node)
       symlinkSync(replacement, node)
       expect((await piRpcEnvironment(profile, base)).ROTOM_NODE).toBe(replacement)
