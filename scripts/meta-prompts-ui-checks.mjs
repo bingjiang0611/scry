@@ -15,6 +15,7 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
     throw new Error(`Meta Prompts DOM condition timed out: ${expression.slice(0, 160)}; state=${JSON.stringify(state)}`)
   }
   const click = async selector => {
+    await wait(`document.querySelector(${JSON.stringify(selector)}) != null`)
     const point = await read(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
       if (!node) throw new Error('Missing control: ' + ${JSON.stringify(selector)});
