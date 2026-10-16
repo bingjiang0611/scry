@@ -539,7 +539,7 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
   const activeControls = controls.current.get(activeKey)
   const canReplay = statuses[activeKey] === 'exited' || statuses[activeKey] === 'readonly'
   return (
-    <section className="terminal-surface" aria-label="本机终端">
+    <section className="terminal-surface" aria-label={`${machineLabel}终端`}>
       <div className="terminal-toolbar">
         <div className="terminal-tabs" role="tablist" aria-label="终端会话">
           {tabs.map((tab) => (

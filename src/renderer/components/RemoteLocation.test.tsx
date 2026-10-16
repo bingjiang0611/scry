@@ -12,6 +12,7 @@ import { WorkdirPicker } from './Pickers'
 import { RemoteChat, remoteDraftKey, remotePermissionOption, remoteRunControlCatalog } from './RemoteChat'
 import { createRightSurfaceState } from '../right-surface'
 import { RightSurfacePanel } from './RightSurfacePanel'
+import { TerminalSurface } from './TerminalSurface'
 
 const host: DesktopRemoteConnection = {
   id: 'mac2', label: 'mac2', hostId: 'host', anchorSHA256: 'anchor',
@@ -109,6 +110,12 @@ describe('remote sidebar activity evidence', () => {
 })
 
 describe('composer execution location', () => {
+  it('names the authenticated terminal host instead of labeling every terminal local', () => {
+    const html = renderToStaticMarkup(<TerminalSurface cwd="/remote/app" active={false} machineLabel="mac2" />)
+    expect(html).toContain('aria-label="mac2终端"')
+    expect(html).not.toContain('aria-label="本机终端"')
+  })
+
   it('renders exactly the local workdir picker when no host is saved', () => {
     const local = renderToStaticMarkup(<WorkdirPicker cwd="/work/app" recent={['/work/app', '/work/other']}
       onChoose={() => {}} onUnbind={() => {}} onPick={() => {}} onRemove={() => {}} />)
