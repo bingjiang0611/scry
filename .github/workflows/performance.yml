@@ -77,7 +77,11 @@ jobs:
         # Runs after timing measurement so counters never share the runner with timed batches.
         run: |
           set -o pipefail
-          (cd candidate && node scripts/performance-counters.mjs collect ../performance-results/counters.json) 2>&1 | tee performance-results/counters.log
+          (cd candidate && node scripts/performance-counters.mjs collect ../performance-results/collectors.json) 2>&1 | tee performance-results/counters.log
+          # perf may be absent or forbidden on hosted runners; the probe then reports unavailable, never zero.
+          sudo sysctl -w kernel.perf_event_paranoid=1 || true
+          (cd candidate && node scripts/performance-instructions.mjs ../performance-results/instructions.json) 2>&1 | tee performance-results/instructions.log
+          node candidate/scripts/performance-counters.mjs merge performance-results/counters.json "$(jq -r .revision performance-results/collectors.json)" performance-results/collectors.json performance-results/instructions.json
           node candidate/scripts/performance-ratchet.mjs check candidate/scripts/performance-ratchet.json performance-results/counters.json performance-results/ratchet.md
       - name: Compare fixed budgets and base-relative regressions
         run: |

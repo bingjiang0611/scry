@@ -34,7 +34,13 @@ describe('native performance evidence gate', () => {
     expect(composerModes.filter(mode => mode === 'stop-visible')).toHaveLength(3)
     const base = report()
     const counters = exportNativeCounters(base)
-    expect(counters.observations).toHaveLength(72)
+    // 4 workloads x (history + 3 send modes + 2 stop modes) x metrics; modes are never mixed.
+    expect(counters.observations).toHaveLength(4 * 6 * nativeCounterMetrics.length)
+    const runsOf = (scenario: string) => counters.observations.find(observation => observation.scenario === scenario)?.runs
+    expect(runsOf('short.send-settled.complete')).toHaveLength(3)
+    expect(runsOf('short.send-settled.stop-immediate')).toHaveLength(6)
+    expect(runsOf('short.stop-settled.stop-visible')).toHaveLength(3)
+    expect(runsOf('short.stop-settled.complete')).toBeUndefined()
     expect(counters.observations.every(observation => observation.availability === 'measured')).toBe(true)
     expect(compareNative(base, structuredClone(base)).passed).toBe(true)
     const head = report()
