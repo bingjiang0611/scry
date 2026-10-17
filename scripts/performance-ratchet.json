@@ -12,7 +12,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 24
+        "darwin-arm64": 18
       }
     },
     "source-control.service.diff-validated/subprocess.total": {
@@ -26,7 +26,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 24
+        "darwin-arm64": 18
       }
     },
     "source-control.service.diff-validated/revision.status-checks": {
@@ -54,7 +54,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 6
+        "darwin-arm64": 0
       }
     },
     "source-control.terminal-pair/subprocess.git": {
