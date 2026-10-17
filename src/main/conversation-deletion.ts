@@ -14,13 +14,34 @@ function footprint(conversation: Conversation, bindingId: string): Set<string> {
   ])
 }
 
+/** Completed owners released their catalog references; shared history alone is not ownership. */
+export function liveConversationDeletionCatalog(conversations: Conversation[], catalog: AppSession[]): AppSession[] {
+  const released = new Set<string>()
+  for (const conversation of conversations) {
+    if (conversation.deletion?.status !== 'complete') continue
+    for (const binding of conversation.bindings) {
+      if (binding.historyOnly || !binding.nativeSessionId) continue
+      for (const alias of footprint(conversation, binding.id)) {
+        released.add(JSON.stringify([conversation.cwd, binding.providerId, binding.agentProfileId ?? null, alias]))
+      }
+    }
+  }
+  return catalog.filter(session => ![session.sessionId, session.externalSessionId, session.runId].some(alias =>
+    alias && released.has(JSON.stringify([session.cwd, session.providerId, session.agentProfileId ?? null, alias]))))
+}
+
 export function planConversationDeletion(conversation: Conversation, others: Conversation[], catalog: AppSession[] = []): ConversationDeletionPreview {
   if (!conversation.archivedAt) throw new Error('请先存档统一对话，再预览删除')
+  if (conversation.fork && ['pending', 'unknown'].includes(conversation.fork.status)) throw new Error('原生分支尚未确认，不能删除恢复证据')
   if (conversation.turns.some(turn => turn.origin === 'dispatch' && (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown'))) {
     throw new Error('投递仍未收敛，不能删除其归属和恢复证据')
   }
   for (const other of others) {
     if (other.id === conversation.id || other.cwd !== conversation.cwd || other.deletion?.status === 'complete') continue
+    const forkBinding = other.bindings.find(binding => binding.id === other.fork?.bindingId)
+    if (other.fork && ['pending', 'unknown'].includes(other.fork.status) && conversation.bindings.some(binding => binding.providerId === forkBinding?.providerId)) {
+      throw new Error('同一 Provider 存在未确认的原生分支，不能证明删除范围安全')
+    }
     if (other.turns.some(turn => {
       if (turn.origin !== 'dispatch') return false
       const binding = other.bindings.find(binding => binding.id === turn.bindingId)!
@@ -61,7 +82,8 @@ export function planConversationDeletion(conversation: Conversation, others: Con
   // Until deletion has per-run reference accounting, retain the whole native
   // evidence group when any part is shared. The preview makes this explicit.
   if (sharedWith.length) for (const target of targets.values()) target.sharedWith = sharedWith
-  const plan = { conversationId: conversation.id, revision: conversation.revision, targets: [...targets.values()] }
+  const plan = { conversationId: conversation.id, revision: conversation.revision, targets: [...targets.values()],
+    ...(conversation.deletion?.status === 'complete' ? { reclaim: true as const } : {}) }
   return { ...plan, fingerprint: createHash('sha256').update(JSON.stringify(plan)).digest('hex') }
 }
 
@@ -101,6 +123,6 @@ export function resolveConversationDeletionRuns(preview: ConversationDeletionPre
     }
   }
   if (shared.size) for (const target of targets) target.sharedWith = [...shared].sort()
-  const plan = { conversationId: preview.conversationId, revision: preview.revision, targets }
+  const plan = { conversationId: preview.conversationId, revision: preview.revision, targets, ...(preview.reclaim ? { reclaim: true as const } : {}) }
   return { ...plan, fingerprint: createHash('sha256').update(JSON.stringify(plan)).digest('hex') }
 }

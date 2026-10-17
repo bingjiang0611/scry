@@ -19,6 +19,8 @@ export interface ConversationTarget {
 export interface ConversationBinding extends ConversationTarget {
   id: string
   nativeSessionId?: string
+  /** Forked timelines may reference shared archives without owning their native sessions. */
+  historyOnly?: true
   /** Explicitly retired generations remain in history but can never be selected for resume. */
   retiredReason?: string
 }
@@ -78,6 +80,20 @@ export interface ConversationDeletionResult extends Omit<DeleteSessionResult, 'd
   deleted: string[]
 }
 
+export interface ConversationFork {
+  commandId: string
+  intentHash: string
+  sourceConversationId: string
+  sourceRevision: number
+  sourceRunId: string
+  sourceBindingId: string
+  bindingId: string
+  status: 'pending' | 'accepted' | 'unknown' | 'not_sent'
+  reason?: string
+  /** Coverage proven by the native fork boundary, not by copying the App timeline. */
+  inheritedItems: ConversationItemRef[]
+}
+
 export interface Conversation {
   version: 1
   id: string
@@ -89,7 +105,8 @@ export interface Conversation {
   /** Fingerprint of the explicitly confirmed legacy capture; original binding stays retired. */
   adoptionFingerprint?: string
   /** Durable write fence; completed tombstones retain IDs/hashes, never historical bodies. */
-  deletion?: { status: 'pending' | 'complete'; fingerprint: string; result?: ConversationDeletionResult }
+  deletion?: { status: 'pending' | 'complete'; fingerprint: string; result?: ConversationDeletionResult; retainedCopies?: boolean }
+  fork?: ConversationFork
   bindings: ConversationBinding[]
   turns: ConversationTurn[]
 }
@@ -107,12 +124,27 @@ export function sameConversationTarget(a: ConversationTarget, b: ConversationTar
     a.continuationKey === b.continuationKey
 }
 
+export function conversationCoverage(conversation: Conversation, bindingId: string): ConversationItemRef[] {
+  const covered = new Map<string, ConversationItemRef>()
+  if (conversation.fork?.status === 'accepted' && conversation.fork.bindingId === bindingId) {
+    for (const item of conversation.fork.inheritedItems) covered.set(conversationItemKey(item), item)
+  }
+  for (const turn of conversation.turns) {
+    if (turn.bindingId !== bindingId) continue
+    const items = turn.origin === 'imported' ? turn.nativeItems : turn.delivery.status === 'accepted'
+      ? [...turn.importedItems, ...turn.delivery.nativeItems] : []
+    for (const item of items) covered.set(conversationItemKey(item), item)
+  }
+  return [...covered.values()]
+}
+
 /** Planning never resumes a foreign Provider/profile or treats an unknown delivery as unsent. */
 export function planConversationContinuation(
   conversation: Conversation,
   target: ConversationTarget
 ): ConversationContinuation {
   if (conversation.deletion) return { kind: 'blocked', reason: '统一对话正在删除或已删除，不能恢复执行' }
+  if (conversation.fork && conversation.fork.status !== 'accepted') return { kind: 'blocked', reason: conversation.fork.reason ?? '原生分支尚未确认，不能发送或重试创建' }
   const unsettled = conversation.turns.find((turn) => turn.origin === 'dispatch' &&
     (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown'))
   if (unsettled) return {
@@ -122,17 +154,7 @@ export function planConversationContinuation(
   const binding = [...conversation.bindings].reverse().find((candidate) =>
     candidate.nativeSessionId !== undefined && candidate.retiredReason === undefined &&
     sameConversationTarget(candidate, target))
-  const covered = new Set<string>()
-  for (const turn of conversation.turns) {
-    if (!binding || turn.bindingId !== binding.id) continue
-    if (turn.origin === 'imported') {
-      for (const item of turn.nativeItems) covered.add(conversationItemKey(item))
-    } else if (turn.delivery.status === 'accepted') {
-      for (const item of [...turn.importedItems, ...turn.delivery.nativeItems]) {
-        covered.add(conversationItemKey(item))
-      }
-    }
-  }
+  const covered = new Set(binding ? conversationCoverage(conversation, binding.id).map(conversationItemKey) : [])
   const missingItems = conversation.turns.flatMap((turn) => turn.items)
     .filter((item) => !covered.has(conversationItemKey(item)))
   return binding?.nativeSessionId !== undefined

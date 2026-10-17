@@ -13,6 +13,7 @@ export interface ConversationSummary {
   archivedAt?: number
   deletion?: Conversation['deletion']
   activeRunId?: string
+  fork?: Pick<NonNullable<Conversation['fork']>, 'sourceConversationId' | 'sourceRunId' | 'bindingId' | 'status' | 'reason'>
   blockedReason?: string
 }
 
@@ -47,6 +48,14 @@ export interface ConversationPreview {
 export type ConversationTargetRequest = Pick<AgentStartRequest, 'model' | 'effort' | 'permissionMode'> & {
   providerId: ProviderId
   agentProfileId?: string
+}
+
+export interface ConversationForkRequest {
+  conversationId: string
+  expectedRevision: number
+  sourceRunId: string
+  commandId: string
+  permissionMode?: AgentStartRequest['permissionMode']
 }
 
 export interface ConversationSendRequest extends ConversationTargetRequest {
@@ -89,6 +98,7 @@ export interface ConversationDeletionTarget {
 }
 
 export interface ConversationDeletionPreview {
+  reclaim?: true
   conversationId: string
   revision: number
   fingerprint: string
@@ -98,6 +108,7 @@ export interface ConversationDeletionPreview {
 /** Only these typed operations cross the preload boundary; runtime callbacks stay in main. */
 export interface ConversationApi {
   create(cwd: string): Promise<ConversationSummary>
+  fork(request: ConversationForkRequest): Promise<ConversationSummary>
   previewAdoption(source: ConversationLegacySource, target?: ConversationTargetRequest): Promise<ConversationAdoptionPreview>
   adopt(source: ConversationLegacySource, fingerprint: string): Promise<ConversationSummary>
   previewDeletion(id: string): Promise<ConversationDeletionPreview>

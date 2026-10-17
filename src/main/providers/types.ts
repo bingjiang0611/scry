@@ -160,6 +160,9 @@ export interface ForkLastTurnFacet {
 }
 
 export interface ProviderForkSessionRequest extends AgentForkSessionRequest {
+  /** Main-owned identity fence: before Provider effects, and again before fork if startup awaited RPC. */
+  beforeFork?: () => Promise<void>
+  expectedContinuationKey?: string
   codexHookTrust?: CodexHookTrustGrant[]
   openCodePluginTrust?: OpenCodeProjectPluginAuthorization
   mcpExecution?: AuthorizedMcpExecution

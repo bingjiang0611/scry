@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { ActiveRun } from '@shared/trace'
-import type { ConversationMetadataChange, ConversationPage, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
+import type { ConversationForkRequest, ConversationMetadataChange, ConversationPage, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
 import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
@@ -14,13 +14,14 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 export interface ConversationProjection { conversationId: string; turns: Turn[]; busy: boolean }
 
 /** Same chat/composer, separate durable ownership from each native session. */
-export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection }: {
+export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
   chatProps: ComponentProps<typeof SessionChatView>
   initialAgentId?: string
   onChanged: () => void
   onProjection: (projection: ConversationProjection) => void
+  onOpenConversation: (conversation: ConversationSummary) => void
 }) {
   const draftKey = composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })
   const drafts = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot)
@@ -31,6 +32,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const [latestRequest, setLatestRequest] = useState(0)
   const [live, setLive] = useState<ActiveRun>()
   const [attempt, setAttempt] = useState<ConversationSendRequest>()
+  const [forkAttempt, setForkAttempt] = useState<ConversationForkRequest>()
   const [attemptReadback, setAttemptReadback] = useState(false)
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
@@ -154,7 +156,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const blockedReason = !page ? '正在读取对话…' : page.summary.blockedReason ??
     (page.summary.archivedAt ? '对话已存档；恢复后可继续发送' : null)
   const send = async (original?: ConversationSendRequest): Promise<void> => {
-    if (busyRef.current || (!original && (blockedReason || attempt || !input.trim() || chatProps.sendBlockedReason))) return
+    if (busyRef.current || forkAttempt || (!original && (blockedReason || attempt || !input.trim() || chatProps.sendBlockedReason))) return
     busyRef.current = true
     setWorking(true)
     setError(undefined)
@@ -185,6 +187,37 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       }
     } finally { busyRef.current = false; if (mounted.current) setWorking(false) }
   }
+  const forkableRunIds = useMemo(() => new Set((page?.turns ?? []).filter(turn =>
+    turn.delivery.status === 'accepted' && page?.bindings.some(binding => binding.id === turn.bindingId && binding.nativeSessionId && !binding.retiredReason))
+    .map(turn => turn.runId)), [page])
+  const fork = async (turn?: Turn, original?: ConversationForkRequest): Promise<void> => {
+    if (!page || busyRef.current || managing || (!original && (blockedReason || attempt || forkAttempt))) return
+    let request = original
+    if (!request) {
+      const selected = page.turns.find(item => item.runId === turn?.runId)
+      const binding = page.bindings.find(item => item.id === selected?.bindingId)
+      if (!binding || !turn || !forkableRunIds.has(turn.runId)) throw new Error('该轮没有可执行的原生归属；共享历史请回到源对话操作')
+      const sameAgent = chatProps.selectedAgentId === (binding.agentProfileId ?? binding.providerId)
+      if (binding.providerId === 'pi' && (!sameAgent || chatProps.runControls.permissionMode !== 'full_access')) {
+        throw new Error('请先选择该轮的 Pi Profile 并明确启用本机完全访问，再创建原生分支；不会发送消息')
+      }
+      request = { conversationId: conversation.id, expectedRevision: page.summary.revision, sourceRunId: turn.runId,
+        commandId: crypto.randomUUID(), permissionMode: sameAgent ? chatProps.runControls.permissionMode : 'default' }
+    }
+    busyRef.current = true
+    setWorking(true)
+    setForkAttempt(request)
+    setError(undefined)
+    try {
+      const result = await window.scry.conversations.fork(request)
+      changedRef.current()
+      if (!mounted.current) return
+      setForkAttempt(undefined)
+      onOpenConversation(result)
+    } catch (error) {
+      if (mounted.current) setError(`分支结果尚未确认：${message(error)}。不会自动重建；核对 / 继续使用同一条请求，宿主若尚未收到则可能首次执行。`)
+    } finally { busyRef.current = false; if (mounted.current) setWorking(false) }
+  }
   const missing = page?.turns.filter(turn => !turn.history && live?.runId !== turn.runId) ?? []
   const inherited = page?.bindings.some(binding => binding.retiredReason && binding.continuationKey.startsWith('unverified-legacy:'))
   const firstHandoff = inherited && page?.turns.every(turn => turn.delivery.status === 'imported')
@@ -197,9 +230,10 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       <details className="conversation-options"><summary>对话选项</summary><div className="unified-management">
         <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => setRenaming(true)}>重命名</button>
         <button className="btn" aria-label={page?.summary.pinnedAt ? '取消置顶统一对话' : '置顶统一对话'} disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'pin', pinned: !page?.summary.pinnedAt }).catch(error => setError(message(error))) }}>{page?.summary.pinnedAt ? '取消置顶' : '置顶'}</button>
-        <button className="btn" aria-label={page?.summary.archivedAt ? '恢复统一对话' : '存档统一对话'} disabled={!page || managing || working || Boolean(page?.summary.blockedReason || page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'archive', archived: !page?.summary.archivedAt }).catch(error => setError(message(error))) }}>{page?.summary.archivedAt ? '恢复' : '存档'}</button>
-        {page?.summary.archivedAt && page.summary.deletion?.status !== 'complete' && <button className="btn" aria-label="删除统一对话" disabled={managing || working || Boolean(activeRunId)} onClick={() => setDeleting(true)}>{page.summary.deletion ? '继续清理…' : '删除副本…'}</button>}
+        <button className="btn" aria-label={page?.summary.archivedAt ? '恢复统一对话' : '存档统一对话'} disabled={!page || managing || working || Boolean((page?.summary.blockedReason && page.summary.fork?.status !== 'not_sent') || page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'archive', archived: !page?.summary.archivedAt }).catch(error => setError(message(error))) }}>{page?.summary.archivedAt ? '恢复' : '存档'}</button>
+        {page?.summary.archivedAt && (page.summary.deletion?.status !== 'complete' || page.summary.deletion.retainedCopies) && <button className="btn" aria-label="删除统一对话" disabled={managing || working || Boolean(activeRunId)} onClick={() => setDeleting(true)}>{page.summary.deletion?.status === 'complete' ? '核对保留副本…' : page.summary.deletion ? '继续清理…' : '删除副本…'}</button>}
         <p>{limitation}</p>
+        <p>从轮次创建原生分支不发送消息，也不回退文件。共享历史仅供查看；再次从这些轮次分支，请回到源对话。</p>
         {inherited && <p>旧原生会话未记录可验证的接续身份。迁入保留已捕获的文字，不证明恢复了旧原生上下文。</p>}
       </div></details>
     </div>
@@ -209,24 +243,32 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     </nav>}
     {missing.map(turn => <p className="conversation-history-notice" role="status" key={turn.runId}>第 {turn.ordinal} 轮：{turn.unavailableReason ?? '正在等待运行记录'}{turn.delivery.status === 'unknown' || turn.delivery.status === 'not_sent' ? `；${turn.delivery.reason}` : ''}</p>)}
     {page?.summary.deletion && <div className="conversation-history-notice" role="status">
-      {page.summary.deletion.status === 'complete' ? '对话副本已删除' : '删除未完成'}，正文不可用。草稿仍保留。
+      {page.summary.deletion.status === 'complete' ? page.summary.deletion.retainedCopies ? '逻辑对话已删除；上次保留的共享副本可重新核对' : '对话副本已删除' : '删除未完成'}，正文不可用。草稿仍保留。
       {input && <button className="btn" onClick={() => { void window.scry.copyText(input).then(() => setNotice('已复制保留的草稿。')).catch(error => setError(message(error))) }}>复制保留的草稿</button>}
       {page.summary.deletion.result && <details><summary>删除回执与保留范围</summary>
         <ul>{page.summary.deletion.result.retained.map(item => <li key={item}>{item}</li>)}</ul>
         {page.summary.deletion.result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
       </details>}
     </div>}
+    {page?.summary.fork?.status === 'accepted' && !page.summary.deletion && <div className="conversation-history-notice" role="status">
+      创建分支不会发送消息或回退文件。分支点之前的历史为共享只读副本。
+      <button className="btn" disabled={working} onClick={() => {
+        void window.scry.conversations.read(page.summary.fork!.sourceConversationId).then(source => {
+          if (mounted.current) onOpenConversation(source.summary)
+        }).catch(error => { if (mounted.current) setError(message(error)) })
+      }}>打开源对话</button>
+    </div>}
     <SessionChatView {...chatProps}
       draftStore={draftStore} draftKey={draftKey} turns={turns} cwd={conversation.cwd} workspaceRoots={[conversation.cwd]}
-      agentLocked={!page || working || Boolean(attempt || blockedReason || activeRunId)} hasSelectedSession
+      agentLocked={!page || working || Boolean(attempt || forkAttempt || blockedReason || activeRunId)} hasSelectedSession
       onInput={setInput} onSend={() => { void send() }} submitting={working} sessionLoading={!page} sessionCacheVisible={false} sessionEvidenceGap={null}
       busy={Boolean(activeRunId)} queueWhileBusy={false}
-      sendBlockedReason={blockedReason ?? (attempt ? '请先核对原发送状态' : chatProps.sendBlockedReason)} composerError={error ?? null}
+      sendBlockedReason={blockedReason ?? (forkAttempt ? '请先核对原分支请求' : attempt ? '请先核对原发送状态' : chatProps.sendBlockedReason)} composerError={error ?? null}
       composerNotice={blockedReason && !activeRunId ? { text: blockedReason, tone: 'blocked' } : notice ? { text: notice, tone: 'blocked' } : firstHandoff ? { text: '旧 Agent 的接续身份无法验证。文字历史已保留，将在新上下文继续。', tone: 'blocked' } : null}
       draftAttachments={[]} queuedPrompts={[]} steerCapability={null} onSteerQueuedPrompt={undefined}
       slashOpen={false} slashCmds={[]} slashLoading={false} historyWindow={null} onLoadOlderTurns={undefined}
       pendingQuestions={live?.pendingQuestions ?? []} stopStates={live?.stopState ? { [live.runId]: live.stopState } : {}}
-      traceHealth={undefined} onForkTurn={undefined} renderLocationPicker={undefined}
+      traceHealth={undefined} forkableRunIds={forkableRunIds} onForkTurn={!working && !attempt && !forkAttempt && !blockedReason ? turn => fork(turn) : undefined} renderLocationPicker={undefined}
       agentScopeLabel="切换只影响下一条消息；发送时自动补齐缺失历史"
       onPasteImages={() => setError('跨 Agent 对话暂不支持图片；未发送，文字草稿已保留')}
       onPasteClipboardImage={() => setError('跨 Agent 对话暂不支持图片；未发送，文字草稿已保留')}
@@ -235,6 +277,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
         if (activeRunId) void window.scry.stop(activeRunId).then(requested => setNotice(requested ? '已请求停止，等待本轮结束。' : '运行已结束或无法停止，请刷新状态。')).catch(error => setError(message(error)))
       }}
     />
+    {forkAttempt && <div className="conversation-recovery" role="status"><button className="btn" disabled={working} onClick={() => { void fork(undefined, forkAttempt) }}>核对 / 继续原分支</button></div>}
     {attempt && <div className="conversation-recovery" role="status">
       <button className="btn" disabled={working} onClick={() => { void send(attempt) }}>核对 / 继续原发送</button>
       {attemptReadback && !page?.summary.blockedReason && <button className="btn" disabled={working} onClick={() => { setAttempt(undefined); setError(undefined); setNotice('已解除界面锁定。再次发送是新请求，可能重复执行；请先核对聊天记录。') }}>保留草稿，解除锁定</button>}

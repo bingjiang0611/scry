@@ -953,6 +953,7 @@ export function createCodexAdapter(
     forkSession: {
       async fork(forkRequest) {
         const access = codexAccess(forkRequest.permissionMode)
+        await forkRequest.beforeFork?.()
         const thread = await request<CodexThreadResponse>('thread/fork', {
           threadId: forkRequest.sourceSessionId,
           lastTurnId: forkRequest.sourceForkTurnId,
@@ -960,7 +961,7 @@ export function createCodexAdapter(
           excludeTurns: true,
           ...access,
           ...(forkRequest.model ? { model: forkRequest.model.id } : {})
-        }, forkRequest.cwd, forkRequest.codexHookTrust, forkRequest.mcpExecution)
+        }, forkRequest.cwd, forkRequest.codexHookTrust, forkRequest.mcpExecution, forkRequest.expectedContinuationKey)
         return { externalSessionId: thread.thread.id }
       }
     },
