@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
+import { exerciseConversationFork } from './conversation-fork-smoke.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
 import { exercisePiAgentSwitch } from './conversation-agent-switch-smoke.mjs'
 import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
@@ -248,6 +249,11 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     assert.ok(turn.history.items.some((item) => item.kind === 'model' && item.text === 'isolated remote assistant evidence'))
   }
 
+  const nativeFork = await exerciseConversationFork({ cdp, evaluate, fixture, click, button, wait, read, preview, settled, sendRequest, inputs, ledger, capture })
+  await click(`.sidebar [data-conversation-id=${json(id)}]`)
+  await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId===${json(id)}`), 'return from native fork fixture')
+  await wait(() => evaluate('document.querySelector(\'[aria-label="重命名统一对话"]\')?.disabled===false'), 'returned conversation finished loading')
+
   const management = await exerciseConversationManagement({ cdp, evaluate, fixture, id, click, button, key, wait, read, inputs, ledger, capture, captureNarrow })
 
   const deletion = await exerciseConversationDeletion({ cdp, evaluate, fixture, click, button, key, wait, read, preview, settled, sendRequest, inputs, ledger, capture, captureNarrow })
@@ -333,7 +339,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   assert.equal(inputs(fixture).length, invocationCount)
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
-    duplicate, management, deletion, piSwitch, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
+    duplicate, nativeFork, management, deletion, piSwitch, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
 }
 
 export async function verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity) {
@@ -365,6 +371,11 @@ export async function verifyUnifiedConversationRestart(evaluate, fixture, result
   const next = await preview(evaluate, result.id, 'claude')
   assert.equal(next.continuation.kind, changedIdentity ? 'fresh' : 'resume')
   assert.equal(next.missingItems.length, changedIdentity ? 6 : 0)
+  for (const id of [result.nativeFork.sourceId, result.nativeFork.branchId]) {
+    assert.equal((await read(evaluate, id)).summary.deletion.status, 'complete')
+  }
+  const forkCalls = readFileSync(fixture.callsFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).filter(call => call.operation === 'fork')
+  assert.equal(forkCalls.length, result.nativeFork.forkCalls, 'restart cannot recreate the native branch')
   await verifyConversationDeletionRestart(evaluate, fixture, result.deletion, inputs)
   assert.deepEqual(inputs(fixture), result.receipts, 'restart/read/preview/duplicate must not execute the Provider again')
 }

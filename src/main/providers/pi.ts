@@ -2059,6 +2059,8 @@ export function createPiAdapter(options: {
         if (!request.agentProfileId) throw new Error('Pi 分支缺少 agentProfileId')
         const profile = await options.resolveProfile(request.agentProfileId)
         if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
+        // Launching Pi can run extensions, so fence startup as well as the fork RPC below.
+        await request.beforeFork?.()
         return withPiRpc(
           profile,
           request.cwd,
@@ -2075,6 +2077,7 @@ export function createPiAdapter(options: {
               type: typeof entry.type === 'string' ? entry.type : undefined,
               role: typeof record(entry.message).role === 'string' ? String(record(entry.message).role) : undefined
             })), snapshot.leafId, request.sourceForkTurnId)
+            await request.beforeFork?.()
             const forked = target.operation === 'fork_before'
               ? await rpc.send({ type: 'fork', entryId: target.entryId }, null)
               : await rpc.send({ type: 'clone' }, null)

@@ -79,6 +79,7 @@ interface ChatViewProps {
   onSelect: (event: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void
   onForkTurn?: (turn: Turn) => Promise<void>
+  forkableRunIds?: ReadonlySet<string>
   onOpenFile?: (target: WorkspaceFileTarget) => void
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onInput: (value: string) => void
@@ -129,7 +130,7 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
 }
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
+  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
 
 // Keep small/light histories intact, but window text-heavy pages even below
 // the turn-count threshold. Source length is a work budget, not a latency estimate.
@@ -163,7 +164,7 @@ export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, fo
 
 const TranscriptTurn = memo(function TranscriptTurn({
   turn, index, total, windowed, initiallyVisible, focused,
-  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, pendingQuestions = [], onAnswerQuestion, remote = false
+  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
 }) {
@@ -264,7 +265,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
     {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
       <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
-        onForkTurn={onForkTurn} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote} />
+        onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote} />
     </>}
   </div>
 })
@@ -443,6 +444,7 @@ export function ChatView({
   onSelect,
   onOpenDiff,
   onForkTurn,
+  forkableRunIds,
   onOpenFile,
   onAnswerQuestion,
   onInput,
@@ -654,6 +656,7 @@ export function ChatView({
           {(!sessionLoading || sessionCacheVisible) && <ChatTranscriptTurns
             turns={turns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId}
             onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff}
+            forkableRunIds={forkableRunIds}
             onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
             pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
           />}

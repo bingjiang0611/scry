@@ -166,6 +166,7 @@ const api = {
   sourceControl,
   conversations: {
     create: (cwd: string): ReturnType<ConversationApi['create']> => ipcRenderer.invoke('conversation:create', cwd),
+    fork: (request: Parameters<ConversationApi['fork']>[0]): ReturnType<ConversationApi['fork']> => ipcRenderer.invoke('conversation:fork', request),
     previewAdoption: (...args: Parameters<ConversationApi['previewAdoption']>): ReturnType<ConversationApi['previewAdoption']> => ipcRenderer.invoke('conversation:previewAdoption', ...args),
     adopt: (source: Parameters<ConversationApi['adopt']>[0], fingerprint: string): ReturnType<ConversationApi['adopt']> => ipcRenderer.invoke('conversation:adopt', source, fingerprint),
     previewDeletion: (id: string): ReturnType<ConversationApi['previewDeletion']> => ipcRenderer.invoke('conversation:previewDeletion', id),

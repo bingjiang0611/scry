@@ -126,6 +126,15 @@ describe('Codex provider adapter', () => {
     }))
   })
 
+  it('does not call Codex thread/fork when the managed identity fence rejects', async () => {
+    const adapter = createCodexAdapter()
+    await expect(adapter.forkSession!.fork({ providerId: 'codex', cwd: '/repo', sourceSessionId: 'thread-source',
+      sourceRunId: 'run-source', sourceProviderTurnId: 'turn-source', sourceForkTurnId: 'turn-source',
+      beforeFork: async () => { throw new Error('managed identity changed') }
+    })).rejects.toThrow('managed identity changed')
+    expect(appServer.request).not.toHaveBeenCalled()
+  })
+
   it('clears implicit MCP and serializes only approved Codex configs', () => {
     expect(codexMcpConfigArgs()).toEqual(['-c', 'mcp_servers={}'])
     expect(codexMcpConfigArgs({
