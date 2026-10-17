@@ -1,0 +1,324 @@
+{
+  "schema": 1,
+  "kind": "controlled-pi-probe-phase-comparison",
+  "recordedDate": "2026-10-17",
+  "environment": {
+    "hostAlias": "mac2",
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.3.0",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "vitest": "3.2.7"
+  },
+  "baseline": "1456e3580a907b4eb8dd36270b10c3a93c5ede65",
+  "candidate": "afd8f033b72b162e88d1d5291877707526c3dfe8",
+  "measurementSource": {
+    "baselineArchiveSha256": "666c007daf3943169d9d1968575d38624a729154dd18bfd596997f7300b58e27",
+    "candidatePatchSha256": "ccab9ed9bc160b049e2649acaee64c1e0d7b30519252a0356d500600af3f798c",
+    "note": "Benchmark used the frozen baseline plus the recorded production/test patch; later metadata unit-fixture correction did not change the measured producer, RPC fixture, collector or workload."
+  },
+  "measuredInputs": {
+    "packageLockSha256": "3fa76d639b39db7577971f3e4004911f1e326ff1bf996d5bcda298020f68b219",
+    "collectorSha256": "2e3626d59639b8564664827065de94b641f04a230e24244a4734e22b739b7cb0",
+    "rpcFixtureSha256": "f8a2db2d097ee6637350c550f8b8a18274ca10fb539ef96737aea364b08e4bac",
+    "candidateProducerSha256": "91ba73b61ea71f7412de907c509cd9bcb604ead29a9e61d843c6834aa0b64355"
+  },
+  "validationSourceFiles": {
+    "src/main/providers/pi.ts": "91ba73b61ea71f7412de907c509cd9bcb604ead29a9e61d843c6834aa0b64355",
+    "src/main/providers/pi-lifecycle.test.ts": "80f0b0e9d037cbc13e591d8218f69b45ab3875a8e35ea3fc087bfc849cd88603",
+    "src/main/providers/pi-environment.test.ts": "246ebaf92c11527e5251f35ec4b8755210a394d5cf8cdf84d2fb7b61dced3719"
+  },
+  "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+  "timing": {
+    "label": "mac2-pi-probe-phases",
+    "exit": 0,
+    "wallMs": 19928,
+    "cores": 8,
+    "loadBefore": 2.24,
+    "loadAfter": 2.13,
+    "highLoad": false
+  },
+  "samples": {
+    "baseline": [
+      {
+        "environmentMs": 0.3668330000000424,
+        "firstResponseMs": 816.724125,
+        "responseBurstMs": 1.3317919999999503,
+        "shutdownMs": 762.0414999999998,
+        "postCloseMs": 0.17383300000028612,
+        "totalMs": 1580.638083,
+        "responsesMs": {
+          "get_state": 816.724125,
+          "get_available_models": 818.0462089999999,
+          "get_available_thinking_levels": 818.0509999999999,
+          "get_commands": 818.0559169999999
+        }
+      },
+      {
+        "environmentMs": 0.09462500000017826,
+        "firstResponseMs": 809.9689169999997,
+        "responseBurstMs": 0.3858330000002752,
+        "shutdownMs": 757.4118329999997,
+        "postCloseMs": 0.054209000000355445,
+        "totalMs": 1567.9154170000002,
+        "responsesMs": {
+          "get_state": 809.9689169999997,
+          "get_available_models": 810.347667,
+          "get_available_thinking_levels": 810.3511669999998,
+          "get_commands": 810.35475
+        }
+      },
+      {
+        "environmentMs": 0.15945899999996982,
+        "firstResponseMs": 1084.118916,
+        "responseBurstMs": 0.6900420000001759,
+        "shutdownMs": 762.7675419999996,
+        "postCloseMs": 0.08458300000074814,
+        "totalMs": 1847.8205420000004,
+        "responsesMs": {
+          "get_state": 1084.118916,
+          "get_available_models": 1084.5025410000003,
+          "get_available_thinking_levels": 1084.508625,
+          "get_commands": 1084.808958
+        }
+      },
+      {
+        "environmentMs": 0.13100000000031287,
+        "firstResponseMs": 884.5707499999999,
+        "responseBurstMs": 0.602125000000342,
+        "shutdownMs": 761.0674589999999,
+        "postCloseMs": 0.08075000000008004,
+        "totalMs": 1646.4520840000005,
+        "responsesMs": {
+          "get_state": 884.5707499999999,
+          "get_available_models": 884.9386669999994,
+          "get_available_thinking_levels": 884.9445420000002,
+          "get_commands": 885.1728750000002
+        }
+      },
+      {
+        "environmentMs": 0.1350830000001224,
+        "firstResponseMs": 869.4472499999993,
+        "responseBurstMs": 0.39737500000046566,
+        "shutdownMs": 760.8027919999995,
+        "postCloseMs": 0.06041700000059791,
+        "totalMs": 1630.842917,
+        "responsesMs": {
+          "get_state": 869.4472499999993,
+          "get_available_models": 869.706792,
+          "get_available_thinking_levels": 869.7094999999999,
+          "get_commands": 869.8446249999997
+        }
+      }
+    ],
+    "candidate": [
+      {
+        "environmentMs": 0.34575000000000955,
+        "firstResponseMs": 830.7033749999999,
+        "responseBurstMs": 1.6457500000001346,
+        "shutdownMs": 3.2593749999998636,
+        "postCloseMs": 0.05737500000009277,
+        "totalMs": 836.0116250000001,
+        "responsesMs": {
+          "get_state": 830.7033749999999,
+          "get_available_models": 832.3340830000001,
+          "get_available_thinking_levels": 832.3435410000001,
+          "get_commands": 832.3491250000001
+        }
+      },
+      {
+        "environmentMs": 0.0439169999999649,
+        "firstResponseMs": 867.1632909999998,
+        "responseBurstMs": 0.45687500000030923,
+        "shutdownMs": 2.510208999999577,
+        "postCloseMs": 0.015166000000135682,
+        "totalMs": 870.1894579999998,
+        "responsesMs": {
+          "get_state": 867.1632909999998,
+          "get_available_models": 867.6067910000002,
+          "get_available_thinking_levels": 867.6165409999999,
+          "get_commands": 867.6201660000002
+        }
+      },
+      {
+        "environmentMs": 0.04291700000021592,
+        "firstResponseMs": 875.1345409999999,
+        "responseBurstMs": 0.670542000000296,
+        "shutdownMs": 2.114541999999801,
+        "postCloseMs": 0.014833000000180618,
+        "totalMs": 877.9773750000004,
+        "responsesMs": {
+          "get_state": 875.1345409999999,
+          "get_available_models": 875.507333,
+          "get_available_thinking_levels": 875.5131660000002,
+          "get_commands": 875.8050830000002
+        }
+      },
+      {
+        "environmentMs": 0.059791000000132044,
+        "firstResponseMs": 866.451125,
+        "responseBurstMs": 0.8710000000000946,
+        "shutdownMs": 2.2620419999998376,
+        "postCloseMs": 0.01724999999987631,
+        "totalMs": 869.661208,
+        "responsesMs": {
+          "get_state": 866.451125,
+          "get_available_models": 866.8204169999999,
+          "get_available_thinking_levels": 867.1562090000002,
+          "get_commands": 867.3221250000001
+        }
+      },
+      {
+        "environmentMs": 0.048500000000331056,
+        "firstResponseMs": 872.5367499999998,
+        "responseBurstMs": 0.45604199999979755,
+        "shutdownMs": 2.0224170000001322,
+        "postCloseMs": 0.01187500000014552,
+        "totalMs": 875.0755840000002,
+        "responsesMs": {
+          "get_state": 872.5367499999998,
+          "get_available_models": 872.8237919999997,
+          "get_available_thinking_levels": 872.8271669999999,
+          "get_commands": 872.9927919999996
+        }
+      }
+    ]
+  },
+  "summaries": {
+    "baseline": {
+      "n": 5,
+      "phases": {
+        "environmentMs": 0.1350830000001224,
+        "firstResponseMs": 869.4472499999993,
+        "responseBurstMs": 0.602125000000342,
+        "shutdownMs": 761.0674589999999,
+        "postCloseMs": 0.08075000000008004,
+        "totalMs": 1630.842917
+      },
+      "responses": {
+        "get_state": 869.4472499999993,
+        "get_available_models": 869.706792,
+        "get_available_thinking_levels": 869.7094999999999,
+        "get_commands": 869.8446249999997
+      },
+      "counts": [
+        {
+          "metric": "subprocess.rpc",
+          "runs": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "metric": "rpc.responses",
+          "runs": [
+            4,
+            4,
+            4,
+            4,
+            4
+          ]
+        },
+        {
+          "metric": "shutdown.grace-expiries",
+          "runs": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    "candidate": {
+      "n": 5,
+      "phases": {
+        "environmentMs": 0.048500000000331056,
+        "firstResponseMs": 867.1632909999998,
+        "responseBurstMs": 0.670542000000296,
+        "shutdownMs": 2.2620419999998376,
+        "postCloseMs": 0.015166000000135682,
+        "totalMs": 870.1894579999998
+      },
+      "responses": {
+        "get_state": 867.1632909999998,
+        "get_available_models": 867.6067910000002,
+        "get_available_thinking_levels": 867.6165409999999,
+        "get_commands": 867.6201660000002
+      },
+      "counts": [
+        {
+          "metric": "subprocess.rpc",
+          "runs": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "metric": "rpc.responses",
+          "runs": [
+            4,
+            4,
+            4,
+            4,
+            4
+          ]
+        },
+        {
+          "metric": "shutdown.grace-expiries",
+          "runs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    }
+  },
+  "validation": {
+    "mac2FullUnit": {
+      "passed": 3263,
+      "skipped": 4,
+      "failed": 0
+    },
+    "localInitialFullUnit": {
+      "passed": 3263,
+      "skipped": 4,
+      "unhandledWorkerRpcError": 1,
+      "exit": 1,
+      "rootCause": "not attributed; onTaskUpdate transport timeout"
+    },
+    "mac2InitialFullUnit": {
+      "passed": 3261,
+      "skipped": 4,
+      "failed": 2,
+      "causes": [
+        "archive snapshot had no Git HEAD required by performance-measure integration test",
+        "metadata unit fixture copied and launched an entire Node binary and exceeded its unchanged five-second deadline"
+      ]
+    },
+    "corrections": [
+      "Create a local isolated snapshot commit for the integration test; no push or changes to existing projects.",
+      "Keep real Node for concurrent/cache checks; use a small controlled Node-response executable and real file metadata for replacement invalidation. All assertions retained; no timeout increase or skip."
+    ]
+  },
+  "resultArchiveSha256": "21fe82cd7a2137eca3f772ff3155f2a8b329858c15e3171c48aae66a77668239",
+  "limitations": [
+    "Offline controlled provider, not a real installed CLI or a model invocation.",
+    "The measured case retains an idle handle after EOF; early-EOF-exit providers may not have this wait.",
+    "Five samples per side; not statistical significance or a production p95.",
+    "Startup and all four response timings are fixture-specific; the real twelve-second catalog wait remains unverified.",
+    "L3 and real App interaction have not been run."
+  ]
+}

@@ -1,18 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
 
-const processCounters = vi.hoisted(() => ({ active: false, commands: new Map<string, number>() }))
+const processCounters = vi.hoisted(() => ({ active: false, commands: new Map<string, number>(), snapshotTrees: 0, statusChecks: 0, remoteQueries: 0 }))
 
 function resetProcessCounters(): void {
   processCounters.commands = new Map()
+  processCounters.snapshotTrees = 0
+  processCounters.statusChecks = 0
+  processCounters.remoteQueries = 0
 }
 
 // `exec`/`execSync` take a shell command line; the others take the executable path.
-function countCommand(value: unknown, shell = false): void {
+function countCommand(value: unknown, shell = false, args?: unknown): void {
   if (!processCounters.active) return
   const executable = typeof value === 'string' ? (shell ? value.trim().split(/\s+/)[0] : value) : 'unknown'
   const command = executable.split('/').at(-1) ?? executable
   processCounters.commands.set(command, (processCounters.commands.get(command) ?? 0) + 1)
+  if (command === 'git' && Array.isArray(args)) {
+    const tree = args.indexOf('write-tree')
+    const paths = args.indexOf('--')
+    if (tree >= 0 && (paths < 0 || tree < paths)) processCounters.snapshotTrees++
+    const status = args.indexOf('status')
+    const remote = args.indexOf('remote')
+    if (status >= 0 && (paths < 0 || status < paths)) processCounters.statusChecks++
+    if (remote >= 0 && (paths < 0 || remote < paths)) processCounters.remoteQueries++
+  }
 }
 
 // Every node:child_process entry point that starts a process is counted, so switching a call
@@ -23,14 +35,14 @@ vi.mock('node:child_process', async () => {
   const wrap = <T extends (...args: never[]) => unknown>(name: keyof typeof actual, shell = false): T => {
     const original = actual[name] as unknown as T
     const wrapped = ((...args: unknown[]) => {
-      countCommand(args[0], shell)
+      countCommand(args[0], shell, args[1])
       return Reflect.apply(original, actual, args)
     }) as unknown as T
     const custom = (original as unknown as Record<symbol, unknown>)[promisifySymbol]
     if (typeof custom === 'function') {
       Object.defineProperty(wrapped, promisifySymbol, {
         value: (...args: unknown[]) => {
-          countCommand(args[0], shell)
+          countCommand(args[0], shell, args[1])
           return Reflect.apply(custom, actual, args)
         }
       })
@@ -49,7 +61,10 @@ async function measure(operation: () => unknown | Promise<unknown>): Promise<Rec
   resetProcessCounters()
   processCounters.active = true
   try { await operation() } finally { processCounters.active = false }
-  const result: Record<string, number> = { total: 0 }
+  const result: Record<string, number> = {
+    total: 0, snapshotTrees: processCounters.snapshotTrees,
+    statusChecks: processCounters.statusChecks, remoteQueries: processCounters.remoteQueries
+  }
   for (const [command, count] of processCounters.commands) {
     result[command === 'git' ? 'git' : command] = count
     result.total += count
@@ -126,6 +141,162 @@ describe('fixed production subprocess work counters', () => {
       measured({ scenario: 'source-control.diff', metric: 'subprocess.total', ...meta }, recorderRuns.total),
       measured({ scenario: 'source-control.service.status-diff', metric: 'subprocess.total', ...meta }, sourceControlRuns.total)
     ])
+  }, 120_000)
+
+  it('counts real Service.diff with both revision checks on 5000 files and one configured remote', async () => {
+    const { SourceControlService } = await import('../../src/main/source-control/service')
+    const { ScProcess } = await import('../../src/main/source-control/process')
+    const { writeFile, readFile, realpath, rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+    const { performance } = await import('node:perf_hooks')
+    const samples: number[] = []
+    const runs = await repeatCounters(defaultRepeats, async () => {
+      const fixture = await gitFixture()
+      const repo = await realpath(join(fixture.root, 'repo'))
+      const env = { ...process.env, HOME: fixture.home, XDG_CONFIG_HOME: fixture.home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_COUNT: '0' }
+      const git = (args: string[]) => execFileSync('git', args, { cwd: repo, env })
+      const service = new SourceControlService({
+        userData: join(fixture.root, 'data'), unsettledDirectories: () => [],
+        authorizeDirectory: path => { if (path !== repo) throw new Error('fixture denied directory'); return path },
+        process: new ScProcess(() => env)
+      })
+      try {
+        await writeFile(join(repo, 'changed.ts'), 'export const changed = false\n')
+        for (let start = 0; start < 5000; start += 100) {
+          await Promise.all(Array.from({ length: 100 }, (_, offset) => writeFile(join(repo, `file-${start + offset}.txt`), 'base\n')))
+        }
+        git(['add', '.'])
+        git(['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', '-c', 'user.email=bench@scry.local', '-c', 'user.name=bench', 'commit', '-q', '-m', 'large baseline'])
+        git(['remote', 'add', 'origin', 'https://example.invalid/fixture/repo.git'])
+        await writeFile(join(repo, 'changed.ts'), 'export const changed = true\n')
+        git(['add', 'changed.ts'])
+        git(['mv', 'file-1.txt', 'renamed name.txt'])
+        await writeFile(join(repo, 'changed.ts'), 'export const changed = true\n// working only\n')
+        await writeFile(join(repo, 'file-0.txt'), 'other working change\n')
+        await writeFile(join(repo, 'new 中文.txt'), 'untracked\n')
+        const state = await service.read(repo)
+        expect(state.status).toBe('available')
+        if (state.status !== 'available') throw new Error(state.reason)
+        expect(state.data.files).toHaveLength(4)
+        expect(state.data.remotes).toHaveLength(1)
+        const index = await readFile(join(repo, '.git/index'))
+        const counts = await measure(async () => {
+          const started = performance.now()
+          const diff = await service.diff({ repositoryId: state.data.id, expectedRevision: state.data.revision, path: 'changed.ts', staged: false })
+          expect(diff.status).toBe('available')
+          if (diff.status !== 'available') throw new Error(diff.reason)
+          expect(diff.data.patch).toContain('+// working only')
+          expect(diff.data.patch).not.toContain('+export const changed = true')
+          expect(diff.data).toMatchObject({ binary: false, truncated: false })
+          expect((await readFile(join(repo, '.git/index'))).equals(index)).toBe(true)
+          samples.push(performance.now() - started)
+        })
+        expect(counts.statusChecks).toBe(2)
+        return { git: counts.git, total: counts.total, statusChecks: counts.statusChecks, remoteQueries: counts.remoteQueries }
+      } finally {
+        await service.dispose()
+        await rm(fixture.root, { recursive: true, force: true })
+      }
+    })
+    const meta = { scenario: 'source-control.service.diff-validated', layer: 'main' as const, unit: 'count' as const,
+      workload: 'tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true',
+      source: 'real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion' }
+    writeCollector('service-diff', [
+      measured({ ...meta, metric: 'subprocess.git' }, runs.git),
+      measured({ ...meta, metric: 'subprocess.total' }, runs.total),
+      measured({ ...meta, metric: 'revision.status-checks' }, runs.statusChecks),
+      measured({ ...meta, metric: 'remote.queries' }, runs.remoteQueries)
+    ])
+    if (process.env.SCRY_SERVICE_DIFF_TIMINGS) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync(process.env.SCRY_SERVICE_DIFF_TIMINGS, JSON.stringify({ measurementVersion: 1, workload: meta.workload, samples }, null, 2))
+    }
+  }, 120_000)
+
+  it('counts paired terminal diffs on 5000 files with distinct dirty anchors and retained user changes', async () => {
+    const { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnAndSessionDiff } = await import('../../src/core/turn-recorder/git')
+    const { writeFile, rm, realpath, readFile, stat } = await import('node:fs/promises')
+    const { join, basename } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+    const { performance } = await import('node:perf_hooks')
+    const samples: Array<{ totalMs: number; turnReadyMs: number }> = []
+    vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null')
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+    vi.stubEnv('GIT_CONFIG_COUNT', '0')
+    for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) vi.stubEnv(key, undefined)
+    try {
+      const runs = await repeatCounters(defaultRepeats, async () => {
+        const fixture = await gitFixture()
+        const repo = await realpath(join(fixture.root, 'repo'))
+        const env = { ...process.env, HOME: fixture.home }
+        const git = (args: string[]) => execFileSync('git', args, { cwd: repo, env })
+        let turn: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+        let session: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+        try {
+          for (let start = 0; start < 4999; start += 64) await Promise.all(
+            Array.from({ length: Math.min(64, 4999 - start) }, (_, offset) => writeFile(join(repo, `file-${start + offset}.txt`), 'base\n'))
+          )
+          git(['add', '.'])
+          git(['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', '-c', 'user.email=bench@scry.local', '-c', 'user.name=bench', 'commit', '-q', '-m', '5000 files'])
+          await writeFile(join(repo, 'changed.ts'), 'user dirt before session\n')
+          session = await beginGitTurnDiff(repo)
+          await writeFile(join(repo, 'file-0.txt'), 'round-one\n')
+          await writeFile(join(repo, 'previous.txt'), 'previous turn\n')
+          turn = await beginGitTurnDiff(repo)
+          expect(turn.status).toBe('ready')
+          expect(session.status).toBe('ready')
+          expect(turn.beforeTree).not.toBe(session.beforeTree)
+          await writeFile(join(repo, 'file-0.txt'), 'base\n')
+          await writeFile(join(repo, 'file-1.txt'), 'round-two\n')
+          await rm(join(repo, 'previous.txt'))
+          await writeFile(join(repo, 'created.txt'), 'created this turn\n')
+          const indexBefore = await readFile(join(repo, '.git/index'))
+          const turnDir = turn.tempDir!
+          const baselineDir = session.tempDir!
+          const capture = turn
+          const baseline = session
+          const counts = await measure(async () => {
+            const started = performance.now()
+            const pair = finishGitTurnAndSessionDiff(capture, baseline)
+            let turnReadyMs = 0
+            const observedTurn = pair.turn.then(snapshot => {
+              turnReadyMs = performance.now() - started
+              return snapshot
+            })
+            const [turnDiff, sessionDiff] = await Promise.all([observedTurn, pair.session])
+            expect(turnDiff.status).toBe('captured')
+            expect(sessionDiff.status).toBe('captured')
+            expect(turnDiff.files.map(file => basename(file.path)).sort()).toEqual(['created.txt', 'file-0.txt', 'file-1.txt', 'previous.txt'])
+            expect(sessionDiff.files.map(file => basename(file.path)).sort()).toEqual(['created.txt', 'file-1.txt'])
+            expect(turnDiff.files.find(file => basename(file.path) === 'file-0.txt')?.patch).toContain('-round-one\n+base')
+            expect(sessionDiff.files.find(file => basename(file.path) === 'file-1.txt')?.patch).toContain('+round-two')
+            // Compare every byte without timing Vitest's per-byte object traversal.
+            expect((await readFile(join(repo, '.git/index'))).equals(indexBefore)).toBe(true)
+            await expect(stat(turnDir)).rejects.toMatchObject({ code: 'ENOENT' })
+            expect((await stat(baselineDir)).isDirectory()).toBe(true)
+            samples.push({ totalMs: performance.now() - started, turnReadyMs })
+          })
+          return { git: counts.git ?? 0, trees: counts.snapshotTrees, total: counts.total }
+        } finally {
+          if (turn) await cancelGitTurnDiff(turn)
+          if (session) await cancelGitTurnDiff(session)
+          await rm(fixture.root, { recursive: true, force: true })
+        }
+      })
+      const meta = { scenario: 'source-control.terminal-pair', layer: 'main' as const, unit: 'count' as const,
+        workload: 'tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2',
+        source: 'pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions' }
+      writeCollector('terminal-pair', [
+        measured({ ...meta, metric: 'subprocess.git' }, runs.git),
+        measured({ ...meta, metric: 'snapshot.write-tree' }, runs.trees),
+        measured({ ...meta, metric: 'subprocess.total' }, runs.total)
+      ])
+      if (process.env.SCRY_TERMINAL_PAIR_TIMINGS) {
+        const { writeFileSync } = await import('node:fs')
+        writeFileSync(process.env.SCRY_TERMINAL_PAIR_TIMINGS, JSON.stringify({ measurementVersion: 2, workload: meta.workload, samples }, null, 2))
+      }
+    } finally { vi.unstubAllEnvs() }
   }, 120_000)
 
   it('is sensitive to duplicated recorder diff work', async () => {

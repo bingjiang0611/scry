@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "kind": "controlled-runtime-evidence-comparison",
+  "recordedDate": "2026-10-17",
+  "environment": {
+    "hostAlias": "mac2",
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.3.0",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "vitest": "3.2.7",
+    "npm": "11.16.0"
+  },
+  "baseline": "cafc418ebcb25718ad031b50bbf3ba03d7be9922",
+  "candidate": "ff5a4fd39ff81bced1372a5a8eb12dc07e7bcd83",
+  "identicalInputs": {
+    "packageLockSha256": "3fa76d639b39db7577971f3e4004911f1e326ff1bf996d5bcda298020f68b219",
+    "collectorSha256": "e1c9e27e4c6047f5a84f0da07e32a0691d6c11ffb10ad50e78a989f8e42ce020",
+    "timingRunnerSha256": "7d7984bb4f2b610e0e9d07a978723779018944dbff79423ef90f98e5e1dfb9b8"
+  },
+  "timing": {
+    "label": "mac2-runtime-evidence",
+    "cores": 8,
+    "loadBefore": 7.95,
+    "loadAfter": 7.12,
+    "highLoad": false,
+    "exit": 0,
+    "wallMs": 12067
+  },
+  "samples": {
+    "baseline": {
+      "nodeEnvironmentMs": [
+        568.691084,
+        551.096,
+        567.614417,
+        548.3190409999997,
+        557.7015839999999
+      ],
+      "usageMixedAppendMs": [
+        27.701958000000104,
+        26.261917000000267,
+        27.563750000000255,
+        26.219750000000204,
+        25.65816599999971
+      ]
+    },
+    "candidate": {
+      "nodeEnvironmentMs": [
+        438.228958,
+        401.43554199999994,
+        400.39212499999985,
+        395.29062499999986,
+        396.523416
+      ],
+      "usageMixedAppendMs": [
+        4.919499999999971,
+        1.7141249999999673,
+        1.1835000000000946,
+        1.105417000000216,
+        1.430667000000085
+      ]
+    }
+  },
+  "metrics": [
+    {
+      "metric": "nodeEnvironmentMs",
+      "samplesPerSide": 5,
+      "baselineP50": 557.7015839999999,
+      "candidateP50": 400.39212499999985,
+      "baselineMax": 568.691084,
+      "candidateMax": 438.228958,
+      "medianReductionPercent": 28.206744164456254
+    },
+    {
+      "metric": "usageMixedAppendMs",
+      "samplesPerSide": 5,
+      "baselineP50": 26.261917000000267,
+      "candidateP50": 1.430667000000085,
+      "baselineMax": 27.701958000000104,
+      "candidateMax": 4.919499999999971,
+      "medianReductionPercent": 94.55231314606596
+    }
+  ],
+  "counts": {
+    "baseline": [
+      {
+        "scenario": "providers.pi-environment",
+        "metric": "subprocess.node",
+        "runs": [
+          5,
+          5,
+          5,
+          5,
+          5
+        ]
+      },
+      {
+        "scenario": "analytics.usage-mixed-append",
+        "metric": "io.read.calls",
+        "runs": [
+          5,
+          5,
+          5,
+          5,
+          5
+        ]
+      },
+      {
+        "scenario": "analytics.usage-mixed-append",
+        "metric": "io.read.bytes",
+        "runs": [
+          4757290,
+          4757290,
+          4757290,
+          4757290,
+          4757290
+        ]
+      }
+    ],
+    "candidate": [
+      {
+        "scenario": "providers.pi-environment",
+        "metric": "subprocess.node",
+        "runs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "scenario": "analytics.usage-mixed-append",
+        "metric": "io.read.calls",
+        "runs": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "scenario": "analytics.usage-mixed-append",
+        "metric": "io.read.bytes",
+        "runs": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "resultArchiveSha256": "8818f75641195fe4a4f4169499ea87c6a14980d4f80e8492daf581a737411dad",
+  "limitations": [
+    "Five fixed-workload samples per side, not statistical significance or production p95.",
+    "Load was below the timing guard but close to the eight-core limit.",
+    "L2 applies only to the two measured function workloads, not Provider catalog latency or the whole App.",
+    "No real Provider, packaged App, UI or L3 validation."
+  ]
+}

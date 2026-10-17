@@ -251,7 +251,7 @@ export class ScGit {
     }
   }
 
-  async status(identity: GitIdentity): Promise<ScRepository> {
+  private async readStatus(identity: GitIdentity) {
     const fresh = await this.identity(identity.root)
     if (fresh.id !== identity.id) throw new Error('仓库身份已改变，请重新打开源代码管理')
     await this.assertSafeWorktreeRead(identity.root)
@@ -266,6 +266,38 @@ export class ScGit {
     if (state.files.length > 1000)
       throw new Error('工作区超过 1,000 个变更文件；不提供不完整的可写快照，请在终端缩小范围')
     const config = await this.config(identity.root)
+    return { state, output, config }
+  }
+
+  private async revisionState(
+    identity: GitIdentity,
+    { state, output, config }: Awaited<ReturnType<ScGit['readStatus']>>
+  ): Promise<Omit<ScRepository, 'remotes'>> {
+    const actionBlockers = await this.actionBlockers(identity, config)
+    const writeBlocker = state.files.some((file) => file.conflict)
+      ? '存在未解决的冲突，请在终端处理'
+      : await this.executionBlocker(identity)
+    return {
+      ...state,
+      id: identity.id,
+      root: identity.root,
+      writeBlocker,
+      actionBlockers,
+      revision: hash(
+        `${identity.id}\0${output}\0${await this.fingerprint(identity, state.files, config)}\0${writeBlocker}\0${JSON.stringify(actionBlockers)}`
+      ),
+      observedAt: Date.now()
+    }
+  }
+
+
+  /** Same revision material as status; remotes are a display projection, not hash input. */
+  async revisionSnapshot(identity: GitIdentity): Promise<Omit<ScRepository, 'remotes'>> {
+    return this.revisionState(identity, await this.readStatus(identity))
+  }
+
+  async status(identity: GitIdentity): Promise<ScRepository> {
+    const observed = await this.readStatus(identity)
     const remoteNames = (await this.run(identity.root, ['remote'])).trim().split('\n').filter(Boolean)
     const remotes: ScRepository['remotes'] = []
     for (const name of remoteNames) {
@@ -278,22 +310,8 @@ export class ScGit {
       const redact = (value: string): string => value.replace(/(https?:\/\/)[^\s/@]+@/g, '$1[redacted]@')
       remotes.push({ name, pushUrls: values.map(redact), fetchUrls: fetchUrls.map(redact) })
     }
-    const actionBlockers = await this.actionBlockers(identity, config)
-    const writeBlocker = state.files.some((file) => file.conflict)
-      ? '存在未解决的冲突，请在终端处理'
-      : await this.executionBlocker(identity)
-    return {
-      ...state,
-      id: identity.id,
-      root: identity.root,
-      remotes,
-      writeBlocker,
-      actionBlockers,
-      revision: hash(
-        `${identity.id}\0${output}\0${await this.fingerprint(identity, state.files, config)}\0${writeBlocker}\0${JSON.stringify(actionBlockers)}`
-      ),
-      observedAt: Date.now()
-    }
+    const snapshot = await this.revisionState(identity, observed)
+    return { ...snapshot, remotes }
   }
 
   async diff(identity: GitIdentity, file: ScFile, staged: boolean): Promise<ScDiff> {

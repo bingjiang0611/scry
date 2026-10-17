@@ -1,6 +1,188 @@
 {
   "schema": 1,
   "metrics": {
+    "source-control.service.diff-validated/subprocess.git": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 18
+      }
+    },
+    "source-control.service.diff-validated/subprocess.total": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 18
+      }
+    },
+    "source-control.service.diff-validated/revision.status-checks": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "revision.status-checks",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2
+      }
+    },
+    "source-control.service.diff-validated/remote.queries": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "remote.queries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "source-control.terminal-pair/subprocess.git": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 17
+      }
+    },
+    "source-control.terminal-pair/snapshot.write-tree": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "snapshot.write-tree",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "source-control.terminal-pair/subprocess.total": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 17
+      }
+    },
+    "providers.pi-probe/subprocess.rpc": {
+      "scenario": "providers.pi-probe",
+      "metric": "subprocess.rpc",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "providers.pi-probe/rpc.responses": {
+      "scenario": "providers.pi-probe",
+      "metric": "rpc.responses",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "providers.pi-probe/shutdown.grace-expiries": {
+      "scenario": "providers.pi-probe",
+      "metric": "shutdown.grace-expiries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "providers.pi-environment/subprocess.node": {
+      "scenario": "providers.pi-environment",
+      "metric": "subprocess.node",
+      "layer": "main",
+      "unit": "count",
+      "workload": "native-node=1;environment-resolutions=5;cold-first=1",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "analytics.usage-mixed-append/io.read.calls": {
+      "scenario": "analytics.usage-mixed-append",
+      "metric": "io.read.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "usage-rows=10000;warm-cache=1;performance-append-and-stats=5",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "analytics.usage-mixed-append/io.read.bytes": {
+      "scenario": "analytics.usage-mixed-append",
+      "metric": "io.read.bytes",
+      "layer": "io",
+      "unit": "bytes",
+      "workload": "usage-rows=10000;warm-cache=1;performance-append-and-stats=5",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
     "files.fixed-operations/io.open": {
       "scenario": "files.fixed-operations",
       "metric": "io.open",

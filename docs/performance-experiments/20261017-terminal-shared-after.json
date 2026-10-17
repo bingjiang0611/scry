@@ -1,0 +1,422 @@
+{
+  "schema": 1,
+  "date": "2026-10-17",
+  "scenario": "source-control.terminal-pair",
+  "productionCommit": "aff6006",
+  "measurementCommits": [
+    "7ad8957",
+    "67a8252"
+  ],
+  "fixtureRepairCommit": "8987f46",
+  "worktree": "/private/tmp/scry-perf-climb-runtime-evidence-20261016",
+  "branch": "perf/climb-runtime-evidence-20261016",
+  "host": {
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.3.0",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "git": "2.50.1 (Apple Git-155)"
+  },
+  "sourceSha256": {
+    "src/core/turn-recorder/git.ts": "b87edc07d0d309260a91923c56c4bac0ddde9b6a661a191c943e9df1170dbecc",
+    "src/shared/trace.ts": "640fab6cbdb9a74c981296c3a8eef1cca1f353dac8db8aad32a38b887ffc0659",
+    "src/main/git-terminal-pair.test.ts": "35ad7544f8250b89986f1aa4f00fd625df11f625a9d9b75f73279b29ae7e7b9a",
+    "scripts/performance-counters/subprocesses.counters.test.ts": "a165a1b05dce4722119b317cf3b72c4012d981b9592e9660c85d84bb536b143d",
+    "scripts/performance-measure.test.ts": "0e657f02bbc5e6eac5a3e635090360ab2a536d6b19869630cf99d3cdd79c9867",
+    "package-lock.json": "3fa76d639b39db7577971f3e4004911f1e326ff1bf996d5bcda298020f68b219",
+    "src/main/index.ts": "beb1732707fa7549d9f0e65c4d38d3ef5609055d8bf0b2eed105f0bce5423b32",
+    "src/main/git.ts": "09941f29f1240a176656126fa4413e85f2b94673bbba39e63e07b7f08a205e7a",
+    "src/main/session-diff.ts": "f2828ab5a6f1abf6be5e4872560e9a6e919678409677c6c7bb2c0060d4fe34ab"
+  },
+  "l1": {
+    "baseline": [
+      {
+        "scenario": "source-control.terminal-pair",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+        "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+        "metric": "subprocess.git",
+        "availability": "measured",
+        "runs": [
+          24,
+          24,
+          24,
+          24,
+          24
+        ]
+      },
+      {
+        "scenario": "source-control.terminal-pair",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+        "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+        "metric": "snapshot.write-tree",
+        "availability": "measured",
+        "runs": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "scenario": "source-control.terminal-pair",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+        "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+        "metric": "subprocess.total",
+        "availability": "measured",
+        "runs": [
+          24,
+          24,
+          24,
+          24,
+          24
+        ]
+      }
+    ],
+    "candidate": [
+      {
+        "scenario": "source-control.terminal-pair",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+        "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+        "metric": "subprocess.git",
+        "availability": "measured",
+        "runs": [
+          17,
+          17,
+          17,
+          17,
+          17
+        ]
+      },
+      {
+        "scenario": "source-control.terminal-pair",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+        "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+        "metric": "snapshot.write-tree",
+        "availability": "measured",
+        "runs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "scenario": "source-control.terminal-pair",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+        "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+        "metric": "subprocess.total",
+        "availability": "measured",
+        "runs": [
+          17,
+          17,
+          17,
+          17,
+          17
+        ]
+      }
+    ]
+  },
+  "l2": {
+    "method": "same Mac, dependency installation, lockfile, frozen fixed Git workload; serialized baseline then candidate through timing-run; five isolated repositories per side; all samples retained",
+    "firstRejected": {
+      "measurementVersion": 1,
+      "baseline": [
+        {
+          "totalMs": 1219.068292,
+          "turnReadyMs": 425.4569999999999
+        },
+        {
+          "totalMs": 1211.574708,
+          "turnReadyMs": 423.13174999999956
+        },
+        {
+          "totalMs": 1214.087916999999,
+          "turnReadyMs": 421.8349999999991
+        },
+        {
+          "totalMs": 1183.1365829999995,
+          "turnReadyMs": 422.1314999999995
+        },
+        {
+          "totalMs": 1210.4479999999985,
+          "turnReadyMs": 419.7026659999992
+        }
+      ],
+      "candidate": [
+        {
+          "totalMs": 900.9855000000002,
+          "turnReadyMs": 456.54204100000015
+        },
+        {
+          "totalMs": 895.5781670000006,
+          "turnReadyMs": 455.5290420000001
+        },
+        {
+          "totalMs": 885.1160840000002,
+          "turnReadyMs": 457.13479199999983
+        },
+        {
+          "totalMs": 879.0762919999997,
+          "turnReadyMs": 459.8005840000005
+        },
+        {
+          "totalMs": 873.9148339999992,
+          "turnReadyMs": 454.63629199999923
+        }
+      ],
+      "medians": {
+        "totalMs": {
+          "baseline": 1211.574708,
+          "candidate": 885.1160840000002,
+          "deltaMs": -326.4586239999999,
+          "percent": -26.94498505493727
+        },
+        "turnReadyMs": {
+          "baseline": 422.1314999999995,
+          "candidate": 456.54204100000015,
+          "deltaMs": 34.41054100000065,
+          "percent": 8.151616498650466
+        }
+      },
+      "loadBefore": 2.17,
+      "loadAfter": 3.62,
+      "highLoad": false,
+      "decision": "Rejected by user: do not delay the first turn snapshot to wait for the session projection"
+    },
+    "retainedOwnershipBeforeCleanupTimingAudit": {
+      "measurementVersion": 2,
+      "baseline": [
+        {
+          "totalMs": 825.381791,
+          "turnReadyMs": 451.3452500000001
+        },
+        {
+          "totalMs": 803.9887920000001,
+          "turnReadyMs": 442.7498749999995
+        },
+        {
+          "totalMs": 812.2902910000003,
+          "turnReadyMs": 446.07275000000027
+        },
+        {
+          "totalMs": 780.7678329999999,
+          "turnReadyMs": 424.47158300000046
+        },
+        {
+          "totalMs": 776.1986669999987,
+          "turnReadyMs": 423.5410419999989
+        }
+      ],
+      "candidate": [
+        {
+          "totalMs": 561.333625,
+          "turnReadyMs": 443.735625
+        },
+        {
+          "totalMs": 538.9717499999997,
+          "turnReadyMs": 422.3259159999998
+        },
+        {
+          "totalMs": 562.648209,
+          "turnReadyMs": 443.7439999999997
+        },
+        {
+          "totalMs": 536.6046250000009,
+          "turnReadyMs": 421.27820900000006
+        },
+        {
+          "totalMs": 545.198042,
+          "turnReadyMs": 428.16899999999987
+        }
+      ],
+      "medians": {
+        "totalMs": {
+          "baseline": 803.9887920000001,
+          "candidate": 545.198042,
+          "deltaMs": -258.7907500000001,
+          "percent": -32.18835294410424
+        },
+        "turnReadyMs": {
+          "baseline": 442.7498749999995,
+          "candidate": 428.16899999999987,
+          "deltaMs": -14.58087499999965,
+          "percent": -3.2932533295463196
+        }
+      },
+      "loadBefore": 1.66,
+      "loadAfter": 3.24,
+      "highLoad": false
+    },
+    "final": {
+      "measurementVersion": 2,
+      "baseline": [
+        {
+          "totalMs": 782.6427920000001,
+          "turnReadyMs": 425.76979200000005
+        },
+        {
+          "totalMs": 778.2426250000008,
+          "turnReadyMs": 424.191417
+        },
+        {
+          "totalMs": 777.5931249999994,
+          "turnReadyMs": 424.1365000000005
+        },
+        {
+          "totalMs": 776.9715830000005,
+          "turnReadyMs": 422.1411250000001
+        },
+        {
+          "totalMs": 777.3070000000007,
+          "turnReadyMs": 421.75887499999953
+        }
+      ],
+      "candidate": [
+        {
+          "totalMs": 540.3183329999999,
+          "turnReadyMs": 423.9004159999997
+        },
+        {
+          "totalMs": 542.6580829999998,
+          "turnReadyMs": 426.82704199999944
+        },
+        {
+          "totalMs": 542.1638329999996,
+          "turnReadyMs": 426.66191699999945
+        },
+        {
+          "totalMs": 538.9138750000002,
+          "turnReadyMs": 423.12233300000025
+        },
+        {
+          "totalMs": 536.0996660000001,
+          "turnReadyMs": 420.66491600000154
+        }
+      ],
+      "medians": {
+        "totalMs": {
+          "baseline": 777.5931249999994,
+          "candidate": 540.3183329999999,
+          "deltaMs": -237.27479199999948,
+          "percent": -30.514003322753098
+        },
+        "turnReadyMs": {
+          "baseline": 424.1365000000005,
+          "candidate": 423.9004159999997,
+          "deltaMs": -0.2360840000008011,
+          "percent": -0.055662269104592696
+        }
+      },
+      "loadBefore": 2.89,
+      "loadAfter": 5.02,
+      "highLoad": false
+    },
+    "measurementV2": "Same 5000 files, anchors, content/index/cleanup assertions. Native Buffer.equals compares the entire real index instead of assertion-framework byte traversal. Revalidated old production: all seven baseline subprocess counter series unchanged. Never compare V1 elapsed values with V2 elapsed values.",
+    "scope": "Terminal paired Git API, through both projections, last-owner cleanup and correctness checks. Initial anchors/setup excluded. turnReadyMs is promise readiness, not rendered screen latency."
+  },
+  "verification": {
+    "fullUnitFinal": {
+      "host": "mac2",
+      "passed": 3274,
+      "skipped": 4,
+      "filesPassed": 268,
+      "filesSkipped": 4,
+      "exit": 0
+    },
+    "preservedFirstFullUnitFailure": {
+      "passed": 3273,
+      "skipped": 4,
+      "unhandledErrors": 1,
+      "exit": 1,
+      "error": "[vitest-worker]: Timeout calling onTaskUpdate",
+      "synchronousComparisonTestMs": 60184
+    },
+    "repair": "Async execFile, same CLI args, assertion count, full collectors and 120000ms test deadline. First repaired full suite 3273/4; final adds cleanup-timing check and passes 3274/4.",
+    "focusedOwnershipTests": 10,
+    "typecheck": "passed",
+    "appBuild": "passed",
+    "cliBuild": "passed",
+    "negativeControl": "First shared-tree implementation fails turnSeen === true while the session projection is blocked; no sleep or timeout inflation",
+    "app": {
+      "mode": "hidden real Electron main/preload/renderer, offline test Provider only",
+      "pairedSnapshots": 7,
+      "nonemptySnapshots": 3,
+      "runIds": [
+        "3aef87ad-a91f-4ff2-a6cf-661d7e1ff34b",
+        "986244bd-3056-439e-97d5-88d805399cca",
+        "cc424d2c-643d-4b19-9289-855c3ddb5371",
+        "ca27ed3d-4d41-4d52-b354-1a52b49ebd3c",
+        "run-mvbbpqk5-0",
+        "cd1a3ff1-13c0-47dc-aefc-bfa43febf7c9",
+        "92baff56-519b-4ae2-8e34-077c36717af0"
+      ],
+      "turns": 3,
+      "providerInvocations": 10,
+      "restarts": 2,
+      "identityChangeFresh": true,
+      "artifactHashes": {
+        "out/main/index.js": "c2a9e5c0c18c48ff723d94831a39889e445d46332e4ba7823c070d61f5268eb4",
+        "out/preload/index.cjs": "694c97143a5b1dad3019f9827304833a858ef7a2229b0a4bcdf1434a0f9b5858",
+        "out/renderer/index.html": "42a3f97e8c7bb17b9743bea7be074eeb9cb31592c81795a00a791c62b1ee4757",
+        "out/renderer/assets/AnalyticsView-D3yj4yaN.js": "9aa4b20988351fa17f7a439d7d1d32fd6d492b92af4b24ea375e19b788a2098b",
+        "out/renderer/assets/TerminalSurface-2jDGphTr.js": "a4ae103ea4bc622c2f37f12c3a5414d49d8cc4dce0408d8ca17eb867f7e7f571",
+        "out/renderer/assets/TerminalSurface-GVL3fBIr.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
+        "out/renderer/assets/index-CGTfU3Lt.js": "51394af7c64a54bf3b8c99d59513016b2468ac6b966d840fe68de5e64c84a800",
+        "out/renderer/assets/index-gJY2ULgs.css": "4d3931228138c43a880b201aee0b946d6cfa0d84464151af1cdfa44bb8adfde2"
+      },
+      "preservedHarnessFailures": "Two initial archive readout failures used type/kind instead of the actual stage field. Corrected read-only checker, retained both logs. No production assertions weakened."
+    },
+    "countersBeforeTightening": {
+      "better": 3,
+      "unchanged": 31,
+      "pass": 2,
+      "missing": 3
+    },
+    "candidateBaselinesOnly": {
+      "subprocess.git": [
+        24,
+        17
+      ],
+      "snapshot.write-tree": [
+        2,
+        1
+      ],
+      "subprocess.total": [
+        24,
+        17
+      ]
+    },
+    "gatingGitCounters": [
+      8,
+      11
+    ]
+  },
+  "artifacts": {
+    "localRoot": "/tmp/scry-terminal-pair-results",
+    "remoteBundleSha256": "a1d1b7aae76f875149ebbbd13a8a4b3d051239fd5bf36dc915775cc531e17216",
+    "remoteTemporaryRootRemoved": true
+  },
+  "limitations": [
+    "No real Provider/account, daily-use L3, installation, merge, push or release",
+    "Five samples per cohort; unchanged first-promise median is not a proven rendered-UI speedup",
+    "mac2 unit install ignored native build scripts; local Electron SQLite counter fixture and hidden App were separate checks",
+    "Three macOS CPU-instruction candidate metrics remain unavailable",
+    "The old source-control.service.status-diff workload does not include real Service.diff revision validation; unchanged, not substituted"
+  ]
+}

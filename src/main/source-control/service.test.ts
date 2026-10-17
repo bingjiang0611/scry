@@ -657,6 +657,99 @@ describe('source control real temporary Git', { timeout: 15_000 }, () => {
     expect(git('status', '--porcelain')).toContain('?? base.txt')
   })
 
+  it('keeps revision-only material identical to a full status without fabricating empty remote evidence', async () => {
+    git('remote', 'add', 'origin', 'https://fixture:secret@example.invalid/team/repo.git')
+    await writeFile(join(cwd, 'base.txt'), 'changed\n')
+    const identity = await service.git.identity(cwd)
+    const full = await service.git.status(identity)
+    const revision = await service.git.revisionSnapshot(identity)
+    const { remotes, ...expected } = full
+    expect(revision).toEqual({ ...expected, observedAt: revision.observedAt })
+    expect(revision).not.toHaveProperty('remotes')
+    expect(remotes).toEqual([{ name: 'origin', pushUrls: ['https://[redacted]@example.invalid/team/repo.git'], fetchUrls: ['https://[redacted]@example.invalid/team/repo.git'] }])
+  })
+
+  it('reads staged, unstaged and untracked diffs through both validations without changing the index', async () => {
+    await writeFile(join(cwd, 'base.txt'), 'staged\n')
+    git('add', 'base.txt')
+    await writeFile(join(cwd, 'base.txt'), 'staged\nworking only\n')
+    await writeFile(join(cwd, 'new 中文.txt'), 'untracked\n')
+    const state = await snapshot()
+    const index = await readFile(join(cwd, '.git/index'))
+    for (const [path, staged, included, excluded] of [
+      ['base.txt', true, '+staged', 'working only'],
+      ['base.txt', false, '+working only', '+staged'],
+      ['new 中文.txt', false, '+untracked', '+working only']
+    ] as const) {
+      const result = await service.diff({ repositoryId: state.id, expectedRevision: state.revision, path, staged })
+      expect(result.status).toBe('available')
+      if (result.status !== 'available') throw new Error(result.reason)
+      expect(result.data.patch).toContain(included)
+      expect(result.data.patch).not.toContain(excluded)
+      expect(result.data).toMatchObject({ binary: false, truncated: false })
+    }
+    expect((await readFile(join(cwd, '.git/index'))).equals(index)).toBe(true)
+    expect((await snapshot()).revision).toBe(state.revision)
+  })
+
+  it.each(['worktree', 'index', 'head', 'remote-config', 'hook'] as const)(
+    'rejects a %s change after reading a diff instead of returning stale evidence', async kind => {
+      git('remote', 'add', 'origin', 'https://example.invalid/before.git')
+      await writeFile(join(cwd, 'base.txt'), 'before diff\n')
+      const state = await snapshot()
+      const original = service.git.diff.bind(service.git)
+      const reader = vi.spyOn(service.git, 'diff').mockImplementation(async (...args) => {
+        const data = await original(...args)
+        if (kind === 'worktree') await writeFile(join(cwd, 'base.txt'), 'after diff\n')
+        else if (kind === 'index') git('add', 'base.txt')
+        else if (kind === 'head') git('-c', 'core.hooksPath=/dev/null', 'commit', '-am', 'concurrent change')
+        else if (kind === 'remote-config') git('remote', 'set-url', 'origin', 'https://example.invalid/after.git')
+        else {
+          await mkdir(join(cwd, '.git/hooks'), { recursive: true })
+          await writeFile(join(cwd, '.git/hooks/pre-commit'), '#!/bin/sh\nexit 0\n')
+          await chmod(join(cwd, '.git/hooks/pre-commit'), 0o755)
+        }
+        return data
+      })
+      try {
+        const result = await service.diff({ repositoryId: state.id, expectedRevision: state.revision, path: 'base.txt', staged: false })
+        expect(result.status).toBe('failed')
+        expect(result).not.toHaveProperty('data')
+        if (result.status === 'failed') expect(result.reason).toContain('仓库已变化')
+      } finally { reader.mockRestore() }
+    }
+  )
+
+  it('rejects a newly executable filter during the diff before running another status', async () => {
+    await writeFile(join(cwd, 'base.txt'), 'before diff\n')
+    const state = await snapshot()
+    const marker = join(temp, 'filter-executed')
+    const original = service.git.diff.bind(service.git)
+    const reader = vi.spyOn(service.git, 'diff').mockImplementation(async (...args) => {
+      const data = await original(...args)
+      git('config', 'filter.late.clean', `printf unsafe > '${marker}'`)
+      await writeFile(join(cwd, '.gitattributes'), 'base.txt filter=late\n')
+      return data
+    })
+    try {
+      const result = await service.diff({ repositoryId: state.id, expectedRevision: state.revision, path: 'base.txt', staged: false })
+      expect(result.status).toBe('failed')
+      if (result.status === 'failed') expect(result.reason).toContain('filter')
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { reader.mockRestore() }
+  })
+
+  it('rejects a stale pre-diff revision without invoking the patch reader', async () => {
+    await writeFile(join(cwd, 'base.txt'), 'before\n')
+    const state = await snapshot()
+    await writeFile(join(cwd, 'base.txt'), 'after\n')
+    const reader = vi.spyOn(service.git, 'diff')
+    try {
+      expect((await service.diff({ repositoryId: state.id, expectedRevision: state.revision, path: 'base.txt', staged: false })).status).toBe('failed')
+      expect(reader).not.toHaveBeenCalled()
+    } finally { reader.mockRestore() }
+  })
+
   it('treats corrupt recovery journals as failure, not an empty ledger', async () => {
     await service.store.ready
     await service.dispose()
