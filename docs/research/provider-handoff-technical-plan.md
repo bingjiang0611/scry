@@ -562,4 +562,43 @@ Pi 成功证据位于 `/tmp/scry-pi-fixed-YA0P17/`。两组真实测试使用同
 - runtime 的一次全新 `npm ci` 在 600 秒内未完成，已确认进程退出，没有重试或放宽超时。实际隔离运行使用第三方 lock 对齐的已有依赖，并校验/解包七个新本地归档；这是依赖复用验证，**不是 consumer 全新安装通过**。记录保留在 `/tmp/rotom-rpc-fix-vPPzsx/rpc-local-materialization.json`。
 - 首轮测试类型检查发现新测试的类型错误，已修正；隔离 SDK 缺少 workspace 内嵌依赖造成的 OpenAI 类型错误，通过按一致 lock 复制对应依赖解决。一次 focused 命令在错误 cwd 执行、一次只读 smoke 在 EOF 后误用存活进程清理 helper，均保留首次日志并修正夹具，没有削弱断言或扩大超时。最后的类型、focused、构建和只读 smoke 均通过。
 - 两个测试 App、其已登记子进程及脱离父进程的临时 Computer Use helper 均已按身份关闭。复制的认证、悬空 auth 链接与只读 smoke 生成的空认证文件已移除，见 `/tmp/scry-provider-fix-credential-cleanup.json`。私有证据和 Rotom 隔离 worktree 保留。
-- 本次没有回写历史用量账本，没有安装或发布。尚未验证成功的 Codex↔Pi 双向回路、Pi 分支继续发送、完整菜单交互和 workspace recorder/CLI overview；**④仍不能标为全部完成**。下一步由用户确认是否将 Rotom 隔离修复合入原维护工作分支 `pi-1.3-merge`，开发方再执行；若继续整体验收，另确认后续真实调用范围，Claude 仍不在本轮修复范围内。
+- 本次没有回写历史用量账本，没有安装或发布。尚未验证成功的 Codex↔Pi 双向回路、Pi 分支继续发送、完整菜单交互和 workspace recorder/CLI overview；**④仍不能标为全部完成**。当时下一步是确认是否将 Rotom 隔离修复合入原维护工作分支 `pi-1.3-merge`，并确认后续真实调用范围；用户随后授权按顺序执行，结果见第 18 节。Claude 仍不在本轮修复范围内。
+
+## 18. Rotom 合入与 Codex/Pi 双向接续、分支续聊验收（2026-10-17）
+
+用户授权按顺序合入、补验，再另行确认安装。本轮上限为 5 次新 prompt；不处理 Claude、不推送、不授予系统权限，也没有执行安装。
+
+### 源码合入与冻结
+
+- Rotom 维护分支 `pi-1.3-merge` 从 `6719405` fast-forward 至 `42b68a1`，无冲突、无额外实现改动；与隔离分支的 Git tree 一致。合入后 `check:pi`、16 项 RPC 回归、TypeScript 与 2 项构建器测试通过，日志为 `/tmp/rotom-rpc-merge-{check,tests,types,builder-test}.log`。
+- Scry 从干净的 `2405d92` 重新构建，冻结 main/preload/renderer 的 13 个文件；main SHA256 仍为 `2111ae15497ae593ad9dbef53a90265408b7beedc7b4417f8be62384d45c2a59`。Rotom 使用与合入提交相同的隔离 runtime，源码摘要 `007105d6ba6dc512a0d0a4a5bf95ede1b476dfc01dd3b05bcc787d912792ae08`；695 个运行时代码/数据文件与已提交归档逐项一致。没有把旧日常安装当成新修复运行。
+- 所有真实调用经隐藏 Electron 的生产 preload/main IPC 发起，临时 HOME/userData/workspace 隔离；保留既有代理环境，仅复制 Codex 与 Pi `openai-codex` 所需认证，不复制用户项目、hooks、MCP 或额外插件。
+
+### 五条消息的决定性结果
+
+模型为 Codex `gpt-6.1-sol` 与 Pi/Rotom `openai-codex/gpt-5.6-sol`。A/B/C/D 为本轮生成的独立随机标记；下表使用别名，不是硬编码模型返回。
+
+| 步骤 | 结果 | 接续与历史证据 |
+|---|---|---|
+| 1. Codex 输入 A | 回复 A | 新原生会话，无缺失历史 |
+| 2. 切换 Pi，输入 B | 回复 A、B | 只交接第 1 轮的 user/assistant 两项正文 |
+| 3. 关闭测试宿主、重启，再切回 Codex 输入 C | 回复 A、B、C | 恢复同一 Codex 原生 ID；只交接第 2 轮两项正文，不重复交接已覆盖历史 |
+| 4. 再切回 Pi，输入 D | 回复 A、B、C、D | 恢复同一 Pi 原生 ID；只交接第 3 轮两项正文 |
+| 5. 从第 2 轮 Pi 创建原生分支并续聊 | 仅回复 A、B | 分支有独立原生 ID；续聊明确走 resume、缺失历史为零；原生分支文件保留第 2 轮输入/回答，排除源会话后续的实际 C/D 内容与原生 entry ID |
+
+五轮均有 accepted 投递、completed outcome 和已提交归档。每次 preview 都未改变 conversation revision/轮次数，未启动新 run。重复同一 fork command 返回同一分支；原生文件只有一个 Codex session、两个 Pi session，未发现额外持久化分支。分支续聊后，源对话的 run、binding、投递、user 正文和 assistant 正文保持不变。
+
+### 独立核对与清理
+
+证据目录：`/tmp/scry-handoff-roundtrip-i597ha/`。`probe.mjs` 首次 exit 0；`verify-evidence.py` 独立解析原生 JSONL，按 Codex turn ID / Pi user entry ID 对齐归档，再核对 usage 日志、SQLite `usage_ledger` 和 `model_usage`，exit 0；报告为 `verification.json`。
+
+- 五轮原生用量与各存储层对应字段一致；两张用量表均恰好 5 行。Pi 分支复制的旧 assistant 用量没有重复计入 Scry 账本。
+- Codex 两轮输入/输出/缓存分别为 `13999 / 27 / 11392`、`14418 / 33 / 13824`。Pi 三轮分别为 `4389 / 23 / 4736`、`588 / 40 / 8960`、`9188 / 23 / 0`。这些是 **Provider 原生字段**：Codex input 包含 cached input，Pi input 不包含另列的 cacheRead，不把 raw input 跨 Provider 直接相加冒充统一总量。
+- Pi 三轮价格表估算合计 **$0.0638584**，账本明确为 estimated；Codex 没有提供金额，所以实际总费用仍 unavailable，不写成零或完整账单。
+- `freeze.json`、`rotom-runtime-integrity.json`、请求/回执、`source-before-fork.json` 与 `source-after-fork.json` 保留可复核证据。宿主重启和最终关闭分别追踪 7、8 个进程；另行按身份关闭临时 Computer Use helper。最终 active runs 为空、定向进程检查为零，认证文件及有效/悬空链接均已移除，见 `cleanup-check.json`。私有证据与隔离 worktree 保留。
+
+### 安装状态与剩余范围
+
+验收期间另一项已授权的性能任务安装了 **0.2.197**，并将版本/文档合入 main 至 `06a49e9`。该安装冻结源码为 `313f451`（base `2adcfdb`），**不含 `2405d92` 的本次 Provider 修复**。本轮只读核对安装包：版本 0.2.197、main SHA256 `bf615ca0395475f5f60c9d9e5d9854edb2e9d5e0f0227a765cc8336278c80ac0`，缺少修复构建具备的两处唯一标记；记录在 `installed-scry-observation.json`。这是静态安装文件核对，不替代运行中进程证明。本轮没有覆盖这个安装，也没有升级日常 Rotom。
+
+`2405d92` 到当前 main 的 runtime 源码与 scripts 无差异，仅版本/文档变动；本次真实验收仍按冻结构建报告，不冒充已安装 0.2.197 的验收。**Codex/Pi 的上述纯文本闭环与 Pi 分支续聊已通过**；完整菜单交互、workspace recorder/CLI overview、长历史、附件、原生命令、Steer 仍不在本轮证据范围，不能据此将④全部标为完成。下一步须由用户授权新的本地安装流程；安装涉及当前 Scry 会话时先安排安全交接，不直接终止承载本任务的宿主。
