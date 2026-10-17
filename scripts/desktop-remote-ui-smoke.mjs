@@ -16,6 +16,8 @@ const negativeAddressControl = process.argv.includes('--negative-address-control
 const negativeHoverControl = process.argv.includes('--negative-hover-control')
 const negativeActivityControl = process.argv.includes('--negative-activity-control')
 const negativeWorkspaceControl = process.argv.includes('--negative-workspace-control')
+const negativePromptControl = process.argv.includes('--negative-prompt-control')
+const parityOnly = process.argv.includes('--session-parity-only')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -37,10 +39,10 @@ const secondLedger = '22222222-2222-4222-8222-222222222222'
 const firstScryRun = 'remote-run-fixture-1'
 const secondScryRun = 'remote-run-fixture-2'
 const state = {
-  historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [],
+  historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
-  intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false,
+  intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
   catalogFailure: false, sessionActive: false, sessionTs: 1700000000000,
@@ -72,7 +74,7 @@ const catalog = {
     { sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 },
     { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
   ],
-  providerEvidence: 'host_snapshot', directorySelection: true
+  providerEvidence: 'host_snapshot', directorySelection: true, sessionActions: true
 }
 const contextFor = (input) => ({ ...input.context })
 const activeRun = (runId, externalSessionId, text, question, background = false) => ({
@@ -110,6 +112,19 @@ const api = {
       providers: state.hideProvider ? [beta] : catalog.providers, directorySelection: state.oldDirectoryHost ? undefined : true
     })
   },
+  async commands(id, context) {
+    state.commandCalls.push({ id, context })
+    return { commands: [{ name: 'skill:host-only', description: 'Skill from the remote host' }] }
+  },
+  async sessionAction(id, context, action) {
+    state.sessionActions.push({ id, context, action })
+    const session = catalog.sessions.find(item => item.externalSessionId === context.externalSessionId && item.cwd === context.cwd && item.providerId === context.providerId)
+    if (!session) throw new Error('remote session mismatch')
+    if (action.kind === 'rename') session.label = action.title
+    if (action.kind === 'pin') session.pinnedAt = action.pinned ? Date.now() : undefined
+    if (action.kind === 'archive') session.archivedAt = action.archived ? Date.now() : undefined
+    return true
+  },
   async directories(id, path = '/fixture/home', cursor = 0, snapshot) {
     state.directoryReads.push({ id, path, cursor, snapshot })
     if (!['/fixture/home', '/fixture/home/custom', '/fixture/home/empty'].includes(path)) throw new Error('directory_unavailable')
@@ -142,23 +157,34 @@ const api = {
   },
   async intents() {
     state.intentsCalls++
-    return state.intent ? [state.intent] : []
+    return structuredClone(state.intent ? [state.intent] : [])
   },
   async submit(_id, input) {
     state.submitInputs.push(input)
+    if (state.autoResetOnSubmit) state.runState = 'dispatched'
     if (state.holdSubmit) await new Promise(resolve => { window.releaseSubmit = resolve })
     const first = state.submitInputs.length === 1
     state.intent = { intentId: first ? 'intent-first' : 'intent-second', connectionId: connection.id, context: contextFor(input), createdAt: state.submitInputs.length, status: 'recorded', runId: first ? firstLedger : secondLedger }
-    return state.intent
+    return structuredClone(state.intent)
   },
-  async intentStatus() { return state.intent },
+  async intentStatus() { return structuredClone(state.intent) },
   async runStatus(_id, runId) {
+    if (state.holdRunStatus) await new Promise(resolve => { window.releaseRunStatus = resolve })
     if (state.runStatusFailure) throw new Error('desktop_remote_output_capture_queue_full')
     if (state.answerFailure && runId === firstLedger) {
       state.firstIntentCleared = true; state.intent = null
       return { state: 'failed', scryRunId: firstScryRun, externalSessionId: 'native-session' }
     }
-    if (state.runState !== 'dispatched' || !state.exposeTrace) return { state: state.runState }
+    if (state.runState !== 'dispatched' || !state.exposeTrace) {
+      if (state.runState === 'settled' || state.runState === 'failed') state.intent = null
+      return { state: state.runState }
+    }
+    if (state.intent && !state.intent.context.externalSessionId) {
+      state.intent.context.externalSessionId = 'native-session'
+      if (!catalog.sessions.some(session => session.externalSessionId === 'native-session')) catalog.sessions.push({
+        sessionId: 'native-session', externalSessionId: 'native-session', ...state.intent.context, label: 'Adopted remote session', ts: Date.now()
+      })
+    }
     if (runId === firstLedger) return { state: 'dispatched', scryRunId: firstScryRun, externalSessionId: 'native-session', detail: 'fixture dispatched' }
     return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', detail: 'fixture background work' }
   },
@@ -224,7 +250,7 @@ function Fixture() {
 createRoot(document.getElementById('root')).render(<Fixture />)
 `
 
-async function exercise(contents, pointer, capture) {
+async function exercise(contents, pointer, capture, options) {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression, label = expression) => {
@@ -284,20 +310,22 @@ async function exercise(contents, pointer, capture) {
   const projectOrder = () => read('Array.from(document.querySelectorAll(".sb-proj .pname"), node => node.textContent)')
   check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Recent local', 'Project A', 'Older local', 'Project B']), 'Remote project was appended instead of sorted by recent activity')
   check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
-  // Host-side activity changes while the user stays in the local composer.
-  // No explicit refresh: the shared loader must observe starts and stops itself.
-  await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000')
-  await wait('document.querySelector(".sb-remote-proj .sb-sess.running .sb-running") != null', 'background remote session shows a running spinner')
-  check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')
-  check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "sb-running-spin"'), 'Remote activity did not reuse the local spinner animation')
-  await capture('remote-sidebar-running')
-  await read('window.desktopRemoteFixture.catalogFailure = true')
-  await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "unknown"', 'failed catalog read invalidates live activity')
-  check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Stale catalog still claimed a running remote session')
-  check(await read('document.querySelector(".sb-remote-proj [data-remote-session=old-native]") != null'), 'Catalog failure discarded remote history')
-  await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false')
-  await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog polling recovers')
-  check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
+  if (!options.parityOnly) {
+    // Host-side activity changes while the user stays in the local composer.
+    // No explicit refresh: the shared loader must observe starts and stops itself.
+    await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000')
+    await wait('document.querySelector(".sb-remote-proj .sb-sess.running .sb-running") != null', 'background remote session shows a running spinner')
+    check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')
+    check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "sb-running-spin"'), 'Remote activity did not reuse the local spinner animation')
+    await capture('remote-sidebar-running')
+    await read('window.desktopRemoteFixture.catalogFailure = true')
+    await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "unknown"', 'failed catalog read invalidates live activity')
+    check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Stale catalog still claimed a running remote session')
+    check(await read('document.querySelector(".sb-remote-proj [data-remote-session=old-native]") != null'), 'Catalog failure discarded remote history')
+    await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false')
+    await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog polling recovers')
+    check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
+  }
   const projectAHead = '.sb-proj-head[aria-label="Project A · Fixture desktop · /fixture/project-a"]'
   await click(projectAHead)
   await wait(`document.querySelector(${JSON.stringify(projectAHead)}).getAttribute('aria-expanded') === 'false'`, 'remote project collapsed')
@@ -310,6 +338,91 @@ async function exercise(contents, pointer, capture) {
   // Remote workbenches must use the production shell, not an overlay drawer.
   await click('[data-remote-session="old-native"]')
   await wait(remoteShown, 'remote history selected for workspace checks')
+  // Native input through production App: insertion must retain the owning host/session.
+  await click('textarea[aria-label="描述任务"]'); await insert('remote draft')
+  await read(`localStorage.setItem('scry.meta-prompts.v1', JSON.stringify([{id:'remote-meta',title:'Remote routing',body:'host scoped prompt'}]))`)
+  await click('.sb-navitem', 'Meta Prompts')
+  await wait('document.querySelector(".mp-button") != null', 'meta prompt library')
+  await click('.mp-button', '放入当前会话')
+  await wait(remoteShown, 'meta prompt returns to remote session, not local')
+  await wait(`${composerValue} === 'remote draft\\n\\nhost scoped prompt'`, 'remote meta prompt preserves its draft')
+  check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'Meta prompt unexpectedly sent')
+  await click('.sb-hosts'); await click('.sb-navitem', 'Meta Prompts'); await click('.mp-button', '放入当前会话')
+  await wait(`${composerValue} === 'remote draft\\n\\nhost scoped prompt\\n\\nhost scoped prompt'`, 'auxiliary views retain the remote insertion target')
+  await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await insert('/skill')
+  await wait('document.querySelector(".slash-item")?.textContent.includes("skill:host-only")', 'host-only slash completion')
+  await key('Enter')
+  await wait(`${composerValue} === '/skill:host-only '`, 'keyboard slash selection')
+  check((await fixture()).commandCalls.at(-1).id === 'fixture-connection' && (await fixture()).commandCalls.at(-1).context.cwd === '/fixture/project-a', 'Slash discovery used the wrong host/project')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const remoteRowPoint = await pointFor('[data-remote-session="old-native"]')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...remoteRowPoint })
+  await click('button[aria-label="置顶：Old session"]')
+  await wait('document.querySelector(\'button[aria-label="取消置顶：Old session"]\')?.getAttribute("aria-pressed") === "true"', 'host session pinned')
+  await click('button[aria-label="取消置顶：Old session"]')
+  await wait('document.querySelector(\'button[aria-label="置顶：Old session"]\') != null', 'host session unpinned')
+  await click('button[aria-label="会话操作：Old session"]'); await click('[role=menuitem]', '重命名')
+  await wait('document.querySelector(".session-rename-dialog input") != null', 'remote rename dialog')
+  await insert('Remote renamed'); await formEnter()
+  await wait('document.querySelector(\'[data-remote-session="old-native"] .sb-sesstext\')?.textContent === "Remote renamed"', 'host rename readback')
+  await click('button[aria-label="存档会话：Remote renamed"]')
+  await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'host archived row hidden')
+  check(await read('!document.querySelector(".clibtn").disabled'), 'Archiving the active remote session did not leave it for a new draft')
+  await click('.sb-archive-toggle', '已归档远程会话')
+  const archivedRowPoint = await pointFor('[data-remote-session="old-native"]')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...archivedRowPoint })
+  await click('button[aria-label="恢复会话：Remote renamed"]')
+  await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'restored session no longer archived')
+  await click('.sb-archive-toggle', '已归档远程会话')
+  await wait('document.querySelector(\'[data-remote-session="old-native"]\') != null', 'restored host row visible')
+  check((await fixture()).sessionActions.every(call => call.id === 'fixture-connection' && call.context.externalSessionId === 'old-native'), 'Session actions targeted local/wrong session')
+  await click('[data-remote-session="old-native"]')
+  await wait('document.querySelector(".clibtn").disabled', 'restored remote session selected')
+  if (options.parityOnly) {
+    await click('.sb-new')
+    await wait(remoteShown, 'new remote session for adoption')
+    await read('window.desktopRemoteFixture.autoResetOnSubmit = true; window.desktopRemoteFixture.holdRunStatus = true')
+    await click('textarea[aria-label="描述任务"]'); await insert('first remote turn'); await key('Enter')
+    await wait('document.querySelector(".run-status") != null && typeof window.releaseRunStatus === "function"', 'remote run active before native id arrives')
+    await insert('queued remote turn'); await key('Enter')
+    await wait('document.querySelector(".prompt-queue")?.textContent.includes("queued remote turn")', 'remote follow-up queued')
+    check((await fixture()).submitInputs.length === 1, 'Queued message sent before terminal confirmation')
+    await read('window.desktopRemoteFixture.holdRunStatus = false; window.releaseRunStatus()')
+    await wait('window.desktopRemoteFixture.intent?.context.externalSessionId === "native-session"', 'host session binding')
+    await read('window.refreshFixtureCatalog()')
+    await wait('document.querySelector(\'[data-remote-session="native-session"]\') != null', 'adopted native session in sidebar')
+    await read('window.desktopRemoteFixture.runStatusFailure = true')
+    await wait('document.querySelector(".composer-notice")?.textContent.includes("output_capture_queue_full")', 'failed status read preserves queue')
+    check((await fixture()).submitInputs.length === 1, 'Failed status read drained queue')
+    await click('.sb-navitem', 'Meta Prompts'); await click('.mp-button', '放入当前会话')
+    await wait(`${composerValue} === 'host scoped prompt'`, 'running remote meta prompt retains current session')
+    check(await read('document.querySelector(".prompt-queue")?.textContent.includes("queued remote turn")'), 'Meta prompts lost remote queue')
+    await click('.sb-hosts')
+    await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
+    await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "0/1"', 'background disconnect')
+    await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+    await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'background reconnect')
+    await read('window.desktopRemoteFixture.runStatusFailure = false; window.desktopRemoteFixture.runState = "settled"')
+    await click('[data-remote-session="native-session"]')
+    await wait('document.querySelector(".composer-notice")?.textContent.includes("继续队列") && window.desktopRemoteFixture.intent === null', 'reopened adopted queue remains paused after terminal')
+    check((await fixture()).submitInputs.length === 1, 'Background reconnect automatically sent queued input')
+    await click('.composer-notice button', '继续队列')
+    await wait('window.desktopRemoteFixture.submitInputs.length === 2', 'queue drains only after explicit continuation')
+    check((await fixture()).submitInputs[1].prompt === 'queued remote turn' && (await fixture()).submitInputs[1].context.externalSessionId === 'native-session', 'Queued message lost adopted native session identity')
+    check((await fixture()).localStarts === 0, 'Remote queue started local Provider')
+    await wait('!document.querySelector(".prompt-queue")', 'queue entry removed after acknowledged submission')
+    // Cancel the view while a terminal status read is pending: the receipt is
+    // retired by main, but App-owned queued work must still consume its evidence.
+    await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await insert('terminal navigation race'); await key('Enter')
+    await read('window.releaseRunStatus = null; window.desktopRemoteFixture.holdRunStatus = true; window.desktopRemoteFixture.runState = "settled"')
+    await wait('typeof window.releaseRunStatus === "function"', 'terminal read pending')
+    await click('.sb-hosts')
+    await read('window.desktopRemoteFixture.holdRunStatus = false; window.releaseRunStatus()')
+    await wait('window.desktopRemoteFixture.intent === null', 'terminal receipt retired after navigation')
+    await click('[data-remote-session="native-session"]')
+    await wait('window.desktopRemoteFixture.submitInputs.length === 3', 'queue reconciles terminal evidence after view cancellation')
+    return { remoteSessionParity: { metaPromptRouting: true, hostSlashKeyboardSelection: true, pinUnpin: true, rename: true, archiveRestore: true, queueTerminalGate: true, queueSurvivesMetaPrompts: true, adoptedSessionNavigation: true, backgroundReconnectPaused: true, cancelledTerminalReadReconciled: true, noLocalExecution: true } }
+  }
   await click('button[aria-label="右侧工作区"]')
   const remotePanel = '#remote-right-surface-pane'
   await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('纵览')`, 'remote uses normal overview tab')
@@ -704,6 +817,7 @@ async function exercise(contents, pointer, capture) {
     hostsPageSeparatesConnectionDirections: true,
     removedProviderNeverSubstituted: true,
     sharedChatViewForRemote: true,
+    remoteSessionParity: { metaPromptRouting: true, hostSlashKeyboardSelection: true, pinUnpin: true, rename: true, archiveRestore: true },
     locationPickerCarriesDraft: true,
     hostNamedPermissionCopy: true,
     existingSessionIdentityLocked: true,
@@ -738,7 +852,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativePromptControl && id.endsWith('/App.tsx')) {
+        const target = 'const target = metaPromptTarget.current'
+        if (!source.includes(target)) throw new Error('meta prompt routing control not found')
+        return source.replace(target, 'const target = { view: "chat", draftKey }').replace('returnFromMetaPrompts()\n  }', 'changeView("chat")\n  }')
+      }
       if (negativeWorkspaceControl && id.endsWith('/DesktopRemote.tsx')) {
         return source.replace('api.file(connectionId, context, path, offset, snapshot)', 'window.scry.workspaceReadPage({ cwd: context.cwd, path, offset, snapshot })')
       }
@@ -791,7 +910,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        })
+        }, { parityOnly: ${parityOnly} })
         console.log('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }

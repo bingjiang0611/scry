@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 import { DesktopHostListeners, type DesktopHostListenerPorts } from './desktop-host-listeners'
-import type { DesktopHostAccess, DesktopHostInvitation } from '../../shared/desktop-remote'
+import type { DesktopHostAccess, DesktopHostInvitation, DesktopRemoteContext, DesktopRemoteSessionAction } from '../../shared/desktop-remote'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding, type HostControllerFactoryDependencies } from './host-controller-factory'
 import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
@@ -51,6 +51,7 @@ export interface RemoteHostServiceDependencies {
   listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
+  sessionAction?: (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => Promise<boolean> | boolean
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
@@ -133,6 +134,7 @@ export class RemoteHostService {
       ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
       ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
+      ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
       ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
       ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),

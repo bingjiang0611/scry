@@ -2,8 +2,8 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
-import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef } from '../../shared/desktop-remote'
-export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef } from '../../shared/desktop-remote'
+import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
+export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
 
 // G1 application service: the device-facing surface that a verified remote peer
 // reaches once its inner-mTLS identity is established. It composes the two host
@@ -78,22 +78,10 @@ export interface RemoteProviderSource {
   list(): RemoteProviderRef[]
 }
 
-export interface RemoteCommandRef {
-  name: string
-  description: string
-  argumentHint?: string
-  source?: 'builtin' | 'skill' | 'mcp' | 'custom'
-}
-
 export interface RemoteCommandQuery {
   providerId: string
   cwd: string
   agentProfileId?: string
-}
-
-export interface RemoteCommandCatalog {
-  commands: RemoteCommandRef[]
-  reason?: string
 }
 
 export interface RemoteCommandSource {
@@ -117,6 +105,7 @@ export interface RemoteSessionSource {
 }
 
 export interface RemoteSessionPageQuery {
+  includeArchived?: boolean
   cursor?: number
   limit?: number
   snapshot?: string
@@ -600,6 +589,7 @@ export class RemoteGateway {
         label: typeof entry.label === 'string' ? entry.label.slice(0, 256) : '',
         ts: Number.isFinite(entry.ts) ? entry.ts : 0,
         ...(typeof entry.pinnedAt === 'number' && Number.isFinite(entry.pinnedAt) && entry.pinnedAt > 0 ? { pinnedAt: entry.pinnedAt } : {}),
+        ...(typeof entry.archivedAt === 'number' && Number.isFinite(entry.archivedAt) && entry.archivedAt > 0 ? { archivedAt: entry.archivedAt } : {}),
         ...(entry.isActive === true ? { isActive: true } : {})
       })
       if (out.length >= limit) break
@@ -610,7 +600,7 @@ export class RemoteGateway {
   // Compatibility endpoint for older clients. New clients drain listSessionsPage.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
     this.#authorize(peerCertSHA256)
-    return this.sessionRefs(this.#sessions?.list() ?? [])
+    return this.sessionRefs((this.#sessions?.list() ?? []).filter(session => !session.archivedAt))
   }
 
   listSessionsPage(peerCertSHA256: string, input: RemoteSessionPageQuery): RemoteSessionPage {
@@ -619,14 +609,15 @@ export class RemoteGateway {
     const limit = input?.limit ?? MAX_CATALOG_PAGE
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
-    const key = peerCertSHA256
+    if (input.includeArchived !== undefined && typeof input.includeArchived !== 'boolean') throw new RemoteGatewayError('invalid_session_query')
+    const key = `${peerCertSHA256}:${input.includeArchived === true}`
     const now = Date.now()
     if (!this.#sessions?.revision) this.#sessionCatalogs.delete(key)
     const revision = this.#sessions?.revision?.() ?? ''
     const fresh = cursor === 0 && input.snapshot === undefined
     let cached = this.#sessionCatalogs.get(key)
     if (fresh || !cached || cached.expiresAt <= now || cached.revision !== revision) {
-      const sessions = this.sessionRefs(this.#sessions?.list() ?? [], MAX_CATALOG_ITEMS + 1)
+      const sessions = this.sessionRefs((this.#sessions?.list() ?? []).filter(session => input.includeArchived || !session.archivedAt), MAX_CATALOG_ITEMS + 1)
       if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
       const snapshot = createHash('sha256').update(JSON.stringify(sessions)).digest('hex')
       cached = { sessions, snapshot, revision, expiresAt: now + 30_000 }

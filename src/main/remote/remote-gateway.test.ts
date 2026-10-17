@@ -344,16 +344,20 @@ describe('RemoteGateway', () => {
     const list = vi.fn(() => [
       { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30, isActive: true },
       { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'dup', ts: 21 }, // dup id dropped
-      { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }, // no externalSessionId
+      { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10, archivedAt: 40, pinnedAt: 35 }, // no externalSessionId
       { sessionId: '', providerId: 'qoder', cwd: '/w', label: 'empty-id', ts: 5 }
     ])
     const { gw } = gateway(authority, undefined, undefined, undefined, { list })
     expectCode(() => gw.listSessions('f'.repeat(64)), 'device_not_authorized')
     const sessions = gw.listSessions(CERT)
     expect(sessions).toEqual([
-      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30, isActive: true },
-      { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10 }
+      { sessionId: 's1', externalSessionId: 'ext1', providerId: 'qoder', cwd: '/w/a', label: 'hello', ts: 20, pinnedAt: 30, isActive: true }
     ])
+    expect(gw.listSessionsPage(CERT, {}).sessions).toEqual(sessions)
+    expect(gw.listSessionsPage(CERT, { includeArchived: true }).sessions).toEqual([
+      ...sessions, { sessionId: 's2', providerId: 'claude', cwd: '/w/b', label: 'pending', ts: 10, archivedAt: 40, pinnedAt: 35 }
+    ])
+    expect(gw.listSessionsPage(CERT, {}).sessions).toEqual(sessions)
   })
 
   it('pages the complete session catalog and rejects a changed snapshot', async () => {

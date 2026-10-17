@@ -6,6 +6,7 @@ import { refreshDesktopConnections } from '../hooks/useDesktopConnections'
 import { forgetRemoteCatalog, refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import { SidebarRemoteProjects, useRemoteProjectGroups } from './SidebarRemoteProjects'
 import { createComposerDraftStore } from '../composer-drafts'
+import { RemotePromptQueueStore } from '../remote-prompt-queue'
 import { HostsView } from './HostsView'
 import { LocationPicker, LOCAL_MACHINE } from './LocationPicker'
 import { WorkdirPicker } from './Pickers'
@@ -34,7 +35,7 @@ const picker = (machineId = LOCAL_MACHINE) => renderToStaticMarkup(<LocationPick
 const remoteChat = (connectionId: string, draft = '') => {
   const draftStore = createComposerDraftStore(new Map(draft ? [[remoteDraftKey(connectionId, '/remote/app'), { input: draft, attachments: [] }]] : []))
   return renderToStaticMarkup(<RemoteChat
-    connectionId={connectionId} cwd="/remote/app" draftStore={draftStore} onDraftInput={() => {}}
+    connectionId={connectionId} cwd="/remote/app" draftStore={draftStore} queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}}
     scrollRef={createRef()} textareaRef={createRef()} renderLocationPicker={() => null}
     onSessionAdopted={() => {}} surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }}
   />)

@@ -1,0 +1,98 @@
+import { describe, expect, it } from 'vitest'
+import type { DesktopRemoteIntent, DesktopRemoteSubmit } from '@shared/desktop-remote'
+import { RemotePromptQueueStore, remoteQueueKey } from './remote-prompt-queue'
+
+const request: DesktopRemoteSubmit = { context: { cwd: '/project', providerId: 'pi' }, prompt: '/skill:review', modelId: 'remote-model', effort: 'high' }
+const receipt: DesktopRemoteIntent = { intentId: 'next', connectionId: 'mac2', context: request.context, createdAt: 1, status: 'recorded', runId: 'run-next' }
+const key = remoteQueueKey('mac2/project/session', 'pi')
+
+describe('remote prompt queue', () => {
+  it('waits for the exact receipt to reach a confirmed terminal state, then submits once', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request, 'running')
+    expect(store.claim(key)).toBeUndefined()
+    store.settle(key, 'another-run')
+    expect(store.claim(key)).toBeUndefined()
+    store.settle(key, 'running')
+    expect(store.claim(key)?.submission).toEqual(request)
+    expect(store.claim(key)).toBeUndefined()
+  })
+  it('rebinds remaining entries to the newly submitted receipt', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request, 'running')
+    store.enqueue(key, 'mac2', { ...request, prompt: 'second' }, 'running')
+    store.settle(key, 'running')
+    store.claim(key)
+    store.submitted(key, receipt)
+    expect(store.get(key).prompts.map(prompt => prompt.text)).toEqual(['second'])
+    expect(store.claim(key)).toBeUndefined()
+    store.settle(key, receipt.intentId)
+    expect(store.claim(key)?.text).toBe('second')
+  })
+  it('keeps unknown writes and throwing submissions paused without automatic or manual resend', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request)
+    store.claim(key)
+    store.fail(key)
+    store.resume(key)
+    expect(store.claim(key)).toBeUndefined()
+    expect(store.get(key).writeUnknown).toBe(true)
+    expect(store.get(key).prompts).toHaveLength(1)
+  })
+  it('pauses on disconnect and requires explicit continuation after terminal confirmation', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request, 'running')
+    store.pause(key)
+    store.settle(key, 'running')
+    expect(store.claim(key)).toBeUndefined()
+    store.resume(key)
+    expect(store.claim(key)?.text).toBe(request.prompt)
+  })
+  it('migrates new-session queues with the adopted native session without losing model controls', () => {
+    const store = new RemotePromptQueueStore()
+    const destination = remoteQueueKey('mac2/project/native', 'pi')
+    store.enqueue(key, 'mac2', request, 'running')
+    store.migrate(key, destination, 'native')
+    expect(store.get(key).prompts).toEqual([])
+    store.settle(destination, 'running')
+    expect(store.claim(destination)?.submission).toEqual({ ...request, context: { ...request.context, externalSessionId: 'native' } })
+  })
+  it('isolates hosts, sessions and profiles; archive cancels only the chosen session', () => {
+    const store = new RemotePromptQueueStore()
+    const otherProfile = remoteQueueKey('mac2/project/session', 'pi:profile')
+    const otherHost = remoteQueueKey('local/project/session', 'pi')
+    store.enqueue(key, 'mac2', request)
+    store.enqueue(otherProfile, 'mac2', request)
+    store.enqueue(otherHost, 'local', request)
+    store.clearSession('mac2/project/session')
+    expect(store.get(key).prompts).toEqual([])
+    expect(store.get(otherProfile).prompts).toEqual([])
+    expect(store.get(otherHost).prompts).toHaveLength(1)
+  })
+  it('bounds queued work and preserves earlier entries when full', () => {
+    const store = new RemotePromptQueueStore()
+    for (let index = 0; index < 32; index++) store.enqueue(key, 'mac2', request)
+    expect(() => store.enqueue(key, 'mac2', request)).toThrow('32')
+    expect(store.get(key).prompts).toHaveLength(32)
+  })
+  it('pauses background queues on disconnect without resuming them on reconnect', () => {
+    const store = new RemotePromptQueueStore()
+    const other = remoteQueueKey('other', 'pi')
+    store.enqueue(key, 'mac2', request, 'running')
+    store.enqueue(other, 'mac3', request)
+    store.pauseDisconnected(new Set(['mac3']))
+    store.pauseDisconnected(new Set(['mac2', 'mac3']))
+    store.settle(key, 'running')
+    expect(store.claim(key)).toBeUndefined()
+    expect(store.claim(other)?.text).toBe(request.prompt)
+    store.resume(key)
+    expect(store.claim(key)?.text).toBe(request.prompt)
+  })
+  it('cannot remove the write in flight', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request)
+    const prompt = store.claim(key)!
+    store.remove(key, prompt.messageId)
+    expect(store.get(key).prompts).toHaveLength(1)
+  })
+})

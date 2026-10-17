@@ -85,6 +85,47 @@ describe('DesktopRemoteClient', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('validates command catalogs and gates session actions on the host capability', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Parity', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      fixture.tlsRequest.mockResolvedValueOnce({ commands: { commands: [{ name: 'review', description: 'Review', source: 'builtin' }] } })
+      await expect(fixture.client.commands(id, { cwd: '/workspace', providerId: 'claude' })).resolves.toEqual({ commands: [{ name: 'review', description: 'Review', source: 'builtin' }] })
+      fixture.tlsRequest.mockResolvedValueOnce({ commands: { commands: [{ name: 'skill:no-description', description: '' }] } })
+      await expect(fixture.client.commands(id, { cwd: '/workspace', providerId: 'pi' })).resolves.toEqual({ commands: [{ name: 'skill:no-description', description: '' }] })
+      fixture.tlsRequest.mockResolvedValueOnce({ commands: { commands: [{ name: 'bad', description: 'bad', source: 'invalid' }] } })
+      await expect(fixture.client.commands(id, { cwd: '/workspace', providerId: 'claude' })).rejects.toThrow('invalid_catalog_response')
+      const before = fixture.tlsRequest.mock.calls.length
+      await expect(fixture.client.sessionAction(id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true })).rejects.toThrow('desktop_session_actions_unsupported')
+      expect(fixture.tlsRequest.mock.calls.slice(before).map((call) => (call[0] as { request: { op?: string } }).request.op)).toEqual(['desktop'])
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', sessionActions: true } })
+      fixture.tlsRequest.mockResolvedValueOnce({ sessionAction: 'yes' })
+      await expect(fixture.client.sessionAction(id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true })).rejects.toThrow('invalid_session_action_response')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('persists the host-confirmed native session binding for first-run receipts across client restart', async () => {
+    const runId = randomUUID()
+    const fixture = await setup({ submitResponse: () => ({ runId, status: 'recorded' }) })
+    let reloaded: DesktopRemoteClient | undefined
+    try {
+      const pending = await fixture.client.pair({ label: 'Adoption', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      await fixture.client.submit(id, { context: { cwd: '/workspace', providerId: 'pi' }, prompt: 'new session' })
+      fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
+      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }] } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ externalSessionId: 'native-adopted' })
+      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
+      await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-adopted' } }])
+      expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
+    } finally { await reloaded?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('lists a fresh profile without touching secure storage, and fails pairing before networking when encryption fails', async () => {
     const unavailable = vi.fn(() => { throw new Error('secure_storage_unavailable') })
     const fixture = await setup({ encrypt: unavailable })

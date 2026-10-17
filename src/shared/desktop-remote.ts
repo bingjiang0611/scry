@@ -39,6 +39,16 @@ export interface RemoteProviderRef {
   efforts?: RemoteControlOption[]
   permissions?: RemoteControlOption[]
 }
+export interface RemoteCommandRef {
+  name: string
+  description: string
+  argumentHint?: string
+  source?: 'builtin' | 'skill' | 'mcp' | 'custom'
+}
+export interface RemoteCommandCatalog {
+  commands: RemoteCommandRef[]
+  reason?: string
+}
 export interface RemoteSessionRef {
   sessionId: string
   externalSessionId?: string
@@ -48,8 +58,13 @@ export interface RemoteSessionRef {
   label: string
   ts: number
   pinnedAt?: number
+  archivedAt?: number
   isActive?: boolean
 }
+export type DesktopRemoteSessionAction =
+  | { kind: 'rename'; title: string }
+  | { kind: 'pin'; pinned: boolean }
+  | { kind: 'archive'; archived: boolean }
 
 // SSH coordinates are independent of the pinned Scry host identity. The first
 // desktop version deliberately accepts no SSH config aliases or arbitrary flags.
@@ -96,6 +111,7 @@ export interface DesktopRemoteCatalog {
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
+  sessionActions?: true
 }
 export interface DesktopRemoteHistory {
   turns: LoadedSessionTurn[]
@@ -111,7 +127,7 @@ export type DesktopHostRead =
   | { kind: 'history'; context: DesktopRemoteContext; before?: number; snapshot?: string }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true; workbench?: 1 }
+  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true; workbench?: 1; sessionActions?: true }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'trace'; run: ActiveRun | null }
 
@@ -149,6 +165,8 @@ export interface DesktopRemoteAPI {
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
   catalog(connectionId: string): Promise<DesktopRemoteCatalog>
+  commands(connectionId: string, context: DesktopRemoteContext): Promise<RemoteCommandCatalog>
+  sessionAction(connectionId: string, context: DesktopRemoteContext, action: DesktopRemoteSessionAction): Promise<boolean>
   directories(connectionId: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage>
   selectDirectory(connectionId: string, path: string): Promise<RemoteProjectRef>
   history(connectionId: string, context: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory>

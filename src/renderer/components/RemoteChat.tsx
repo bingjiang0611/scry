@@ -27,6 +27,8 @@ import type {
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
 import type { ComposerDraftStore } from '../composer-drafts'
+import { RemotePromptQueueStore, remoteQueueKey } from '../remote-prompt-queue'
+import type { SlashCmd } from '@shared/trace'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { ChatView } from './ChatView'
@@ -37,8 +39,6 @@ import './remote-location.css'
 const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
 const NO_ATTACHMENTS: never[] = []
-const NO_QUEUE: never[] = []
-const NO_SLASH: never[] = []
 
 export function remoteDraftKey(connectionId: string, cwd: string, externalSessionId?: string): string {
   return JSON.stringify(['remote', connectionId, cwd, externalSessionId ?? 'new'])
@@ -95,11 +95,12 @@ export interface RemoteChatProps {
   cwd: string
   session?: RemoteSessionRef
   draftStore: ComposerDraftStore
+  queueStore: RemotePromptQueueStore
   onDraftInput: (key: string, value: string) => void
   scrollRef: RefObject<HTMLDivElement>
   textareaRef: RefObject<HTMLTextAreaElement>
   renderLocationPicker: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
-  onSessionAdopted: (externalSessionId: string) => void
+  onSessionAdopted: (externalSessionId: string, provider: RemoteProviderRef) => void
   surface: {
     target: HTMLElement | null
     state: RightSurfaceState
@@ -115,6 +116,7 @@ export function RemoteChat({
   cwd,
   session,
   draftStore,
+  queueStore,
   onDraftInput,
   scrollRef,
   textareaRef,
@@ -168,6 +170,38 @@ export function RemoteChat({
   const draftKey = remoteDraftKey(connectionId, cwd, sessionId)
   const readInput = () => draftStore.getSnapshot().get(draftKey)?.input ?? ''
   const input = useSyncExternalStore(draftStore.subscribe, readInput, readInput)
+  const queueKey = remoteQueueKey(draftKey, providerSelection)
+  const readQueue = () => queueStore.get(queueKey)
+  const queue = useSyncExternalStore(queueStore.subscribe, readQueue, readQueue)
+  const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
+  const [slashReason, setSlashReason] = useState<string | null>(null)
+  const [slashLoading, setSlashLoading] = useState(false)
+  const [slashRevision, setSlashRevision] = useState(0)
+  const [slashSel, setSlashSel] = useState(0)
+  const [slashHidden, setSlashHidden] = useState(false)
+  const submissionInFlight = useRef(false)
+  const slashOpen = /^\/[^\s]*$/.test(input) && !slashHidden
+  useEffect(() => {
+    setSlashSel(0)
+    setSlashHidden(false)
+  }, [input])
+  useEffect(() => {
+    setSlashCmds([]); setSlashReason(null)
+    if (!connected || !providerId) { setSlashLoading(false); return }
+    let cancelled = false
+    setSlashLoading(true)
+    void api.commands(connectionId, context).then(result => {
+      if (cancelled) return
+      setSlashCmds(result.commands)
+      setSlashReason(result.reason ?? null)
+    }).catch(reason => {
+      if (!cancelled) setSlashReason(errorText(reason))
+    }).finally(() => { if (!cancelled) setSlashLoading(false) })
+    return () => { cancelled = true }
+  }, [api, connectionId, connected, context, providerId, slashRevision])
+  useEffect(() => {
+    if (!connected) queueStore.pause(queueKey)
+  }, [connected, queueKey, queueStore])
 
   // A new draft picks the host's first available Provider once the catalog arrives.
   // An existing session keeps its recorded Provider even when the host removed it.
@@ -232,6 +266,14 @@ export function RemoteChat({
         setIntents(pending)
         if (!activeIntent?.runId) { setActiveRun(null); setRunStatus(null); setPollError(null); return }
         const nextStatus = await api.runStatus(connectionId, activeIntent.runId)
+        const boundQueueKey = nextStatus.externalSessionId
+          ? remoteQueueKey(remoteDraftKey(connectionId, cwd, nextStatus.externalSessionId), providerSelection) : queueKey
+        // runStatus may retire the durable receipt. Reconcile App-owned queued
+        // work even if navigation cancelled this view while the read was pending.
+        if (nextStatus.externalSessionId && !context.externalSessionId) {
+          queueStore.migrate(queueKey, boundQueueKey, nextStatus.externalSessionId)
+        }
+        if (nextStatus.state === 'settled' || nextStatus.state === 'failed') queueStore.settle(boundQueueKey, activeIntent.intentId)
         if (cancelled || sequence !== pollSequence.current) return
         setRunStatus({ ...nextStatus, runId: activeIntent.runId })
         if (nextStatus.externalSessionId && !context.externalSessionId && !activeIntent.context.externalSessionId) {
@@ -245,7 +287,7 @@ export function RemoteChat({
             onDraftInput(pendingKey, '')
           }
           setSessionId(nextStatus.externalSessionId)
-          onSessionAdopted(nextStatus.externalSessionId)
+          if (provider) onSessionAdopted(nextStatus.externalSessionId, provider)
         }
         // Terminal status retires the main-process receipt. Refresh history even
         // if the last trace read fails, before the next poll drops that receipt.
@@ -264,7 +306,7 @@ export function RemoteChat({
     }
     void poll(); const timer = window.setInterval(() => { void poll() }, 1500)
     return () => { cancelled = true; pollSequence.current += 1; window.clearInterval(timer) }
-  }, [api, catalogReady, connectionId, connected, context, providerId])
+  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore])
 
   const runControlCatalog = useMemo(() => remoteRunControlCatalog(provider, host), [host, provider])
   const chosenModel = provider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
@@ -293,9 +335,15 @@ export function RemoteChat({
   // A previous turn's status is not evidence for the newly submitted receipt.
   const currentRunStatus = runStatus?.runId === currentIntent?.runId ? runStatus : null
   // Same gate as the host ledger: a listed run or an unknown receipt blocks another send.
-  const runActive = Boolean(currentIntent && (currentIntent.status === 'unknown' || currentIntent.runId))
+  const runActive = Boolean(currentIntent && (currentIntent.status === 'unknown' ||
+    (currentIntent.runId && currentRunStatus?.state !== 'settled' && currentRunStatus?.state !== 'failed')))
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
-  const contextAvailable = connected && Boolean(provider?.available) && projectAvailable
+  const sessionArchived = Boolean(catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
+    item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? ''))?.archivedAt)
+  const contextAvailable = connected && Boolean(provider?.available) && projectAvailable && !sessionArchived
+  useEffect(() => {
+    if (sessionArchived) queueStore.clearSession(draftKey)
+  }, [sessionArchived, queueStore, draftKey])
 
   const sendBlockedReason = !connection
     ? '这台主机已不在保存列表中；草稿已保留，不会改用本机执行'
@@ -305,29 +353,33 @@ export function RemoteChat({
         ? `正在读取 ${host} 的项目与 Provider`
         : !projectAvailable
           ? `${host} 上已没有这个项目；不会代选其他目录`
+          : sessionArchived
+            ? '该会话已归档；请恢复会话或新建会话'
           : !provider
             ? '原 Provider / profile 在主机上已不可用；不会代选其他运行环境'
             : !provider.available
               ? `${provider.label} 在 ${host} 上不可用`
-              : runActive
-                ? '远程运行进行中；远程会话不支持排队，结束后再发送'
-                : null
+              : null
 
-  const submit = async (): Promise<void> => {
-    const text = input.trim()
-    if (!contextAvailable || !text || submitting || runActive) return
+  const submission = (text: string) => ({
+    context, prompt: text,
+    ...(chosenModel ? { modelId: chosenModel.id, modelProviderId: chosenModel.providerId } : {}),
+    ...(validEffort ? { effort: validEffort } : {}),
+    ...(validPermissionMode ? { permissionMode: validPermissionMode } : {})
+  })
+  const execute = async (request: ReturnType<typeof submission>, queued: boolean): Promise<void> => {
+    if (submissionInFlight.current) return
+    submissionInFlight.current = true
     const submittedGeneration = contextGeneration.current
     const submittedKey = draftKey
     setSubmitting(true); setError(null); setStatus(null)
+    let acknowledged = false
     try {
-      const intent = await api.submit(connectionId, {
-        context,
-        prompt: text,
-        ...(chosenModel ? { modelId: chosenModel.id, modelProviderId: chosenModel.providerId } : {}),
-        ...(validEffort ? { effort: validEffort } : {}),
-        ...(validPermissionMode ? { permissionMode: validPermissionMode } : {})
-      })
-      onDraftInput(submittedKey, '')
+      const intent = await api.submit(connectionId, request)
+      acknowledged = true
+      if (queued) queueStore.submitted(queueKey, intent)
+      // Preserve edits made while the network write was pending.
+      else if (draftStore.getSnapshot().get(submittedKey)?.input.trim() === request.prompt) onDraftInput(submittedKey, '')
       if (submittedGeneration !== contextGeneration.current) return
       setIntents((current) => [...current.filter((item) => item.intentId !== intent.intentId), intent])
       if (shouldQueryUnknownIntent(intent)) {
@@ -336,9 +388,27 @@ export function RemoteChat({
         setIntents((current) => current.map((item) => item.intentId === queried.intentId ? queried : item))
       }
     } catch (reason) {
+      if (queued && !acknowledged) queueStore.fail(queueKey)
       if (submittedGeneration === contextGeneration.current) { setError(errorText(reason)); setStatus(null) }
-    } finally { setSubmitting(false) }
+    } finally { submissionInFlight.current = false; setSubmitting(false) }
   }
+  const submit = async (): Promise<void> => {
+    const text = input.trim()
+    if (!contextAvailable || !text || submitting) return
+    if (runActive || queue.prompts.length > 0) {
+      try {
+        queueStore.enqueue(queueKey, connectionId, submission(text), currentIntent?.intentId)
+        onDraftInput(draftKey, '')
+      } catch (reason) { setError(errorText(reason)) }
+      return
+    }
+    await execute(submission(text), false)
+  }
+  useEffect(() => {
+    if (!contextAvailable || runActive || submitting || pollError || submissionInFlight.current) return
+    const next = queueStore.claim(queueKey)
+    if (next) void execute(next.submission, true)
+  }, [queue, contextAvailable, runActive, submitting, pollError, queueKey])
   const checkUnknown = async (intent: DesktopRemoteIntent): Promise<void> => {
     const checkedGeneration = contextGeneration.current
     try {
@@ -414,6 +484,10 @@ export function RemoteChat({
       ? { tone: 'error' as const, text: noticeError }
       : unknownIntent
         ? { tone: 'blocked' as const, text: '提交结果未知；Scry 不会盲目重发同一提示词。', action: { label: '检查远端状态', onClick: () => void checkUnknown(unknownIntent) } }
+      : queue.paused && queue.prompts.length > 0
+        ? { tone: 'blocked' as const,
+            text: queue.writeUnknown ? '队首提交结果未知；不会自动重发。请核对远端记录后移除该条消息。' : '远程队列已暂停；重连不会自动发送。',
+            ...(!queue.writeUnknown ? { action: { label: '继续队列', onClick: () => queueStore.resume(queueKey) } } : {}) }
       : currentRunStatus?.state === 'unknown'
         ? { tone: 'blocked' as const, text: `远程运行结果未知${currentRunStatus.detail ? ` · ${currentRunStatus.detail}` : ''}；不会自动重试。` }
         // Stop/answer notes remain relevant while the run is in flight.
@@ -458,11 +532,13 @@ export function RemoteChat({
           : null}
         busy={runActive && Boolean(currentIntent?.runId)}
         draftAttachments={NO_ATTACHMENTS}
-        queuedPrompts={NO_QUEUE}
-        slashOpen={false}
-        slashLoading={false}
-        slashCmds={NO_SLASH}
-        slashSel={0}
+        queuedPrompts={queue.prompts}
+        queueWhileBusy
+        slashOpen={slashOpen}
+        slashLoading={slashLoading}
+        slashCmds={slashCmds}
+        slashReason={slashReason}
+        slashSel={slashSel}
         pendingQuestions={activeRun?.pendingQuestions}
         historyWindow={historyEvidence?.hasOlder && historyEvidence.before !== undefined && sessionId
           ? { sessionId, offset: 0, totalTurns: displayTurns.length, hasOlder: true, completeness: 'partial' }
@@ -479,16 +555,23 @@ export function RemoteChat({
         onChooseFolder={() => {}}
         onPickRecent={() => {}}
         onRemoveRecent={() => {}}
-        onRetrySlash={() => {}}
-        onPickSlash={() => {}}
-        onSlashSel={() => {}}
-        onHideSlash={() => {}}
+        onRetrySlash={() => setSlashRevision(revision => revision + 1)}
+        onPickSlash={(cmd) => {
+          onDraftInput(draftKey, `/${cmd.name.replace(/^\/+/, '')} `)
+          setSlashHidden(true)
+          textareaRef.current?.focus()
+        }}
+        onSlashSel={setSlashSel}
+        onHideSlash={() => setSlashHidden(true)}
         onSend={() => { void submit() }}
         onStop={() => { void stop() }}
         onPasteImages={() => setError('远程会话暂不支持图片附件；请改为发送文本。')}
         onPasteClipboardImage={() => setError('远程会话暂不支持图片附件；请改为发送文本。')}
         onRemoveDraftAttachment={() => {}}
-        onRemoveQueuedPrompt={() => {}}
+        onRemoveQueuedPrompt={(messageId) => {
+          if (queue.writeUnknown && queue.prompts[0]?.messageId === messageId) setError(null)
+          queueStore.remove(queueKey, messageId)
+        }}
         onSelectAgent={(agentId) => {
           const next = catalog?.providers.find((item) => remoteAgentId(item) === agentId)
           if (next?.available) setProviderSelection(desktopProviderKey(next))
