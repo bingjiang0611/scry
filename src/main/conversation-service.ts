@@ -4,6 +4,7 @@ import { historicalInputPrefix } from './providers/historical-input'
 import type { ProviderInputReceipt } from './providers/types'
 import type {
   ConversationArchiveRef,
+  ConversationBinding,
   Conversation,
   ConversationContinuation,
   ConversationDelivery,
@@ -13,6 +14,7 @@ import type {
 import { conversationItemKey, planConversationContinuation } from '../shared/conversation'
 import type {
   ConversationMetadataChange,
+  ConversationForkRequest,
   ConversationPage,
   ConversationPreview,
   ConversationSendRequest,
@@ -111,6 +113,7 @@ export interface ConversationServiceDeps {
   resolveContinuationKey: (context: { providerId: ProviderId; cwd: string; agentProfileId?: string }) => Promise<string>
   supportsHistoricalInput: (providerId: ProviderId) => boolean
   startAppRun: (request: AgentStartRequest, options: { managedConversation: ManagedConversationStart }) => Promise<{ runId: string }>
+  forkNative?: (request: { source: Conversation; binding: ConversationBinding; turn: Conversation['turns'][number]; permissionMode: AgentStartRequest['permissionMode']; beforeFork: () => Promise<void> }) => Promise<string>
   loadItemText?: (conversation: Conversation, ref: ConversationItemRef) => Promise<string>
   loadTurn?: (conversation: Conversation, turn: Conversation['turns'][number]) => Promise<LoadedSessionTurn | undefined>
 }
@@ -122,6 +125,9 @@ function summary(conversation: Conversation, activeRunIds: ReadonlySet<string>):
     id: conversation.id,
     cwd: conversation.cwd,
     ...(conversation.deletion ? { deletion: structuredClone(conversation.deletion), blockedReason: '统一对话正在删除或已删除，不能执行' } : {}),
+    ...(conversation.fork ? { fork: { sourceConversationId: conversation.fork.sourceConversationId, sourceRunId: conversation.fork.sourceRunId,
+      bindingId: conversation.fork.bindingId, status: conversation.fork.status, reason: conversation.fork.reason },
+      ...(conversation.fork.status !== 'accepted' && !conversation.deletion ? { blockedReason: conversation.fork.status === 'not_sent' ? `原生分支未创建：${conversation.fork.reason}` : `原生分支结果尚未确认：${conversation.fork.reason ?? '等待宿主回执'}；不会自动重建` } : {}) } : {}),
     title: conversation.title ?? `对话 ${conversation.id.slice(0, 8)}`,
     ...(conversation.pinnedAt ? { pinnedAt: conversation.pinnedAt } : {}),
     ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
@@ -195,9 +201,61 @@ export class ConversationService {
     return summary(await this.deps.store.create(cwd), this.active)
   }
 
+  async fork(input: unknown): Promise<ConversationSummary> {
+    const value = requestObject(input, ['conversationId', 'sourceRunId', 'expectedRevision', 'commandId', 'permissionMode'])
+    if (typeof value.conversationId !== 'string' || typeof value.sourceRunId !== 'string' || !value.sourceRunId ||
+      !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0 || typeof value.commandId !== 'string' || !isCommandId(value.commandId) ||
+      (value.permissionMode !== undefined && !isAgentPermissionMode(value.permissionMode))) throw new Error('分支请求无效')
+    const request: ConversationForkRequest = { conversationId: value.conversationId, sourceRunId: value.sourceRunId,
+      expectedRevision: Number(value.expectedRevision), commandId: value.commandId, permissionMode: value.permissionMode as AgentStartRequest['permissionMode'] ?? 'default' }
+    const intentHash = hash(JSON.stringify(request))
+    const existing = await this.deps.store.findFork(request.conversationId, request.commandId)
+    if (existing) {
+      if (existing.fork!.intentHash !== intentHash) throw new Error('同一分支命令不能替换内容')
+      return summary(existing, this.active)
+    }
+    if (!this.deps.forkNative) throw new Error('原生分支不可用')
+    const source = await this.deps.store.read(request.conversationId)
+    const turn = source?.turns.find(item => item.runId === request.sourceRunId)
+    const binding = source?.bindings.find(item => item.id === turn?.bindingId)
+    if (!source || !turn || !binding?.nativeSessionId || binding.retiredReason) throw new Error('该轮缺少可验证的原生分支归属')
+    const context = { providerId: binding.providerId, agentProfileId: binding.agentProfileId, cwd: source.cwd }
+    const verifyIdentity = async (): Promise<void> => {
+      if (await this.deps.resolveContinuationKey(context) !== binding.continuationKey) throw new Error('源 Agent 接续身份已变化，不能创建原生分支')
+    }
+    await verifyIdentity()
+    const begun = await this.deps.store.beginFork(source.id, { ...request, intentHash })
+    if (!begun.created) return summary(begun.conversation, this.active)
+    let attempting = false
+    try {
+      const nativeSessionId = await this.deps.forkNative({ source, binding, turn, permissionMode: request.permissionMode, beforeFork: async () => {
+        await verifyIdentity()
+        await this.deps.store.assertManagedWriteAllowed({ conversationId: source.id, cwd: source.cwd, target: binding, nativeSessionId: binding.nativeSessionId })
+        attempting = true
+      } })
+      if (!attempting) {
+        attempting = true
+        throw new Error('Provider 未遵守原生分支投递边界，结果未知')
+      }
+      if (!nativeSessionId || nativeSessionId === binding.nativeSessionId) throw new Error('Provider 未返回新的原生分支身份')
+      await verifyIdentity()
+      return summary(await this.deps.store.finishFork(begun.conversation.id, { status: 'accepted', nativeSessionId }), this.active)
+    } catch (error) {
+      // A successful atomic publish may lose its acknowledgement. Read, never replay the native fork.
+      const persisted = await this.deps.store.read(begun.conversation.id)
+      if (persisted?.fork?.status !== 'pending') {
+        if (!persisted) throw error
+        return summary(persisted, this.active)
+      }
+      return summary(await this.deps.store.finishFork(begun.conversation.id, {
+        status: attempting ? 'unknown' : 'not_sent', reason: error instanceof Error ? error.message : String(error)
+      }), this.active)
+    }
+  }
+
   async list(cwd: string): Promise<ConversationSummary[]> {
     const conversations = await this.deps.store.list(cwd)
-    return conversations.filter(conversation => conversation.deletion?.status !== 'complete').map((conversation) => summary(conversation, this.active))
+    return conversations.filter(conversation => conversation.deletion?.status !== 'complete' || conversation.deletion.retainedCopies).map((conversation) => summary(conversation, this.active))
   }
 
   async nativeSessionAliases(cwd: string): Promise<Set<string>> {

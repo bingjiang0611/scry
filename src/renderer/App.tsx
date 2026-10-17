@@ -2562,7 +2562,7 @@ export function App() {
             {conversationError && <p role="alert">{conversationError}</p>}
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={pinnedSummary.toggle} onTogglePanel={toggleOverviewPanel} />
-              <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} />
+              <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />
             </>
               : !conversationError && <p role="status">正在打开对话…</p>}
           </>

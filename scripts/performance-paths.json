@@ -73,6 +73,7 @@
         "ipc.conversation:list",
         "ipc.conversation:previewAdoption",
         "ipc.conversation:adopt",
+        "ipc.conversation:fork",
         "ipc.conversation:update",
         "ipc.conversation:previewDeletion",
         "ipc.conversation:delete"

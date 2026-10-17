@@ -252,9 +252,9 @@ import {
 } from './attachment-store'
 import { deleteOwnedSessionData } from './session-deletion'
 import { ConversationStore, type NativeSessionScope } from './conversation-store'
-import { ConversationService, parseConversationTarget, type ManagedConversationStart } from './conversation-service'
+import { ConversationService, parseConversationTarget, type ConversationServiceDeps, type ManagedConversationStart } from './conversation-service'
 import type { Conversation, ConversationDeletionResult } from '../shared/conversation'
-import { planConversationDeletion, resolveConversationDeletionRuns } from './conversation-deletion'
+import { liveConversationDeletionCatalog, planConversationDeletion, resolveConversationDeletionRuns } from './conversation-deletion'
 import { parseConversationLegacySource, prepareConversationAdoption } from './conversation-adoption'
 import { conversationItemsFromTrace, deleteConversationHistory, readConversationHistoryItem } from './conversation-history'
 import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
@@ -557,6 +557,7 @@ let conversationServiceInstance: ConversationService | undefined
 const conversationService = (): ConversationService => conversationServiceInstance ??= new ConversationService({
   store: conversationStore(),
   resolveContinuationKey: (context) => providerRegistry.continuationKey(context),
+  forkNative: forkManagedConversation,
   supportsHistoricalInput: (providerId) => providerRegistry.get(providerId).historicalContext === true,
   startAppRun: async (request, options) => {
     const result = await startAppRun(request, options)
@@ -1630,6 +1631,37 @@ handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
   return true
 })
 
+async function forkManagedConversation(input: Parameters<NonNullable<ConversationServiceDeps['forkNative']>>[0]): Promise<string> {
+  const { source, binding, turn, permissionMode, beforeFork } = input
+  const cwd = resolveKnownProjectDirectory(source.cwd)
+  const { providerId, agentProfileId } = binding
+  const adapter = providerRegistry.get(providerId)
+  if (!adapter.forkSession) throw new Error('该轮的 Provider 不支持原生分支')
+  if (providerId === 'pi' && permissionMode !== 'full_access') throw new Error('Pi 原生分支需要明确选择本机完全访问')
+  const lease = providerOperationGate.acquireOperation(providerOperationKey(providerId, agentProfileId))
+  if (!lease.ok) throw new Error('源 Provider 正在认证，不能创建分支')
+  try {
+    return await contextAdmission.run(providerContextKey(providerId, cwd, agentProfileId), async () => {
+      if (runs.unsettledStates().some(run => run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd)) {
+        throw new Error('源 Provider 仍在运行或保存证据，请等待收敛')
+      }
+      if (!turn.archive) throw new Error('分支轮次缺少已提交归档')
+      const archive = await readTraceArchiveAsync({ userDataDir: app.getPath('userData'), providerId, cwd, sessionId: turn.archive.sessionId })
+      const recorded = archive?.turns.find(item => item.runId === turn.runId)
+      if (!recorded?.providerTurnId) throw new Error('归档没有稳定的原生轮次边界')
+      const request = { providerId, agentProfileId, cwd, sourceSessionId: binding.nativeSessionId!, sourceRunId: turn.runId,
+        sourceProviderTurnId: recorded.providerTurnId, sourceForkTurnId: recorded.forkTurnId ?? recorded.providerTurnId, permissionMode }
+      verifyForkArchiveBoundary(archive, request)
+      const codexHookTrust = providerId === 'codex' ? await resolveCodexHookTrust(cwd) : []
+      const mcpSnapshot = providerId === 'pi' ? null : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
+      const result = await adapter.forkSession!.fork({ ...request, expectedContinuationKey: binding.continuationKey,
+        beforeFork, codexHookTrust, mcpExecution: authorizedMcpExecution(mcpSnapshot) })
+      if (!result.externalSessionId) throw new Error('Provider 未返回原生分支身份')
+      return result.externalSessionId
+    })
+  } finally { lease.release() }
+}
+
 handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<AgentForkSessionResult> => {
   const request = normalizeAgentForkSessionRequest(payload)
   const providerId = request.providerId
@@ -1867,6 +1899,13 @@ async function adoptLegacyConversation(input: unknown, fingerprint?: string, req
     } finally { for (const key of reservations) adoptingSessionKeys.delete(key) }
   })
 }
+handleTrusted('conversation:fork', async (_event, request: unknown) => {
+  await startupManagedRecovery
+  const result = await conversationService().fork(request)
+  invalidateSessionHistoryLoad('logical conversation fork')
+  win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: result.id })
+  return result
+})
 handleTrusted('conversation:previewAdoption', async (_event, input: unknown, target?: unknown) => {
   const source = parseConversationLegacySource(input)
   source.cwd = resolveKnownProjectDirectory(source.cwd)
@@ -1892,7 +1931,7 @@ function assertConversationDeletionIdle(conversation: Conversation): void {
 
 async function prepareConversationDeletion(conversation: Conversation) {
   const others = await conversationStore().list(conversation.cwd)
-  const catalog = appSessionStore().load().filter(session => session.cwd === conversation.cwd)
+  const catalog = liveConversationDeletionCatalog(others, appSessionStore().load().filter(session => session.cwd === conversation.cwd))
   return resolveConversationDeletionRuns(planConversationDeletion(conversation, others, catalog), target =>
     resolveSessionRunIds({ providerId: target.providerId, cwd: conversation.cwd, externalSessionId: target.externalSessionId, runIds: new Set() }), others, catalog)
 }
@@ -1901,7 +1940,7 @@ handleTrusted('conversation:previewDeletion', async (_event, id: unknown) => {
   if (typeof id !== 'string') throw new Error('对话删除请求无效')
   await startupManagedRecovery
   const conversation = await conversationStore().read(id)
-  if (!conversation || conversation.deletion?.status === 'complete') throw new Error('对话不存在或已经删除')
+  if (!conversation || (conversation.deletion?.status === 'complete' && !conversation.deletion.retainedCopies)) throw new Error('对话不存在或没有待核对的保留副本')
   assertConversationDeletionIdle(conversation)
   return prepareConversationDeletion(conversation)
 })
@@ -1912,15 +1951,15 @@ handleTrusted('conversation:delete', async (_event, id: unknown, fingerprint: un
     const original = await conversationStore().read(id)
     if (!original) throw new Error('找不到统一对话')
     if (original.deletion?.status === 'complete') {
-      if (original.deletion.fingerprint !== fingerprint) throw new Error('对话已删除，确认指纹不匹配')
-      return original.deletion.result!
+      if (original.deletion.fingerprint === fingerprint) return original.deletion.result!
+      if (!original.deletion.retainedCopies) throw new Error('对话已删除，没有待核对的保留副本')
     }
     const { conversation, plan } = await contextAdmission.runMany(original.bindings.map(binding => providerContextKey(binding.providerId, original.cwd, binding.agentProfileId)), async () => {
       const conversation = (await conversationStore().read(id))!
       assertConversationDeletionIdle(conversation)
       const plan = await prepareConversationDeletion(conversation)
       if (plan.fingerprint !== fingerprint) throw new Error('删除范围已变化，请重新预览；本次请求未执行清理')
-      await conversationStore().beginDeletion(id, plan.revision, fingerprint)
+      await conversationStore().beginDeletion(id, plan.revision, fingerprint, plan.reclaim === true)
       return { conversation, plan }
     })
     const result: ConversationDeletionResult = { ok: false, deleted: [], retained: [
@@ -1951,7 +1990,7 @@ handleTrusted('conversation:delete', async (_event, id: unknown, fingerprint: un
     result.retained = [...new Set(result.retained)]
     result.ok = result.failed.length === 0
     if (!result.ok) result.reason = 'partial_failure'
-    await conversationStore().finishDeletion(id, fingerprint, result)
+    await conversationStore().finishDeletion(id, fingerprint, result, plan.targets.some(target => target.sharedWith.length > 0))
     invalidateSessionHistoryLoad('logical conversation deletion')
     win?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
     return result

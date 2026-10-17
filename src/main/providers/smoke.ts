@@ -17,6 +17,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
   }
   const forkSession: ProviderAdapter['forkSession'] = callsFile ? {
     fork: async (request) => {
+      await request.beforeFork?.()
       recordCall('fork', request.sourceSessionId)
       return { externalSessionId: `smoke-fork-${request.sourceRunId}` }
     }

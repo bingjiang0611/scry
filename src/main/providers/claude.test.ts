@@ -209,6 +209,19 @@ describe('Claude provider adapter', () => {
     })
   })
 
+  it('does not mutate the Claude native session when the managed identity fence rejects', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      { uuid: 'u1', type: 'user', message: { role: 'user', content: 'first' } },
+      { uuid: 'a1', type: 'assistant', message: { role: 'assistant', content: 'answer' } }
+    ])
+    await expect(createClaudeAdapter('/tmp/scry-home').forkSession!.fork({
+      providerId: 'claude', cwd: '/repo', sourceSessionId: 'session-source', sourceRunId: 'run-source',
+      sourceProviderTurnId: 'u1', sourceForkTurnId: 'u1',
+      beforeFork: async () => { throw new Error('managed identity changed') }
+    })).rejects.toThrow('managed identity changed')
+    expect(sdk.forkSession).not.toHaveBeenCalled()
+  })
+
   it('lists native slash commands through the existing control transport without a model prompt', async () => {
     sdk.query.mockReturnValue({
       supportedModels: vi.fn().mockResolvedValue([]),

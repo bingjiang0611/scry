@@ -4,7 +4,7 @@ import type { Dirent } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { ContextAdmission } from './context-admission'
 import { writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
-import { normalizeSessionTitle } from '../shared/session-title'
+import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
 import type { ConversationMetadataChange } from '../shared/conversation-api'
 import { isCommandId } from '../shared/runtime'
 import { isToolContentRef } from '../shared/tool-content'
@@ -12,6 +12,7 @@ import { prepareConversationHistory, loadConversationHistory, MAX_CONVERSATION_H
 import type { ProviderHistoricalContext } from './providers/types'
 import {
   conversationItemKey,
+  conversationCoverage,
   planConversationContinuation,
   sameConversationTarget,
   type Conversation,
@@ -78,6 +79,7 @@ export function decodeConversation(value: unknown): Conversation {
   if (data.deletion !== undefined) {
     requireValue(data.archivedAt !== undefined, '删除记录必须保留存档状态')
     const deletion = object(data.deletion)
+    requireValue(deletion.retainedCopies === undefined || typeof deletion.retainedCopies === 'boolean', '共享副本标记无效')
     requireValue((deletion.status === 'pending' || deletion.status === 'complete') && typeof deletion.fingerprint === 'string' && hashPattern.test(deletion.fingerprint), '删除记录无效')
     if (deletion.result !== undefined) {
       const result = object(deletion.result)
@@ -94,7 +96,8 @@ export function decodeConversation(value: unknown): Conversation {
     const binding = object(raw)
     requireValue(typeof binding.id === 'string' && idPattern.test(binding.id) && !bindings.has(binding.id), '对话绑定 ID 无效或重复')
     requireValue(binding.nativeSessionId === undefined || text(binding.nativeSessionId), '原生会话 ID 无效')
-    requireValue(binding.retiredReason === undefined || (text(binding.retiredReason) && text(binding.nativeSessionId)), '弃用原生绑定缺少身份或原因')
+    requireValue(binding.historyOnly === undefined || (binding.historyOnly === true && data.fork !== undefined && binding.nativeSessionId === undefined && text(binding.retiredReason)), '只读历史绑定无效')
+    requireValue(binding.retiredReason === undefined || (text(binding.retiredReason) && (text(binding.nativeSessionId) || binding.historyOnly === true)), '弃用原生绑定缺少身份或原因')
     if (binding.nativeSessionId !== undefined && binding.retiredReason === undefined) {
       const identity = JSON.stringify([binding.providerId, binding.agentProfileId ?? null, binding.continuationKey])
       requireValue(!activeTargets.has(identity), '同一接续身份存在多个未弃用的原生绑定')
@@ -122,7 +125,7 @@ export function decodeConversation(value: unknown): Conversation {
     requireValue(turn.items.every((item) => item.runId === turn.runId), '轮次包含其他 run 的内容')
     if (turn.origin === 'imported') {
       items(turn.nativeItems)
-      requireValue(binding.nativeSessionId !== undefined && subset(turn.nativeItems, turn.items), '导入轮次的原生覆盖无效')
+      requireValue((binding.nativeSessionId !== undefined && subset(turn.nativeItems, turn.items)) || (binding.historyOnly === true && turn.nativeItems.length === 0), '导入轮次的原生覆盖无效')
     } else {
       requireValue(turn.origin === 'dispatch', '轮次来源无效')
       requireValue(typeof turn.commandId === 'string' && isCommandId(turn.commandId) && !commandIds.has(turn.commandId), '对话命令 ID 无效或重复')
@@ -152,6 +155,21 @@ export function decodeConversation(value: unknown): Conversation {
     }
     runIds.add(turn.runId)
     priorItems.push(...turn.items)
+  }
+  if (data.fork !== undefined) {
+    const fork = object(data.fork)
+    requireValue(typeof fork.commandId === 'string' && isCommandId(fork.commandId) && typeof fork.intentHash === 'string' && hashPattern.test(fork.intentHash), '分支命令无效')
+    requireValue(typeof fork.sourceConversationId === 'string' && idPattern.test(fork.sourceConversationId) && fork.sourceConversationId !== data.id &&
+      Number.isSafeInteger(fork.sourceRevision) && Number(fork.sourceRevision) >= 0 && text(fork.sourceBindingId), '分支来源无效')
+    const boundary = (data.turns as ConversationTurn[]).findIndex(turn => turn.runId === fork.sourceRunId)
+    requireValue(boundary >= 0 && typeof fork.bindingId === 'string' && bindings.has(fork.bindingId), '分支边界或绑定无效')
+    requireValue(['pending', 'accepted', 'unknown', 'not_sent'].includes(String(fork.status)), '分支状态无效')
+    requireValue(fork.reason === undefined || text(fork.reason), '分支错误说明无效')
+    items(fork.inheritedItems)
+    requireValue(subset(fork.inheritedItems, (data.turns as ConversationTurn[]).slice(0, boundary + 1).flatMap(turn => turn.items)), '分支覆盖引用了未来或未知内容')
+    requireValue(fork.status !== 'accepted' || Boolean(bindings.get(fork.bindingId)?.nativeSessionId), '原生分支缺少回执身份')
+    requireValue(fork.status === 'accepted' || (data.turns as ConversationTurn[]).every(turn => turn.origin === 'imported'), '未确认分支不能追加投递')
+    requireValue(fork.status === 'pending' || fork.status === 'accepted' || text(fork.reason), '分支未收敛缺少说明')
   }
   return structuredClone(data) as unknown as Conversation
 }
@@ -341,6 +359,10 @@ export class ConversationStore {
         // Runtime identity is profile-scoped; physical App copies are not.
         const matches = (binding: ConversationBinding): boolean => binding.providerId === scope.providerId &&
           (deletion !== undefined || binding.agentProfileId === scope.agentProfileId)
+        if (conversation.fork && ['pending', 'unknown'].includes(conversation.fork.status) &&
+          conversation.bindings.some(binding => binding.id === conversation.fork!.bindingId && matches(binding))) {
+          throw new Error('存在未确认的原生分支，无法证明该会话可由旧入口写入或删除')
+        }
         if (conversation.bindings.some((binding) => matches(binding) && binding.nativeSessionId === scope.nativeSessionId)) {
           throw new Error(`原生会话已归属统一对话 ${conversation.id}，不能从旧入口写入或删除`)
         }
@@ -407,16 +429,79 @@ export class ConversationStore {
     })
   }
 
+  async findFork(sourceId: string, commandId: string): Promise<Conversation | undefined> {
+    return structuredClone([...(await this.loadOwnership()).values()].find(item =>
+      item.fork?.sourceConversationId === sourceId && item.fork.commandId === commandId))
+  }
+
+  /** Publish the only fork intent before any native effect; never clone usage or trace rows. */
+  async beginFork(sourceId: string, input: { commandId: string; intentHash: string; expectedRevision: number; sourceRunId: string }): Promise<{ conversation: Conversation; created: boolean }> {
+    const request = structuredClone(input)
+    return this.admission.run('ownership', async () => {
+      const existing = await this.findFork(sourceId, request.commandId)
+      if (existing) {
+        requireValue(existing.fork?.intentHash === request.intentHash, '同一分支命令不能替换内容')
+        return { conversation: existing, created: false }
+      }
+      const source = await this.required(sourceId)
+      requireValue(source.revision === request.expectedRevision && !source.deletion && !source.archivedAt, '源对话已变化或不可执行，请重新读取')
+      requireValue(!source.fork || source.fork.status === 'accepted', '源分支尚未确认')
+      requireValue(!source.turns.some(turn => turn.origin === 'dispatch' && ['pending', 'unknown'].includes(turn.delivery.status)), '源对话投递尚未收敛')
+      requireValue(![...(await this.loadOwnership()).values()].some(item => item.fork?.sourceConversationId === sourceId && ['pending', 'unknown'].includes(item.fork.status)), '此源对话已有未确认的原生分支，不能再次创建')
+      const index = source.turns.findIndex(turn => turn.runId === request.sourceRunId)
+      requireValue(index >= 0, '分支轮次不属于源对话')
+      const selected = source.turns[index]
+      const binding = source.bindings.find(item => item.id === selected.bindingId)!
+      requireValue(binding.nativeSessionId && !binding.retiredReason && !binding.historyOnly && selected.origin === 'dispatch' && selected.delivery.status === 'accepted', '该轮没有可验证的原生分支归属')
+      const prefix = source.turns.slice(0, index + 1)
+      requireValue(prefix.every(turn => turn.archive), '分支历史缺少已提交归档')
+      const bindingId = randomUUID()
+      const referenced = new Set(prefix.map(turn => turn.bindingId))
+      const titleSuffix = ' · 分支'
+      const conversation: Conversation = {
+        version: 1, id: randomUUID(), cwd: source.cwd, revision: 0,
+        title: normalizeSessionTitle(`${(source.title ?? '对话').slice(0, SESSION_TITLE_MAX_LENGTH - titleSuffix.length)}${titleSuffix}`),
+        bindings: [...source.bindings.filter(item => referenced.has(item.id)).map(item => ({
+          id: item.id, providerId: item.providerId, agentProfileId: item.agentProfileId, continuationKey: item.continuationKey,
+          historyOnly: true as const, retiredReason: '共享历史只读，不继承源原生会话的执行权'
+        })), { id: bindingId, providerId: binding.providerId, agentProfileId: binding.agentProfileId, continuationKey: binding.continuationKey }],
+        turns: prefix.map(turn => ({ origin: 'imported' as const, ordinal: turn.ordinal, runId: turn.runId,
+          bindingId: turn.bindingId, items: turn.items, nativeItems: [], archive: turn.archive })),
+        fork: { commandId: request.commandId, intentHash: request.intentHash, sourceConversationId: sourceId,
+          sourceRevision: source.revision, sourceRunId: selected.runId, sourceBindingId: binding.id, bindingId,
+          status: 'pending', inheritedItems: conversationCoverage({ ...source, turns: prefix }, binding.id) }
+      }
+      await this.persist(this.checked(conversation), true)
+      return { conversation: structuredClone(conversation), created: true }
+    })
+  }
+
+  async finishFork(id: string, result: { status: 'accepted'; nativeSessionId: string } | { status: 'not_sent' | 'unknown'; reason: string }): Promise<Conversation> {
+    const receipt = structuredClone(result)
+    return this.admission.run('ownership', async () => {
+      const conversation = await this.required(id)
+      requireValue(conversation.fork?.status === 'pending' && !conversation.deletion, '分支意图已变化')
+      const binding = conversation.bindings.find(item => item.id === conversation.fork!.bindingId)!
+      if (receipt.status === 'accepted') binding.nativeSessionId = receipt.nativeSessionId
+      conversation.fork.status = receipt.status
+      if (receipt.status !== 'accepted') conversation.fork.reason = receipt.reason
+      conversation.revision += 1
+      await this.persist(this.checked(conversation))
+      return structuredClone(conversation)
+    })
+  }
+
   async list(cwd?: string): Promise<Conversation[]> {
     const conversations = await this.loadOwnership()
     const values = [...conversations.values()]
     return structuredClone(cwd === undefined ? values : values.filter((conversation) => conversation.cwd === cwd))
   }
 
-  async beginDeletion(id: string, revision: number, fingerprint: string): Promise<Conversation> {
+  async beginDeletion(id: string, revision: number, fingerprint: string, reclaim = false): Promise<Conversation> {
     return this.admission.run('ownership', async () => {
       const conversation = await this.required(id)
-      requireValue(conversation.revision === revision && conversation.deletion?.status !== 'complete', '对话已变化，请重新预览删除')
+      requireValue(conversation.revision === revision && (conversation.deletion?.status !== 'complete' || (reclaim && conversation.deletion.retainedCopies)), '对话已变化，请重新预览删除')
+      requireValue(!conversation.fork || !['pending', 'unknown'].includes(conversation.fork.status), '原生分支尚未收敛，不能删除')
       requireValue(Boolean(conversation.archivedAt), '请先存档统一对话')
       requireValue(!conversation.turns.some(turn => turn.origin === 'dispatch' && ['pending', 'unknown'].includes(turn.delivery.status)), '投递未收敛，不能删除')
       conversation.deletion = { status: 'pending', fingerprint }
@@ -426,16 +511,16 @@ export class ConversationStore {
     })
   }
 
-  async finishDeletion(id: string, fingerprint: string, result: ConversationDeletionResult): Promise<void> {
+  async finishDeletion(id: string, fingerprint: string, result: ConversationDeletionResult, retainedCopies = false): Promise<void> {
     const receipt = structuredClone(result)
     return this.admission.run('ownership', async () => {
       const conversation = await this.required(id)
       requireValue(conversation.deletion?.status === 'pending' && conversation.deletion.fingerprint === fingerprint, '删除操作已变化')
-      conversation.deletion = { status: receipt.ok ? 'complete' : 'pending', fingerprint, result: receipt }
+      conversation.deletion = { status: receipt.ok ? 'complete' : 'pending', fingerprint, result: receipt, ...(retainedCopies ? { retainedCopies: true } : {}) }
       if (receipt.ok) {
         delete conversation.title
         delete conversation.pinnedAt
-        for (const binding of conversation.bindings) binding.retiredReason = '已删除的统一对话'
+        for (const binding of conversation.bindings) if (binding.nativeSessionId || binding.historyOnly) binding.retiredReason = '已删除的统一对话'
         for (const turn of conversation.turns) {
           if (turn.origin === 'dispatch' && turn.delivery.status === 'not_sent') turn.delivery.reason = '已删除的统一对话'
         }
@@ -485,6 +570,7 @@ export class ConversationStore {
       const conversation = await this.required(input.conversationId)
       requireValue(!conversation.deletion, '统一对话正在删除或已删除，不能执行')
       requireValue(conversation.cwd === input.cwd, '统一对话工作区不一致')
+      requireValue(!conversation.fork || conversation.fork.status === 'accepted', '原生分支尚未确认，不能执行')
       const binding = conversation.bindings.find((candidate) =>
         sameConversationTarget(candidate, input.target) &&
         (input.nativeSessionId === undefined || candidate.nativeSessionId === input.nativeSessionId))
@@ -630,6 +716,11 @@ export class ConversationStore {
     return this.admission.run('ownership', async () => {
       const conversation = await this.required(id)
       let changed = false
+      if (conversation.fork?.status === 'pending') {
+        conversation.fork.status = 'unknown'
+        conversation.fork.reason = '宿主重启后缺少原生分支回执；不会自动重建分支'
+        changed = true
+      }
       for (const turn of conversation.turns) {
         if (turn.origin !== 'dispatch' || turn.delivery.status !== 'pending' || live.has(turn.runId)) continue
         turn.delivery = { status: 'unknown', reason: '未找到活动 owner，且缺少原生投递确认；不会自动重发' }

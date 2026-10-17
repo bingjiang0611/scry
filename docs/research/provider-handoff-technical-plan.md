@@ -419,7 +419,7 @@
 ### 尚未覆盖
 
 - 真实 Claude/Codex/Pi 账号的端到端接续、真实付费调用、前台焦点行为、正式签名/公证和安装均未执行，需另行授权。
-- 当前接续仍限纯文本；附件、slash 命令、Steer、原生 fork、共享副本显式回收不在本轮交付内。第 4 项完整路线图仍未全部完成。
+- 当前接续仍限纯文本；附件、slash 命令、Steer、原生 fork、共享副本显式回收不在本轮交付内。原生 fork 与回收的后续进度见第 14 节；第 4 项完整路线图仍未全部完成。
 - 32 KiB 超限不会隐式总结。若需支持长会话，下一步须单独定义可审阅的压缩/附件交接合同及验收；不能删除上限或静默丢内容。
 
 ## 13. 用户授权安装 0.2.196（2026-10-17）
@@ -432,3 +432,45 @@
 - 安装后独立读回 `/Applications/Scry.app` 版本 **0.2.196**、内置 CLI **0.2.49**；已安装 `app.asar` 与验证后的开发包逐字节 hash 一致：`144096b49c29713319ca636808833574365ebe91ad45cb740d620d76213a7270`。读回证据 `/tmp/scry-install-0.2.196-verification.json`。
 - 原 **0.2.195** 保留在 `/Applications/.Scry.app.backup`，其 `app.asar` hash 与安装前快照一致。
 - 清除发布凭据并关闭签名身份自动发现；这是开发安装，不是正式 Developer ID 签名、公证或发布。没有主动退出或重启用户正在使用的 App，重启由用户执行；未调用真实账号、未推送。
+
+## 14. 原生分支与共享副本显式回收（2026-10-17）
+
+### 实现与边界
+
+用户要求继续第④项。发现同一工作区有桌面远程功能并行写入后，按用户选择将本次改动迁入独立 worktree，原工作区只撤回本次对应的 hunks，保留另一任务的修改。分支 `feat/conversation-fork-4bj0ay7k` 基于 `386fb6e`；本节验证不包含随后主分支的远程功能提交，不等于两项功能已合入验收。
+
+- 复用聊天轮次的“在新会话中分支”按钮、原生 Provider fork facet、`verifyForkArchiveBoundary()`、context admission、Provider operation lease、workspace 与 MCP/Hook trust gate。main 从所选轮次推导真正的 binding/provider/profile/native ID，不使用当前 composer Agent 冒充来源。创建分支不发送新消息、不回退工作区文件。
+- `conversation:fork` 先持久化 immutable command / pending intent，再执行原生操作。源 revision、输入投递、归档、接续身份均须可证明；在 Provider 效果之前复验身份。Pi 启动可能执行 extension，因此启动前和 fork RPC 前各有一次围栏；从另一 Agent 查看 Pi 历史时，须先明确选择该 Pi Profile 和本机完全访问，不继承另一 Provider 的完全访问选择。Claude SDK helper 的宿主目录与运行时配置不一致时拒绝分支。
+- 成功后登记新的 native ID。分支点之前仅共享归档引用，不克隆 usage/trace 数据库行，不转移源 native session 的执行权。继承覆盖只来自所选 binding 已证明的内容；其他 binding 的缺失正文仍在下一次发送时补齐。
+- 相同 command 只读回原结果；回执丢失不会自动重建。越过 Provider 效果边界后的错误、原生身份异常、重启后的 pending 均保持 `unknown`，阻断发送、重复创建及不安全删除。界面的“核对 / 继续原分支”明确是同一请求；宿主未收到原请求时，用户点击可能首次执行。
+- 共享历史不显示可执行 fork 按钮。界面说明其只读来源，并提供“打开源对话”，保留源草稿。这里沿用既有组件和 tokens，未引入第二套聊天或分支工作台。原始外部合同参考已安装 Claude SDK `sdk.d.ts` 的 `ForkSessionOptions`：按原生 message 边界创建新 session，不把 UI 历史复制视作原生分支。
+- 删除仍按整组物理副本保守保留。新删除回执用 `retainedCopies` 标明曾保留共享副本；该只读入口继续出现在已存档区域。用户可重新预览并明确确认回收；main 重验全 binding/attempt、存活引用、SQLite 真实归属和 fingerprint。最后一个引用释放后才清理；旧确认、未知分支、活跃运行不能绕过围栏。只有已完成删除的真实 owner 才释放 catalog 引用，共享只读 binding 不算 owner。旧请求只返回旧回执，不自动执行新回收。
+
+### 验证与证据
+
+环境：macOS arm64、Node **24.18.0**、Electron **42.10.1**。隔离源码仍标桌面 **0.2.196** / CLI **0.2.49**，这是未安装的开发检查产物，不是新发布版本。
+
+| 检查 | 结果 | 可读证据 |
+|---|---|---|
+| 最终全量 `npm test` | 267 文件 / **3286 通过、4 项原有检查跳过**；shell 通过 | `/tmp/scry-fork-full-final.log` |
+| node/web typecheck、`check:cli-release` | 类型检查通过；CLI 32 文件 / **587 测试**及 tarball smoke 通过 | `/tmp/scry-fork-cli.log`；最终类型检查在本节代码冻结后再次通过 |
+| 最终 `test:renderer:ui` | 全部通过，包括 Credits、原生所有权生产 IPC、混合历史、分支及共享副本回收 | `/tmp/scry-fork-renderer-final.log` |
+| 最终开发 `pack:artifact` | App/CLI build、传递依赖与资源检查、packaged security/crash/file/remote smoke 通过；关闭签名自动发现，无安装 | `/tmp/scry-fork-package-final.log` |
+| L1 工作量计数 | 30 项：25 unchanged、2 pass、3 CPU instruction candidate missing；无 worse | `/tmp/scry-fork-performance-final/measure.json`、`ratchet.md` |
+
+新增 backend 用例覆盖不同 Provider 的选中轮次路由与前缀、缺失覆盖、长标题保留分支标记、命令幂等、身份变化、unknown/restart/旧入口围栏、拒绝无效来源及共享副本显式回收。三个 adapter 增加效果前围栏回归，Pi 用真实临时 RPC 子进程证明拒绝启动时没有进程收据、第二次拒绝时没有 fork/clone RPC。删除实际效果与未知 IPC 回执恢复走现有隐藏 Electron fixture，不以 SSR 或程序化 `.click()` 替代交互。
+
+隐藏 App 在当前选择 Claude 时点击 Codex 轮次：仅产生 **1 次原生 fork**，没有新增 prompt；故意在原生结果及 durable commit 后丢失 IPC 回执，点击核对仍只有这一次 fork。新分支下一条消息 resume 新 native ID，不重复交接已继承历史；源草稿保留，“打开源对话”真实导航成功。删除源 owner 后，共享归档字节不变且分支可读；最后引用释放后归档被清理，旧回收确认被拒绝，显式重新确认后不再显示保留入口。两次宿主重启没有重建分支。
+
+最终 UI 证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-A9Ythp/verification.json`。其中 **8/8 artifact hash** 与最终构建一致；`native-fork-*`、`shared-copy-reclaim-*` 保存深浅色截图。本次查看了深色分支页与浅色回收框，复用了既有布局，无独立新主题。
+
+负对照 `/tmp/scry-fork-identity-negative.log`：故意移除最后一次身份围栏，新用例检测到不应发生的 native effect（1 而不是 0）并失败；恢复后通过。所有首次失败保留：新测试最初有未使用变量、preload 调用计数漏加新操作、非 canonical fixture cwd 与随机加载顺序导致错误文案断言过窄，均修正 fixture/断言合同而非放宽保护；前两次 UI 检查分别在跨会话返回后的清理/重命名按钮尚未就绪时失败，补了明确 enabled-state 等待，未加 sleep、重试或扩大超时。首次打包因 `node_modules` 指向原工作区导致传递依赖漏打包；改为独立依赖副本后完整重验通过，没有删除包完整性检查。
+
+最终全套串行计时锁记录：`/tmp/scry-fork-final-gate.log`，10 核，load 2.09→5.45、`highLoad:false`。此耗时只是验证执行记录；未测量真实账号 fork 延迟，不宣称 L2/L3 性能提升。
+
+### 尚未验证与下一责任动作
+
+- 真实 Claude/Codex/Pi 账号、付费调用、前台系统焦点未验收，需要维护者单独授权。全局安装、重启、正式签名/公证、发布、push 均未执行。
+- fork 仅开放当前可证明原生执行归属和稳定归档边界的轮次。共享前缀须通过“打开源对话”回到真正 owner；不猜测 fork 后重写的原生 entry ID。若要在副本内直接从共享轮次再次 fork，须先增加各 Provider 可证明的原生 ID 映射与回执验收。
+- 回收是整组引用释放后的显式清理，不是逐轮 GC。旧版已删除记录没有 `retainedCopies` typed 标记时，不从自由文本回执猜测迁移，也不自动修改真实用户数据。
+- 第④仍有真实账号验收和长历史/附件/命令/Steer 合同待完成；32 KiB 纯文本接续上限不变。本任务下一步是在维护者确认另一写入任务结束后合入主分支，并重跑合入态检查；不把本隔离分支的结果冒充集成结果。第⑥、⑦未在本次开展。
