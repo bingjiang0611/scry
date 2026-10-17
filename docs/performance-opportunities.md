@@ -6,13 +6,28 @@
 
 用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成五个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
 
-**本轮交付状态快照（性能代码与实验截至 `c599723`，不是宿主运行状态）**：
+**当前交付状态（2026-10-17，源码已合入，未安装）**：
 
-- 优化源码：`7ac7fcb`（前两项）、`afd8f03`、`aff6006`、`06a3f41`。L1/L2 已验证，L3 待验证。
-- 合入/安装：本轮均未执行，用户已暂停此次合入。
-- 构建：已有隔离验证产物及 SHA，见各实验 JSON；不等于用户 App 已生效。
-- 宿主运行映射：App 版本、完整 build ID、安装/首次生效时间、日常 baseline→candidate 均为 `unknown`，未核对安装/启动证据。
-- 下次分析先重验以上状态；相关旧 build 热点不能据此判为优化回归或触发同一优化重做。
+- 优化源码：`7ac7fcb`（前两项）、`afd8f03`、`aff6006`、`06a3f41`。通过 `89e4465` 合入 main，合入前 main 为 `a091c22`；原生会话 fork、远端会话改动均保留。
+- 构建：验证产物 App **0.2.196**，完整 build ID `1d7585fc0e27063072cc5fc0975b074a3a192800dedb1d68cf4888da9710b2e1`。产物 SHA 与源码树对应证据在 `/tmp/scry-perf-integration.B1UmYE/identity.json`；这是测试构建，不是已安装实例。
+- 安装/生效：本次未安装、未推送或发布。宿主实际版本/build ID、安装/首次生效时间、日常 baseline→candidate 映射仍为 `unknown`。L3 待验证；旧 build 热点不能据此判为优化回归或触发同一优化重做。
+- 验证级别：下表 L2 保留原实验源码归属；集成版重验功能及 40 项工作量计数，没有重新测量 L2 毫秒，也没有日常 L3 结论。
+
+### 集成验收与未通过项
+
+代码复查保留 main 较完整的 legacy 日志迁移/排序实现；Pi 只统一异步 fs import，保留 native fork 的身份、配置指纹与回收行为。自动合并的 turn/session diff 仍先封口 preview、等待 idle，再保持 turn→session 发布和 archive 收敛顺序。最终完整测试、CLI、UI 与打包使用集成树 `2b520429bb13904a9ee869e546fd1c609b7abb58`；验证快照 `2d1abee` 与源码 merge 的树一致。重点测试先前快照与此树仅有 skill 镜像文档差异，源代码一致；40 项计数也对同一集成源码执行。
+
+| 检查 | 结果 |
+|---|---|
+| 重点冲突/相邻路径 | 201 项通过，覆盖 Pi/fork、日志、用量、共享 diff 与 session baseline |
+| `npm test` | 最终 3331 通过、4 既有 opt-in skipped；shell 通过 |
+| 首轮完整测试 | 3330 通过、1 失败：skill 在 `.agents` / `.claude` 镜像漂移。同步三份文档后完整重跑通过；未改测试断言或超时 |
+| `check:cli-release` | 类型检查、587 项相关测试、CLI build 与 package smoke 通过（CLI 0.2.49） |
+| App build / `test:renderer:ui` | 隐藏真实 App 全套通过，包含 Credits、远端会话 parity、源代码管理、归属与统一对话重启/fork 路径；无真实账号/Provider 探针 |
+| `performance:measure` | 40 obs；38 candidate unchanged、2 gating pass，另3个CPU指令 candidate missing；8/11旧门禁、17/1共享树、18/2/0双校验保持 |
+| `pack:artifact` | 构建成功，但 `check:packaged-app` 在私有 CLI `--version` 收到 SIGKILL（PID 96233）；后续 packaged smoke 未执行，不算完整打包验收通过 |
+
+`codesign --verify --deep --strict` 对同一产物通过。macOS 对 PID 96233 记录 `Unable to apply provenance sandbox`，但不能据此确定谁发送了 SIGKILL。没有重试碰运气、换路径、改签名、关闭安全软件或放宽边界。用户在得知该结果后明确选择**仅合入源码**；发布/安装安全门禁未获豁免。首轮失败、最终测试、签名与打包日志留在 `/tmp/scry-perf-integration.B1UmYE/`；测试 App 已由 fixture 结束，诊断产物暂留供排查。
 
 | 实验 | 固定负载 L1 | L2 / L3 | 减少的工作 |
 |---|---|---|---|
@@ -34,7 +49,7 @@
 
 **第五步真实 Service.diff 已验证**：冻结 `8514551`，生产 `06a3f41`；两个时间点的完整 revision 材料与公式不变，仅内部投影不取 remotes。普通面板、写入、PR/传输仍取完整 status。9 项新增验收、故意去掉 post-check 后 5 项确定性失败的负对照、mac2全量3284通过/4既有opt-in跳过、隐藏真实App源代码管理UI均通过，无外部GitHub写入。首组L2 `highLoad=true` 不作收益结论，观察到负载恢复后补得有效组（3.03→3.86 / 8核）；没有改 workload、timeout 或丢弃样本。40 obs：3 better、35 unchanged、2 gating pass，另3个CPU指令candidate缺失，无worse；只降三个candidate基线。旧11次同名负载与8次门禁不变。
 
-**后续优先顺序**：建议先由用户确认合入/安装，再采同场景≥30样本、≥2会话的L3，判断真实优先级，不为继续降次数删除身份、filter或revision校验。若继续优化Provider启动/扩展/模型目录，agent先补真实listCommands/runControls的端到端分段；真实账号/费用授权不足时不运行，不把离线结果当12秒根因。当前不合入、安装或推送。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
+**后续优先顺序**：建议先由用户确认合入/安装，再采同场景≥30样本、≥2会话的L3，判断真实优先级，不为继续降次数删除身份、filter或revision校验。若继续优化Provider启动/扩展/模型目录，agent先补真实listCommands/runControls的端到端分段；真实账号/费用授权不足时不运行，不把离线结果当12秒根因。当前已按用户授权合入源码，未安装或推送；安装前还需通过被 SIGKILL 阻断的打包运行验收。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
 
 ## 原始机会排名（2026-10-16，日常记录首次分析）
 
