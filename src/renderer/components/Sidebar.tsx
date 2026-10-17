@@ -72,7 +72,9 @@ export const Sidebar = memo(function Sidebar({
   hostsActive = false,
   activeRemote = null,
   onPickRemoteSession,
-  onNewRemoteProjectChat
+  onNewRemoteProjectChat,
+  onArchiveRemoteSession,
+  onArchivedRemoteSession
 }: {
   id?: string
   projects: ProjectMeta[]
@@ -113,6 +115,8 @@ export const Sidebar = memo(function Sidebar({
   activeRemote?: ActiveRemoteLocation | null
   onPickRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
   onNewRemoteProjectChat?: (connectionId: string, cwd: string) => void
+  onArchiveRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
+  onArchivedRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
 }) {
   const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)
   const openSessionMenu = (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta): void => {
@@ -328,6 +332,8 @@ export const Sidebar = memo(function Sidebar({
               onToggle={toggle}
               onPickSession={onPickRemoteSession!}
               onNewProjectChat={onNewRemoteProjectChat!}
+              onArchiveSession={onArchiveRemoteSession}
+              onArchivedSession={onArchivedRemoteSession}
             />
           )
           const p = group.project

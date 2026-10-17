@@ -1,0 +1,97 @@
+import type { DesktopRemoteIntent, DesktopRemoteSubmit } from '@shared/desktop-remote'
+
+export interface RemoteQueuedPrompt {
+  messageId: string
+  text: string
+  attachments: never[]
+  request: Record<string, never>
+  submission: DesktopRemoteSubmit
+}
+interface Queue {
+  connectionId: string | null
+  prompts: RemoteQueuedPrompt[]
+  waitingFor?: string
+  sending: boolean
+  paused: boolean
+  writeUnknown?: boolean
+}
+const EMPTY: Queue = { connectionId: null, prompts: [], sending: false, paused: false }
+
+// App-owned, so navigation cannot discard queued input or retry a claimed write.
+// Unknown writes remain paused until the user removes them; never auto-resend.
+export class RemotePromptQueueStore {
+  private queues = new Map<string, Queue>()
+  private listeners = new Set<() => void>()
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+  get = (key: string): Queue => this.queues.get(key) ?? EMPTY
+  private set(key: string, queue: Queue): void {
+    if (!queue.prompts.length && !queue.sending) this.queues.delete(key)
+    else this.queues.set(key, queue)
+    for (const listener of this.listeners) listener()
+  }
+  enqueue(key: string, connectionId: string, submission: DesktopRemoteSubmit, waitingFor?: string): void {
+    const queue = this.get(key)
+    if (queue.prompts.length >= 32) throw new Error('队列最多保留 32 条消息，请先处理已有消息。')
+    this.set(key, { ...queue, connectionId, waitingFor: queue.waitingFor ?? waitingFor,
+      prompts: [...queue.prompts, { messageId: crypto.randomUUID(), text: submission.prompt, attachments: [], request: {}, submission }] })
+  }
+  remove(key: string, messageId: string): void {
+    const queue = this.get(key)
+    if (queue.sending && queue.prompts[0]?.messageId === messageId) return
+    this.set(key, { ...queue, prompts: queue.prompts.filter(prompt => prompt.messageId !== messageId),
+      ...(queue.prompts[0]?.messageId === messageId ? { writeUnknown: false } : {}) })
+  }
+  settle(key: string, intentId: string): void {
+    const queue = this.get(key)
+    if (queue.waitingFor === intentId) this.set(key, { ...queue, waitingFor: undefined })
+  }
+  claim(key: string): RemoteQueuedPrompt | undefined {
+    const queue = this.get(key)
+    if (queue.sending || queue.paused || queue.waitingFor || !queue.prompts.length) return
+    this.set(key, { ...queue, sending: true })
+    return queue.prompts[0]
+  }
+  submitted(key: string, intent: DesktopRemoteIntent): void {
+    const queue = this.get(key)
+    this.set(key, { ...queue, prompts: queue.prompts.slice(1), sending: false, waitingFor: intent.intentId,
+      paused: intent.status === 'unknown' })
+  }
+  pause(key: string): void {
+    const queue = this.get(key)
+    if (queue.prompts.length && !queue.paused) this.set(key, { ...queue, paused: true })
+  }
+  pauseDisconnected(connectedIds: ReadonlySet<string>): void {
+    for (const [key, queue] of this.queues) {
+      if (queue.connectionId && !connectedIds.has(queue.connectionId)) this.pause(key)
+    }
+  }
+  fail(key: string): void {
+    const queue = this.get(key)
+    this.set(key, { ...queue, sending: false, paused: true, writeUnknown: true })
+  }
+  resume(key: string): void {
+    const queue = this.get(key)
+    if (queue.writeUnknown) return
+    this.set(key, { ...queue, paused: false })
+  }
+  clearSession(draftKey: string): void {
+    for (const key of this.queues.keys()) {
+      if ((JSON.parse(key) as [string, string])[0] === draftKey) this.set(key, EMPTY)
+    }
+  }
+  migrate(from: string, to: string, externalSessionId: string): void {
+    const queue = this.queues.get(from)
+    if (!queue || from === to) return
+    this.queues.delete(from)
+    this.set(to, { ...queue, prompts: queue.prompts.map(prompt => ({ ...prompt,
+      submission: { ...prompt.submission, context: { ...prompt.submission.context, externalSessionId } }
+    })) })
+  }
+}
+
+export function remoteQueueKey(draftKey: string, provider: string): string {
+  return JSON.stringify([draftKey, provider])
+}

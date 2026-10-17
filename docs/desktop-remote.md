@@ -20,6 +20,20 @@ ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -p 22 USER@HOST t
 
 TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化拒绝沿用连接。客户端私钥、证书和待核对回执由 Electron safeStorage 加密保存；加密不可用时不退回明文。
 
+## 2026-10-17：远程会话操作与输入路由
+
+此节替代下方历史记录中「远程没有置顶、重命名、Slash 或排队」的旧限制。
+
+- Meta Prompts 保存打开前的机器、会话与草稿键；插入和返回都回到原会话，不写入隐藏的本机 composer。远程运行与队列在提示词库打开期间保持挂载；首轮采用原生 session 后同步迁移目标。
+- 置顶、取消置顶、重命名、归档及恢复通过专用 typed IPC / mTLS 操作写入宿主 catalog。等待恢复/归属检查后、写入前再次校验 owner 与 canonical cwd。归档保留宿主原有停止运行语义，并取消客户端该会话队列。旧宿主未声明 `sessionActions` 时禁用操作，不做本机覆盖。桌面显式请求归档条目；手机旧目录接口仍默认隐藏归档。
+- Slash 复用宿主现有 Provider/profile/cwd 命令发现接口，包括 skills。命令描述允许为空；发现失败保留错误，不查询本机目录作为替代。
+- 每个远程 Provider/profile/会话最多排队 32 条文本消息，保存入队时的模型、effort 和权限。只有收到对应 intent 的明确终态才依次派发。导航不会丢队列；后台断连/读取连接状态失败会暂停，重连不自动发送。未知提交不得重试；核对后可移除未知队首再继续余下消息。队列仅保留在本次 App 进程内，不承诺崩溃恢复。
+- 首轮的宿主 session 绑定持久化到回执，返回已有会话后仍可查运行状态。终态读取即使遇到视图取消，仍先收敛 App 持有的队列，避免回执已移除却永远等待。
+- 回归：`remote-prompt-queue.test.ts`、远程 client/controller/IPC 测试；`node scripts/desktop-remote-ui-smoke.mjs --session-parity-only` 覆盖真实键鼠路由、Slash、元数据、采用后导航、后台重连暂停及终态导航竞争。`--negative-prompt-control` 故意恢复本机插入路由时必须失败。此 focused UI 入口已纳入 `test:renderer:ui` 和 `test:desktop-remote`。
+- 验证记录：macOS / Node 24.18.0，`test:unit -- src scripts` 为 3288 passed / 4 既有 skipped；`typecheck`、`build`、完整 `test:renderer:ui`（含 Credits 与生产 IPC）通过。当前开发构建的真实临时宿主 TLS 验收证明元数据写入宿主 sidebar store、归档停止对应运行、未授权目录/撤销 owner 拒绝、手机归档仍隐藏。`performance:measure -- --scenario remote.trace.preview` ratchet 通过（1 条消息 / 2778 bytes），不据此宣称网络或真实 mac2 更快。
+- 首轮验证记录：新增 `queueStore` 后旧 SSR fixture 漏传依赖，已补齐；坐标验收需先 hover 行，重命名关闭后的焦点恢复改为与本机相同的下一帧；宿主 info 精确断言已加入真实新增能力。并行工作区一度存在无关 `ConversationApi.fork` WIP，导致 type/允许列表测试失败，未修改其合同；对方移除 WIP 后复测通过。全量首跑超过工具的 120 秒进程期限；确认子进程收敛后用 360 秒外层预算完成（196 秒），未扩大任何用例超时。负向插入路由对照按预期失败。
+- 本机与 mac2 的已安装 App 未替换；真实 SSH/mac2 原始会话交互仍待两端升级后重放。本次不将 Provider 能力差异抹平；图片附件上传、单个后台任务停止等旧缺口仍需独立补齐，不能据本节宣称远程已全功能等同本机。
+
 ## 2026-10-15：远端运行状态与侧栏一致性修复
 
 - **反馈 / 采用**：用户截图中已输出工具结果却仍提示「等待远端派发」，运行会话缺少转圈且项目总在本地项目之后。复用本地 `sb-running` 样式和项目的置顶优先、最近活动时间排序，不增加另一套视觉规则。远端仍不提供本机专属的置顶、重命名和未读操作。

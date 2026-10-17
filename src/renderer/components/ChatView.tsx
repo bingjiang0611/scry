@@ -109,8 +109,8 @@ interface ChatViewProps {
   // ChatView keeps owning which composer menu is open.
   renderLocationPicker?: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
   // Remote sessions run on another Scry desktop. Their evidence comes from that
-  // host's archive, local file links and recorder content cannot be opened here,
-  // and a busy run cannot queue a follow-up prompt.
+  // host's archive; host paths must never use the client's local file API.
+  // The owning controller supplies queue and capability state.
   remoteHost?: string
   // A location-level notice (offline host, unavailable Provider) that stays visible
   // without a draft, unlike sendBlockedReason which explains a disabled send.
@@ -547,7 +547,7 @@ export function ChatView({
       description: option.description
     }))
   ]
-  const queueing = busy && !remote && queueWhileBusy
+  const queueing = busy && queueWhileBusy
   const sendActionLabel = submitting ? '正在启动' : queueing ? '加入队列' : '发送'
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
   const composerStatus = composerError ?? detectionIssue ?? (hasDraft ? sendBlockedReason : null)

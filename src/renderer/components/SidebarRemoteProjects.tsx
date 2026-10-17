@@ -1,11 +1,13 @@
 // Remote rows share local activity styling. The App refreshes host catalogs even
 // for background sessions; disconnected or failed reads are not live evidence.
-// Local-only pin, archive, rename and unread controls remain unavailable here.
-import type { RemoteSessionRef } from '@shared/desktop-remote'
+// Session actions execute on the owning host; cached/offline rows cannot mutate it.
+import { useRef, useState, type MouseEvent } from 'react'
+import type { DesktopRemoteAPI, RemoteSessionRef } from '@shared/desktop-remote'
+import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { providerIdForAgentId } from '@shared/runtime'
 import { basename, relTime } from '../format'
 import { useDesktopConnections } from '../hooks/useDesktopConnections'
-import { useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
+import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { hostState } from './LocationPicker'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
@@ -43,7 +45,8 @@ export function useRemoteProjectGroups(query: string) {
       cwd,
       name: labels.get(cwd) ?? basename(cwd),
       mtime: Math.max(...sessions.map((session) => session.ts)),
-      sessions: sessions.sort((left, right) => right.ts - left.ts)
+      canManage: catalog.sessionActions === true && state === 'connected',
+      sessions: sessions.sort((left, right) => (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0) || right.ts - left.ts)
     }))
   })
 }
@@ -54,7 +57,9 @@ export function SidebarRemoteProjects({
   collapsed,
   onToggle,
   onPickSession,
-  onNewProjectChat
+  onNewProjectChat,
+  onArchiveSession,
+  onArchivedSession
 }: {
   groups: RemoteProjectGroup[]
   active: ActiveRemoteLocation | null
@@ -62,9 +67,58 @@ export function SidebarRemoteProjects({
   onToggle: (key: string) => void
   onPickSession: (connectionId: string, session: RemoteSessionRef) => void
   onNewProjectChat: (connectionId: string, cwd: string) => void
+  onArchiveSession?: (connectionId: string, session: RemoteSessionRef) => void
+  onArchivedSession?: (connectionId: string, session: RemoteSessionRef) => void
 }) {
+  const [menu, setMenu] = useState<{ group: RemoteProjectGroup; session: RemoteSessionRef; target: SessionMenuTarget } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const writing = useRef(false)
+  const [showArchived, setShowArchived] = useState(false)
+  const closeMenu = (): void => {
+    const trigger = menu?.target.trigger
+    setMenu(null)
+    window.requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus() })
+  }
+  const openMenu = (event: MouseEvent<HTMLButtonElement>, group: RemoteProjectGroup, session: RemoteSessionRef): void => {
+    event.preventDefault()
+    if (!group.canManage) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    setMenu({ group, session, target: {
+      cwd: group.cwd, trigger: event.currentTarget,
+      left: Math.max(8, Math.min(event.type === 'contextmenu' ? event.clientX : rect.left, window.innerWidth - 208)),
+      top: Math.max(8, Math.min(event.type === 'contextmenu' ? event.clientY : rect.bottom, window.innerHeight - 64)),
+      session: { ...session, providerId: providerIdForAgentId(session.providerId) ?? 'legacy_unknown',
+        preview: session.label, mtime: session.ts, count: 0 }
+    } })
+  }
+  const change = async (group: RemoteProjectGroup, session: RemoteSessionRef,
+    action: Parameters<DesktopRemoteAPI['sessionAction']>[2]): Promise<void> => {
+    if (writing.current || !group.canManage) throw new Error('主机未连接、正在保存，或需要更新远端 Scry。')
+    writing.current = true; setPending(true); setError(null)
+    if (action.kind === 'archive' && action.archived) onArchiveSession?.(group.connection.id, session)
+    try {
+      const changed = await window.scry.desktopRemote.sessionAction(group.connection.id, {
+        cwd: group.cwd, providerId: session.providerId, agentProfileId: session.agentProfileId,
+        externalSessionId: session.externalSessionId
+      }, action)
+      if (!changed) throw new Error('远端未确认会话更新，请刷新后核对。')
+      if (action.kind === 'archive' && action.archived) onArchivedSession?.(group.connection.id, session)
+    } finally {
+      writing.current = false; setPending(false)
+      // An error may follow a committed write. Read back; never repeat the write.
+      void refreshRemoteCatalog(group.connection.id)
+    }
+  }
+  const dispatch = (group: RemoteProjectGroup, session: RemoteSessionRef,
+    action: Parameters<DesktopRemoteAPI['sessionAction']>[2]): void => {
+    void change(group, session, action).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+  }
   return (
     <>
+      {error && <div className="sb-catalog-warning" role="alert">{error}</div>}
+      {(showArchived || groups.some(group => group.sessions.some(session => session.archivedAt))) && <button type="button" className="sb-archive-toggle"
+        aria-expanded={showArchived} onClick={() => setShowArchived(value => !value)}>已归档远程会话</button>}
       {groups.map((group) => {
         const open = !collapsed.has(group.key)
         const projectSelected = active?.connectionId === group.connection.id && active.cwd === group.cwd && !active.externalSessionId
@@ -96,7 +150,7 @@ export function SidebarRemoteProjects({
             </div>
             {open && (
               <div className="sb-sess-list">
-                {group.sessions.map((session) => {
+                {group.sessions.filter(session => showArchived ? Boolean(session.archivedAt) : !session.archivedAt).map((session) => {
                   const selected = active?.connectionId === group.connection.id && active.cwd === group.cwd && active.externalSessionId === session.externalSessionId
                   const provider = providerIdForAgentId(session.providerId)
                   const running = group.state === 'connected' && session.isActive === true
@@ -109,6 +163,7 @@ export function SidebarRemoteProjects({
                         data-remote-session={session.externalSessionId}
                         aria-current={selected ? 'true' : undefined}
                         title={`${session.label}\n${group.connection.label} · ${group.cwd}`}
+                        onContextMenu={(event) => openMenu(event, group, session)}
                         onClick={() => onPickSession(group.connection.id, session)}
                       >
                         <span className="sb-session-main">
@@ -116,10 +171,22 @@ export function SidebarRemoteProjects({
                           <span className="sb-sesstext">{session.label || '(无预览)'}</span>
                         </span>
                         <span className="sb-session-meta">
+                          {Boolean(session.pinnedAt) && <Icon name="pin" />}
                           <span className="sb-sesstime">{relTime(session.ts)}</span>
                         </span>
                         {running && <span className="sb-running" role="status" aria-label="正在运行" title="正在运行" />}
                       </button>
+                      <span className="sb-sess-acts" title={!group.canManage ? '主机未连接或需要更新远端 Scry' : undefined}>
+                        <button type="button" className="sb-act" aria-haspopup="menu" disabled={!group.canManage || pending}
+                          aria-label={`会话操作：${session.label}`} onClick={event => openMenu(event, group, session)}>···</button>
+                        <button type="button" className={`sb-act ${session.pinnedAt ? 'on' : ''}`} disabled={!group.canManage || pending}
+                          aria-label={`${session.pinnedAt ? '取消置顶' : '置顶'}：${session.label}`} aria-pressed={Boolean(session.pinnedAt)}
+                          onClick={() => dispatch(group, session, { kind: 'pin', pinned: !session.pinnedAt })}><Icon name="pin" /></button>
+                        <button type="button" className="sb-act" disabled={!group.canManage || pending}
+                          aria-label={`${session.archivedAt ? '恢复会话' : '存档会话'}：${session.label}`}
+                          title={session.archivedAt ? '恢复会话' : '存档并停止运行，取消排队消息'}
+                          onClick={() => dispatch(group, session, { kind: 'archive', archived: !session.archivedAt })}><Icon name={session.archivedAt ? 'undo' : 'archive'} /></button>
+                      </span>
                     </div>
                   )
                 })}
@@ -128,6 +195,8 @@ export function SidebarRemoteProjects({
           </div>
         )
       })}
+      {menu && <SessionRenameMenu target={menu.target} onClose={closeMenu}
+        onRename={(_cwd, _session, title) => change(menu.group, menu.session, { kind: 'rename', title })} />}
     </>
   )
 }

@@ -139,7 +139,7 @@ export class InnerMtlsHost {
   }
 
   async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; deviceLabel?: unknown; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown; revision?: string; history?: unknown }
+    let request: { op?: string; deviceLabel?: unknown; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown; revision?: string; history?: unknown; context?: unknown; action?: unknown; includeArchived?: unknown }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
@@ -230,15 +230,20 @@ export class InnerMtlsHost {
           ...(typeof request.agentProfileId === 'string' ? { agentProfileId: request.agentProfileId } : {})
         }) }
       }
+      if (request.op === 'sessionAction') {
+        return { sessionAction: await controller.sessionAction(fingerprint, { context: request.context, action: request.action }) }
+      }
       if (request.op === 'sessions') {
         // Same owner-device authorization; display-only catalog metadata.
         return { sessions: controller.listSessions(fingerprint) }
       }
       if (request.op === 'sessionsPage') {
-        if ((request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
+        if ((request.includeArchived !== undefined && typeof request.includeArchived !== 'boolean') ||
+            (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
             (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
             (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
         return { sessionsPage: controller.listSessionsPage(fingerprint, {
+          ...(request.includeArchived === true ? { includeArchived: true } : {}),
           ...(typeof request.cursor === 'number' ? { cursor: request.cursor } : {}),
           ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
           ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})

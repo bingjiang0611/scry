@@ -271,7 +271,7 @@ async function main() {
   assert.equal(granted.kind, 'pair.granted')
   const deviceCertPEM = granted.certificatePEM
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
-  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical', directorySelection: true, workbench: 1 })
+  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical', directorySelection: true, workbench: 1, sessionActions: true })
   const customDirectory = join(temp, 'custom project ')
   mkdirSync(customDirectory)
   const canonicalCustom = realpathSync(customDirectory)
@@ -372,6 +372,27 @@ async function main() {
   assert.equal(history.desktop.history.status, 'available')
   assert.ok(history.desktop.history.turns.length > 0 && history.desktop.history.turns.length <= 10_000)
   assert.ok(history.desktop.history.turns.some((turn) => turn.items.some((item) => item.stage === 'tool_result')))
+  const sessionContext = { ...context, externalSessionId: normalSession }
+  const sessionAction = (target, action) => tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'sessionAction', context: target, action })
+  const sessionPage = (includeArchived = true) => tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'sessionsPage', includeArchived })
+  assert.equal(info.desktop.sessionActions, true)
+  const commands = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'commands', ...context })
+  assert.ok(Array.isArray(commands.commands.commands), 'commands must come from the host catalog even when unavailable')
+  assert.equal((await sessionAction(sessionContext, { kind: 'rename', title: 'Host-owned title' })).sessionAction, true)
+  assert.equal((await sessionAction(sessionContext, { kind: 'pin', pinned: true })).sessionAction, true)
+  const renamed = (await sessionPage()).sessionsPage.sessions.find(session => session.externalSessionId === normalSession)
+  assert.equal(renamed.label, 'Host-owned title')
+  assert.ok(renamed.pinnedAt > 0)
+  const hostProjects = await evaluate('window.scry.listProjects()')
+  assert.ok(hostProjects.some(project => project.sessions.some(session => session.externalSessionId === normalSession && session.preview === 'Host-owned title')), 'remote metadata did not update the actual host sidebar store')
+  const deniedMetadata = await sessionAction({ ...sessionContext, cwd: join(temp, 'not-authorized') }, { kind: 'rename', title: 'Denied title' })
+  assert.ok(deniedMetadata.error, 'unauthorized workspace mutation must fail')
+  assert.equal((await sessionAction(sessionContext, { kind: 'archive', archived: true })).sessionAction, true)
+  assert.ok((await sessionPage()).sessionsPage.sessions.find(session => session.externalSessionId === normalSession)?.archivedAt)
+  assert.ok(!(await sessionPage(false)).sessionsPage.sessions.some(session => session.externalSessionId === normalSession), 'legacy/mobile catalog exposed archived rows')
+  assert.equal((await sessionAction(sessionContext, { kind: 'archive', archived: false })).sessionAction, true)
+  assert.equal((await sessionAction(sessionContext, { kind: 'pin', pinned: false })).sessionAction, true)
+  assert.ok(!(await sessionPage()).sessionsPage.sessions.find(session => session.externalSessionId === normalSession).pinnedAt)
   const resumed = await submit(randomUUID(), 'desktop remote write two', { resume: normalSession })
   const resumedWatch = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: resumed.runId, expect: 'settled' })
   const resumedRunId = progressMarkers(resumedWatch, resumed.runId).find(marker => marker.event === 'bound')?.scryRunId
@@ -446,6 +467,20 @@ async function main() {
   const adoptedDiff = interruptedHistory.desktop.history.turns.flatMap(turn => turn.items).find(item => item.stage === 'session_diff')?.turnDiff
   assert.equal(adoptedDiff?.status, 'captured', 'Mac adoption must not detach the remote run baseline')
 
+  const archiveRun = await submit(randomUUID(), 'dock badge question smoke')
+  let archiveWatch
+  const archiveDeadline = Date.now() + 10_000
+  while (Date.now() < archiveDeadline) {
+    archiveWatch = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'watch', runId: archiveRun.runId, cursor: 0, outputCursor: 0, waitMs: 1_000 })
+    if (archiveWatch.watch?.questions?.length) break
+  }
+  assert.ok(archiveWatch?.watch?.questions?.length, 'archive fixture did not reach a running session')
+  const archiveNativeSession = progressMarkers(archiveWatch, archiveRun.runId).find(marker => marker.event === 'session')?.externalSessionId
+  assert.ok(archiveNativeSession)
+  assert.equal((await sessionAction({ ...context, externalSessionId: archiveNativeSession }, { kind: 'archive', archived: true })).sessionAction, true)
+  const archivedRun = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: archiveRun.runId })
+  assert.ok(progressMarkers(archivedRun, archiveRun.runId).some(marker => marker.event === 'settled' && ['interrupted', 'cancelled'].includes(marker.status)), 'archiving did not stop the owning host run')
+
   // A real adapter rejection after publishing its native session exercises the
   // production runtime rejection/recording/finally branches, not input rejection.
   const failed = await submit(randomUUID(), 'remote provider failure smoke')
@@ -471,12 +506,14 @@ async function main() {
   await evaluate(`window.scry.remoteRevokeDevice(${JSON.stringify(localGrant.deviceId)})`)
   const revoked = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
   assert.equal(revoked.error, 'device_not_authorized')
+  assert.equal((await sessionAction(sessionContext, { kind: 'rename', title: 'Revoked title' })).error, 'device_not_authorized')
   for (const action of ['list', 'select']) {
     const denied = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktopDirectory', query: { action, path: realpathSync(temp) } })
     assert.equal(denied.error, 'device_not_authorized')
   }
   assert.ok(!JSON.parse(readFileSync(join(userDataDir, 'recent-folders.json'), 'utf8')).includes(realpathSync(temp)), 'revoked selection must not persist a grant')
   console.log(JSON.stringify({
+    sessionActions: { hostStoreRename: true, pinUnpin: true, archiveRestore: true, archiveStopsActiveRun: true, unauthorizedWorkspaceDenied: true, revokedOwnerDenied: true, mobileArchivesRemainHidden: true },
     workbench: { realFileWrite: true, staleRevisionDenied: true, createRename: true, realGitStageCommit: true, realPtyCwdAndInput: true, cumulativeAckDuplicateSafe: true, detachedLargeOutputContinues: true, recordingCatchUp: true, staleWriterDenied: true },
     directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
     appPath, rendererUrl: page.url, hostId: invitation.hostId, pairPort: invitation.pairPort, runPort: invitation.runPort,

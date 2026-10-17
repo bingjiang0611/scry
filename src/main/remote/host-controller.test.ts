@@ -96,6 +96,44 @@ describe('HostController (composition root)', () => {
     expect(select).toHaveBeenCalledTimes(1)
   })
 
+  it('authorizes session metadata actions, canonicalizes cwd, and never dispatches denied requests', async () => {
+    const sessionAction = vi.fn(async () => true)
+    const { controller } = await grantedController(vi.fn(async () => {}), undefined, {
+      workspace: { authorize: (path) => { if (path === '/alias') return AUTHORIZED; if (path === AUTHORIZED) return AUTHORIZED; throw new Error('not authorized') } },
+      sessionAction
+    })
+    const context = { cwd: '/alias', providerId: 'claude', externalSessionId: 'session-1' }
+    await expect(controller.sessionAction('0'.repeat(64), { context, action: { kind: 'pin', pinned: true } })).rejects.toThrow('device_not_authorized')
+    expect(sessionAction).not.toHaveBeenCalled()
+    await expect(controller.sessionAction(CERT, { context: { ...context, cwd: '/other' }, action: { kind: 'pin', pinned: true } })).rejects.toThrow('not authorized')
+    expect(sessionAction).not.toHaveBeenCalled()
+    await expect(controller.sessionAction(CERT, { context, action: { kind: 'pin', pinned: true } })).resolves.toBe(true)
+    expect(sessionAction).toHaveBeenCalledExactlyOnceWith({ cwd: AUTHORIZED, providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true }, expect.any(Function))
+  })
+
+  it.each(['device', 'workspace'] as const)('rejects %s revocation during metadata recovery before the write', async (revoked) => {
+    let release!: () => void
+    const recovery = new Promise<void>(resolve => { release = resolve })
+    let authorized = true
+    const write = vi.fn()
+    const { controller, deviceId } = await grantedController(vi.fn(async () => {}), undefined, {
+      workspace: { authorize: (path) => { if (!authorized) throw new Error('not authorized'); return path } },
+      sessionAction: async (_context, _action, authorize) => {
+        await recovery
+        authorize()
+        write()
+        return true
+      }
+    })
+    const result = controller.sessionAction(CERT, { context: { cwd: AUTHORIZED, providerId: 'pi', externalSessionId: 'session' }, action: { kind: 'archive', archived: true } })
+    const denied = expect(result).rejects.toThrow(revoked === 'device' ? 'device_not_authorized' : 'not authorized')
+    if (revoked === 'device') await controller.authority.revoke(deviceId)
+    else authorized = false
+    release()
+    await denied
+    expect(write).not.toHaveBeenCalled()
+  })
+
   it('runs a routed intent end-to-end through the real modules and reflects settlement', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting; progress(d?: string): void }) => { seen.push(routing) })

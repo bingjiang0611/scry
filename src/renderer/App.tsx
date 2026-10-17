@@ -27,6 +27,7 @@ import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
 import { RemoteChat, remoteDraftKey } from './components/RemoteChat'
+import { RemotePromptQueueStore } from './remote-prompt-queue'
 import { HostsView } from './components/HostsView'
 import { LocationPicker, LOCAL_MACHINE, hostState, type ExecutionLocation } from './components/LocationPicker'
 import { useDesktopConnections } from './hooks/useDesktopConnections'
@@ -1014,6 +1015,7 @@ export function App() {
     return () => { disposed = true }
   }, [view, logicalConversation, cwd])
   const [remoteTarget, setRemoteTarget] = useState<RemoteTarget | null>(null)
+  const [remoteQueueStore] = useState(() => new RemotePromptQueueStore())
   // Native session id adopted after the first run; keeps sidebar and workbench ownership aligned.
   const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
   const remoteSurfaceKey = remoteTarget
@@ -1030,6 +1032,10 @@ export function App() {
   }
   const desktopConnections = useDesktopConnections()
   useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error)
+  useEffect(() => {
+    const connected = new Set(desktopConnections.error ? [] : desktopConnections.connections.filter(connection => connection.state === 'connected').map(connection => connection.id))
+    remoteQueueStore.pauseDisconnected(connected)
+  }, [desktopConnections.connections, desktopConnections.error, remoteQueueStore])
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
@@ -2163,18 +2169,27 @@ export function App() {
       onOpenChange={menu.onOpenChange}
     />
   )
+  const metaPromptTarget = useRef<{ view: 'chat' | 'conversation' | 'remote'; draftKey: string }>({ view: 'chat', draftKey })
+  // Auxiliary pages do not select a different conversation or execution machine.
+  if (view === 'remote' || view === 'conversation' || view === 'chat') {
+    metaPromptTarget.current = { view, draftKey: view === 'remote' ? remoteSurfaceKey : draftKey }
+  }
   const openMetaPrompts = (): void => {
-    setShowSkills(false)
-    setShowMcp(false)
-    setShowLlmPerformance(false)
-    changeView('meta-prompts')
+    if (view === 'meta-prompts' || !changeView('meta-prompts')) return
+    closeOverlays()
+  }
+  const returnFromMetaPrompts = (): void => {
+    changeView(metaPromptTarget.current.view)
+    window.setTimeout(() => taRef.current?.focus(), 0)
   }
   const insertMetaPrompt = (body: string): void => {
-    setInput(current => appendMetaPrompt(current, body))
+    const target = metaPromptTarget.current
+    setSessionDrafts(current => updateSessionComposerDraft(current, target.draftKey, draft => ({
+      ...draft, input: appendMetaPrompt(draft.input, body)
+    }), releaseDraft))
     setComposerError(null)
     setSlashHidden(true)
-    changeView('chat')
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    returnFromMetaPrompts()
   }
   const openTurnDiffReview = useCallback(
     (turn: { runId: string; userText: string }, _turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
@@ -2497,6 +2512,16 @@ export function App() {
     onHosts: useEventCallback(openHosts),
     onPickRemoteSession: useEventCallback((connectionId: string, remoteSession: RemoteSessionRef) => openRemoteLocation(connectionId, remoteSession.cwd, remoteSession)),
     onNewRemoteProjectChat: useEventCallback((connectionId: string, remoteCwd: string) => openRemoteLocation(connectionId, remoteCwd)),
+    onArchiveRemoteSession: useEventCallback((connectionId: string, remoteSession: RemoteSessionRef) => {
+      remoteQueueStore.clearSession(remoteDraftKey(connectionId, remoteSession.cwd, remoteSession.externalSessionId))
+    }),
+    onArchivedRemoteSession: useEventCallback((connectionId: string, remoteSession: RemoteSessionRef) => {
+      if (view === 'remote' && remoteTarget?.connectionId === connectionId && remoteTarget.cwd === remoteSession.cwd &&
+          remoteAdoptedSession === remoteSession.externalSessionId && remoteTarget.session?.providerId === remoteSession.providerId &&
+          (remoteTarget.session?.agentProfileId ?? '') === (remoteSession.agentProfileId ?? '')) {
+        openRemoteLocation(connectionId, remoteSession.cwd)
+      }
+    }),
     onPick: useEventCallback(pickSession),
     onTogglePin: useEventCallback(togglePinSession),
     onArchive: useEventCallback(archiveSession),
@@ -2568,23 +2593,37 @@ export function App() {
           </>
         ) : view === 'hosts' ? (
           <HostsView onNewSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} />
-        ) : view === 'remote' && remoteTarget ? (
-          <RemoteView
-            target={remoteTarget}
-            connections={desktopConnections}
-            draftStore={draftStore}
-            onDraftInput={setRemoteDraft}
-            scrollRef={scrollRef}
-            textareaRef={taRef}
-            renderLocationPicker={renderLocationPicker({ machineId: remoteTarget.connectionId, cwd: remoteTarget.cwd })}
-            onSessionAdopted={(externalSessionId) => {
-              remoteSurfaces.migrate(remoteSurfaceKey, remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, externalSessionId))
-              setRemoteAdoptedSession(externalSessionId)
-            }}
-            showPanel={remotePanelVisible}
-            onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
-            surface={{ target: remoteSurfaceTarget, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }}
-          />
+        ) : (view === 'remote' || (view === 'meta-prompts' && metaPromptTarget.current.view === 'remote')) && remoteTarget ? (
+          <>
+            <div style={{ display: view === 'remote' ? 'contents' : 'none' }}>
+              <RemoteView
+                target={remoteTarget}
+                connections={desktopConnections}
+                draftStore={draftStore}
+                queueStore={remoteQueueStore}
+                onDraftInput={setRemoteDraft}
+                scrollRef={scrollRef}
+                textareaRef={taRef}
+                renderLocationPicker={renderLocationPicker({ machineId: remoteTarget.connectionId, cwd: remoteTarget.cwd })}
+                onSessionAdopted={(externalSessionId, provider) => {
+                  remoteSurfaces.migrate(remoteSurfaceKey, remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, externalSessionId))
+                  setRemoteAdoptedSession(externalSessionId)
+                  if (metaPromptTarget.current.view === 'remote' && metaPromptTarget.current.draftKey === remoteSurfaceKey) {
+                    metaPromptTarget.current.draftKey = remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, externalSessionId)
+                  }
+                  setRemoteTarget(current => current ? { ...current, session: {
+                    sessionId: externalSessionId, externalSessionId, cwd: current.cwd,
+                    providerId: provider.id, agentProfileId: provider.agentProfileId,
+                    label: current.session?.label ?? '', ts: current.session?.ts ?? Date.now()
+                  } } : current)
+                }}
+                showPanel={remotePanelVisible}
+                onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
+                surface={{ target: remoteSurfaceTarget, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }}
+              />
+            </div>
+            {view === 'meta-prompts' && <MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} />}
+          </>
         ) : view === 'analytics' ? (
           <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView
@@ -2598,7 +2637,7 @@ export function App() {
             />
           </Suspense>
         ) : view === 'meta-prompts' ? (
-          <MetaPromptsView onBack={() => changeView('chat')} onInsert={insertMetaPrompt} />
+          <MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} />
         ) : (
           <>
             <ViewChrome

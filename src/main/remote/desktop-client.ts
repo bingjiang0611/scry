@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
-  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopSshTarget, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
+  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
 import { isAgentPermissionMode, type AgentQuestionResponse } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
@@ -150,9 +150,17 @@ function validatePairingResponse(response: unknown, requestId: string, pairingId
   return response
 }
 
-function validateInfo(response: unknown, hostId: string): void {
+function validateInfo(response: unknown, hostId: string): { directorySelection?: true; workbench?: 1; sessionActions?: true } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
-      response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical') fail('desktop_capability_unavailable')
+      response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
+      (response.desktop.directorySelection !== undefined && response.desktop.directorySelection !== true) ||
+      (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
+      (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true)) fail('desktop_capability_unavailable')
+  return {
+    ...(response.desktop.directorySelection === true ? { directorySelection: true as const } : {}),
+    ...(response.desktop.workbench === 1 ? { workbench: 1 as const } : {}),
+    ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {})
+  }
 }
 
 function context(value: unknown): DesktopRemoteContext {
@@ -293,7 +301,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
     const sessions: RemoteSessionRef[] = []; let cursor = 0; let snapshot: string | undefined
     for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await this.#catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', cursor, limit: 100, ...(snapshot ? { snapshot } : {}) }, 'sessionsPage')
+      const response = await this.#catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', includeArchived: true, cursor, limit: 100, ...(snapshot ? { snapshot } : {}) }, 'sessionsPage')
       if (!Array.isArray(response.sessions) || !Number.isSafeInteger(response.cursor) || !Number.isSafeInteger(response.total) || typeof response.hasMore !== 'boolean' || !text(response.snapshot, 256)) fail('invalid_catalog_response')
       if (snapshot !== undefined && response.snapshot !== snapshot) fail('catalog_snapshot_changed')
       if (response.sessions.length > 100 || sessions.length + response.sessions.length > MAX_ITEMS) fail('catalog_too_large')
@@ -304,7 +312,43 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
     const info = await this.#desktop(connectionIdValue, { kind: 'info' })
-    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...(info.directorySelection === true ? { directorySelection: true as const } : {}), ...(info.workbench === 1 ? { workbench: 1 as const } : {}) }
+    const state = await this.#state()
+    const item = this.#connection(state, connectionIdValue)
+    const capabilities = validateInfo({ desktop: info }, item.hostId)
+    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...capabilities }
+  }
+
+  async commands(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteCommandCatalog> {
+    const query = context(value)
+    const raw = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'commands', providerId: query.providerId, cwd: query.cwd, ...(query.agentProfileId ? { agentProfileId: query.agentProfileId } : {}) }, 'commands')
+    if (!record(raw) || !Array.isArray(raw.commands) || raw.commands.length > MAX_ITEMS || (raw.reason !== undefined && !text(raw.reason, 512))) fail('invalid_catalog_response')
+    const commands = raw.commands.map((item): RemoteCommandCatalog['commands'][number] => {
+      if (!record(item) || !text(item.name, 128) || !pathText(item.description, 512) ||
+          (item.argumentHint !== undefined && !text(item.argumentHint, 256)) ||
+          (item.source !== undefined && !['builtin', 'skill', 'mcp', 'custom'].includes(String(item.source)))) fail('invalid_catalog_response')
+      return { name: item.name, description: item.description, ...(text(item.argumentHint, 256) ? { argumentHint: item.argumentHint } : {}), ...(item.source !== undefined ? { source: item.source as RemoteCommandCatalog['commands'][number]['source'] } : {}) }
+    })
+    return { commands, ...(text(raw.reason, 512) ? { reason: raw.reason } : {}) }
+  }
+
+  async sessionAction(connectionIdValue: string, value: DesktopRemoteContext, action: DesktopRemoteSessionAction): Promise<boolean> {
+    const query = context(value)
+    if (!query.externalSessionId || !record(action)) fail('invalid_session_action')
+    if (action.kind === 'rename') {
+      if (typeof action.title !== 'string' || action.title.length > 256) fail('invalid_session_action')
+    } else if (action.kind === 'pin') {
+      if (typeof action.pinned !== 'boolean') fail('invalid_session_action')
+    } else if (action.kind === 'archive') {
+      if (typeof action.archived !== 'boolean') fail('invalid_session_action')
+    } else fail('invalid_session_action')
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    const state = await this.#state()
+    const item = this.#connection(state, connectionIdValue)
+    const capabilities = validateInfo({ desktop: info }, item.hostId)
+    if (capabilities.sessionActions !== true) fail('desktop_session_actions_unsupported')
+    const response = await this.#write(connectionIdValue, { op: 'sessionAction', context: query, action })
+    if (!record(response) || typeof response.sessionAction !== 'boolean') fail('invalid_session_action_response')
+    return response.sessionAction
   }
 
   async directories(connectionIdValue: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage> {
@@ -425,10 +469,18 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     }
     this.#runWatch.set(key, watch)
     const state: DesktopRemoteRunStatus['state'] = authoritativeState === null ? observedState : authoritativeState === 'cancelled' ? 'failed' : authoritativeState as DesktopRemoteRunStatus['state']
-    if (state === 'settled' || state === 'failed') {
+    if (state === 'settled' || state === 'failed' || watch.externalSessionId) {
       const stateData = await this.#state()
       const intent = stateData.intents.find((item) => item.connectionId === connectionIdValue && item.runId === runIdValue)
-      if (intent) { stateData.intents = stateData.intents.filter((item) => item.intentId !== intent.intentId); await this.#save(stateData) }
+      if (intent && (state === 'settled' || state === 'failed')) {
+        stateData.intents = stateData.intents.filter((item) => item.intentId !== intent.intentId)
+        await this.#save(stateData)
+      } else if (intent && !intent.context.externalSessionId && watch.externalSessionId) {
+        // Keep the host-confirmed session binding across navigation and restart.
+        // This changes no submitted prompt and never replays the original intent.
+        intent.context.externalSessionId = watch.externalSessionId
+        await this.#save(stateData)
+      }
     }
     return { state, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}) }
   }
@@ -632,7 +684,15 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   }
   #project(value: unknown): RemoteProjectRef { if (!record(value) || !text(value.path, 16_384) || !text(value.label, 512)) fail('invalid_catalog_response'); return { path: value.path as string, label: value.label as string } }
   #provider(value: unknown): RemoteProviderRef { if (!record(value) || !text(value.id, 256) || !text(value.label, 512) || typeof value.available !== 'boolean') fail('invalid_catalog_response'); return value as unknown as RemoteProviderRef }
-  #session(value: unknown): RemoteSessionRef { if (!record(value) || !text(value.sessionId, 256) || !text(value.providerId, 256) || !text(value.cwd, 16_384) || !text(value.label, 512) || !Number.isSafeInteger(value.ts)) fail('invalid_catalog_response'); return value as unknown as RemoteSessionRef }
+  #session(value: unknown): RemoteSessionRef {
+    if (!record(value) || !text(value.sessionId, 256) || !text(value.providerId, 256) || !text(value.cwd, 16_384) || !text(value.label, 512) || !Number.isSafeInteger(value.ts) ||
+        (value.externalSessionId !== undefined && !text(value.externalSessionId, 256)) ||
+        (value.agentProfileId !== undefined && !text(value.agentProfileId, 256)) ||
+        (value.pinnedAt !== undefined && (!Number.isSafeInteger(value.pinnedAt) || Number(value.pinnedAt) <= 0)) ||
+        (value.archivedAt !== undefined && (!Number.isSafeInteger(value.archivedAt) || Number(value.archivedAt) <= 0)) ||
+        (value.isActive !== undefined && typeof value.isActive !== 'boolean')) fail('invalid_catalog_response')
+    return value as unknown as RemoteSessionRef
+  }
 }
 
 export { parseInvitation as parseDesktopInvitation }

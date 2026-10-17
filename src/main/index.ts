@@ -139,6 +139,7 @@ import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
 import { remoteProviderEntry } from './remote/remote-provider-snapshot'
 import type { RemoteProviderRef } from './remote/remote-gateway'
+import type { DesktopRemoteContext, DesktopRemoteSessionAction } from '../shared/desktop-remote'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { sessionAttentionKey } from '../shared/session-attention'
@@ -4841,18 +4842,33 @@ async function startRemoteHostIfEnabled(): Promise<void> {
           ...(result.reason ? { reason: result.reason } : {})
         }
       },
+      // Session metadata is always changed in the host catalog. The workspace
+      // and exact Provider/profile/session identity are rechecked by the host
+      // controller and the shared legacy-write fence before this callback runs.
+      sessionAction: async (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => {
+        const ref = sessionRefFromRequest(context)
+        if (!ref) throw new Error('无效的远程会话操作请求')
+        return changeLegacySessionMetadata(ref, () => {
+          // Recovery/adoption checks await IO; revocation must win before writing.
+          authorize()
+          if (action.kind === 'rename') return appSessionStore().rename(ref, action.title)
+          if (action.kind === 'pin') return appSessionStore().setPinned(ref, action.pinned)
+          return action.archived
+            ? archiveSessionAndStop(appSessionStore(), ref, runs.activeStates(), requestRunStop)
+            : appSessionStore().setArchived(ref, false)
+        })
+      },
       // The host session catalog the device may browse, so the phone shows the
       // SAME conversations the Mac lists. Filtered to device-visible authorized
       // projects (a session whose cwd is not an authorized project dir is not
-      // offered), non-archived, most-recent-first. Display metadata only; opening
-      // a session's content is re-authorized separately.
+      // offered), most-recent-first. Archived metadata remains visible so a
+      // client can restore it; opening content is re-authorized separately.
       sessionCatalogRevision: () => createHash('sha256').update(JSON.stringify(canonicalRemoteProjectRoots(knownProjectDirectories()))).digest('hex'),
       listSessions: () => {
         const roots = canonicalRemoteProjectRoots(knownProjectDirectories())
         const activeRuns = runs.activeStates()
-        const out: { sessionId: string; externalSessionId?: string; providerId: string; agentProfileId?: string; cwd: string; label: string; ts: number; pinnedAt?: number; isActive?: boolean }[] = []
+        const out: { sessionId: string; externalSessionId?: string; providerId: string; agentProfileId?: string; cwd: string; label: string; ts: number; pinnedAt?: number; archivedAt?: number; isActive?: boolean }[] = []
         for (const s of appSessionStore().load()) {
-          if (s.archivedAt) continue
           if (!s.cwd) continue
           let canonical: string
           try { canonical = resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { continue }
@@ -4868,6 +4884,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             label: (s.title ?? s.preview ?? '').slice(0, 256),
             ts: s.ts,
             ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {}),
+            ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
             ...(isActive ? { isActive: true } : {})
           })
         }
