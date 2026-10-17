@@ -493,3 +493,36 @@
 整套检查使用 timing lock 串行运行，记录 `/tmp/scry-fork-main-gate.log`。10 核、load 2.92→10.60、`highLoad:true`；不据此宣称延迟或日常性能改善。没有修改单项测试超时、增加重试或跳过新失败。
 
 本次仅本地合入：未升版本、未推送、未安装或重启用户 App。开发打包关闭签名自动发现并移除发布凭据；不代表正式签名/公证或真实 Provider 账号验收。隔离分支、worktree 与本地验证日志保留。
+
+## 16. 真实账号验收：局部通过、用量失败与环境阻塞（2026-10-17）
+
+用户明确授权 Claude、Codex、Pi/Rotom 使用已有登录状态，在临时工作区验证接续和原生分支，允许测试消息产生模型费用；不安装、不推送、不操作真实项目。本次经生产 preload/main IPC 驱动隐藏的真实 App，没有替换 Provider adapter。只复制所需认证文件/环境项到私有临时 HOME，不复制用户 hooks、MCP、plugins 或项目内容。
+
+### 冻结范围与实际执行
+
+验收准备期间 main 已推进到 `81e2979`，包含另一轮性能合入。本次没有重建或混入其产物：复制第 15 节构建，main/preload/renderer 的 8 项 hash 与 `scry-unified-rendering-ID0GGS/verification.json` 全部一致。冻结的 `app.asar` SHA256 为 `7fbcbf030d74884c151586253a6d3b5321ec2f9f5c4c019aa3e1aefb400efe47`。这不是最新 main 的真实账号验收。
+
+| 项目 | 结果 | 决定性证据 |
+|---|---|---|
+| Codex 新会话及宿主重启后接续 | 功能通过 | CLI `0.160.1`、模型 `gpt-6.1-sol`；第一轮记住随机 A，重启后第二轮返回 A、B；两轮均有 accepted 回执、completed outcome 和已提交归档，原生 session ID 相同 |
+| Codex 从第一轮创建原生分支 | 功能通过 | 分支获得不同原生 session ID；第三条测试消息只返回 A，不含源会话后续 B；源会话仍保留原两轮；相同 fork command 返回同一分支，原生目录共两个会话文件 |
+| Codex 每轮用量 | **失败，确认重复计数** | 第二轮原生单次调用为输入 14,105、输出 26、缓存读取 13,824；Scry archive、`usage.jsonl`、SQLite `usage_ledger`/`model_usage` 却记录会话累计 28,124 / 40 / 25,216，恰好多计第一轮 |
+| Claude | **发送前受阻** | 默认 `2.1.226` 和已安装 npm 入口执行 `--version` 均被 SIGKILL；macOS AppleSystemPolicy 日志分别报告无法建立 provenance sandbox、security policy 不允许进程；默认入口静态 codesign 校验通过，不能据此认定二进制损坏 |
+| Pi / Rotom | **发送前受阻** | 精确 Rotom `0.1.25` Profile 的能力探测提前退出；独立的只读 RPC 复现收到内置 Computer Use 的 macOS 权限选择请求，尚未返回 `get_state` 就以 code 0 退出。未授予屏幕录制权限、未选择打开系统设置、未替换成另一个 Profile 冒充通过 |
+
+实际仅发送 **3 条 Codex 消息**，没有向 Claude 或 Pi 发送测试消息。三次原生调用合计输入 **42,197**、输出 **54**，其中缓存读取 **36,608**（已包含在输入中，不能再相加）。Provider 没有返回金额，成本为 **unavailable，不是 0**。
+
+### 失败保留与核对方式
+
+- 第一次 Codex 调用真实成功后，临时验收脚本错误断言不存在的 `history.status`，首次失败保存在 `result-first.json`。按实际合同改为检查 `delivery.outcome === completed` 和 `history.done`；重启后只读核对原 run 的归档，再继续第二轮，**没有重发第一条消息**。
+- `/tmp/scry-real-codex-HQKSeT/probe.mjs --resume-after-fixture-error` 的功能检查 exit 0；这只证明接续/分支功能，不代表用量通过。
+- `python3 /tmp/scry-real-codex-HQKSeT/verify-native-usage.py` 以原生 `task_started.turn_id` 对齐 Scry `providerTurnId`，逐轮比较原生 JSONL 与只读 SQLite。每轮恰好一个 `token_count`；检查 exit 1，三轮中仅第二轮不一致，详细结果在 `usage-evidence.json`。
+- 用量缺陷定位到 `src/main/providers/codex.ts` 的首个累计通知处理：本次 resume 的首条通知同时包含 `total` 和 `last`，代码取 `total`。现有 cumulative-only resume 回归没有覆盖这种真实通知形态。当前 main 的该 adapter 与冻结构建对应源码无差异；本轮仅记录，不修改产品实现。
+
+### 证据、清理与剩余工作
+
+- Codex：`/tmp/scry-real-codex-HQKSeT/`，保留 `result.json`、首次失败、发送/分支请求及回执、归档投影、原生 transcript、SQLite 和用量核对脚本。
+- Claude：`/tmp/scry-real-handoff-BNSSoA/`，保留发送前失败和 `claude-system-diagnostic.log`；后者包含本次 CLI PID 对应的系统策略记录。
+- Pi：`/tmp/scry-real-handoff-two-kO3zNr/`，保留能力失败。Rotom 自动初始化了临时 HOME 下的 Computer Use helper；它脱离父进程后另行按精确路径、PID 和启动时间登记并复验终止，记录在 `helper-cleanup.json`。最终定向进程检查无上述测试目录的存活进程；复制的认证文件及其有效/悬空链接均已移除，不把普通父进程退出冒充 helper 已退出。
+- 临时工作区没有初始化 recorder 配置，因此没有 `.scry/records`；本次不声称验证了 workspace recorder/CLI overview、完整菜单点击流程、跨 Provider 切换、共享副本回收或长历史/附件/命令/Steer。
+- **④仍未完成**。下一步由开发方修复并补充 Codex `total + last` resume 用量回归（本次仅获准验收，待用户确认修复）；Claude 需恢复可正常执行 `--version` 的受信入口，Rotom 需解决 RPC 启动时的 Computer Use 权限依赖。涉及本机安装或系统权限变更须另行确认；恢复后再续测三 Provider，不绕过系统安全策略。
