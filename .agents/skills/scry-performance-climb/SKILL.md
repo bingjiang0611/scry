@@ -33,6 +33,7 @@ description: 维护 Scry 的性能闭环。用于：从本机日常性能记录�
 3. **不拿安全和证据换速度**：不放宽 sandbox/CSP，不绕过 trust/fingerprint 重验。缓存必须正确失效；可能显示旧结果时必须标“刷新中/来源时间”，不能把旧 diff、旧用量当成当前事实。recorder core 保持无 Electron/SQLite/原生依赖；不能为提速让 recorder 在证据收敛前提交。
 4. **测量安全**：临时目录、离线受控 Provider、只停自己启动的进程；不调付费 Provider；不在开发仓库驱动真实 Agent；Electron 测试隐藏窗口、保留 sandbox、不加 `--no-sandbox`。日常记录只读，先快照再分析，报告不粘贴会话内容或路径。
 5. **一个 cwd 一个写者**；保留他人 WIP；默认只本地提交。
+6. **构建与生效隔离**：在原实验记录登记优化 commit、合入/构建/安装状态和 L1/L2/L3。App 版本号不等于 build ID，不为每次优化自动升版本。先确认实际运行的 packaged build 再排当前热点；未部署的优化不能被旧日志判为回归。缺少映射写 `unknown`，详见[日常记录分析](references/journal-analysis.md)。
 
 ## 防止“数字变小但没变快”（agent 必读）
 
@@ -47,7 +48,7 @@ description: 维护 Scry 的性能闭环。用于：从本机日常性能记录�
 
 ## A. 分析
 
-按 [journal-analysis.md](references/journal-analysis.md)：快照 → 按 build 生成基线 → `scripts/journal-hotspots.mjs` 排名 → 判断是否阻塞用户、归属（Scry/Provider）、已有覆盖、趋势。
+按 [journal-analysis.md](references/journal-analysis.md)：核对运行 build 与已有优化的交付状态 → 快照 → 选定当前 build，旧 build 另作历史对照 → `scripts/journal-hotspots.mjs` 排名 → 判断是否阻塞用户、归属（Scry/Provider）、已有覆盖、趋势。
 
 ## B. 爬坡
 
@@ -56,7 +57,7 @@ description: 维护 Scry 的性能闭环。用于：从本机日常性能记录�
 1. 发散：每个慢点用 10 个视角各提至少一个想法（要大胆，包括架构级）；列出从未测量的地方。
 2. 收敛：收益 × 置信度 ÷ 成本风险排序，选出此刻最大机会；违反硬规则 3 的直接否决并写理由。
 3. 先测量：目标路径没有稳定计数就先加（单独提交）。
-4. 单假设实验 → 验证（L1 计数、L2 毫秒）→ `performance:propose` 锁定 → 写实验记录。
+4. 单假设实验 → 验证（L1 计数、L2 毫秒）→ `performance:propose` 锁定 → 按手册模板写实验记录及交付状态；后续合入/构建/安装时更新原记录，不另建版本台账。
 
 **收尾条件**（满足任一就停下汇报，不要无限循环）：
 
@@ -90,7 +91,7 @@ agent 做不到时，明确写“到这里交给你”和具体动作：
 
 - **慢点/机会表**：项 | 证据 | 预计收益 | 置信度 | 成本/风险
 - **大胆想法**：按视角分组，标“可立即实验 / 需先测量 / 需用户决定”
-- **本次改动与验证**：命令、前后数值、负载（`SCRY_TIMING_RUN`）、减少的工作去了哪里、未验证项
+- **本次改动与验证**：命令、前后数值、负载（`SCRY_TIMING_RUN`）、减少的工作去了哪里、优化 commit、合入/构建/安装状态、baseline→candidate build 与未验证项
 - **需要你决定**：只列真正需要用户拍板的事项
 
 中文、短句；区分“已测量事实”和“推测”。
