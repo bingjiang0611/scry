@@ -1,12 +1,12 @@
 # 2026-10-17 Pi 只读能力探测：去掉无必要的 EOF 宽限等待
 
-## 当前交付状态（2026-10-17 集成更新）
+## 当前交付状态（2026-10-17，已安装并核对运行身份）
 
-- 优化源码 `afd8f03` 已随 `89e4465` 合入 main；保留 main 的原生会话 fork 与较完整的旧日志迁移逻辑。
-- 验证构建：App **0.2.196**，完整 build ID `1d7585fc0e27063072cc5fc0975b074a3a192800dedb1d68cf4888da9710b2e1`。这是源码/依赖配置指纹，不是安装回执或包二进制哈希。
-- 构建验收：unit/shell、CLI、开发构建与隐藏 App/UI 通过；打包运行校验中私有 CLI 收到 SIGKILL，未通过。深度签名校验通过，终止来源未知；用户明确批准只合入源码，不安装、不放宽门禁。
-- 安装/生效：本次未安装；宿主实际版本/build、安装/首次生效时间及日常 baseline→candidate 映射仍为 `unknown`，L3 待验证。
-- 下文 L2 数据属于原实验源码。集成版仅重验了功能与 L1，没有把旧毫秒样本改标成新构建收益。集成验收与首轮失败见[机会日志](../performance-opportunities.md)。
+- 优化源码 `afd8f03` 已随 `89e4465` 合入 main。安装包冻结源码为 `313f451`（base `2adcfdb`），不含构建期间稍后合入的 `2405d92`；main 的该并行改动仍保留。
+- 本机安装：App **0.2.197**、CLI **0.2.49**，完整 build ID `5ef349e1d00e156fdcbedff0e1705e039b0969a23f8c7a77da38418482d4bf44`。通过标准 `scripts/install-macos.mjs` 于 **2026-10-17T12:39:42.021Z** 安装到 `/Applications/Scry.app`；目标版本、asar/可执行文件 SHA 与冻结产物一致，深度签名通过。旧版保留在 `/Applications/.Scry.app.backup`。
+- 实际运行：新 PID **35636**、真实 userData 的 packaged 日志匹配上述版本/build；首条证据 **2026-10-17T12:39:42.982Z**。安装后快照解析 82713 条、无格式/清单哈希问题；其中新 build 有 659 条、1 个会话。这只证明启动身份，不能将条数当成完成业务场景或 L3 样本数。
+- 构建/安装证据：`/tmp/scry-install-performance.ROQOkg/{handoff-receipt,runtime-verification,install-identity}.json` 与同目录日志。冻结包 typecheck、3331 unit（4既有 opt-in skipped）、shell、587 CLI release、packaged check 与全部 packaged smoke 通过。首次新包 CLI 的 SIGKILL 保留在 `pack.log`；原生诊断成功后，同一未改动包通过后续门禁，未改变安全策略。正常退出宿主会中断自身 Pi，故改用独立的一次性安装任务；任务完成后已卸载。
+- 验证级别：下文 L1/L2 保留原实验源码归属，未冒充本次构建的毫秒收益。当前运行 build 已确认；日常对照 baseline、同场景 ≥30 样本/≥2 会话与 L3 仍待验证。安装前后日志快照仅本地保留；详见[机会日志](../performance-opportunities.md)。
 
 
 ## 结论与边界

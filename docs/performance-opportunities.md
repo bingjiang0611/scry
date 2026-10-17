@@ -6,13 +6,15 @@
 
 用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成五个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
 
-**0.2.197 安装交接（2026-10-17，最终安装/运行结果待回执核对）**：
+**0.2.197 当前交付状态（2026-10-17，已安装并核对实际运行）**：
 
-- 用户已授权安装、正常退出旧 App 并启动新版。构建冻结于 `313f451`（base `2adcfdb`），不含构建期间稍后合入的 `2405d92`；不得称为最新 main 的完整交付。main 的新改动保持不动。
-- 目标 App **0.2.197**、CLI **0.2.49**，完整 build ID `5ef349e1d00e156fdcbedff0e1705e039b0969a23f8c7a77da38418482d4bf44`。typecheck、3331 unit（4既有 opt-in skipped）、shell、587 CLI release、packaged check 与全部 packaged smoke 已通过。新签名包首次 CLI 仍曾 SIGKILL，原始 `pack.log` 保留；签名与同一原生二进制诊断通过后，同一未改动产物重新通过剩余打包门禁；未改测试、安全策略或签名来绕过。
-- 当前 Pi 是 Scry 的子进程；前台正常退出两次均先中断本次工具，安装尚未执行。因此已登记独立的一次性 launchd 任务 `gui/502/com.scry.install.performance.ROQOkg`，交由标准 `scripts/install-macos.mjs` 安装并负责失败回滚，再打开 App。
-- **以 `/tmp/scry-install-performance.ROQOkg/handoff-receipt.json` 为当前进度证据**。必须先读取回执，不得在未知结果上重复 kick/安装。`installedVerified=true` 只证明目标版本、字节与签名；实际运行还需核对新的 App PID 和真实 userData 日志中匹配的版本/build。交接检查单见同目录 `HANDOFF.md`。L3 仍未验证。
-- 安装前旧实例性能数据将保存到本地 `/Users/baobingjiang/scry-performance-archive/20261017-before-0.2.197-ROQOkg`；不上传、不提交原始日志，不用旧 build 充当新构建效果。
+- 冻结安装源码 `313f451`（base `2adcfdb`），包含五项优化。构建期间稍后提交的 `2405d92` **不在本安装包中**，不得称为最新 main 完整交付；main 中该改动保留。版本元数据通过 `ae84ff2` 集成，原始安装源码仍以 `313f451` 为准。
+- App **0.2.197**、CLI **0.2.49**，完整 build ID `5ef349e1d00e156fdcbedff0e1705e039b0969a23f8c7a77da38418482d4bf44`。冻结包 typecheck、3331 unit（4既有 opt-in skipped）、shell、587 CLI release、packaged check 与全部 packaged smoke 通过。
+- 首次新签名包 CLI 仍曾 SIGKILL（PID11281），原始 `pack.log` 保留。深度签名与同一原生二进制诊断通过后，同一未改动包通过剩余打包门禁；未改测试、安全策略或重签名来绕过。终止来源仍未知，不能因后续成功宣称根因修复。
+- 用户已授权正常退出旧 App 并启动新版。前台退出两次都中断了作为 Scry 子进程的当前 Pi，且均未安装；最后交由独立 launchd 一次性任务正常退出 PID23211，再调用原样的 `scripts/install-macos.mjs`。安装器返回成功（自带目标 CLI/版本校验），目标 asar/可执行文件 SHA 与冻结产物一致，目标深度签名通过。**安装时间 2026-10-17T12:39:42.021Z**，目标 `/Applications/Scry.app`，旧版备份 `/Applications/.Scry.app.backup`。
+- **实际生效证据**：新 PID **35636** 的真实 userData 由已打开的 `scry.db` 路径确认；真实 packaged 日志匹配版本/build，首条 **2026-10-17T12:39:42.982Z**。安装后快照经现有 gzip-aware `readRecords` 解析 82713 条、issues为空，其中新 build 659 条、1个会话；这些只是身份与运行记录，**不是659个完成场景，也不是L3改善结论**。一次性诊断器最初将 gzip 当 JSON 解析失败，改用现有 helper 后通过；这不是产品失败，未改日志或分析合同。
+- 核对证据：`/tmp/scry-install-performance.ROQOkg/handoff-receipt.json`、`runtime-verification.json`、`install-identity.json`、`install.log`。保留初次失败/最终检查日志与诊断构建；安装任务正常完成、exit0、仅运行1次，已 `bootout` 自有服务 `gui/502/com.scry.install.performance.ROQOkg`，未留下活跃安装任务。未推送或正式发布；此为本机 Apple Development 签名安装，不冒充 Developer ID 公证发布。
+- 本地日志快照：`/Users/baobingjiang/scry-performance-archive/20261017-{before,after}-0.2.197-ROQOkg`。安装前保留旧证据；当前热点必须显式选择新 build，旧 build 只作历史对照。日常 baseline 的场景/环境/source匹配与 L3 仍未验证；需要同场景两侧各 ≥30 样本、≥2 会话和数据健康证据后再比较。
 
 **前次集成交付快照（0.2.196 验证包，仅作历史记录）**：
 
@@ -57,7 +59,7 @@
 
 **第五步真实 Service.diff 已验证**：冻结 `8514551`，生产 `06a3f41`；两个时间点的完整 revision 材料与公式不变，仅内部投影不取 remotes。普通面板、写入、PR/传输仍取完整 status。9 项新增验收、故意去掉 post-check 后 5 项确定性失败的负对照、mac2全量3284通过/4既有opt-in跳过、隐藏真实App源代码管理UI均通过，无外部GitHub写入。首组L2 `highLoad=true` 不作收益结论，观察到负载恢复后补得有效组（3.03→3.86 / 8核）；没有改 workload、timeout 或丢弃样本。40 obs：3 better、35 unchanged、2 gating pass，另3个CPU指令candidate缺失，无worse；只降三个candidate基线。旧11次同名负载与8次门禁不变。
 
-**后续优先顺序**：建议先由用户确认合入/安装，再采同场景≥30样本、≥2会话的L3，判断真实优先级，不为继续降次数删除身份、filter或revision校验。若继续优化Provider启动/扩展/模型目录，agent先补真实listCommands/runControls的端到端分段；真实账号/费用授权不足时不运行，不把离线结果当12秒根因。当前已按用户授权合入源码，未安装或推送；安装前还需通过被 SIGKILL 阻断的打包运行验收。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
+**后续优先顺序**：本轮性能包已安装且运行身份已核对，接下来按当前新 build 采样；同场景两侧各≥30样本、≥2会话且核对环境/数据健康后再做L3，判断真实优先级，不为继续降次数删除身份、filter或revision校验。若继续优化Provider启动/扩展/模型目录，agent先补真实listCommands/runControls的端到端分段；真实账号/费用授权不足时不运行，不把离线结果当12秒根因。未推送、未正式发布；后续并行提交不自动算作已安装。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
 
 ## 原始机会排名（2026-10-16，日常记录首次分析）
 
