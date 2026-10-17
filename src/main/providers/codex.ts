@@ -969,6 +969,7 @@ export function createCodexAdapter(
       const history = new HistoricalInput(runRequest)
       let externalSessionId = runRequest.resume
       let turnId: string | undefined
+      let turnStartRequested = false
       let stopped = false
       let unsubscribe = () => {}
       let unsubscribeRequest = () => {}
@@ -1395,6 +1396,13 @@ export function createCodexAdapter(
               if (!isRoot) return
               const usage = record(params.tokenUsage) as unknown as ThreadTokenUsage
               const total = tokenUsage(usage.total)
+              // thread/resume publishes the previous turn's persisted usage, including `last`.
+              // It establishes a baseline, not a model call or billable usage for this run.
+              if (!turnStartRequested) {
+                if (usage.total) lastSeenCumulativeUsage = total
+                return
+              }
+              if (turnId && typeof params.turnId === 'string' && params.turnId !== turnId) return
               const last = tokenUsage(usage.last)
               const delta = usage.total
                 ? lastSeenCumulativeUsage
@@ -1647,6 +1655,8 @@ export function createCodexAdapter(
             ...codexInput(text, runRequest.attachments)
           ]
           history.attempting(text)
+          // Notifications can arrive before the turn/start response supplies the native turn ID.
+          turnStartRequested = true
           const turn = await request<CodexTurnResponse>('turn/start', {
             threadId: externalSessionId,
             input,

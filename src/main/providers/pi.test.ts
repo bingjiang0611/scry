@@ -55,6 +55,7 @@ const persistEntries = () => require('node:fs').writeFileSync(sessionFile, [
 // This fixture starts with native conversation entries, so its session is already on disk.
 persistEntries()
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
+let finishStartupUi
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => {
   buffer += chunk
@@ -66,6 +67,10 @@ process.stdin.on('data', (chunk) => {
     const command = JSON.parse(raw)
     require('node:fs').appendFileSync(process.cwd() + '/fixture-commands', JSON.stringify(command) + '\\n')
     const response = (data) => send({ type: 'response', id: command.id, command: command.type, success: true, ...(data ? { data } : {}) })
+    if (command.type === 'extension_ui_response' && command.id === 'catalog-startup') {
+      finishStartupUi(command)
+      continue
+    }
     if (command.type === 'get_state') {
       if (promptMessage === 'final-state-hang') {
         send({ type: 'extension_ui_request', id: 'final-state-wait', method: 'select', title: 'Final state', options: ['Continue'] })
@@ -87,6 +92,16 @@ process.stdin.on('data', (chunk) => {
       }
       if (promptMessage === 'stop-before-final-state') {
         require('node:fs').writeFileSync(process.cwd() + '/final-state-requested', '')
+      }
+      if (require('node:fs').existsSync(process.cwd() + '/startup-ui')) {
+        const timeout = setTimeout(() => send({ type: 'response', id: command.id, command: command.type, success: false, error: 'Startup UI was not cancelled' }), 1000)
+        finishStartupUi = (reply) => {
+          clearTimeout(timeout)
+          if (reply.cancelled === true && reply.value === undefined && reply.confirmed === undefined) response(state)
+          else send({ type: 'response', id: command.id, command: command.type, success: false, error: 'Read-only probe must not approve setup' })
+        }
+        send({ type: 'extension_ui_request', id: 'catalog-startup', method: 'select', title: 'Optional setup', options: ['Open Settings'] })
+        continue
       }
       response(state)
     }
@@ -510,6 +525,19 @@ describe('Pi RPC Provider', () => {
       id: 'select-1', method, title: '继续？', options: ['1. 继续', '2. 停下']
     })
     expect(request?.questions[0]).toMatchObject({ allowCustomAnswer: false, multiSelect: false })
+  })
+
+  it('cancels startup dialogs during read-only capability discovery without approving setup or sending a prompt', async () => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'startup-ui'), '')
+      const probe = await probePiAgent(profile, cwd)
+      expect(probe.models).toContainEqual(expect.objectContaining({ id: 'test-model' }))
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+      expect(commands.filter((command) => command.type === 'extension_ui_response')).toEqual([
+        { type: 'extension_ui_response', id: 'catalog-startup', cancelled: true }
+      ])
+      expect(commands.some((command) => command.type === 'prompt')).toBe(false)
+    })
   })
 
   it('allows cold session startup to exceed the ordinary 15 second command deadline', () => {

@@ -948,9 +948,17 @@ async function withPiRpc<T>(
   operation: (rpc: PiRpcProcess) => Promise<T>
 ): Promise<T> {
   const rpc = PiRpcProcess.start(profile, args, await piRpcEnvironment(profile), cwd)
+  const off = rpc.onEvent((event) => {
+    // Catalog/session operations have no interactive owner. Decline startup dialogs;
+    // never select a setup action or approve a permission merely to obtain metadata.
+    if (event.type === 'extension_ui_request' && questionFromExtension('pi-noninteractive', event)) {
+      rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true })
+    }
+  })
   try {
     return await operation(rpc)
   } finally {
+    off()
     await rpc.close()
   }
 }
