@@ -352,11 +352,19 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     },
     forkSession: {
       async fork(request) {
+        if (request.expectedContinuationKey) {
+          const env = claudeRuntimeEnv()
+          // SDK session helpers use the host environment, unlike query's explicit env.
+          if (env.CLAUDE_CONFIG_DIR !== process.env.CLAUDE_CONFIG_DIR || (env.HOME ?? homedir()) !== (process.env.HOME ?? homedir())) {
+            throw new Error('Claude SDK 分支目录与运行时配置不一致，不能证明原生分支归属')
+          }
+        }
         const messages = await getSessionMessages(request.sourceSessionId, {
           dir: request.cwd,
           includeSystemMessages: true
         })
         const boundary = completedTranscriptTurnBoundary(messages, request.sourceForkTurnId, 'Claude')
+        await request.beforeFork?.()
         const forked = await forkSession(request.sourceSessionId, {
           dir: request.cwd,
           upToMessageId: boundary,

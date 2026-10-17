@@ -761,6 +761,23 @@ describe('Pi RPC Provider', () => {
     })
   })
 
+  it('fences managed fork before starting Pi and again before the native mutation', async () => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const request = { providerId: 'pi' as const, sourceSessionId: 'pi-session-1', sourceRunId: 'run-active',
+        sourceProviderTurnId: 'active-user', sourceForkTurnId: 'active-user', agentProfileId: profile.id, cwd }
+      await expect(adapter.forkSession!.fork({ ...request, beforeFork: async () => { throw new Error('identity changed before startup') } })).rejects.toThrow('identity changed before startup')
+      expect(existsSync(join(cwd, 'fixture-starts'))).toBe(false)
+      let checks = 0
+      await expect(adapter.forkSession!.fork({ ...request, beforeFork: async () => {
+        if (++checks === 2) throw new Error('identity changed before fork')
+      } })).rejects.toThrow('identity changed before fork')
+      expect(checks).toBe(2)
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as { type: string })
+      expect(commands.some(command => command.type === 'fork' || command.type === 'clone')).toBe(false)
+    })
+  })
+
   it('clones Pi at the active leaf after the selected final turn', async () => {
     await withFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })

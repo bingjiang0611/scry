@@ -212,7 +212,7 @@ export const Sidebar = memo(function Sidebar({
   const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
       <span className="sb-session-main"><Icon name={conversation.pinnedAt ? 'pin' : 'message'} /><span className="sb-sesstext" title={conversation.cwd}>{conversation.title}</span></span>
-      <span className="sb-session-meta">{conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}</span>
+      <span className="sb-session-meta">{conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? conversation.deletion.status === 'complete' ? '副本待核对' : '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}</span>
     </button>
   </div>
   return (

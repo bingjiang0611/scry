@@ -39,6 +39,7 @@ let child
 let stderr = ''
 let smokeIdentity = 'default'
 const conversationInputs = join(temp, 'conversation-inputs.jsonl')
+const conversationCalls = join(temp, 'conversation-provider-calls.jsonl')
 
 async function freePort() {
   const server = createServer()
@@ -213,9 +214,29 @@ async function main() {
       })
     `)
   }
+  const conversationEntry = join(temp, 'conversation-main.mjs')
+  if (unifiedConversationOnly) {
+    // Fault injection surrounds, rather than replaces, the production trusted handler.
+    // Lose one reply after the native effect and durable commit; recovery must not replay it.
+    writeFileSync(conversationEntry, `
+      import { ipcMain } from 'electron'
+      import { existsSync, writeFileSync } from 'node:fs'
+      const marker = ${JSON.stringify(join(temp, 'fork-reply-lost'))}
+      const handle = ipcMain.handle.bind(ipcMain)
+      ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
+        const result = await listener(...args)
+        if (channel === 'conversation:fork' && result.fork?.status === 'accepted' && !existsSync(marker)) {
+          writeFileSync(marker, 'native fork committed')
+          throw new Error('fixture: native fork reply lost after commit')
+        }
+        return result
+      })
+      await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
+    `)
+  }
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
@@ -233,7 +254,7 @@ async function main() {
         SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
-        ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
+        ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
         // Only explicit smoke adapters may run. Never discover/start real Provider services.
         SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode' : 'claude,qoder,opencode,pi',
         SCRY_REMOTE_HOST: '0'
@@ -260,7 +281,7 @@ async function main() {
     return response.result?.value
   }
   if (unifiedConversationOnly) {
-    const fixture = { workspace: canonicalWorkspace, userData: userDataDir, inputsFile: conversationInputs }
+    const fixture = { workspace: canonicalWorkspace, userData: userDataDir, inputsFile: conversationInputs, callsFile: conversationCalls }
     const result = await exerciseUnifiedConversation(cdp, evaluate, fixture)
     for (const changedIdentity of [false, true]) {
       cdp.close()
