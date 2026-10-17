@@ -602,3 +602,28 @@ Pi 成功证据位于 `/tmp/scry-pi-fixed-YA0P17/`。两组真实测试使用同
 验收期间另一项已授权的性能任务安装了 **0.2.197**，并将版本/文档合入 main 至 `06a49e9`。该安装冻结源码为 `313f451`（base `2adcfdb`），**不含 `2405d92` 的本次 Provider 修复**。本轮只读核对安装包：版本 0.2.197、main SHA256 `bf615ca0395475f5f60c9d9e5d9854edb2e9d5e0f0227a765cc8336278c80ac0`，缺少修复构建具备的两处唯一标记；记录在 `installed-scry-observation.json`。这是静态安装文件核对，不替代运行中进程证明。本轮没有覆盖这个安装，也没有升级日常 Rotom。
 
 `2405d92` 到当前 main 的 runtime 源码与 scripts 无差异，仅版本/文档变动；本次真实验收仍按冻结构建报告，不冒充已安装 0.2.197 的验收。**Codex/Pi 的上述纯文本闭环与 Pi 分支续聊已通过**；完整菜单交互、workspace recorder/CLI overview、长历史、附件、原生命令、Steer 仍不在本轮证据范围，不能据此将④全部标为完成。下一步须由用户授权新的本地安装流程；安装涉及当前 Scry 会话时先安排安全交接，不直接终止承载本任务的宿主。
+
+## 19. 仅准备安装包与隔离安装验证（2026-10-17）
+
+用户选择只准备安装包：不覆盖日常安装、不关闭或重启日常 Scry、不推送、不发布、不授予系统权限。本轮没有新增真实模型调用。产物保存在 `/Users/baobingjiang/Downloads/scry-provider-packages-sKt4O9/`，构建与原始日志在 `/tmp/scry-provider-package-build-TUILX1/`。
+
+### 冻结版本与产物状态
+
+| 产物 | 冻结提交 | 实际结果 |
+|---|---|---|
+| Rotom 0.1.26：`bingjiang0611-rotom-0.1.26.tgz` | `30d977f`，基于 `42b68a1`，只升产品版本 | 干净依赖打包、临时 npm 离线安装、运行与卸载检查通过 |
+| Scry 0.2.198：`Scry-0.2.198-arm64-development-UNVERIFIED.zip` | `5657f63`，基于 `1932284`，只升 App 与 lock 版本 | 开发签名有效，临时事务安装与私有 CLI 检查通过；打包 GUI 启动被 SIGKILL，**候选包未通过完整验收，不建议安装** |
+
+App 私有/独立 CLI 保持 0.2.49，没有改动其分发面。两个升版提交留在独立准备分支，未合回维护分支、未创建 release tag。日常磁盘版本只读确认仍为 Scry 0.2.197、Rotom 0.1.25，不将候选版本当作已安装版本。
+
+### 验证与保留的失败
+
+- Scry `typecheck` 通过；`npm test` 为 3333 通过、4 项既有 opt-in 跳过，shell 检查通过；`check:cli-release` 的 587 项及打包检查通过；`test:renderer:ui` 在开发 Electron fixture 中通过。`pack:artifact` 完成构建和 Apple Development 签名，但首次私有 CLI 检查被 SIGKILL；同一原构建路径的最小 Node 模式诊断也被 SIGKILL。没有重签、移除安全属性或改变系统策略。
+- 将同一 bundle 压缩、解包后，复用生产 `installBundle` 事务核心安装到临时目录。逐项核对所有文件内容、模式和符号链接；staging 与最终目录均与原产物一致。保留生产版本/CLI 校验，不主动调用 LaunchServices 或 Spotlight。临时安装成功，签名校验、CLI 0.2.49 及 `check-packaged-app.mjs <临时 App>` 通过：311 条运行时依赖、298079667 bytes，未超过既定预算。
+- 同一临时 App 的 `electron-security-smoke.mjs <临时 App>` 在获得 CDP target 前被 SIGKILL（pid 90865）；因此 **packaged GUI 与整包集成仍未通过**。macOS 同时记录 provenance sandbox 错误，`spctl --assess` 返回 rejected；签名有效不能替代系统执行许可，也没有证据把某条警告单独认定为 SIGKILL 根因。夹具随后因进程提前退出无法登记而报清理 unknown；另行定向进程核对未发现该构建范围残留。失败日志完整保留，未重跑刷绿。
+- Rotom `check:pi`、25 项 distribution 测试通过。官方 `pack:release` 在全新 HOME/cache/staging 内执行两组 `npm ci`，未把维护者 node_modules 打进产物；源码/产物隐私审计与运行时校验通过。tgz 为 48667632 bytes、18885 文件；这次 **0.1.26 的 consumer 干净安装验证**不再受第 17 节依赖复用限制，但不改写当时的失败记录。
+- 从 tgz 在临时 npm prefix 离线安装，公开 `rotom --version` 返回 0.1.26。通过已安装公开 launcher 注入隔离启动对话夹具：取消回执被扩展确认，排队的 `get_state` 随后成功，EOF 正常退出；没有真实 prompt。已安装 SDK 的默认/full 工具面 smoke 均通过，各使用 2 个 faux 响应、0 个 lifecycle error；公开入口与 Scry 已审核的两个 launcher hash 一致。
+- 首次直接 SDK smoke 漏掉公开 launcher 初始化的 scoped execution store，因不存在的 `/tmp/pi-subagents-uid-502` 失败；保留首次日志。改用已由真实公开 launcher 初始化的隔离 store 后通过，没有关闭 owned scope 或削弱断言。临时 npm 卸载后包目录与 bin 链接均不存在；临时 Computer Use helper 按身份关闭，认证占位文件移除，私有证据保留。
+- 候选 Scry main SHA256 为 `ca2d4333fce5d8db94b950d3423dfa5f05e093018ac1c8a6f877e87dfd0ce329`，与五消息探针不是逐字节相同。完整 diff 只有一处性能记录的构建指纹变化；仅排除该明确元数据后，其余 main 内容相同，runtime 源码/scripts Git diff 为空。这能证明代码来源，不能替代当前 packaged GUI 验收。
+
+产物目录提供 `README.md`、`manifest.json`、`SHA256SUMS` 和 `verification/`，区分已通过、首次失败与阻碍。Scry 若要升级为可安装通过状态，需要单独处理本机执行校验阻碍并重做同一候选的打包 GUI 验收；本轮没有授权改变系统权限、关闭安全校验或扩为正式签名公证发布。④其余验收、⑥和⑦没有顺带推进。
