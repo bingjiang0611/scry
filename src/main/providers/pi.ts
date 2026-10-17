@@ -325,12 +325,40 @@ function compatibleNodeVersion(raw: string, rotom: boolean): boolean {
   return major >= 24 || (!rotom && major === 23 && minor >= 6)
 }
 
+// Only cache a direct Node runtime, not a version-manager shim whose target can change without
+// changing the shim. Each lookup revalidates file identity; the environment digest isolates profiles
+// without retaining credentials as cache keys. This does not cache Provider capabilities or trust.
+const piNodeVersions = new Map<string, Promise<string>>()
+const PI_NODE_VERSION_CACHE_LIMIT = 32
+
 async function compatiblePiNode(env: Record<string, string>, rotom: boolean): Promise<string | undefined> {
+  const environment = createHash('sha256').update(JSON.stringify(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)))).digest('hex')
   for (const directory of (env.PATH ?? '').split(delimiter)) {
     const candidate = resolveCommandOnPath('node', directory)
     if (!candidate) continue
-    const version = await execFileText(candidate, ['-p', 'process.versions.node'], { env, timeout: PI_NODE_PROBE_TIMEOUT_MS })
-    if (compatibleNodeVersion(version, rotom)) return realpathSync(candidate)
+    const canonical = await realpathAsync(candidate)
+    const file = await statAsync(canonical, { bigint: true })
+    const key = JSON.stringify([canonical, String(file.dev), String(file.ino), String(file.size),
+      String(file.mtimeNs), String(file.ctimeNs), environment])
+    let pending = piNodeVersions.get(key)
+    if (!pending) {
+      pending = execFileText(candidate, ['-p', 'JSON.stringify([process.execPath, process.versions.node])'], {
+        env, timeout: PI_NODE_PROBE_TIMEOUT_MS
+      }).then((raw) => {
+        let response: unknown
+        try { response = JSON.parse(raw) } catch { /* A failed/non-Node candidate is not reusable. */ }
+        if (!Array.isArray(response) || response.length !== 2 || typeof response[0] !== 'string' || typeof response[1] !== 'string') {
+          piNodeVersions.delete(key)
+          return ''
+        }
+        if (response[0] !== canonical) piNodeVersions.delete(key)
+        return response[1]
+      })
+      if (piNodeVersions.size >= PI_NODE_VERSION_CACHE_LIMIT) piNodeVersions.delete(piNodeVersions.keys().next().value!)
+      piNodeVersions.set(key, pending)
+    }
+    const version = await pending
+    if (compatibleNodeVersion(version, rotom)) return canonical
   }
   return undefined
 }
@@ -946,7 +974,7 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
     const modelRows = record(models.data).models
     const thinkingLevels = record(levels.data).levels
     const commandRows = record(commands.data).commands
-    return {
+    const snapshot: PiProbe = {
       state: record(state.data),
       models: Array.isArray(modelRows) ? modelRows.map(record) : [],
       levels: Array.isArray(thinkingLevels)
@@ -954,6 +982,11 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
         : [],
       commands: Array.isArray(commandRows) ? commandRows.map(record) : []
     }
+    // This offline/no-session process has finished all four reads, with no session writer to
+    // drain. Request TERM now instead of waiting for EOF grace; withPiRpc still confirms exit.
+    // Run/fork RPCs keep their existing graceful-close path and evidence convergence.
+    rpc.terminate()
+    return snapshot
   }).finally(() => { piProbesInFlight.delete(key) })
   piProbesInFlight.set(key, probe)
   return probe

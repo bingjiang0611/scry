@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -140,6 +140,47 @@ describe('performance feedback contract', () => {
       expect(durations).toEqual(Array.from({ length: 12 }, (_, index) => index))
       expect(records.at(-1).observation.kind).toBe('health')
     } finally { rmSync(source, { recursive: true, force: true }) }
+  })
+
+  it('keeps same-millisecond rotations ordered across restart and clock rollback without changing record timestamps', async () => {
+    const source = mkdtempSync(join(tmpdir(), 'scry-performance-same-clock-'))
+    const target = join(source, 'snapshot')
+    const onError = vi.fn()
+    const environment = { version: 'test', build: 'same-clock', mode: 'development' as const, platform: 'test', osRelease: 'test', arch: 'test', cpu: 'test', runtime: 'test' }
+    const journals: PerformanceJournal[] = []
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      for (let session = 0; session < 2; session++) {
+        vi.setSystemTime(session === 0 ? '2026-10-16T00:00:00.000Z' : '2026-10-15T00:00:00.000Z')
+        const journal = new PerformanceJournal({ directory: source, environment, maxFileBytes: 900, onError })
+        journals.push(journal)
+        await journal.open()
+        for (let index = 0; index < 12; index++) journal.record({ kind: 'trace', sample: {
+          name: 'ipc.agent:loadSession', durationMs: session * 12 + index, outcome: 'completed',
+          startedAt: '2026-01-01T00:00:00.000Z', dimensions: {}, checkpoints: []
+        } })
+        await journal.close()
+      }
+      const stamps = readdirSync(source).flatMap(name => {
+        const match = /^performance-(\d{8}T\d{9}Z)-[0-9a-f]{8}\.jsonl\.gz$/.exec(name)
+        return match ? [match[1]] : []
+      })
+      expect(stamps.length).toBeGreaterThan(2)
+      expect(new Set(stamps).size).toBe(stamps.length)
+      snapshotPerformanceDirectory(source, target)
+      const { records, issues } = await readRecords(target)
+      expect(issues).toEqual([])
+      expect(records.filter(item => item.observation.kind === 'trace').map(item => item.observation.sample.durationMs))
+        .toEqual(Array.from({ length: 24 }, (_, index) => index))
+      expect(new Set(records.map(item => item.recordedAt))).toEqual(new Set(['2026-10-16T00:00:00.000Z', '2026-10-15T00:00:00.000Z']))
+      expect(records.at(-1).observation.kind).toBe('health')
+      expect(new Set(records.map(item => item.session)).size).toBe(2)
+      expect(onError).not.toHaveBeenCalled()
+    } finally {
+      for (const journal of journals) await journal.close()
+      vi.useRealTimers()
+      rmSync(source, { recursive: true, force: true })
+    }
   })
 
   it('creates hashed bounded snapshots, detects modification and refuses overwrite', async () => {

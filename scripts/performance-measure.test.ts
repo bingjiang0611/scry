@@ -1,12 +1,14 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { compareObservations, filterObservations, parseArgs } from './performance-measure.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const run = promisify(execFile)
 const observation = (metric: string, value: number, extra: Record<string, unknown> = {}) => ({
   scenario: 'trace.delivery', metric, layer: 'ipc', unit: 'count', workload: 'trace-events=1000;unicode=true', source: 'test',
   availability: 'measured', runs: [value, value], ...extra
@@ -32,10 +34,12 @@ describe('performance measurement tool', () => {
     expect(compareObservations(baseline, candidate)[0]).toMatchObject({ baseline: 4, candidate: 5, delta: 1, percent: 25 })
   })
 
-  it('compares HEAD with the reference trace collector and cleans up its detached worktree', () => {
+  it('compares HEAD with the reference trace collector and cleans up its detached worktree', async () => {
     const output = mkdtempSync(join(tmpdir(), 'scry-performance-measure-test-'))
     try {
-      execFileSync(process.execPath, [join(root, 'scripts/performance-measure.mjs'), '--compare', 'HEAD', '--scenario', 'trace.delivery', '--repeats', '5', '--out', output], { cwd: root, encoding: 'utf8' })
+      // The collectors may exceed Vitest's RPC heartbeat while this test remains within 120s.
+      // Keep the worker responsive; do not shorten the collection or extend either deadline.
+      await run(process.execPath, [join(root, 'scripts/performance-measure.mjs'), '--compare', 'HEAD', '--scenario', 'trace.delivery', '--repeats', '5', '--out', output], { cwd: root, encoding: 'utf8' })
       const result = JSON.parse(readFileSync(join(output, 'measure.json'), 'utf8'))
       expect(result.comparisons).toHaveLength(2)
       expect(result.comparisons.every((row: { baseline: number, candidate: number, delta: number }) => row.baseline === row.candidate && row.delta === 0)).toBe(true)

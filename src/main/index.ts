@@ -18,7 +18,7 @@ import type { ParsedTurn } from './normalize'
 import { readCachedTranscript, disposeTranscriptParser } from './transcript-parser'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, replayDatabaseTurnOutbox, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
-import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnAndSessionDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import { SourceControlService } from './source-control/service'
 import { registerSourceControlIpc } from './source-control/ipc'
@@ -3362,7 +3362,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       : result?.modelUsage?.length ? '多模型'
         : result?.contextModel ?? (request.model ? `所选：${request.model.id}` : '未知模型')
     try {
-      appendLlmPerformance(app.getPath('userData'), { cwd: catalogCwd, externalSessionId }, {
+      await appendLlmPerformance(app.getPath('userData'), { cwd: catalogCwd, externalSessionId }, {
         runId, ts: performance.observedAt, providerId, agentProfileId,
         model,
         upstreamProvider: result?.modelUsage?.length === 1 ? result.modelUsage[0].upstreamProvider : result?.upstreamProvider,
@@ -3510,6 +3510,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
   })
   notifyDiffChange = () => void diffPreviewer.notifyChange()
+  let pairedSessionDiff: { capture: GitTurnDiffCapture; snapshot: Promise<TurnDiffSnapshot> } | undefined
   let turnDiffPromise: Promise<void> | null = null
   const finalizeTurnDiff = (): Promise<void> => {
     // 终态第一次进入收口就把所有 scope 封口，再等全局 idle：idle 等的是全部在途预览链，
@@ -3518,10 +3519,23 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     diffPreviewer.sealAll()
     turnDiffPromise ??= diffPreviewer.idle()
       .then(() => turnDiffCapture)
-      .then((capture) => finishGitTurnDiff(capture, undefined, {
-        ...turnChangeJournal?.snapshot(),
-        patchExcludeBasenames
-      }))
+      .then(async (capture) => {
+        const options = { ...turnChangeJournal?.snapshot(), patchExcludeBasenames }
+        const entry = cwd && contextKey
+          ? sessionDiffBaselines.get(diffContextKey, 0, observedSessionId ?? resume)
+          : undefined
+        if (!entry) return finishGitTurnDiff(capture, undefined, options)
+        let baseline: GitTurnDiffCapture
+        try { baseline = await entry.capture } catch {
+          // Session finalization retains its existing no_baseline reporting; turn evidence is independent.
+          return finishGitTurnDiff(capture, undefined, options)
+        }
+        if (baseline.status !== 'ready') return finishGitTurnDiff(capture, undefined, options)
+        const pair = finishGitTurnAndSessionDiff(capture, baseline, undefined, options, { patchExcludeBasenames })
+        pairedSessionDiff = { capture: baseline, snapshot: pair.session }
+        void pair.session.catch(error => console.warn('[scry] paired session diff failed:', runId, error))
+        return pair.turn
+      })
       .then((turnDiff) => {
         const event: TraceEvent = {
           id: mainEventId('turn-diff', runId),
@@ -3638,7 +3652,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       }
       let snapshot: TurnDiffSnapshot
       try {
-        snapshot = await snapshotSessionNetDiff(baseline, undefined, { patchExcludeBasenames })
+        snapshot = await (pairedSessionDiff?.capture === baseline
+          ? pairedSessionDiff.snapshot
+          : snapshotSessionNetDiff(baseline, undefined, { patchExcludeBasenames }))
       } catch (error) {
         console.warn('[scry] session diff capture failed:', runId, error)
         publishSessionDiff(unavailableSnapshot('git_error'), entry.origin)
