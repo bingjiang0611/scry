@@ -139,21 +139,30 @@ export class SourceControlService {
     }
   }
 
+  private assertRevision(current: string, expected: string): void {
+    if (current !== expected)
+      throw new Error('仓库已变化；重新读取并确认 HEAD、暂存区和文件范围后再操作')
+  }
+
   private async expected(identity: GitIdentity, request: ScExpected): Promise<ScRepository> {
     const snapshot = await this.git.status(identity)
-    if (snapshot.revision !== request.expectedRevision)
-      throw new Error('仓库已变化；重新读取并确认 HEAD、暂存区和文件范围后再操作')
+    this.assertRevision(snapshot.revision, request.expectedRevision)
     return snapshot
   }
 
   async diff(request: ScExpected & { path: string; staged: boolean }): Promise<ScRead<ScDiff>> {
     try {
       const identity = await this.identity(request)
-      const snapshot = await this.expected(identity, request)
+      const expected = async () => {
+        const snapshot = await this.git.revisionSnapshot(identity)
+        this.assertRevision(snapshot.revision, request.expectedRevision)
+        return snapshot
+      }
+      const snapshot = await expected()
       const file = snapshot.files.find((file) => file.path === request.path)
       if (!file) throw new Error('该文件不属于当前 Git 快照')
       const data = await this.git.diff(identity, file, request.staged)
-      await this.expected(identity, request)
+      await expected()
       return { status: 'available', data }
     } catch (error) {
       return { status: 'failed', reason: scMessage(error) }
