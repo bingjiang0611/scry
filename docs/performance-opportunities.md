@@ -6,7 +6,15 @@
 
 用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成五个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
 
-**当前交付状态（2026-10-17，源码已合入，未安装）**：
+**0.2.197 安装交接（2026-10-17，最终安装/运行结果待回执核对）**：
+
+- 用户已授权安装、正常退出旧 App 并启动新版。构建冻结于 `313f451`（base `2adcfdb`），不含构建期间稍后合入的 `2405d92`；不得称为最新 main 的完整交付。main 的新改动保持不动。
+- 目标 App **0.2.197**、CLI **0.2.49**，完整 build ID `5ef349e1d00e156fdcbedff0e1705e039b0969a23f8c7a77da38418482d4bf44`。typecheck、3331 unit（4既有 opt-in skipped）、shell、587 CLI release、packaged check 与全部 packaged smoke 已通过。新签名包首次 CLI 仍曾 SIGKILL，原始 `pack.log` 保留；签名与同一原生二进制诊断通过后，同一未改动产物重新通过剩余打包门禁；未改测试、安全策略或签名来绕过。
+- 当前 Pi 是 Scry 的子进程；前台正常退出两次均先中断本次工具，安装尚未执行。因此已登记独立的一次性 launchd 任务 `gui/502/com.scry.install.performance.ROQOkg`，交由标准 `scripts/install-macos.mjs` 安装并负责失败回滚，再打开 App。
+- **以 `/tmp/scry-install-performance.ROQOkg/handoff-receipt.json` 为当前进度证据**。必须先读取回执，不得在未知结果上重复 kick/安装。`installedVerified=true` 只证明目标版本、字节与签名；实际运行还需核对新的 App PID 和真实 userData 日志中匹配的版本/build。交接检查单见同目录 `HANDOFF.md`。L3 仍未验证。
+- 安装前旧实例性能数据将保存到本地 `/Users/baobingjiang/scry-performance-archive/20261017-before-0.2.197-ROQOkg`；不上传、不提交原始日志，不用旧 build 充当新构建效果。
+
+**前次集成交付快照（0.2.196 验证包，仅作历史记录）**：
 
 - 优化源码：`7ac7fcb`（前两项）、`afd8f03`、`aff6006`、`06a3f41`。通过 `89e4465` 合入 main，合入前 main 为 `a091c22`；原生会话 fork、远端会话改动均保留。
 - 构建：验证产物 App **0.2.196**，完整 build ID `1d7585fc0e27063072cc5fc0975b074a3a192800dedb1d68cf4888da9710b2e1`。产物 SHA 与源码树对应证据在 `/tmp/scry-perf-integration.B1UmYE/identity.json`；这是测试构建，不是已安装实例。
