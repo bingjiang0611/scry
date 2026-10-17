@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
 
-const processCounters = vi.hoisted(() => ({ active: false, commands: new Map<string, number>(), snapshotTrees: 0 }))
+const processCounters = vi.hoisted(() => ({ active: false, commands: new Map<string, number>(), snapshotTrees: 0, statusChecks: 0, remoteQueries: 0 }))
 
 function resetProcessCounters(): void {
   processCounters.commands = new Map()
   processCounters.snapshotTrees = 0
+  processCounters.statusChecks = 0
+  processCounters.remoteQueries = 0
 }
 
 // `exec`/`execSync` take a shell command line; the others take the executable path.
@@ -18,6 +20,10 @@ function countCommand(value: unknown, shell = false, args?: unknown): void {
     const tree = args.indexOf('write-tree')
     const paths = args.indexOf('--')
     if (tree >= 0 && (paths < 0 || tree < paths)) processCounters.snapshotTrees++
+    const status = args.indexOf('status')
+    const remote = args.indexOf('remote')
+    if (status >= 0 && (paths < 0 || status < paths)) processCounters.statusChecks++
+    if (remote >= 0 && (paths < 0 || remote < paths)) processCounters.remoteQueries++
   }
 }
 
@@ -55,7 +61,10 @@ async function measure(operation: () => unknown | Promise<unknown>): Promise<Rec
   resetProcessCounters()
   processCounters.active = true
   try { await operation() } finally { processCounters.active = false }
-  const result: Record<string, number> = { total: 0, snapshotTrees: processCounters.snapshotTrees }
+  const result: Record<string, number> = {
+    total: 0, snapshotTrees: processCounters.snapshotTrees,
+    statusChecks: processCounters.statusChecks, remoteQueries: processCounters.remoteQueries
+  }
   for (const [command, count] of processCounters.commands) {
     result[command === 'git' ? 'git' : command] = count
     result.total += count
@@ -132,6 +141,77 @@ describe('fixed production subprocess work counters', () => {
       measured({ scenario: 'source-control.diff', metric: 'subprocess.total', ...meta }, recorderRuns.total),
       measured({ scenario: 'source-control.service.status-diff', metric: 'subprocess.total', ...meta }, sourceControlRuns.total)
     ])
+  }, 120_000)
+
+  it('counts real Service.diff with both revision checks on 5000 files and one configured remote', async () => {
+    const { SourceControlService } = await import('../../src/main/source-control/service')
+    const { ScProcess } = await import('../../src/main/source-control/process')
+    const { writeFile, readFile, realpath, rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+    const { performance } = await import('node:perf_hooks')
+    const samples: number[] = []
+    const runs = await repeatCounters(defaultRepeats, async () => {
+      const fixture = await gitFixture()
+      const repo = await realpath(join(fixture.root, 'repo'))
+      const env = { ...process.env, HOME: fixture.home, XDG_CONFIG_HOME: fixture.home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_COUNT: '0' }
+      const git = (args: string[]) => execFileSync('git', args, { cwd: repo, env })
+      const service = new SourceControlService({
+        userData: join(fixture.root, 'data'), unsettledDirectories: () => [],
+        authorizeDirectory: path => { if (path !== repo) throw new Error('fixture denied directory'); return path },
+        process: new ScProcess(() => env)
+      })
+      try {
+        await writeFile(join(repo, 'changed.ts'), 'export const changed = false\n')
+        for (let start = 0; start < 5000; start += 100) {
+          await Promise.all(Array.from({ length: 100 }, (_, offset) => writeFile(join(repo, `file-${start + offset}.txt`), 'base\n')))
+        }
+        git(['add', '.'])
+        git(['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', '-c', 'user.email=bench@scry.local', '-c', 'user.name=bench', 'commit', '-q', '-m', 'large baseline'])
+        git(['remote', 'add', 'origin', 'https://example.invalid/fixture/repo.git'])
+        await writeFile(join(repo, 'changed.ts'), 'export const changed = true\n')
+        git(['add', 'changed.ts'])
+        git(['mv', 'file-1.txt', 'renamed name.txt'])
+        await writeFile(join(repo, 'changed.ts'), 'export const changed = true\n// working only\n')
+        await writeFile(join(repo, 'file-0.txt'), 'other working change\n')
+        await writeFile(join(repo, 'new 中文.txt'), 'untracked\n')
+        const state = await service.read(repo)
+        expect(state.status).toBe('available')
+        if (state.status !== 'available') throw new Error(state.reason)
+        expect(state.data.files).toHaveLength(4)
+        expect(state.data.remotes).toHaveLength(1)
+        const index = await readFile(join(repo, '.git/index'))
+        const counts = await measure(async () => {
+          const started = performance.now()
+          const diff = await service.diff({ repositoryId: state.data.id, expectedRevision: state.data.revision, path: 'changed.ts', staged: false })
+          expect(diff.status).toBe('available')
+          if (diff.status !== 'available') throw new Error(diff.reason)
+          expect(diff.data.patch).toContain('+// working only')
+          expect(diff.data.patch).not.toContain('+export const changed = true')
+          expect(diff.data).toMatchObject({ binary: false, truncated: false })
+          expect((await readFile(join(repo, '.git/index'))).equals(index)).toBe(true)
+          samples.push(performance.now() - started)
+        })
+        expect(counts.statusChecks).toBe(2)
+        return { git: counts.git, total: counts.total, statusChecks: counts.statusChecks, remoteQueries: counts.remoteQueries }
+      } finally {
+        await service.dispose()
+        await rm(fixture.root, { recursive: true, force: true })
+      }
+    })
+    const meta = { scenario: 'source-control.service.diff-validated', layer: 'main' as const, unit: 'count' as const,
+      workload: 'tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true',
+      source: 'real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion' }
+    writeCollector('service-diff', [
+      measured({ ...meta, metric: 'subprocess.git' }, runs.git),
+      measured({ ...meta, metric: 'subprocess.total' }, runs.total),
+      measured({ ...meta, metric: 'revision.status-checks' }, runs.statusChecks),
+      measured({ ...meta, metric: 'remote.queries' }, runs.remoteQueries)
+    ])
+    if (process.env.SCRY_SERVICE_DIFF_TIMINGS) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync(process.env.SCRY_SERVICE_DIFF_TIMINGS, JSON.stringify({ measurementVersion: 1, workload: meta.workload, samples }, null, 2))
+    }
   }, 120_000)
 
   it('counts paired terminal diffs on 5000 files with distinct dirty anchors and retained user changes', async () => {

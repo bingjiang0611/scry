@@ -1,6 +1,62 @@
 {
   "schema": 1,
   "metrics": {
+    "source-control.service.diff-validated/subprocess.git": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 24
+      }
+    },
+    "source-control.service.diff-validated/subprocess.total": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 24
+      }
+    },
+    "source-control.service.diff-validated/revision.status-checks": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "revision.status-checks",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2
+      }
+    },
+    "source-control.service.diff-validated/remote.queries": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "remote.queries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 6
+      }
+    },
     "source-control.terminal-pair/subprocess.git": {
       "scenario": "source-control.terminal-pair",
       "metric": "subprocess.git",
