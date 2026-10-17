@@ -1,0 +1,310 @@
+{
+  "schema": 1,
+  "date": "2026-10-17",
+  "scenario": "source-control.service.diff-validated",
+  "baselineProductionCommit": "e62f99e",
+  "measurementCommit": "8514551",
+  "productionCommit": "06a3f4149d6f8b21941b8bc548542750645f818a",
+  "branch": "perf/climb-runtime-evidence-20261016",
+  "worktree": "/private/tmp/scry-perf-climb-runtime-evidence-20261016",
+  "host": {
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.3.0",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "git": "2.50.1 (Apple Git-155)"
+  },
+  "sourceSha256": {
+    "src/main/source-control/git.ts": "5f88a181ce4d056711558b0051064800fdefdaaaaa2a998567c7c7536d1af1bd",
+    "src/main/source-control/service.ts": "c8073cc3425a260d294c31283280f0346efd79b72587f24c205a065b4a2785ff",
+    "src/main/source-control/service.test.ts": "501c04ac0d77c12f485f05f94bb9de0a6aaee29d162460095c9943f12204731e",
+    "scripts/performance-counters/subprocesses.counters.test.ts": "6b763d73d02c9cb95bd86763ad208f2e94c8bd12241c6890382d532431baf9e5",
+    "package-lock.json": "3fa76d639b39db7577971f3e4004911f1e326ff1bf996d5bcda298020f68b219"
+  },
+  "l1": {
+    "baseline": [
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "subprocess.git",
+        "availability": "measured",
+        "runs": [
+          24,
+          24,
+          24,
+          24,
+          24
+        ]
+      },
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "subprocess.total",
+        "availability": "measured",
+        "runs": [
+          24,
+          24,
+          24,
+          24,
+          24
+        ]
+      },
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "revision.status-checks",
+        "availability": "measured",
+        "runs": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "remote.queries",
+        "availability": "measured",
+        "runs": [
+          6,
+          6,
+          6,
+          6,
+          6
+        ]
+      }
+    ],
+    "candidate": [
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "subprocess.git",
+        "availability": "measured",
+        "runs": [
+          18,
+          18,
+          18,
+          18,
+          18
+        ]
+      },
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "subprocess.total",
+        "availability": "measured",
+        "runs": [
+          18,
+          18,
+          18,
+          18,
+          18
+        ]
+      },
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "revision.status-checks",
+        "availability": "measured",
+        "runs": [
+          2,
+          2,
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "scenario": "source-control.service.diff-validated",
+        "layer": "main",
+        "unit": "count",
+        "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+        "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+        "metric": "remote.queries",
+        "availability": "measured",
+        "runs": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "l2": {
+    "measurementVersion": 1,
+    "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+    "method": "Same machine/dependency installation/lockfile/frozen collector; serial baseline then candidate under timing-run; five fresh repositories per side, all samples retained",
+    "rejectedHighLoad": {
+      "baseline": [
+        525.0292499999998,
+        503.01854100000037,
+        558.6141669999997,
+        569.7640419999998,
+        504.84050000000025
+      ],
+      "candidate": [
+        400.862042,
+        403.4544999999998,
+        386.9674580000001,
+        393.4890000000005,
+        392.9417080000003
+      ],
+      "loadBefore": 12.92,
+      "loadAfter": 17.63,
+      "highLoad": true,
+      "medianMs": {
+        "baseline": 525.0292499999998,
+        "candidate": 393.4890000000005
+      },
+      "percent": -25.05388985470798,
+      "conclusion": "Untrusted for L2; not a product speed claim"
+    },
+    "acceptedAfterLoadRecovery": {
+      "baseline": [
+        634.788041,
+        496.926375,
+        580.9260409999997,
+        507.6410420000002,
+        503.14224999999897
+      ],
+      "candidate": [
+        599.5120000000002,
+        382.84841700000015,
+        380.5625829999999,
+        379.17345900000055,
+        386.8927910000002
+      ],
+      "loadBefore": 3.03,
+      "loadAfter": 3.86,
+      "highLoad": false,
+      "medianMs": {
+        "baseline": 507.6410420000002,
+        "candidate": 382.84841700000015
+      },
+      "percent": -24.582847854133906,
+      "reasonForNewRun": "After regression work, external load had fallen to 2.35/8 cores; not an identical-environment retry to pick green"
+    },
+    "scope": "Real authorized SourceControlService.diff, including both complete revision observations, patch and full-index-byte verification; initial UI read and repository construction excluded identically on both sides",
+    "removedWork": "Six native remote/list/get-url display queries are not performed; not cached, delayed, moved to UI read or outside the measured return boundary"
+  },
+  "verification": {
+    "focusedServiceTests": 36,
+    "newAcceptanceCases": 9,
+    "deliberateBrokenProtection": {
+      "mutation": "omit only post-diff expected()",
+      "failedAcceptanceCases": 5,
+      "failures": "worktree/index/HEAD/remote-config/hook edits return available instead of failed",
+      "restored": true
+    },
+    "fullUnit": {
+      "host": "mac2",
+      "passed": 3284,
+      "skipped": 4,
+      "filesPassed": 268,
+      "filesSkipped": 4,
+      "exit": 0,
+      "measurementComparisonTestMs": 81689
+    },
+    "typecheck": "passed",
+    "appBuild": "passed",
+    "appUi": {
+      "sourceControl": "production App / real temporary Git",
+      "zeroIndexEntry": true,
+      "prospectiveSelection": true,
+      "explicitUnstage": true,
+      "partialIndexPreserved": true,
+      "fullIndexAndSelectedCommit": true,
+      "nativeFocusAndEscape": true,
+      "prePushOnlyBlocksPush": true,
+      "hookExecuted": false,
+      "pushToLocalRemote": true,
+      "draftRestoredAfterSurfaceClose": true,
+      "externalGithubWrites": 0,
+      "captures": [
+        "/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-source-control-ui-vb9P5Q/partial-index-narrow.png",
+        "/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-source-control-ui-vb9P5Q/partial-index-wide.png",
+        "/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-source-control-ui-vb9P5Q/commit-range-confirmation.png",
+        "/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-source-control-ui-vb9P5Q/dark.png",
+        "/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-source-control-ui-vb9P5Q/light.png"
+      ],
+      "mode": "hidden real App, production main/preload/renderer, real temporary Git and local bare remote, no Provider or GitHub request",
+      "entryArtifactSha256": {
+        "out/main/index.js": "741c4c787e1087a89cfb273c4e55716b73896f26b9db7c5f2536aa7f35a550b1",
+        "out/preload/index.cjs": "694c97143a5b1dad3019f9827304833a858ef7a2229b0a4bcdf1434a0f9b5858",
+        "out/renderer/index.html": "42a3f97e8c7bb17b9743bea7be074eeb9cb31592c81795a00a791c62b1ee4757"
+      }
+    },
+    "countersBeforeTightening": {
+      "better": 3,
+      "unchanged": 35,
+      "pass": 2,
+      "missing": 3
+    },
+    "candidateBaselines": {
+      "subprocess.git": [
+        24,
+        18
+      ],
+      "subprocess.total": [
+        24,
+        18
+      ],
+      "revision.status-checks": [
+        2,
+        2
+      ],
+      "remote.queries": [
+        6,
+        0
+      ]
+    },
+    "unchangedLegacyGating": [
+      8,
+      11
+    ],
+    "unchangedTerminalPair": {
+      "git": 17,
+      "writeTree": 1
+    },
+    "ratchetFeedbackTests": 24
+  },
+  "artifacts": {
+    "root": "/tmp/scry-service-diff-results",
+    "remoteBundleSha256": "31b575801ec2dee028d18b15915b65ac54530e74300a6bf13c6306736f0fc8db",
+    "remoteRootRemoved": true
+  },
+  "limits": [
+    "One configured remote, 5001 tracked files, four dirty paths, five samples per cohort; not a daily p95 or whole App speed claim",
+    "No L3, real Provider, installation, merge, push or release",
+    "mac2 npm ci ignored native build scripts; its SQLite degradation warnings do not prove native DB behavior; local Electron counter and real App checks were separate",
+    "Existing 1000-dirty-path and diff-size limits unchanged",
+    "Three macOS CPU instruction candidates remain missing; no gate promotion"
+  ]
+}
