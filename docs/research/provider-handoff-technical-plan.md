@@ -517,7 +517,7 @@
 - 第一次 Codex 调用真实成功后，临时验收脚本错误断言不存在的 `history.status`，首次失败保存在 `result-first.json`。按实际合同改为检查 `delivery.outcome === completed` 和 `history.done`；重启后只读核对原 run 的归档，再继续第二轮，**没有重发第一条消息**。
 - `/tmp/scry-real-codex-HQKSeT/probe.mjs --resume-after-fixture-error` 的功能检查 exit 0；这只证明接续/分支功能，不代表用量通过。
 - `python3 /tmp/scry-real-codex-HQKSeT/verify-native-usage.py` 以原生 `task_started.turn_id` 对齐 Scry `providerTurnId`，逐轮比较原生 JSONL 与只读 SQLite。每轮恰好一个 `token_count`；检查 exit 1，三轮中仅第二轮不一致，详细结果在 `usage-evidence.json`。
-- 用量缺陷定位到 `src/main/providers/codex.ts` 的首个累计通知处理：本次 resume 的首条通知同时包含 `total` 和 `last`，代码取 `total`。现有 cumulative-only resume 回归没有覆盖这种真实通知形态。当前 main 的该 adapter 与冻结构建对应源码无差异；本轮仅记录，不修改产品实现。
+- 当时初步将用量缺陷归因于首条 `total + last` 通知的取值。第 17 节的原生事件与回归更正了这一解释：恢复阶段的 `last` 本身也是上一轮历史用量，旧实现把这份快照计入新轮，而不是简单地直接选了 `total`。当时 main 的 adapter 与冻结构建源码无差异；本轮仅记录，没有修改产品实现。
 
 ### 证据、清理与剩余工作
 
@@ -525,4 +525,41 @@
 - Claude：`/tmp/scry-real-handoff-BNSSoA/`，保留发送前失败和 `claude-system-diagnostic.log`；后者包含本次 CLI PID 对应的系统策略记录。
 - Pi：`/tmp/scry-real-handoff-two-kO3zNr/`，保留能力失败。Rotom 自动初始化了临时 HOME 下的 Computer Use helper；它脱离父进程后另行按精确路径、PID 和启动时间登记并复验终止，记录在 `helper-cleanup.json`。最终定向进程检查无上述测试目录的存活进程；复制的认证文件及其有效/悬空链接均已移除，不把普通父进程退出冒充 helper 已退出。
 - 临时工作区没有初始化 recorder 配置，因此没有 `.scry/records`；本次不声称验证了 workspace recorder/CLI overview、完整菜单点击流程、跨 Provider 切换、共享副本回收或长历史/附件/命令/Steer。
-- **④仍未完成**。下一步由开发方修复并补充 Codex `total + last` resume 用量回归（本次仅获准验收，待用户确认修复）；Claude 需恢复可正常执行 `--version` 的受信入口，Rotom 需解决 RPC 启动时的 Computer Use 权限依赖。涉及本机安装或系统权限变更须另行确认；恢复后再续测三 Provider，不绕过系统安全策略。
+- **④仍未完成**。以上是修复前的验收状态。后续用户授权修复 Codex 与 Pi/Rotom，并明确不处理 Claude；修复与复验见第 17 节。涉及本机安装或系统权限变更仍须另行确认，不绕过系统安全策略。
+
+## 17. Codex 用量与 Rotom RPC 启动修复（2026-10-17）
+
+用户授权同时修改 Scry 与 Rotom 源码并隔离验证；**不处理 Claude、不安装、不推送、不授予 macOS 权限**。Scry 基于 `2adcfdb` 修改；Rotom 使用维护仓 `dev-agent` 的隔离分支 `fix/rpc-startup-ui`，提交 `42b68a1`，尚未合入原维护工作区（当前为 `pi-1.3-merge` 分支、`6719405`）。日常安装没有更新。
+
+### 修复与负对照
+
+- `src/main/providers/codex.ts`：`turn/start` 请求前的用量只建立累计基线；获得当前 turn ID 后，忽略其他 turn 的迟到通知。启动响应之前到达的新轮通知仍正常累计。真实 CLI `0.160.1` 的恢复通知携带旧 turn ID、`total` 和 `last`；这份旧快照不是新模型调用。
+- Codex 回归同时覆盖旧快照、启动响应前的新用量、迟到旧通知、多请求累计及重复通知去重。旧实现的有效负对照得到 `28144 / 45 / 25216`，正确值应为 `14125 / 31 / 13824`（输入 / 输出 / 缓存读取）；修复后通过。保留 `/tmp/scry-resume-usage-negative-final.log`。
+- `src/main/providers/pi.ts`：没有交互所有者的能力/会话查询显式发送 `extension_ui_response` 的 `cancelled: true`，不选择设置动作、不批准权限、不发送 prompt。旧实现对应负对照失败，见 `/tmp/scry-pi-startup-negative.log`。
+- Rotom 的 `packages/rotom-pi/packages/coding-agent/src/modes/rpc/rpc-mode.ts`：先连接 stdin，再初始化扩展；启动 UI 回执不等待初始化，普通命令仍等待。初始化失败时移除输入及信号监听。旧实现回归直接失败于 stdin reader 尚未连接，不依赖扩大超时。
+- Rotom 官方 `build:pi` 门禁加入启动 UI、prompt response 与 JSONL 回归；重新生成七个私有 Pi 归档。runtime lock 仅七个本地归档 integrity 改变，没有更新第三方依赖。
+
+### 实际验证
+
+| 项目 | 结果 | 证据 |
+|---|---|---|
+| Scry 定向回归 | 5 文件、204 项通过 | Codex、Pi、conversation fork、历史输入与接续身份；`/tmp/scry-provider-fix-focused.log` |
+| Scry 类型与构建 | 通过 | `npm run typecheck`、`npm run build`；`/tmp/scry-provider-fix-{typecheck,build}.log` |
+| Rotom RPC / 类型 / 格式 | 16 项通过；类型与 Biome 通过 | coding-agent 包内三组 RPC 测试；`/tmp/rotom-rpc-{focused-final,typecheck-final,lint}.log` |
+| Rotom 官方构建 | `build:pi`、`check:pi` 通过 | `/tmp/rotom-rpc-{build-final,check-final}.log` |
+| Codex 重启续聊及用量 | **通过** | 两轮同一原生 thread；原生 JSONL、archive、usage 日志和 SQLite 逐轮核对通过。新轮原生与账本均为 `14303 / 30 / 13824`，没有计入第一轮 `14009 / 26 / 11392` |
+| Pi 真实消息与原生分支 | **通过所列范围** | 隔离 Rotom Profile 完成一条真实消息，accepted + completed + committed archive；fork 返回不同原生 ID，同 command 返回同分支，源历史不变；没有再次发送分支消息 |
+| 性能工作量 | 38 unchanged、2 pass、3 missing，无 worse | timing lock 下 `performance:measure`；`/tmp/scry-provider-fix-performance/ratchet.md`。`highLoad: true`，不作毫秒改善结论 |
+
+Codex 证据位于 `/tmp/scry-provider-fixed-2HAmgY/`；`verify-native-usage.py` 与 `verify-archive-usage-log.py` 均 exit 0，两轮均匹配。archive/SQLite 比对输入、输出及缓存，usage 日志只含输入/输出；初次探索按 run 计所有日志行的断言不适用，因为其中另有独立性能样本，最终按记录类型区分。该次续聊原生事件还记录了旧 turn 的恢复快照，随后才是当前 turn 的用量通知。金额仍 unavailable，不按 0 计算。
+
+Pi 成功证据位于 `/tmp/scry-pi-fixed-YA0P17/`。两组真实测试使用同一 Scry main 产物 SHA256 `2111ae15497ae593ad9dbef53a90265408b7beedc7b4417f8be62384d45c2a59`。其后只修正 Rotom 测试类型并重建；最终源码摘要为 `007105d6ba6dc512a0d0a4a5bf95ede1b476dfc01dd3b05bcc787d912792ae08`，695 个运行时代码/数据文件与真实测试构建逐项 hash 一致，见 `/tmp/rotom-rpc-code-equivalence.json`。最终构建另以无凭据 RPC 验证 `get_state`、EOF 正常退出和已登记进程收敛，见 `/tmp/rotom-rpc-final-smoke-fQG6uw/result.json`；这项检查没有模型调用，也没有出现权限对话框。
+
+### 首次失败、清理与边界
+
+- 首次组合脚本没有处理挂起的 Pi 启动问题而超时；持久化回执明确为 `not_sent`。修正夹具后用新 command 继续，已成功的 Codex 首轮只读恢复，没有重发。第二次 Pi 输入已 accepted，但隔离环境漏带既有代理配置，结果为 WebSocket 连接失败；保留 `result-before-question-fix.json`、`result-pi-network-failure.json` 与对应日志。补齐原有代理环境后的 Pi 成功来自新的独立会话，不冒充原失败轮成功，也不代表双向接续通过。
+- 本轮新增 **4 次原生 prompt 尝试**：Codex 成功 2 次，Pi 成功 1 次、连接失败 1 次；另有一次启动阶段 `not_sent`。与第 16 节合计 7 次 prompt 尝试。失败尝试没有独立账单核对，不能宣称免费。
+- runtime 的一次全新 `npm ci` 在 600 秒内未完成，已确认进程退出，没有重试或放宽超时。实际隔离运行使用第三方 lock 对齐的已有依赖，并校验/解包七个新本地归档；这是依赖复用验证，**不是 consumer 全新安装通过**。记录保留在 `/tmp/rotom-rpc-fix-vPPzsx/rpc-local-materialization.json`。
+- 首轮测试类型检查发现新测试的类型错误，已修正；隔离 SDK 缺少 workspace 内嵌依赖造成的 OpenAI 类型错误，通过按一致 lock 复制对应依赖解决。一次 focused 命令在错误 cwd 执行、一次只读 smoke 在 EOF 后误用存活进程清理 helper，均保留首次日志并修正夹具，没有削弱断言或扩大超时。最后的类型、focused、构建和只读 smoke 均通过。
+- 两个测试 App、其已登记子进程及脱离父进程的临时 Computer Use helper 均已按身份关闭。复制的认证、悬空 auth 链接与只读 smoke 生成的空认证文件已移除，见 `/tmp/scry-provider-fix-credential-cleanup.json`。私有证据和 Rotom 隔离 worktree 保留。
+- 本次没有回写历史用量账本，没有安装或发布。尚未验证成功的 Codex↔Pi 双向回路、Pi 分支继续发送、完整菜单交互和 workspace recorder/CLI overview；**④仍不能标为全部完成**。下一步由用户确认是否将 Rotom 隔离修复合入原维护工作分支 `pi-1.3-merge`，开发方再执行；若继续整体验收，另确认后续真实调用范围，Claude 仍不在本轮修复范围内。

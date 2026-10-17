@@ -1816,6 +1816,66 @@ describe('Codex provider adapter', () => {
     })
   })
 
+  it('does not charge the historical usage snapshot delivered while resuming a thread', async () => {
+    const events: TraceEvent[] = []
+    let notify: ((method: string, params: unknown) => void) | undefined
+    const cumulative = (inputTokens: number, outputTokens: number, cachedInputTokens: number) => ({
+      inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens: 0,
+      totalTokens: inputTokens + outputTokens
+    })
+    const previous = cumulative(14_019, 14, 11_392)
+    const firstCall = cumulative(14_105, 26, 13_824)
+    appServer.onNotification.mockImplementation((listener: (method: string, params: unknown) => void) => {
+      notify = listener
+      return () => { notify = undefined }
+    })
+    appServer.request.mockImplementation(async (method: string) => {
+      if (method === 'thread/resume') {
+        // Codex 0.160.1 publishes persisted usage before this run requests a turn.
+        // It includes `last`, but that last API call belongs to the previous run.
+        notify?.('thread/tokenUsage/updated', {
+          threadId: 'resumed-thread', turnId: 'previous-turn',
+          tokenUsage: { total: previous, last: previous, modelContextWindow: 475_000 }
+        })
+        return { thread: { id: 'resumed-thread' }, model: 'gpt-test', modelProvider: 'openai' }
+      }
+      if (method === 'turn/start') {
+        // Current-turn notifications may arrive before the start acknowledgement.
+        notify?.('thread/tokenUsage/updated', {
+          threadId: 'resumed-thread', turnId: 'current-turn',
+          tokenUsage: { total: cumulative(28_124, 40, 25_216), last: firstCall, modelContextWindow: 475_000 }
+        })
+        return { turn: { id: 'current-turn' } }
+      }
+      return {}
+    })
+    const adapter = createCodexAdapter()
+    const handle = adapter.run({
+      runId: 'run-resumed-usage', prompt: 'continue', cwd: '/isolated-copy',
+      resume: 'resumed-thread', attachments: [], emit: (event) => events.push(event)
+    })
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+      stage: 'runtime:steer_capability', runtimeMetadata: expect.objectContaining({ turnId: 'current-turn' })
+    })))
+    // A delayed snapshot from the previous turn must not reset the current baseline.
+    notify?.('thread/tokenUsage/updated', {
+      threadId: 'resumed-thread', turnId: 'previous-turn', tokenUsage: { total: previous, last: previous }
+    })
+    const secondCall = {
+      threadId: 'resumed-thread', turnId: 'current-turn',
+      tokenUsage: { total: cumulative(28_144, 45, 25_216), last: cumulative(20, 5, 0), modelContextWindow: 475_000 }
+    }
+    notify?.('thread/tokenUsage/updated', secondCall)
+    notify?.('thread/tokenUsage/updated', secondCall)
+    notify?.('turn/completed', {
+      threadId: 'resumed-thread', turn: { id: 'current-turn', status: 'completed', error: null }
+    })
+    await handle.promise
+    const result = events.find((event) => event.kind === 'harness' && event.stage === 'result')
+    expect(result).toMatchObject({ tokensIn: 14_125, tokensOut: 31, cacheReadTokens: 13_824 })
+    expect(result?.modelUsage?.[0]).toMatchObject({ inputTokens: 14_125, outputTokens: 31, cacheReadTokens: 13_824 })
+  })
+
   it('uses the first cumulative-only resume update as a baseline instead of charging session history', async () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     appServer.onNotification.mockImplementation((listener) => {
