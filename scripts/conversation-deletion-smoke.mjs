@@ -22,19 +22,18 @@ export async function exerciseConversationDeletion({ cdp, evaluate, fixture, cli
     if(String(error).includes('运行或证据保存未收敛')) return false;
     throw error;
   })`), 'deletion runtime has really settled')
-  let page = await read(evaluate, id)
-  await evaluate(`window.scry.conversations.update(${json(id)},${page.summary.revision},{kind:'archive',archived:true})`)
+  const entry = `.sidebar [data-conversation-id=${json(id)}]`
+  await wait(() => evaluate(`Boolean(document.querySelector(${json(entry)}))`), 'live deletion target in sidebar')
+  await click(entry)
+  await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId===${json(id)}`), 'deletion target selected before archival')
+  await click('[aria-label="存档统一对话"]')
+  await wait(() => evaluate(`!document.querySelector(${json(entry)}) && Boolean(document.querySelector('[aria-label="删除统一对话"]'))`), 'archived target stays open but leaves the sidebar')
   const oldPreview = await evaluate(`window.scry.conversations.previewDeletion(${json(id)})`)
   assert.deepEqual(new Set(oldPreview.targets.map(target => target.providerId)), new Set(['claude', 'codex']))
   await evaluate(`window.scry.conversations.update(${json(id)},${oldPreview.revision},{kind:'rename',title:'Delete isolated copies'})`)
   assert.match(await evaluate(`window.scry.conversations.delete(${json(id)},${json(oldPreview.fingerprint)}).then(()=>'',error=>String(error))`), /删除范围已变化/)
   assert.equal(ledger(fixture, id).deletion, undefined)
 
-  const entry = `.sidebar [data-conversation-id=${json(id)}]`
-  await wait(() => evaluate(`Boolean(document.querySelector(${json(entry)}))`), 'archived deletion target in sidebar')
-  const disclosure = await evaluate(`(() => {const group=document.querySelector(${json(entry)}).closest('details');if(!group || group.open)return false;group.dataset.deletionTest='true';return true})()`)
-  if (disclosure) await click('[data-deletion-test] > summary')
-  await click(entry)
   await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId===${json(id)} && Boolean(document.querySelector('[aria-label="删除统一对话"]'))`), 'archived deletion view')
   const original = ledger(fixture, id)
   const archives = original.turns.map(turn => conversationFixtureArchivePath(fixture.userData, fixture.workspace, turn.archive.sessionId,
@@ -73,7 +72,7 @@ export async function exerciseConversationDeletion({ cdp, evaluate, fixture, cli
   await button('确认删除 Scry 副本')
   await wait(() => evaluate("document.querySelector('.unified-delete section')?.textContent.includes('未完整删除')"), 'real partial deletion is reported')
   await wait(() => evaluate("document.activeElement?.textContent === '关闭'"), 'partial receipt focuses its enabled close action')
-  page = await read(evaluate, id)
+  const page = await read(evaluate, id)
   assert.equal(page.summary.deletion.status, 'pending')
   assert.ok(page.summary.deletion.result.failed.some(failure => failure.store === 'frozen handoff bodies'))
   assert.deepEqual(page.turns, [], 'deleted bodies are unavailable, not replayed from a cache')

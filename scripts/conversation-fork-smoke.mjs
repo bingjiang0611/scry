@@ -22,10 +22,9 @@ export async function exerciseConversationFork({ cdp, evaluate, fixture, click, 
   })`), 'fork source runtime settled')
   const archive = async id => {
     await idle(id)
-    const page = await read(evaluate, id)
-    await evaluate(`window.scry.conversations.update(${json(id)},${page.summary.revision},{kind:'archive',archived:true})`)
     await pick(id)
-    await wait(() => evaluate('Boolean(document.querySelector(\'[aria-label="删除统一对话"]\'))'), 'fork deletion action available')
+    await click('[aria-label="存档统一对话"]')
+    await wait(() => evaluate(`!document.querySelector('.sidebar [data-conversation-id=${json(id)}]') && Boolean(document.querySelector('[aria-label="删除统一对话"]'))`), 'archived fork stays open for deletion but leaves the sidebar')
   }
   const remove = async () => {
     await wait(() => evaluate('document.querySelector(\'[aria-label="删除统一对话"]\')?.disabled===false'), 'loaded recovery action')
@@ -112,13 +111,18 @@ export async function exerciseConversationFork({ cdp, evaluate, fixture, click, 
   await capture('shared-copy-reclaim')
   await button('取消')
 
-  await archive(branchId)
+  // Archived entries intentionally have no sidebar recovery route. Keep the source
+  // open to exercise its reclaim UI, and remove the other owner via production IPC.
+  await idle(branchId)
+  const branchPage = await read(evaluate, branchId)
+  await evaluate(`window.scry.conversations.update(${json(branchId)},${branchPage.summary.revision},{kind:'archive',archived:true})`)
   const lastOwner = await evaluate(`window.scry.conversations.previewDeletion(${json(branchId)})`)
   assert.ok(lastOwner.targets.every(target => target.sharedWith.length === 0))
-  await remove()
+  const branchDeletion = await evaluate(`window.scry.conversations.delete(${json(branchId)},${json(lastOwner.fingerprint)})`)
+  assert.equal(branchDeletion.ok, true)
   assert.equal(ledger(fixture, branchId).deletion.status, 'complete')
   sourceArchives.forEach(path => assert.equal(existsSync(path), false, 'last explicit owner cleanup removes shared App archives'))
-  await pick(source.id)
+  assert.equal(await evaluate("document.querySelector('.unified-conversation')?.dataset.conversationId"), source.id)
   assert.match(await evaluate(`window.scry.conversations.delete(${json(source.id)},${json(retained.fingerprint)}).then(()=>'',error=>String(error))`), /删除范围已变化/)
   assert.equal(ledger(fixture, source.id).deletion.retainedCopies, true)
   const reclaim = await evaluate(`window.scry.conversations.previewDeletion(${json(source.id)})`)

@@ -65,3 +65,13 @@ npm run test:unit -- src/renderer/sidebar-activity.test.ts src/renderer/componen
 ## 下次使用
 
 用户要求状态列表动效时：先复用真实身份与状态投影，再实现同级 keyed 行的位移；检查可中断动画、焦点、按下期间点击对象、减少动态效果和列表上限。此次只确认需求，不升级为全局审美偏好，也不把夹具通过当作用户验收。
+
+## 门禁修复与隔离安装（2026-10-18）
+
+用户授权继续排查并安装。原工作区的历史预算 WIP 保持不动；从已提交的 `a54e07c` 创建隔离工作区 `/tmp/scry-sidebar-install-dOx1Jc/source`，使用已有 Node 22.23.1 / npm 10.9.8 与本机依赖，不将未提交的 main 改造混入安装产物。
+
+- 根因：`64955fa` 明确取消侧栏已存档对话入口，并已有对应 SSR 断言，但统一会话的三组 UI smoke 仍查找旧入口。干净隔离源码复现 `fork conversation in sidebar` 超时。
+- 改法：先打开真实会话，再通过原生 UI 存档；断言侧栏入口消失、当前视图仍支持恢复/删除。fork 的共享副本场景保持源视图打开，通过生产 IPC 清理另一个 owner，继续通过原生 UI 验证源视图的重新核对/回收；保留原有 fingerprint、归档字节、Provider 未执行、最后 owner 清理与回执断言。
+- 坐标输入：复用现有 `nativeUiPointer`，等待稳定布局并检查原生 pointerup 的可信事件与命中目标。不会重发未知点击，不扩大单用例期限。
+- 修复后统一会话完整 UI/IPC 通过：18 次仅测试 Provider 调用，2 次隔离 App 重启，证据 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-ZmCs5c/verification.json`。这些重启仅属于临时 fixture，不是用户正在运行的 App。
+- 干净版本 conversation-management 与 performance-measure 共 16 项通过；后者已有 `c13cd2d` 的 collector 按场景过滤修复，未修改性能 workload 或测试时限。原工作区的预算 WIP 仍交由其原任务维护，不声称已修完该改造。

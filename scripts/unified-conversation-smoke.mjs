@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
 import { exerciseConversationFork } from './conversation-fork-smoke.mjs'
+import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
 import { exercisePiAgentSwitch } from './conversation-agent-switch-smoke.mjs'
 import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
@@ -39,18 +40,13 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     if (await evaluate(`Boolean(document.querySelector(${json(selector)})?.closest('.conversation-options:not([open]) .unified-management'))`)) {
       await click('.conversation-options > summary')
     }
-    const point = await evaluate(`(() => {
-      const node = document.querySelector(${json(selector)});
-      if (!node || node.disabled) throw new Error('Missing/enabled UI target: ' + ${json(selector)});
-      node.scrollIntoView({block:'nearest'});
-      const rect = node.getBoundingClientRect();
-      if (!rect.width || !rect.height) throw new Error('Hidden UI target');
-      const x=rect.x+rect.width/2, y=rect.y+rect.height/2;
-      if (!node.contains(document.elementFromPoint(x,y))) throw new Error('UI target is occluded: '+${json(selector)});
-      return {x,y};
-    })()`)
+    assert.equal(await evaluate(`Boolean(document.querySelector(${json(selector)}) && !document.querySelector(${json(selector)}).disabled)`), true, `Missing/enabled UI target: ${selector}`)
+    const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, { timeoutMs: 20000, scroll: true, captureReceipt: true })`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+    await wait(() => evaluate('window.__nativeUiPointerReceipt'), 'native pointer receipt')
+    const receipt = await evaluate('window.__nativeUiPointerReceipt')
+    assert.equal(receipt.trusted && receipt.targetMatched, true, `Native click missed ${selector}: ${json(receipt)}`)
   }
   const button = async (label) => {
     const selector = await evaluate(`(() => {
