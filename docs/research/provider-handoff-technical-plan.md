@@ -649,4 +649,15 @@ App 私有/独立 CLI 保持 0.2.49，没有改动其分发面。两个升版提
 
 Scry 包移除文件名中的 `UNVERIFIED`，现为 `Scry-0.2.198-arm64-development.zip`，内容/哈希不变。`verification/` 保留确认前的 README、manifest、校验和及首次失败日志，并新增 `scry-post-confirmation-*.log/json`。定向进程与临时认证检查无残留；没有新增真实模型调用，日常磁盘 Scry 仍为 0.2.197，未覆盖或重启日常 App。两个准备分支及产物继续保留，未推送、发布或公证。
 
-本次“只准备安装包”的本机隔离验收已完成。日常配置/已有会话的跨版本升级，以及安装包内的真实账号双向聊天不在该范围；实际日常安装、其他机器验收或正式分发仍需独立授权。
+本次“只准备安装包”的本机隔离验收已完成。日常配置/已有会话的跨版本升级，以及安装包内的真实账号双向聊天不在该范围；当时尚未授权实际日常安装、其他机器验收或正式分发。后续本机安装授权与结果见第 20 节。
+
+## 20. 用户授权本机安装，保留运行中进程待用户重启（2026-10-18）
+
+用户明确要求“安装吧，我重启生效”。安装使用第 19 节的同一 zip/tgz，没有重新构建、重签、发布或推送，也没有停止/重启日常 App 或当前 Rotom 会话。
+
+- Scry：先从已验收 zip 解包并复核全部 456 项清单，再调用冻结源码的官方 `scripts/install-macos.mjs`/`installBundle` 事务安装到 `/Applications/Scry.app`。没有调用会重建产物的 npm wrapper，也没有手工覆盖 App。安装后全部 456 项内容、模式和符号链接与验收清单一致；版本为 **0.2.198**，私有 CLI 为 **0.2.49**，`codesign --verify --deep --strict` 通过，安装 journal/lock 已清除。官方安装器的 LaunchServices 注册、Spotlight 索引命令退出成功。
+- 安装前把既有 0.2.196 备份保留到 `/Applications/.Scry.app.backup-before-daily-install-sb3ij2xs`，避免安装器删除它；本次事务生成的 `/Applications/.Scry.app.backup` 为 0.2.197。安装后核对原 Scry pid 35636 的启动时间未变：新版本在磁盘，运行中进程没有被本轮重启。
+- Rotom：以官方 `scripts/install-release.sh` 安装已验收 tgz，使用隔离 npm config/cache、offline 和 ignore-scripts，不使用 `--force`。新版本位于 `~/.local/share/rotom/releases/0.1.26/node_modules/rotom`，Node 24 的公开 `rotom` 链接已切换到新 launcher，`rotom --version` 返回 **0.1.26**。逐项比对 tgz 的 **18885 个文件内容**全部一致；旧 0.1.25 目录仍保留，四个已记录关键文件 hash 未变，当前进程可以继续使用旧 runtime。
+- 同步维护分支的已验收版本元数据：Scry 的准备提交 `5657f63` cherry-pick 为 main 上的 `4982883`；Rotom 维护分支从 `42b68a1` fast-forward 至 `30d977f`。对应 package/lock 与冻结构建文件逐字节一致，没有新增 runtime 改动。
+
+持久证据位于产物目录的 `installation/`：官方安装日志、版本/签名结果、安装前状态和 `verification.json`；原始工作目录为 `/tmp/scry-provider-package-build-TUILX1/daily-install-sb3ij2xs/`。没有新增真实模型调用。新日常 App 的启动与已有配置/会话升级仍由用户手动重启后观察；本轮不冒充已完成重启后的真实业务验收。开发签名、未公证及跨机分发的限制不变。
