@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
+import { collectorFiles } from './performance-counters.mjs'
 import { compareObservations, filterObservations, parseArgs } from './performance-measure.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -26,6 +27,13 @@ describe('performance measurement tool', () => {
   it('filters observations without changing their measured values', () => {
     const report = { schema: 1 as const, revision: 'test', observations: [observation('ipc.messages', 2), { ...observation('ipc.bytes', 10), layer: 'io', unit: 'bytes' }] }
     expect(filterObservations(report, { scenario: 'trace.delivery', layer: 'ipc' }).observations).toEqual([report.observations[0]])
+  })
+
+  it('selects only collectors that declare the requested scenario', () => {
+    expect(collectorFiles('trace.delivery').map(file => file.split('/').at(-1))).toEqual(['trace-delivery.counters.test.ts'])
+    expect(collectorFiles('history.page').map(file => file.split('/').at(-1))).toEqual(['main-ipc.counters.test.ts'])
+    expect(collectorFiles('source-control.service.diff-validated').map(file => file.split('/').at(-1)))
+      .toEqual(['subprocesses.counters.test.ts'])
   })
 
   it('calculates integer deltas and percentages from conservative repeated values', () => {

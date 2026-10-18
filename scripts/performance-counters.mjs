@@ -59,13 +59,24 @@ function runCollectors(executable, files, extraArgs, env) {
   if (result.status !== 0) throw new Error(`Counter collectors failed with status ${result.status}`)
 }
 
+export function collectorFiles(filter, repository = root) {
+  return readdirSync(join(repository, 'scripts/performance-counters'))
+    .filter(file => file.endsWith('.counters.test.ts'))
+    .sort()
+    .map(file => `scripts/performance-counters/${file}`)
+    .filter(file => {
+      if (!filter || file.includes(filter) || filter.includes(file)) return true
+      const source = readFileSync(join(repository, file), 'utf8')
+      return source.includes(`'${filter}'`) || source.includes(`"${filter}"`)
+    })
+}
+
 function collect(output, filter) {
   const directory = mkdtempSync(join(tmpdir(), 'scry-counters-'))
   try {
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
     const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8' }).trim().length > 0
-    const files = readdirSync(join(root, 'scripts/performance-counters')).filter(file => file.endsWith('.counters.test.ts')).sort()
-      .map(file => `scripts/performance-counters/${file}`).filter(file => !filter || file.includes(filter) || filter.includes(file))
+    const files = collectorFiles(filter)
     if (files.length === 0) throw new Error(`No counter collector matches ${filter}`)
     const env = { ...process.env, SCRY_PERFORMANCE_COUNTERS_DIR: directory }
     const electron = electronBinary()

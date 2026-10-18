@@ -78,11 +78,11 @@ function profileEnvironment(profileDir) {
   return { ...process.env, NODE_OPTIONS: `${existing} --cpu-prof --cpu-prof-dir=${profileDir}`.trim() }
 }
 
-function collectOnce(repo, output, environment) {
+function collectOnce(repo, output, environment, scenario) {
   // macOS exposes temporary directories as /var while import.meta.url canonicalizes
   // them to /private/var. Pass the canonical script path so the collector's CLI guard runs.
   const script = realpathSync(join(repo, 'scripts/performance-counters.mjs'))
-  const result = spawnSync(process.execPath, [script, 'collect', output], {
+  const result = spawnSync(process.execPath, [script, 'collect', output, ...(scenario ? [scenario] : [])], {
     cwd: repo,
     env: environment,
     stdio: 'inherit'
@@ -91,7 +91,7 @@ function collectOnce(repo, output, environment) {
   if (result.status !== 0) fail(`Counter collection failed in ${repo} with status ${result.status}`)
 }
 
-export function collectReport(repo, repeats, { profileDir } = {}) {
+export function collectReport(repo, repeats, { profileDir, scenario } = {}) {
   const temporary = mkdtempSync(join(tmpdir(), 'scry-performance-collection-'))
   const reports = []
   try {
@@ -99,7 +99,7 @@ export function collectReport(repo, repeats, { profileDir } = {}) {
     const environment = profileDir ? profileEnvironment(profileDir) : process.env
     for (let index = 0; index < batches; index++) {
       const output = join(temporary, `collection-${index}.json`)
-      collectOnce(repo, output, environment)
+      collectOnce(repo, output, environment, scenario)
       reports.push(readJson(output))
     }
     return mergeReports(reports, repeats)
@@ -239,7 +239,7 @@ export function measure(options, candidate = root) {
   const outputDirectory = resolve(candidate, options.out ?? mkdtempSync(join(tmpdir(), 'scry-performance-measure-')))
   mkdirSync(outputDirectory, { recursive: true })
   const profileDirs = options.profile ? [join(outputDirectory, 'profile-candidate')] : []
-  const candidateReport = filterObservations(collectReport(candidate, options.repeats, options.profile ? { profileDir: profileDirs[0] } : {}), options)
+  const candidateReport = filterObservations(collectReport(candidate, options.repeats, { scenario: options.scenario, profileDir: profileDirs[0] }), options)
   writeFileSync(join(outputDirectory, 'candidate.json'), `${JSON.stringify(candidateReport, null, 2)}\n`)
   let baselineReport
   let comparisons
@@ -249,7 +249,7 @@ export function measure(options, candidate = root) {
     const state = createBaselineWorktree(candidate, options.compare)
     try {
       baselineProfile = options.profile ? join(outputDirectory, 'profile-baseline') : undefined
-      baselineReport = filterObservations(collectReport(state.worktree, options.repeats, baselineProfile ? { profileDir: baselineProfile } : {}), options)
+      baselineReport = filterObservations(collectReport(state.worktree, options.repeats, { scenario: options.scenario, profileDir: baselineProfile }), options)
       comparisons = compareObservations(baselineReport, candidateReport)
       writeFileSync(join(outputDirectory, 'baseline.json'), `${JSON.stringify(baselineReport, null, 2)}\n`)
       writeFileSync(join(outputDirectory, 'comparison.json'), `${JSON.stringify({ schema: 1, baseline: baselineReport.revision, candidate: candidateReport.revision, rows: comparisons }, null, 2)}\n`)
