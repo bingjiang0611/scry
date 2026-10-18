@@ -13,6 +13,9 @@ import { PairingTransport } from './pairing-transport'
 import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { listDesktopDirectories, selectDesktopDirectory } from './desktop-directory-picker'
+import { createDesktopHostReader } from './desktop-host-reader'
+import { upsertTraceArchiveTurn } from '../transcript-archive'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 
 const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
@@ -60,6 +63,43 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
 }
 
 describe('DesktopRemoteClient', () => {
+  it('reassembles bounded history chunks and rejects malformed or non-progressing pages', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'History', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const context = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'session' }
+      const history = { turns: [{ userText: 'prompt', items: [{ id: 'event', ts: '2026-10-14', runId: 'run', kind: 'model', stage: 'text', text: 'x'.repeat(DESKTOP_HISTORY_CHUNK_BYTES) }] }], hasOlder: true, before: 5, snapshot: 'stamp', source: 'trace_archive', status: 'available' }
+      const result = { kind: 'history', history }
+      const bytes = Buffer.from(JSON.stringify(result))
+      const first = { kind: 'history_chunk', id: randomUUID(), offset: 0, totalBytes: bytes.length, data: bytes.subarray(0, DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
+      const second = { ...first, offset: DESKTOP_HISTORY_CHUNK_BYTES, data: bytes.subarray(DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: second })
+      const loaded = await fixture.client.history(id, context, 7, 'stamp')
+      expect(loaded).toMatchObject(history)
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktop', query: { kind: 'history', context, before: 7, snapshot: 'stamp', byteChunks: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
+      // Hosts that do not know byteChunks still return their original envelope.
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: result })
+      await expect(fixture.client.history(id, context)).resolves.toMatchObject(history)
+      for (const invalid of [
+        { ...first, id: 'invalid' }, { ...first, totalBytes: DESKTOP_HISTORY_MAX_BYTES + 1 },
+        { ...first, totalBytes: 0 }, { ...first, offset: 1 },
+        { ...first, data: first.data.slice(1) }, { ...first, data: '!'.repeat(first.data.length) }
+      ]) {
+        fixture.tlsRequest.mockResolvedValueOnce({ desktop: invalid })
+        await expect(fixture.client.history(id, context)).rejects.toThrow('invalid_history_response')
+      }
+      for (const invalid of [first, { ...second, id: randomUUID() }, { ...second, totalBytes: bytes.length + 1 }, { ...second, data: '' }, result]) {
+        fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: invalid })
+        await expect(fixture.client.history(id, context)).rejects.toThrow('invalid_history_response')
+      }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { ...first, totalBytes: 1, data: Buffer.from('{').toString('base64') } })
+      await expect(fixture.client.history(id, context)).rejects.toThrow('invalid_history_response')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('validates bounded directory pages and forwards explicit selection without a run intent', async () => {
     const fixture = await setup()
     try {
@@ -427,11 +467,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
       listProviders: () => [{ id: 'claude', label: 'Claude', available: true }],
       listSessions: () => [{ sessionId: 'session-real', externalSessionId: 'session-real', providerId: 'claude', cwd: '/workspace', label: 'real', ts: Date.now() }],
       sessionCatalogRevision: () => 'revision-real',
-      readDesktop: async (query) => query.kind === 'info'
-        ? { kind: 'info', protocol: 1, hostId: identity.hostId, execution: 'canonical' }
-        : query.kind === 'history'
-          ? { kind: 'history', history: { turns: [], hasOlder: false, source: 'trace_archive', status: 'available' } }
-          : { kind: 'trace', run: null }
+      readDesktop: createDesktopHostReader({ userDataDir: directory, hostId: () => identity.hostId, authorizeWorkspace: cwd => cwd, getRun: () => null })
     })
     const server = await identity.issueHostServer()
     const pairingTransport = new PairingTransport({ authority: binding.controller.authority, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM })
@@ -474,6 +510,21 @@ describe('DesktopRemoteClient over real host TLS', () => {
       await expect(client.catalog(pending.connection.id)).resolves.toMatchObject({ projects: catalog.projects })
       expect(wire.filter((request) => (request as { operation?: string }).operation?.startsWith('pair.'))).toHaveLength(pairingRequests)
       await expect(client.history(pending.connection.id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' })).resolves.toMatchObject({ turns: [] })
+      if (!captureFailure) {
+        const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
+        const text = '中文🙂\"\n'.repeat(400_000)
+        for (let i = 0; i < 3; i++) expect(upsertTraceArchiveTurn({
+          cwd: directory, userDataDir: directory, sessionId: context.externalSessionId, providerId: 'pi',
+          turn: { runId: `history-${i}`, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
+        })).toBe(true)
+        const history = await client.history(pending.connection.id, context)
+        expect(history.turns.map(turn => turn.userText)).toEqual(['prompt 1', 'prompt 2'])
+        expect(history.turns[1].items[0].text).toBe(text)
+        expect(history.hasOlder).toBe(true)
+        const older = await client.history(pending.connection.id, context, history.before, history.snapshot)
+        expect(older.turns.map(turn => turn.userText)).toEqual(['prompt 0'])
+        expect(older.hasOlder).toBe(false)
+      }
       await expect(client.trace(pending.connection.id, { cwd: '/workspace', providerId: 'claude' }, 'run-real-1')).resolves.toBeNull()
       expect(wire).toContainEqual(expect.objectContaining({ op: 'desktop', query: expect.objectContaining({ kind: 'trace', runId: 'run-real-1' }) }))
       const unknownIntent = await client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'real wire' })

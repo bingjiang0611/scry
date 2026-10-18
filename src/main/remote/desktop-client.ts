@@ -4,6 +4,7 @@ import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
@@ -370,7 +371,27 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
 
   async history(connectionIdValue: string, value: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory> {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 0) || snapshot !== undefined && !text(snapshot, 256)) fail('invalid_history_cursor')
-    const result = await this.#desktop(connectionIdValue, { kind: 'history', context: context(value), ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) })
+    const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', context: context(value), byteChunks: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
+    let result = await this.#desktop(connectionIdValue, query)
+    if (result.kind === 'history_chunk') {
+      const { id, totalBytes } = result
+      if (!uuid(id) || !Number.isSafeInteger(totalBytes) || Number(totalBytes) <= 0 || Number(totalBytes) > DESKTOP_HISTORY_MAX_BYTES) fail('invalid_history_response')
+      const bytes = Buffer.alloc(totalBytes as number)
+      let offset = 0
+      while (offset < bytes.length) {
+        const length = Math.min(DESKTOP_HISTORY_CHUNK_BYTES, bytes.length - offset)
+        if (result.kind !== 'history_chunk' || result.id !== id || result.totalBytes !== totalBytes || result.offset !== offset || typeof result.data !== 'string' || result.data.length !== 4 * Math.ceil(length / 3)) fail('invalid_history_response')
+        const chunk = Buffer.from(result.data, 'base64')
+        if (chunk.length !== length || chunk.toString('base64') !== result.data) fail('invalid_history_response')
+        chunk.copy(bytes, offset)
+        offset += length
+        if (offset < bytes.length) result = await this.#desktop(connectionIdValue, { ...query, chunk: { id, offset } })
+      }
+      let decoded: unknown
+      try { decoded = JSON.parse(bytes.toString('utf8')) } catch { fail('invalid_history_response') }
+      if (!record(decoded)) fail('invalid_history_response')
+      result = decoded
+    }
     const raw = result.history
     if (result.kind !== 'history' || !record(raw) || !Array.isArray(raw.turns) || typeof raw.hasOlder !== 'boolean' || raw.source !== 'trace_archive' || !['available', 'unavailable'].includes(String(raw.status))) fail('invalid_history_response')
     if (raw.turns.length > MAX_ITEMS) fail('history_too_large')
@@ -613,7 +634,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   async #requestForConnection(id: string, request: unknown): Promise<Record<string, unknown>> { const state = await this.#state(); const item = this.#connection(state, id); const active = this.#active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.#request(active.tunnel.runPath, item, request) as Record<string, unknown> }
   async #desktop(id: string, query: DesktopHostRead): Promise<Record<string, unknown>> {
     const response = await this.#requestForConnection(id, { op: 'desktop', query })
-    if (!record(response) || !record(response.desktop) || !['info', 'history', 'trace'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
+    if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
     return response.desktop
   }
   async #catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.#requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }
