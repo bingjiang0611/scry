@@ -265,6 +265,7 @@ import {
   canRestartInterruptedLocalOnlySession,
   expectedRestartSourceMatches,
   expectedSessionMatches,
+  runConflictsWithSession,
   waitForCompletedRuns
 } from './context-admission'
 import {
@@ -2933,10 +2934,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         nextAction: '等待删除完成后新建会话或重新选择历史会话'
       })
     }
-    const conflictingRuns = contextRuns.filter((run) => {
-      const sessionId = run.externalSessionId ?? run.sessionId
-      return resume ? sessionId === resume : !sessionId
-    })
+    const conflictingRuns = contextRuns.filter((run) => runConflictsWithSession(run, resume, expectedSessionId))
     const conflictingEntries = conflictingRuns.flatMap((run) => {
       const entry = runs.get(run.runId)
       return entry ? [{ done: run.done, settled: entry.control.settled }] : []
@@ -2968,10 +2966,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         nextAction: '等待删除完成后新建会话或重新选择历史会话'
       })
     }
-    if (latestContextRuns.some((run) => {
-      const sessionId = run.externalSessionId ?? run.sessionId
-      return resume ? sessionId === resume : !sessionId
-    })) {
+    if (latestContextRuns.some((run) => runConflictsWithSession(run, resume, expectedSessionId))) {
       throw new AgentRuntimeError('会话切换后目标会话仍有一轮正在收口', {
         provider: runtimeProvider,
         stage: 'frontdoor',
@@ -3215,10 +3210,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       nextAction: '等待删除完成后新建会话或重新选择历史会话'
     })
   }
-  if (committedRuns.some((run) => {
-    const sessionId = run.externalSessionId ?? run.sessionId
-    return committedResume ? sessionId === committedResume : !sessionId
-  })) {
+  if (committedRuns.some((run) => runConflictsWithSession(run, committedResume, committedExpectedSessionId))) {
     throw new AgentRuntimeError('同一会话在发送前进入运行态，已拒绝重复启动', {
       provider: runtimeProvider,
       stage: 'frontdoor',

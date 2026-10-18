@@ -1,7 +1,25 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ContextAdmission, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, waitForCompletedRuns } from './context-admission'
+import { ContextAdmission, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, runConflictsWithSession, waitForCompletedRuns } from './context-admission'
 
 describe('context admission', () => {
+  it('admits an explicit new session while another first turn has no Provider session ID', async () => {
+    const pending = { runId: 'run-first', done: false, settled: Promise.resolve() }
+    const conflicts = [pending].filter((run) => runConflictsWithSession(run, undefined, null))
+    await expect(waitForCompletedRuns(conflicts)).resolves.toBe(true)
+    const sameSession = [pending].filter((run) => runConflictsWithSession(run, undefined, 'run-first'))
+    await expect(waitForCompletedRuns(sameSession)).resolves.toBe(false)
+    expect(runConflictsWithSession(pending, undefined, 'run-first')).toBe(true)
+    expect(runConflictsWithSession(pending, undefined, 'run-other')).toBe(false)
+    expect(runConflictsWithSession(pending, undefined, undefined)).toBe(true)
+  })
+
+  it('still blocks the same native session and admits independent native sessions', () => {
+    const run = { runId: 'run-first', sessionId: 'session-first', externalSessionId: 'native-first' }
+    expect(runConflictsWithSession(run, 'native-first', 'native-first')).toBe(true)
+    expect(runConflictsWithSession(run, 'native-other', 'native-other')).toBe(false)
+    expect(runConflictsWithSession(run, undefined, null)).toBe(false)
+  })
+
   it('serializes the same provider workspace while allowing another context through', async () => {
     const admission = new ContextAdmission()
     let releaseFirst!: () => void
