@@ -1273,6 +1273,25 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
 })
 
 describe('Sidebar 项目分组', () => {
+  it('项目侧栏不显示已存档对话，只有存档时显示空状态', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[{
+          cwd: '/repo', name: 'repo', mtime: 1, sessions: [],
+          conversations: [{ id: 'archived', cwd: '/repo', title: '已归档的标题', revision: 1, turnCount: 1, archivedAt: 1, pinnedAt: 1 }]
+        }]}
+        activeCwd={null}
+        onNewChat={() => {}}
+        onPick={() => {}}
+        onTogglePin={() => {}}
+        onArchive={() => {}}
+      />
+    )
+    expect(html).not.toContain('已存档对话')
+    expect(html).not.toContain('已归档的标题')
+    expect(html).toContain('暂无会话')
+  })
+
   it('Skill 和 MCP 与分析同组展示，入口不读取数量或连接状态', () => {
     const html = renderToStaticMarkup(
       <Sidebar

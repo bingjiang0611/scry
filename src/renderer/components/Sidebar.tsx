@@ -176,8 +176,8 @@ export const Sidebar = memo(function Sidebar({
     const filtered = projects
       .map((project) => ({
         ...project,
-        totalSessions: project.sessions.length + (project.conversations?.length ?? 0),
-        conversations: (project.conversations ?? []).filter((conversation) => (!conversation.pinnedAt || conversation.archivedAt) && (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql))),
+        totalSessions: project.sessions.length + (project.conversations?.filter(conversation => !conversation.archivedAt).length ?? 0),
+        conversations: (project.conversations ?? []).filter((conversation) => !conversation.pinnedAt && !conversation.archivedAt && (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql))),
         projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
         sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
       }))
@@ -381,11 +381,7 @@ export const Sidebar = memo(function Sidebar({
               </div>
               {open && (
                 <div className="sb-sess-list">
-                  {p.conversations.filter(item => !item.archivedAt).sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
-                  {p.conversations.some(item => item.archivedAt) && <details className="unified-archived">
-                    <summary>已存档对话</summary>
-                    {p.conversations.filter(item => item.archivedAt).map(renderConversation)}
-                  </details>}
+                  {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
                   {p.sessions.map((s) => (
                     <SessionRow
                       key={sessionKey(p.cwd, s)}
