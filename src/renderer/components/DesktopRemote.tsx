@@ -1,5 +1,5 @@
 // Remote building blocks shared by the hosts page and remote conversations.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import type { TraceEvent } from '@shared/trace'
 import type { Turn } from '../format'
 import type {
@@ -10,7 +10,10 @@ import type {
   RemoteControlOption,
   RemoteProviderRef
 } from '@shared/desktop-remote'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { WorkspacePanel, type ReadOnlyWorkspaceSource } from './WorkspacePanel'
+import { Icon } from './primitives/Icon'
+import { ModalFrame } from './Modals'
 import './desktop-remote.css'
 
 export function desktopRemoteStateKey(connectionId: string, context: DesktopRemoteContext): string {
@@ -88,21 +91,19 @@ export function ClientPairForm({ onPaired }: { onPaired: (id: string) => Promise
   }
   return (
     <section className="desktop-remote__card">
-      <h2>连接另一台 Scry 桌面</h2>
-      <p className="desktop-remote__muted">在远端主机的 Scry 设置中生成 SSH 邀请，再粘贴完整邀请字符串。连接不会替换本机权限或 API。</p>
       <div className="desktop-remote__form-grid">
-        <label>显示名称<input value={label} onChange={(event) => setLabel(event.target.value)} autoComplete="off" /></label>
-        <label>SSH 用户名<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label>
-        <label>主机名<input value={hostname} onChange={(event) => setHostname(event.target.value)} autoComplete="off" required /></label>
-        <label>端口<input value={port} onChange={(event) => setPort(event.target.value)} inputMode="numeric" required /></label>
+        <label>{copy.displayName}<input value={label} onChange={(event) => setLabel(event.target.value)} autoComplete="off" /></label>
+        <label>{copy.sshUsername}<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label>
+        <label>{copy.hostname}<input value={hostname} onChange={(event) => setHostname(event.target.value)} autoComplete="off" required /></label>
+        <label>{copy.sshPort}<input value={port} onChange={(event) => setPort(event.target.value)} inputMode="numeric" required /></label>
       </div>
-      <label>邀请字符串<textarea value={invitation} onChange={(event) => setInvitation(event.target.value)} rows={4} spellCheck={false} required /></label>
+      <label>{copy.invitationString}<textarea value={invitation} onChange={(event) => setInvitation(event.target.value)} rows={4} spellCheck={false} required /></label>
       {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-      {!pairing ? <button type="button" onClick={() => void pair()} disabled={busy || !username.trim() || !hostname.trim() || !invitation.trim()}>配对</button> : (
+      {!pairing ? <button type="button" onClick={() => void pair()} disabled={busy || !username.trim() || !hostname.trim() || !invitation.trim()}>{copy.pair}</button> : (
         <div className="desktop-remote__pairing-result">
-          <p><b>设备指纹</b></p><code>{pairing.publicKeySHA256}</code>
-          <p>{pairing.state === 'pending' ? '请在远端 Scry 上确认此设备，然后点击完成。' : '设备已配对。'}</p>
-          {pairing.state === 'pending' && <button type="button" onClick={() => void finish()} disabled={busy}>完成配对</button>}
+          <p><b>{copy.deviceFingerprint}</b></p><code>{pairing.publicKeySHA256}</code>
+          <p>{pairing.state === 'pending' ? copy.awaitingHostApproval : copy.devicePaired}</p>
+          {pairing.state === 'pending' && <button type="button" onClick={() => void finish()} disabled={busy}>{copy.finishPairing}</button>}
         </div>
       )}
     </section>
@@ -130,6 +131,7 @@ export function RemoteFiles({
 }
 
 export function RemoteHostPanel(): JSX.Element {
+  const titleId = useId()
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [invite, setInvite] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -138,18 +140,28 @@ export function RemoteHostPanel(): JSX.Element {
     try {
       const status = await window.scry.remoteDesktopHostStatus()
       setEnabled(status.enabled)
-      if (!status.enabled && status.reason) setError(status.reason)
-    } catch (reason) { setError(errorText(reason)) }
+      setError(!status.enabled && status.reason ? status.reason : null)
+    } catch (reason) { setEnabled(null); setError(errorText(reason)) }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
   const run = async (action: () => Promise<void>): Promise<void> => { setBusy(true); setError(null); try { await action(); await refresh() } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) } }
-  if (enabled === null) return error ? <p role="alert">{error}</p> : <p>加载远程桌面主机状态…</p>
-  return <section className="desktop-remote__host">
-    <div className="desktop-remote__section-head"><b>通过 SSH 访问本机</b><span>{enabled ? '已启用' : '未启用'}</span></div>
-    <p className="desktop-remote__muted">SSH 认证不能替代本机配对批准。生成新邀请会使旧的未完成邀请失效。</p>
+  return <article className="remote-access-card desktop-remote__host">
+    <div className="remote-access-card-head">
+      <span className="remote-access-icon"><Icon name="server" /></span>
+      <b>{copy.desktop}</b>
+      <span className={`remote-access-status ${enabled ? 'is-ready' : ''}`}>{enabled === null ? error ? copy.status.unknown : copy.loadingDesktopStatus : enabled ? copy.enabled : copy.disabled}</span>
+    </div>
     {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-    <button type="button" onClick={() => void run(async () => setInvite(await window.scry.remoteDesktopHostInvite()))} disabled={busy}>{enabled ? '生成 SSH 邀请' : '启用并生成 SSH 邀请'}</button>
-    {enabled && invite && <div className="desktop-remote__invite"><code>{invite}</code><p>邀请包含短时 secret；请仅交给预期的 Scry 桌面客户端。</p></div>}
-    {enabled && <button type="button" onClick={() => void run(async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) })} disabled={busy}>关闭桌面远程主机</button>}
-  </section>
+    {enabled !== null && <div className="remote-access-actions">
+      <button type="button" className="hosts-button" onClick={() => void run(async () => setInvite(await window.scry.remoteDesktopHostInvite()))} disabled={busy}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</button>
+      {enabled && <button type="button" className="hosts-button is-quiet" onClick={() => void run(async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) })} disabled={busy}>{copy.disableDesktopAccess}</button>}
+    </div>}
+    {enabled && invite && <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setInvite(null)}>
+      <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><button type="button" className="modal-x" aria-label={copy.closeInvite} onClick={() => setInvite(null)}><Icon name="x" /></button></div>
+      <div className="modal-body"><p className="hosts-muted">{copy.sshInviteEffect}</p><div className="desktop-remote__invite"><code>{invite}</code></div>
+        {error && <p className="desktop-remote__error" role="alert">{error}</p>}
+        <div className="hosts-address-actions"><button type="button" className="hosts-button" onClick={() => setInvite(null)}>{copy.close}</button><button type="button" className="hosts-button is-primary" onClick={() => { void window.scry.copyText(invite).catch(reason => setError(errorText(reason))) }}><Icon name="copy" />{copy.copyInvite}</button></div>
+      </div>
+    </ModalFrame>}
+  </article>
 }

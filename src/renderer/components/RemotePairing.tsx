@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import type { RemotePairingCode } from '../../shared/remote'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { projectRemote, confirmArguments, type PendingRow, type RemotePairingViewModel } from '../remote-pairing'
 import { RemoteHostPanel } from './DesktopRemote'
+import { RemoteConnectionsSettings } from './HostsView'
+import { Icon } from './primitives/Icon'
+import { ModalFrame } from './Modals'
 
 // Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
-// data: URL, no innerHTML). The QR encodes only what the code already contains
-// (relay coords + hostId + one-time secret + public anchor cert); it is not a
-// second source of truth. If encoding fails we surface it and the raw code stays
-// visible below as a fallback.
+// data: URL, no innerHTML). The QR encodes only what the code already contains.
 function DeviceCodeQR({ code }: { code: string }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [failed, setFailed] = useState(false)
@@ -23,35 +24,37 @@ function DeviceCodeQR({ code }: { code: string }): JSX.Element {
   }, [code])
   return (
     <div className="remote-pairing__qr">
-      <canvas ref={canvasRef} width={240} height={240} aria-label="配对二维码" />
-      {failed && <p className="remote-pairing__error" role="alert">二维码生成失败，请使用下方文本码。</p>}
+      <canvas ref={canvasRef} width={240} height={240} aria-label={copy.pairingQr} />
+      {failed && <p className="remote-pairing__error" role="alert">{copy.qrFailed}</p>}
     </div>
   )
 }
 
-// Trusted-LOCAL remote-access pairing screen (Mac's own renderer only). It drives
-// the narrow window.scry.remote* bridge and renders the honest projection: it
-// never shows a device as paired until the host confirms a grant, always shows
-// the fingerprint the operator must compare against the phone, and surfaces
-// disabled/dormant as real states and lists only currently paired devices. It
-// holds no secret beyond the
-// short-lived pairing code the host returns for display. Only the inbound
-// direction lives here; hosts this Mac connects to are managed on the hosts page.
-export function RemotePairing({ onOpenHosts }: { onOpenHosts?: () => void } = {}): JSX.Element {
+// Trusted-local remote access settings. Outbound hosts and inbound grants share
+// one tab but remain separate sections because they have different authority.
+export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }): JSX.Element {
+  const titleId = useId()
   const [vm, setVm] = useState<RemotePairingViewModel | null>(null)
   const [code, setCode] = useState<RemotePairingCode | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [readError, setReadError] = useState<string | null>(null)
+  const reading = useRef(false)
 
   const refresh = useCallback(async () => {
-    try { setVm(projectRemote(await window.scry.remoteStatus())) }
-    catch (e) { setError(String((e as Error)?.message ?? e)) }
+    if (reading.current) return
+    reading.current = true
+    try {
+      setVm(projectRemote(await window.scry.remoteStatus()))
+      setReadError(null)
+    } catch (reason) {
+      setVm(null)
+      setReadError(String((reason as Error)?.message ?? reason))
+    } finally { reading.current = false }
   }, [])
 
   useEffect(() => {
     void refresh()
-    // Poll while enabled so a device that just proved possession appears without
-    // a manual refresh. This is display polling only; it changes no host state.
     const timer = setInterval(() => { void refresh() }, 2000)
     return () => clearInterval(timer)
   }, [refresh])
@@ -59,7 +62,7 @@ export function RemotePairing({ onOpenHosts }: { onOpenHosts?: () => void } = {}
   const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true); setError(null)
     try { await action(); await refresh() }
-    catch (e) { setError(String((e as Error)?.message ?? e)) }
+    catch (reason) { setError(String((reason as Error)?.message ?? reason)) }
     finally { setBusy(false) }
   }, [refresh])
 
@@ -72,91 +75,90 @@ export function RemotePairing({ onOpenHosts }: { onOpenHosts?: () => void } = {}
   const cancel = useCallback((pairingId: string) => run(() => window.scry.remoteCancelPairing(pairingId)), [run])
   const revoke = useCallback((deviceId: string) => run(() => window.scry.remoteRevokeDevice(deviceId)), [run])
 
-  const clientHosts = onOpenHosts ? <section className="remote-client-settings" aria-label="我连接的主机">
-    <h3>我连接的主机</h3>
-    <p>添加、连接和移除其他电脑，在侧栏的“主机”页完成。</p>
-    <div className="remote-pairing__actions"><button type="button" onClick={onOpenHosts}>打开主机页</button></div>
-  </section> : null
-  if (vm === null) return <section className="remote-pairing">{clientHosts}<h3>允许设备访问本机</h3><p>{error || '加载中…'}</p></section>
-  if (vm.kind === 'disabled') {
-    return (
-      <section className="remote-pairing">
-        <h2>远程访问</h2>
-        {clientHosts}
-        <h3>允许设备访问本机</h3>
-        <p className="remote-pairing__disabled">手机中继远程访问未启用。桌面 SSH 远程仍可单独使用。</p>
-        <RemoteHostPanel />
-      </section>
-    )
-  }
-
   return (
     <section className="remote-pairing">
-      <h2>远程访问</h2>
-      {clientHosts}
-      <h3>允许设备访问本机</h3>
-      <p className={vm.relayReady ? 'remote-pairing__relay' : 'remote-pairing__relay remote-pairing__relay--dormant'}>{vm.relayHint}</p>
-      <RemoteHostPanel />
-      {error && <p className="remote-pairing__error" role="alert">{error}</p>}
-
-      <div className="remote-pairing__actions">
-        <button type="button" onClick={beginPairing} disabled={busy}>生成配对码</button>
-      </div>
-      {code && (
-        <div className="remote-pairing__code">
-          {code.deviceCode ? (
-            <>
-              <p>用 Scry 手机 App 扫描此二维码（约 2 分钟内有效）：</p>
-              <DeviceCodeQR code={code.deviceCode} />
-              <details className="remote-pairing__codetext">
-                <summary>无法扫描？展开文本码</summary>
-                <code className="remote-pairing__devicecode">{code.deviceCode}</code>
-              </details>
-            </>
-          ) : (
-            // No relay dialed yet: there is nothing for the phone to reach, so we
-            // only show the one-time secret and say so plainly rather than
-            // implying the device can connect.
-            <>
-              <p>尚未连接中继，手机暂时无法接入。一次性配对口令（约 2 分钟内有效）：</p>
-              <code>{code.secret}</code>
-            </>
-          )}
-          <p className="remote-pairing__anchor">主机指纹 {code.anchorSHA256.slice(0, 16).toUpperCase()}…</p>
+      <RemoteConnectionsSettings onNewSession={onNewSession} />
+      <section className="remote-access-section remote-access-inbound" aria-label={copy.inboundTitle}>
+        <h3>{copy.inboundTitle}</h3>
+        <div className="remote-access-grid">
+          <RemoteHostPanel />
+          <article className="remote-access-card">
+            <div className="remote-access-card-head">
+              <span className="remote-access-icon"><Icon name="laptop" /></span>
+              <b>{copy.phone}</b>
+              <span className={`remote-access-status ${vm?.kind === 'enabled' && vm.relayReady ? 'is-ready' : vm?.kind === 'enabled' ? 'is-dormant' : ''}`}>
+                {vm === null ? readError ? copy.status.unknown : copy.loadingHosts : vm.kind === 'disabled' ? copy.disabled : vm.relayReady ? copy.relayOnline : copy.relayDormant}
+              </span>
+            </div>
+            {vm?.kind === 'disabled' && <p className="remote-access-card-note">{copy.phoneDisabled}</p>}
+            {vm?.kind === 'enabled' && !vm.relayReady && <p className="remote-access-card-note">{copy.relayDormantEffect}</p>}
+            {vm?.kind === 'enabled' && (
+              <div className="remote-access-actions">
+                <button type="button" className="hosts-button" onClick={beginPairing} disabled={busy}>{copy.generatePairingCode}</button>
+              </div>
+            )}
+            {code && (
+              <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setCode(null)}>
+                <div className="modal-head"><b id={titleId}>{copy.pairPhone}</b><button type="button" className="modal-x" aria-label={copy.closePairing} onClick={() => setCode(null)}><Icon name="x" /></button></div>
+                <div className="modal-body remote-pairing__code">
+                {code.deviceCode ? (
+                  <>
+                    <p>{copy.scanQr}</p>
+                    <DeviceCodeQR code={code.deviceCode} />
+                    <details className="remote-pairing__codetext">
+                      <summary>{copy.showTextCode}</summary>
+                      <code className="remote-pairing__devicecode">{code.deviceCode}</code>
+                    </details>
+                  </>
+                ) : (
+                  <>
+                    <p>{copy.relayUnavailableSecret}</p>
+                    <code>{code.secret}</code>
+                  </>
+                )}
+                <p className="remote-pairing__anchor">{copy.hostFingerprint} {code.anchorSHA256.slice(0, 16).toUpperCase()}…</p>
+                <p className="hosts-muted">{copy.pairingFingerprintEffect}</p>
+                </div>
+              </ModalFrame>
+            )}
+          </article>
         </div>
-      )}
+        {(readError || error) && <p className="remote-pairing__error" role="alert">{readError || error}</p>}
 
-      <h3>等待确认的设备</h3>
-      {vm.pending.length === 0 ? <p className="remote-pairing__empty">暂无</p> : (
-        <ul className="remote-pairing__pending">
-          {vm.pending.map((row) => (
-            <li key={row.pairingId}>
-              <span className="remote-pairing__label">{row.label}</span>
-              <span className="remote-pairing__status">{row.statusText}</span>
-              {row.confirmable && row.fingerprintShort && (
-                <span className="remote-pairing__fp">指纹 {row.fingerprintShort}…（请与连接设备上显示的一致）</span>
-              )}
-              {row.confirmable
-                ? <button type="button" onClick={() => confirm(row)} disabled={busy}>确认</button>
-                : null}
-              <button type="button" onClick={() => cancel(row.pairingId)} disabled={busy}>取消</button>
-            </li>
-          ))}
-        </ul>
-      )}
+        {vm?.kind === 'enabled' && vm.pending.length > 0 && (
+          <section className="remote-device-section">
+            <h4>{copy.pendingDevices}</h4>
+            <ul className="remote-pairing__pending">
+              {vm.pending.map((row) => (
+                <li key={row.pairingId}>
+                  <span className="remote-pairing__label">{row.label}</span>
+                  <span className="remote-pairing__status">{row.statusText}</span>
+                  {row.confirmable && row.fingerprintShort && (
+                    <span className="remote-pairing__fp">{copy.pendingFingerprint(row.fingerprintShort)}</span>
+                  )}
+                  {row.confirmable && <button type="button" onClick={() => confirm(row)} disabled={busy}>{copy.confirm}</button>}
+                  <button type="button" onClick={() => cancel(row.pairingId)} disabled={busy}>{copy.cancel}</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      <h3>已授权访问本机</h3>
-      {vm.devices.length === 0 ? <p className="remote-pairing__empty">暂无</p> : (
-        <ul className="remote-pairing__devices">
-          {vm.devices.map((d) => (
-            <li key={d.deviceId}>
-              <span className="remote-pairing__label">{d.label}</span>
-              <span className="remote-pairing__status">{d.statusText}</span>
-              <button type="button" onClick={() => revoke(d.deviceId)} disabled={busy}>吊销</button>
-            </li>
-          ))}
-        </ul>
-      )}
+        {vm?.kind === 'enabled' && <section className="remote-device-section">
+          <h4>{copy.authorizedDevices}</h4>
+          {vm.devices.length === 0 ? <p className="remote-pairing__empty">{copy.noAuthorizedDevices}</p> : (
+            <ul className="remote-pairing__devices">
+              {vm.devices.map((device) => (
+                <li key={device.deviceId}>
+                  <span className="remote-access-icon"><Icon name="laptop" /></span>
+                  <span className="remote-pairing__label">{device.label}</span>
+                  <button type="button" onClick={() => revoke(device.deviceId)} disabled={busy}>{copy.revoke}</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>}
+      </section>
     </section>
   )
 }

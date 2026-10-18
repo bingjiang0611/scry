@@ -128,8 +128,3 @@
 .sb-host-tag[data-state='disconnected'],
 .sb-host-tag[data-state='pairing'],
 .sb-host-tag[data-state='unknown'] { border-color: var(--border3); color: var(--dim2); }
-.sb-nav-count { margin-left: auto; color: var(--dim2); font-size: 11px; font-variant-numeric: tabular-nums; }
-
-.remote-client-settings { display: grid; gap: 12px; margin-bottom: 24px; }
-.remote-client-settings h3, .remote-client-settings p { margin: 0; }
-.remote-client-settings p { color: var(--dim); }

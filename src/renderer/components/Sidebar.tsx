@@ -18,7 +18,6 @@ import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
 import { ProviderGlyph } from './ProviderGlyph'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
-import { useDesktopConnections } from '../hooks/useDesktopConnections'
 import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocation } from './SidebarRemoteProjects'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
@@ -70,8 +69,6 @@ export const Sidebar = memo(function Sidebar({
   metaPromptsActive = false,
   catalogHealth,
   onSettings,
-  onHosts,
-  hostsActive = false,
   activeRemote = null,
   onPickRemoteSession,
   onNewRemoteProjectChat,
@@ -112,8 +109,6 @@ export const Sidebar = memo(function Sidebar({
   metaPromptsActive?: boolean
   catalogHealth?: CatalogHealth
   onSettings?: () => void
-  onHosts?: () => void
-  hostsActive?: boolean
   activeRemote?: ActiveRemoteLocation | null
   onPickRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
   onNewRemoteProjectChat?: (connectionId: string, cwd: string) => void
@@ -236,7 +231,7 @@ export const Sidebar = memo(function Sidebar({
         <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts || onHosts) && (
+      {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (
         <nav className="sb-nav" aria-label="主要视图">
           {onAnalytics && (
             <button
@@ -280,7 +275,6 @@ export const Sidebar = memo(function Sidebar({
               <Icon name="terminal" /> Meta Prompts
             </button>
           )}
-          {onHosts && <HostsNavItem active={hostsActive} onClick={onHosts} />}
         </nav>
       )}
 
@@ -704,25 +698,5 @@ function SessionRow({
         </button>
       </span>
     </div>
-  )
-}
-
-// Saved hosts this Mac connects to. The count is a status read, not a reachability
-// proof; a failed read shows no count instead of 0.
-function HostsNavItem({ active, onClick }: { active: boolean; onClick: () => void }) {
-  const { connections, error } = useDesktopConnections()
-  const connected = connections.filter((connection) => connection.state === 'connected').length
-  return (
-    <button
-      type="button"
-      className={`sb-navitem sb-hosts ${active ? 'active' : ''}`}
-      aria-current={active ? 'page' : undefined}
-      onClick={onClick}
-    >
-      <Icon name="server" /> 主机
-      {connections.length > 0 && !error && (
-        <span className="sb-nav-count" aria-label={`已连接 ${connected} / ${connections.length} 台`}>{connected}/{connections.length}</span>
-      )}
-    </button>
   )
 }

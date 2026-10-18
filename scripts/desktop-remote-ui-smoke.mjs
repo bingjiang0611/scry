@@ -17,6 +17,8 @@ const negativeHoverControl = process.argv.includes('--negative-hover-control')
 const negativeActivityControl = process.argv.includes('--negative-activity-control')
 const negativeWorkspaceControl = process.argv.includes('--negative-workspace-control')
 const negativePromptControl = process.argv.includes('--negative-prompt-control')
+const negativeSettingsControl = process.argv.includes('--negative-settings-control')
+const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
@@ -47,7 +49,8 @@ const state = {
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
   catalogFailure: false, sessionActive: false, sessionTs: 1700000000000,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
-  directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false
+  directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
+  phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
@@ -223,8 +226,13 @@ window.scry = {
   usageStats: async () => null, stats: async () => null, focusRun: async () => true,
   newSession: async () => { state.localNewSessions++; return true },
   start: async () => { state.localStarts++; throw new Error('Local execution must not be reached') },
-  remoteStatus: async () => ({ enabled: true, hostId: 'local-host', anchorSHA256: 'local-anchor', relayConfigured: true,
-    pending: [], devices: [{ deviceId: 'phone', deviceLabel: 'Fixture iPhone', confirmedAt: 1, expiresAt: 4102444800000, revoked: false }] }),
+  remoteStatus: async () => {
+    if (state.phoneStatusFailure) throw new Error('fixture phone status unavailable')
+    return state.phoneEnabled ? { enabled: true, hostId: 'local-host', anchorSHA256: 'local-anchor', relayConfigured: state.relayConfigured,
+      pending: [], devices: [{ deviceId: 'phone', deviceLabel: 'Fixture iPhone', confirmedAt: 1, expiresAt: 4102444800000, revoked: false }] } : { enabled: false }
+  },
+  remoteBeginPairing: async () => { state.phonePairingCalls++; return { pairingId: 'fixture-pairing', secret: 'fixture-secret', hostId: 'local-host', anchorSHA256: 'local-anchor', expiresAt: Date.now() + 120000, deviceCode: 'scry1:fixture' } },
+  copyText: async () => {},
   desktopRemote: api, stopBackgroundTask: async () => { state.backgroundStopCalls++; return { status: 'unavailable', message: 'fixture remote task stop trap' } },
   async remoteDesktopHostStatus() { return state.hostEnabled ? { enabled: true, pairPort: 10001, runPort: 10002 } : { enabled: false } },
   async remoteDesktopHostInvite() { state.hostInviteCalls++; state.hostEnabled = true; return 'scry-desktop1:fixture' },
@@ -296,6 +304,8 @@ async function exercise(contents, pointer, capture, options) {
   await click('.desktop-remote__host button')
   await wait('document.querySelector(".desktop-remote__invite")?.textContent.includes("scry-desktop1:fixture")', 'enabled host invitation')
   check((await fixture()).hostInviteCalls === 1, 'Host enable dispatched more than one invitation')
+  check(await read('document.querySelector(".hosts-add-modal").textContent.includes("新邀请会使旧的未完成邀请失效")'), 'Invitation lost invalidation consequence')
+  await click('button[aria-label="关闭 SSH 邀请"]')
   await click('.desktop-remote__host button:last-child')
   await wait('window.desktopRemoteFixture.hostDisableCalls === 1 && !document.querySelector(".desktop-remote__invite")', 'disable clears invitation')
 
@@ -304,9 +314,44 @@ async function exercise(contents, pointer, capture, options) {
   const remoteShown = 'document.querySelector(".execution-location.is-remote") != null'
   const sendDisabled = 'document.querySelector(".runtime-composer button.send").disabled'
   const composerValue = 'document.querySelector(\'textarea[aria-label="描述任务"]\').value'
-  await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'hosts nav connected count')
+  await wait('document.querySelector(".sb-remote-proj") != null', 'connected remote project')
+  check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation remains')
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
+  await click('.location-button'); await click('.location-menu .mitem', '管理远程访问')
+  await wait('document.querySelector(".settings-tab.active")?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null', 'manage hosts opens remote settings directly')
+  check(await read(`${composerValue} === 'settings keeps this draft'`), 'Opening settings replaced the current draft')
+  check(await read('document.activeElement === document.querySelector(".settings-tab.active")'), 'Direct settings entry did not focus the remote tab')
+  if (options.settingsOnly) {
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")', 'phone grant in focused settings')
+    await capture('remote-settings-focused')
+    await click('.remote-access-header button')
+    await wait('document.querySelector(".hosts-add-modal") != null', 'nested add-host dialog')
+    await key('Tab')
+    check(await read('document.querySelector(".hosts-add-modal").contains(document.activeElement)'), 'Nested dialog lost keyboard focus')
+    await key('Escape')
+    await wait('!document.querySelector(".hosts-add-modal") && document.querySelector(".settings-modal") != null', 'Escape closes only the nested dialog')
+    check(await read('document.activeElement === document.querySelector(".remote-access-header button")'), 'Nested dialog did not restore action focus')
+    await click('.remote-access-card:not(.desktop-remote__host) button')
+    await wait('document.querySelector(".remote-pairing__qr canvas") != null', 'phone code opens a nested dialog')
+    check(await read('document.querySelector(".hosts-add-modal").textContent.includes("2 分钟内有效") && document.querySelector(".hosts-add-modal").textContent.includes("核对连接设备上的公钥指纹")'), 'Phone pairing lost expiry or fingerprint guidance')
+    await key('Escape')
+    check(await read('document.querySelector(".settings-modal") != null && !document.querySelector(".hosts-add-modal")'), 'Closing phone code closed settings too')
+    await read('window.desktopRemoteFixture.phoneStatusFailure = true')
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("状态未知") && document.querySelector(".remote-access-inbound").textContent.includes("fixture phone status unavailable")', 'unread phone status stays unknown')
+    check(!(await read('document.querySelector(".remote-device-section")')), 'Failed phone read claimed no devices or kept current grants')
+    await read('window.desktopRemoteFixture.phoneStatusFailure = false; window.desktopRemoteFixture.relayConfigured = false')
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("中继休眠") && document.querySelector(".remote-device-section") != null', 'dormant phone relay with preserved grants')
+    await read('window.desktopRemoteFixture.phoneEnabled = false')
+    await wait('document.querySelector(".remote-access-card:not(.desktop-remote__host)").textContent.includes("未启用") && !document.querySelector(".remote-access-card:not(.desktop-remote__host) button")', 'disabled phone access has no pairing action')
+    await read('window.desktopRemoteFixture.phoneEnabled = true; window.desktopRemoteFixture.relayConfigured = true')
+    await wait('document.querySelector(".remote-access-card:not(.desktop-remote__host)").textContent.includes("中继已配置")', 'phone status recovers')
+    return { remoteSettingsInteractions: { directEntryKeepsDraft: true, nestedDialogKeyboard: true, phoneExpiryAndFingerprint: true, phoneUnknownDormantDisabled: true }, nativeCoordinateInput: true }
+  }
+  await click('.settings-modal .modal-x')
+  check(await read('document.activeElement === document.querySelector(".location-button")'), 'Closing settings did not return focus to the location picker')
+  await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
   const projectOrder = () => read('Array.from(document.querySelectorAll(".sb-proj .pname"), node => node.textContent)')
   check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Recent local', 'Project A', 'Older local', 'Project B']), 'Remote project was appended instead of sorted by recent activity')
   check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
@@ -347,7 +392,7 @@ async function exercise(contents, pointer, capture, options) {
   await wait(remoteShown, 'meta prompt returns to remote session, not local')
   await wait(`${composerValue} === 'remote draft\\n\\nhost scoped prompt'`, 'remote meta prompt preserves its draft')
   check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'Meta prompt unexpectedly sent')
-  await click('.sb-hosts'); await click('.sb-navitem', 'Meta Prompts'); await click('.mp-button', '放入当前会话')
+  await click('.sb-navitem', '分析'); await click('.sb-navitem', 'Meta Prompts'); await click('.mp-button', '放入当前会话')
   await wait(`${composerValue} === 'remote draft\\n\\nhost scoped prompt\\n\\nhost scoped prompt'`, 'auxiliary views retain the remote insertion target')
   await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await insert('/skill')
   await wait('document.querySelector(".slash-item")?.textContent.includes("skill:host-only")', 'host-only slash completion')
@@ -397,11 +442,11 @@ async function exercise(contents, pointer, capture, options) {
     await click('.sb-navitem', 'Meta Prompts'); await click('.mp-button', '放入当前会话')
     await wait(`${composerValue} === 'host scoped prompt'`, 'running remote meta prompt retains current session')
     check(await read('document.querySelector(".prompt-queue")?.textContent.includes("queued remote turn")'), 'Meta prompts lost remote queue')
-    await click('.sb-hosts')
+    await click('.sb-navitem', '分析')
     await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
-    await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "0/1"', 'background disconnect')
+    await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.getAttribute("data-state") === "disconnected"', 'background disconnect')
     await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
-    await wait('document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'background reconnect')
+    await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.getAttribute("data-state") === "connected"', 'background reconnect')
     await read('window.desktopRemoteFixture.runStatusFailure = false; window.desktopRemoteFixture.runState = "settled"')
     await click('[data-remote-session="native-session"]')
     await wait('document.querySelector(".composer-notice")?.textContent.includes("继续队列") && window.desktopRemoteFixture.intent === null', 'reopened adopted queue remains paused after terminal')
@@ -416,7 +461,7 @@ async function exercise(contents, pointer, capture, options) {
     await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await insert('terminal navigation race'); await key('Enter')
     await read('window.releaseRunStatus = null; window.desktopRemoteFixture.holdRunStatus = true; window.desktopRemoteFixture.runState = "settled"')
     await wait('typeof window.releaseRunStatus === "function"', 'terminal read pending')
-    await click('.sb-hosts')
+    await click('.sb-navitem', '分析')
     await read('window.desktopRemoteFixture.holdRunStatus = false; window.releaseRunStatus()')
     await wait('window.desktopRemoteFixture.intent === null', 'terminal receipt retired after navigation')
     await click('[data-remote-session="native-session"]')
@@ -699,7 +744,7 @@ async function exercise(contents, pointer, capture, options) {
   await wait('document.querySelector(".execution-location.is-remote")?.dataset.state === "unknown"', 'read failure is not an empty or connected list')
   check(await read('document.querySelector(".composer-notice").textContent.includes("无法确认 Fixture desktop 的连接状态")'), 'Read failure was not explained')
   check(await read('document.querySelector(".sb-remote-proj")?.textContent.includes("Fixture desktop")'), 'Read failure forgot saved host')
-  check(!(await read('document.querySelector(".sb-hosts .sb-nav-count")')), 'Read failure showed a host count')
+  check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation returned after failed read')
   await read('window.desktopRemoteFixture.listFailure = false')
   await wait('document.querySelector(".execution-location.is-remote")?.dataset.state === "disconnected"', 'read recovery')
   await click('.composer-notice button')
@@ -738,13 +783,12 @@ async function exercise(contents, pointer, capture, options) {
   await click('.sb-settings')
   await click('.settings-rail button:last-child')
   await wait('document.querySelector(".remote-pairing")?.textContent.includes("Fixture iPhone")', 'inbound device grant')
-  check(!(await read('document.querySelector(".remote-client-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')
+  check(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture desktop")'), 'Remote settings omitted saved host')
+  check(!(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')
+  check(!(await read('document.querySelector(".hosts-view") || document.querySelector(".remote-client-settings") || document.querySelector(".sb-hosts")')), 'Legacy hosts page or jump remains')
+  check(await read('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")'), 'Settings omitted inbound grant')
+  check(!(await read('document.querySelector(".remote-access-card-note")')), 'Default remote cards contain explanatory small copy')
   await capture('remote-settings')
-  await click('.remote-client-settings button')
-  await wait('!document.querySelector(".settings-modal") && document.querySelector(".hosts-view") != null', 'settings opens hosts page')
-  check(await read('document.querySelector(\'.hosts-section[aria-label="我连接的主机"]\').textContent.includes("Fixture desktop")'), 'Hosts page omitted outbound host')
-  check(!(await read('document.querySelector(\'.hosts-section[aria-label="我连接的主机"]\').textContent.includes("Fixture iPhone")')), 'Hosts page mixed inbound devices into outbound hosts')
-  await wait('document.querySelector(\'.hosts-section[aria-label="允许其他设备访问本机"]\')?.textContent.includes("Fixture iPhone")', 'hosts page inbound section')
   await click('.hosts-row-toggle')
   await wait('document.querySelectorAll(".hosts-projects li").length === 3', 'host projects listed')
   await capture('remote-hosts')
@@ -788,7 +832,7 @@ async function exercise(contents, pointer, capture, options) {
   check(await read('document.querySelector(".hosts-row-details").textContent.includes("fixture-fingerprint")'), 'Address edit replaced the pinned identity')
   check(await read('[...document.querySelectorAll(".hosts-projects button")].every(node => node.disabled)'), 'Disconnected projects allowed session creation')
   await click('.hosts-row-actions button')
-  await wait('window.desktopRemoteFixture.connected && document.querySelector(".sb-hosts .sb-nav-count")?.textContent === "1/1"', 'explicit reconnect after editing')
+  await wait('window.desktopRemoteFixture.connected && document.querySelector(".hosts-state")?.getAttribute("data-state") === "connected"', 'explicit reconnect after editing')
   await read('[...document.querySelectorAll(".hosts-projects li")].find(node => node.querySelector("code")?.textContent === "/fixture/project-b").querySelector("button").setAttribute("data-host-project-b", "")')
   await click('[data-host-project-b]')
   await wait(`${remoteShown} && document.querySelector(".location-button")?.getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-b"`, 'host project opens a remote draft')
@@ -814,7 +858,8 @@ async function exercise(contents, pointer, capture, options) {
     hostAddressEdit: { cancel: true, focusRestored: true, validation: true, storageFailure: true, doubleEnterSingleSave: true, identityKept: true, explicitReconnect: true, noProviderStart: true },
     boundSessionReconnectRefreshesCatalog: true,
     savedHostsAfterRendererReload: true,
-    hostsPageSeparatesConnectionDirections: true,
+    remoteSettingsSeparateConnectionDirections: true,
+    remoteSettingsDirectEntryKeepsDraft: true,
     removedProviderNeverSubstituted: true,
     sharedChatViewForRemote: true,
     remoteSessionParity: { metaPromptRouting: true, hostSlashKeyboardSelection: true, pinUnpin: true, rename: true, archiveRestore: true },
@@ -852,7 +897,8 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeSettingsControl && id.endsWith('/App.tsx')) return source.replace("setSettingsTab('remote')", "setSettingsTab('appearance')")
       if (negativePromptControl && id.endsWith('/App.tsx')) {
         const target = 'const target = metaPromptTarget.current'
         if (!source.includes(target)) throw new Error('meta prompt routing control not found')
@@ -910,7 +956,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly} })
         console.log('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }

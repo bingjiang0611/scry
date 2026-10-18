@@ -7,7 +7,9 @@ import { forgetRemoteCatalog, refreshRemoteCatalog } from '../hooks/useRemoteCat
 import { SidebarRemoteProjects, useRemoteProjectGroups } from './SidebarRemoteProjects'
 import { createComposerDraftStore } from '../composer-drafts'
 import { RemotePromptQueueStore } from '../remote-prompt-queue'
-import { HostsView } from './HostsView'
+import { RemotePairing } from './RemotePairing'
+import { SettingsModal } from './Modals'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { LocationPicker, LOCAL_MACHINE } from './LocationPicker'
 import { WorkdirPicker } from './Pickers'
 import { RemoteChat, remoteDraftKey, remotePermissionOption, remoteRunControlCatalog } from './RemoteChat'
@@ -25,7 +27,7 @@ function RemoteSidebar() {
   const groups = useRemoteProjectGroups('')
   return <SidebarRemoteProjects groups={groups} active={null} collapsed={new Set()} onToggle={() => {}} onPickSession={() => {}} onNewProjectChat={() => {}} />
 }
-const hosts = () => renderToStaticMarkup(<HostsView onNewSession={() => {}} />)
+const hosts = () => renderToStaticMarkup(<RemotePairing onNewSession={() => {}} />)
 const picker = (machineId = LOCAL_MACHINE) => renderToStaticMarkup(<LocationPicker
   current={{ machineId, cwd: machineId === LOCAL_MACHINE ? '/work/app' : '/remote/app' }}
   localCwd="/work/app" recent={['/work/app', '/work/other']}
@@ -66,8 +68,28 @@ describe('saved host projection', () => {
     list.mockResolvedValue([host])
     await refreshDesktopConnections()
     const html = hosts()
-    expect(html).toContain('aria-label="我连接的主机"')
-    expect(html).toContain('aria-label="允许其他设备访问本机"')
+    expect(html).toContain(`aria-label="${copy.outboundTitle}"`)
+    expect(html).toContain(`aria-label="${copy.inboundTitle}"`)
+    expect(html).not.toContain('打开主机页')
+    expect(html).not.toContain('通过 SSH 访问本机')
+  })
+
+  it('opens the remote settings tab without claiming unread devices or access are ready', () => {
+    const html = renderToStaticMarkup(<SettingsModal initialTab="remote" theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />)
+    expect(html).toContain(`class="settings-tab active" aria-current="page"`)
+    expect(html).toContain(`class="remote-connections-settings"`)
+    expect(html).toContain(copy.loadingDesktopStatus)
+    expect(html).not.toContain(copy.noAuthorizedDevices)
+    expect(html).not.toContain(copy.relayOnline)
+    expect(html).not.toContain(copy.settingsAppearanceFooter)
+  })
+
+  it('does not present a failed saved-host read as an empty list', async () => {
+    list.mockRejectedValue(new Error('keychain unavailable'))
+    await refreshDesktopConnections()
+    const html = hosts()
+    expect(html).toContain('keychain unavailable')
+    expect(html).not.toContain(copy.noHostsHint)
   })
 
   it('does not let an older connection read erase a newer result', async () => {

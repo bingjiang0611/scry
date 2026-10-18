@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { DesktopRemoteConnection } from '@shared/desktop-remote'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 
 type Snapshot = { connections: DesktopRemoteConnection[]; loaded: boolean; error: string | null }
 let snapshot: Snapshot = { connections: [], loaded: false, error: null }
@@ -39,6 +40,5 @@ export function useDesktopConnections(): Snapshot {
 }
 
 export function desktopConnectionLabel(connection: DesktopRemoteConnection, error: string | null): string {
-  if (error) return '状态未知'
-  return connection.state === 'connected' ? '已连接' : connection.state === 'pairing' ? '待批准' : '未连接'
+  return error ? copy.status.unknown : copy.status[connection.state]
 }
