@@ -1,18 +1,30 @@
 import type { Root, RootContent } from 'mdast'
 import { matchingFileEvidencePaths } from '@shared/file-evidence'
 
-/** A directory followed by filenames in one paragraph is an explicit path context, not a disk search. */
+/** Decode link URLs before rendering re-encodes them; paragraph directories are explicit context, not a disk search. */
 export function remarkWorkspaceFileDirectories() {
   return (tree: Root): void => {
     const visit = (node: Root | RootContent): void => {
+      if (node.type === 'link') {
+        const token = stripWorkspaceToken(node.url)
+        if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(token) && !token.startsWith('#')) {
+          // Decode the source URL before mdast-to-hast re-encodes it. Code paths and file: URLs stay literal.
+          node.data = { ...node.data, hProperties: {
+            ...node.data?.hProperties,
+            'data-scry-file-reference': markdownLinkPath(token) ?? ''
+          } }
+        }
+      }
+      if ('children' in node) node.children.forEach(visit)
       if (node.type === 'paragraph') {
         let directory: string | null = null
         const inline = (child: RootContent): void => {
           const reference = child.type === 'inlineCode' ? child.value : child.type === 'link' ? child.url : null
           if (reference !== null) {
             const token = stripWorkspaceToken(reference)
-            const path = token.startsWith('file:') ? fileUrlPath(token) : token
-            if (path && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) && !path.startsWith('#')) {
+            const path = token.startsWith('file:') ? fileUrlPath(token)
+              : child.type === 'link' ? child.data?.hProperties?.['data-scry-file-reference'] ?? token : token
+            if (typeof path === 'string' && path && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) && !path.startsWith('#')) {
               if (path.endsWith('/')) directory = path
               else if (directory && !path.startsWith('/') && !path.startsWith('~')) {
                 child.data = { ...child.data, hProperties: {
@@ -27,7 +39,7 @@ export function remarkWorkspaceFileDirectories() {
           if ('children' in child) child.children.forEach(inline)
         }
         node.children.forEach(inline)
-      } else if ('children' in node) node.children.forEach(visit)
+      }
     }
     visit(tree)
   }
@@ -38,6 +50,14 @@ function stripWorkspaceToken(reference: string): string {
   if (value.startsWith('@"') && value.endsWith('"')) return value.slice(2, -1)
   if (value.startsWith('@')) return value.slice(1)
   return value
+}
+
+function markdownLinkPath(reference: string): string | null {
+  try {
+    return decodeURIComponent(reference)
+  } catch {
+    return null
+  }
 }
 
 function fileUrlPath(reference: string): string | null {

@@ -132,6 +132,48 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).not.toContain('/var/tmp/screens/next.md')
   })
 
+  it('decodes Markdown file URLs once while preserving literal code paths and file URLs', () => {
+    const report = 'generated/2026-10-18 AI 学习资源推荐清单回检.md'
+    const encodedReport = report.split('/').map(encodeURIComponent).join('/')
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{`[查看完整报告](${encodedReport}) [中文](generated/中文.md) [percent](docs/literal%2520.md) \`docs/literal%20.md\` [file](file:///repo/docs/literal%2520%23L12.md)`}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html).toContain(`${report} · 打开文件`)
+    expect(html).toContain('generated/中文.md · 打开文件')
+    expect(html).toContain('docs/literal%20.md · 打开文件')
+    expect(html).toContain('docs/literal%20.md · 在右侧文件面板打开')
+    expect(html).toContain('docs/literal%20#L12.md · 打开文件')
+    expect(html.match(/class="md-file-ref"/g)).toHaveLength(5)
+  })
+
+  it('decodes filenames before joining a Markdown link to its paragraph directory', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'`generated/中文%20/` [报告](AI%20%E6%8A%A5%E5%91%8A.md) [目录](docs/%E4%B8%AD%E6%96%87/) [笔记](%E7%AC%94%E8%AE%B0.md)\n\n[独立](%E7%AC%94%E8%AE%B0.md)'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html).toContain('generated/中文%20/AI 报告.md · 打开文件')
+    expect(html).toContain('docs/中文/笔记.md · 打开文件')
+    expect(html).toContain('笔记.md · 打开文件')
+    expect(html).not.toContain('docs/中文/独立')
+  })
+
+  it('decodes file links in headings and tables and rejects invalid encoded targets', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>
+        <MarkdownImpl>{'## [标题](docs/%E4%B8%AD%E6%96%87.md)\n\n| 报告 |\n| --- |\n| [表格](docs/AI%20report.md) |\n\n[invalid](docs/%E4.md) [null](docs/%00.md) [scheme](javascript%3Aalert%281%29) [fragment](#section)'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    )
+    expect(html).toContain('docs/中文.md · 打开文件')
+    expect(html).toContain('docs/AI report.md · 打开文件')
+    expect(html.match(/class="md-file-ref"/g)).toHaveLength(2)
+    expect(html).toContain('<span>invalid</span>')
+    expect(html).toContain('<span>null</span>')
+    expect(html).toContain('<span>scheme</span>')
+  })
+
   it('keeps multiple directory groups, absolute files, URLs and fenced code separate', () => {
     const html = renderToStaticMarkup(
       <WorkspaceFileLinkProvider workspaces={['/repo']} onOpen={() => {}}>

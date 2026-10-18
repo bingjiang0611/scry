@@ -149,7 +149,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
           request.emit({
             id: `${request.runId}:files`, runId: request.runId, ts: new Date().toISOString(),
             kind: 'model', stage: 'text_delta', messageId: `${request.runId}:message`,
-            text: `验收总表：\`rotom-team/docs/NATIVE-DELIVERY.md\`\n\n[absolute](${absolute}) [license](../LICENSE) [binary](../asset.custom) [outside](escaped.md) \`missing.md\`\n\n[interactive-mode.ts:1252](packages/coding-agent/src/modes/interactive/interactive-mode.ts#L1252)\n\n\`packages/coding-agent/src/modes/interactive/interactive-mode.ts:1252:3\`\n\n截图留在 \`${join(request.cwd, 'screens')}/\`（\`remote-workspace.png\`、\`remote-hosts.png\`、\`remote-settings.png\`、\`asset.custom\`、\`fail.custom\`）。`
+            text: `验收总表：\`rotom-team/docs/NATIVE-DELIVERY.md\`\n\n[encoded report](generated/2026-10-18%20AI%20%E5%AD%A6%E4%B9%A0%E8%B5%84%E6%BA%90%E6%8E%A8%E8%8D%90%E6%B8%85%E5%8D%95%E5%9B%9E%E6%A3%80.md) [absolute](${absolute}) [license](../LICENSE) [binary](../asset.custom) [outside](escaped.md) \`missing.md\`\n\n[interactive-mode.ts:1252](packages/coding-agent/src/modes/interactive/interactive-mode.ts#L1252)\n\n\`packages/coding-agent/src/modes/interactive/interactive-mode.ts:1252:3\`\n\n截图留在 \`${join(request.cwd, 'screens')}/\`（\`remote-workspace.png\`、\`remote-hosts.png\`、\`remote-settings.png\`、\`asset.custom\`、\`fail.custom\`）。`
           })
         }
         if (request.prompt === 'performance long stream') {

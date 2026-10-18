@@ -571,6 +571,9 @@ async function main() {
     const sourcePath = 'packages/coding-agent/src/modes/interactive/interactive-mode.ts'
     mkdirSync(dirname(join(cwd, sourcePath)), { recursive: true })
     writeFileSync(join(cwd, sourcePath), 'export const source = true\n')
+    const reportPath = 'generated/2026-10-18 AI 学习资源推荐清单回检.md'
+    mkdirSync(dirname(join(cwd, reportPath)), { recursive: true })
+    writeFileSync(join(cwd, reportPath), '# Actual encoded report\n')
     writeFileSync(join(canonicalHome, 'projects', 'LICENSE'), 'Actual license without an extension')
     writeFileSync(join(canonicalHome, 'projects', 'asset.custom'), Buffer.from([0, 1, 2, 3]))
     writeFileSync(join(canonicalHome, 'projects', 'report.docx'), Buffer.from([0x50, 0x4b, 0, 1]))
@@ -657,6 +660,8 @@ async function main() {
       await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
     }
+    await clickFile(`${reportPath} · 打开文件`)
+    await wait(`document.querySelector('.workspace-preview h1')?.textContent === 'Actual encoded report'`)
     await clickFile('rotom-team/docs/NATIVE-DELIVERY.md · 在右侧文件面板打开')
     // Markdown opens as a read-only preview first (7d4b6bd); expanding the
     // source must show the actual file bytes in a read-only textarea.
@@ -702,7 +707,7 @@ async function main() {
       assert.equal(JSON.parse(readFileSync(openReceipt, 'utf8')).filter(path => path.endsWith('/fail.custom')).length, 1)
     }
     console.log(JSON.stringify({ fileLinks: { siblingProject: true, actualContent: true, readOnlyOutsideWorkspace: true,
-      sourceLocationLinks: true, extensionlessLink: true, officeAndUnknownBinary: true, outsideHomeSymlink: true, fileScopedReads: true,
+      encodedMarkdownLink: true, sourceLocationLinks: true, extensionlessLink: true, officeAndUnknownBinary: true, outsideHomeSymlink: true, fileScopedReads: true,
       missingFileReported: true, outsideWorkspaceWriteDenied: true,
       contextualScreenshotsAndDirectory: devFilesOnly, executableHandoff: devFilesOnly, systemErrorReportedWithoutRetry: devFilesOnly } }))
     cdp.close()
