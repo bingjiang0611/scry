@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Icon } from '../../src/renderer/components/primitives/Icon'
 import { InteractivePreview } from './InteractivePreview'
+import { copy } from './copy'
 
 type CanvasProps = { children?: React.ReactNode; id?: string; title?: string; subtitle?: string; gap?: number; label?: string; width?: number; height?: number; minScale?: number; maxScale?: number }
 const { DesignCanvas, DCSection, DCArtboard, DCPostIt } = window as unknown as Record<string, React.ComponentType<CanvasProps>>
@@ -63,28 +64,26 @@ function AccessCards() {
   const [pairing, setPairing] = useState(false)
   return <div className="access-grid">
     <article className="access-card">
-      <div className="access-head"><span className="access-icon"><Icon name="server" /></span><span className="access-copy"><b>Scry 桌面</b><span>通过 SSH 接入本机</span></span><span className="status-pill">已启用</span></div>
-      <p>新邀请会使之前未完成的邀请失效。</p>
+      <div className="access-head"><span className="access-icon"><Icon name="server" /></span><span className="access-copy"><b>{copy.desktop}</b></span><span className="status-pill">已启用</span></div>
       <div className="access-actions"><Button onClick={() => setInvite(!invite)}>生成 SSH 邀请</Button><Button kind="subtle danger">关闭</Button></div>
       {invite && <div className="code-box"><b>完整 SSH 邀请显示区域（设计示意）</b><small>短时有效 · 仅发送给预期设备</small></div>}
     </article>
     <article className="access-card">
-      <div className="access-head"><span className="access-icon"><Icon name="laptop" /></span><span className="access-copy"><b>手机</b><span>通过加密中继接入本机</span></span><span className="status-pill">中继在线</span></div>
-      <p>已授权 1 台设备，没有等待确认的设备。</p>
+      <div className="access-head"><span className="access-icon"><Icon name="laptop" /></span><span className="access-copy"><b>{copy.phone}</b></span><span className="status-pill">中继在线</span></div>
       <div className="access-actions"><Button onClick={() => setPairing(!pairing)}>生成配对码</Button></div>
       {pairing && <div className="code-box"><b>扫码区域（设计示意，不可配对）</b><small>实际显示宿主返回的二维码 · 约 2 分钟内有效</small></div>}
-      <div className="devices"><div className="device"><Icon name="laptop" /><b>Bing 的 iPhone</b><span>已授权</span><button>吊销</button></div></div>
+      <div className="devices"><div className="device"><Icon name="laptop" /><b>Bing 的 iPhone</b><button>{copy.revoke}</button></div></div>
     </article>
   </div>
 }
 
 function DirectionA() {
   return <>
-    <div className="pane-head"><div><h2>远程访问</h2><p>管理其他主机，以及哪些设备可以访问这台 Mac。</p></div><Button kind="primary"><Icon name="plus" />添加主机</Button></div>
+    <div className="pane-head"><div><h2>远程访问</h2></div><Button kind="primary"><Icon name="plus" />添加主机</Button></div>
     <div className="pane-body">
-      <section className="section"><div className="section-title"><h3>我连接的主机</h3><span>1 台 · 1 台已连接</span></div><HostList /></section>
+      <section className="section"><div className="section-title"><h3>{copy.outbound}</h3></div><HostList /></section>
       <div className="section-rule" />
-      <section className="section"><div className="section-title"><h3>允许设备访问本机</h3><span>入站访问</span></div><AccessCards /><p className="safety-note"><Icon name="lock" />配对时请核对两台设备显示的公钥指纹。授权设备将以这台 Mac 的当前用户权限运行。</p></section>
+      <section className="section"><div className="section-title"><h3>{copy.inbound}</h3></div><AccessCards /></section>
     </div>
   </>
 }

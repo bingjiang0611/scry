@@ -4,7 +4,7 @@
 
 ## 入口
 
-- `preview.html`：推荐 A 的独立交互预览。可切换默认、空列表、状态未知、待确认、中继休眠、手机未启用、多主机/长内容。连接、配对、吊销、邀请和复制都只是本地演示，不调用真实后端或剪贴板。
+- `preview.html`：推荐 A 的独立交互预览。当前版本已按用户反馈压缩默认文案：只保留名称、状态与动作；安全后果在对应弹窗显示。可切换默认、空列表、状态未知、待确认、中继休眠、手机未启用、多主机/长内容。连接、配对、吊销、邀请和复制都只是本地演示，不调用真实后端或剪贴板。
 - `remote-access-settings.html`：A 分区单栏 / B 列表详情 / C 本机优先的信息结构对照。B、C 只表达结构，不作为完整能力实现。
 - `brief.md`：需求、硬约束、调研、推荐与验证边界。
 
@@ -22,6 +22,7 @@ python3 -m http.server 8946 --bind 127.0.0.1 --directory designs/scry-remote-acc
 - 对照画布使用 design-loop 内置 `toolkit/baoyu/starter-components/design-canvas.jsx`，转换后放在 `design-canvas.js`。不改 toolkit。
 - `vendor/` 为仓库已安装 React 18.3.1 / ReactDOM 18.3.1 UMD，保留其 license header。无需 CDN 或新依赖。
 - `react-shim.js` / `react-dom-shim.js` 把编译后的原型绑定到同一个 UMD React，避免重复 React 实例。
+- `copy.ts` 是本轮新增或改写文案的唯一来源；正式实现时迁移到项目文案模块，不在 JSX 复制字符串。
 
 修改原型后，在仓库根目录使用已安装 esbuild 更新 bundle：
 
@@ -46,7 +47,7 @@ node_modules/.bin/tsc --noEmit --strict --skipLibCheck --jsx react-jsx \
 ```
 
 - 两个 HTML 的 loopback HTTP 请求返回成功。
-- Chrome Relay：查看了推荐稿画面、画布 A 画面、空列表、添加弹窗；点击展开主机后读回详情；状态未知读回明确错误且不显示计数；待确认切换曾 timeout，恢复原标签后只读核对，确认指纹与确认操作区域存在，没有重放该动作。
+- Chrome Relay：查看了推荐稿画面、文案精简后的默认画面、画布 A 画面、空列表、添加弹窗；点击展开主机后读回详情；状态未知读回明确错误且不显示计数；待确认切换曾 timeout，恢复原标签后只读核对，确认指纹与确认操作区域存在，没有重放该动作。
 - 自审修正：主机身份左对齐；推荐稿移除重复说明与 rail 提示；高度跟随视口；不画可误认为能配对的假二维码。
 - 后续截图请求遇到 Relay timeout，recover 仍 hello timeout。最终几处 CSS/文字减法没有新截图，不能宣称最终全场景视觉验收通过。手机、真实 SSH、真实配对、键盘焦点约束、真 App 均未验收。
 - 独立视觉 reviewer 尝试受阻：浏览器截图返回 encrypted artifact，而不是可读本地文件；reviewer 没有读到截图，所以不算独立视觉评审通过。

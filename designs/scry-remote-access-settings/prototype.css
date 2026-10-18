@@ -127,7 +127,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .access-copy span { display: block; margin-top: 2px; color: var(--dim2); font-size: 11px; }
 .status-pill { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--ok); font-size: 10.5px; }
 .status-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.access-card p { min-height: 34px; margin: 0 0 12px; color: var(--dim2); font-size: 11.5px; line-height: 1.5; }
+.access-card p { margin: 0 0 12px; color: var(--dim); font-size: 12px; line-height: 1.45; }
 .access-actions { display: flex; align-items: center; gap: 7px; }
 .devices { margin-top: 12px; border-top: 1px solid var(--border3); }
 .device { min-height: 40px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border3); }
@@ -204,7 +204,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .host-select { border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .host-icon { width: 24px; height: 24px; display: grid; place-items: center; color: var(--dim2); }
 .host-select:hover .host-copy b { color: var(--accent); }
-.host-remove { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 10px; color: var(--dim2); font-size: 10.5px; }
+.host-remove { display: flex; align-items: center; justify-content: flex-end; padding-top: 10px; }
 .preview-alert, .preview-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 10px; padding: 9px 11px; border-radius: 7px; font-size: 11.5px; }
 .preview-alert { background: var(--warn-soft); color: var(--warn); }
 .preview-alert span { display: inline-flex; align-items: center; gap: 7px; }
@@ -213,7 +213,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .preview-empty { padding: 32px; display: grid; justify-items: center; gap: 8px; border: 1px dashed var(--border2); border-radius: 8px; color: var(--dim2); text-align: center; }
 .preview-empty > .ico { width: 24px; height: 24px; }
 .preview-empty b { color: var(--fg); }
-.preview-empty p { margin: 0 0 3px; font-size: 11.5px; }
+.preview-empty p { margin: 0 0 3px; color: var(--dim); font-size: 12px; }
 .status-pill.off { color: var(--dim2); }
 .status-pill.dormant { color: var(--warn); }
 .pending-device { margin-top: 14px; padding: 13px 14px; border: 1px solid var(--warn); border-radius: 8px; background: var(--warn-soft); }
@@ -225,7 +225,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .authorized-section { margin-top: 18px; }
 .authorized-section h4 { margin: 0; font-size: 12px; }
 .authorized-section .device { min-height: 45px; padding: 0 4px; border-top: 1px solid var(--border3); border-bottom: 1px solid var(--border3); }
-.muted { color: var(--dim2); font-size: 11.5px; line-height: 1.55; }
+.muted { color: var(--dim); font-size: 12px; line-height: 1.5; }
+.field-title { display: block; margin: 12px 0 5px; color: var(--dim); font-size: 11.5px; font-weight: 600; }
 .preview-closed { height: 480px; max-width: 1040px; margin: 0 auto; display: grid; place-content: center; justify-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--main-surface); color: var(--dim2); }
 .sheet-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 62%); }
 .preview-sheet { width: min(500px, calc(100vw - 40px)); overflow: hidden; border: 1px solid var(--border2); border-radius: 9px; background: var(--panel); box-shadow: 0 30px 90px rgb(0 0 0 / 65%); }
