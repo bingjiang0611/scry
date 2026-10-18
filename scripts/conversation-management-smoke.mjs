@@ -22,7 +22,7 @@ export async function exerciseConversationManagement({ cdp, evaluate, fixture, i
   await click('[aria-label="存档统一对话"]')
   await wait(() => evaluate("Boolean(document.querySelector('.unified-conversation .send')?.disabled && document.querySelector('[aria-label=\"恢复统一对话\"]'))"), 'archived conversation cannot send')
   assert.equal(await evaluate(`Boolean(document.querySelector('.sb-pinned [data-conversation-id="${id}"]'))`), false)
-  await wait(() => evaluate(`Boolean(document.querySelector('.unified-archived [data-conversation-id="${id}"]'))`), 'archived entry is reachable')
+  await wait(() => evaluate(`!document.querySelector('.sidebar [data-conversation-id="${id}"]')`), 'archived conversation leaves the sidebar while its open view remains usable')
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(id)}, {providerId:'claude'}).then(()=>false,()=>true)`), true)
   await captureNarrow('archived')
   await click('[aria-label="恢复统一对话"]')
