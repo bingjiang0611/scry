@@ -37,7 +37,7 @@ function Fixture() {
   })
   return <div id="summary-performance">
     {state.mounted && <PinnedSummary
-      cwd="/tmp/scry-summary-fixture" gitDiff={[]} turns={state.turns} busy={state.busy}
+      cwd="/tmp/scry-summary-fixture" gitDiff={undefined} turns={state.turns} busy={state.busy}
       temporary={false} expandedSections={expanded} onDismiss={noop} onToggleSection={noop}
       onOpenCall={noop} onOpenAgents={noop}
     />}

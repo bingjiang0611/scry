@@ -32,7 +32,7 @@ const session: Turn = {
 const render = (
   turns: Turn[],
   expandedSections: ReadonlySet<PinnedSummarySection> = new Set(['inventory']),
-  gitDiff: PinnedSummaryProps['gitDiff'] = [{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }]
+  gitDiff: PinnedSummaryProps['gitDiff'] = { status: 'captured', files: [{ path: '/repo/scry/a.ts', added: 12, deleted: 3 }] }
 ) => renderToStaticMarkup(
   <PinnedSummary
     cwd="/repo/scry"
@@ -103,12 +103,31 @@ describe('PinnedSummary', () => {
     }
   })
 
-  it('hides Changes without a Git diff, keeping the workspace visible', () => {
-    const html = render([], new Set(), [])
-    expect(html).not.toContain('>Changes<')
+  it('shows successful empty Git evidence without confusing it with missing data', () => {
+    const html = render([], new Set(), { status: 'captured', files: [] })
+    expect(html).toContain('>Changes<')
+    expect(html).toContain('data-evidence="captured"')
+    expect(html).toContain('无改动')
     expect(html).not.toContain('additions')
     expect(html).not.toContain('deletions')
     expect(html).toContain('>scry</span>')
+  })
+
+  it.each([
+    [{ status: 'unavailable', reason: 'not_git', files: [] }, '不可用'],
+    [{ status: 'timeout', reason: 'deadline', files: [] }, '采集超时'],
+    [{ status: 'failed', reason: 'request_failed', files: [] }, '采集失败'],
+    [null, '采集中']
+  ] as const)('keeps non-successful Git evidence visible in summary and Overview (%s)', (diff, label) => {
+    const result = diff ? { ...diff, files: [] as [] } : null
+    const pinned = render([], new Set(), result)
+    const overview = renderToStaticMarkup(<OverviewPanel turns={[]} selected={null} onSelect={() => undefined} usage={null} stats={null} gitDiff={result} />)
+    for (const html of [pinned, overview]) {
+      expect(html).toContain(label)
+      expect(html).not.toContain('无改动')
+      expect(html).not.toContain('>+0<')
+      expect(html).not.toContain('data-evidence="captured"')
+    }
   })
 
   it('shows only populated Context groups', () => {

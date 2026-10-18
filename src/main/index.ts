@@ -18,7 +18,7 @@ import type { ParsedTurn } from './normalize'
 import { readCachedTranscript, disposeTranscriptParser } from './transcript-parser'
 import { classifyError } from './error-classify'
 import { billingStateQuery, deleteSessionData, deleteTurnOutboxSessionRows, importBillingFixture, initDb, recordTurn, replayDatabaseTurnOutbox, resolveSessionRunIds, setBillingEnvProvider, statsQuery, syncBillingAdmin, turnOutboxSessionRunIds, usageAnalyticsWithCreditsQuery } from './db'
-import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnAndSessionDiff, finishGitTurnDiff, gitNumstat, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnAndSessionDiff, finishGitTurnDiff, registerGitDiffIpc, snapshotSessionNetDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry, WriteCompletionTracker, sessionLoadMatchesRun } from './session-diff'
 import { SourceControlService } from './source-control/service'
 import { registerSourceControlIpc } from './source-control/ipc'
@@ -4577,7 +4577,7 @@ handleTrusted('agent:importBillingFixture', async () => {
 })
 
 // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
-handleTrusted('agent:gitDiff', (_e, cwd: string) => gitNumstat(cwd))
+registerGitDiffIpc(handleTrusted, resolveKnownProjectDirectory)
 handleTrusted('agent:recorderContentPage', async (_event, request: unknown) => {
   const cwd = currentCwd ?? ''
   if (request && typeof request === 'object' && 'source' in request) {

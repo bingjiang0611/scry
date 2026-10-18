@@ -1,9 +1,10 @@
 // renderer 共享的纯逻辑：常量 / 视图类型 / 格式化与投影 helper。无 React 依赖，给各组件复用。
+import { workspaceDiffCopy } from '@shared/constants/copy'
 import {
   contextUsageEvidence,
   mcpCallsForEvent,
   type TraceEvent,
-  type DiffFile,
+  type WorkspaceDiffResult,
   type HookConfiguredCommand,
   type ModelUsageRow
 } from '@shared/trace'
@@ -1502,7 +1503,7 @@ export function analyzeBilling(turns: Turn[]): BillingAnalysis {
 
 // Billing Guardian P0：把本会话的 SDK/transcript token 和行动信号汇成可复制 Markdown。
 // 工具/Skill/MCP/hook 没有独立 token 字段；报告只说明不可硬拆，不展示弱关联明细。
-export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts: { sessionId?: string | null } = {}): string {
+export function buildSessionReport(turns: Turn[], gitDiff?: WorkspaceDiffResult | null, opts: { sessionId?: string | null } = {}): string {
   const billing = analyzeBilling(turns)
   const all = turns.flatMap((t) => t.items)
   const calls = aggregateCalls(turns.flatMap((turn) => logicalCallEventsForTurn(turn.items, turn.userText)))
@@ -1512,7 +1513,7 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
   const dangers = all.filter((e) => e.danger && e.stage !== 'tool_result')
   const toolErrors = all.filter((e) => e.stage === 'tool_result' && e.isError).length
   const touched = new Set(structured.map((f) => f.path))
-  const diffUntouched = gitDiff.filter((d) => !touched.has(d.path))
+  const diffUntouched = (gitDiff?.files ?? []).filter((d) => !touched.has(d.path))
 
   const L: string[] = ['# Session Token 用量报告']
   if (opts.sessionId) L.push(`- **sessionId**：${opts.sessionId}`)
@@ -1553,8 +1554,7 @@ export function buildSessionReport(turns: Turn[], gitDiff: DiffFile[] = [], opts
     L.push(
       `- **文件（工具证据）**：改 ${cov.written}（先读 ${cov.readBefore}/${cov.written}${cov.inferredReadBefore ? `，其中 ${cov.inferredReadBefore} 个仅有 Bash 推断` : ''}${cov.blind.length ? `，无先读证据 ${cov.blind.length}` : ''}）`
     )
-  if (gitDiff.length)
-    L.push(`- **git diff**：${gitDiff.length} 文件${diffUntouched.length ? `（${diffUntouched.length} 未经工具标记）` : ''}`)
+  L.push(workspaceDiffCopy.report(gitDiff, diffUntouched.length))
   if (dangers.length)
     L.push(
       `- **危险审计**：${dangers.map((e) => `[${e.danger!.level === 'danger' ? '高危' : '可疑'}] ${e.danger!.reason}`).join(' · ')}`

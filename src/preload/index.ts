@@ -7,7 +7,7 @@ import type {
   TraceEvent,
   ActiveRun,
   DbStats,
-  DiffFile,
+  WorkspaceDiffResult,
   UsageAnalytics,
   UsageAnalyticsRangeDays,
   UsageStats
@@ -242,7 +242,7 @@ const api = {
   billingState: (): Promise<BillingGuardianState> => ipcRenderer.invoke('agent:billingState'),
   syncBillingAdmin: (): Promise<BillingSyncResult> => ipcRenderer.invoke('agent:syncBillingAdmin'),
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
-  gitDiff: (cwd: string): Promise<DiffFile[]> => ipcRenderer.invoke('agent:gitDiff', cwd),
+  gitDiff: (cwd: string): Promise<WorkspaceDiffResult> => ipcRenderer.invoke('agent:gitDiff', cwd),
   recorderContentPage: (request: RecorderContentPageRequest): Promise<RecorderContentPage> =>
     ipcRenderer.invoke('agent:recorderContentPage', request),
   // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。

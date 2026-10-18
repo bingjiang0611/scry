@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
-import type { DiffFile, TraceEvent } from '@shared/trace'
+import type { WorkspaceDiffResult, TraceEvent } from '@shared/trace'
+import { workspaceDiffCopy } from '@shared/constants/copy'
 import { sessionCapabilityCalls } from '../session-capability-calls'
 import { deriveAgentRows, type AgentRowStatus } from '../agent-panel'
 import type { Turn } from '../format'
@@ -22,7 +23,7 @@ export type PinnedSummarySection = 'inventory' | 'web' | 'agents'
 
 export interface PinnedSummaryProps {
   cwd: string | null
-  gitDiff: DiffFile[]
+  gitDiff: WorkspaceDiffResult | null | undefined
   turns: Turn[]
   busy: boolean
   temporary: boolean
@@ -140,8 +141,9 @@ function PinnedSummaryBody({
   const webSourceScan = useMemo(() => scanWebSourcesFromTurns(turns), [turns])
   const webSources = webSourceScan.sources
   const agentRows = useMemo(() => deriveAgentRows(turns, { busy }), [busy, turns])
-  const additions = gitDiff.reduce((total, file) => total + file.added, 0)
-  const deletions = gitDiff.reduce((total, file) => total + file.deleted, 0)
+  const files = gitDiff?.files ?? []
+  const additions = files.reduce((total, file) => total + file.added, 0)
+  const deletions = files.reduce((total, file) => total + file.deleted, 0)
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? '未绑定工作区'
   const capabilityCalls = useMemo(() => sessionCapabilityCalls(turns), [turns])
   const callScope = '当前会话已加载记录中观测到的 Skill 调用/注入、明确请求后的技能文件加载推断与 MCP 工具调用；不代表完整调用清单，未观测到不等于未调用'
@@ -176,18 +178,20 @@ function PinnedSummaryBody({
     <div className={`pinned-summary-layer ${temporary ? 'is-temporary' : 'is-persistent'}`}>
       <aside className="pinned-summary-card" aria-label="固定摘要" ref={cardRef}>
         <div className="pinned-summary-section-title">Environment</div>
-        {gitDiff.length > 0 && (
+        {cwd && (
           <button
             type="button"
             className="pinned-summary-row"
             disabled={!onOpenChanges}
             onClick={onOpenChanges}
-            title={`${gitDiff.length} 个工作区文件的 Git 净改动`}
+            title={gitDiff?.status === 'captured' && files.length ? workspaceDiffCopy.count(files.length) : workspaceDiffCopy.detail(gitDiff)}
           >
             <span className="pinned-summary-row-icon"><Icon name="diff" /></span>
-            <span className="pinned-summary-row-main">Changes</span>
-            <span className="pinned-summary-row-value" data-evidence="available">
-              <span className="additions">+{additions.toLocaleString()}</span><span className="deletions">−{deletions.toLocaleString()}</span>
+            <span className="pinned-summary-row-main">{workspaceDiffCopy.heading}</span>
+            <span className="pinned-summary-row-value" role="status" data-evidence={gitDiff?.status ?? 'pending'}>
+              {gitDiff?.status === 'captured' && files.length ? <>
+                <span className="additions">+{additions.toLocaleString()}</span><span className="deletions">−{deletions.toLocaleString()}</span>
+              </> : workspaceDiffCopy.label(gitDiff)}
             </span>
           </button>
         )}

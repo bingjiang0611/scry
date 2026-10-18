@@ -4,7 +4,7 @@ import type { CapabilityEnvelope, McpSnapshot, ProviderContext, ProviderId } fro
 import type { ProviderCompatibilityAdvisory } from '@shared/provider-compatibility'
 import type {
   DbStats,
-  DiffFile,
+  WorkspaceDiffResult,
   McpLiveStatus,
   UsageAnalytics,
   UsageAnalyticsRangeDays,
@@ -560,7 +560,8 @@ export function useIntegrations(
   const [billingFixtureLoading, setBillingFixtureLoading] = useState(false)
   const [mcpGuardReportsByCwd, setMcpGuardReportsByCwd] = useState<Record<string, McpGuardReport>>({})
   const [mcpGuardScanning, setMcpGuardScanning] = useState(false)
-  const [gitDiff, setGitDiff] = useState<DiffFile[]>([])
+  // undefined: no workspace; null: a fresh capture is in flight.
+  const [gitDiff, setGitDiff] = useState<WorkspaceDiffResult | null>()
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
   const usageRequestSeq = useRef(0)
@@ -769,15 +770,18 @@ export function useIntegrations(
   const loadGitDiff = useCallback((dir = cwdRef.current): void => {
     const seq = ++gitDiffRequestSeq.current
     if (dir && typeof window.scry.gitDiff === 'function') {
+      setGitDiff(null)
       window.scry
         .gitDiff(dir)
         .then((diff) => {
           if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) setGitDiff(diff)
         })
         .catch(() => {
-          if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) setGitDiff([])
+          if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) {
+            setGitDiff({ status: 'failed', reason: 'request_failed', files: [] })
+          }
         })
-    } else setGitDiff([])
+    } else setGitDiff(dir ? { status: 'unavailable', reason: 'request_failed', files: [] } : undefined)
   }, [])
 
   const refreshSkills = useCallback(async (): Promise<void> => {

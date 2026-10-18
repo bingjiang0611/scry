@@ -104,7 +104,7 @@ function Fixture() {
       <PinnedSummaryHost
         visible={pinnedSummary.visible}
         cwd={null}
-        gitDiff={[]}
+        gitDiff={undefined}
         turns={turns}
         busy={false}
         temporary={!pinnedSummary.persistent}

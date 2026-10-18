@@ -3637,10 +3637,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       sessionId="dea0c990-714d-4888-aed0-7a13952d84ad"
       selected={null}
       onSelect={() => {}}
-      gitDiff={[
+      gitDiff={{ status: 'captured', files: [
         { path: '/tmp/probe.txt', added: 5, deleted: 2 },
         { path: '/x/other.ts', added: 1, deleted: 0 }
-      ]}
+      ] }}
       usage={{ cost: 0.5, tin: 3000, tout: 400, turns: 2 }}
       stats={{
         status: 'ready',
@@ -4614,7 +4614,7 @@ describe('OverviewPanel 本会话改动：来自各轮 turnDiff 累计，不冒�
         onSelect={() => {}}
         usage={null}
         stats={null}
-        gitDiff={[{ path: '/repo/src/a.ts', added: 4, deleted: 5 }]}
+        gitDiff={{ status: 'captured', files: [{ path: '/repo/src/a.ts', added: 4, deleted: 5 }] }}
         onOpenSessionDiff={() => {}}
       />
     )

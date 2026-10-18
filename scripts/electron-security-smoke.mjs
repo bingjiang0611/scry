@@ -946,6 +946,23 @@ async function main() {
     reopened: true
   })
 
+  symlinkSync(temp, join(workspace, 'git-outside-link'))
+  const gitBoundary = await evaluate(`(async () => {
+    const cwd = ${JSON.stringify(canonicalWorkspace)}
+    const result = await window.scry.gitDiff(cwd)
+    const rejected = []
+    for (const input of [null, {}, ${JSON.stringify(temp)}, ${JSON.stringify(join(workspace, 'git-outside-link'))}]) {
+      try { await window.scry.gitDiff(input); rejected.push(false) }
+      catch { rejected.push(true) }
+    }
+    return { result, rejected }
+  })()`)
+  assert.deepEqual(gitBoundary, {
+    result: { status: 'unavailable', reason: 'not_git', files: [] },
+    rejected: [true, true, true, true]
+  })
+  console.log('Workspace Git diff: production preload/main preserve unavailable evidence and reject invalid, unapproved and symlink-escape directories')
+
   const lifecycleSmoke = await evaluate(`(async () => {
     const cwd = ${JSON.stringify(canonicalWorkspace)}
     await window.scry.setCwd(cwd)

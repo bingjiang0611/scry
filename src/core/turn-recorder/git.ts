@@ -1,5 +1,5 @@
 // P2 Files & Diff（RFC §8.4）：拿 cwd 在单轮开始/结束之间的净 diff，与工具足迹对照。
-// 用 execFile（非 exec，无 shell 注入）。非 git 仓 / 出错 → 返回空，不连累 UI。
+// 用 execFile（非 exec，无 shell 注入）。采集失败保留状态与原因，不冒充成功空结果。
 import { execFile } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,6 +9,7 @@ import { promisify } from 'node:util'
 import { limitToolContent } from './tool-content.js'
 import type {
   DiffFile,
+  WorkspaceDiffResult,
   DiffFileChange,
   TurnDiffCollection,
   TurnDiffFallbackReason,
@@ -1080,11 +1081,14 @@ export async function readWorkspaceGitDiff(cwd: string): Promise<WorkspaceGitDif
   }
 }
 
-export async function gitNumstat(cwd: string): Promise<DiffFile[]> {
+export async function gitNumstat(cwd: string): Promise<WorkspaceDiffResult> {
   const capture = await beginGitTurnDiff(cwd)
   try {
-    if (capture.status !== 'ready' || !capture.repoRoot || !capture.beforeTree) return []
-    if (capture.baselineClean) return [] // 工作树与 HEAD 一致
+    if (capture.status !== 'ready') {
+      return { status: capture.status, reason: capture.reason ?? 'git_error', files: [] }
+    }
+    if (!capture.repoRoot || !capture.beforeTree) return { status: 'failed', reason: 'no_baseline', files: [] }
+    if (capture.baselineClean) return { status: 'captured', files: [] }
     const stdout = await gitCommand(
       snapshotGitArgs(capture.filterOverrides ?? [], [
         'diff',
@@ -1108,9 +1112,9 @@ export async function gitNumstat(cwd: string): Promise<DiffFile[]> {
         deadline: Date.now() + TURN_DIFF_BEGIN_DEADLINE_MS
       }
     )
-    return parseNumstat(stdout, capture.repoRoot)
-  } catch {
-    return [] // 非 git 仓 / git 不可用 / 无 HEAD / 超时：静默空
+    return { status: 'captured', files: parseNumstat(stdout, capture.repoRoot) }
+  } catch (error) {
+    return { status: error instanceof GitDeadlineError ? 'timeout' : 'failed', reason: reasonOf(error), files: [] }
   } finally {
     await cancelGitTurnDiff(capture)
   }
