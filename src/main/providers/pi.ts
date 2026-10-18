@@ -807,19 +807,33 @@ async function piEntryBaseline(rpc: PiRpcProcess): Promise<PiEntrySnapshot> {
 
 const PI_PERSISTED_SCAN_MAX_BYTES = 128 * 1024 * 1024
 
-function exactPiUserText(content: unknown, expectedText: string): boolean {
+function exactPiUserText(content: unknown, expectedText: string, imageCount: number): boolean {
   if (content === expectedText) return true
   if (!Array.isArray(content)) return false
-  const text = content.map(record)
-  return text.every((block) => block.type === 'text' && typeof block.text === 'string') &&
-    text.map((block) => block.text as string).join('') === expectedText
+  const blocks = content.map(record)
+  if (!blocks.every((block) =>
+    (block.type === 'text' && typeof block.text === 'string') ||
+    (block.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string')
+  )) return false
+  const text = blocks.filter((block) => block.type === 'text').map((block) => block.text as string).join('')
+  if (text === expectedText) return true
+  if (imageCount === 0 || blocks.filter((block) => block.type === 'image').length !== imageCount ||
+    !text.startsWith(`${expectedText}\n\n`)) return false
+  // Pi appends one dimension note per resized image. This fixed metadata is not a
+  // user-text rewrite; the receipt's textHash does not claim image-byte equivalence.
+  const notes = text.slice(expectedText.length + 2).split('\n')
+  return notes.length <= imageCount && notes.every((note) => {
+    const match = note.match(/^\[Image: original ([1-9]\d*)x([1-9]\d*), displayed at ([1-9]\d*)x([1-9]\d*)\. Multiply coordinates by (\d+\.\d{2}) to map to original image\.\]$/)
+    return match !== null && (Number(match[1]) / Number(match[3])).toFixed(2) === match[5]
+  })
 }
 
 async function persistedPiUserEntryMatches(
   sessionFile: string,
   sessionId: string,
   entryId: string,
-  expectedText: string
+  expectedText: string,
+  imageCount: number
 ): Promise<boolean> {
   let input: ReturnType<typeof createReadStream> | undefined
   let lines: ReturnType<typeof createInterface> | undefined
@@ -840,7 +854,7 @@ async function persistedPiUserEntryMatches(
       }
       if (value.id !== entryId) continue
       const message = record(value.message)
-      entryMatches = value.type === 'message' && message.role === 'user' && exactPiUserText(message.content, expectedText)
+      entryMatches = value.type === 'message' && message.role === 'user' && exactPiUserText(message.content, expectedText, imageCount)
     }
     return headerMatches && entryMatches
   } catch {
@@ -856,7 +870,7 @@ async function waitForPiUserEntryId(
   baseline: PiEntrySnapshot,
   isSettled: () => boolean,
   hasSteerInput: () => boolean,
-  exact?: { sessionId: string; sessionFile: string; text: string }
+  exact?: { sessionId: string; sessionFile: string; text: string; imageCount: number }
 ): Promise<string> {
   for (;;) {
     let changed!: () => void
@@ -880,7 +894,7 @@ async function waitForPiUserEntryId(
         hasSteerInput()
       )
       if (id) {
-        if (!exact || await persistedPiUserEntryMatches(exact.sessionFile, exact.sessionId, id, exact.text)) return id
+        if (!exact || await persistedPiUserEntryMatches(exact.sessionFile, exact.sessionId, id, exact.text, exact.imageCount)) return id
       }
       // Only a post-settlement snapshot proves missing identity. Do not kill a running
       // Provider because its prompt entry has not appeared within an arbitrary five seconds.
@@ -1919,7 +1933,7 @@ async function runPiAgent(
       entryBaseline,
       () => agentSettled,
       () => state.steerDispatched === true,
-      exactHandoff ? { sessionId: state.sessionId!, sessionFile: state.sessionFile!, text: outgoingPrompt } : undefined
+      exactHandoff ? { sessionId: state.sessionId!, sessionFile: state.sessionFile!, text: outgoingPrompt, imageCount: images.length } : undefined
     )
     if (exactHandoff) history.accepted(state.sessionId!, 'pi_persisted_session_entry', state.providerTurnId)
     publishPersistedPiSession(request, state)

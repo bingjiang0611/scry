@@ -197,7 +197,12 @@ process.stdin.on('data', (chunk) => {
         }
         const entry = {
           type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString(),
-          message: { role: 'user', content: [{ type: 'text', text: command.message === 'mismatched-entry' ? 'rewritten input' : command.message.startsWith('/skill:') ? 'expanded skill content' : command.message }] }
+          message: { role: 'user', content: require('node:fs').existsSync(process.cwd() + '/persisted-user-content.json')
+            ? JSON.parse(require('node:fs').readFileSync(process.cwd() + '/persisted-user-content.json', 'utf8'))
+            : [
+              { type: 'text', text: command.message === 'mismatched-entry' ? 'rewritten input' : command.message.startsWith('/skill:') ? 'expanded skill content' : command.message },
+              ...(command.images ?? [])
+            ] }
         }
         entries.push(entry)
         persistEntries()
@@ -1857,6 +1862,62 @@ describe('Pi RPC Provider', () => {
       })
       const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
       expect(commands.find((command: { type?: string }) => command.type === 'prompt').message).toBe(outgoing)
+    })
+  }, 15_000)
+
+  it.each([
+    { name: 'unchanged image', imageCount: 1, notes: '' },
+    { name: 'resized screenshot', imageCount: 1, notes: '\n\n[Image: original 2346x1584, displayed at 2000x1350. Multiply coordinates by 1.17 to map to original image.]' },
+    { name: 'multiple resized images', imageCount: 2, notes: '\n\n[Image: original 2346x1584, displayed at 2000x1350. Multiply coordinates by 1.17 to map to original image.]\n[Image: original 4000x2000, displayed at 2000x1000. Multiply coordinates by 2.00 to map to original image.]' }
+  ])('accepts a persisted Pi image receipt: $name', async ({ imageCount, notes }) => {
+    await withFixture(async (profile, cwd) => {
+      const attachments = Array.from({ length: imageCount }, (_, index) => ({
+        kind: 'image' as const, name: `screen-${index}.png`, mimeType: 'image/png' as const, dataBase64: 'aW1hZ2U='
+      }))
+      const content = [
+        { type: 'text', text: `inspect this image${notes}` },
+        ...attachments.map(attachment => ({ type: 'image', data: attachment.dataBase64, mimeType: attachment.mimeType }))
+      ]
+      if (notes) writeFileSync(join(cwd, 'persisted-user-content.json'), JSON.stringify(content))
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-pi-image-receipt', prompt: 'inspect this image', cwd, agentProfileId: profile.id,
+        trackInputReceipt: true, attachments, permissionMode: 'full_access', emit: vi.fn()
+      })
+      await expect(handle.promise).resolves.toMatchObject({ providerTurnId: 'pi-user-1', status: 'completed' })
+      expect(handle.getInputReceipt?.()).toMatchObject({
+        status: 'accepted',
+        textHash: createHash('sha256').update('inspect this image').digest('hex'),
+        nativeSessionId: 'pi-session-1',
+        providerTurnId: 'pi-user-1',
+        source: 'pi_persisted_session_entry'
+      })
+      const entries = readFileSync(join(cwd, 'pi-session-1.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+      expect(entries.at(-1)?.message?.content).toEqual(content)
+    })
+  }, 15_000)
+
+  it.each([
+    { name: 'rewritten body', text: 'rewritten input', block: { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' } },
+    { name: 'arbitrary appended text', text: 'inspect this image\n\nextra instruction', block: { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' } },
+    { name: 'invalid dimension note', text: 'inspect this image\n\n[Image: original 4000x2000, displayed at 2000x1000. Multiply coordinates by 1.00 to map to original image.]', block: { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' } },
+    { name: 'unsupported block', text: 'inspect this image', block: { type: 'toolCall' } },
+    { name: 'malformed image', text: 'inspect this image', block: { type: 'image', mimeType: 'image/png' } },
+    { name: 'dimension note without image', text: 'inspect this image\n\n[Image: original 4000x2000, displayed at 2000x1000. Multiply coordinates by 2.00 to map to original image.]', block: null }
+  ])('keeps invalid persisted Pi image receipts unknown: $name', async ({ text, block }) => {
+    await withFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'persisted-user-content.json'), JSON.stringify([
+        { type: 'text', text }, ...(block ? [block] : [])
+      ]))
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-pi-invalid-image-receipt', prompt: 'inspect this image', cwd, agentProfileId: profile.id,
+        trackInputReceipt: true,
+        attachments: [{ kind: 'image', name: 'screen.png', mimeType: 'image/png', dataBase64: 'aW1hZ2U=' }],
+        permissionMode: 'full_access', emit: vi.fn()
+      })
+      await expect(handle.promise).rejects.toThrow('未出现 authoritative user session entry')
+      expect(handle.getInputReceipt?.()).toMatchObject({ status: 'unknown' })
     })
   }, 15_000)
 
