@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="page-header">
+    <div><p class="eyebrow" data-copy="eyebrow"></p><h1 data-copy="heading"></h1><p class="subtitle" data-copy="subtitle"></p></div>
+    <span class="prototype-tag" data-copy="prototype"></span>
+  </header>
+  <main class="study">
+    <section class="app-frame">
+      <div class="window-bar"><span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span><span data-copy="app"></span></div>
+      <div class="app-body">
+        <aside class="sidebar">
+          <div class="navigation"><span data-copy="projects"></span><span class="active" data-copy="activity"></span></div>
+          <div class="search"><span class="search-icon" aria-hidden="true"></span><input type="search" id="search"></div>
+          <nav id="tasks"></nav>
+          <p id="empty" hidden data-copy="empty"></p>
+          <footer class="sidebar-footer"><span class="avatar" aria-hidden="true">S</span><span data-copy="workspace"></span></footer>
+        </aside>
+        <section class="workspace">
+          <div class="workspace-bar"><span data-copy="workspace"></span><span class="workspace-marker" aria-hidden="true">⌘</span></div>
+          <div class="task-detail">
+            <span class="detail-label" data-copy="detailLabel"></span>
+            <h2 id="detail-title"></h2>
+            <span id="detail-status"></span>
+            <div class="quiet-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+          </div>
+          <p class="workspace-hint" data-copy="detail"></p>
+        </section>
+      </div>
+    </section>
+    <aside class="controls">
+      <p class="eyebrow" data-copy="demoLabel"></p><h2 data-copy="demoTitle"></h2><p class="control-hint" data-copy="demoHint"></p>
+      <div class="playback"><button id="play" class="play-button"></button><button id="reset" class="reset-button" data-copy="reset"></button></div>
+      <div class="progress"><span id="event" role="status"></span><span id="step"></span></div>
+      <div id="actions" class="actions"></div>
+      <div class="preferences">
+        <label><span data-copy="narrow"></span><input type="checkbox" id="narrow"></label>
+        <label><span data-copy="light"></span><input type="checkbox" id="light"></label>
+        <label><span data-copy="reduced"></span><input type="checkbox" id="reduced"></label>
+      </div>
+      <p class="control-note" data-copy="note"></p>
+    </aside>
+  </main>
+  <footer class="page-footer" data-copy="evidence"></footer>
+  <p class="sr-only" id="announcement" role="status"></p>
+  <script type="module" src="./preview.mjs"></script>
+</body>
+</html>
