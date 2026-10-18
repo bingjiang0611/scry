@@ -1240,7 +1240,7 @@ describe('buildSessionReport（Session Token 用量报告）', () => {
       })
     ]
     const turns = [{ runId: 'r', userText: 'x', items, done: true }]
-    const md = buildSessionReport(turns, [], { sessionId: 'sess-1' })
+    const md = buildSessionReport(turns, { status: 'captured', files: [] }, { sessionId: 'sess-1' })
     expect(md).toContain('# Session Token 用量报告')
     expect(md).toContain('sess-1')
     expect(md).toContain('本会话可验证 token')
@@ -1274,7 +1274,17 @@ describe('buildSessionReport（Session Token 用量报告）', () => {
     expect(md).not.toContain('tool output')
   })
 
-  it('空会话只出标题行', () => {
+  it('区分成功空 diff、缺失证据与采集失败', () => {
+    expect(buildSessionReport([], { status: 'captured', files: [] })).toContain('**git diff**：无改动')
+    expect(buildSessionReport([])).toContain('**git diff**：尚未采集')
+    expect(buildSessionReport([], { status: 'timeout', reason: 'deadline', files: [] })).toContain('**git diff**：Git 采集超时')
+    const failed = buildSessionReport([], { status: 'failed', reason: 'request_failed', files: [] })
+    expect(failed).toContain('**git diff**：无法读取工作区改动')
+    expect(failed).not.toContain('**git diff**：无改动')
+    expect(failed).not.toContain('**git diff**：0')
+  })
+
+  it('空会话不编造用量或 Git 采集成功', () => {
     expect(buildSessionReport([])).toContain('# Session Token 用量报告')
     expect(buildSessionReport([])).toContain('等待 result')
     expect(buildSessionReport([])).not.toContain('$0.0000')

@@ -8,6 +8,7 @@ import electron from 'electron'
 import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
+import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const cacheOnly = process.argv.includes('--cache-only')
@@ -18,12 +19,13 @@ const modelsOnly = process.argv.includes('--models-only')
 const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
 const summaryOnly = process.argv.includes('--summary-only')
+const workspaceDiffOnly = process.argv.includes('--workspace-diff-only')
 const performanceOnly = process.argv.includes('--performance-only')
 // Opt-in only: this native hide/show check necessarily displays a window.
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity']
+const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
@@ -1312,6 +1314,11 @@ try {
             finish(result)
             return
           }
+        }
+        if (${fixtures.includes('workspace-diff')}) {
+          await win.loadFile(${JSON.stringify(join(temp, 'workspace-diff.html'))})
+          result.workspaceDiff = await (${exerciseWorkspaceDiff.toString()})(win.webContents)
+          if (${workspaceDiffOnly}) { finish(result); return }
         }
         if (${fixtures.includes('pinned-summary-performance')}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pinned-summary-performance.html'))})

@@ -1,6 +1,7 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
 import { memo, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
+import { workspaceDiffCopy } from '@shared/constants/copy'
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
 import {
@@ -10,6 +11,7 @@ import {
   type TraceEvent,
   type DbStats,
   type DiffFile,
+  type WorkspaceDiffResult,
   type HookConfiguredCommand,
   type TurnDiffSnapshot
 } from '@shared/trace'
@@ -668,7 +670,7 @@ export interface OverviewPanelProps {
   usage: { cost: number | null; tin: number | null; tout: number | null; turns: number } | null
   stats: DbStats | null
   runtimeProvider?: RuntimeProvider
-  gitDiff?: DiffFile[]
+  gitDiff?: WorkspaceDiffResult | null
   busy?: boolean
   onSelect: (ev: TraceEvent) => void
   onOpenTurn?: (runId: string, ev?: TraceEvent | null, target?: 'turn' | 'event') => void
@@ -686,7 +688,7 @@ function OverviewPanelBody({
   sessionId = null,
   selected,
   runtimeProvider,
-  gitDiff = [],
+  gitDiff,
   busy = false,
   onSelect,
   onOpenTurn,
@@ -877,8 +879,9 @@ function OverviewPanelBody({
     vstate = 'warn'
     judge = `轮次已结束 · ${dangers.length} 处可疑操作`
   }
-  const diffAdd = gitDiff.reduce((s, d) => s + d.added, 0)
-  const diffDel = gitDiff.reduce((s, d) => s + d.deleted, 0)
+  const diffFiles = gitDiff?.files ?? []
+  const diffAdd = diffFiles.reduce((s, d) => s + d.added, 0)
+  const diffDel = diffFiles.reduce((s, d) => s + d.deleted, 0)
   const sessionNetDiff = useMemo(() => sessionNetDiffSummary(turns), [turns])
   const sessionActivity = useMemo(() => sessionDiffSummary(turns), [turns])
   const sessionNetResumed = sessionNetDiff?.baseline === 'resumed'
@@ -1746,26 +1749,28 @@ function OverviewPanelBody({
         </div>
       )}
 
-      {gitDiff.length > 0 &&
+      {gitDiff !== undefined &&
         (() => {
           // P2 §8.4：工具足迹 vs 工作区 diff 对照——diff 里的文件，工具碰过标 check，没碰过标 alert
           const touched = new Set(structured.map((f) => f.path))
           return (
             <div className="panel-section">
               <h4>
-                工作区未提交改动（vs HEAD）
-                <span className="more">
-                  {gitDiff.length} files · +{diffAdd} −{diffDel}
+                {workspaceDiffCopy.overviewHeading}
+                <span className="more" role="status" data-evidence={gitDiff?.status ?? 'pending'} title={workspaceDiffCopy.detail(gitDiff)}>
+                  {gitDiff?.status === 'captured' && diffFiles.length
+                    ? workspaceDiffCopy.totals(diffFiles.length, diffAdd, diffDel)
+                    : workspaceDiffCopy.label(gitDiff)}
                 </span>
               </h4>
-              {gitDiff.map((d) => (
+              {diffFiles.map((d) => (
                 <div className="gdrow" key={d.path} title={d.path}>
                   <span className={`gd-mark ${touched.has(d.path) ? 'gd-add' : 'gd-del'}`}>
                     <Icon name={touched.has(d.path) ? 'check' : 'alert'} />
                   </span>
                   <span className="gd-path">{basename(d.path)}</span>
                   {d.binary ? (
-                    <span className="dim">binary</span>
+                    <span className="dim">{workspaceDiffCopy.binary}</span>
                   ) : (
                     <>
                       <span className="gd-add">+{d.added}</span>
@@ -1775,8 +1780,7 @@ function OverviewPanelBody({
                 </div>
               ))}
               <div className="psrc">
-                当前工作树对比 HEAD（含未跟踪新文件，不含 ignored）· 含本会话之外的改动 · check=结构化文件工具足迹内 ·
-                alert=未被结构化文件工具记录
+                {workspaceDiffCopy.scope}
               </div>
             </div>
           )

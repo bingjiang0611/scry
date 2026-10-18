@@ -78,9 +78,9 @@ describe('parseNumstat（P2 git diff）', () => {
       await writeFile(sibling, 'after\n')
 
       const canonicalRoot = await realpath(root)
-      await expect(gitNumstat(selected)).resolves.toEqual([
+      await expect(gitNumstat(selected)).resolves.toEqual({ status: 'captured', files: [
         { path: join(canonicalRoot, 'selected/inside.txt'), added: 1, deleted: 1 }
-      ])
+      ] })
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -105,7 +105,9 @@ describe('parseNumstat（P2 git diff）', () => {
 
       const canonicalRoot = await realpath(root)
       const indexBefore = await stat(join(root, '.git', 'index'))
-      const files = await gitNumstat(root)
+      const result = await gitNumstat(root)
+      expect(result.status).toBe('captured')
+      const files = result.files
       const byPath = new Map(files.map((file) => [file.path, file]))
 
       expect(byPath.get(join(canonicalRoot, 'tracked.txt'))).toEqual({
@@ -150,8 +152,33 @@ describe('parseNumstat（P2 git diff）', () => {
       await pexecFile('git', ['add', '.'], { cwd: root })
       await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
 
-      await expect(gitNumstat(root)).resolves.toEqual([])
+      await expect(gitNumstat(root)).resolves.toEqual({ status: 'captured', files: [] })
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('workspace diff evidence', () => {
+  it('preserves non-Git, no-HEAD and failed-capture states instead of successful empty data', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-workspace-diff-state-'))
+    try {
+      await expect(gitNumstat(root)).resolves.toEqual({ status: 'unavailable', reason: 'not_git', files: [] })
+      await pexecFile('git', ['init'], { cwd: root })
+      await expect(gitNumstat(root)).resolves.toEqual({ status: 'unavailable', reason: 'no_head', files: [] })
+      await expect(gitNumstat(join(root, 'missing'))).resolves.toEqual({ status: 'failed', reason: 'git_error', files: [] })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves a capture deadline as timeout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-workspace-diff-deadline-'))
+    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(6000)
+    try {
+      await expect(gitNumstat(root)).resolves.toEqual({ status: 'timeout', reason: 'deadline', files: [] })
+    } finally {
+      now.mockRestore()
       await rm(root, { recursive: true, force: true })
     }
   })
