@@ -43,7 +43,9 @@ async function nodeEnvironmentWorkload(calls: number): Promise<{ probes: number;
   try {
     for (let index = 0; index < calls; index++) {
       const env = await piRpcEnvironment({ id: 'pi:rotom', label: 'Rotom', executable: join(root, 'rotom') }, { PATH: root, HOME: root })
-      expect(env.ROTOM_NODE).toBe(realpathSync(process.execPath))
+      // Probe/cache workload is identical on App CI (Node 22) and Node 24;
+      // only a runtime satisfying Rotom's >=24 contract may be selected.
+      expect(env.ROTOM_NODE).toBe(Number(process.versions.node.split('.')[0]) >= 24 ? realpathSync(process.execPath) : undefined)
     }
     return { probes: meter.probes, durationMs: performance.now() - started }
   } finally {
