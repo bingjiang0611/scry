@@ -33,6 +33,19 @@ export async function waitForCompletedRuns(
   return true
 }
 
+export function runConflictsWithSession(
+  run: { runId: string; externalSessionId?: string; sessionId?: string },
+  resume: string | undefined,
+  expected: string | null | undefined
+): boolean {
+  const sessionId = run.externalSessionId ?? run.sessionId
+  if (resume) return sessionId === resume
+  // An explicit new session has its own identity even before the Provider assigns an ID.
+  if (expected === null) return false
+  if (typeof expected === 'string') return run.runId === expected
+  return !sessionId
+}
+
 // 首轮失败/停止后 catalog 只剩一个以 runId 命名的本地会话壳（appSessionCanResume=false）：
 // 它没有原生 session 边界，但 renderer 仍然把它当作当前会话展示。
 export function localOnlySessionShell(
