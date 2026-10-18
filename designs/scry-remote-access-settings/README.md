@@ -1,6 +1,6 @@
 # Scry · 远程访问设置设计稿
 
-状态：**A 已实现，安装受门禁阻碍**。用户选择精简 A 后说“没问题 落地吧”。原型不再是待选方向；正式 App 的最终验收仍需安装后由用户手动重启检查。
+状态：**A 已实现并安装**。用户选择精简 A 后说“没问题 落地吧”。0.2.201 已安装；正式 App 的最终验收仍需用户手动启动或重启后检查。
 
 ## 入口
 
@@ -57,6 +57,6 @@ node_modules/.bin/tsc --noEmit --strict --skipLibCheck --jsx react-jsx \
 
 生产实现已移除 sidebar 主机入口；位置菜单的管理入口直达设置；复用原有主机与配对 API。当前生产 renderer 的隔离 Electron 原生输入回归已通过，含草稿、焦点、嵌套弹窗与未知/休眠/关闭状态；故意改错入口的反向对照失败，证明回归可以发现接线错误。生产独立视觉评审已读取截图，具体建议及取舍见 `brief.md`。
 
-继续验证时，冻结已提交 0.2.201（`2dde21c`）的完整类型、3368 项单测、Shell、CLI 发布检查与完整 Renderer UI 均通过；未混入并行 WIP。安装流程完成开发签名，但 packaged check 的私有 CLI 被 macOS SIGKILL。用户确认允许后复验仍失败，未执行安装；`/Applications/Scry.app` 保持 0.2.200。
+继续验证时，冻结已提交 0.2.201（`2dde21c`）的完整类型、3368 项单测、Shell、CLI 发布检查与完整 Renderer UI 均通过；未混入并行 WIP。解除 macOS 执行阻碍后，同一候选的 packaged check 与全部 smoke 通过，事务安装到 `/Applications/Scry.app`；未重建、未绕过检查、未自动启动 App。
 
-候选保留于 `/Users/baobingjiang/IdeaProjects/vibecoding/scry-remote-install-2dde21c/dist/mac-arm64/Scry.app`。需确认系统允许的是这个候选，再补完同产物校验与安装；不移除安全属性或绕过检查，也不自动重启日常 App。实际手机/SSH 配对仍未验收。详见 `brief.md` 的“继续验证与安装尝试”。历史“实际检查”段落记录的是设计稿阶段，不代表生产验收。
+已核对安装版本 0.2.201、私有 CLI 0.2.49，安装后 app.asar 与候选 SHA256 一致。旧 0.2.200 保存在安装器备份路径。请用户手动启动或重启后检查真实界面；实际手机/SSH 配对仍未验收。详见 `brief.md` 的“重新安装成功”。历史“实际检查”段落记录的是设计稿阶段，不代表真实设备验收。

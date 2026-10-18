@@ -86,3 +86,13 @@
 - `/Applications/Scry.app` 仍为 0.2.200，asar SHA256：`c64d54747be719632f3db9173d02f439a1bab67ec25387cc7a3e9ffe2b6f3bc5`；私有 CLI 0.2.49 正常返回。未覆盖、退出或重启日常 App。
 - 日志：类型/全量 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-9bda00175f0ac94a.log`；CLI `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-1d73dc4a15f59b18.log`；完整 UI `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-20b67b7ce1c8f5b7.log`；项目目录安装失败 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-d87f105de08a0961.log`。均为本机临时日志。
 - 下一步由用户确认 macOS 允许的是上述候选，而非旧安装或其他包；若没有可允许条目，提供系统提示以继续定位。解除执行阻碍后，助手复用同一候选补完 packaged check、smoke 和生产安装器；不重新构建，不将已通过的开发 fixture 当作 packaged 验收。
+
+## 重新安装成功 / 2026-10-18
+
+用户明确说“现在好了 重新安装”。复用上述同一候选和哈希，不重新构建。按既定顺序执行 `check:packaged-app` → `smoke:electron` → `install-macos.mjs`，全部通过：
+
+- packaged check：298104891 bytes（预算 346030080），311 条运行时依赖，CJS preload、Qoder SDK、node-pty 与私有 CLI 均存在；私有 CLI 返回 0.2.49。
+- packaged smoke：外链/隐藏窗口、renderer 崩溃恢复、生产 preload/main、工具内容边界、终端记录与恢复、文件只读授权，以及桌面远程 TLS/配对/会话/工作台/PTY/目录授权与撤销全部通过。均为隔离 fixture，不是真实 Provider 或真实手机。
+- 生产安装器事务安装到 `/Applications/Scry.app`，旧版备份至 `/Applications/.Scry.app.backup`；无 install journal、lock 或 staging 残留。
+- 安装后只读核对：App 0.2.201，私有 CLI 0.2.49；app.asar SHA256 与候选相同，均为 `d2406d56bb09d7bce3ecf859d1541f09b20590cbf1d36438f9d45609e96ad254`。备份版本为 0.2.200。
+- 安装后未发现 `/Applications/Scry.app/Contents/MacOS/Scry` 运行进程；未自动启动或重启。用户需手动启动/重启后进行真实界面验收。未执行真实 SSH 或手机配对。
