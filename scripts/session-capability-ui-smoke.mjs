@@ -903,6 +903,7 @@ async function exerciseSessionModels(contents, screenshotPath) {
   await pickSession('Conversation one')
   await wait(`document.querySelector('.run-status') != null && ${modelIs('model-1')}`)
   await click('textarea[aria-label="描述任务"]')
+  await wait(`document.activeElement === document.querySelector('textarea[aria-label="描述任务"]')`)
   await contents.insertText('Draft survives detection timeout')
   await wait(`document.querySelector('textarea').value === 'Draft survives detection timeout'`)
   await click('#fail-detection')

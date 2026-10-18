@@ -75,3 +75,5 @@ npm run test:unit -- src/renderer/sidebar-activity.test.ts src/renderer/componen
 - 坐标输入：复用现有 `nativeUiPointer`，等待稳定布局并检查原生 pointerup 的可信事件与命中目标。不会重发未知点击，不扩大单用例期限。
 - 修复后统一会话完整 UI/IPC 通过：18 次仅测试 Provider 调用，2 次隔离 App 重启，证据 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-ZmCs5c/verification.json`。这些重启仅属于临时 fixture，不是用户正在运行的 App。
 - 干净版本 conversation-management 与 performance-measure 共 16 项通过；后者已有 `c13cd2d` 的 collector 按场景过滤修复，未修改性能 workload 或测试时限。原工作区的预算 WIP 仍交由其原任务维护，不声称已修完该改造。
+- 扩大检查另发现原生点击后焦点未落定就 insertText，以及会话容器已出现但管理按钮尚未可用两处夹具时序问题；改为检查真实 focus/disabled 状态后输入，不加 sleep、重试或更大期限。模型夹具 focused 通过；统一会话再次完整通过，证据 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-y4UHeE/verification.json`。
+- renderer 组合运行前面的全部子门禁通过，末项统一会话因三个串联命令的 300 秒外层期限中断；中断后确认无该工作区子进程，未将组合命令记为通过。独立运行的同一统一会话脚本已完整通过。CLI release：32 文件 / 587 项及 npm 包 smoke 通过，版本仍为 0.2.49；App 候选版本为 0.2.200。

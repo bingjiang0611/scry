@@ -40,7 +40,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     if (await evaluate(`Boolean(document.querySelector(${json(selector)})?.closest('.conversation-options:not([open]) .unified-management'))`)) {
       await click('.conversation-options > summary')
     }
-    assert.equal(await evaluate(`Boolean(document.querySelector(${json(selector)}) && !document.querySelector(${json(selector)}).disabled)`), true, `Missing/enabled UI target: ${selector}`)
+    await wait(() => evaluate(`Boolean(document.querySelector(${json(selector)}) && !document.querySelector(${json(selector)}).disabled)`), `enabled UI target: ${selector}`)
     const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, { timeoutMs: 20000, scroll: true, captureReceipt: true })`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
