@@ -607,7 +607,9 @@ Pi 成功证据位于 `/tmp/scry-pi-fixed-YA0P17/`。两组真实测试使用同
 
 用户选择只准备安装包：不覆盖日常安装、不关闭或重启日常 Scry、不推送、不发布、不授予系统权限。本轮没有新增真实模型调用。产物保存在 `/Users/baobingjiang/Downloads/scry-provider-packages-sKt4O9/`，构建与原始日志在 `/tmp/scry-provider-package-build-TUILX1/`。
 
-### 冻结版本与产物状态
+### 首次检查的冻结版本与产物状态（确认弹窗前）
+
+以下保留首次检查结果；当前产物状态见本节末尾的确认后复验。
 
 | 产物 | 冻结提交 | 实际结果 |
 |---|---|---|
@@ -626,4 +628,25 @@ App 私有/独立 CLI 保持 0.2.49，没有改动其分发面。两个升版提
 - 首次直接 SDK smoke 漏掉公开 launcher 初始化的 scoped execution store，因不存在的 `/tmp/pi-subagents-uid-502` 失败；保留首次日志。改用已由真实公开 launcher 初始化的隔离 store 后通过，没有关闭 owned scope 或削弱断言。临时 npm 卸载后包目录与 bin 链接均不存在；临时 Computer Use helper 按身份关闭，认证占位文件移除，私有证据保留。
 - 候选 Scry main SHA256 为 `ca2d4333fce5d8db94b950d3423dfa5f05e093018ac1c8a6f877e87dfd0ce329`，与五消息探针不是逐字节相同。完整 diff 只有一处性能记录的构建指纹变化；仅排除该明确元数据后，其余 main 内容相同，runtime 源码/scripts Git diff 为空。这能证明代码来源，不能替代当前 packaged GUI 验收。
 
-产物目录提供 `README.md`、`manifest.json`、`SHA256SUMS` 和 `verification/`，区分已通过、首次失败与阻碍。Scry 若要升级为可安装通过状态，需要单独处理本机执行校验阻碍并重做同一候选的打包 GUI 验收；本轮没有授权改变系统权限、关闭安全校验或扩为正式签名公证发布。④其余验收、⑥和⑦没有顺带推进。
+产物目录提供 `README.md`、`manifest.json`、`SHA256SUMS` 和 `verification/`，区分已通过、首次失败与阻碍。当时 Scry 仍需确认执行校验阻碍并重做同一候选的打包 GUI 验收；后续结果如下。没有授权由 Agent 改变系统权限、关闭安全校验或扩为正式签名公证发布。④其余验收、⑥和⑦没有顺带推进。
+
+### 用户确认允许打开后的同产物复验（2026-10-18）
+
+用户说明拦截时有确认弹窗，并明确选择“已确认允许打开”。这只授权继续同一隔离包的 GUI 验收，不是覆盖日常安装、授权其他系统权限或正式发布。
+
+- 复验前后核对原产物清单的全部 456 项文件、目录、模式与符号链接，完全一致；zip SHA256 仍为 `33e9b4f178f6b546821668d2ef5b305c4be70756e52385d6803153c69ddd3f4d`。冻结提交仍为 `5657f63`，未重建或重签，没有放宽超时或断言。
+- `node scripts/electron-security-smoke.mjs <临时已安装 App>` 通过。实际 renderer URL 来自该 App 的 asar，覆盖生产 preload、工具内容边界、终端/renderer 重载、记录回放、历史重启和窗口/导航拒绝；Provider 为隔离 fixture，不是真实账号。
+- 继续完成原 `smoke:electron` 的其余脚本，结果如下。文件和桌面宿主脚本使用临时验证 cwd，把默认 `dist/mac-arm64/Scry.app` 指向已经验过的同一 App；未改脚本或产品代码。
+
+| 检查 | 执行范围 | 结果 |
+|---|---|---|
+| `external-links-smoke.mjs` | 开发 Electron fixture：隐藏启动、原生点击外链、危险 URL/导航拒绝 | 通过 |
+| `renderer-crash-recovery-smoke.mjs` | 开发 Electron fixture：首次崩溃恢复、重复崩溃先询问 | 通过 |
+| `electron-security-smoke.mjs --files-only` | 同一已安装 App：既定文件链接、只读范围和写入拒绝检查 | 通过 |
+| `desktop-remote-host-smoke.mjs` | 同一已安装 App：本地 TLS/配对、会话、工作台/PTY、目录授权及撤销 | 通过 |
+
+原 `pack:artifact` 聚合命令的首次失败仍保留；现按其实际脚本逐项补齐同产物检查，不把旧 exit 1 改写为 exit 0。`codesign --verify --deep --strict` 复查通过；`spctl --assess` 仍返回 rejected。这证明用户确认后该开发包在本机的隔离检查通过，不证明正式 Gatekeeper/公证发布通过，也不从时间先后单独断定此前 SIGKILL 的根因。
+
+Scry 包移除文件名中的 `UNVERIFIED`，现为 `Scry-0.2.198-arm64-development.zip`，内容/哈希不变。`verification/` 保留确认前的 README、manifest、校验和及首次失败日志，并新增 `scry-post-confirmation-*.log/json`。定向进程与临时认证检查无残留；没有新增真实模型调用，日常磁盘 Scry 仍为 0.2.197，未覆盖或重启日常 App。两个准备分支及产物继续保留，未推送、发布或公证。
+
+本次“只准备安装包”的本机隔离验收已完成。日常配置/已有会话的跨版本升级，以及安装包内的真实账号双向聊天不在该范围；实际日常安装、其他机器验收或正式分发仍需独立授权。
