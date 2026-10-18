@@ -1,0 +1,44 @@
+# 主机页并入设置·远程访问 / 2026-10-18
+
+任务：用户日常在另一台 Mac 上跑 Agent；主机管理不再占用侧栏一级入口，统一收进「设置 → 远程访问」。成功标准：侧栏没有「主机」项后，用户仍能在设置里完成添加/连接/断开/编辑地址/移除主机、生成 SSH 邀请、手机扫码配对与吊销，且 LocationPicker 的「管理主机…」落到这里。
+
+感受：这是一页"管理"，不是仪表盘。状态一眼可扫（状态点 + 文字），动作就地完成；删掉成段解释小字，只保留安全关键事实（指纹核对、邀请失效）。沿用 Scry 深色 tokens 与设置弹窗模式，不新造视觉身份。
+
+约束：
+- H1 出站「我连接的主机」与入站「允许其他设备访问本机」是两个方向，分区呈现，不合并列表（HostsView 注释、scry-unified-remote brief H5）。
+- H2 状态必须诚实：连接状态读取失败显示"状态未知"+ 重试，不显示成断开或 0；中继休眠、未启用是真实状态文案（CLAUDE.md 第 1 条）。
+- H3 配对安全事实不可删：等待确认设备显示指纹并要求与手机核对；SSH 邀请含短时 secret 的提示保留；编辑地址后需手动重连的说明保留。
+- H4 删除侧栏主机入口与 HostsView 后，composer LocationPicker「管理主机…」必须改指向设置·远程访问；远程会话本身不依赖主机页（会话归侧栏远程项目分组）。
+- S1 信息减法：解释性段落最多每区一条；辅助说明用 12px dim2，不堆叠。
+- A1 设置弹窗从 920×620 加宽到 1040×720 是否影响其他 tab：外观/已存档内容少，加宽无害，待用户确认。
+- A2 本设计稿以本地假数据演示，所有连接、配对、复制与授权动作都不触发真实主机、剪贴板或中继。
+
+范围：侧栏 nav 删除「主机」；HostsView 三个能力（出站列表、SSH 入站、手机配对）并入 RemotePairing 所在设置 tab 并重排；LocationPicker「管理主机…」改跳设置。不做：远程会话视图、composer 结构、Provider 能力变化；本阶段只做设计稿，不改生产代码。
+
+现状：HostsView（整页 860px max-width，header + 两 section）与 RemotePairing（设置 tab 内单列，h2/h3 + 成段小字 + "打开主机页"跳转按钮）双入口并存。生产 tokens：`src/renderer/styles.css`（--bg/#07090d 等深色为主）；组件样式 `hosts-view.css`、`desktop-remote.css`。
+
+复用：P-SCRY-DESKTOP-REMOTE（docs/desktop-remote.md，身份与路由分离、原位编辑）；scry-unified-remote（designs/scry-unified-remote，H5 两方向分离沿用）；个人库无匹配的设置页组件。
+
+调研：
+| 来源/区域 | 观察 | 采用/不采用 | 动作/检查 |
+| --- | --- | --- | --- |
+| Chrome Remote Desktop 官方帮助 · Set up Remote Access vs Access a computer | 入站（这台电脑被访问）与出站（访问别的电脑）是两个命名清晰的分区；一次性码带有效期 | 采用两方向分区与"邀请/配对码有时效"的行内提示 | 方向 A/B/C 都保持两分区；码区显示有效期 |
+| [VS Code Remote-SSH 文档](https://code.visualstudio.com/docs/remote/ssh) · Remember hosts / SSH Targets，以及官方 ssh-explorer-connect.png 图 | 已保存主机集中管理；显示名（Host）与路由地址（HostName）分离；引导式添加；截图中设备图标与主机名沿同一边线排列 | 采用身份/地址分行显示、原位编辑地址；不采用自由 SSH config 编辑 | 主机行 label + user@host:port 两级；编辑地址弹窗沿用现有 |
+| 项目 docs/desktop-remote.md | 同上，且已落地 | 沿用 | 不引入第二套机器导航 |
+| 用户截图（侧栏 主机 1/1） | 一级导航承载低频管理任务，占用常驻位置 | 删除该入口 | 三个方向均演示无主机入口的侧栏与 LocationPicker 落点 |
+
+方向（同内容、同视口对比，见 remote-access-settings.html）：
+
+| 方向 | 信息优先级/任务路径 | 满足 | 放弃 | 风险 |
+| --- | --- | --- | --- | --- |
+| A 分区单栏 | 出站主机列表在上（行内展开详情），入站「SSH 邀请 / 手机配对」两卡片在下；顺设置 tab 单列滚动 | H1/H2/H3, S1 | 长内容需滚动 | 配对 QR 在 730px 栏宽内偏左，用两栏码区缓解 |
+| B 列表-详情 | tab 内左列主机+方向项，右列详情 | H1/H3 | 嵌套第二级导航 | 与设置 rail 视觉重复；2–5 台主机时左列空荡 |
+| C 本机优先 | 入站「这台电脑」卡片置顶，出站列表在后 | H1 | 与现主机页顺序相反 | 日常出站路径变长；卡片化有装饰风险 |
+
+推荐 A：设置是管理语义，单栏分区改动最小、最诚实；B 的 master-detail 超出 2–5 台主机的规模；C 把低频入站放到日常出站前面。
+
+补充调研：Designeer 入口实际请求返回 HTTP 403，未作为已查看的视觉参考。已直接读取 VS Code 官方 `https://code.visualstudio.com/assets/docs/remote/ssh/ssh-explorer-connect.png`，借鉴紧凑主机行、图标与身份对齐，不借其高饱和整行选中颜色。
+
+视觉自查（2026-10-18）：推荐稿已在 Chrome 1512×708 查看默认、展开详情、空列表和添加主机弹窗；状态未知与待确认已有状态读回。后续截图与 recover 超时，最终几处文字/CSS 调整未获得新截图。减掉页面顶部重复说明，只保留两个方向标题；主机状态与身份保持同一行，次级地址使用等宽字体；设置 rail 不再重复解释入口。Craft 应用：主机计数使用 tabular nums；即时 hover 不加延时过渡；根背景与深色画布一致。独立评审尝试受阻：评审 agent 无法访问 browser artifact 指定路径，因此没有把它算作通过。
+
+验收：设计稿阶段——用户确认方向与配套改动（侧栏、LocationPicker 落点、弹窗加宽）。实现阶段——侧栏无主机入口；设置·远程访问完成添加/连接/断开/编辑/移除/邀请/配对/吊销全路径；状态未知与空态诚实显示；`npm run test:unit` 受影响用例通过；真实 App 目视验收。
