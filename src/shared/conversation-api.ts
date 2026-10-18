@@ -64,6 +64,7 @@ export interface ConversationSendRequest extends ConversationTargetRequest {
   expectedContinuationKey: string
   commandId: string
   prompt: string
+  attachments?: AgentStartRequest['attachments']
   selectedItems: ConversationItemRef[]
   confirmFresh: boolean
 }

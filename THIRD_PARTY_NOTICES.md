@@ -8,9 +8,11 @@ Scry directly integrates with the following Provider packages:
 - `@qoder-ai/qoder-agent-sdk` — Copyright Qoder. Use is governed by the Qoder Product Service Terms: <https://qoder.com/product-service>.
 - `@opencode-ai/sdk` — distributed under the MIT License.
 
-## T3 Code incremental Markdown parser
+## T3 Code incremental Markdown parser and handoff budgeting
 
 `src/renderer/markdown-incremental.ts` is adapted from `apps/web/src/markdown-incremental.ts` in [T3 Code](https://github.com/pingdotgg/t3code/tree/7ac952c630ef8a60d14ca8f6a0c7adce33db4bae).
+
+`src/main/conversation-handoff-budget.ts` adapts the budgeting and intact-entry selection algorithm from `packages/provider-core/src/server/handoffBudget.ts` at the same pinned commit. Scry supplies its own serialized input cost and run-scoped retrieval transport.
 
 MIT License
 

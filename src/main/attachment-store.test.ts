@@ -58,7 +58,9 @@ describe('attachment store', () => {
       size: png.byteLength,
       path: '/user-data/attachments/run-1/01-screen.png'
     }
-    expect(providerAttachmentPrompt('pi', ' inspect this ', [attachment])).toBe('inspect this')
+    expect(providerAttachmentPrompt('pi', ' inspect this ', [attachment])).toBe(' inspect this ')
+    expect(providerAttachmentPrompt('codex', '  code\n', [])).toBe('  code\n')
+    expect(providerAttachmentPrompt('qoder', ' inspect this ', [attachment])).toMatch(/^ inspect this \n\nScry/)
     expect(providerAttachmentPrompt('qoder', ' inspect this ', [attachment])).toContain('local copy: /user-data/attachments/run-1/01-screen.png')
   })
 

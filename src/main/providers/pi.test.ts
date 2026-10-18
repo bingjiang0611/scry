@@ -55,6 +55,7 @@ const persistEntries = () => require('node:fs').writeFileSync(sessionFile, [
 // This fixture starts with native conversation entries, so its session is already on disk.
 persistEntries()
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
+if (process.env.SCRY_HISTORY_READER_SNAPSHOT) require('node:fs').writeFileSync(process.cwd() + '/history-launch.json', JSON.stringify({ args: process.argv, snapshotId: process.env.SCRY_HISTORY_READER_SNAPSHOT }))
 let finishStartupUi
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => {
@@ -80,6 +81,7 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'extension_ui_request', id: 'startup-wait', method: 'select', title: 'Loading', options: ['Wait'] })
         continue
       }
+      if (require('node:fs').existsSync(process.cwd() + '/small-window')) model.contextWindow = 8000
       const state = {
         model,
         thinkingLevel,
@@ -125,6 +127,8 @@ process.stdin.on('data', (chunk) => {
     }
     else if (command.type === 'get_available_thinking_levels') response({ levels: ['off', 'high'] })
     else if (command.type === 'get_commands') response({ commands: [
+      ...(process.env.SCRY_HISTORY_READER_SNAPSHOT && require('node:fs').existsSync(process.cwd() + '/history-ready')
+        ? [{ name: 'scry_history_ready_' + process.env.SCRY_HISTORY_READER_SNAPSHOT.replaceAll('-', ''), source: 'extension' }] : []),
       { name: 'fixture-menu', description: 'Open an extension menu', source: 'extension' },
       {
         name: 'skill:review', description: 'Review code', source: 'skill',
@@ -155,6 +159,12 @@ process.stdin.on('data', (chunk) => {
       } else response({ entries: entries.slice(start), leafId })
     }
     else if (command.type === 'prompt') {
+      if (command.message.startsWith('/scry_history_ready_')) {
+        if (model.id !== 'changed-model') send({ type: 'extension_ui_request', method: 'notify', message: 'scry_history_ready:' + process.env.SCRY_HISTORY_READER_SNAPSHOT })
+        else send({ type: 'extension_error', extensionPath: process.argv.at(-1), error: 'Fixture tool disabled after model selection' })
+        response()
+        continue
+      }
       promptMessage = command.message
       if (require('node:fs').existsSync(process.cwd() + '/hold-model-query')) require('node:fs').writeFileSync(process.cwd() + '/prompt-received', '')
       if (command.message === '/fixture-menu') {
@@ -1840,6 +1850,65 @@ describe('Pi RPC Provider', () => {
       ])
       await expect(recoverManagedRecorderTurns(cwd, process.env, { provider: 'pi' }))
         .resolves.toEqual({ recovered: 0, pending: 0 })
+    })
+  }, 15_000)
+
+  it.each([false, true])('gates a scoped Pi history extension before prompt and never pools its authority (ready=%s)', async ready => {
+    await withCommandFixture(async (profile, cwd) => {
+      const { createConversationHistoryReader } = await import('../conversation-history-reader')
+      const text = 'prior'
+      const reader = await createConversationHistoryReader([{ ref: { runId: 'prior', itemId: 'user', contentHash: createHash('sha256').update(text).digest('hex') }, text }])
+      const extension = realpathSync(join(process.cwd(), 'resources/scry-history/pi-history-reader.mjs'))
+      if (ready) writeFileSync(join(cwd, 'history-ready'), '')
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile, historyExtensionPath: extension })
+      try {
+        for (let index = 0; index < (ready ? 2 : 1); index++) {
+          const handle = adapter.run({ runId: `reader-${index}`, prompt: 'continue', cwd, agentProfileId: profile.id, resume: 'pi-session-1',
+            historicalContext: { text, contentHash: createHash('sha256').update(text).digest('hex'), requiresReader: true },
+            historyReader: reader.connection, historyBudget: {}, attachments: [], permissionMode: 'full_access', emit: vi.fn() })
+          if (ready) {
+            await handle.promise
+            expect(handle.getInputReceipt?.()?.status).toBe('accepted')
+          } else {
+            await expect(handle.promise).rejects.toThrow('未注册本轮历史检索检查命令')
+            expect(handle.getInputReceipt?.()?.status).toBe('not_sent')
+          }
+        }
+        const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+        expect(commands.filter(command => command.type === 'prompt' && !command.message.startsWith('/scry_history_ready_'))).toHaveLength(ready ? 2 : 0)
+        expect(commands.filter(command => command.type === 'prompt' && command.message.startsWith('/scry_history_ready_'))).toHaveLength(ready ? 2 : 0)
+        const launch = JSON.parse(readFileSync(join(cwd, 'history-launch.json'), 'utf8'))
+        expect(launch.args.slice(-2)).toEqual(['--extension', extension])
+        expect(launch.snapshotId).toBe(reader.connection.snapshotId)
+        const pids = readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n').map(Number)
+        expect(pids).toHaveLength(ready ? 2 : 1)
+        for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow()
+      } finally { await adapter.dispose?.(); await reader.close() }
+    })
+  }, 15_000)
+
+  it.each(['changed-asset', 'small-window', 'model-select'])('rejects Pi reader admission for %s before native prompt', async failure => {
+    await withCommandFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'history-ready'), '')
+      if (failure === 'small-window') writeFileSync(join(cwd, 'small-window'), '')
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile,
+        historyExtensionPath: failure === 'changed-asset' ? profile.executable : realpathSync(join(process.cwd(), 'resources/scry-history/pi-history-reader.mjs')) })
+      try {
+        const text = 'prior'
+        const handle = adapter.run({ runId: 'reader-rejected', prompt: 'continue', cwd, agentProfileId: profile.id,
+          historicalContext: { text, contentHash: createHash('sha256').update(text).digest('hex'), requiresReader: true },
+          historyReader: { url: 'http://127.0.0.1:1/mcp', token: 'fixture', snapshotId: 'fixture' }, historyBudget: {},
+          ...(failure === 'model-select' ? { model: { providerId: 'test-provider', id: 'changed-model' } } : {}),
+          attachments: [], permissionMode: 'full_access', emit: vi.fn() })
+        await expect(handle.promise).rejects.toThrow(failure === 'changed-asset' ? '扩展身份' : failure === 'small-window' ? '模型预算' : '模型选择后')
+        expect(handle.getInputReceipt?.()?.status).toBe('not_sent')
+        const file = join(cwd, 'fixture-commands')
+        if (existsSync(file)) {
+          const commands = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+          expect(commands.filter(command => command.type === 'prompt' && !command.message.startsWith('/scry_history_ready_'))).toHaveLength(0)
+        }
+        else expect(failure).toBe('changed-asset')
+      } finally { await adapter.dispose?.() }
     })
   }, 15_000)
 

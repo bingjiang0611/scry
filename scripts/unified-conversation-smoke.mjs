@@ -7,7 +7,7 @@ import { conversationFixtureArchivePath } from './conversation-ownership-smoke.m
 import { exerciseConversationFork } from './conversation-fork-smoke.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
-import { exercisePiAgentSwitch } from './conversation-agent-switch-smoke.mjs'
+import { exercisePiAgentSwitch, exerciseConversationImages } from './conversation-agent-switch-smoke.mjs'
 import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
 
 const json = JSON.stringify
@@ -255,6 +255,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const deletion = await exerciseConversationDeletion({ cdp, evaluate, fixture, click, button, key, wait, read, preview, settled, sendRequest, inputs, ledger, capture, captureNarrow })
 
   const piSwitch = await exercisePiAgentSwitch({ cdp, evaluate, fixture, click, wait, inputs, read, settled, ledger })
+  const images = await exerciseConversationImages({ cdp, evaluate, fixture, click, wait, inputs, read, preview, settled, sendRequest, capture })
 
   // Exercise the actual registered legacy/adoption/Steer handlers while a
   // managed Provider is waiting for an answer, not just a store/controller mock.
@@ -335,7 +336,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   assert.equal(inputs(fixture).length, invocationCount)
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
-    duplicate, nativeFork, management, deletion, piSwitch, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
+    duplicate, nativeFork, management, deletion, piSwitch, images, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
 }
 
 export async function verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity) {

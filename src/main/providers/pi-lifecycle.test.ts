@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import * as recorder from '../../core/turn-recorder/recorder'
 import { recoverManagedRecorderTurns } from '../../core/turn-recorder/managed'
 import type { ProviderRunHandle } from './types'
@@ -18,6 +18,13 @@ describe('Pi startup and probe lifecycle', () => {
     await withProbeFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const events: TraceEvent[] = []
+      const startedAt = Date.now()
+      onTestFailed(() => {
+        const commands = join(cwd, 'commands')
+        console.error('Pi idle-child lifecycle evidence', JSON.stringify({ action, elapsedMs: Date.now() - startedAt,
+          events: events.map(event => ({ stage: event.stage, ms: Date.parse(event.ts) - startedAt })).slice(-24),
+          commands: existsSync(commands) ? readFileSync(commands, 'utf8').slice(-4000) : 'not created' }))
+      })
       let checkpoint!: () => void
       const waiting = new Promise<void>(resolve => { checkpoint = resolve })
       const handle = adapter.run({

@@ -58,6 +58,8 @@ import type { SessionAttentionSnapshot } from '@shared/session-attention'
 import {
   createComposerDraftStore,
   composerDraftKey,
+  inputAttachments,
+  attachmentsAfterSuccessfulSubmit,
   persistComposerDraftStore,
   readComposerDrafts,
   writeComposerDrafts,
@@ -377,13 +379,6 @@ export function inputAfterSuccessfulSubmit(current: string, submitted: string): 
   return current
 }
 
-export function attachmentsAfterSuccessfulSubmit(
-  current: DraftAttachment[],
-  submittedIds: ReadonlySet<string>
-): DraftAttachment[] {
-  return current.filter((attachment) => !submittedIds.has(attachment.id))
-}
-
 export function inputAfterFailedSubmit(current: string, submitted: string): string {
   if (!submitted || current === submitted || current.startsWith(`${submitted}\n`)) return current || submitted
   return current ? `${submitted}\n${current}` : submitted
@@ -401,10 +396,6 @@ export async function commitDraftOnDispatch(start: () => Promise<void>, commit: 
   const pending = start()
   commit()
   await pending
-}
-
-function inputAttachments(attachments: DraftAttachment[]): AgentInputAttachment[] {
-  return attachments.map(({ previewUrl: _previewUrl, id: _id, ...attachment }) => ({ ...attachment }))
 }
 
 function pastedImageName(file: File, index: number): string {

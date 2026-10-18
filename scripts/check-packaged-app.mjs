@@ -1,5 +1,6 @@
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { join, resolve, posix } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 
@@ -96,6 +97,12 @@ accessSync(ptySpawnHelper, constants.X_OK)
 accessSync(scryCli, constants.X_OK)
 if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
 if (!existsSync(scryPiIntegration)) throw new Error('packaged app 缺少 Pi recorder integration')
+const historyExtension = join(resources, 'scry-history', 'pi-history-reader.mjs')
+if (!existsSync(historyExtension) || !lstatSync(historyExtension).isFile()) throw new Error('packaged app 缺少普通文件 Pi history reader')
+const historyExtensionHash = createHash('sha256').update(readFileSync(historyExtension)).digest('hex')
+if (!extractFile(asarPath, 'out/main/index.js').toString('utf8').includes(historyExtensionHash)) {
+  throw new Error('packaged Pi history reader 与 main 中固定的扩展指纹不匹配')
+}
 for (const locale of ['en.lproj', 'zh_CN.lproj', 'zh_TW.lproj']) {
   if (!existsSync(join(electronResources, locale, 'locale.pak'))) throw new Error(`packaged app 缺少必需 locale：${locale}`)
 }
@@ -130,5 +137,6 @@ console.log(JSON.stringify({
   runtimeDependencies,
   nodePty: true,
   scryCliBundled: true,
-  scryCliVersion: actualCliVersion
+  scryCliVersion: actualCliVersion,
+  historyExtensionHash
 }))

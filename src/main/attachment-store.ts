@@ -32,13 +32,13 @@ export function providerAttachmentPrompt(
   prompt: string,
   attachments: PreparedAttachment[]
 ): string {
-  const text = prompt.trim()
-  if (attachments.length === 0 || providerId === 'pi') return text
+  // Preserve the current request exactly; its whitespace participates in input receipts.
+  if (attachments.length === 0 || providerId === 'pi') return prompt
   const lines = attachments.map((attachment, index) => {
     const size = attachment.size ? `, ${Math.round(attachment.size / 1024)} KB` : ''
     return `${index + 1}. ${attachment.name} (${attachment.mimeType}${size}) local copy: ${attachment.path}`
   })
-  return [text, `Scry pasted image attachments:\n${lines.join('\n')}`].filter(Boolean).join('\n\n')
+  return [prompt, `Scry pasted image attachments:\n${lines.join('\n')}`].filter(Boolean).join('\n\n')
 }
 
 export interface StoredAttachmentInline {

@@ -561,6 +561,7 @@ const conversationService = (): ConversationService => conversationServiceInstan
   resolveContinuationKey: (context) => providerRegistry.continuationKey(context),
   forkNative: forkManagedConversation,
   supportsHistoricalInput: (providerId) => providerRegistry.get(providerId).historicalContext === true,
+  supportsHistoryReader: (providerId) => providerRegistry.get(providerId).historyReader === true,
   startAppRun: async (request, options) => {
     const result = await startAppRun(request, options)
     if (!('runId' in result)) throw new Error('统一对话不能使用远程执行结果')
@@ -591,7 +592,8 @@ const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id)
   join(app.getPath('userData'), 'codex-home-v1'),
   join(app.getPath('userData'), 'provider-auth', 'opencode'),
   join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
-  { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile }
+  { listProfiles: listPiProfiles, resolveProfile: resolvePiProfile,
+    historyExtensionPath: join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'scry-history', 'pi-history-reader.mjs') }
 )
 /**
  * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；
@@ -3263,6 +3265,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
   const turnChangeJournal = cwd ? new TurnChangeJournal(cwd) : null
   let attachments: PreparedAttachment[] = []
+  let managedInputTextHash = managedConversation?.inputTextHash
   const displayPrompt = request.prompt
   let runtimePrompt = options.providerPrompt ?? displayPrompt
   let observedSessionId = resume
@@ -3409,7 +3412,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       cwd ? { providerId, cwd, ...(resume ? { sessionId: resume } : {}) } : undefined
     )
     runState.attachments = attachments
-    runtimePrompt = providerAttachmentPrompt(providerId, runtimePrompt, attachments)
+    if (managedConversation) {
+      const prepared = managedConversation.prepareInput(attachments)
+      runtimePrompt = prepared.prompt
+      managedInputTextHash = prepared.inputTextHash
+    } else runtimePrompt = providerAttachmentPrompt(providerId, runtimePrompt, attachments)
     if (resume) {
       win?.webContents.send('agent:session', {
         runId,
@@ -3764,9 +3771,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       runId,
       prompt: runtimePrompt,
       ...(managedConversation?.historicalContext ? { historicalContext: managedConversation.historicalContext } : {}),
+      ...(managedConversation?.historyReader ? { historyReader: managedConversation.historyReader } : {}),
       ...(managedConversation ? {
         expectedContinuationKey: managedConversation.target.continuationKey,
-        expectedInputTextHash: managedConversation.inputTextHash
+        expectedInputTextHash: managedInputTextHash,
+        historyBudget: managedConversation.historyBudget
       } : {}),
       // First / same-provider turns need receipts too. Native slash commands retain
       // their existing dispatch; a successful control command is not model-input evidence.

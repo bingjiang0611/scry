@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 
 const json = JSON.stringify
 
@@ -63,4 +65,70 @@ export async function exercisePiAgentSwitch({ cdp, evaluate, fixture, click, wai
   assert.equal(calls[4].agentProfileId, profile)
   assert.deepEqual(ledger(fixture, id).turns[4].importedItems.map(item => item.runId), [page.turns[3].runId, page.turns[3].runId])
   return { id, profile, calls: calls.length, runIds: page.turns.map(turn => turn.runId) }
+}
+
+// Synthetic clipboard data drives the production paste handler; send/Agent
+// controls use real CDP coordinate input. Provider execution stays smoke-only.
+export async function exerciseConversationImages({ cdp, evaluate, fixture, click, wait, inputs, read, preview, settled, sendRequest, capture }) {
+  const image = readFileSync(new URL('../build/icon.png', import.meta.url))
+  const contentHash = createHash('sha256').update(image).digest('hex')
+  const open = async id => {
+    const entry = `.sidebar [data-conversation-id=${json(id)}]`
+    await wait(() => evaluate(`Boolean(document.querySelector(${json(entry)}))`), 'image conversation in sidebar')
+    await click(entry)
+    await wait(() => evaluate(`document.querySelector('.conversation-chat')?.dataset.conversationId === ${json(id)} && document.querySelector('.clibtn')?.disabled === false`), 'image composer ready')
+  }
+  const agent = async id => {
+    if (await evaluate(`document.querySelector('.clibtn')?.dataset.agentId !== ${json(id)}`)) {
+      await click('.clibtn'); await click(`.climenu .mitem[data-agent-id=${json(id)}]`)
+    }
+    await wait(() => evaluate(`document.querySelector('.clibtn')?.dataset.agentId === ${json(id)} && document.querySelector('.clibtn')?.disabled === false`), 'image target selected')
+  }
+  const paste = async () => {
+    await click('textarea[aria-label="描述任务"]')
+    await evaluate(`(() => {
+      const data = new DataTransfer()
+      data.items.add(new File([Uint8Array.from(atob(${json(image.toString('base64'))}), c => c.charCodeAt(0))], 'current.png', {type:'image/png'}))
+      document.querySelector('textarea[aria-label="描述任务"]').dispatchEvent(new ClipboardEvent('paste', {clipboardData:data,bubbles:true,cancelable:true}))
+    })()`)
+    await wait(() => evaluate("document.querySelectorAll('.draft-attachment').length === 1 && document.querySelector('.draft-attachment img')?.naturalWidth > 0"), 'pasted image decodes in ordinary composer')
+  }
+  const created = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
+  await open(created.id); await agent('codex'); await paste()
+  await capture('current-image')
+  assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="描述任务"]\').value'), '')
+  await wait(() => evaluate("document.querySelector('.conversation-chat .send')?.disabled === false"), 'image-only send enabled')
+  await click('.conversation-chat .send')
+  const first = await settled(evaluate, created.id, 1)
+  const imageCall = inputs(fixture).find(call => call.runId === first.turns[0].runId)
+  assert.equal(imageCall.attachments.length, 1)
+  assert.equal(imageCall.attachments[0].contentHash, contentHash)
+  assert.equal(createHash('sha256').update(readFileSync(imageCall.attachments[0].path)).digest('hex'), contentHash)
+  await wait(() => evaluate("document.querySelectorAll('.draft-attachment').length === 0"), 'submitted image removed from draft')
+  await agent('claude')
+  await click('textarea[aria-label="描述任务"]')
+  await cdp.send('Input.insertText', { text: '  follow up without an image\n\n' })
+  await wait(() => evaluate("document.querySelector('.conversation-chat .send')?.disabled === false"), 'text-only handoff enabled')
+  await click('.conversation-chat .send')
+  const second = await settled(evaluate, created.id, 2)
+  const textCall = inputs(fixture).find(call => call.runId === second.turns[1].runId)
+  assert.equal(textCall.prompt, '  follow up without an image\n\n')
+  assert.equal(textCall.attachments, undefined, 'historical images are not sent again')
+  assert.ok(!textCall.historicalContext.text.includes('Scry pasted image attachments:'), 'historical attachment hints are not replayed')
+
+  const failed = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
+  const longHistory = 'desktop remote ' + 'complete historical text '.repeat(1800)
+  const source = sendRequest(await preview(evaluate, failed.id, 'claude'), 'image-source', longHistory)
+  await evaluate(`window.scry.conversations.send(${json(source)})`)
+  await settled(evaluate, failed.id, 1)
+  await open(failed.id); await agent('codex'); await paste()
+  await cdp.send('Input.insertText', { text: 'retain this draft' })
+  const before = inputs(fixture).length
+  await click('.conversation-chat .send')
+  await wait(() => evaluate("document.querySelector('.composer-status.is-error')?.textContent.includes('历史检索工具')"), 'unavailable reader refuses before native input')
+  assert.equal(inputs(fixture).length, before)
+  assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="描述任务"]\').value'), 'retain this draft')
+  assert.equal(await evaluate("document.querySelectorAll('.draft-attachment').length"), 1)
+  assert.equal((await read(evaluate, failed.id)).turns.length, 1, 'failed admission did not add a native turn')
+  return { id: created.id, failedId: failed.id, contentHash, runIds: second.turns.map(turn => turn.runId) }
 }

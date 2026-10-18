@@ -8,7 +8,8 @@ import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/sessi
 import type { ConversationMetadataChange } from '../shared/conversation-api'
 import { isCommandId } from '../shared/runtime'
 import { isToolContentRef } from '../shared/tool-content'
-import { prepareConversationHistory, loadConversationHistory, MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history'
+import { prepareConversationHistory, prepareConversationHandoff, loadConversationHistory, MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES, type NativeHandoffTarget } from './conversation-history'
+import type { HandoffBudgetInput } from './conversation-handoff-budget'
 import type { ProviderHistoricalContext } from './providers/types'
 import {
   conversationItemKey,
@@ -134,7 +135,8 @@ export function decodeConversation(value: unknown): Conversation {
       requireValue(turn.resumeSessionId === null || (text(turn.resumeSessionId) && turn.resumeSessionId === binding.nativeSessionId), '原生恢复身份不一致')
       items(turn.importedItems)
       items(turn.omittedItems)
-      requireValue(turn.importedItems.length > 0
+      requireValue(turn.historyPolicy === undefined || turn.historyPolicy === 'retrievable-v1', '未知历史交接策略')
+      requireValue(turn.importedItems.length > 0 || (turn.historyPolicy === 'retrievable-v1' && turn.omittedItems.length > 0)
         ? isToolContentRef(turn.history) && turn.history.encoding === 'json' && turn.history.bytes <= MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES
         : turn.history === undefined, '交接 intent 缺少正文 artifact 或关联了多余正文')
       requireValue(subset(turn.importedItems, priorItems) && subset(turn.omittedItems, priorItems), '交接引用了不存在或未来的内容')
@@ -195,6 +197,8 @@ export interface BeginConversationTurn {
   payloadHash: string
   items: ConversationItemRef[]
   selectedItems: ConversationItemRef[]
+  /** Already sealed against the same revision; validated before publishing the intent. */
+  preparedHistory?: DispatchedConversationTurn['history']
 }
 
 export type BeginConversationTurnResult = {
@@ -588,6 +592,10 @@ export class ConversationStore {
     return loadConversationHistory(this.userData, conversation, turn)
   }
 
+  prepareHandoff(conversation: Conversation, missing: ConversationItemRef[], budget: HandoffBudgetInput, allowOmission: boolean, nativeTarget?: NativeHandoffTarget) {
+    return prepareConversationHandoff(this.userData, conversation, missing, budget, allowOmission, nativeTarget)
+  }
+
   async begin(id: string, input: BeginConversationTurn): Promise<BeginConversationTurnResult> {
     // Freeze caller-owned objects before waiting in the queue.
     const request = structuredClone(input)
@@ -625,19 +633,22 @@ export class ConversationStore {
         previous = position
       }
       // Publish the exact body first. Failure leaves no dispatch intent and cannot start a Provider.
-      const history = request.selectedItems.length
-        ? await prepareConversationHistory(this.userData, conversation, request.selectedItems)
-        : undefined
+      const importedItems = request.selectedItems
+      const selected = new Set(importedItems.map(conversationItemKey))
+      const omittedItems = plan.missingItems.filter((item) => !selected.has(conversationItemKey(item)))
+      const history = request.preparedHistory ?? (importedItems.length || omittedItems.length
+        ? await prepareConversationHistory(this.userData, conversation, importedItems, omittedItems)
+        : undefined)
       const bindingId = plan.kind === 'resume' ? plan.bindingId : randomUUID()
       if (plan.kind === 'fresh') conversation.bindings.push({ ...request.target, id: bindingId })
-      const selected = new Set(request.selectedItems.map(conversationItemKey))
       const turn: DispatchedConversationTurn = {
         origin: 'dispatch', ordinal: conversation.turns.length + 1, runId: request.runId, bindingId,
         items: request.items, commandId: request.commandId, intentHash,
         resumeSessionId: plan.kind === 'resume' ? plan.nativeSessionId : null,
-        importedItems: request.selectedItems,
+        importedItems,
+        historyPolicy: 'retrievable-v1',
         ...(history ? { history } : {}),
-        omittedItems: plan.missingItems.filter((item) => !selected.has(conversationItemKey(item))),
+        omittedItems,
         delivery: { status: 'pending' }
       }
       conversation.turns.push(turn)

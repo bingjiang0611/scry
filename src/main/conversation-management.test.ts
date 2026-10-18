@@ -80,9 +80,11 @@ describe('logical conversation migration and metadata', () => {
     expect(await store.list()).toEqual([])
   })
 
-  it('keeps the native chat writable when automatic handoff would exceed its byte budget', async () => {
-    publish('x'.repeat(33 * 1024))
-    await expect(prepareConversationAdoption(userData, source, catalog(), true)).rejects.toThrow('32 KiB')
+  it('checks large capture integrity without truncating it or retiring the source during preview', async () => {
+    const text = 'x'.repeat(33 * 1024)
+    publish(text)
+    const prepared = await prepareConversationAdoption(userData, source, catalog(), true)
+    expect(prepared.seed.turns?.[0].items[0].contentHash).toBe(createHash('sha256').update(text).digest('hex'))
     expect(await store.list()).toEqual([])
     await expect(store.assertLegacyWriteAllowed({ ...source, nativeSessionId: source.externalSessionId })).resolves.toBeUndefined()
     const manual = await prepareConversationAdoption(userData, source, { ...catalog(), title: undefined })

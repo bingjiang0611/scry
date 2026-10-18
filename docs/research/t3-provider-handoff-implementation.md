@@ -4,7 +4,7 @@
 
 - 对应推进顺序 **2 → 4 → 6 → 7** 的第 4 项；本文是研究，不是 Scry 功能完成声明。
 - T3 固定在 [`7ac952c630ef8a60d14ca8f6a0c7adce33db4bae`](https://github.com/pingdotgg/t3code/tree/7ac952c630ef8a60d14ca8f6a0c7adce33db4bae)。沿用上一项的 main 快照，不把它当作稳定版 `0.0.45` 或当前最新版本。
-- Scry 核查基线：`1f932e0`，App `0.2.190`。本轮只读相关调用链，没有启动 Provider、运行 T3 测试或进行账号切换。
+- 研究时的 Scry 核查基线：`1f932e0`，App `0.2.190`。当时只读相关调用链，没有启动 Provider、运行 T3 测试或进行账号切换。后续 Scry 实现与验证见第 8 节，不改变此处固定 T3 快照的研究范围。
 - **跨 Provider 转交的是可观察的历史资料，不是原生 session、隐藏推理、工具执行状态或审批。**
 - 初始评估曾建议“保留源会话，交接到目标 Provider 的新会话”；**用户随后明确选择统一会话内切换**，当前技术方案已按该选择更新。统一 app thread 必须有真实身份和覆盖模型，不能仅解锁现有 Provider 下拉框。
 
@@ -47,7 +47,7 @@ App Thread：统一历史
 5. 包装文字明确历史不是新的请求或更高优先级指令；不重放原生工具调用、推理与附件。
 6. 使用 `t3_thread_read` 的 thread/item/分页引用找回省略资料。
 
-这不是“自动理解并提炼全部约束”。很长的关键指令仍可能整条被省略。T3 的检索工具是补偿机制；Scry 没有对应的跨 Provider 历史工具合同，不能复制提示词后就声称目标 Agent 能找回全文。
+这不是“自动理解并提炼全部约束”。很长的关键指令仍可能整条被省略。T3 的检索工具是补偿机制；研究时 Scry 没有对应的跨 Provider 历史工具合同，不能复制提示词后就声称目标 Agent 能找回全文。后续已实现有实际服务器、原生就绪门禁与撤销的 reader，见第 8 节。
 
 ### 预算的真实含义
 
@@ -109,3 +109,10 @@ App Thread：统一历史
 - [用户说明](https://github.com/pingdotgg/t3code/blob/7ac952c630ef8a60d14ca8f6a0c7adce33db4bae/docs/user/portable-handoffs.md) / [有差异的内部说明](https://github.com/pingdotgg/t3code/blob/7ac952c630ef8a60d14ca8f6a0c7adce33db4bae/docs/internals/context-handoffs.md)
 
 建议实施合同见 [Scry 跨 Provider 接续技术方案](provider-handoff-technical-plan.md)。
+
+## 8. Scry 后续落地与证据边界（2026-10-18）
+
+- 在 `2dde21c` 的工作树、App `0.2.201` 上复用固定 T3 的完整条目预算选择，保留完整 MIT/版权；没有运行 T3 自身测试，也不宣称跟进了它的最新版。
+- `conversation-handoff-budget.ts`、`conversation-history.ts` 与 `conversation-history-reader.ts` 接通一次选择/封存、真实遗漏检索和当前图片输入。沿用普通聊天与 Agent 菜单，不移植 T3 的整套 orchestration；预算按 Scry 的实际 wire 格式计算，不添加未经请求的预算配置。
+- Pi 使用 App-owned 固定扩展和发送前私有检查命令，不虚构通用 MCP 状态能力。真实已安装 CLI + 本地假模型已验证完整分页、原生图片、accepted 回执、代理直连，以及服务关闭/小窗口/模型切换后工具禁用时零用户投递。早期生命周期 notify 曾被真实负对照证明不足，已替换；不能沿用早期 mock 结果声称该时序已安全。
+- 本地类型、单测、shell、renderer、CLI、性能工作量与开发包门禁通过。随后经用户授权，Codex↔Pi 已完成三轮真实账号长历史往返：两段遗漏正文分别经 21/22 页重建并通过 hash，当前图片原生发送、回执、覆盖与用量均独立核对；Claude reader 仍未真实重测。未提交、推送或安装。本地结果见实施方案第 21 节，真实验收、首次失败、费用与限制见第 22 节。

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { AppSession } from './app-store'
 import type { ConversationAdoptionPreview, ConversationLegacySource } from '../shared/conversation-api'
 import type { ConversationSeed } from './conversation-store'
-import { assertConversationHistoryFits, conversationItemsFromTrace } from './conversation-history'
+import { assertConversationHistoryReadable, conversationItemsFromTrace } from './conversation-history'
 import { SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
 import { readTraceArchiveForMigration } from './transcript-archive'
 import { parseConversationTarget } from './conversation-service'
@@ -28,8 +28,8 @@ export async function prepareConversationAdoption(userData: string, source: Conv
   const archive = await readTraceArchiveForMigration({ userDataDir: userData, cwd: source.cwd,
     providerId: source.providerId, sessionId: source.externalSessionId })
   if (!archive?.turns.length) throw new Error('没有可完整迁入的 App 捕获归档；旧入口保留')
-  if (archive.turns.some(turn => !turn.done || turn.status !== 'completed' || turn.attachments?.length || turn.items.some(event => event.steer))) {
-    throw new Error('迁移仅支持已完成的纯文本捕获；未收敛、失败、附件或 Steer 历史需先核查，旧入口保留')
+  if (archive.turns.some(turn => !turn.done || turn.items.some(event => event.steer))) {
+    throw new Error('迁移仅支持已收敛的捕获；未收敛或 Steer 历史需先核查，旧入口保留')
   }
   const turns: ConversationSeed['turns'] = []
   for (const turn of archive.turns) {
@@ -40,9 +40,10 @@ export async function prepareConversationAdoption(userData: string, source: Conv
       archive: { sessionId: source.externalSessionId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}) } })
   }
   if (requireHandoff) {
-    // The switcher transfers every visible item automatically. Prove the exact
-    // payload fits before retiring the source; never strand a long native chat.
-    await assertConversationHistoryFits(userData, {
+    // Preserve complete captured text, including partial work from terminal failures.
+    // Historical attachments stay in the archive/UI, never in the handoff payload.
+    // The current target, input budget and retrieval tool are checked on Send.
+    await assertConversationHistoryReadable(userData, {
       cwd: source.cwd,
       bindings: [{ id: source.externalSessionId, providerId: source.providerId, agentProfileId: source.agentProfileId,
         continuationKey: 'unverified-legacy', nativeSessionId: source.externalSessionId }],

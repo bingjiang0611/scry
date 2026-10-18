@@ -14,6 +14,7 @@ export function createBuiltInProviderAdapters(
   piProfiles?: {
     listProfiles: () => Promise<PiAgentProfile[]>
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
+    historyExtensionPath?: string
   }
 ): ProviderAdapter[] {
   return [

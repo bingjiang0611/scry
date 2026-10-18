@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConversationStore, type BeginConversationTurn } from './conversation-store'
 import { readTraceArchiveTurnForHistory, traceArchiveTurnPath, traceArchivePath, upsertTraceArchiveTurn } from './transcript-archive'
 import { HistoricalInput } from './providers/historical-input'
+import { conversationItemsFromTrace } from './conversation-history'
 import { writeRecorderContent } from '../core/turn-recorder/content-store'
 import * as io from '../core/turn-recorder/io'
 import * as traceContent from './trace-tool-content'
@@ -60,6 +61,16 @@ function artifactFile(conversation: Conversation, body: ContentRef): string {
 }
 
 describe('durable conversation history bodies', () => {
+  it('preserves literal attachment-marker text in an authoritative user request', async () => {
+    const user = '  explain this literal text:\nScry pasted image attachments:\n  keep this code and whitespace\n'
+    publish(user, [event('answer')])
+    const refs = await conversationItemsFromTrace({ userData, conversation: { cwd }, runId: 'run-A', userText: user, items: [event('answer')] })
+    expect(refs[0]).toEqual(ref('user', user))
+    const conversation = await seed(user)
+    await store.begin(conversation.id, input(conversation))
+    expect(JSON.parse((await store.history(conversation.id, 'run-B'))!.text).messages[0].text).toBe(user)
+  })
+
   it('reads the explicit App archive, deduplicates delta/final text, and excludes private events', async () => {
     const user = '  keep code indentation\n'
     const answer = 'const x = 1\n\n\nDone'
@@ -200,11 +211,20 @@ describe('durable conversation history bodies', () => {
     expect(await store.read(conversation.id)).toEqual(conversation)
   })
 
-  it.each(['stale-hash', 'unfinished', 'foreign-run', 'oversized-history'])('fails closed for %s source evidence', async (kind) => {
+  it.each(['stale-hash', 'unfinished', 'foreign-run', 'oversized-history'])('handles %s without sending incomplete history', async (kind) => {
     const answer = kind === 'oversized-history' ? '中'.repeat(12_000) : 'answer'
     publish('hello', [event(answer, kind === 'foreign-run' ? { runId: 'different-run' } : {})], kind !== 'unfinished')
     const conversation = await seed('hello', kind === 'stale-hash' ? 'different' : answer)
-    await expect(store.begin(conversation.id, input(conversation))).rejects.toThrow(/hash|收敛|其他 run|32 KiB/)
+    if (kind === 'oversized-history') {
+      const prepared = await store.prepareHandoff(conversation, conversation.turns[0].items, { userText: 'continue', attachments: [] }, true)
+      const started = await store.begin(conversation.id, { ...input(conversation, prepared.selectedItems), preparedHistory: prepared.history })
+      expect(started.turn.importedItems).toEqual([ref('user', 'hello')])
+      expect(started.turn.omittedItems).toEqual([ref('assistant', answer)])
+      expect(prepared.readerItems.map(item => item.text)).toEqual([answer])
+      expect((await store.history(conversation.id, 'run-B'))?.requiresReader).toBe(true)
+      return
+    }
+    await expect(store.begin(conversation.id, input(conversation))).rejects.toThrow(/hash|收敛|其他 run/)
     expect(await store.read(conversation.id)).toEqual(conversation)
   })
 

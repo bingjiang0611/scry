@@ -1,4 +1,4 @@
-import { providerIdForAgentId, type AgentRunControls } from '@shared/runtime'
+import { providerIdForAgentId, type AgentInputAttachment, type AgentRunControls } from '@shared/runtime'
 import type { ConversationAdoptionPreview, ConversationApi, ConversationSendRequest, ConversationSummary, ConversationTargetRequest } from '@shared/conversation-api'
 
 export function conversationTarget(agentId: string, controls?: AgentRunControls): ConversationTargetRequest {
@@ -35,9 +35,11 @@ export async function prepareConversationSend(
   conversationId: string,
   target: ConversationTargetRequest,
   prompt: string,
-  commandId: string
+  commandId: string,
+  attachments: AgentInputAttachment[] = []
 ): Promise<ConversationSendRequest> {
   const captured = structuredClone(target)
+  const capturedAttachments = structuredClone(attachments)
   const preview = await api.preview(conversationId, captured)
   if (preview.continuation.kind === 'blocked') throw new Error(preview.continuation.reason)
   return {
@@ -47,6 +49,7 @@ export async function prepareConversationSend(
     expectedContinuationKey: preview.target.continuationKey,
     commandId,
     prompt,
+    ...(capturedAttachments.length ? { attachments: capturedAttachments } : {}),
     selectedItems: preview.missingItems.map(item => item.ref),
     // Choosing an Agent and pressing Send authorizes its context. Nothing is
     // launched by menu selection; unknown attempts retain this exact command.

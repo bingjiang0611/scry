@@ -1,5 +1,7 @@
 # Scry 统一会话内跨 Provider 接续
 
+**当前进度：** 第 21 节记录最新本地门禁，第 22 节记录已授权并通过的 Codex↔Pi 真实账号长历史往返、当前图片与覆盖/用量核验。此前章节的 32 KiB 限制属于旧版本。Claude reader 未真实重测，新功能未安装到日常 App。
+
 **用户已选择：统一会话内切换 Provider。** 不采用此前“另开目标会话”的产品方案；旧方案保留在 Git 历史 `09de750`。源码依据见 [T3 核查](t3-provider-handoff-implementation.md)。
 
 **当前进度：Claude/Codex 统一会话的生产 main/preload/UI 主链路已接通，隔离 Electron 已验证 A→B→A、完整正文预览、实际文件效果、归档故障和两次重启不重发。身份验证仍是合成配置/transport；没有真实账号验收。已补受限旧会话迁入、logical rename/pin/archive/restore，以及独占 App 副本删除和部分失败恢复；共享副本保守保留整组。第 6 节的原生 fork、共享副本显式回收及其余相邻动作仍未完成，因此不能宣称整个第 4 项已完整交付。最新证据与限制见第 8–10 节；此前各阶段记录保留当时的验收范围。**
@@ -661,3 +663,101 @@ Scry 包移除文件名中的 `UNVERIFIED`，现为 `Scry-0.2.198-arm64-developm
 - 同步维护分支的已验收版本元数据：Scry 的准备提交 `5657f63` cherry-pick 为 main 上的 `4982883`；Rotom 维护分支从 `42b68a1` fast-forward 至 `30d977f`。对应 package/lock 与冻结构建文件逐字节一致，没有新增 runtime 改动。
 
 持久证据位于产物目录的 `installation/`：官方安装日志、版本/签名结果、安装前状态和 `verification.json`；原始工作目录为 `/tmp/scry-provider-package-build-TUILX1/daily-install-sb3ij2xs/`。没有新增真实模型调用。新日常 App 的启动与已有配置/会话升级仍由用户手动重启后观察；本轮不冒充已完成重启后的真实业务验收。开发签名、未公证及跨机分发的限制不变。
+
+## 21. 预算、历史检索与当前图片：本地验收（2026-10-18）
+
+本轮在 `2dde21cfe0aa6040600017bd2979de6f4c1d9f07` 的工作树上完成，App 元数据为 `0.2.201`。未提交、推送、安装或重启 Scry。复用已安装的 Rotom `0.1.27-parent-shutdown.1` / Pi `1.3.0-rotom.2`，不恢复用户已放弃的旧任务。
+
+### 实现合同与边界
+
+- `conversation-handoff-budget.ts` 复用固定 T3 commit 的完整条目选择顺序：末条 user、末条 assistant、首条 user，再从近到远补充，最后恢复原顺序。不生成摘要、不裁切入选正文。版权和完整 MIT 保留在 `THIRD_PARTY_NOTICES.md`。
+- Scry 使用实际 JSON 转义、包装和 256-byte 余量计算开销；默认历史预算 16,000，另设 64,000-byte 硬上限。扣除当前完整请求、当前图片估算、已有原生上下文和模型/工具预留。未知窗口 128,000 只是 fallback，不是 tokenizer 或账单证据；未引入 T3 的环境变量预算配置。
+- 一次有界正文投影产生入选与遗漏集合，再封存 v2 artifact；全部省略时仍有检索说明。v1 artifact 继续按旧格式验证，不改旧冻结文本。新 user ref 保留完整 App 捕获文字，包括字面上的 `Scry pasted image attachments:`；旧 ref 只有匹配其已保存 hash 时才使用旧剥离投影，不追溯扩写旧覆盖。
+- 迁入仅核验捕获完整性，不再因旧 32 KiB 上限拒绝；发送时才选择预算并核验目标能力。当前限制为最多 2,000 源轮次、4 MiB 正文、16 MiB 源文件读取总量；超限拒绝，不静默截断。超过这些界限时，须先设计分页来源/封存合同并补验证，不能直接提高上限。
+- `conversation-history-reader.ts` 提供 run-scoped `scry_thread_read`：冻结遗漏清单、完整 hash、来源信息与分页正文。main 创建 loopback endpoint、Bearer 和 snapshot；renderer/repository 不能指定 authority。结束或启动失败即撤销，token/endpoint 不写 ledger。
+- 有遗漏而工具缺失、未就绪、资产损坏或最终预算不足时，在用户输入投递前拒绝。工具可用、甚至成功检索，都不自动推进 coverage；只有精确接受的注入文字、原生条目及合法继承才算覆盖。
+- Claude 在 held input 放行前核验 SDK 初始化和 MCP 工具状态；Codex 在同一 scoped client 中核验实际 MCP tool list，并在结束时关闭 client。仓库同名 MCP 拒绝，不绕过原 trust/fingerprint。两者目前仅有 mock 原生边界 + 真实 loopback reader 证据。
+- Pi 加载固定 hash 的 App-owned 扩展，不复用/保留 reader run 的进程池。**不能依靠 `session_start`/`model_select` 里的早期 notify**：后续扩展仍可能关闭工具。现在先完成模型选择，再通过 `get_commands` 确认精确的 run-scoped 私有检查命令确已注册，才调用该只读命令，重验 registered/active tool 与服务器。缺失命令时不发送 slash 文本，避免被当作模型输入。真实 CLI 已证明控制命令不增加 user entry、不调用模型。这不是 Pi 的通用 MCP 状态 API。
+- Pi reader 使用 `node:http` 专用直连 Agent，不使用受环境代理接管的全局 fetch。Claude/Codex 合并两种大小写的 `NO_PROXY` 并加入 `127.0.0.1`，保留其他代理设置。Scry 仍不是 OS 沙箱。
+- 当前图片沿普通 composer、typed IPC、附件准备与原生输入通道发送；保留原文字空白，按最终 prepared prompt 校验回执。发送前冻结目标和附件；成功只移除已提交附件，失败保留草稿。不重放历史图片、reasoning、工具状态、审批或子代理执行。原生命令和 Steer 仍不在统一交接范围内。
+
+### 当前源码的验证
+
+环境为 macOS arm64、Node `24.18.0`；下列是本机门禁，不是 Node 20/22 或其他平台 CI 矩阵。
+
+| 检查 | 结果与范围 | 证据 |
+| --- | --- | --- |
+| `npm run typecheck`、`npm test` | 277 文件、3,397 测试通过，4 测试/文件跳过；shell 通过 | `/tmp/scry-handoff-command-types.log`、`/tmp/scry-handoff-command-full.log` |
+| `npm run check:cli-release` | 32 文件、587 测试通过；CLI 构建及隔离 package smoke 通过，版本 0.2.49 | `/tmp/scry-handoff-command-cli.log` |
+| `npm run build`、`npm run test:renderer:ui` | 完整本地 renderer 门禁通过，含 Credits、统一对话生产 IPC 与 Pi 历史恢复 | `/tmp/scry-handoff-command-build.log`、`/tmp/scry-handoff-command-ui.log` |
+| 普通对话图片场景 | 真实 Electron paste handler、坐标点击发送；image-only、文件字节/hash、文本空白、历史图片不重放、无 reader 时拒绝且保留文字/图片草稿 | `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-7itu9t/verification.json` 及 `current-image-{light,dark}.png` |
+| 真实 Pi CLI + 本地假模型 | 五个场景通过，详情如下；无远程模型调用 | `/tmp/scry-native-reader-thZd7e/*-command.log` 与对应目录 |
+| `npm run performance:measure -- --out /tmp/scry-handoff-performance-command` | 工作量门禁通过，已有计数无 worse；3 项 CPU 指令候选缺数据，不声称 L2 毫秒或 L3 日常性能改善 | 目录内 `candidate.json`、`measure.json`、`ratchet.md` |
+| `SCRY_RELEASE_BUILD=0 npm run pack:artifact` | 开发打包、实际资源 hash/包体检查与 packaged Electron smoke 通过；未安装、未公证 | `/tmp/scry-handoff-command-package.log` |
+
+开发产物：`dist/mac-arm64/Scry.app`。实际打包扩展 SHA256 为 `c86db7857dddea255eda02931d32827e62babc7a4b440e74d5ac8b7f2d11e186`；检查要求该文件为普通文件，并确认同一 hash 在 `app.asar/out/main/index.js` 的固定校验中。
+
+真实 Pi 测试使用 package 声明的 `dist/bundle/cli.js`、隔离 HOME/workspace/配置、本地 OpenAI SSE fixture，以及当前仓库的 adapter、reader、附件准备代码：
+
+- `normal-command`、`proxy-command`：均经模型切换，原生工具读取 16 页并完整重建 Unicode 历史；当前图片进入原生模型请求；persisted session entry 回执为 accepted，且各只有 1 个 user entry。每例 18 次请求全部发往本地假模型。
+- `offline-command`、`small-window-command`、`inactive-command`：分别关闭 reader、使用过小模型窗口、由另一扩展在 `model_select` 关闭历史工具；三例均为 `not_sent`、0 模型请求、0 user entry。
+- 五例均记录真实 ChildProcess close，并当次验证 PID 已不存在。代理场景为 0 proxy hit、未观察到 capability。`result.json`、`transport.json`、`processes.json` 分别保留业务、传输和关闭证据。
+
+### 首次失败与负对照保留
+
+- 全局 fetch 的代理负对照：`proxy-connect/transport.json` 记录 1 proxy hit 且 Bearer 可见。直连修复后的 `proxy-command` 为 0；不把代理接收请求当作 reader 成功。
+- 生命周期 notify 的负对照：`inactive-final.log` / `inactive-final/transport.json` 证明工具已被后续 handler 关闭时仍产生了 1 个原生 user entry、1 次本地模型请求。改为发送前私有命令检查后，`inactive-command` 两者均为 0。最初仅 mock 通过不足以发现此时序问题。
+- 字面附件标记：`/tmp/scry-history-literal-negative.log` 中新回归在旧实现上因正文 hash 被截断而失败；修复后 focused 与最终全量检查通过，旧 ref/旧 artifact 合同仍覆盖。
+- 首次全量单测 `/tmp/scry-handoff-full-unit.log` 中 Pi `interrupt` 用例超出既有 5 秒。隔离诊断约 1,852ms 完成，未定位首次超时根因；没有扩大超时或加 retry。已在该用例保留失败时阶段/命令诊断，后续两次全量通过不抹掉首轮失败。若再现，维护者应据新增阶段证据调查子进程收敛，而不是先加超时。
+- 前两次 UI smoke 分别暴露错误文案不一致和旧 32 KiB 迁入断言；修复为当前合同后通过。日志 `/tmp/scry-handoff-ui-{first,second}.log` 保留。早期类型错误、错误 CLI 入口及探针证据文件缺失也保留，未计入最终通过证据。
+
+### 未验证与下一责任动作
+
+本地实现与上述门禁已通过；没有把本地假模型当作真实账号验收，也没有把开发包当作日常安装。Claude 不真实重测；Codex/Claude 新 reader 的实际 CLI/远程模型交互仍未验证。Windows/Linux、Node 20/22 矩阵、正式签名公证和日常已有配置升级未在本轮执行。
+
+若要收尾④的新长历史能力，下一步由维护者授权 Codex/Pi 的新真实账号长历史往返（可能计费），再由 Agent 冻结模型/身份、使用隔离目录执行并核对输入回执与覆盖。安装、提交、推送仍需另行授权；不顺带启动⑥/⑦或处理旧 Rotom 任务。随后授权与执行结果见第 22 节。
+
+## 22. 已授权的 Codex↔Pi 真实长历史往返（2026-10-18）
+
+用户明确授权新的真实账号验收。执行限定为三次新用户输入；不调用 Claude、不自动重发未知输入、不提交/推送/安装、不处理旧 Rotom 任务。使用隔离 HOME、userData、临时 Git workspace 和凭据 allowlist，通过真实 App 的 production preload/main IPC 驱动实际 Provider，不使用 smoke adapter 或假模型。本轮没有重放日常 App 的菜单/粘贴操作；这些交互的本地 fixture 证据仍见第 21 节。
+
+### 冻结与实际环境
+
+- 源码基线 `2dde21cfe0aa6040600017bd2979de6f4c1d9f07` + 本轮功能工作树，App `0.2.201`；`npm run build` 成功后复制运行产物与资源到隔离目录。结束时逐项复核 artifact hash，并确认仓库 tracked diff hash 在真实调用期间未变。
+- 主进程 SHA256：`3e4b8ec359b87620dad49e9f17574f2a38af87b926e50d6b7230375abff10905`；reader 扩展仍为第 21 节的 `c86db785…`。
+- Codex CLI `0.160.1`，模型 `gpt-6.1-sol`、low effort、默认审批；Pi 使用已安装官方 Rotom `0.1.27-main.0d90623` launcher，显式 Node `24.18.0`，Pi `1.3.0-rotom.2`，模型 `openai-codex/gpt-5.6-sol`、low effort、full_access。全权限仍不是 OS 沙箱；测试只提供合成数据，未复制用户项目或其他 Provider 凭据。
+- 证据根目录：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-real-long-rn0cgh7a/`。`freeze.json`、`result.json`、`verification.json`、原生 transcript、App archive 与 SQLite 均保留；没有上传。
+
+### 决定性结果
+
+| 步骤/检查 | 结果 | 证据 |
+| --- | --- | --- |
+| Codex 写入 A | 接受完整 22,026-byte Unicode 用户正文，回复 `STORED_A`；只出现一次原生输入 | 原生 Codex rollout、第一轮 archive、`resume-after-verifier.json` |
+| Codex → Pi | A 的 user 条目确实未内联；真实调用 1 页 manifest + 21 页正文，完整重建并通过 SHA256；正确返回 A 的随机标记 | `selection-69b20a24-ada3-4ae9-954b-8b514d112a1a.json`、Pi native toolResult、`verification.json` |
+| 当前图片 | 64×64 PNG 的原始字节进入唯一 Pi user entry；真实模型回答 `BLUE` | 当前 PNG、Pi 原生 image block 与 archive 回答 |
+| Pi → Codex | 恢复第一轮的同一原生 Codex session；B 的 22,560-byte user 条目未内联，真实读取 1 页 manifest + 22 页正文，全文/hash 一致并返回 B 的标记 | 第三轮 selection、同一 Codex rollout、`verification.json` |
+| 回执与覆盖 | 三轮 accepted + completed；逐轮核对实际原生输入、prepared wire hash、context hash、native turn/session ID；检索过的遗漏 user 条目仍未被自动记为 coverage | 完整 App archive 的 `inputReceipt`、conversation ledger、原生记录及只读 preview |
+| 不重放/不重复 | 共三次用户输入，零重发；私有 readiness command 未生成 Pi user entry；Codex 原生输入没有历史 image block | 原生 user entry 精确匹配计数，`verification.json` |
+| 独立负对照 | 仅在验证器内存视图篡改一页的一个字符，原始文件不变；全文/hash 核验按预期失败 | `verify-negative.py`、`negative-control.json` |
+
+Codex 在原生 `exec` 编排工具里发现并调用 reader；四段脚本仅做工具发现、manifest 与分页读取，不是 OS shell。App 捕获到实际 23 次 MCP reader 调用。Pi 实际 22 次 reader 调用。独立验证解析原生 tool result，按 offset 连续重建正文，检查末页、snapshot、来源 hash；不把模型声称“已读完”当作证据。两轮当前输入都不含它需要回答的前轮随机标记，因此不能靠当前提示猜出答案。
+
+### 用量与费用
+
+独立解析全部原生记录：Codex 按每轮累计 usage 差值，Pi 按 23 条原生 assistant response 汇总；与 App final、SQLite `usage_ledger` / `model_usage`、`usage.jsonl` 逐轮一致，没有因 started/progress/response 重复计数。Codex 两轮共有 6 次原生模型用量增量；这是记录计数，不是无法观测的 HTTP 重试次数。
+
+| Provider/轮次 | input | output | cache read | 费用证据 |
+| --- | ---: | ---: | ---: | --- |
+| Codex A | 18,739 | 8 | 11,392 | unavailable |
+| Pi B | 28,320 | 2,071 | 421,504 | 价格表估算 **$0.3233016** |
+| Codex C | 111,793 | 248 | 84,864 | unavailable |
+
+两种 Provider 的 input/cache 字段语义不同，不据此直接相加比较。Pi 的美元值不是账单；Codex 费用缺失，因此总实际费用仍为 unavailable，不能报告为 $0.3233016 或零。
+
+### 保留的首次失败、清理与范围
+
+- 首次预检直接调用 SDK bin，登录 shell 选到 Node `20.17.0`，因缺少 `node:module.enableCompileCache` 退出。零用户输入，已确认进程关闭并清除凭据副本；`preflight-direct-entry/` 保留。随后改用官方 launcher + 明确 Node 24。本轮不证明 SDK 直接入口与 Node 20 兼容，也未修改/安装 runtime。
+- 第一轮 Codex 其实已成功，但探针只检查 `text` 而漏掉 `text_delta`，误报回答缺失。`verification-first/` 和 `runner-official-launcher.log` 保留。先离线核对原生 transcript 中唯一输入与 `STORED_A`，再改用生产 `conversations.readItem` 完整正文读取，复用已接受轮次继续后两步；未重发首轮。
+- 离线验证器先有变量作用域错误，随后把有历史输入的 receipt stage 错写成普通输入 stage；负对照初版还意外重排了 JSON 编码的 item ID。修正依据分别是 Python 作用域、`HistoricalInput` 的真实 stage 合同与保持未修改字符串原样；未降低验收断言、未改原生证据、未新增模型调用。各首次日志保留，最终 `verify.py` 与单字符负对照均通过。
+- 所有测试 App/登记后代与隔离 HOME 下的 helper 已核验收敛；活动 run 为空。凭据副本和私有 Codex auth 链接已删除；对隔离目录普通文件的已知凭据字符串扫描为零命中。证据和合成测试文件保留，日常 App/配置未重启或覆盖。
+- 本次授权的三轮真实长历史往返已完成。没有启用 workspace recorder，`.scry/records` 为 0，不冒充 recorder/CLI overview 的真实验收。Claude、新平台/Node 矩阵、日常安装升级和发布仍不在本轮范围；需要这些范围时由维护者另行授权相应隔离验收。按原推进顺序，后续可讨论⑥ Agent/MCP；本轮未开始⑥/⑦。

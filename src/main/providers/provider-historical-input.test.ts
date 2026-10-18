@@ -7,7 +7,7 @@ import type { TraceEvent } from '../../shared/trace'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
 
 const sdk = vi.hoisted(() => ({ query: vi.fn(), getSessionMessages: vi.fn(), forkSession: vi.fn() }))
-const server = vi.hoisted(() => ({ request: vi.fn(), onNotification: vi.fn(), shutdown: vi.fn() }))
+const server = vi.hoisted(() => ({ request: vi.fn(), onNotification: vi.fn(), shutdown: vi.fn(), created: vi.fn() }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => sdk)
 vi.mock('../claude-locate', () => ({
   resolveClaudeBin: () => '/fixture/claude',
@@ -19,6 +19,7 @@ vi.mock('../skill-config', () => ({ computeEnabledSkills: () => [], listSkills: 
 vi.mock('./codex-app-server', () => ({
   CodexAppServerResponseError: class extends Error {},
   CodexAppServerClient: class {
+    constructor(options: unknown) { server.created(options) }
     request = server.request
     requestRunning = server.request
     onNotification = server.onNotification
@@ -94,6 +95,99 @@ function launch(providerId: 'claude' | 'codex', extra: Partial<ProviderRunReques
   }
   return { handle: new ProviderRegistry([adapter]).run(providerId, input), events, input }
 }
+
+describe('run-scoped historical reader at native adapter boundaries', () => {
+  it.each([false, true])('withholds Claude SDK input until native MCP readiness (available=%s)', async available => {
+    const { createConversationHistoryReader } = await import('../conversation-history-reader')
+    const reader = await createConversationHistoryReader([{ ref: { runId: 'prior', itemId: 'user', contentHash: createHash('sha256').update('old').digest('hex') }, text: 'old' }])
+    let resolveStatus!: (value: unknown[]) => void
+    const status = new Promise<unknown[]>(resolve => { resolveStatus = resolve })
+    let sawStatus!: () => void
+    const statusRequested = new Promise<void>(resolve => { sawStatus = resolve })
+    let nativeInputs = 0
+    let inputDone: Promise<unknown> | undefined
+    const close = vi.fn()
+    sdk.query.mockImplementation(({ prompt, options }) => {
+      expect(typeof prompt).not.toBe('string')
+      expect(options.mcpServers.scry_history).toEqual({ type: 'http', url: reader.connection.url, headers: { Authorization: `Bearer ${reader.connection.token}` } })
+      expect(options.env.NO_PROXY.split(',')).toContain('127.0.0.1')
+      expect(options.env.no_proxy).toBe(options.env.NO_PROXY)
+      const next = prompt[Symbol.asyncIterator]().next()
+      inputDone = next
+      return {
+        initializationResult: async () => ({}),
+        mcpServerStatus: () => { sawStatus(); return status },
+        close,
+        async *[Symbol.asyncIterator]() {
+          const received = await next
+          if (received.done) return
+          nativeInputs++
+          expect(received.value.message.content).toEqual([{ type: 'text', text: expectedText('继续') }])
+          yield { type: 'result', subtype: 'success', is_error: false, session_id: 'native-A' }
+        }
+      }
+    })
+    try {
+      const { handle } = launch('claude', { historyReader: reader.connection, historicalContext: { ...historicalContext, requiresReader: true }, historyBudget: {} })
+      await statusRequested
+      expect(nativeInputs).toBe(0)
+      expect(handle.getInputReceipt?.()?.status).toBe('not_sent')
+      const response = await fetch(reader.connection.url, { method: 'POST', headers: { Authorization: `Bearer ${reader.connection.token}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
+      const listed = await response.json() as { result: { tools: Array<{ name: string }> } }
+      resolveStatus([{ name: 'scry_history', status: 'connected', tools: available ? listed.result.tools : [] }])
+      if (available) {
+        await handle.promise
+        expect(nativeInputs).toBe(1)
+        expect(handle.getInputReceipt?.()?.status).toBe('accepted')
+      } else {
+        await expect(handle.promise).rejects.toThrow('历史检索工具')
+        expect(nativeInputs).toBe(0)
+        expect(handle.getInputReceipt?.()?.status).toBe('not_sent')
+        await expect(inputDone).resolves.toMatchObject({ done: true })
+      }
+      expect(close).toHaveBeenCalled()
+    } finally { await reader.close() }
+  })
+
+  it.each([false, true])('verifies Codex tool exposure before turn/start and closes its scoped client (available=%s)', async available => {
+    const { createConversationHistoryReader } = await import('../conversation-history-reader')
+    const reader = await createConversationHistoryReader([{ ref: { runId: 'prior', itemId: 'user', contentHash: createHash('sha256').update('old').digest('hex') }, text: 'old' }])
+    const base = server.request.getMockImplementation()!
+    server.request.mockImplementation(async (method: string, params: unknown) => {
+      if (method === 'mcpServerStatus/list') {
+        const response = await fetch(reader.connection.url, { method: 'POST', headers: { Authorization: `Bearer ${reader.connection.token}` },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
+        const listed = await response.json() as { result: { tools: Array<{ name: string }> } }
+        return { data: [{ name: 'scry_history', authStatus: 'unsupported', tools: available ? Object.fromEntries(listed.result.tools.map(tool => [tool.name, tool])) : {} }] }
+      }
+      return base(method, params)
+    })
+    try {
+      const { handle } = launch('codex', { historyReader: reader.connection, historicalContext: { ...historicalContext, requiresReader: true }, historyBudget: {} })
+      if (available) {
+        await vi.waitFor(() => expect(handle.getInputReceipt?.()?.status).toBe('accepted'))
+        notify('turn/completed', { threadId: 'native-A', turn: { id: 'turn-current', status: 'completed' } })
+        await handle.promise
+        const methods = server.request.mock.calls.map(([method]) => method)
+        expect(methods.indexOf('mcpServerStatus/list')).toBeLessThan(methods.indexOf('turn/start'))
+      } else {
+        await expect(handle.promise).rejects.toThrow('历史检索工具')
+        expect(server.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false)
+        expect(handle.getInputReceipt?.()?.status).toBe('not_sent')
+      }
+      // Initialization, resume and input must all use the same scoped client.
+      expect(server.created).toHaveBeenCalledTimes(1)
+      const launchOptions = server.created.mock.calls[0][0]
+      expect(launchOptions.args.join(' ')).toContain(reader.connection.url)
+      expect(launchOptions.args.join(' ')).not.toContain(reader.connection.token)
+      expect(launchOptions.env.SCRY_HISTORY_READER_TOKEN).toBe(reader.connection.token)
+      expect(launchOptions.env.NO_PROXY.split(',')).toContain('127.0.0.1')
+      expect(launchOptions.env.no_proxy).toBe(launchOptions.env.NO_PROXY)
+      expect(server.shutdown).toHaveBeenCalledTimes(1)
+    } finally { await reader.close() }
+  })
+})
 
 describe('Claude historical input at the real runner / mocked SDK boundary', () => {
   it('retains a not_sent receipt when frozen runtime identity cannot be proved before SDK input', async () => {

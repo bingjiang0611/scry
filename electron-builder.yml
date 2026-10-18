@@ -40,6 +40,10 @@ files:
 # App 私有 recorder CLI：Provider/Hook 固定调用 Resources/bin/scry，随 App 一起升级。
 # wrapper 复用 Electron 的 Node 模式，不再额外捆绑 Node runtime。
 extraResources:
+  - from: resources/scry-history
+    to: scry-history
+    filter:
+      - pi-history-reader.mjs
   - from: packages/turn-recorder-cli
     to: scry-cli
     filter:

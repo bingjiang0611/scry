@@ -87,9 +87,9 @@ describe('historical input boundary', () => {
     expect(() => new HistoricalInput(request({ historicalContext: context('  ') }))).toThrow('为空')
   })
 
-  it('counts UTF-8 plus wrapper bytes, but never truncates the current request', () => {
-    expect(() => new HistoricalInput(request({ historicalContext: context('中'.repeat(11_000)) }))).toThrow('32 KiB')
-    expect(() => new HistoricalInput(request({ historicalContext: context('x'.repeat(32 * 1024)) }))).toThrow('32 KiB')
+  it('accepts intact history larger than the legacy 32 KiB boundary and never truncates the current request', () => {
+    const history = new HistoricalInput(request({ historicalContext: context('中'.repeat(11_000)) }))
+    expect(history.text('继续')).toContain('中'.repeat(11_000))
     const input = request({ historicalContext: context('old'), prompt: 'new'.repeat(40_000) })
     expect(new HistoricalInput(input).text(input.prompt).endsWith(input.prompt)).toBe(true)
   })

@@ -37,6 +37,7 @@ import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { McpLiveStatus } from '../../shared/trace'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
 import { HistoricalInput } from './historical-input'
+import { HISTORY_READER_SERVER, historyReaderEnvironment } from '../conversation-history-reader'
 import { effortOption, permissionOptions } from './run-controls'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 
@@ -304,6 +305,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     id: 'claude',
     runtimeProvider: 'claude_sdk',
     historicalContext: true,
+    historyReader: true,
     continuationKey: (context) => {
       const env = claudeRuntimeEnv()
       if (!env.HOME) throw new Error('Claude runtime HOME 不可用，无法确认接续身份')
@@ -379,12 +381,16 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       const claudePath = executable()
       const history = new HistoricalInput(request)
       const prompt = history.text(request.prompt)
-      if (request.expectedContinuationKey) {
+      const mcpServers = { ...authorizedMcpServers(request.mcpExecution) }
+      if (request.expectedContinuationKey || request.historyReader) {
         try {
-          if (!env.HOME) throw new Error('Claude runtime HOME 不可用，输入未投递')
-          const identity = claudeContinuationKey({ providerId: 'claude', cwd: request.cwd, agentProfileId: request.agentProfileId },
-            env.HOME, claudePath, { ...env, SCRY_CLAUDE_SETTING_SOURCES: JSON.stringify(settingSources) })
-          if (identity !== request.expectedContinuationKey) throw new Error('Claude 接续身份已变化，请重新预览')
+          if (request.historyReader && mcpServers[HISTORY_READER_SERVER]) throw new Error('仓库 MCP 名称与 App 历史检索服务冲突')
+          if (request.expectedContinuationKey) {
+            if (!env.HOME) throw new Error('Claude runtime HOME 不可用，输入未投递')
+            const identity = claudeContinuationKey({ providerId: 'claude', cwd: request.cwd, agentProfileId: request.agentProfileId },
+              env.HOME, claudePath, { ...env, SCRY_CLAUDE_SETTING_SOURCES: JSON.stringify(settingSources) })
+            if (identity !== request.expectedContinuationKey) throw new Error('Claude 接续身份已变化，请重新预览')
+          }
         } catch (error) {
           // No SDK or child exists yet. Return a failed handle so the caller can
           // retain not_sent evidence; SDK exceptions below remain unknown.
@@ -397,6 +403,9 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
             getInputReceipt: () => history.snapshot()
           }
         }
+      }
+      if (request.historyReader) mcpServers[HISTORY_READER_SERVER] = {
+        type: 'http', url: request.historyReader.url, headers: { Authorization: `Bearer ${request.historyReader.token}` }
       }
       const handle = runAgent(
         prompt,
@@ -423,7 +432,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           cwd: request.mcpExecution?.cwd ?? request.cwd,
           skills: computeEnabledSkills(request.cwd, env.HOME ?? homeDir),
           claudePath,
-          env,
+          env: request.historyReader ? historyReaderEnvironment(env) : env,
           settingSources,
           onSessionId: request.onExternalSessionId,
           onInputAttempt: () => history.attempting(prompt),
@@ -433,7 +442,8 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           model: request.model?.id,
           effort: request.effort,
           permissionMode: request.permissionMode,
-          mcpServers: authorizedMcpServers(request.mcpExecution),
+          mcpServers,
+          historyReader: request.historyReader,
           recordNative: request.recordNative
         }
       )

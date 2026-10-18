@@ -86,3 +86,7 @@ export const REMOTE_ACCESS_COPY = {
   settingsAppearanceFooter: '选择会保存在此设备，并立即应用到全部视图。',
   settingsArchiveFooter: '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'
 } as const
+
+export const CONVERSATION_COPY = {
+  handoffScope: '缺失文字按预算补齐，其余可检索。只发送当前图片，不重放历史图片。原生命令和 Steer 暂不支持。'
+} as const
