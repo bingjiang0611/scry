@@ -57,4 +57,6 @@ node_modules/.bin/tsc --noEmit --strict --skipLibCheck --jsx react-jsx \
 
 生产实现已移除 sidebar 主机入口；位置菜单的管理入口直达设置；复用原有主机与配对 API。当前生产 renderer 的隔离 Electron 原生输入回归已通过，含草稿、焦点、嵌套弹窗与未知/休眠/关闭状态；故意改错入口的反向对照失败，证明回归可以发现接线错误。生产独立视觉评审已读取截图，具体建议及取舍见 `brief.md`。
 
-当前全量测试和 Node 类型检查受现有 main/history WIP 阻碍，未执行安装。远程 smoke 曾在总预算处超时；将新增状态场景搬入同一门禁的专项模式后，完整远程 UI、会话 parity 和设置专项均通过。首次失败仍保留，详见 `brief.md`。待这些门禁问题处理后，按仓库流程构建安装；不自动重启正在运行的 App。由用户手动重启后确认实际布局与既有主机操作；真实手机/SSH 配对仍未验收。历史“实际检查”段落记录的是设计稿阶段，不代表生产验收。
+继续验证时，冻结已提交 0.2.201（`2dde21c`）的完整类型、3368 项单测、Shell、CLI 发布检查与完整 Renderer UI 均通过；未混入并行 WIP。安装流程完成开发签名，但 packaged check 的私有 CLI 被 macOS SIGKILL。用户确认允许后复验仍失败，未执行安装；`/Applications/Scry.app` 保持 0.2.200。
+
+候选保留于 `/Users/baobingjiang/IdeaProjects/vibecoding/scry-remote-install-2dde21c/dist/mac-arm64/Scry.app`。需确认系统允许的是这个候选，再补完同产物校验与安装；不移除安全属性或绕过检查，也不自动重启日常 App。实际手机/SSH 配对仍未验收。详见 `brief.md` 的“继续验证与安装尝试”。历史“实际检查”段落记录的是设计稿阶段，不代表生产验收。
