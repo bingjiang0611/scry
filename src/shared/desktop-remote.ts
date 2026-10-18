@@ -122,13 +122,19 @@ export interface DesktopRemoteHistory {
   status: 'available' | 'unavailable'
   reason?: string
 }
+// Oversized history pages are transferred losslessly in bounded byte chunks.
+// The assembled page is capped separately from the 4 MiB wire response limit.
+export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
+export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
+
 export type DesktopHostRead =
   | { kind: 'info' }
-  | { kind: 'history'; context: DesktopRemoteContext; before?: number; snapshot?: string }
+  | { kind: 'history'; context: DesktopRemoteContext; before?: number; snapshot?: string; byteChunks?: true; chunk?: { id: string; offset: number } }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string }
 export type DesktopHostReadResult =
   | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true; workbench?: 1; sessionActions?: true }
   | { kind: 'history'; history: DesktopRemoteHistory }
+  | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
   | { kind: 'trace'; run: ActiveRun | null }
 
 export interface DesktopRemoteSubmit {
