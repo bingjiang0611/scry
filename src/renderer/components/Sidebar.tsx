@@ -2,6 +2,8 @@
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
+import { sidebarActivity } from '../sidebar-activity'
+import { SidebarActivity } from './SidebarActivity'
 import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { sessionAttentionKey } from '@shared/session-attention'
@@ -131,6 +133,11 @@ export const Sidebar = memo(function Sidebar({
     })
   }
   const [q, setQ] = useState('')
+  const [view, setView] = useState<'projects' | 'activity'>('projects')
+  const activity = useMemo(() => view === 'activity'
+    ? sidebarActivity(projects, runningRunIds, waitingQuestionRunIds, q) : [],
+  [view, projects, runningRunIds, waitingQuestionRunIds, q])
+  const tabId = `${id ?? 'sidebar'}-view`
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
   const [projectDialog, setProjectDialog] = useState<{ mode: 'rename' | 'remove'; project: ProjectMeta } | null>(null)
@@ -277,7 +284,20 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <SessionHoverProvider><div className="sb-list">
+      <div className="sb-view-tabs" role="tablist" aria-label="会话列表视图" onKeyDown={(event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
+        setView(next)
+        document.getElementById(`${tabId}-${next}`)?.focus()
+      }}>
+        {(['projects', 'activity'] as const).map((tab) => <button key={tab} type="button" role="tab"
+          id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
+          tabIndex={view === tab ? 0 : -1} onClick={() => setView(tab)}>
+          {tab === 'projects' ? '项目' : '动态'}
+        </button>)}
+      </div>
+      <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealth && catalogHealth.status !== 'ready' && (
           <div className="sb-empty" role="status" title={catalogHealth.reason}>
             {catalogHealth.status === 'degraded'
@@ -285,6 +305,22 @@ export const Sidebar = memo(function Sidebar({
               : '会话索引不可用；请检查 app-sessions.json 与 .bak 后重试。'}
           </div>
         )}
+        {view === 'activity' ? <>
+          <div className="sb-activity-scope">本机会话</div>
+          <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
+            ? renderConversation(entry.conversation)
+            : <SessionRow cwd={entry.project.cwd} session={entry.session}
+              active={isActive(entry.project.cwd, entry.session)}
+              running={Boolean(entry.session.runId && runningRunIds.has(entry.session.runId))}
+              waitingForAnswer={Boolean(entry.session.runId && waitingQuestionRunIds.has(entry.session.runId))}
+              unread={unreadSessionKeys.has(sessionAttentionKey({ providerId: entry.session.providerId,
+                agentProfileId: entry.session.agentProfileId, cwd: entry.project.cwd,
+                sessionId: entry.session.externalSessionId ?? entry.session.sessionId }))}
+              backgroundWork={entry.session.runId ? backgroundWorkByRun[entry.session.runId] : undefined}
+              onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
+              onMenu={onRenameSession ? openSessionMenu : undefined} />}
+          />
+        </> : <>
         {pinned.length > 0 && (
           <>
             <div className="sb-section">置顶</div>
@@ -412,6 +448,7 @@ export const Sidebar = memo(function Sidebar({
             </div>
           )
         })}
+        </>}
       </div></SessionHoverProvider>
 
       {sessionMenu && onRenameSession && (

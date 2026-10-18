@@ -7,9 +7,11 @@ import { build } from 'vite'
 import electron from 'electron'
 import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
+import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const cacheOnly = process.argv.includes('--cache-only')
+const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
 const modelsOnly = process.argv.includes('--models-only')
@@ -21,7 +23,7 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache']
+const fixtures = sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
@@ -1252,7 +1254,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${fixture === 'sidebar-activity' ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -1271,6 +1273,12 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
+        if (${fixtures.includes('sidebar-activity')}) {
+          win.setSize(1100, 760)
+          await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
+          result.sidebarActivity = await (${exerciseSidebarActivity.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '')})
+          if (${sidebarActivityOnly}) { finish(result); return }
+        }
         if (${fixtures.includes('session-cache')}) {
           win.setSize(1200, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'session-cache.html'))})
