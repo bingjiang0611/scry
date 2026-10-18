@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
 import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
@@ -44,7 +45,9 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
       if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, runId: request.runId, prompt: request.prompt,
-        resume: request.resume ?? null, sessionId, historicalContext: request.historicalContext ?? null, outgoingPrompt })}\n`)
+        resume: request.resume ?? null, sessionId, historicalContext: request.historicalContext ?? null, outgoingPrompt,
+        ...(request.attachments.length ? { attachments: request.attachments.map(attachment => ({ kind: attachment.kind, name: attachment.name,
+          path: attachment.path, mimeType: attachment.mimeType, contentHash: createHash('sha256').update(Buffer.from(attachment.dataBase64, 'base64')).digest('hex') })) } : {}) })}\n`)
       let stopped = false
       const composerProbe = request.prompt.startsWith('native composer ')
       const deferredNativeTurn = request.prompt.startsWith('native composer stop-immediate ')

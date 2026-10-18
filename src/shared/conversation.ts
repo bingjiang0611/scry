@@ -68,7 +68,9 @@ export interface DispatchedConversationTurn extends ConversationTurnBase {
   /** Exact selection, not a high-watermark pretending that omitted items were delivered. */
   importedItems: ConversationItemRef[]
   omittedItems: ConversationItemRef[]
-  /** Immutable body published before this intent; required for non-empty importedItems. */
+  /** New dispatches require a bootstrap artifact even when every item is omitted. */
+  historyPolicy?: 'retrievable-v1'
+  /** Immutable body published before this intent. */
   history?: ContentRef
   delivery: ConversationDelivery
 }
@@ -124,7 +126,7 @@ export function sameConversationTarget(a: ConversationTarget, b: ConversationTar
     a.continuationKey === b.continuationKey
 }
 
-export function conversationCoverage(conversation: Conversation, bindingId: string): ConversationItemRef[] {
+export function conversationCoverage(conversation: Pick<Conversation, 'turns' | 'fork'>, bindingId: string): ConversationItemRef[] {
   const covered = new Map<string, ConversationItemRef>()
   if (conversation.fork?.status === 'accepted' && conversation.fork.bindingId === bindingId) {
     for (const item of conversation.fork.inheritedItems) covered.set(conversationItemKey(item), item)

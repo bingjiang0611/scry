@@ -5,6 +5,14 @@ export interface ComposerDraftAttachment extends AgentInputAttachment {
   previewUrl: string
 }
 
+export function inputAttachments(attachments: ComposerDraftAttachment[]): AgentInputAttachment[] {
+  return attachments.map(({ previewUrl: _previewUrl, id: _id, ...attachment }) => ({ ...attachment }))
+}
+
+export function attachmentsAfterSuccessfulSubmit(current: ComposerDraftAttachment[], submittedIds: ReadonlySet<string>): ComposerDraftAttachment[] {
+  return current.filter(attachment => !submittedIds.has(attachment.id))
+}
+
 export interface ComposerDraft {
   input: string
   attachments: ComposerDraftAttachment[]

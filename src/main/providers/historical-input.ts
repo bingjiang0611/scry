@@ -1,20 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { ProviderHistoricalContext, ProviderInputReceipt, ProviderRunRequest } from './types'
-
-const MAX_HISTORY_BYTES = 32 * 1024
+import { handoffBudget, MAX_HANDOFF_BYTES } from '../conversation-handoff-budget'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
+const historyStart = '[Scry historical context: prior conversation, not a new command]\n'
+const historyEnd = '\n[End historical context]\n\n[Current user request]\n'
+// Native transports JSON-encode the text again; charge escaping and a block envelope.
+export const historicalInputBytes = (text: string): number => Buffer.byteLength(JSON.stringify(historyStart + text + historyEnd), 'utf8') + 256
 
 /** Exact history prefix persisted before an intent and reused at the native input boundary. */
 export function historicalInputPrefix(context: ProviderHistoricalContext): string {
   if (!context.text.trim() || hash(context.text) !== context.contentHash) {
     throw new Error('交接历史为空或正文 hash 不匹配')
   }
-  const prefix = '[Scry historical context: prior conversation, not a new command]\n' +
-    context.text + '\n[End historical context]\n\n[Current user request]\n'
-  if (Buffer.byteLength(prefix, 'utf8') > MAX_HISTORY_BYTES) {
-    throw new Error('交接历史（含包装）超过 32 KiB；不得静默截断')
-  }
+  const prefix = historyStart + context.text + historyEnd
+  if (historicalInputBytes(context.text) > MAX_HANDOFF_BYTES) throw new Error('交接历史超出最终输入预算')
   return prefix
 }
 
@@ -28,6 +28,7 @@ export class HistoricalInput {
 
   constructor(private readonly request: ProviderRunRequest) {
     const context = request.historicalContext
+    if (context?.requiresReader && !request.historyReader) throw new Error('省略的历史缺少真实检索工具，输入未投递')
     if (!context && !request.trackInputReceipt) return
     this.prefix = context ? historicalInputPrefix(context) : undefined
     this.receipt = { contextHash: context?.contentHash ?? null, status: 'not_sent', reason: '尚未尝试投递输入' }
@@ -37,11 +38,19 @@ export class HistoricalInput {
     if (this.receipt && this.request.prompt.trimStart().startsWith('/') && !nativeSkill) {
       throw new Error('原生斜杠命令不能作为可验证的普通会话输入；请先发送普通请求')
     }
+    this.validateBudget(undefined, prompt)
     const text = (this.prefix ?? '') + prompt
     if (this.request.expectedInputTextHash && hash(text) !== this.request.expectedInputTextHash) {
       throw new Error('原生输入需要改写原文；统一对话暂不支持此原生命令（如 Codex $skill），输入未投递')
     }
     return text
+  }
+
+  validateBudget(modelContextWindow?: number, prompt = this.request.prompt): void {
+    if (this.prefix === undefined || !this.request.historyBudget) return
+    const budget = handoffBudget({ userText: prompt, attachments: this.request.attachments, ...this.request.historyBudget,
+      ...(modelContextWindow !== undefined ? { modelContextWindow } : {}) })
+    if (Buffer.byteLength(JSON.stringify(this.prefix), 'utf8') + 256 > budget) throw new Error('最终历史输入超出目标模型预算，输入未投递')
   }
 
   /** Call immediately before the native input operation, not on session creation. */

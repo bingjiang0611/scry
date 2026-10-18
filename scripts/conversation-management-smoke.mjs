@@ -53,8 +53,15 @@ export async function exerciseConversationManagement({ cdp, evaluate, fixture, i
     assert.ok((await evaluate('window.scry.listProjects()')).find(project => project.cwd === fixture.workspace).sessions.some(session => session.externalSessionId === receipt.sessionId), 'failed adoption retains the old entry')
     changed.turns[0].userText = 'x'.repeat(33 * 1024)
     writeFileSync(path, JSON.stringify(changed))
-    assert.match(await evaluate(`window.scry.conversations.previewAdoption(${json(source)}, {providerId:'claude'}).then(()=>'',error=>String(error))`), /32 KiB/)
-    assert.ok((await evaluate('window.scry.listProjects()')).find(project => project.cwd === fixture.workspace).sessions.some(session => session.externalSessionId === receipt.sessionId), 'oversized automatic handoff does not retire the native source')
+    // Adoption preserves complete readable history. Selection/reader admission
+    // belongs to the next send, not the old fixed-size migration limit.
+    const callsBeforePreview = inputs(fixture)
+    const largePreview = await evaluate(`window.scry.conversations.previewAdoption(${json(source)}, {providerId:'claude'})`)
+    assert.equal(largePreview.turnCount, 1)
+    assert.notEqual(largePreview.fingerprint, sourcePreview.fingerprint)
+    assert.equal(largePreview.adoptedConversation, undefined)
+    assert.deepEqual(inputs(fixture), callsBeforePreview)
+    assert.ok((await evaluate('window.scry.listProjects()')).find(project => project.cwd === fixture.workspace).sessions.some(session => session.externalSessionId === receipt.sessionId), 'previewing large history does not retire the native source')
   } finally { writeFileSync(path, bytes) }
   const invocations = inputs(fixture)
   const usageBefore = (await evaluate('window.scry.stats()')).totals

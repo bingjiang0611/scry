@@ -2,6 +2,7 @@
 // 断言核心流程的三样 UI 都出来——trace 树（工具节点）/ footer（token）/ 文件足迹。
 // renderToStaticMarkup 不需 DOM，纯 node 跑，确定性、零成本，可常驻套件。
 import { describe, it, expect, vi } from 'vitest'
+import { attachmentsAfterSuccessfulSubmit } from '../composer-drafts'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRef, type ComponentProps } from 'react'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
@@ -16,7 +17,6 @@ import {
   activeRunForSession,
   adoptLocalStartSessionId,
   attachmentsAfterFailedSubmit,
-  attachmentsAfterSuccessfulSubmit,
   appendWorkspaceReference,
   buildForkSessionRequest,
   applyNewConversationEffects,

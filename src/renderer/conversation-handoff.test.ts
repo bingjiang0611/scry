@@ -51,8 +51,17 @@ describe('same-composer Agent handoff', () => {
 
   it('freezes the clicked target before asynchronous planning and propagates refusal', async () => {
     const target = { providerId: 'codex' as const, model: { id: 'model-a' } }
-    const api = { preview: vi.fn(async () => { target.model.id = 'model-b'; return preview }) }
-    expect((await prepareConversationSend(api, 'conversation', target, 'captured prompt', 'command')).model).toEqual({ id: 'model-a' })
+    const attachments = [{ kind: 'image' as const, name: 'current.png', mimeType: 'image/png' as const, dataBase64: 'original-image' }]
+    const api = { preview: vi.fn(async () => {
+      target.model.id = 'model-b'
+      attachments[0].dataBase64 = 'new-draft-image'
+      attachments.push({ ...attachments[0], name: 'next.png' })
+      return preview
+    }) }
+    const frozen = await prepareConversationSend(api, 'conversation', target, '  captured prompt\n', 'command', attachments)
+    expect(frozen.model).toEqual({ id: 'model-a' })
+    expect(frozen.prompt).toBe('  captured prompt\n')
+    expect(frozen.attachments).toEqual([{ kind: 'image', name: 'current.png', mimeType: 'image/png', dataBase64: 'original-image' }])
     api.preview.mockRejectedValueOnce(new Error('身份不可验证'))
     await expect(prepareConversationSend(api, 'conversation', target, 'prompt', 'next')).rejects.toThrow('身份不可验证')
   })

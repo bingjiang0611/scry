@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { ActiveRun } from '@shared/trace'
 import type { ConversationForkRequest, ConversationMetadataChange, ConversationPage, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
-import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
+import { attachmentsAfterSuccessfulSubmit, composerDraftKey, inputAttachments, type ComposerDraftStore } from '../composer-drafts'
+import { CONVERSATION_COPY } from '../constants/copy'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
 import type { Turn } from '../format'
@@ -31,7 +32,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const [reload, setReload] = useState(0)
   const [latestRequest, setLatestRequest] = useState(0)
   const [live, setLive] = useState<ActiveRun>()
-  const [attempt, setAttempt] = useState<ConversationSendRequest>()
+  const [attempt, setAttempt] = useState<{ request: ConversationSendRequest; attachments: Array<{ id: string; previewUrl: string }> }>()
   const [forkAttempt, setForkAttempt] = useState<ConversationForkRequest>()
   const [attemptReadback, setAttemptReadback] = useState(false)
   const [error, setError] = useState<string>()
@@ -155,22 +156,36 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   }
   const blockedReason = !page ? '正在读取对话…' : page.summary.blockedReason ??
     (page.summary.archivedAt ? '对话已存档；恢复后可继续发送' : null)
-  const send = async (original?: ConversationSendRequest): Promise<void> => {
-    if (busyRef.current || forkAttempt || (!original && (blockedReason || attempt || !input.trim() || chatProps.sendBlockedReason))) return
+  const send = async (original?: typeof attempt): Promise<void> => {
+    const draft = draftStore.getSnapshot().get(draftKey)
+    const prompt = draft?.input ?? ''
+    const attachments = draft?.attachments ?? []
+    const submitted = original?.attachments ?? attachments.map(({ id, previewUrl }) => ({ id, previewUrl }))
+    if (busyRef.current || forkAttempt || (!original && (blockedReason || attempt || (!prompt.trim() && !attachments.length) || chatProps.sendBlockedReason))) return
     busyRef.current = true
     setWorking(true)
     setError(undefined)
-    let request = original
+    let request = original?.request
     try {
       request ??= await prepareConversationSend(window.scry.conversations, conversation.id,
-        conversationTarget(chatProps.selectedAgentId, chatProps.runControls), input, crypto.randomUUID())
+        conversationTarget(chatProps.selectedAgentId, chatProps.runControls), prompt, crypto.randomUUID(), inputAttachments(attachments))
       if (!mounted.current) return
-      setAttempt(request)
+      setAttempt({ request, attachments: submitted })
       setAttemptReadback(false)
       const result = await window.scry.conversations.send(request)
       const sentPrompt = request.prompt
-      draftStore.update(current => current.get(draftKey)?.input === sentPrompt
-        ? new Map(current).set(draftKey, { ...current.get(draftKey)!, input: '' }) : current)
+      const submittedIds = new Set(submitted.map(attachment => attachment.id))
+      draftStore.update(current => {
+        const draft = current.get(draftKey)
+        if (!draft) return current
+        const remaining = { input: draft.input === sentPrompt ? '' : draft.input,
+          attachments: attachmentsAfterSuccessfulSubmit(draft.attachments, submittedIds) }
+        const next = new Map(current)
+        if (remaining.input || remaining.attachments.length) next.set(draftKey, remaining)
+        else next.delete(draftKey)
+        return next
+      })
+      for (const attachment of submitted) if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
       if (!mounted.current) return
       setAttempt(undefined)
       showLatest()
@@ -221,7 +236,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const missing = page?.turns.filter(turn => !turn.history && live?.runId !== turn.runId) ?? []
   const inherited = page?.bindings.some(binding => binding.retiredReason && binding.continuationKey.startsWith('unverified-legacy:'))
   const firstHandoff = inherited && page?.turns.every(turn => turn.delivery.status === 'imported')
-  const limitation = '切换时自动补齐缺失的文字历史（最多 32 KiB）；附件、原生命令和 Steer 暂不支持。'
+  const limitation = CONVERSATION_COPY.handoffScope
 
   return <main className="unified-conversation conversation-chat" aria-label="对话" data-conversation-id={conversation.id}>
     <div className="conversation-toolbar">
@@ -265,13 +280,11 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       busy={Boolean(activeRunId)} queueWhileBusy={false}
       sendBlockedReason={blockedReason ?? (forkAttempt ? '请先核对原分支请求' : attempt ? '请先核对原发送状态' : chatProps.sendBlockedReason)} composerError={error ?? null}
       composerNotice={blockedReason && !activeRunId ? { text: blockedReason, tone: 'blocked' } : notice ? { text: notice, tone: 'blocked' } : firstHandoff ? { text: '旧 Agent 的接续身份无法验证。文字历史已保留，将在新上下文继续。', tone: 'blocked' } : null}
-      draftAttachments={[]} queuedPrompts={[]} steerCapability={null} onSteerQueuedPrompt={undefined}
+      draftAttachments={drafts.get(draftKey)?.attachments ?? []} queuedPrompts={[]} steerCapability={null} onSteerQueuedPrompt={undefined}
       slashOpen={false} slashCmds={[]} slashLoading={false} historyWindow={null} onLoadOlderTurns={undefined}
       pendingQuestions={live?.pendingQuestions ?? []} stopStates={live?.stopState ? { [live.runId]: live.stopState } : {}}
       traceHealth={undefined} forkableRunIds={forkableRunIds} onForkTurn={!working && !attempt && !forkAttempt && !blockedReason ? turn => fork(turn) : undefined} renderLocationPicker={undefined}
       agentScopeLabel="切换只影响下一条消息；发送时自动补齐缺失历史"
-      onPasteImages={() => setError('跨 Agent 对话暂不支持图片；未发送，文字草稿已保留')}
-      onPasteClipboardImage={() => setError('跨 Agent 对话暂不支持图片；未发送，文字草稿已保留')}
       onAnswerQuestion={async response => { if (!await window.scry.answerQuestion(response)) throw new Error('问题已关闭或不再属于本轮'); await refresh() }}
       onStop={() => {
         if (activeRunId) void window.scry.stop(activeRunId).then(requested => setNotice(requested ? '已请求停止，等待本轮结束。' : '运行已结束或无法停止，请刷新状态。')).catch(error => setError(message(error)))

@@ -19,6 +19,8 @@ import {
   type AgentSteerResult
 } from '../../shared/runtime'
 import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
+import { HISTORY_READER_SERVER, HISTORY_READER_TOOL, historyReaderEnvironment, type HistoryReaderConnection } from '../conversation-history-reader'
 import { join } from 'node:path'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
@@ -143,7 +145,7 @@ function tomlInline(value: unknown): string {
   throw new Error('Codex MCP 配置包含不支持的 TOML 值')
 }
 
-export function codexMcpConfigArgs(execution?: AuthorizedMcpExecution): string[] {
+export function codexMcpConfigArgs(execution?: AuthorizedMcpExecution, historyReader?: HistoryReaderConnection): string[] {
   const servers: Record<string, Record<string, unknown>> = {}
   for (const [name, config] of Object.entries(authorizedMcpServers(execution))) {
     servers[name] = isRemoteMcpConfig(config)
@@ -165,6 +167,11 @@ export function codexMcpConfigArgs(execution?: AuthorizedMcpExecution): string[]
           startup_timeout_sec: config.startup_timeout_sec,
           tool_timeout_sec: config.tool_timeout_sec
         }
+  }
+  if (historyReader) {
+    if (servers[HISTORY_READER_SERVER]) throw new Error('仓库 MCP 名称与 App 历史检索服务冲突')
+    servers[HISTORY_READER_SERVER] = { url: historyReader.url, bearer_token_env_var: 'SCRY_HISTORY_READER_TOKEN',
+      enabled: true, enabled_tools: [HISTORY_READER_TOOL], startup_timeout_sec: 10, tool_timeout_sec: 10 }
   }
   return ['-c', `mcp_servers=${tomlInline(servers)}`]
 }
@@ -704,7 +711,8 @@ export function createCodexAdapter(
     cwd?: string,
     hookTrust: CodexHookTrustGrant[] = [],
     mcpExecution?: AuthorizedMcpExecution,
-    expectedContinuationKey?: string
+    expectedContinuationKey?: string,
+    historyReader?: HistoryReaderConnection
   ): CodexAppServerClient => {
     const trustedHooks = [...hookTrust].sort((left, right) => left.key.localeCompare(right.key))
     const trustKey = trustedHooks.map((hook) => `${hook.key}\0${hook.currentHash}`).join('\n')
@@ -725,7 +733,8 @@ export function createCodexAdapter(
         throw new ContinuationIdentityUnavailable('Codex 接续身份已变化，请重新预览')
       }
     }
-    const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}\0${identity}`
+    const readerKey = historyReader ? createHash('sha256').update(JSON.stringify(historyReader)).digest('hex') : 'none'
+    const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}\0${identity}\0${readerKey}`
     const existing = clients.get(key)
     if (existing) {
       const timer = clientIdleTimers.get(existing)
@@ -763,14 +772,14 @@ export function createCodexAdapter(
     const args = [
       ...projectTrustArgs,
       ...hookTrustArgs,
-      ...codexMcpConfigArgs(mcpExecution),
+      ...codexMcpConfigArgs(mcpExecution, historyReader),
       ...appServerArgs
     ]
     const client = new CodexAppServerClient({
       command: path,
       args,
       cwd,
-      env: { ...env, CODEX_HOME: privateHome.path }
+      env: { ...(historyReader ? historyReaderEnvironment(env) : env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}) }
     })
     clients.set(key, client)
     clientLastUsed.set(client, Date.now())
@@ -801,9 +810,10 @@ export function createCodexAdapter(
     cwd?: string,
     hookTrust: CodexHookTrustGrant[] = [],
     mcpExecution?: AuthorizedMcpExecution,
-    expectedContinuationKey?: string
+    expectedContinuationKey?: string,
+    historyReader?: HistoryReaderConnection
   ): Promise<T> => {
-    const client = getClient(cwd, hookTrust, mcpExecution, expectedContinuationKey)
+    const client = getClient(cwd, hookTrust, mcpExecution, expectedContinuationKey, historyReader)
     clientActivity.set(client, (clientActivity.get(client) ?? 0) + 1)
     try {
       const result = await client.request<T>(method, params)
@@ -902,6 +912,7 @@ export function createCodexAdapter(
     id: 'codex',
     runtimeProvider: 'codex_cli',
     historicalContext: true,
+    historyReader: true,
     continuationKey: (context) => {
       const env = runtimeEnvironment()
       const sourceHome = sourceHomeFor(env)
@@ -1214,7 +1225,8 @@ export function createCodexAdapter(
             runRequest.cwd,
             runRequest.codexHookTrust,
             runRequest.mcpExecution,
-            runRequest.expectedContinuationKey
+            runRequest.expectedContinuationKey,
+            runRequest.historyReader
           )
           activeClient = appServer
           clientActivity.set(appServer, (clientActivity.get(appServer) ?? 0) + 1)
@@ -1596,7 +1608,8 @@ export function createCodexAdapter(
                 runRequest.cwd,
                 runRequest.codexHookTrust,
                 runRequest.mcpExecution,
-                runRequest.expectedContinuationKey
+                runRequest.expectedContinuationKey,
+                runRequest.historyReader
               )
             : await request<CodexThreadResponse>(
                 'thread/start',
@@ -1608,10 +1621,18 @@ export function createCodexAdapter(
                 runRequest.cwd,
                 runRequest.codexHookTrust,
                 runRequest.mcpExecution,
-                runRequest.expectedContinuationKey
+                runRequest.expectedContinuationKey,
+                runRequest.historyReader
               )
           externalSessionId = thread.thread.id
           history.verifySession(externalSessionId)
+          if (runRequest.historyReader) {
+            const statuses = codexMcpStatus(await appServer.request('mcpServerStatus/list', { threadId: externalSessionId, detail: 'full' }))
+            const reader = statuses.find(server => server.name === HISTORY_READER_SERVER)
+            if (!reader?.toolNames?.includes(HISTORY_READER_TOOL) || reader.status === 'failed' || reader.status === 'needs-auth') {
+              throw new Error('Codex 未确认历史检索工具可用，输入未投递')
+            }
+          }
           model = thread.model
           modelProvider = thread.modelProvider
           serviceTier = thread.serviceTier
@@ -1665,7 +1686,7 @@ export function createCodexAdapter(
             ...(access.approvalsReviewer ? { approvalsReviewer: access.approvalsReviewer } : {}),
             ...(runRequest.model ? { model: runRequest.model.id } : {}),
             ...(runRequest.effort ? { effort: runRequest.effort } : {})
-          }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution, runRequest.expectedContinuationKey)
+          }, runRequest.cwd, runRequest.codexHookTrust, runRequest.mcpExecution, runRequest.expectedContinuationKey, runRequest.historyReader)
           turnId = turn.turn.id
           if (turnId) history.accepted(externalSessionId, 'codex_turn_start_response', turnId)
           runRequest.emit(newEvent(runRequest.runId, {
@@ -1695,7 +1716,8 @@ export function createCodexAdapter(
             const active = Math.max(0, (clientActivity.get(activeClient) ?? 1) - 1)
             if (active > 0) clientActivity.set(activeClient, active)
             else clientActivity.delete(activeClient)
-            scheduleClientShutdown(activeClient)
+            if (runRequest.historyReader) await shutdownClient(activeClient)
+            else scheduleClientShutdown(activeClient)
           }
         }
       })()

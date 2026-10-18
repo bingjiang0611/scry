@@ -48,7 +48,8 @@ describe('conversation backend lane', () => {
     })
     const created = await service.create(cwd)
     const valid = request(created.id, created.revision, 'schema-command')
-    for (const invalid of [null, [], { ...valid, attachments: [] }, { ...valid, resume: 'foreign-native' },
+    for (const invalid of [null, [], { ...valid, attachments: [{}] }, { ...valid, attachments: 'not-an-array' },
+      { ...valid, historyReader: { url: 'http://127.0.0.1/mcp' } }, { ...valid, resume: 'foreign-native' },
       { ...valid, confirmFresh: 'yes' }, { ...valid, permissionMode: 'invalid-mode' },
       { ...valid, agentProfileId: 'unimplemented-profile' }, { ...valid, providerId: 'opencode' },
       { ...valid, model: { id: 42 } }, { ...valid, selectedItems: [{ runId: 'r', itemId: 'user', contentHash: hash('body'), text: 'untrusted history' }] }]) {

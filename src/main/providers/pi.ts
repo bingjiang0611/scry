@@ -59,6 +59,8 @@ const bounded = (value: unknown, max = 200_000): string => {
   return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated by Scry]`
 }
 
+// Paired with the packaged App-owned extension, never a repository-selected path.
+const PI_HISTORY_EXTENSION_SHA256 = 'c86db7857dddea255eda02931d32827e62babc7a4b440e74d5ac8b7f2d11e186'
 const PI_BOOTSTRAP_MAX_BYTES = 64 * 1024
 const PI_NODE_PROBE_TIMEOUT_MS = 5_000
 export const PI_RPC_COMMAND_TIMEOUT_MS = 15_000
@@ -1346,7 +1348,8 @@ async function runPiAgent(
   state: PiRunState,
   maxFrameBytes = PI_RPC_MAX_FRAME_BYTES,
   rotomPool?: RotomRpcPool,
-  history = new HistoricalInput(request)
+  history = new HistoricalInput(request),
+  historyExtensionPath?: string
 ): Promise<ProviderRunResult> {
   if (request.permissionMode !== 'full_access') {
     throw new AgentRuntimeError('Pi 只支持显式选择“本机完全访问”后运行', {
@@ -1368,15 +1371,29 @@ async function runPiAgent(
   // Stop may arrive while resolving the profile or probing Node. Do not spawn after that stop.
   if (state.stopped) return { stopped: true, status: 'interrupted' }
   const args = piRpcArgs({ session: request.resume })
-  const mayReuse = isRotomLauncher(profile)
+  const launchEnv = { ...env }
+  if (request.historyReader) {
+    if (!historyExtensionPath) throw new Error('Pi 历史检索扩展不可用，输入未投递')
+    const info = await lstat(historyExtensionPath)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > PI_BOOTSTRAP_MAX_BYTES ||
+      await fileDigest(historyExtensionPath) !== PI_HISTORY_EXTENSION_SHA256) throw new Error('Pi 历史检索扩展身份不匹配，输入未投递')
+    if (request.resume) await rotomPool?.invalidate({ providerId: 'pi', cwd: request.cwd, agentProfileId: profile.id, externalSessionId: request.resume })
+    args.push('--extension', await realpathAsync(historyExtensionPath))
+    launchEnv.SCRY_HISTORY_READER_URL = request.historyReader.url
+    launchEnv.SCRY_HISTORY_READER_TOKEN = request.historyReader.token
+    launchEnv.SCRY_HISTORY_READER_SNAPSHOT = request.historyReader.snapshotId
+  }
+  // A startup extension cannot refresh its authority for another run. Never pool it.
+  const mayReuse = isRotomLauncher(profile) && !request.historyReader
   const pooledRpc = mayReuse ? await rotomPool?.take(profile, request.cwd, request.resume, env, continuationKey) : undefined
   if (state.stopped) {
     await pooledRpc?.close()
     return { stopped: true, status: 'interrupted' }
   }
-  const rpc = pooledRpc ?? PiRpcProcess.start(profile, args, env, request.cwd, maxFrameBytes)
+  const rpc = pooledRpc ?? PiRpcProcess.start(profile, args, launchEnv, request.cwd, maxFrameBytes)
   state.rpc = rpc
   let retainRpc = false
+  let historyReaderReady = false
   const usage: UsageAggregate = {
     input: 0,
     output: 0,
@@ -1636,6 +1653,10 @@ async function runPiAgent(
       return
     }
     if (event.type !== 'extension_ui_request') return
+    if (request.historyReader && event.method === 'notify' && event.message === `scry_history_ready:${request.historyReader.snapshotId}`) {
+      historyReaderReady = true
+      return
+    }
     const question = questionFromExtension(request.runId, event)
     if (question && stagedCustomAnswer !== undefined) {
       const answer = stagedCustomAnswer
@@ -1774,6 +1795,7 @@ async function runPiAgent(
       }
     }))
     let modelChanged = false
+    let activeModel = record(initialState.model)
     if (request.model) {
       if (!request.model.providerId) throw new Error('Pi 模型选择缺少 upstream providerId')
       const currentModel = record(initialState.model)
@@ -1782,12 +1804,26 @@ async function runPiAgent(
       // native thinking defaults. Preserve that last effect when no explicit effort was selected.
       // Compare with this run's fresh state, not UI state or a previous pooled turn.
       if (modelChanged || !request.effort) {
-        await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })
+        activeModel = record((await rpc.send({ type: 'set_model', provider: request.model.providerId, modelId: request.model.id })).data)
       }
     }
+    const activeWindow = number(activeModel.contextWindow)
+    if (activeWindow && activeWindow > 0) history.validateBudget(activeWindow)
     // A model switch may clamp/reset thinking; the pre-switch level is no longer authoritative.
     if (request.effort && (modelChanged || request.effort !== initialState.thinkingLevel)) {
       await rpc.send({ type: 'set_thinking_level', level: request.effort })
+    }
+    if (request.historyReader) {
+      const command = `scry_history_ready_${request.historyReader.snapshotId.replaceAll('-', '')}`
+      const commands = record((await rpc.send({ type: 'get_commands' })).data).commands
+      // An unknown slash command could become a model prompt. Require the exact
+      // run-scoped extension command before invoking this read-only control.
+      if (!Array.isArray(commands) || !commands.some(item => record(item).name === command && record(item).source === 'extension')) {
+        throw new Error('Pi 未注册本轮历史检索检查命令，输入未投递')
+      }
+      historyReaderReady = false
+      await rpc.send({ type: 'prompt', message: `/${command}` })
+      if (!historyReaderReady) throw new Error('Pi 模型选择后未确认历史检索工具可用，输入未投递')
     }
     // Model-window telemetry is optional. Do not put its native catalog latency in front of
     // entry baseline, recorder identity, or the prompt; the response can enrich context usage
@@ -2049,6 +2085,8 @@ async function runPiAgent(
 export function createPiAdapter(options: {
   listProfiles: () => Promise<PiAgentProfile[]>
   resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
+  /** Fixed App resource, not a profile/repository/renderer input. */
+  historyExtensionPath?: string
   /** Tests may lower the frame residency boundary without allocating tens of MiB. */
   rpcMaxFrameBytes?: number
 }): ProviderAdapter {
@@ -2063,6 +2101,7 @@ export function createPiAdapter(options: {
     id: 'pi',
     runtimeProvider: 'pi_rpc',
     historicalContext: true,
+    ...(options.historyExtensionPath ? { historyReader: true as const } : {}),
     async continuationKey(context: ProviderContext): Promise<string> {
       const profile = await profileForContext(context)
       const env = await piRpcEnvironment(profile)
@@ -2155,7 +2194,7 @@ export function createPiAdapter(options: {
         if (!profile) throw new Error(`Pi Agent Profile 不存在：${request.agentProfileId}`)
         let result: ProviderRunResult
         try {
-          result = await runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool, history)
+          result = await runPiAgent(profile, request, state, options.rpcMaxFrameBytes, rotomPool, history, options.historyExtensionPath)
         } finally {
           // Prompt admission can race a stop/transport exit. Recheck after transport
           // cleanup, including failures, so persisted history remains resumable.

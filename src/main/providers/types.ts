@@ -33,6 +33,8 @@ import type { OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trus
 export interface ProviderHistoricalContext {
   text: string
   contentHash: string
+  /** Omission is only usable with an actual run-scoped retrieval tool. */
+  requiresReader?: true
 }
 
 /**
@@ -114,6 +116,9 @@ export interface ProviderRunRequest {
   /** Original input for native command / Skill dispatch, without historical context. */
   prompt: string
   historicalContext?: ProviderHistoricalContext
+  /** Main-owned, run-scoped retrieval authority; never accepted from renderer input. */
+  historyReader?: import('../conversation-history-reader').HistoryReaderConnection
+  historyBudget?: Pick<import('../conversation-handoff-budget').HandoffBudgetInput, 'contextUsage' | 'modelContextWindow'>
   /** Main opt-in for native receipts on first / history-free inputs as well. */
   trackInputReceipt?: true
   cwd?: string
@@ -224,6 +229,8 @@ export interface ProviderAdapter {
   run(request: ProviderRunRequest): ProviderRunHandle
   /** Opt in after history wire input and native receipts (including ordinary input) are implemented. */
   readonly historicalContext?: true
+  /** Adapter checks the actual reader is active before submitting model input. */
+  readonly historyReader?: true
   readonly forkLastTurn?: ForkLastTurnFacet
   readonly forkSession?: ForkSessionFacet
   readonly skills?: SkillsFacet

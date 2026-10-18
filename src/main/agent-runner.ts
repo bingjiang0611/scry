@@ -1,6 +1,7 @@
 // 模式 A：用 Claude Agent SDK 驱动 claude，把 message stream 归一化成 TraceEvent 流式 emit。
 // 支持多轮对话（resume）+ 工作目录（cwd）+ 中断（interrupt）+ subagent 内部明细（tail transcript 一层）。
 
+import { HISTORY_READER_SERVER, HISTORY_READER_TOOL, type HistoryReaderConnection } from './conversation-history-reader'
 import { query, type HookInput, type PermissionUpdate, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { open } from 'node:fs/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
@@ -43,7 +44,8 @@ export interface RunOpts {
   env?: Record<string, string>
   settingSources?: Array<'user' | 'project' | 'local'>
   onSessionId?: (sessionId: string) => void
-  /** Called at the SDK query boundary, after local option preparation. */
+  historyReader?: HistoryReaderConnection
+  /** Called immediately before releasing input to the SDK. */
   onInputAttempt?: () => void
   captureProviderTurnId?: boolean
   attachments?: AgentInputAttachment[]
@@ -195,9 +197,10 @@ async function providerTurnIdFromTranscript(
   }
 }
 
-function sdkPrompt(prompt: string, attachments: AgentInputAttachment[]): string | AsyncIterable<SDKUserMessage> {
-  if (attachments.length === 0) return prompt
+function sdkPrompt(prompt: string, attachments: AgentInputAttachment[], beforeInput?: () => Promise<boolean>): string | AsyncIterable<SDKUserMessage> {
+  if (attachments.length === 0 && !beforeInput) return prompt
   async function* stream(): AsyncIterable<SDKUserMessage> {
+    if (beforeInput && !await beforeInput()) return
     const content: Array<Record<string, unknown>> = []
     if (prompt.trim()) content.push({ type: 'text', text: prompt })
     for (const attachment of attachments) {
@@ -389,11 +392,21 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   // 软指令实测压不住「列出全部 skill」，故弃用 appendSystemPrompt 改 allowlist。
   if (opts.skills?.length) options.skills = opts.skills
 
-  opts.onInputAttempt?.()
-  const q = query({ prompt: sdkPrompt(prompt, opts.attachments ?? []), options: options as never })
+  let releaseInput: ((allowed: boolean) => void) | undefined
+  let inputAdmitted = false
+  const admission = opts.historyReader ? new Promise<boolean>(resolve => { releaseInput = resolve }) : undefined
+  const beforeInput = admission ? async (): Promise<boolean> => {
+    if (!await admission || stopped) return false
+    opts.onInputAttempt?.()
+    inputAdmitted = true
+    return true
+  } : undefined
+  if (!admission) opts.onInputAttempt?.()
+  const q = query({ prompt: sdkPrompt(prompt, opts.attachments ?? [], beforeInput), options: options as never })
 
   const interrupt = (): void => {
     stopped = true
+    if (admission && !inputAdmitted) { releaseInput?.(false); q.close(); return }
     try {
       const fn = (q as { interrupt?: () => unknown }).interrupt
       if (typeof fn === 'function') Promise.resolve(fn.call(q)).catch(() => {})
@@ -425,6 +438,24 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     let sawTerminalResult = false
     let streamedAssistantText = ''
     try {
+      if (opts.historyReader) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          const statuses = await Promise.race([
+            (async () => { await q.initializationResult(); return q.mcpServerStatus() })(),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => reject(new Error('Claude 历史检索工具就绪超时，输入未投递')), 15_000)
+              timer.unref()
+            })
+          ])
+          const reader = statuses.find(server => server.name === HISTORY_READER_SERVER)
+          if (reader?.status !== 'connected' || !reader.tools?.some(tool =>
+            tool.name === HISTORY_READER_TOOL || tool.name === `mcp__${HISTORY_READER_SERVER}__${HISTORY_READER_TOOL}`)) {
+            throw new Error('Claude 未确认历史检索工具可用，输入未投递')
+          }
+          releaseInput?.(!stopped)
+        } finally { if (timer) clearTimeout(timer) }
+      }
       for await (const msg of q) {
         const m = msg as {
           type?: string
@@ -478,6 +509,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       }
     } catch (err) {
       if (!stopped) runErr = err // 用户主动 interrupt 引发的中断不算错误
+    } finally {
+      if (admission) { releaseInput?.(false); q.close() }
     }
     if (opts.captureProviderTurnId && !providerTurnId && transcriptPath && frozenTranscriptBaseline) {
       providerTurnId = await providerTurnIdFromTranscript(transcriptPath, prompt, sessionId, frozenTranscriptBaseline)
