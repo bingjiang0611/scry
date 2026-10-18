@@ -79,3 +79,12 @@ npm run test:unit -- src/renderer/sidebar-activity.test.ts src/renderer/componen
 - renderer 组合运行前面的全部子门禁通过，末项统一会话因三个串联命令的 300 秒外层期限中断；中断后确认无该工作区子进程，未将组合命令记为通过。独立运行的同一统一会话脚本已完整通过。CLI release：32 文件 / 587 项及 npm 包 smoke 通过，版本仍为 0.2.49；App 候选版本为 0.2.200。
 - 隔离版本首次 `install:mac:dev` 全量结束：3350 passed / 3 failed / 4 既有 opt-in skipped。两项 Pi 测试错误假定当前 Node 必须能被 Rotom 选中；生产合同实际要求 Rotom >=24，而 App CI 使用 22。仅修测试的版本条件及探测数量预期，不改生产版本要求。Node 22 focused 24 项、Node 24 focused 17 项通过；counter workload 未变，Node 22 的 `providers.pi-environment/subprocess.node` 五次采样仍为 1、ratchet passed，报告 `/tmp/scry-sidebar-install-dOx1Jc/pi-counter-check/measure.json`。计数测试修改单独提交。
 - 其余失败为既有 remote-workbench 真 Git 用例 15 秒超时；不扩大期限。调整为单 worker 后该文件 7 项通过，其中原失败用例约 1.9 秒；并行 Node 24 专项也曾超时，串行后 17 项通过。这是环境/并发下的验证差异，不声称生产性能被修复。后续按 `typecheck → test:unit --maxWorkers=1 → test:shell → pack:artifact → install-macos.mjs` 完成与原安装脚本相同的检查，唯一差别是 unit 文件串行；不绕过打包或安装校验。
+
+### 最终安装结果
+
+- 冻结源码：`a0451299ebc608f53e5ca0f989ef095849e9c42f`；App 0.2.200 / CLI 0.2.49。只包含该冻结提交，不含主工作区随后提交的远程改动或尚未提交的历史预算/设置 UI 改造。
+- Node 22.23.1 串行全量：272 文件 / 3353 项通过，4 项原有 opt-in 保持 skipped；typecheck、shell 通过。完整日志 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-c037f239054ea175.log`。未新增 skip 或修改任何单项 timeout。
+- 初次打包因工作区以符号链接复用 node_modules，electron-builder 漏收 transitive dependency `cross-spawn`，被原完整性检查拒绝；未安装该不完整包。将同一已安装依赖原样复制到隔离工作区（APFS clone，不改 lock 版本）后重新打包，完整性检查验证 311 项运行时依赖、298091342 bytes，低于原 346030080 bytes 上限。
+- 原 `pack:artifact` 完整通过：App/CLI build、开发签名、资源完整性、external-links、renderer crash recovery、安全/终端/文件、远程宿主 smoke 均通过。随后原 `install-macos.mjs` 成功安装到 `/Applications/Scry.app`；上一包保留在 `/Applications/.Scry.app.backup`。日志 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-8bfefc5acc29541f.log`。
+- 安装后 plist=0.2.200，私有 CLI=0.2.49，`codesign --verify --deep --strict` 通过；安装包与目标 `app.asar` SHA-256 一致：`c64d54747be719632f3db9173d02f439a1bab67ec25387cc7a3e9ffe2b6f3bc5`。属于 Apple Development 本机包，不是 Developer ID 公证发布。
+- 未停止、启动或重启用户正在运行的 Scry；用户手动重启后才加载动态 Tab。真实会话多状态动效仍待用户验收。隔离工作区和产物保留在 `/tmp/scry-sidebar-install-dOx1Jc/`；未留下活跃测试或安装进程。
