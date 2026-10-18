@@ -5,6 +5,7 @@ import type { DesktopRemoteConnection } from '@shared/desktop-remote'
 import { basename } from '../format'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog, useRemoteCatalogs, type RemoteCatalogEntry } from '../hooks/useRemoteCatalogs'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import { bridge } from './DesktopRemote'
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker'
@@ -190,8 +191,8 @@ function MachineLocationPicker({
             ))}
             {current.machineId !== LOCAL_MACHINE && !currentConnection && machineButton(current.machineId, '远程主机不可用', '已删除或尚未读取', 'unknown')}
             <div className="mdiv" />
-            <button type="button" className="mitem" onClick={() => { setOpen(false); onManageHosts() }}>
-              <Icon name="settings" /> 管理主机…
+            <button type="button" className="mitem" onClick={() => { setOpen(false); buttonRef.current?.focus(); onManageHosts() }}>
+              <Icon name="settings" /> {copy.manage}
             </button>
           </div>
           <div className="location-col location-projects" role="group" aria-label="项目">

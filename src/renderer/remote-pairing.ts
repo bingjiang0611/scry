@@ -1,4 +1,5 @@
 import type { RemoteStatus, RemotePendingPairing, RemoteDevice } from '../shared/remote'
+import { REMOTE_ACCESS_COPY as copy } from './constants/copy'
 
 // Pure projection for the trusted-LOCAL remote-access pairing screen. It maps
 // the honest RemoteStatus envelope into a view model the component renders, and
@@ -63,11 +64,11 @@ function projectPending(p: RemotePendingPairing): PendingRow {
   const fingerprint = confirmable ? (p.publicKeySHA256 as string) : null
   return {
     pairingId: p.pairingId,
-    label: p.deviceLabel && p.deviceLabel.trim().length > 0 ? p.deviceLabel : '未命名设备',
+    label: p.deviceLabel && p.deviceLabel.trim().length > 0 ? p.deviceLabel : copy.unnamedDevice,
     fingerprint,
     fingerprintShort: fingerprint ? shortFingerprint(fingerprint) : null,
     confirmable,
-    statusText: confirmable ? '等待你在 Mac 上确认指纹' : '设备连接中…',
+    statusText: confirmable ? copy.awaitingFingerprint : copy.deviceConnecting,
     expiresAt: p.expiresAt
   }
 }
@@ -75,8 +76,8 @@ function projectPending(p: RemotePendingPairing): PendingRow {
 function projectDevice(d: RemoteDevice): DeviceRow {
   return {
     deviceId: d.deviceId,
-    label: d.deviceLabel && d.deviceLabel.trim().length > 0 ? d.deviceLabel : '未命名设备',
-    statusText: '已配对',
+    label: d.deviceLabel && d.deviceLabel.trim().length > 0 ? d.deviceLabel : copy.unnamedDevice,
+    statusText: copy.paired,
     confirmedAt: d.confirmedAt,
     expiresAt: d.expiresAt
   }

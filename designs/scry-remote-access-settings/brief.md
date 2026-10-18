@@ -13,7 +13,7 @@
 - A1 设置弹窗从 920×620 加宽到 1040×720 是否影响其他 tab：外观/已存档内容少，加宽无害，待用户确认。
 - A2 本设计稿以本地假数据演示，所有连接、配对、复制与授权动作都不触发真实主机、剪贴板或中继。
 
-范围：侧栏 nav 删除「主机」；HostsView 三个能力（出站列表、SSH 入站、手机配对）并入 RemotePairing 所在设置 tab 并重排；LocationPicker「管理主机…」改跳设置。不做：远程会话视图、composer 结构、Provider 能力变化；本阶段只做设计稿，不改生产代码。
+范围：侧栏 nav 删除「主机」；HostsView 三个能力（出站列表、SSH 入站、手机配对）并入 RemotePairing 所在设置 tab 并重排；LocationPicker 的管理入口改跳设置。不做：远程会话视图、composer 结构、Provider 能力变化。最初只做原型；用户随后说“没问题 落地吧”，授权按精简后的 A 稿实施。
 
 现状：HostsView（整页 860px max-width，header + 两 section）与 RemotePairing（设置 tab 内单列，h2/h3 + 成段小字 + "打开主机页"跳转按钮）双入口并存。生产 tokens：`src/renderer/styles.css`（--bg/#07090d 等深色为主）；组件样式 `hosts-view.css`、`desktop-remote.css`。
 
@@ -45,4 +45,22 @@
 
 视觉自查（2026-10-18）：推荐稿已在 Chrome 1512×708 查看默认、展开详情、空列表和添加主机弹窗；状态未知与待确认已有状态读回。后续截图与 recover 超时，最终几处文字/CSS 调整未获得新截图。减掉页面顶部重复说明，只保留两个方向标题；主机状态与身份保持同一行，次级地址使用等宽字体；设置 rail 不再重复解释入口。Craft 应用：主机计数使用 tabular nums；即时 hover 不加延时过渡；根背景与深色画布一致。独立评审尝试受阻：评审 agent 无法访问 browser artifact 指定路径，因此没有把它算作通过。
 
-验收：设计稿阶段——用户确认方向与配套改动（侧栏、LocationPicker 落点、弹窗加宽）。实现阶段——侧栏无主机入口；设置·远程访问完成添加/连接/断开/编辑/移除/邀请/配对/吊销全路径；状态未知与空态诚实显示；`npm run test:unit` 受影响用例通过；真实 App 目视验收。
+验收：设计稿阶段——用户确认方向与配套改动（侧栏、LocationPicker 落点、弹窗加宽）。实现阶段——侧栏无主机入口；设置·远程访问复用原有添加/连接/断开/编辑/移除/邀请/配对/吊销 API；状态未知与空态诚实显示；受影响自动测试通过。真实 App 验收等待用户手动重启后进行，不把安装或样例测试当成真实配对通过。
+
+## 生产落地 / 2026-10-18
+
+- 用户授权：本轮“没问题 落地吧”。保留精简 A 的结构，不再重新比较方向；不把实施授权等同于真实 App 的最终视觉验收。
+- 实现：删除侧栏主机项和 `hosts` 视图；设置远程分区直接展示主机管理；位置菜单改为“管理远程访问…”，直达目标分区且保留当前草稿。`HostsView.tsx` 保留源码路径以复用连接能力，但不再是页面路由。
+- 默认减法：只显示身份、地址、真实状态与动作；没有计数、方向说明或常驻安全段落。地址是已选 A 稿的次级身份信息。安全后果放在 SSH 邀请、手机配对和地址编辑流程；文案集中在 `src/renderer/constants/copy.ts`。
+- 状态诚实：中继文案改为“中继已配置”，不把配置事实写成在线证明；手机状态读取失败清除当前授权投影并显示未知，不伪装为空列表。
+- 独立视觉评审：已读取当前隔离 Electron `remote-settings.png` 和 VS Code 原始参考。建议把入站双卡改纵向、隐藏地址、把添加按钮移到分区标题。均未采纳：前两项改变了已选 A 的双卡/身份布局，第三项偏离已确认页头动作；本次没有新的用户证据支持重新调整结构。保留两个方向标题、无重复计数、真实状态文字。评审不证明交互或用户认可。
+- 自动交互：现有隔离 Electron fixture 使用生产 App/renderer 与原生坐标和键盘输入，验证直达远程设置且不丢草稿、返回焦点、嵌套弹窗 Escape 仅关闭子层、手机码有效期/指纹提示、未知/休眠/关闭状态，以及地址修改后的手动重连与不启动 Provider。真实手机/SSH 未操作。
+- 反向对照：`--negative-settings-control` 故意把直达入口指到外观，回归在“manage hosts opens remote settings directly”处失败；正常实现通过。
+- 首轮问题：新增验收对邀请文案和管理入口使用了旧字符串，分别失败；核对实际集中管理的文案后修正选择器。新空态回归还证明：已读到空列表后发生读取失败，旧实现仍会显示“没有主机”；已修复为读取失败时不显示空态。保留失败日志，未删断言、放宽超时或重试未知写入。
+- 性能：映射中的 `navigation.catalog` 没有对应计数 collector，首次测量明确失败。实际已有 `files.fixed-operations`（包含固定 catalog 与 drafts 工作量）3 次计数通过 ratchet；高负载下不作毫秒或页面更快的结论。记录 `/tmp/scry-performance-remote-settings/measure.json`。
+- 扩大检查未全绿：`npm run test:unit` 首轮 3352 通过、8 失败、4 跳过；包含现有 main/history 的 32 KiB 合同失败、主进程超时和 Codex 子进程 SIGABRT。Node v24.18.0，负载约 24–30（10 核）；不将这些失败隐藏或直接归因为负载。
+- `npm run test:renderer:ui` 的 Credits、远程 UI/会话 parity、source-control 与 ownership 均通过，最终统一对话 fork 超时。对照检查使用不含本次 renderer 改动的 HEAD 临时副本，叠加同一现有 main WIP：该副本和当前 App 的 focused unified-conversation 都在既有 32 KiB 预期失败，证明该合同问题不依赖本次设置改动。首次 fork 超时仍保留为未解决的时序失败。
+- 当前版本 0.2.200：focused 265 项通过；`typecheck:web` 与 build 通过。Node 类型检查先因并行新增 `conversation-history-reader.test.ts` 的 unknown 报错失败；最后重新核对当前 WIP，则为 `conversation-history.ts` / `conversation-service.ts` 与 `conversation-handoff-budget.ts` 的导出/参数合同不一致。本次未修改这些 main 文件。
+- 一次 full remote smoke 在 90 秒总预算处超时，PID 61896 已退出；保留首次失败。调查发现该轮已经走到主机展开，新增的轮询状态场景与原有完整交互共享总预算。将新增场景搬到同一 fixture 的 `--remote-settings-only`，并同时纳入 `test:renderer:ui` 和 `test:desktop-remote`，没有删除断言或扩大超时。调整后 default、`--session-parity-only`、`--remote-settings-only` 三组均通过。最终默认画面已读取 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-desktop-remote-ui-QZIKWG/remote-settings-focused.png`。
+- 安装未执行：当前全量/Node gate 未通过，不能绕过正常打包安装流程。本次只保留本地 renderer 与相关测试/设计记录提交，不推送；未自动关闭、启动或连接任何真实主机。需现有 main/history 改动维护者处理合同与类型失败后，再按原流程安装；安装后由用户手动重启验收。
+- 设计记录已保存并通过 `library.py search '统一远程访问' --kind page` 找到原 ID；build 成功。全库 check 仍因之前五条 stale 来源失败，本次没有删除那些指针。

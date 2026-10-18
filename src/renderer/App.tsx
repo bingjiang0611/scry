@@ -25,10 +25,9 @@ import { appendMetaPrompt } from './meta-prompts'
 import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
-import { CapabilitiesModal, SettingsModal } from './components/Modals'
+import { CapabilitiesModal, SettingsModal, type SettingsTab } from './components/Modals'
 import { RemoteChat, remoteDraftKey } from './components/RemoteChat'
 import { RemotePromptQueueStore } from './remote-prompt-queue'
-import { HostsView } from './components/HostsView'
 import { LocationPicker, LOCAL_MACHINE, hostState, type ExecutionLocation } from './components/LocationPicker'
 import { useDesktopConnections } from './hooks/useDesktopConnections'
 import { useConnectedCatalogLoader } from './hooks/useRemoteCatalogs'
@@ -81,7 +80,7 @@ import {
 const AnalyticsView = lazy(() => import('./components/AnalyticsView').then((module) => ({ default: module.AnalyticsView })))
 const TerminalSurface = lazy(() => import('./components/TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
-type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote' | 'hosts'
+type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
 
 // A conversation on a saved remote desktop. `generation` remounts the remote
 // controller for every opened location, so no run/session state leaks between them.
@@ -996,7 +995,7 @@ export function App() {
       return next
     })
   }, [currentSurface.id])
-  const [showSettings, setShowSettings] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   const logicalWorkspaceSelected = useRef(false)
   useEffect(() => {
@@ -2090,14 +2089,14 @@ export function App() {
     })()
   }
   const closeOverlays = (): void => {
-    setShowSettings(false)
+    setSettingsTab(null)
     setShowSkills(false)
     setShowMcp(false)
     setShowLlmPerformance(false)
   }
-  const openHosts = (): void => {
+  const openRemoteAccessSettings = (): void => {
     closeOverlays()
-    changeView('hosts')
+    setSettingsTab('remote')
   }
   const setRemoteDraft = (key: string, value: string): void => {
     setSessionDrafts((current) => updateSessionComposerDraft(current, key, (draft) => ({ ...draft, input: value }), releaseDraft))
@@ -2164,7 +2163,7 @@ export function App() {
       onChooseLocalFolder={chooseFolder}
       onRemoveRecent={removeRecentFolder}
       onPickRemote={pickRemoteLocation}
-      onManageHosts={openHosts}
+      onManageHosts={openRemoteAccessSettings}
       open={menu.open}
       onOpenChange={menu.onOpenChange}
     />
@@ -2509,7 +2508,6 @@ export function App() {
 
   const sidebarActions = {
     onNewChat: useEventCallback(startNewConversation),
-    onHosts: useEventCallback(openHosts),
     onPickRemoteSession: useEventCallback((connectionId: string, remoteSession: RemoteSessionRef) => openRemoteLocation(connectionId, remoteSession.cwd, remoteSession)),
     onNewRemoteProjectChat: useEventCallback((connectionId: string, remoteCwd: string) => openRemoteLocation(connectionId, remoteCwd)),
     onArchiveRemoteSession: useEventCallback((connectionId: string, remoteSession: RemoteSessionRef) => {
@@ -2538,7 +2536,7 @@ export function App() {
     onSkills: useEventCallback(openSkills),
     onMcp: useEventCallback(openMcp),
     onMetaPrompts: useEventCallback(openMetaPrompts),
-    onSettings: useEventCallback(() => setShowSettings(true))
+    onSettings: useEventCallback(() => setSettingsTab('appearance'))
   }
 
   return (
@@ -2553,7 +2551,6 @@ export function App() {
           activeCwd={view === 'conversation' ? logicalConversation?.cwd ?? null : view === 'remote' ? null : cwd}
           activeSessionId={view === 'remote' || view === 'conversation' ? null : activeSessionId}
           activeConversationId={view === 'conversation' ? logicalConversation?.id : undefined}
-          hostsActive={view === 'hosts'}
           activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
           activeProviderId={integrations.selectedProviderId}
           activeAgentProfileId={integrations.providerContext.agentProfileId}
@@ -2591,8 +2588,6 @@ export function App() {
             </>
               : !conversationError && <p role="status">正在打开对话…</p>}
           </>
-        ) : view === 'hosts' ? (
-          <HostsView onNewSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} />
         ) : (view === 'remote' || (view === 'meta-prompts' && metaPromptTarget.current.view === 'remote')) && remoteTarget ? (
           <>
             <div style={{ display: view === 'remote' ? 'contents' : 'none' }}>
@@ -2815,16 +2810,17 @@ export function App() {
               }}
             />
           )}
-          {showSettings && (
+          {settingsTab !== null && (
             <SettingsModal
+              initialTab={settingsTab}
               theme={theme}
               onThemeChange={changeTheme}
               onSessionsChanged={() => {
                 setArchiveUndo(null)
                 workspace.loadProjects()
               }}
-              onOpenHosts={openHosts}
-              onClose={() => setShowSettings(false)}
+              onNewRemoteSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)}
+              onClose={() => setSettingsTab(null)}
             />
           )}
       </>

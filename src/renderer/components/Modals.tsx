@@ -15,6 +15,7 @@ import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, DeleteArchivedSessionsResult, McpSnapshot } from '@shared/provider'
 import { Icon } from './primitives/Icon'
 import { RemotePairing } from './RemotePairing'
+import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
 import type { AppTheme } from '../theme'
 
 export function ModalFrame({
@@ -58,6 +59,9 @@ export function ModalFrame({
       if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) focusInitial()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
+      // A settings action can open a nested dialog. Only that dialog owns
+      // Escape and Tab; its parent must not close or move focus as well.
+      if (document.activeElement instanceof Element && document.activeElement.closest('[role="dialog"][aria-modal="true"]') !== dialogRef.current) return
       if (event.key === 'Escape') {
         event.preventDefault()
         onCloseRef.current()
@@ -106,24 +110,26 @@ export function ModalFrame({
   )
 }
 
-type SettingsTab = 'appearance' | 'archived' | 'remote'
+export type SettingsTab = 'appearance' | 'archived' | 'remote'
 
 export function SettingsModal({
   theme,
   onThemeChange,
   onClose,
   onSessionsChanged,
-  onOpenHosts
+  onNewRemoteSession,
+  initialTab = 'appearance'
 }: {
   theme: AppTheme
   onThemeChange: (theme: AppTheme) => void
   onClose: () => void
   onSessionsChanged: () => void
-  onOpenHosts?: () => void
+  onNewRemoteSession: (connectionId: string, cwd: string) => void
+  initialTab?: SettingsTab
 }) {
   const titleId = useId()
-  const appearanceRef = useRef<HTMLButtonElement>(null)
-  const [tab, setTab] = useState<SettingsTab>('appearance')
+  const initialTabRef = useRef<HTMLButtonElement>(null)
+  const [tab, setTab] = useState<SettingsTab>(initialTab)
   // null = 还没读到索引；不能当成 0 个已存档会话。
   const [archived, setArchived] = useState<ProjectMeta[] | null>(null)
   const refreshArchived = useCallback(async (): Promise<void> => {
@@ -138,7 +144,7 @@ export function SettingsModal({
   }, [refreshArchived])
   const archivedCount = archived?.reduce((sum, project) => sum + project.sessions.length, 0)
   return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={appearanceRef} className="settings-modal" onClose={onClose}>
+    <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>设置</b>
         <button className="modal-x" onClick={onClose} aria-label="关闭设置">
@@ -148,7 +154,7 @@ export function SettingsModal({
       <div className="settings-shell">
         <nav className="settings-rail" aria-label="设置分区">
           <button
-            ref={appearanceRef}
+            ref={initialTab === 'appearance' ? initialTabRef : undefined}
             type="button"
             className={`settings-tab ${tab === 'appearance' ? 'active' : ''}`}
             aria-current={tab === 'appearance' ? 'page' : undefined}
@@ -158,6 +164,7 @@ export function SettingsModal({
           </button>
           <button
             type="button"
+            ref={initialTab === 'archived' ? initialTabRef : undefined}
             className={`settings-tab ${tab === 'archived' ? 'active' : ''}`}
             aria-current={tab === 'archived' ? 'page' : undefined}
             onClick={() => setTab('archived')}
@@ -167,11 +174,12 @@ export function SettingsModal({
           </button>
           <button
             type="button"
+            ref={initialTab === 'remote' ? initialTabRef : undefined}
             className={`settings-tab ${tab === 'remote' ? 'active' : ''}`}
             aria-current={tab === 'remote' ? 'page' : undefined}
             onClick={() => setTab('remote')}
           >
-            <Icon name="globe" /> 远程访问
+            <Icon name="globe" /> {remoteCopy.settingsTab}
           </button>
         </nav>
         <div className="settings-pane">
@@ -225,17 +233,13 @@ export function SettingsModal({
               onSessionsChanged={onSessionsChanged}
             />
           ) : (
-            <div className="settings-body"><RemotePairing onOpenHosts={onOpenHosts} /></div>
+            <RemotePairing onNewSession={onNewRemoteSession} />
           )}
         </div>
       </div>
-      <div className="modal-foot dim">
-        {tab === 'appearance'
-          ? '选择会保存在此设备，并立即应用到全部视图。'
-          : tab === 'archived'
-            ? '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'
-            : '配对必须在被访问的主机上批准。请核对连接设备与待确认列表中显示的设备公钥指纹。'}
-      </div>
+      {tab !== 'remote' && <div className="modal-foot dim">
+        {tab === 'appearance' ? remoteCopy.settingsAppearanceFooter : remoteCopy.settingsArchiveFooter}
+      </div>}
     </ModalFrame>
   )
 }
