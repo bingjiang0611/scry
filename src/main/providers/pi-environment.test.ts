@@ -38,14 +38,18 @@ describe('Pi launcher environment', () => {
       symlinkSync(process.execPath, node)
       const profile = { id: 'pi:rotom', label: 'Rotom', executable: join(cwd, 'rotom') }
       const base = { PATH: path, HOME: cwd }
+      // App CI runs Node 22, but Rotom requires Node >=24. An incompatible
+      // direct runtime is still cached; selection must continue to the fixture's 24.
+      const directCompatible = Number(process.versions.node.split('.')[0]) >= 24
+      const initialProbes = directCompatible ? 1 : 2
       probes.count = 0
       const first = await Promise.all([piRpcEnvironment(profile, base), piRpcEnvironment(profile, base)])
-      expect(first[0].ROTOM_NODE).toBe(realpathSync(process.execPath))
-      expect(probes.count).toBe(1)
+      expect(first[0].ROTOM_NODE).toBe(directCompatible ? realpathSync(process.execPath) : join(cwd, '1/node'))
+      expect(probes.count).toBe(initialProbes)
       await piRpcEnvironment(profile, base)
-      expect(probes.count).toBe(1)
+      expect(probes.count).toBe(initialProbes)
       await piRpcEnvironment(profile, { ...base, PROBE_ENVIRONMENT: 'changed' })
-      expect(probes.count).toBe(2)
+      expect(probes.count).toBe(initialProbes * 2)
       const replacement = join(cwd, 'replacement-node')
       // Replacement invalidation needs a real file and Node's response protocol, not a copied
       // full Node binary whose first launch may dominate this test on another macOS host.
@@ -54,10 +58,10 @@ describe('Pi launcher environment', () => {
       rmSync(node)
       symlinkSync(replacement, node)
       expect((await piRpcEnvironment(profile, base)).ROTOM_NODE).toBe(replacement)
-      expect(probes.count).toBe(3)
+      expect(probes.count).toBe(initialProbes * 2 + 1)
       utimesSync(replacement, new Date(0), new Date(0))
       await piRpcEnvironment(profile, base)
-      expect(probes.count).toBe(4)
+      expect(probes.count).toBe(initialProbes * 2 + 2)
     })
   })
 
