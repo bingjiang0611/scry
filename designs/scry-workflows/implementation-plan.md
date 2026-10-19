@@ -115,7 +115,7 @@ Provider 工具审批仍走原生/映射后的权限模式。批准计划不替�
 | WorkflowProgram | workflowId、programRevision、userGoal、workspace identity、templateRef（可空）、配置快照、程序体、输入/输出与证据合同；取代 v4 仅静态节点的 WorkflowPlan |
 | ProgramBlock | blockId、phase 分组、sequence/parallel/map/branch/loop/call/return、typed 输入/绑定/表达式；call 绑定 Agent 或 classifier |
 | ControlFrame | scopePath、程序位置、frameRevision、已提交变量/引用、分支决策、loopState、iteration、最佳候选、终止原因 |
-| SystemStep | 编译器按已批准写入策略派生的准备/组合/应用/清理步骤；effectId、受控目标引用与结果；不接受任意命令/路径，也不计为 Agent |
+| SystemStep | 编译器按已批准计划派生的准备/检查/组合/应用/清理步骤；effectId、受控目标引用与结果；检查只执行确认时冻结的 argv 与可执行文件指纹（[执行语义 §3.1](execution-semantics.md#31-检查步骤由-main-执行agent-自述不算通过)）；不接受任意命令/路径，也不计为 Agent |
 | ExpandedTask | taskId、nodeId、scopePath、stableItemKey、iteration、inputFingerprint、来源；不是数组位置或完成顺序 |
 | Attempt | attemptId、执行身份、派发意图/回执、状态、输出及证据引用、已知副作用、用量来源 |
 
@@ -188,7 +188,7 @@ flowchart TD
 
 实现先抽取最小启动/收口接缝，不顺手重写整个 main。请求模型和观测模型分列；不支持/未登录/不可选择就拒绝或明确 unavailable，不自动替换。实际模型未被上游报告则标 unknown，不把请求值冒充观测值。若 Provider 自行替换模型，保留事实并标记合同未满足，不能悄悄沿用原名称。
 
-工具审批和 Agent 追问沿现有 requestUserInput/权限回调，绑定 workflow/task/attempt，显示在对应运行面板而非污染当前聊天。回答只作用于仍有效的目标请求；停止后的旧问题不可恢复旧 attempt。不同 adapter 不支持交互时显式拒绝相关计划，不自动代用户回答。
+工具/权限审批沿现有权限回调，绑定 workflow/task/attempt 与请求 ID，显示在对应运行面板而非污染当前聊天；审批只回应该操作，不接受自由文本。Agent 提出的业务问题（requestUserInput 类追问）按 [v7 §5](runtime-limits.md#5-运行中无业务输入阶段确认另开工作流) 记 unsupported_interaction/blocked，不等待、不转交用户、不代答。停止后的旧审批不可恢复旧 attempt。adapter 无法区分权限请求与业务提问时，显式拒绝相关计划。
 
 ### 权限事实
 
@@ -259,9 +259,19 @@ flowchart TD
 | M1 启动与收口接缝 | workflow owner、独立 session、全 run observer、completion/recording outcome、停止/再次停止与可信等待阶段 | 两个后台 run 不串聊天；真实 trusted wrapper 拒绝非法调用且不执行 listener；关闭 run controls 不静默换模型；所需证据未收口不提前放行 |
 | M2 入口、程序与编译器 | 聊天/命令/模式与规模建议解析/来源快照；路由规划和模板共用 WorkflowProgram；模板作用域/修订/草稿与Agent编写请求；全部控制指令、作用域/类型/终止校验、预览冻结 | 规模仅软建议、文件覆盖/下一次生效；单次不污染会话；来源/费用授权、命令冲突、direct/workflow/template_edit互斥；顺序/并行/map/branch/loop 语义；unknown 不当 false；非法依赖/裸无限循环拒绝；模板编写只产候选、参数化不携带私有运行状态 |
 | M3 持久解释器 | 控制帧、绑定、join、iteration/attempt、checkpoint、限额、依赖恢复与停滞重启；模板发布收据与实例快照 | 共享并发默认≤16、配置1–256；4097项整批拒绝、第1001次不发送；跨重启预算/槽位恢复；运行中业务输入拒绝；carry/最佳候选恢复，nothing_to_resume不重开；unknown不重发；旧scope收敛后最多五次重启；模板保存冲突不覆盖，修订恢复不重置root预算 |
-| M4 完整质量与写入模式 | 六种模板；对抗复核、多角度起草/交叉评审/裁决/改进、检查修复和批量迁移；Jev 及副本/应用合同 | 反例能推翻候选；全不合格无假赢家；反馈实际改变下一版；综合方案再验证；组合 patch 回归/冲突阻止应用；中间数据不泄漏父上下文 |
+| M4 完整质量与写入模式 | 六种模板；对抗复核、多角度起草/交叉评审/裁决/改进、检查修复和批量迁移；main 执行的 check 步骤；Jev 及副本/应用合同 | 反例能推翻候选；Agent 自述通过不能代替 check 结果；全不合格无假赢家；反馈实际改变下一版；综合方案再验证；组合 patch 回归/冲突阻止应用；中间数据不泄漏父上下文 |
 | M5 生产面板与控制 | 聊天入口/授权、规模偏好/有效来源、管理与停止/恢复、后台/退出；模板保存/编辑/diff/来源/冲突；同源代码视图、连线实例图、轮次/分支/候选/证据、retry用量及历史 | 三种入口真实交互与每运行自动关联；重挂不双发、模式退出不误停；原会话无安全回注能力时不伪造 turn；窗口隐藏不停止执行；新版/另存/仅本次操作不串源，运行中模板变更不替换旧快照 |
 | M6 授权真实验收 | 单 Provider → 跨 Provider → Jev → 循环/对抗复核/多方案/写入组合 → 模板Agent修改与跨会话/项目复用 | 临时 workspace/userData；账号/费用/数据及写入明确授权；实际模型/终态/证据可核对；程序级全部验收通过才称完整 |
+
+### 首个可交付竖切（M0）
+
+范围不变，只调整交付顺序：先交付一个端到端可用、可验证的最小路径，再按 M1–M6 扩展。M0 是 M1–M3 各自的子集，不是第二套实现。
+
+| 包含 | 不含（编译时明确 unavailable） |
+| --- | --- |
+| 仅 Claude；显式 `/scry-workflow run` 单次入口；sequence/parallel/call/return；计划预览与确认；持久控制帧与 attempt 记录；共享槽位、单批 4096 与 1000 次预算；停止/再次停止、退出保存；最终报告卡片与只读进度面板 | map/branch/loop、写入与 check 步骤、Jev、模板保存/编辑、manual/auto 识别、依赖恢复与停滞重启、其他 Provider |
+
+M0 验收沿用对应行的可证伪检查：第 1001 次不发送、停止未收敛不释放槽位、中间结果不进入父会话、重启只恢复观察不重发。M0 交付不代表方案完成；开始 M2 前先做各 Provider 能力探测矩阵（结构化候选 + 禁用宿主工具、模型沉默与工具/配额等待的区分、权限请求与业务提问的区分），不满足的能力按合同标 unavailable。
 
 UI 可在 M2 后并行按同一合同开发，但不得先用计时器动画冒充真实执行。改 main 前需协调当前 remote/iOS WIP 所有者；本轮未改这些文件。
 
@@ -273,5 +283,5 @@ UI 可在 M2 后并行按同一合同开发，但不得先用计时器动画冒�
 
 - 已完成：v5 补齐控制流与质量模式，v6 补齐聊天入口，v7 加入运行输入/资源约束；v8 补齐管理与依赖恢复，v9补齐规模软建议，v10补齐个人/项目保存、手动/Agent编辑与版本隔离；不将建议当运行门禁，默认medium且不按未经验证的订阅猜测。初始识别关闭、额外路由费用、计划仍须确认及原生命令不劫持都是显式合同，不声称与 Claude 原生行为完全相同。以上为方案完成，不是生产能力已通过。
 - 未实现：生产规划器/调度器/Jev API/React 面板；HTML v3 仍是固定样例。此次没有驱动真实 Agent、读取凭据或调用分类 API。
-- 下一授权动作：以此完整方案从 M1 开始实施，先协调 `src/main/index.ts` 的 WIP 所有权；实际 Provider/账号、费用、TypeSafe 数据范围与写入/应用策略在真实执行前确认。循环和多方案的设计范围不再等用户重复批准。
+- 下一授权动作：以此完整方案先交付 M0 竖切，再从 M1 开始实施，先协调 `src/main/index.ts` 的 WIP 所有权；实际 Provider/账号、费用、TypeSafe 数据范围与写入/应用策略在真实执行前确认。循环和多方案的设计范围不再等用户重复批准。
 - 强制禁止副本外写入仍不是现有 Provider 权限合同能保证的能力。默认差异审阅，若选择验证后应用必须具体授权；任何生成程序都不能授予自己更多权限。

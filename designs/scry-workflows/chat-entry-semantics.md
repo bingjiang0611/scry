@@ -9,8 +9,8 @@
 | 用自然语言请求工作流 | 启用聊天识别后，说“用工作流审计这个目录”即可生成本次计划；无需先打开独立工作流页面 |
 | 仅当前任务采用工作流 | 单次请求、输入框的本次工作流选项或 `/scry-workflow run <目标>` 只作用于当前 submission，不改变会话模式或 Provider effort |
 | 让模型自行决定 | 开启会话自动模式后，编排模型判断每个新的用户任务是否适合工作流；常规问答可直接回答 |
-| 运行内置或保存的工作流 | 模板选择器或 `/scry-workflow template <templateId> <参数>`；研究快捷入口为 `/scry-workflow research <问题>` |
-| 成功后保存复用 | 保存为 App-owned、版本化模板；登记 templateId、参数合同和名称，下次重新校验能力与授权 |
+| 运行内置或保存的工作流 | 模板选择器或 `/scry-workflow template <scope>:<templateId> <参数>`（scope 为 builtin/personal/project）；研究快捷入口为 `/scry-workflow research <问题>` |
+| 保存复用 | 将有效草案或运行定义保存为个人（App 数据域）或项目（授权根 `.scry-workflows/`）模板，按内容哈希版本化；下次重新校验能力与授权，见 [保存与编辑合同](template-lifecycle.md) |
 
 这些是 **Scry 命令与模式**。不劫持 Claude 的 `ultracode`、`/effort ultracode` 或 `/deep-research`，不改变原生 effort、模型或权限。Scry 的 research 模板提供对应的研究流程，但不是执行 Claude 的同名内置命令。
 

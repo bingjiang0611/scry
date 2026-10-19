@@ -1,5 +1,5 @@
 export const copy = {
-  title: 'Scry · Workflow live', brand: 'SCRY', heading: 'WORKFLOW LIVE', demo: '演示回放 · 未连接 Provider',
+  title: 'Scry · Workflow live', brand: 'SCRY', heading: 'WORKFLOW LIVE', demo: '演示回放 · 未连接 Provider · v3 过时样例：任务一次全部启动，未按并发上限排队',
   objective: '检查鉴权逻辑，隔离修复，再独立验证', project: 'scry / src/routes',
   configure: '模型配置', configHint: '样例模型目录。保存后用于下一次演示，当前运行保持不变。',
   provider: 'Provider', profile: '配置档', model: '模型', defaultProfile: '默认配置', piProfile: '研究配置（样例）',
