@@ -2,7 +2,7 @@
 
 ## D-20261018-scry-sidebar-activity
 
-- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；0.2.202 的安装状态及剩余安装包/安全门禁已核验通过。未自动启动日常 App，真实会话体验仍待用户手动打开确认。
+- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；0.2.203 已安装，包含字体统一与进行中文字扫光；完整验证与安装包安全门禁通过。未自动启动日常 App，真实会话体验仍待用户手动打开确认。
 - Feedback：2026-10-18，用户纠正「不一样啊 他是这样的三个 tab 哪个下面有任务展示哪个 然后顺序和任务都可以跳动 先出设计稿」，并提供 Needs input / Working / Completed 三段列表截图。原要求增加侧栏入口，并不等于认可上一版的分组细节。
 - 方向：保留外层「项目 / 动态」入口背景；内部是同时可见的三个状态分区，不做三个互斥横向 Tab。空组连标题一起隐藏，任务和标题一起移动。当前参考方向已明确，只做一稿；分区换位提供独立比较动作，不擅自定义自动抢占排序。
 - 目标：并行会话状态变化时，用户能追踪同一会话去了哪里，而不是看到旧行消失、新行出现。
@@ -99,7 +99,19 @@
 - 复用本项目 Sidebar/CSS tokens；个人组件库定向检索无适配项。已查看实际深/浅色截图 `/tmp/scry-sidebar-sweep-working-{dark,light}.png`，属于隔离Electron fixture，不是用户会话验收。
 - 新检查先对旧实现运行，以 `Activity titles do not match project-list typography` 失败；改后动态页20项与251项focused单测、typecheck通过。检查实际CSS动画持续前进、左→右关键帧、选中标题两时刻截图不同，且完成/等待回复无扫光，reduced-motion/forced-colors文字可见且静态。
 - 首次新增reduced-motion断言遇到CDP媒体变更尚未落帧；fixture现明确等待媒体查询与渲染帧，不添加sleep/retry或扩大5s等待上限。主题截图也等待实际样式与过渡收敛，避免把旧帧当新主题。
-- 准备可安装App0.2.203，CLI保持0.2.49。交付门禁和安装结果将在后续记录；不自动重启用户App。
+- 已安装App0.2.203，CLI保持0.2.49；不自动重启用户App。冻结源码 `105a6ba872c6e14d471e15d9f0add5bbd8af0a59`，仅包含本次5文件变更，排除了主目录并行iOS WIP。
+
+| 0.2.203 交付验证 | 结果与范围 |
+| --- | --- |
+| mac2 / Apple M1 / Node22.22.2 | typecheck、3401 unit passed / 4 existing opt-in skips、shell、App/CLI build、完整renderer UI通过；新增动态页20项全过；CLI release 587项及私有CLI init/hook/doctor通过 |
+| 性能原门禁 | 40项各5样本，ratchet通过；37 unchanged、1 better（仅1byte，不宣称性能收益）、2 pass；另3个instruction candidate missing。不是扫光帧率/CPU实测 |
+| 本机 / arm64 / Node22.23.1 | 完整 `npm run pack:artifact` 首次通过：build、CLI build、开发签名、packaged resource/size/CLI检查及全套security smoke；包体298141923 bytes，未公证 |
+| 原安装流程 | `node scripts/install-macos.mjs` 成功，安装后App0.2.203 / CLI0.2.49，deep strict签名通过；345个文件/链接逐项与签名源包一致；0.2.202备份保留于 `/Applications/.Scry.app.backup` |
+
+- 两端源码归档SHA-256 `34ece993dc3ed9bf00ab2f936c73b8612f7d7ab2f15ba3a69939a9344b53f119` 一致；安装前后`app.asar` SHA-256均为 `b01ddd062efe0e940bb51400e47416f21a858cb8bf046baff6657d264574fb5f`。
+- 完整日志、冻结源码、依赖与签名产物保留在 `/Users/baobingjiang/.local/state/scry-sidebar-0.2.203-AJSg4A/`（`verify.log` / `verify.exit` / `measure.json` / `pack.log` / `install.log`）；`evidence/`含安装manifest和深浅色截图。mac2隔离目录 `/Users/test/scry-sidebar-0.2.203-FYjUJM/` 保留，定向查询未发现两端fixture残留进程。
+- 依赖复制阶段外层120s命令超时，已检查进程和拷贝结果：remote完整，local缺4036个条目；以增量文件同步补齐后才构建，未盲目重跑源命令。全量测试与打包没有扩大超时/修改断言。
+- 真实用户会话验收仍待用户手动重启Scry后检查；当前自动验证只证明冻结构建与隔离受控交互，不声称已测量持续扫光帧率或实际用户体验。现有40行/组上限不变；若实际多任务扫光出现卡顿，再按真实性能记录定位，而不是现在添加调度/依赖。
 
 ## v1 · 历史实现记录（以下不是当前认可方案）
 
