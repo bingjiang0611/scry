@@ -892,7 +892,9 @@ async function exercise(contents, pointer, capture, options) {
 
   // Back to this Mac: a new draft picks the local machine; local new sessions stay intact.
   await click('.sb-new')
-  await wait('document.querySelector(".location-button") != null', 'remote new draft location picker')
+  // The old session also has a location button. Wait for the new draft before
+  // measuring it, or the transition can move the target before native input.
+  await wait('document.querySelector(".unbound-empty.bound") != null && document.querySelector(".location-button") != null', 'remote new draft location picker')
   await click('.location-button')
   await wait('document.querySelector(\'[data-machine-id="local"]\') != null', 'local machine option')
   await click('[data-machine-id="local"]')
@@ -1087,8 +1089,7 @@ try {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
         }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
-        console.log('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result))
-        app.exit(0)
+        process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
