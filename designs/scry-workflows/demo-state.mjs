@@ -1,26 +1,54 @@
-// Deterministic presentation fixture, not a Provider runner or production contract.
-import { catalog, copy, paths, stageIds } from './copy.mjs'
+// Presentation fixture only. No CLI, Provider, worktree or production scheduler.
+import { catalog, copy, paths, stageIds, workerStages } from './copy.mjs'
 
 export function defaultConfig() {
-  return {
-    concurrency: 3,
-    stages: Object.fromEntries(stageIds.map(id => [id, { provider: 'claude', profile: 'default', model: id === 'scan' ? 'haiku' : 'sonnet' }]))
-  }
+  return { stages: Object.fromEntries(stageIds.map(id => [id, {
+    provider: 'claude', profile: 'default', model: id === 'plan' ? 'opus' : id === 'scan' ? 'haiku' : 'sonnet'
+  }])) }
 }
 
 export function validConfig(config) {
-  if (!config || !Number.isInteger(config.concurrency) || config.concurrency < 1 || config.concurrency > 4) return false
-  return stageIds.every(id => {
+  return Boolean(config && stageIds.every(id => {
     const stage = config.stages?.[id]
-    const provider = catalog[stage?.provider]
-    return provider && provider.profiles.includes(stage.profile) && provider.models.includes(stage.model)
-  })
+    return stage && Object.hasOwn(catalog, stage.provider) &&
+      catalog[stage.provider].profiles.includes(stage.profile) && catalog[stage.provider].models.includes(stage.model)
+  }))
 }
 
-export function createDemo(config, number = 1) {
+function record(run, actor, message) {
+  run.logs.push({ sequence: ++run.sequence, tick: run.tick, actor, message })
+  // Bound presentation history, never the number of ready/running tasks.
+  run.logs = run.logs.slice(-120)
+}
+
+function dispatch(run, stage) {
+  run.phase = stage
+  for (const task of run.tasks[stage]) task.state = 'running'
+  record(run, 'runtime', copy.logs.dispatch(stage, run.tasks[stage].length))
+}
+
+export function createDemo(config, scanTargets = paths) {
   if (!validConfig(config)) throw new Error(copy.invalid)
-  return { number, config: structuredClone(config), phase: 'scan', status: 'running', scanDone: 4,
-    active: Math.min(config.concurrency, 4), logs: [copy.logs.started, copy.logs.planned] }
+  const task = title => ({ title, state: 'pending' })
+  const run = { config: structuredClone(config), phase: 'scan', status: 'running', tick: 0, sequence: 0, logs: [], tasks: {
+    scan: scanTargets.map(task),
+    edit: ['worktree/auth', 'worktree/documents', 'worktree/webhooks', 'worktree/permissions'].map(task),
+    verify: copy.findings.map(task)
+  } }
+  record(run, 'main', copy.logs.start)
+  record(run, 'main', copy.logs.plan)
+  dispatch(run, 'scan')
+  return run
+}
+
+function continueAfterPhase(run) {
+  if (run.status !== 'running' || run.tasks[run.phase].some(task => task.state === 'running')) return
+  const next = workerStages[workerStages.indexOf(run.phase) + 1]
+  if (next) dispatch(run, next)
+  else {
+    run.status = 'completed'
+    record(run, 'main', copy.logs.summary)
+  }
 }
 
 export function transition(run, action) {
@@ -28,73 +56,44 @@ export function transition(run, action) {
   if (['completed', 'stopped'].includes(run.status)) return next
   if (action === 'pause' && run.status === 'running') {
     next.status = 'paused'
-    next.logs.push(copy.logs.paused)
+    record(next, 'runtime', copy.logs.paused)
   } else if (action === 'resume' && run.status === 'paused') {
     next.status = 'running'
-    if (run.phase === 'scan') next.active = Math.min(run.config.concurrency, 8 - run.scanDone)
-    next.logs.push(copy.logs.resumed)
+    record(next, 'runtime', copy.logs.resumed)
+    continueAfterPhase(next)
   } else if (action === 'stop' && run.status !== 'stopping') {
     next.status = 'stopping'
-    next.logs.push(copy.logs.stopping)
-  } else if (action === 'advance' && run.status === 'stopping') {
-    next.status = 'stopped'
-    next.active = 0
-    next.logs.push(copy.logs.stopped)
-  } else if (action === 'advance' && run.status === 'paused') {
-    if (run.phase === 'scan' && run.active > 0) {
-      next.scanDone += run.active
-      next.active = 0
-      next.logs.push(copy.logs.scanning)
-    }
-    // Other phases remain at their last observable checkpoint until resumed.
-  } else if (action === 'advance' && run.status === 'running') {
-    if (run.phase === 'scan') {
-      next.scanDone += run.active
-      next.active = Math.min(run.config.concurrency, 8 - next.scanDone)
-      next.logs.push(copy.logs.scanning)
-      if (next.scanDone === 8) {
-        next.phase = 'verify'
-        next.active = 1
-        next.logs.push(copy.logs.scanned, copy.logs.verifying)
+    record(next, 'runtime', copy.logs.stopping)
+  } else if (action === 'advance') {
+    next.tick++
+    if (run.status === 'stopping') {
+      for (const tasks of Object.values(next.tasks)) for (const task of tasks) {
+        if (['pending', 'running'].includes(task.state)) task.state = 'cancelled'
       }
-    } else if (run.phase === 'verify') {
-      next.phase = 'summarize'
-      next.active = 1
-      next.logs.push(copy.logs.verified)
-    } else if (run.phase === 'summarize') {
-      next.phase = 'done'
-      next.status = 'completed'
-      next.active = 0
-      next.logs.push(copy.logs.summarized)
+      next.status = 'stopped'
+      record(next, 'runtime', copy.logs.stopped)
+    } else {
+      const task = next.tasks[next.phase].find(entry => entry.state === 'running')
+      if (task) {
+        task.state = next.phase === 'verify' && task.title === copy.findings[2] ? 'unverified' : 'completed'
+        record(next, next.phase, task.state === 'unverified' ? copy.logs.partial : copy.logs.finish(task.title))
+      }
+      continueAfterPhase(next)
     }
   }
   return next
 }
 
-export function tasksFor(run, stage) {
-  const currentIndex = run.phase === 'done' ? stageIds.length : stageIds.indexOf(run.phase)
-  const index = stageIds.indexOf(stage)
-  const stateFor = (taskIndex = 0) => {
-    if (stage === 'scan' && taskIndex < run.scanDone) return 'completed'
-    if (index < currentIndex) return 'completed'
-    if (run.status === 'stopped') return 'cancelled'
-    if (index === currentIndex && (stage !== 'scan' || taskIndex < run.scanDone + run.active)) return 'running'
-    return 'pending'
-  }
-  if (stage === 'plan') return [{ title: copy.planTask, state: 'completed', prompt: copy.planPrompt, result: copy.planResult }]
-  if (stage === 'scan') return paths.map((title, i) => ({ title, state: stateFor(i), prompt: copy.scanPrompt, result: copy.scanResult }))
-  if (stage === 'verify') return copy.findings.map((finding, i) => ({ title: finding.title, path: finding.path,
-    state: index < currentIndex && i === 2 ? 'unverified'
-      : index === currentIndex && i < 2 ? 'completed' : stateFor(),
-    prompt: copy.verifyPrompt, result: finding.result,
-    verdict: index < currentIndex || (index === currentIndex && i < 2) ? finding.verdict : undefined }))
-  return [{ title: copy.summaryTask, state: stateFor(), prompt: copy.summaryPrompt, result: copy.summaryResult }]
+export function stageState(run, stage) {
+  const tasks = run.tasks[stage]
+  const done = tasks.filter(task => ['completed', 'unverified'].includes(task.state)).length
+  const active = tasks.filter(task => task.state === 'running').length
+  const state = tasks.some(task => task.state === 'cancelled') ? 'cancelled'
+    : done === tasks.length ? tasks.some(task => task.state === 'unverified') ? 'partial' : 'completed'
+      : active > 0 ? 'running' : 'pending'
+  return { state, done, active, total: tasks.length }
 }
 
-export function stageState(run, stage) {
-  const tasks = tasksFor(run, stage)
-  const done = tasks.filter(task => ['completed', 'unverified'].includes(task.state)).length
-  const state = done === tasks.length ? (tasks.some(task => task.state === 'unverified') ? 'partial' : 'completed')
-    : tasks.some(task => task.state === 'running') ? 'running' : run.status === 'stopped' ? 'cancelled' : 'pending'
-  return { state, done, total: tasks.length }
+export function activeCount(run) {
+  return Object.values(run.tasks).flat().filter(task => task.state === 'running').length
 }

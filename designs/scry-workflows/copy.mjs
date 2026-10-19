@@ -1,63 +1,59 @@
 export const copy = {
-  title: 'Scry · 工作流', brand: 'Scry', workspace: '工作区', project: 'scry',
-  workflow: '工作流', current: '当前演示', history: '上一次演示',
-  demo: '交互原型 · 演示数据 · 未连接 Provider', objective: '检查接口的鉴权与输入校验',
-  scope: 'src/routes/ · 8 个文件', template: '代码审计',
-  inspect: '运行详情', configuration: '配置下一次运行', configure: '模型与执行配置',
-  configHint: '此处是样例目录，不代表本机模型可用。配置只应用于下一次演示。',
+  title: 'Scry · Workflow live', brand: 'SCRY', heading: 'WORKFLOW LIVE', demo: '演示回放 · 未连接 Provider',
+  objective: '检查鉴权逻辑，隔离修复，再独立验证', project: 'scry / src/routes',
+  configure: '模型配置', configHint: '样例模型目录。保存后用于下一次演示，当前运行保持不变。',
   provider: 'Provider', profile: '配置档', model: '模型', defaultProfile: '默认配置', piProfile: '研究配置（样例）',
-  selectModel: '请选择模型', fieldLabel: (stage, field) => `${stage} · ${field}`,
-  concurrency: '扫描并发上限', concurrencyHint: '样例上限 1–4；生产还需检查各 Provider 的并发限制。',
-  readIntent: '请求只读审计', readBoundary: '只读是任务意图，不是安全沙箱；Provider 和获准的仓库配置仍以本机权限运行。',
-  frozen: '当前运行的模型配置已冻结', modelUnknown: '实际模型：未观测（演示）',
-  save: '保存模板', saved: '样例模板已保存到此浏览器', saveFailed: '浏览器未允许保存；本次配置仍可用于演示。',
-  start: '开始演示', cancel: '关闭', finishFirst: '可以先保存配置；请完成或停止当前演示后，再开始下一次。',
-  invalid: '请为每个阶段选择模型，并将并发设为 1–4 的整数。',
-  pause: '暂停调度', resume: '恢复调度', stop: '停止', next: '下一步演示',
-  readOnlyHistory: '历史记录 · 只读',
-  status: { running: '运行中', paused: '调度已暂停', stopping: '停止待确认', stopped: '已停止', completed: '已完成 · 含未验证' },
-  states: { completed: '已完成', partial: '含未验证', running: '运行中', pending: '待调度', cancelled: '已取消', unverified: '未验证' },
+  selectModel: '请选择模型',
+  save: '保存模型配置', saved: '已保存，重新演示时生效', saveFailed: '无法保存到浏览器，本次配置仍可用于重新演示。',
+  close: '关闭', invalid: '请为每个阶段选择有效模型。',
+  play: '播放回放', freeze: '暂停回放', replay: '重新演示', next: '下一帧',
+  pause: '暂停调度', resume: '恢复调度', stop: '停止任务',
+  orchestrator: 'ORCHESTRATOR', script: 'workflow.js', mainSession: 'main session',
+  plannerRole: '编写工作流 · 等待汇总', plannerIdle: 'idle · 等待执行结果', plannerDone: 'review · 汇总已返回',
+  plannerStopped: 'idle · 运行已停止', ownerEnd: '◇ review results',
+  phaseLabel: '当前阶段', agentsLabel: '执行中的 Agent', contextLabel: '上下文用量', unknown: '未提供',
+  scriptHeld: '脚本保持流程，主会话等待结果', runtime: 'SCRY RUNTIME',
+  routing: '按阶段分派', routingModel: '模型来源', routingModelValue: '用户配置',
+  routingReady: '可运行任务', routingReadyValue: '依赖就绪即派发',
+  routingEvidence: '完成依据', routingEvidenceValue: '执行与证据确认',
+  runtimeCaption: '执行器 · 依赖与事件驱动', signoff: 'back to main · review',
+  signoffWaiting: '等待工作流结果', signoffDone: '结果已返回 · 1 项未验证', signoffStopped: '运行已停止 · 保留已有结果',
+  signoffHint: '只汇总结果与证据引用', events: 'SESSION LOG', eventSource: '演示事件',
+  stageDetail: '任务详情', requestedModel: '请求模型', actualModel: '实际模型未观测（演示）',
+  evidence: '演示证据 · 不是本仓库的审计结论', emptyResult: '等待任务结果',
+  simulatedEdit: '修复阶段仅演示；没有创建 worktree 或改写文件。',
+  noCharge: '用量 / 费用：未提供',
+  pauseNotice: '调度已暂停；在途任务仍会结束，不启动后续阶段。',
+  stopNotice: '停止待确认；下一帧模拟确认，不自动重试。',
+  finishedNotice: '回放完成 · 没有执行真实模型或修改文件。', stoppedNotice: '演示已停止 · 没有执行真实模型或修改文件。',
+  stageStatus: { pending: '等待依赖', running: '执行中', completed: '已结束', partial: '含未验证', cancelled: '已取消', paused: '待恢复调度' },
+  runStatus: { running: 'RUNNING', paused: 'PAUSED', stopping: 'STOP REQUESTED', stopped: 'STOPPED', completed: 'COMPLETED · PARTIAL' },
+  taskStatus: { pending: '等待依赖', running: '执行中', completed: '已结束', unverified: '未验证', cancelled: '已取消' },
   stages: {
-    plan: { title: '范围规划', description: '拆分检查范围与验收标准' },
-    scan: { title: '并行扫描', description: '逐文件收集候选问题' },
-    verify: { title: '独立复核', description: '重读源码，验证每项发现' },
-    summarize: { title: '汇总报告', description: '保留依据与未验证项' }
+    plan: { title: '主编排', code: 'plan', detail: '生成检查范围与阶段依赖' },
+    scan: { title: '并行扫描', code: 'scan', detail: '逐文件发现候选问题' },
+    edit: { title: '隔离修复', code: 'edit', detail: '各自在隔离副本中修复' },
+    verify: { title: '独立验证', code: 'verify', detail: '重读证据，交叉检查改动' }
   },
-  progress: (done, total) => `${done} / ${total} 已收口`, active: (count, cap) => `${count} / ${cap} 执行槽位`,
-  selectedStage: '阶段详情', detail: '任务证据', events: '事件日志',
-  evidence: '来源', prompt: '任务说明', result: '结果', requestedModel: '请求模型',
-  evidenceUnavailable: '此任务尚未产生结果。',
-  providerUnavailable: '费用不可用 · 演示未连接 Provider',
-  totalStages: (count) => `${count} / 4 阶段收口`,
-  notice: {
-    running: '点击阶段查看任务；用“下一步演示”推进样例。',
-    paused: '已停止新任务调度。在途任务仍可完成；“下一步演示”只收敛在途任务。',
-    stopping: '已请求停止，不再派发新任务。等待在途任务确认，结果未知时不自动重试。',
-    stopped: '演示任务已确认停止。未开始的任务已取消。',
-    completed: '审计完成：1 项确认，1 项排除，1 项未验证。未修改文件。'
-  },
-  planTask: '检查范围与分片', planPrompt: '根据用户目标生成有界文件清单与检查标准，不修改文件。',
-  planResult: '已规划 8 个文件；复核需独立读取源码，无法确认的发现保留为未验证。',
-  scanPrompt: '检查所分配文件的鉴权与输入校验，输出带文件与证据位置的候选问题；不修改文件。',
-  scanResult: '扫描结果已收集；候选问题必须经过独立复核，不能直接计为确认缺陷。',
-  verifyPrompt: '使用新会话重新读取候选证据及调用方；分别标记确认、排除或未验证，并记录依据。',
-  summaryTask: '有依据的审计报告', summaryPrompt: '按已确认、已排除、未验证汇总，保留证据引用，不将验证失败解释为安全。',
-  summaryResult: '1 项确认：缺少资源归属检查。1 项排除：上层已有校验。1 项未验证：任务中断，未取得足够证据。',
-  evidenceLabel: '演示证据 · 非本仓库审计结论',
-  findings: [
-    { title: '资源归属检查', path: 'src/routes/documents.ts:42', result: '确认（样例）：读取资源前未核对当前用户归属。', verdict: '已确认' },
-    { title: '列表参数边界', path: 'src/routes/search.ts:18', result: '排除（样例）：调用方已统一限制参数范围。', verdict: '已排除' },
-    { title: 'Webhook 签名验证', path: 'src/routes/webhooks.ts:76', result: '未验证（样例）：复核任务中断，缺少足够证据；不计为已排除。', verdict: '未验证' }
-  ],
+  active: count => `${count} agents running`, counts: (done, total) => `${done} / ${total} 已结束`,
+  nodeLabel: (name, state, done, total) => `${name}，${state}，${done} / ${total} 已结束`,
   logs: {
-    started: '演示开始；配置已冻结，运行面板自动关联。', planned: '范围规划完成：8 个文件。',
-    scanning: '扫描在途任务已收敛。', scanned: '扫描完成：收集到 3 项候选发现。',
-    verifying: '开始独立复核：使用新会话重读证据。', verified: '复核收口：1 项确认、1 项排除、1 项未验证。',
-    summarized: '报告已汇总；未修改工作区。', paused: '暂停新任务调度；在途执行不冻结。',
-    resumed: '恢复新任务调度。', stopping: '停止请求已登记，等待任务确认。', stopped: '在途任务确认结束；未开始任务取消。'
+    start: 'workflow.js 已载入 · 模型配置已冻结', plan: '检查范围已展开 · 阶段依赖已建立',
+    dispatch: (stage, count) => `${stage} · 派发全部 ${count} 个就绪任务`,
+    finish: name => `${name} · 结果已返回`,
+    partial: 'signature check · 证据不足，保留为未验证',
+    summary: '结果交回主会话 · 含 1 项未验证；未修改真实文件',
+    paused: '暂停调度 · 允许在途任务结束', resumed: '恢复调度 · 派发依赖就绪任务',
+    stopping: '停止请求已登记 · 等待终态', stopped: '停止已确认 · 待执行任务取消'
+  },
+  findings: ['类型检查', '回归检查', '签名检查'],
+  results: {
+    scan: '候选发现已返回。是否成立仍需独立验证。',
+    edit: '隔离修复样例已返回；演示没有产生真实文件改动。',
+    verify: '验证样例已结束。',
+    unverified: '未取得足够证据，保留为未验证；不计为通过或排除。'
   }
 }
-
 export const catalog = {
   claude: { label: 'Claude', profiles: ['default'], models: ['sonnet', 'opus', 'haiku'] },
   codex: { label: 'Codex', profiles: ['default'], models: ['sample-codex-model'] },
@@ -65,5 +61,6 @@ export const catalog = {
   opencode: { label: 'OpenCode', profiles: ['default'], models: ['sample-provider/sample-model'] },
   pi: { label: 'Pi', profiles: ['default', 'research'], models: ['sample-provider/sample-model'] }
 }
-export const stageIds = ['plan', 'scan', 'verify', 'summarize']
-export const paths = ['auth.ts', 'documents.ts', 'search.ts', 'webhooks.ts', 'users.ts', 'teams.ts', 'sessions.ts', 'exports.ts'].map(name => `src/routes/${name}`)
+export const stageIds = ['plan', 'scan', 'edit', 'verify']
+export const workerStages = ['scan', 'edit', 'verify']
+export const paths = ['auth.ts', 'documents.ts', 'search.ts', 'webhooks.ts', 'users.ts', 'teams.ts', 'sessions.ts', 'exports.ts', 'permissions.ts'].map(name => `src/routes/${name}`)

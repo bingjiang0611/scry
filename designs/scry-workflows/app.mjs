@@ -1,110 +1,99 @@
-import { catalog, copy, stageIds } from './copy.mjs'
-import { createDemo, defaultConfig, stageState, tasksFor, transition, validConfig } from './demo-state.mjs'
+import { catalog, copy, stageIds, workerStages } from './copy.mjs'
+import { activeCount, createDemo, defaultConfig, stageState, transition, validConfig } from './demo-state.mjs'
 
-const storageKey = 'scry-workflow-prototype-v1'
+document.title = copy.title
+const storageKey = 'scry-workflow-prototype-v2'
 let config = defaultConfig()
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey))
   if (validConfig(saved)) config = saved
-} catch { /* Local prototype preferences are optional; never call a Provider. */ }
-let current = createDemo(config)
-let previous = null
-let history = false
-let selectedStage = 'scan'
-let selectedTask = 0
+} catch { /* Optional prototype preferences; no Provider access. */ }
+let run = createDemo(config)
+let playing = true
+let detailStage = null
 const app = document.querySelector('#app')
 document.title = copy.title
-
-// All UI copy is centralized. Values inserted into templates are escaped, including localStorage data.
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
-const button = (id, label, className = '', disabled = false) => `<button id="${id}" class="${className}" ${disabled ? 'disabled' : ''}>${escape(label)}</button>`
-const tag = (label, state) => `<span class="status ${state}"><i aria-hidden="true"></i>${escape(label)}</span>`
-const modelName = assignment => `${catalog[assignment.provider].label} / ${assignment.model}`
-const on = (id, handler) => document.getElementById(id)?.addEventListener('click', handler)
+const button = (id, text, className = '', disabled = false) => `<button type="button" id="${id}" class="${className}" ${disabled ? 'disabled' : ''}>${escape(text)}</button>`
+const on = (id, action) => document.getElementById(id)?.addEventListener('click', action)
+const modelName = stage => `${catalog[run.config.stages[stage].provider].label} / ${run.config.stages[stage].model}`
+const timestamp = tick => `${String(Math.floor(tick * 2 / 60)).padStart(2, '0')}:${String(tick * 2 % 60).padStart(2, '0')}`
 
 function render(focusId) {
-  const run = history ? previous : current
   const terminal = ['completed', 'stopped'].includes(run.status)
-  const completed = stageIds.filter(id => ['completed', 'partial'].includes(stageState(run, id).state)).length
-  const tasks = tasksFor(run, selectedStage)
-  selectedTask = Math.min(selectedTask, tasks.length - 1)
-  const task = tasks[selectedTask]
-  const assignment = run.config.stages[selectedStage]
-  const hasResult = ['completed', 'unverified'].includes(task.state)
-  app.innerHTML = `
-    <aside class="sidebar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span>${escape(copy.brand)}</div>
-      <div class="workspace"><span class="eyebrow">${escape(copy.workspace)}</span><strong>${escape(copy.project)}</strong></div>
-      <div class="nav-heading">${escape(copy.workflow)}</div>
-      ${button('current', copy.current, history ? 'nav' : 'nav selected')}
-      ${button('history', copy.history, history ? 'nav selected' : 'nav', !previous)}
-      <div class="sidebar-bottom"><span class="intent-dot" aria-hidden="true"></span>${escape(copy.readIntent)}</div>
-    </aside>
-    <main>
-      <header><div class="breadcrumb">${escape(copy.project)} <span>/</span> ${escape(copy.workflow)}</div><span class="demo-label">${escape(copy.demo)}</span></header>
-      <section class="heading">
-        <div><div class="eyebrow">${escape(copy.template)} <span class="mono">· DEMO-${String(run.number).padStart(3, '0')}</span></div><h1>${escape(copy.objective)}</h1><p>${escape(copy.scope)}</p></div>
-        ${button('configure', copy.configuration, 'secondary')}
-      </section>
-      <section class="runbar" aria-label="${escape(copy.inspect)}">
-        <div class="runfacts">${tag(copy.status[run.status], run.status === 'completed' ? 'partial' : run.status)}<span>${escape(copy.totalStages(completed))}</span><span class="numeric">${escape(copy.active(run.active, run.config.concurrency))}</span></div>
-        <div class="actions">${history ? `<span>${escape(copy.readOnlyHistory)}</span>` : `${button('pause', run.status === 'paused' ? copy.resume : copy.pause, 'quiet', terminal || run.status === 'stopping')}${button('stop', copy.stop, 'quiet danger', terminal || run.status === 'stopping')}${button('advance', copy.next, 'primary', terminal)}`}</div>
-      </section>
-      <p class="notice" role="status">${escape(copy.notice[run.status])}</p>
-      <div class="workbench">
-        <section class="canvas">
-          <div class="flow" aria-label="${escape(copy.workflow)}">${stageIds.map((id, i) => {
-            const stage = stageState(run, id)
-            return `<button class="node ${stage.state} ${selectedStage === id ? 'active' : ''}" data-stage="${id}" aria-pressed="${selectedStage === id}"><span class="node-top"><span class="step mono">0${i + 1}</span>${tag(copy.states[stage.state], stage.state)}</span><strong>${escape(copy.stages[id].title)}</strong><span class="node-model">${escape(modelName(run.config.stages[id]))}</span><span class="track"><span style="width:${stage.done / stage.total * 100}%"></span></span><span class="node-count numeric">${escape(copy.progress(stage.done, stage.total))}</span></button>`
-          }).join('')}</div>
-          <section class="task-section"><div class="section-heading"><h2>${escape(copy.stages[selectedStage].title)}</h2><span>${escape(copy.stages[selectedStage].description)}</span></div>
-          <div class="task-list">${tasks.map((entry, i) => `<button class="task-row ${i === selectedTask ? 'selected' : ''}" data-task="${i}" aria-pressed="${i === selectedTask}"><span class="task-index numeric">${String(i + 1).padStart(2, '0')}</span><span class="task-name ${selectedStage === 'scan' ? 'mono' : ''}">${escape(entry.title)}</span>${tag(entry.verdict || copy.states[entry.state], entry.state)}<span class="chevron" aria-hidden="true">›</span></button>`).join('')}</div></section>
-          <section class="events"><div class="section-heading"><h2>${escape(copy.events)}</h2><span class="mono">DEMO</span></div><ol>${run.logs.slice(-8).map((line, i) => `<li><span class="mono numeric">${String(Math.max(0, run.logs.length - 8) + i + 1).padStart(3, '0')}</span><p>${escape(line)}</p></li>`).join('')}</ol></section>
-        </section>
-        <aside class="inspector" aria-label="${escape(copy.selectedStage)}">
-          <div class="eyebrow">${escape(copy.detail)}</div><h2>${escape(task.title)}</h2>${tag(task.verdict || copy.states[task.state], task.state)}
-          <dl><dt>${escape(copy.requestedModel)}</dt><dd>${escape(modelName(assignment))}</dd><dt>${escape(copy.profile)}</dt><dd>${escape(assignment.profile === 'research' ? copy.piProfile : copy.defaultProfile)}</dd></dl>
-          <div class="evidence-note">${escape(copy.modelUnknown)}</div>
-          <h3>${escape(copy.prompt)}</h3><p>${escape(task.prompt)}</p>
-          <h3>${escape(copy.result)}</h3><p class="result ${task.state}">${escape(hasResult ? task.result : copy.evidenceUnavailable)}</p>
-          ${task.path ? `<code>${escape(task.path)}</code>` : ''}
-          <details><summary>${escape(copy.evidence)}</summary><p>${escape(copy.evidenceLabel)}</p><span class="mono">DEMO-${String(run.number).padStart(3, '0')} / ${selectedStage} / ${selectedTask + 1}</span></details>
-        </aside>
-      </div>
-      <footer>${escape(copy.frozen)}<span>${escape(copy.providerUnavailable)}</span></footer>
-    </main>
-    <dialog id="configuration"></dialog>`
-  on('current', () => { history = false; render('current') })
-  on('history', () => { history = true; render('history') })
-  on('configure', openConfiguration)
-  for (const [id, action] of [['pause', run.status === 'paused' ? 'resume' : 'pause'], ['stop', 'stop'], ['advance', 'advance']]) {
-    on(id, () => { current = transition(current, action); render(id) })
+  const states = Object.fromEntries(workerStages.map(id => [id, stageState(run, id)]))
+  const active = activeCount(run)
+  const node = id => {
+    const stage = states[id]
+    return `<button id="stage-${id}" class="worker ${id} ${stage.state}" data-stage="${id}" aria-label="${escape(copy.nodeLabel(copy.stages[id].title, copy.stageStatus[stage.state], stage.done, stage.total))}">
+      <span class="worker-heading"><strong>${escape(copy.stages[id].code)}</strong><span>${escape(copy.stageStatus[stage.state])}</span></span>
+      <span class="model">${escape(modelName(id))}</span>
+      <span class="progress"><span style="width:${stage.done / stage.total * 100}%"></span></span>
+      <span class="agents">${run.tasks[id].map(task => `<i class="${task.state}" aria-hidden="true"></i>`).join('')}</span>
+      <span class="worker-description">${escape(copy.stages[id].detail)}</span>
+      <span class="worker-count">${escape(copy.counts(stage.done, stage.total))}</span>
+    </button>`
   }
-  for (const element of document.querySelectorAll('[data-stage]')) element.addEventListener('click', () => {
-    selectedStage = element.dataset.stage
-    selectedTask = 0
-    render()
-    document.querySelector(`[data-stage="${selectedStage}"]`).focus()
-  })
-  for (const element of document.querySelectorAll('[data-task]')) element.addEventListener('click', () => {
-    selectedTask = Number(element.dataset.task)
-    render()
-    document.querySelector(`[data-task="${selectedTask}"]`).focus()
-  })
+  app.innerHTML = `<main class="terminal ${playing ? '' : 'replay-paused'}">
+    <header><div class="heading"><strong>${escape(copy.brand)}</strong><span>${escape(copy.heading)}</span><span class="run-status ${run.status}">${escape(copy.runStatus[run.status])}</span></div><div class="header-actions">${button('configure', copy.configure)}${button('pause', run.status === 'paused' ? copy.resume : copy.pause, '', terminal || run.status === 'stopping')}${button('stop', copy.stop, '', terminal || run.status === 'stopping')}</div></header>
+    <div class="subhead"><span>${escape(copy.objective)}</span><span class="demo-label">${escape(copy.demo)}</span></div>
+    <div class="legend">${stageIds.map(id => `<span class="${id}"><i></i>${escape(run.config.stages[id].model)} · ${escape(copy.stages[id].code)}</span>`).join('')}</div>
+    <section class="stage-layout">
+      <aside class="orchestrator plan"><div class="orchestrator-heading"><strong>${escape(run.config.stages.plan.model)}</strong><span>${escape(copy.orchestrator)}</span></div>
+        <div class="script-title">${escape(copy.script)}</div>
+        <pre class="script"><span>plan(objective)</span><span class="${run.phase === 'scan' ? 'current scan' : ''}">phase('scan')</span><span class="indent">parallel(files)</span><span class="${run.phase === 'edit' ? 'current edit' : ''}">phase('edit')</span><span class="indent">isolated(patches)</span><span class="${run.phase === 'verify' ? 'current verify' : ''}">phase('verify')</span><span class="indent">review(evidence)</span><span>return findings</span></pre>
+        <dl><dt>${escape(copy.phaseLabel)}</dt><dd class="${run.phase}">${escape(run.phase)}</dd><dt>${escape(copy.agentsLabel)}</dt><dd>${active}</dd><dt>${escape(copy.contextLabel)}</dt><dd>${escape(copy.unknown)}</dd></dl>
+        <div class="idle-state">◇ ${escape(run.status === 'stopped' ? copy.plannerStopped : terminal ? copy.plannerDone : copy.plannerIdle)}</div><p>${escape(copy.scriptHeld)}</p><div class="owner-end">${escape(copy.ownerEnd)}</div>
+      </aside>
+      <div class="graph">
+        <svg class="connections" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">
+          <path class="edge owner" d="M0 44 H300"/><path class="edge owner" d="M500 88 V120"/>
+          <path class="edge" d="M500 230 V280 M166 300 V280 H834 V300 M500 280 V300"/>
+          <path class="edge" d="M166 444 V468 H834 V444 M500 444 V488"/>
+          ${active > 0 ? `<path class="signal ${run.phase}" d="M500 230 V280 H${run.phase === 'scan' ? 166 : run.phase === 'edit' ? 500 : 834} V300"/>` : ''}
+          ${run.status === 'completed' ? '<path class="signal plan" d="M500 444 V488"/>' : ''}
+        </svg>
+        <div class="main-node plan"><strong>${escape(modelName('plan'))} · ${escape(copy.mainSession)}</strong><span>${escape(copy.plannerRole)}</span><small>${escape(copy.project)}</small></div>
+        <div class="runtime-node"><div class="runtime-title"><strong>${escape(copy.runtime)}</strong><span>${escape(copy.routing)}</span></div><div class="routing-row"><span>${escape(copy.routingModel)}</span><i class="route-bar models"></i><b>${escape(copy.routingModelValue)}</b></div><div class="routing-row"><span>${escape(copy.routingReady)}</span><i class="route-bar ready"></i><b>${escape(copy.routingReadyValue)}</b></div><div class="routing-row"><span>${escape(copy.routingEvidence)}</span><i class="route-bar evidence"></i><b>${escape(copy.routingEvidenceValue)}</b></div></div>
+        <div class="runtime-caption"><span>${escape(copy.runtimeCaption)} <b>${escape(copy.active(active))}</b></span></div>
+        <div class="workers">${workerStages.map(node).join('')}</div>
+        <div class="signoff plan ${terminal ? 'arrived' : ''}"><strong>${escape(copy.signoff)}</strong><span class="${run.status === 'completed' ? 'warning' : ''}">${escape(run.status === 'completed' ? copy.signoffDone : run.status === 'stopped' ? copy.signoffStopped : copy.signoffWaiting)}</span><small>${escape(copy.signoffHint)}</small></div>
+      </div>
+    </section>
+    <section class="console"><div class="console-heading"><strong>${escape(copy.events)}</strong><span><i class="live-dot ${playing && !terminal ? 'live' : ''}"></i>${escape(copy.eventSource)}</span></div><ol>${run.logs.slice(-6).map(event => `<li><time>${timestamp(event.tick)}</time><b class="${event.actor === 'main' ? 'plan' : event.actor}">${escape(event.actor)}</b><span>${escape(event.message)}</span></li>`).join('')}</ol></section>
+    <footer><div class="playback">${button('play', playing ? copy.freeze : copy.play, '', terminal)}${button('advance', copy.next, '', terminal)}${button('replay', copy.replay)}</div><span class="footer-status">${escape(run.status === 'paused' ? copy.pauseNotice : run.status === 'stopping' ? copy.stopNotice : run.status === 'stopped' ? copy.stoppedNotice : terminal ? copy.finishedNotice : copy.noCharge)}</span></footer>
+    </main><dialog id="configuration"></dialog><dialog id="details"></dialog>`
+  on('configure', openConfiguration)
+  on('play', () => { playing = !playing; render('play') })
+  on('advance', () => { run = transition(run, 'advance'); render('advance') })
+  on('replay', () => { run = createDemo(config); playing = true; render('replay') })
+  on('pause', () => { run = transition(run, run.status === 'paused' ? 'resume' : 'pause'); render('pause') })
+  on('stop', () => { playing = false; run = transition(run, 'stop'); render('advance') })
+  for (const element of document.querySelectorAll('[data-stage]')) element.addEventListener('click', () => openDetails(element.dataset.stage))
   if (focusId) document.getElementById(focusId)?.focus()
 }
 
+function openDetails(stage) {
+  playing = false
+  render()
+  detailStage = stage
+  const dialog = document.querySelector('#details')
+  dialog.innerHTML = `<div class="dialog-heading"><h2>${escape(copy.stages[stage].title)} · ${escape(copy.stageDetail)}</h2>${button('close-details', copy.close)}</div><p>${escape(copy.evidence)}</p><div class="detail-model"><span>${escape(copy.requestedModel)} · ${escape(modelName(stage))}</span><small>${escape(copy.actualModel)}</small></div>${stage === 'edit' ? `<p class="warning">${escape(copy.simulatedEdit)}</p>` : ''}<div class="detail-tasks">${run.tasks[stage].map(task => `<details><summary><span>${escape(task.title)}</span><b class="${task.state}">${escape(copy.taskStatus[task.state])}</b></summary><p>${escape(task.state === 'unverified' ? copy.results.unverified : task.state === 'completed' ? copy.results[stage] : copy.emptyResult)}</p></details>`).join('')}</div>`
+  dialog.setAttribute('aria-label', copy.stageDetail)
+  on('close-details', () => dialog.close())
+  dialog.addEventListener('close', () => { document.querySelector(`[data-stage="${detailStage}"]`)?.focus(); detailStage = null }, { once: true })
+  dialog.showModal()
+}
+
 function openConfiguration() {
-  const dialog = document.querySelector('#configuration')
+  playing = false
+  render()
   const draft = structuredClone(config)
-  dialog.innerHTML = `<form id="config-form"><div class="dialog-heading"><h2>${escape(copy.configure)}</h2>${button('close', copy.cancel, 'quiet')}</div><p>${escape(copy.configHint)}</p>
-    <div class="config-grid config-labels"><span>${escape(copy.workflow)}</span><span>${escape(copy.provider)}</span><span>${escape(copy.profile)}</span><span>${escape(copy.model)}</span></div>
-    ${stageIds.map(id => `<div class="config-grid"><strong>${escape(copy.stages[id].title)}</strong><select id="${id}-provider" aria-label="${escape(copy.fieldLabel(copy.stages[id].title, copy.provider))}">${Object.entries(catalog).map(([key, value]) => `<option value="${key}" ${key === draft.stages[id].provider ? 'selected' : ''}>${escape(value.label)}</option>`).join('')}</select><select id="${id}-profile" aria-label="${escape(copy.fieldLabel(copy.stages[id].title, copy.profile))}"></select><select id="${id}-model" aria-label="${escape(copy.fieldLabel(copy.stages[id].title, copy.model))}"></select></div>`).join('')}
-    <div class="concurrency"><label for="concurrency">${escape(copy.concurrency)}</label><input id="concurrency" type="number" min="1" max="4" step="1" value="${draft.concurrency}" required><span>${escape(copy.concurrencyHint)}</span></div>
-    <div class="boundary"><strong>${escape(copy.readIntent)}</strong><p>${escape(copy.readBoundary)}</p></div>
-    <p id="config-message" role="status"></p><div class="dialog-actions">${button('save', copy.save, 'secondary')}${button('start', copy.start, 'primary')}</div></form>`
-  dialog.setAttribute('aria-labelledby', 'config-title')
-  dialog.querySelector('h2').id = 'config-title'
+  const dialog = document.querySelector('#configuration')
+  dialog.innerHTML = `<div class="dialog-heading"><h2>${escape(copy.configure)}</h2>${button('close-config', copy.close)}</div><p>${escape(copy.configHint)}</p>
+    ${stageIds.map(id => `<fieldset><legend>${escape(copy.stages[id].title)}</legend><label>${escape(copy.provider)}<select id="${id}-provider">${Object.entries(catalog).map(([key, value]) => `<option value="${key}" ${key === draft.stages[id].provider ? 'selected' : ''}>${escape(value.label)}</option>`).join('')}</select></label><label>${escape(copy.profile)}<select id="${id}-profile"></select></label><label>${escape(copy.model)}<select id="${id}-model"></select></label></fieldset>`).join('')}
+    <p id="config-message" role="status"></p><div class="dialog-actions">${button('save', copy.save, 'primary')}</div>`
+  dialog.setAttribute('aria-label', copy.configure)
   const message = document.querySelector('#config-message')
   const updateChoices = id => {
     const assignment = draft.stages[id]
@@ -120,35 +109,22 @@ function openConfiguration() {
     })
     for (const field of ['profile', 'model']) document.getElementById(`${id}-${field}`).addEventListener('change', event => { draft.stages[id][field] = event.target.value })
   }
-  document.getElementById('concurrency').addEventListener('input', event => { draft.concurrency = Number(event.target.value) })
-  document.getElementById('config-form').addEventListener('submit', event => event.preventDefault())
-  for (const element of dialog.querySelectorAll('button')) element.type = 'button'
-  on('close', () => dialog.close())
-  const apply = () => {
-    if (!validConfig(draft)) { message.textContent = copy.invalid; return false }
-    config = structuredClone(draft)
-    return true
-  }
+  on('close-config', () => dialog.close())
   on('save', () => {
-    if (!apply()) return
+    if (!validConfig(draft)) { message.textContent = copy.invalid; return }
+    config = structuredClone(draft)
     try { localStorage.setItem(storageKey, JSON.stringify(config)); message.textContent = copy.saved }
     catch { message.textContent = copy.saveFailed }
   })
-  on('start', () => {
-    if (!apply()) return
-    // Never discard an active sample. Finish/stop it before creating another run.
-    if (!['completed', 'stopped'].includes(current.status)) return
-    previous = structuredClone(current)
-    current = createDemo(config, current.number + 1)
-    history = false
-    selectedStage = 'scan'
-    selectedTask = 0
-    dialog.close()
-    render('configure')
-  })
-  document.getElementById('start').disabled = !['completed', 'stopped'].includes(current.status)
-  if (document.getElementById('start').disabled) message.textContent = copy.finishFirst
+  dialog.addEventListener('close', () => document.getElementById('configure').focus(), { once: true })
   dialog.showModal()
 }
 
 render()
+const timer = window.setInterval(() => {
+  if (!playing || document.hidden || ['completed', 'stopped'].includes(run.status)) return
+  const focused = document.activeElement?.id
+  run = transition(run, 'advance')
+  render(focused)
+}, 1800)
+window.addEventListener('pagehide', () => window.clearInterval(timer), { once: true })
