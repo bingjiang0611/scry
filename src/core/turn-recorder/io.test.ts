@@ -35,13 +35,15 @@ describe('withDirectoryLock', () => {
       let active = 0
       let maxActive = 0
       const order: number[] = []
+      // A dead PID is recoverable without shortening the ownerless-lock grace
+      // period. A 1ms TTL also stole freshly created contenders before owner write.
       const action = (id: number) => withDirectoryLock(lock, async () => {
         active++
         maxActive = Math.max(maxActive, active)
         await new Promise((resolve) => setTimeout(resolve, 25))
         order.push(id)
         active--
-      }, { waitMs: 1_000, ttlMs: 1 })
+      }, { waitMs: 1_000 })
       await Promise.all([action(1), action(2)])
       expect(maxActive).toBe(1)
       expect(order.sort()).toEqual([1, 2])

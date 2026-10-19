@@ -68,10 +68,12 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
     const sweepImages = []
     for (const time of [1100, 2100]) {
-      const rect = await read(`(() => {
+      const rect = await read(`(async () => {
         const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext');
         const animation = title.getAnimations().find(item => item.animationName === 'sb-activity-sweep');
-        animation.pause(); animation.currentTime = ${time};
+        animation.pause();
+        await animation.ready;
+        animation.currentTime = ${time};
         const bounds = title.getBoundingClientRect();
         return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
       })()`)

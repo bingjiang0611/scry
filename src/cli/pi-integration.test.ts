@@ -139,7 +139,9 @@ describe('Pi recorder extension lifecycle', () => {
     const cli = join(root, 'scry')
     const harness = join(root, 'harness.mjs')
     const extensionUrl = pathToFileURL(resolve('packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')).href
-    await writeFile(cli, '#!/usr/bin/env node\nimport { closeSync } from "node:fs"\ncloseSync(0)\nsetTimeout(() => {}, 200)\n')
+    // Only the parent needs Node. Close the child pipe directly, without another
+    // Node startup or a timer that is unrelated to EPIPE handling.
+    await writeFile(cli, '#!/bin/sh\nexec 0<&-\n')
     await chmod(cli, 0o700)
     await writeFile(harness, `
 import extension from ${JSON.stringify(extensionUrl)}
