@@ -2,7 +2,7 @@
 // ChatView as local sessions; only the controller differs. The host owns Provider
 // install, credentials, files and archive, so this view never falls back to local
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
 import { runtimeProviderForAgentId } from '@shared/runtime'
 import type { AgentModelRef, AgentPermissionMode, AgentQuestionResponse, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
@@ -15,6 +15,7 @@ import { AgentsSurface } from './AgentsSurface'
 import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
 import { createRemoteWorkbench } from '../remote-workbench'
+import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import type { RightSurfaceAction, RightSurfaceState } from '../right-surface'
 import type {
   DesktopRemoteContext,
@@ -157,6 +158,8 @@ export function RemoteChat({
   const [submitting, setSubmitting] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const generation = useRef(0)
+  const openingLatest = useRef(true)
+  const followLatest = useRef(true)
   const provider = catalog?.providers.find((item) => desktopProviderKey(item) === providerSelection)
   const providerId = provider?.id ?? ''
   const context = useMemo<DesktopRemoteContext>(() => ({ cwd, providerId, ...(provider?.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}), ...(sessionId ? { externalSessionId: sessionId } : {}) }), [cwd, provider?.agentProfileId, providerId, sessionId])
@@ -187,7 +190,7 @@ export function RemoteChat({
   }, [input])
   useEffect(() => {
     setSlashCmds([]); setSlashReason(null)
-    if (!connected || !providerId) { setSlashLoading(false); return }
+    if (!connected || !providerId || !slashOpen) { setSlashLoading(false); return }
     let cancelled = false
     setSlashLoading(true)
     void api.commands(connectionId, context).then(result => {
@@ -198,7 +201,7 @@ export function RemoteChat({
       if (!cancelled) setSlashReason(errorText(reason))
     }).finally(() => { if (!cancelled) setSlashLoading(false) })
     return () => { cancelled = true }
-  }, [api, connectionId, connected, context, providerId, slashRevision])
+  }, [api, connectionId, connected, context, providerId, slashOpen, slashRevision])
   useEffect(() => {
     if (!connected) queueStore.pause(queueKey)
   }, [connected, queueKey, queueStore])
@@ -211,15 +214,13 @@ export function RemoteChat({
     if (first) setProviderSelection(desktopProviderKey(first))
   }, [catalog, providerSelection])
 
-  useEffect(() => {
-    if (connected) void refreshRemoteCatalog(connectionId)
-  }, [connected, connectionId])
-
   // Changing Provider/profile or session is a different execution context: clear
   // transcript, run state and controls. Session adoption keeps the run it adopted.
   useEffect(() => {
     if (previousContextKey.current === contextKey) return
     previousContextKey.current = contextKey
+    openingLatest.current = true
+    followLatest.current = true
     contextGeneration.current += 1
     const preserveAdoptedRun = adoptingSession.current
     adoptingSession.current = false
@@ -330,6 +331,38 @@ export function RemoteChat({
     }
     return [...turns.filter((turn) => turn.runId !== activeRun.runId), active]
   }, [activeRun, turns])
+
+  // This mounted remote context owns its scroll intent, independently of the
+  // last local/remote session. Follow late Markdown/image layout until the
+  // reader deliberately scrolls away from the latest message.
+  useEffect(() => {
+    const history = scrollRef.current
+    if (!history) return
+    let previousTop = history.scrollTop
+    const onScroll = (): void => {
+      const nearLatest = chatBottomStickinessAfterScroll(history, openingLatest.current)
+      // A queued programmatic scroll may arrive after content grew. Only an
+      // upward move releases following; a larger scrollHeight alone does not.
+      if (nearLatest || history.scrollTop < previousTop) followLatest.current = nearLatest
+      previousTop = history.scrollTop
+    }
+    history.addEventListener('scroll', onScroll, { passive: true })
+    const unobserve = observeChatBottomLayout(history, () => openingLatest.current || followLatest.current)
+    return () => { history.removeEventListener('scroll', onScroll); unobserve?.() }
+  }, [scrollRef])
+  useLayoutEffect(() => {
+    scrollChatToBottomIfNeeded(scrollRef.current, openingLatest.current || followLatest.current)
+    if (!openingLatest.current || historyLoading || (sessionId && !historyEvidence && !historyError)) return
+    // History arrives asynchronously; retain the opening intent through the
+    // first loaded layout and its clamped/queued scroll event.
+    const frame = requestAnimationFrame(() => {
+      scrollChatToBottomIfNeeded(scrollRef.current, true)
+      openingLatest.current = false
+      followLatest.current = true
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [displayTurns, historyLoading, historyEvidence, historyError, scrollRef, sessionId])
+
   const currentIntent = intents.filter((intent) => intentMatches(intent, context)).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
     (adoptedIntent.current ? intents.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
   // A previous turn's status is not evidence for the newly submitted receipt.
