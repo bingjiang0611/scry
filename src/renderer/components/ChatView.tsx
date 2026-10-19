@@ -45,6 +45,7 @@ interface ChatViewProps {
   runControlsLoading?: boolean
   runControlsReason?: string | null
   input: string
+  composerScopeKey?: string
   sendBlockedReason?: string | null
   composerError?: string | null
   detectionIssue?: string | null
@@ -126,7 +127,7 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
 }) {
   const readInput = () => draftStore.getSnapshot().get(draftKey)?.input ?? ''
   const input = useSyncExternalStore(draftStore.subscribe, readInput, readInput)
-  return <ChatView {...props} input={input} />
+  return <ChatView {...props} input={input} composerScopeKey={draftKey} />
 }
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
@@ -411,6 +412,7 @@ export function ChatView({
   runControlsLoading = false,
   runControlsReason = null,
   input,
+  composerScopeKey,
   sendBlockedReason = null,
   composerError = null,
   detectionIssue = null,
@@ -428,7 +430,7 @@ export function ChatView({
   steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(),
   onSteerQueuedPrompt,
-  slashOpen,
+  slashOpen: slashRequested,
   slashLoading,
   slashCmds,
   slashReason = null,
@@ -495,10 +497,16 @@ export function ChatView({
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
   const promptHistory = useMemo(() => composerPromptHistory(turns, queuedPrompts), [turns, queuedPrompts])
-  const promptHistoryKey = useMemo(() => promptHistory.map((value) => `${value.length}:${value}`).join('|'), [promptHistory])
-  const promptHistoryRef = useRef<{ key: string; position: number | null }>({ key: promptHistoryKey, position: null })
+  // Browse one snapshot until returning to the draft. Remote refreshes, older-page
+  // loads and queue dispatch must not invalidate the cursor on a recalled prompt.
+  const promptHistoryRef = useRef<{ scopeKey?: string; history: string[]; position: number } | null>(null)
+  const historyNavigation = promptHistoryRef.current?.scopeKey === composerScopeKey &&
+    promptHistoryRef.current?.history[promptHistoryRef.current.position] === input
+    ? promptHistoryRef.current : null
+  // Recalling a slash prompt is history navigation, not command completion.
+  const slashOpen = slashRequested && !historyNavigation
   const resetPromptHistory = (): void => {
-    promptHistoryRef.current = { key: promptHistoryKey, position: null }
+    promptHistoryRef.current = null
   }
   const modelValue = runControls.model
     ? JSON.stringify([runControls.model.providerId ?? null, runControls.model.id])
@@ -913,18 +921,17 @@ export function ChatView({
               !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
               !nativeCompositionActive
             ) {
-              const currentHistory = promptHistoryRef.current.key === promptHistoryKey
-                ? promptHistoryRef.current
-                : { key: promptHistoryKey, position: null }
+              const history = historyNavigation?.history ?? promptHistory
               const navigation = navigateComposerHistory(
-                promptHistory,
+                history,
                 input,
-                currentHistory.position,
+                historyNavigation?.position ?? null,
                 event.key === 'ArrowUp' ? 'older' : 'newer'
               )
               if (navigation) {
                 event.preventDefault()
-                promptHistoryRef.current = { key: promptHistoryKey, position: navigation.position }
+                promptHistoryRef.current = navigation.position == null ? null
+                  : { scopeKey: composerScopeKey, history, position: navigation.position }
                 onInput(navigation.value)
                 requestAnimationFrame(() => {
                   textareaRef.current?.setSelectionRange(navigation.value.length, navigation.value.length)
