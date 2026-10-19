@@ -2,7 +2,7 @@
 
 ## D-20261018-scry-sidebar-activity
 
-- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；0.2.203 已安装，包含字体统一与进行中文字扫光；完整验证与安装包安全门禁通过。未自动启动日常 App，真实会话体验仍待用户手动打开确认。
+- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；0.2.204 已安装，包含字体统一与加强可见性的进行中文字扫光；完整验证与安装包安全门禁通过。未自动启动日常 App，真实会话体验仍待用户手动打开确认。
 - Feedback：2026-10-18，用户纠正「不一样啊 他是这样的三个 tab 哪个下面有任务展示哪个 然后顺序和任务都可以跳动 先出设计稿」，并提供 Needs input / Working / Completed 三段列表截图。原要求增加侧栏入口，并不等于认可上一版的分组细节。
 - 方向：保留外层「项目 / 动态」入口背景；内部是同时可见的三个状态分区，不做三个互斥横向 Tab。空组连标题一起隐藏，任务和标题一起移动。当前参考方向已明确，只做一稿；分区换位提供独立比较动作，不擅自定义自动抢占排序。
 - 目标：并行会话状态变化时，用户能追踪同一会话去了哪里，而不是看到旧行消失、新行出现。
@@ -120,7 +120,18 @@
 - 新回归通过React fixture设置与反馈相近的 `/design-loop ios上没法看到mac2上的会话与进行中的任务状态` 长标题，确认真实ellipsis截断，再检查深/浅色下扫光两个位置的字形像素：至少20像素的RGB通道变化≥40/255。原0.2.203实现明确失败：`Long dark working title sweep is too faint: 0 pixels changed by >=40/255`，不是改测试迁就实现。
 - 最小修正只改动态标题CSS：高光宽度48→96px，峰值45%fg→完整fg，仍以dim为静态基色，持续3.2s从左到右。保留现有13px共享字体/字重、减少动态效果和forced-colors保护；没有加全行闪动、计时器或依赖。
 - 修正后21项隔离Electron检查通过，包含长标题深浅色对比、原生选择/迁移/焦点及静态状态。截图样本 `/tmp/scry-sweep-contrast-sweep-{dark,light}-{1100,2100}.png` 已查看；这是受控fixture，不把可见性阈值称为用户主观认可或帧率测量。
-- 准备App0.2.204，CLI不变；需冻结后完整验证、原打包/安装流程。真实用户窗口体验仍在安装后由用户手动重启核对，不自动重启或改动当前会话。
+- 已安装App0.2.204 / CLI0.2.49；冻结源码 `72f439e57e2094b5cd265bfa1b9716a8ca53a2e3`。mac2使用独立物理依赖副本，去除根版本后的lock一致；两端源码归档SHA-256 `eaaadcab8a56551ed079a57ad784f2f2a66ea6526504bb1ceb1a9bbedb4a79fe` 一致，未复制个人会话/凭据，未开启付费Provider探针。
+
+| 0.2.204 交付检查 | 实际结果 |
+| --- | --- |
+| mac2 / Node22.22.2 | typecheck、3401 unit passed / 4 existing opt-in skipped、shell、App/CLI build、完整renderer UI通过（新增动态页21项）；CLI release 587项及package smoke通过，runner退出0 |
+| 性能原门禁 | 40项各5样本，ratchet通过；不代表扫光帧率或实际用户认可 |
+| 本机 / Node22.23.1 | 完整 `npm run pack:artifact` 首次通过，含原build/签名/资源/CLI/security/remote-host smoke；开发签名、未公证 |
+| 原安装与安装后核对 | `node scripts/install-macos.mjs` 成功，deep strict签名通过；App0.2.204 / CLI0.2.49；345个文件/链接与源包完全相同；安装asar中的96px/完整fg规则已直接读取确认 |
+
+- 源/目标 `app.asar` SHA-256均为 `05b2055c2507301258636c5d222a2720e938086adb7122bf33b79a5df766de6c`。安装后的 `/Applications/.Scry.app.backup` 实测也为0.2.204且同asar哈希，不将它称为0.2.203备份；期间有其他任务提交/安装活动，冻结构建不包含并行iOS WIP，桌面产物内容核对一致。
+- 长期证据：`/Users/baobingjiang/.local/state/scry-sidebar-0.2.204-no7PM3/` 含源码、`verify.log` / `verify.exit` / `measure.json` / `pack.log` / `install.log`；`evidence/`含深浅色长标题两时刻截图和安装manifest。mac2目录 `/Users/test/scry-sidebar-0.2.204-KnwoxL/` 保留；两端定向查询未发现fixture残留进程。
+- 真实用户窗口体验仍待手动重启：本轮末检查用户Scry进程仍为23:39:23启动的原PID，未停止/重启或改动其会话。这里只证明可见性回归、冻结构建与安装通过，不从测试成功反推用户反馈已解决；重启后仍以真实窗口观察为准。
 
 ## v1 · 历史实现记录（以下不是当前认可方案）
 
