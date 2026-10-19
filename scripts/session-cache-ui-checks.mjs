@@ -45,7 +45,7 @@ export async function exerciseSessionCache(contents) {
   const cached = async id => {
     const condition = `document.querySelector('.chat-transcript[aria-busy="true"]') != null &&
       document.querySelector('.chat-transcript')?.textContent.includes(${JSON.stringify(`Authoritative ${id}`)}) &&
-      document.querySelector('.chat-evidence-source')?.textContent.includes('待核对')`
+      document.querySelector('.chat-session-evidence-gap[data-status="loading"]')?.textContent.includes('核对完成前不能发送或分叉')`
     await wait(condition)
     return read(condition)
   }
@@ -94,7 +94,7 @@ export async function exerciseSessionCache(contents) {
     fork: document.querySelector('button[title="从此轮创建分支会话"]') != null,
     disabled: document.querySelector('button.send').disabled, input: document.querySelector('textarea').value,
     composer: document.querySelector('.composer')?.textContent })`)
-  check(!refreshed.source.includes('待核对') && refreshed.fork && !refreshed.disabled,
+  check(refreshed.source == null && refreshed.fork && !refreshed.disabled,
     'Authority refresh did not replace cached state or restore controls: ' + JSON.stringify(refreshed))
 
   await select('cache-b'); await pending('cache-b')
@@ -140,7 +140,7 @@ export async function exerciseSessionCache(contents) {
   await select('cache-a'); await pending('cache-a')
   check(await cached('cache-a'), 'Focus supersession requires a real warm cache')
   await control('focus-live-b'); await pending('cache-b')
-  check(await read(`!document.querySelector('.chat-evidence-source')?.textContent.includes('待核对')`), 'Authoritative live focus retained the cache source label')
+  check(await read(`!document.querySelector('.chat-evidence-source') && !document.querySelector('.chat-session-evidence-gap')?.textContent.includes('最近会话缓存')`), 'Authoritative live focus retained the cache source label')
   await control('resolve-a')
   await wait(`!JSON.parse(document.getElementById('cache-state').textContent).pending.includes('cache-a')`)
   check(await read(`document.querySelector('.chat-transcript[aria-busy="true"]') != null && !document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a')`), 'Late cache authority replaced the newer live focus')
