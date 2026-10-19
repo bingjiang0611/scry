@@ -22,6 +22,8 @@ const negativeHistorySlashControl = process.argv.includes('--negative-history-sl
 const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
+const openingOnly = process.argv.includes('--session-opening-only')
+const measureOpening = process.argv.includes('--measure-session-opening')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -45,6 +47,7 @@ const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyPrompts: ['older remote prompt', 'latest remote prompt'],
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
+  catalogCalls: 0, holdHistory: false,
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
@@ -111,6 +114,7 @@ const api = {
   async disconnect() { state.connected = false },
   async forget() {},
   async catalog() {
+    state.catalogCalls++
     if (state.catalogFailure) throw new Error('fixture catalog unavailable')
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
@@ -149,6 +153,10 @@ const api = {
   },
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
+    if (state.holdHistory) await new Promise(resolve => { window.releaseHistory = resolve })
+    if (${openingOnly || measureOpening}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
+      { id: 'opening-answer', runId: 'opening-history', ts: '2026-10-19T12:00:00.000Z', kind: 'model', stage: 'text', text: Array.from({ length: 80 }, (_, i) => 'Remote history paragraph ' + i).join('\\n\\n') }
+    ] }], hasOlder: false, source: 'trace_archive', status: 'available' }
     const turns = ${composerHistoryOnly} && context.externalSessionId === 'old-native'
       ? state.historyPrompts.map((userText, index) => ({ runId: 'history-' + index, userText, items: [], done: true }))
       : state.firstIntentCleared && context.externalSessionId === 'native-session'
@@ -323,6 +331,53 @@ async function exercise(contents, pointer, capture, options) {
   check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation remains')
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  if (options.openingOnly || options.measureOpening) {
+    const bottom = '(() => { const el = document.querySelector(".chat"); return el && el.scrollHeight - el.scrollTop - el.clientHeight <= 2 })()'
+    const samples = []
+    const wheelUp = async () => {
+      const point = await pointFor('.chat')
+      await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX: 0, deltaY: -10000 })
+      await wait('document.querySelector(".chat").scrollTop < document.querySelector(".chat").scrollHeight - document.querySelector(".chat").clientHeight - 64', 'native upward scroll leaves latest')
+    }
+    for (let index = 0; index < 5; index++) {
+      if (index > 0) await wheelUp()
+      const before = await fixture()
+      await read('window.openingPreviousChat = document.querySelector(".chat"); window.openingStartedAt = performance.now()')
+      const session = index % 2 ? 'other-native' : 'old-native'
+      await click(`[data-remote-session="${session}"]`)
+      await wait('document.querySelector(".chat") !== window.openingPreviousChat && document.querySelector(".chat")?.textContent.includes("Remote history paragraph 79")', 'bounded remote history renders')
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      const elapsedMs = await read('performance.now() - window.openingStartedAt')
+      const after = await fixture()
+      samples.push({ elapsedMs, historyRequests: after.historyCalls.length - before.historyCalls.length,
+        commandRequests: after.commandCalls.length - before.commandCalls.length, catalogRequests: after.catalogCalls - before.catalogCalls })
+      if (options.openingOnly) {
+        await wait(bottom, 'each selected remote session opens at the latest message')
+      }
+    }
+    if (options.openingOnly) {
+      check(samples.every(sample => sample.commandRequests === 0), 'Opening history eagerly queried Provider commands')
+      await read('window.desktopRemoteFixture.holdHistory = true')
+      await click('[data-remote-session="other-native"]')
+      await wait('typeof window.releaseHistory === "function"', 'history request held in flight')
+      check(!await read('document.querySelector(".chat").textContent.includes("Remote history paragraph 79")'), 'Previous history leaked into the loading context')
+      await read('window.desktopRemoteFixture.holdHistory = false; window.releaseHistory(); delete window.releaseHistory')
+      await wait('document.querySelector(".chat").textContent.includes("Remote history paragraph 79")', 'delayed history resolves')
+      await wait(bottom, 'delayed history opens at bottom')
+      await read('const extra = document.createElement("div"); extra.dataset.openingResize = "true"; extra.style.height = "900px"; document.querySelector(".chat").append(extra)')
+      await wait(bottom, 'late history layout remains at bottom')
+      await wheelUp()
+      const position = await read('document.querySelector(".chat").scrollTop')
+      await read('document.querySelector("[data-opening-resize]").style.height = "1200px"')
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      check(await read(`Math.abs(document.querySelector(".chat").scrollTop - ${position}) < 2`), 'Remote layout pulled the reader away from older messages')
+      await click('textarea[aria-label="描述任务"]'); await insert('/skill')
+      await wait('document.querySelector(".slash-item")?.textContent.includes("skill:host-only")', 'slash commands still load on demand')
+      check((await fixture()).commandCalls.length === 1, 'Slash query was duplicated across remote opens')
+    }
+    return { remoteSessionOpening: { samples, nativeSelection: true, nativeScroll: true, bottomChecked: options.openingOnly,
+      noLocalExecution: (await fixture()).localStarts === 0, onDemandCommands: options.openingOnly } }
+  }
   await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
   await click('.location-button'); await click('.location-menu .mitem', '管理远程访问')
   await wait('document.querySelector(".settings-tab.active")?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null', 'manage hosts opens remote settings directly')
@@ -723,7 +778,10 @@ async function exercise(contents, pointer, capture, options) {
   await wait('document.querySelector(".composer-notice")?.textContent.includes("已请求停止，等待远端确认")', 'stop acknowledgement remains visible on a dispatched run')
   check((await fixture()).stopCalls[0] === '11111111-1111-4111-8111-111111111111', 'Stop did not use the ledger intent UUID')
   const historyBeforeTerminal = (await fixture()).historyCalls.length
-  await click('.question-option input[type="radio"]')
+  // The label is the native option hit area, including its radio. Pinning a
+  // short transcript can shift the 16px input within that same clickable label.
+  await click('.question-option')
+  check(await read('document.querySelector(\'.question-option input[type="radio"]\').checked'), 'Native option click did not select the radio')
   await click('.question-submit')
   await wait('document.querySelector(".question-error")?.textContent.includes("remote answer rejected")', 'stable answer failure')
   const afterAnswer = await fixture()
@@ -1028,7 +1086,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, composerHistoryOnly: ${composerHistoryOnly} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
         console.log('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
