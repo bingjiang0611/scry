@@ -259,6 +259,18 @@ async function exerciseNativeWorkspace(contents, screenshotPath) {
       }) && actions.getBoundingClientRect().left < status.getBoundingClientRect().left
         && root.scrollWidth <= root.clientWidth;
     })()`, 'Workspace rules or compact left-aligned action buttons regressed: ' + theme)
+    const alignment = await read(`(() => {
+      const root = document.querySelector('#workspace-fixture');
+      const back = root.querySelector('.workspace-head > button').getBoundingClientRect();
+      const action = root.querySelector('.workspace-editor-actions > button').getBoundingClientRect();
+      const content = root.querySelector('.workspace-preview-content');
+      return { backLeft: back.left, actionLeft: action.left,
+        contentLeft: content.getBoundingClientRect().left + parseFloat(getComputedStyle(content).paddingLeft),
+        backHeight: back.height, actionHeight: action.height };
+    })()`)
+    if (Math.abs(alignment.backLeft - alignment.actionLeft) > 1 || Math.abs(alignment.actionLeft - alignment.contentLeft) > 1 || Math.abs(alignment.backHeight - alignment.actionHeight) > 1) {
+      throw new Error('Workspace left alignment ' + theme + ': ' + JSON.stringify(alignment))
+    }
     if (screenshotPath) {
       const width = await read('innerWidth')
       require('node:fs').writeFileSync(screenshotPath + '-' + width + '-' + theme + '.png', (await contents.capturePage()).toPNG())

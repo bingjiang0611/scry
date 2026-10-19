@@ -8468,7 +8468,14 @@ textarea:focus-visible,
 }
 
 .workspace-panel.file-open .workspace-head {
+  padding-inline: 16px;
   border-bottom: 0;
+}
+
+.workspace-panel.file-open .workspace-head > .iconbtn {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
 }
 
 .workspace-title {
@@ -8665,7 +8672,7 @@ textarea:focus-visible,
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 4px 10px 12px;
+  padding: 4px 16px 12px;
 }
 
 .workspace-editor-actions {
