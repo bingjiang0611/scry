@@ -74,8 +74,8 @@
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   :root .sidebar .sb-activity [data-activity-group='working'] .sb-sesstext {
     background-color: var(--dim);
-    background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--fg) 45%, transparent), transparent);
-    background-size: 48px 100%;
+    background-image: linear-gradient(90deg, transparent, var(--fg), transparent);
+    background-size: 96px 100%;
     background-repeat: no-repeat;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -84,8 +84,8 @@
 }
 
 @keyframes sb-activity-sweep {
-  from { background-position-x: -48px; }
-  to { background-position-x: calc(100% + 48px); }
+  from { background-position-x: -96px; }
+  to { background-position-x: calc(100% + 96px); }
 }
 
 /* Preserve provider and status descriptions for assistive technology. */
