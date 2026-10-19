@@ -202,7 +202,7 @@ async function exerciseNativeComposerEnter(contents) {
   return { hostRendersWhileTyping: 0, latestDraftSubmitted: true }
 }
 
-async function exerciseNativeWorkspace(contents) {
+async function exerciseNativeWorkspace(contents, screenshotPath) {
   const read = (expression) => contents.executeJavaScript(expression)
   const check = async (expression, message) => {
     if (!await read(expression)) throw new Error(message)
@@ -240,8 +240,36 @@ async function exerciseNativeWorkspace(contents) {
     const preview = document.querySelector('#workspace-fixture .workspace-preview').getBoundingClientRect();
     return Math.abs(body.width - preview.width) < 1 && Math.abs(body.height - preview.height) < 1;
   })()`, 'Collapsed preview must fill both dimensions')
+  for (const theme of ['dark', 'light']) {
+    await read(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`)
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    await read(`Promise.all(Array.from(document.querySelectorAll('#workspace-fixture .workspace-editorbar button')).flatMap(button => button.getAnimations()).map(animation => animation.finished)).then(() => true)`)
+    await check(`(() => {
+      const root = document.querySelector('#workspace-fixture');
+      const rules = root.querySelectorAll('.workspace-head, .workspace-editorbar, .workspace-preview-content h1, .workspace-preview-content h2, .workspace-preview-content hr');
+      const actions = root.querySelector('.workspace-editor-actions');
+      const status = root.querySelector('.workspace-editorbar > span');
+      const buttons = actions?.querySelectorAll('button');
+      return rules.length === 6 && Array.from(rules).every(element => {
+        const style = getComputedStyle(element);
+        return parseFloat(style.borderTopWidth) === 0 && parseFloat(style.borderBottomWidth) === 0;
+      }) && buttons?.length === 2 && Array.from(buttons).every(button => {
+        const style = getComputedStyle(button);
+        return button.getBoundingClientRect().height <= 32 && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+      }) && actions.getBoundingClientRect().left < status.getBoundingClientRect().left
+        && root.scrollWidth <= root.clientWidth;
+    })()`, 'Workspace rules or compact left-aligned action buttons regressed: ' + theme)
+    if (screenshotPath) {
+      const width = await read('innerWidth')
+      require('node:fs').writeFileSync(screenshotPath + '-' + width + '-' + theme + '.png', (await contents.capturePage()).toPNG())
+    }
+  }
+  await read(`document.documentElement.dataset.theme = 'dark'`)
   await click(toggle)
   await wait(`document.querySelector('${toggle}').getAttribute('aria-expanded') === 'true' && document.querySelector('${source}')`)
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+  await wait(`document.activeElement === document.querySelector('#workspace-fixture .workspace-reload')`)
   await click(source)
   await wait(`document.activeElement === document.querySelector('${source}')`)
   contents.selectAll()
@@ -259,6 +287,17 @@ async function exerciseNativeWorkspace(contents) {
   await wait(`document.querySelector('#workspace-fixture').dataset.dirty === 'false' && !document.querySelector('${save}')`)
   await click(toggle)
   await wait(`document.querySelector('${source}')`)
+  await click(source)
+  contents.selectAll()
+  await contents.insertText('# Unsaved reload draft')
+  await wait(`document.querySelector('#workspace-fixture').dataset.dirty === 'true'`)
+  await read(`globalThis.workspaceOriginalConfirm = window.confirm; window.confirm = () => false; true`)
+  await click('#workspace-fixture .workspace-reload')
+  await check(`document.querySelector('${source}').value === '# Unsaved reload draft' && document.querySelector('#workspace-fixture').dataset.dirty === 'true'`, 'Cancelled reload discarded the draft')
+  await read(`window.confirm = () => true; true`)
+  await click('#workspace-fixture .workspace-reload')
+  await wait(`document.querySelector('${source}').value === '# Edited preview' && document.querySelector('#workspace-fixture').dataset.dirty === 'false'`)
+  await read(`window.confirm = globalThis.workspaceOriginalConfirm; delete globalThis.workspaceOriginalConfirm`)
   for (const file of ['second.MDX', 'preview.md']) {
     await click(`[data-file="${file}"]`)
     await wait(`document.querySelector('#workspace-fixture .workspace-title b')?.textContent === '${file}' && document.querySelector('#workspace-fixture h1')?.textContent === 'Edited preview'`)
@@ -277,7 +316,7 @@ async function exerciseNativeWorkspace(contents) {
   await wait(`document.querySelector('${source}')?.value === '# Paged source'`)
   await check(`document.querySelector('${source}').readOnly && !document.querySelector('${toggle}')`, 'Paged read-only view regressed')
   await read(`document.querySelector('#workspace-fixture').hidden = true`)
-  return { previewDefault: true, fullSize: true, nativeToggleAndEdit: true, draftRetained: true, saveWhileCollapsed: true, fileReset: true, plainText: true, readOnly: true, paged: true }
+  return { previewDefault: true, fullSize: true, borderlessPreview: true, compactLeftActions: true, themes: ['dark', 'light'], keyboardReloadFocus: true, reloadDiscardProtection: true, nativeToggleAndEdit: true, draftRetained: true, saveWhileCollapsed: true, fileReset: true, plainText: true, readOnly: true, paged: true }
 }
 
 try {
@@ -313,12 +352,12 @@ try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         let result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
         result.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
-        result.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents)
+        result.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_WORKSPACE_UI_SCREENSHOT ?? '')})
         win.setSize(560, 480)
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         result = { wide: result, narrow: await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )}) }
         result.narrow.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
-        result.narrow.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents)
+        result.narrow.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_WORKSPACE_UI_SCREENSHOT ?? '')})
         console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }

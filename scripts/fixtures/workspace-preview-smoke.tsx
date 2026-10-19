@@ -3,7 +3,7 @@ import type { WorkspaceFileSnapshot } from '../../src/shared/workspace'
 import { WorkspacePanel } from '../../src/renderer/components/WorkspacePanel'
 
 // In-memory file transport only. No real workspace or preload writes.
-const initialContent = '# Preview first\n\nReadable **Markdown**.'
+const initialContent = '---\n\n# Preview first\n\nReadable **Markdown**.\n\n## Details\n\n---\n\nKeep the content, remove the decorative rules.'
 let savedContent = initialContent
 const snapshot = (path: string, content: string): WorkspaceFileSnapshot => ({
   name: path, path, content, size: content.length, mtimeMs: 0, revision: content, language: 'markdown'

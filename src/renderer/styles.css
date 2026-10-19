@@ -8467,6 +8467,10 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--border);
 }
 
+.workspace-panel.file-open .workspace-head {
+  border-bottom: 0;
+}
+
 .workspace-title {
   min-width: 0;
   flex: 1;
@@ -8657,12 +8661,18 @@ textarea:focus-visible,
 
 .workspace-editorbar {
   flex: 0 0 auto;
-  min-height: 56px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  padding: 4px 10px 12px;
+}
+
+.workspace-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .workspace-editorbar > span {
@@ -8675,10 +8685,24 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
+.workspace-editor-actions + span {
+  text-align: right;
+}
+
 .workspace-editorbar .btn {
-  padding: 5px 8px;
-  font-size: 10.5px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 0;
+  font-size: var(--text-compact-size);
   white-space: nowrap;
+}
+
+.workspace-editorbar .btn:not(.primary) {
+  background: var(--panel2);
+}
+
+.workspace-editorbar .btn:not(.primary):hover {
+  background: var(--panel3);
 }
 
 .workspace-editorbody {
@@ -8740,6 +8764,10 @@ textarea:focus-visible,
   color: var(--fg);
   background: var(--panel);
   overflow-wrap: anywhere;
+}
+
+.workspace-preview-content :is(h1, h2, hr) {
+  border: 0;
 }
 
 .workspace-dialog-backdrop {
