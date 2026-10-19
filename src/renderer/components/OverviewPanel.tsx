@@ -1,5 +1,5 @@
 // 右栏纵览（蓝本视觉）：会话 verdict 卡 + context 占用 + top tools + 文件足迹 + git diff。
-import { memo, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { memo, useId, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
 import { workspaceDiffCopy } from '@shared/constants/copy'
 import { latestBackgroundWork } from '@shared/background-work'
@@ -37,7 +37,7 @@ import {
 } from '../format'
 import type { FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
 import { displayDiffPath, sessionDiffSummary, sessionNetDiffSummary, turnDiffViewOf } from '../turn-diff'
-import { OVERVIEW_COST_COPY } from '../constants/copy'
+import { OVERVIEW_COST_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -664,6 +664,50 @@ export function TurnToolErrorDetails({
   )
 }
 
+function OverviewSessionSummary({ sessionId, compactions }: { sessionId: string | null; compactions: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [scopeDismissed, setScopeDismissed] = useState(false)
+  const scopeId = useId()
+  const fullId = useId()
+  const shortId = sessionId && sessionId.length > 17 ? `${sessionId.slice(0, 8)}…${sessionId.slice(-8)}` : sessionId
+  const copy = OVERVIEW_SESSION_COPY
+
+  return (
+    <section className="panel-section overview-session-summary">
+      <div className="overview-session-head">
+        <h4>{copy.heading}</h4>
+        <div className="overview-session-compact">
+          <span>{copy.compact}</span>
+          <span className="overview-session-scope" data-dismissed={scopeDismissed ? '' : undefined} onMouseEnter={() => setScopeDismissed(false)} onFocus={() => setScopeDismissed(false)} onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setScopeDismissed(true)
+              event.stopPropagation()
+            }
+          }}>
+            <button type="button" aria-label={copy.scopeLabel} aria-describedby={scopeId}><Icon name="info" /></button>
+            <span id={scopeId} role="tooltip">{copy.scope}</span>
+          </span>
+          <strong className="overview-session-count">{compactions}</strong>
+        </div>
+      </div>
+      <div className="overview-session-identity">
+        <span>{copy.id}</span>
+        {sessionId ? (
+          <button type="button" className="overview-session-id-toggle" title={sessionId} aria-label={expanded ? copy.collapseId : copy.expandId} aria-expanded={expanded} aria-controls={fullId} onClick={() => setExpanded(!expanded)}>
+            <code>{shortId}</code>
+          </button>
+        ) : <span className="overview-session-missing">{copy.missingId}</span>}
+        <button type="button" className="overview-session-copy" disabled={!sessionId} aria-label={copy.copy} title={copy.copy} onClick={() => {
+          if (sessionId) void window.scry.copyText(sessionId).then(() => setCopyStatus('copied')).catch(() => setCopyStatus('failed'))
+        }}><Icon name={copyStatus === 'copied' ? 'check' : 'copy'} /></button>
+      </div>
+      <div id={fullId} className="overview-session-full-id" hidden={!expanded}><code>{sessionId}</code></div>
+      {copyStatus !== 'idle' && <div className="overview-session-notice" role={copyStatus === 'failed' ? 'alert' : 'status'}>{copyStatus === 'copied' ? copy.copied : copy.copyFailed}</div>}
+    </section>
+  )
+}
+
 export interface OverviewPanelProps {
   turns: Turn[]
   sessionId?: string | null
@@ -990,19 +1034,7 @@ function OverviewPanelBody({
       )}
 
       {turns.length > 0 && (
-        <div className="panel-section">
-          <h4>会话</h4>
-          <div className="filerow">
-            <span className="fname">sessionId</span>
-            <span className="dim session-id" title={sessionId ?? '尚未捕获 sessionId'}>
-              {sessionId ?? '（尚未捕获）'}
-            </span>
-          </div>
-          <div className="filerow" title="仅统计当前已加载记录中确认完成的压缩；不代表原生会话的全部历史">
-            <span className="fname">Compact</span>
-            <span className="dim">{compactions.length > 0 ? `${compactions.length} 次` : '未观测到'}</span>
-          </div>
-        </div>
+        <OverviewSessionSummary key={sessionId} sessionId={sessionId} compactions={compactions.length} />
       )}
 
       {turns.length > 0 && (

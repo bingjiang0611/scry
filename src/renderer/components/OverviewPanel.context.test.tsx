@@ -76,7 +76,7 @@ describe('OverviewPanel request-level context', () => {
     const items = [sample('first', 201600), compact]
     const afterCompact = render(items)
     expect(afterCompact).toContain('暂无上下文数据')
-    expect(afterCompact).toContain('Compact</span><span class="dim">1 次')
+    expect(afterCompact).toContain('<strong class="overview-session-count">1</strong>')
     expect(render([...items, sample('after', 20000)])).toContain('20.0k / 272.0k')
   })
 
@@ -86,8 +86,24 @@ describe('OverviewPanel request-level context', () => {
     ])).toContain('暂无上下文数据')
   })
 
-  it('shows no observed evidence instead of asserting zero compactions', () => {
-    expect(render([])).toContain('Compact</span><span class="dim">未观测到')
+  it('shows zero observed compactions while retaining the loaded-record scope', () => {
+    const html = render([])
+    expect(html).toContain('<strong class="overview-session-count">0</strong>')
+    expect(html).toContain('仅统计当前已加载记录中确认完成的压缩；不代表原生会话的全部历史')
+    const summary = html.slice(html.indexOf('overview-session-summary'), html.indexOf('overview-data-tabs'))
+    expect(summary).not.toContain('未观测到')
+  })
+
+  it('shortens long IDs without losing the full ID or exposing an unknown ID as a copy action', () => {
+    const props = { turns: [{ runId: 'test', userText: '', items: [], done: true }], selected: null, usage: null, stats: null, onSelect: () => {} }
+    const known = renderToStaticMarkup(<OverviewPanel {...props} sessionId="01a10000-1111-7000-8000-00000000abcd" />)
+    expect(known).toContain('01a10000…0000abcd')
+    expect(known).toContain('title="01a10000-1111-7000-8000-00000000abcd"')
+    expect(known).toContain('aria-expanded="false"')
+    const missing = renderToStaticMarkup(<OverviewPanel {...props} sessionId={null} />)
+    expect(missing).toContain('尚未捕获')
+    expect(missing).not.toContain('overview-session-id-toggle')
+    expect(missing).toContain('class="overview-session-copy" disabled=""')
   })
 
   it('reads successful raw Pi compaction lifecycle evidence from older archives', () => {
@@ -97,7 +113,7 @@ describe('OverviewPanel request-level context', () => {
     }
     expect(contextCompactionOf(legacy)).toEqual({ trigger: 'manual', preTokens: 201600 })
     expect(render([sample('first', 201600), legacy])).toContain('暂无上下文数据')
-    expect(render([legacy])).toContain('Compact</span><span class="dim">1 次')
+    expect(render([legacy])).toContain('<strong class="overview-session-count">1</strong>')
     for (const patch of [{ aborted: true }, { result: undefined }, { errorMessage: 'failed' }]) {
       const failed = { ...legacy, runtimeMetadata: { ...legacy.runtimeMetadata, ...patch } }
       expect(contextCompactionOf(failed)).toBeNull()
