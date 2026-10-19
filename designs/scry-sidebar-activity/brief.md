@@ -90,6 +90,17 @@
 - 长期证据目录仍为 `/Users/baobingjiang/.local/state/scry-install-0.2.202-537Zh6/evidence/`；新增 `installed-0.2.202-smoke.log` 与 `installed-manifest.json`。此前 SIGKILL 与本机超时记录保留；本轮对当前包的成功核验不反推旧失败的根因。
 - 交付状态：安装及自动检查已完成核验；本轮只更新记录，不重放安装、不重签、不自动启动/重启用户 App。保留用户已有的 `designs/scry-ios-multihost/` 未跟踪内容。下一步由用户手动打开 Scry，查看「动态」页并在真实会话中确认迁移体验；这是用户验收，不是缺失的自动门禁。
 
+### 2026-10-18 · 字体统一与进行中文字扫光
+
+- 用户指出动态列表字号/字体与整体不协调，并补充原始 Working 截图参考；结构继续沿用已批准的三段列表。经明确询问，用户选择「新增轻微扫光」，不是去掉动效。
+- 参考区域 → 动作：用户截图的紧凑标题和低对比运行文字 → 删除动态标题独有的15px/400与选中600覆盖，直接复用项目列表的13px/450与选中550；分组标题使用既有 supporting 字号token，行高/高度与侧栏34px行节奏一致。保留现有字体栈，不引入字体/依赖。
+- 参考的进行中提示 → 只在 working 标题上加48px窄高光，3.2s线性从左向右扫过；基色使用dim，高光随fg主题token变化，不做全行闪烁/亮度脉冲。选中任务仍保留共享字重与原生选择语义，不把动效延伸到等待回复/完成状态。
+- Craft只应用hover克制：保留即时hover与焦点，不添加过渡队列；扫光参数来自本次参考与局部设计判断，不声称是Craft规范。减少动态效果或forced-colors下使用不透明静态文字；既有分组迁移、按住鼠标期间顺序冻结不变。
+- 复用本项目 Sidebar/CSS tokens；个人组件库定向检索无适配项。已查看实际深/浅色截图 `/tmp/scry-sidebar-sweep-working-{dark,light}.png`，属于隔离Electron fixture，不是用户会话验收。
+- 新检查先对旧实现运行，以 `Activity titles do not match project-list typography` 失败；改后动态页20项与251项focused单测、typecheck通过。检查实际CSS动画持续前进、左→右关键帧、选中标题两时刻截图不同，且完成/等待回复无扫光，reduced-motion/forced-colors文字可见且静态。
+- 首次新增reduced-motion断言遇到CDP媒体变更尚未落帧；fixture现明确等待媒体查询与渲染帧，不添加sleep/retry或扩大5s等待上限。主题截图也等待实际样式与过渡收敛，避免把旧帧当新主题。
+- 准备可安装App0.2.203，CLI保持0.2.49。交付门禁和安装结果将在后续记录；不自动重启用户App。
+
 ## v1 · 历史实现记录（以下不是当前认可方案）
 
 ### 参考 → 动作 → 检查
