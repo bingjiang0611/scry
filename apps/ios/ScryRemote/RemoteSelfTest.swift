@@ -136,6 +136,7 @@ enum RemoteSelfTest {
     check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())
     check("run.submittingIsNotRecorded", RemoteRunStore.Lifecycle.submitting != .recorded)
     check("run.stateGates", RemoteRunStore.selfTestStateGates())
+    for (name, passed) in RemoteRunStore.selfTestCatalogRefreshProjection() { check("catalog.\(name)", passed) }
     for (name, passed) in RemoteRunStore.selfTestInteractionState() { check("run.\(name)", passed) }
     for (name, passed) in RemoteRunStore.selfTestConnectionReplacement() { check("run.\(name)", passed) }
     for (name, passed) in RemoteRunStore.selfTestPreviewConnectionIsolation() { check("run.\(name)", passed) }
@@ -308,6 +309,9 @@ enum RemoteSelfTest {
         check("boundedEntryCount", try FileManager.default.contentsOfDirectory(atPath: root.path).count == 2)
         let small = RemoteHistoryCache(directory: root.appendingPathComponent("small"), byteLimit: 100)
         check("oversizeNotClaimedSaved", try await !small.write(snapshot, key: "large", epoch: 0))
+        for (name, passed) in try await RemoteRunStore.selfTestCatalogRefreshFlow(directory: root.appendingPathComponent("catalog-refresh")) {
+          check("catalog.\(name)", passed)
+        }
         for (name, passed) in try await RemoteRunStore.selfTestHistoryStore(directory: root.appendingPathComponent("store"), snapshot: snapshot) {
           check(name, passed)
         }

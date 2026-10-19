@@ -7,24 +7,32 @@ struct HomeView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var pinnedExpanded = true
+  @State private var refreshToastVisible = false
+  @State private var showingRefreshDetails = false
+  @State private var manualRefreshing = false
+  @State private var refreshToastID = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(spacing: 0) {
-      RemoteHeader(title: "远程", subtitle: hostCaption, link: model.link,
-                   menuAction: { model.route = .settings }) {
-        Menu {
-          Button { run.loadSessions(force: true) } label: { Label("刷新会话", systemImage: "arrow.clockwise") }
-          Button { model.route = .pair } label: { Label("连接 Mac", systemImage: Symbol.link) }
-          Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
-        } label: {
-          Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
+      RemoteHeader(title: ConnectionCopy.homeTitle, menuAction: { model.route = .settings }) {
+        HStack(spacing: 0) {
+          if run.catalogRefreshInFlight {
+            ProgressView().frame(width: 44, height: 44).accessibilityLabel(ConnectionCopy.refreshing)
+          } else {
+            PlainIcon(symbol: "arrow.clockwise", label: ConnectionCopy.refresh) { manualRefresh() }
+          }
+          Menu {
+            Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
+            Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
+          } label: {
+            Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
+          }
+          .accessibilityLabel(ConnectionCopy.more)
         }
-        .accessibilityLabel("更多选项")
       }
-      if !model.link.isConnected { Notice(text: offlineText) }
-      if let connectionNotice = model.connectionNotice { Notice(text: connectionNotice, warning: true) }
-      if let catalogError = run.catalogRefreshError {
-        Notice(text: "会话列表提示：\(catalogError)", warning: true)
+      if let failure = run.catalogRefreshFailure, run.catalog.hasVisibleValue {
+        refreshFailure(failure)
       }
       if run.hasUnresolvedRun {
         Button { model.route = .chat } label: {
@@ -44,14 +52,62 @@ struct HomeView: View {
       dock
     }
     .background(Palette.surface)
+    .overlay(alignment: .top) {
+      if refreshToastVisible && run.catalogRefreshFailure == nil {
+        Text(ConnectionCopy.refreshSuccess).font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(Palette.surface).padding(.horizontal, 16).frame(height: 36)
+          .background(Palette.ink, in: Capsule()).padding(.top, 64)
+          .transition(.opacity)
+      }
+    }
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: refreshToastVisible)
+    .task(id: refreshToastID) {
+      guard refreshToastVisible else { return }
+      do { try await Task.sleep(for: .milliseconds(2_600)) }
+      catch { return }
+      refreshToastVisible = false
+    }
+    .onDisappear { refreshToastVisible = false }
+    .sheet(isPresented: $showingRefreshDetails) {
+      if let failure = run.catalogRefreshFailure {
+        CatalogRefreshDetails(failure: failure, lastFullRefresh: run.catalogVerifiedAt,
+                              address: run.hostLabel, paired: run.hasConnection)
+          .presentationDetents([.medium, .large])
+      }
+    }
     .onAppear {
       if run.hasConnection { run.loadSessions(); run.loadProjects() }
     }
   }
 
+  private func manualRefresh() {
+    Task { await showManualRefresh() }
+  }
+
+  @MainActor private func showManualRefresh() async {
+    guard !manualRefreshing else { return }
+    manualRefreshing = true
+    refreshToastVisible = false
+    defer { manualRefreshing = false }
+    guard await run.refreshSessions(), !Task.isCancelled else { return }
+    refreshToastID += 1
+    refreshToastVisible = true
+  }
+
+  private func refreshFailure(_ failure: RemoteRunStore.CatalogRefreshFailure) -> some View {
+    CatalogRefreshBanner(failure: failure, lastFullRefresh: run.catalogVerifiedAt,
+                         refreshing: run.catalogRefreshInFlight,
+                         onRetry: { if failure.requiresPairing { model.route = .pair } else { manualRefresh() } },
+                         onDetails: { showingRefreshDetails = true })
+  }
+
   @ViewBuilder private var content: some View {
     ScrollView {
       backgroundSendsSection
+      if case .unverifiedCache = run.catalogEvidence, run.catalogRefreshFailure == nil {
+        Text(ConnectionCopy.unverifiedCache).font(.system(size: 12)).foregroundStyle(Palette.muted)
+          .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 19).padding(.top, 10)
+      }
       switch run.catalog {
       case .idle, .loading:
         if !run.hasConnection { notPairedEmpty }
@@ -74,15 +130,13 @@ struct HomeView: View {
         EmptyState(title: "主机还没有会话", detail: "点击右下角，从 iPhone 发起第一项任务。")
           .padding(.top, 24)
       case let .failed(reason):
-        VStack(spacing: 4) {
-          EmptyState(title: "无法读取会话", detail: reason, symbol: "exclamationmark.triangle")
-          Button("重新读取") { run.loadSessions(force: true) }.font(.system(size: 14, weight: .medium))
-        }.padding(.top, 18)
+        if !run.hasConnection { notPairedEmpty }
+        else { refreshFailure(run.catalogRefreshFailure ?? .transport(reason)).padding(.top, 18) }
       }
     }
     .scrollIndicators(.hidden)
     .scrollDismissesKeyboard(.interactively)
-    .refreshable { await run.refreshSessions() }
+    .refreshable { await showManualRefresh() }
   }
 
   // Live runs whose session is not in the list yet (just started, or archived
@@ -266,7 +320,7 @@ struct HomeView: View {
         if let live = run.liveRun(providerId: session.providerId, cwd: session.cwd, externalSessionId: session.externalSessionId) {
           LiveRunBadge(live: live, waiting: run.openLiveQuestion(live) != nil)
         } else if session.isActive == true {
-          Text("运行中").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.blue)
+          Text(ConnectionCopy.lastRunning).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
         } else if !openable {
           // No Provider session id and not running on the Mac: nothing to open.
           // It may have failed before starting; "preparing" would be a guess.
@@ -296,21 +350,6 @@ struct HomeView: View {
     .background(Palette.surface)
   }
 
-  private var hostCaption: String { model.statusText() }
-  private var offlineText: String {
-    switch model.link {
-    case .notPaired: return "尚未连接 Mac；浏览可用，但发送和审批已停用。"
-    case .pairing: return "正在等待 Mac 确认，尚未授予权限。"
-    case .offline:
-      switch model.connectionObservation {
-      case let .hostReply(code): return "已配对；Mac 已响应，但本次操作不可用（\(code)）。"
-      case let .protocolFailure(code): return "已配对；协议不匹配（\(code)），请更新并完全重启 Mac Scry。"
-      case .transportFailure: return "已配对，但未收到主机响应；刷新或发送时会尝试连接。"
-      default: return "已配对，但尚未验证主机可达；刷新或发送时会尝试连接。"
-      }
-    case .connected: return ""
-    }
-  }
   private func projectName(_ cwd: String) -> String { cwd.split(separator: "/").last.map(String.init) ?? cwd }
   private static func relativeTime(_ ms: Double) -> String {
     let seconds = Date().timeIntervalSince1970 - ms / 1000
@@ -319,6 +358,67 @@ struct HomeView: View {
     if seconds < 86400 { return "\(Int(seconds / 3600))h" }
     return "\(Int(seconds / 86400))d"
   }
+}
+
+private struct CatalogRefreshBanner: View {
+  let failure: RemoteRunStore.CatalogRefreshFailure
+  let lastFullRefresh: Date?
+  let refreshing: Bool
+  let onRetry: () -> Void
+  let onDetails: () -> Void
+
+  private var title: String { failure.summary }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      HStack(alignment: .top, spacing: 8) {
+        Image(systemName: "exclamationmark.circle").font(.system(size: 14, weight: .medium)).padding(.top, 1)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title).font(.system(size: 13, weight: .semibold))
+          Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.system(size: 11))
+        }
+        Spacer(minLength: 4)
+      }
+      HStack(spacing: 16) {
+        Button(failure.requiresPairing ? ConnectionCopy.pairAgain : ConnectionCopy.retry, action: onRetry)
+          .font(.system(size: 12, weight: .semibold)).frame(minWidth: 44, minHeight: 44).disabled(refreshing)
+        Button(ConnectionCopy.details, action: onDetails).font(.system(size: 12, weight: .medium))
+          .frame(minWidth: 44, minHeight: 44)
+      }
+    }
+    .foregroundStyle(Palette.warnInk).padding(12)
+    .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .padding(.horizontal, 16).padding(.vertical, 8)
+  }
+}
+
+private struct CatalogRefreshDetails: View {
+  let failure: RemoteRunStore.CatalogRefreshFailure
+  let lastFullRefresh: Date?
+  let address: String?
+  let paired: Bool
+  @Environment(\.dismiss) private var dismiss
+  @State private var technicalExpanded = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      HStack {
+        Text(ConnectionCopy.detailsTitle).font(.title3.weight(.semibold))
+        Spacer()
+        Button(ConnectionCopy.done) { dismiss() }.frame(minWidth: 44, minHeight: 44)
+      }
+      LabeledContent(ConnectionCopy.pairing, value: paired ? ConnectionCopy.pairingSaved : ConnectionCopy.pairingAbsent)
+      LabeledContent(ConnectionCopy.connectionAddress, value: address ?? ConnectionCopy.unavailableAddress)
+      LabeledContent(ConnectionCopy.listRequest, value: failure.summary)
+      Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.caption).foregroundStyle(Palette.muted)
+      DisclosureGroup(ConnectionCopy.technicalDetails, isExpanded: $technicalExpanded) {
+        Text(failure.technicalDetail).font(.caption.monospaced()).foregroundStyle(Palette.muted)
+          .textSelection(.enabled).padding(.top, 8)
+      }
+      Spacer()
+    }.padding(20)
+  }
+
 }
 
 // Host-proven live state for one run. "Mac" marks a run the owner started in

@@ -27,6 +27,56 @@ final class ConversationUITests: XCTestCase {
     add(attachment)
   }
 
+  private func launchHome(extra: [String] = []) {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"] + extra
+    app.launch()
+    XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 10))
+  }
+
+  func testHomeManualRefreshShowsShortSuccessFeedback() {
+    launchHome(extra: ["-uiRefreshFeedback"])
+    XCTAssertTrue(app.buttons["刷新会话"].waitForExistence(timeout: 5))
+    app.buttons["刷新会话"].tap()
+    XCTAssertTrue(app.staticTexts["刷新成功"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["已连接 · 主机可达"].exists)
+    capture("home-manual-refresh-success")
+    let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["刷新成功"])
+    XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+  }
+
+  func testHomeRefreshFailureKeepsCacheActionableAndTechnicalDetailsCollapsed() {
+    launchHome(extra: ["-uiMockRefreshFailure"])
+    XCTAssertTrue(app.staticTexts["会话列表刷新失败"].waitForExistence(timeout: 5))
+    // The failure already carries freshness; do not stack another status line.
+    XCTAssertFalse(app.staticTexts["尚未核对 · 下拉刷新"].exists)
+    XCTAssertEqual(app.staticTexts.matching(identifier: "会话列表刷新失败").count, 1)
+    XCTAssertTrue(app.staticTexts["上次：运行中"].exists)
+    XCTAssertTrue(app.buttons["重试"].exists)
+    app.buttons["详情"].tap()
+    XCTAssertTrue(app.staticTexts["技术详情"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["fixture transport failure"].exists)
+    app.buttons["技术详情"].tap()
+    XCTAssertTrue(app.staticTexts["fixture transport failure"].waitForExistence(timeout: 5))
+    capture("home-refresh-failure-details")
+  }
+
+  func testHomeFirstFailureHasOneActionableStateAndNoRawError() {
+    launchHome(extra: ["-uiMockFirstRefreshFailure"])
+    XCTAssertTrue(app.staticTexts["会话列表刷新失败"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts.matching(identifier: "会话列表刷新失败").count, 1)
+    XCTAssertTrue(app.buttons["重试"].exists)
+    XCTAssertTrue(app.buttons["详情"].exists)
+    XCTAssertFalse(app.staticTexts["fixture transport failure"].exists)
+    XCTAssertFalse(app.staticTexts["无法读取会话"].exists)
+  }
+
+  func testHomePartialRefreshFailureIsDistinct() {
+    launchHome(extra: ["-uiMockPartialRefreshFailure"])
+    XCTAssertTrue(app.staticTexts["列表未完整更新"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["会话列表刷新失败"].exists)
+    capture("home-partial-refresh-failure")
+  }
+
   func testOpeningSearchResultWithKeyboardVisibleStaysResponsive() {
     app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
     app.launch()

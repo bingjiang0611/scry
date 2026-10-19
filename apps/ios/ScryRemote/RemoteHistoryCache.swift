@@ -47,6 +47,13 @@ actor RemoteHistoryCache {
     let version: Int
     let key: String
     let sessions: [G0Transport.RunSessionRef]
+    // Synthesized Codable reads older entries without this optional field as
+    // nil; file mtime is never substituted for a verified refresh timestamp.
+    let fetchedAt: Date?
+  }
+  struct CatalogValue: Sendable {
+    let sessions: [G0Transport.RunSessionRef]
+    let fetchedAt: Date?
   }
   struct StructuredWindow: Codable, Sendable {
     let page: G0Transport.RunHistoryTurnsPage
@@ -94,20 +101,25 @@ actor RemoteHistoryCache {
     return FileManager.default.fileExists(atPath: windowFileURL(key).path)
   }
 
-  func readCatalog(_ key: String) throws -> [G0Transport.RunSessionRef]? {
+  func readCatalogValue(_ key: String) throws -> CatalogValue? {
     let url = catalogFileURL(key)
     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
     let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
     guard size <= byteLimit else { throw CocoaError(.fileReadTooLarge) }
     let entry = try JSONDecoder().decode(CatalogEntry.self, from: Data(contentsOf: url))
     guard entry.version == 1, entry.key == key else { throw CocoaError(.fileReadCorruptFile) }
-    return entry.sessions
+    return CatalogValue(sessions: entry.sessions, fetchedAt: entry.fetchedAt)
+  }
+
+  func readCatalog(_ key: String) throws -> [G0Transport.RunSessionRef]? {
+    try readCatalogValue(key)?.sessions
   }
 
   @discardableResult
-  func writeCatalog(_ sessions: [G0Transport.RunSessionRef], key: String, epoch expectedEpoch: Int) throws -> Bool {
+  func writeCatalog(_ sessions: [G0Transport.RunSessionRef], key: String, epoch expectedEpoch: Int,
+                    fetchedAt: Date = Date()) throws -> Bool {
     guard expectedEpoch == epoch else { return false }
-    let data = try JSONEncoder().encode(CatalogEntry(version: 1, key: key, sessions: sessions))
+    let data = try JSONEncoder().encode(CatalogEntry(version: 1, key: key, sessions: sessions, fetchedAt: fetchedAt))
     guard data.count <= byteLimit else { return false }
     try persist(data, to: catalogFileURL(key))
     return FileManager.default.fileExists(atPath: catalogFileURL(key).path)
