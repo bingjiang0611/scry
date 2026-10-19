@@ -31,10 +31,13 @@
 | [Resume](https://code.claude.com/docs/en/workflows#which-agents-run-again)：按启动顺序重放；B 失败可令已完成 C/D 一并重跑 | 改为 task/attempt 稳定身份与输入/产物指纹；用户在 v8 明确选择按依赖恢复；重试产生新 attempt。只重新评估受影响的依赖，不把队列位置作为身份；证据不足时不复用、不自动重发 |
 | [Stalls](https://code.claude.com/docs/en/workflows#when-an-agent-stalls-and-restarts)：自动重启最多五次；旧文件改动和 token 消耗仍保留 | v8 加入受条件约束的自动停滞恢复；手动/自动最多重启5次。必须先停止并确认作用域收敛、核对可重放性与授权；unknown 不重发。原文件变化和旧用量保留；逻辑循环与 attempt 分开 |
 | [Usage wait](https://code.claude.com/docs/en/workflows#when-a-run-hits-your-usage-limit)：仅特定交互订阅、设置和重置时间条件下等待；headless/SDK 不同 | 不把这种能力视为 Scry adapter 共有。只有 Provider 明确返回可证实状态才显示 rate_limited/waiting；本期不承诺自动等重置再续跑 |
+| [Set a size guideline](https://code.claude.com/docs/en/workflows#set-a-size-guideline)：unrestricted无建议，small<5、medium<10、large<50；任务可覆盖建议，设置文件优先，下次提示生效，硬上限不变 | v9采用相同软建议语义、文件覆盖和来源快照；用Scry自己的设置/命令，统一默认medium，不推断Claude版本/Pro权益，不取消运行限额；详见[规模指引](chat-entry-semantics.md#规模指引v9) |
 | [Cost](https://code.claude.com/docs/en/workflows#cost)：大运行提示是提醒，不是限额；原生可能替换组织不允许的模型 | 请求模型与观测模型分列，前置拒绝不可用选择；若上游仍替换，保留差异且不宣称满足指定模型合同。缺价格/用量是 unknown，不假装免费或保证硬预算 |
 | [Watch](https://code.claude.com/docs/en/workflows#watch-the-run)：phase → agent → prompt/tools/result，可过滤、停止和保存 | 自动绑定 workflow 面板；真实事件投影驱动图、详情与历史。左侧显示本次计划及版本，模型名称只是角色绑定，不等于 Workflow 本身 |
 
 v8 另核对 Manage runs 与 Resume after you leave the session：采用管理视图/任务面板、停止后保留未收敛任务、明确再次停止、记录丢失报 nothing_to_resume。Scry 现有 RunStopLifecycle 重复 request 只重播状态，重发需要实现新路径。后台由 main 驻留承担；用户已选择真正退出时停止并保存，不扩展为 Claude 云服务或独立后台 daemon。
+
+v9 定向复核同一快照的 Set a size guideline 小节。原文默认medium、特定新版Claude Pro默认small及旧版unrestricted是Claude特有行为；Scry保留用户可选四档，默认medium，不伪造订阅识别。文件覆盖时隐藏可编辑设置，但仍展示只读有效值/来源，避免用户不知道实际用了哪一档。
 
 ## 3. 两个容易混淆的点
 
