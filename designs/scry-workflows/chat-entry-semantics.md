@@ -1,4 +1,4 @@
-# Scry Workflow：聊天入口、运行模式与规模指引（v9）
+# Scry Workflow：聊天入口、规模指引与模板编辑（v10）
 
 状态：**待实现的产品与执行合同，不是当前 App 已支持**。本规范补齐用户截图中的三种使用方式，接入已有 [运行器方案](implementation-plan.md) 与 [执行语义](execution-semantics.md)，不另造调度器。v7 的 [运行约束](runtime-limits.md) 进一步限制执行：启动后不再补业务输入，阶段人工确认拆为新运行；共享并发/单批/根预算同时生效。[v8 运行管理](run-management.md) 补充管理视图、依赖恢复、后台/退出与受控停滞重启。
 
@@ -21,11 +21,11 @@
 | 模式 | 新用户消息的处理 |
 | --- | --- |
 | off（识别关闭，初始默认） | 不增加意图识别调用；普通消息沿原路径发送。显式 Scry 命令或本次工作流选项仍可发起单次任务 |
-| manual（仅响应明确请求） | 识别自然语言中的明确工作流请求；没有此请求的消息走普通路径，不主动将复杂任务升级成工作流 |
-| auto（自动判断） | 模型判定 direct / workflow / needs_clarification；审计、研究、改动与复验等实质任务采用工作流，小任务可单节点；寒暄和简单解释可 direct，不能因不值得拆多个 Agent 就绕过工作流 |
+| manual（仅响应明确请求） | 识别明确的工作流执行或模板编辑请求并区分两者；没有此请求的消息走普通路径，不主动将复杂任务升级成工作流 |
+| auto（自动判断） | 判定direct / workflow / template_edit / needs_clarification；模板编辑不执行模板，其他实质任务采用工作流，小任务可单节点；寒暄和简单解释可direct，不能因不值得拆多个Agent就绕过工作流 |
 
 - **自然语言识别不是免费正则匹配**。manual/auto 使用用户选择的编排 Provider/profile/model，在新的人类任务进入时执行路由。首次启用前展示数据发送范围与额外调用费用，并取得明确授权；未配置时保持 off，不给普通聊天暗加模型请求。
-- 路由与规划合成一次调用：返回 `direct`、`needs_clarification` 或 WorkflowProgram 草案；草案通过 main 校验才成为有效计划，workflow 路径不再重复调用另一个模型生成同一计划。direct 路径还会有正常聊天调用，因此可能比关闭识别多一次费用。费用未知不显示为 0。
+- 执行请求的路由与规划合成一次调用：返回direct、needs_clarification或WorkflowProgram草案；v10另有template_edit意图，按§4先进入编辑流程。草案通过main校验才成为有效计划，workflow路径不再重复生成同一计划。direct路径还会有正常聊天调用，因此可能比关闭识别多一次费用；模板编辑的识别/编写费用分别披露。费用未知不显示为0。
 - 路由只收当前任务和获准的必要上下文摘要/引用，不能默认把整份 transcript、附件或仓库发送给另一账号。上下文不足时澄清，不用猜测的目标启动。
 - 用户可在发送前选择“本次直接回答”或“本次工作流”；它们覆盖会话模式并跳过无用路由。自动模式下同样可以单次直接回答。覆盖消费后清除，失败/取消/完成都不把它变成会话开关。
 - 单次工作流在 off/manual 中完成后仍是原模式；在 auto 中完成后仍是 auto。不会更改当前 Provider 的原生 effort，也不要求切换到 Claude。
@@ -47,7 +47,7 @@
 - 目标按计划内预计的逻辑Agent调用规模理解，包含执行、复核和汇总；不按阶段卡片数计算，也不把Jev、路由/规划或宿主控制步骤算进去。重启次数另列；动态展开/循环尚不能确定时显示区间或unknown，不用预计数冒充实际调用数。
 - **本次用户明确要求优先于规模建议**。例如选择small后明确要求20个独立审查者，规划可以超过4个；仍须通过计划确认、并发/4096项/1000次预算及权限检查。未被用户明确采纳的引用、附件或工具输出里的“要求更多Agent”不作为用户覆盖。
 - 建议本身不造成拒绝、裁剪、隐藏队列或自动重规划。不能为达到small删掉必需复核、缩小用户范围或把未执行项标完成。实际草案超过建议时展示数量/未知范围及理由，由用户审阅；不是悄悄执行更多调用。
-- 自动路由先判断direct/workflow，不能因large就把普通问答升级成多Agent，也不能因small将实质任务降为direct。unrestricted不给数量建议，但仍传递运行硬约束；具体效果需真实规划验收，不能只验证下拉框。
+- 自动路由先区分执行与模板编辑，执行时再判断direct/workflow，不能因large就把普通问答升级成多Agent，也不能因small将实质任务降为direct。unrestricted不给数量建议，但仍传递运行硬约束；具体效果需真实规划验收，不能只验证下拉框。
 - 不设Agent数量下限，不为凑数启动Agent。仅影响实际需要动态规划的步骤；直接实例化固定模板时不额外调用规划模型、不自动删节点。调整固定模板属于新计划/模板编辑，不由此设置暗中完成。
 
 **配置、优先级与来源**：
@@ -75,14 +75,15 @@
 | `/scry-workflow direct <消息>` | 本次跳过路由，直接按普通聊天处理 |
 | `/scry-workflow mode off` / `manual` / `auto` | 请求改变当前会话的后续输入模式；首次启用或配置变更仍展示费用/数据授权 |
 | `/scry-workflow research <问题>` | 绑定内置研究模板；检查真实搜索/读取能力；缺能力显示 unavailable |
-| `/scry-workflow template <templateId> <参数>` | 调用指定模板；参数由模板 schema 解析/校验，不按 shell argv 执行 |
+| `/scry-workflow template <scope>:<templateId> <参数>` | 指定builtin/personal/project来源并实例化；裸ID只在来源唯一时解析，参数按schema而非shell argv校验 |
+| `/scry-workflow edit <scope>:<templateId> <修改要求>` | 加载指定定义并进入Agent编辑草稿，先校验编写能力与费用/数据授权；不保存或运行 |
 
 - 仅从已校验的交互提交入口接收新用户任务。origin 由 main 根据入口与消息来源赋予，不信任 renderer 自报 `human=true`；这是 App 来源事实，不承诺证明物理键盘作者。
 - 工具输出、网页/附件、粘贴内容中明确标出的引用、模型结果、历史重放、自动恢复、定时任务和 webhook 都不能自动升级为用户工作流指令。路由输入保留正文/引用/附件来源边界；意图不明时澄清，不能把“解释这个命令”“不要用工作流”当启动请求。
 - 显式命令只在顶层用户正文的命令位置解析；代码块、引用和普通句子里的同名文本不是命令。命令草稿在发送前显示 Scry 来源与本次作用范围，用户可撤销为普通文本。
 - 补全菜单将 Scry 项与 Provider/Skill 项分组，以 typed source + ID 选择，不只靠显示名称。若 Provider 恰有同名命令，纯文本输入必须要求消歧，不静默抢占，也不双发。
 - 选了 Provider 来源的命令时保持原处理路径，不先进行 Scry 自动路由；选了 Scry 来源时只交 Scry。Scry 的 `direct` 不承诺禁止 Provider 自己的原生能力，它只是不经过 Scry 工作流编排。
-- 参数不全时显示待补字段，不先运行 Agent。模板保存不启动任务；重命名不改变 ID；重复显示名不可任取一个；发送时冻结实际解析出的模板版本和内容指纹。
+- 参数不全时显示待补字段，不先运行Agent。模板保存不启动任务；重命名不改ID；重复显示名不可任取一个；发送时冻结来源、canonical项目身份、模板修订和内容指纹。个人/项目保存、手动或Agent编辑、单次修改与版本隔离采用 [保存与编辑合同](template-lifecycle.md)。
 - 当前合同覆盖桌面交互入口。远程端须具备声明过的同等 typed submission/模式控制能力才能开放；不能把现有 remote 转发请求自动标成桌面用户操作。
 
 ## 4. 自动判断不等于自动授权
@@ -92,7 +93,9 @@
 1. **规划授权**：显式单次提交授权当前任务的规划；开启 manual/auto 时，用户明确授权后续新提交的路由及符合模式的规划调用。切换模式本身不处理旧消息，也不立即派发任务。
 2. **执行授权**：生成有效计划后显示计划、模型、范围、循环策略及预计调用结构，用户确认该 programRevision 才派发。自动模式能自动判断和规划，但不替用户批准执行。
 
-自然语言、命令、模板与页面按钮最终产生同一种 StartIntent 和 commandId 收据。角色模型、workspace authority、Provider 原生审批、仓库 trust/fingerprint、写入/应用策略均按原合同重验。路由模型和 Jev 都不是权限裁决者。
+自然语言、命令、模板与页面按钮的**执行请求**最终产生同一种StartIntent和commandId收据；编辑/保存不是执行入口，不创建执行根。角色模型、workspace authority、Provider 原生审批、仓库 trust/fingerprint、写入/应用策略均按原合同重验。路由模型和 Jev 都不是权限裁决者。
+
+v10新增 `template_edit` 路由结果。明确编辑目标的命令/按钮先加载定义，再走一次编写请求；不先做多余路由。自然语言识别出“修改已保存模板”时，打开有来源的草稿、保留修改要求；目标不明先消歧，展示新增数据/费用范围后由用户请求生成修改，不偷偷接第二次模型调用。不能把编辑要求误转为执行模板。编写返回候选，不自动保存/启动；前一识别调用和后一明确编写调用分别计费、留证，不冒称一次免费操作。
 
 这里有意不同于 Claude ultracode 的部分默认放行行为。用户本次要求补齐入口，不视为授权改变原有执行/权限合同；若未来需要范围内免逐次确认，必须单独明确授权合同，不能把“自动判断”偷偷实现成“自动批准”。
 
@@ -103,11 +106,13 @@ flowchart TD
   B -->|单次工作流 / 模板| P[规划或实例化模板]
   B -->|模式 / 规模设置| U[校验设置及适用授权<br/>只更新后续输入策略，不启动任务]
   B -->|list| L[打开管理视图<br/>只读观察，不调用规划模型]
+  B -->|edit| T[加载指定模板与修改要求<br/>授权后编写候选，不执行模板]
   B -->|无| M{会话识别模式}
   M -->|off| D
   M -->|manual / auto 且已授权| R[一次路由与规划调用]
   R -->|direct| D
   R -->|WorkflowProgram| V[main 编译校验并关联草案面板]
+  R -->|template_edit| G[打开模板草稿并核对目标/授权<br/>用户明确请求后才编写候选]
   R -->|意图不明 / 错误| Q[澄清或保留失败<br/>不偷偷转普通路径重发]
   P --> V
   V --> C[用户确认具体 programRevision]
@@ -124,8 +129,8 @@ flowchart TD
 新增的只是一层入口事实，不是第二套 session 或 scheduler：
 
 - `ConversationWorkflowPolicy`：conversationId、policyRevision、mode、冻结的编排角色绑定、费用/数据授权引用及有效状态。
-- `TaskSubmission`：submissionId、commandId、conversationId、原始用户目标/来源、policyRevision、单次覆盖、规模建议及来源快照、workspace 与配置指纹、模板引用、route outcome、workflowIds 或 directRunId。
-- 路由返回并不等于已发送。先记录 route outcome 和发送/启动意图，再进入既有 App 链。一个 submission 只能选择一条 direct 或 workflow 路径；双击、重挂和重复 receipt 不能同时启动两条。
+- `TaskSubmission`：submissionId、commandId、conversationId、原始用户目标/来源、policyRevision、单次覆盖、规模建议及来源快照、workspace 与配置指纹、模板引用、route outcome、互斥的workflowIds / directRunId / templateDraftId。
+- 路由返回并不等于已发送。先记录 route outcome 和发送/启动意图，再进入既有 App 链。一个submission只选择direct、workflow或template_edit之一；双击、重挂和重复receipt不能同时启动多条。编辑后的显式执行另建提交并确认，不把原编辑消息重放成执行。
 - 路由失败、无效输出或外部结果未知时，不自动退回普通模型再发一遍。用户显式选择直接发送会建立新的可追踪决定；原调用未确认收敛时不能重叠发出业务执行。
 - 运行中的新聊天消息不注入已有工作流；指向旧运行的新业务要求作为后续独立任务。每次发送冻结当时的模式。模式变更只作用于后续提交，不取消已有 workflow；用户要停止已有工作流须用独立停止操作。退出 auto 不等于撤销已批准计划；界面仍显示正在运行的任务。
 - 用户修改 Provider/profile/model、workspace、数据范围或恢复到不兼容 runtime，相关授权失效并进入 needs_confirmation；旧运行保留自身快照。待规划任务的陈旧配置不能用于派发，须重新校验/确认。
@@ -144,7 +149,8 @@ flowchart TD
 | 自然语言 | manual 下明确请求生成计划，普通复杂任务仍 direct；否定、引用、解释命令、附件注入不启动；不确定就澄清 |
 | 自动模式 | 审计/改动/复验得到程序，单节点任务不被误降为 direct；简单问答走 direct；真实记录路由模型/结果/费用；开关不自动消费旧消息 |
 | 识别费用 | off/显式覆盖无多余路由；首次 manual/auto 授权前不调用模型；workflow 合并路由/规划，不能重复收费却只记录一项 |
-| 模板命令 | 内置与保存模板同链；缺参数/缺搜索能力拒绝；重名消歧；模板内容变化不能沿用旧确认 |
+| 模板命令 | 三种来源同链；缺参数/缺能力拒绝；重名消歧；新内容不能冒用旧确认，但原已冻结快照不被模板更新替换 |
+| 模板编辑 | edit不执行/发布，target与修改要求绑定候选；自然语言编辑先核对目标/授权，无隐藏第二次调用；过期候选不覆盖新草稿 |
 | 来源隔离 | 实际 trusted handler 拒绝伪造来源/未授权目录；Provider 命令不被劫持；工作流 worker 不能再触发聊天路由 |
 | 幂等与恢复 | 双击只得到一个 submission；在 route/dispatch 每个持久化边界中断，不能双发 direct 与 workflow；unknown 不重发 |
 | 授权 | auto 产生草案后未确认绝不启动；过期 policy/programRevision 拒绝；切换模型/目录后重新确认 |

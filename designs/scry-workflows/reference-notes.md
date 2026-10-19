@@ -21,7 +21,8 @@
 | [When to use a workflow](https://code.claude.com/docs/en/workflows#when-to-use-a-workflow)：脚本持有循环、分支、中间结果，主会话只接最终答案 | 采用“计划外置、运行器调度、结果按引用传递”。编排模型准备计划，不在每个子任务之间重复当调度器；不承诺零上下文或零 token |
 | [Have Claude write a workflow](https://code.claude.com/docs/en/workflows#have-claude-write-a-workflow)：任务生成 JavaScript；ultracode 可让实质任务自动走 Workflow | v6 定义自然语言单次请求、会话 auto 和模板命令，使用 Scry 命名空间，不调用原生 ultracode 或生成 JS。编排模型由用户选；简单任务可 direct 或单节点；执行仍确认计划，识别费用和默认 off 显式披露 |
 | [Approve the plan](https://code.claude.com/docs/en/workflows#approve-the-plan-before-it-runs)：可查看原脚本，审批行为随权限模式变化 | 提供结构化计划预览和配置确认；启动规划与批准执行是不同动作。确认计划不替代 Provider 工具审批、workspace authority 或仓库 trust |
-| [Save for reuse](https://code.claude.com/docs/en/workflows#save-the-workflow-for-reuse)：`.claude/workflows/`、用户目录、`meta` 名称/描述、args、`/reload-skills` | 保存为 App-owned 的版本化数据模板、参数和角色绑定；不写 `.claude/workflows`。保存只保存定义，不连带执行或授权。固定任务列表不自动变成可泛化模板 |
+| [Save for reuse](https://code.claude.com/docs/en/workflows#save-the-workflow-for-reuse)：个人/项目脚本保存为命令，参数化复用 | v10补齐个人App-owned与项目 `.scry-workflows/`；保存结构化定义、参数/角色，不存JS或运行授权；同名显式消歧，不采用项目自动遮蔽个人，重跑重验上下文/能力 |
+| [Edit a saved script](https://code.claude.com/docs/en/workflows#edit-a-saved-script)：手动或Agent编辑，提供编写说明，也能只改本次脚本 | v10采用同一草稿/编译器/diff；Agent只产待审候选，新版/另存/仅本次分开，旧实例保留快照；详见[保存与编辑](template-lifecycle.md)，不依赖原生skill或执行JS |
 | [Saved script](https://code.claude.com/docs/en/workflows#what-the-saved-script-looks-like)：`agent()`、`pipeline()`、`parallel()`、`phase()`、`log()` | 概念映射为 Agent 节点、按项目展开、依赖图并行、阶段分组、带来源事件；阶段是展示分组，不应强制所有节点存在全局 barrier |
 | 同节：schema 在启动前校验矛盾；输出失败默认最多五次校验尝试 | Scry 校验版本化输出合同、引用与依赖；不假设每个 adapter 支持原生 schema。先做后验校验，不静默追加五次付费尝试；Provider 内部尝试若可观测则单独记录 |
 | 同节：停止/不可恢复错误可返回 null；示例 `.filter(Boolean)` 丢弃空槽 | **不照搬**。任务必须保留 failed/cancelled/unverified 和 coverage；空数组只用于真实成功且没有发现。部分结果可汇总，但不能让失败消失 |
@@ -38,6 +39,8 @@
 v8 另核对 Manage runs 与 Resume after you leave the session：采用管理视图/任务面板、停止后保留未收敛任务、明确再次停止、记录丢失报 nothing_to_resume。Scry 现有 RunStopLifecycle 重复 request 只重播状态，重发需要实现新路径。后台由 main 驻留承担；用户已选择真正退出时停止并保存，不扩展为 Claude 云服务或独立后台 daemon。
 
 v9 定向复核同一快照的 Set a size guideline 小节。原文默认medium、特定新版Claude Pro默认small及旧版unrestricted是Claude特有行为；Scry保留用户可选四档，默认medium，不伪造订阅识别。文件覆盖时隐藏可编辑设置，但仍展示只读有效值/来源，避免用户不知道实际用了哪一档。
+
+v10定向读完同一快照的保存复用与编辑已保存脚本两节，并与用户截图建议核对。补齐作用域、手动/Agent编辑、差异预览与版本隔离；未据此宣称已经实现生产功能。个人/项目存储、同名消歧和结构化程序是Scry自己的合同，不冒充原生路径/命令兼容。
 
 ## 3. 两个容易混淆的点
 

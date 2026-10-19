@@ -1,8 +1,8 @@
-# Scry-owned 工作流 v9：规模指引、运行管理与程序化编排
+# Scry-owned 工作流 v10：保存编辑与完整程序化编排
 
-状态：**技术方案，不是已实现的生产能力**。按用户确认的截图功能与取舍迭代：运行器承载循环、分支和中间结果，独立 Agent 对抗复核，多角度方案起草与权衡。v5 将这些全部纳入目标能力，不再把循环/多方案列为范围外。v6 进一步补齐自然语言单次请求、会话自动判断与模板命令，详见入口合同。v7 按用户最新要求加入运行中无业务输入、并发/单批/总量限额，覆盖此前无上限约定。v8 补齐运行管理、依赖恢复、后台/退出与最多五次停滞重启；v9 增加动态工作流规模软建议，硬限制不变。HTML 仍为 v3 固定模板演示，不代表这些能力已生效，本轮不修改生产运行器或调用真实 Provider。
+状态：**技术方案，不是已实现的生产能力**。按用户确认的范围迭代：v5纳入控制流、中间状态、对抗复核与多方案；v6补齐聊天入口；v7加入无运行中业务输入及资源硬限额；v8补齐管理、依赖恢复与停滞重启；v9加入规模软建议。v10补齐个人/项目保存、手动/Agent编辑、差异预览及模板与运行版本隔离。HTML仍为v3固定模板演示，本轮不修改生产运行器或调用真实Provider。
 
-规范补充：[执行语义与质量模式](execution-semantics.md) · [聊天入口与运行模式](chat-entry-semantics.md)。新增 [v7 运行约束](runtime-limits.md) 优先于三份文档中的历史无上限表述。再加 [v8 运行管理与恢复](run-management.md)，五者共同构成方案；入口、执行、质量、限额与恢复合同都须通过，不能用旧原型冒充已实现。
+规范补充：[执行语义与质量模式](execution-semantics.md) · [聊天入口与运行模式](chat-entry-semantics.md) · [运行约束](runtime-limits.md) · [运行管理与恢复](run-management.md) · [保存与编辑](template-lifecycle.md)。六者共同构成方案；v7覆盖历史无上限约定，v10覆盖模板仅App-owned的旧限制。全部合同都须通过，不能用旧原型冒充已实现。
 
 参考：[Claude 官方 Workflows](https://code.claude.com/docs/en/workflows)；逐项事实与取舍见 [原文核对](reference-notes.md)。核心方案读取基线为 `2779a07`，v6 入口补充基线为 `5dfc1f4`。v7 起点 `43685ee`，v8 读取时 HEAD 已为 `8c2d835`。工作区含并行 WIP，实施前重验接缝，不把旧行号当合同；已实读 RunStopLifecycle，现有重复 request 只重播状态，并不重发停止信号。
 
@@ -19,7 +19,7 @@
 
 ### 聊天入口与模式
 
-- 三种入口：自然语言明确请求、会话自动判断、内置/保存模板命令；复用同一 StartIntent，不另造执行链。
+- 三种执行入口：自然语言明确请求、会话自动判断、内置/保存模板命令；复用同一StartIntent，不另造执行链。模板编辑/保存不创建执行根。
 - off/manual/auto 作用于当前会话；本次 direct/workflow 覆盖只消费一次，不修改 Provider effort。初始 off 不增加路由费用，启用自然语言识别前明确授权编排模型和数据范围。
 - 自动判断只授权路由与规划，不自动批准生成的计划。Scry 命令使用 `/scry-workflow` 命名空间，不劫持原生 `ultracode`、`/effort`、`/deep-research`。
 - 路由合并规划以免重复调用；失败/unknown 不自动转普通模型重发。来源、命令冲突、恢复、组合任务及验收见 [完整入口合同](chat-entry-semantics.md)。
@@ -96,9 +96,13 @@ Provider 工具审批仍走原生/映射后的权限模式。批准计划不替�
 2. 模板是可复用的计划骨架，不是强制路线；允许省略无用阶段、增加受支持的独立检查分支。
 3. main 编译程序，校验类型/作用域、结构化循环、条件的 unknown 路径、终止策略与副作用范围。能力缺失、未授权写入或非法程序必须明确拒绝；不能靠退回主模型逐轮决策掩盖解释器不支持。
 4. 用户看到计划差异与模型绑定后批准。规划模型不能偷偷选择更贵模型或改变权限。
-5. 完成后可“保存为模板”：明确哪些输入变成参数、哪些依赖固定，再保存版本化定义；下次执行重新校验能力、范围和 trust。
+5. 有效草案或运行定义可“保存为模板”：明确哪些输入变成参数、哪些依赖固定；个人跨项目复用，项目定义经用户Git操作共享。保存不代表运行成功，下次执行重新校验能力、范围和trust。
 
-模板存 App-owned storage。第一批不扫描并自动执行仓库内脚本、不实现导入插件，也不创建通用拖拽编辑器或模板市场。
+### 保存、编辑与单次修改
+
+完整流程见 [v10保存与编辑合同](template-lifecycle.md)。个人定义存App-owned目录，项目定义存授权根下的 `.scry-workflows/`，都保存结构化程序而非JS。模板源码可手动编辑，Agent只生成待审候选；共用编译器、差异预览及冲突检查，明确区分保存新版、另存为与仅本次使用。
+
+模板更新不影响已冻结实例。修订后恢复创建新执行实例但保留原root预算与逻辑身份；全新运行必须另行明确选择。读取项目模板不自动执行，不引入插件、通用拖拽编辑器或模板市场。
 
 ## 4. 程序与数据合同：不是任意 JS，也不只是静态 DAG
 
@@ -106,7 +110,8 @@ Provider 工具审批仍走原生/映射后的权限模式。批准计划不替�
 
 | 记录 | 核心字段 / 语义 |
 | --- | --- |
-| TemplateDefinition | templateId、version、参数合同、角色、节点骨架；来源标 built-in/user |
+| TemplateDefinition / TemplateRef | schemaVersion、稳定templateId、内容revisionHash、参数/角色/完整程序；来源builtin/personal/project及canonical项目身份；不含运行授权 |
+| TemplateDraft | 来源与baseRevisionHash、draftRevision、编辑目标、候选及校验/diff；Agent返回绑定基线，保存操作绑定commandId与指纹 |
 | WorkflowProgram | workflowId、programRevision、userGoal、workspace identity、templateRef（可空）、配置快照、程序体、输入/输出与证据合同；取代 v4 仅静态节点的 WorkflowPlan |
 | ProgramBlock | blockId、phase 分组、sequence/parallel/map/branch/loop/call/return、typed 输入/绑定/表达式；call 绑定 Agent 或 classifier |
 | ControlFrame | scopePath、程序位置、frameRevision、已提交变量/引用、分支决策、loopState、iteration、最佳候选、终止原因 |
@@ -211,7 +216,7 @@ flowchart TD
 - 下游准入依据：执行 terminal、输出有效、节点要求的产物/归档落盘；managed recorder 开启且属于必需证据时也须收口。禁用/不支持的可选证据以明确 coverage 表达，不要求不存在的 API；必需证据失败则依赖 blocked。
 - 三组状态分离：execution（pending/preparing/running/terminal）、recording（pending/committed/failed/disabled）、evidence（available/partial/unavailable/stale）。completed 不自动等于 verified。
 - 失败集合保留每项 outcome。报告节点可以按显式 collect-outcomes 合同读取成功与失败的摘要，不能把失败输入当普通成功产物喂给执行节点。
-- 首版采用 `userData/workflows/` 下 App-owned 文件：版本化模板、每次运行的计划/展开页、任务与 attempt 记录。主 manifest 只放运行头和引用，不塞全部任务。根执行准入记录原子保存预算与 attempt 派发意图；任务记录保存生命周期和结果，不能成为第二个派发许可。列表索引可重建，不把索引当执行事实。
+- 运行事实始终存 `userData/workflows/` 的App-owned文件：所用模板修订快照、计划/展开页、任务与attempt记录。个人模板也在该数据域；项目当前定义在授权根 `.scry-workflows/`，不能把运行授权/产物写进共享模板。模板当前文件与历史快照的发布/冲突/恢复规则见v10合同。主 manifest 只放运行头和引用，不塞全部任务。根执行准入记录原子保存预算与 attempt 派发意图；任务记录保存生命周期和结果，不能成为第二个派发许可。列表索引可重建，不把索引当执行事实。
 - 现有 `scry.db` 是可降级的分析/用量账本，不选它作为必须可用的调度事实源。沿 `transcript-archive.ts` 的 owned-path / 临时文件原子替换模式实现异步写入，不直接调用其中同步写 helper 阻塞 main。此处不承诺外部调用与文件事务的 exactly-once。
 - 编排历史保存阶段/任务生命周期和证据引用，不复制每个流式 token 或工具正文；工具级回放读取原有归档，并诚实标出证据缺口。renderer 只持有当前窗口；不建立第二套 transcript/费用事实源。
 
@@ -252,21 +257,21 @@ flowchart TD
 | 阶段 | 交付 | 必须能证明的行为 |
 | --- | --- | --- |
 | M1 启动与收口接缝 | workflow owner、独立 session、全 run observer、completion/recording outcome、停止/再次停止与可信等待阶段 | 两个后台 run 不串聊天；真实 trusted wrapper 拒绝非法调用且不执行 listener；关闭 run controls 不静默换模型；所需证据未收口不提前放行 |
-| M2 入口、程序与编译器 | 聊天/命令/模式与规模建议解析/来源快照；路由规划和模板共用 WorkflowProgram；全部控制指令、作用域/类型/终止校验、预览冻结 | 规模仅软建议、文件覆盖/下一次生效；单次不污染会话；来源/费用授权、命令冲突、direct/workflow 互斥；顺序/并行/map/branch/loop 语义；unknown 不当 false；非法依赖/裸无限循环拒绝 |
-| M3 持久解释器 | 控制帧、绑定、join、iteration/attempt、checkpoint、限额、依赖恢复与停滞重启 | 共享并发默认≤16、配置1–256；4097项整批拒绝、第1001次不发送；跨重启预算/槽位恢复；运行中业务输入拒绝；carry/最佳候选恢复，nothing_to_resume不重开；unknown不重发；旧scope收敛后最多五次重启 |
+| M2 入口、程序与编译器 | 聊天/命令/模式与规模建议解析/来源快照；路由规划和模板共用 WorkflowProgram；模板作用域/修订/草稿与Agent编写请求；全部控制指令、作用域/类型/终止校验、预览冻结 | 规模仅软建议、文件覆盖/下一次生效；单次不污染会话；来源/费用授权、命令冲突、direct/workflow/template_edit互斥；顺序/并行/map/branch/loop 语义；unknown 不当 false；非法依赖/裸无限循环拒绝；模板编写只产候选、参数化不携带私有运行状态 |
+| M3 持久解释器 | 控制帧、绑定、join、iteration/attempt、checkpoint、限额、依赖恢复与停滞重启；模板发布收据与实例快照 | 共享并发默认≤16、配置1–256；4097项整批拒绝、第1001次不发送；跨重启预算/槽位恢复；运行中业务输入拒绝；carry/最佳候选恢复，nothing_to_resume不重开；unknown不重发；旧scope收敛后最多五次重启；模板保存冲突不覆盖，修订恢复不重置root预算 |
 | M4 完整质量与写入模式 | 六种模板；对抗复核、多角度起草/交叉评审/裁决/改进、检查修复和批量迁移；Jev 及副本/应用合同 | 反例能推翻候选；全不合格无假赢家；反馈实际改变下一版；综合方案再验证；组合 patch 回归/冲突阻止应用；中间数据不泄漏父上下文 |
-| M5 生产面板与控制 | 聊天入口/授权、规模偏好/有效来源、管理与停止/恢复、后台/退出；同源代码视图、连线实例图、轮次/分支/候选/证据、retry用量及历史 | 三种入口真实交互与每运行自动关联；重挂不双发、模式退出不误停；原会话无安全回注能力时不伪造 turn；窗口隐藏不停止执行 |
-| M6 授权真实验收 | 单 Provider → 跨 Provider → Jev → 循环/对抗复核/多方案/写入组合 | 临时 workspace/userData；账号/费用/数据及写入明确授权；实际模型/终态/证据可核对；程序级全部验收通过才称完整 |
+| M5 生产面板与控制 | 聊天入口/授权、规模偏好/有效来源、管理与停止/恢复、后台/退出；模板保存/编辑/diff/来源/冲突；同源代码视图、连线实例图、轮次/分支/候选/证据、retry用量及历史 | 三种入口真实交互与每运行自动关联；重挂不双发、模式退出不误停；原会话无安全回注能力时不伪造 turn；窗口隐藏不停止执行；新版/另存/仅本次操作不串源，运行中模板变更不替换旧快照 |
+| M6 授权真实验收 | 单 Provider → 跨 Provider → Jev → 循环/对抗复核/多方案/写入组合 → 模板Agent修改与跨会话/项目复用 | 临时 workspace/userData；账号/费用/数据及写入明确授权；实际模型/终态/证据可核对；程序级全部验收通过才称完整 |
 
 UI 可在 M2 后并行按同一合同开发，但不得先用计时器动画冒充真实执行。改 main 前需协调当前 remote/iOS WIP 所有者；本轮未改这些文件。
 
 验证复用 `run-registry.test.ts`、`provider-operation-gate.test.ts`、`command-receipts.test.ts`、`run-stop-lifecycle.test.ts`、`live-trace-ingestion.test.ts`、`trace-turn-progress.test.ts`、`managed-turn-commit.test.ts`，再补紧贴新合同的 focused tests。关键拒绝/恢复用临时工作区与负对照证明不是只检查 UI 文案；DOM/坐标/焦点走现有隔离 Electron fixture。
 
-[执行语义 §9](execution-semantics.md#9-全部能力必须有对应验收不能支持循环只测改计数) 给出每项能力的可证伪检查。迁移/修复的副本、组合验证和应用合同已明确并纳入 M4；工作副本仍不称安全沙箱。实现可以分批；循环、多方案、上下文边界、写入、聊天入口/模式、v7 限额和 v8 运行管理/恢复合同必须全部通过，才能宣布整个方案完成。
+[执行语义 §9](execution-semantics.md#9-全部能力必须有对应验收不能支持循环只测改计数) 给出每项能力的可证伪检查。迁移/修复的副本、组合验证和应用合同已明确并纳入 M4；工作副本仍不称安全沙箱。实现可以分批；循环、多方案、上下文边界、写入、聊天入口/模式、v7限额、v8运行管理/恢复、v9规模建议和v10保存/编辑合同必须全部通过，才能宣布整个方案完成。
 
 ## 10. 当前完成度与下一步
 
-- 已完成：v5 补齐控制流与质量模式，v6 补齐聊天入口，v7 加入运行输入/资源约束；v8 补齐管理与依赖恢复，v9补齐规模软建议；不将建议当运行门禁，默认medium且不按未经验证的订阅猜测。初始识别关闭、额外路由费用、计划仍须确认及原生命令不劫持都是显式合同，不声称与 Claude 原生行为完全相同。以上为方案完成，不是生产能力已通过。
+- 已完成：v5 补齐控制流与质量模式，v6 补齐聊天入口，v7 加入运行输入/资源约束；v8 补齐管理与依赖恢复，v9补齐规模软建议，v10补齐个人/项目保存、手动/Agent编辑与版本隔离；不将建议当运行门禁，默认medium且不按未经验证的订阅猜测。初始识别关闭、额外路由费用、计划仍须确认及原生命令不劫持都是显式合同，不声称与 Claude 原生行为完全相同。以上为方案完成，不是生产能力已通过。
 - 未实现：生产规划器/调度器/Jev API/React 面板；HTML v3 仍是固定样例。此次没有驱动真实 Agent、读取凭据或调用分类 API。
 - 下一授权动作：以此完整方案从 M1 开始实施，先协调 `src/main/index.ts` 的 WIP 所有权；实际 Provider/账号、费用、TypeSafe 数据范围与写入/应用策略在真实执行前确认。循环和多方案的设计范围不再等用户重复批准。
 - 强制禁止副本外写入仍不是现有 Provider 权限合同能保证的能力。默认差异审阅，若选择验证后应用必须具体授权；任何生成程序都不能授予自己更多权限。
