@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1500 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Scry v5：对抗复核与多方案权衡程序</title>
+  <desc id="desc">设计图，尚未实现。左侧对候选独立寻找反证并裁决，右侧独立起草多方案、交叉评审、权衡和循环改进。运行器保管中间结果、控制分支与循环；只有最终报告回到主会话。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#65758c"/></marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #24334a; }
+      .title { font-size: 29px; font-weight: 700; }
+      .subtitle { font-size: 18px; fill: #62738b; }
+      .panel { fill: #f0f4f9; stroke: #d2dbe7; rx: 16; }
+      .node { fill: #fff; stroke: #b8c7d9; stroke-width: 1.5; rx: 10; }
+      .accent { fill: #edf3ff; stroke: #819fce; }
+      .decision { fill: #fff8ed; stroke: #cbb58c; }
+      .heading { font-size: 21px; font-weight: 650; text-anchor: middle; }
+      .detail { font-size: 17px; fill: #5d7088; text-anchor: middle; }
+      .edge { fill: none; stroke: #65758c; stroke-width: 2; marker-end: url(#arrow); }
+      .label { font-size: 16px; fill: #725a31; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect width="1500" height="1080" fill="#f8fafc"/>
+  <text x="44" y="50" class="title">质量模式成为程序的一部分，而不是“多跑几个 Agent”</text>
+  <text x="44" y="82" class="subtitle">方案 v5 · 拟实现；用户选模型，Jev 可选；循环、分支和中间状态由 Scry 承载</text>
+  <rect x="36" y="108" width="680" height="774" class="panel"/>
+  <rect x="742" y="108" width="722" height="774" class="panel"/>
+  <text x="376" y="146" class="heading">A · 独立对抗性复核</text>
+  <text x="1103" y="146" class="heading">B · 多角度方案权衡与改进</text>
+
+  <rect x="126" y="175" width="500" height="68" class="node"/>
+  <text x="376" y="204" class="heading">扫描者提出候选</text>
+  <text x="376" y="228" class="detail">claim / 来源 / 可证伪依据；不自称 verified</text>
+  <path d="M376 243 V277" class="edge"/>
+  <rect x="126" y="277" width="500" height="78" class="node"/>
+  <text x="376" y="307" class="heading">新会话尝试推翻候选</text>
+  <text x="376" y="332" class="detail">读取原始证据；找反例、例外与调用链</text>
+  <path d="M376 355 V389" class="edge"/>
+  <rect x="126" y="389" width="500" height="78" class="node"/>
+  <text x="376" y="419" class="heading">记录独立 reviewer 的结果</text>
+  <text x="376" y="444" class="detail">supported / refuted / unknown + 来源版本</text>
+  <path d="M376 467 V501" class="edge"/>
+  <rect x="126" y="501" width="500" height="78" class="node decision"/>
+  <text x="376" y="531" class="heading">证据足够且无未解决冲突？</text>
+  <text x="376" y="556" class="detail">多数票不代替事实；失败 verifier 不消失</text>
+  <path d="M376 579 V620 H239 V647" class="edge"/>
+  <path d="M376 620 H533 V647" class="edge"/>
+  <text x="239" y="610" class="label">是</text>
+  <text x="533" y="610" class="label">否 / unknown</text>
+  <rect x="100" y="647" width="278" height="78" class="node accent"/>
+  <text x="239" y="677" class="heading">有依据的结论</text>
+  <text x="239" y="702" class="detail">confirmed / refuted</text>
+  <rect x="394" y="647" width="278" height="78" class="node decision"/>
+  <text x="533" y="677" class="heading">裁决 / 声明的取证循环</text>
+  <text x="533" y="702" class="detail">仍不明则 unverified</text>
+  <path d="M239 725 V788 H376 V819" class="edge"/>
+  <path d="M533 725 V788 H376" fill="none" stroke="#65758c" stroke-width="2"/>
+  <text x="376" y="847" class="detail">汇总包含异议、失败、覆盖范围与证据引用</text>
+
+  <rect x="822" y="175" width="562" height="68" class="node"/>
+  <text x="1103" y="204" class="heading">冻结目标、硬约束与评价 rubric</text>
+  <text x="1103" y="228" class="detail">同一完整任务；终止策略与角色模型可见</text>
+  <path d="M1103 243 V275" class="edge"/>
+  <rect x="786" y="275" width="192" height="65" class="node accent"/>
+  <rect x="1007" y="275" width="192" height="65" class="node accent"/>
+  <rect x="1228" y="275" width="192" height="65" class="node accent"/>
+  <text x="882" y="301" class="heading">方案 A</text><text x="882" y="326" class="detail">最小复杂度</text>
+  <text x="1103" y="301" class="heading">方案 B</text><text x="1103" y="326" class="detail">性能 / 可扩展</text>
+  <text x="1324" y="301" class="heading">方案 C</text><text x="1324" y="326" class="detail">安全 / 兼容</text>
+  <path d="M1103 259 H882 V275" class="edge"/><path d="M1103 259 H1324 V275" class="edge"/>
+  <path d="M882 340 V363 H1103 V389" class="edge"/><path d="M1324 340 V363 H1103" fill="none" stroke="#65758c" stroke-width="2"/>
+  <path d="M1103 340 V363" fill="none" stroke="#65758c" stroke-width="2"/>
+  <rect x="822" y="389" width="562" height="78" class="node"/>
+  <text x="1103" y="419" class="heading">非作者交叉审查 + 硬约束检查</text>
+  <text x="1103" y="444" class="detail">作者互不读草稿；缺证据不能被高总分抵消</text>
+  <path d="M1103 467 V501" class="edge"/>
+  <rect x="822" y="501" width="562" height="78" class="node decision"/>
+  <text x="1103" y="531" class="heading">裁决 / 综合 / 有理由的权衡</text>
+  <text x="1103" y="556" class="detail">保留反对意见；全不合格不能强选赢家</text>
+  <path d="M1103 579 V613" class="edge"/>
+  <text x="1215" y="601" class="label">有可接受候选</text>
+  <path d="M822 540 H786 V783 H822" class="edge"/>
+  <text x="776" y="663" class="label" transform="rotate(-90 776 663)">无合格候选且终止</text>
+  <path d="M1384 540 H1440" fill="none" stroke="#65758c" stroke-width="2"/>
+  <rect x="822" y="613" width="562" height="78" class="node"/>
+  <text x="1103" y="643" class="heading">独立复验推荐或综合结果</text>
+  <text x="1103" y="668" class="detail">综合方案是新版本，不能继承旧方案的通过状态</text>
+  <path d="M1103 691 V746" class="edge"/>
+  <rect x="822" y="746" width="562" height="76" class="node accent"/>
+  <text x="1103" y="775" class="heading">通过 → 最终报告；不通过 → 明确退出原因</text>
+  <text x="1103" y="801" class="detail">no_progress / exhausted / no_acceptable_plan</text>
+  <path d="M1384 650 H1440 V259 H1103" class="edge"/>
+  <text x="1457" y="464" class="label" transform="rotate(-90 1457 464)">需改进且未终止</text>
+  <text x="1103" y="860" class="detail">需改进且未终止 → 携相关反馈生成下一版，再交叉评审</text>
+
+  <rect x="210" y="919" width="1080" height="101" class="node accent"/>
+  <text x="750" y="951" class="heading">运行器持久保存：草稿、证据、分支、候选版本、反馈、轮次、最佳结果和终止原因</text>
+  <text x="750" y="983" class="detail">主会话只收到启动收据和最终报告 / 引用；不收到每个 worker 的完整 transcript</text>
+  <text x="750" y="1049" class="label">逻辑下一轮 ≠ 未知调用自动重试；没有产品并发上限；图中 A/B/C 是模板样例，不是固定任务数限制。</text>
+</svg>

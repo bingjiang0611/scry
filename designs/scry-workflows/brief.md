@@ -1,8 +1,34 @@
-# Scry 工作流 · 方案 v4 / 原型 v3
+# Scry 工作流 · 方案 v5 / 原型 v3
 
-状态：用户已确认“任务驱动编排，模板作为捷径”。本轮完整核对 Claude Workflows 文章，更新技术方案和三张 Mermaid 流程图；HTML 仍为 v3 固定模板原型，不接生产、不调用 Provider、不修改真实工作区文件。
+状态：按用户要求补齐文章截图中的完整能力：运行器承载循环、分支和中间结果，独立对抗复核，多角度方案起草、权衡与改进。**方案已更新，生产能力未实现**；HTML 仍为 v3 固定模板演示，不接生产、不调用 Provider。
 
-## v4 技术方案修订
+## v5：补齐执行语义，不把关键能力留到以后
+
+- [主技术方案](implementation-plan.md)：WorkflowProgram 取代仅静态 DAG 的计划；sequence/parallel/map/branch/loop/call/return 共用解释器。模型可选、Jev 可选、不设产品并发上限的约束不变。
+- [执行语义与质量模式](execution-semantics.md)：明确分支 unknown、变量/并行结果合并、循环 carry、进展与终止、checkpoint/副作用、上下文边界；还包括对抗复核、多方案权衡、检查修复和迁移的写入/应用合同。
+- [运行器总览图](workflow-overview.svg) 与 [对抗复核 / 多方案权衡图](workflow-quality-patterns.svg)：两者是拟实现架构，不是运行截图。五段 Mermaid 源图补充具体流转。
+- 补充核对官方 Agent SDK 与 LangGraph 的相关章节，来源和阅读范围见 [参考记录](reference-notes.md)。借鉴模式，不接 Claude 原生 Workflow 或引入 LangGraph 依赖。
+- 主会话只保留目标、最小启动收据与最终报告/引用；中间草稿、反馈、候选版本和循环状态由运行器持久存储。实际验收必须检查发送给主模型的 payload，不能只看 UI。
+- 实施拆为 M1–M6，循环、多方案及写入合同都包含在完成标准中，不把阶段性交付当全部完成；真实账号、费用、数据发送和写入范围仍在实际运行前确认。
+
+### v5 实际验证与安装结果
+
+| 检查 | 结果与范围 |
+| --- | --- |
+| 文档 | 四份 Markdown 的 21 个本地链接/锚点、代码围栏通过；五段 Mermaid 源码未渲染 |
+| 图示 | 两份 SVG 的 XML、title/desc 与 aria-labelledby 通过；Chrome 在 1512×764 / 1512×708 检查实际布局，补齐“没有合格候选时退出”的分支 |
+| Diff | `git diff --check -- designs/scry-workflows` 通过；仅修改本目录的方案/图，无生产代码变更 |
+| 默认安装 | `npm run install:mac:dev` 退出 1；node/web typecheck 通过，unit 为 277 文件通过 / 4 失败 / 4 跳过，3442 测试通过 / 4 失败 / 4 跳过，451.45s；未进入 shell、构建、打包或安装 |
+
+失败范围：`performance-baseline.test.ts`（子进程 SIGKILL / 结果不符）、`runtime-evidence.counters.test.ts`（5s 超时）、`OverviewPanel.context.test.tsx`（上下文数值断言）、`providers/pi.test.ts`（menu-only command 未及时收敛）。本次文档不在 Vitest 输入中，未为这些失败改测试、延长超时或重跑；具体根因未逐项确定。
+
+安装日志 `/tmp/scry-workflow-v5-install.log`，退出收据 `/tmp/scry-workflow-v5-install.exit`。日志显示 typecheck 阶段版本 0.2.205、test 阶段 0.2.206，期间仓库还有并行提交，因此这不是冻结源码的发布验证。进程组 669 已无成员；未替换 `/Applications/Scry.app`，也没有重启 App。
+
+后续由相关代码维护者在冻结版本上定位四项失败，再执行安装；本轮不扩大为 Provider/性能/Overview 修复。生产实施从 M1 开始前仍需协调 main WIP 所有权。预览服务保留在 `http://127.0.0.1:8767/`。
+
+以下 v4/v3/v2 保留为历史记录；能力范围与最新验证结果以 v5 为准。
+
+## v4 技术方案修订（历史）
 
 - [技术方案与流程图](implementation-plan.md)：自动规划和三种 Scry 模板共用结构化计划、依赖调度和运行面板；不执行任意生成 JS，不再把每个目标强制套同一四阶段模板。
 - [官方原文核对](reference-notes.md)：完整读取官方 Markdown 506 行。当前只明确内置 `/deep-research`；审计、迁移、循环修复等属于六类示例提示词，不能混称内置命令。
@@ -28,7 +54,7 @@
 - Jev 单独作为可选 classifier 节点，不混入 coding Agent 模型列表。支持启用、`jev-latest` 与复核阈值（默认 0.70）。开启后同时更新左侧、四节点图和回放阶段；关闭则是原有三节点图。
 - 3 条分类样例使用 P(true)=0.96 / 0.09 / 0.55，置信度为 max(p,1-p)。低于用户阈值标记 Agent 复核；所有候选保留。示例概率明确标注非 API 返回，不宣称真实分类或文件修改。
 - Agent 数与分类请求数分开；配置随运行冻结，保存只影响下一次演示。增加“下一阶段”回放快捷键，通过同一状态机推进事件，不跳过依赖或编造额外任务。
-- 用户随后已确认按任务生成结构化计划，模板作为捷径。原型尚未实现此能力；当前合同与实施顺序以 v4 技术方案为准。
+- 用户随后已确认按任务生成结构化计划，模板作为捷径。原型尚未实现此能力；当前合同与实施顺序以 v5 技术方案为准。
 - 复用已收录的 `D-SCRY-WORKFLOWS` 画布和原生配置表单；本轮共享组件检索无现成分类配置组件。TypeSafe 官网仅用于核对 typed decisions / calibrated confidence，不采用营销的速度与成本数字；本机 Pi Classify 文档用于区分 bool 概率与 choice/score confidence，不当作 Scry 已集成 API。
 
 ### v3 实际验证
@@ -78,7 +104,7 @@ Craft：等宽数字、根背景、焦点即时反馈、reduced-motion。连线�
 ## 实际原型行为
 
 - 页面默认播放有限样例：9 个扫描任务 → 4 个隔离修复样例 → 3 个验证任务 → 主会话汇总。一次派发该阶段全部就绪任务，没有并发槽位数。
-- 这是包含未来修复阶段的视觉回放，没有真实 worktree、文件写入或 Provider 调用；点击 edit 可见说明。真实执行第一期仍按方案先完成审计闭环，不能拿回放冒充实现。
+- 这是包含未来修复阶段的视觉回放，没有真实 worktree、文件写入或 Provider 调用；点击 edit 可见说明。真实执行须按 v5 的完整合同分阶段实现，不能拿回放冒充实现。
 - 连线粒子标示当前阶段，脚本 phase 高亮与节点点阵使用同一演示状态。修复与验证尚未就绪时保持暗态。
 - “暂停回放”只冻结演示时间；“暂停调度”允许在途样例结束，但不启动后续阶段。两者不是同一能力。
 - 停止先进入 STOP REQUESTED，下一帧才模拟确认；未开始的任务取消，不自动重发。
@@ -114,11 +140,11 @@ node --check designs/scry-workflows/app.mjs
 
 ## 验收边界与后续
 
-- 原型仍待用户确认视觉，不把本轮“修改吧”当作成品认可。
+- 生产面板仍需实际验收；架构与完整功能方向已经确认，不重复把它们列为待批准。
 - 真实 Provider、生产 Electron、真实限流与资源不足仍未验证；它们需要在实施阶段通过真实或隔离 fixture 检查。
 - 没有产品层并发上限不代表 Provider 或主机资源无限；遇到实际拒绝如实显示，不绕过认证、同 session fencing 或仓库 trust，也不偷偷加回固定槽位。
 - 独立视觉评审工具缺口：本会话可用 reviewer/delegate 子 Agent 不带浏览器或截图工具，Relay 截图为加密附件；不复用上轮受阻结论冒充本轮独立通过。由主会话直接截图对照，用户保留成品验收权。
-- 方案：`implementation-plan.md`。用户确认当前原型与编排范围后才接生产运行器；本轮不改已有 remote/iOS/main WIP。
+- 方案：`implementation-plan.md` 与 `execution-semantics.md`。下一实施动作从 M1 开始，先协调 main WIP；本轮方案修订不改已有 remote/iOS/main WIP。
 
 ## 设计记忆
 

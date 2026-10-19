@@ -2,7 +2,7 @@
 
 本轮依据：用户确认“任务驱动编排，模板作为捷径”，要求核对官方文章细节。来源为 [官方页面](https://code.claude.com/docs/en/workflows) 与对应 [Markdown](https://code.claude.com/docs/en/workflows.md)。本轮完整读取 Markdown 的 506 行；HTML 同时取回用于核对页面来源。文档会更新，下列数字和行为是本次取回版本，不是所有历史版本的保证。
 
-本文只说明文档事实与设计取舍。没有运行 Claude 原生 Workflow、付费 Agent 或 Jev 请求。
+本文只说明文档事实与设计取舍。没有运行 Claude 原生 Workflow、付费 Agent 或 Jev 请求。v5 已补齐循环、分支、中间状态与质量模式的规范，见 [执行语义与补充研究](execution-semantics.md)。下表的“不执行任意 JS”不再意味着只能做静态 DAG。
 
 本次源文件：`/tmp/scry-workflows-article.md`，SHA-256 `a324b4814d760d6c6f115a0a534123fe71acc40e4a9fa63f0e2f85200df197dd`。该临时副本用于核对，仓库只保留提炼后的事实与链接，不镜像整篇文章。
 
@@ -43,4 +43,14 @@
 
 已修订 [技术方案与流程图](implementation-plan.md)，用户认可的“自动编排 + 模板”不再列为待确认方向。当前 HTML 原型仍只演示固定鉴权模板及可选 Jev，不将方案更新当成生产实现。
 
-本轮不导入原生脚本、不添加执行引擎、不修改现有 remote/iOS WIP。循环修复、自动合入、任意 JS、跨设备工作流不在第一批范围内。
+v5 修订：循环修复、多方案权衡、批量迁移、明确授权后的应用均已纳入完整方案，不能继续以“第一期不做”代替用户要求。任意 JS/import、插件市场和跨设备运行不属于截图中的目标能力；不因此引入。
+
+本轮只修订文档和图，不执行真实修复或自动合入、不添加生产执行引擎、不修改现有 remote/iOS WIP。
+
+## 5. v5 补充核对
+
+- 本轮重新下载官方 Workflows Markdown，SHA-256 与上述 506 行副本一致；原文含循环、对抗复核及多角度规划，v4 范围确实不完整。
+- 另定向读取官方 Agent SDK 的 WorkflowInput/WorkflowOutput：status=async_launched 仍可能携带编译 error，最终结果是后续 task completion。因此受理、实际开始与完成必须分开。
+- 读取 LangGraph 的并行、Routing、Orchestrator-worker、Evaluator-optimizer，以及 Checkpointers 的任务写入、Replay、Durability 小节。借鉴状态隔离、评价反馈、checkpoint 与 side-effect 边界，不采用框架依赖或照搬其重放策略。
+- `durable-execution.md` 获取到的内容标题实际为 Persistence，本轮以具体 Checkpointers 页面核对恢复行为，不把 URL 名当内容证据。最初 platform 域的 SDK `.md` 返回 HTML，不将它当已阅读的 Markdown；使用 code.claude.com 对应 Markdown 的指定小节。
+- 补充来源的链接、实际阅读范围及哪些属于 Scry 设计决定，均列在 [执行语义 §1](execution-semantics.md#1-研究结论与实现选择)。

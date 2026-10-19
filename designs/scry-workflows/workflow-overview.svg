@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1440 1060" role="img" aria-labelledby="title desc">
-  <title id="title">Scry 工作流方案 v4：自动编排与模板共用运行器</title>
-  <desc id="desc">拟实现的架构，不是当前运行状态。用户选择模型和任务，自动生成或实例化模板，经过校验和确认后持久化任务，再由 Scry 执行 Agent 或可选 Jev。必要证据收口后推进下游，真实事件驱动关联面板。未知请求不自动重发。</desc>
+  <title id="title">Scry 工作流方案 v5：程序化控制流与质量模式</title>
+  <desc id="desc">拟实现架构，不是当前运行状态。模型生成工作流程序，由 Scry 运行器承载循环、分支和中间状态。Agent 执行对抗复核、多方案权衡或检查修复，Jev 可选。必要证据收口后更新控制帧，只有最终报告回到主会话，未知请求不重发。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#65758c"/></marker>
     <style>
@@ -22,7 +22,7 @@
   </defs>
   <rect width="1440" height="1060" fill="#f8fafc"/>
   <text x="50" y="52" class="title">Scry 工作流：按任务编排，模板作为捷径</text>
-  <text x="50" y="84" class="subtitle">方案 v4 · 拟实现架构；现有 HTML 仍是固定模板原型，未接入真实执行</text>
+  <text x="50" y="84" class="subtitle">方案 v5 · 拟实现架构；循环、分支、状态与质量模式均纳入目标，当前原型尚未实现</text>
 
   <rect x="430" y="110" width="580" height="62" class="node accent"/>
   <text x="720" y="137" class="heading">目标 + 范围 + 用户选择的角色模型</text>
@@ -31,33 +31,33 @@
   <path d="M720 190 H965 V206" class="edge"/>
   <rect x="270" y="206" width="410" height="66" class="node"/>
   <text x="475" y="234" class="heading">自动编排</text>
-  <text x="475" y="257" class="detail">模型生成数据计划，可选模板或组合节点</text>
+  <text x="475" y="257" class="detail">模型生成程序，运行器接管后续控制流</text>
   <rect x="760" y="206" width="410" height="66" class="node"/>
   <text x="965" y="234" class="heading">Scry 内置 / 用户模板</text>
-  <text x="965" y="257" class="detail">审计、变更评审、资料调研；绑定参数</text>
+  <text x="965" y="257" class="detail">审计 / 研究 / 多方案 / 检查修复 / 迁移</text>
   <path d="M475 272 V290 H720 V309" class="edge"/>
   <path d="M965 272 V290 H720" fill="none" stroke="#65758c" stroke-width="2"/>
 
   <rect x="430" y="309" width="580" height="66" class="node"/>
-  <text x="720" y="337" class="heading">校验结构化计划</text>
-  <text x="720" y="360" class="detail">依赖无环 · 类型 / 能力 / 引用有效 · 不执行生成 JS</text>
+  <text x="720" y="337" class="heading">编译并校验 WorkflowProgram</text>
+  <text x="720" y="360" class="detail">作用域 / 类型 / 能力 / 终止策略；只允许结构化循环</text>
   <path d="M720 375 V402" class="edge"/>
   <rect x="430" y="402" width="580" height="62" class="node"/>
   <text x="720" y="428" class="heading">用户确认，冻结本次计划</text>
-  <text x="720" y="451" class="detail">计划版本、模型、参数和允许的展开范围</text>
+  <text x="720" y="451" class="detail">程序版本、角色模型、参数、终止与副作用范围</text>
   <path d="M720 464 V491" class="edge"/>
   <rect x="430" y="491" width="580" height="62" class="node"/>
   <text x="720" y="518" class="heading">先持久化任务身份与派发意图</text>
-  <text x="720" y="541" class="detail">workflow → node → task → attempt；失败不发送</text>
+  <text x="720" y="541" class="detail">scope / item / iteration / attempt；失败不发送</text>
   <path d="M720 553 V580" class="edge"/>
   <rect x="430" y="580" width="580" height="70" class="node accent"/>
-  <text x="720" y="609" class="heading">Scry 调度依赖就绪的任务</text>
-  <text x="720" y="635" class="detail">无产品并发上限；实际准入 / 限流 / 资源拒绝仍生效</text>
+  <text x="720" y="609" class="heading">运行器执行程序与持久控制帧</text>
+  <text x="720" y="635" class="detail">sequence / parallel / map / branch / loop / call / return</text>
   <path d="M720 650 V672 H475 V690" class="edge"/>
   <path d="M720 672 H965 V690" class="edge"/>
   <rect x="270" y="690" width="410" height="70" class="node"/>
   <text x="475" y="718" class="heading">Agent 执行</text>
-  <text x="475" y="743" class="detail">完整 App 启动链；独立会话与原生权限</text>
+  <text x="475" y="743" class="detail">独立起草 / 对抗复核 / 评价改进 / 检查修复</text>
   <rect x="760" y="690" width="410" height="70" class="node classifier"/>
   <text x="965" y="718" class="heading">可选 Jev 分类</text>
   <text x="965" y="743" class="detail">单独计数；低置信度 / 缺失交给已批准的复核</text>
@@ -65,27 +65,29 @@
   <path d="M965 760 V780 H720" fill="none" stroke="#65758c" stroke-width="2"/>
   <rect x="430" y="800" width="580" height="70" class="node"/>
   <text x="720" y="829" class="heading">终态 + 输出有效 + 所需证据落盘</text>
-  <text x="720" y="854" class="detail">满足后推进下游；不是只看到 turnDone 就算完成</text>
+  <text x="720" y="854" class="detail">提交分支 / carry / 最佳候选，再推进控制流</text>
   <path d="M430 835 H220 V522 H430" class="edge"/>
-  <text x="205" y="793" text-anchor="end" class="subtitle">还有下游 / 展开项</text>
+  <text x="205" y="788" text-anchor="end" class="subtitle">所选分支 / 下一轮</text>
+  <text x="205" y="814" text-anchor="end" class="subtitle">或下游任务</text>
   <path d="M720 870 V904" class="edge"/>
   <rect x="430" y="904" width="580" height="66" class="node accent"/>
-  <text x="720" y="932" class="heading">报告：结论 + 来源 + 覆盖范围</text>
-  <text x="720" y="955" class="detail">confirmed / refuted / unverified；失败和未知不消失</text>
+  <text x="720" y="932" class="heading">仅最终报告与引用交回主会话</text>
+  <text x="720" y="955" class="detail">中间结果留在运行器；失败、异议和未知不消失</text>
 
   <rect x="40" y="344" width="320" height="150" class="side"/>
   <text x="64" y="378" class="sidehead">控制与恢复</text>
-  <text x="64" y="411" class="sidebody">暂停：停新派发，在途可收口</text>
-  <text x="64" y="441" class="sidebody">停止：请求 ≠ 已停止</text>
-  <text x="64" y="471" class="sidebody">未知：核对证据，不自动重发</text>
+  <text x="64" y="407" class="sidebody">并发：无产品上限</text>
+  <text x="64" y="431" class="sidebody">暂停：停新派发，在途可收口</text>
+  <text x="64" y="455" class="sidebody">停止：请求 ≠ 已停止</text>
+  <text x="64" y="479" class="sidebody">未知：核对证据，不自动重发</text>
 
   <rect x="1080" y="361" width="320" height="252" class="side"/>
   <text x="1104" y="396" class="sidehead">每次运行自动关联面板</text>
   <text x="1104" y="433" class="sidebody">左侧：本次计划与当前位置</text>
-  <text x="1104" y="467" class="sidebody">中间：节点、任务和分类</text>
+  <text x="1104" y="467" class="sidebody">中间：实例、分支、轮次和候选</text>
   <text x="1104" y="501" class="sidebody">详情：工具、来源与实际模型</text>
   <text x="1104" y="535" class="sidebody">用量：保留 unknown / partial</text>
-  <text x="1104" y="577" class="sidebody">读取持久事实，不控制调度</text>
+  <text x="1104" y="577" class="sidebody">进度不注入主模型消息历史</text>
   <path d="M1010 522 H1080" class="edge observation"/>
   <path d="M1010 835 H1360 V613" class="edge observation"/>
   <text x="1210" y="821" text-anchor="middle" class="subtitle">事件 / 证据投影</text>
