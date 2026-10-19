@@ -8,8 +8,23 @@
 | --- | --- |
 | 方案 | v10 合同齐全，并经整体评审修正：检查由 main 执行的 check 步骤承担，Agent 自述只算 inferred（[执行语义 §3.1](execution-semantics.md#31-检查步骤由-main-执行agent-自述不算通过)）；Agent 业务追问一律 blocked；新增 M0 竖切交付顺序（[主方案 §9](implementation-plan.md#9-实施顺序与可证伪验收)） |
 | 生产能力 | 未实现；没有调用真实 Provider 或 Jev |
-| 原型 | v3 固定样例，任务一次全部启动，与 v7 并发上限不符；界面已标明过时 |
+| 设计稿 | **v4**：`v4/index.html`，按 v10 方案重做，四个视图（运行 / 计划确认 / 管理 / 模板编辑）。根目录 `index.html` 是 v3 历史样例，与 v7 并发上限不符 |
 | 下一步 | 协调 `src/main/index.ts` 的 WIP 后实施 M0，再做 Provider 能力探测矩阵与 M1–M6 |
+
+### v4 设计稿
+
+保留用户确认过的参考结构（左侧编排程序、主会话 → runtime → 连线节点、底部日志），内容改为按 v10 方案表达：
+
+| 视图 | 表达的方案点 |
+| --- | --- |
+| 运行 | 程序视图与实例图同源高亮；map → 对抗复核 → branch（unknown 单列）→ loop（fix → main check）→ return；16 共享槽位、超出排队；1000 次预算只增不退；check 占槽位不计预算；#07 停滞后收敛再重启为 attempt 2/6；停止先 STOP REQUESTED 再确认收敛；主会话只收最终报告 |
+| 计划确认 | programRevision、角色模型、main 将执行的 argv 与可执行文件指纹、限额与自动重启、规模建议被任务覆盖、费用 unknown 不写 0；无“不再询问” |
+| 管理 | 运行中 / 停止中（再次停止）/ 已暂停 / 按依赖恢复 / nothing_to_resume（只能显式全新运行）；槽位合计不超 16 |
+| 模板编辑 | builtin/personal/project 同名消歧；JSON 源码、定义有效与本次可用分开；语义 diff；Agent 候选过期不覆盖；保存新版 / 另存为 / 仅本次 |
+
+定位：同模式更新，沿用 v3 tokens；未做多结构方案对比。调研：项目记录 D-SCRY-WORKFLOWS 命中，无可导入的流程组件；重读 Claude Workflows 原文 Watch the run、Approve the plan、Manage runs，采用“阶段 → Agent → 详情”钻取、批准卡展示阶段与用量提醒、停止后保留未退出 Agent；不采用“Always / 不再询问”和按启动顺序重放。
+
+校验：`node --test v4/state.test.mjs` 5/5 通过（槽位上限、预算含重启不含 check、check 失败触发下一轮、暂停不派发、停止与再次停止收敛且不重启）。Chrome 1512px 截图检查运行（第 6/13 帧、终态、停止中）、计划确认、模板编辑；管理视图只读取了 DOM 文本，未截图；窄屏布局未渲染验证。评审链接：`?view=plan|list|template`、`?frame=N&node=scan`。这是固定样例，不是生产调度器。
 
 以下为按版本倒序的历史记录。
 
