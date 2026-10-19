@@ -470,7 +470,7 @@ process.stdin.on('data', (chunk) => {
 })
 `
 
-function withFixture<T>(
+async function withFixture<T>(
   run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<T>,
   executableName = 'fixture-pi'
 ): Promise<T> {
@@ -478,24 +478,36 @@ function withFixture<T>(
   const executable = join(dir, executableName)
   writeFileSync(executable, fixtureSource)
   chmodSync(executable, 0o755)
-  return run(piProfileForExecutable(executable), dir).finally(() => rmSync(dir, { recursive: true, force: true }))
+  // RPC fixtures must not discover the developer's login shell, Node shims or auth namespace.
+  // Launcher-selection tests supply their own environment explicitly; transport and recorder IO stay real.
+  const environment = vi.spyOn(shellEnvironment, 'shellEnv').mockReturnValue({
+    PATH: dirname(process.execPath), HOME: dir, PI_AGENT_NODE: process.execPath, ROTOM_NODE: process.execPath
+  })
+  try {
+    return await run(piProfileForExecutable(executable), dir)
+  } finally {
+    environment.mockRestore()
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 function withRotomFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<T>): Promise<T> {
   return withFixture(run, 'rotom')
 }
 
-function withCommandFixture(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string) => Promise<void>): Promise<void> {
-  return withRotomFixture(async (profile, cwd) => {
-    // Command tests exercise real RPC and recorder IO, not the developer's login shell.
-    const environment = vi.spyOn(shellEnvironment, 'shellEnv').mockReturnValue({
-      PATH: dirname(process.execPath), HOME: cwd, ROTOM_NODE: process.execPath
-    })
-    try { await run(profile, cwd) } finally { environment.mockRestore() }
-  })
-}
+const withCommandFixture = withRotomFixture
 
 describe('Pi RPC Provider', () => {
+  it('isolates RPC fixtures from the host HOME and pins the current Node runtime', async () => {
+    await withFixture(async (profile, cwd) => {
+      const env = await piRpcEnvironment(profile)
+      expect(env.HOME).toBe(cwd)
+      expect(env.PATH).toBe(dirname(process.execPath))
+      expect(env.PI_AGENT_NODE).toBe(process.execPath)
+      expect(env.ROTOM_NODE).toBe(process.execPath)
+    })
+  })
+
   it('restores structured multi-select choices from an extension text-input prompt', () => {
     const title = '[不满意点] 你最想改善什么？（可多选）\n\n1. 布局不均衡 — 卡片留白混乱\n2. 视觉风格不够精致 — 层级与质感不足'
     const request = questionFromExtension('run-input', {
