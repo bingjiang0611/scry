@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { SessionMeta } from '../env'
 import { composerDraftKey, createComposerDraftStore, type ComposerDraft } from '../composer-drafts'
 import { Sidebar } from './Sidebar'
-import { SidebarRemoteProjects, type RemoteProjectGroup } from './SidebarRemoteProjects'
+import { SidebarRemoteProjects } from './SidebarRemoteProjects'
 import { remoteDraftKey } from './RemoteChat'
 
 const session: SessionMeta = {
@@ -24,13 +24,13 @@ const sidebar = (drafts: ReadonlyMap<string, ComposerDraft>, row = session, wait
   onNewChat={noop} onPick={noop} onTogglePin={noop} onArchive={noop}
 />)
 
-const group: RemoteProjectGroup = {
+const group = {
   key: 'host:/repo', connection: {
     id: 'host', label: 'Host', hostId: 'host-id', anchorSHA256: 'anchor',
-    ssh: { hostname: 'example.test', username: 'test', port: 22 }, state: 'connected', expiresAt: 4102444800000
+    ssh: { hostname: 'example.test', username: 'test', port: 22 }, state: 'connected' as const, expiresAt: 4102444800000
   },
-  state: 'connected', cwd: '/repo', name: 'repo', mtime: 1, canManage: true,
-  sessions: [{ sessionId: 'remote-local-id', externalSessionId: 'native-id', cwd: '/repo', providerId: 'pi', label: 'Remote conversation', ts: 1, isActive: true }]
+  state: 'connected' as const, cwd: '/repo', name: 'repo', mtime: 1, canManage: true, canDelete: true, needsUpgrade: false,
+  sessions: [{ sessionId: 'remote-local-id', externalSessionId: 'native-id', cwd: '/repo', providerId: 'pi' as const, label: 'Remote conversation', ts: 1, isActive: true }]
 }
 const remoteSidebar = (drafts: ReadonlyMap<string, ComposerDraft>) => renderToStaticMarkup(<SidebarRemoteProjects
   groups={[group]} active={null} collapsed={new Set()} draftStore={createComposerDraftStore(drafts)}
