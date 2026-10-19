@@ -28,7 +28,7 @@
 .sb-activity-heading {
   margin: 22px 10px 6px;
   color: var(--fg);
-  font: 500 15px/24px var(--font-ui);
+  font: 500 var(--text-supporting-size)/20px var(--font-ui);
 }
 
 .sb-activity-heading:first-child { margin-top: 6px; }
@@ -38,15 +38,14 @@
    only the activity presentation loses its cards and secondary visual labels. */
 :root .sidebar .sb-activity .sb-sess,
 :root .sidebar .sb-activity .sb-sess.active {
-  min-height: 40px;
-  padding: 7px 34px 7px 10px;
+  min-height: 34px;
+  padding: 0 34px 0 10px;
   border-color: transparent;
   border-radius: 5px;
   background: transparent;
   box-shadow: none;
   color: var(--fg);
-  font-size: 15px;
-  line-height: 24px;
+  line-height: 20px;
 }
 
 :root .sidebar .sb-activity [data-activity-group='working'] .sb-sess {
@@ -63,14 +62,30 @@
 .sidebar .sb-activity .sb-session-main { gap: 0; }
 :root .sidebar .sb-activity .sb-sesstext {
   color: inherit;
-  font-size: inherit;
   line-height: inherit;
-  font-weight: 400;
 }
 :root .sidebar .sb-activity .sb-sess.active .sb-sesstext,
 :root .sidebar .sb-activity .sb-sess.unread .sb-sesstext {
   color: var(--fg);
-  font-weight: 600;
+}
+
+/* A narrow highlight crosses only running titles. Keep opaque text as the
+   default so reduced motion and forced colors never depend on text clipping. */
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  :root .sidebar .sb-activity [data-activity-group='working'] .sb-sesstext {
+    background-color: var(--dim);
+    background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--fg) 45%, transparent), transparent);
+    background-size: 48px 100%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: sb-activity-sweep 3.2s linear infinite;
+  }
+}
+
+@keyframes sb-activity-sweep {
+  from { background-position-x: -48px; }
+  to { background-position-x: calc(100% + 48px); }
 }
 
 /* Preserve provider and status descriptions for assistive technology. */
@@ -90,7 +105,7 @@
 .sb-activity-status {
   position: absolute;
   right: 12px;
-  top: 12px;
+  top: 9px;
   display: flex;
   color: var(--dim);
   pointer-events: none;

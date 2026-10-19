@@ -32,13 +32,48 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   const layoutAnimations = `document.querySelector('.sb-activity').getAnimations({ subtree: true }).filter(animation => animation.effect.target.hasAttribute('data-motion-key'))`
   await wait('window.activityFixture && document.querySelector("[role=tab]")')
   check(await read(`document.querySelector('[role="tab"][aria-selected="true"]').textContent === '项目'`), 'Original project view is not the default')
+  const projectTypography = await read(`(() => {
+    const style = getComputedStyle(document.querySelector('.sb-sess .sb-sesstext'));
+    return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
+  })()`)
   await click('#activity-sidebar-view-projects')
   await wait(`document.activeElement?.id === 'activity-sidebar-view-projects'`)
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
   await wait(`document.activeElement?.id === 'activity-sidebar-view-activity' && ${group} === 'working'`)
+  const activityTypography = await read(`(() => {
+    const style = getComputedStyle(document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'));
+    return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
+  })()`)
+  check(JSON.stringify(activityTypography) === JSON.stringify(projectTypography), 'Activity titles do not match project-list typography')
+  const titleAnimations = `document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext').getAnimations()`
+  check(await read(`${titleAnimations}.some(animation => animation.animationName === 'sb-activity-sweep')`), 'Working title has no sweep animation')
+  const sweep = await read(`(async () => {
+    const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext');
+    const animation = title.getAnimations().find(item => item.animationName === 'sb-activity-sweep');
+    await animation.ready;
+    const before = getComputedStyle(title).backgroundPositionX;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { before, after: getComputedStyle(title).backgroundPositionX, frames: animation.effect.getKeyframes() };
+  })()`)
+  check(sweep.before !== sweep.after && sweep.frames[0].backgroundPositionX === '-48px' && sweep.frames.at(-1).backgroundPositionX === 'calc(100% + 48px)', 'Working sweep is not advancing from left to right')
+  check(await read(`Array.from(document.querySelectorAll('[data-activity-group="completed"] .sb-sesstext')).every(title => title.getAnimations().length === 0 && getComputedStyle(title).webkitTextFillColor !== 'rgba(0, 0, 0, 0)')`), 'Completed titles inherited the working sweep')
   await click(row)
   await wait(`document.querySelector('#activity-selection').textContent === 'webhook' && document.activeElement === document.querySelector(${JSON.stringify(row)})`)
+  const sweepImages = []
+  for (const time of [1100, 2100]) {
+    const rect = await read(`(() => {
+      const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext');
+      const animation = title.getAnimations().find(item => item.animationName === 'sb-activity-sweep');
+      animation.pause(); animation.currentTime = ${time};
+      const bounds = title.getBoundingClientRect();
+      return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
+    })()`)
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    sweepImages.push((await contents.capturePage(rect)).toPNG())
+  }
+  check(!sweepImages[0].equals(sweepImages[1]), 'Selected working title does not visibly sweep')
+  await read(`${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play()`)
   check(await read(`document.querySelectorAll('.sb-activity-heading').length === 2 && !document.querySelector('.sb-activity-project') && !document.querySelector('.sb-activity-heading span')`), 'Empty groups, project subtitles or counts leaked into the flat list')
   check(await read(`!document.querySelector('.sb-activity').textContent.includes('未核实的历史')`), 'Unknown history leaked into completed')
   await read(`window.activityRow = document.querySelector(${JSON.stringify(row)}); window.activityHeading = document.getElementById('sidebar-activity-working'); window.activityFixture.setReversed(true)`)
@@ -50,6 +85,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await read("window.activityFixture.setPhase('attention')")
   await wait(`${group} === 'attention'`)
   check(await read(`window.activityRow === document.querySelector(${JSON.stringify(row)}) && document.activeElement === window.activityRow`), 'Cross-group move remounted the focused row')
+  check(await read(`${titleAnimations}.length === 0 && getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor !== 'rgba(0, 0, 0, 0)'`), 'Attention title kept its working sweep or became invisible')
   const movement = await read(`${layoutAnimations}.map(animation => animation.effect.getKeyframes()[0].transform)`)
   check(movement.some(transform => transform && transform !== 'translateY(0px)'), 'State transition has no real layout animation')
   check(await read(`document.getElementById('sidebar-activity-working') === window.activityHeading && window.activityHeading.getAnimations().some(animation => animation.effect.getKeyframes()[0].transform !== 'translateY(0px)')`), 'Section heading did not move with its tasks')
@@ -60,7 +96,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     check(await read(`getComputedStyle(document.querySelector('.sidebar')).backgroundColor === '${theme === 'light' ? 'rgb(247, 247, 245)' : 'rgb(24, 24, 24)'}'`), 'Theme did not update the sidebar surface')
     await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    check(await read(`getComputedStyle(window.activityRow).fontSize === '15px' && getComputedStyle(window.activityRow).backgroundImage === 'none' && getComputedStyle(window.activityRow).boxShadow === 'none'`), 'Production CSS overrode the approved flat-row appearance')
+    check(await read(`getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).fontSize === ${JSON.stringify(projectTypography.size)} && getComputedStyle(window.activityRow).backgroundImage === 'none' && getComputedStyle(window.activityRow).boxShadow === 'none'`), 'Production CSS overrode the flat-row appearance or shared typography')
     if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-${theme}.png`, (await contents.capturePage({ x: 0, y: 0, width: 280, height: 650 })).toPNG())
   }
   // Put the existing completed task before this task in catalog order. Promotion
@@ -86,9 +122,19 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    await wait(`matchMedia('(prefers-reduced-motion: reduce)').matches`)
     await read(`window.activityFixture.setPhase('working')`)
     await wait(`${group} === 'working'`)
-    check(await read(`${layoutAnimations}.length === 0`), 'Reduced-motion still animates')
+    const reducedState = await read(`({ reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, layout: ${layoutAnimations}.length, title: ${titleAnimations}.map(animation => ({ name: animation.animationName, property: animation.transitionProperty })), fill: getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor })`)
+    check(reducedState.reduced && reducedState.layout === 0 && reducedState.title.length === 0 && reducedState.fill !== 'rgba(0, 0, 0, 0)', `Reduced-motion still animates or hides the working title: ${JSON.stringify(reducedState)}`)
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'active' }] })
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    await wait(`matchMedia('(forced-colors: active)').matches`)
+    check(await read(`${titleAnimations}.length === 0 && getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor !== 'rgba(0, 0, 0, 0)'`), 'Forced colors hides or animates the working title')
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    await wait(`!matchMedia('(forced-colors: active)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches`)
   } finally { contents.debugger.detach() }
   check(await read(`window.activityRow === document.querySelector(${JSON.stringify(row)})`), 'Reduced-motion state change remounted the row')
   await wait(`${layoutAnimations}.length === 0`)
@@ -99,6 +145,13 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   }
   await read("window.activityFixture.setPhase('working')")
   await wait(`${group} === 'working' && ${layoutAnimations}.length === 0`)
+  for (const theme of ['dark', 'light']) {
+    await read(`document.documentElement.dataset.theme = '${theme}'`)
+    await wait(`${titleAnimations}.some(animation => animation.animationName === 'sb-activity-sweep') && getComputedStyle(document.querySelector('.sidebar')).backgroundColor === '${theme === 'light' ? 'rgb(247, 247, 245)' : 'rgb(24, 24, 24)'}'`)
+    await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-working-${theme}.png`, (await contents.capturePage({ x: 0, y: 0, width: 280, height: 650 })).toPNG())
+  }
   await click('#activity-sidebar-view-projects')
   await wait(`document.querySelector('.sb-list').textContent.includes('未核实的历史')`)
   await click('#activity-sidebar-view-activity')
@@ -122,5 +175,6 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await wait(`!document.querySelector('.sidebar')`)
   return { tabsKeyboard: true, nativeSelection: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
     conditionalSections: true, movingHeadings: true, flatAppearance: true, honestCompletion: true, inGroupReorder: true,
-    pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true }
+    pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,
+    sharedTypography: true, workingSweep: true, staticTerminalTitles: true, forcedColors: true }
 }
