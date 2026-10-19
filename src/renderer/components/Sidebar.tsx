@@ -18,6 +18,8 @@ import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
 import { ProviderGlyph } from './ProviderGlyph'
+import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
+import { SessionDraftIndicator } from './SessionDraftIndicator'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocation } from './SidebarRemoteProjects'
 
@@ -44,6 +46,7 @@ export const Sidebar = memo(function Sidebar({
   onPickConversation,
   activeProviderId,
   activeAgentProfileId,
+  draftStore,
   runningRunIds = new Set<string>(),
   waitingQuestionRunIds = new Set<string>(),
   unreadSessionKeys = new Set<string>(),
@@ -84,6 +87,7 @@ export const Sidebar = memo(function Sidebar({
   onPickConversation?: (conversation: ConversationSummary) => void
   activeProviderId?: SessionProviderId
   activeAgentProfileId?: string
+  draftStore?: ComposerDraftStore
   runningRunIds?: ReadonlySet<string>
   waitingQuestionRunIds?: ReadonlySet<string>
   unreadSessionKeys?: ReadonlySet<string>
@@ -214,7 +218,11 @@ export const Sidebar = memo(function Sidebar({
   }
   const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
-      <span className="sb-session-main"><Icon name={conversation.pinnedAt ? 'pin' : 'message'} /><span className="sb-sesstext" title={conversation.cwd}>{conversation.title}</span></span>
+      <span className="sb-session-main">
+        <Icon name={conversation.pinnedAt ? 'pin' : 'message'} />
+        {draftStore && <SessionDraftIndicator store={draftStore} draftKey={composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })} />}
+        <span className="sb-sesstext" title={conversation.cwd}>{conversation.title}</span>
+      </span>
       <span className="sb-session-meta">{conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? conversation.deletion.status === 'complete' ? '副本待核对' : '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}</span>
     </button>
   </div>
@@ -304,10 +312,10 @@ export const Sidebar = memo(function Sidebar({
           <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
             ? renderConversation(entry.conversation)
             : entry.kind === 'remote' ? <SidebarRemoteProjects groups={[{ ...entry.project, sessions: [entry.session] }]}
-              layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
+              draftStore={draftStore} layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
               onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />
-            : <SessionRow cwd={entry.project.cwd} projectName={entry.project.name} session={entry.session}
+            : <SessionRow cwd={entry.project.cwd} projectName={entry.project.name} session={entry.session} draftStore={draftStore}
               active={isActive(entry.project.cwd, entry.session)}
               running={Boolean(entry.session.runId && runningRunIds.has(entry.session.runId))}
               waitingForAnswer={Boolean(entry.session.runId && waitingQuestionRunIds.has(entry.session.runId))}
@@ -329,6 +337,7 @@ export const Sidebar = memo(function Sidebar({
                 return <SessionRow
                   key={sessionKey(cwd, session)}
                   session={session}
+                  draftStore={draftStore}
                   cwd={cwd}
                   projectName={name}
                   showProjectName
@@ -361,6 +370,7 @@ export const Sidebar = memo(function Sidebar({
             <SidebarRemoteProjects
               key={group.project.key}
               groups={[group.project]}
+              draftStore={draftStore}
               active={activeRemote}
               collapsed={collapsed}
               onToggle={toggle}
@@ -420,6 +430,7 @@ export const Sidebar = memo(function Sidebar({
                     <SessionRow
                       key={sessionKey(p.cwd, s)}
                       session={s}
+                      draftStore={draftStore}
                       cwd={p.cwd}
                       projectName={p.name}
                       active={isActive(p.cwd, s)}
@@ -609,6 +620,7 @@ function SessionRow({
   waitingForAnswer,
   unread,
   backgroundWork,
+  draftStore,
   onPick,
   onTogglePin,
   onArchive,
@@ -623,6 +635,7 @@ function SessionRow({
   waitingForAnswer: boolean
   unread: boolean
   backgroundWork?: BackgroundWork
+  draftStore?: ComposerDraftStore
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
@@ -662,6 +675,10 @@ function SessionRow({
               label={providerDisplayName[session.providerId]}
             />
           )}
+          {draftStore && <SessionDraftIndicator store={draftStore} draftKey={composerDraftKey({
+            providerId: session.providerId, agentProfileId: session.agentProfileId, cwd,
+            sessionId: session.externalSessionId ?? session.sessionId
+          })} />}
           <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
         </span>
         <span className="sb-session-meta">

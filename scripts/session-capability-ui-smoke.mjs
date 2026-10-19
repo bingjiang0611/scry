@@ -495,18 +495,35 @@ async function exerciseSessionSelection(contents, scenario) {
       contents.focus()
       await click(input)
       await wait(`document.activeElement === document.querySelector(${JSON.stringify(input)})`)
-      await contents.insertText(value)
+      contents.selectAll()
+      if (value) await contents.insertText(value)
+      else {
+        contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
+        contents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+      }
       await wait(`document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(value)}`)
     }
     await click(newButton)
     await wait(`document.querySelector(${JSON.stringify(input)})?.value === '' && ${state}.newSessions === 1`)
     await type(newDraft)
+    if (await read(`document.querySelector('.sb-draft') != null`)) throw new Error('A new workspace draft marked an existing session')
     await click('.sb-sess.running')
     await wait(`${state}.historyReads === 1`)
     await click('#resolve-history')
     await wait(`document.querySelector(${JSON.stringify(input)}).value === ''`)
     await type(existingDraft)
+    await wait(`document.querySelector('.sb-sess.running .sb-draft')?.textContent === '草稿'`)
+    if (!await read(`(() => {
+      const row = document.querySelector('.sb-sess.running')
+      const draft = row.querySelector('.sb-draft')
+      const title = row.querySelector('.sb-sesstext')
+      const time = row.querySelector('.sb-sesstime')
+      return draft.nextElementSibling === title && draft.getBoundingClientRect().right <= time.getBoundingClientRect().left &&
+        getComputedStyle(draft).whiteSpace === 'nowrap' && document.activeElement === document.querySelector(${JSON.stringify(input)})
+    })()`)) throw new Error('Draft label displaced session metadata or interrupted typing focus')
     await click(newButton)
+    await wait(`document.querySelector('.sb-sess.running:not(.active) .sb-draft') != null`)
+    if (await read(`document.querySelector('.sb-sess[data-provider="pi"] .sb-draft') != null`)) throw new Error('Draft leaked to another Provider/profile')
     await wait(`document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(newDraft)}`)
     await click(newButton)
     await wait(`${state}.newSessions === 3 && document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(newDraft)}`)
@@ -521,6 +538,12 @@ async function exerciseSessionSelection(contents, scenario) {
     await wait(`${state}.historyReads === 3`)
     await click('#resolve-history')
     await wait(`document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(existingDraft)}`)
+    await type('')
+    await wait(`document.querySelector('.sb-sess.running .sb-draft') == null`)
+    await type('   ')
+    if (await read(`document.querySelector('.sb-sess.running .sb-draft') != null`)) throw new Error('Whitespace-only input was marked as a draft')
+    await type(existingDraft)
+    await wait(`document.querySelector('.sb-sess.running .sb-draft') != null`)
     await click(newButton)
     await wait(`${state}.newSessions === 5 && document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(newDraft)}`)
     await click('.sb-sess[data-provider="pi"]')
@@ -529,7 +552,7 @@ async function exerciseSessionSelection(contents, scenario) {
     await click(newButton)
     await wait(`${state}.newSessions === 6 && document.querySelector(${JSON.stringify(input)}).value === ${JSON.stringify(projectDraft)}`)
     if (await read(`${state}.starts`) !== 0) throw new Error('Restoring a draft started a Provider')
-    return { scenario, newDraftRestored: true, existingDraftPreserved: true, projectDraftIsolated: true, repeatedNewPreserved: true, noImplicitSend: true }
+    return { scenario, newDraftRestored: true, existingDraftPreserved: true, projectDraftIsolated: true, repeatedNewPreserved: true, sidebarDraftPresence: true, clearAndWhitespace: true, draftLayoutAndFocus: true, noImplicitSend: true }
   }
   if (scenario === 'focused-event') await click('#focus-pi')
   else await click('.sb-sess[data-provider="pi"]:not(.running)')

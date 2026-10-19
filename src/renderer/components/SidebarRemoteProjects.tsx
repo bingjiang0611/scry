@@ -11,6 +11,9 @@ import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatal
 import { hostState } from './LocationPicker'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
+import type { ComposerDraftStore } from '../composer-drafts'
+import { remoteDraftKey } from './RemoteChat'
+import { SessionDraftIndicator } from './SessionDraftIndicator'
 
 export interface ActiveRemoteLocation {
   connectionId: string
@@ -55,6 +58,7 @@ export function SidebarRemoteProjects({
   groups,
   layout = 'projects',
   active,
+  draftStore,
   collapsed,
   onToggle,
   onPickSession,
@@ -65,6 +69,7 @@ export function SidebarRemoteProjects({
   groups: RemoteProjectGroup[]
   layout?: 'projects' | 'activity'
   active: ActiveRemoteLocation | null
+  draftStore?: ComposerDraftStore
   collapsed: ReadonlySet<string>
   onToggle: (key: string) => void
   onPickSession: (connectionId: string, session: RemoteSessionRef) => void
@@ -170,6 +175,7 @@ export function SidebarRemoteProjects({
                       >
                         <span className="sb-session-main">
                           {provider ? <ProviderGlyph className="sb-provider" provider={provider} /> : <Icon name="cube" className="sb-provider" />}
+                          {draftStore && <SessionDraftIndicator store={draftStore} draftKey={remoteDraftKey(group.connection.id, group.cwd, session.externalSessionId)} />}
                           <span className="sb-sesstext">{session.label || '(无预览)'}</span>
                           {layout === 'activity' && <span className="sb-host-tag" data-state={group.state}>{group.connection.label}</span>}
                         </span>

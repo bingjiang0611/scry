@@ -2,7 +2,7 @@
 
 ## D-20261019-scry-session-drafts
 
-- 状态：需求已确认；A/B 设计稿待用户选择。只新增独立原型，不改产品源码，不把原型当作已上线能力。
+- 状态：用户于 2026-10-19 明确选择 A；产品实现已完成本地与远程隔离 Electron 交互回归，安装与真实 App 验收见下方实施记录。原型仍仅用于展示，不把原型当作已上线能力。
 - 用户要求：「当对话框中有输入的时候 切换会话可以显示下有草稿吗 先出设计稿」。2026-10-19 当前会话，附桌面端原始截图。
 - 目标仓库与实际 cwd：`/Users/baobingjiang/IdeaProjects/vibecoding/scry`。开始时已有大量远程、iOS、composer 相关 WIP；本次不修改、提交或安装这些改动。
 - 产物：[交互设计稿](index.html)，预览 `http://127.0.0.1:8956/`。本机 HTTP 服务只暴露此目录。无外部依赖、网络 API、真实 Provider 或真实草稿读取。文本仅存在本页内存中，刷新重置。
@@ -59,7 +59,18 @@ Craft：应用 [Hover 克制](https://craft.gustavofior.com/hover-restraint)、[
 
 减法：删除无操作的侧栏快捷键装饰；不增加草稿数量、提示气泡、额外列表或 composer 状态条。渲染自审发现文案集中化后的 Provider 标签误用了图标字体，已把 CSS 限定至图标并重新查看最终截图。行的辅助名称含「有草稿」，按钮保留键盘 focus-visible；完整键盘路径和屏幕阅读器未验收。局部新增状态，不是整体重设计，未另做独立 critic。
 
-### 交付边界与下一步
+### A 方案实施记录（2026-10-19）
+
+- 新增 `SessionDraftIndicator`，直接订阅已有 `ComposerDraftStore` 的布尔 presence：非空白文本或附件即有草稿。标记在 Provider 图标之后、标题之前；时间、运行中、待回答、未读和排序语义不变。
+- 覆盖本地、置顶、动态、逻辑 conversation 与远程会话。沿用现有 Provider/profile/cwd/native-session 和 remote host 键，不建第二套草稿存储，不读取正文作列表摘要，不增加 IPC 或自动发送。
+- 实现 worktree：`/tmp/scry-session-draft-indicators`，基线 `67f03e7`；不混入主工作区的远程/iOS 等 WIP。
+- 回归对照：新 `SidebarDrafts.test.tsx` 在旧实现上 5 项失败、2 项通过；实现后 7 项全通过。与 composer/remote 单测合跑 32 项通过；`npm run typecheck`、`npm run build` 通过。
+- 原生输入验证：`session-capability-ui-smoke.mjs --selection-only` 10 个场景通过，新增切走保留、清空移除、空白不标、元数据位置与输入焦点断言；`desktop-remote-ui-smoke.mjs --composer-history-only` 通过，新增远程切换及草稿归属断言。未调用真实 Provider。
+- 性能：`performance:measure -- --compare 67f03e7` 既有工作量计数一致、ratchet 通过，无 worse；机器负载 14.45→15.64（10 核，highLoad），不宣称毫秒改善。该计数集不直接覆盖侧栏逐键开销；本次不修改 collector、workload 或门限。
+- 日常 `/Applications/Scry.app` 为 0.2.208，不能用主分支 0.2.204 的隔离代码直接覆盖。已找到 `~/.local/state/scry-catalog-current-8GWCgkE7/source` 的同版快照：1221 项 manifest 的可执行源码无漂移（只有性能机会文档变化和单独的 skill symlink），13 个已编译 out 文件与当前安装 ASAR 内容逐字节一致。当前安装 ASAR SHA-256 为 `568cd059efcb467f1829d188cb9a7a72f9155a40cead7917c43eac92f6c8c3cf`；旧安装记录的不同 ASAR hash 不冒充本次实测值。
+- 安装将仅在上述已安装基线快照上叠加本次 patch、单独升级 App 版本并通过现有打包/安装校验；安装前复核基线未改变。不自动退出、启动或重启用户 App。真实日常 App 重放仍须用户重启后执行。
+
+### 设计阶段交付边界（历史）
 
 - 待用户选择 A 或 B，再接入真实 store 与侧栏。批准本稿不代表真实 App 验收。
 - 附件草稿、远程/本地会话身份隔离、发送失败保留、重启恢复、待回答与草稿共存须在接入阶段补 focused 回归并于当前版本真实 App 重放。

@@ -465,6 +465,7 @@ async function exercise(contents, pointer, capture, options) {
     await click('textarea[aria-label="描述任务"]')
     await key('ArrowUp')
     await wait(`${composerValue} === 'latest remote prompt'`, 'recall latest remote prompt')
+    await wait('document.querySelector(\'[data-remote-session="old-native"] .sb-draft\') != null', 'remote session draft indicator')
     const refreshHistory = async (prompts) => {
       const reads = (await fixture()).historyCalls.length
       await read(`window.desktopRemoteFixture.historyPrompts = ${JSON.stringify(prompts)}; window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()`)
@@ -480,6 +481,7 @@ async function exercise(contents, pointer, capture, options) {
     await wait(`${composerValue} === 'latest remote prompt'`, 'return through the original history snapshot')
     await key('ArrowDown')
     await wait(`${composerValue} === ''`, 'leave history at empty draft')
+    await wait('document.querySelector(\'[data-remote-session="old-native"] .sb-draft\') == null', 'empty remote composer removes draft indicator')
     await key('ArrowUp')
     await wait(`${composerValue} === 'arrived while browsing'`, 'next traversal sees refreshed history')
     await key('ArrowDown')
@@ -502,8 +504,11 @@ async function exercise(contents, pointer, capture, options) {
     await wait(`${composerValue} === '' && document.querySelector(".chat-session-evidence-gap") != null`, 'switch to an empty remote session')
     await click('textarea[aria-label="描述任务"]'); await key('ArrowUp')
     check(await read(`${composerValue} === ''`), 'History leaked from another session')
+    check(await read('document.querySelector(\'[data-remote-session="old-native"]:not(.active) .sb-draft\') != null && document.querySelector(\'[data-remote-session="other-native"] .sb-draft\') == null'), 'Remote draft indicator leaked or disappeared after switching')
+    await click('[data-remote-session="old-native"]')
+    await wait(`${composerValue} === '/skill'`, 'return to marked remote draft')
     check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'History browsing sent a prompt')
-    return { remoteComposerHistory: { refreshDuringNavigation: true, slashRecall: true, typedSlashAndEscape: true, editedDraftPreserved: true, sessionIsolation: true, nativeKeyboard: true } }
+    return { remoteComposerHistory: { refreshDuringNavigation: true, slashRecall: true, typedSlashAndEscape: true, editedDraftPreserved: true, sessionIsolation: true, sidebarDraftPresence: true, nativeKeyboard: true } }
   }
   // Native input through production App: insertion must retain the owning host/session.
   await click('textarea[aria-label="描述任务"]'); await insert('remote draft')
