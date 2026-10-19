@@ -14,6 +14,7 @@
   --dim: #b5b5af;
   --dim2: #8d8d87;
   --dim3: #686864;
+  --draft-fg: #c7b795;
   --accent: #5b9cff;
   --accent-fg: #ffffff;
   --accent-soft: rgb(91 156 255 / 12%);
@@ -57,6 +58,7 @@
   --dim: #62625e;
   --dim2: #85857f;
   --dim3: #aaa9a2;
+  --draft-fg: #78613a;
   --scrollbar-thumb: #c5c5bf;
   --scrollbar-thumb-hover: #aaa9a2;
   --resizer-line: #e8e8e4;
@@ -285,6 +287,14 @@ select:focus-visible,
 .sb-sesstext {
   font-size: 13px;
   font-weight: 450;
+}
+
+.sb-draft {
+  flex: none;
+  color: var(--draft-fg);
+  font-size: var(--text-compact-size);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .sidebar .sb-sess .sb-provider {

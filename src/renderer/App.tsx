@@ -2537,6 +2537,7 @@ export function App() {
     >
       <Sidebar
           id="sidebar-pane"
+          draftStore={draftStore}
           version={packageJson.version}
           projects={projects}
           activeCwd={view === 'conversation' ? logicalConversation?.cwd ?? null : view === 'remote' ? null : cwd}

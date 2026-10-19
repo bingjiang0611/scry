@@ -45,6 +45,8 @@ export const LLM_RUNNING_MODELS_COPY = {
   states: { streaming: '生成中', tool: '工具执行', complete: '收尾中', waiting: '等待模型', firstOutput: '等待首次输出' }
 } as const
 
+export const SESSION_DRAFT_LABEL = '草稿'
+
 export const SIDEBAR_ACTIVITY_COPY = {
   navigation: '侧栏视图',
   projects: '项目',
