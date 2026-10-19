@@ -1318,7 +1318,7 @@ export function App() {
   }
 
   useEffect(() => {
-    if (view === 'conversation') return
+    if (view !== 'chat') return
     const el = scrollRef.current
     if (!el) return
     const onScroll = (): void => {
@@ -1332,14 +1332,14 @@ export function App() {
   }, [cwd, view])
 
   useEffect(() => {
-    if (view === 'conversation') return
+    if (view !== 'chat') return
     const el = scrollRef.current
     if (!el) return
     return observeChatBottomLayout(el, () => openingSessionBottomRef.current || shouldStickToBottomRef.current)
   }, [cwd, selectedProviderSessionId, view])
 
   useLayoutEffect(() => {
-    if (view === 'conversation') return
+    if (view !== 'chat') return
     const openingSession = openingSessionBottomRef.current
     scrollChatToBottomIfNeeded(
       scrollRef.current,
