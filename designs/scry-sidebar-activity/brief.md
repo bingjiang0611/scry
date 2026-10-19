@@ -2,7 +2,7 @@
 
 ## D-20261018-scry-sidebar-activity
 
-- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；安装门禁仍受阻，未替换或重启用户 App，详情见下述最终状态。
+- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；0.2.202 的安装状态及剩余安装包/安全门禁已核验通过。未自动启动日常 App，真实会话体验仍待用户手动打开确认。
 - Feedback：2026-10-18，用户纠正「不一样啊 他是这样的三个 tab 哪个下面有任务展示哪个 然后顺序和任务都可以跳动 先出设计稿」，并提供 Needs input / Working / Completed 三段列表截图。原要求增加侧栏入口，并不等于认可上一版的分组细节。
 - 方向：保留外层「项目 / 动态」入口背景；内部是同时可见的三个状态分区，不做三个互斥横向 Tab。空组连标题一起隐藏，任务和标题一起移动。当前参考方向已明确，只做一稿；分区换位提供独立比较动作，不擅自定义自动抢占排序。
 - 目标：并行会话状态变化时，用户能追踪同一会话去了哪里，而不是看到旧行消失、新行出现。
@@ -59,7 +59,7 @@
 - **未打包/安装0.2.202**；实际 `/Applications/Scry.app` 仍为0.2.201，未重启。隔离工作区、依赖、测试日志保留在 `/tmp/scry-activity-v2-41seVH/`，没有留下本次活跃测试进程。
 - 下一步：在低负载环境重新执行完整安装门禁；如果 Pi 的3s/5s失败仍存在，再单独排查该路径，不删断言、不扩大 timeout、不以旧绿灯或 focused 通过放行安装。需要用户提供空闲时段或明确下一步范围。
 
-### 2026-10-18 · mac2 完整复验通过，本机签名包启动受阻
+### 2026-10-18 · mac2 完整复验通过，本机签名包启动受阻（历史，下节已补验）
 
 - 用户授权转到 mac2 验证。冻结当前 main `2532d6ad1f79a3610a5381a9a1dd9ded7db2237b`，仅复制浅克隆的已提交源码，不复制个人会话/凭据；两端源码归档 SHA-256 均为 `b35953fefc14a2cf0b69c2b2be87ea98338438b6f0bde0bc327563f342653b38`。mac2 使用独立目录与物理依赖副本，依赖 lock（去除根版本）一致，没有改动已有工程或安装的 App。
 - mac2：Apple M1 / arm64，Node 22.22.2，首次检查负载1.45；验证结束负载3.37。完整 runner 退出0，源码 HEAD 与工作区保持不变。没有改测试、断言、单项时限或开启付费探针。
@@ -79,6 +79,16 @@
 - 为防重启清空 `/tmp`，本机已将 `/tmp/scry-install-mac2-sl5LS8/` 完整保存到 **`/Users/baobingjiang/.local/state/scry-install-0.2.202-537Zh6/`**：源码、签名产物、回传的 `verify.log` / `verify.exit` / `measure.json`，以及 `evidence/` 内的本机失败与系统日志。保存后源码 HEAD/工作区、产物哈希和深层严格签名再次核对一致；未尝试通过换路径再次启动。产物 `source/dist/mac-arm64/Scry.app/Contents/Resources/app.asar` SHA-256：`3f73604b6bdf351756f29e8f2845322d787ed630fcdb182b431b56c4c1e3c54a`。mac2 保留 `/Users/test/scry-install-0.2.202-ewQvBF/`，未发现该源码路径的活跃进程。
 - **仍未执行安装，`/Applications/Scry.app` 仍为0.2.201。** 新包为开发签名、未公证；未自动启动、停止或重启用户 Scry。
 - 下一步由用户保存工作并手动重启本机 macOS，再回复继续。Agent 先核对上述冻结源码/产物哈希，复查原 `check:packaged-app` 与完整 `smoke:electron`；全部通过后才运行原 `node scripts/install-macos.mjs`，再验版本、签名、源/目标哈希与备份。如果同样被系统终止，交接系统侧排查，不循环重建、不绕过门禁。
+
+### 2026-10-18 · 0.2.202 安装核验完成
+
+- 用户再次要求继续安装时，磁盘上的 `/Applications/Scry.app` 已经是0.2.202，签名时间为22:22:29；本轮没有观察到此前安装动作，不将其追认为本轮执行，也没有重复覆盖安装。机器 uptime 仍为4天，不能声称问题由重启修复。
+- 已安装包与当前主仓 `dist/mac-arm64/Scry.app` 的345个普通文件/符号链接条目（文件 SHA-256、文件权限、链接目标）逐项一致；测试后再次核对仍一致。`app.asar` SHA-256 仍为上述 `3f73604b…e3c54a`，与 mac2 验证的冻结代码构建一致。主仓自 `2532d6a` 后仅有设计稿/记录变更，无生产代码变化。新旧包签名时间与 CDHash 不同，不把旧的21:11签名产物称为新包的逐字节副本。
+- 原 `check:packaged-app` 分别检查 `/Applications/Scry.app` 与主仓构建产物，均通过：App0.2.202，内置 CLI0.2.49，311个运行依赖引用完整，包体298141201 bytes，未突破346030080 bytes上限，preload/资源 allowlist/原生模块/history extension 指纹通过。
+- 主仓执行完整 `npm run smoke:electron` 退出0：外部链接、renderer崩溃恢复、签名包安全检查、文件预览、桌面远程宿主全部完成。使用临时 userData/HOME/工作区和受控 Provider fixture，不启动真实付费 Provider；不能据此宣称真实用户会话体验通过。
+- 已安装包 `codesign --verify --deep --strict` 通过；仍为 Apple Development 开发签名，非公证发布。`/Applications/.Scry.app.backup` 为0.2.201；安装 journal/lock 均不存在。定向查询未发现本次 fixture App 残留或已启动的日常 Scry 主进程。
+- 长期证据目录仍为 `/Users/baobingjiang/.local/state/scry-install-0.2.202-537Zh6/evidence/`；新增 `installed-0.2.202-smoke.log` 与 `installed-manifest.json`。此前 SIGKILL 与本机超时记录保留；本轮对当前包的成功核验不反推旧失败的根因。
+- 交付状态：安装及自动检查已完成核验；本轮只更新记录，不重放安装、不重签、不自动启动/重启用户 App。保留用户已有的 `designs/scry-ios-multihost/` 未跟踪内容。下一步由用户手动打开 Scry，查看「动态」页并在真实会话中确认迁移体验；这是用户验收，不是缺失的自动门禁。
 
 ## v1 · 历史实现记录（以下不是当前认可方案）
 
