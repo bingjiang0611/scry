@@ -6,13 +6,36 @@ v2 用户纠正：以原始视频的编排侧栏、节点连线、执行动效�
 
 ## 1. 产品合同
 
-- 用户选择每阶段的 Provider、可用配置档、模型；不使用 Claude 原生 Workflow，不固定 Opus/Haiku/Sonnet，不要求 JEV。
+- 用户选择每阶段的 Provider、可用配置档、模型；不使用 Claude 原生 Workflow，不固定 Opus/Haiku/Sonnet。用户可选配 TypeSafe Jev 分类节点；Jev 不强制启用，也不冒充 coding Agent。
 - 不设置产品层并发上限，不提供并发数量控件，不在内部隐藏同等限制。就绪任务由依赖与真实 Provider 准入决定。
 - 真实执行第一期仍先实现「范围规划 → 并行扫描 → 独立复核 → 汇总」模板；v2 画布预览完整的 scan → edit → verify → review 形态，后续模板可启用修复阶段。规划 Agent 产生结构化计划，分页读取，不执行任意模型生成的 JavaScript。
-- 用户确认目标、范围、配置和任务上限后启动。每次启动立即拥有独立 workflow ID 与面板入口；切走聊天不会丢失，历史可重新打开。
+- 用户确认目标、范围和配置后启动。每次启动立即拥有独立 workflow ID 与面板入口；切走聊天不会丢失，历史可重新打开。
 - 模型配置在创建运行时冻结。调整配置只作用于下一次运行；请求模型与 Provider 实际观测模型分别记录。Provider 没有上报实际模型就显示 unknown。
 - 扫描结果是候选，不直接作为缺陷；复核使用新会话，重新读取源码与调用链。结构校验不等于事实验证。复核失败保留 unverified，不能计为 refuted。
 - 第一期不自动修复、不自动合入、不建立任意 DAG 编辑器、不运行无限修复循环、不接手机端、不做跨设备执行。
+
+### 左侧 Workflow 是什么
+
+- 当前原型是固定鉴权审计模板，不会理解用户目标后自动生成流程。左侧现在明确标记“模板 · 流程示意”，不再用 `workflow.js` 暗示实际执行文件。
+- 开关 Jev 后，运行快照中的阶段顺序同时驱动左侧代码示意、节点、连线和回放。只是按配置组合模板，不是模型自动编排。
+- 原计划的一期：模板规定阶段，规划 Agent 按任务产生范围、分片和检查标准；不是所有任务检查同一组文件。
+- 建议后续提供按任务自动编排：理解目标 → 提出结构化依赖图 → 用户确认 → 冻结计划后执行。审计、实现、解释不应都强制经过 scan/edit/verify。此模式尚待用户决定，不把当前固定模板伪装成已实现的自动编排。
+
+### 可选 Jev 分类节点
+
+v3 原型展示 `scan → jev → edit → verify`；关闭后无 Jev 节点、请求或等待。真实审计一期不执行 edit：`scan → [jev] → verify → summary`。
+
+- 分类器与 Agent 是不同执行类型。Jev 负责 typed classification，不提供终端、文件修改、Agent session 或工具调用能力。不能把 `jev-latest` 塞入 Claude/Pi 的 coding-model picker。
+- 原型配置：启用、分类模型 `jev-latest`、0.50–1.00 的复核阈值，默认 0.70。配置随运行冻结。先展示固定 bool 问题；用户要求其他分类任务时再扩展 question/criteria，以及 choice/score，不预建通用规则编辑器。
+- bool 输出是 `P(true)`；置信度使用 `max(p, 1-p)`。例如 p=0.09 的置信度是 0.91，不能错当低置信度。低于阈值标记 Agent 复核；阈值不是“缺陷成立概率”或执行授权。
+- 原型概率为 0.96、0.09、0.55 的确定性样例，全部保留；阈值只改变分类结果的复核标记，不动态生成真实 Agent 请求。最终的签名检查仍为 unverified，不借分类假装验证成功。
+- 生产保存题目/criteria、输入引用、请求与观测模型、完整概率/置信度、路由原因和用量来源。未提供、error、aborted 保留 unavailable/partial；不得补 0、默认放行、静默换模型或自动重发未知请求。分类不能批准修复、合入或任何安全敏感动作。
+- Jev 请求单独计数，不计为 Agent session。单独归档并按 provenance 汇总用量，避免与 Agent token/cost 双计；模型目录无价格不能宣称免费。
+- `src/`、`packages/` 和 `package.json` 检索没有 TypeSafe/Jev 分类集成。Pi Codemode 的 `models.classify` 合同可参考，但它不是 Scry 已有 API，也不意味着 App 继承当前 Pi 凭据。生产需先确认 TypeSafe 官方 transport/认证与已有依赖，再在 main 增加最小分类调用路径，保持 typed IPC、sender/schema、输入授权和派发前持久绑定。
+- 凭据只放 App 的受控主进程凭据存储，不进入 renderer、localStorage、日志或模板。启用真实请求前须确认账号、费用和要向 TypeSafe 发送的数据范围；本轮没有调用付费 API，也没有读取凭据。
+- Jev 同样不设人为并发上限；实际 API 拒绝或限流如实记录，不绕过或伪造成功。观测/载荷分页不限制总任务数。
+
+依据：TypeSafe 官网的 typed decisions / calibrated confidence 说明，以及本机 Pi `docs/codemode.md` 的 Classify 合同；两者不能替代 Scry 的真实集成测试。没有复述宣传中的速度/费用比例为本产品收益。
 
 ### 需要明确纠正的“只读”表述
 
@@ -124,7 +147,8 @@ pending → preparing → running → settling → completed
 | 区域 | 原型演示 | 生产实现 |
 | --- | --- | --- |
 | 配置 | 静态、明确标记样例目录；Pi 才有额外样例配置档 | adapter capability/model catalog；身份变更清理旧能力与模型 |
-| 运行图 | 自动／单帧回放；左编排轨迹、中间连接图与粒子、下方日志；9 个扫描、4 个修复、3 个验证样例 | 运行器事实投影，自动出现并持久可回放；粒子和阶段高亮随真实事件变化 |
+| Jev | 可选节点、固定 bool 样例概率、可调阈值；无 API 调用 | 独立 classifier transport、账号/数据授权、真实概率与证据、低置信度复核 |
+| 运行图 | 自动／单帧／下一阶段回放；左编排轨迹、中间连接图与粒子、下方日志；9 个扫描、4 个修复、3 个验证样例 | 运行器事实投影，自动出现并持久可回放；粒子和阶段高亮随真实事件变化 |
 | 节点详情 | 假路径、提示、固定结果，标记演示证据 | 显示真实 task/run/session/turn、逻辑工具调用与证据来源 |
 | 用量 | unavailable | canonical usage + coverage，不承诺完整计量 |
 | 暂停／停止 | 演示请求与确认的分离 | 真正的队列 admission 与已登记 handle 作用域 |
@@ -141,7 +165,7 @@ pending → preparing → running → settling → completed
 
 ### M2：固定模板、持久绑定、真实执行闭环
 
-实现四阶段模板、用户模型配置、依赖就绪派发、结构化 findings、独立 verifier、暂停／停止及崩溃恢复。用现有临时 workspace/userData 与本地进程 fixture，不调用付费 Provider。
+实现四阶段模板、用户模型配置、可选 Jev 分类与独立请求身份、依赖就绪派发、结构化 findings、独立 verifier、暂停／停止及崩溃恢复。用现有临时 workspace/userData 与本地进程 fixture，不调用付费 Provider。
 
 验收：逐阶段不同 Provider/model/profile 正确到达 adapter；新验证会话可追溯；失败不会生成全绿报告；重复 start 不重复执行；派发前落盘失败不发出；派发后崩溃不重发；等待 settling 不提前派发下游。
 
@@ -175,7 +199,7 @@ pending → preparing → running → settling → completed
 
 ## 7. 下一步与待确认
 
-1. 用户确认本版面板结构和模型配置体验，然后实施 M1–M3。
+1. 用户确认含 Jev 的面板与配置体验，并决定保留模板优先还是把按任务自动编排纳入一期；当前没有自动编排生产实现。随后更新范围并实施 M1–M3。
 2. 权限文案默认采用“请求只读审计”，不承诺安全隔离。若要求强制禁止写入，需要维护者明确这一升级目标，先设计执行约束再排期。
 3. 生产修改 `src/main/index.ts` 前，由实现者协调现有 remote/iOS WIP；本次不改该文件。
 4. 真实 Provider 组合与费用授权由用户在 M4 前决定；本次不会启动模型或模型目录探针。

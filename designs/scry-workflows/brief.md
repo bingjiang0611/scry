@@ -1,8 +1,37 @@
-# Scry 工作流 · v2 连线执行画布
+# Scry 工作流 · v3 可选 Jev 与连线执行画布
 
-状态：用户已纠正方向；v2 成品待审。范围仍是独立 HTML 原型与实现方案，不接生产、不调用 Provider、不修改真实工作区文件。
+状态：v3 成品待审。范围仍是独立 HTML 原型与实现方案，不接生产、不调用 Provider、不修改真实工作区文件。
 
-## 本轮反馈：替代 v1
+## v3：Jev 与左侧 Workflow 的真实含义
+
+用户要求加入可配置 Jev，并询问左侧是否按任务自动编排。
+
+- 当前左侧是固定鉴权审计模板的流程示意，不是模型生成的 Workflow，也没有执行 `workflow.js`。现已直接标记“鉴权审计模板 · 流程示意”。
+- Jev 单独作为可选 classifier 节点，不混入 coding Agent 模型列表。支持启用、`jev-latest` 与复核阈值（默认 0.70）。开启后同时更新左侧、四节点图和回放阶段；关闭则是原有三节点图。
+- 3 条分类样例使用 P(true)=0.96 / 0.09 / 0.55，置信度为 max(p,1-p)。低于用户阈值标记 Agent 复核；所有候选保留。示例概率明确标注非 API 返回，不宣称真实分类或文件修改。
+- Agent 数与分类请求数分开；配置随运行冻结，保存只影响下一次演示。增加“下一阶段”回放快捷键，通过同一状态机推进事件，不跳过依赖或编造额外任务。
+- 产品建议是按任务生成结构化计划并让用户确认，而非所有目标强制套同一流程。这仍是待用户决定的实施范围，不在本原型冒充已完成。原计划的模板优先方案也可保留。
+- 复用已收录的 `D-SCRY-WORKFLOWS` 画布和原生配置表单；本轮共享组件检索无现成分类配置组件。TypeSafe 官网仅用于核对 typed decisions / calibrated confidence，不采用营销的速度与成本数字；本机 Pi Classify 文档用于区分 bool 概率与 choice/score confidence，不当作 Scry 已集成 API。
+
+### v3 实际验证
+
+- `node --test designs/scry-workflows/demo-state.test.mjs`：13/13 通过。新增覆盖可选节点、按配置插入依赖、模型类型隔离、配置冻结、阈值改变路由、缺失概率、Jev 暂停/停止。原有 257 个就绪任务全派发回归仍通过。
+- 负对照：临时副本误把 bool confidence 写成 probability，同一测试正确失败（0.09 ≠ 0.91，路由错误）。未改正式源码；临时副本已清理。
+- `node --check designs/scry-workflows/app.mjs`、`git diff --check` 通过。
+- Chrome Relay：开启 Jev、保存，当前三节点运行不变；重新演示出现 Jev 节点与左侧 classify 行。“下一阶段”后 Agent=0、classifier requests=3；下一次推进产生 3 条分类结果，之后才进入 edit。
+- 点击 Jev / 签名检查，实际显示 P=55%、置信度 55%、阈值 70%、Agent 复核。将配置改为 0.97 保存，当前结果不变；重新演示后 3 条都标为低置信度，验证配置确实影响回放而不只是改标签。
+- 1497×764 截图检查四节点、粉色 Jev 连线、左侧高亮、分类计数与配置输入。没有扩大到本轮未操作的窄窗口、屏幕阅读器、系统 reduced-motion 或真实 API 验收。
+- 一次打开配置的 click 超时，原 tab recover（relayAttached=true）并只读确认弹窗已打开，未重发未知写操作。后续使用新 refs 正常完成。
+
+### v3 默认安装
+
+`npm run install:mac:dev` 退出 2，在 `typecheck:node` 被 `src/preload/index.test.ts:135` 的 TS1360 阻断：remote 映射缺少 `forkSession`、`deleteSession`。该文件/合同不在本次原型改动中，工作区仍有并行 remote/iOS WIP；未顺手修改它们或重跑掩盖首轮结果。
+
+Web typecheck、全量 unit/shell、build/package/install 未进入；未替换 `/Applications/Scry.app`，未重启 Scry。日志 `/tmp/scry-workflow-jev-install.log`，退出码 `/tmp/scry-workflow-jev-install.exit`。由 remote WIP 所有者补齐合同与检查，再运行安装；这不妨碍预览本地原型。
+
+以下保留 v2 的设计依据与历史检查，不作为 v3 新增能力的验收证据。
+
+## v2 反馈：替代 v1
 
 用户：“我要做的是这种可视化效果，不要设置并发上限。”参考为同一 mirku 视频截图，并给出 v1 配置弹窗反例。
 
@@ -37,7 +66,7 @@ Craft：等宽数字、根背景、焦点即时反馈、reduced-motion。连线�
 - 停止先进入 STOP REQUESTED，下一帧才模拟确认；未开始的任务取消，不自动重发。
 - 点击阶段查看完整请求模型与任务结果；最后一项验证缺少证据，保留 unverified。
 - 模型配置按阶段冻结；Provider 切换清空旧模型。只有 Pi 有额外样例配置档。保存只作用于重新演示；目录不代表本机登录／可用模型。
-- 本版模板存于浏览器 `scry-workflow-prototype-v2`；v1 localStorage 不迁移。演示没有真实数据，不需要兼容生产迁移。
+- v3 模板存于浏览器 `scry-workflow-prototype-v3`；旧演示 localStorage 不迁移、不删除。只保存样例配置，不包含 API key 或生产数据。
 - 显示日志保留最近 120 条、画布显示最近 6 条。这个显示界限不限制可派发任务数量。
 - 页面隐藏时暂停演示计时，离开页面清理 timer；系统 reduced-motion 关闭连线动效。生产后台执行不会因面板隐藏而暂停。
 
@@ -51,7 +80,7 @@ node --check designs/scry-workflows/app.mjs
 
 入口：`http://127.0.0.1:8767/`。只服务此目录；不服务仓库根或 HOME。现有本地预览服务可复用。
 
-### 当前验证
+### v2 历史验证
 
 - 状态测试 7/7 通过：模型冻结、Provider/profile/model 失效、无隐藏并发限制、暂停与在途收敛、停止请求与确认、scan/edit/verify 保留未验证、日志窗口不限制任务派发。
 - 无上限检查不是只删输入框：提供 257 个就绪任务，断言 257 个全部进入 running；默认配置只含 stages，没有并发字段。
@@ -71,7 +100,7 @@ node --check designs/scry-workflows/app.mjs
 - 真实 Provider、生产 Electron、真实限流与资源不足仍未验证；它们需要在实施阶段通过真实或隔离 fixture 检查。
 - 没有产品层并发上限不代表 Provider 或主机资源无限；遇到实际拒绝如实显示，不绕过认证、同 session fencing 或仓库 trust，也不偷偷加回固定槽位。
 - 独立视觉评审工具缺口：本会话可用 reviewer/delegate 子 Agent 不带浏览器或截图工具，Relay 截图为加密附件；不复用上轮受阻结论冒充本轮独立通过。由主会话直接截图对照，用户保留成品验收权。
-- 方案：`implementation-plan.md`。用户确认 v2 后才接生产运行器；本轮不改已有 remote/iOS/main WIP。
+- 方案：`implementation-plan.md`。用户确认当前原型与编排范围后才接生产运行器；本轮不改已有 remote/iOS/main WIP。
 
 ## 设计记忆
 
@@ -79,7 +108,7 @@ node --check designs/scry-workflows/app.mjs
 
 library build 已成功（50 项）；check 仍因 5 个先前已记录的 stale 来源失败：P-PI-MODEL-SELECTOR、D-20260912-scry-ios-remote、D-20261008-scry-ios-continuity、P-SCRY-SESSION-HISTORY、D-20261010-scry-llm-sidebar。没有删除旧记录来让检查通过，本条权威文件已更新。
 
-## 默认安装流程（本轮）
+## v2 历史安装流程
 
 按项目约定运行 `npm run install:mac:dev`，退出 1。当前 macOS / Node 24.18.0 / Vitest 3.2.7；工作区包含既有且并行变化的 remote/iOS WIP，不把本轮总数与上轮当成同源码性能或质量对照。
 

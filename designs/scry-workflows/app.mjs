@@ -1,8 +1,7 @@
-import { catalog, copy, stageIds, workerStages } from './copy.mjs'
-import { activeCount, createDemo, defaultConfig, stageState, transition, validConfig } from './demo-state.mjs'
+import { catalog, copy, jevModels, stageIds } from './copy.mjs'
+import { activeAgentCount, activeCount, advancePhase, createDemo, defaultConfig, stageState, transition, validConfig } from './demo-state.mjs'
 
-document.title = copy.title
-const storageKey = 'scry-workflow-prototype-v2'
+const storageKey = 'scry-workflow-prototype-v3'
 let config = defaultConfig()
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey))
@@ -16,13 +15,15 @@ document.title = copy.title
 const escape = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 const button = (id, text, className = '', disabled = false) => `<button type="button" id="${id}" class="${className}" ${disabled ? 'disabled' : ''}>${escape(text)}</button>`
 const on = (id, action) => document.getElementById(id)?.addEventListener('click', action)
-const modelName = stage => `${catalog[run.config.stages[stage].provider].label} / ${run.config.stages[stage].model}`
+const modelName = stage => stage === 'jev' ? `${copy.jevProvider} / ${run.config.jev.model}` : `${catalog[run.config.stages[stage].provider].label} / ${run.config.stages[stage].model}`
 const timestamp = tick => `${String(Math.floor(tick * 2 / 60)).padStart(2, '0')}:${String(tick * 2 % 60).padStart(2, '0')}`
 
 function render(focusId) {
   const terminal = ['completed', 'stopped'].includes(run.status)
-  const states = Object.fromEntries(workerStages.map(id => [id, stageState(run, id)]))
+  const states = Object.fromEntries(run.order.map(id => [id, stageState(run, id)]))
   const active = activeCount(run)
+  const agentCount = activeAgentCount(run)
+  const positions = Object.fromEntries(run.order.map((id, index) => [id, (index + 0.5) * 1000 / run.order.length]))
   const node = id => {
     const stage = states[id]
     return `<button id="stage-${id}" class="worker ${id} ${stage.state}" data-stage="${id}" aria-label="${escape(copy.nodeLabel(copy.stages[id].title, copy.stageStatus[stage.state], stage.done, stage.total))}">
@@ -37,35 +38,36 @@ function render(focusId) {
   app.innerHTML = `<main class="terminal ${playing ? '' : 'replay-paused'}">
     <header><div class="heading"><strong>${escape(copy.brand)}</strong><span>${escape(copy.heading)}</span><span class="run-status ${run.status}">${escape(copy.runStatus[run.status])}</span></div><div class="header-actions">${button('configure', copy.configure)}${button('pause', run.status === 'paused' ? copy.resume : copy.pause, '', terminal || run.status === 'stopping')}${button('stop', copy.stop, '', terminal || run.status === 'stopping')}</div></header>
     <div class="subhead"><span>${escape(copy.objective)}</span><span class="demo-label">${escape(copy.demo)}</span></div>
-    <div class="legend">${stageIds.map(id => `<span class="${id}"><i></i>${escape(run.config.stages[id].model)} · ${escape(copy.stages[id].code)}</span>`).join('')}</div>
+    <div class="legend">${['plan', ...run.order].map(id => `<span class="${id}"><i></i>${escape(id === 'jev' ? run.config.jev.model : run.config.stages[id].model)} · ${escape(copy.stages[id].code)}</span>`).join('')}</div>
     <section class="stage-layout">
       <aside class="orchestrator plan"><div class="orchestrator-heading"><strong>${escape(run.config.stages.plan.model)}</strong><span>${escape(copy.orchestrator)}</span></div>
         <div class="script-title">${escape(copy.script)}</div>
-        <pre class="script"><span>plan(objective)</span><span class="${run.phase === 'scan' ? 'current scan' : ''}">phase('scan')</span><span class="indent">parallel(files)</span><span class="${run.phase === 'edit' ? 'current edit' : ''}">phase('edit')</span><span class="indent">isolated(patches)</span><span class="${run.phase === 'verify' ? 'current verify' : ''}">phase('verify')</span><span class="indent">review(evidence)</span><span>return findings</span></pre>
-        <dl><dt>${escape(copy.phaseLabel)}</dt><dd class="${run.phase}">${escape(run.phase)}</dd><dt>${escape(copy.agentsLabel)}</dt><dd>${active}</dd><dt>${escape(copy.contextLabel)}</dt><dd>${escape(copy.unknown)}</dd></dl>
+        <pre class="script"><span>${escape(copy.planCode)}</span>${run.order.map(id => id === 'jev' ? `<span class="${run.phase === id ? 'current jev' : ''}">${escape(copy.operations.jev)}</span>` : `<span class="${run.phase === id ? `current ${id}` : ''}">${escape(copy.phaseCode(id))}</span><span class="indent">${escape(copy.operations[id])}</span>`).join('')}<span>${escape(copy.returnCode)}</span></pre>
+        <dl><dt>${escape(copy.phaseLabel)}</dt><dd class="${run.phase}">${escape(run.phase)}</dd><dt>${escape(copy.agentsLabel)}</dt><dd>${agentCount}</dd>${run.config.jev.enabled ? `<dt>${escape(copy.classifiersLabel)}</dt><dd>${states.jev.active}</dd>` : ''}<dt>${escape(copy.contextLabel)}</dt><dd>${escape(copy.unknown)}</dd></dl>
         <div class="idle-state">◇ ${escape(run.status === 'stopped' ? copy.plannerStopped : terminal ? copy.plannerDone : copy.plannerIdle)}</div><p>${escape(copy.scriptHeld)}</p><div class="owner-end">${escape(copy.ownerEnd)}</div>
       </aside>
       <div class="graph">
         <svg class="connections" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">
           <path class="edge owner" d="M0 44 H300"/><path class="edge owner" d="M500 88 V120"/>
-          <path class="edge" d="M500 230 V280 M166 300 V280 H834 V300 M500 280 V300"/>
-          <path class="edge" d="M166 444 V468 H834 V444 M500 444 V488"/>
-          ${active > 0 ? `<path class="signal ${run.phase}" d="M500 230 V280 H${run.phase === 'scan' ? 166 : run.phase === 'edit' ? 500 : 834} V300"/>` : ''}
+          <path class="edge" d="M500 230 V280 ${run.order.map(id => `M500 280 H${positions[id]} V300`).join(' ')}"/>
+          <path class="edge" d="${run.order.map(id => `M${positions[id]} 444 V468 H500 V488`).join(' ')}"/>
+          ${active > 0 ? `<path class="signal ${run.phase}" d="M500 230 V280 H${positions[run.phase]} V300"/>` : ''}
           ${run.status === 'completed' ? '<path class="signal plan" d="M500 444 V488"/>' : ''}
         </svg>
         <div class="main-node plan"><strong>${escape(modelName('plan'))} · ${escape(copy.mainSession)}</strong><span>${escape(copy.plannerRole)}</span><small>${escape(copy.project)}</small></div>
         <div class="runtime-node"><div class="runtime-title"><strong>${escape(copy.runtime)}</strong><span>${escape(copy.routing)}</span></div><div class="routing-row"><span>${escape(copy.routingModel)}</span><i class="route-bar models"></i><b>${escape(copy.routingModelValue)}</b></div><div class="routing-row"><span>${escape(copy.routingReady)}</span><i class="route-bar ready"></i><b>${escape(copy.routingReadyValue)}</b></div><div class="routing-row"><span>${escape(copy.routingEvidence)}</span><i class="route-bar evidence"></i><b>${escape(copy.routingEvidenceValue)}</b></div></div>
-        <div class="runtime-caption"><span>${escape(copy.runtimeCaption)} <b>${escape(copy.active(active))}</b></span></div>
-        <div class="workers">${workerStages.map(node).join('')}</div>
+        <div class="runtime-caption"><span>${escape(copy.runtimeCaption)} <b>${escape(run.phase === 'jev' ? copy.classifierActive(active) : copy.active(agentCount))}</b></span></div>
+        <div class="workers" style="--stage-count:${run.order.length}">${run.order.map(node).join('')}</div>
         <div class="signoff plan ${terminal ? 'arrived' : ''}"><strong>${escape(copy.signoff)}</strong><span class="${run.status === 'completed' ? 'warning' : ''}">${escape(run.status === 'completed' ? copy.signoffDone : run.status === 'stopped' ? copy.signoffStopped : copy.signoffWaiting)}</span><small>${escape(copy.signoffHint)}</small></div>
       </div>
     </section>
     <section class="console"><div class="console-heading"><strong>${escape(copy.events)}</strong><span><i class="live-dot ${playing && !terminal ? 'live' : ''}"></i>${escape(copy.eventSource)}</span></div><ol>${run.logs.slice(-6).map(event => `<li><time>${timestamp(event.tick)}</time><b class="${event.actor === 'main' ? 'plan' : event.actor}">${escape(event.actor)}</b><span>${escape(event.message)}</span></li>`).join('')}</ol></section>
-    <footer><div class="playback">${button('play', playing ? copy.freeze : copy.play, '', terminal)}${button('advance', copy.next, '', terminal)}${button('replay', copy.replay)}</div><span class="footer-status">${escape(run.status === 'paused' ? copy.pauseNotice : run.status === 'stopping' ? copy.stopNotice : run.status === 'stopped' ? copy.stoppedNotice : terminal ? copy.finishedNotice : copy.noCharge)}</span></footer>
+    <footer><div class="playback">${button('play', playing ? copy.freeze : copy.play, '', terminal)}${button('advance', copy.next, '', terminal)}${button('next-stage', copy.nextPhase, '', run.status !== 'running')}${button('replay', copy.replay)}</div><span class="footer-status">${escape(run.status === 'paused' ? copy.pauseNotice : run.status === 'stopping' ? copy.stopNotice : run.status === 'stopped' ? copy.stoppedNotice : terminal ? copy.finishedNotice : copy.noCharge)}</span></footer>
     </main><dialog id="configuration"></dialog><dialog id="details"></dialog>`
   on('configure', openConfiguration)
   on('play', () => { playing = !playing; render('play') })
   on('advance', () => { run = transition(run, 'advance'); render('advance') })
+  on('next-stage', () => { playing = false; run = advancePhase(run); render('next-stage') })
   on('replay', () => { run = createDemo(config); playing = true; render('replay') })
   on('pause', () => { run = transition(run, run.status === 'paused' ? 'resume' : 'pause'); render('pause') })
   on('stop', () => { playing = false; run = transition(run, 'stop'); render('advance') })
@@ -73,12 +75,20 @@ function render(focusId) {
   if (focusId) document.getElementById(focusId)?.focus()
 }
 
+function taskDescription(stage, task) {
+  if (task.classification) {
+    const { probability, confidence, route } = task.classification
+    return probability === null ? copy.jevUnavailable : copy.jevResult(probability, confidence, run.config.jev.threshold, copy.jevRoutes[route])
+  }
+  return task.state === 'unverified' ? copy.results.unverified : task.state === 'completed' ? copy.results[stage] : copy.emptyResult
+}
+
 function openDetails(stage) {
   playing = false
   render()
   detailStage = stage
   const dialog = document.querySelector('#details')
-  dialog.innerHTML = `<div class="dialog-heading"><h2>${escape(copy.stages[stage].title)} · ${escape(copy.stageDetail)}</h2>${button('close-details', copy.close)}</div><p>${escape(copy.evidence)}</p><div class="detail-model"><span>${escape(copy.requestedModel)} · ${escape(modelName(stage))}</span><small>${escape(copy.actualModel)}</small></div>${stage === 'edit' ? `<p class="warning">${escape(copy.simulatedEdit)}</p>` : ''}<div class="detail-tasks">${run.tasks[stage].map(task => `<details><summary><span>${escape(task.title)}</span><b class="${task.state}">${escape(copy.taskStatus[task.state])}</b></summary><p>${escape(task.state === 'unverified' ? copy.results.unverified : task.state === 'completed' ? copy.results[stage] : copy.emptyResult)}</p></details>`).join('')}</div>`
+  dialog.innerHTML = `<div class="dialog-heading"><h2>${escape(copy.stages[stage].title)} · ${escape(copy.stageDetail)}</h2>${button('close-details', copy.close)}</div><p>${escape(copy.evidence)}</p><div class="detail-model"><span>${escape(copy.requestedModel)} · ${escape(modelName(stage))}</span><small>${escape(copy.actualModel)}</small></div>${stage === 'edit' ? `<p class="warning">${escape(copy.simulatedEdit)}</p>` : ''}${stage === 'jev' ? `<p>${escape(copy.jevQuestion)}</p><p class="warning">${escape(copy.jevEvidence)}</p>` : ''}<div class="detail-tasks">${run.tasks[stage].map(task => `<details><summary><span>${escape(task.title)}</span><b class="${task.state}">${escape(copy.taskStatus[task.state])}</b></summary><p>${escape(taskDescription(stage, task))}</p></details>`).join('')}</div>`
   dialog.setAttribute('aria-label', copy.stageDetail)
   on('close-details', () => dialog.close())
   dialog.addEventListener('close', () => { document.querySelector(`[data-stage="${detailStage}"]`)?.focus(); detailStage = null }, { once: true })
@@ -91,6 +101,12 @@ function openConfiguration() {
   const draft = structuredClone(config)
   const dialog = document.querySelector('#configuration')
   dialog.innerHTML = `<div class="dialog-heading"><h2>${escape(copy.configure)}</h2>${button('close-config', copy.close)}</div><p>${escape(copy.configHint)}</p>
+    <fieldset class="classifier-config"><legend>${escape(copy.classifier)}</legend>
+      <label class="enable-classifier"><input id="jev-enabled" type="checkbox" ${draft.jev.enabled ? 'checked' : ''}>${escape(copy.enableJev)}</label>
+      <label>${escape(copy.jevModel)}<select id="jev-model">${jevModels.map(model => `<option value="${escape(model)}" ${model === draft.jev.model ? 'selected' : ''}>${escape(model)}</option>`).join('')}</select></label>
+      <label>${escape(copy.threshold)}<input id="jev-threshold" type="number" min="0.5" max="1" step="0.01" value="${draft.jev.threshold}"></label>
+      <p>${escape(copy.jevHint)}</p>
+    </fieldset>
     ${stageIds.map(id => `<fieldset><legend>${escape(copy.stages[id].title)}</legend><label>${escape(copy.provider)}<select id="${id}-provider">${Object.entries(catalog).map(([key, value]) => `<option value="${key}" ${key === draft.stages[id].provider ? 'selected' : ''}>${escape(value.label)}</option>`).join('')}</select></label><label>${escape(copy.profile)}<select id="${id}-profile"></select></label><label>${escape(copy.model)}<select id="${id}-model"></select></label></fieldset>`).join('')}
     <p id="config-message" role="status"></p><div class="dialog-actions">${button('save', copy.save, 'primary')}</div>`
   dialog.setAttribute('aria-label', copy.configure)
@@ -109,6 +125,13 @@ function openConfiguration() {
     })
     for (const field of ['profile', 'model']) document.getElementById(`${id}-${field}`).addEventListener('change', event => { draft.stages[id][field] = event.target.value })
   }
+  const updateClassifier = () => {
+    for (const id of ['jev-model', 'jev-threshold']) document.getElementById(id).disabled = !draft.jev.enabled
+  }
+  document.getElementById('jev-enabled').addEventListener('change', event => { draft.jev.enabled = event.target.checked; updateClassifier() })
+  document.getElementById('jev-model').addEventListener('change', event => { draft.jev.model = event.target.value })
+  document.getElementById('jev-threshold').addEventListener('input', event => { draft.jev.threshold = Number(event.target.value) })
+  updateClassifier()
   on('close-config', () => dialog.close())
   on('save', () => {
     if (!validConfig(draft)) { message.textContent = copy.invalid; return }

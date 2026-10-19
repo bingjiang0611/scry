@@ -5,10 +5,20 @@ export const copy = {
   provider: 'Provider', profile: '配置档', model: '模型', defaultProfile: '默认配置', piProfile: '研究配置（样例）',
   selectModel: '请选择模型',
   save: '保存模型配置', saved: '已保存，重新演示时生效', saveFailed: '无法保存到浏览器，本次配置仍可用于重新演示。',
-  close: '关闭', invalid: '请为每个阶段选择有效模型。',
-  play: '播放回放', freeze: '暂停回放', replay: '重新演示', next: '下一帧',
+  close: '关闭', invalid: '请选择有效模型，并将 Jev 复核阈值设为 0.50–1.00。',
+  classifier: 'Jev 分类器（可选）', enableJev: '启用 Jev', jevProvider: 'TypeSafe', jevModel: 'TypeSafe / 分类模型',
+  threshold: '复核置信度阈值', jevHint: '扫描后分类；低于阈值交给 Agent 复核，不把分类当作验证。',
+  jevQuestion: '判断问题：该候选是否值得进入复核？',
+  jevEvidence: '以下概率为演示样例，不是 Jev API 返回值。所有候选保留，低置信度项标记为待复核。',
+  classifiersLabel: '执行中的分类请求', jevUnavailable: '分类结果未提供 · 交给 Agent 复核',
+  jevRoutes: { review: '低置信度 · Agent 复核', candidate: '倾向进入复核', not_candidate: '倾向不进入复核 · 仍保留证据' },
+  jevResult: (probability, confidence, threshold, route) => `P(值得复核) ${Math.round(probability * 100)}% · 置信度 ${Math.round(confidence * 100)}% · 阈值 ${Math.round(threshold * 100)}% · ${route}`,
+  classifierActive: count => `${count} classifier requests running`,
+  phaseCode: stage => `phase('${stage}')`, planCode: 'plan(objective)', returnCode: 'return findings',
+  operations: { scan: 'parallel(files)', jev: 'classify(candidates)', edit: 'isolated(patches)', verify: 'review(evidence)' },
+  play: '播放回放', freeze: '暂停回放', replay: '重新演示', next: '下一帧', nextPhase: '下一阶段',
   pause: '暂停调度', resume: '恢复调度', stop: '停止任务',
-  orchestrator: 'ORCHESTRATOR', script: 'workflow.js', mainSession: 'main session',
+  orchestrator: 'ORCHESTRATOR', script: '鉴权审计模板 · 流程示意', mainSession: 'main session',
   plannerRole: '编写工作流 · 等待汇总', plannerIdle: 'idle · 等待执行结果', plannerDone: 'review · 汇总已返回',
   plannerStopped: 'idle · 运行已停止', ownerEnd: '◇ review results',
   phaseLabel: '当前阶段', agentsLabel: '执行中的 Agent', contextLabel: '上下文用量', unknown: '未提供',
@@ -32,15 +42,17 @@ export const copy = {
   stages: {
     plan: { title: '主编排', code: 'plan', detail: '生成检查范围与阶段依赖' },
     scan: { title: '并行扫描', code: 'scan', detail: '逐文件发现候选问题' },
+    jev: { title: 'Jev 分类', code: 'jev', detail: '低置信度交给 Agent 复核' },
     edit: { title: '隔离修复', code: 'edit', detail: '各自在隔离副本中修复' },
     verify: { title: '独立验证', code: 'verify', detail: '重读证据，交叉检查改动' }
   },
   active: count => `${count} agents running`, counts: (done, total) => `${done} / ${total} 已结束`,
   nodeLabel: (name, state, done, total) => `${name}，${state}，${done} / ${total} 已结束`,
   logs: {
-    start: 'workflow.js 已载入 · 模型配置已冻结', plan: '检查范围已展开 · 阶段依赖已建立',
+    start: '审计模板已载入 · 运行配置已冻结', plan: '检查范围已展开 · 阶段依赖已建立',
     dispatch: (stage, count) => `${stage} · 派发全部 ${count} 个就绪任务`,
     finish: name => `${name} · 结果已返回`,
+    classification: (name, route) => `${name} · ${route}`,
     partial: 'signature check · 证据不足，保留为未验证',
     summary: '结果交回主会话 · 含 1 项未验证；未修改真实文件',
     paused: '暂停调度 · 允许在途任务结束', resumed: '恢复调度 · 派发依赖就绪任务',
@@ -63,4 +75,5 @@ export const catalog = {
 }
 export const stageIds = ['plan', 'scan', 'edit', 'verify']
 export const workerStages = ['scan', 'edit', 'verify']
+export const jevModels = ['jev-latest']
 export const paths = ['auth.ts', 'documents.ts', 'search.ts', 'webhooks.ts', 'users.ts', 'teams.ts', 'sessions.ts', 'exports.ts', 'permissions.ts'].map(name => `src/routes/${name}`)
