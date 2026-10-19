@@ -2,7 +2,7 @@
 
 ## D-20261018-scry-sidebar-activity
 
-- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮按该方案接入生产，运行验证及默认构建安装；不自动重启用户 App。
+- Scope / status：Scry 桌面端；上一版被用户否定。用户已对 [v2 交互设计稿](v2/index.html) 明确回复「没问题 落地吧」，本轮已按该方案接入生产并合入 main；安装门禁仍受阻，未替换或重启用户 App，详情见下述最终状态。
 - Feedback：2026-10-18，用户纠正「不一样啊 他是这样的三个 tab 哪个下面有任务展示哪个 然后顺序和任务都可以跳动 先出设计稿」，并提供 Needs input / Working / Completed 三段列表截图。原要求增加侧栏入口，并不等于认可上一版的分组细节。
 - 方向：保留外层「项目 / 动态」入口背景；内部是同时可见的三个状态分区，不做三个互斥横向 Tab。空组连标题一起隐藏，任务和标题一起移动。当前参考方向已明确，只做一稿；分区换位提供独立比较动作，不擅自定义自动抢占排序。
 - 目标：并行会话状态变化时，用户能追踪同一会话去了哪里，而不是看到旧行消失、新行出现。
@@ -47,6 +47,17 @@
 - 全量串行 unit 初轮：3372 通过、4 个既有 opt-in skipped，typecheck/shell 通过。末次任务排序调整后重新执行交付检查，结果见本节后续安装记录。
 - 性能原门禁：40 指标、每项5样本，ratchet passed，无计数退化；不等于动画帧率或真实设备体验。保留 `/tmp/scry-activity-v2-41seVH/performance/measure.json`。
 - 独立只读 reviewer 检查生产源码与两张实际截图，未发现重要实现问题；补审指出首版排序断言没有排除“原本就在第一”的情况。已反转 fixture 目录顺序，并通过第二个负控验证：忽略任务提位时明确失败 `New completion did not move ahead of an existing completed task`；恢复后16项全部通过。截图只证明静态外观，不冒充真实用户运行验收。安装后仍需用户手动重启，再在真实会话中确认。
+
+### 最终状态与安装阻碍
+
+- 隔离实现提交 `44aad7f`，以最小 patch 合入 main 为 `f64cb48`；main 同时保留原有 `c689cb2` handoff 改动。合入前后未暂存 WIP 的 binary diff 完全一致；未推送。
+- 在合入后的 **main** 实际重新执行 typecheck、5 个受影响文件（289 项全部通过）及 Electron 动态页16项（全部通过）。日志 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-e5c39c535760726f.log`。这不是合入后全仓通过的宣称。
+- 最终隔离冻结版本的全量复验超出900s外层命令期限：Pi startup-dialog 原5s测试超时，Git selected/index 原15s测试超时；没有最终汇总，shell 未执行。日志 `pi-bash-8947936fc22c1a19.log`（同上 temp 目录）。未扩大单项 timeout。
+- 独立重跑两个相关文件仍超出300s外层期限，并出现两个 Pi menu-only 3s 收敛断言失败。再精确运行这4个失败场景，Git 通过（12.4s），Pi三项仍失败；139项是 `-t` 定向过滤，不是新增 skip。最终失败日志 `pi-bash-d58f0ceb12458f89.log`。这些 Pi / Git 源码及测试与隔离基线 `9c7b564` 完全相同；曾通过的3372项旧轮次不能覆盖本次失败。
+- 失败期间机器负载一度94.61，普通子进程操作显著变慢。Pi失败分别是5s case deadline及3s terminal guard，未证明为功能结果错误，但也不能只凭负载推定全部根因；没有关闭其他应用或系统/安全服务来绕过问题。
+- 性能文件进一步核对：38 unchanged、2 gate pass；另3个 CPU-instruction candidate missing，不当作0或已测量。动画帧率未测。
+- **未打包/安装0.2.202**；实际 `/Applications/Scry.app` 仍为0.2.201，未重启。隔离工作区、依赖、测试日志保留在 `/tmp/scry-activity-v2-41seVH/`，没有留下本次活跃测试进程。
+- 下一步：在低负载环境重新执行完整安装门禁；如果 Pi 的3s/5s失败仍存在，再单独排查该路径，不删断言、不扩大 timeout、不以旧绿灯或 focused 通过放行安装。需要用户提供空闲时段或明确下一步范围。
 
 ## v1 · 历史实现记录（以下不是当前认可方案）
 
