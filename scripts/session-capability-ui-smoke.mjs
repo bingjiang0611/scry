@@ -992,13 +992,15 @@ async function exerciseOverviewDensity(contents, screenshotPath) {
         resolve({ headerHeight: header.height, contextGap: context.top - header.bottom,
           sessionGap: session.top - metrics.bottom, tabsGap: tabs.top - session.bottom,
           firstTurnTop: firstTurn.top, overflow: document.querySelector('.ov-scroll').scrollWidth > ${width},
-          columns: getComputedStyle(document.querySelector('.overview-metric-grid')).gridTemplateColumns.split(' ').length });
+          columns: getComputedStyle(document.querySelector('.overview-metric-grid')).gridTemplateColumns.split(' ').length,
+          metricCount: document.querySelectorAll('.overview-metric').length,
+          hasInputOutput: Array.from(document.querySelectorAll('.overview-metric > span')).some(label => label.textContent === '输入 / 输出') });
       })))`)
       if (screenshotPath && theme === 'dark' && width === 380) {
         const image = await contents.capturePage({ x: 0, y: 0, width, height: 650 })
         require('node:fs').writeFileSync(screenshotPath, image.toPNG())
       }
-      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2) {
+      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.metricCount !== 3 || geometry.hasInputOutput) {
         throw new Error('Overview density ' + theme + '/' + width + ': ' + JSON.stringify(geometry))
       }
       results.push({ theme, width, ...geometry })

@@ -1,3 +1,9 @@
+export const OVERVIEW_COST_COPY = {
+  label: '成本',
+  unavailable: '当前 Provider 未上报成本',
+  coverage: (known: number, total: number) => `${known}/${total} 轮上报了成本`
+} as const
+
 export const LLM_RUNNING_MODELS_COPY = {
   region: '运行中的模型',
   unknownProvider: '未知 Provider',
