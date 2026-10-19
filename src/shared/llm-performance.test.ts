@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { llmMetricSamples, smoothLlmMetric, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow } from './llm-performance'
+import { groupRunningLlmSessions, llmMetricSamples, smoothLlmMetric, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow, type LlmRunningSession } from './llm-performance'
 import type { ActiveRun } from './trace'
 import { RunRegistry } from '../main/run-registry'
 
@@ -32,6 +32,49 @@ describe('running LLM sessions', () => {
     registry.register(active, { runId: active.runId })
     registry.register(ended, { runId: ended.runId })
     expect(summarizeRunningLlmSessions(registry.activeStates()).sessions.map(session => session.key)).toHaveLength(1)
+  })
+})
+
+describe('running LLM models', () => {
+  const session = (key: string, partial: Partial<LlmRunningSession> = {}): LlmRunningSession => ({
+    key, runId: key, model: 'astra', state: 'waiting', outputStarted: true, ...partial
+  })
+
+  it('merges matching models across projects and Providers and averages each session equally', () => {
+    const sessions = [
+      session('a', { cwd: '/scry', providerId: 'codex', tokensPerSecond: 28.9, firstTokenMs: 3000, state: 'tool' }),
+      session('b', { model: 'sol', tokensPerSecond: 36.9, firstTokenMs: 2500 }),
+      session('c', { cwd: '/scry', tokensPerSecond: 24.4, firstTokenMs: 3400 }),
+      session('d', { cwd: '/etch', providerId: 'pi', tokensPerSecond: 22.5, firstTokenMs: 2900 }),
+      session('e', { model: 'sol', tokensPerSecond: 33.3, firstTokenMs: 2400 })
+    ]
+    const groups = groupRunningLlmSessions(sessions)
+    expect(groups.map(group => [group.model, group.sessions.length])).toEqual([['astra', 3], ['sol', 2]])
+    expect(groups[0].tokensPerSecond).toBeCloseTo(25.2666667)
+    expect(groups[0].firstTokenMs).toBeCloseTo(3100)
+    expect(groups[1].tokensPerSecond).toBeCloseTo(35.1)
+    expect(groups[1].firstTokenMs).toBe(2450)
+    expect(groups[0].sessions.map(member => member.key)).toEqual(['a', 'c', 'd'])
+    expect(sessions).toHaveLength(5)
+  })
+
+  it('uses separate measured-session denominators and never treats absent evidence as zero', () => {
+    const [group] = groupRunningLlmSessions([
+      session('a', { tokensPerSecond: 20 }), session('b', { firstTokenMs: 2000 }),
+      session('c', { tokensPerSecond: 60, firstTokenMs: 0 }), session('d')
+    ])
+    expect(group).toMatchObject({ tokensPerSecond: 40, firstTokenMs: 1000 })
+    const [missing] = groupRunningLlmSessions([session('missing')])
+    expect(missing).not.toHaveProperty('tokensPerSecond')
+    expect(missing).not.toHaveProperty('firstTokenMs')
+  })
+
+  it('keeps unknown models separate and recomputes when members leave', () => {
+    const unknown = [session('a', { model: undefined, providerId: 'pi' }), session('b', { model: undefined, providerId: 'pi' })]
+    expect(groupRunningLlmSessions(unknown).map(group => group.sessions.length)).toEqual([1, 1])
+    expect(groupRunningLlmSessions([])).toEqual([])
+    const remaining = session('last', { tokensPerSecond: 60 })
+    expect(groupRunningLlmSessions([remaining])[0]).toMatchObject({ sessions: [remaining], tokensPerSecond: 60 })
   })
 })
 

@@ -37,7 +37,7 @@
 .llm-perf-live-note { margin: 0 0 10px; color: var(--dim2); font-size: 11px; }
 
 .llm-perf-running { display: grid; gap: 6px; }
-.llm-perf-run { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 104px 104px; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--panel2); }
+.llm-perf-run { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 120px 132px; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--panel2); }
 .llm-perf-run > i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim3); }
 .llm-perf-run b { font-weight: 550; }
 .llm-perf-run > div:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -88,5 +88,5 @@
   .llm-perf-head { flex-wrap: wrap; padding: 10px 14px; }
   .llm-perf-range { margin-left: 0; order: 3; }
   .llm-perf-mhead, .llm-perf-mrow, .llm-perf-scale { grid-template-columns: minmax(90px, 1fr) minmax(60px, 1.2fr) 84px 56px 32px; gap: 8px; }
-  .llm-perf-run { grid-template-columns: 10px minmax(0, 1fr) auto 84px 84px; gap: 8px; }
+  .llm-perf-run { grid-template-columns: 10px minmax(0, 1fr) auto 104px 124px; gap: 8px; }
 }

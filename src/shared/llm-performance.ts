@@ -24,6 +24,37 @@ export interface LlmPerformanceSummary {
   sessions: LlmRunningSession[]
 }
 
+export interface LlmRunningModel {
+  key: string
+  model?: string
+  sessions: LlmRunningSession[]
+  tokensPerSecond?: number
+  firstTokenMs?: number
+}
+
+/** One row per known model across projects/Providers; unknown models stay separate.
+ * Metrics are arithmetic session means, each with its own measured-session denominator.
+ * This is not combined throughput or a call-weighted mean.
+ */
+export function groupRunningLlmSessions(sessions: readonly LlmRunningSession[]): LlmRunningModel[] {
+  const groups = new Map<string, LlmRunningSession[]>()
+  for (const session of sessions) {
+    const key = session.model ? `model:${session.model}` : `session:${session.key}`
+    const group = groups.get(key)
+    if (group) group.push(session)
+    else groups.set(key, [session])
+  }
+  return [...groups].map(([key, members]) => {
+    const speeds = members.flatMap(session => session.tokensPerSecond != null ? [session.tokensPerSecond] : [])
+    const waits = members.flatMap(session => session.firstTokenMs != null ? [session.firstTokenMs] : [])
+    return {
+      key, model: members[0].model, sessions: members,
+      ...(speeds.length ? { tokensPerSecond: speeds.reduce((sum, value) => sum + value, 0) / speeds.length } : {}),
+      ...(waits.length ? { firstTokenMs: waits.reduce((sum, value) => sum + value, 0) / waits.length } : {})
+    }
+  })
+}
+
 /** Reads only the bounded per-run observation, never the trace. The latest main run owns its session. */
 export function summarizeRunningLlmSessions(activeRuns: readonly ActiveRun[], now = Date.now()): LlmPerformanceSummary {
   const sessions = new Map<string, ActiveRun>()

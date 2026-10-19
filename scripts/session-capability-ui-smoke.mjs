@@ -1169,13 +1169,20 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await click('.llm-perf-metric button:nth-child(2)')
   await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2`)
   await click('.llm-perf-metric button:nth-child(1)')
+  // Same model across Providers/projects: one row, independent measured-session means, honest mixed state.
+  await click('#performance-group')
+  await wait(`${modal}.textContent.includes('6 个会话运行中') && ${runs}.length === 3 && ${runs}.some(text => text.includes('pi-live-model') && text.includes('4 个会话') && text.includes('平均50.0token/s') && text.includes('平均首 token2.0秒') && text.includes('多种状态'))`)
+  const groupedState = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-run')).find(node => node.textContent.includes('pi-live-model')).querySelector('.llm-perf-state').title`)
+  if (!groupedState.includes('生成中 1') || !groupedState.includes('工具执行 1') || !groupedState.includes('等待模型 2')) throw new Error('Grouped row lost session states: ' + groupedState)
   win.setSize(700, 700)
   await wait(`innerWidth === 700`)
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   if (!await read(`${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth`)) throw new Error('Running performance samples overflow the narrow modal')
   win.setSize(1000, 800)
   await wait(`innerWidth === 1000`)
-  if (await read(`${runs}.some(text => text.includes('project-a') && text.includes('token/s'))`)) throw new Error('Session without per-call evidence showed speed')
+  await click('#performance-ungroup')
+  await wait(`${modal}.textContent.includes('3 个会话运行中') && ${runs}.some(text => text.includes('pi-live-model') && text.includes('1 个会话') && text.includes('平均40.0token/s') && text.includes('平均首 token1.5秒') && text.includes('生成中'))`)
+  if (await read(`${runs}.some(text => text.includes('Claude') && text.includes('token/s'))`)) throw new Error('Session without per-call evidence showed speed')
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
   if (!await read(`${modal}.textContent.includes('3 个会话运行中')`)) throw new Error('Focus changed the global source')
@@ -1224,7 +1231,7 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
   if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'one row per model across projects/providers', 'independent metric means omit missing evidence', 'mixed states + departing members', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', themes: ['dark', 'light'] }
 }
 
 try {

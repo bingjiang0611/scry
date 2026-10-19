@@ -1,3 +1,16 @@
+export const LLM_RUNNING_MODELS_COPY = {
+  region: '运行中的模型',
+  unknownProvider: '未知 Provider',
+  sessions: (count: number) => ` · ${count} 个会话`,
+  average: '平均',
+  speedUnit: 'token/s',
+  firstToken: '平均首 token',
+  seconds: '秒',
+  mixedState: '多种状态',
+  stateCount: (label: string, count: number) => `${label} ${count}`,
+  states: { streaming: '生成中', tool: '工具执行', complete: '收尾中', waiting: '等待模型', firstOutput: '等待首次输出' }
+} as const
+
 export const SIDEBAR_ACTIVITY_COPY = {
   navigation: '侧栏视图',
   projects: '项目',
