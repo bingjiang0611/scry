@@ -48,7 +48,7 @@
 - 性能原门禁：40 指标、每项5样本，ratchet passed，无计数退化；不等于动画帧率或真实设备体验。保留 `/tmp/scry-activity-v2-41seVH/performance/measure.json`。
 - 独立只读 reviewer 检查生产源码与两张实际截图，未发现重要实现问题；补审指出首版排序断言没有排除“原本就在第一”的情况。已反转 fixture 目录顺序，并通过第二个负控验证：忽略任务提位时明确失败 `New completion did not move ahead of an existing completed task`；恢复后16项全部通过。截图只证明静态外观，不冒充真实用户运行验收。安装后仍需用户手动重启，再在真实会话中确认。
 
-### 最终状态与安装阻碍
+### 首次合入与安装阻碍（历史，后续复验见下节）
 
 - 隔离实现提交 `44aad7f`，以最小 patch 合入 main 为 `f64cb48`；main 同时保留原有 `c689cb2` handoff 改动。合入前后未暂存 WIP 的 binary diff 完全一致；未推送。
 - 在合入后的 **main** 实际重新执行 typecheck、5 个受影响文件（289 项全部通过）及 Electron 动态页16项（全部通过）。日志 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-e5c39c535760726f.log`。这不是合入后全仓通过的宣称。
@@ -58,6 +58,27 @@
 - 性能文件进一步核对：38 unchanged、2 gate pass；另3个 CPU-instruction candidate missing，不当作0或已测量。动画帧率未测。
 - **未打包/安装0.2.202**；实际 `/Applications/Scry.app` 仍为0.2.201，未重启。隔离工作区、依赖、测试日志保留在 `/tmp/scry-activity-v2-41seVH/`，没有留下本次活跃测试进程。
 - 下一步：在低负载环境重新执行完整安装门禁；如果 Pi 的3s/5s失败仍存在，再单独排查该路径，不删断言、不扩大 timeout、不以旧绿灯或 focused 通过放行安装。需要用户提供空闲时段或明确下一步范围。
+
+### 2026-10-18 · mac2 完整复验通过，本机签名包启动受阻
+
+- 用户授权转到 mac2 验证。冻结当前 main `2532d6ad1f79a3610a5381a9a1dd9ded7db2237b`，仅复制浅克隆的已提交源码，不复制个人会话/凭据；两端源码归档 SHA-256 均为 `b35953fefc14a2cf0b69c2b2be87ea98338438b6f0bde0bc327563f342653b38`。mac2 使用独立目录与物理依赖副本，依赖 lock（去除根版本）一致，没有改动已有工程或安装的 App。
+- mac2：Apple M1 / arm64，Node 22.22.2，首次检查负载1.45；验证结束负载3.37。完整 runner 退出0，源码 HEAD 与工作区保持不变。没有改测试、断言、单项时限或开启付费探针。
+
+| mac2 检查 | 结果 |
+| --- | --- |
+| typecheck、完整 unit `--maxWorkers=1` | 3401 passed，4 existing skipped；277 passed files |
+| shell、App/私有 CLI build | 全部通过 |
+| 完整 `test:renderer:ui` | 通过；不是用户实际会话体验验收 |
+| `check:cli-release` | 587 passed；0.2.49 打包 CLI init/hook/doctor smoke 通过 |
+| `performance:measure` | 40指标各5样本，ratchet passed；37 unchanged、1 better（仅1 byte，不宣称优化）、2 pass；另3个 instruction candidate missing |
+
+- 本机本轮初次重跑仍有 Git/Pi/recorder/counter 失败，并超出900s外层期限，没有完整汇总；保留 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-ed8723c1c9e5c4fa.log`，不被 mac2 绿灯抹去。
+- 本机对同一冻结源码执行 `npm run pack:artifact`，build、CLI build、原生依赖重建、Apple Development 签名完成；**不是已通过整条 pack gate**。首次 `check:packaged-app` 的包内 `scry --version` 被 SIGKILL，未产生版本输出，原15s限制未改。日志 `pi-bash-044f08ca7a7bc6d6.log`（同上目录）。
+- `codesign --verify --deep --strict --verbose=4` 确认该包 valid on disk / satisfies its Designated Requirement。随后仅复查一次原 package gate，仍被 SIGKILL。系统日志记录两次 `ASP: Unable to apply provenance sandbox: 268451845`；该数值对应 `MACH_RCV_INTERRUPTED`，是伴随证据，不足以断言最终根因或保证重启可修复。没有删除 provenance/quarantine 属性、调整系统安全策略或放宽检查。
+- 独立运行剩余 `smoke:electron`：外部链接、renderer crash recovery 通过；**签名包的普通 GUI 启动也被 SIGKILL**，CDP target 未出现，后续文件/远程宿主检查未执行。fixture 报进程所有权采集未完成；定向查询未发现此临时包路径的残留进程，未停止其他进程。
+- 为防重启清空 `/tmp`，本机已将 `/tmp/scry-install-mac2-sl5LS8/` 完整保存到 **`/Users/baobingjiang/.local/state/scry-install-0.2.202-537Zh6/`**：源码、签名产物、回传的 `verify.log` / `verify.exit` / `measure.json`，以及 `evidence/` 内的本机失败与系统日志。保存后源码 HEAD/工作区、产物哈希和深层严格签名再次核对一致；未尝试通过换路径再次启动。产物 `source/dist/mac-arm64/Scry.app/Contents/Resources/app.asar` SHA-256：`3f73604b6bdf351756f29e8f2845322d787ed630fcdb182b431b56c4c1e3c54a`。mac2 保留 `/Users/test/scry-install-0.2.202-ewQvBF/`，未发现该源码路径的活跃进程。
+- **仍未执行安装，`/Applications/Scry.app` 仍为0.2.201。** 新包为开发签名、未公证；未自动启动、停止或重启用户 Scry。
+- 下一步由用户保存工作并手动重启本机 macOS，再回复继续。Agent 先核对上述冻结源码/产物哈希，复查原 `check:packaged-app` 与完整 `smoke:electron`；全部通过后才运行原 `node scripts/install-macos.mjs`，再验版本、签名、源/目标哈希与备份。如果同样被系统终止，交接系统侧排查，不循环重建、不绕过门禁。
 
 ## v1 · 历史实现记录（以下不是当前认可方案）
 
