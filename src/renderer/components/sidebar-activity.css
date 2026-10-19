@@ -33,6 +33,9 @@
 
 .sb-activity-heading:first-child { margin-top: 6px; }
 .sb-activity-item { position: relative; }
+.sidebar .sb-activity .sb-remote-proj { margin: 0; border: 0; background: transparent; }
+.sidebar .sb-activity .sb-remote-proj .sb-sess-list { padding: 0; }
+.sidebar .sb-activity .sb-host-tag { margin-left: 8px; flex-shrink: 0; }
 
 /* Keep existing native selection, menus, hover details and action hit targets;
    only the activity presentation loses its cards and secondary visual labels. */

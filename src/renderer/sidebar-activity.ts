@@ -1,13 +1,18 @@
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { ProjectMeta, SessionMeta } from './env'
+import type { RemoteSessionRef } from '@shared/desktop-remote'
+import type { RemoteProjectGroup } from './components/SidebarRemoteProjects'
 import { SIDEBAR_ACTIVITY_COPY as copy } from './constants/copy'
 
 export type ActivityGroup = 'attention' | 'working' | 'completed'
 export type ActivityEntry = {
   key: string
-  project: ProjectMeta
   group: ActivityGroup
-} & ({ kind: 'session'; session: SessionMeta } | { kind: 'conversation'; conversation: ConversationSummary })
+} & (
+  | { kind: 'session'; project: ProjectMeta; session: SessionMeta }
+  | { kind: 'conversation'; project: ProjectMeta; conversation: ConversationSummary }
+  | { kind: 'remote'; project: RemoteProjectGroup; session: RemoteSessionRef }
+)
 
 export const activityGroups: { id: ActivityGroup; label: string }[] = [
   { id: 'attention', label: copy.attention },
@@ -19,7 +24,8 @@ export function sidebarActivity(
   projects: ProjectMeta[],
   runningRunIds: ReadonlySet<string>,
   waitingQuestionRunIds: ReadonlySet<string>,
-  query: string
+  query: string,
+  remoteProjects: readonly RemoteProjectGroup[] = []
 ): ActivityEntry[] {
   const entries: ActivityEntry[] = []
   const needle = query.trim().toLocaleLowerCase()
@@ -40,6 +46,19 @@ export function sidebarActivity(
       const status = group(session.runId, session.lastRunOutcome)
       if (status) entries.push({ key: `session:${JSON.stringify([project.cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
         kind: 'session', project, session, group: status })
+    }
+  }
+  for (const project of remoteProjects) {
+    // Cached activity after a disconnect/read failure is not live evidence. The remote
+    // catalog has no terminal outcome or question evidence, so only claim working.
+    if (project.state !== 'connected') continue
+    for (const session of project.sessions) {
+      if (!session.isActive || session.archivedAt || !session.externalSessionId) continue
+      if (needle && !`${project.connection.label} ${project.name} ${project.cwd} ${session.label}`.toLocaleLowerCase().includes(needle)) continue
+      entries.push({
+        key: `remote:${JSON.stringify([project.connection.id, project.cwd, session.providerId, session.agentProfileId, session.externalSessionId])}`,
+        kind: 'remote', project, session, group: 'working'
+      })
     }
   }
   // Preserve catalog order within each group; progress events do not add a second sort.

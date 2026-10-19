@@ -363,13 +363,30 @@ async function exercise(contents, pointer, capture, options) {
     check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')
     check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "sb-running-spin"'), 'Remote activity did not reuse the local spinner animation')
     await capture('remote-sidebar-running')
+    await click('.sb-view-tabs [role=tab]', '动态')
+    await wait('document.querySelector(".sb-activity [data-remote-session=old-native]") != null', 'live remote session appears in activity tab')
+    check(await read('document.querySelectorAll(".sb-activity [data-remote-session=old-native]").length === 1'), 'Activity duplicated a remote session')
+    check(await read('document.querySelector(".sb-activity [data-activity-group=working] .sb-host-tag")?.textContent === "Fixture desktop"'), 'Activity lost the owning host')
+    check(!await read('document.querySelector(".sb-activity .sb-proj-head")'), 'Activity inserted project headers into the flat session list')
+    await click('.sb-search input'); await insert('Fixture desktop')
+    await wait('document.querySelector(".sb-activity [data-remote-session=old-native]") != null', 'activity searches remote host labels')
+    await read('document.querySelector(".sb-search input").select()'); await key('Backspace')
+    await click('.sb-activity [data-remote-session="old-native"]')
+    await wait(remoteShown, 'activity selection opens the owning remote session')
+    check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'Activity selection executed a turn')
+    await capture('remote-activity-tab')
     await read('window.desktopRemoteFixture.catalogFailure = true')
+    await wait('!document.querySelector(".sb-activity [data-remote-session=old-native]")', 'failed catalog removes cached live activity')
+    await click('.sb-view-tabs [role=tab]', '项目')
     await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "unknown"', 'failed catalog read invalidates live activity')
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Stale catalog still claimed a running remote session')
     check(await read('document.querySelector(".sb-remote-proj [data-remote-session=old-native]") != null'), 'Catalog failure discarded remote history')
     await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false')
     await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog polling recovers')
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
+    await click('.sb-view-tabs [role=tab]', '动态')
+    check(!await read('document.querySelector(".sb-activity [data-remote-session]")'), 'Idle remote history was guessed to be completed')
+    await click('.sb-view-tabs [role=tab]', '项目')
   }
   const projectAHead = '.sb-proj-head[aria-label="Project A · Fixture desktop · /fixture/project-a"]'
   await click(projectAHead)
@@ -872,7 +889,7 @@ async function exercise(contents, pointer, capture, options) {
     staleDispatchNoticeCleared: true,
     dispatchNoticeLifecycle: { unacknowledged: true, recorded: true, unknown: true, dispatchedBeforeTrace: true, resumedTurn: true, stopAcknowledgement: true, pollErrorRecovery: true, terminalHistoryRefresh: true, actionErrorPreserved: true },
     remoteWorkbench: { sharedTabsAndColumns: true, resize: true, maximizeRestore: true, sessionScopedTabs: true, treePagination: true, snapshotFilePagination: true, markdownPreview: true, unsupportedPreviewNeverLocal: true, unavailableTerminal: true },
-    remoteSidebarActivity: { backgroundStartStop: true, sharedSpinner: true, recentProjectOrder: true, localPinsPreserved: true, staleReadNotLive: true, collapseSurvivesSearch: true },
+    remoteSidebarActivity: { activityTab: true, activitySelection: true, failedCatalogRemoved: true, idleNotCompleted: true, backgroundStartStop: true, sharedSpinner: true, recentProjectOrder: true, localPinsPreserved: true, staleReadNotLive: true, collapseSurvivesSearch: true },
     hostEnableInviteDisable: true,
     providerProfileIdentity: true,
     nativeCoordinateInput: true,

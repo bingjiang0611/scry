@@ -130,9 +130,11 @@ export const Sidebar = memo(function Sidebar({
   }
   const [q, setQ] = useState('')
   const [view, setView] = useState<'projects' | 'activity'>('projects')
+  const remoteGroups = useRemoteProjectGroups(q)
+  const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const activity = useMemo(() => view === 'activity'
-    ? sidebarActivity(projects, runningRunIds, waitingQuestionRunIds, q) : [],
-  [view, projects, runningRunIds, waitingQuestionRunIds, q])
+    ? sidebarActivity(projects, runningRunIds, waitingQuestionRunIds, q, showRemote ? remoteGroups : []) : [],
+  [view, projects, runningRunIds, waitingQuestionRunIds, q, showRemote, remoteGroups])
   const tabId = `${id ?? 'sidebar'}-view`
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
@@ -160,8 +162,6 @@ export const Sidebar = memo(function Sidebar({
     }
   }, [projectMenu])
   const ql = q.trim().toLowerCase()
-  const remoteGroups = useRemoteProjectGroups(q)
-  const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const { pinned, filtered } = useMemo(() => {
     const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
     // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名。
@@ -303,6 +303,10 @@ export const Sidebar = memo(function Sidebar({
         {view === 'activity' ? <>
           <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
             ? renderConversation(entry.conversation)
+            : entry.kind === 'remote' ? <SidebarRemoteProjects groups={[{ ...entry.project, sessions: [entry.session] }]}
+              layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
+              onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
+              onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />
             : <SessionRow cwd={entry.project.cwd} projectName={entry.project.name} session={entry.session}
               active={isActive(entry.project.cwd, entry.session)}
               running={Boolean(entry.session.runId && runningRunIds.has(entry.session.runId))}

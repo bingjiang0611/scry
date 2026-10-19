@@ -1,7 +1,7 @@
 // Remote rows share local activity styling. The App refreshes host catalogs even
 // for background sessions; disconnected or failed reads are not live evidence.
 // Session actions execute on the owning host; cached/offline rows cannot mutate it.
-import { useRef, useState, type MouseEvent } from 'react'
+import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { DesktopRemoteAPI, RemoteSessionRef } from '@shared/desktop-remote'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { providerIdForAgentId } from '@shared/runtime'
@@ -25,7 +25,7 @@ export function useRemoteProjectGroups(query: string) {
   const { connections, error: readError } = useDesktopConnections()
   const catalogs = useRemoteCatalogs()
   const ql = query.trim().toLowerCase()
-  return connections.flatMap((connection) => {
+  return useMemo(() => connections.flatMap((connection) => {
     const entry = catalogs.get(connection.id)
     const catalog = entry?.catalog
     if (!catalog) return []
@@ -48,11 +48,12 @@ export function useRemoteProjectGroups(query: string) {
       canManage: catalog.sessionActions === true && state === 'connected',
       sessions: sessions.sort((left, right) => (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0) || right.ts - left.ts)
     }))
-  })
+  }), [connections, catalogs, ql, readError])
 }
 
 export function SidebarRemoteProjects({
   groups,
+  layout = 'projects',
   active,
   collapsed,
   onToggle,
@@ -62,6 +63,7 @@ export function SidebarRemoteProjects({
   onArchivedSession
 }: {
   groups: RemoteProjectGroup[]
+  layout?: 'projects' | 'activity'
   active: ActiveRemoteLocation | null
   collapsed: ReadonlySet<string>
   onToggle: (key: string) => void
@@ -120,11 +122,11 @@ export function SidebarRemoteProjects({
       {(showArchived || groups.some(group => group.sessions.some(session => session.archivedAt))) && <button type="button" className="sb-archive-toggle"
         aria-expanded={showArchived} onClick={() => setShowArchived(value => !value)}>已归档远程会话</button>}
       {groups.map((group) => {
-        const open = !collapsed.has(group.key)
+        const open = layout === 'activity' || !collapsed.has(group.key)
         const projectSelected = active?.connectionId === group.connection.id && active.cwd === group.cwd && !active.externalSessionId
         return (
           <div key={group.key} className={`sb-proj sb-remote-proj ${open ? 'open' : ''}`} data-connection-id={group.connection.id}>
-            <div className={`sb-proj-row ${projectSelected ? 'active' : ''}`}>
+            {layout === 'projects' && <div className={`sb-proj-row ${projectSelected ? 'active' : ''}`}>
               <button
                 type="button"
                 className={`sb-proj-head ${projectSelected ? 'on' : ''}`}
@@ -147,7 +149,7 @@ export function SidebarRemoteProjects({
                   <Icon name="plus" />
                 </button>
               </span>
-            </div>
+            </div>}
             {open && (
               <div className="sb-sess-list">
                 {group.sessions.filter(session => showArchived ? Boolean(session.archivedAt) : !session.archivedAt).map((session) => {
@@ -169,6 +171,7 @@ export function SidebarRemoteProjects({
                         <span className="sb-session-main">
                           {provider ? <ProviderGlyph className="sb-provider" provider={provider} /> : <Icon name="cube" className="sb-provider" />}
                           <span className="sb-sesstext">{session.label || '(无预览)'}</span>
+                          {layout === 'activity' && <span className="sb-host-tag" data-state={group.state}>{group.connection.label}</span>}
                         </span>
                         <span className="sb-session-meta">
                           {Boolean(session.pinnedAt) && <Icon name="pin" />}

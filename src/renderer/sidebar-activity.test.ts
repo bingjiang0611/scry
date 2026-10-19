@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { activityGroups, sidebarActivity } from './sidebar-activity'
 import type { ProjectMeta } from './env'
 
+const remoteProject = {
+  key: '["mac2","/remote/rotom-team"]',
+  connection: { id: 'mac2', label: 'mac2', hostId: 'host-2', anchorSHA256: 'anchor',
+    ssh: { hostname: 'mac2', username: 'owner', port: 22 }, state: 'connected' as const, expiresAt: 0 },
+  state: 'connected' as const, cwd: '/remote/rotom-team', name: 'rotom-team', mtime: 5,
+  canManage: true, canDelete: true, needsUpgrade: false,
+  sessions: [{ sessionId: 'remote-row', externalSessionId: 'native-id', providerId: 'pi',
+    cwd: '/remote/rotom-team', label: '/skill:rotom-team-performance', ts: 5, isActive: true, pinnedAt: 1 }]
+}
+
 const projects: ProjectMeta[] = [{
   cwd: '/work/store', name: 'Store', mtime: 3,
   sessions: [
@@ -62,6 +72,42 @@ describe('sidebar activity projection', () => {
     const reordered = sidebarActivity([{ ...projects[0], sessions: [...projects[0].sessions].reverse() }], empty, empty, '')
     expect(reordered.filter(row => row.kind === 'session').map(row => row.key))
       .toEqual(before.filter(row => row.kind === 'session').map(row => row.key).reverse())
+  })
+
+  it('merges live remote sessions with local activity, retaining their host and session identity', () => {
+    const rows = sidebarActivity(projects, new Set(['run-a']), empty, '', [remoteProject])
+    const remote = rows.filter(row => row.kind === 'remote')
+    expect(rows.filter(row => row.kind !== 'remote')).toEqual(sidebarActivity(projects, new Set(['run-a']), empty, ''))
+    expect(remote).toHaveLength(1)
+    expect(remote[0]).toMatchObject({ group: 'working', project: remoteProject, session: remoteProject.sessions[0] })
+    expect(sidebarActivity([], empty, empty, 'MAC2', [remoteProject])).toEqual(remote)
+    expect(sidebarActivity([], empty, empty, 'performance', [remoteProject])).toEqual(remote)
+    expect(sidebarActivity([], empty, empty, 'rotom-team', [remoteProject])).toEqual(remote)
+    expect(sidebarActivity([], empty, empty, '/remote/', [remoteProject])).toEqual(remote)
+    expect(sidebarActivity([], empty, empty, 'missing', [remoteProject])).toEqual([])
+  })
+
+  it('does not treat cached, archived, idle or unknown remote sessions as live or completed', () => {
+    for (const state of ['disconnected', 'unknown', 'pairing'] as const) {
+      expect(sidebarActivity([], empty, empty, '', [{ ...remoteProject, state }])).toEqual([])
+    }
+    for (const change of [{ isActive: false }, { isActive: undefined }, { archivedAt: 1 }, { externalSessionId: undefined }]) {
+      expect(sidebarActivity([], empty, empty, '', [{ ...remoteProject,
+        sessions: [{ ...remoteProject.sessions[0], ...change }] }])).toEqual([])
+    }
+  })
+
+  it('keeps remote keys stable across titles and pins, but distinct across hosts, profiles, providers and workspaces', () => {
+    const session = remoteProject.sessions[0]
+    const original = sidebarActivity([], empty, empty, '', [remoteProject])[0].key
+    expect(sidebarActivity([], empty, empty, '', [{ ...remoteProject,
+      sessions: [{ ...session, label: 'renamed', pinnedAt: undefined }] }])[0].key).toBe(original)
+    const rows = sidebarActivity([], empty, empty, '', [remoteProject,
+      { ...remoteProject, connection: { ...remoteProject.connection, id: 'mac3' } },
+      { ...remoteProject, cwd: '/another' },
+      { ...remoteProject, sessions: [{ ...session, providerId: 'codex' }, { ...session, agentProfileId: 'work' }] }
+    ])
+    expect(new Set(rows.map(row => row.key)).size).toBe(5)
   })
 
   it('separates native identities across profiles, providers and workspaces', () => {
