@@ -29,6 +29,42 @@ afterEach(async () => {
 })
 
 describe('conversation backend lane', () => {
+  it('exposes only the latest accepted terminal outcome and clears stale success during a new turn', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-conversation-outcome-'))
+    roots.push(root)
+    const cwd = join(root, 'project')
+    await mkdir(cwd)
+    let outcome: 'completed' | 'failed' | 'interrupted' | 'cancelled' = 'completed'
+    const service = new ConversationService({
+      store: new ConversationStore(join(root, 'user-data')),
+      resolveContinuationKey: async () => 'identity-a',
+      supportsHistoricalInput: () => true,
+      startAppRun: async (_request, { managedConversation: managed }) => {
+        managed.onProviderDispatchAttempt?.()
+        const running = (await service.list(created.cwd))[0]
+        expect(running.activeRunId).toBe(managed.runId)
+        expect(running.lastRunOutcome).toBeUndefined()
+        await managed.onTerminal({
+          status: outcome,
+          finalItems: [{ runId: managed.runId, itemId: 'user', contentHash: hash('hello') }],
+          receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' },
+          archive: { sessionId: 'archive-a' }
+        })
+        return { runId: managed.runId }
+      }
+    })
+    const created = await service.create(cwd)
+    expect(created.lastRunOutcome).toBeUndefined()
+    for (const status of ['completed', 'failed', 'interrupted', 'cancelled'] as const) {
+      outcome = status
+      const current = (await service.list(created.cwd))[0]
+      await service.send(request(created.id, current.revision, `outcome-${status}`))
+      const terminal = (await service.list(created.cwd))[0]
+      expect(terminal.lastRunOutcome).toBe(status)
+      expect(terminal.activeRunId).toBeUndefined()
+    }
+  })
+
   it('validates untrusted wire fields before any Provider preparation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-conversation-schema-'))
     roots.push(root)

@@ -13,6 +13,8 @@ export interface ConversationSummary {
   archivedAt?: number
   deletion?: Conversation['deletion']
   activeRunId?: string
+  /** Latest dispatched turn only; imported history has no inferred outcome. */
+  lastRunOutcome?: import('./turn-record').AgentTurnRecord['status']
   fork?: Pick<NonNullable<Conversation['fork']>, 'sourceConversationId' | 'sourceRunId' | 'bindingId' | 'status' | 'reason'>
   blockedReason?: string
 }

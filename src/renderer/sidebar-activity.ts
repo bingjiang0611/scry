@@ -1,7 +1,8 @@
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { ProjectMeta, SessionMeta } from './env'
+import { SIDEBAR_ACTIVITY_COPY as copy } from './constants/copy'
 
-export type ActivityGroup = 'attention' | 'working' | 'recent'
+export type ActivityGroup = 'attention' | 'working' | 'completed'
 export type ActivityEntry = {
   key: string
   project: ProjectMeta
@@ -9,10 +10,9 @@ export type ActivityEntry = {
 } & ({ kind: 'session'; session: SessionMeta } | { kind: 'conversation'; conversation: ConversationSummary })
 
 export const activityGroups: { id: ActivityGroup; label: string }[] = [
-  { id: 'attention', label: '等待回复' },
-  { id: 'working', label: '运行中' },
-  // Catalog history has no authoritative terminal outcome. Inactive is not success.
-  { id: 'recent', label: '最近' }
+  { id: 'attention', label: copy.attention },
+  { id: 'working', label: copy.working },
+  { id: 'completed', label: copy.completed }
 ]
 
 export function sidebarActivity(
@@ -23,20 +23,23 @@ export function sidebarActivity(
 ): ActivityEntry[] {
   const entries: ActivityEntry[] = []
   const needle = query.trim().toLocaleLowerCase()
-  const group = (runId?: string): ActivityGroup => runId && waitingQuestionRunIds.has(runId)
+  const group = (runId?: string, outcome?: SessionMeta['lastRunOutcome']): ActivityGroup | undefined => runId && waitingQuestionRunIds.has(runId)
     ? 'attention'
-    : runId && runningRunIds.has(runId) ? 'working' : 'recent'
+    : runId && runningRunIds.has(runId) ? 'working' : outcome === 'completed' ? 'completed' : undefined
   for (const project of projects) {
     const matches = (title: string): boolean => !needle || `${project.name} ${project.cwd} ${title}`.toLocaleLowerCase().includes(needle)
     for (const conversation of project.conversations ?? []) {
       if (conversation.archivedAt || !matches(conversation.title)) continue
-      entries.push({ key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation,
-        group: conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? 'attention' : 'working' : 'recent' })
+      const status = conversation.activeRunId
+        ? waitingQuestionRunIds.has(conversation.activeRunId) ? 'attention' : 'working'
+        : group(undefined, conversation.lastRunOutcome)
+      if (status) entries.push({ key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status })
     }
     for (const session of project.sessions) {
       if (session.archivedAt || !matches(session.preview)) continue
-      entries.push({ key: `session:${JSON.stringify([project.cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
-        kind: 'session', project, session, group: group(session.runId) })
+      const status = group(session.runId, session.lastRunOutcome)
+      if (status) entries.push({ key: `session:${JSON.stringify([project.cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
+        kind: 'session', project, session, group: status })
     }
   }
   // Preserve catalog order within each group; progress events do not add a second sort.

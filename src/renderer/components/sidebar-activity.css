@@ -1,17 +1,14 @@
 .sb-view-tabs {
   display: flex;
-  gap: 4px;
-  margin: 8px 2px 4px;
-  padding: 3px;
-  border-radius: 9px;
-  background: var(--panel3);
+  gap: 22px;
+  margin: 8px 10px 12px;
 }
 
 .sb-view-tabs [role='tab'] {
-  flex: 1;
-  min-height: 30px;
+  min-height: 32px;
+  padding: 4px 0;
   border: 0;
-  border-radius: 6px;
+  border-bottom: 1px solid transparent;
   background: transparent;
   color: var(--dim);
   font: 500 12px/1 var(--font-ui);
@@ -19,9 +16,8 @@
 }
 
 .sb-view-tabs [aria-selected='true'] {
-  background: var(--sidebar-surface);
+  border-bottom-color: var(--fg);
   color: var(--fg);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
 }
 
 .sb-activity {
@@ -29,33 +25,79 @@
   padding-bottom: 12px;
 }
 
-.sb-activity-scope {
-  margin: 10px 10px 0;
-  color: var(--dim2);
-  font-size: 11px;
-}
-
 .sb-activity-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 16px 10px 6px;
+  margin: 22px 10px 6px;
   color: var(--fg);
-  font: 550 12px/1.4 var(--font-ui);
+  font: 500 15px/24px var(--font-ui);
 }
 
-.sb-activity-heading:first-child { margin-top: 12px; }
-.sb-activity-heading span { color: var(--dim); font-variant-numeric: tabular-nums; }
-.sb-activity-item { position: relative; margin: 2px 0 3px; }
-.sb-activity .sb-act:not(:hover):not(.on) { color: var(--dim); }
-.sb-activity .sb-sess { padding-left: 8px; }
-.sb-activity-project {
-  padding: 0 10px 0 30px;
-  overflow: hidden;
-  color: var(--dim);
-  font-size: 11px;
-  line-height: 1.4;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.sb-activity-heading:first-child { margin-top: 6px; }
+.sb-activity-item { position: relative; }
+
+/* Keep existing native selection, menus, hover details and action hit targets;
+   only the activity presentation loses its cards and secondary visual labels. */
+:root .sidebar .sb-activity .sb-sess,
+:root .sidebar .sb-activity .sb-sess.active {
+  min-height: 40px;
+  padding: 7px 34px 7px 10px;
+  border-color: transparent;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 24px;
 }
+
+:root .sidebar .sb-activity [data-activity-group='working'] .sb-sess {
+  color: var(--dim);
+  padding-right: 10px;
+}
+
+:root .sidebar .sb-activity .sb-sess-row:hover .sb-sess,
+:root .sidebar .sb-activity .sb-sess-row:focus-within .sb-sess {
+  padding-right: 64px;
+  background: var(--surface-hover);
+}
+
+.sidebar .sb-activity .sb-session-main { gap: 0; }
+:root .sidebar .sb-activity .sb-sesstext {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 400;
+}
+:root .sidebar .sb-activity .sb-sess.active .sb-sesstext,
+:root .sidebar .sb-activity .sb-sess.unread .sb-sesstext {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Preserve provider and status descriptions for assistive technology. */
+.sidebar .sb-activity .sb-session-meta,
+.sidebar .sb-activity .sb-provider,
+.sidebar .sb-activity .sb-session-main > svg,
+.sidebar .sb-activity .sb-running {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sidebar .sb-activity .sb-running { animation: none; }
+
+.sb-activity-status {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  color: var(--dim);
+  pointer-events: none;
+}
+.sb-activity-status .ico { width: 16px; height: 16px; }
+[data-activity-group='attention'] > .sb-activity-status { color: var(--fg); }
+.sb-activity-item:hover > .sb-activity-status,
+.sb-activity-item:focus-within > .sb-activity-status { visibility: hidden; }
+.sb-activity .sb-act:not(:hover):not(.on) { color: var(--dim); }
 .sb-activity-limit { margin: 8px 10px; color: var(--dim2); font-size: 12px; }

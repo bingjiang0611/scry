@@ -38,6 +38,8 @@ export async function exerciseConversationManagement({ cdp, evaluate, fixture, i
   await wait(() => evaluate(`window.scry.activeRuns().then(runs=>!runs.some(run=>run.runId===${json(started.runId)}))`), 'legacy source has settled')
   const receipt = inputs(fixture).at(-1)
   assert.equal(receipt.runId, started.runId)
+  const nativeCatalog = await evaluate('window.scry.listProjects()')
+  assert.equal(nativeCatalog.find(project => project.cwd === fixture.workspace).sessions.find(session => session.runId === started.runId)?.lastRunOutcome, 'completed', 'native completion is persisted by the real run lifecycle')
   const source = { providerId: 'codex', cwd: fixture.workspace, externalSessionId: receipt.sessionId }
   const sourcePreview = await wait(() => evaluate(`window.scry.conversations.previewAdoption(${json(source)}).catch(error=>{
     if (String(error).includes('源 Provider 仍在执行、保存证据或删除')) return false;

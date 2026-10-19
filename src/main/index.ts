@@ -4086,6 +4086,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       // 归档仍等待它完成，保证历史回放最终包含 turn_diff。
       try {
         appSessionStore().record({
+          lastRunOutcome: completionStatus,
           providerId,
           agentProfileId,
           runtimeProvider,
@@ -4322,7 +4323,8 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
           runId,
           externalSessionId: storageSessionId,
           cwd: catalogCwd,
-          prompt: displayPrompt
+          prompt: displayPrompt,
+          lastRunOutcome: stopped ? 'interrupted' : 'failed'
         })
       } catch (catalogError) {
         win?.webContents.send('agent:error', {

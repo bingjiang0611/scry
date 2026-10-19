@@ -8,7 +8,7 @@
         {
           "path": "v2/index.html",
           "createdAt": "2026-10-18T11:26:34.929Z",
-          "status": "needs-review",
+          "status": "approved",
           "subtitle": "有任务才显示分区，标题与任务共同位移",
           "viewport": {
             "width": 1512,
@@ -20,5 +20,5 @@
     }
   },
   "createdAt": "2026-10-18T11:26:34.930Z",
-  "updatedAt": "2026-10-18T11:26:34.930Z"
+  "updatedAt": "2026-10-19T02:46:23.996Z"
 }

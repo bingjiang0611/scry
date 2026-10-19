@@ -130,6 +130,8 @@ export interface ConversationServiceDeps {
 }
 
 function summary(conversation: Conversation, activeRunIds: ReadonlySet<string>): ConversationSummary {
+  const latest = conversation.turns.at(-1)
+  const lastRunOutcome = latest?.origin === 'dispatch' && latest.delivery.status === 'accepted' ? latest.delivery.outcome : undefined
   const pending = conversation.turns.find((turn) => turn.origin === 'dispatch' &&
     (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown')) as Extract<Conversation['turns'][number], { origin: 'dispatch' }> | undefined
   return {
@@ -144,6 +146,7 @@ function summary(conversation: Conversation, activeRunIds: ReadonlySet<string>):
     ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
     revision: conversation.revision,
     turnCount: conversation.turns.length,
+    ...(lastRunOutcome ? { lastRunOutcome } : {}),
     ...(activeRunIds.has(pending?.runId ?? '') ? { activeRunId: pending?.runId } : {}),
     ...(pending ? { blockedReason: pending.delivery.status === 'unknown' ? pending.delivery.reason : activeRunIds.has(pending.runId) ? '当前轮仍在投递' : '投递结果尚未确认，且没有可关联的运行；请重启核查' } : {})
   }
