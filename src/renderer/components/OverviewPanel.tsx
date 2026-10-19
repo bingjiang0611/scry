@@ -37,6 +37,7 @@ import {
 } from '../format'
 import type { FileRow, HookInstanceRow, HookScriptRow, HookSummary, Turn } from '../format'
 import { displayDiffPath, sessionDiffSummary, sessionNetDiffSummary, turnDiffViewOf } from '../turn-diff'
+import { OVERVIEW_COST_COPY } from '../constants/copy'
 import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
 import { TurnTimingDetails } from './TurnTimingDetails'
@@ -721,10 +722,6 @@ function OverviewPanelBody({
       known: values.length
     }
   }
-  const formatObserved = (evidence: { value: number | null; known: number }, format: (value: number) => string = fmtTok): string =>
-    evidence.value == null ? '—' : format(evidence.value)
-  const tin = sumObserved((e) => e.tokensIn)
-  const tout = sumObserved((e) => e.tokensOut)
   const cost = sumObserved((e) => e.costUsd)
   const cacheHit = useMemo(() => cacheHitEvidence(results), [results])
   const isQoder = runtimeProvider === 'qoder_cli' || all.some((event) =>
@@ -968,10 +965,6 @@ function OverviewPanelBody({
               <span>{billing.tokenFormulaLabel}</span>
               <strong>{billingTokenText}</strong>
             </div>
-            <div className="overview-metric">
-              <span>输入 / 输出</span>
-              <strong>{formatObserved(tin)} / {formatObserved(tout)}</strong>
-            </div>
             <div
               className={`overview-metric ${cacheHit.rate == null ? 'unsupported' : ''}`}
               title={cacheHit.rate == null
@@ -985,12 +978,12 @@ function OverviewPanelBody({
               className={`overview-metric ${isQoder ? (qoderCreditKnown ? 'accent' : 'unsupported') : cost.value == null ? 'unsupported' : ''}`}
               title={isQoder
                 ? qoderCreditKnown ? `仅统计已观测到的主会话请求 Credit${qoderCreditPartial ? '，存在未覆盖请求或轮次' : ''}` : '当前会话没有可用的 Qoder Credit 证据'
-                : cost.value == null ? '当前 Provider 未上报成本' : `${cost.known}/${results.length} 轮上报了成本`}
+                : cost.value == null ? OVERVIEW_COST_COPY.unavailable : OVERVIEW_COST_COPY.coverage(cost.known, results.length)}
             >
-              <span>{isQoder ? 'Credit' : '成本'}</span>
+              <span>{isQoder ? 'Credit' : OVERVIEW_COST_COPY.label}</span>
               <strong>{isQoder
                 ? qoderCreditKnown ? `${qoderCreditPartial ? '≥' : ''}${formatOverviewCredits(qoderCredits)}` : '—'
-                : cost.value == null ? '—' : `${cost.known < results.length ? '≥' : ''}${formatOverviewCost(cost.value)}`}</strong>
+                : cost.value == null ? '—' : formatOverviewCost(cost.value)}</strong>
             </div>
           </div>
         </section>

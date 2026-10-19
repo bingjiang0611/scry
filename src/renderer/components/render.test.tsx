@@ -3669,7 +3669,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     expect(html).not.toContain('overview-metric-foot')
   })
 
-  it('百万级 token 总量、输入及缓存使用 M，小数值和缺失证据保持原样', () => {
+  it('百万级 token 总量使用 M，不再单独展示输入/输出', () => {
     const largeTokenTurn: Turn = {
       runId: 'large-token-usage',
       userText: 'probe',
@@ -3691,7 +3691,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
 
     expect(largeTokenHtml).toContain('<strong>19.7M</strong>')
     expect(largeTokenHtml).not.toContain('<strong>19.7M tok</strong>')
-    expect(largeTokenHtml).toContain('<strong>10.6M / 43.9k</strong>')
+    expect(largeTokenHtml).not.toContain('<strong>10.6M / 43.9k</strong>')
     expect(largeTokenHtml).not.toContain('overview-metric-foot')
   })
 
@@ -4503,7 +4503,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
 
   it('会话数据只聚合当前会话，不混入 usage.jsonl 与 SQLite 的跨会话累计', () => {
     expect(html).toContain('<strong>3.0k</strong>')
-    expect(html).toContain('<strong>1.5k / 200</strong>')
+    expect(html).not.toContain('<strong>1.5k / 200</strong>')
     expect(html).not.toContain('累计 Token 用量')
     expect(html).not.toContain('3.4k tok')
     expect(html).not.toContain('SQLite 历史累计')
@@ -4695,11 +4695,11 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(detailsHtml).toContain('定位到对话')
   })
 
-  it('部分轮次缺少 Token 时用不等号保留下界语义，但不再显示 tok+', () => {
+  it('部分证据保留 Token 下界，成本仅显示金额并保留缺失提示', () => {
     const html = renderToStaticMarkup(
       <OverviewPanel
         turns={[
-          { runId: 'known', userText: 'one', done: true, items: [ev({ id: 'known-result', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5 })] },
+          { runId: 'known', userText: 'one', done: true, items: [ev({ id: 'known-result', kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 5, costUsd: 29.14 })] },
           { runId: 'missing', userText: 'two', done: true, items: [ev({ id: 'missing-result', kind: 'harness', stage: 'result' })] }
         ]}
         selected={null}
@@ -4710,6 +4710,9 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     )
 
     expect(html).toContain('<strong>≥15</strong>')
+    expect(html).toContain('<strong>$29.14</strong>')
+    expect(html).toContain('title="1/2 轮上报了成本"')
+    expect(html).not.toContain('≥$')
     expect(html).not.toContain('tok+')
   })
 
@@ -4753,7 +4756,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).toContain('overview-verdict warn')
   })
 
-  it('指标区展示 Token、输入/输出、缓存命中率与成本，并移除调用、危险及辅助脚注', () => {
+  it('指标区只展示 Token、缓存命中率与成本，不再展示输入/输出', () => {
     const html = renderToStaticMarkup(
       <OverviewPanel
         turns={[
@@ -4777,8 +4780,9 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
       />
     )
 
-    expect(html).toContain('<strong>13 / 5</strong>')
-    expect(html.match(/class="overview-metric(?: |")/g)).toHaveLength(4)
+    expect(html).not.toContain('<span>输入 / 输出</span>')
+    expect(html).not.toContain('<strong>13 / 5</strong>')
+    expect(html.match(/class="overview-metric(?: |")/g)).toHaveLength(3)
     expect(html).toContain('<span>缓存命中率 · 部分</span><strong>36.8%</strong>')
     expect(html).toContain('<span>成本</span><strong>—</strong>')
     expect(html).not.toContain('<span>调用</span>')
@@ -4790,7 +4794,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).not.toContain('overview-metric-foot')
   })
 
-  it('Qoder 会话的第四栏显示 Credit，不把它冒充美元成本', () => {
+  it('Qoder 会话的第三栏显示 Credit，不把它冒充美元成本', () => {
     const html = renderToStaticMarkup(
       <OverviewPanel
         turns={[{

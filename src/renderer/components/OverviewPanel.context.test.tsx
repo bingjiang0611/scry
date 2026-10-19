@@ -57,7 +57,8 @@ describe('OverviewPanel request-level context', () => {
     const next = render([sample('first', 150000), sample('second', 201600)], [previous])
     expect(next).toContain('201.6k / 272.0k')
     expect(next).toContain('随请求用量上报更新，非逐 token')
-    expect(next).toContain('<strong>10 / 4</strong>')
+    expect(next).toContain('<strong>14</strong>')
+    expect(next).not.toContain('<span>输入 / 输出</span>')
     expect(next).not.toContain('100.0k / 272.0k')
   })
 
