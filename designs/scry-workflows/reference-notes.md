@@ -2,7 +2,7 @@
 
 本轮依据：用户确认“任务驱动编排，模板作为捷径”，要求核对官方文章细节。来源为 [官方页面](https://code.claude.com/docs/en/workflows) 与对应 [Markdown](https://code.claude.com/docs/en/workflows.md)。本轮完整读取 Markdown 的 506 行；HTML 同时取回用于核对页面来源。文档会更新，下列数字和行为是本次取回版本，不是所有历史版本的保证。
 
-本文只说明文档事实与设计取舍。没有运行 Claude 原生 Workflow、付费 Agent 或 Jev 请求。v5 已补齐循环、分支、中间状态与质量模式的规范，见 [执行语义与补充研究](execution-semantics.md)。下表的“不执行任意 JS”不再意味着只能做静态 DAG。
+本文只说明文档事实与设计取舍。没有运行 Claude 原生 Workflow、付费 Agent 或 Jev 请求。v5 已补齐循环、分支、中间状态与质量模式的规范，见 [执行语义与补充研究](execution-semantics.md)。下表的“不执行任意 JS”不再意味着只能做静态 DAG。v6 的 [聊天入口与模式](chat-entry-semantics.md) 另行补齐单次请求、自动判断和模板命令，未实现状态不变。
 
 本次源文件：`/tmp/scry-workflows-article.md`，SHA-256 `a324b4814d760d6c6f115a0a534123fe71acc40e4a9fa63f0e2f85200df197dd`。该临时副本用于核对，仓库只保留提炼后的事实与链接，不镜像整篇文章。
 
@@ -19,7 +19,7 @@
 | 原文位置 / 事实 | Scry 采用或明确差异 |
 | --- | --- |
 | [When to use a workflow](https://code.claude.com/docs/en/workflows#when-to-use-a-workflow)：脚本持有循环、分支、中间结果，主会话只接最终答案 | 采用“计划外置、运行器调度、结果按引用传递”。编排模型准备计划，不在每个子任务之间重复当调度器；不承诺零上下文或零 token |
-| [Have Claude write a workflow](https://code.claude.com/docs/en/workflows#have-claude-write-a-workflow)：任务生成 JavaScript；ultracode 可让实质任务自动走 Workflow | Scry 支持自动规划入口及模板入口；本期不用 ultracode，也不执行生成的 JS。编排模型由用户选；简单任务可生成单节点，不强行拆成多 Agent |
+| [Have Claude write a workflow](https://code.claude.com/docs/en/workflows#have-claude-write-a-workflow)：任务生成 JavaScript；ultracode 可让实质任务自动走 Workflow | v6 定义自然语言单次请求、会话 auto 和模板命令，使用 Scry 命名空间，不调用原生 ultracode 或生成 JS。编排模型由用户选；简单任务可 direct 或单节点；执行仍确认计划，识别费用和默认 off 显式披露 |
 | [Approve the plan](https://code.claude.com/docs/en/workflows#approve-the-plan-before-it-runs)：可查看原脚本，审批行为随权限模式变化 | 提供结构化计划预览和配置确认；启动规划与批准执行是不同动作。确认计划不替代 Provider 工具审批、workspace authority 或仓库 trust |
 | [Save for reuse](https://code.claude.com/docs/en/workflows#save-the-workflow-for-reuse)：`.claude/workflows/`、用户目录、`meta` 名称/描述、args、`/reload-skills` | 保存为 App-owned 的版本化数据模板、参数和角色绑定；不写 `.claude/workflows`。保存只保存定义，不连带执行或授权。固定任务列表不自动变成可泛化模板 |
 | [Saved script](https://code.claude.com/docs/en/workflows#what-the-saved-script-looks-like)：`agent()`、`pipeline()`、`parallel()`、`phase()`、`log()` | 概念映射为 Agent 节点、按项目展开、依赖图并行、阶段分组、带来源事件；阶段是展示分组，不应强制所有节点存在全局 barrier |
@@ -54,3 +54,9 @@ v5 修订：循环修复、多方案权衡、批量迁移、明确授权后的�
 - 读取 LangGraph 的并行、Routing、Orchestrator-worker、Evaluator-optimizer，以及 Checkpointers 的任务写入、Replay、Durability 小节。借鉴状态隔离、评价反馈、checkpoint 与 side-effect 边界，不采用框架依赖或照搬其重放策略。
 - `durable-execution.md` 获取到的内容标题实际为 Persistence，本轮以具体 Checkpointers 页面核对恢复行为，不把 URL 名当内容证据。最初 platform 域的 SDK `.md` 返回 HTML，不将它当已阅读的 Markdown；使用 code.claude.com 对应 Markdown 的指定小节。
 - 补充来源的链接、实际阅读范围及哪些属于 Scry 设计决定，均列在 [执行语义 §1](execution-semantics.md#1-研究结论与实现选择)。
+
+## 6. v6：入口能力不等于执行能力
+
+本轮复核同一官方快照的 Have Claude write a workflow、Ask for a workflow、Let Claude decide with ultracode 与 Bundled workflows 小节：自然语言或关键词可只作用于当前任务；`/effort ultracode` 对会话实质任务自动使用工作流；内置命令是独立入口。这些不能用“已有自动规划按钮”代替。
+
+Scry 的设计对应三种入口，但不承诺原生命令兼容或自动放行：默认关闭额外路由，启用识别前取得费用/数据授权，执行计划仍须确认。没有读取原生运行时实现，也没有真实调用验证；它们是已核对文档事实与明确的 Scry 产品选择。
