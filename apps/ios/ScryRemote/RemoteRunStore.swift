@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import RemoteTransport
 #if canImport(UIKit)
 import UIKit
@@ -189,14 +190,56 @@ final class RemoteRunStore: ObservableObject {
     case empty
     case failed(String)
 
-    fileprivate var hasVisibleValue: Bool {
+    var hasVisibleValue: Bool {
       if case .loaded = self { return true }
       if case .empty = self { return true }
       return false
     }
   }
   @Published private(set) var catalog: CatalogState = .idle
-  @Published private(set) var catalogRefreshError: String?
+  enum CatalogEvidence: Equatable {
+    case none
+    case unverifiedCache(Date?)
+    case verified(Date)
+  }
+  enum CatalogRefreshFailure: Equatable {
+    case transport(String)
+    case partial(String)
+    case cacheRead(String)
+    case cacheWriteRejected
+    case cacheWrite(String)
+    case authorization(String)
+    case protocolMismatch(String)
+
+    var summary: String {
+      switch self {
+      case .partial: return ConnectionCopy.partialRefreshFailure
+      case .cacheWriteRejected, .cacheWrite: return ConnectionCopy.cacheWriteRejected
+      case .cacheRead: return ConnectionCopy.cacheReadFailure
+      case .transport: return ConnectionCopy.refreshFailure
+      case .authorization: return ConnectionCopy.authorizationFailure
+      case .protocolMismatch: return ConnectionCopy.protocolFailure
+      }
+    }
+
+    var requiresPairing: Bool {
+      if case .authorization = self { return true }
+      return false
+    }
+
+    var technicalDetail: String {
+      switch self {
+      case let .transport(detail), let .partial(detail), let .cacheRead(detail), let .cacheWrite(detail),
+           let .authorization(detail), let .protocolMismatch(detail): return detail
+      case .cacheWriteRejected: return ConnectionCopy.cacheWriteRejectedTechnical
+      }
+    }
+  }
+  @Published private(set) var catalogRefreshFailure: CatalogRefreshFailure?
+  @Published private(set) var catalogEvidence: CatalogEvidence = .none
+  @Published private(set) var catalogVerifiedAt: Date?
+  @Published private(set) var catalogRefreshInFlight = false
+  @Published private(set) var catalogRefreshRevision = 0
 
   enum HistoryPreviewState: Equatable {
     case idle
@@ -318,6 +361,7 @@ final class RemoteRunStore: ObservableObject {
   private var deliveryTasks: [String: Task<Void, Never>] = [:]
   private var pausedDeliveries = Set<String>()
   private var catalogTask: Task<Void, Never>?
+  private var catalogRequestID = 0
   private var historyTask: Task<Void, Never>?
   private var providersTask: Task<Void, Never>?
   private var commandsTask: Task<Void, Never>?
@@ -365,6 +409,14 @@ final class RemoteRunStore: ObservableObject {
   #if DEBUG
   private var mockMode = false
   private var historyTestOffline = false
+  // Test data enters the real catalog request/caching path; other transports
+  // remain disabled by mockMode and cannot reach stored credentials.
+  private struct CatalogFixture {
+    let connection: RemoteConnection
+    let fetch: @Sendable (@escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void) async throws -> [G0Transport.RunSessionRef]
+    var beforePersist: @Sendable () async -> Void = {}
+  }
+  private var catalogFixture: CatalogFixture?
   #endif
 
   let historyOnly: Bool
@@ -629,81 +681,167 @@ final class RemoteRunStore: ObservableObject {
     permissionMode = id
   }
 
+  private actor CatalogProgress {
+    var receivedPage = false
+    func markPage() { receivedPage = true }
+  }
+
   // Load the host session catalog so the phone's session list shows the SAME
-  // conversations the Mac has. Returning from a transcript uses the warm value
-  // immediately; a fresh cache performs no network request at all.
+  // conversations the Mac has. Cached content is never promoted to verified;
+  // only the frozen, complete host response receives a full-refresh timestamp.
   func loadSessions(force: Bool = false) {
     #if DEBUG
-    if mockMode { return }
+    if mockMode && catalogFixture == nil { return }
+    let fixture = catalogFixture
+    let requestedClient = fixture.map { RemoteRunClient(connection: $0.connection) } ?? makeClient()
+    #else
+    let requestedClient = makeClient()
     #endif
-    let hasCachedValue = catalog.hasVisibleValue
-    if !force, hasCachedValue, isFresh(catalogLoadedAt, within: Self.catalogFreshness) { return }
+    let hasVisibleValue = catalog.hasVisibleValue
+    if !force, hasVisibleValue, isFresh(catalogLoadedAt, within: Self.catalogFreshness) { return }
     guard catalogTask == nil else { return }
-    guard let client = makeClient() else {
-      if !hasCachedValue { catalog = .failed("尚未配对") }
+    guard let client = requestedClient else {
+      if !hasVisibleValue { catalog = .failed(ConnectionCopy.notPaired) }
       return
     }
-    if !hasCachedValue { catalog = .loading }
-    catalogRefreshError = nil
+    if !hasVisibleValue { catalog = .loading }
+    catalogRequestID += 1
+    let requestID = catalogRequestID
+    catalogRefreshInFlight = true
+    catalogRefreshFailure = nil
     let requestDataGeneration = dataGeneration
     let disk = historyDisk
     let diskKey = RemoteHistoryCache.catalogKey(connection: client.connection)
     let requestConnectionRevision = connectionSuccessRevision
+    let progress = CatalogProgress()
     catalogTask = Task { [weak self] in
       let diskEpoch = await disk.epoch
       do {
-        if !hasCachedValue {
+        if !hasVisibleValue {
           do {
-            if let cached = try await disk.readCatalog(diskKey) {
+            if let cached = try await disk.readCatalogValue(diskKey) {
               await MainActor.run {
-                guard let self, self.dataGeneration == requestDataGeneration else { return }
-                self.catalog = cached.isEmpty ? .empty : .loaded(cached)
+                guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
+                self.catalogEvidence = .unverifiedCache(cached.fetchedAt)
+                self.catalogVerifiedAt = cached.fetchedAt
+                self.catalog = cached.sessions.isEmpty ? .empty : .loaded(cached.sessions)
               }
             }
           } catch {
             await MainActor.run {
-              guard let self, self.dataGeneration == requestDataGeneration else { return }
-              self.catalogRefreshError = "本地列表缓存不可用，将核对主机：\(Self.describe(error))"
+              guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
+              self.catalogRefreshFailure = .cacheRead(Self.describe(error))
             }
           }
         }
-        let list = try await client.sessions(progress: { [weak self] page in
+        let retainCompleteList = await MainActor.run { self?.catalog.hasVisibleValue ?? false }
+        let onPage: @Sendable ([G0Transport.RunSessionRef]) async -> Void = { [weak self] page in
+          await progress.markPage()
           await MainActor.run {
-            guard let self, self.dataGeneration == requestDataGeneration else { return }
+            guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
             self.recordSuccess()
-            self.catalog = page.isEmpty ? .empty : .loaded(page)
-            // Only warm after the frozen catalog is complete. A partial page
-            // must not start work for sessions that may not belong to it.
+            // Keep a complete old list during refresh. On a cold start, pages
+            // can become readable but never acquire a full-refresh timestamp.
+            if !retainCompleteList { self.catalog = page.isEmpty ? .empty : .loaded(page) }
           }
-        })
-        await MainActor.run {
-          guard let self, self.dataGeneration == requestDataGeneration else { return }
-          self.catalogTask = nil
+        }
+        let list: [G0Transport.RunSessionRef]
+        #if DEBUG
+        if let fixture { list = try await fixture.fetch(onPage) }
+        else { list = try await client.sessions(progress: onPage) }
+        #else
+        list = try await client.sessions(progress: onPage)
+        #endif
+        let verifiedAt = Date()
+        let current = await MainActor.run { () -> Bool in
+          guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return false }
           self.recordSuccess()
-          self.catalogLoadedAt = Date()
-          self.catalogRefreshError = nil
+          self.catalogLoadedAt = verifiedAt
+          self.catalogVerifiedAt = verifiedAt
+          self.catalogEvidence = .verified(verifiedAt)
+          self.catalogRefreshFailure = nil
           self.catalog = list.isEmpty ? .empty : .loaded(list)
           self.prefetchHistory(list)
+          return true
         }
+        guard current else { return }
+        #if DEBUG
+        if let fixture { await fixture.beforePersist() }
+        #endif
         do {
-          _ = try await disk.writeCatalog(list, key: diskKey, epoch: diskEpoch)
+          let saved = try await disk.writeCatalog(list, key: diskKey, epoch: diskEpoch, fetchedAt: verifiedAt)
+          await MainActor.run {
+            guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
+            if saved { self.catalogRefreshRevision += 1 }
+            else { self.catalogRefreshFailure = .cacheWriteRejected }
+            self.finishCatalogRequest(requestID)
+          }
         } catch {
           await MainActor.run {
-            guard let self, self.dataGeneration == requestDataGeneration else { return }
-            self.catalogRefreshError = "会话列表未保存到手机缓存：\(Self.describe(error))"
+            guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
+            self.catalogRefreshFailure = .cacheWrite(Self.describe(error))
+            self.finishCatalogRequest(requestID)
           }
         }
       } catch {
+        let receivedPage = await progress.receivedPage
         await MainActor.run {
-          guard let self, self.dataGeneration == requestDataGeneration else { return }
-          self.catalogTask = nil
+          guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
           self.recordFailure(error, since: requestConnectionRevision)
+          let detail = Self.describe(error)
+          if case let G0Transport.RunError.host(code) = error,
+             ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code) {
+            self.catalogRefreshFailure = .authorization(detail)
+          } else if case G0Transport.RunError.host(code: "unknown_op") = error {
+            self.catalogRefreshFailure = .protocolMismatch(detail)
+          } else {
+            self.catalogRefreshFailure = receivedPage ? .partial(detail) : .transport(detail)
+          }
           if !self.catalog.hasVisibleValue { self.catalog = .failed(Self.describe(error)) }
-          else { self.catalogRefreshError = Self.describe(error) }
+          self.finishCatalogRequest(requestID)
         }
       }
     }
   }
+
+  private func isCurrentCatalogRequest(_ requestID: Int, dataGeneration requestDataGeneration: Int) -> Bool {
+    requestID == catalogRequestID && requestDataGeneration == dataGeneration
+  }
+
+  private func finishCatalogRequest(_ requestID: Int) {
+    guard requestID == catalogRequestID else { return }
+    catalogRefreshInFlight = false
+    catalogTask = nil
+  }
+
+  #if DEBUG
+  // A bounded DEBUG-only projection fixture exercises the feedback state's
+  // page-to-complete sequence. It does not execute loadSessions or disk I/O,
+  // and is not evidence for transport, partial, or cache failure behavior.
+  private func applyCatalogRefreshFixture() {
+    guard catalogTask == nil else { return }
+    catalogRequestID += 1
+    let requestID = catalogRequestID
+    catalogRefreshInFlight = true
+    catalogRefreshFailure = nil
+    let list: [G0Transport.RunSessionRef]
+    switch catalog {
+    case let .loaded(current): list = current
+    default: list = []
+    }
+    // Exercise a bounded page receipt before the complete snapshot is
+    // committed; this is not a pre-seeded final-state fixture.
+    let page = Array(list.prefix(max(1, list.count / 2)))
+    catalog = page.isEmpty ? .empty : .loaded(page)
+    catalog = list.isEmpty ? .empty : .loaded(list)
+    let verifiedAt = Date()
+    catalogLoadedAt = verifiedAt
+    catalogVerifiedAt = verifiedAt
+    catalogEvidence = .verified(verifiedAt)
+    catalogRefreshRevision += 1
+    finishCatalogRequest(requestID)
+  }
+  #endif
 
   // At most two small previews while browsing; never download full history.
   // An established readonly tunnel closes on cancellation, so foreground reads
@@ -2200,7 +2338,7 @@ final class RemoteRunStore: ObservableObject {
     activeRouting = nil
     projects = .idle; directories = .idle; chosen = nil
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
-    catalog = .idle; catalogRefreshError = nil; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyWindowKey = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
+    catalog = .idle; catalogRefreshFailure = nil; catalogEvidence = .none; catalogVerifiedAt = nil; catalogRefreshInFlight = false; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyWindowKey = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
     catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil; historyFollowingLatest = true
     historyRequestGeneration += 1
     historySyncing = false; historyFromCache = false; historyFetchedAt = nil
@@ -2328,6 +2466,7 @@ final class RemoteRunStore: ObservableObject {
     await store.prefetchTask?.value
     var checks: [(String, Bool)] = [
       ("store.catalogCacheUsesGrantNamespace", (try? await disk.readCatalog(catalogKey)) == catalogFixture),
+      ("store.catalogCacheKeepsRefreshTimestamp", (try? await disk.readCatalogValue(catalogKey))?.fetchedAt != nil),
       ("store.sessionSwitchDropsOldCommands", store.slashCommands.isEmpty),
       ("store.warmingDoesNotSwitchSession", store.activeSessionIdentity == beforeIdentity && store.prompt == nil),
       ("store.warmingUsesBoundedMirror", store.warmedScreens[key]?.available == true && ((try? JSONEncoder().encode(store.warmedScreens[key]).count) ?? Int.max) <= 16 * 1024),
@@ -2748,6 +2887,146 @@ final class RemoteRunStore: ObservableObject {
     return checks
   }
 
+  static func selfTestCatalogRefreshProjection() -> [(String, Bool)] {
+    let store = RemoteRunStore()
+    let fixture = G0Transport.RunSessionRef(sessionId: "refresh-fixture", externalSessionId: "session",
+      providerId: "codex", cwd: "/fixture", label: "fixture", ts: 1)
+    store.catalog = .loaded([fixture])
+    let before = store.catalogRefreshRevision
+    store.applyCatalogRefreshFixture()
+    return [
+      ("refreshCompletesThroughFixture", store.catalogRefreshRevision == before + 1 && !store.catalogRefreshInFlight),
+      ("refreshMarksVerified", { if case let .verified(date) = store.catalogEvidence { return date == store.catalogVerifiedAt }; return false }()),
+      ("refreshKeepsContents", store.catalog == .loaded([fixture]))
+    ]
+  }
+
+  private actor CatalogTestGate {
+    private var paused = false
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var arrival: CheckedContinuation<Void, Never>?
+    private(set) var calls = 0
+
+    func pause() async {
+      calls += 1
+      paused = true
+      arrival?.resume(); arrival = nil
+      await withCheckedContinuation { waiter = $0 }
+    }
+    func waitForArrival() async {
+      if paused { return }
+      await withCheckedContinuation { arrival = $0 }
+    }
+    func release() { waiter?.resume(); waiter = nil }
+  }
+
+  // Executes loadSessions and the real protected cache in a temporary directory.
+  // Only the network reader is replaced; mockMode disables all other transports.
+  static func selfTestCatalogRefreshFlow(directory: URL) async throws -> [(String, Bool)] {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "catalog-fixture", anchorPEM: "fixture-anchor", deviceId: "fixture-grant")
+    let key = RemoteHistoryCache.catalogKey(connection: connection)
+    let old = G0Transport.RunSessionRef(sessionId: "old", providerId: "codex", cwd: "/fixture", label: "old", ts: 1)
+    let next = G0Transport.RunSessionRef(sessionId: "new", providerId: "codex", cwd: "/fixture", label: "new", ts: 2)
+    func store(_ label: String, limit: Int = 1_000_000) -> RemoteRunStore {
+      let value = RemoteRunStore(historyDisk: RemoteHistoryCache(directory: directory.appendingPathComponent(label), byteLimit: limit),
+        historyOnly: true, stateDirectory: nil)
+      value.mockMode = true
+      value.catalogFixture = CatalogFixture(connection: connection, fetch: { page in await page([next]); return [next] })
+      return value
+    }
+    var checks: [(String, Bool)] = []
+    let success = store("success")
+    let refreshed = await success.refreshSessions()
+    let saved = try await success.historyDisk.readCatalogValue(key)
+    checks.append(("completePersisted", refreshed && success.catalog == .loaded([next]) && saved?.fetchedAt == success.catalogVerifiedAt && !success.catalogRefreshInFlight))
+
+    let partial = store("partial")
+    partial.catalog = .loaded([old]); partial.catalogVerifiedAt = Date(timeIntervalSince1970: 100)
+    partial.catalogFixture = CatalogFixture(connection: connection, fetch: { page in await page([next]); throw URLError(.networkConnectionLost) })
+    let partialResult = await partial.refreshSessions()
+    checks.append(("partialRetainsCompleteList", !partialResult && partial.catalog == .loaded([old]) && partial.catalogVerifiedAt == Date(timeIntervalSince1970: 100)))
+    checks.append(("partialFailureNotSuccess", { if case .partial = partial.catalogRefreshFailure { return true }; return false }()))
+
+    let cold = store("cold")
+    cold.catalogFixture = partial.catalogFixture
+    _ = await cold.refreshSessions()
+    checks.append(("coldPageReadableButUnverified", cold.catalog == .loaded([next]) && cold.catalogVerifiedAt == nil && cold.catalogRefreshRevision == 0))
+
+    let rejected = store("too-small", limit: 1)
+    let rejectedResult = await rejected.refreshSessions()
+    checks.append(("cacheFalseNotSuccess", !rejectedResult && rejected.catalogRefreshFailure == .cacheWriteRejected && rejected.catalog == .loaded([next])))
+    let blocked = directory.appendingPathComponent("blocked")
+    try Data().write(to: blocked)
+    let diskError = store("blocked")
+    let diskResult = await diskError.refreshSessions()
+    checks.append(("cacheThrowNotTransportFailure", !diskResult && { if case .cacheWrite = diskError.catalogRefreshFailure { return true }; return false }()))
+    checks.append(("cacheTechnicalDetailNotInSummary", diskError.catalogRefreshFailure?.summary == ConnectionCopy.cacheWriteRejected))
+
+    let unauthorized = store("unauthorized")
+    unauthorized.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in throw G0Transport.RunError.host(code: "grant_revoked") })
+    _ = await unauthorized.refreshSessions()
+    checks.append(("revocationNeedsPairing", unauthorized.catalogRefreshFailure?.requiresPairing == true))
+
+    let gate = CatalogTestGate()
+    let merged = store("merged")
+    merged.catalogFixture = CatalogFixture(connection: connection, fetch: { page in await gate.pause(); await page([next]); return [next] })
+    let first = Task { await merged.refreshSessions() }
+    await gate.waitForArrival()
+    merged.loadSessions(force: true)
+    checks.append(("inFlightRequestCoalesced", await gate.calls == 1 && merged.catalogRefreshInFlight))
+    await gate.release()
+    checks.append(("coalescedRequestCompletes", await first.value))
+
+    let staleGate = CatalogTestGate()
+    let isolated = store("isolation")
+    isolated.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in await staleGate.pause(); return [old] })
+    let staleTask = Task { await isolated.refreshSessions() }
+    await staleGate.waitForArrival()
+    try isolated.clearAllState()
+    isolated.mockMode = true
+    isolated.catalogFixture = success.catalogFixture
+    let newResult = await isolated.refreshSessions()
+    await staleGate.release()
+    let staleResult = await staleTask.value
+    let isolatedDisk = try await isolated.historyDisk.readCatalogValue(key)
+    checks.append(("staleReplyCannotPublishOrPersist", newResult && !staleResult && isolated.catalog == .loaded([next]) && isolatedDisk?.sessions == [next]))
+
+    let persistGate = CatalogTestGate()
+    let lateJoin = store("late-join")
+    lateJoin.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in [next] },
+      beforePersist: { await persistGate.pause() })
+    let persistenceTask = Task { await lateJoin.refreshSessions() }
+    await persistGate.waitForArrival()
+    // A manual request joining now snapshots this revision, then waits on the
+    // same task. Completion must still advance it after persistence succeeds.
+    let joinedRevision = lateJoin.catalogRefreshRevision
+    checks.append(("notSuccessfulBeforePersistence", joinedRevision == 0 && lateJoin.catalogRefreshInFlight))
+    lateJoin.loadSessions(force: true)
+    await persistGate.release()
+    let persisted = await persistenceTask.value
+    checks.append(("lateJoinObservesCompletion", persisted && lateJoin.catalogRefreshRevision > joinedRevision))
+
+    let oldDate = Date(timeIntervalSince1970: 100)
+    checks.append(("oldTimestampIncludesDate", ConnectionCopy.lastFullRefresh(oldDate).contains(oldDate.formatted(date: .abbreviated, time: .shortened))))
+    let cache = store("cache-time")
+    _ = try await cache.historyDisk.writeCatalog([old], key: key, epoch: 0, fetchedAt: Date(timeIntervalSince1970: 200))
+    cache.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in throw URLError(.cannotConnectToHost) })
+    _ = await cache.refreshSessions()
+    checks.append(("restoredTimeIsNotCurrentReachability", cache.catalogVerifiedAt == Date(timeIntervalSince1970: 200) && cache.catalogEvidence == .unverifiedCache(Date(timeIntervalSince1970: 200))))
+    let legacy = store("legacy")
+    let legacyDirectory = legacy.historyDisk.directory
+    try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+    let sessions = try JSONSerialization.jsonObject(with: JSONEncoder().encode([old]))
+    try JSONSerialization.data(withJSONObject: ["version": 1, "key": key, "sessions": sessions])
+      .write(to: legacyDirectory.appendingPathComponent("catalog-" + key + ".json"))
+    legacy.catalogFixture = cache.catalogFixture
+    _ = await legacy.refreshSessions()
+    checks.append(("legacyTimeRemainsUnknown", legacy.catalog == .loaded([old]) && legacy.catalogVerifiedAt == nil && legacy.catalogEvidence == .unverifiedCache(nil)))
+    return checks
+  }
+
   nonisolated static func selfTestStateGates() -> Bool {
     !unresolvedState(pending: false, runId: nil, drained: false, interrupted: false) &&
       unresolvedState(pending: true, runId: nil, drained: false, interrupted: false) &&
@@ -2832,6 +3111,23 @@ final class RemoteRunStore: ObservableObject {
       G0Transport.RunSessionRef(sessionId: "mock-atlas-1", externalSessionId: "opencode-atlas-1", providerId: "opencode", cwd: roots[2].path,
         label: "实现登录错误态与离线重试体验", ts: now - 3 * 86_400_000)
     ])
+    if ProcessInfo.processInfo.arguments.contains("-uiMockFirstRefreshFailure") {
+      catalog = .failed(ConnectionCopy.fixtureTransportFailure)
+      catalogEvidence = .none
+      catalogRefreshFailure = .transport(ConnectionCopy.fixtureTransportFailure)
+    } else if ProcessInfo.processInfo.arguments.contains("-uiMockRefreshFailure") {
+      catalogVerifiedAt = Date(timeIntervalSince1970: now / 1_000 - 900)
+      catalogEvidence = .unverifiedCache(catalogVerifiedAt)
+      catalogRefreshFailure = .transport(ConnectionCopy.fixtureTransportFailure)
+    } else if ProcessInfo.processInfo.arguments.contains("-uiMockPartialRefreshFailure") {
+      catalogEvidence = .verified(Date(timeIntervalSince1970: now / 1_000 - 900))
+      catalogVerifiedAt = Date(timeIntervalSince1970: now / 1_000 - 900)
+      catalogRefreshFailure = .partial(ConnectionCopy.fixturePartialFailure)
+    } else {
+      let verified = Date(timeIntervalSince1970: now / 1_000)
+      catalogEvidence = .verified(verified)
+      catalogVerifiedAt = verified
+    }
 
     history = .loaded([
       G0Transport.RunHistoryTurn(userText: "请检查 iOS 远程首页的信息层级，并给出可以直接落地的修改。", items: [
@@ -3121,9 +3417,23 @@ final class RemoteRunStore: ObservableObject {
 
 extension RemoteRunStore {
   // Pull-to-refresh: reload the catalog and wait for that request to finish.
-  func refreshSessions() async {
+  // The Bool is true only for a complete host refresh whose cache write did not
+  // report a failure; automatic refreshes do not call this method.
+  @discardableResult
+  func refreshSessions() async -> Bool {
+    #if DEBUG
+    if mockMode, ProcessInfo.processInfo.arguments.contains("-uiRefreshFeedback") {
+      applyCatalogRefreshFixture()
+      return true
+    }
+    #endif
+    let revision = catalogRefreshRevision
     loadSessions(force: true)
+    let requestID = catalogRequestID
+    let requestGeneration = dataGeneration
     await catalogTask?.value
+    return isCurrentCatalogRequest(requestID, dataGeneration: requestGeneration) &&
+      catalogRefreshRevision > revision && catalogRefreshFailure == nil
   }
 
   func startLiveRuns() {

@@ -1,8 +1,8 @@
-# iOS 连接反馈 · 设计提案（待确认）
+# iOS 连接反馈 · A 已选，原生实现待真机验收
 
 ## 范围与用户反馈
 
-本轮仅制作独立交互稿，不修改 Swift、后端或权限合同。用户反馈：iOS 状态混乱，希望更简洁；可考虑不常驻状态，在刷新成功时提供反馈。此反馈只适用于 Scry iOS 连接与刷新区，不升级为全局隐藏状态的偏好。
+本稿最初仅制作独立交互稿，不修改 Swift、后端或权限合同。用户反馈：iOS 状态混乱，希望更简洁；可考虑不常驻状态，在刷新成功时提供反馈。该反馈只适用于 Scry iOS 连接与刷新区，不升级为全局隐藏状态的偏好。用户随后批准 A；原生实现状态见文末，且不涉及多主机 gateway。
 
 预览：`http://127.0.0.1:8765/ios-connection-feedback/`。
 
@@ -40,7 +40,7 @@ A 的失败态是同一结构的状态变化，不是第三个方向。只调整
 
 ## 生产集成时必须保留的边界
 
-此表是设计合同，不代表本轮已经实现这些原生状态。
+此表是设计合同。原生实现与各项检查见文末；未执行的真机场景不能标成已验收。
 
 | 情形 | 首页呈现 | 证据要求 |
 | --- | --- | --- |
@@ -70,7 +70,7 @@ A 的失败态是同一结构的状态变化，不是第三个方向。只调整
 
 Apple 原文通过其公开 JSON 文档端点读取：`https://developer.apple.com/tutorials/data/design/human-interface-guidelines/feedback.json`。研究没有上传项目内容或截图。
 
-## 本轮检查与限制
+## 原型阶段的历史检查与限制
 
 - esbuild 编译通过；没有新增 npm 包；生成脚本与重新编译结果逐字节一致。
 - 按仓库默认执行 `npm run install:mac:dev` 成功：typecheck、277 个 unit 文件（3401 个测试）通过，4 个明确探针测试跳过；shell、打包与 Electron smoke 通过。桌面 Scry 0.2.202 已安装到 `/Applications/Scry.app`，保留 `/Applications/.Scry.app.backup`，未重启正在运行的 App。此安装不包含本稿的 iOS UI，不是原生设计验收。
@@ -78,7 +78,36 @@ Apple 原文通过其公开 JSON 文档端点读取：`https://developer.apple.c
 - 已查看最终版浏览器截图：列表、底部搜索与新建按钮完整可见；修正了初版画布只占视口高度导致底部被裁切的问题。
 - 独立 reviewer 完成源码/交互逻辑评审；无法获取 Relay 或可读截图，未完成独立视觉评审。其三个问题已处理：B 始终显示时间、进度改浮层、主失败文案不推断 Mac 无响应。
 - 未运行 iOS 真机操作、VoiceOver 或真实网络故障验收；手势仅实现演示，尚未真机验证。原生 Swift 集成与设备验收须在用户选定方向后执行。
-- 设计稿未获用户认可，只登记为待确认 reference，不登记为已批准页面或组件，不覆盖既有已认可设计。
+- 此阶段原型尚未获用户认可。用户随后在当前任务明确选 A；确认的是方向，不是原生 App 或真机成品已验收。
 - 个人库已注册本稿并可搜索；全库 check 仍有 5 个既存失效路径（Pi model selector、旧 iOS brief、iOS continuity、session history、LLM sidebar），与本稿无关，未越界修复。
 
-下一步由用户确认 A / B；推荐 A。确认前不集成原生 App。
+## 实施状态（用户已批准 A）
+
+用户已批准方向 A。本次原生实现仅覆盖 `apps/ios/**` 中的连接与会话列表刷新反馈；不实现多主机 gateway，也不改变配对、发送 admission、项目/搜索/置顶/归档或安全合同。
+
+已实现的 A 反馈：
+
+- 首页常态不显示持久连接状态；标题保留刷新与更多。
+- 手动完整刷新成功显示 2.6 秒短提示；自动刷新成功静默。
+- 失败使用单条可操作提示，可重试并打开详情；技术诊断在详情 sheet 中默认收起。
+- 保留旧列表和上次完整刷新时间；分页中断明确显示“列表未完整更新”。
+- 远端刷新成功但磁盘缓存返回 false 或抛错时分别保留缓存写入失败证据。
+- 缓存内容显示“尚未核对”，历史运行徽标显示“上次：运行中”，除非有独立 live-run 证据。
+- 配对不等于可达；首页不因尚未核对可达而禁用新建或发送 admission。
+
+### 当前验证（原生状态 A）
+
+- `python3 apps/ios/Checks/catalog-refresh.py`：**16/16 通过**。macOS 直接编译生产 `RemoteRunStore/RemoteRunClient/RemoteHistoryCache` 等源文件；仅用 DEBUG feed 替换网络读取，执行真实 `loadSessions` 与临时缓存，不访问真实配对/Keychain/Provider。覆盖完整刷新、冷启动部分内容、旧完整列表保留、磁盘 false/throw、撤销识别、合并刷新、旧 generation 隔离、写盘期间加入的等待者、跨天时间、旧 schema 缺时间。它不是 iPhone Data Protection 或 UIKit 验收。
+- 反向对照：临时副本恢复“忽略缓存 false”和“写盘前宣布成功”，`cacheFalseNotSuccess`、`notSuccessfulBeforePersistence`、`lateJoinObservesCompletion` 三项按预期失败；生产源码未修改。日志 `/tmp/scry-catalog-negative-final.log`。此检查能区分真实修复与只修改显示文案。
+- 原生 App 与 UI 测试编译：`xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath /tmp/scry-remote-native-feedback-final2 CODE_SIGNING_ALLOWED=NO build-for-testing` 通过。日志 `/tmp/scry-native-feedback-final-build.log`。新增 UI 用例验证短提示消失、失败详情折叠、首次失败只有一处提示；**仅编译，未执行真机测试**。
+- `-uiRefreshFeedback` 与同步 `selfTestCatalogRefreshProjection` 只验证投影，不冒充网络/磁盘流程。实际异步回归另通过 `selfTestCatalogRefreshFlow`，并加入原有 `-historyCacheTest` 入口。
+- 独立源码评审指出两处 P2，均已修复并加入回归：完成 revision 延迟到写盘完成，避免晚加入者错过成功；非当天的来源时间带日期，避免把昨天的 HH:mm 误认为今天。首次失败和已有数据失败不再叠两处提示；失败状态不另叠“尚未核对”说明。技术磁盘错误只在展开详情后可见；详情保留配对记录、连接地址和本次请求三种不同事实。
+- 性能：`npm run performance:measure -- --scenario remote.trace.preview --out /tmp/scry-ios-feedback-final-performance` 经 timing lock 执行，5 次观测各为 1 条 IPC / 2778 bytes，ratchet 通过。这是桌面 remote trace 的计数，不覆盖手机 UI，不宣称更快；机器 highLoad=true。首次尝试文档中的 `remote.loopback` 没有 counter collector，明确保留该缺口，不加造假指标。
+- 按仓库默认运行桌面 `npm run install:mac:dev`。首次在全量测试启动后收到 SIGKILL（`/tmp/scry-ios-status-install-mac.log`），检查确认无残留构建/测试进程后，进行一次标准重试并成功：277 个 unit 文件/3401 tests 通过，4 个付费/真实探针明确跳过；shell、typecheck、打包和现有 Electron smoke 通过。安装的是当时并行桌面提交形成的 **0.2.204**，不包含本次 Swift UI；未重启正在运行的 Scry。重试日志 `/tmp/scry-ios-status-install-mac-retry.log`，不能用重试成功抹掉首轮失败或据此推断 SIGKILL 来源。
+- 首轮验证接线失败单列：worker 尝试了不存在的独立 UI scheme，随后改用实际 ScryRemote scheme；本机原生 runner 初版缺 C 模块/UI 声明，随后因 LinkFileList 的带空格路径引号未解析而链接失败，均修正后才运行 16 项行为检查。未删断言、skip 或扩大超时。现有 Swift 5 并发诊断保留，不宣称 Swift 6 严格模式通过。
+
+### 仍需真机验收
+
+`ictrl --host 127.0.0.1:8200 call device_info` 再次返回 Connection refused；未用模拟器替代。iOS 产物为 unsigned，没有安装到手机。用户需恢复已授权 iPhone 的 iCTRL/USB 服务，随后在签名安装的当前 iOS 版本上重放手动刷新/连续刷新、失败→重试、详情展开、退后台/返回、Dynamic Type/VoiceOver。实现、编译、macOS 状态/磁盘测试与真机视觉认可分别报告，不互相替代。
+
+本轮批准只针对首页连接与列表刷新反馈。手机经 Mac1 访问 Mac2 仍是 `../scry-ios-multihost/brief.md` 的 v2 方案，尚未实现，也未改变现有手机目录授权或发送准入。
