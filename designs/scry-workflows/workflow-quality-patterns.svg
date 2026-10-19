@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1500 1080" role="img" aria-labelledby="title desc">
-  <title id="title">Scry v5：对抗复核与多方案权衡程序</title>
+  <title id="title">Scry v7：受运行约束的对抗复核与多方案权衡</title>
   <desc id="desc">设计图，尚未实现。左侧对候选独立寻找反证并裁决，右侧独立起草多方案、交叉评审、权衡和循环改进。运行器保管中间结果、控制分支与循环；只有最终报告回到主会话。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#65758c"/></marker>
@@ -19,7 +19,7 @@
   </defs>
   <rect width="1500" height="1080" fill="#f8fafc"/>
   <text x="44" y="50" class="title">质量模式成为程序的一部分，而不是“多跑几个 Agent”</text>
-  <text x="44" y="82" class="subtitle">方案 v5 · 拟实现；用户选模型，Jev 可选；循环、分支和中间状态由 Scry 承载</text>
+  <text x="44" y="82" class="subtitle">方案 v7 · 拟实现；模型可选、Jev 可选；运行中无业务输入，人工决策拆成独立工作流</text>
   <rect x="36" y="108" width="680" height="774" class="panel"/>
   <rect x="742" y="108" width="722" height="774" class="panel"/>
   <text x="376" y="146" class="heading">A · 独立对抗性复核</text>
@@ -93,5 +93,5 @@
   <rect x="210" y="919" width="1080" height="101" class="node accent"/>
   <text x="750" y="951" class="heading">运行器持久保存：草稿、证据、分支、候选版本、反馈、轮次、最佳结果和终止原因</text>
   <text x="750" y="983" class="detail">主会话只收到启动收据和最终报告 / 引用；不收到每个 worker 的完整 transcript</text>
-  <text x="750" y="1049" class="label">逻辑下一轮 ≠ 未知调用自动重试；没有产品并发上限；图中 A/B/C 是模板样例，不是固定任务数限制。</text>
+  <text x="750" y="1049" class="label">共享并发默认≤16（可配1–256）；单批≤4096项；根执行≤1000次Agent；循环与重试不重置预算。</text>
 </svg>

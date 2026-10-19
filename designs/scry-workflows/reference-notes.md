@@ -2,7 +2,7 @@
 
 本轮依据：用户确认“任务驱动编排，模板作为捷径”，要求核对官方文章细节。来源为 [官方页面](https://code.claude.com/docs/en/workflows) 与对应 [Markdown](https://code.claude.com/docs/en/workflows.md)。本轮完整读取 Markdown 的 506 行；HTML 同时取回用于核对页面来源。文档会更新，下列数字和行为是本次取回版本，不是所有历史版本的保证。
 
-本文只说明文档事实与设计取舍。没有运行 Claude 原生 Workflow、付费 Agent 或 Jev 请求。v5 已补齐循环、分支、中间状态与质量模式的规范，见 [执行语义与补充研究](execution-semantics.md)。下表的“不执行任意 JS”不再意味着只能做静态 DAG。v6 的 [聊天入口与模式](chat-entry-semantics.md) 另行补齐单次请求、自动判断和模板命令，未实现状态不变。
+本文只说明文档事实与设计取舍。没有运行 Claude 原生 Workflow、付费 Agent 或 Jev 请求。v5 已补齐循环、分支、中间状态与质量模式的规范，见 [执行语义与补充研究](execution-semantics.md)。下表的“不执行任意 JS”不再意味着只能做静态 DAG。v6 的 [聊天入口与模式](chat-entry-semantics.md) 补齐单次请求、自动判断和模板命令；v7 按用户最新要求采用 [运行输入与资源限额](runtime-limits.md)，明确覆盖旧的无上限取舍。v8 的 [运行管理](run-management.md) 补齐暂停/停止、依赖恢复和停滞重启；用户确认只做本地后台，不新增 daemon 或云执行。未实现状态不变。
 
 本次源文件：`/tmp/scry-workflows-article.md`，SHA-256 `a324b4814d760d6c6f115a0a534123fe71acc40e4a9fa63f0e2f85200df197dd`。该临时副本用于核对，仓库只保留提炼后的事实与链接，不镜像整篇文章。
 
@@ -27,12 +27,14 @@
 | 同节：停止/不可恢复错误可返回 null；示例 `.filter(Boolean)` 丢弃空槽 | **不照搬**。任务必须保留 failed/cancelled/unverified 和 coverage；空数组只用于真实成功且没有发现。部分结果可汇总，但不能让失败消失 |
 | [Runtime](https://code.claude.com/docs/en/workflows#how-a-workflow-runs)：脚本无直接文件/命令访问，无 import；禁止时钟和随机性来支持重放 | 不引入 JS VM、eval 或模块加载器。计划为数据，文件/工具工作仍走获准的现有执行路径。稳定 ID 和持久事实支持恢复，不靠重新运行脚本重建身份 |
 | [Prompt caching](https://code.claude.com/docs/en/workflows#prompt-caching-in-a-fan-out)：同模型/effort/agent type/tools/schema/cwd 才共享前缀；后续 Agent 默认最多等首个响应 5 秒 | 仅参考提示前缀复用，保持稳定的公共规则与每项差异输入。不跨 Provider 承诺缓存；本期不加这种延迟队列，也不以缓存为由改用户模型或隐藏限制并发 |
-| [Behavior and limits](https://code.claude.com/docs/en/workflows#behavior-and-limits)：默认最多 16 并发，可能受 CPU 降低；配置 1–256；单次集合 4096、总计 1000 Agent | **不照搬数字或固定上限**。遵守用户不要并发限制；真实准入/资源拒绝如实显示。分页和虚拟化限制单批开销，不限制总任务数 |
-| [Resume](https://code.claude.com/docs/en/workflows#which-agents-run-again)：按启动顺序重放；B 失败可令已完成 C/D 一并重跑 | 改为 task/attempt 稳定身份与输入/产物指纹；重试是显式新 attempt。只重新评估受影响的依赖，不把队列位置作为身份；证据不足时不复用、不自动重发 |
-| [Stalls](https://code.claude.com/docs/en/workflows#when-an-agent-stalls-and-restarts)：自动重启最多五次；旧文件改动和 token 消耗仍保留 | 不默认自动重试写入或未知请求。停止/进程收敛、已知副作用、重试授权都要先确认。逻辑修复循环与 transport 重试分开 |
+| [Behavior and limits](https://code.claude.com/docs/en/workflows#behavior-and-limits)：运行中不接受用户输入；默认最多16并发、CPU可降低，配置1–256；单次集合4096、总计1000 Agent | **v7 按用户最新指示采用这些约束**；阶段人工确认拆成独立工作流。Scry 使用自己的配置，不接原生环境变量；共享槽位、根预算与恢复口径见运行约束，超限不静默截断 |
+| [Resume](https://code.claude.com/docs/en/workflows#which-agents-run-again)：按启动顺序重放；B 失败可令已完成 C/D 一并重跑 | 改为 task/attempt 稳定身份与输入/产物指纹；用户在 v8 明确选择按依赖恢复；重试产生新 attempt。只重新评估受影响的依赖，不把队列位置作为身份；证据不足时不复用、不自动重发 |
+| [Stalls](https://code.claude.com/docs/en/workflows#when-an-agent-stalls-and-restarts)：自动重启最多五次；旧文件改动和 token 消耗仍保留 | v8 加入受条件约束的自动停滞恢复；手动/自动最多重启5次。必须先停止并确认作用域收敛、核对可重放性与授权；unknown 不重发。原文件变化和旧用量保留；逻辑循环与 attempt 分开 |
 | [Usage wait](https://code.claude.com/docs/en/workflows#when-a-run-hits-your-usage-limit)：仅特定交互订阅、设置和重置时间条件下等待；headless/SDK 不同 | 不把这种能力视为 Scry adapter 共有。只有 Provider 明确返回可证实状态才显示 rate_limited/waiting；本期不承诺自动等重置再续跑 |
 | [Cost](https://code.claude.com/docs/en/workflows#cost)：大运行提示是提醒，不是限额；原生可能替换组织不允许的模型 | 请求模型与观测模型分列，前置拒绝不可用选择；若上游仍替换，保留差异且不宣称满足指定模型合同。缺价格/用量是 unknown，不假装免费或保证硬预算 |
 | [Watch](https://code.claude.com/docs/en/workflows#watch-the-run)：phase → agent → prompt/tools/result，可过滤、停止和保存 | 自动绑定 workflow 面板；真实事件投影驱动图、详情与历史。左侧显示本次计划及版本，模型名称只是角色绑定，不等于 Workflow 本身 |
+
+v8 另核对 Manage runs 与 Resume after you leave the session：采用管理视图/任务面板、停止后保留未收敛任务、明确再次停止、记录丢失报 nothing_to_resume。Scry 现有 RunStopLifecycle 重复 request 只重播状态，重发需要实现新路径。后台由 main 驻留承担；用户已选择真正退出时停止并保存，不扩展为 Claude 云服务或独立后台 daemon。
 
 ## 3. 两个容易混淆的点
 
@@ -58,5 +60,7 @@ v5 修订：循环修复、多方案权衡、批量迁移、明确授权后的�
 ## 6. v6：入口能力不等于执行能力
 
 本轮复核同一官方快照的 Have Claude write a workflow、Ask for a workflow、Let Claude decide with ultracode 与 Bundled workflows 小节：自然语言或关键词可只作用于当前任务；`/effort ultracode` 对会话实质任务自动使用工作流；内置命令是独立入口。这些不能用“已有自动规划按钮”代替。
+
+v7 再次核对同一快照的 Behavior and limits 表。用户明确修改了先前的无限并发要求；旧的反对固定上限记录只保留作历史，不再约束当前方案。截图没有给出 Scry 的跨 Provider 调度实现，本文不将设计决定冒充原生运行时保证。
 
 Scry 的设计对应三种入口，但不承诺原生命令兼容或自动放行：默认关闭额外路由，启用识别前取得费用/数据授权，执行计划仍须确认。没有读取原生运行时实现，也没有真实调用验证；它们是已核对文档事实与明确的 Scry 产品选择。

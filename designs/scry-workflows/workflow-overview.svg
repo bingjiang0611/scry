@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1440 1060" role="img" aria-labelledby="title desc">
-  <title id="title">Scry 工作流方案 v5：程序化控制流与质量模式</title>
+  <title id="title">Scry 工作流方案 v7：程序化控制流、质量模式与运行约束</title>
   <desc id="desc">拟实现架构，不是当前运行状态。模型生成工作流程序，由 Scry 运行器承载循环、分支和中间状态。Agent 执行对抗复核、多方案权衡或检查修复，Jev 可选。必要证据收口后更新控制帧，只有最终报告回到主会话，未知请求不重发。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#65758c"/></marker>
@@ -22,7 +22,7 @@
   </defs>
   <rect width="1440" height="1060" fill="#f8fafc"/>
   <text x="50" y="52" class="title">Scry 工作流：按任务编排，模板作为捷径</text>
-  <text x="50" y="84" class="subtitle">方案 v5 · 拟实现架构；循环、分支、状态与质量模式均纳入目标，当前原型尚未实现</text>
+  <text x="50" y="84" class="subtitle">方案 v7 · 拟实现架构；运行约束已更新，当前原型尚未实现</text>
 
   <rect x="430" y="110" width="580" height="62" class="node accent"/>
   <text x="720" y="137" class="heading">目标 + 范围 + 用户选择的角色模型</text>
@@ -51,7 +51,7 @@
   <text x="720" y="541" class="detail">scope / item / iteration / attempt；失败不发送</text>
   <path d="M720 553 V580" class="edge"/>
   <rect x="430" y="580" width="580" height="70" class="node accent"/>
-  <text x="720" y="609" class="heading">运行器执行程序与持久控制帧</text>
+  <text x="720" y="609" class="heading">运行器按共享槽位与总预算准入</text>
   <text x="720" y="635" class="detail">sequence / parallel / map / branch / loop / call / return</text>
   <path d="M720 650 V672 H475 V690" class="edge"/>
   <path d="M720 672 H965 V690" class="edge"/>
@@ -76,10 +76,10 @@
 
   <rect x="40" y="344" width="320" height="150" class="side"/>
   <text x="64" y="378" class="sidehead">控制与恢复</text>
-  <text x="64" y="407" class="sidebody">并发：无产品上限</text>
-  <text x="64" y="431" class="sidebody">暂停：停新派发，在途可收口</text>
-  <text x="64" y="455" class="sidebody">停止：请求 ≠ 已停止</text>
-  <text x="64" y="479" class="sidebody">未知：核对证据，不自动重发</text>
+  <text x="64" y="407" class="sidebody">并发默认≤16，可配1–256</text>
+  <text x="64" y="431" class="sidebody">单批≤4096 / 总Agent≤1000</text>
+  <text x="64" y="455" class="sidebody">无业务输入；审批/停止保留</text>
+  <text x="64" y="479" class="sidebody">未知不重发、不释放占位</text>
 
   <rect x="1080" y="361" width="320" height="252" class="side"/>
   <text x="1104" y="396" class="sidehead">每次运行自动关联面板</text>
