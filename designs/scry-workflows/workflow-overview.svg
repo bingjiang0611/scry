@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1440 1060" role="img" aria-labelledby="title desc">
+  <title id="title">Scry 工作流方案 v4：自动编排与模板共用运行器</title>
+  <desc id="desc">拟实现的架构，不是当前运行状态。用户选择模型和任务，自动生成或实例化模板，经过校验和确认后持久化任务，再由 Scry 执行 Agent 或可选 Jev。必要证据收口后推进下游，真实事件驱动关联面板。未知请求不自动重发。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#65758c"/></marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #24334a; }
+      .title { font-size: 30px; font-weight: 700; }
+      .subtitle { font-size: 19px; fill: #66768c; }
+      .node { fill: #fff; stroke: #bcc9d9; stroke-width: 1.5; rx: 12; }
+      .accent { fill: #edf3ff; stroke: #7997cf; }
+      .classifier { fill: #fbf0f8; stroke: #c18caf; }
+      .side { fill: #f0f4f9; stroke: #d0dae6; stroke-width: 1.5; rx: 14; }
+      .heading { font-size: 22px; font-weight: 650; text-anchor: middle; }
+      .detail { font-size: 17px; fill: #617189; text-anchor: middle; }
+      .sidehead { font-size: 21px; font-weight: 650; }
+      .sidebody { font-size: 18px; fill: #52657f; }
+      .edge { fill: none; stroke: #65758c; stroke-width: 2; marker-end: url(#arrow); }
+      .observation { stroke-dasharray: 6 6; }
+      .note { font-size: 17px; fill: #725a31; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect width="1440" height="1060" fill="#f8fafc"/>
+  <text x="50" y="52" class="title">Scry 工作流：按任务编排，模板作为捷径</text>
+  <text x="50" y="84" class="subtitle">方案 v4 · 拟实现架构；现有 HTML 仍是固定模板原型，未接入真实执行</text>
+
+  <rect x="430" y="110" width="580" height="62" class="node accent"/>
+  <text x="720" y="137" class="heading">目标 + 范围 + 用户选择的角色模型</text>
+  <text x="720" y="159" class="detail">编排 / 执行 / 独立复核 / 汇总；Jev 可选</text>
+  <path d="M720 172 V190 H475 V206" class="edge"/>
+  <path d="M720 190 H965 V206" class="edge"/>
+  <rect x="270" y="206" width="410" height="66" class="node"/>
+  <text x="475" y="234" class="heading">自动编排</text>
+  <text x="475" y="257" class="detail">模型生成数据计划，可选模板或组合节点</text>
+  <rect x="760" y="206" width="410" height="66" class="node"/>
+  <text x="965" y="234" class="heading">Scry 内置 / 用户模板</text>
+  <text x="965" y="257" class="detail">审计、变更评审、资料调研；绑定参数</text>
+  <path d="M475 272 V290 H720 V309" class="edge"/>
+  <path d="M965 272 V290 H720" fill="none" stroke="#65758c" stroke-width="2"/>
+
+  <rect x="430" y="309" width="580" height="66" class="node"/>
+  <text x="720" y="337" class="heading">校验结构化计划</text>
+  <text x="720" y="360" class="detail">依赖无环 · 类型 / 能力 / 引用有效 · 不执行生成 JS</text>
+  <path d="M720 375 V402" class="edge"/>
+  <rect x="430" y="402" width="580" height="62" class="node"/>
+  <text x="720" y="428" class="heading">用户确认，冻结本次计划</text>
+  <text x="720" y="451" class="detail">计划版本、模型、参数和允许的展开范围</text>
+  <path d="M720 464 V491" class="edge"/>
+  <rect x="430" y="491" width="580" height="62" class="node"/>
+  <text x="720" y="518" class="heading">先持久化任务身份与派发意图</text>
+  <text x="720" y="541" class="detail">workflow → node → task → attempt；失败不发送</text>
+  <path d="M720 553 V580" class="edge"/>
+  <rect x="430" y="580" width="580" height="70" class="node accent"/>
+  <text x="720" y="609" class="heading">Scry 调度依赖就绪的任务</text>
+  <text x="720" y="635" class="detail">无产品并发上限；实际准入 / 限流 / 资源拒绝仍生效</text>
+  <path d="M720 650 V672 H475 V690" class="edge"/>
+  <path d="M720 672 H965 V690" class="edge"/>
+  <rect x="270" y="690" width="410" height="70" class="node"/>
+  <text x="475" y="718" class="heading">Agent 执行</text>
+  <text x="475" y="743" class="detail">完整 App 启动链；独立会话与原生权限</text>
+  <rect x="760" y="690" width="410" height="70" class="node classifier"/>
+  <text x="965" y="718" class="heading">可选 Jev 分类</text>
+  <text x="965" y="743" class="detail">单独计数；低置信度 / 缺失交给已批准的复核</text>
+  <path d="M475 760 V780 H720 V800" class="edge"/>
+  <path d="M965 760 V780 H720" fill="none" stroke="#65758c" stroke-width="2"/>
+  <rect x="430" y="800" width="580" height="70" class="node"/>
+  <text x="720" y="829" class="heading">终态 + 输出有效 + 所需证据落盘</text>
+  <text x="720" y="854" class="detail">满足后推进下游；不是只看到 turnDone 就算完成</text>
+  <path d="M430 835 H220 V522 H430" class="edge"/>
+  <text x="205" y="793" text-anchor="end" class="subtitle">还有下游 / 展开项</text>
+  <path d="M720 870 V904" class="edge"/>
+  <rect x="430" y="904" width="580" height="66" class="node accent"/>
+  <text x="720" y="932" class="heading">报告：结论 + 来源 + 覆盖范围</text>
+  <text x="720" y="955" class="detail">confirmed / refuted / unverified；失败和未知不消失</text>
+
+  <rect x="40" y="344" width="320" height="150" class="side"/>
+  <text x="64" y="378" class="sidehead">控制与恢复</text>
+  <text x="64" y="411" class="sidebody">暂停：停新派发，在途可收口</text>
+  <text x="64" y="441" class="sidebody">停止：请求 ≠ 已停止</text>
+  <text x="64" y="471" class="sidebody">未知：核对证据，不自动重发</text>
+
+  <rect x="1080" y="361" width="320" height="252" class="side"/>
+  <text x="1104" y="396" class="sidehead">每次运行自动关联面板</text>
+  <text x="1104" y="433" class="sidebody">左侧：本次计划与当前位置</text>
+  <text x="1104" y="467" class="sidebody">中间：节点、任务和分类</text>
+  <text x="1104" y="501" class="sidebody">详情：工具、来源与实际模型</text>
+  <text x="1104" y="535" class="sidebody">用量：保留 unknown / partial</text>
+  <text x="1104" y="577" class="sidebody">读取持久事实，不控制调度</text>
+  <path d="M1010 522 H1080" class="edge observation"/>
+  <path d="M1010 835 H1360 V613" class="edge observation"/>
+  <text x="1210" y="821" text-anchor="middle" class="subtitle">事件 / 证据投影</text>
+
+  <text x="720" y="1018" class="note">批准计划不替代权限与 trust；分类不是验证；工作流和工作副本都不是安全沙箱。</text>
+</svg>

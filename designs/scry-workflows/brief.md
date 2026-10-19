@@ -1,6 +1,24 @@
-# Scry 工作流 · v3 可选 Jev 与连线执行画布
+# Scry 工作流 · 方案 v4 / 原型 v3
 
-状态：v3 成品待审。范围仍是独立 HTML 原型与实现方案，不接生产、不调用 Provider、不修改真实工作区文件。
+状态：用户已确认“任务驱动编排，模板作为捷径”。本轮完整核对 Claude Workflows 文章，更新技术方案和三张 Mermaid 流程图；HTML 仍为 v3 固定模板原型，不接生产、不调用 Provider、不修改真实工作区文件。
+
+## v4 技术方案修订
+
+- [技术方案与流程图](implementation-plan.md)：自动规划和三种 Scry 模板共用结构化计划、依赖调度和运行面板；不执行任意生成 JS，不再把每个目标强制套同一四阶段模板。
+- [官方原文核对](reference-notes.md)：完整读取官方 Markdown 506 行。当前只明确内置 `/deep-research`；审计、迁移、循环修复等属于六类示例提示词，不能混称内置命令。
+- 吸收 phase/agent/pipeline 的分层、外置中间结果、结构化输出和可复用模板；不照搬固定并发/总量上限、null 过滤、自动重启、顺序重放、模型静默替换或仅特定订阅支持的配额等待。
+- Jev 首批用于分类、分组和复核优先级，不能替代事实验证，也不宣称一定省钱；开启关闭、模型与阈值仍由用户配置。
+- 计划确认、动态集合展开、派发前持久化、所需证据收口、未知结果不重发和受影响依赖失效均写入验收门槛。
+- 本轮只改文档，没有将方案更新宣称为生产实现。下一步是协调 main 的并行 WIP 所有权后从 M1 开始，不重复询问用户已经确认的编排方向。
+
+### v4 验证与交付记录
+
+- `git diff --check` 通过；三个 Markdown 文件的本地链接及代码围栏检查通过。三张 Mermaid 为方案源图，未运行 Mermaid 渲染器。
+- 另提供 [SVG 总览图](workflow-overview.svg)：XML、可访问标题/描述、无 script/foreignObject 检查通过；Chrome Relay 1512×764 实际截图检查文字、分支/回流箭头和证据投影，整图可见。它是架构说明，不是运行截图。
+- 默认 `npm run install:mac:dev`：当前工作区 Scry 0.2.205 / Vitest 3.2.7；node/web typecheck 通过。全量 unit 270 文件通过、11 失败、4 跳过；3421 测试通过、24 失败、4 跳过；900.50s，退出 1。
+- 失败摘要实际含子进程 timedOut/SIGKILL、5000ms 超时及断言差异。失败涉及 Provider、remote、Git 与性能 fixture，未逐项定位原因，不能推断全是资源争用或声称已修复。失败文件不在本次文档/SVG 改动范围，Vitest 排除 designs；当前还有并行 WIP，不能把总数变化当同源码对照。
+- shell/build/package/install 未进入，未替换 `/Applications/Scry.app`、未重启 Scry。未重跑掩盖首轮失败或放宽测试。进程组 99133 已收敛为空；日志 `/tmp/scry-workflow-plan-v4-install.log`，退出码 `/tmp/scry-workflow-plan-v4-install.exit`。
+- 后续实施按方案 M1 起步；全量失败需由相应代码所有者另行排查，未混入本轮方案任务。预览服务保持可用。
 
 ## v3：Jev 与左侧 Workflow 的真实含义
 
@@ -10,7 +28,7 @@
 - Jev 单独作为可选 classifier 节点，不混入 coding Agent 模型列表。支持启用、`jev-latest` 与复核阈值（默认 0.70）。开启后同时更新左侧、四节点图和回放阶段；关闭则是原有三节点图。
 - 3 条分类样例使用 P(true)=0.96 / 0.09 / 0.55，置信度为 max(p,1-p)。低于用户阈值标记 Agent 复核；所有候选保留。示例概率明确标注非 API 返回，不宣称真实分类或文件修改。
 - Agent 数与分类请求数分开；配置随运行冻结，保存只影响下一次演示。增加“下一阶段”回放快捷键，通过同一状态机推进事件，不跳过依赖或编造额外任务。
-- 产品建议是按任务生成结构化计划并让用户确认，而非所有目标强制套同一流程。这仍是待用户决定的实施范围，不在本原型冒充已完成。原计划的模板优先方案也可保留。
+- 用户随后已确认按任务生成结构化计划，模板作为捷径。原型尚未实现此能力；当前合同与实施顺序以 v4 技术方案为准。
 - 复用已收录的 `D-SCRY-WORKFLOWS` 画布和原生配置表单；本轮共享组件检索无现成分类配置组件。TypeSafe 官网仅用于核对 typed decisions / calibrated confidence，不采用营销的速度与成本数字；本机 Pi Classify 文档用于区分 bool 概率与 choice/score confidence，不当作 Scry 已集成 API。
 
 ### v3 实际验证
