@@ -86,6 +86,7 @@ import type {
 export interface SessionMeta {
   sessionId: string
   runId?: string
+  lastRunOutcome?: import('../shared/turn-record').AgentTurnRecord['status']
   externalSessionId?: string
   pending?: boolean
   providerId: SessionProviderId

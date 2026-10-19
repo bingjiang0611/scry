@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
+import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
 import { SidebarActivity } from './SidebarActivity'
 import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
@@ -278,7 +279,7 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <div className="sb-view-tabs" role="tablist" aria-label="会话列表视图" onKeyDown={(event) => {
+      <div className="sb-view-tabs" role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
         const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
@@ -287,8 +288,8 @@ export const Sidebar = memo(function Sidebar({
       }}>
         {(['projects', 'activity'] as const).map((tab) => <button key={tab} type="button" role="tab"
           id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
-          tabIndex={view === tab ? 0 : -1} onClick={() => setView(tab)}>
-          {tab === 'projects' ? '项目' : '动态'}
+          tabIndex={view === tab ? 0 : -1} title={tab === 'activity' ? activityCopy.scope : undefined} onClick={() => setView(tab)}>
+          {activityCopy[tab]}
         </button>)}
       </div>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
@@ -300,10 +301,9 @@ export const Sidebar = memo(function Sidebar({
           </div>
         )}
         {view === 'activity' ? <>
-          <div className="sb-activity-scope">本机会话</div>
           <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
             ? renderConversation(entry.conversation)
-            : <SessionRow cwd={entry.project.cwd} session={entry.session}
+            : <SessionRow cwd={entry.project.cwd} projectName={entry.project.name} session={entry.session}
               active={isActive(entry.project.cwd, entry.session)}
               running={Boolean(entry.session.runId && runningRunIds.has(entry.session.runId))}
               waitingForAnswer={Boolean(entry.session.runId && waitingQuestionRunIds.has(entry.session.runId))}

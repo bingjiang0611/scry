@@ -164,6 +164,30 @@ describe('app-store', () => {
     expect(projects.map((project) => project.cwd)).toEqual(['/repo/pinned', '/repo/session', '/repo/empty', ''])
   })
 
+  it('persists terminal evidence, clears it for a newer run, and never invents outcomes for legacy rows', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      const request = { providerId: 'claude' as const, runtimeProvider: 'claude_sdk' as const,
+        externalSessionId: 'native', cwd: '/repo', prompt: 'task', runId: 'run-1' }
+      store.record(request)
+      expect(store.listSessions('/repo')[0]).toMatchObject({ runId: 'run-1' })
+      expect(store.listSessions('/repo')[0].lastRunOutcome).toBeUndefined()
+      store.record({ ...request, lastRunOutcome: 'completed' })
+      expect(createAppSessionStore(dir).listSessions('/repo')[0].lastRunOutcome).toBe('completed')
+      store.record(request)
+      expect(store.listSessions('/repo')[0].lastRunOutcome).toBe('completed')
+      store.record({ ...request, runId: 'run-2' })
+      expect(store.listSessions('/repo')[0].lastRunOutcome).toBeUndefined()
+      for (const lastRunOutcome of ['failed', 'cancelled', 'interrupted'] as const) {
+        store.record({ ...request, runId: 'run-2', lastRunOutcome })
+        expect(createAppSessionStore(dir).listSessions('/repo')[0].lastRunOutcome).toBe(lastRunOutcome)
+      }
+      store.record({ ...request, externalSessionId: 'legacy', runId: undefined })
+      expect(store.listSessions('/repo').find(session => session.sessionId === 'legacy')?.lastRunOutcome).toBeUndefined()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('app sessions 只按 app 自己记录的 cwd 分组', () => {
     const dir = tempDir()
     try {

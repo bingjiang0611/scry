@@ -1,5 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { activityGroups, type ActivityEntry } from '../sidebar-activity'
+import { SIDEBAR_ACTIVITY_COPY as copy } from '../constants/copy'
+import { Icon } from './primitives/Icon'
 import './sidebar-activity.css'
 
 // Bound layout reads and DOM size even when the local catalog contains years of history.
@@ -13,7 +15,22 @@ export function SidebarActivity({ entries, renderEntry }: {
   const positions = useRef(new Map<string, number>())
   const animations = useRef(new Map<string, Animation>())
   const [heldEntries, setHeldEntries] = useState<ActivityEntry[] | null>(null)
-  const displayed = heldEntries ?? entries
+  const [arrivals, setArrivals] = useState({ source: entries, keys: [] as string[] })
+  // Promote observed state changes, not guessed timestamps or conversation revisions.
+  // Adjust derived state before commit so the list moves once, without an intermediate layout.
+  if (arrivals.source !== entries) {
+    const previous = new Map(arrivals.source.map(entry => [entry.key, entry.group]))
+    const moved = entries.filter(entry => previous.has(entry.key) && previous.get(entry.key) !== entry.group).map(entry => entry.key)
+    const live = new Set(entries.map(entry => entry.key))
+    const movedKeys = new Set(moved)
+    setArrivals({ source: entries, keys: [...moved, ...arrivals.keys.filter(key => live.has(key) && !movedKeys.has(key))].slice(0, GROUP_LIMIT * activityGroups.length) })
+  }
+  const ordered = useMemo(() => {
+    const rank = new Map(arrivals.keys.map((key, index) => [key, index]))
+    const promoted = entries.filter(entry => rank.has(entry.key)).sort((a, b) => rank.get(a.key)! - rank.get(b.key)!)
+    return [...promoted, ...entries.filter(entry => !rank.has(entry.key))]
+  }, [entries, arrivals.keys])
+  const displayed = heldEntries ?? ordered
 
   useEffect(() => {
     if (!heldEntries) return
@@ -42,18 +59,19 @@ export function SidebarActivity({ entries, renderEntry }: {
       const previous = positions.current.get(key)
       const transform = animations.current.has(key) ? getComputedStyle(node).transform : 'none'
       const translation = transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42
-      return { node, key, top: node.offsetTop, delta: previous === undefined ? 0 : previous + translation - node.offsetTop }
+      const entering = previous === undefined && positions.current.size > 0
+      return { node, key, entering, top: node.offsetTop, delta: previous === undefined ? entering ? 8 : 0 : previous + translation - node.offsetTop }
     })
     for (const animation of animations.current.values()) animation.cancel()
     animations.current.clear()
     positions.current = new Map(measurements.map(({ key, top }) => [key, top]))
     if (reduceMotion) return
-    for (const { node, key, delta } of measurements) {
-      if (Math.abs(delta) < 1) continue
+    for (const { node, key, delta, entering } of measurements) {
+      if (Math.abs(delta) < 1 && !entering) continue
       const animation = node.animate([
-        { transform: `translateY(${delta}px)` },
-        { transform: 'translateY(0)' }
-      ], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
+        { transform: `translateY(${delta}px)`, opacity: entering ? 0 : 1 },
+        { transform: 'translateY(0)', opacity: 1 }
+      ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
       animations.current.set(key, animation)
       animation.onfinish = () => animations.current.delete(key)
     }
@@ -76,20 +94,22 @@ export function SidebarActivity({ entries, renderEntry }: {
     if (!items.length) continue
     const headingId = `sidebar-activity-${group.id}`
     children.push(<h3 key={group.id} id={headingId} className="sb-activity-heading" data-motion-key={group.id}>
-      {group.label}<span>{items.length}</span>
+      {group.label}
     </h3>)
     // Flat keyed siblings preserve each row's DOM/focus as it migrates between groups.
     for (const entry of items.slice(0, GROUP_LIMIT)) {
-      children.push(<div key={entry.key} className="sb-activity-item" data-motion-key={entry.key} data-activity-group={group.id} aria-describedby={headingId}>
+      children.push(<div key={entry.key} className="sb-activity-item" data-motion-key={entry.key} data-activity-group={group.id} role="group" aria-labelledby={headingId}>
         {renderEntry(entry)}
-        <div className="sb-activity-project" title={entry.project.cwd}>{entry.project.name}</div>
+        {group.id !== 'working' && <span className="sb-activity-status" aria-hidden="true">
+          <Icon name={group.id === 'attention' ? 'alert' : 'laptop'} />
+        </span>}
       </div>)
     }
     if (items.length > GROUP_LIMIT) children.push(<p key={`${group.id}-limit`} className="sb-activity-limit">
-      另有 {items.length - GROUP_LIMIT} 条，请搜索定位
+      {copy.overflow(items.length - GROUP_LIMIT)}
     </p>)
   }
-  return <div className="sb-activity" ref={root} onPointerDownCapture={() => setHeldEntries(entries)}>
-    {children.length ? children : <div className="sb-empty">暂无匹配的本机会话</div>}
+  return <div className="sb-activity" ref={root} onPointerDownCapture={() => setHeldEntries(displayed)}>
+    {children.length ? children : <div className="sb-empty">{copy.empty}</div>}
   </div>
 }

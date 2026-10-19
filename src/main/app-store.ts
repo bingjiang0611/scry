@@ -16,11 +16,13 @@ import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CatalogHealth, ProviderId, SessionProviderId } from '../shared/provider'
 import type { RuntimeProvider } from '../shared/runtime'
+import type { AgentTurnRecord } from '../shared/turn-record'
 import { normalizeSessionTitle } from '../shared/session-title'
 
 export interface AppSession {
   sessionId: string
   runId?: string
+  lastRunOutcome?: AgentTurnRecord['status']
   externalSessionId?: string
   providerId?: SessionProviderId
   agentProfileId?: string
@@ -37,6 +39,7 @@ export interface AppSession {
 export interface SessionMeta {
   sessionId: string
   runId?: string
+  lastRunOutcome?: AgentTurnRecord['status']
   externalSessionId?: string
   pending?: boolean
   providerId: SessionProviderId
@@ -419,6 +422,7 @@ export function createAppSessionStore(userDataDir: string) {
     agentProfileId?: string
     runtimeProvider: RuntimeProvider
     runId?: string
+    lastRunOutcome?: AgentTurnRecord['status']
     externalSessionId: string
     cwd: string
     prompt: string
@@ -444,6 +448,8 @@ export function createAppSessionStore(userDataDir: string) {
     if (ex) {
       ex.sessionId = args.externalSessionId
       ex.externalSessionId = args.externalSessionId
+      // A newer run invalidates the previous result before its terminal event arrives.
+      ex.lastRunOutcome = args.lastRunOutcome ?? (args.runId && args.runId !== ex.runId ? undefined : ex.lastRunOutcome)
       ex.runId = args.runId ?? ex.runId
       ex.runtimeProvider = args.runtimeProvider
       ex.agentProfileId = args.agentProfileId
@@ -453,6 +459,8 @@ export function createAppSessionStore(userDataDir: string) {
     else
       list.push({
         sessionId: args.externalSessionId,
+        ...(args.runId ? { runId: args.runId } : {}),
+        ...(args.lastRunOutcome ? { lastRunOutcome: args.lastRunOutcome } : {}),
         externalSessionId: args.externalSessionId,
         providerId: args.providerId,
         agentProfileId: args.agentProfileId,
@@ -467,6 +475,7 @@ export function createAppSessionStore(userDataDir: string) {
   const toSessionMeta = (session: AppSession): SessionMeta => ({
     sessionId: session.sessionId,
     ...(session.runId ? { runId: session.runId } : {}),
+    ...(session.lastRunOutcome ? { lastRunOutcome: session.lastRunOutcome } : {}),
     ...(session.externalSessionId ? { externalSessionId: session.externalSessionId } : { pending: true }),
     providerId: session.providerId!,
     agentProfileId: session.agentProfileId,
