@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { canOpenWorkspaceFileExternally, WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFilePage, type WorkspaceFileSnapshot } from '@shared/workspace'
 import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } from '../workbench-api'
+import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
@@ -322,7 +323,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const selectedReadOnly = Boolean(readOnlySource) || selectedCwd !== cwd
 
   return (
-    <section className="workspace-panel" aria-label="工作区文件">
+    <section className={`workspace-panel${selected ? ' file-open' : ''}`} aria-label="工作区文件">
       <header className="workspace-head">
         {selected ? (
           <button type="button" className="iconbtn" onClick={() => confirmLeave() && setSelected(null)} title="返回文件树">
@@ -745,7 +746,7 @@ function FileEditor({
           <button type="button" className="btn" disabled={loading || !page.hasMore} onClick={() =>
             void movePage(page.nextOffset, [...pageBack, page.offset])
           }>下一页</button>
-          <button type="button" className="btn" disabled={loading} onClick={() => void load()}>重新载入</button>
+          <button type="button" className="btn" disabled={loading} onClick={() => void load()}>{WORKSPACE_EDITOR_COPY.reload}</button>
         </div>
         <div className="workspace-editorbody">
           <div className="workspace-source">
@@ -759,32 +760,39 @@ function FileEditor({
   return (
     <div className={`workspace-editor ${markdown ? 'markdown' : ''} ${sourceExpanded ? 'source-expanded' : ''}`}>
       <div className="workspace-editorbar">
-        <span>{readOnly ? '只读预览' : dirty ? '未保存' : '已保存'} · {Math.round((snapshot?.size ?? page!.totalBytes) / 1024 * 10) / 10} KiB</span>
-        {markdown && (
+        <div className="workspace-editor-actions" role="group" aria-label={WORKSPACE_EDITOR_COPY.actions}>
+          {markdown && (
+            <button
+              type="button"
+              className="btn"
+              aria-expanded={sourceExpanded}
+              onClick={() => setSourceExpanded((expanded) => !expanded)}
+            >
+              <Icon name={sourceExpanded ? 'collapse' : 'expand'} />
+              {sourceExpanded ? WORKSPACE_EDITOR_COPY.collapseSource : WORKSPACE_EDITOR_COPY.expandSource}
+            </button>
+          )}
           <button
             type="button"
-            className="btn"
-            aria-expanded={sourceExpanded}
-            onClick={() => setSourceExpanded((expanded) => !expanded)}
+            className="btn workspace-reload"
+            disabled={saving}
+            onClick={() => {
+              if (!dirty || window.confirm(WORKSPACE_EDITOR_COPY.confirmReload)) void load()
+            }}
           >
-            {sourceExpanded ? '收起源码' : '展开源码'}
+            <Icon name="refresh" />
+            {WORKSPACE_EDITOR_COPY.reload}
           </button>
-        )}
-        <button
-          type="button"
-          className="btn"
-          disabled={saving}
-          onClick={() => {
-            if (!dirty || window.confirm('放弃当前修改并从磁盘重新载入吗？')) void load()
-          }}
-        >
-          重新载入
-        </button>
-        {!readOnly && (!markdown || sourceExpanded || dirty) && (
-          <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
-            {saving ? '保存中…' : '保存 ⌘S'}
-          </button>
-        )}
+          {!readOnly && (!markdown || sourceExpanded || dirty) && (
+            <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
+              {saving ? WORKSPACE_EDITOR_COPY.saving : WORKSPACE_EDITOR_COPY.save}
+            </button>
+          )}
+        </div>
+        <span>{WORKSPACE_EDITOR_COPY.status(
+          readOnly ? WORKSPACE_EDITOR_COPY.readOnly : dirty ? WORKSPACE_EDITOR_COPY.unsaved : WORKSPACE_EDITOR_COPY.saved,
+          Math.round((snapshot?.size ?? page!.totalBytes) / 1024 * 10) / 10
+        )}</span>
       </div>
       <div className="workspace-editorbody">
         {(!markdown || sourceExpanded) && (

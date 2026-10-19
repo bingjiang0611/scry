@@ -1,3 +1,17 @@
+export const WORKSPACE_EDITOR_COPY = {
+  actions: '文件操作',
+  expandSource: '展开源码',
+  collapseSource: '收起源码',
+  reload: '重新载入',
+  confirmReload: '放弃当前修改并从磁盘重新载入吗？',
+  readOnly: '只读预览',
+  unsaved: '未保存',
+  saved: '已保存',
+  status: (state: string, kib: number) => `${state} · ${kib} KiB`,
+  saving: '保存中…',
+  save: '保存 ⌘S'
+} as const
+
 export const OVERVIEW_COST_COPY = {
   label: '成本',
   unavailable: '当前 Provider 未上报成本',
