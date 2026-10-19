@@ -476,8 +476,6 @@ export function ChatView({
   composerNotice = null
 }: ChatViewProps) {
   const remote = remoteHost != null
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
-  const selectedAgentName = selectedAgent?.name ?? '当前 Agent'
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
   // New conversation clears the visible session synchronously, while main may still be
   // invalidating Provider context. Do not make the project picker wait for that background
@@ -581,15 +579,6 @@ export function ChatView({
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-        {turns.length > 0 && (!sessionLoading || sessionCacheVisible) && (
-          <div className="chat-evidence-source" role="note" aria-label="会话证据来源">
-            <span><i aria-hidden="true" />{sessionLoading && sessionCacheVisible
-              ? '最近会话缓存 · 待核对' : remote ? `${remoteHost} 真实会话` : '本机真实会话'}</span>
-            <code title={cwd ?? '未绑定工作目录'}>{workspaceName ?? '不绑定项目'}</code>
-            <b>{selectedAgentName} · {sessionLoading && sessionCacheVisible
-              ? '正在核对本机归档；缓存不代表当前运行状态' : remote ? 'runtime / host trace archive' : 'runtime / local archive'} · 未捕获字段保持未知</b>
-          </div>
-        )}
         <div
           className="chat chat-transcript"
           ref={scrollRef}

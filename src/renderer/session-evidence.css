@@ -1,4 +1,4 @@
-/* Evidence System production structure: chat provenance, overview dossier and segment ledger. */
+/* Evidence System production structure: overview dossier and segment ledger. */
 .main-area {
   container-type: inline-size;
 }
@@ -7,57 +7,12 @@
   flex-direction: column;
 }
 
-.chat-evidence-source {
-  flex: 0 0 31px;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(100px, auto) minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--border3);
-  background: var(--surface-faint);
-  color: var(--dim2);
-  font: 10px/1 var(--font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.chat-evidence-source span,
-.chat-evidence-source b {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-evidence-source span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--fg);
-}
-
-.chat-evidence-source span i,
 .overview-panel-title em i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--ok);
   box-shadow: 0 0 0 4px var(--ok-soft);
-}
-
-.chat-evidence-source code {
-  max-width: 220px;
-  overflow: hidden;
-  color: var(--dim);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-evidence-source b {
-  justify-self: end;
-  font-weight: 500;
 }
 
 .overview-panel-title {
@@ -70,18 +25,10 @@
   border-bottom: 1px solid var(--border3);
 }
 
-.overview-panel-title > div {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
 .overview-panel-title strong {
   font-size: 13px;
 }
 
-.overview-panel-title span,
 .overview-panel-title em {
   color: var(--dim2);
   font: 10px/1 var(--font-mono);
@@ -540,8 +487,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 @container (max-width: 560px) {
-  .chat-evidence-source { grid-template-columns: auto minmax(0, 1fr); }
-  .chat-evidence-source b { display: none; }
   .segments-evidence-header,
   .seg-note { padding-inline: 18px; }
   .segment-ribbon,
@@ -565,24 +510,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
    -------------------------------------------------------------------------- */
 
 /* Chat · stable transcript rhythm ------------------------------------------------ */
-
-.chat-evidence-source {
-  flex-basis: 32px;
-  min-height: 32px;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
-  gap: 9px;
-  padding-inline: 16px;
-  background: var(--panel);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.chat-evidence-source span { color: var(--dim); }
-.chat-evidence-source span i { width: 5px; height: 5px; box-shadow: 0 0 0 3px var(--ok-soft); }
-.chat-evidence-source code { max-width: none; color: var(--dim3); font: inherit; }
-.chat-evidence-source b { color: var(--dim3); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* transcript、零 turn 欢迎区、composer 共用同一条正文列：列宽与两侧 gutter 只在这里定义。 */
 .chat-body,
@@ -917,7 +844,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .overview-dossier .overview-panel-title strong { font-size: 14px; }
-.overview-dossier .overview-panel-title span,
 .overview-dossier .overview-panel-title em { font-size: 10px; letter-spacing: 0; text-transform: none; }
 
 .overview-dossier .panel-tabs {
@@ -1610,8 +1536,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 @container (max-width: 720px) {
-  .chat-evidence-source { grid-template-columns: max-content minmax(0, 1fr); }
-  .chat-evidence-source b { display: none; }
   .chat-body .chat-transcript { padding-inline: 18px; }
   .runtime-composer { padding-inline: 18px; }
 
@@ -1638,8 +1562,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 @container (max-width: 560px) {
-  .chat-evidence-source code { display: none; }
-  .chat-evidence-source { grid-template-columns: minmax(0, 1fr); }
   .chat-body .transcript-turn.is-selected::before,
   .chat-body .transcript-turn.turn-jump-target::before { left: -8px; }
 

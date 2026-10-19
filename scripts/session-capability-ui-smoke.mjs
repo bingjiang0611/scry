@@ -1005,13 +1005,15 @@ async function exerciseOverviewDensity(contents, screenshotPath) {
           firstTurnTop: firstTurn.top, overflow: document.querySelector('.ov-scroll').scrollWidth > ${width},
           columns: getComputedStyle(document.querySelector('.overview-metric-grid')).gridTemplateColumns.split(' ').length,
           metricCount: document.querySelectorAll('.overview-metric').length,
-          hasInputOutput: Array.from(document.querySelectorAll('.overview-metric > span')).some(label => label.textContent === '输入 / 输出') });
+          hasInputOutput: Array.from(document.querySelectorAll('.overview-metric > span')).some(label => label.textContent === '输入 / 输出'),
+          hasTitleSubtitle: document.querySelector('.overview-panel-title span') != null,
+          hasTurnFootnote: document.querySelector('.turn-calls-section > .psrc') != null });
       })))`)
       if (screenshotPath && theme === 'dark' && width === 380) {
         const image = await contents.capturePage({ x: 0, y: 0, width, height: 650 })
         require('node:fs').writeFileSync(screenshotPath, image.toPNG())
       }
-      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.metricCount !== 3 || geometry.hasInputOutput) {
+      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
         throw new Error('Overview density ' + theme + '/' + width + ': ' + JSON.stringify(geometry))
       }
       results.push({ theme, width, ...geometry })

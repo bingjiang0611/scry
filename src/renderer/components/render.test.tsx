@@ -383,6 +383,25 @@ const renderWelcome = (overrides: Partial<ComponentProps<typeof ChatView>> = {})
   return renderToStaticMarkup(<ChatView {...props} {...overrides} />)
 }
 
+describe('ChatView 隐藏常驻来源说明', () => {
+  const turns: Turn[] = [{ runId: 'copy-cleanup', userText: 'question', items: [], done: true }]
+
+  it.each([false, true])('正常会话不显示来源横条或 runtime 脚注（remote=%s）', (remote) => {
+    const html = renderWelcome({ turns, remoteHost: remote ? 'fixture-host' : undefined })
+    expect(html).not.toContain('chat-evidence-source')
+    expect(html).not.toContain('本机真实会话')
+    expect(html).not.toContain('runtime /')
+    expect(html).not.toContain('未捕获字段保持未知')
+  })
+
+  it('仍明确显示缓存待核对状态和操作限制', () => {
+    const html = renderWelcome({ turns, sessionLoading: true, sessionCacheVisible: true, hasSelectedSession: true })
+    expect(html).toContain('正在更新最近会话缓存')
+    expect(html).toContain('核对完成前不能发送或分叉')
+    expect(html).toContain('data-status="loading"')
+  })
+})
+
 describe('ChatView 项目选择条', () => {
   const hasPicker = (overrides: Partial<ComponentProps<typeof ChatView>> = {}) =>
     renderWelcome({ cwd: '/repo/rate-native', ...overrides }).includes('class="composer-context"')
@@ -4928,7 +4947,10 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 
   it('每轮调用展示报错、介入、MCP、Skill、子 Agent、Hooks、文件计数，常规明细默认收起', () => {
-    const turnCallHtml = html.slice(html.indexOf('turn-call-list'), html.indexOf('每轮展示工具报错'))
+    const turnStart = html.indexOf('turn-call-list')
+    const sessionStart = html.indexOf('id="overview-session-panel"')
+    expect(sessionStart).toBeGreaterThan(turnStart)
+    const turnCallHtml = html.slice(turnStart, sessionStart)
     expect(html).toContain('每轮调用')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle intervention')
     expect(turnCallHtml).toContain('turn-call-group turn-call-toggle mcp')

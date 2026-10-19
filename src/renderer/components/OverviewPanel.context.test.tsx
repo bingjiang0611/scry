@@ -28,6 +28,16 @@ function render(items: TraceEvent[], previous: Turn[] = []): string {
 }
 
 describe('OverviewPanel request-level context', () => {
+  it('keeps the heading and count while removing persistent helper subtitles and footnotes', () => {
+    const html = render([])
+    expect(html).toContain('<strong>总览</strong>')
+    expect(html).toContain('overview-session-count')
+    expect(html).not.toContain('class="overview-panel-title"><div>')
+    expect(html).not.toContain('当前执行</span>')
+    expect(html).not.toContain('会话证据</span>')
+    expect(html).not.toContain('每轮展示工具报错及其输入')
+  })
+
   it.each<{ quality: TraceEvent['contextUsageQuality']; description: string }>([
     { quality: 'exact', description: '精确：最近一次 Provider 请求用量' },
     { quality: 'inferred', description: '推断：Provider usage 比例换算' },

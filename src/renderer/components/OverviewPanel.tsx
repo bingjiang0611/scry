@@ -974,7 +974,7 @@ function OverviewPanelBody({
     <aside className="panel overview-dossier" data-screen-label="总览 · 当前会话证据" aria-label="当前执行总览">
       <div className="ov-topbar">
         <div className="overview-panel-title">
-          <div><strong>总览</strong><span>{busy ? '当前执行' : '会话证据'}</span></div>
+          <strong>总览</strong>
           <em><i aria-hidden="true" />本机真实数据</em>
         </div>
       </div>
@@ -1235,7 +1235,6 @@ function OverviewPanelBody({
               )
             })}
           </div>
-          <div className="psrc">每轮展示工具报错及其输入、输出、错误信息，并汇总结构化介入、MCP、Skill、子 Agent、Hook 与文件数量；Skill 含用户明确指定且成功读取技能文件的加载推断，不等于 Provider 原生 Skill 调用。介入仅统计结构化问答/权限请求。</div>
         </div>
       )}
         </div>
