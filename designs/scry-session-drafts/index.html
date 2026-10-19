@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <header class="review-bar">
+    <div class="review-heading"><span class="review-eyebrow" id="eyebrow"></span><h1 id="review-title"></h1></div>
+    <div class="review-controls"><div class="segmented" id="variants"></div><button class="theme-button" id="theme" type="button"></button></div>
+  </header>
+  <main class="app-shell" id="app">
+    <aside class="sidebar">
+      <div class="sidebar-heading"><span id="projects-label"></span></div>
+      <nav id="sessions"></nav>
+      <div class="sidebar-bottom"><span aria-hidden="true">⚙</span><span id="settings-label"></span></div>
+    </aside>
+    <section class="conversation">
+      <header class="conversation-heading"><div><span class="breadcrumb" id="breadcrumb"></span><h2 id="conversation-title"></h2></div><span class="local-label" id="local-label"></span></header>
+      <div class="transcript" id="transcript"></div>
+      <div class="composer-area">
+        <div class="composer">
+          <label class="sr-only" id="composer-label" for="input"></label>
+          <textarea id="input" spellcheck="false"></textarea>
+          <div class="composer-footer"><span class="permission"><span aria-hidden="true">△</span><span id="permission-label"></span></span><div class="composer-options"><span class="provider"><span aria-hidden="true">π</span><span id="provider-label"></span></span><span class="model" id="model-label"></span><button class="send" id="send" type="button"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
+        </div>
+        <p class="simulation-note" id="simulation-note"></p>
+      </div>
+    </section>
+  </main>
+  <footer class="review-footer"><div><span class="recommendation" id="recommendation"></span><p id="rationale"></p></div><p class="try-it" id="try-it"></p></footer>
+  <script src="copy.js"></script>
+  <script src="prototype.js"></script>
+</body>
+</html>

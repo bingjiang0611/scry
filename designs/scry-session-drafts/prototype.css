@@ -1,0 +1,72 @@
+/* Local prototype; colors mirror src/renderer/codex-alignment.css, not a new product theme. */
+:root { color-scheme: dark; --bg:#151515; --panel:#1c1c1c; --panel2:#232323; --fg:#f1f1ef; --dim:#b5b5af; --dim2:#8d8d87; --border:#333331; --accent:#5b9cff; --sidebar:#181818; --hover:rgb(255 255 255 / 6%); --selected:rgb(91 156 255 / 10%); --selected-line:rgb(91 156 255 / 42%); --draft:#c7b795; --draft-bg:rgb(199 183 149 / 9%); --provider:#af98ed; --permission:#ed7770 }
+:root[data-theme='light'] { color-scheme:light; --bg:#f7f7f5; --panel:#fff; --panel2:#f6f6f3; --fg:#222220; --dim:#62625e; --dim2:#85857f; --border:#e4e4df; --accent:#3f7ee8; --sidebar:#f6f6f3; --hover:rgb(34 34 32 / 5%); --selected:rgb(63 126 232 / 8%); --selected-line:rgb(63 126 232 / 38%); --draft:#78613a; --draft-bg:rgb(120 97 58 / 8%); --provider:#8062c5; --permission:#b7443b }
+* { box-sizing:border-box }
+html { background:var(--bg) }
+body { margin:0; padding:28px 36px 22px; color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif }
+button,textarea { font:inherit }
+button { cursor:pointer; color:inherit }
+button:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:3px }
+.review-bar { max-width:1400px; margin:0 auto 23px; display:flex; align-items:center; justify-content:space-between; gap:24px }
+.review-eyebrow { font-size:10px; letter-spacing:1.8px; color:var(--dim2); font-weight:600 }
+h1 { font-size:23px; letter-spacing:-.4px; font-weight:550; margin:5px 0 0 }
+.review-controls { display:flex; gap:14px; align-items:center }
+.segmented { display:flex; padding:3px; background:var(--panel2); border:1px solid var(--border); border-radius:9px }
+.segmented button { padding:7px 12px; border:0; background:transparent; color:var(--dim); border-radius:6px; font-size:12px }
+.segmented button[aria-pressed='true'] { background:var(--hover); color:var(--fg) }
+.theme-button { border:1px solid var(--border); background:transparent; border-radius:8px; padding:9px 12px; color:var(--dim); font-size:12px }
+.app-shell { height:calc(100vh - 216px); min-height:530px; max-height:850px; max-width:1400px; margin:auto; display:grid; grid-template-columns:300px minmax(0,1fr); border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--panel) }
+.sidebar { background:var(--sidebar); border-right:1px solid var(--border); padding:20px 10px 0; display:flex; flex-direction:column; min-height:0 }
+.sidebar-heading { display:flex; justify-content:space-between; align-items:center; margin:0 13px 17px; color:var(--dim2); font-size:13px; font-weight:550 }
+#sessions { overflow:auto; flex:1; padding-bottom:20px }
+.project { margin:0 0 18px }
+.project-name { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:570; padding:0 13px 8px }
+.folder { width:17px; height:17px; color:var(--dim2); flex-shrink:0 }
+.session { width:100%; display:flex; align-items:center; gap:9px; border:1px solid transparent; background:transparent; border-radius:9px; padding:11px 11px 11px 30px; min-height:45px; text-align:left; color:var(--dim) }
+.session:hover { background:var(--hover) }
+.session[aria-current='true'] { background:var(--hover); border-color:var(--selected-line); box-shadow:inset 3px 0 var(--accent); color:var(--fg) }
+.session-main { flex:1; min-width:0; display:flex; align-items:center; gap:9px }
+.glyph { color:var(--provider); font-size:16px; width:15px; flex-shrink:0; font-family:Georgia,serif; font-weight:700; text-align:center }
+.session-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; font-size:14px }
+.session[aria-current='true'] .session-title { font-weight:550 }
+.draft { flex-shrink:0; color:var(--draft); font-size:12px; font-weight:500; white-space:nowrap }
+.session-meta { display:flex; align-items:center; flex-shrink:0; gap:6px; color:var(--dim2); font-size:12px; font-variant-numeric:tabular-nums }
+.session-meta .draft { font-size:11px; border:1px solid color-mix(in srgb,var(--draft) 20%,transparent); background:var(--draft-bg); border-radius:4px; padding:1px 4px }
+.running { width:11px; height:11px; border-radius:50%; border:2px solid var(--dim2); border-right-color:transparent; display:inline-block }
+.unread { width:5px; height:5px; border-radius:50%; background:var(--accent); display:inline-block }
+.sidebar-bottom { border-top:1px solid var(--border); color:var(--dim); display:flex; align-items:center; gap:9px; padding:16px 13px; font-size:14px }
+.sidebar-bottom > :first-child { font-size:18px }
+.conversation { min-width:0; min-height:0; display:flex; flex-direction:column }
+.conversation-heading { height:83px; border-bottom:1px solid var(--border); padding:16px 30px; display:flex; align-items:center; justify-content:space-between; gap:16px }
+.breadcrumb { color:var(--dim2); font-size:11px }
+h2 { margin:4px 0 0; font-size:15px; font-weight:550; overflow:hidden; white-space:nowrap; text-overflow:ellipsis }
+.conversation-heading > div { min-width:0 }
+.local-label { color:var(--dim2); font-size:12px; white-space:nowrap }
+.transcript { flex:1; min-height:0; overflow:auto; padding:30px; max-width:900px; width:100%; margin:0 auto }
+.user-message { background:var(--panel2); padding:12px 17px; border-radius:13px; margin-left:auto; max-width:83%; width:fit-content; color:var(--fg); font-size:14px }
+.assistant-message { margin:28px 0 0; font-size:15px; line-height:1.9; color:var(--fg) }
+.assistant-mark { color:var(--provider); font:700 18px Georgia,serif; margin-bottom:12px }
+.usage { font:11px/1.5 ui-monospace,SFMono-Regular,monospace; color:var(--dim2); border-top:1px solid var(--border); padding-top:17px; margin-top:23px }
+.composer-area { padding:15px 25px 12px }
+.composer { border:1px solid var(--border); border-radius:21px; background:var(--panel); padding:19px 19px 13px }
+textarea { display:block; width:100%; height:93px; resize:none; border:0; outline:none; background:transparent; color:var(--fg); font-size:16px; line-height:1.65; padding:0 }
+textarea::placeholder { color:var(--dim2) }
+textarea:focus-visible { outline:none }
+.composer:focus-within { border-color:var(--dim2) }
+.composer-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; border-top:1px solid var(--border); padding-top:12px; margin-top:12px }
+.permission { color:var(--permission); font-size:12px; display:flex; align-items:center; gap:7px; white-space:nowrap }
+.permission > :first-child { font-size:17px }
+.composer-options { display:flex; align-items:center; gap:16px; font-size:12px; color:var(--dim) }
+.provider { display:flex; align-items:center; gap:7px }
+.provider > span[aria-hidden='true'] { color:var(--provider); font:700 16px Georgia,serif }
+.model { background:var(--hover); border-radius:22px; padding:10px 14px; white-space:nowrap }
+.send { width:39px; height:39px; border:0; border-radius:50%; background:var(--fg); color:var(--bg); display:grid; place-items:center; flex-shrink:0 }
+.send:disabled { opacity:.25; cursor:default }
+.simulation-note { text-align:center; color:var(--dim2); font-size:10px; margin:8px 0 0 }
+.review-footer { max-width:1400px; margin:19px auto 0; display:flex; justify-content:space-between; gap:30px; align-items:flex-start; color:var(--dim); font-size:12px }
+.review-footer p { margin:4px 0 0 }
+.recommendation { color:var(--fg); font-weight:550; font-size:12px }
+.try-it { max-width:305px; text-align:right; line-height:1.8 }
+.sr-only { position:absolute; height:1px; width:1px; overflow:hidden; clip-path:inset(50%) }
+@media (max-width:1050px) { body { padding:22px 20px } .review-heading h1 { font-size:19px } .app-shell { grid-template-columns:280px minmax(0,1fr) } .permission { font-size:11px } .composer-options { gap:9px } .model { padding:8px 10px; font-size:11px } }
+@media (max-width:760px) { body { padding:15px 10px } .review-bar { align-items:flex-start; flex-direction:column; gap:13px } .review-controls { width:100%; justify-content:space-between } .app-shell { grid-template-columns:245px minmax(300px,1fr); overflow:auto; height:650px } .conversation { min-width:300px } .composer-area { padding:12px } .permission,.model { display:none } .review-footer { flex-direction:column; gap:8px } .try-it { text-align:left; max-width:none } }
