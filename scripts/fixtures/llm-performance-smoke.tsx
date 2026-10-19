@@ -92,6 +92,21 @@ for (const [id, action] of Object.entries({
     publish('second', { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 80, durationMs: 2000, firstTokenMs: 1500, model: 'pi-live-model' } }, 3100)
     publish('second', { text: 'still streaming' }, 3200)
   },
+  'performance-group': () => {
+    const source = registry.get('second')!.state
+    for (const [index, tokensPerSecond, firstTokenMs, state] of [
+      [1, 20, 500, 'tool'], [2, 90, 4000, 'waiting'], [3, undefined, undefined, 'waiting']
+    ] as const) {
+      const runId = `group-${index}`
+      registry.register({
+        ...source, runId, externalSessionId: runId, providerId: 'codex', cwd: `/other-project-${index}`,
+        llmPerformance: { ...source.llmPerformance!, state, apiTokensPerSecond: tokensPerSecond, firstTokenMs }
+      }, { runId })
+    }
+  },
+  'performance-ungroup': () => {
+    for (const runId of ['group-1', 'group-2', 'group-3']) registry.get(runId)!.state.done = true
+  },
   'performance-focus': () => { registry.focus('waiting') },
   'performance-complete': () => {
     publish('first', { kind: 'harness', stage: 'result', tokensOut: 100, durationApiMs: 5000 }, 3000)

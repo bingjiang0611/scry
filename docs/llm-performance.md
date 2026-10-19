@@ -61,7 +61,7 @@ Codex 等这次请求调用的工具全部跑完，才发出它的 usage 通知�
 
 ## 运行中的会话
 
-摘要只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化；一个会话只取当前主 run。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。每行显示模型（无调用证据前显示 Provider）、项目、状态，以及本轮已完成调用的速度和平均首 token；没有单次调用证据的 Provider（如运行中的 Claude）不显示速度。曲线使用 observer 的最后更新时间，不使用轮询时间；运行中样本不写入历史或 billing。读取失败时清空旧摘要及临时样本并显示错误。
+摘要只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化；一个会话只取当前主 run。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。相同模型跨项目和 Provider 合并为一行，显示会话总数；模型未知时仍按会话分别显示 Provider，避免误合并。速度和首 token 分别取有对应证据的会话的算术平均值，每个会话权重相同；这不是并发总吞吐或按调用数加权的平均值。缺失指标不计入该指标的分母，也不当作 0；没有单次调用证据的 Provider（如运行中的 Claude）不显示速度。状态一致时显示该状态，否则显示「多种状态」，悬停可查看各状态的会话数。曲线使用 observer 的最后更新时间，不使用轮询时间；运行中样本不写入历史或 billing。读取失败时清空旧摘要及临时样本并显示错误。
 
 ## 历史与归属
 
@@ -82,6 +82,6 @@ npm run build
 node scripts/electron-security-smoke.mjs --dev-performance-only
 ```
 
-UI fixture 使用生产 App、registry 和 observer，配合预置历史。它用真实指针事件验证：失败与无证据轮次不进图、模型中位数、首 token 列与指标切换（无证据显示 —）、悬停（有数据处显示速度，空闲处显示「空闲」）、选中模型、范围切换、运行中会话的单次调用速度、成员结束/停止/空闲、焦点独立、隐藏/关闭停止刷新、读取错误清空，以及两种主题和窄窗口。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter。两者都不启动真实付费 Provider。
+UI fixture 使用生产 App、registry 和 observer，配合预置历史。它用真实指针事件验证：失败与无证据轮次不进图、模型中位数、首 token 列与指标切换（无证据显示 —）、悬停（有数据处显示速度，空闲处显示「空闲」）、选中模型、范围切换、运行中会话的单次调用速度、同模型跨项目/Provider 合并与缺失指标的独立分母、混合状态和成员离开后的重新计算、成员结束/停止/空闲、焦点独立、隐藏/关闭停止刷新、读取错误清空，以及两种主题和窄窗口。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter。两者都不启动真实付费 Provider。
 
 UI fixture 在后台用 `showInactive()` 打开窗口，可能被用户窗口遮挡；被遮挡的窗口不出帧，会卡住 `requestAnimationFrame` 和按帧派发的 mousemove。因此 fixture 进程带 `--disable-backgrounding-occluded-windows`，显式 `hide()` 仍会让 `document.hidden` 为真。`win.setSize()` 是异步的，点击和测量前等待 `innerWidth` 更新。

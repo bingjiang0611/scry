@@ -1,9 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary, LlmRunningSession } from '@shared/llm-performance'
-import { llmMetricSamples, quantile, smoothLlmMetric } from '@shared/llm-performance'
+import { groupRunningLlmSessions, llmMetricSamples, quantile, smoothLlmMetric } from '@shared/llm-performance'
 import type { ProviderId } from '@shared/provider'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
+import { LLM_RUNNING_MODELS_COPY as runningCopy } from '../constants/copy'
 import './llm-performance.css'
 
 type RangeHours = 1 | 24 | 168
@@ -32,10 +33,23 @@ const clock = (ts: number): string => { const d = new Date(ts); return `${pad(d.
 const day = (ts: number): string => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}` }
 
 function stateLabel(session: LlmRunningSession): string {
-  if (session.state === 'streaming') return '生成中'
-  if (session.state === 'tool') return '工具执行'
-  if (session.state === 'complete') return '收尾中'
-  return session.outputStarted ? '等待模型' : '等待首次输出'
+  if (session.state === 'streaming') return runningCopy.states.streaming
+  if (session.state === 'tool') return runningCopy.states.tool
+  if (session.state === 'complete') return runningCopy.states.complete
+  return session.outputStarted ? runningCopy.states.waiting : runningCopy.states.firstOutput
+}
+
+function modelState(sessions: readonly LlmRunningSession[]): { label: string; detail: string; streaming: boolean } {
+  const counts = new Map<string, number>()
+  for (const session of sessions) {
+    const label = stateLabel(session)
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  return {
+    label: counts.size === 1 ? stateLabel(sessions[0]) : runningCopy.mixedState,
+    detail: [...counts].map(([label, count]) => runningCopy.stateCount(label, count)).join(' · '),
+    streaming: sessions.every(session => session.state === 'streaming')
+  }
 }
 
 /** Monotone cubic (Fritsch–Carlson): smooth without overshooting the sampled values. */
@@ -133,6 +147,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
   const firstTokenInRange = useMemo(() => within(firstTokenSamples), [firstTokenSamples, from, to])
   const oldestKept = history?.truncated && history.rows.length ? Date.parse(history.rows.at(-1)!.ts) : undefined
   const sessions = summary?.sessions ?? []
+  const runningModels = useMemo(() => groupRunningLlmSessions(summary?.sessions ?? []), [summary])
 
   if (!open) return null
   return (
@@ -152,21 +167,25 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
       <div className="llm-perf-body">
         {summaryError && <p className="llm-perf-alert" role="alert">运行中会话读取失败：{summaryError}</p>}
         {sessions.length > 0 && (
-          <section className="llm-perf-running" aria-label="运行中的会话">
-            {sessions.map(session => (
-              <div key={session.key} className="llm-perf-run">
-                <i aria-hidden="true" style={session.model ? { background: colorOf(session.model) } : undefined} />
-                <div><b>{session.model ?? (session.providerId ? providerName[session.providerId] : '未知 Provider')}</b>
-                  {session.cwd && <span> · {session.cwd.split('/').filter(Boolean).pop()}</span>}</div>
-                <span className={`llm-perf-state${session.state === 'streaming' ? ' gen' : ''}`}>{stateLabel(session)}</span>
-                <div className="llm-perf-run-speed">
-                  {session.tokensPerSecond != null && <><strong>{formatSpeed(session.tokensPerSecond)}</strong><small>token/s</small></>}
+          <section className="llm-perf-running" aria-label={runningCopy.region}>
+            {runningModels.map(group => {
+              const state = modelState(group.sessions)
+              const first = group.sessions[0]
+              return (
+                <div key={group.key} className="llm-perf-run">
+                  <i aria-hidden="true" style={group.model ? { background: colorOf(group.model) } : undefined} />
+                  <div><b>{group.model ?? (first.providerId ? providerName[first.providerId] : runningCopy.unknownProvider)}</b>
+                    <span>{runningCopy.sessions(group.sessions.length)}</span></div>
+                  <span className={`llm-perf-state${state.streaming ? ' gen' : ''}`} title={state.detail}>{state.label}</span>
+                  <div className="llm-perf-run-speed">
+                    {group.tokensPerSecond != null && <><small>{runningCopy.average}</small><strong>{formatSpeed(group.tokensPerSecond)}</strong><small>{runningCopy.speedUnit}</small></>}
+                  </div>
+                  <div className="llm-perf-run-speed">
+                    {group.firstTokenMs != null && <><small>{runningCopy.firstToken}</small><strong>{formatSeconds(group.firstTokenMs / 1000)}</strong><small>{runningCopy.seconds}</small></>}
+                  </div>
                 </div>
-                <div className="llm-perf-run-speed">
-                  {session.firstTokenMs != null && <><small>首 token</small><strong>{formatSeconds(session.firstTokenMs / 1000)}</strong><small>秒</small></>}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </section>
         )}
         <section>
