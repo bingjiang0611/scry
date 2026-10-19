@@ -169,7 +169,7 @@ function Fixture() {
       </div>
     </section>
     <SidebarArchiveFixture />
-    <section id="overview"><OverviewPanel turns={turns} sessionId={turns[0]?.runId ?? null} busy={turns.some((turn) => !turn.done)} selected={null} onSelect={select} usage={null} stats={null} /></section>
+    <section id="overview"><OverviewPanel turns={turns} sessionId={turns[0]?.runId === 'fixture-run' ? '01a10000-1111-7000-8000-00000000abcd' : turns[0]?.runId ?? null} busy={turns.some((turn) => !turn.done)} selected={null} onSelect={select} usage={null} stats={null} /></section>
   </>
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)

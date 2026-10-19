@@ -3626,7 +3626,7 @@ describe('OverviewPanel compact count', () => {
       <OverviewPanel turns={[compactTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(html).toContain('<span class="fname">Compact</span><span class="dim">1 次</span>')
+    expect(html).toContain('<strong class="overview-session-count">1</strong>')
   })
 })
 

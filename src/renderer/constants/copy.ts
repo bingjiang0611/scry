@@ -1,3 +1,17 @@
+export const OVERVIEW_SESSION_COPY = {
+  heading: '会话',
+  id: 'ID',
+  compact: 'Compact',
+  scopeLabel: '查看压缩统计范围',
+  scope: '仅统计当前已加载记录中确认完成的压缩；不代表原生会话的全部历史',
+  expandId: '展开完整 sessionId',
+  collapseId: '收起完整 sessionId',
+  copy: '复制完整 sessionId',
+  copied: '已复制完整 sessionId',
+  copyFailed: '复制未完成，请展开 ID 后手动选择',
+  missingId: '尚未捕获'
+} as const
+
 export const WORKSPACE_EDITOR_COPY = {
   actions: '文件操作',
   expandSource: '展开源码',
