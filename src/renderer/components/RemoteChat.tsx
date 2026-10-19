@@ -524,6 +524,7 @@ export function RemoteChat({
         runControlCatalog={runControlCatalog}
         runControlsReason={provider && runControlCatalog.models.length === 0 ? `${host} 未提供模型列表；使用 Provider 默认模型` : null}
         input={input}
+        composerScopeKey={draftKey}
         sendBlockedReason={sendBlockedReason}
         submitting={submitting}
         sessionLoading={historyLoading && displayTurns.length === 0}

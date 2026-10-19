@@ -18,8 +18,10 @@ const negativeActivityControl = process.argv.includes('--negative-activity-contr
 const negativeWorkspaceControl = process.argv.includes('--negative-workspace-control')
 const negativePromptControl = process.argv.includes('--negative-prompt-control')
 const negativeSettingsControl = process.argv.includes('--negative-settings-control')
+const negativeHistorySlashControl = process.argv.includes('--negative-history-slash-control')
 const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
+const composerHistoryOnly = process.argv.includes('--composer-history-only')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -41,6 +43,7 @@ const secondLedger = '22222222-2222-4222-8222-222222222222'
 const firstScryRun = 'remote-run-fixture-1'
 const secondScryRun = 'remote-run-fixture-2'
 const state = {
+  historyPrompts: ['older remote prompt', 'latest remote prompt'],
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
@@ -146,7 +149,9 @@ const api = {
   },
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
-    const turns = state.firstIntentCleared && context.externalSessionId === 'native-session'
+    const turns = ${composerHistoryOnly} && context.externalSessionId === 'old-native'
+      ? state.historyPrompts.map((userText, index) => ({ runId: 'history-' + index, userText, items: [], done: true }))
+      : state.firstIntentCleared && context.externalSessionId === 'native-session'
       ? [{ runId: firstScryRun, userText: 'archived terminal turn', items: [], done: true }] : []
     return { turns, hasOlder: false, source: 'trace_archive', status: 'available' }
   },
@@ -355,7 +360,7 @@ async function exercise(contents, pointer, capture, options) {
   const projectOrder = () => read('Array.from(document.querySelectorAll(".sb-proj .pname"), node => node.textContent)')
   check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Recent local', 'Project A', 'Older local', 'Project B']), 'Remote project was appended instead of sorted by recent activity')
   check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
-  if (!options.parityOnly) {
+  if (!options.parityOnly && !options.composerHistoryOnly) {
     // Host-side activity changes while the user stays in the local composer.
     // No explicit refresh: the shared loader must observe starts and stops itself.
     await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000')
@@ -400,6 +405,51 @@ async function exercise(contents, pointer, capture, options) {
   // Remote workbenches must use the production shell, not an overlay drawer.
   await click('[data-remote-session="old-native"]')
   await wait(remoteShown, 'remote history selected for workspace checks')
+  if (options.composerHistoryOnly) {
+    await wait('document.querySelector(".chat-transcript")?.textContent.includes("latest remote prompt")', 'remote prompt history')
+    await click('textarea[aria-label="描述任务"]')
+    await key('ArrowUp')
+    await wait(`${composerValue} === 'latest remote prompt'`, 'recall latest remote prompt')
+    const refreshHistory = async (prompts) => {
+      const reads = (await fixture()).historyCalls.length
+      await read(`window.desktopRemoteFixture.historyPrompts = ${JSON.stringify(prompts)}; window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()`)
+      await wait('document.querySelector(".composer-notice")?.textContent.includes("未连接")', 'history refresh disconnect')
+      await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+      await wait(`window.desktopRemoteFixture.historyCalls.length > ${reads} && !document.querySelector(".composer-notice")`, 'history refresh reconnect')
+      await wait(`document.querySelector(".chat-transcript")?.textContent.includes(${JSON.stringify(prompts.at(-1))})`, 'updated remote history')
+    }
+    await refreshHistory(['older remote prompt', 'latest remote prompt', 'arrived while browsing'])
+    await key('ArrowUp')
+    await wait(`${composerValue} === 'older remote prompt'`, 'continue history after remote refresh')
+    await key('ArrowDown')
+    await wait(`${composerValue} === 'latest remote prompt'`, 'return through the original history snapshot')
+    await key('ArrowDown')
+    await wait(`${composerValue} === ''`, 'leave history at empty draft')
+    await key('ArrowUp')
+    await wait(`${composerValue} === 'arrived while browsing'`, 'next traversal sees refreshed history')
+    await key('ArrowDown')
+    await refreshHistory(['older remote prompt', '/skill:host-only'])
+    await key('ArrowUp')
+    await wait(`${composerValue} === '/skill:host-only'`, 'recall slash prompt')
+    check(!await read('document.querySelector(".slash-menu") != null'), 'History recall opened slash completion instead of history navigation')
+    await key('ArrowUp')
+    await wait(`${composerValue} === 'older remote prompt'`, 'slash prompt does not consume history arrows')
+    await key('ArrowDown'); await key('ArrowDown')
+    await insert('edited draft')
+    await key('ArrowUp')
+    check(await read(`${composerValue} === 'edited draft'`), 'History replaced a manually edited draft')
+    await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()')
+    await key('Backspace'); await insert('/skill')
+    await wait('document.querySelector(".slash-menu") != null', 'typing still opens command completion')
+    await key('Escape')
+    await wait('document.querySelector(".slash-menu") == null', 'Escape closes typed command completion')
+    await click('[data-remote-session="other-native"]')
+    await wait(`${composerValue} === '' && document.querySelector(".chat-session-evidence-gap") != null`, 'switch to an empty remote session')
+    await click('textarea[aria-label="描述任务"]'); await key('ArrowUp')
+    check(await read(`${composerValue} === ''`), 'History leaked from another session')
+    check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'History browsing sent a prompt')
+    return { remoteComposerHistory: { refreshDuringNavigation: true, slashRecall: true, typedSlashAndEscape: true, editedDraftPreserved: true, sessionIsolation: true, nativeKeyboard: true } }
+  }
   // Native input through production App: insertion must retain the owning host/session.
   await click('textarea[aria-label="描述任务"]'); await insert('remote draft')
   await read(`localStorage.setItem('scry.meta-prompts.v1', JSON.stringify([{id:'remote-meta',title:'Remote routing',body:'host scoped prompt'}]))`)
@@ -914,7 +964,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeHistorySlashControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeHistorySlashControl && id.endsWith('/ChatView.tsx')) {
+        const guard = 'const slashOpen = slashRequested && !historyNavigation'
+        if (!source.includes(guard)) throw new Error('history slash guard not found')
+        return source.replace(guard, 'const slashOpen = slashRequested')
+      }
       if (negativeSettingsControl && id.endsWith('/App.tsx')) return source.replace("setSettingsTab('remote')", "setSettingsTab('appearance')")
       if (negativePromptControl && id.endsWith('/App.tsx')) {
         const target = 'const target = metaPromptTarget.current'
@@ -973,7 +1028,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, composerHistoryOnly: ${composerHistoryOnly} })
         console.log('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
