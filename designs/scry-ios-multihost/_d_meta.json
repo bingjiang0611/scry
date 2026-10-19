@@ -1,0 +1,22 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "createdAt": "2026-10-19T05:16:23.964Z",
+  "updatedAt": "2026-10-19T06:14:16.245Z",
+  "assets": {
+    "Scry iOS 多主机 · 经 Mac1 转发 v2": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-19T06:14:16.243Z",
+          "status": "needs-review",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          }
+        }
+      ]
+    }
+  }
+}
