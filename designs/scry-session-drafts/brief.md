@@ -67,13 +67,34 @@ Craft：应用 [Hover 克制](https://craft.gustavofior.com/hover-restraint)、[
 - 回归对照：新 `SidebarDrafts.test.tsx` 在旧实现上 5 项失败、2 项通过；实现后 7 项全通过。与 composer/remote 单测合跑 32 项通过；`npm run typecheck`、`npm run build` 通过。
 - 原生输入验证：`session-capability-ui-smoke.mjs --selection-only` 10 个场景通过，新增切走保留、清空移除、空白不标、元数据位置与输入焦点断言；`desktop-remote-ui-smoke.mjs --composer-history-only` 通过，新增远程切换及草稿归属断言。未调用真实 Provider。
 - 性能：`performance:measure -- --compare 67f03e7` 既有工作量计数一致、ratchet 通过，无 worse；机器负载 14.45→15.64（10 核，highLoad），不宣称毫秒改善。该计数集不直接覆盖侧栏逐键开销；本次不修改 collector、workload 或门限。
-- 日常 `/Applications/Scry.app` 为 0.2.208，不能用主分支 0.2.204 的隔离代码直接覆盖。已找到 `~/.local/state/scry-catalog-current-8GWCgkE7/source` 的同版快照：1221 项 manifest 的可执行源码无漂移（只有性能机会文档变化和单独的 skill symlink），13 个已编译 out 文件与当前安装 ASAR 内容逐字节一致。当前安装 ASAR SHA-256 为 `568cd059efcb467f1829d188cb9a7a72f9155a40cead7917c43eac92f6c8c3cf`；旧安装记录的不同 ASAR hash 不冒充本次实测值。
-- 安装将仅在上述已安装基线快照上叠加本次 patch、单独升级 App 版本并通过现有打包/安装校验；安装前复核基线未改变。不自动退出、启动或重启用户 App。真实日常 App 重放仍须用户重启后执行。
+- 安装预检时，日常 `/Applications/Scry.app` 为 0.2.208，不能用主分支 0.2.204 的隔离代码直接覆盖。已找到 `~/.local/state/scry-catalog-current-8GWCgkE7/source` 的同版快照：1221 项 manifest 的可执行源码无漂移（只有性能机会文档变化和单独的 skill symlink），13 个已编译 out 文件与当前安装 ASAR 内容逐字节一致。当前安装 ASAR SHA-256 为 `568cd059efcb467f1829d188cb9a7a72f9155a40cead7917c43eac92f6c8c3cf`；旧安装记录的不同 ASAR hash 不冒充本次实测值。
+- 主分支功能提交 `8826602`，测试 fixture 修正 `962acc5`。通过重建前后文件内容核对，原主工作区 WIP 保留；主分支最终 typecheck 通过。主工作区受影响单测为 33 项通过（含原有并行附件 helper 测试），隔离实现基线为 32 项通过。
+
+### 安装候选与阻碍（未安装）
+
+候选在原 0.2.208 已装快照上仅叠加本次 9 个源码/测试文件与 App 版本变更，升级为 0.2.209；没有把主分支的其他 WIP 顺带打包。CLI 保持 0.2.49。交付 worktree 已从 `/tmp/scry-drafts-install` 移至 `~/.local/state/scry-draft-delivery-20261019/source`，交付分支提交为 `e34016b` / `9971768`；其中原已装版本的未提交快照按原样保留，不纳入任务提交。
+
+| 当前候选检查 | 实际结果 |
+| --- | --- |
+| typecheck / unit / shell | 通过；3482 unit 通过、4 个既有 opt-in 跳过；Node 24.18.0，macOS arm64 |
+| App/CLI build、原生依赖重建、开发签名 | 通过；未公证 |
+| `codesign --verify --deep --strict` | 当前包通过磁盘签名校验 |
+| packaged check | 未通过：内置 CLI `--version` 被 SIGKILL；系统日志报告 provenance sandbox 错误。不能宣称包可运行 |
+| 当前候选源上的两项 focused Electron UI | 本地 10 场景、远程 composer history 均通过；通过 `ELECTRON_OVERRIDE_DIST_PATH` 使用现有同版本 Electron 42.10.1 运行，不把它冒充新包 runtime 验证 |
+| 其余 packaged/security smoke、安装、日常 App 验收 | 未到达；没有绕过门禁，没有自动启动/停止/重启用户 App |
+
+首次失败保留：①候选基线的远程行新增 `canDelete/needsUpgrade`，新测试 fixture 起初未提供；补全 fixture，断言未削弱。②共享 `node_modules` symlink 使 electron-builder 漏收传递依赖；只移除本任务 symlink，以不变 lockfile 执行 `npm ci` 后重建，原缺依赖问题消失。③新包 CLI 被系统杀死；检查签名及针对性系统日志，并把任务 worktree 移至用户状态目录后仍 SIGKILL，因此停止安装，不关闭系统安全机制、不跳过校验。依赖安装另报告 22 项既有审计告警（含 3 critical），没有升级依赖或执行 audit fix。
+
+验收末尾再次检查，外部安装已变化为 **0.2.206** / ASAR `cc514d0aa0b94be8435a000115ed11c3611876948e36f48612c48e4eebd3574e`；5 个已装 renderer JS/CSS 资产均没有 `sb-draft`。本任务没有运行安装器、没有覆盖该安装。故原 0.2.208 基线候选除运行门禁失败外，也已不适合直接安装：必须重新匹配最新已装快照，不能拿旧候选覆盖并行交付。
+
+证据保留于 `~/.local/state/scry-draft-delivery-20261019/evidence/`：`delivery-status.json`、1223 项 `source-manifest.json`、首次失败和最终 unit/pack/UI/performance 日志、`system-policy.log`。候选 ASAR SHA-256 `72553fe075881a18a07f95e42bcb38d79c03009caf32843f0bb3df3f0a311c1e`，标记为 **不得直接安装**，不是已验收产物。
+
+下一步由用户决定是否授权沿用既有 mac2 构建流程。获准后，助手先冻结并匹配最新安装基线，只移植本次草稿改动，重跑门禁再安装；不自动重启 App。若暂不授权，保留代码与证据，安装保持未完成。
 
 ### 设计阶段交付边界（历史）
 
 - 待用户选择 A 或 B，再接入真实 store 与侧栏。批准本稿不代表真实 App 验收。
 - 附件草稿、远程/本地会话身份隔离、发送失败保留、重启恢复、待回答与草稿共存须在接入阶段补 focused 回归并于当前版本真实 App 重放。
 - 本轮仅设计，不构建、安装、重启或发送到 Provider；不把并行 WIP 打包交付。
-- 无新增跨项目视觉偏好；本记录只确认 Scry 草稿可见性的需求，设计成品仍待审。
+- 无新增跨项目视觉偏好；A 方向已被用户明确选择，不代表当前真实 App 交互已验收。
 - 共享检索回执：已 register 为 `D-20261019-scry-session-drafts`，`search 'Scry 会话草稿'` 首条命中本文件。`build` exit 0（53 条）；`check` exit 1，因为原有 5 个失效来源：`P-PI-MODEL-SELECTOR`、`D-20260912-scry-ios-remote`、`D-20261008-scry-ios-continuity`、`P-SCRY-SESSION-HISTORY`、`D-20261010-scry-llm-sidebar`。本次条目可读且可检索，不宣称全库健康；日志在 `/tmp/scry-session-drafts-library-{build,check}.log`。
