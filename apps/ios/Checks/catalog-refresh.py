@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the native store/cache checks on macOS; no simulator, phone or credentials."""
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import shlex
@@ -22,7 +23,8 @@ for path in [
 ]:
     module_maps.append(package / '.build/checkouts' / path)
 sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteHistoryCache', 'RemoteConnection',
-           'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy']
+           'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy',
+           'ExecutionTargetCoordinator']
 with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     executable = Path(temporary) / 'catalog-refresh-checks'
     command = ['xcrun', 'swiftc', '-D', 'DEBUG', '-swift-version', '5', '-parse-as-library',
@@ -37,10 +39,20 @@ with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     view_models.write_text('import SwiftUI\n' +
         components[components.index('struct TurnOutcomeNote:'):components.index('// A turn this device already')] +
         components[components.index('struct SessionStatusLine {'):components.index('struct SessionStatusStrip:')])
+    home = (root / 'apps/ios/ScryRemote/HomeView.swift').read_text()
+    details_snapshot = Path(temporary) / 'CatalogRefreshDetailsSnapshot.swift'
+    details_snapshot.write_text('import Foundation\n' +
+        home[home.index('struct CatalogRefreshDetailsSnapshot:'):home.index('// One projection')])
+    command += [str(details_snapshot)]
     command += [str(root / 'apps/ios/ScryRemote' / (source + '.swift')) for source in sources]
     command += [str(root / 'apps/ios/ScryRemote/Theme.swift'), str(view_models),
                 str(Path(__file__).with_suffix('.swift')), *objects, '-o', str(executable)]
     compiled = subprocess.run(command, cwd=root)
     if compiled.returncode:
         raise SystemExit(compiled.returncode)
+    # Managed Macs may reject linker-only ad-hoc signatures. Use an explicitly
+    # supplied local development identity; signing/verification must succeed.
+    identity = os.environ.get('SCRY_IOS_CHECK_SIGN_IDENTITY', '-')
+    subprocess.run(['codesign', '--force', '--sign', identity, str(executable)], check=True)
+    subprocess.run(['codesign', '--verify', '--strict', str(executable)], check=True)
     raise SystemExit(subprocess.run([str(executable), '-catalogRefreshChecks'], cwd=root).returncode)

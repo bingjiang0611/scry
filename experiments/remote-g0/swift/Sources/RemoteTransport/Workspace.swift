@@ -67,7 +67,11 @@ extension G0Transport {
     }
   }
   private struct WorkspaceRequest: Encodable { let op = "workspace"; let query: WorkspaceQuery }
-  private struct WorkspaceResponse: Decodable { let workspace: WorkspaceResult?; let error: String? }
+  private struct WorkspaceResponse: Decodable {
+    let workspace: WorkspaceResult?
+    let executionTarget: G0Transport.ExecutionTargetBinding?
+    let error: String?
+  }
 
   public static func relayWorkspace(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
                                     query: WorkspaceQuery) async throws -> WorkspaceResult {
@@ -76,6 +80,9 @@ extension G0Transport {
       request: request, responseLimit: 513 * 1024, lane: .bulk)
     let response = try JSONDecoder().decode(WorkspaceResponse.self, from: bytes)
     if let error = response.error { throw RunError.host(code: error) }
+    if let expectedTarget = endpoint.executionTarget, response.executionTarget != expectedTarget {
+      throw ProbeError.unexpectedReply
+    }
     guard let workspace = response.workspace else { throw ProbeError.unexpectedReply }
     return workspace
   }

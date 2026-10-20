@@ -40,7 +40,8 @@ public final class RelaySession: Sendable {
               deviceLabel: String? = nil) {
     self.deviceLabel = deviceLabel
     let base = G0Transport.RelayEndpoint(host: endpoint.host, port: endpoint.port, hostId: endpoint.hostId,
-                                         relayServerName: endpoint.relayServerName, outerTLS: endpoint.outerTLS)
+                                         relayServerName: endpoint.relayServerName, outerTLS: endpoint.outerTLS,
+                                         executionTarget: endpoint.executionTarget)
     var lanes: [Lane: RelayLane] = [:]
     for lane in Lane.allCases {
       lanes[lane] = RelayLane(endpoint: base, identity: identity, abortOnCancel: lane != .control,
@@ -221,10 +222,16 @@ final class LaneConnection: Sendable {
         attempt += 1
         // A rejected certificate/anchor is not transient; everything else here
         // happened before any request byte was written and is safe to retry.
-        if error is NIOSSLError || attempt >= 3 || Task.isCancelled { throw error }
+        if isNonRetryableOpenError(error) || attempt >= 3 || Task.isCancelled { throw error }
         try await Task.sleep(nanoseconds: attempt == 1 ? 250_000_000 : 800_000_000)
       }
     }
+  }
+
+  static func isNonRetryableOpenError(_ error: Error) -> Bool {
+    if error is NIOSSLError { return true }
+    if case RelayTransportError.tlsHandshake = error { return true }
+    return false
   }
 
   private static func openOnce(endpoint: G0Transport.RelayEndpoint, identity: G0ProbeIdentity) async throws -> LaneConnection {
@@ -242,7 +249,7 @@ final class LaneConnection: Sendable {
       return LaneConnection(channel: channel, handler: handler)
     } catch {
       channel.close(promise: nil)
-      throw error
+      throw RelayTransportError.identifyingHandshake(error, layer: .host)
     }
   }
 }

@@ -150,7 +150,7 @@ enum RemoteSelfTest {
     model.bindDraft(externalSessionId: "external", to: identity)
     let reopened = model.composerDraft(for: .conversation(.opened(providerId: "codex", cwd: "/fixture", externalSessionId: "external")))
     check("draft.localToCatalogIdentity", reopened.wrappedValue.text == "unsent" && reopened.wrappedValue.attachments.count == 1)
-    check("draft.newTaskIsolated", model.composerDraft(for: .newTask).wrappedValue.text.isEmpty)
+    check("draft.newTaskIsolated", model.composerDraft(for: .newTask(model.targetCoordinator.localScope)).wrappedValue.text.isEmpty)
     let profileA = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true, agentProfileId: "pi:a")
     let profileB = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true, agentProfileId: "pi:b")
     check("provider.profileRowIdentity", profileA.selectionId != profileB.selectionId)
@@ -200,6 +200,26 @@ enum RemoteSelfTest {
 
   // Disk/network-assembly fixture: isolated temporary directory, no relay,
   // no real Keychain/grant and no Provider execution.
+  @MainActor static func runCatalogRefreshChecksIfRequested() {
+    guard ProcessInfo.processInfo.arguments.contains("-catalogRefreshChecks") else { return }
+    Task {
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      do {
+        let checks = try await RemoteRunStore.selfTestCatalogRefreshFlow(directory: directory)
+          + RemoteRunStore.selfTestExecutionTargets(directory: directory.appendingPathComponent("targets"))
+          + RemoteRunStore.selfTestInteractionState()
+        for (name, passed) in checks { print("TARGETTEST \(name) \(passed ? "PASS" : "FAIL")") }
+        let failures = checks.filter { !$0.1 }.count
+        try FileManager.default.removeItem(at: directory)
+        print("TARGETTEST DONE checks=\(checks.count) failures=\(failures)")
+        exit(failures == 0 ? 0 : 1)
+      } catch {
+        print("TARGETTEST ERROR \(error)")
+        exit(1)
+      }
+    }
+  }
+
   @MainActor static func runHistoryCacheTestIfRequested() {
     guard ProcessInfo.processInfo.arguments.contains("-historyCacheTest") else { return }
     Task {
@@ -255,6 +275,10 @@ enum RemoteSelfTest {
         var connection = RemoteConnection(relayHost: "fixture", relayPort: 443, relayTLS: "system",
           hostId: "host-a", anchorPEM: "anchor-a", deviceId: "grant-a")
         let key = RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same")
+        let legacyFields = [connection.hostId, connection.anchorPEM, connection.deviceId, "pi", "/fixture", "same"]
+        let legacyKey = SHA256.hash(data: try JSONEncoder().encode(legacyFields)).map { String(format: "%02x", $0) }.joined()
+        check("unprovenLegacyHistoryNotReused", key != legacyKey)
+        check("profileHistoryIsolation", key != RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same", agentProfileId: "A"))
         connection.hostId = "host-b"
         check("hostIsolation", key != RemoteHistoryCache.key(connection: connection, providerId: "pi", cwd: "/fixture", sessionId: "same"))
         connection.hostId = "host-a"; connection.deviceId = "grant-b"
@@ -340,12 +364,18 @@ enum RemoteSelfTest {
     checks.append(("delivery.backoffAttempts", pauses == [1, 2, 3]))
 
     sends = 0
-    let rejected = await RemoteRunStore.deliver(
+    let uncertain = await RemoteRunStore.deliver(
       submit: { () async throws -> String in sends += 1; throw G0Transport.RunError.host(code: "grant_revoked") },
       status: { () async throws -> String? in nil },
       transportFailed: { _ in }, pause: { _ in })
-    if case .rejected("grant_revoked") = rejected { checks.append(("delivery.hostRejectionIsFinal", sends == 1)) }
-    else { checks.append(("delivery.hostRejectionIsFinal", false)) }
+    if case .uncertain("grant_revoked") = uncertain { checks.append(("delivery.authorityLossPreservesUncertainty", sends == 1)) }
+    else { checks.append(("delivery.authorityLossPreservesUncertainty", false)) }
+    let rejected = await RemoteRunStore.deliver(
+      submit: { () async throws -> String in throw G0Transport.RunError.host(code: "invalid_request") },
+      status: { () async throws -> String? in nil },
+      transportFailed: { _ in }, pause: { _ in })
+    if case .rejected("invalid_request") = rejected { checks.append(("delivery.definitiveRejectionIsFinal", true)) }
+    else { checks.append(("delivery.definitiveRejectionIsFinal", false)) }
 
     let adopted = await RemoteRunStore.deliver(
       submit: { () async throws -> String in throw G0Transport.RunError.host(code: "intent_payload_conflict") },

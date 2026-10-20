@@ -17,10 +17,13 @@ import RemoteTransport
 struct RemoteRunClient {
   let keychain: RemoteKeychain
   let connection: RemoteConnection
+  let executionTarget: G0Transport.ExecutionTargetBinding?
 
-  init(connection: RemoteConnection, keychain: RemoteKeychain = RemoteKeychain()) {
+  init(connection: RemoteConnection, keychain: RemoteKeychain = RemoteKeychain(),
+       executionTarget: G0Transport.ExecutionTargetBinding? = nil) {
     self.connection = connection
     self.keychain = keychain
+    self.executionTarget = executionTarget
   }
 
   enum ClientError: Error, Equatable { case missingCredentials }
@@ -70,11 +73,19 @@ struct RemoteRunClient {
 
   private func endpoint() -> G0Transport.RelayEndpoint {
     let outerTLS: G0Transport.RelayEndpoint.OuterTLS = connection.relayTLS == "system" ? .system : .plaintext
-    let base = G0Transport.RelayEndpoint(host: connection.relayHost, port: connection.relayPort, hostId: connection.hostId, outerTLS: outerTLS)
-    let session = RemoteSessionRegistry.shared.session(for: connection, keychainService: keychain.service) { [self] in
+    let base = G0Transport.RelayEndpoint(host: connection.relayHost, port: connection.relayPort,
+                                         hostId: connection.hostId, outerTLS: outerTLS,
+                                         executionTarget: executionTarget)
+    let session = RemoteSessionRegistry.shared.session(for: connection, keychainService: keychain.service,
+                                                       executionTarget: executionTarget) { [self] in
       try identity()
     } endpoint: { base }
-    return G0Transport.RelayEndpoint(host: base.host, port: base.port, hostId: base.hostId, outerTLS: outerTLS, session: session)
+    return G0Transport.RelayEndpoint(host: base.host, port: base.port, hostId: base.hostId,
+                                     outerTLS: outerTLS, session: session, executionTarget: executionTarget)
+  }
+
+  func executionTargets() async throws -> G0Transport.ExecutionTargetCatalog {
+    try await G0Transport.relayExecutionTargets(endpoint: endpoint(), identity: try identity())
   }
 
   // Opens the interactive lane before the user acts (app foreground). Failure
@@ -93,9 +104,9 @@ struct RemoteRunClient {
   // Long-poll the host's live runs, optionally joined with one session's
   // history version. A read on its own lane; never blocks a run's watch.
   func liveRuns(revision: String?, waitMs: Int = 15_000,
-                history: (providerId: String, cwd: String, externalSessionId: String, known: String?)?) async throws -> G0Transport.LiveRunsOutcome {
+                history: (providerId: String, cwd: String, externalSessionId: String, known: String?)?, historyAgentProfileId: String? = nil) async throws -> G0Transport.LiveRunsOutcome {
     try await G0Transport.relayLiveRuns(endpoint: endpoint(), identity: try identity(), revision: revision,
-                                        waitMs: waitMs, history: history)
+                                        waitMs: waitMs, history: history, historyAgentProfileId: historyAgentProfileId)
   }
 
   // Ask the host to interrupt this run's Provider. A receipt, not a lifecycle.
@@ -108,7 +119,9 @@ struct RemoteRunClient {
   // intentId defaults to a fresh lowercase v4 UUID — the host ledger requires the
   // canonical lowercase form (Foundation's uuidString is uppercase).
   func submit(routing: Routing, intentId: String = UUID().uuidString.lowercased()) async throws -> G0Transport.RunSubmitOutcome {
-    let detail = String(decoding: try JSONEncoder().encode(routing), as: UTF8.self)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let detail = String(decoding: try encoder.encode(routing), as: UTF8.self)
     return try await G0Transport.relayRunSubmit(endpoint: endpoint(), identity: try identity(), intentId: intentId, detail: detail)
   }
 
@@ -220,44 +233,45 @@ struct RemoteRunClient {
     }
   }
 
-  func historyVersion(providerId: String, cwd: String, externalSessionId: String) async throws -> G0Transport.RunHistoryVersion {
-    try await G0Transport.relayRunHistoryVersion(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  func historyVersion(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> G0Transport.RunHistoryVersion {
+    try await G0Transport.relayRunHistoryVersion(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
   }
 
-  func historyPreview(providerId: String, cwd: String, externalSessionId: String) async throws -> G0Transport.RunHistoryPreview {
-    try await G0Transport.relayRunHistoryPreview(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  func historyPreview(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> G0Transport.RunHistoryPreview {
+    try await G0Transport.relayRunHistoryPreview(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
   }
 
-  func historyTurnsPage(providerId: String, cwd: String, externalSessionId: String, before: Int?, limit: Int = 3, snapshot: String?) async throws -> G0Transport.RunHistoryTurnsPage {
-    try await G0Transport.relayRunHistoryTurnsPage(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot)
+  func historyTurnsPage(providerId: String, cwd: String, externalSessionId: String, before: Int?, limit: Int = 3, snapshot: String?, agentProfileId: String? = nil) async throws -> G0Transport.RunHistoryTurnsPage {
+    try await G0Transport.relayRunHistoryTurnsPage(endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot, agentProfileId: agentProfileId)
   }
 
-  func historyPage(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> G0Transport.RunHistoryPage {
+  func historyPage(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?, agentProfileId: String? = nil) async throws -> G0Transport.RunHistoryPage {
     try await G0Transport.relayRunHistoryPage(
       endpoint: endpoint(), identity: try identity(), providerId: providerId, cwd: cwd,
-      externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot
+      externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot, agentProfileId: agentProfileId
     )
   }
 
   // Complete, restart-stable history. No turn/item/text is clipped to a frame.
   // A currently running Mac conversation can change between pages; restart the
   // bounded read from cursor zero instead of surfacing a stale-snapshot error.
-  func history(providerId: String, cwd: String, externalSessionId: String) async throws -> [G0Transport.RunHistoryTurn] {
-    try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId).turns
+  func history(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> [G0Transport.RunHistoryTurn] {
+    try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId).turns
   }
 
   func historySnapshot(providerId: String, cwd: String, externalSessionId: String,
                        cached: RemoteHistorySnapshot? = nil,
                        connection: G0Transport.HistoryConnection? = nil,
+                       agentProfileId: String? = nil,
                        progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
     for attempt in 0..<3 {
       do {
         return try await Self.downloadHistory(cached: cached, pageSize: connection == nil ? 64 * 1024 : 256 * 1024, fetch: { cursor, snapshot in
           if let connection {
-            return try await connection.page(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot)
+            return try await connection.page(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot, agentProfileId: agentProfileId)
           }
           return try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
-                                      cursor: cursor, snapshot: snapshot)
+                                      cursor: cursor, snapshot: snapshot, agentProfileId: agentProfileId)
         }, progress: progress)
       }
       catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
@@ -335,8 +349,9 @@ struct RemoteRunClient {
 final class RemoteSessionRegistry: @unchecked Sendable {
   static let shared = RemoteSessionRegistry()
   private let lock = NSLock()
-  private var key: String?
-  private var current: RelaySession?
+  private var sessions: [String: RelaySession] = [:]
+  private var recentKeys: [String] = []
+  private static let sessionLimit = 67
   private let pathMonitor = NWPathMonitor()
   private var lastPath: String?
 
@@ -356,24 +371,34 @@ final class RemoteSessionRegistry: @unchecked Sendable {
   }
 
   func session(for connection: RemoteConnection, keychainService: String,
+               executionTarget: G0Transport.ExecutionTargetBinding?,
                identity: @escaping @Sendable () throws -> G0ProbeIdentity,
                endpoint: () -> G0Transport.RelayEndpoint) -> RelaySession {
+    let targetKey = executionTarget.map { "\($0.id):\($0.binding)" } ?? "local"
     let wanted = [connection.relayHost, String(connection.relayPort), connection.relayTLS, connection.hostId,
-                  connection.deviceId, keychainService, connection.anchorPEM].joined(separator: "\u{1f}")
+                  connection.deviceId, keychainService, connection.anchorPEM, targetKey].joined(separator: "\u{1f}")
     return lock.withLock {
-      if key == wanted, let current { return current }
-      let replaced = current
+      recentKeys.removeAll { $0 == wanted }
+      recentKeys.append(wanted)
+      if let existing = sessions[wanted] { return existing }
+      if sessions.count >= Self.sessionLimit {
+        let oldest = recentKeys.removeFirst()
+        if let evicted = sessions.removeValue(forKey: oldest) {
+          // Close cached tunnels only. Host tasks and their durable intents are
+          // not cancelled; a later request reopens under the same binding.
+          Task { await evicted.reset() }
+        }
+      }
       let session = RelaySession(endpoint: endpoint(), identity: identity, deviceLabel: RemoteDeviceModel.currentLabel)
-      key = wanted
-      current = session
-      if let replaced { Task { await replaced.reset() } }
+      sessions[wanted] = session
       return session
     }
   }
 
-  // Background / network path change: drop tunnels; the next request reopens.
+  // Background / network path change: drop every lane; the next request reopens.
+  // Target switches must not reset another target's live lane.
   func resetAll() async {
-    let session = lock.withLock { current }
-    await session?.reset()
+    let current = lock.withLock { Array(sessions.values) }
+    for session in current { await session.reset() }
   }
 }

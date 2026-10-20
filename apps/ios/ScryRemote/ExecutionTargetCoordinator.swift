@@ -1,0 +1,358 @@
+import Foundation
+import Combine
+import RemoteTransport
+
+// Labels and routes are display metadata. A scope is the gateway grant plus
+// the immutable final-host grant binding, not the selected row or a host name.
+struct ExecutionTargetScope: Codable, Hashable, Sendable, Identifiable {
+  let gatewayHostId: String
+  let gatewayIdentity: String?
+  let targetId: String?
+  let binding: String?
+  let hostId: String
+  let label: String
+
+  var id: String { [gatewayIdentity ?? gatewayHostId, targetId ?? "local", binding ?? ""].joined(separator: "\u{0}") }
+  var isLocal: Bool { targetId == nil }
+  var targetBinding: G0Transport.ExecutionTargetBinding? {
+    guard let targetId, let binding else { return nil }
+    return G0Transport.ExecutionTargetBinding(id: targetId, binding: binding)
+  }
+  static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+  func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
+  init(gatewayHostId: String, targetId: String, binding: String, hostId: String, label: String, gatewayIdentity: String? = nil) {
+    self.gatewayHostId = gatewayHostId; self.gatewayIdentity = gatewayIdentity
+    self.targetId = targetId; self.binding = binding; self.hostId = hostId; self.label = label
+  }
+  init(gatewayHostId: String, label: String, gatewayIdentity: String? = nil) {
+    self.gatewayHostId = gatewayHostId; self.gatewayIdentity = gatewayIdentity
+    self.targetId = nil; self.binding = nil; self.hostId = gatewayHostId; self.label = label
+  }
+  init(gatewayHostId: String, target: G0Transport.ExecutionTargetRef, gatewayIdentity: String? = nil) {
+    self.init(gatewayHostId: gatewayHostId, targetId: target.id, binding: target.binding,
+              hostId: target.hostId, label: target.label, gatewayIdentity: gatewayIdentity)
+  }
+}
+
+@MainActor
+final class ExecutionTargetCoordinator: ObservableObject {
+  struct HomeSession: Identifiable, Equatable {
+    let session: G0Transport.RunSessionRef
+    let scope: ExecutionTargetScope
+    var id: RemoteRunStore.SessionIdentity {
+      .opened(providerId: session.providerId, agentProfileId: session.agentProfileId, cwd: session.cwd,
+              externalSessionId: session.sessionId, scope: scope)
+    }
+  }
+  enum HomeFilter: Equatable { case all, target(ExecutionTargetScope) }
+
+  @Published private(set) var discoveredTargets: [ExecutionTargetScope] = []
+  @Published private(set) var homeSessions: [HomeSession] = []
+  @Published private(set) var homeLoading = false
+  @Published private(set) var homeFailure: RemoteRunStore.CatalogRefreshFailure?
+  @Published private(set) var discoveryIssue: RemoteRunStore.CatalogRefreshFailure?
+  @Published private(set) var catalogFetchedAt: Date?
+  @Published private(set) var forwardingSupported = false
+  @Published private(set) var recoveryUnavailable = false
+  @Published private(set) var selectedScope: ExecutionTargetScope
+  @Published private(set) var newTaskScope: ExecutionTargetScope
+  @Published private(set) var homeFilter: HomeFilter = .all
+
+  let localStore: RemoteRunStore
+  private let connections: RemoteConnectionStore
+  private let historyDisk: RemoteHistoryCache
+  private let stateDirectory: URL?
+  private let defaults: UserDefaults
+  private var gatewayIdentity: String?
+  private var gatewayLabel = ConnectionCopy.gatewayHost
+  private var stores: [ExecutionTargetScope: RemoteRunStore] = [:]
+  private var observers: [ExecutionTargetScope: [AnyCancellable]] = [:]
+  private var rebuilding = false
+  private var foregroundEligible = false
+  private var discoveryTask: Task<Void, Never>?
+  private var refreshTask: Task<Bool, Never>?
+  private var authorityRevision = 0
+  private static let retainedLimit = 64
+  #if DEBUG
+  var targetCatalogFixture: (() async throws -> G0Transport.ExecutionTargetCatalog)?
+  #endif
+
+  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache(), defaults: UserDefaults? = nil,
+       stateDirectory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ScryRemote", isDirectory: true)) {
+    self.connections = connections; self.historyDisk = historyDisk; self.defaults = defaults ?? connections.defaults; self.stateDirectory = stateDirectory
+    self.localStore = RemoteRunStore(connections: connections, historyDisk: historyDisk, stateDirectory: stateDirectory)
+    let connection = connections.load()
+    let identity = connection.map { RemoteHistoryCache.catalogKey(connection: $0) }
+    gatewayIdentity = identity
+    let scope = ExecutionTargetScope(gatewayHostId: connection?.hostId ?? "local", label: ConnectionCopy.gatewayHost, gatewayIdentity: identity)
+    selectedScope = scope; newTaskScope = scope
+    stores[scope] = localStore
+    observe(localStore, scope: scope)
+    restoreDescriptors()
+  }
+
+  var localScope: ExecutionTargetScope {
+    ExecutionTargetScope(gatewayHostId: connections.load()?.hostId ?? "local", label: gatewayLabel, gatewayIdentity: gatewayIdentity)
+  }
+  var selectedStore: RemoteRunStore { store(for: selectedScope) }
+  var newTaskStore: RemoteRunStore { store(for: newTaskScope) }
+  var targetScopes: [ExecutionTargetScope] { [localScope] + discoveredTargets }
+  var visibleScopes: [ExecutionTargetScope] {
+    switch homeFilter { case .all: return targetScopes; case let .target(scope): return [scope] }
+  }
+  var lastFullRefresh: Date? {
+    if recoveryUnavailable && homeFilter == .all { return nil }
+    if let catalogFetchedAt { return catalogFetchedAt }
+    if homeLoading || homeFailure != nil || (homeFilter == .all && discoveryIssue != nil) { return nil }
+    let dates = visibleScopes.compactMap { store(for: $0).catalogVerifiedAt }
+    return dates.count == visibleScopes.count ? dates.min() : nil
+  }
+  var aggregatesHosts: Bool { !discoveredTargets.isEmpty }
+  var hasPendingWork: Bool { stores.values.contains { $0.hasUnsentMessages || $0.hasUnresolvedRun } }
+  var pendingScopes: [ExecutionTargetScope] { targetScopes.filter { store(for: $0).hasUnresolvedRun || store(for: $0).hasUnsentMessages } }
+  var filterLabel: String {
+    switch homeFilter { case .all: return ConnectionCopy.allHosts; case let .target(scope): return scope.label }
+  }
+
+  func store(for scope: ExecutionTargetScope) -> RemoteRunStore {
+    if scope.isLocal { return localStore }
+    if let value = stores[scope] { return value }
+    // Discovery + retained unresolved bindings have an explicit capacity bound.
+    // Never evict a store with unknown delivery to create another route.
+    pruneStores()
+    precondition(stores.count <= Self.retainedLimit + 2)
+    let value = RemoteRunStore(connections: connections, historyDisk: historyDisk, stateDirectory: stateDirectory, targetScope: scope, prefetchEnabled: false)
+    value.setLiveRunsForegroundEligible(foregroundEligible)
+    stores[scope] = value
+    observe(value, scope: scope)
+    return value
+  }
+
+  func select(_ scope: ExecutionTargetScope) { selectedScope = scope; _ = store(for: scope) }
+  func selectNewTask(_ scope: ExecutionTargetScope) {
+    guard newTaskScope != scope else { return }
+    _ = beginNewTask(scope: scope)
+  }
+  @discardableResult func beginNewTask(scope explicit: ExecutionTargetScope? = nil) -> Bool {
+    let scope: ExecutionTargetScope
+    if let explicit { scope = explicit }
+    else { switch homeFilter { case let .target(filtered): scope = filtered; case .all: scope = newTaskScope } }
+    let next = store(for: scope)
+    guard next.detachFocusedRun() else { return false }
+    next.resetNewTaskContext()
+    newTaskScope = scope
+    return true
+  }
+  func focusNewTask() { select(newTaskScope) }
+  func selectFilter(_ filter: HomeFilter) { homeFilter = filter; catalogFetchedAt = nil; homeFailure = nil; rebuildHomeSessions() }
+
+  private func observe(_ store: RemoteRunStore, scope: ExecutionTargetScope) {
+    observers[scope] = [
+      store.objectWillChange.sink { [weak self] _ in
+        guard let self, scope == self.selectedScope || scope == self.newTaskScope else { return }
+        self.objectWillChange.send()
+      },
+      store.$catalog.dropFirst().sink { [weak self] _ in self?.scheduleRebuild() },
+      store.$pendingQuestions.dropFirst().sink { [weak self] _ in self?.objectWillChange.send() },
+      store.$outbox.dropFirst().sink { [weak self] _ in self?.objectWillChange.send() },
+      store.$lifecycle.dropFirst().sink { [weak self] _ in self?.objectWillChange.send() }
+    ]
+  }
+  private func scheduleRebuild() {
+    guard !rebuilding else { return }
+    rebuilding = true
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      self.rebuilding = false
+      self.rebuildHomeSessions()
+    }
+  }
+
+  func refreshTargets() async {
+    if let discoveryTask { await discoveryTask.value; return }
+    let revision = authorityRevision
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.readTargets()
+    }
+    // Keep one discovery in flight, including the authorization/metadata phase.
+    discoveryTask = task
+    await task.value
+    if authorityRevision == revision { discoveryTask = nil }
+  }
+
+  private func readTargets() async {
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-uiPreview") { return }
+    #endif
+    guard let connection = connections.load() else { discoveryIssue = .transport(ConnectionCopy.notPaired); return }
+    let identity = RemoteHistoryCache.catalogKey(connection: connection)
+    guard gatewayIdentity == identity else { discoveryIssue = .transport(ConnectionCopy.targetDiscoveryFailure); return }
+    for scope in discoveredTargets { store(for: scope).updateTargetAvailability(false) }
+    do {
+      let catalog: G0Transport.ExecutionTargetCatalog
+      #if DEBUG
+      if let targetCatalogFixture { catalog = try await targetCatalogFixture() }
+      else { catalog = try await RemoteRunClient(connection: connection).executionTargets() }
+      #else
+      catalog = try await RemoteRunClient(connection: connection).executionTargets()
+      #endif
+      guard !Task.isCancelled, connections.load() == connection else { return }
+      let current = catalog.targets.map { ExecutionTargetScope(gatewayHostId: catalog.gateway.hostId, target: $0, gatewayIdentity: identity) }
+      let retained = current + discoveredTargets.filter { old in
+        !current.contains(old) && (store(for: old).hasUnsentMessages || store(for: old).hasUnresolvedRun)
+      }
+      guard retained.count <= Self.retainedLimit else { discoveryIssue = .transport(ConnectionCopy.targetCapacity); return }
+      gatewayLabel = catalog.gateway.label
+      if selectedScope.isLocal { selectedScope = localScope }
+      if newTaskScope.isLocal { newTaskScope = localScope }
+      discoveredTargets = retained
+      forwardingSupported = true
+      for scope in retained {
+        let available = catalog.targets.contains { $0.id == scope.targetId && $0.binding == scope.binding && $0.state == "connected" }
+        let store = store(for: scope)
+        store.updateTargetAvailability(available)
+        if available { store.startLiveRuns() } else { store.stopLiveRuns() }
+      }
+      persistDescriptors(retained)
+      discoveryIssue = recoveryUnavailable ? .transport(ConnectionCopy.targetMetadataUnavailable) : nil
+    } catch {
+      guard !Task.isCancelled, connections.load() == connection else { return }
+      let detail: String
+      if case G0Transport.RunError.host(code: "unknown_op") = error {
+        detail = ConnectionCopy.forwardingUnsupported
+      } else {
+        detail = RemoteRunStore.describe(error)
+      }
+      discoveryIssue = .transport(ConnectionCopy.targetDiscoveryDiagnostic(detail))
+      // A failed discovery cannot redirect an existing conversation/new draft.
+    }
+  }
+
+  @discardableResult func refreshHome() async -> Bool {
+    if let refreshTask { return await refreshTask.value }
+    // Freeze the last complete visible snapshot before any constituent store
+    // advances. A partial/local success cannot attest a full host refresh.
+    catalogFetchedAt = lastFullRefresh
+    homeLoading = true
+    let filter = homeFilter
+    let revision = authorityRevision
+    let task = Task { @MainActor [weak self] () -> Bool in
+      guard let self else { return false }
+      // Local cached content must not wait for optional target discovery. The
+      // same single-flight refresh is awaited below, never requested twice.
+      let wantsLocal = filter == .all || filter == .target(self.localScope)
+      let localRefresh: Task<Bool, Never>? = wantsLocal ? Task { await self.localStore.refreshSessions() } : nil
+      defer { localRefresh?.cancel() }
+      await self.refreshTargets()
+      guard !Task.isCancelled, self.authorityRevision == revision else { return false }
+      let scopes = self.visibleScopes
+      let remoteScopes = scopes.filter { !$0.isLocal }
+      var succeeded = await localRefresh?.value ?? true
+      for index in stride(from: 0, to: remoteScopes.count, by: 2) {
+        let batch = remoteScopes[index..<min(index + 2, remoteScopes.count)].map { self.store(for: $0) }
+        await withTaskGroup(of: Bool.self) { group in
+          for store in batch { group.addTask { await store.refreshSessions() } }
+          for await result in group { succeeded = succeeded && result }
+        }
+      }
+      guard !Task.isCancelled, self.authorityRevision == revision, self.homeFilter == filter else { return false }
+      self.rebuildHomeSessions()
+      let failed = scopes.first { self.store(for: $0).catalogRefreshFailure != nil }
+      self.homeFailure = failed.flatMap { self.store(for: $0).catalogRefreshFailure }
+      if case .all = self.homeFilter { self.homeFailure = self.homeFailure ?? self.discoveryIssue }
+      if !succeeded && self.homeFailure == nil { self.homeFailure = .partial(ConnectionCopy.partialRefreshFailure) }
+      if succeeded && self.homeFailure == nil { self.catalogFetchedAt = Date() }
+      return succeeded && self.homeFailure == nil
+    }
+    refreshTask = task
+    let result = await task.value
+    if authorityRevision == revision { refreshTask = nil; homeLoading = false }
+    return result
+  }
+
+  func rebuildHomeSessions() {
+    homeSessions = visibleScopes.flatMap { scope -> [HomeSession] in
+      guard case let .loaded(list) = store(for: scope).catalog else { return [HomeSession]() }
+      return list.map { HomeSession(session: $0, scope: scope) }
+    }.sorted { lhs, rhs in
+      if (lhs.session.pinnedAt != nil) != (rhs.session.pinnedAt != nil) { return lhs.session.pinnedAt != nil }
+      return lhs.session.ts > rhs.session.ts
+    }
+  }
+
+  func prepareConnectionReplacement(_ connection: RemoteConnection) throws {
+    guard !recoveryUnavailable else { throw RemoteRunStore.ConnectionReplacementError.recoveryUnavailable }
+    guard !hasPendingWork else { throw RemoteRunStore.ConnectionReplacementError.pendingWork }
+    for store in stores.values { try store.prepareConnectionReplacement(connection) }
+  }
+
+  func clearAllState() async throws {
+    guard !recoveryUnavailable else { throw RemoteRunStore.ConnectionReplacementError.recoveryUnavailable }
+    guard !hasPendingWork else { throw RemoteRunStore.ConnectionReplacementError.pendingWork }
+    for store in stores.values { try store.clearAllState() }
+    try await localStore.clearHistoryCache()
+    if let descriptorKey { defaults.removeObject(forKey: descriptorKey) }
+  }
+
+  func connectionChanged() {
+    let identity = connections.load().map { RemoteHistoryCache.catalogKey(connection: $0) }
+    guard identity != gatewayIdentity else { return }
+    authorityRevision += 1
+    discoveryTask?.cancel(); discoveryTask = nil
+    refreshTask?.cancel(); refreshTask = nil
+    backgrounded()
+    stores = [:]; observers = [:]
+    gatewayIdentity = identity; gatewayLabel = ConnectionCopy.gatewayHost
+    discoveredTargets = []; homeSessions = []; homeFailure = nil; discoveryIssue = nil
+    catalogFetchedAt = nil; forwardingSupported = false; homeLoading = false; recoveryUnavailable = false
+    selectedScope = localScope; newTaskScope = localScope; homeFilter = .all
+    stores[localScope] = localStore
+    observe(localStore, scope: localScope)
+    restoreDescriptors()
+  }
+
+  func foregrounded() {
+    foregroundEligible = true
+    for store in stores.values { store.setLiveRunsForegroundEligible(true) }
+    for (scope, store) in stores where scope.isLocal || store.executionTargetAvailable || store.hasUnresolvedRun || store.hasUnsentMessages { store.foregrounded() }
+  }
+  func backgrounded() {
+    foregroundEligible = false
+    for store in stores.values { store.setLiveRunsForegroundEligible(false) }
+  }
+
+  private var descriptorKey: String? { gatewayIdentity.map { "com.scry.remote.execution-targets." + $0 } }
+  private func pruneStores() {
+    let kept = Set(targetScopes + [selectedScope, newTaskScope])
+    for (scope, store) in stores where !scope.isLocal && !kept.contains(scope) && !store.hasUnsentMessages && !store.hasUnresolvedRun {
+      store.stopLiveRuns()
+      observers.removeValue(forKey: scope)
+      stores.removeValue(forKey: scope)
+    }
+  }
+  private func persistDescriptors(_ scopes: [ExecutionTargetScope]) {
+    guard !recoveryUnavailable, let descriptorKey else { return }
+    // Only strings and optional strings are encoded; this cannot encode a
+    // nonfinite number or an unsupported value. No credentials are persisted.
+    defaults.set(try! JSONEncoder().encode(scopes), forKey: descriptorKey)
+  }
+  private func restoreDescriptors() {
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-uiPreview") { return }
+    #endif
+    guard let descriptorKey, let data = defaults.data(forKey: descriptorKey) else { return }
+    do {
+      guard data.count <= 256 * 1024 else { throw CocoaError(.fileReadCorruptFile) }
+      let scopes = try JSONDecoder().decode([ExecutionTargetScope].self, from: data)
+      guard scopes.count <= Self.retainedLimit, Set(scopes).count == scopes.count,
+            scopes.allSatisfy({ !$0.isLocal && $0.targetBinding?.isValid == true && !$0.hostId.isEmpty && $0.hostId.utf16.count <= 128 && $0.label.utf16.count <= 256 && $0.gatewayIdentity == gatewayIdentity && $0.gatewayHostId == localScope.gatewayHostId }) else { throw CocoaError(.fileReadCorruptFile) }
+      discoveredTargets = scopes
+      for scope in scopes { store(for: scope).updateTargetAvailability(false) }
+    } catch {
+      recoveryUnavailable = true
+      discoveryIssue = .transport(ConnectionCopy.targetMetadataUnavailable)
+    }
+  }
+}

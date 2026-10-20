@@ -4,10 +4,10 @@ import RemoteTransport
 @main
 struct ScryRemoteApp: App {
   @StateObject private var model = AppModel()
-  @StateObject private var runStore = RemoteRunStore()
   init() {
     #if DEBUG
     RemoteSelfTest.runIfRequested()
+    RemoteSelfTest.runCatalogRefreshChecksIfRequested()
     RemoteSelfTest.runHistoryCacheTestIfRequested()
     RemoteSelfTest.runRelayTLSProbeIfRequested()
     RemoteSelfTest.runRunProbeIfRequested()
@@ -18,7 +18,7 @@ struct ScryRemoteApp: App {
   }
   var body: some Scene {
     WindowGroup {
-      RootView().environmentObject(model).environmentObject(runStore)
+      RootView().environmentObject(model).environmentObject(model.targetCoordinator)
     }
   }
 }
@@ -27,7 +27,9 @@ struct ScryRemoteApp: App {
 // connected unless a real paired transport exchange has proved reachability.
 struct RootView: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
+  @EnvironmentObject var targets: ExecutionTargetCoordinator
+
+  private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
@@ -36,14 +38,14 @@ struct RootView: View {
         PairView()
       } else {
         switch model.route {
-        case .home: HomeView()
+        case .home: HomeView().environmentObject(targets.localStore)
         case .newSession: NewSessionView()
         case .chat: ChatView()
         case .pair: PairView()
         case .transcript:
           // A session switch inside this route (the waiting-decision banner)
           // must re-run onAppear, which loads and watches the new session.
-          let identity = model.openedSession.map { RemoteRunStore.SessionIdentity.opened(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId) }
+          let identity = model.openedSession?.identity
           if model.readOnlyTranscript {
             ReadOnlySessionTranscriptView(owner: run).id(identity)
           } else {
@@ -53,6 +55,7 @@ struct RootView: View {
         }
       }
     }
+    .environmentObject(run)
     .foregroundStyle(Palette.ink)
     .background(Palette.surface.ignoresSafeArea())
     .tint(Palette.blue)
@@ -69,7 +72,8 @@ struct RootView: View {
         // session, or a run started on the Mac). Open its session to answer.
         Button {
           model.open(OpenedSession(providerId: waiting.providerId, agentProfileId: waiting.agentProfileId, cwd: waiting.cwd,
-                                   externalSessionId: external, label: waiting.prompt, isActive: true), run: run)
+                                   externalSessionId: external, label: waiting.prompt, isActive: true,
+                                   scope: targets.selectedScope.isLocal ? nil : targets.selectedScope), run: run)
         } label: {
           Label(waitingElsewhere.count > 1 ? "\(waitingElsewhere.count) 个任务等待你的决定 · 查看" : "另一个任务等待你的决定 · 查看",
                 systemImage: "hand.raised")
@@ -80,13 +84,13 @@ struct RootView: View {
     }
     // Questions belong to the run, not a particular route. Returning home or
     // continuing an archived conversation must never hide a waiting request.
-    .onChange(of: run.pendingQuestions.first?.questionId) { _, id in model.showRunQuestion = model.canShowWorkspace && id != nil }
+    .onChange(of: run.focusedQuestionIdentity) { _, id in model.showRunQuestion = model.canShowWorkspace && id != nil }
     .sheet(isPresented: Binding(get: { model.canShowWorkspace && model.showRunQuestion }, set: { model.showRunQuestion = $0 })) {
       if model.canShowWorkspace, let request = run.pendingQuestions.first {
         RemoteQuestionSheet(request: request, submitting: run.questionAnswering, error: run.questionError,
           onAnswer: { if model.canShowWorkspace { run.answerPendingQuestion(answers: $0) } },
           onCancel: { if model.canShowWorkspace { run.answerPendingQuestion(answers: [:], cancel: true) } })
-          .id(request.questionId)
+          .id(run.questionIdentity(request))
       }
     }
     .simultaneousGesture(
@@ -105,8 +109,8 @@ struct RootView: View {
     // The run channel is the honest source of reachability: reflect a real
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
-    .onChange(of: run.reachable) { if let ok = run.reachable { model.markReachable(ok) } }
-    .onChange(of: run.connectionObservation) { _, observation in model.markObservation(observation) }
+    .onChange(of: run.reachable) { if run.targetScope == nil, let ok = run.reachable { model.markReachable(ok) } }
+    .onChange(of: run.connectionObservation) { _, observation in if run.targetScope == nil { model.markObservation(observation) } }
     .onChange(of: run.liveExternalSessionId) {
       if let external = run.liveExternalSessionId, let identity = run.activeSessionIdentity {
         model.bindDraft(externalSessionId: external, to: identity)
@@ -117,15 +121,15 @@ struct RootView: View {
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .background:
-        run.stopLiveRuns()
+        targets.backgrounded()
         Task { await RemoteSessionRegistry.shared.resetAll() }
-      case .active: if model.canShowWorkspace { run.foregrounded() }
+      case .active: if model.canShowWorkspace { targets.foregrounded() }
       default: break
       }
     }
     .onChange(of: model.canShowWorkspace) { paired in
       model.showRunQuestion = paired && !run.pendingQuestions.isEmpty
-      if paired { resumeRecoveredRun(); run.startLiveRuns() } else { run.stopLiveRuns() }
+      if paired { resumeRecoveredRun(); targets.foregrounded() } else { targets.backgrounded() }
     }
     .onAppear {
       #if DEBUG
@@ -133,7 +137,7 @@ struct RootView: View {
       run.applyUIPreviewArguments()
       #endif
       resumeRecoveredRun()
-      if model.canShowWorkspace { run.startLiveRuns() }
+      if model.canShowWorkspace { targets.foregrounded() }
     }
   }
 
@@ -144,7 +148,7 @@ struct RootView: View {
     case .chat: return true
     case .transcript:
       guard !model.readOnlyTranscript, let s = model.openedSession else { return false }
-      return run.activeSessionIdentity == .opened(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+      return run.activeSessionIdentity == s.identity
     default: return false
     }
   }
@@ -154,7 +158,7 @@ struct RootView: View {
     let shown = model.route == .transcript ? model.openedSession : nil
     return run.waitingLiveRuns.filter { live in
       guard let shown else { return true }
-      return !(live.providerId == shown.providerId && live.cwd == shown.cwd && live.externalSessionId == shown.externalSessionId)
+      return !(live.providerId == shown.providerId && live.agentProfileId == shown.agentProfileId && live.cwd == shown.cwd && live.externalSessionId == shown.externalSessionId)
     }
   }
 

@@ -16,7 +16,7 @@ struct ChatView: View {
   @State private var confirmStop = false
   private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
   private var composer: Binding<AppModel.ComposerDraft> {
-    model.composerDraft(for: run.activeSessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
+    model.composerDraft(for: run.activeSessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask(model.targetCoordinator.selectedScope))
   }
   private var draft: String { composer.wrappedValue.text }
   private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
@@ -71,7 +71,7 @@ struct ChatView: View {
       }.accessibilityLabel("项目文件与 Diff").disabled(projectCwd == nil)
       Menu {
         // Leaving keeps an unsent message sending and a run running on the Mac.
-        Button { if run.detachFocusedRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
+        Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
         Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)

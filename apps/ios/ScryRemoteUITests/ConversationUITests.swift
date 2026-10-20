@@ -60,6 +60,29 @@ final class ConversationUITests: XCTestCase {
     capture("home-refresh-failure-details")
   }
 
+  func testRefreshDetailsSurviveBackgroundRecoveryWithoutChangingRequestMetadata() {
+    launchHome(extra: ["-uiMockRefreshFailure", "-uiResolveRefreshDetails"])
+    XCTAssertTrue(app.buttons["详情"].waitForExistence(timeout: 5))
+    let timestamp = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "上次完整刷新：")).firstMatch.label
+    XCTAssertFalse(timestamp.isEmpty)
+    app.buttons["详情"].tap()
+    // The identifier changes only after the real fixture refresh commits a new
+    // full-refresh timestamp. Do not use a sleep to race the disappearing body.
+    let updatedDone = app.buttons.matching(identifier: "catalog-refresh-details-updated")
+      .matching(NSPredicate(format: "label == %@", "完成")).firstMatch
+    XCTAssertTrue(updatedDone.waitForExistence(timeout: 5))
+    XCTAssertTrue(updatedDone.isHittable)
+    XCTAssertTrue(app.staticTexts[timestamp].exists)
+    XCTAssertFalse(app.staticTexts["fixture transport failure"].exists)
+    app.buttons["技术详情"].tap()
+    XCTAssertTrue(app.staticTexts["fixture transport failure"].waitForExistence(timeout: 5))
+    capture("home-details-after-background-recovery")
+    app.buttons["完成"].tap()
+    XCTAssertTrue(app.buttons["新任务"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["会话列表刷新失败"].exists)
+    XCTAssertFalse(app.staticTexts["刷新成功"].exists)
+  }
+
   func testHomeFirstFailureHasOneActionableStateAndNoRawError() {
     launchHome(extra: ["-uiMockFirstRefreshFailure"])
     XCTAssertTrue(app.staticTexts["会话列表刷新失败"].waitForExistence(timeout: 5))
