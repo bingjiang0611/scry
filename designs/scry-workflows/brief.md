@@ -9,7 +9,7 @@
 | 方案 | v10 合同齐全，并经整体评审修正：检查由 main 执行的 check 步骤承担，Agent 自述只算 inferred（[执行语义 §3.1](execution-semantics.md#31-检查步骤由-main-执行agent-自述不算通过)）；Agent 业务追问一律 blocked；新增 M0 竖切交付顺序（[主方案 §9](implementation-plan.md#9-实施顺序与可证伪验收)） |
 | 生产能力 | 未实现；没有调用真实 Provider 或 Jev |
 | 设计稿 | **v4（用户已确认，作为 M5 面板设计依据）**：`v4/index.html`，按 v10 方案重做，四个视图（运行 / 计划确认 / 管理 / 模板编辑）。根目录 `index.html` 是 v3 历史样例，与 v7 并发上限不符 |
-| 下一步 | 协调 `src/main/index.ts` 的 WIP 后实施 M0，再做 Provider 能力探测矩阵与 M1–M6 |
+| 下一步 | 协调 `src/main/index.ts` 的 WIP 后实施 M0（任意已配置 Provider/模型，按四项最小能力准入），再补齐能力探测矩阵与 M1–M6 |
 
 ### v4 设计稿
 
