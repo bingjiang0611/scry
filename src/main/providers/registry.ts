@@ -23,6 +23,7 @@ import type {
   ProviderRunRequest
 } from './types'
 import type { CodexHookInspection } from '../codex-hook-trust'
+import { PerformanceTrace, performanceRecordingEnabled } from '../performance-timing'
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, ProviderAdapter>()
@@ -95,7 +96,32 @@ export class ProviderRegistry {
     return this.get(context.providerId).sessionEvidence?.enrich(context, turns) ?? Promise.resolve(turns)
   }
 
+  private measureCatalog<T>(
+    facet: 'commands' | 'run_controls' | 'skills',
+    context: ProviderContext,
+    read: () => Promise<CapabilityEnvelope<T>>
+  ): Promise<CapabilityEnvelope<T>> {
+    if (!performanceRecordingEnabled()) return read()
+    const trace = new PerformanceTrace(`provider.catalog.${facet}`, { provider: context.providerId })
+    try {
+      return read().then(result => {
+        trace.finish(undefined, result.state === 'unknown' || result.state === 'unsupported' ? 'unavailable' : 'completed')
+        return result
+      }, (error: unknown) => {
+        trace.finish(undefined, 'error')
+        throw error
+      })
+    } catch (error) {
+      trace.finish(undefined, 'error')
+      throw error
+    }
+  }
+
   runControls(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> {
+    return this.measureCatalog('run_controls', context, () => this.readRunControls(context))
+  }
+
+  private readRunControls(context: ProviderContext): Promise<CapabilityEnvelope<AgentRunControlCatalog>> {
     const disabled = this.disabled<AgentRunControlCatalog>(context)
     if (disabled) return disabled
     if (!this.runControlsEnabled) {
@@ -159,8 +185,9 @@ export class ProviderRegistry {
   }
 
   listSkills(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> {
-    return this.disabled<SkillMeta[]>(context) ?? this.get(context.providerId).skills?.list(context) ??
-      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 Skill 读取接口'))
+    return this.measureCatalog('skills', context, () =>
+      this.disabled<SkillMeta[]>(context) ?? this.get(context.providerId).skills?.list(context) ??
+        Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 Skill 读取接口')))
   }
 
   invalidateContext(context: ProviderContext): Promise<void> | void {
@@ -198,8 +225,9 @@ export class ProviderRegistry {
   }
 
   listCommands(context: ProviderContext): Promise<CapabilityEnvelope<ProviderCommand[]>> {
-    return this.disabled<ProviderCommand[]>(context) ?? this.get(context.providerId).commands?.list(context) ??
-      Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可嵌入的命令目录'))
+    return this.measureCatalog('commands', context, () =>
+      this.disabled<ProviderCommand[]>(context) ?? this.get(context.providerId).commands?.list(context) ??
+        Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可嵌入的命令目录')))
   }
 
   inspectHookTrust(context: ProviderContext): Promise<CodexHookInspection> {

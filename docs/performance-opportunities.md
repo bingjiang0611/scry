@@ -2,6 +2,16 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## 目录观测与传输修复交付（2026-10-20，已安装、待手动重启）
+
+[0.2.211交付记录](performance-experiments/20261020-catalog-observation-0211.json)已冻结本次范围：原样迁移此前 `ee782b4` 的最小脱敏目录观测，并将当前WIP中已有的Mac1连接元数据剥离修复纳入安装包。不实现按需刷新，不改变冷发现、进程退出、模型/权限或Owner/trust语义。
+
+- App **0.2.211**、CLI仍为 **0.2.49**；安装build `f6c2a4d279d7a731369907876e52976cd717638cdd7cf541d6d75fd340e00dc1`，已按 `npm run install:mac:dev` 安装 `/Applications/Scry.app`，源码build与安装包嵌入值一致。已核对编译后的元数据剥离逻辑、三个registry观测入口及两个Pi观测名称。
+- 验证：完整typecheck、3486 unit（4项既有opt-in跳过）、shell、587 CLI release、完整renderer UI（含Credits）、packaged resource/ABI/security/remote-host门禁通过。Pi工作量对照均不变：RPC进程1→1、响应4→4、grace expiry 0→0、环境Node进程1→1；无worse，不报毫秒或提速。
+- 保留首轮聚焦合并命令120秒超时；拆分用例和最终全量通过，未放宽断言或测试超时。安装取证先后修正了VM缺少原生 `structuredClone`、把动态registry事件名误当完整字面量的工具假设；这些不是产品故障。
+- 安装基于 `be907ef` + 已冻结的既有WIP基线 `b1df508a…` 及本次迁移/版本变更。72项既有脏路径已逐项验哈希，package原有脚本修改保留。既有remote/iOS工作不混入本次源码提交；不能声称仅凭新提交即可复现整个WIP安装包。
+- **尚未生效/未验收**：用户进程PID14356仍运行0.2.209/build `6bd35f8c…`，未被自动重启。需用户手动退出并重开Scry后，由我确认运行build及gateway绑定，再在已获准的iPhone13重放Mac2文件夹/Provider/模型路径。修复版真机结果、完整首次目录/relay可见耗时仍未验证；不把安装成功当作手机错误已修复。
+
 ## 最新爬坡进展（2026-10-17）
 
 用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成五个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。

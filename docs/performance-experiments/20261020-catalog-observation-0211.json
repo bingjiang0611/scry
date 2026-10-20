@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "status": "installed_waiting_for_user_restart_and_physical_phone_replay",
+  "authorization": {
+    "userApprovedIntegrationAndInstallation": true,
+    "onDemandRefreshAuthorizedOrImplemented": false,
+    "realProviderTaskAuthorizedOrSent": false,
+    "desktopRestartMustBeManual": true
+  },
+  "scope": {
+    "observationSourceCommit": "ee782b4578ad008c70135590fdd40d78228d5bc8",
+    "migrationMatchesOriginalPatch": true,
+    "changes": [
+      "src/main/providers/registry.ts",
+      "src/main/providers/pi.ts",
+      "src/main/providers/catalog-performance.test.ts",
+      "scripts/performance-paths.json"
+    ],
+    "transportFix": "Preexisting WIP in src/main/remote/inner-mtls-host.ts strips only authenticated Mac1 transport keepAlive/deviceLabel before strict target business-envelope validation; retained and included, not duplicated or committed as a new implementation.",
+    "unchanged": ["cold SDK discovery", "in-flight probe sharing", "model/permission semantics", "Owner and trust checks", "process close barriers", "journal schema and retention", "production refresh strategy"]
+  },
+  "sourceIdentity": {
+    "repository": "/Users/baobingjiang/IdeaProjects/vibecoding/scry",
+    "baseCommit": "be907effbc202a3c54537571952037cfa4c816f1",
+    "preexistingWipSourceBuild": "b1df508aea922c396bc63f9adba0249543b6db144bcf50c80b8096c27c06845a",
+    "installedSourceBuild": "f6c2a4d279d7a731369907876e52976cd717638cdd7cf541d6d75fd340e00dc1",
+    "includesPreexistingUncommittedBaseline": true,
+    "unrelatedWipPathsHashChecked": 72,
+    "unrelatedPackageScriptsPreserved": true,
+    "reproductionNote": "The artifact is the identified frozen WIP baseline plus this observation migration and App version bump. The new commit alone does not include or recreate the preexisting uncommitted remote/iOS feature baseline."
+  },
+  "installedArtifact": {
+    "appVersion": "0.2.211",
+    "cliVersion": "0.2.49",
+    "build": "f6c2a4d279d7a731369907876e52976cd717638cdd7cf541d6d75fd340e00dc1",
+    "archiveSha256": "dbb08f30aa395fe9dc9aebd0d137bf955f9b5dada3c013c2a8f69c653a630172",
+    "path": "/Applications/Scry.app",
+    "backup": "/Applications/.Scry.app.backup",
+    "installationCommand": "npm run install:mac:dev",
+    "installationExit": 0,
+    "developmentSigned": true,
+    "notarizedRelease": false,
+    "sourceBuildEqualsEmbeddedBuild": true,
+    "compiledTransportNormalizationVerified": true,
+    "compiledObservationFactory": "provider.catalog.${facet}",
+    "compiledObservationFacets": ["commands", "run_controls", "skills"],
+    "compiledPiObservationNames": ["pi.catalog.read", "pi.catalog.probe"],
+    "embeddedCliVersionReadback": "0.2.49"
+  },
+  "verification": {
+    "focused": { "catalogPrivacyAndLifecycle": 6, "registry": 14, "pi": 113, "skipped": 0 },
+    "sourceTransportAndTargetRegressionBeforeMigration": { "passed": 23, "negativeControlFailedAsExpected": true },
+    "typecheck": "passed through check:cli-release and install:mac:dev",
+    "cliRelease": { "command": "npm run check:cli-release", "testsPassed": 587, "packageSmoke": "passed" },
+    "renderer": { "command": "npm run test:renderer:ui", "status": "passed", "includesCredits": true, "boundary": "hidden isolated Electron fixtures; not physical-phone or native foreground acceptance" },
+    "installPipeline": {
+      "command": "npm run install:mac:dev",
+      "unitTestsPassed": 3486,
+      "optInTestsSkipped": 4,
+      "shell": "PASS setup-scry-workspace",
+      "build": "passed",
+      "packagedResourceAndAbiChecks": "passed",
+      "packagedSecurityAndRemoteHostSmokes": "passed"
+    },
+    "counters": {
+      "baselineCommit": "be907ef",
+      "collectorHarnessCopiedIdenticallyToBaseline": true,
+      "piProbe": { "rpcProcesses": [1, 1], "rpcResponses": [4, 4], "graceExpiries": [0, 0] },
+      "piEnvironment": { "nodeProcesses": [1, 1] },
+      "arrayMeaning": "baseline, candidate",
+      "ratchets": "passed",
+      "worseMetrics": [],
+      "millisecondsClaimed": false
+    },
+    "gitDiffCheck": "passed"
+  },
+  "firstFailuresRetained": [
+    { "scope": "worker combined focused invocation", "result": "tool command timed out at 120 seconds with no assertion failure", "followup": "No remaining scoped test process; each affected suite passed independently; full final 3486-test suite passed. No assertions or test timeouts changed." },
+    { "scope": "earlier installed-router VM harness", "result": "structuredClone not exposed in the initial VM context", "followup": "Supplied the native platform function; product declarations and assertions unchanged." },
+    { "scope": "post-install artifact verifier", "result": "incorrectly expected provider.catalog.commands as a full string literal", "followup": "Inspected compiled implementation; verified the actual provider.catalog.${facet} factory and all three compiled call facets instead, plus exact source/build identity. This was a verifier assumption error, not missing product instrumentation." }
+  ],
+  "runtimeAndRemainingAcceptance": {
+    "oldUserProcessStillRunningAfterInstallation": { "pid": 14356, "version": "0.2.209", "build": "6bd35f8c8d8f7f39e6de1eb04f974ea32e7d0bbe60877bd8acf0b341207bba1f" },
+    "oldProcessRestartedByAssistant": false,
+    "installedDoesNotMeanActive": true,
+    "phone": { "device": "physical iPhone 13", "bundle": "com.scry.remote.local", "version": "0.1.14", "build": "16", "changedThisTask": false },
+    "physicalPhoneOriginalFailureReplayedOnNewBuild": false,
+    "gatewayRuntimeIdentityBinding": "not yet verified on the restarted build",
+    "fullColdFirstRequestAndRelayLatency": "unavailable",
+    "liveProviderLatencyOrSpeedupClaimed": false
+  },
+  "evidenceDirectory": "/Users/baobingjiang/.local/state/scry-catalog-current-8GWCgkE7/evidence/remote-catalog-reconcile-kyTEY1J1",
+  "next": "User manually quits and reopens Scry, then tells the assistant it has restarted. Assistant verifies runtime f6c2a4d2… and paired gateway identity, replays the authorized iPhone 13 read-only Mac2 directory/Provider/model path, then resumes complete lifecycle measurement under the timing lock when machine load permits. No new pairing, phone installation, paid Provider task or refresh-policy implementation is implied."
+}
