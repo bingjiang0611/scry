@@ -3,6 +3,7 @@ import NIOCore
 import NIOEmbedded
 import NIOWebSocket
 import NIOSSL
+import NIOConcurrencyHelpers
 @testable import RemoteTransport
 
 private final class ErrorRecorder: ChannelInboundHandler, @unchecked Sendable {
@@ -11,7 +12,35 @@ private final class ErrorRecorder: ChannelInboundHandler, @unchecked Sendable {
   func errorCaught(context: ChannelHandlerContext, error: Error) { errors.append(error) }
 }
 
+private final class WriteDuringCloseDrain: ChannelInboundHandler, @unchecked Sendable {
+  typealias InboundIn = ByteBuffer
+  let writeResult: EventLoopPromise<Void>
+  init(writeResult: EventLoopPromise<Void>) { self.writeResult = writeResult }
+  func channelReadComplete(context: ChannelHandlerContext) {
+    context.channel.writeAndFlush(ByteBuffer(string: "queued ciphertext"), promise: writeResult)
+  }
+  func errorCaught(context: ChannelHandlerContext, error: Error) {}
+}
+
 final class TunnelCodecTests: XCTestCase {
+  func testCloseDrainCannotEmitNewCiphertext() throws {
+    let channel = EmbeddedChannel()
+    let write = channel.eventLoop.makePromise(of: Void.self)
+    let failure = NIOLockedValueBox<Error?>(nil)
+    write.futureResult.whenFailure { error in failure.withLockedValue { $0 = error } }
+    try channel.pipeline.syncOperations.addHandlers([TunnelCodec(), WriteDuringCloseDrain(writeResult: write)])
+    defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+    var payload = channel.allocator.buffer(capacity: 13)
+    payload.writeInteger(UInt16(1000))
+    payload.writeString("peer_closed")
+    channel.pipeline.fireChannelRead(WebSocketFrame(fin: true, opcode: .connectionClose, data: payload))
+    channel.embeddedEventLoop.run()
+    XCTAssertNil(try channel.readOutbound(as: WebSocketFrame.self))
+    guard let error = failure.withLockedValue({ $0 }), case RelayTransportError.closed = error else {
+      return XCTFail("A reentrant write escaped the relay-close fence")
+    }
+  }
+
   func testEarlyCloseSurvivesTeardownWithoutReplacingTLSFailures() throws {
     let codec = TunnelCodec()
     let recorder = ErrorRecorder()
