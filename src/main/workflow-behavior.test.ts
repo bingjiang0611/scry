@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowBlock, WorkflowPlanPreview } from '../shared/workflow'
 import { workflowProgressSnapshot, workflowSlotLimit } from '../shared/workflow'
 import { MemoryWorkflowStore, type WorkflowStoreRecord } from './workflow-store'
-import { WorkflowRunner, WorkflowSlots } from './workflow-runner'
+import { WorkflowDispatch, WorkflowRunner, WorkflowSlots } from './workflow-runner'
 import { makePlanPreview, validateWorkflowProgram } from './workflow-program'
 
 const worker = { role: 'worker' as const, providerId: 'codex' as const }
@@ -100,6 +100,66 @@ describe('workflow execution contracts (no real Provider)', () => {
     await expect(begin(runner, preview)).rejects.toThrow('fixture outcome write failure')
     expect(runner.snapshot(preview.workflowId)?.state).toBe('unknown')
     expect(slots.active).toBe(1)
+  })
+  it('commits a non-dispatch refusal before releasing capacity and fences delayed Provider entry', async () => {
+    let entered!: () => void
+    let release!: () => void
+    const committing = new Promise<void>(resolve => { entered = resolve })
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    class DelayedOutcomeStore extends MemoryWorkflowStore {
+      override async save(record: WorkflowStoreRecord) {
+        if (record.outcomes[0]?.providerDispatch === 'not_attempted') { entered(); await barrier }
+        await super.save(record)
+      }
+    }
+    const dispatch = new WorkflowDispatch()
+    const nativeRun = vi.fn()
+    const slots = new WorkflowSlots(1)
+    const runner = new WorkflowRunner({ store: new DelayedOutcomeStore(), slots, execute: () => ({
+      result: Promise.reject(dispatch.rejected(new Error('admission refused'))), stop: () => true
+    }) })
+    const result = begin(runner, plan([call('report'), returned('report')]))
+    await committing
+    let nextStarted = false
+    const next = slots.withSlot(async () => { nextStarted = true }, 'next-root')
+    expect(slots.active).toBe(1)
+    expect(nextStarted).toBe(false)
+    expect(() => { dispatch.onProviderDispatchAttempt(); nativeRun() }).toThrow('admission refused')
+    expect(nativeRun).not.toHaveBeenCalled()
+    release()
+    expect((await result).state).toBe('failed')
+    await next
+    expect(nextStarted).toBe(true)
+    expect(slots.active).toBe(0)
+  })
+  it('does not release a proven non-dispatch slot when the outcome write fails', async () => {
+    class FailingOutcomeStore extends MemoryWorkflowStore {
+      override async save(record: WorkflowStoreRecord) {
+        if (record.outcomes.length) throw new Error('refusal outcome fsync failed')
+        await super.save(record)
+      }
+    }
+    const dispatch = new WorkflowDispatch()
+    const slots = new WorkflowSlots(1)
+    const runner = new WorkflowRunner({ store: new FailingOutcomeStore(), slots, execute: () => ({
+      result: Promise.reject(dispatch.rejected(new Error('admission refused'))), stop: () => true
+    }) })
+    await expect(begin(runner, plan([call('report'), returned('report')]))).rejects.toThrow('refusal outcome fsync failed')
+    expect(slots.active).toBe(1)
+  })
+  it('settles a proven pre-dispatch stop without refunding the attempt', async () => {
+    const preview = plan([call('report'), returned('report')])
+    const dispatch = new WorkflowDispatch()
+    const slots = new WorkflowSlots(1)
+    const runner = new WorkflowRunner({ store: new MemoryWorkflowStore(), slots, execute: () => {
+      runner.stop(preview.workflowId)
+      return { result: Promise.reject(dispatch.rejected(new Error('admission stopped'))), stop: () => true }
+    } })
+    const progress = await begin(runner, preview)
+    expect(progress.state).toBe('stopped')
+    expect(progress.dispatchAttempts).toBe(1)
+    expect(progress.attempts[0]).toMatchObject({ state: 'stopped', settled: true, providerDispatch: 'not_attempted' })
+    expect(slots.active).toBe(0)
   })
   it('window delivery failure does not turn durable settled work into an unknown scope', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})

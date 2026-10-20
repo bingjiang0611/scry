@@ -208,6 +208,7 @@ export class WorkflowService {
         } catch (error) {
           const settled = !plannerInvoked || plannerReturned || (error instanceof WorkflowScopeError && error.settled)
           intent.scopeSettled = settled
+          if (settled && error instanceof WorkflowScopeError && error.providerDispatch === 'not_attempted') intent.providerDispatch = error.providerDispatch
           intent.status = settled ? (controller.signal.aborted ? 'stopped' : 'failed') : 'unknown'
           intent.error = message(error)
           if (intent.result) delete intent.result.output

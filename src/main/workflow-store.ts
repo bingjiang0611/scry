@@ -36,6 +36,7 @@ export interface WorkflowPlanningIntent {
   createdAt: number
   status?: 'queued' | 'running' | 'completed' | 'failed' | 'unknown' | 'stopped'
   scopeSettled?: boolean
+  providerDispatch?: 'not_attempted'
   result?: { output?: string; outputRef?: string; actualModel?: string; archiveRef?: string }
   error?: string
 }

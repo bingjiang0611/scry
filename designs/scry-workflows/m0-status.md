@@ -72,10 +72,20 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 
 用户随后明确授权当前 Pi·Rotom / Codex 账号和默认模型、预算无上限、Pi 本机完全访问，并在故障后批准另开独立 Codex 停止现场。真实目录为 Pi 上游 `qoder/ultimate` 与 Codex `gpt-6.1-sol`，没有静默替换。实际调用使用临时 workspace/HOME/userData，不触碰生产会话。完整记录见 [m0-real-acceptance.md](m0-real-acceptance.md)。
 
-真实调用发现并修复三个问题：规划提示遗漏容器 `blocks`、冷目录初始化前抓取旧健康状态、公共进度返回历史槽位计数。最新代码默认 `npm test` 为 3478 passed / 4 skipped（shell 通过），typecheck、打包安全 gate、相关原生输入 UI 和 trace.delivery 计数 ratchet 通过。机器高负载，不作毫秒提升结论。
+真实调用发现并修复三个问题：规划提示遗漏容器 `blocks`、冷目录初始化前抓取旧健康状态、公共进度返回历史槽位计数。`d4c5f94` 运行代码的默认 `npm test` 为 3478 passed / 4 skipped（shell 通过），typecheck、打包安全 gate、相关原生输入 UI 和 trace.delivery 计数 ratchet 通过。机器高负载，不作毫秒提升结论。
 
 此前已核对混合完成链和最终产物上 Pi、Codex 各自生成后的 `stopped + settled`，5 个关键 outcome 与 12 个 canonical JSON / 13 个 archive 有独立核对。用户再次授权后，已在最终 `projection-fix` 冻结构建（`d4c5f94` 运行代码）新建独立现场补齐完整混合链：3 个子调用全部收敛、共享占用峰值 2 后归零；4 个不同 Native session 的规划/执行均与本轮 4 个 canonical record、4 个 archive 精确匹配，最终报告逐字等于两行真实标记。完成后重新启动仅观察，派发次数仍为 3、records 仍为 4、active run 0，无自动重发；CLI verify / doctor 通过，pending 为 0。
 
 旧停止控制器断连后的现场仍保留 2 个 unknown reservation 和 1 个 pending managed turn，不清空、不降级证据、不重发；本轮前后两条 unknown workflow 与 managed open 文件的 3 个哈希均不变。三个临时现场的进程和共 6 份登录态副本已清理，记录和冻结产物保留。本次指定账号/模型、隐藏 App + 生产 IPC 范围的最终构建混合补验完成；前台 OS 焦点、完整 UI 操作和五 Provider 能力矩阵不在此范围。canonical 新身份/role/task-link 字段仍有 legacy_unset advisory，费用没有 costUsd，均不冒充完整或零费用。
+
+### 未派发拒绝的后续修复（受控检查，不替代上述真实构建验收）
+
+- canonical `startAppRun` 在进入 `providerRegistry.run` 前触发内部派发标记，规划和子调用各自拥有独立、单向的标记。在标记前拒绝会锁住延迟派发入口，并产生 `providerDispatch: not_attempted` 的结构化证明；不是按错误消息或 `frontdoor` 文案猜测。
+- 证明随规划收据/子调用 outcome 持久化后，未派发失败或停止才释放槽位。子调用的尝试次数仍保留，不退款、不自动重试。不明异常、已尝试派发后的异常、必要持久化失败仍保留容量。
+- 不迁移或清空旧记录。旧现场的 2 个 unknown reservation / 1 个真实 pending 继续保留；旧 Native history 的 `inProgress` 只是最后持久化状态，没有可用于 exact-managed 提交的整轮终态。没有重发任务，也没有从进程退出推断完成或中断。
+- 新增 9 项回归，覆盖未派发/已尝试/未证明拒绝、延迟派发封口、停止不退款、写入失败保留容量、重启不重跑和真实文件 round-trip。全部 workflow 测试 **64 passed**；关闭新分类的负对照会因 `unknown != failed` 失败。typecheck、build、shell、生产 conversation ownership / unified conversation IPC 通过；后者是隔离 smoke Provider，不是真实付费调用。
+- 保留首次验证失败：首批 32 个 focused 中 3 项因新证明未进入既有 outcome 投影失败（含一个等待超时），已补齐投影，未改断言或超时。默认全量首轮在未改动的 recorder FIFO 同步用例 15 秒超时，随后工具 300 秒截止，没有完整汇总；单项复核通过。串行全量为 **3486 passed / 1 failed / 4 skipped**，失败是 Pi custom-command fixture 的 3 秒终态等待；它在当前代码单项复核中既有失败也有通过，`fcc55ad` 生产源码对照单项通过。尚未确定该时序失败的原因，不能称全量绿色；没有修改 Pi 测试来通过。
+- trace.delivery 计数为 2 IPC / 165996 bytes，5 次一致，ratchet 通过；该场景不代表新拒绝分支的端到端耗时。测速锁报告 highLoad，不作毫秒提升结论。
+- 本次证据：`/tmp/scry-workflow-no-dispatch.LEItDb/`；旧现场只读调查：`/tmp/scry-workflow-pending-audit.uvf8wW/report.md`。没有新真实 Provider 验收、App 安装/重启或 push；旧冻结产物不包含这次新代码。
 
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。

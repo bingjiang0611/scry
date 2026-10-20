@@ -44,6 +44,30 @@ describe('actual workflow filesystem', () => {
     for await (const intent of reopened.planningIntents()) planning.push(intent)
     expect(planning).toEqual([])
   })
+  it('round-trips non-dispatch proof without adding proof to legacy unknown records', async () => {
+    const { path, store } = await fixture()
+    const failed = record('refused')
+    failed.progress.state = 'failed'
+    failed.progress.dispatchAttempts = 1
+    failed.intents.push({ workflowId: 'refused', programRevision: 'rev', taskId: 'task', attemptId: 'attempt', role: 'worker', providerId: 'pi', createdAt: 1 })
+    failed.outcomes.push({ attemptId: 'attempt', taskId: 'task', nodeId: 'call', role: 'worker', providerId: 'pi', actualModelStatus: 'unknown',
+      state: 'failed', settled: true, providerDispatch: 'not_attempted' })
+    failed.progress.attempts = failed.outcomes
+    await store.save(failed)
+    await store.savePlanningIntent({ workflowId: 'refused-plan', role: 'orchestrator', providerId: 'pi', workspace: '/fixture', goal: 'inspect',
+      createdAt: 1, status: 'failed', scopeSettled: true, providerDispatch: 'not_attempted' })
+    const legacy = record('legacy')
+    legacy.outcomes = [{ ...failed.outcomes[0], state: 'unknown', settled: false }]
+    delete legacy.outcomes[0].providerDispatch
+    await store.save(legacy)
+    const reopened = new FileWorkflowStore(path)
+    expect((await reopened.load('refused'))?.outcomes[0]).toMatchObject({ state: 'failed', settled: true, providerDispatch: 'not_attempted' })
+    expect((await reopened.load('refused'))?.progress.attempts[0].providerDispatch).toBe('not_attempted')
+    expect(await reopened.loadPlanningIntent('refused-plan')).toMatchObject({ status: 'failed', scopeSettled: true, providerDispatch: 'not_attempted' })
+    const old = (await reopened.load('legacy'))!.outcomes[0]
+    expect(old.settled).toBe(false)
+    expect(old.providerDispatch).toBeUndefined()
+  })
   it('rejects invalid identity instead of aliasing a different existing record', async () => {
     const { store } = await fixture()
     await store.save(record('a_b'))

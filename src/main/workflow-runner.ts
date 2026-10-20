@@ -41,7 +41,23 @@ export interface WorkflowProviderExecution {
 }
 
 export class WorkflowScopeError extends Error {
-  constructor(message: string, readonly settled: boolean) { super(message); this.name = 'WorkflowScopeError' }
+  constructor(message: string, readonly settled: boolean, readonly providerDispatch?: 'not_attempted') { super(message); this.name = 'WorkflowScopeError' }
+}
+
+/** Owned by one canonical start; mark before entering Provider code, even if run() throws. */
+export class WorkflowDispatch {
+  private attempted = false
+  private refused?: WorkflowScopeError
+  readonly onProviderDispatchAttempt = (): void => {
+    if (this.refused) throw this.refused
+    this.attempted = true
+  }
+  rejected(error: unknown): WorkflowScopeError {
+    const failure = new WorkflowScopeError(String(error), !this.attempted, this.attempted ? undefined : 'not_attempted')
+    // Canonical startup schedules async work: fence a delayed run() before claiming no dispatch.
+    if (!this.attempted) this.refused = failure
+    return failure
+  }
 }
 
 interface WorkflowSlotResult {
@@ -395,8 +411,13 @@ export class WorkflowRunner {
         if (controller.stopped) stop()
         let result: Awaited<WorkflowProviderExecution['result']> | undefined
         try { result = await execution.result } catch (error) {
-          const outcome = this.outcome(preview, block, 'unknown', { attemptId, taskId, runId: execution.runId, settled: false, error: String(error) })
+          const notAttempted = error instanceof WorkflowScopeError && error.settled && error.providerDispatch === 'not_attempted'
+          const outcome = this.outcome(preview, block, notAttempted ? (controller.stopped ? 'stopped' : 'failed') : 'unknown', {
+            attemptId, taskId, runId: execution.runId, settled: notAttempted, error: String(error),
+            ...(notAttempted ? { providerDispatch: 'not_attempted' as const } : {})
+          })
           await this.commitOutcome(record, outcome)
+          if (notAttempted) { activeStops.delete(stop); return { outcome } }
           const hold = execution.settled ?? new Promise<void>(() => {})
           return { outcome, hold: hold.then(async () => {
             outcome.settled = true
@@ -468,6 +489,7 @@ export class WorkflowRunner {
     return { attemptId: patch.attemptId ?? randomUUID(), taskId: patch.taskId ?? `${preview.workflowId}:${block.blockId}`, nodeId: block.blockId,
       role: block.role, providerId: patch.providerId ?? role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel } : {}),
       actualModelStatus: patch.actualModel ? 'observed' : 'unknown', state, settled: patch.settled ?? false,
+      ...(patch.providerDispatch ? { providerDispatch: patch.providerDispatch } : {}),
       ...(output ? { output } : {}), ...(patch.error ? { error: patch.error.slice(0, 4096) } : {}), ...(patch.runId ? { runId: patch.runId } : {}),
       ...(patch.archiveRef ? { archiveRef: patch.archiveRef } : {}), ...(patch.actualModel ? { actualModel: patch.actualModel } : {}) }
   }

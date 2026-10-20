@@ -118,6 +118,8 @@ export interface WorkflowAttemptOutcome {
   error?: string
   runId?: string
   archiveRef?: string
+  /** Canonical start failed before entering Provider.run; absent on legacy/uncertain attempts. */
+  providerDispatch?: 'not_attempted'
   settled: boolean
 }
 

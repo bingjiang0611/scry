@@ -137,7 +137,7 @@ import { workflowPlanningPrompt } from './workflow-program'
 import { registerWorkflowIpc } from './workflow-ipc'
 import { workflowPermissionResponse } from './workflow-question'
 import { workflowBindingControls } from './workflow-capability'
-import { WorkflowSlots, WorkflowScopeError } from './workflow-runner'
+import { WorkflowSlots, WorkflowScopeError, WorkflowDispatch } from './workflow-runner'
 import type { WorkflowRoleBinding } from '../shared/workflow'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
@@ -2797,6 +2797,7 @@ interface AppRunStartOptions {
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
   expectedWorkflowCapability?: string
+  onProviderDispatchAttempt?: () => void
   onTerminal?: (result: WorkflowTerminalResult) => void | Promise<void>
 }
 
@@ -3797,6 +3798,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       throw new Error('统一对话 runId 与 Provider 投递 runId 不一致')
     }
     managedConversation?.onProviderDispatchAttempt?.()
+    options.onProviderDispatchAttempt?.()
     h = providerRegistry.run(providerId, {
       runId,
       prompt: runtimePrompt,
@@ -4617,6 +4619,7 @@ const workflowService = new WorkflowService({
   runControls: workflowRunControls,
   plan: async ({ workflowId, role, roles, goal, workspace, signal }) => {
     const runId = `workflow-plan-${workflowId}`
+    const dispatch = new WorkflowDispatch()
     let resolve: ((result: { output: string; actualModel?: string; archiveRef?: string }) => void) | undefined
     let reject: ((error: unknown) => void) | undefined
     const completion = new Promise<{ output: string; actualModel?: string; archiveRef?: string }>((res, rej) => { resolve = res; reject = rej })
@@ -4625,6 +4628,7 @@ const workflowService = new WorkflowService({
         workflowPlanningPrompt(roles, goal),
         workspace), {
         origin: 'workflow', runId, stopSignal: signal, expectedWorkflowCapability: role.runtimeIdentity,
+        onProviderDispatchAttempt: dispatch.onProviderDispatchAttempt,
         onTerminal: (terminal) => {
           const result = workflowOutput(terminal.items)
           const hasTerminalEvidence = terminal.items.some(item => item.kind === 'harness' && item.stage === 'result')
@@ -4632,11 +4636,12 @@ const workflowService = new WorkflowService({
           else reject?.(new WorkflowScopeError(`编排 Provider 未完成：${terminal.status}`, terminal.settled))
         }
       })
-    } catch (error) { reject?.(error) }
+    } catch (error) { reject?.(dispatch.rejected(error)) }
     return completion
   },
   execute: ({ attemptId, role, prompt, workspace }) => {
     const runId = `workflow-${attemptId}`
+    const dispatch = new WorkflowDispatch()
     let startedRunId: string | undefined
     let stopRequested = false
     const stopController = new AbortController()
@@ -4645,6 +4650,7 @@ const workflowService = new WorkflowService({
     const result = new Promise<import('./workflow-runner').WorkflowProviderExecutionResult>((res, rej) => { resolve = res; reject = rej })
     void startAppRun(workflowStartRequest(role, prompt, workspace), {
       origin: 'workflow', runId, stopSignal: stopController.signal, expectedWorkflowCapability: role.runtimeIdentity,
+      onProviderDispatchAttempt: dispatch.onProviderDispatchAttempt,
       onTerminal: (terminal) => {
         const observed = workflowOutput(terminal.items)
         const hasTerminalEvidence = terminal.items.some((item) => item.kind === 'harness' && item.stage === 'result')
@@ -4657,7 +4663,7 @@ const workflowService = new WorkflowService({
         startedRunId = started.runId
         if (stopRequested) requestRunStop(started.runId)
       }
-    }).catch((error) => reject?.(error))
+    }).catch((error) => reject?.(dispatch.rejected(error)))
     return { runId, result, stop: () => {
       if (!stopRequested) {
         stopRequested = true
