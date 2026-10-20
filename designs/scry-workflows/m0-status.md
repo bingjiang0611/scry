@@ -96,4 +96,15 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - 人为破坏终态断言的负对照按预期失败且输出诊断，恢复后全套通过。该负对照只证明诊断路径有效，不是原超时复现。
 - 日志：`/tmp/scry-pi-command-convergence.ekAvy5/`。若该分支再次失败，保留 `PI_COMMAND_DIAGNOSTIC` 行后由维护 Agent 继续定位；当前仍不宣称根因修复。没有新增真实 Provider 调用，也没有修改旧 pending/unknown 或安装/重启现有 App。
 
+### 受控阶段复现（仍不认定历史根因）
+
+- 用户选择继续受控复现。没有空跑全套或调用真实模型；生产 `pi.ts` 最终无改动，原 custom-message 和 menu-only 的 3 秒等待、15 秒测试上限及原断言均保留。
+- 临时分别阻塞 profile 返回、prompt 应答、idle 状态应答，三个位置都能产生同样的 3 秒 `terminal=false` 失败；释放门后同一次请求完成，均只发送一次 prompt，未出现模型轮次。常规回归保留三个事件门，不保留人为等待 deadline 的固定延迟。与原用例相同的隔离 Rotom fixture 中，Promise 完成时 PID 仍存活，dispose 后确认退出；不能把正常池内保活误判为等待进程关闭。
+- 绕过生产 prompt 应答等待的负对照导致提前 terminal，被门控回归抓住；已恢复生产代码。这是保护敏感性检查，不是历史故障的根因证据。
+- 排查中真实出现一次相邻 managed menu (`cancelled=false`) 的自然 3 秒超时：该轮 Pi 范围为 **165 passed / 1 failed**，记录保留为 `pi-final.log`。它不同于原 custom-message，且当时未覆盖 recorder 阶段，不能据此认定两者同因。
+- 因此将失败诊断复用于 menu/custom 两类用例，加入运行开始、子进程首次记录、最后命令的时间，以及真实 recorder start/cancel 的 enter/exit。观察器仍调用并等待原方法，exit 不表示成功；原错误继续抛出。暂时阻塞 cancellation receipt 后，诊断能区分 `cancel.enter` 而没有 `cancel.exit`，同样得到 3 秒失败；解除注入后恢复，不跳过持久化。这仍是合成实验，不是那次自然失败的复现。
+- 加入上述观测后，按预先限定最多 5 次、只跑两个 menu 用例的自然采样，5 次均通过（10 个用例）；若失败即停止，不重试失败来覆盖结果。仍不能据此宣称间歇故障消失。
+- 最新验证：**Pi 范围 166 passed**、typecheck、build、diff check；不以本次 focused 范围冒充最新全套。原现场 16 份源证据哈希不变。证据目录 `/tmp/scry-pi-controlled.CMumpp/`；没有安装、重启现有 App 或 push。
+- 当前能证明“这条 3 秒断言覆盖多个阶段”，不能证明历史失败具体发生在哪个阶段。下一次自然失败时由维护 Agent 根据新的 `PI_COMMAND_DIAGNOSTIC` 继续定位；现在不以猜测修改 Provider 或放宽验收口径。
+
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。

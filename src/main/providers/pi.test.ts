@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
@@ -42,6 +42,8 @@ let model = { provider: 'test-provider', id: 'test-model' }
 let thinkingLevel = 'high'
 let entrySeq = 0
 let promptMessage = ''
+const statusGateFile = process.cwd() + '/status-gate'
+const statusGate = require('node:fs').existsSync(statusGateFile) ? require('node:fs').readFileSync(statusGateFile, 'utf8') : ''
 let acknowledgePrompt
 const entries = [
   { type: 'message', id: 'active-user', parentId: null, timestamp: new Date().toISOString(), message: { role: 'user' } },
@@ -91,6 +93,11 @@ process.stdin.on('data', (chunk) => {
         sessionId,
         sessionFile,
         cwd: process.cwd()
+      }
+      if (promptMessage === '/fixture-menu status' && statusGate === 'idle-response') {
+        acknowledgePrompt = () => response(state)
+        send({ type: 'extension_ui_request', id: 'question-status-idle', method: 'select', title: 'Idle response gate', options: ['1. Continue'] })
+        continue
       }
       if (promptMessage === 'stop-before-final-state') {
         require('node:fs').writeFileSync(process.cwd() + '/final-state-requested', '')
@@ -185,6 +192,11 @@ process.stdin.on('data', (chunk) => {
         entries.push({ type: 'custom_message', id: 'custom-' + (++entrySeq), parentId: leafId, ...message })
         persistEntries()
         leafId = entries.at(-1).id
+        if (statusGate === 'prompt-response') {
+          acknowledgePrompt = response
+          send({ type: 'extension_ui_request', id: 'question-status-prompt', method: 'select', title: 'Prompt response gate', options: ['1. Continue'] })
+          continue
+        }
         response()
         continue
       }
@@ -496,6 +508,20 @@ function withRotomFixture<T>(run: (profile: ReturnType<typeof piProfileForExecut
 }
 
 const withCommandFixture = withRotomFixture
+
+function commandFailureEvidence(cwd: string, terminal: boolean, events: TraceEvent[], startedAt: number,
+  recorderStages: readonly { step: string; at: number }[] = []): void {
+  // Fixture cleanup deletes the protocol evidence. Capture it before interrupting the child.
+  const commands = join(cwd, 'fixture-commands')
+  console.error('PI_COMMAND_DIAGNOSTIC', JSON.stringify({ test: expect.getState().currentTestName, cwd, terminal,
+    startedAt, elapsedMs: Date.now() - startedAt, recorderStages,
+    lastCommandAt: existsSync(commands) ? statSync(commands).mtimeMs : null,
+    childStartedAt: existsSync(join(cwd, 'fixture-starts')) ? statSync(join(cwd, 'fixture-starts')).mtimeMs : null,
+    events: events.slice(-32).map(event => ({ kind: event.kind, stage: event.stage, ts: event.ts })),
+    commands: existsSync(commands) ? readFileSync(commands, 'utf8').slice(-4096) : null,
+    starts: existsSync(join(cwd, 'fixture-starts')) ? readFileSync(join(cwd, 'fixture-starts'), 'utf8').slice(-512) : null
+  }))
+}
 
 describe('Pi RPC Provider', () => {
   it('isolates RPC fixtures from the host HOME and pins the current Node runtime', async () => {
@@ -1643,6 +1669,20 @@ describe('Pi RPC Provider', () => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const events: TraceEvent[] = []
       const questions: string[] = []
+      const recorderStages: { step: string; at: number }[] = []
+      const hooks = await import('../../core/turn-recorder/recorder')
+      const managed = await import('../../core/turn-recorder/managed')
+      const start = hooks.handleRecorderHook
+      const cancel = managed.cancelManagedRecorderTurn
+      const startSpy = vi.spyOn(hooks, 'handleRecorderHook').mockImplementation(async (...args) => {
+        recorderStages.push({ step: 'start.enter', at: Date.now() })
+        try { return await start(...args) } finally { recorderStages.push({ step: 'start.exit', at: Date.now() }) }
+      })
+      const cancelSpy = vi.spyOn(managed, 'cancelManagedRecorderTurn').mockImplementation(async (...args) => {
+        recorderStages.push({ step: 'cancel.enter', at: Date.now() })
+        try { return await cancel(...args) } finally { recorderStages.push({ step: 'cancel.exit', at: Date.now() }) }
+      })
+      const startedAt = Date.now()
       const handle = adapter.run({
         runId: 'menu-run', prompt: '/fixture-menu', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', managedRecorder: true,
@@ -1677,10 +1717,16 @@ describe('Pi RPC Provider', () => {
         }).promise
         expect(next).toMatchObject({ status: 'completed', providerTurnId: 'pi-user-1' })
         expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
+        expect(recorderStages.map(stage => stage.step)).toEqual(['start.enter', 'start.exit', 'cancel.enter', 'cancel.exit'])
+      } catch (error) {
+        commandFailureEvidence(cwd, terminal, events, startedAt, recorderStages)
+        throw error
       } finally {
-        handle.forceKill()
-        await handle.promise.catch(() => {})
-        await adapter.dispose?.()
+        try {
+          handle.forceKill()
+          await handle.promise.catch(() => {})
+          await adapter.dispose?.()
+        } finally { startSpy.mockRestore(); cancelSpy.mockRestore() }
       }
     })
   }, 15_000)
@@ -1730,10 +1776,72 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
+  it.each(['profile', 'prompt-response', 'idle-response'] as const)('locates a pending custom command at the controlled %s gate', async phase => {
+    await withCommandFixture(async (profile, cwd) => {
+      if (phase !== 'profile') writeFileSync(join(cwd, 'status-gate'), phase)
+      let release!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      let reached = false
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => {
+        if (phase === 'profile') { reached = true; await gate }
+        return profile
+      } })
+      const events: TraceEvent[] = []
+      const handle = adapter.run({
+        runId: `controlled-${phase}`, prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => events.push(event),
+        requestUserInput: async request => {
+          reached = true
+          await gate
+          const question = request.questions[0]
+          return { runId: request.runId, questionId: request.questionId, behavior: 'answered', answers: { [question.question]: question.options[0].label } }
+        }
+      })
+      let terminal = false
+      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
+      const commands = () => {
+        const path = join(cwd, 'fixture-commands')
+        return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { type: string }) : []
+      }
+      try {
+        await vi.waitFor(() => expect(reached).toBe(true), { timeout: 3_000 })
+        expect(terminal).toBe(false)
+        expect(events.some(event => event.stage === 'result')).toBe(false)
+        expect(events.some(event => event.stage === 'runtime:init')).toBe(phase !== 'profile')
+        expect(events.some(event => event.stage === 'runtime:extension_message')).toBe(phase !== 'profile')
+        expect(commands().at(-1)?.type).toBe(phase === 'profile' ? undefined : phase === 'prompt-response' ? 'prompt' : 'get_state')
+        release()
+        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+        expect(events.some(event => event.kind === 'model')).toBe(false)
+        expect(events.find(event => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
+        expect(events.find(event => event.stage === 'result')).toMatchObject({ providerCommand: { modelTurn: 'unobserved' } })
+        expect(commands().filter(command => command.type === 'prompt')).toHaveLength(1)
+        if (phase === 'prompt-response') {
+          const types = commands().map(command => command.type)
+          const responseIndex = types.indexOf('extension_ui_response')
+          expect(responseIndex).toBeGreaterThan(types.indexOf('prompt'))
+          expect(responseIndex).toBeLessThan(types.indexOf('get_state', types.indexOf('prompt')))
+        }
+        // This is the original Rotom fixture: completion retains the RPC, rather than waiting for exit.
+        const pid = Number(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim())
+        expect(() => process.kill(pid, 0)).not.toThrow()
+      } finally {
+        release()
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+      const pid = Number(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim())
+      expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+    })
+  }, 15_000)
+
   it('preserves visible custom command messages without inventing a model turn', async () => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const events: TraceEvent[] = []
+      const startedAt = Date.now()
       const handle = adapter.run({
         runId: 'command-status', prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
@@ -1746,13 +1854,7 @@ describe('Pi RPC Provider', () => {
         expect(events.some((event) => event.kind === 'model')).toBe(false)
         expect(events.find((event) => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
       } catch (error) {
-        // Fixture cleanup deletes the protocol evidence. Capture it before interrupting the child.
-        const commands = join(cwd, 'fixture-commands')
-        console.error('PI_COMMAND_DIAGNOSTIC', JSON.stringify({ cwd, terminal,
-          events: events.slice(-32).map(event => ({ kind: event.kind, stage: event.stage, ts: event.ts })),
-          commands: existsSync(commands) ? readFileSync(commands, 'utf8').slice(-4096) : null,
-          starts: existsSync(join(cwd, 'fixture-starts')) ? readFileSync(join(cwd, 'fixture-starts'), 'utf8') : null
-        }))
+        commandFailureEvidence(cwd, terminal, events, startedAt)
         throw error
       } finally {
         handle.forceKill()
