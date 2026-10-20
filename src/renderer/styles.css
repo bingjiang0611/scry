@@ -1278,6 +1278,7 @@ body.pane-resizing * {
   font: inherit;
   text-align: left;
   cursor: pointer;
+  user-select: text;
 }
 .md-file-ref-icon {
   width: 0.92em;

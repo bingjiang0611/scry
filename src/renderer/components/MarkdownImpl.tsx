@@ -125,7 +125,13 @@ function WorkspaceFileAction({ targets, reference, title, onOpen, children }: {
       </option>)}
     </select>
   }
-  return <button type="button" className="md-file-ref" title={title} aria-label={title} onClick={() => onOpen(targets[0])}>
+  return <button type="button" className="md-file-ref" title={title} aria-label={title} onClick={(event) => {
+    const selection = window.getSelection()
+    // Chromium also clicks a button after dragging its selectable text. Keep the selection
+    // instead of opening a preview; keyboard activation must still work with a selection.
+    if (event.detail > 0 && selection && !selection.isCollapsed && selection.containsNode(event.currentTarget, true)) return
+    onOpen(targets[0])
+  }}>
     <Icon name="file" className="md-file-ref-icon" />{children}
   </button>
 }
