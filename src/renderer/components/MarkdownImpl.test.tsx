@@ -66,6 +66,20 @@ describe('streaming Markdown cadence', () => {
   })
 })
 
+describe('MarkdownImpl code block text', () => {
+  it('omits the parser-added final newline without trimming source whitespace', () => {
+    for (const [source, expected] of [
+      ['```\n/Users/example/Downloads/rate-aigc-image-udtf.jar\n```', '/Users/example/Downloads/rate-aigc-image-udtf.jar'],
+      ['```sh\n  first  \nsecond\n```', '  first  \nsecond'],
+      ['```\nfirst\n\n```', 'first\n'],
+      ['    indented code\n', 'indented code']
+    ]) {
+      const html = renderToStaticMarkup(<MarkdownImpl>{source}</MarkdownImpl>)
+      expect(html.match(/<code[^>]*>([\s\S]*?)<\/code>/)?.[1]).toBe(expected)
+    }
+  })
+})
+
 describe('MarkdownImpl trust boundary', () => {
   it('does not emit remote image requests or dangerous links', () => {
     const html = renderToStaticMarkup(

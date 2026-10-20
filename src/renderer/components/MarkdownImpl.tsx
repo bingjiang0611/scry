@@ -325,6 +325,11 @@ const MarkdownImpl = memo(function MarkdownImpl({ children, streaming = false }:
     },
     code: ({ node, children: codeChildren, className, ...props }) => {
       const reference = String(codeChildren)
+      // Markdown adds one terminal newline to block code. Do not copy that synthetic
+      // character as a trailing separator; preserve whitespace from the source itself.
+      if (reference.endsWith('\n')) {
+        return <code {...props} className={className}>{reference.slice(0, -1)}</code>
+      }
       const externalHref = safeExternalHref(reference)
       if (externalHref && /^https?:\/\//i.test(externalHref)) {
         return (
