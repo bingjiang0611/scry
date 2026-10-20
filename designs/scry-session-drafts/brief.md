@@ -2,7 +2,7 @@
 
 ## D-20261019-scry-session-drafts
 
-- 状态：用户于 2026-10-19 明确选择 A；产品实现已完成本地与远程隔离 Electron 交互回归，安装与真实 App 验收见下方实施记录。原型仍仅用于展示，不把原型当作已上线能力。
+- 状态：用户明确选择 A，随后要求本地重试安装。A 已实现并安装为 **0.2.209**，本地与远程隔离 Electron 交互回归通过；真实日常 App 交互仍待用户手动打开后验收。安装身份与完整证据见下方续装记录。
 - 用户要求：「当对话框中有输入的时候 切换会话可以显示下有草稿吗 先出设计稿」。2026-10-19 当前会话，附桌面端原始截图。
 - 目标仓库与实际 cwd：`/Users/baobingjiang/IdeaProjects/vibecoding/scry`。开始时已有大量远程、iOS、composer 相关 WIP；本次不修改、提交或安装这些改动。
 - 产物：[交互设计稿](index.html)，预览 `http://127.0.0.1:8956/`。本机 HTTP 服务只暴露此目录。无外部依赖、网络 API、真实 Provider 或真实草稿读取。文本仅存在本页内存中，刷新重置。
@@ -70,7 +70,7 @@ Craft：应用 [Hover 克制](https://craft.gustavofior.com/hover-restraint)、[
 - 安装预检时，日常 `/Applications/Scry.app` 为 0.2.208，不能用主分支 0.2.204 的隔离代码直接覆盖。已找到 `~/.local/state/scry-catalog-current-8GWCgkE7/source` 的同版快照：1221 项 manifest 的可执行源码无漂移（只有性能机会文档变化和单独的 skill symlink），13 个已编译 out 文件与当前安装 ASAR 内容逐字节一致。当前安装 ASAR SHA-256 为 `568cd059efcb467f1829d188cb9a7a72f9155a40cead7917c43eac92f6c8c3cf`；旧安装记录的不同 ASAR hash 不冒充本次实测值。
 - 主分支功能提交 `8826602`，测试 fixture 修正 `962acc5`。通过重建前后文件内容核对，原主工作区 WIP 保留；主分支最终 typecheck 通过。主工作区受影响单测为 33 项通过（含原有并行附件 helper 测试），隔离实现基线为 32 项通过。
 
-### 安装候选与阻碍（未安装）
+### 首次安装候选与阻碍（历史，已由下方续装替代）
 
 候选在原 0.2.208 已装快照上仅叠加本次 9 个源码/测试文件与 App 版本变更，升级为 0.2.209；没有把主分支的其他 WIP 顺带打包。CLI 保持 0.2.49。交付 worktree 已从 `/tmp/scry-drafts-install` 移至 `~/.local/state/scry-draft-delivery-20261019/source`，交付分支提交为 `e34016b` / `9971768`；其中原已装版本的未提交快照按原样保留，不纳入任务提交。
 
@@ -89,7 +89,28 @@ Craft：应用 [Hover 克制](https://craft.gustavofior.com/hover-restraint)、[
 
 证据保留于 `~/.local/state/scry-draft-delivery-20261019/evidence/`：`delivery-status.json`、1223 项 `source-manifest.json`、首次失败和最终 unit/pack/UI/performance 日志、`system-policy.log`。候选 ASAR SHA-256 `72553fe075881a18a07f95e42bcb38d79c03009caf32843f0bb3df3f0a311c1e`，标记为 **不得直接安装**，不是已验收产物。
 
-下一步由用户决定是否授权沿用既有 mac2 构建流程。获准后，助手先冻结并匹配最新安装基线，只移植本次草稿改动，重跑门禁再安装；不自动重启 App。若暂不授权，保留代码与证据，安装保持未完成。
+首次受阻后询问是否沿用 mac2；用户明确回答「重试安装」。实际随后在本机完成续装，没有传输源码或使用 mac2。
+
+### 本地续装成功（当前交付）
+
+- 新冻结 worktree：`~/.local/state/scry-draft-delivery-20261019/source-retry`，交付提交 **`e3ee731`**。主分支功能/fixture 提交仍为 `8826602` / `962acc5`；不提交或推送原有无关 WIP。
+- 先按已安装 0.2.206 的 `source-snapshot.json` 恢复 `67f03e7 + source.patch`（SHA-256 `1a767b1560da69805474f2c4b62903193b4b0533bf30226264676a818b3f43d8`），补齐快照的 11 个未跟踪文件，重建后 **13 个编译文件与已安装 ASAR 逐字节一致**，才叠加本次改动。不是从旧 0.2.208 候选直接覆盖。
+- 仅改变本次 9 个实现/测试文件与 App package/lockfile 版本。最终冻结 1228 项源文件，差异清单与 hash 在 `retry-final-source-manifest.json`。CLI 保持 0.2.49。
+- 用户要求重试时，原候选 CLI 的只读版本检查已经恢复可运行；SIGKILL 根因仍 unknown。本次在全新 worktree/dist 生成完整包，并通过全部原门禁，未修改系统安全策略、签名要求、测试断言、重试次数或超时。
+
+| 当前 0.2.209 检查 | 结果 / 证据 |
+| --- | --- |
+| `npm run pack` | 通过：typecheck、3476 unit 通过 / 4 项既有 opt-in 跳过、shell、App/CLI build、原生 rebuild、packaged check 与全部 `smoke:electron`；Node 24.18.0，macOS arm64 |
+| packaged check | 311 个运行时依赖、资源/体积、CJS preload、node-pty、私有 CLI 与版本均通过；开发签名，未公证 |
+| 本次原生 UI 回归 | 新冻结源上的 `--selection-only` 10 场景与远程 `--composer-history-only` 全通过；使用该 worktree 的正常 Electron，不再使用 runtime override |
+| 安装前检查 | 已装仍为 0.2.206 / ASAR `cc514d0a…`，随后才执行原 `node scripts/install-macos.mjs`；未跳过 `install:mac:dev` 的 pack 与安装校验链 |
+| 安装后身份 | `/Applications/Scry.app` 为 **0.2.209**，私有 CLI **0.2.49**；ASAR SHA-256 **`535a825f7c1260b8b2d7d518d246008d9db43a5ef1e97b259f4093d38d470ee3`** |
+| 同一产物证明 | 安装包与已装 bundle **338 个文件/链接完全一致**，差异 0；已装 deep/strict codesign 校验通过，已装 renderer JS 与 CSS 均含草稿实现 |
+| 启动与真实使用 | 没有自动启动、停止或重启 App；安装前后匹配的用户 App 进程均为空。用户手动打开后仍需重放真实输入/切换；受控 fixture 不替代真实 Provider 验收 |
+
+成功安装时间：`2026-10-20T02:29:26.394Z`。证据位于同一 `evidence/`：`retry-baseline-comparison.json`、`retry-baseline-source-manifest.json`、`retry-final-source-manifest.json`、`retry-pack.log`、`retry-selection-ui.log`、`retry-remote-ui.log`、`retry-install-preflight.json`、`retry-install.log`、`retry-installed-verification.json`。`delivery-status.json` 指向当前成功交付；首次受阻记录另存为 `delivery-status-initial-blocked.json`，原 0.2.208 候选仍标记不得安装。安装器保留旧版于 `/Applications/.Scry.app.backup`。
+
+下一步由用户手动打开 Scry，输入内容后切换会话，再点回确认草稿标记与内容；无需发送消息。若实际体验不符，由助手基于新版本继续定位，不能用上述构建或 fixture 结果代替反馈。
 
 ### 设计阶段交付边界（历史）
 
