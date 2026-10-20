@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App, sessionComposerDraftKey } from '../../src/renderer/App'
+import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import type { ProviderContext } from '../../src/shared/provider'
 import type { WorkspaceFileOpenTarget, WorkspacePathRequest } from '../../src/shared/workspace'
 import type { TerminalDataEvent, TerminalExitEvent, TerminalRecordingRequest, TerminalSessionInfo, TerminalStartRequest } from '../../src/shared/terminal'
@@ -44,6 +45,7 @@ const projects = [
 ]
 const noopSubscribe = () => () => {}
 Object.defineProperty(window, 'scry', { value: {
+  workflow: emptyWorkflowBridge,
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   onSession: (listener: (event: { runId: string; sessionId: string; previousSessionId: string }) => void) => {

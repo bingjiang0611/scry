@@ -28,6 +28,14 @@ function render(items: TraceEvent[], previous: Turn[] = []): string {
 }
 
 describe('OverviewPanel request-level context', () => {
+  it('omits session aggregates for a new session with no loaded turns', () => {
+    const html = renderToStaticMarkup(<OverviewPanel turns={[]} busy={false} sessionId={null}
+      selected={null} usage={null} stats={null} onSelect={() => {}} />)
+    expect(html).not.toContain('overview-session-summary')
+    expect(html).not.toContain('overview-session-count')
+    // This differs from one observed turn without a compaction event.
+    expect(render([])).toContain('<strong class="overview-session-count">0</strong>')
+  })
   it('keeps the heading and count while removing persistent helper subtitles and footnotes', () => {
     const html = render([])
     expect(html).toContain('<strong>总览</strong>')

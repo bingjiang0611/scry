@@ -40,10 +40,36 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 
 同步 `be907ef`（0.2.210）后：focused 13 文件 / 100 tests、typecheck、build、独立工作流 UI 和新版后台卡片 UI 通过。同步前本地结果：focused 12 文件 / 88 tests、五 Provider 的受控回归 339 tests、typecheck、build、独立工作流 Electron UI、shell 和 trace.delivery 计数检查通过。计数测试时机器高负载，不据此作毫秒或用户体感结论。
 
-完整门禁仍未通过，不能称 M0 已交付：默认并发全量 unit 为 3462 passed / 11 failed / 4 skipped，失败位于四个原有文件；相同四文件在本分支与无 M0 改动的 `c405df0` 基线均串行通过 39 tests，未增加测试超时，不能用串行结果抹去首次全量失败。完整 UI 先发现并修正了全 App fixture 缺少新 workflow API 的问题；随后在原有 compaction 场景失败。无 M0 的基线 UI 同样失败，但在不同的 reduced-motion / scrollbar-color 场景，尚不能据此宣布两者根因相同。完整打包 gate 与真实 App 重放未通过/未执行。
+### 本轮最终本地结果
 
-同步后的全量串行 unit（相同测试超时，仅 `--maxWorkers=1` 控制争用）为 3474 passed / 1 failed / 4 skipped；唯一失败在原有 `subprocesses.counters.test.ts` 的 5000 文件终端 diff 场景，生产 `beginGitTurnDiff` 返回 timeout。该 collector 与 `src/core/turn-recorder/git.ts` 相对 `be907ef` 未修改。随后机器观测为 10 核、load average 23.00 / 37.60 / 40.68；负载是已观测限制，但没有把剩余失败当作已证实无关，也没有扩大超时。同步后 `--overview-only` 的六组主题/宽度检查通过，不等于之前失败的完整 compaction 场景已经通过。
+验证对象为同步 `be907ef` 后的 M0 与本次测试修复，环境为 macOS arm64、Node 24.18.0、Electron 42.10.1。没有修改生产 Git 实现、测试超时、预算或像素断言。
 
-尚未执行付费模型或生产 userData/`.scry` 验收。需要明确账号、模型、费用和数据范围授权后，再做真实混合 Provider、停止和证据收口验收。
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| `npm test`（默认 2 workers，含 shell） | 3476 passed / 4 skipped；shell 通过 | `/tmp/scry-workflow-m0-final-default-test.log` |
+| `npm run test:unit -- --maxWorkers=1` | 3476 passed / 4 skipped | `/tmp/scry-workflow-m0-final-unit-serial.log` |
+| 工作流、preload、Overview 等 focused 检查 | 14 文件 / 113 tests 通过 | `/tmp/scry-workflow-m0-final-focused-shell.log` |
+| `npm run test:renderer:ui` | 最终单次完整命令通过，包含 compaction、模型、终端、Credits、工作流、可信 IPC 与 Pi 历史 | `/tmp/scry-workflow-m0-final-renderer-ui-settled.log` |
+| `npm run check:cli-release` | typecheck、587 tests、CLI 构建与独立包 smoke 通过 | `/tmp/scry-workflow-m0-cli-release.log` |
+| `npm run pack:artifact` | build、打包、产物校验、隔离 Electron 安全/恢复/远程宿主 smoke 通过 | `/tmp/scry-workflow-m0-pack-artifact.log` |
 
-实现检查点 `32a70bd` 基于 `c405df0`（0.2.204），明确标注未完成验收。经用户授权，本分支已同步 `be907ef`（0.2.210），未包含或修改原工作区的未提交改动。尚未安装本分支，也不自动重启用户 App。完整门禁及真实 Provider 验收仍待完成，不能把主线版本号相同当作本分支已部署。
+默认全量测试经 timing lock 串行于其他测速任务执行；10 核机器 load 为 8.63 → 8.34，`highLoad: false`。这不是性能提升证据。4 个默认关闭的检查为性能相关性、billing-admin-real、P0 和 P1；没有启用真实账号探针。产物为本工作区 `dist/mac-arm64/Scry.app`，开发签名、未公证，不是已安装版本或正式发布包。
+
+本次修复位于测试层：空会话应隐藏汇总，有已观测 turn 且无压缩事件才显示计数 0，新增单测同时证明这两个状态；终端完整 App fixture 补充 typed 空 workflow bridge；模型选择的原生输入在 hover 后重读几何与命中状态，保持 5 秒上限，业务点击只派发一次。新增 `--capability-only` 用于隔离诊断，不改变默认完整 UI 范围。
+
+动画测量改为读取 Electron 新呈现帧，而不是把 rAF 后的 `capturePage` 当作新帧证明；使用设备比例裁剪，呈现事件有 5 秒失败期限并清理订阅，不强制重绘、不按像素结果重采样。减少动态效果检查先等待项目既有 CSS 合同允许的 ≤0.01ms 微过渡结束；不等待更长或无限动画，最终无动画/非透明断言不变。增加样式与失败截图诊断，没有放宽可见像素阈值。两个故意破坏的控制均按预期失败：移除可见渐变被像素检查拒绝，注入 1000ms 无限动画被减少动态效果检查拒绝；控制结束后校验源文件 SHA-256 恢复。证据：`/tmp/scry-workflow-m0-sidebar-frozen-control.log`、`/tmp/scry-workflow-m0-sidebar-motion-control.log`。
+
+### 先前失败记录（保留，不被最终通过抹去）
+
+- 同步前默认全量 unit：3462 passed / 11 failed / 4 skipped，四个原有文件；相同四文件在本分支与无 M0 的 `c405df0` 基线均串行通过 39 tests。这不是等价的默认全量基线对照。
+- 同步后第一次全量串行 unit：3474 passed / 1 failed / 4 skipped；5000 文件终端 diff 的生产 `beginGitTurnDiff` 返回 timeout。collector 与 `src/core/turn-recorder/git.ts` 相对 `be907ef` 未修改。当时 10 核机器 load 为 23.00 / 37.60 / 40.68，不能据此独立证明失败根因。随后该用例单独通过、整个 counter 文件 6 tests 通过，最终默认及串行全量也通过；未增加超时。完整 counter 证据：`/tmp/scry-workflow-m0-subprocess-file.log`。
+- 完整 UI 曾先因缺少 workflow fixture API 失败，再因空会话过时计数断言失败；后者已用上述状态区分修正。模型场景还发现旧坐标在布局改变后失效；第一版预等待遗漏 hover，诊断失败保留于 `/tmp/scry-workflow-m0-models-stable-input.log`，最终修复保留 hover 与新坐标命中检查。
+- 无 M0 的基线曾在 reduced-motion / scrollbar-color 失败；本分支也出现 sweep 截图 0 个可见变化像素。最终审查重放再次失败，这次诊断证明两个动画位置不同的采样 PNG 哈希完全相同（`/tmp/scry-workflow-m0-final-sidebar.log`），改用新呈现帧后像素检查通过；继而读到 scrollbar-color 的 0.01ms 过渡仍在结算（`/tmp/scry-workflow-m0-sidebar-presented-frame.log`），对应 `styles.css` 的既有减少动态效果合同。两者分别修正测量/状态读取边界，不修改生产动画，不用重跑通过替代修复。保留最初 `/tmp/scry-workflow-m0-baseline-capability-ui.log`、`/tmp/scry-workflow-m0-renderer-ui-continue-4.log` 与后续负向控制。
+- 一次完整 UI 在 steer 检查后被取消，没有计为整套通过；分段检查完成后，最终另行执行了上述单次完整 UI 命令。
+- Credits 首次因独立 worktree 缺少 SQLite 原生 binding 失败；仅重建已锁定的 `better-sqlite3` / `node-pty` 并执行现有 helper 准备，未更改依赖或全局放行安装脚本。证据：`/tmp/scry-workflow-m0-native-rebuild.log`。
+
+### 仍待真实验收
+
+尚未执行付费模型或生产 userData/`.scry` 验收。需要用户明确账号/profile、模型、费用上限和临时数据范围授权后，由后续验收执行真实混合 Provider、停止和证据收口检查。隐藏 fixture 不证明前台 OS 焦点行为、真实账号能力矩阵或生产 App 上的完整工作流。
+
+实现检查点 `32a70bd` 基于 `c405df0`（0.2.204），明确标注未完成验收。经用户授权，本分支已同步 `be907ef`（0.2.210），未包含或修改原工作区的未提交改动。本地代码门禁已通过，但真实 Provider 验收仍未完成，不能称完整 M0 产品验收已交付。尚未安装本分支，不自动重启用户 App，也未 push；不能把主线版本号相同当作本分支已部署。

@@ -67,18 +67,38 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
     await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
     const sweepImages = []
+    const sweepStates = []
+    const screenshots = []
     for (const time of [1100, 2100]) {
-      const rect = await read(`(async () => {
+      const state = await read(`(async () => {
         const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext');
         const animation = title.getAnimations().find(item => item.animationName === 'sb-activity-sweep');
         animation.pause();
         await animation.ready;
         animation.currentTime = ${time};
         const bounds = title.getBoundingClientRect();
-        return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
+        return { rect: { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) },
+          viewportWidth: innerWidth, currentTime: animation.currentTime, position: getComputedStyle(title).backgroundPositionX, fill: getComputedStyle(title).webkitTextFillColor };
       })()`)
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-      const image = await contents.capturePage(rect)
+      // rAF is a style/layout boundary, not proof that a frame was presented.
+      // Sample a newly presented frame, not capturePage's possibly old surface.
+      // Do not force a repaint or wait for a particular pixel result.
+      const image = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          contents.endFrameSubscription()
+          reject(new Error('No presented frame for working-title sample'))
+        }, 5000)
+        contents.beginFrameSubscription((frame) => {
+          clearTimeout(timeout)
+          contents.endFrameSubscription()
+          const scale = frame.getSize().width / state.viewportWidth
+          const rect = Object.fromEntries(Object.entries(state.rect).map(([key, value]) => [key, Math.round(value * scale)]))
+          resolve(frame.crop(rect))
+        })
+      })
+      sweepStates.push(state)
+      screenshots.push(image.toPNG())
       sweepImages.push(image.toBitmap())
       if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-sweep-${theme}-${time}.png`, image.toPNG())
     }
@@ -89,7 +109,13 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
       const delta = Math.max(...[0, 1, 2].map(channel => Math.abs(sweepImages[0][index + channel] - sweepImages[1][index + channel])))
       if (delta >= 40) visiblePixels++
     }
-    check(visiblePixels >= 20, `Long ${theme} working title sweep is too faint: ${visiblePixels} pixels changed by >=40/255`)
+    if (visiblePixels < 20) {
+      screenshots.forEach((png, index) => {
+        const path = require('node:path').join(require('node:os').tmpdir(), `scry-sidebar-animation-${theme}-${index}.png`)
+        require('node:fs').writeFileSync(path, png)
+      })
+    }
+    check(visiblePixels >= 20, `Long ${theme} working title sweep is too faint: ${visiblePixels} pixels changed by >=40/255; states=${JSON.stringify(sweepStates)}`)
   }
   await read(`${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('Retry failed webhook delivery')`)
@@ -145,7 +171,11 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     await wait(`matchMedia('(prefers-reduced-motion: reduce)').matches`)
     await read(`window.activityFixture.setPhase('working')`)
     await wait(`${group} === 'working'`)
-    const reducedState = await read(`({ reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, layout: ${layoutAnimations}.length, title: ${titleAnimations}.map(animation => ({ name: animation.animationName, property: animation.transitionProperty })), fill: getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor })`)
+    // The app's reduced-motion rule uses 0.01ms transitions so lifecycle events
+    // still fire. Flush styles and await only those micro-transitions; longer
+    // or infinite animations remain visible to the unchanged assertion below.
+    await read(`Promise.all(${titleAnimations}.filter(animation => animation.effect.getComputedTiming().duration <= 0.01).map(animation => animation.finished))`)
+    const reducedState = await read(`({ reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, layout: ${layoutAnimations}.length, title: ${titleAnimations}.map(animation => ({ name: animation.animationName, property: animation.transitionProperty, frames: animation.effect.getKeyframes() })), transition: getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).transition, scrollable: window.activityRow.querySelector('.sb-sesstext').scrollHeight > window.activityRow.querySelector('.sb-sesstext').clientHeight, fill: getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor })`)
     check(reducedState.reduced && reducedState.layout === 0 && reducedState.title.length === 0 && reducedState.fill !== 'rgba(0, 0, 0, 0)', `Reduced-motion still animates or hides the working title: ${JSON.stringify(reducedState)}`)
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'active' }] })
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')

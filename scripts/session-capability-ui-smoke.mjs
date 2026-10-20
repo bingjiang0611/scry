@@ -11,6 +11,7 @@ import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const capabilityOnly = process.argv.includes('--capability-only')
 const cacheOnly = process.argv.includes('--cache-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
@@ -25,7 +26,7 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
+const fixtures = capabilityOnly ? ['session-capability'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
@@ -335,7 +336,9 @@ async function exercise() {
   await waitFor(() => text('#overview .ctx-copy').trim() === '20.0k / 272.0k')
   document.querySelector('#empty').click()
   await waitFor(() => !text('#overview').includes('20.0k / 272.0k'))
-  check(text('#overview .overview-session-count') === '0', 'New session inherited the previous compaction count')
+  // Overview deliberately omits session aggregates when there are no loaded
+  // turns. Zero is valid for an observed turn, not an empty, unobserved session.
+  check(document.querySelector('#overview .overview-session-summary') == null, 'Empty session retained the previous session summary')
   return { compactContextCopy: true, contextEvidenceTooltip: true, liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
@@ -789,22 +792,29 @@ async function exerciseSessionModels(contents, screenshotPath) {
     }
   }
   const click = async (selector) => {
-    const point = await read(`(() => {
+    // Hover reveals project-row actions. Project/model reads may then shift
+    // layout: refresh geometry before dispatch, never replay a business click.
+    await read(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' })`)
+    const measure = () => read(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
-      if (!node) throw new Error('Missing model control: ' + ${JSON.stringify(selector)});
-      node.scrollIntoView({ block: 'center' });
       const rect = node.getBoundingClientRect();
       const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
-      return { x, y };
+      return { x, y, hit: node.contains(document.elementFromPoint(x, y)) };
     })()`)
-    contents.sendInputEvent({ type: 'mouseMove', ...point })
-    try {
-      await wait(`document.querySelector(${JSON.stringify(selector)}).contains(document.elementFromPoint(${point.x}, ${point.y}))`)
-    } catch (error) {
-      throw new Error(`${error.message}; hit=${await read(`document.elementFromPoint(${point.x}, ${point.y})?.outerHTML`)}`)
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      const before = await measure()
+      contents.sendInputEvent({ type: 'mouseMove', x: before.x, y: before.y })
+      await read('new Promise(resolve => requestAnimationFrame(resolve))')
+      const after = await measure()
+      if (after.hit && before.x === after.x && before.y === after.y) {
+        const point = { x: after.x, y: after.y }
+        contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+        contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+        return
+      }
     }
-    contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
-    contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+    throw new Error('Model control did not become stable and hit-testable: ' + selector)
   }
   const pickSession = async (text) => {
     const index = await read(`[...document.querySelectorAll('.sb-sess')].findIndex(node => node.textContent.includes(${JSON.stringify(text)}))`)
@@ -1412,7 +1422,7 @@ try {
             }
           }
         }
-        if (${summaryOnly}) {
+        if (${summaryOnly || capabilityOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()`)}))
           finish(result)
