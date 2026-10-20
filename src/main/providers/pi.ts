@@ -39,6 +39,7 @@ import { AgentRuntimeError } from '../run-outcome'
 import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv, shellEnvError } from '../claude-locate'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import type { ParsedTurn } from '../normalize'
+import { PerformanceTrace, performanceRecordingEnabled } from '../performance-timing'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 import { effortOption } from './run-controls'
@@ -439,15 +440,19 @@ class PiRpcProcess {
   private failed: Error | null = null
   private closing = false
   private closed = false
+  private catalogResponses = 0
   private readonly exited: Promise<void>
 
   private constructor(
     readonly child: ChildProcessWithoutNullStreams,
     readonly profile: PiAgentProfile,
-    private readonly maxFrameBytes = PI_RPC_MAX_FRAME_BYTES
+    private readonly maxFrameBytes = PI_RPC_MAX_FRAME_BYTES,
+    private readonly catalogTrace?: PerformanceTrace
   ) {
+    if (catalogTrace) child.once('spawn', () => catalogTrace.mark('spawned'))
     this.exited = new Promise((resolve) => child.once('close', () => {
       this.closed = true
+      catalogTrace?.mark('closed')
       resolve()
     }))
     child.stdin.on('error', (error) => this.fail(error))
@@ -468,14 +473,14 @@ class PiRpcProcess {
     })
   }
 
-  static start(profile: PiAgentProfile, args: string[], env: Record<string, string>, cwd?: string, maxFrameBytes = PI_RPC_MAX_FRAME_BYTES): PiRpcProcess {
+  static start(profile: PiAgentProfile, args: string[], env: Record<string, string>, cwd?: string, maxFrameBytes = PI_RPC_MAX_FRAME_BYTES, catalogTrace?: PerformanceTrace): PiRpcProcess {
     const child = spawn(profile.executable, args, {
       cwd: cwd || homedir(),
       env,
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe']
     })
-    return new PiRpcProcess(child, profile, maxFrameBytes)
+    return new PiRpcProcess(child, profile, maxFrameBytes, catalogTrace)
   }
 
   private receive(message: JsonRecord): void {
@@ -485,6 +490,12 @@ class PiRpcProcess {
       if (pending) {
         clearTimeout(pending.timer)
         this.pending.delete(message.id)
+        // Catalog timing sees only lifecycle/counts, never RPC data, command names or errors.
+        if (this.catalogTrace) {
+          this.catalogResponses++
+          if (this.catalogResponses === 1) this.catalogTrace.mark('first_response')
+          if (this.pending.size === 0) this.catalogTrace.mark('responses_received', { rpcResponses: this.catalogResponses })
+        }
         if (message.success === false) {
           pending.reject(new PiRpcCommandError(pending.command, String(message.error ?? 'Pi RPC command failed')))
         } else pending.resolve(message)
@@ -961,9 +972,12 @@ async function withPiRpc<T>(
   profile: PiAgentProfile,
   cwd: string | undefined,
   args: string[],
-  operation: (rpc: PiRpcProcess) => Promise<T>
+  operation: (rpc: PiRpcProcess) => Promise<T>,
+  catalogTrace?: PerformanceTrace
 ): Promise<T> {
-  const rpc = PiRpcProcess.start(profile, args, await piRpcEnvironment(profile), cwd)
+  const env = await piRpcEnvironment(profile)
+  catalogTrace?.mark('environment_ready')
+  const rpc = PiRpcProcess.start(profile, args, env, cwd, PI_RPC_MAX_FRAME_BYTES, catalogTrace)
   const off = rpc.onEvent((event) => {
     // Catalog/session operations have no interactive owner. Decline startup dialogs;
     // never select a setup action or approve a permission merely to obtain metadata.
@@ -988,6 +1002,7 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
   const key = JSON.stringify([profile.id, profile.executable, probeCwd])
   const pending = piProbesInFlight.get(key)
   if (pending) return pending
+  const trace = performanceRecordingEnabled() ? new PerformanceTrace('pi.catalog.probe', { provider: 'pi' }) : undefined
   const probe = withPiRpc(profile, probeCwd, piRpcArgs({ noSession: true, offline: true }), async (rpc) => {
     const [state, models, levels, commands] = await Promise.all([
       rpc.send({ type: 'get_state' }, PI_RPC_STARTUP_TIMEOUT_MS),
@@ -1011,6 +1026,12 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
     // Run/fork RPCs keep their existing graceful-close path and evidence convergence.
     rpc.terminate()
     return snapshot
+  }, trace).then(snapshot => {
+    trace?.finish()
+    return snapshot
+  }, (error: unknown) => {
+    trace?.finish(undefined, 'error')
+    throw error
   }).finally(() => { piProbesInFlight.delete(key) })
   piProbesInFlight.set(key, probe)
   return probe
@@ -2097,6 +2118,20 @@ export function createPiAdapter(options: {
     if (!profile) throw new Error(`Pi Agent Profile 不存在：${context.agentProfileId}`)
     return profile
   }
+  const readProbe = async (context: ProviderContext): Promise<PiProbe> => {
+    const trace = performanceRecordingEnabled() ? new PerformanceTrace('pi.catalog.read', { provider: 'pi' }) : undefined
+    try {
+      const profile = await profileForContext(context)
+      trace?.mark('profile_resolved')
+      const probe = await probePiAgent(profile, context.cwd)
+      trace?.mark('probe_settled')
+      trace?.finish()
+      return probe
+    } catch (error) {
+      trace?.finish(undefined, 'error')
+      throw error
+    }
+  }
   return {
     id: 'pi',
     runtimeProvider: 'pi_rpc',
@@ -2243,7 +2278,7 @@ export function createPiAdapter(options: {
     skills: {
       async list(context) {
         try {
-          return capabilityReady(context, 'read', skillCatalog(await probePiAgent(await profileForContext(context), context.cwd)))
+          return capabilityReady(context, 'read', skillCatalog(await readProbe(context)))
         } catch (error) {
           return capabilityUnavailable(context, 'unknown', `Pi Skill 目录探测失败：${String((error as Error).message)}`)
         }
@@ -2252,7 +2287,7 @@ export function createPiAdapter(options: {
     commands: {
       async list(context) {
         try {
-          return capabilityReady(context, 'read', commandCatalog(await probePiAgent(await profileForContext(context), context.cwd)))
+          return capabilityReady(context, 'read', commandCatalog(await readProbe(context)))
         } catch (error) {
           return capabilityUnavailable(context, 'unknown', `Pi 命令目录探测失败：${String((error as Error).message)}`)
         }
@@ -2261,7 +2296,7 @@ export function createPiAdapter(options: {
     runControls: {
       async read(context) {
         try {
-          return capabilityReady(context, 'read', runControlCatalog(await probePiAgent(await profileForContext(context), context.cwd)))
+          return capabilityReady(context, 'read', runControlCatalog(await readProbe(context)))
         } catch (error) {
           return capabilityUnavailable(context, 'unknown', `Pi 运行能力探测失败：${String((error as Error).message)}`)
         }

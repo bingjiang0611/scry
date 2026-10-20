@@ -30,6 +30,11 @@
         "ipc.agent:invalidateProviderContext",
         "ipc.agent:listCommands",
         "ipc.agent:listSkills",
+        "provider.catalog.commands",
+        "provider.catalog.run_controls",
+        "provider.catalog.skills",
+        "pi.catalog.read",
+        "pi.catalog.probe",
         "ipc.agent:mcpGuardScan",
         "ipc.agent:mcpSnapshot",
         "ipc.agent:testMcp",
@@ -37,7 +42,9 @@
       ],
       "sources": [
         "src/main/index.ts",
-        "src/main/context-admission.bench.ts"
+        "src/main/context-admission.bench.ts",
+        "src/main/providers/registry.ts",
+        "src/main/providers/pi.ts"
       ],
       "benchmarks": [
         "providers.catalog"
