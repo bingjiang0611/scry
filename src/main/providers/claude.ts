@@ -304,6 +304,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
   return {
     id: 'claude',
     runtimeProvider: 'claude_sdk',
+    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
     historicalContext: true,
     historyReader: true,
     continuationKey: (context) => {

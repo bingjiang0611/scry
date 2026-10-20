@@ -33,7 +33,15 @@
         "ipc.agent:mcpGuardScan",
         "ipc.agent:mcpSnapshot",
         "ipc.agent:testMcp",
-        "ipc.agent:reauthenticateMcp"
+        "ipc.agent:reauthenticateMcp",
+        "ipc.workflow:plan",
+        "ipc.workflow:approve",
+        "ipc.workflow:preview",
+        "ipc.workflow:start",
+        "ipc.workflow:stop",
+        "ipc.workflow:snapshot",
+        "ipc.workflow:list",
+        "ipc.workflow:cancelPlanning"
       ],
       "sources": [
         "src/main/index.ts",

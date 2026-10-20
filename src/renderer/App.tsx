@@ -12,6 +12,7 @@ import {
   type RuntimeProvider
 } from '@shared/runtime'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
+import { parseWorkflowRunCommand } from '@shared/workflow'
 import type { WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView, type ConversationProjection } from './components/ConversationView'
@@ -37,6 +38,8 @@ import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } fr
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
+import { WorkflowProgressPanel, type WorkflowLaunchRequest } from './components/WorkflowProgressPanel'
+import { WORKFLOW_COPY } from './constants/copy'
 import { PinnedSummaryHost, usePinnedSummaryVisibility } from './components/PinnedSummary'
 import type { RightSurfaceAction } from './right-surface'
 import { useSessionRightSurfaces } from './hooks/useSessionRightSurfaces'
@@ -778,6 +781,7 @@ export function App() {
   const viewRef = useRef(view)
   viewRef.current = view
   const integrations = useIntegrations(cwd, activeSessionId, projects, showMcp ? 'mcp' : showSkills ? 'skills' : null)
+  const [workflowLaunch, setWorkflowLaunch] = useState<WorkflowLaunchRequest | null>(null)
   useEffect(() => {
     const subscribe = window.scry.onDataUpdated
     if (typeof subscribe !== 'function') return
@@ -1441,6 +1445,15 @@ export function App() {
     ]
   )
 
+  const beginWorkflow = useCallback((command: string, workspace: string, binding?: WorkflowLaunchRequest['orchestrator']) => {
+    const request = currentRunRequest()
+    if (!binding && !request.providerId) throw new Error(WORKFLOW_COPY.unavailable)
+    setWorkflowLaunch({ id: crypto.randomUUID(), command, cwd: workspace, orchestrator: binding ?? {
+      role: 'orchestrator', providerId: request.providerId!, agentProfileId: request.agentProfileId,
+      requestedModel: request.model, permissionMode: request.permissionMode
+    } })
+  }, [currentRunRequest])
+
   const startPrompt = useCallback(
     async (
       text: string,
@@ -1448,6 +1461,24 @@ export function App() {
       request = currentRunRequest(),
       sourceDraftKey = draftKey
     ): Promise<void> => {
+      const normalizedText = text.trim()
+      const workflowGoal = parseWorkflowRunCommand(normalizedText)?.goal
+      if ((normalizedText === '/scry-workflow' || normalizedText.startsWith('/scry-workflow ')) && !workflowGoal) throw new Error(WORKFLOW_COPY.unsupported)
+      if (workflowGoal) {
+        if (slashCmds.some(command => command.name.replace(/^\//, '') === 'scry-workflow')) throw new Error(WORKFLOW_COPY.commandConflict)
+        const workspace = cwdRef.current
+        if (!workspace) throw new Error(WORKFLOW_COPY.workspaceRequired)
+        const binding = {
+          role: 'orchestrator' as const,
+          providerId: integrations.selectedProviderId,
+          ...(integrations.providerContext.agentProfileId ? { agentProfileId: integrations.providerContext.agentProfileId } : {}),
+          ...(integrations.runControls.model ? { requestedModel: integrations.runControls.model } : {}),
+          permissionMode: integrations.runControls.permissionMode
+        }
+        if (attachments.length > 0) throw new Error(WORKFLOW_COPY.attachmentsUnsupported)
+        beginWorkflow(text.trim(), workspace, binding)
+        return
+      }
       shouldStickToBottomRef.current = true
       const expectedSessionId = activeSessionIdRef.current
       // Capture the request before admission: native session capture may arrive
@@ -1490,7 +1521,8 @@ export function App() {
         }
       }
     },
-    [currentRunRequest, draftKey, integrations.rememberSessionModel, migrateRightSurface, selectSessionId, session.send]
+    [currentRunRequest, beginWorkflow, draftKey, slashCmds, integrations.providerContext.agentProfileId, integrations.runControls.model, integrations.runControls.permissionMode,
+      integrations.selectedProviderId, integrations.rememberSessionModel, migrateRightSurface, selectSessionId, session.send]
   )
 
   useEffect(() => {
@@ -2576,7 +2608,7 @@ export function App() {
             {conversationError && <p role="alert">{conversationError}</p>}
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={pinnedSummary.toggle} onTogglePanel={toggleOverviewPanel} />
-              <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />
+              <ConversationView onWorkflow={beginWorkflow} key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />
             </>
               : !conversationError && <p role="status">正在打开对话…</p>}
           </>
@@ -2638,6 +2670,12 @@ export function App() {
             <SessionChatView {...chatProps} />
           </>
         )}
+        {(view === 'chat' || view === 'conversation') && <WorkflowProgressPanel request={workflowLaunch} agents={integrations.agents}
+          cwd={view === 'conversation' ? logicalConversation?.cwd ?? null : cwd} onDismiss={() => setWorkflowLaunch(null)}
+          onNew={() => {
+            const workspace = view === 'conversation' ? logicalConversation?.cwd : cwd
+            if (workspace) beginWorkflow('/scry-workflow run', workspace)
+          }} /> }
         <PinnedSummaryHost
           visible={(view === 'chat' || view === 'conversation') && summaryVisible}
           cwd={cwd}

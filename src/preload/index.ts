@@ -65,6 +65,7 @@ import type {
   WorkspaceWriteRequest
 } from '../shared/workspace'
 import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
+import type { WorkflowApi } from '../shared/workflow-api'
 import type { DesktopRemoteAPI, DesktopHostAccess } from '../shared/desktop-remote'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ScanReport } from '../cli/mcpguard-core'
@@ -354,6 +355,21 @@ const api = {
   // A device-initiated (remote) run just wrote an AppSession into the catalog.
   // This is a refresh hint only (no active-run semantics), so the Mac session
   // list shows the phone's conversation live without corrupting local run state.
+  workflow: {
+    plan: (request: Parameters<WorkflowApi['plan']>[0]): ReturnType<WorkflowApi['plan']> => ipcRenderer.invoke('workflow:plan', request),
+    preview: (workflowId: string): ReturnType<WorkflowApi['preview']> => ipcRenderer.invoke('workflow:preview', workflowId),
+    approve: (approval: Parameters<WorkflowApi['approve']>[0]): ReturnType<WorkflowApi['approve']> => ipcRenderer.invoke('workflow:approve', approval),
+    start: (workflowId: string, approval: Parameters<WorkflowApi['start']>[1], commandId?: string): ReturnType<WorkflowApi['start']> => ipcRenderer.invoke('workflow:start', workflowId, { ...approval, ...(commandId ? { commandId } : {}) }),
+    stop: (workflowId: string): ReturnType<WorkflowApi['stop']> => ipcRenderer.invoke('workflow:stop', workflowId),
+    cancelPlanning: (commandId: string): ReturnType<WorkflowApi['cancelPlanning']> => ipcRenderer.invoke('workflow:cancelPlanning', commandId),
+    list: (cwd: string, cursor?: string): ReturnType<WorkflowApi['list']> => ipcRenderer.invoke('workflow:list', cwd, cursor),
+    snapshot: (workflowId: string): ReturnType<WorkflowApi['snapshot']> => ipcRenderer.invoke('workflow:snapshot', workflowId),
+    onProgress: (cb: Parameters<WorkflowApi['onProgress']>[0]): ReturnType<WorkflowApi['onProgress']> => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: Parameters<WorkflowApi['onProgress']>[0] extends (value: infer T) => void ? T : never): void => cb(progress)
+      ipcRenderer.on('workflow:progress', listener)
+      return () => ipcRenderer.removeListener('workflow:progress', listener)
+    }
+  } satisfies WorkflowApi,
   onRemoteSessionRecorded: (cb: (e: { cwd: string }) => void): (() => void) => {
     const l = (_: unknown, e: { cwd: string }): void => cb(e)
     ipcRenderer.on('remote:sessionRecorded', l)

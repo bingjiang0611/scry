@@ -1,0 +1,120 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { ProviderDescriptor, ProviderId } from '../shared/provider'
+import { MemoryWorkflowStore, type WorkflowPlanningIntent } from './workflow-store'
+import { WorkflowService, type WorkflowServiceOptions } from './workflow-service'
+import { WorkflowSlots } from './workflow-runner'
+
+const role = { role: 'orchestrator' as const, providerId: 'codex' as const }
+const worker = { role: 'worker' as const, providerId: 'pi' as const, agentProfileId: 'pi:default', requestedModel: { providerId: 'openai', id: 'fixture' } }
+const request = { commandId: 'plan-command', command: '/scry-workflow run inspect', workspace: '/fixture', orchestrator: role, roles: [worker] }
+const output = JSON.stringify({ body: { kind: 'sequence', blockId: 'root', blocks: [
+  { kind: 'call', blockId: 'scan', role: 'worker', prompt: 'inspect' },
+  { kind: 'return', blockId: 'finish', ref: { nodeId: 'scan' } }
+] } })
+function descriptor(id: ProviderId): ProviderDescriptor {
+  return { id, label: id, runtimeProvider: id === 'pi' ? 'pi_rpc' : 'codex_cli', transport: 'fixture', available: true,
+    capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } }
+}
+function fixture(store = new MemoryWorkflowStore(), changes: Partial<WorkflowServiceOptions> = {}) {
+  const plan = vi.fn(async () => ({ output }))
+  const execute = vi.fn<WorkflowServiceOptions['execute']>(() => ({ result: Promise.resolve({ runId: 'fixture', status: 'completed' as const, output: 'final', archiveRef: 'fixture/archive', settled: true }), stop: () => true }))
+  const slots = new WorkflowSlots(2)
+  const service = new WorkflowService({ store, slots, describeProviders: async () => [descriptor('pi'), descriptor('codex')], providerRegistered: () => true,
+    runControls: async () => ({ model: true, stop: true, identity: 'fixture-runtime', independentRun: true, terminalOutput: true }), plan, execute, ...changes })
+  return { service, plan, execute, slots, store }
+}
+
+describe('workflow service receipts, capabilities and recovery', () => {
+  it('does not invent execution capability from a matching model catalog', async () => {
+    const { service, plan } = fixture(undefined, { runControls: async () => ({ model: true, stop: false, identity: 'catalog-only', independentRun: false, terminalOutput: false }) })
+    await expect(service.planCommand(request)).rejects.toThrow()
+    expect(plan).not.toHaveBeenCalled()
+  })
+  it('queued planning and durably settled planning never become phantom unknown slots on restart', async () => {
+    const store = new MemoryWorkflowStore()
+    const base = { role: 'orchestrator', providerId: 'codex', workspace: '/fixture', goal: 'inspect', createdAt: 1 }
+    await store.savePlanningIntent({ ...base, workflowId: 'queued', status: 'queued' })
+    await store.savePlanningIntent({ ...base, workflowId: 'returned', status: 'running', scopeSettled: true, result: { output: 'durable result' } })
+    const { service, slots, plan } = fixture(store)
+    expect((await service.list('/fixture')).unresolvedPlanning).toBe(0)
+    expect(slots.active).toBe(0)
+    expect((await store.loadPlanningIntent('queued'))?.status).toBe('stopped')
+    expect((await store.loadPlanningIntent('returned'))?.status).toBe('failed')
+    expect(plan).not.toHaveBeenCalled()
+  })
+  it('persists planner results before releasing shared capacity', async () => {
+    let ready!: () => void
+    let release!: () => void
+    const entered = new Promise<void>(resolve => { ready = resolve })
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    class DelayedStore extends MemoryWorkflowStore {
+      override async savePlanningIntent(intent: WorkflowPlanningIntent) {
+        await super.savePlanningIntent(intent)
+        if (intent.status === 'running' && intent.result) { ready(); await barrier }
+      }
+    }
+    const slots = new WorkflowSlots(1)
+    const { service } = fixture(new DelayedStore(), { slots })
+    const pending = service.planCommand(request)
+    await entered
+    let otherStarted = false
+    const other = slots.withSlot(async () => { otherStarted = true }, 'other-root')
+    expect(slots.active).toBe(1)
+    expect(otherStarted).toBe(false)
+    release()
+    const preview = await pending
+    await other
+    expect(otherStarted).toBe(true)
+    expect((await service.preview(preview.workflowId)).programRevision).toBe(preview.programRevision)
+  })
+  it('one command calls the planner once, including duplicate concurrent delivery', async () => {
+    const { service, plan } = fixture()
+    const [a, b] = await Promise.all([service.planCommand(request), service.planCommand(request)])
+    expect(a.workflowId).toBe(b.workflowId)
+    expect(plan).toHaveBeenCalledTimes(1)
+    await expect(service.planCommand({ ...request, command: '/scry-workflow run different' })).rejects.toThrow('commandId')
+  })
+  it('a recovered planning receipt never charges for the same command again', async () => {
+    const { service, store } = fixture()
+    const a = await service.planCommand(request)
+    const reopened = fixture(store)
+    const b = await reopened.service.planCommand(request)
+    expect(b.workflowId).toBe(a.workflowId)
+    expect(reopened.plan).not.toHaveBeenCalled()
+  })
+  it('unsettled outcomes retain capacity on EVERY restart, not just first recovery', async () => {
+    const { service, store } = fixture()
+    const preview = await service.planCommand(request)
+    const record = (await store.load(preview.workflowId))!
+    record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId: 'root:scan', attemptId: 'pending-attempt', role: 'worker', providerId: 'pi', createdAt: 1 })
+    record.progress.dispatchAttempts = 1
+    await store.save(record)
+    const first = fixture(store)
+    expect((await first.service.snapshot(preview.workflowId))?.state).toBe('unknown')
+    expect(first.slots.active).toBe(1)
+    const second = fixture(store)
+    expect((await second.service.snapshot(preview.workflowId))?.state).toBe('unknown')
+    expect(second.slots.active).toBe(1)
+    expect(second.execute).not.toHaveBeenCalled()
+  })
+  it('a completed plan can run a Pi worker and returns only its explicit report', async () => {
+    const { service, execute } = fixture()
+    const preview = await service.planCommand(request)
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: Date.now() }
+    await service.approve(approval)
+    const result = await service.start(preview.workflowId, approval, 'start-command')
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({ role: worker })
+    expect(result.finalReport).toBe('final')
+    expect(result.state).toBe('completed')
+  })
+  it('a changed capability refuses dispatch even after a valid preview', async () => {
+    let available = true
+    const { service, execute } = fixture(undefined, { runControls: async () => ({ model: available, stop: available, identity: 'fixture-runtime', independentRun: available, terminalOutput: available }) })
+    const preview = await service.planCommand(request)
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: Date.now() }
+    await service.approve(approval)
+    available = false
+    await expect(service.start(preview.workflowId, approval)).rejects.toThrow()
+    expect(execute).not.toHaveBeenCalled()
+  })
+})

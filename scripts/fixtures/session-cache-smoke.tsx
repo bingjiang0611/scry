@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from '../../src/renderer/App'
+import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import type { ProjectMeta, SessionHistoryPage, TraceBacklogState, TraceBatchReceipt } from '../../src/preload'
 import type { ActiveRun, TraceEvent } from '../../src/shared/trace'
 import type { ProviderContext } from '../../src/shared/provider'
@@ -38,6 +39,7 @@ function page(sessionId: string): SessionHistoryPage {
     offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' }
 }
 Object.defineProperty(window, 'scry', { value: {
+  workflow: emptyWorkflowBridge,
   activeRun: async () => null, activeRuns: async () => [],
   focusedRunSnapshot: async () => { recoveryReads++; update(); return null },
   onTrace: (callback: (events: TraceEvent[], receipt?: TraceBatchReceipt) => void) => {

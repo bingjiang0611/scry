@@ -122,7 +122,8 @@ const invokeChannels = {
   remoteRevokeDevice: 'remote:device:revoke',
   remoteDesktopHostStatus: 'remote:desktop:status',
   remoteDesktopHostInvite: 'remote:desktop:invite',
-  remoteDesktopHostDisable: 'remote:desktop:disable'
+  remoteDesktopHostDisable: 'remote:desktop:disable',
+  workflow: 'workflow'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const desktopChannels = {
@@ -178,11 +179,14 @@ describe('preload IPC boundary', () => {
     expect(electron.send).toHaveBeenCalledWith('app:rendererReady')
 
     for (const [method, channel] of Object.entries(invokeChannels)) {
+      if (method === 'workflow') continue
       electron.invoke.mockClear()
       await callableApi[method]()
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
     }
+    await api.workflow.snapshot('workflow-test')
+    expect(electron.invoke).toHaveBeenLastCalledWith('workflow:snapshot', 'workflow-test')
   })
 
   it('exposes only fixed conversation operations with their scoped arguments', async () => {

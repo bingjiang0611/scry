@@ -870,6 +870,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
   return {
     id: 'qoder',
     runtimeProvider: 'qoder_cli',
+    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
     describe: async () => {
       const path = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
       return {

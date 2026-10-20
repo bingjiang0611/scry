@@ -219,6 +219,15 @@ export interface SessionEvidenceFacet {
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
+  /** Explicit fresh-run driver contract, NOT native Workflow support or a paid
+   * account/model probe. Missing declarations are unavailable to Scry workflows.
+   * Settlement covers the registered call, not escaped processes or shared servers. */
+  readonly workflowExecution?: {
+    independentRun: boolean
+    terminalOutput: boolean
+    scopedStop: boolean
+    scopeSettlement: boolean
+  }
   /**
    * Stable identity of the actual transport/auth home used by run(). The key is
    * opaque and may be conservative (a credential refresh can require fresh

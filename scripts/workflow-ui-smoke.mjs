@@ -1,0 +1,127 @@
+import { spawn } from 'node:child_process'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { build } from 'vite'
+import electron from 'electron'
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const temp = await mkdtemp(join(tmpdir(), 'scry-workflow-ui-'))
+try {
+  await mkdir(join(temp, 'home'))
+  await build({ configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    resolve: { alias: { '@shared': join(root, 'src/shared') } }, define: { 'process.env.NODE_ENV': '"production"' },
+    build: { outDir: join(temp, 'renderer'), emptyOutDir: true, copyPublicDir: false, minify: false,
+      lib: { entry: join(root, 'scripts/fixtures/workflow-smoke.tsx'), formats: ['iife'], name: 'WorkflowFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } } })
+  await writeFile(join(temp, 'renderer', 'entry.html'), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>`)
+  const main = join(temp, 'main.cjs')
+  await writeFile(main, `
+    const { app, BrowserWindow } = require('electron')
+    const assert = require('node:assert/strict')
+    const { writeFile } = require('node:fs/promises')
+    const enforceHiddenWindows = require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})
+    if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
+    enforceHiddenWindows(app)
+    app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
+    app.whenReady().then(async () => {
+      const win = new BrowserWindow({ width: 1280, height: 960, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } })
+      const read = expression => win.webContents.executeJavaScript(expression)
+      const wait = expression => read('(async () => { const until = performance.now() + 5000; while (!(' + expression + ')) { if(performance.now()>until) throw new Error("UI condition: " + ' + JSON.stringify(expression) + '); await new Promise(resolve => requestAnimationFrame(resolve)) } return true })()')
+      const choose = character => { for (const type of ['keyDown', 'char', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: character }) }
+      const click = async selector => {
+        const rect = await read('(() => { const e=document.querySelector(' + JSON.stringify(selector) + '); if(!e)throw new Error("Missing control"); e.scrollIntoView({block:"center"}); const r=e.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)} })()')
+        win.webContents.sendInputEvent({ type: 'mouseDown', ...rect, button: 'left', clickCount: 1 })
+        win.webContents.sendInputEvent({ type: 'mouseUp', ...rect, button: 'left', clickCount: 1 })
+      }
+      try {
+        await win.loadFile(${JSON.stringify(join(temp, 'renderer', 'entry.html'))})
+        await wait('document.querySelector("[data-workflow-action=plan]") && !document.querySelector("[data-workflow-action=plan]").disabled')
+        assert.equal(await read('window.workflowFixture.counters.catalogs'), 1, 'four identical role reads must coalesce')
+        // Native Chromium key input, not DOM value assignment or programmatic click.
+        await read('document.querySelector("[data-workflow-role=orchestrator] select").focus()')
+        choose('p')
+        await wait('document.querySelector("[data-workflow-role=orchestrator] select").value === "pi:fixture"')
+        await wait('document.querySelectorAll("[data-workflow-role=orchestrator] select")[2].options.length === 2')
+        assert.equal(await read('document.querySelector("[data-workflow-action=plan]").disabled'), true)
+        await read('document.querySelectorAll("[data-workflow-role=orchestrator] select")[2].focus()')
+        choose('e')
+        await read('document.querySelectorAll("[data-workflow-role=orchestrator] select")[1].focus()')
+        choose('e')
+        await wait('!document.querySelector("[data-workflow-action=plan]").disabled')
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        await writeFile('/tmp/scry-workflow-m0-ui-config-wide.png', (await win.webContents.capturePage()).toPNG())
+        win.setSize(430, 900)
+        await wait('innerWidth === 430')
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        assert.equal(await read('Array.from(document.querySelectorAll(".workflow-role")).every(e=>e.getBoundingClientRect().right <= innerWidth)'), true)
+        await writeFile('/tmp/scry-workflow-m0-ui-config-narrow.png', (await win.webContents.capturePage()).toPNG())
+        win.setSize(1280, 960)
+        await wait('innerWidth === 1280')
+        await click('[data-workflow-action=plan]')
+        await wait('window.workflowFixture.counters.plans === 1 && document.querySelector("#native-permission")')
+        const selected = await read('JSON.parse(document.body.dataset.workflowRequest)')
+        assert.equal(selected.orchestrator.providerId, 'pi')
+        assert.equal(selected.orchestrator.agentProfileId, 'pi:fixture')
+        assert.equal(selected.orchestrator.requestedModel.providerId, 'different-vendor')
+        assert.equal(selected.roles.find(role=>role.role==="worker").providerId, 'codex')
+        await click('#allow-native-permission')
+        await wait('window.workflowFixture.counters.permissionClicks === 1')
+        await click('#parent-composer')
+        win.webContents.insertText('STILL_RESPONSIVE')
+        await wait('document.querySelector("#parent-composer").value.includes("STILL_RESPONSIVE")')
+        await read('window.workflowFixture.finishPlan()')
+        await wait('document.querySelector("[data-workflow-action=review]")')
+        assert.equal(await read('document.activeElement.id'), 'parent-composer', 'completed planning must not steal focus')
+        assert.equal(await read('window.workflowFixture.counters.starts'), 0)
+        await click('[data-workflow-action=review]')
+        await wait('document.querySelector("[data-workflow-action=approve]")')
+        assert.equal(await read('document.body.textContent.includes("ui-revision")'), true)
+        await click('[data-workflow-action=approve]')
+        await wait('window.workflowFixture.counters.approvals === 1')
+        await click('[data-workflow-action=approve]')
+        assert.equal(await read('window.workflowFixture.counters.approvals'), 1)
+        assert.equal(await read('window.workflowFixture.counters.starts'), 0)
+        await read('window.workflowFixture.finishApproval()')
+        await wait('window.workflowFixture.counters.starts === 1 && document.querySelector("[data-workflow-id=ui-workflow]")')
+        await click('[data-workflow-id=ui-workflow] summary')
+        await wait('Array.from(document.querySelectorAll("button")).some(e=>e.textContent.includes("再次停止"))')
+        const stopSelector = '[data-workflow-id=ui-workflow] > button:last-of-type'
+        await click(stopSelector)
+        await wait('window.workflowFixture.counters.stops === 1')
+        assert.equal(await read('document.querySelector("[data-workflow-id=ui-workflow]").textContent.includes("未知")'), true)
+        await read('window.workflowFixture.rehydrate()')
+        await wait('document.querySelector("[data-workflow-id=ui-workflow]")')
+        assert.equal(await read('window.workflowFixture.counters.starts'), 1, 'rehydration must not restart')
+        assert.equal(win.isVisible(), false)
+        assert.equal(win.isFocused(), false)
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        await writeFile('/tmp/scry-workflow-m0-ui-wide.png', (await win.webContents.capturePage()).toPNG())
+        win.setSize(430, 900)
+        await wait('innerWidth === 430')
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        await writeFile('/tmp/scry-workflow-m0-ui-narrow.png', (await win.webContents.capturePage()).toPNG())
+        console.log('SCRY_WORKFLOW_UI_RESULT=' + JSON.stringify({ counters: await read('window.workflowFixture.counters'), nativeInput: true, focusRetained: true, rehydratedWithoutReplay: true, visible: win.isVisible() }))
+        app.exit(0)
+      } catch(error) {
+        console.error(error)
+        console.error(await read('JSON.stringify({keys:window.workflowFixture?.keys,counters:window.workflowFixture?.counters,active:document.activeElement?.outerHTML?.slice(0,500),values:Array.from(document.querySelectorAll("[data-workflow-role=orchestrator] select")).map(e=>e.value)})'))
+        app.exit(1)
+      }
+    })
+  `)
+  await new Promise((resolve, reject) => {
+    const child = spawn(electron, [main, '--disable-gpu'], { env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = ''
+    const timer = setTimeout(() => child.kill('SIGTERM'), 30_000)
+    child.stdout.on('data', data => { output += data })
+    child.stderr.on('data', data => { output += data })
+    child.once('error', error => { clearTimeout(timer); reject(error) })
+    child.once('exit', code => {
+      clearTimeout(timer)
+      const result = output.match(/^SCRY_WORKFLOW_UI_RESULT=(.+)$/m)?.[1]
+      if (code === 0 && result) { console.log(result); resolve() }
+      else reject(new Error('Workflow UI smoke failed (' + code + '): ' + output))
+    })
+  })
+} finally { await rm(temp, { recursive: true, force: true }) }

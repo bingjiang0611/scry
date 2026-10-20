@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from '../../src/renderer/App'
+import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import type { AgentStartRequest, AgentRunControlCatalog } from '../../src/shared/runtime'
 import type { CapabilityEnvelope, ProviderContext } from '../../src/shared/provider'
 import '../../src/renderer/styles.css'
@@ -25,6 +26,7 @@ document.addEventListener('keyup', (event) => {
 const agents = [{ id: 'pi:rotom', name: 'Pi · Rotom', path: '/fixture/pi', bin: 'pi', health: { state: 'ready', transport: 'rpc' } }]
 const noopSubscribe = () => () => {}
 Object.defineProperty(window, 'scry', { value: {
+  workflow: emptyWorkflowBridge,
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   listProjects: async () => [], recentFolders: async () => [],

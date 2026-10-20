@@ -2100,6 +2100,7 @@ export function createPiAdapter(options: {
   return {
     id: 'pi',
     runtimeProvider: 'pi_rpc',
+    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
     historicalContext: true,
     ...(options.historyExtensionPath ? { historyReader: true as const } : {}),
     async continuationKey(context: ProviderContext): Promise<string> {

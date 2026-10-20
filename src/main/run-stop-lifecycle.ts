@@ -103,6 +103,18 @@ export class RunStopLifecycle {
     return state
   }
 
+  /**
+   * Explicit user stop-again. It re-sends the cooperative signal without resetting the
+   * escalation window. Ordinary duplicate requests keep the idempotent request() semantics.
+   */
+  repeat(target: StopLifecycleTarget): AgentStopState | undefined {
+    const entry = this.entries.get(target.runId)
+    if (!entry || entry.state.providerSettled) return undefined
+    this.invoke(target.runId, 'interrupt', target.interrupt)
+    this.options.publish(entry.state)
+    return entry.state
+  }
+
   /** Provider runtime 已 settle：终止有证据了，取消所有未触发的升级。 */
   settle(runId: string): AgentStopState | undefined {
     const entry = this.entries.get(runId)

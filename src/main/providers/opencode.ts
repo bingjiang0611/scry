@@ -1145,6 +1145,7 @@ export function createOpenCodeAdapter(
   return {
     id: 'opencode',
     runtimeProvider: 'opencode_server',
+    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
     describe: async () => {
       const path = executable()
       const current = [...managers.values()].map((manager) => manager.state).find((state) => state != null)

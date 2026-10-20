@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from '../../src/renderer/App'
+import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import type { ActiveRun } from '../../src/shared/trace'
 import type { AgentStartRequest } from '../../src/shared/runtime'
 import type { ProviderContext } from '../../src/shared/provider'
@@ -44,6 +45,7 @@ const agents = [
   { id: 'pi:second', name: 'Pi second', path: '/fixture/pi', bin: 'pi' }
 ]
 Object.defineProperty(window, 'scry', { value: {
+  workflow: emptyWorkflowBridge,
   activeRun: async () => focusedRun ? runs.get(focusedRun) : null,
   activeRuns: async () => [...runs.values()],
   onTrace: (cb: (event: unknown) => void) => subscribe('trace', cb),

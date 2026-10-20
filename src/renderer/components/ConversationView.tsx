@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import type { ActiveRun } from '@shared/trace'
 import type { ConversationForkRequest, ConversationMetadataChange, ConversationPage, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
 import { attachmentsAfterSuccessfulSubmit, composerDraftKey, inputAttachments, type ComposerDraftStore } from '../composer-drafts'
-import { CONVERSATION_COPY } from '../constants/copy'
+import { CONVERSATION_COPY, WORKFLOW_COPY } from '../constants/copy'
+import { parseWorkflowRunCommand, type WorkflowRoleBinding } from '@shared/workflow'
+import { providerIdForAgentId } from '@shared/runtime'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
 import type { Turn } from '../format'
@@ -15,7 +17,7 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 export interface ConversationProjection { conversationId: string; turns: Turn[]; busy: boolean }
 
 /** Same chat/composer, separate durable ownership from each native session. */
-export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation }: {
+export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation, onWorkflow }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
   chatProps: ComponentProps<typeof SessionChatView>
@@ -23,6 +25,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   onChanged: () => void
   onProjection: (projection: ConversationProjection) => void
   onOpenConversation: (conversation: ConversationSummary) => void
+  onWorkflow?: (command: string, cwd: string, binding: WorkflowRoleBinding) => void
 }) {
   const draftKey = composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })
   const drafts = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot)
@@ -160,6 +163,18 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     const draft = draftStore.getSnapshot().get(draftKey)
     const prompt = draft?.input ?? ''
     const attachments = draft?.attachments ?? []
+    if (!original && parseWorkflowRunCommand(prompt)) {
+      try {
+        if (chatProps.slashCmds.some(command => command.name.replace(/^\//, '') === 'scry-workflow')) throw new Error(WORKFLOW_COPY.commandConflict)
+        if (attachments.length) throw new Error(WORKFLOW_COPY.attachmentsUnsupported)
+        const providerId = providerIdForAgentId(chatProps.selectedAgentId)
+        if (!onWorkflow || !providerId) throw new Error(WORKFLOW_COPY.unavailable)
+        onWorkflow(prompt, conversation.cwd, { role: 'orchestrator', providerId,
+          ...(providerId === 'pi' ? { agentProfileId: chatProps.selectedAgentId } : {}),
+          requestedModel: chatProps.runControls?.model, permissionMode: chatProps.runControls?.permissionMode })
+      } catch (error) { setError(message(error)) }
+      return
+    }
     const submitted = original?.attachments ?? attachments.map(({ id, previewUrl }) => ({ id, previewUrl }))
     if (busyRef.current || forkAttempt || (!original && (blockedReason || attempt || (!prompt.trim() && !attachments.length) || chatProps.sendBlockedReason))) return
     busyRef.current = true

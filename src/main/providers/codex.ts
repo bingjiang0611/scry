@@ -911,6 +911,7 @@ export function createCodexAdapter(
   return {
     id: 'codex',
     runtimeProvider: 'codex_cli',
+    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
     historicalContext: true,
     historyReader: true,
     continuationKey: (context) => {

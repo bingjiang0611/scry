@@ -1,0 +1,42 @@
+import { createHash } from 'node:crypto'
+import type { CapabilityEnvelope, ProviderContext, ProviderDescriptor } from '../shared/provider'
+import type { ProviderAdapter } from './providers/types'
+import type { AgentRunControlCatalog } from '../shared/runtime'
+import type { WorkflowRoleBinding } from '../shared/workflow'
+
+/** Catalog membership alone never establishes fresh-session/stop semantics. */
+export function workflowBindingControls(role: WorkflowRoleBinding, context: ProviderContext,
+  descriptor: ProviderDescriptor, envelope: CapabilityEnvelope<AgentRunControlCatalog>,
+  execution: ProviderAdapter['workflowExecution'], enabled: boolean) {
+  if (!enabled || envelope.state !== 'ready' || !envelope.data || !descriptor.available) {
+    return { model: false, stop: false, identity: '', independentRun: false, terminalOutput: false }
+  }
+  const catalog = envelope.data
+  const requested = role.requestedModel
+  const model = requested
+    ? catalog.models.some(option => option.model.id === requested.id && (!requested.providerId || option.model.providerId === requested.providerId))
+    : catalog.models.length > 0
+  const permission = catalog.permissions.some(option => option.id === (role.permissionMode ?? 'default'))
+  return { model: model && permission, stop: execution?.scopedStop === true && execution.scopeSettlement,
+    independentRun: execution?.independentRun === true, terminalOutput: execution?.terminalOutput === true,
+    identity: workflowCapabilityFingerprint(context, descriptor, catalog, execution) }
+}
+
+/** Fresh-run capability snapshot, NOT a native resume/account identity.
+ * Credential namespaces are neither saved nor inferred here. Native permission,
+ * executable/config trust and process ownership remain in the App start chain.
+ * All registered Providers can supply this without pretending resume parity.
+ */
+export function workflowCapabilityFingerprint(
+  context: ProviderContext,
+  descriptor: ProviderDescriptor,
+  catalog: AgentRunControlCatalog,
+  execution?: ProviderAdapter['workflowExecution']
+): string {
+  const models = catalog.models.map(option => ({ model: { id: option.model.id, providerId: option.model.providerId }, isDefault: option.isDefault ?? false,
+    efforts: option.efforts.map(effort => [effort.id, effort.isDefault ?? false]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))) }))
+    .sort((a, b) => JSON.stringify(a.model).localeCompare(JSON.stringify(b.model)))
+  return createHash('sha256').update(JSON.stringify({ providerId: context.providerId, profile: context.agentProfileId,
+    cwd: context.cwd, runtimeProvider: descriptor.runtimeProvider, path: descriptor.path, version: descriptor.version,
+    transport: descriptor.transport, execution, models, permissions: catalog.permissions.map(permission => permission.id).sort() })).digest('hex')
+}

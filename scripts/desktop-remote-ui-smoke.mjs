@@ -35,6 +35,7 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
+import { emptyWorkflowBridge } from ${JSON.stringify(join(root, 'scripts/fixtures/empty-workflow-bridge.ts'))}
 import { refreshRemoteCatalog } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
 import { refreshDesktopConnections } from ${JSON.stringify(join(root, 'src/renderer/hooks/useDesktopConnections.ts'))}
 import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
@@ -224,6 +225,7 @@ const api = {
 }
 const noopSubscribe = () => () => {}
 window.scry = {
+  workflow: emptyWorkflowBridge,
   // Same minimal full-App bridge contract as session-selection-smoke.tsx.
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,

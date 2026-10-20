@@ -131,6 +131,13 @@ import { createDesktopHostReader } from './remote/desktop-host-reader'
 import { createDesktopWorkbench } from './remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
+import { FileWorkflowStore } from './workflow-store'
+import { WorkflowService } from './workflow-service'
+import { registerWorkflowIpc } from './workflow-ipc'
+import { workflowPermissionResponse } from './workflow-question'
+import { workflowBindingControls } from './workflow-capability'
+import { WorkflowSlots, WorkflowScopeError } from './workflow-runner'
+import type { WorkflowRoleBinding } from '../shared/workflow'
 import { ReverseTunnelTransport } from './remote/relay-client'
 import { createRelayConnect } from './remote/relay-connect'
 import { createRelayConnectWS } from './remote/relay-connect-ws'
@@ -2768,8 +2775,17 @@ function boundedLiveRun(run: ActiveRun): ActiveRun {
   return { ...run, items: sanitizeToolEvents(run.items, LIVE_TOOL_CONTENT_POLICY, 'live_renderer') }
 }
 
+interface WorkflowTerminalResult {
+  runId: string
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'unknown' | 'blocked'
+  items: TraceEvent[]
+  externalSessionId?: string
+  archiveRef?: string
+  settled: true
+}
+
 interface AppRunStartOptions {
-  origin?: 'local' | 'remote'
+  origin?: 'local' | 'remote' | 'workflow'
   runId?: string
   stopSignal?: AbortSignal
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
@@ -2779,10 +2795,13 @@ interface AppRunStartOptions {
   onSession?: (externalSessionId: string) => void
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
+  expectedWorkflowCapability?: string
+  onTerminal?: (result: WorkflowTerminalResult) => void | Promise<void>
 }
 
 async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<{ runId: string } | RemoteRunCompletion> {
   const isRemoteRun = options.origin === 'remote'
+  const isWorkflowRun = options.origin === 'workflow'
   const request = normalizeAgentStartRequest(payload)
   const providerId = request.providerId
   const agentProfileId = request.agentProfileId
@@ -2804,7 +2823,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   const cwd = request.cwd
     ? (isRemoteRun ? resolveRemoteProjectDirectory(request.cwd) : resolveKnownProjectDirectory(request.cwd))
     : currentCwd
-  if (!isRemoteRun && request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
+  if (!isRemoteRun && !isWorkflowRun && request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
     throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -2850,7 +2869,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       nextAction: '等待浏览器认证完成或超时后再发送'
     })
   }
-  const admissionKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
+  const admissionKey = isWorkflowRun
+    ? `workflow:${providerId}:${agentProfileId ?? 'default'}:${randomUUID()}`
+    : providerContextKey(providerId, cwd ?? '', agentProfileId)
   const managedConversation = options.managedConversation
   const admissionKeys = managedConversation
     ? [admissionKey, `conversation:${managedConversation.conversationId}`]
@@ -2870,17 +2891,17 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     const contextKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
     const scopedSessionKey = (sessionId: string): string =>
       providerSessionKey(providerId, catalogCwd, sessionId, agentProfileId)
-    const expectedSessionId = isRemoteRun ? (request.expectedExternalSessionId ?? null) : request.expectedExternalSessionId
+    const expectedSessionId = isRemoteRun ? (request.expectedExternalSessionId ?? null) : isWorkflowRun ? null : request.expectedExternalSessionId
     // expectedExternalSessionId=null 是 renderer 对“必须新建会话”的显式要求。
     // 即使较早的 agent:newSession IPC 仍在路上，这里也先原子清空 main 的旧上下文，
     // 再捕获 revision/resume，避免把新提示词误判为要投递到旧会话。
-    if (!managedConversation && !isRemoteRun && expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
+    if (!managedConversation && !isRemoteRun && !isWorkflowRun && expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
       resetSessionContext(contextKey)
     }
     let contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
     let resume = managedConversation
       ? (managedConversation.resumeSessionId ?? undefined)
-      : isRemoteRun ? request.expectedExternalSessionId ?? undefined : sessionByContext.get(contextKey)
+      : isRemoteRun ? request.expectedExternalSessionId ?? undefined : isWorkflowRun ? undefined : sessionByContext.get(contextKey)
     const forkSourceSessionId = !isRemoteRun && request.forkLastTurn ? resume : undefined
     const restartSourceSessionId = !isRemoteRun && request.restartLastTurn && typeof expectedSessionId === 'string'
       ? expectedSessionId
@@ -2924,7 +2945,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         nextAction: '草稿已保留；确认当前会话后重新发送'
       }
     )
-    if (!managedConversation && !isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+    if (!managedConversation && !isRemoteRun && !isWorkflowRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
       !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...catalogAliases()]))) {
       throw contextChangedError()
     }
@@ -2952,11 +2973,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     // Renderer 会在 turnDone 后立即投递队列下一条；此时 Provider 已结束，但 diff/archive
     // 仍可能在收口。等待真实 settled 后再继续，避免稳定拒绝并破坏 FIFO。
     contextRevision = sessionRevisionByContext.get(contextKey) ?? 0
-    if (!managedConversation && !isRemoteRun) resume = sessionByContext.get(contextKey)
+    if (!managedConversation && !isRemoteRun && !isWorkflowRun) resume = sessionByContext.get(contextKey)
     const latestContextRuns = runs.unsettledStates().filter((run) =>
       run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
     )
-    if (!managedConversation && !isRemoteRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
+    if (!managedConversation && !isRemoteRun && !isWorkflowRun && (!(request.restartLastTurn && expectedRestartSourceMatches(expectedSessionId, resume, request.restartLastTurn.replaceRunId)) &&
       !expectedSessionMatches(expectedSessionId, resume, () => [...contextRuns, ...latestContextRuns, ...catalogAliases()]))) {
       throw contextChangedError()
     }
@@ -3194,13 +3215,13 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     sessionByContext.delete(contextKey)
     sessionAliasesByContext.delete(contextKey)
   }
-  const committedResume = managedConversation ? resume : isRemoteRun ? resume : sessionByContext.get(contextKey)
+  const committedResume = managedConversation ? resume : isRemoteRun ? resume : isWorkflowRun ? undefined : sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) =>
     run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
   )
   const committedExpectedSessionId = request.forkLastTurn || request.restartLastTurn ? resume ?? null : expectedSessionId
-  if (!managedConversation && !isRemoteRun && (
+  if (!managedConversation && !isRemoteRun && !isWorkflowRun && (
     committedResume !== resume || committedRevision !== contextRevision ||
     !expectedSessionMatches(committedExpectedSessionId, committedResume, () => [...committedRuns, ...catalogAliases()])
   )) throw contextChangedError()
@@ -3294,7 +3315,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       runtimeProvider,
       billingProvider: result?.billingProvider
     })) return
-    win?.webContents.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
+    if (!isWorkflowRun) win?.webContents.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
   }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
@@ -3340,7 +3361,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     const liveEvent = sanitizeToolEvents([ev], LIVE_TOOL_CONTENT_POLICY, 'live_renderer')[0]
     appendCoalescedTrace(runState.items, ev)
     ingestion.enqueue(ev, liveEvent)
-    if (ev.backgroundWork && rendererCanReceive()) win?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
+    if (ev.backgroundWork && !isWorkflowRun && rendererCanReceive()) win?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChange()
@@ -3417,7 +3438,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       runtimePrompt = prepared.prompt
       managedInputTextHash = prepared.inputTextHash
     } else runtimePrompt = providerAttachmentPrompt(providerId, runtimePrompt, attachments)
-    if (resume) {
+    if (!isWorkflowRun && resume) {
       win?.webContents.send('agent:session', {
         runId,
         sessionId: resume,
@@ -3426,7 +3447,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         providerId,
         agentProfileId
       })
-    } else {
+    } else if (!isWorkflowRun) {
       win?.webContents.send('agent:session', {
         runId,
         sessionId: runId,
@@ -3667,9 +3688,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   const publishSessionId = (sessionId: string | undefined): void => {
     if (!sessionId) return
     observedSessionId = sessionId
-    if (isRemoteRun) options.onSession?.(sessionId)
+    if (isRemoteRun || isWorkflowRun) options.onSession?.(sessionId)
     diffContextKey = sessionDiffBaselines.promote(diffContextKey, sessionBaselineKey(contextKey, sessionId), sessionId)
-    if (!managedConversation && !isRemoteRun && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
+    if (!managedConversation && !isRemoteRun && !isWorkflowRun && (sessionRevisionByContext.get(contextKey) ?? 0) === contextRevision) {
       sessionByContext.set(contextKey, sessionId)
       sessionAliasesByContext.set(contextKey, new Map([[runId, sessionId]]))
     }
@@ -3721,6 +3742,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       cwd ? { providerId, cwd, sessionId: runState.externalSessionId } : undefined, input.messageId),
     emit
   )
+  let workflowInteractionBlocked = false
   let interrupted = options.stopSignal?.aborted === true
   // 双流事件日志：每个 run 一个 writer，native 与 canonical 共享同一文件和序号。
   // 未通过环境变量启用时为 undefined，所有调用点直接跳过。
@@ -3762,6 +3784,13 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       const identity = await providerRegistry.continuationKey({ providerId, cwd: catalogCwd, agentProfileId })
       if (identity !== managedConversation.target.continuationKey) throw new Error('Provider 接续身份在启动准备期间变化，未发送；请重新预览')
     } else await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
+    if (isWorkflowRun) {
+      const controls = await workflowRunControls({ role: 'worker', providerId, agentProfileId,
+        requestedModel: request.model, permissionMode: options.permissionModeOverride ?? request.permissionMode }, catalogCwd)
+      if (!controls.model || !controls.stop || !controls.independentRun || !controls.terminalOutput || !options.expectedWorkflowCapability || controls.identity !== options.expectedWorkflowCapability) {
+        throw new Error('工作流的 Provider 入口或模型/权限目录在启动准备期间变化，未发送；请重新规划并确认')
+      }
+    }
     const mcpExecution = authorizedMcpExecution(mcpExecutionSnapshot)
     if (managedConversation && runId !== managedConversation.runId) {
       throw new Error('统一对话 runId 与 Provider 投递 runId 不一致')
@@ -3813,6 +3842,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       },
       onExternalSessionId: publishSessionId,
       requestUserInput: async (question, signal) => {
+        if (isWorkflowRun) return workflowPermissionResponse(question, signal,
+          (request, permissionSignal) => userQuestionBroker.request({ ...request, providerId }, permissionSignal),
+          () => { workflowInteractionBlocked = true; requestRemoteStop() })
         if (!isRemoteRun) return userQuestionBroker.request({ ...question, providerId }, signal)
         if (!options.requestUserInput) throw new Error('remote_interactive_input_unsupported')
         const openedAtMs = Date.now()
@@ -3912,7 +3944,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     },
     forceKillScope: () => h?.forceKillScope,
     stopBackgroundTask: (taskId) => h?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
-    steer: (input) => managedConversation
+    steer: (input) => isWorkflowRun
+      ? Promise.resolve({ status: 'unavailable', message: '工作流运行中不接受业务输入；请发起独立任务。' })
+      : managedConversation
       ? Promise.resolve({ status: 'unavailable', message: '统一对话暂不支持 Steer；追加输入尚无完整的顺序投影，未发送。' })
       : steering.submit(input),
     cwd,
@@ -3945,7 +3979,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     // registration so it either rejects this start or can stop the registered run.
     await sourceControl.admitRun(cwd, () => {
       assertSessionNotArchived([request.expectedExternalSessionId, resume, runId])
-      runs.register(runState, control, isRemoteRun || managedConversation ? { focus: false } : undefined)
+      runs.register(runState, control, isRemoteRun || isWorkflowRun || managedConversation ? { focus: false } : undefined)
     })
   } catch (error) {
     if (isRemoteRun) {
@@ -3960,11 +3994,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
   startPerf.mark('run_registered')
   firstTextPerf.mark('run_registered')
-  if (!isRemoteRun && !managedConversation) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
+  if (!isRemoteRun && !isWorkflowRun && !managedConversation) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(win?.isFocused()))
   // `agent:start` can also be invoked through the preload bridge (for example by
   // the regression runner), so publish the authoritative focused snapshot after
   // registration and before the Provider can emit trace or questions.
-  if (!isRemoteRun && !managedConversation) {
+  if (!isRemoteRun && !isWorkflowRun && !managedConversation) {
     try {
       win?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
     } catch (error) {
@@ -4110,7 +4144,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
       const recordingPolicy = providerRecordingPolicy('completed', r.recordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
-        if (isRemoteRun) remoteRecordingFailed = true
+        if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
         const { message, category } = recordingPolicy.rendererError
         runState.error = message
         runState.errorHint = recordingRecoveryHint
@@ -4138,7 +4172,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         // 恢复 archive/CLI；diff 会明确记为 unavailable，而不是伪造零值。
         await persistTerminalProgress(completionArchiveArgs)
       } catch (error) {
-        if (isRemoteRun) remoteRecordingFailed = true
+        if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
         const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录快照失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
@@ -4174,7 +4208,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         terminalPerf.mark('archive_committed')
         await settleManagedConversation(completionStatus)
       } catch (error) {
-        if (isRemoteRun) remoteRecordingFailed = true
+        if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
         const message = `${terminalOutcomeLabel(completionStatus)}，但 Scry 精确记录提交失败：${String((error as Error).message)}`
         runState.error = message
         runState.errorHint = recordingRecoveryHint
@@ -4338,7 +4372,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       await ingestion.liveIdle()
       const recordingPolicy = providerRecordingPolicy(stopped ? 'interrupted' : 'failed', providerRecordingFailure)
       if (!recordingPolicy.allowCanonicalCommit) {
-        if (isRemoteRun) remoteRecordingFailed = true
+        if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
         const { message: recordingMessage, category } = recordingPolicy.rendererError
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
@@ -4362,7 +4396,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       try {
         await persistTerminalProgress(terminalArchiveArgs)
       } catch (progressError) {
-        if (isRemoteRun) remoteRecordingFailed = true
+        if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
         const recordingMessage = `Provider 已结束，但 Scry 精确记录快照失败：${String((progressError as Error).message)}`
         runState.error = recordingMessage
         runState.errorHint = recordingRecoveryHint
@@ -4399,7 +4433,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         recordingBlockedSessions.delete(scopedSessionKey(storageSessionId))
         await settleManagedConversation(stopped ? 'interrupted' : 'failed')
       } catch (archiveError) {
-        if (isRemoteRun) remoteRecordingFailed = true
+        if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
         exactRecorded = false
         recordingBlockedSessions.set(
           scopedSessionKey(storageSessionId),
@@ -4458,7 +4492,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         category: 'recording',
         hint: '保留 userData 与 workspace/.scry 后重启 Scry 检查归档'
       })
-      if (isRemoteRun) remoteRecordingFailed = true
+      if (isRemoteRun || isWorkflowRun) remoteRecordingFailed = true
       markTerminalAttention(
         terminalArchiveArgs?.sessionId ?? observedSessionId ?? resume ?? runId,
         !interrupted
@@ -4488,6 +4522,22 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         releaseSessionBaseline?.()
         resolveSettled?.()
         void eventLog?.close()
+        if (isWorkflowRun) {
+          const settledStatus = terminalStatus ?? (interrupted ? 'interrupted' : 'failed')
+          const durable = !workflowInteractionBlocked && !remoteRecordingFailed && settledStatus === 'completed' && terminalArchiveCommitted && terminalArchiveArgs?.sessionId
+          try {
+            await options.onTerminal?.({
+              runId,
+              status: workflowInteractionBlocked ? 'blocked' : durable ? 'completed' : settledStatus === 'interrupted' ? 'interrupted' : settledStatus === 'failed' ? 'failed' : 'unknown',
+              items: [...runState.items],
+              ...(observedSessionId ? { externalSessionId: observedSessionId } : {}),
+              ...(terminalArchiveCommitted && terminalArchiveArgs?.sessionId ? { archiveRef: `run:${runId}:session:${terminalArchiveArgs.sessionId}` } : {}),
+              settled: true
+            })
+          } catch (error) {
+            console.error('[scry] workflow terminal callback failed:', runId, error)
+          }
+        }
       } finally {
         if (isRemoteRun) {
           if (!remoteCompletion) {
@@ -4514,11 +4564,121 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   }
 }
 
+function workflowOutput(items: TraceEvent[]): { output?: string; actualModel?: string } {
+  const output = flattenTraceItems(items).filter((chunk) => chunk.kind === 'output').map((chunk) => chunk.text).join('')
+  const result = [...items].reverse().find((item) => item.kind === 'harness' && item.stage === 'result')
+  const actualModel = result?.modelUsage?.length === 1 ? result.modelUsage[0].model : undefined
+  return { ...(output ? { output } : {}), ...(actualModel ? { actualModel } : {}) }
+}
+
+function workflowStartRequest(role: WorkflowRoleBinding, prompt: string, cwd: string): AgentStartRequest {
+  return {
+    prompt,
+    cwd,
+    providerId: role.providerId,
+    agentId: role.providerId,
+    ...(role.agentProfileId ? { agentProfileId: role.agentProfileId } : {}),
+    ...(role.requestedModel ? { model: role.requestedModel } : {}),
+    ...(role.permissionMode ? { permissionMode: role.permissionMode } : {}),
+    expectedExternalSessionId: null
+  }
+}
+
+const workflowCatalogReads = new Map<string, ReturnType<typeof providerRegistry.runControls>>()
+async function workflowRunControls(role: WorkflowRoleBinding, workspace: string, descriptor?: Awaited<ReturnType<typeof providerRegistry.describe>>[number]) {
+  const adapter = providerRegistry.get(role.providerId)
+  const context = { providerId: role.providerId, cwd: workspace, agentProfileId: role.agentProfileId }
+  const key = providerContextKey(role.providerId, workspace, role.agentProfileId)
+  let pending = workflowCatalogReads.get(key)
+  if (!pending) {
+    pending = withProviderOperation(role.providerId, () => providerRegistry.runControls(context), role.agentProfileId)
+      .finally(() => { workflowCatalogReads.delete(key) })
+    workflowCatalogReads.set(key, pending)
+  }
+  const [controls, entry] = await Promise.all([pending, descriptor ?? adapter.describe()])
+  return workflowBindingControls(role, context, entry, controls, adapter.workflowExecution, !providerRegistry.isDisabled(role.providerId))
+}
+
+const workflowStore = new FileWorkflowStore(app.getPath('userData'))
+const workflowSlots = new WorkflowSlots()
+const workflowService = new WorkflowService({
+  store: workflowStore,
+  slots: workflowSlots,
+  loadConcurrency: () => workflowStore.readConcurrency(),
+  describeProviders: async providerId => providerId ? [await providerRegistry.get(providerId).describe()] : providerRegistry.describe(),
+  providerRegistered: (providerId) => providerRegistry.isRegistered(providerId) && !providerRegistry.isDisabled(providerId),
+  runControls: workflowRunControls,
+  plan: async ({ workflowId, role, roles, goal, workspace, signal }) => {
+    const runId = `workflow-plan-${workflowId}`
+    let resolve: ((result: { output: string; actualModel?: string; archiveRef?: string }) => void) | undefined
+    let reject: ((error: unknown) => void) | undefined
+    const completion = new Promise<{ output: string; actualModel?: string; archiveRef?: string }>((res, rej) => { resolve = res; reject = rej })
+    try {
+      await startAppRun(workflowStartRequest(role,
+        `Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.\nYou are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, and exactly one final return. Every node must include kind and a unique blockId. A call is {kind:"call",blockId,role,prompt,inputRefs?}; role must be one of orchestrator, worker, reviewer, summarizer. inputRefs may reference only an earlier committed call output by {nodeId}; never reference a parallel sibling or future node. The final root return is {kind:"return",blockId,ref:{nodeId:"..."}} and must reference one completed call output. No JavaScript, eval, imports, shell, command, path, loops, conditionals, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Never exceed 1000 Agent calls. Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}. Goal:\n${goal}`,
+        workspace), {
+        origin: 'workflow', runId, stopSignal: signal, expectedWorkflowCapability: role.runtimeIdentity,
+        onTerminal: (terminal) => {
+          const result = workflowOutput(terminal.items)
+          const hasTerminalEvidence = terminal.items.some(item => item.kind === 'harness' && item.stage === 'result')
+          if (terminal.status === 'completed' && result.output && hasTerminalEvidence) resolve?.({ output: result.output, actualModel: result.actualModel, archiveRef: terminal.archiveRef })
+          else reject?.(new WorkflowScopeError(`编排 Provider 未完成：${terminal.status}`, terminal.settled))
+        }
+      })
+    } catch (error) { reject?.(error) }
+    return completion
+  },
+  execute: ({ attemptId, role, prompt, workspace }) => {
+    const runId = `workflow-${attemptId}`
+    let startedRunId: string | undefined
+    let stopRequested = false
+    const stopController = new AbortController()
+    let resolve: ((result: import('./workflow-runner').WorkflowProviderExecutionResult) => void) | undefined
+    let reject: ((error: unknown) => void) | undefined
+    const result = new Promise<import('./workflow-runner').WorkflowProviderExecutionResult>((res, rej) => { resolve = res; reject = rej })
+    void startAppRun(workflowStartRequest(role, prompt, workspace), {
+      origin: 'workflow', runId, stopSignal: stopController.signal, expectedWorkflowCapability: role.runtimeIdentity,
+      onTerminal: (terminal) => {
+        const observed = workflowOutput(terminal.items)
+        const hasTerminalEvidence = terminal.items.some((item) => item.kind === 'harness' && item.stage === 'result')
+        resolve?.({ runId, status: terminal.status === 'blocked' ? 'blocked' : terminal.status === 'completed' && hasTerminalEvidence ? 'completed' : terminal.status === 'interrupted' ? 'stopped' : terminal.status === 'failed' ? 'failed' : 'unknown',
+          ...observed, ...(terminal.status === 'blocked' ? { error: 'unsupported_interaction' } : {}),
+          ...(terminal.archiveRef ? { archiveRef: terminal.archiveRef } : {}), settled: terminal.settled })
+      }
+    }).then((started) => {
+      if ('runId' in started) {
+        startedRunId = started.runId
+        if (stopRequested) requestRunStop(started.runId)
+      }
+    }).catch((error) => reject?.(error))
+    return { runId, result, stop: () => {
+      if (!stopRequested) {
+        stopRequested = true
+        stopController.abort()
+        return true
+      }
+      return startedRunId ? requestRunStopAgain(startedRunId) : true
+    } }
+  },
+  onProgress: (progress) => {
+    if (rendererCanReceive()) win?.webContents.send('workflow:progress', progress)
+  }
+})
+
 /**
  * 带 commandId 的启动命令是幂等的：重投（连按发送、renderer 重放、远端重试）拿回
  * 第一次的 runId，而不是起第二轮，也不是收到「同一会话已在运行」的误导性错误。
  */
 const agentStartReceipts = new CommandReceipts<{ runId: string } | RemoteRunCompletion>()
+
+registerWorkflowIpc({
+  register: (channel, listener) => handleTrusted(channel, (_event, ...args: unknown[]) => listener(...args)),
+  service: workflowService,
+  resolveWorkspace: resolveKnownProjectDirectory,
+  assertCurrentWorkspace: workspace => {
+    if (currentCwd && workspace !== canonicalExistingDirectory(currentCwd)) throw new Error('工作流工作区与当前授权目录不一致')
+  }
+})
 /** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
 const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
 handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
@@ -4639,6 +4799,23 @@ function requestRunStop(runId: string): boolean {
   })
   userQuestionBroker.cancelRun(stopping.runId)
   return true
+}
+
+function requestRunStopAgain(runId: string): boolean {
+  const entry = runs.get(runId)
+  if (!entry || entry.state.done) return false
+  const stopping = entry.control
+  const state = runStopLifecycle.repeat({
+    runId: stopping.runId,
+    providerId: stopping.providerId,
+    agentProfileId: stopping.runState.agentProfileId,
+    runtimeProvider: stopping.runtimeProvider,
+    interrupt: stopping.interrupt,
+    forceKill: stopping.forceKill,
+    forceKillScope: stopping.forceKillScope
+  })
+  userQuestionBroker.cancelRun(stopping.runId)
+  return Boolean(state)
 }
 
 // Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
@@ -5196,6 +5373,7 @@ app.on('before-quit', (event) => {
   if (quitCleanupStarted) return
   isShuttingDown = true
   quitCleanupStarted = true
+  workflowService.close()
   // Release the remote subsystem's durable leases; a restart re-acquires and
   // replays any recorded-but-undispatched intents.
   const remoteCleanup = Promise.all([remoteHostService?.dispose(), desktopRemoteClient?.dispose()]).then(() => undefined)

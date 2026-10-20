@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from '../../src/renderer/App'
+import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import type { ActiveRun } from '../../src/shared/trace'
 import type { ProviderContext } from '../../src/shared/provider'
 import type { ProjectMeta } from '../../src/preload'
@@ -53,6 +54,7 @@ const update = () => {
   status.textContent = JSON.stringify({ cwd, activeReads, activeListReads, adoptedRuns, historyReads, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
 }
 const bridge = {
+  workflow: emptyWorkflowBridge,
   activeRun: () => {
     activeReads += 1
     update()
