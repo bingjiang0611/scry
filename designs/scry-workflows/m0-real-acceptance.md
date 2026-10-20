@@ -2,7 +2,7 @@
 
 ## 授权与范围
 
-用户明确选择 Pi·Rotom + Codex、当前默认模型、当前账号、预算无上限；另行明确允许 Pi `full_access`。发生故障后，用户明确选择保留原现场，另开独立临时 workspace/userData 验 Codex 停止，不清空原未知容量，也不重发原任务。
+用户明确选择 Pi·Rotom + Codex、当前默认模型、当前账号、预算无上限；另行明确允许 Pi `full_access`。发生故障后，用户明确选择保留原现场，另开独立临时 workspace/userData 验 Codex 停止，不清空原未知容量，也不重发原任务。之后用户再次授权在最终冻结构建上独立重放完整混合链，使用新的临时现场和命令 ID。
 
 - Pi：现有 profile `pi:564f7a994e4e34da`，Rotom `0.1.26-verified.263e5f7b`，模型引用 `{providerId: qoder, id: ultimate}`。Scry Provider 是 Pi，不冒充独立 Qoder CLI。
 - Codex：目录实际默认 `gpt-6.1-sol`，原生 `default` 审批。未替换模型或 Provider。
@@ -15,6 +15,7 @@
 
 - `A=/tmp/scry-workflow-m0-real.n9qssN`
 - `B=/tmp/scry-workflow-m0-codex-stop.w0Hpde`（用户批准的独立 Codex 停止现场）
+- `C=/tmp/scry-workflow-m0-final-mixed.a6gur3`（`d4c5f94` 对应最终产物的完整混合补验；测试并发 2）
 
 A 的测试并发设为 2；B 使用该机器的原生默认 10。两者为独立 App userData / 内核，不声称共享一个 OS 全局池，也没有放宽 A 的上限或清除其预留。
 
@@ -27,7 +28,7 @@ A 的测试并发设为 2；B 使用该机器的原生默认 10。两者为独�
 | `81e4b63` | `ee2699e178f44ae4e895a9eb9f83c520341c84b0141232ae368c13d163ed50b8` | 首次 Pi 规划用了 `children`，被严格校验拒绝，无执行批准 |
 | `prompt-fix` | `9e563404abe3aa58226240aa3ad5ccc5a9a5ca5b8a09fd2d3f1cc5156dcc0c35` | 返回合法程序，但 Codex 冷启动健康快照过早，预览 unavailable，无子任务执行 |
 | `readiness-fix` | `298c84415ff23b7eb01ffe5acc419daa2857e393c2b1f962b594724e8d5f6ba9` | 混合完成链通过；后续第一次停止试验因控制器断连中断，未发出 stop，不计为停止成功 |
-| `projection-fix` | `f5df6ff9a92da971f32536dbd8d6e98636aae9fd80902a6c5efea69e7754c61f` | 恢复只观察、未知容量显示、Pi 实际生成后停止、B 中 Codex 实际生成后停止通过 |
+| `projection-fix` | `f5df6ff9a92da971f32536dbd8d6e98636aae9fd80902a6c5efea69e7754c61f` | 恢复只观察、未知容量显示、Pi / Codex 分别生成后停止通过；随后 C 的完整混合链与完成后重启只观察也通过 |
 
 ### 混合完成链（readiness-fix）
 
@@ -53,6 +54,21 @@ Pi 规划 → 精确 revision 批准 → parallel(Pi worker, Codex reviewer)
 | Codex / gpt-6.1-sol | B 中先观察到真实生成，再发一次 stop；最终 `stopped + settled`，共享占用归零，新增 active run 为零 | `B/cancel-codex-result.json` |
 
 两项均核对了 Provider result 来源的 exact `interrupted` canonical record，不以 stop acknowledgment 代替终态。没有把两次分别停止宣称为一次双 Provider 同时停止验收。
+
+### 最终构建完整混合补验（projection-fix / C）
+
+本轮没有改生产代码或重新构建。执行前后均校验最终 `app.asar` 为上表的 `f5df…c61f`，源版本为 `d4c5f94`，CLI/profile 路径和默认模型未变化；没有复用或重发 A 的任务。
+
+- Root：`workflow-172cf34ea38769d40cf53723390b6d6cf9193a624d6ee40240b03e00cba224e5`。
+- revision：`f541d9e94f874f71ffde5de220a9da2fcc498526b67d0b1954a4d478dea9d16b`。
+- 1 次真实 Pi 规划，精确 revision 批准，随后 3 次子调用：parallel(Pi worker, Codex reviewer) → Codex summarizer → 显式 return。全部 durable execution intent 时间不早于批准时间。
+- 3 个子 outcome 均 `completed + settled`，实际观测模型为 `ultimate` / `gpt-6.1-sol` / `gpt-6.1-sol`。共享槽位峰值 2、结束占用 0；请求的 Model vendor ID `qoder` 不被错误当作 Scry Provider ID。
+- 独立审计连接了包括规划器在内的 4 个不同 Native session、4 个 archive 和 4 个 canonical record：终态均 exact `provider_result`，模型一致，工具证据均 `available + []`。worker/reviewer 各自输出与其合成标记逐字匹配，summarizer 输出与最终报告均精确为两个标记行，不只检查字符串存在于用户提示。
+- `inputRefs` 恰好引用两个已完成并行子节点，最终 return 指向 summarizer；workflow progress 不发布中间 `output`。父焦点仍只做开始/结束采样，不宣称验证 OS 前台焦点。
+- 再启动同一隔离 userData，只读 snapshot/list：仍 completed、派发次数 3、占用 0、active run 0、canonical record 数保持 4，无自动重发。
+- `scry turns verify` 和 `scry doctor` 均 exit 0，doctor pending 0 / records 4 / errors 0。verify 仍有 4 条记录的新身份字段 legacy_unset advisory；costUsd 仍不可用，不作零费用结论。
+- C 在执行前后对 A 的两条 unknown workflow 文件和 Codex managed `open.json` 做 SHA-256 比较，3 个文件逐字节不变。没有清空、降级或释放 A 的故障状态。
+- 证据：`C/happy-result.json`、`C/audit.json`、`C/reopen.json`、`C/turns-verify.log`、`C/doctor.log`。本轮只新增这 4 个真实 canonical record / archive，未改变生产实现；下表代码门禁仍对应相同运行代码，不为纯文档补验重跑全套。
 
 ## 发现并修复的产品问题
 
@@ -95,7 +111,7 @@ Pi 规划 → 精确 revision 批准 → parallel(Pi worker, Codex reviewer)
 ## 清理与剩余动作
 
 - 已关闭本轮隔离 App / 观察宿主；逐 PID 校验后停止 Rotom 内置 computer-use 扩展留在临时 HOME 的 helper。这个 helper 在目录读取时即会启动，不能把 Scry 注册的 run scope 说成覆盖所有扩展后代。
-- 两处 HOME/userData 无本轮残留打开文件进程；4 份临时登录态副本已删除，保留 source hash、脚本、冻结产物、archive、records、unknown 和 pending（`A/cleanup.json`）。原始凭据和原用户 App 数据未改写。
-- 混合完成的直接真实证据属于 `readiness-fix`；最终 `projection-fix` 只改了槽位投影，已有直接真实证据是恢复观察和两项停止。没有在最终产物再重复完整 3-call 混合完成链；若要升级为该产物完整端到端验收，应由下一轮独立授权重放一个新合成计划，不能重发 A 中未知任务。
+- A/B/C 的隔离进程均已关闭；共 6 份临时登录态副本已删除，保留 source hash、脚本、冻结产物、archive、records、unknown 和 pending（`A/cleanup.json`、`C/cleanup.json`）。C 整个临时目录无残留打开文件进程，A 的 3 个故障关键文件哈希不变。原始凭据和原用户 App 数据未改写。
+- 最终 `projection-fix` 已补齐新的 3-call 混合完成链和完成后的重启只观察；不再借上一构建的混合结果声称最终构建成功。本次指定账号/模型、隐藏 App + 生产 IPC 范围的最小混合链补验完成，不扩大为所有 Provider / 所有真实 UI 路径的产品验收。
 - A 的未知/待记录结果仍需原 Provider 权威结果才能恢复，当前 M0 没有手工清空并重跑通道。后续 owner 应先取权威证据并按 exact-managed 合同收口；若要优化前门拒绝的保守 unknown，应先补结构化“未派发”证据合同，不能靠字符串匹配释放容量。
 - 本轮证明了指定模型组合的真实能力，不证明五 Provider / 所有模型 parity，也不代表完整 v10 / M5 或前台真实 UI 产品验收已交付。未 push、未安装、未重启用户 App。

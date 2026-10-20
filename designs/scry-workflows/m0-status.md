@@ -74,8 +74,8 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 
 真实调用发现并修复三个问题：规划提示遗漏容器 `blocks`、冷目录初始化前抓取旧健康状态、公共进度返回历史槽位计数。最新代码默认 `npm test` 为 3478 passed / 4 skipped（shell 通过），typecheck、打包安全 gate、相关原生输入 UI 和 trace.delivery 计数 ratchet 通过。机器高负载，不作毫秒提升结论。
 
-已核对真实混合完成链的 3 个子调用和独立 session / 显式报告，以及最终产物上 Pi、Codex 各自生成后的 `stopped + settled`；5 个关键 outcome 均连接到原生 archive 与 exact provider-result canonical record。12 个 canonical JSON / 13 个 archive 已解析，CLI verify 通过，但新身份/role/task-link 字段仍有 legacy_unset advisory，费用没有 costUsd，均不冒充完整或零费用。
+此前已核对混合完成链和最终产物上 Pi、Codex 各自生成后的 `stopped + settled`，5 个关键 outcome 与 12 个 canonical JSON / 13 个 archive 有独立核对。用户再次授权后，已在最终 `projection-fix` 冻结构建（`d4c5f94` 运行代码）新建独立现场补齐完整混合链：3 个子调用全部收敛、共享占用峰值 2 后归零；4 个不同 Native session 的规划/执行均与本轮 4 个 canonical record、4 个 archive 精确匹配，最终报告逐字等于两行真实标记。完成后重新启动仅观察，派发次数仍为 3、records 仍为 4、active run 0，无自动重发；CLI verify / doctor 通过，pending 为 0。
 
-旧停止控制器断连后的现场保留 2 个 unknown reservation 和 1 个 pending managed turn，不清空、不降级证据、不重发。经用户批准的独立 Codex 停止现场 pending 为 0；两处临时凭据副本已清理、隔离进程已关闭，记录和冻结产物保留。混合完成证据属于 readiness-fix 构建；最终 projection-fix 的直接真实范围是恢复观察与两个分别停止，尚未重复完整混合完成链。前台 OS 焦点、完整 UI 操作和五 Provider 能力矩阵也不在本次真实验收范围。
+旧停止控制器断连后的现场仍保留 2 个 unknown reservation 和 1 个 pending managed turn，不清空、不降级证据、不重发；本轮前后两条 unknown workflow 与 managed open 文件的 3 个哈希均不变。三个临时现场的进程和共 6 份登录态副本已清理，记录和冻结产物保留。本次指定账号/模型、隐藏 App + 生产 IPC 范围的最终构建混合补验完成；前台 OS 焦点、完整 UI 操作和五 Provider 能力矩阵不在此范围。canonical 新身份/role/task-link 字段仍有 legacy_unset advisory，费用没有 costUsd，均不冒充完整或零费用。
 
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。
