@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
+import { lstat, open, readdir, readFile, realpath, type FileHandle } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { LoadedSessionTurn } from './session-history'
 import { classifyTool, type TraceEvent } from '../shared/trace'
@@ -25,17 +25,26 @@ const recoveryNotice = '来自 Pi 原生会话记录；Scry 运行归档缺失�
 // leaf ancestry so abandoned branches do not leak into the displayed timeline.
 export function parsePiNativeHistory(content: string, identity: { sessionId: string; cwd: string }): LoadedSessionTurn[] {
   const entries = content.split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line) as NativeEntry)
-  const header = entries.shift()
-  if (header?.type !== 'session' || header.version !== 3 || header.id !== identity.sessionId ||
-      header.cwd !== identity.cwd) throw new Error('Pi 原生会话身份或格式不匹配')
+  validateHeader(entries.shift(), identity)
   const byId = new Map<string, NativeEntry>()
   for (const entry of entries) {
     if (typeof entry.id !== 'string' || byId.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
     byId.set(entry.id, entry)
   }
-  const chain: NativeEntry[] = []
+  const turns: LoadedSessionTurn[] = []
+  for (const entry of nativeBranch(byId, entries.at(-1))) appendNativeEntry(turns, entry)
+  return turns
+}
+
+function validateHeader(header: NativeEntry | undefined, identity: { sessionId: string; cwd: string }): void {
+  if (header?.type !== 'session' || header.version !== 3 || header.id !== identity.sessionId ||
+      header.cwd !== identity.cwd) throw new Error('Pi 原生会话身份或格式不匹配')
+}
+
+function nativeBranch<T extends Pick<NativeEntry, 'id' | 'parentId'>>(byId: Map<string, T>, leaf: T | undefined): T[] {
+  const chain: T[] = []
   const visited = new Set<string>()
-  let entry = entries.at(-1)
+  let entry = leaf
   while (entry) {
     if (visited.has(entry.id!)) throw new Error('Pi 原生会话分支存在循环')
     visited.add(entry.id!)
@@ -44,44 +53,44 @@ export function parsePiNativeHistory(content: string, identity: { sessionId: str
     if (typeof entry.parentId !== 'string' || !byId.has(entry.parentId)) throw new Error('Pi 原生会话分支不完整')
     entry = byId.get(entry.parentId)
   }
-  const turns: LoadedSessionTurn[] = []
-  let turn: LoadedSessionTurn | undefined
-  for (const current of chain.reverse()) {
-    if (current.type !== 'message' || !current.message) continue
-    const message = current.message
-    const blocks = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? []
-    if (message.role === 'user') {
-      turn = { runId: `pi-native-${current.id}`, userText: blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('\n'),
-        items: [], errorHint: recoveryNotice }
-      if (blocks.some((block) => block.type === 'image')) turn.errorHint += ' 原始图片未恢复。'
-      turns.push(turn)
-      continue
-    }
-    if (!turn) continue
-    if (typeof current.timestamp !== 'string' || !Number.isFinite(Date.parse(current.timestamp))) {
-      throw new Error('Pi 原生消息时间无效')
-    }
-    const emit = (index: number, fields: Pick<TraceEvent, 'kind' | 'stage'> & Partial<TraceEvent>): void => {
-      turn!.items.push({ id: `pi-native-${current.id}-${index}`, runId: turn!.runId!, ts: current.timestamp!,
-        providerId: 'pi', runtimeProvider: 'pi_rpc', runtimeMetadata: { source: 'pi_native_transcript' }, ...fields })
-    }
-    if (message.role === 'assistant') {
-      blocks.forEach((block, index) => {
-        if (block.type === 'text' && typeof block.text === 'string') emit(index, { kind: 'model', stage: 'text', text: block.text, messageId: current.id })
-        else if (block.type === 'thinking' && typeof block.thinking === 'string') emit(index, { kind: 'model', stage: 'thinking', thinking: block.thinking, messageId: current.id })
-        else if (block.type === 'toolCall' && block.id && block.name) {
-          const name = block.name === 'subagent' ? 'Agent' : block.name
-          const classified = classifyTool(name, block.arguments)
-          emit(index, { kind: classified.kind, stage: `${classified.kind}:${classified.name}`,
-            name: classified.name, toolUseId: block.id, tool: name, input: block.arguments })
-        }
-      })
-    } else if (message.role === 'toolResult' && message.toolCallId) {
-      emit(0, { kind: 'tool', stage: 'tool_result', toolUseId: message.toolCallId, tool: message.toolName,
-        output: blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('\n'), isError: message.isError })
-    }
+  return chain.reverse()
+}
+
+function appendNativeEntry(turns: LoadedSessionTurn[], current: NativeEntry): void {
+  let turn = turns.at(-1)
+  if (current.type !== 'message' || !current.message) return
+  const message = current.message
+  const blocks = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? []
+  if (message.role === 'user') {
+    turn = { runId: `pi-native-${current.id}`, userText: blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('\n'),
+      items: [], errorHint: recoveryNotice }
+    if (blocks.some((block) => block.type === 'image')) turn.errorHint += ' 原始图片未恢复。'
+    turns.push(turn)
+    return
   }
-  return turns
+  if (!turn) return
+  if (typeof current.timestamp !== 'string' || !Number.isFinite(Date.parse(current.timestamp))) {
+    throw new Error('Pi 原生消息时间无效')
+  }
+  const emit = (index: number, fields: Pick<TraceEvent, 'kind' | 'stage'> & Partial<TraceEvent>): void => {
+    turn!.items.push({ id: `pi-native-${current.id}-${index}`, runId: turn!.runId!, ts: current.timestamp!,
+      providerId: 'pi', runtimeProvider: 'pi_rpc', runtimeMetadata: { source: 'pi_native_transcript' }, ...fields })
+  }
+  if (message.role === 'assistant') {
+    blocks.forEach((block, index) => {
+      if (block.type === 'text' && typeof block.text === 'string') emit(index, { kind: 'model', stage: 'text', text: block.text, messageId: current.id })
+      else if (block.type === 'thinking' && typeof block.thinking === 'string') emit(index, { kind: 'model', stage: 'thinking', thinking: block.thinking, messageId: current.id })
+      else if (block.type === 'toolCall' && block.id && block.name) {
+        const name = block.name === 'subagent' ? 'Agent' : block.name
+        const classified = classifyTool(name, block.arguments)
+        emit(index, { kind: classified.kind, stage: `${classified.kind}:${classified.name}`,
+          name: classified.name, toolUseId: block.id, tool: name, input: block.arguments })
+      }
+    })
+  } else if (message.role === 'toolResult' && message.toolCallId) {
+    emit(0, { kind: 'tool', stage: 'tool_result', toolUseId: message.toolCallId, tool: message.toolName,
+      output: blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('\n'), isError: message.isError })
+  }
 }
 
 // Pi's adapter uses the initial native user entry ID as providerTurnId. A steer
@@ -152,14 +161,13 @@ export function reconcilePiNativeHistory(native: LoadedSessionTurn[], archived: 
 // Offline fallback for catalog-authorized Pi sessions only. No launcher/config
 // execution and no renderer-supplied path. Default Pi layout (session-manager).
 // Custom profile-owned session roots remain unavailable rather than guessed.
-// Bound full-file parsing at 64 MiB; larger histories require a streaming reader.
-export async function readPiNativeSession(args: {
+async function locatePiNativeSession(args: {
   sessionRoot: string
   cwd: string
   sessionId: string
   signal?: AbortSignal
   maxBytes?: number
-}): Promise<string | null> {
+}): Promise<{ canonical: string; size: number } | null> {
   if (!/^[a-f0-9-]{36}$/i.test(args.sessionId)) return null
   const directory = join(args.sessionRoot, `--${resolve(args.cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
   let names: string[]
@@ -176,12 +184,108 @@ export async function readPiNativeSession(args: {
   if (!inside || inside === '..' || inside.startsWith(`..${sep}`) || resolve(root, inside) !== canonical || !info.isFile() || info.isSymbolicLink()) {
     throw new Error('Pi 原生会话路径越界或不是普通文件')
   }
-  if (info.size > 64 * 1024 * 1024) throw new Error('Pi 原生会话超过 64 MiB，只读恢复需要流式读取')
   if (args.maxBytes != null && info.size > args.maxBytes) throw new Error('Pi metering aggregate byte budget reached')
-  return readFile(canonical, { encoding: 'utf8', signal: args.signal })
+  return { canonical, size: info.size }
+}
+
+// Metering still consumes a whole string and retains its independent byte budget.
+export async function readPiNativeSession(args: Parameters<typeof locatePiNativeSession>[0]): Promise<string | null> {
+  const source = await locatePiNativeSession(args)
+  if (!source) return null
+  if (source.size > 64 * 1024 * 1024) throw new Error('Pi metering aggregate byte budget reached')
+  return readFile(source.canonical, { encoding: 'utf8', signal: args.signal })
+}
+
+interface NativeEntryLocation extends Pick<NativeEntry, 'id' | 'parentId'> {
+  offset: number
+  length: number
+}
+
+// Keep only entry locations during the scan, not abandoned branches or image
+// payloads. These bounds cap a single record and the tree index, not file size.
+// Larger individual records/trees need a paged on-disk index rather than a
+// larger whole-file allocation. Returned message text still scales with history.
+const maxNativeEntryBytes = 64 * 1024 * 1024
+const maxNativeEntries = 1_000_000
+
+async function* nativeLines(file: FileHandle, size: number, signal?: AbortSignal): AsyncGenerator<{ line: Buffer; offset: number }> {
+  let parts: Buffer[] = []
+  let length = 0
+  let offset = 0
+  let position = 0
+  while (position < size) {
+    signal?.throwIfAborted()
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size - position))
+    const { bytesRead } = await file.read(chunk, 0, chunk.length, position)
+    if (bytesRead === 0) throw new Error('Pi 原生会话在读取期间发生变化，请重新打开会话')
+    position += bytesRead
+    const buffer = chunk.subarray(0, bytesRead)
+    let start = 0
+    while (start < buffer.length) {
+      const newline = buffer.indexOf(10, start)
+      const end = newline === -1 ? buffer.length : newline + 1
+      const part = buffer.subarray(start, end)
+      length += part.length
+      if (length > maxNativeEntryBytes) throw new Error('Pi 原生会话单条记录超过 64 MiB')
+      parts.push(part)
+      if (newline !== -1) {
+        yield { line: Buffer.concat(parts, length), offset }
+        offset += length
+        parts = []
+        length = 0
+      }
+      start = end
+    }
+  }
+  if (length) yield { line: Buffer.concat(parts, length), offset }
 }
 
 export async function readPiNativeHistory(args: Parameters<typeof readPiNativeSession>[0]): Promise<LoadedSessionTurn[] | null> {
-  const content = await readPiNativeSession(args)
-  return content == null ? null : parsePiNativeHistory(content, args)
+  args.signal?.throwIfAborted()
+  const source = await locatePiNativeSession(args)
+  if (!source) return null
+  const file = await open(source.canonical, 'r')
+  try {
+    const before = await file.stat()
+    const byId = new Map<string, NativeEntryLocation>()
+    let leaf: NativeEntryLocation | undefined
+    let hasHeader = false
+    for await (const { line, offset } of nativeLines(file, before.size, args.signal)) {
+      args.signal?.throwIfAborted()
+      const text = line.toString('utf8')
+      if (!text.trim()) continue
+      const entry = JSON.parse(text) as NativeEntry
+      if (!hasHeader) {
+        validateHeader(entry, args)
+        hasHeader = true
+        continue
+      }
+      if (typeof entry.id !== 'string' || byId.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
+      if (byId.size >= maxNativeEntries) throw new Error('Pi 原生会话记录数超过 1000000 条')
+      leaf = { id: entry.id, parentId: entry.parentId, offset, length: line.length }
+      byId.set(entry.id, leaf)
+    }
+    if (!hasHeader) validateHeader(undefined, args)
+    const turns: LoadedSessionTurn[] = []
+    for (const entry of nativeBranch(byId, leaf)) {
+      // Positional reads hydrate only the selected ancestry, in branch order.
+      const buffer = Buffer.allocUnsafe(entry.length)
+      let read = 0
+      while (read < buffer.length) {
+        args.signal?.throwIfAborted()
+        const { bytesRead } = await file.read(buffer, read, buffer.length - read, entry.offset + read)
+        if (bytesRead === 0) throw new Error('Pi 原生会话在读取期间发生变化，请重新打开会话')
+        read += bytesRead
+      }
+      appendNativeEntry(turns, JSON.parse(buffer.toString('utf8')) as NativeEntry)
+    }
+    args.signal?.throwIfAborted()
+    const after = await file.stat()
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) {
+      throw new Error('Pi 原生会话在读取期间发生变化，请重新打开会话')
+    }
+    return turns
+  } finally {
+    await file.close()
+  }
 }
