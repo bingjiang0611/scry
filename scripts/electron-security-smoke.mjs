@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -137,12 +137,20 @@ async function main() {
     mkdirSync(nativeDir, { recursive: true })
     const entry = (id, parentId, role, text) => ({ type: 'message', id, parentId,
       timestamp: '2026-10-13T04:36:31Z', message: { role, content: [{ type: 'text', text }] } })
-    writeFileSync(join(nativeDir, `2026-10-13_${nativeSessionId}.jsonl`), [
+    const nativePath = join(nativeDir, `2026-10-13_${nativeSessionId}.jsonl`)
+    writeFileSync(nativePath, [
       { type: 'session', version: 3, id: nativeSessionId, cwd: canonicalWorkspace },
       entry('u', null, 'user', '手机发起的真实格式消息'),
-      entry('old', 'u', 'assistant', 'abandoned branch must not appear'),
-      entry('a', 'u', 'assistant', '主机重启前已有的原生回复')
-    ].map((value) => JSON.stringify(value)).join('\n'))
+      entry('old', 'u', 'assistant', 'abandoned branch must not appear')
+    ].map((value) => JSON.stringify(value)).join('\n') + '\n')
+    // A real >64 MiB JSONL file, not a mocked stat. Abandoned payloads must not
+    // block native-only recovery or later archive reconciliation.
+    const padding = 'x'.repeat(1024 * 1024)
+    for (let i = 0; i < 65; i++) {
+      appendFileSync(nativePath, JSON.stringify(entry(`old-${i}`, 'u', 'assistant', padding)) + '\n')
+    }
+    appendFileSync(nativePath, JSON.stringify(entry('a', 'u', 'assistant', '主机重启前已有的原生回复')))
+    assert.ok(statSync(nativePath).size > 64 * 1024 * 1024)
     writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
       sessionId: nativeSessionId, externalSessionId: nativeSessionId, runId: 'remote-run-fixture-1',
       providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace,
@@ -423,8 +431,8 @@ async function main() {
     // Continue/reopen after one canonical archived turn is added. The original
     // native-only prefix must survive, and a requested page limit must be real.
     const nativePath = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`, `2026-10-13_${nativeSessionId}.jsonl`)
-    const entries = readFileSync(nativePath, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
-    let parentId = entries.at(-1).id
+    const entries = []
+    let parentId = 'a'
     for (let i = 0; i < 40; i++) {
       entries.push({ type: 'message', id: `continued-user-${i}`, parentId, timestamp: '2026-10-13T05:00:00Z',
         message: { role: 'user', content: [{ type: 'text', text: `continued prompt ${i}` }] } })
@@ -432,7 +440,7 @@ async function main() {
       entries.push({ type: 'message', id: parentId, parentId: `continued-user-${i}`, timestamp: '2026-10-13T05:00:01Z',
         message: { role: 'assistant', content: [{ type: 'text', text: `continued reply ${i}` }] } })
     }
-    writeFileSync(nativePath, entries.map(entry => JSON.stringify(entry)).join('\n'))
+    appendFileSync(nativePath, '\n' + entries.map(entry => JSON.stringify(entry)).join('\n'))
     const context = { providerId: 'pi', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
     const page = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
     assert.equal(page.totalTurns, 41)
@@ -452,10 +460,11 @@ async function main() {
     assert.equal(reopened.totalTurns, 41)
     assert.equal(reopened.turns.length, 3)
     assert.equal(reopened.turns.at(-1).runId, 'scry-continuation')
+    assert.ok(!reopened.turns.some(turn => turn.errorHint?.includes('Pi 原生历史未能核对')))
     const oldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
     assert.equal(oldest.turns.length, 1)
     assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
-    console.log('Pi native history: click restores phone conversation; provenance, 41-turn pagination and continuation/reopen verified without Provider execution')
+    console.log('Pi native history >64 MiB: click restores phone conversation; provenance, 41-turn pagination and archive reconciliation verified without Provider execution')
     cdp.close()
     return
   }

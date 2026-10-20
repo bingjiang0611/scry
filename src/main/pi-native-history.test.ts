@@ -1,8 +1,9 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFileSync } from 'node:fs'
+import { mkdtemp, mkdir, open, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { parsePiNativeHistory, readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { parsePiNativeHistory, readPiNativeHistory, readPiNativeSession, reconcilePiNativeHistory } from './pi-native-history'
 import { restoreTraceArchiveTurn, sessionHistoryPage } from './session-history'
 import type { TraceEvent } from '../shared/trace'
 
@@ -42,7 +43,21 @@ function nativeHistoryWithSteers() {
     { ...assistant, id: 'final', parentId: 't3', message: { role: 'assistant', content: 'finished' } }
   ), identity)
 }
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true }) })
+async function nativeFile(content: string) {
+  const root = await mkdtemp(join(tmpdir(), 'scry-pi-native-'))
+  roots.push(root)
+  const sessionRoot = join(root, 'sessions')
+  const dir = join(sessionRoot, '--repo--')
+  await mkdir(dir, { recursive: true })
+  const path = join(dir, `session_${identity.sessionId}.jsonl`)
+  await writeFile(path, content)
+  return { path, args: { ...identity, sessionRoot } }
+}
+
+afterEach(async () => {
+  vi.restoreAllMocks()
+  for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true })
+})
 
 describe('offline Pi native history recovery', () => {
   it('restores phone prompts, real text and matching tool IDs without fabricating billing or a terminal result', () => {
@@ -181,6 +196,83 @@ describe('offline Pi native history recovery', () => {
     expect(() => parsePiNativeHistory(encode(assistant), identity)).toThrow('分支不完整')
     expect(() => parsePiNativeHistory(encode({ ...user, parentId: 'u' }), identity)).toThrow('循环')
     expect(() => parsePiNativeHistory(encode(user, user), identity)).toThrow('entry id')
+  })
+
+  it('streams histories larger than 64 MiB and keeps only the current branch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-native-large-'))
+    roots.push(root)
+    const sessionRoot = join(root, 'sessions')
+    const dir = join(sessionRoot, '--repo--')
+    await mkdir(dir, { recursive: true })
+    const path = join(dir, `large_${identity.sessionId}.jsonl`)
+    const file = await open(path, 'w')
+    try {
+      await file.writeFile(`${encode(user)}\n`)
+      const padding = 'x'.repeat(1024 * 1024)
+      for (let index = 0; index < 65; index++) {
+        await file.writeFile(`${JSON.stringify({ ...assistant, id: `abandoned-${index}`,
+          message: { role: 'assistant', content: padding } })}\n`)
+      }
+      // Include a multi-chunk active record with UTF-8, CRLF and no final newline.
+      const reply = { ...assistant, message: { role: 'assistant', content: '你好🙂'.repeat(16000) } }
+      await file.writeFile(`${JSON.stringify(reply)}\r\n${JSON.stringify(result)}`)
+      expect((await stat(path)).size).toBeGreaterThan(64 * 1024 * 1024)
+      const turns = await readPiNativeHistory({ ...identity, sessionRoot })
+      expect(turns).toEqual(parsePiNativeHistory(encode(user, reply, result), identity))
+      expect(turns?.[0].items[1].output).toBe('/repo')
+      await expect(readPiNativeSession({ ...identity, sessionRoot })).rejects.toThrow('aggregate byte budget')
+    } finally {
+      await file.close()
+    }
+  })
+
+  it.each([
+    ['', '身份'],
+    [JSON.stringify({ ...header, cwd: '/other' }), '身份'],
+    [encode(user, user), 'entry id'],
+    [encode(assistant), '分支不完整'],
+    [encode({ ...user, parentId: 'u' }), '循环'],
+    [encode(user, { ...assistant, timestamp: 'invalid' }), '时间无效'],
+    [`${encode(user)}\n{`, 'JSON']
+  ])('rejects invalid streamed history rather than returning partial success (%#)', async (content, error) => {
+    const { args } = await nativeFile(content)
+    await expect(readPiNativeHistory(args)).rejects.toThrow(error)
+  })
+
+  it('handles blank lines, header-only histories and forward references like the string parser', async () => {
+    for (const content of [JSON.stringify(header), `\n${JSON.stringify(header)}\r\n\n`,
+      encode(assistant, user, result)]) {
+      const { args } = await nativeFile(content)
+      expect(await readPiNativeHistory(args)).toEqual(parsePiNativeHistory(content, identity))
+    }
+  })
+
+  it('rejects cancellation before and during the scan', async () => {
+    const { args } = await nativeFile(encode(user, assistant, result))
+    const controller = new AbortController()
+    const check = controller.signal.throwIfAborted.bind(controller.signal)
+    const abort = vi.spyOn(controller.signal, 'throwIfAborted')
+      .mockImplementationOnce(check)
+      .mockImplementationOnce(() => { controller.abort(); check() })
+    await expect(readPiNativeHistory({ ...args, signal: controller.signal })).rejects.toThrow('aborted')
+    expect(abort).toHaveBeenCalledTimes(2)
+    await expect(readPiNativeHistory({ ...args, signal: controller.signal })).rejects.toThrow('aborted')
+  })
+
+  it('does not present a changed file as a reconciled snapshot', async () => {
+    const { args, path } = await nativeFile(encode(user, assistant, result))
+    const signal = new AbortController().signal
+    vi.spyOn(signal, 'throwIfAborted')
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => { appendFileSync(path, '\n') })
+    await expect(readPiNativeHistory({ ...args, signal })).rejects.toThrow('读取期间发生变化')
+  })
+
+  it('bounds individual records even though the overall file can exceed 64 MiB', async () => {
+    const { args, path } = await nativeFile(`${JSON.stringify(header)}\n`)
+    const file = await open(path, 'r+')
+    try { await file.truncate(65 * 1024 * 1024) } finally { await file.close() }
+    await expect(readPiNativeHistory(args)).rejects.toThrow('单条记录超过 64 MiB')
   })
 
   it('reads only the validated native file and refuses symlink escape and ambiguous copies', async () => {
