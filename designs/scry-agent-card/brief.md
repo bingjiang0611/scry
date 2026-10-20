@@ -1,18 +1,29 @@
-# Scry · Pi Agent 卡片设计稿 v1
+# Scry · Pi Agent 卡片设计稿 v2
 
 ## D-20261019-scry-agent-card
 
-- Scope / status：project:/Users/baobingjiang/IdeaProjects/vibecoding/scry；需求 confirmed，方案 candidate，待用户选择。仅独立设计稿，不改产品实现。
-- Feedback：2026-10-19 用户提供 Pi worker 卡片截图，要求“这个 agent 的卡片优化下 ui，先出设计稿”。
+- Scope / status：project:/Users/baobingjiang/IdeaProjects/vibecoding/scry；需求与 A 方向 confirmed，v2 成品待审。仅独立设计稿，不改产品实现。
+- Feedback：2026-10-19 用户提供 Pi worker 卡片截图，要求“这个 agent 的卡片优化下 ui，先出设计稿”；看 v1 后选择“A 但是不要这么多文字，只保留关键信息即可”。
 - 现状：重复 worker 描述；完整任务 UUID、启动回执、计时和停止说明占据同一视觉层级；状态不突出。
 - Preserve：仅展示已观测任务，清单可能不完整；计时从启动回执起而非进程时长；Pi 不支持单个子 Agent 停止，结束主轮观测不能证明后台子 Agent 停止。不增加进度、Token、子 Agent 工具统计或停止按钮。
 - Applied：`index.html` + `preview.js` + `style.css`，原生 HTML/CSS/JS，无依赖、外部字体或网络服务。所有原型文案集中在 `preview.js` 的 copy 对象（文档标题除外）。静态 fixture，示例状态不是运行数据。
 - Preview：`python3 -m http.server 8473 --bind 127.0.0.1 --directory designs/scry-agent-card`，访问 http://127.0.0.1:8473。
-- Acceptance：待审。推荐 A；用户尚未选择，不代表同意落地。
-- Next use：Pi 后台任务卡片的信息噪声 → 名称/状态/观测时长优先，技术证据折叠，停止限制常驻 → 检查无伪造进度、无假停止能力、未知终态不变成完成。
+- Acceptance：用户已确认 A 的结构方向，并要求减字；不等于认可 v2 或授权产品实现。
+- Next use：Pi 后台任务卡片的信息噪声 → 默认只留名称/Provider/状态/观测时长、短能力限制和详情入口；技术证据与完整解释折叠 → 检查无伪造进度、无假停止能力、未知终态不变成完成。
 - Revisit：方向确认后，在现有 BackgroundWorkPanel 中实现；不得改动 Provider 状态合同来迎合样式。
 
-## 两个方向
+## v2 · A 精简版
+
+- 默认第一行：`worker · Pi` / `等待结果` / `已观测 14m`。
+- 第二行仅保留：`不可单独停止` / `详情`。
+- UUID、回执、计时依据、状态依据、完整停止限制、观测范围均放入详情；未知状态不重复铺一段说明，但详情保留未收到终态的依据。不删除依据或改变权限语义。
+- 删除 B 切换、Agent 冗余标签、卡片内两段说明及预览下方的设计解释。
+- 本次是项目级明确反馈，不推为跨项目全局审美偏好。
+- 验证：`node --check designs/scry-agent-card/preview.js`、作用域内 `git diff --check` 通过；Chrome Relay 实际 DOM 读回 v2 默认字段，折叠状态不再显示 UUID 和长说明。
+- 限制：v2 截图操作超时；recover 同一标签（relayAttached=true）后仅重试一次，仍超时。详情点击返回 unknown，随后一次 snapshot_visible 仍为 expanded=false，未重发该操作。因此本次不宣称 v2 截图视觉或详情展开交互已通过；需要用户在预览中确认。不启动隔离浏览器或通过 OS 工具绕过 Relay。
+- 历史研究沿用下方来源；本轮只调整信息密度，无新的视觉来源或个人组件导入。
+
+## v1 · 两个方向（历史）
 
 | 方向 | 结构 | 适用与代价 |
 | --- | --- | --- |
@@ -33,7 +44,7 @@
 | https://www.anthropic.com/engineering/multi-agent-research-system / “Teach the orchestrator how to delegate” 与 production tracing 段落 | 原文强调任务边界、轻量引用和可追溯性，而非把每个任务的所有输出平铺 | 采用身份/结果/证据分层；拒绝从研究架构推导 Scry 控制能力 | 2026-10-19 curl 获取原始全文，针对相关段落抽取阅读；属于信息结构依据，不是视觉验收 |
 | 库检索 `Scry` / `Agent --kind component` / `后台 --kind page` | 命中 D-20260910-qoder-background-work，保留“静默不等于失败”；UsageReadout/UsageSummary 是用量指标，不适合任务卡 | 复用项目合同，不导入无关组件；旧失效路径保持 stale | 未创建或宣称可移植组件；只登记此项目稿 |
 
-## 验证记录
+## v1 验证记录（不作为 v2 交互证据）
 
 - `node --check designs/scry-agent-card/preview.js`：通过。
 - HTTP 预览返回的 preview.js 与磁盘文件 `cmp` 一致。
