@@ -66,7 +66,13 @@ export class RelayRoom {
 
     // Device: glue to one warm, authenticated, unpaired host leg for this mode.
     const host = this.#popWarmHost(mode)
-    try { const legs = this.state.getWebSockets('host').map((w) => w.deserializeAttachment()).filter(Boolean); console.log(`[relay] device mode=${mode} hostLeg=${host ? 'FOUND' : 'MISSING'} warm{run:${legs.filter((a) => a.mode === 'run' && a.authed && !a.deviceId).length},pair:${legs.filter((a) => a.mode === 'pair' && a.authed && !a.deviceId).length}} total=${legs.length}`) } catch {}
+    try {
+      const hosts = this.state.getWebSockets('host')
+      const available = hosts.filter((ws) => ws.readyState === WebSocket.OPEN)
+        .map((ws) => ws.deserializeAttachment())
+        .filter((att) => att && att.authed && !att.deviceId)
+      console.log(`[relay] device mode=${mode} hostLeg=${host ? 'FOUND' : 'MISSING'} warm{run:${available.filter((att) => att.mode === 'run').length},pair:${available.filter((att) => att.mode === 'pair').length}} total=${hosts.length}`)
+    } catch {}
     this.state.acceptWebSocket(server, ['device'])
     if (!host) {
       try { server.close(1013, 'no_host_leg') } catch { /* closing */ }
@@ -84,6 +90,9 @@ export class RelayRoom {
   // serialized, so this pop is race-free.
   #popWarmHost(mode) {
     for (const ws of this.state.getWebSockets('host')) {
+      // Hibernatable sockets remain listed while their close handshake runs.
+      // Their old admission attachment is not proof they can accept a device.
+      if (ws.readyState !== WebSocket.OPEN) continue
       const att = ws.deserializeAttachment()
       if (att && att.mode === mode && att.authed && !att.deviceId) return ws
     }
