@@ -1,18 +1,26 @@
-# Scry · Pi Agent 卡片设计稿 v2
+# Scry · Pi Agent 卡片设计稿 v3
 
 ## D-20261019-scry-agent-card
 
-- Scope / status：project:/Users/baobingjiang/IdeaProjects/vibecoding/scry；需求与 A 方向 confirmed，v2 成品待审。仅独立设计稿，不改产品实现。
+- Scope / status：project:/Users/baobingjiang/IdeaProjects/vibecoding/scry；需求与 A 方向 confirmed，v3 成品待审。仅独立设计稿，不改产品实现。
 - Feedback：2026-10-19 用户提供 Pi worker 卡片截图，要求“这个 agent 的卡片优化下 ui，先出设计稿”；看 v1 后选择“A 但是不要这么多文字，只保留关键信息即可”。
 - 现状：重复 worker 描述；完整任务 UUID、启动回执、计时和停止说明占据同一视觉层级；状态不突出。
 - Preserve：仅展示已观测任务，清单可能不完整；计时从启动回执起而非进程时长；Pi 不支持单个子 Agent 停止，结束主轮观测不能证明后台子 Agent 停止。不增加进度、Token、子 Agent 工具统计或停止按钮。
 - Applied：`index.html` + `preview.js` + `style.css`，原生 HTML/CSS/JS，无依赖、外部字体或网络服务。所有原型文案集中在 `preview.js` 的 copy 对象（文档标题除外）。静态 fixture，示例状态不是运行数据。
 - Preview：`python3 -m http.server 8473 --bind 127.0.0.1 --directory designs/scry-agent-card`，访问 http://127.0.0.1:8473。
-- Acceptance：用户已确认 A 的结构方向，并要求减字；不等于认可 v2 或授权产品实现。
-- Next use：Pi 后台任务卡片的信息噪声 → 默认只留名称/Provider/状态/观测时长、短能力限制和详情入口；技术证据与完整解释折叠 → 检查无伪造进度、无假停止能力、未知终态不变成完成。
+- Acceptance：用户已确认 A 的结构方向，并要求减字及删除详情中的四行说明；不等于认可 v3 或授权产品实现。
+- Next use：Pi 后台任务卡片的信息噪声 → 默认只留名称/Provider/状态/观测时长、短能力限制和详情入口；详情仅保留任务 ID 和回执时间 → 检查无伪造进度、无假停止能力、未知终态不变成完成。
 - Revisit：方向确认后，在现有 BackgroundWorkPanel 中实现；不得改动 Provider 状态合同来迎合样式。
 
-## v2 · A 精简版
+## v3 · 删除解释行
+
+- 用户圈出详情中的“计时依据、状态依据、停止限制、观测范围”，明确要求“这些都去掉”。这是项目内明确文案删除要求。
+- 已删除四行及无用文案/状态解释配置，不移到其他可见位置。详情只保留任务 ID、回执时间；主卡片仍保留“不可单独停止”和真实含义的观测计时标签。
+- 只改独立原型，不改变 Provider 合同、权限或任务运行行为；不再以长说明作为此卡片设计约束。
+- 验证：语法检查与 diff 检查通过；Chrome Relay 实际点击详情后 DOM 读回仅有任务 ID 和回执时间，snapshot_visible 确认 expanded=true。未重做截图或真实 App 验收，CSS 未变。
+- 复用此前原始来源和项目字段研究；无新视觉主题或组件导入。待用户审阅 v3，不额外假设产品实现授权。
+
+## v2 · A 精简版（历史）
 
 - 默认第一行：`worker · Pi` / `等待结果` / `已观测 14m`。
 - 第二行仅保留：`不可单独停止` / `详情`。

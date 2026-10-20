@@ -1,5 +1,5 @@
 const copy = {
-  title: 'Agent 卡片', version: 'A · 精简版 v2', demo: '静态示例',
+  title: 'Agent 卡片', version: 'A · 精简版 v3', demo: '静态示例',
   theme: '切换明暗主题', stateLabel: '示例状态',
   states: { running: '等待结果', unknown: '状态未知', completed: '已完成', failed: '失败' },
   eyebrow: '会话 / Pi', session: '实现 M0 初版',
@@ -7,17 +7,8 @@ const copy = {
   worker: 'worker', provider: 'Pi', age: '已观测 14m',
   ageLabel: '从收到启动回执起计时，不是精确进程运行时间',
   details: '详情', detailsLabel: '任务详情', capability: '不可单独停止',
-  safety: '停止本轮会结束主会话观测，不保证后台子 Agent 已停止。',
-  scope: '仅展示已观测任务，清单可能不完整。',
-  fields: { task: '任务 ID', receipt: '启动回执', source: '计时依据', result: '状态依据', control: '停止限制', scope: '观测范围' },
+  fields: { task: '任务 ID', receipt: '回执时间' },
   id: 'f7cb2107-7306-41f0-9ca7-fb2b975ab7ba', receipt: '20:04:54',
-  timing: '自收到启动回执起计时，非精确进程运行时间。',
-  source: {
-    running: '收到启动回执，尚未收到终态；不代表已核验后台进程。',
-    unknown: '父轮已结束，但 Provider 未提供子 Agent 终态，不能确认它已结束。',
-    completed: '示例：Provider 明确上报完成终态。',
-    failed: '示例：Provider 明确上报失败终态。'
-  },
   files: '本轮文件', toolEvidence: '工具证据', fileRead: 'R', fileCount: '9',
   contextNote: '文件统计属于整轮工具证据，不归属于此子 Agent。'
 }
@@ -61,10 +52,6 @@ function render() {
             <dl>
               <div><dt>${copy.fields.task}</dt><dd><code>${copy.id}</code></dd></div>
               <div><dt>${copy.fields.receipt}</dt><dd><time>${copy.receipt}</time></dd></div>
-              <div><dt>${copy.fields.source}</dt><dd>${copy.timing}</dd></div>
-              <div><dt>${copy.fields.result}</dt><dd>${copy.source[status]}</dd></div>
-              <div><dt>${copy.fields.control}</dt><dd>${copy.safety}</dd></div>
-              <div><dt>${copy.fields.scope}</dt><dd>${copy.scope}</dd></div>
             </dl>
           </details>
         </article>
