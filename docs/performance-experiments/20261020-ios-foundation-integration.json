@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-20",
+  "authorization": "Maintainer approved integration of the existing iOS/Swift foundation and readiness fix, then confirmed sole source-lane handoff. Mac2 deployment was subsequently explicitly paused.",
+  "evidenceDirectory": "/Users/baobingjiang/.local/state/scry-ios-catalog-ready-XJLKiSYZ/evidence",
+  "source": {
+    "mainBaseObserved": "af190c6",
+    "preservedNewerFoundation": "Adopted the handed-over build19 source, including newer Home/UITest/catalog checks and outer-versus-inner TLS diagnostics, rather than overwriting it with isolated build17",
+    "integrationScope": "apps/ios and experiments/remote-g0/swift, plus this record; no unrelated desktop/main/renderer/package WIP staged",
+    "isolatedReadinessFix": "7079dce4e65874b1282d4bb384b1f34ca311bbb2",
+    "finalArtifactSourceManifest": "main-build20-source-manifest.json (66 files; source hashes checked after build and before commit)"
+  },
+  "changes": [
+    "Integrate execution-target-scoped client/store/cache/navigation foundation and exact readiness-dependent initial catalog task key",
+    "Persist attempted-delivery evidence before any request can start; attempted/unknown or legacy-unproven entries pause after restart, while never-attempted queued messages and in-process backoff still work",
+    "Do not publish a successful attempt marker in memory when its disk write failed; later foreground retries cannot bypass the failed durability preflight",
+    "Keep focused recovery separate from background messages; protect other attempted entries against stale snapshots and release marker state with the outbox",
+    "Gate live polling by foreground eligibility independently from ordinary stop/restart, including discovery that completes after backgrounding and foreground history-watch changes",
+    "Keep the newer TLS diagnostics and add local native checker development-signature option without changing system execution policy"
+  ],
+  "verification": [
+    {"command": "SCRY_IOS_CHECK_SIGN_IDENTITY=<local-development-identity> python3 apps/ios/Checks/catalog-refresh.py", "result": "114 passed, 0 failures on current Main", "log": "main-native-final.log"},
+    {"command": "python3 apps/ios/Checks/new-task-readiness.py", "result": "7 passed, 0 failures", "log": "main-readiness-final.log"},
+    {"command": "swift test --package-path experiments/remote-g0/swift -j 4", "result": "43 passed, including newer TLSLayerTests", "log": "main-swift-final.log"},
+    {"command": "npm run test:unit -- src/main/remote/inner-mtls-host.test.ts src/main/remote/execution-targets.test.ts src/main/remote/session-operation-contract.test.ts", "result": "25 passed; current host contracts only, not the entire unrelated Node WIP suite", "log": "main-host-contract-tests.log"},
+    {"command": "xcodebuild ScryRemote Debug iphoneos for physical iPhone13, pinned resolved packages, local development signing", "result": "BUILD SUCCEEDED, deployment target iOS17", "log": "main-ios-build20.log"},
+    {"command": "codesign --verify --deep --strict", "result": "passed; entitlements match previous installed client", "log": "main-ios-build20-signature.log"},
+    {"command": "devicectl install app and read installed apps for iPhone13", "result": "0.1.15/build20 installed in place; no uninstall, data reset or re-pairing", "log": "main-build20-device-version.json"}
+  ],
+  "negativeControls": {
+    "readiness": "Original key failed4/7 checks before the initial fix; retained in readiness-before-fix.log",
+    "publishBeforeDurable": "Mutating the final implementation back to publishing the marker before its failed persistence makes two critical assertions fail, exit1: first attempt preflight and subsequent retry bypass",
+    "stopMeansBackground": "Mutating ordinary stopLiveRuns to clear foreground eligibility makes two critical assertions fail, exit1: history-watch restart and foreground cancellation/restart",
+    "logs": ["foundation-review-fixes/negative-publish-before-durable-signed.log", "foundation-review-fixes/negative-stop-means-background-signed.log"]
+  },
+  "firstFailuresAndSelfReview": [
+    "First isolated implementation passed103 checks but parent source review found in-process foreground retry and focused-checkpoint regressions; it was not merged or shipped",
+    "Second implementation passed108 checks; parent found that publishing attempted=true before failed persistence allowed a subsequent retry to skip durability. Parent corrected the state publication order and added direct regression, legacy/new-queue checks, marker cleanup, and adjacent polling restart checks",
+    "An unsigned negative-control executable was rejected by local AMFI before assertions (exit247/SIGKILL). Targeted logs showed linker-only signature rejection; memory free33%. The original failure was retained. The same assertions then ran with an explicit normal local development signature, producing semantic exit1 failures. No global security setting, quarantine, timeout or test assertion was weakened"
+  ],
+  "installedClient": {
+    "version": "0.1.15",
+    "build": "20",
+    "bundle": "com.scry.remote.local",
+    "device": "iPhone13, USB forwarding verified for00008110-000808180E8B801E",
+    "mainExecutableSha256": "c89dc7353ffa189a076d486c880e91c4addcca6caa45bc5fc2c312a90fc374e6",
+    "debugCodeSha256": "502cf4dba27b6dd476ca088c7637384d694d84f2720c2157d57a808fc3d26570"
+  },
+  "realDeviceAcceptance": {
+    "passed": ["Normal app opens with retained paired/cached state", "Mac1/Mac2 picker and honest unavailable state render", "Failure Details remain dismissible and show actual handshake failure", "Background to SpringBoard then foreground return succeeds, app remains on remote Home"],
+    "blocked": "Mac2 setup could not become available. Even one explicit host refresh did not resolve the gateway inner lane-handshake timeout; no Provider/model-menu success is claimed for build20",
+    "decidingEvidence": "build20-phone/012-technical-details.json: 连接 Mac 超时（lane-handshake）; current gateway PID16441 still running. Existing docs/ios-execution-targets.md independently records the same inner lane-handshake timeout in build19 before these fixes",
+    "limits": "Normal foreground/background navigation is not proof that no background network request occurred. That polling protection is covered by controlled native lifecycle checks, not a packet trace. No actual message was entered or submitted, no real run was stopped/answered, and no pairing/security state was reset",
+    "finalPhoneScreen": "Remote Home after Details dismissal and foreground return",
+    "freshColdSdkOrLatencyClaim": false
+  },
+  "remaining": {
+    "gatewayTransport": "Pre-existing inner lane-handshake/peer-close investigation needs the owner-controlled safe desktop maintenance window. Do not automatically stop/restart gateway, re-pair, disable certificate checks or follow another session's launcher instructions without current owner confirmation",
+    "mac2": "Deployment paused by maintainer after previous attempt rolled back0.2.206. Do not retry installation or request restart as if the observation package were installed",
+    "performance": "Complete cold first-request timing and performance improvement remain unavailable; no refresh-policy changes"
+  },
+  "pushed": false,
+  "desktopAppInstalledOrRestartedThisIntegration": false
+}

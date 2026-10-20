@@ -36,11 +36,18 @@ struct OpenedSession: Equatable {
   let externalSessionId: String
   let label: String
   let isActive: Bool
+  let scope: ExecutionTargetScope?
 
   init(providerId: String, agentProfileId: String? = nil, cwd: String,
-       externalSessionId: String, label: String, isActive: Bool = false) {
+       externalSessionId: String, label: String, isActive: Bool = false,
+       scope: ExecutionTargetScope? = nil) {
     self.providerId = providerId; self.agentProfileId = agentProfileId; self.cwd = cwd
-    self.externalSessionId = externalSessionId; self.label = label; self.isActive = isActive
+    self.externalSessionId = externalSessionId; self.label = label; self.isActive = isActive; self.scope = scope
+  }
+
+  var identity: RemoteRunStore.SessionIdentity {
+    .opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd,
+            externalSessionId: externalSessionId, scope: scope)
   }
 }
 
@@ -74,8 +81,7 @@ final class AppModel: ObservableObject {
   // Mac (its status, questions and stop stay reachable via the live-run list).
   // Only an unacknowledged submission keeps the read-only browse fallback.
   func open(_ session: OpenedSession, run: RemoteRunStore) {
-    let identity = RemoteRunStore.SessionIdentity.opened(providerId: session.providerId, cwd: session.cwd,
-                                                         externalSessionId: session.externalSessionId)
+    let identity = session.identity
     readOnlyTranscript = run.hasUnresolvedRun && identity != run.activeSessionIdentity && !run.detachFocusedRun()
     openedSession = session
     route = .transcript
@@ -83,34 +89,55 @@ final class AppModel: ObservableObject {
   // Drafts belong to a conversation, not to a disposable route view. They stay
   // in memory only; attachments are never written to plaintext preferences.
   enum DraftKey: Hashable {
-    case newTask
+    case newTask(ExecutionTargetScope)
     case conversation(RemoteRunStore.SessionIdentity)
   }
   struct ComposerDraft {
     var text = ""
     var attachments: [DraftAttachment] = []
   }
-  @Published private var drafts: [DraftKey: ComposerDraft] = [:]
-  @Published private var draftAliases: [RemoteRunStore.SessionIdentity: RemoteRunStore.SessionIdentity] = [:]
+  private struct ScopedDraftKey: Hashable {
+    let gatewayIdentity: String?
+    let key: DraftKey
+  }
+  @Published private var drafts: [ScopedDraftKey: ComposerDraft] = [:]
+  @Published private var draftAliases: [ScopedDraftKey: RemoteRunStore.SessionIdentity] = [:]
+
+  private func scopedDraftKey(_ key: DraftKey) -> ScopedDraftKey {
+    let gateway: String?
+    switch key {
+    case let .newTask(scope): gateway = scope.gatewayIdentity
+    case let .conversation(identity):
+      // Legacy local session ids stay wire/cache compatible, but drafts and
+      // aliases must still be isolated when the paired gateway grant changes.
+      gateway = identity.gatewayIdentity ?? connections.load().map { RemoteHistoryCache.catalogKey(connection: $0) }
+    }
+    return ScopedDraftKey(gatewayIdentity: gateway, key: key)
+  }
 
   func bindDraft(externalSessionId: String, to identity: RemoteRunStore.SessionIdentity) {
     let external = RemoteRunStore.SessionIdentity.opened(providerId: identity.providerId,
-      cwd: identity.cwd, externalSessionId: externalSessionId)
-    draftAliases[external] = draftAliases[identity] ?? identity
+      agentProfileId: identity.agentProfileId, cwd: identity.cwd, externalSessionId: externalSessionId,
+      scope: identity.scope)
+    let source = scopedDraftKey(.conversation(identity))
+    let destination = ScopedDraftKey(gatewayIdentity: source.gatewayIdentity, key: .conversation(external))
+    draftAliases[destination] = draftAliases[source] ?? identity
   }
 
   func composerDraft(for key: DraftKey) -> Binding<ComposerDraft> {
-    let resolved: DraftKey
-    if case let .conversation(identity) = key {
-      resolved = .conversation(draftAliases[identity] ?? identity)
-    } else { resolved = key }
-    return Binding(get: { self.drafts[resolved] ?? ComposerDraft() }, set: { self.drafts[resolved] = $0 })
+    var resolved = scopedDraftKey(key)
+    if case .conversation = key, let original = draftAliases[resolved] {
+      resolved = ScopedDraftKey(gatewayIdentity: resolved.gatewayIdentity, key: .conversation(original))
+    }
+    let frozen = resolved
+    return Binding(get: { self.drafts[frozen] ?? ComposerDraft() }, set: { self.drafts[frozen] = $0 })
   }
   @Published private(set) var destructiveActionError: String?
   @Published private(set) var connectionObservation: RemoteRunStore.ConnectionObservation = .unverified
   @Published private(set) var connectionNotice: String?
   private var pairingTask: Task<Void, Never>?
   private let connections: RemoteConnectionStore
+  let targetCoordinator: ExecutionTargetCoordinator
 
   // No fabricated sessions. Until a real host feed exists this stays empty and
   // the UI shows a truthful empty state rather than mock rows.
@@ -128,8 +155,10 @@ final class AppModel: ObservableObject {
   var hasConnection: Bool { connections.load() != nil }
   var connectionHost: String? { connections.load()?.relayHost }
 
-  init(connections: RemoteConnectionStore = RemoteConnectionStore()) {
+  init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache(),
+       stateDirectory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ScryRemote", isDirectory: true)) {
     self.connections = connections
+    self.targetCoordinator = ExecutionTargetCoordinator(connections: connections, historyDisk: historyDisk, stateDirectory: stateDirectory)
     // Restore the paired state on launch so an already-paired device is never
     // forced to re-scan. Paired != reachable: we show .offline(host) until a real
     // exchange proves the host is reachable (markReachable), never a fake dot.
@@ -228,7 +257,8 @@ final class AppModel: ObservableObject {
   // the Mac operator confirms and a grant is issued. Runs the PROVEN
   // RemotePairingClient; no state is faked.
   func beginPair(scanned: String, runStore: RemoteRunStore) {
-    guard !runStore.hasUnsentMessages, !runStore.hasUnresolvedRun else {
+    guard !targetCoordinator.recoveryUnavailable else { pairing = .failed(ConnectionCopy.targetRecoveryUnavailable); return }
+    guard !targetCoordinator.hasPendingWork, !runStore.hasUnsentMessages, !runStore.hasUnresolvedRun else {
       pairing = .failed(RemoteRunStore.ConnectionReplacementError.pendingWork.localizedDescription)
       return
     }
@@ -297,8 +327,9 @@ final class AppModel: ObservableObject {
     }
   }
   private func setPaired(deviceId: String, host: String, connection: RemoteConnection, runStore: RemoteRunStore) throws {
-    try runStore.prepareConnectionReplacement(connection)
+    try targetCoordinator.prepareConnectionReplacement(connection)
     connections.save(connection)
+    targetCoordinator.connectionChanged()
     openedSession = nil
     readOnlyTranscript = false
     showRunQuestion = false
@@ -306,7 +337,7 @@ final class AppModel: ObservableObject {
     connectionNotice = nil
     // Re-pairing keeps canShowWorkspace true, so RootView's pairing-change
     // observer will not restart the feed cleared with the previous grant.
-    runStore.startLiveRuns()
+    targetCoordinator.foregrounded()
     pairing = .paired(deviceId: deviceId)
     // A live grant now exists and the run channel is wired (RemoteRunClient). We
     // show an honest offline-but-paired link (reachability is only learned by an
@@ -320,7 +351,7 @@ final class AppModel: ObservableObject {
       await MainActor.run {
         if case .paired = self.pairing {
           self.pairing = .idle
-          self.route = .newSession
+          if self.targetCoordinator.beginNewTask() { self.route = .newSession }
         }
       }
     }
@@ -346,10 +377,10 @@ final class AppModel: ObservableObject {
   func destructiveUnpair(runStore: RemoteRunStore) async {
     destructiveActionError = nil
     do {
-      try await runStore.clearHistoryCache()
-      try runStore.clearAllState()
+      try await targetCoordinator.clearAllState()
       try RemoteKeychain().clearAll()
       connections.clear()
+      targetCoordinator.connectionChanged()
       pairingTask?.cancel(); pairingTask = nil
       pairing = .idle; link = .notPaired; connectionObservation = .unverified; connectionNotice = nil; route = .home
       query = ""; sessions = []; drafts = [:]; draftAliases = [:]

@@ -26,9 +26,15 @@ actor RemoteHistoryCache {
     self.entryLimit = entryLimit
   }
 
-  static func key(connection: RemoteConnection, providerId: String, cwd: String, sessionId: String) -> String {
-    // Length-safe JSON encoding; paths/session ids never become filesystem paths.
-    let fields = [connection.hostId, connection.anchorPEM, connection.deviceId, providerId, cwd, sessionId]
+  static func key(connection: RemoteConnection, target: ExecutionTargetScope? = nil,
+                  providerId: String, cwd: String, sessionId: String, agentProfileId: String? = nil) -> String {
+    // Length-safe identity includes the gateway grant, immutable target and Profile.
+    var fields = [connection.hostId, connection.anchorPEM, connection.deviceId]
+    if let target, !target.isLocal { fields += [target.gatewayHostId, target.targetId ?? "", target.binding ?? "", target.hostId] }
+    // Old cache entries lack Profile source proof and must not render under
+    // the strict protocol, including the default Profile. Outbox/catalog keys stay unchanged.
+    fields += ["profile-history-v1", providerId, cwd, sessionId]
+    if let agentProfileId { fields += [agentProfileId] }
     let bytes = try! JSONEncoder().encode(fields)
     return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
   }
@@ -65,8 +71,9 @@ actor RemoteHistoryCache {
     let window: StructuredWindow
   }
 
-  static func catalogKey(connection: RemoteConnection) -> String {
-    let fields = [connection.hostId, connection.anchorPEM, connection.deviceId]
+  static func catalogKey(connection: RemoteConnection, target: ExecutionTargetScope? = nil) -> String {
+    var fields = [connection.hostId, connection.anchorPEM, connection.deviceId]
+    if let target, !target.isLocal { fields += [target.gatewayHostId, target.targetId ?? "", target.binding ?? "", target.hostId] }
     let bytes = try! JSONEncoder().encode(fields)
     return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
   }

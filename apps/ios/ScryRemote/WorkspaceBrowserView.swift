@@ -28,6 +28,7 @@ struct WorkspaceBrowserView: View {
 }
 
 private struct WorkspaceDirectoryView: View {
+  @EnvironmentObject var run: RemoteRunStore
   let cwd: String
   let path: String
   @State private var page: G0Transport.WorkspaceListing?
@@ -69,7 +70,7 @@ private struct WorkspaceDirectoryView: View {
       page = nil; error = nil
       do {
         let result = try await readProject(.init(action: .list, cwd: cwd, path: path,
-          cursor: cursors.last.flatMap { $0 }))
+          cursor: cursors.last.flatMap { $0 }), run: run)
         guard case let .list(value) = result else { throw WorkspaceViewError.unexpectedResponse }
         page = value
       } catch is CancellationError {} catch { self.error = "目录读取失败：\(error)" }
@@ -78,6 +79,7 @@ private struct WorkspaceDirectoryView: View {
 }
 
 private struct WorkspaceContentView: View {
+  @EnvironmentObject var run: RemoteRunStore
   let cwd: String
   let path: String? // nil = current workspace vs HEAD, not this session's edits
   @State private var file: G0Transport.WorkspaceFile?
@@ -139,7 +141,7 @@ private struct WorkspaceContentView: View {
       do {
         let query = path.map { G0Transport.WorkspaceQuery(action: .file, cwd: cwd, path: $0, offset: offset, snapshot: snapshot) }
           ?? .init(action: .diff, cwd: cwd)
-        switch try await readProject(query) {
+        switch try await readProject(query, run: run) {
         case let .file(value): file = value
         case let .diff(value): diff = value
         default: throw WorkspaceViewError.unexpectedResponse
@@ -150,6 +152,7 @@ private struct WorkspaceContentView: View {
 }
 
 struct SessionRunStatusView: View {
+  @EnvironmentObject var run: RemoteRunStore
   let session: OpenedSession
   @Environment(\.scenePhase) private var scenePhase
   @State private var status: G0Transport.SessionStatus?
@@ -180,7 +183,7 @@ struct SessionRunStatusView: View {
       while !Task.isCancelled {
         do {
           let result = try await readProject(.init(action: .status, cwd: session.cwd, providerId: session.providerId,
-            externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId))
+            externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId), run: run)
           guard case let .status(value) = result else { throw WorkspaceViewError.unexpectedResponse }
           status = value; error = nil
         } catch is CancellationError { return }
@@ -218,6 +221,7 @@ struct WorkspaceFileView: View {
 private let htmlPreviewLimit = 4 * 1024 * 1024
 
 private struct WorkspaceHTMLPreview: View {
+  @EnvironmentObject var run: RemoteRunStore
   let cwd: String
   let path: String
   @State private var page: (html: String, rules: WKContentRuleList)?
@@ -240,7 +244,7 @@ private struct WorkspaceHTMLPreview: View {
       do {
         // Fail closed: without the network block the page is not shown.
         let rules = try await SandboxedHTMLView.networkBlock()
-        page = (try await readWholeFile(cwd: cwd, path: path), rules)
+        page = (try await readWholeFile(cwd: cwd, path: path, run: run), rules)
       } catch is CancellationError {
       } catch WorkspaceViewError.tooLarge(let bytes) {
         self.error = "文件 \(bytes / 1024) KB，超过 \(htmlPreviewLimit / 1024 / 1024) MB 预览上限；可切换到源码分页查看。"
@@ -251,12 +255,12 @@ private struct WorkspaceHTMLPreview: View {
 
 // Pages share one snapshot, so a file changed mid-read fails instead of mixing versions.
 @MainActor
-private func readWholeFile(cwd: String, path: String) async throws -> String {
+private func readWholeFile(cwd: String, path: String, run: RemoteRunStore) async throws -> String {
   var text = ""
   var offset = 0
   var snapshot: String?
   while true {
-    guard case let .file(page) = try await readProject(.init(action: .file, cwd: cwd, path: path, offset: offset, snapshot: snapshot))
+    guard case let .file(page) = try await readProject(.init(action: .file, cwd: cwd, path: path, offset: offset, snapshot: snapshot), run: run)
     else { throw WorkspaceViewError.unexpectedResponse }
     guard page.totalBytes <= htmlPreviewLimit else { throw WorkspaceViewError.tooLarge(page.totalBytes) }
     text += page.content
@@ -394,7 +398,7 @@ private struct MacLocalLinkSheet: View {
 private enum WorkspaceViewError: Error { case notPaired, unexpectedResponse, tooLarge(Int), sandboxUnavailable }
 
 @MainActor
-private func readProject(_ query: G0Transport.WorkspaceQuery) async throws -> G0Transport.WorkspaceResult {
+private func readProject(_ query: G0Transport.WorkspaceQuery, run: RemoteRunStore) async throws -> G0Transport.WorkspaceResult {
   #if DEBUG
   if ProcessInfo.processInfo.arguments.contains("-uiWorkspaceFixture") {
     let json: String
@@ -422,9 +426,5 @@ private func readProject(_ query: G0Transport.WorkspaceQuery) async throws -> G0
   // Existing visual fixtures never open a real transport.
   if ProcessInfo.processInfo.arguments.contains("-uiPreview") { throw WorkspaceViewError.notPaired }
   #endif
-  guard let connection = RemoteConnectionStore().load() else { throw WorkspaceViewError.notPaired }
-  let result = try await RemoteRunClient(connection: connection).workspace(query)
-  try Task.checkCancellation()
-  guard connection == RemoteConnectionStore().load() else { throw CancellationError() }
-  return result
+  return try await run.readWorkspace(query)
 }

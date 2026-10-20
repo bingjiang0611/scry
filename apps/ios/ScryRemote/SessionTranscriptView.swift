@@ -83,7 +83,7 @@ struct SessionTranscriptView: View {
   // One stop confirmation for every run, wherever it was started.
   private enum StopTarget { case focused, live(G0Transport.LiveRun) }
   private var composer: Binding<AppModel.ComposerDraft> {
-    model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask)
+    model.composerDraft(for: sessionIdentity.map(AppModel.DraftKey.conversation) ?? .newTask(model.targetCoordinator.selectedScope))
   }
   private var draft: String { composer.wrappedValue.text }
   private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
@@ -92,7 +92,7 @@ struct SessionTranscriptView: View {
   private var hasLiveTurn: Bool { run.prompt != nil }
   private var sessionIdentity: RemoteRunStore.SessionIdentity? {
     guard let s = session else { return nil }
-    return .opened(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+    return s.identity
   }
   private var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
     guard let identity = sessionIdentity else { return [] }
@@ -175,14 +175,14 @@ struct SessionTranscriptView: View {
         RemoteQuestionSheet(request: request, submitting: run.liveActionRunId == live.runId, error: run.liveActionError,
           onAnswer: { run.answerLiveQuestion(live, request: request, answers: $0) },
           onCancel: { run.answerLiveQuestion(live, request: request, answers: [:], cancel: true) })
-          .id(request.questionId)
+          .id(run.questionIdentity(request))
       }
     }
     .onAppear {
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
       // different session identity invalidates old history/poll callbacks.
-      run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+      run.prepareForSession(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId)
       if !readOnly && historyAllowsControls { loadSessionControls() }
       if !readOnly { run.watchHistory(sessionIdentity) }
     }
@@ -195,7 +195,7 @@ struct SessionTranscriptView: View {
       guard followingLatest, let s = session else { return }
       // Returning to the tail must reconcile a version the long-poll already
       // reported while the reader was browsing older messages.
-      await run.refreshHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId)
+      await run.refreshHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId)
     }
     .task(id: sessionIdentity) {
       guard let s = session else { return }
@@ -207,7 +207,7 @@ struct SessionTranscriptView: View {
         // The live-run long-poll already delivers this session's changes.
         if run.historyIsWatched(sessionIdentity) { continue }
         await run.refreshHistory(providerId: s.providerId, cwd: s.cwd,
-                                 externalSessionId: s.externalSessionId)
+                                 externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId)
       }
     }
   }
@@ -215,7 +215,7 @@ struct SessionTranscriptView: View {
   @ViewBuilder private var historyBody: some View {
     if run.activeSessionIdentity == sessionIdentity, run.historyCapacityLimit {
       Button("加载完整历史（完整字节传输）") {
-        if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId) }
+        if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
       }
       .buttonStyle(.borderedProminent)
       .disabled(run.historySyncing)
@@ -230,7 +230,7 @@ struct SessionTranscriptView: View {
       if run.historyOlderBefore != nil {
         Button(run.historySyncing ? "正在读取更早历史…" : "加载更早的完整历史") {
           olderReadRequest += 1
-          if let s = session { run.loadOlderHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId) }
+          if let s = session { run.loadOlderHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
         }
         .buttonStyle(.bordered)
         .disabled(run.historySyncing)
@@ -258,7 +258,7 @@ struct SessionTranscriptView: View {
       EmptyState(title: "暂时无法读取会话", detail: reason + "\n已输入的草稿会保留。", symbol: "exclamationmark.triangle")
       Button("重新读取") {
         if let s = session {
-          run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true)
+          run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId)
         }
       }
       .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
@@ -319,12 +319,12 @@ struct SessionTranscriptView: View {
           if let notice = run.historyStorageNotice { Text(notice) }
         }
         if let s = session {
-          Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) } label: {
+          Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) } label: {
             Label("刷新会话", systemImage: "arrow.clockwise")
           }
         }
         if !readOnly {
-          Button { if run.detachFocusedRun() { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
+          Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
         }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       } label: {
@@ -393,7 +393,13 @@ struct SessionTranscriptView: View {
                    action: .init(title: run.liveActionRunId == live.runId ? "请求中…" : "停止", destructive: true,
                                  disabled: run.liveActionRunId != nil, perform: { stopTarget = .live(live) }))
     }
-    if backgroundSend != nil { return .init(text: "发送中", busy: true) }
+    if let pending = backgroundSend {
+      if pending.uncertainty != nil {
+        return .init(text: ConnectionCopy.targetResultUnknown, tone: .warning,
+                     action: .init(title: ConnectionCopy.reconcileResult, perform: { run.reconcileUncertain(intentId: pending.intentId) }))
+      }
+      return .init(text: ConnectionCopy.sending, busy: true)
+    }
     if let history = historyIssue { return history }
     if !runBusy, historyAllowsControls, !controlsMatch, run.providers != .loading {
       return .init(text: "未读到原 Provider 设置，暂时无法发送",
@@ -415,7 +421,7 @@ struct SessionTranscriptView: View {
     if run.historySyncing { return .init(text: "正在读取 Mac 上的会话记录", busy: true) }
     return .init(text: "未读到 Mac 上更早的记录（不代表没有）",
                  action: .init(title: "重新读取", perform: {
-                   if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true) }
+                   if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) }
                  }))
   }
 

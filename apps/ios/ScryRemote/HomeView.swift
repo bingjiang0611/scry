@@ -1,46 +1,155 @@
 import SwiftUI
 import RemoteTransport
 
-// v5 · Codex Refined home. A flat, searchable conversation list avoids the old
-// project-header duplication; project + Provider remain visible as metadata.
+// Details describe one request, not the next background refresh or pairing.
+struct CatalogRefreshDetailsSnapshot: Identifiable {
+  let id = UUID()
+  let failure: RemoteRunStore.CatalogRefreshFailure
+  let lastFullRefresh: Date?
+  let address: String?
+  let paired: Bool
+}
+
+// One projection for local and forwarded rows: all navigation keeps the row's
+// immutable scope, including when two hosts expose identical session ids.
 struct HomeView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @EnvironmentObject var targets: ExecutionTargetCoordinator
   @State private var pinnedExpanded = true
   @State private var refreshToastVisible = false
-  @State private var showingRefreshDetails = false
+  @State private var refreshDetails: CatalogRefreshDetailsSnapshot?
   @State private var manualRefreshing = false
   @State private var refreshToastID = 0
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+  private var failure: RemoteRunStore.CatalogRefreshFailure? {
+    for scope in targets.visibleScopes {
+      if let failure = targets.store(for: scope).catalogRefreshFailure { return failure }
+    }
+    return targets.homeFailure
+  }
+  private var refreshing: Bool { targets.homeLoading || manualRefreshing }
+  private var filtered: [ExecutionTargetCoordinator.HomeSession] {
+    let needle = model.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return targets.homeSessions.filter {
+      needle.isEmpty || [$0.session.label, $0.session.cwd, $0.session.providerId, $0.scope.label]
+        .contains { $0.lowercased().contains(needle) }
+    }
+  }
+
   var body: some View {
+    let rows = filtered
     VStack(spacing: 0) {
-      RemoteHeader(title: ConnectionCopy.homeTitle, menuAction: { model.route = .settings }) {
+      RemoteHeader(title: ConnectionCopy.homeTitle, subtitle: targets.aggregatesHosts ? targets.filterLabel : nil,
+                   menuAction: { model.route = .settings }) {
         HStack(spacing: 0) {
-          if run.catalogRefreshInFlight {
+          if refreshing {
             ProgressView().frame(width: 44, height: 44).accessibilityLabel(ConnectionCopy.refreshing)
           } else {
             PlainIcon(symbol: "arrow.clockwise", label: ConnectionCopy.refresh) { manualRefresh() }
           }
           Menu {
+            Button { targets.selectFilter(.all) } label: {
+              Label(ConnectionCopy.allHosts, systemImage: targets.homeFilter == .all ? Symbol.check : Symbol.laptop)
+            }
+            ForEach(targets.targetScopes) { target in
+              Button { targets.selectFilter(.target(target)) } label: {
+                Label(target.label, systemImage: targets.homeFilter == .target(target) ? Symbol.check : Symbol.laptop)
+              }
+            }
+            Divider()
             Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
             Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
           } label: {
             Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
-          }
-          .accessibilityLabel(ConnectionCopy.more)
+          }.accessibilityLabel(ConnectionCopy.more)
         }
       }
-      if let failure = run.catalogRefreshFailure, run.catalog.hasVisibleValue {
-        refreshFailure(failure)
+      if let failure { refreshFailure(failure) }
+      ScrollView {
+        currentTasks
+        backgroundSends
+        if targets.visibleScopes.contains(where: { if case .unverifiedCache = targets.store(for: $0).catalogEvidence { return true }; return false }), failure == nil {
+          Text(ConnectionCopy.unverifiedCache).font(.system(size: 12)).foregroundStyle(Palette.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 19).padding(.top, 10)
+        }
+        ForEach(targets.visibleScopes) { scope in liveRuns(scope: scope) }
+        if !rows.isEmpty { sessionSections(rows) }
+        else if !run.hasConnection { notPairedEmpty }
+        else if refreshing { ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 52) }
+        else if !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          EmptyState(title: ConnectionCopy.noMatches, detail: ConnectionCopy.changeSearch).padding(.top, 24)
+        } else if failure == nil {
+          EmptyState(title: ConnectionCopy.noSessions, detail: ConnectionCopy.createFirstTask).padding(.top, 24)
+        }
       }
-      if run.hasUnresolvedRun {
-        Button { model.route = .chat } label: {
+      .scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively)
+      .refreshable { await showManualRefresh() }
+      dock
+    }
+    .background(Palette.surface)
+    .overlay(alignment: .top) {
+      if refreshToastVisible && failure == nil {
+        Text(ConnectionCopy.refreshSuccess).font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(Palette.surface).padding(.horizontal, 16).frame(height: 36)
+          .background(Palette.ink, in: Capsule()).padding(.top, 64).transition(.opacity)
+      }
+    }
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: refreshToastVisible)
+    .task(id: refreshToastID) {
+      guard refreshToastVisible else { return }
+      do { try await Task.sleep(for: .milliseconds(2_600)) } catch { return }
+      refreshToastVisible = false
+    }
+    .onDisappear { refreshToastVisible = false }
+    .sheet(item: $refreshDetails) { details in
+      CatalogRefreshDetails(failure: details.failure, lastFullRefresh: details.lastFullRefresh,
+                            address: details.address, paired: details.paired)
+        .presentationDetents([.medium, .large])
+        #if DEBUG
+        .task {
+          if ProcessInfo.processInfo.arguments.contains("-uiResolveRefreshDetails"), run.prepareRefreshDetailsFixture() {
+            await targets.refreshHome()
+          }
+        }
+        #endif
+    }
+    .task { if run.hasConnection { await targets.refreshHome() } }
+  }
+
+  private func manualRefresh() { Task { await showManualRefresh() } }
+  @MainActor private func showManualRefresh() async {
+    guard !manualRefreshing else { return }
+    manualRefreshing = true; refreshToastVisible = false
+    defer { manualRefreshing = false }
+    guard await targets.refreshHome(), !Task.isCancelled else { return }
+    refreshToastID += 1; refreshToastVisible = true
+  }
+  private func refreshFailure(_ failure: RemoteRunStore.CatalogRefreshFailure) -> some View {
+    let lastFullRefresh = targets.lastFullRefresh
+    let address = run.hostLabel
+    let paired = run.hasConnection
+    return CatalogRefreshBanner(failure: failure, lastFullRefresh: lastFullRefresh, refreshing: refreshing,
+      onRetry: { if failure.requiresPairing { model.route = .pair } else { manualRefresh() } },
+      onDetails: {
+        refreshDetails = CatalogRefreshDetailsSnapshot(failure: failure, lastFullRefresh: lastFullRefresh,
+                                                       address: address, paired: paired)
+      })
+  }
+
+  private var currentTasks: some View {
+    ForEach(targets.pendingScopes) { scope in
+      let store = targets.store(for: scope)
+      if store.hasUnresolvedRun {
+        Button { targets.select(scope); model.route = .chat } label: {
           HStack {
-            Image(systemName: run.observationInterrupted ? "wifi.exclamationmark" : "bubble.left.and.bubble.right")
+            Image(systemName: store.observationInterrupted ? "wifi.exclamationmark" : "bubble.left.and.bubble.right")
             VStack(alignment: .leading, spacing: 3) {
-              Text("返回当前任务").font(.system(size: 14, weight: .semibold))
-              Text(run.lifecycle == .submitting ? "发送中…" : run.observationInterrupted ? "观察中断，点击恢复；主机可能仍在运行" : "任务进行中")
+              Text(ConnectionCopy.returnToTask(scope.label)).font(.system(size: 14, weight: .semibold))
+              Text(store.hasUncertainSubmission ? ConnectionCopy.targetResultUnknown :
+                   store.observationInterrupted ? ConnectionCopy.interruptedRun :
+                   store.lifecycle == .submitting ? ConnectionCopy.sending : ConnectionCopy.running)
                 .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             Spacer()
@@ -48,316 +157,201 @@ struct HomeView: View {
           }.padding(14).background(Palette.noticeBg, in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(.plain).padding(.horizontal, 16).padding(.vertical, 8)
       }
-      content
-      dock
-    }
-    .background(Palette.surface)
-    .overlay(alignment: .top) {
-      if refreshToastVisible && run.catalogRefreshFailure == nil {
-        Text(ConnectionCopy.refreshSuccess).font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(Palette.surface).padding(.horizontal, 16).frame(height: 36)
-          .background(Palette.ink, in: Capsule()).padding(.top, 64)
-          .transition(.opacity)
-      }
-    }
-    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: refreshToastVisible)
-    .task(id: refreshToastID) {
-      guard refreshToastVisible else { return }
-      do { try await Task.sleep(for: .milliseconds(2_600)) }
-      catch { return }
-      refreshToastVisible = false
-    }
-    .onDisappear { refreshToastVisible = false }
-    .sheet(isPresented: $showingRefreshDetails) {
-      if let failure = run.catalogRefreshFailure {
-        CatalogRefreshDetails(failure: failure, lastFullRefresh: run.catalogVerifiedAt,
-                              address: run.hostLabel, paired: run.hasConnection)
-          .presentationDetents([.medium, .large])
-      }
-    }
-    .onAppear {
-      if run.hasConnection { run.loadSessions(); run.loadProjects() }
     }
   }
 
-  private func manualRefresh() {
-    Task { await showManualRefresh() }
-  }
-
-  @MainActor private func showManualRefresh() async {
-    guard !manualRefreshing else { return }
-    manualRefreshing = true
-    refreshToastVisible = false
-    defer { manualRefreshing = false }
-    guard await run.refreshSessions(), !Task.isCancelled else { return }
-    refreshToastID += 1
-    refreshToastVisible = true
-  }
-
-  private func refreshFailure(_ failure: RemoteRunStore.CatalogRefreshFailure) -> some View {
-    CatalogRefreshBanner(failure: failure, lastFullRefresh: run.catalogVerifiedAt,
-                         refreshing: run.catalogRefreshInFlight,
-                         onRetry: { if failure.requiresPairing { model.route = .pair } else { manualRefresh() } },
-                         onDetails: { showingRefreshDetails = true })
-  }
-
-  @ViewBuilder private var content: some View {
-    ScrollView {
-      backgroundSendsSection
-      if case .unverifiedCache = run.catalogEvidence, run.catalogRefreshFailure == nil {
-        Text(ConnectionCopy.unverifiedCache).font(.system(size: 12)).foregroundStyle(Palette.muted)
-          .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 19).padding(.top, 10)
-      }
-      switch run.catalog {
-      case .idle, .loading:
-        if !run.hasConnection { notPairedEmpty }
-        else { ProgressView("正在读取会话…").frame(maxWidth: .infinity).padding(.top, 52) }
-      case let .loaded(list):
-        let filtered = filteredSessions(list)
-        liveRunsSection(list)
-        if filtered.isEmpty {
-          EmptyState(title: "没有匹配的会话", detail: "试试其他关键词。", symbol: Symbol.search).padding(.top, 24)
-        } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-          sessionSections(filtered)
-        } else {
-          VStack(alignment: .leading, spacing: 0) {
-            sectionTitle("搜索结果")
-            ForEach(filtered, id: \.sessionId) { sessionRow($0, showsMetadata: true) }
-          }
-          .padding(.horizontal, 19)
-        }
-      case .empty:
-        EmptyState(title: "主机还没有会话", detail: "点击右下角，从 iPhone 发起第一项任务。")
-          .padding(.top, 24)
-      case let .failed(reason):
-        if !run.hasConnection { notPairedEmpty }
-        else { refreshFailure(run.catalogRefreshFailure ?? .transport(reason)).padding(.top, 18) }
-      }
-    }
-    .scrollIndicators(.hidden)
-    .scrollDismissesKeyboard(.interactively)
-    .refreshable { await showManualRefresh() }
-  }
-
-  // Live runs whose session is not in the list yet (just started, or archived
-  // on the Mac). Rows already in the list carry their own live badge.
-  @ViewBuilder private func liveRunsSection(_ list: [G0Transport.RunSessionRef]) -> some View {
-    let listed = Set(list.compactMap { session in session.externalSessionId.map { "\(session.providerId)\u{0}\(session.cwd)\u{0}\($0)" } })
-    let unlisted = run.liveRuns.filter { live in
-      live.externalSessionId.map { !listed.contains("\(live.providerId)\u{0}\(live.cwd)\u{0}\($0)") } ?? true
-    }
-    if !unlisted.isEmpty {
-      VStack(alignment: .leading, spacing: 0) {
-        sectionTitle("进行中")
-        ForEach(unlisted) { live in
-          Button {
-            guard let external = live.externalSessionId else { return }
-            model.open(OpenedSession(providerId: live.providerId, agentProfileId: live.agentProfileId, cwd: live.cwd,
-                                     externalSessionId: external, label: live.prompt, isActive: true), run: run)
-          } label: {
+  private var backgroundSends: some View {
+    ForEach(targets.targetScopes) { scope in
+      let store = targets.store(for: scope)
+      if !store.backgroundSends.isEmpty {
+        VStack(alignment: .leading, spacing: 0) {
+          sectionTitle(ConnectionCopy.pendingMessages(scope.label))
+          ForEach(store.backgroundSends) { pending in
             HStack(alignment: .top, spacing: 10) {
               VStack(alignment: .leading, spacing: 4) {
-                Text(live.prompt.isEmpty ? "(无预览)" : live.prompt).font(.system(size: 15.5)).lineLimit(1)
-                Text("\(projectName(live.cwd)) · \(live.providerId.uppercased())")
-                  .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
+                Text(pending.routing.prompt).font(.system(size: 15.5)).lineLimit(1)
+                Text(pending.uncertainty != nil ? ConnectionCopy.targetResultUnknown :
+                     pending.failure.map(ConnectionCopy.rejectedMessage) ??
+                     ConnectionCopy.rowContext(host: nil, project: projectName(pending.routing.cwd), provider: pending.routing.providerId))
+                  .font(.system(size: 11.5)).foregroundStyle(pending.failure == nil ? Palette.muted : Palette.negative).lineLimit(2)
               }
               Spacer(minLength: 8)
-              if live.externalSessionId == nil {
-                Text("启动中").font(.system(size: 10)).foregroundStyle(Palette.muted)
+              if pending.uncertainty != nil {
+                Button(ConnectionCopy.reconcileResult) { store.reconcileUncertain(intentId: pending.intentId) }
+                  .font(.caption).frame(minHeight: 44)
+              } else if pending.failure == nil {
+                ProgressView().controlSize(.small).accessibilityLabel(ConnectionCopy.sending)
               } else {
-                LiveRunBadge(live: live, waiting: run.openLiveQuestion(live) != nil)
+                Button { store.discardRejectedSend(pending.intentId) } label: {
+                  Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 44, height: 44)
+                }.buttonStyle(.plain).foregroundStyle(Palette.muted).accessibilityLabel(ConnectionCopy.remove)
               }
-            }
-            .padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.padding(.vertical, 12)
           }
-          .buttonStyle(.plain).disabled(live.externalSessionId == nil)
-        }
+        }.padding(.horizontal, 19)
       }
-      .padding(.horizontal, 19)
-    }
-  }
-
-  // Messages left while still sending. They resend on their own and become
-  // live runs once the Mac records them; only a Mac rejection can be dismissed.
-  @ViewBuilder private var backgroundSendsSection: some View {
-    if !run.backgroundSends.isEmpty {
-      VStack(alignment: .leading, spacing: 0) {
-        sectionTitle("发送中")
-        ForEach(run.backgroundSends) { pending in
-          HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(pending.routing.prompt).font(.system(size: 15.5)).lineLimit(1)
-              Text(pending.failure.map { "Mac 拒绝了这条消息（\($0)），未执行" }
-                   ?? "\(projectName(pending.routing.cwd)) · \(pending.routing.providerId.uppercased())")
-                .font(.system(size: 11.5)).foregroundStyle(pending.failure == nil ? Palette.muted : Palette.negative).lineLimit(2)
-            }
-            Spacer(minLength: 8)
-            if pending.failure == nil {
-              ProgressView().controlSize(.small).accessibilityLabel("发送中")
-            } else {
-              Button { run.discardRejectedSend(pending.intentId) } label: {
-                Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 44, height: 44)
-              }.buttonStyle(.plain).foregroundStyle(Palette.muted).accessibilityLabel("移除")
-            }
-          }
-          .padding(.vertical, 12)
-        }
-      }
-      .padding(.horizontal, 19)
     }
   }
 
   private var notPairedEmpty: some View {
     VStack(spacing: 0) {
-      EmptyState(title: "还没有连接 Mac", detail: "在 Mac 的 Scry 中打开“连接 iPhone”，然后扫描配对码。", symbol: Symbol.laptop)
+      EmptyState(title: ConnectionCopy.noMac, detail: ConnectionCopy.pairInstructions, symbol: Symbol.laptop)
       Button { model.route = .pair } label: {
-        Text("连接 Mac").font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.surface)
-          .padding(.horizontal, 22).frame(minHeight: 46)
-          .background(Palette.ink, in: Capsule())
+        Text(ConnectionCopy.connectMac).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.surface)
+          .padding(.horizontal, 22).frame(minHeight: 46).background(Palette.ink, in: Capsule())
       }
     }.padding(.top, 24)
   }
 
-  private func filteredSessions(_ list: [G0Transport.RunSessionRef]) -> [G0Transport.RunSessionRef] {
-    let needle = model.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !needle.isEmpty else { return list }
-    return list.filter {
-      $0.label.lowercased().contains(needle) || $0.cwd.lowercased().contains(needle) || $0.providerId.lowercased().contains(needle)
+  private struct ProjectKey: Hashable { let scope: ExecutionTargetScope; let cwd: String }
+  private struct ProjectGroup: Identifiable {
+    let scope: ExecutionTargetScope
+    let cwd: String
+    let sessions: [ExecutionTargetCoordinator.HomeSession]
+    var id: ProjectKey { .init(scope: scope, cwd: cwd) }
+  }
+  private func groupedByProject(_ rows: [ExecutionTargetCoordinator.HomeSession]) -> [ProjectGroup] {
+    var order: [ProjectKey] = []
+    var groups: [ProjectKey: [ExecutionTargetCoordinator.HomeSession]] = [:]
+    for row in rows {
+      let key = ProjectKey(scope: row.scope, cwd: row.session.cwd)
+      if groups[key] == nil { order.append(key) }
+      groups[key, default: []].append(row)
+    }
+    return order.compactMap { key in
+      guard let rows = groups[key], let first = rows.first else { return nil }
+      return ProjectGroup(scope: first.scope, cwd: first.session.cwd, sessions: rows)
     }
   }
-
-  private struct ProjectGroup { let cwd: String; let sessions: [G0Transport.RunSessionRef] }
-
-  private func sessionSections(_ list: [G0Transport.RunSessionRef]) -> some View {
-    let pinned = list.filter { $0.pinnedAt != nil }
-    let regular = list.filter { $0.pinnedAt == nil }
+  private func sessionSections(_ rows: [ExecutionTargetCoordinator.HomeSession]) -> some View {
+    let pinned = rows.filter { $0.session.pinnedAt != nil }.sorted { ($0.session.pinnedAt ?? 0) > ($1.session.pinnedAt ?? 0) }
+    let regular = rows.filter { $0.session.pinnedAt == nil }
     return LazyVStack(alignment: .leading, spacing: 0) {
-      if !pinned.isEmpty {
-        Button { withAnimation(.easeInOut(duration: 0.18)) { pinnedExpanded.toggle() } } label: {
-          HStack(spacing: 7) {
-            Text("已置顶").font(.system(size: 18, weight: .semibold))
-            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-              .rotationEffect(.degrees(pinnedExpanded ? 0 : -90)).foregroundStyle(Palette.muted)
-            Spacer()
-          }
-          .frame(minHeight: 44).contentShape(Rectangle())
+      if !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        sectionTitle(ConnectionCopy.searchResults)
+        ForEach(rows) { sessionRow($0) }
+      } else {
+        if !pinned.isEmpty {
+          Button { withAnimation(.easeInOut(duration: 0.18)) { pinnedExpanded.toggle() } } label: {
+            HStack(spacing: 7) {
+              Text(ConnectionCopy.pinned).font(.system(size: 18, weight: .semibold))
+              Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                .rotationEffect(.degrees(pinnedExpanded ? 0 : -90)).foregroundStyle(Palette.muted)
+              Spacer()
+            }.frame(minHeight: 44).contentShape(Rectangle())
+          }.buttonStyle(.plain)
+          if pinnedExpanded { ForEach(pinned) { sessionRow($0) } }
         }
-        .buttonStyle(.plain)
-        if pinnedExpanded {
-          ForEach(pinned.sorted { ($0.pinnedAt ?? 0) > ($1.pinnedAt ?? 0) }, id: \.sessionId) {
-            sessionRow($0, showsMetadata: false)
+        if !regular.isEmpty {
+          sectionTitle(ConnectionCopy.projects).padding(.top, pinned.isEmpty ? 4 : 20)
+          ForEach(groupedByProject(regular)) { group in
+            projectHeader(group)
+            ForEach(group.sessions) { sessionRow($0, indent: 26) }
           }
         }
       }
-
-      if !regular.isEmpty {
-        sectionTitle("项目").padding(.top, pinned.isEmpty ? 4 : 20)
-        ForEach(groupedByProject(regular), id: \.cwd) { group in
-          projectHeader(group.cwd)
-          ForEach(group.sessions, id: \.sessionId) { sessionRow($0, showsMetadata: false, indent: 26) }
-        }
-      }
-    }
-    .padding(.horizontal, 19).padding(.bottom, 24)
+    }.padding(.horizontal, 19).padding(.bottom, 24)
   }
-
   private func sectionTitle(_ title: String) -> some View {
     Text(title).font(.system(size: 18, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
       .padding(.top, 17).padding(.bottom, 7)
   }
-
-  private func groupedByProject(_ list: [G0Transport.RunSessionRef]) -> [ProjectGroup] {
-    var order: [String] = []
-    var groups: [String: [G0Transport.RunSessionRef]] = [:]
-    for session in list {
-      if groups[session.cwd] == nil { order.append(session.cwd); groups[session.cwd] = [] }
-      groups[session.cwd]?.append(session)
-    }
-    return order.map { ProjectGroup(cwd: $0, sessions: groups[$0] ?? []) }
-  }
-
-  private func projectHeader(_ cwd: String) -> some View {
+  private func projectHeader(_ group: ProjectGroup) -> some View {
     HStack(spacing: 11) {
       Image(systemName: Symbol.folder).font(.system(size: 19, weight: .medium)).frame(width: 25)
-      Text(projectName(cwd)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+      Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? group.scope.label : nil,
+                                    project: projectName(group.cwd), provider: ""))
+        .font(.system(size: 16, weight: .semibold)).lineLimit(1)
       Spacer()
       Button {
-        // A finished run's state (including its error) belongs to that session;
-        // a running one stays on the Mac and in the live-run list.
-        guard run.detachFocusedRun() else { return }
-        if case let .loaded(projects) = run.projects, let project = projects.first(where: { $0.path == cwd }) {
-          run.chooseProject(project)
-        }
+        guard targets.beginNewTask(scope: group.scope) else { return }
+        targets.newTaskStore.chooseProject(.init(path: group.cwd, label: projectName(group.cwd)))
         model.route = .newSession
       } label: {
         Image(systemName: Symbol.compose).font(.system(size: 17, weight: .medium)).foregroundStyle(Palette.muted)
           .frame(width: 44, height: 44)
-      }
-      .buttonStyle(.plain).accessibilityLabel("在 \(projectName(cwd)) 中新建任务")
-    }
-    .frame(minHeight: 52)
+      }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.newTaskInProject(projectName(group.cwd)))
+    }.frame(minHeight: 52)
   }
-
-  @ViewBuilder private func sessionRow(_ session: G0Transport.RunSessionRef, showsMetadata: Bool, indent: CGFloat = 0) -> some View {
+  private func sessionRow(_ row: ExecutionTargetCoordinator.HomeSession, indent: CGFloat = 0) -> some View {
+    let session = row.session
+    let store = targets.store(for: row.scope)
     let openable = session.externalSessionId?.isEmpty == false
-    Button {
-      guard openable, let external = session.externalSessionId else { return }
-      model.open(OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
-                               cwd: session.cwd, externalSessionId: external, label: session.label,
-                               isActive: session.isActive == true), run: run)
+    return Button {
+      guard let external = session.externalSessionId, openable else { return }
+      targets.select(row.scope)
+      model.open(OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId, cwd: session.cwd,
+        externalSessionId: external, label: session.label, isActive: session.isActive == true, scope: row.scope.isLocal ? nil : row.scope), run: store)
     } label: {
       HStack(alignment: .top, spacing: 10) {
         VStack(alignment: .leading, spacing: 4) {
-          Text(session.label.isEmpty ? "(无预览)" : session.label)
-            .font(.system(size: 15.5, weight: .regular)).foregroundStyle(openable ? Palette.ink : Palette.muted)
-            .lineLimit(1)
-          if showsMetadata {
-            Text("\(projectName(session.cwd)) · \(session.providerId.uppercased())")
-              .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
-          }
+          Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
+            .font(.system(size: 15.5)).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(1)
+          Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? row.scope.label : nil,
+                                        project: projectName(session.cwd), provider: session.providerId))
+            .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
         }
         Spacer(minLength: 8)
-        if let live = run.liveRun(providerId: session.providerId, cwd: session.cwd, externalSessionId: session.externalSessionId) {
-          LiveRunBadge(live: live, waiting: run.openLiveQuestion(live) != nil)
+        if let live = store.liveRun(providerId: session.providerId, cwd: session.cwd,
+                                   externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId) {
+          LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil)
         } else if session.isActive == true {
           Text(ConnectionCopy.lastRunning).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
-        } else if !openable {
-          // No Provider session id and not running on the Mac: nothing to open.
-          // It may have failed before starting; "preparing" would be a guess.
-          Text("未建立会话").font(.system(size: 10)).foregroundStyle(Palette.muted)
-        }
-      }
-      .padding(.leading, indent).padding(.vertical, showsMetadata ? 12 : 13)
-      .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-    }
-    .buttonStyle(.plain).disabled(!openable)
+        } else if !openable { Text(ConnectionCopy.noSession).font(.system(size: 10)).foregroundStyle(Palette.muted) }
+      }.padding(.leading, indent).padding(.vertical, 13).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+    }.buttonStyle(.plain).disabled(!openable)
   }
-
+  @ViewBuilder private func liveRuns(scope: ExecutionTargetScope) -> some View {
+    let store = targets.store(for: scope)
+    let listed = Set(targets.homeSessions.filter { $0.scope == scope }.compactMap { row -> RemoteRunStore.SessionIdentity? in
+      guard let external = row.session.externalSessionId else { return nil }
+      return .opened(providerId: row.session.providerId, agentProfileId: row.session.agentProfileId,
+                     cwd: row.session.cwd, externalSessionId: external, scope: scope)
+    })
+    let unlisted = store.liveRuns.filter { live in
+      guard let external = live.externalSessionId else { return true }
+      return !listed.contains(.opened(providerId: live.providerId, agentProfileId: live.agentProfileId,
+                                      cwd: live.cwd, externalSessionId: external, scope: scope))
+    }
+    if !unlisted.isEmpty {
+      VStack(alignment: .leading, spacing: 0) {
+        sectionTitle(ConnectionCopy.activeRuns)
+        ForEach(unlisted) { live in
+          Button {
+            guard let external = live.externalSessionId else { return }
+            targets.select(scope)
+            model.open(OpenedSession(providerId: live.providerId, agentProfileId: live.agentProfileId, cwd: live.cwd,
+              externalSessionId: external, label: live.prompt, isActive: true, scope: scope.isLocal ? nil : scope), run: store)
+          } label: {
+            HStack {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(live.prompt.isEmpty ? ConnectionCopy.noPreview : live.prompt).font(.system(size: 15.5)).lineLimit(1)
+                Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? scope.label : nil,
+                                              project: projectName(live.cwd), provider: live.providerId))
+                  .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
+              }
+              Spacer()
+              if live.externalSessionId == nil { Text(ConnectionCopy.starting).font(.system(size: 10)).foregroundStyle(Palette.muted) }
+              else { LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil) }
+            }.padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+          }.buttonStyle(.plain).disabled(live.externalSessionId == nil)
+        }
+      }.padding(.horizontal, 19)
+    }
+  }
   private var dock: some View {
     HStack(spacing: 9) {
       HStack(spacing: 9) {
         Image(systemName: Symbol.search).font(.system(size: 15)).foregroundStyle(Palette.muted)
-        TextField("搜索会话", text: $model.query).font(.system(size: 15))
+        TextField(ConnectionCopy.searchSessions, text: $model.query).font(.system(size: 15))
           .textInputAutocapitalization(.never).autocorrectionDisabled()
+      }.padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
+      CircleButton(symbol: Symbol.plus, label: ConnectionCopy.newTask, filled: true, disabled: !run.hasConnection) {
+        if targets.beginNewTask() { model.route = .newSession }
       }
-      .padding(.horizontal, 15).frame(height: 48).glass(cornerRadius: 24)
-      CircleButton(symbol: Symbol.plus, label: "新任务", filled: true, disabled: !run.hasConnection) {
-        guard run.detachFocusedRun() else { return }
-        model.route = .newSession
-      }
-    }
-    .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 16)
-    .background(Palette.surface)
+    }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 16).background(Palette.surface)
   }
-
   private func projectName(_ cwd: String) -> String { cwd.split(separator: "/").last.map(String.init) ?? cwd }
-  private static func relativeTime(_ ms: Double) -> String {
-    let seconds = Date().timeIntervalSince1970 - ms / 1000
-    if seconds < 60 { return "刚刚" }
-    if seconds < 3600 { return "\(Int(seconds / 60))m" }
-    if seconds < 86400 { return "\(Int(seconds / 3600))h" }
-    return "\(Int(seconds / 86400))d"
-  }
 }
 
 private struct CatalogRefreshBanner: View {
@@ -397,6 +391,9 @@ private struct CatalogRefreshDetails: View {
   let lastFullRefresh: Date?
   let address: String?
   let paired: Bool
+  #if DEBUG
+  @EnvironmentObject private var targets: ExecutionTargetCoordinator
+  #endif
   @Environment(\.dismiss) private var dismiss
   @State private var technicalExpanded = false
 
@@ -417,6 +414,10 @@ private struct CatalogRefreshDetails: View {
       }
       Spacer()
     }.padding(20)
+    #if DEBUG
+    .accessibilityIdentifier(targets.lastFullRefresh == lastFullRefresh
+      ? "catalog-refresh-details" : "catalog-refresh-details-updated")
+    #endif
   }
 
 }
@@ -437,6 +438,7 @@ struct LiveRunBadge: View {
 struct SettingsView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @EnvironmentObject var targets: ExecutionTargetCoordinator
   @State private var confirmUnpair = false
   @State private var cacheNotice: String?
 
@@ -469,8 +471,9 @@ struct SettingsView: View {
             Text("清除本机配对").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 48)
           }
           .buttonStyle(.plain).foregroundStyle(Palette.negative)
-          .disabled(run.hasUnresolvedRun || run.hasUnsentMessages || run.historyCacheClearing)
-          if run.hasUnresolvedRun || run.hasUnsentMessages { Text("仍有消息在发送或任务未结束，完成后再清除配对。清除配对不会停止 Mac 上的运行。")
+          .disabled(targets.hasPendingWork || targets.recoveryUnavailable || run.historyCacheClearing)
+          if targets.recoveryUnavailable { Text(ConnectionCopy.targetRecoveryUnavailable).font(.caption).foregroundStyle(Palette.muted) }
+          else if targets.hasPendingWork { Text(ConnectionCopy.pendingBeforeUnpair)
             .font(.caption).foregroundStyle(Palette.muted) }
         }
         .padding(16)

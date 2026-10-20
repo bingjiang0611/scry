@@ -7,13 +7,15 @@ import RemoteTransport
 struct NewSessionView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
-  private var composer: Binding<AppModel.ComposerDraft> { model.composerDraft(for: .newTask) }
+  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  private var composer: Binding<AppModel.ComposerDraft> { model.composerDraft(for: .newTask(targets.newTaskScope)) }
   private var draft: String { composer.wrappedValue.text }
   private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
   @State private var showProjects = false
   @State private var showProviders = false
+  @State private var showTargets = false
 
-  private var paired: Bool { run.hasConnection }
+  private var paired: Bool { run.hasConnection && (targets.newTaskScope.isLocal || run.executionTargetAvailable) }
   private var canSend: Bool {
     paired && !run.isBusy && run.chosen != nil && run.controlsReady &&
       !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -25,14 +27,14 @@ struct NewSessionView: View {
                    link: model.link, backAction: { model.goBack() }) {
         Color.clear.frame(width: 44, height: 44)
       }
-      if !paired { Notice(text: "尚未连接 Mac，无法创建会话。", warning: true) }
+      if !paired { Notice(text: targets.newTaskScope.isLocal ? ConnectionCopy.noGatewayForNewTask : ConnectionCopy.targetUnavailable, warning: true) }
       if let error = run.submitError { Notice(text: error, warning: true) }
 
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
           VStack(spacing: 0) {
-            contextRow(symbol: Symbol.laptop, eyebrow: "主机",
-                       value: displayHost, enabled: false, connected: model.link.isConnected)
+            contextRow(symbol: Symbol.laptop, eyebrow: ConnectionCopy.executionHost,
+                       value: displayHost, enabled: true, connected: nil) { showTargets = true }
             contextRow(symbol: Symbol.folder, eyebrow: "工作目录",
                        value: run.chosen?.label ?? "选择文件夹", enabled: paired) {
               run.loadDirectories(path: run.chosen?.path); showProjects = true
@@ -73,6 +75,7 @@ struct NewSessionView: View {
         let payload = attachments.map(\.wireValue)
         if run.submit(prompt: draft, providerId: providerId, attachments: payload) {
           composer.wrappedValue = .init()
+          targets.focusNewTask()
           model.route = .chat
         }
       }
@@ -81,12 +84,32 @@ struct NewSessionView: View {
       .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 0.5) }
     }
     .background(Palette.surface)
-    .onAppear { if paired { run.loadProjects(); run.loadProviders() } }
+    // A discovered target can become ready without changing its identity.
+    .task(id: paired ? targets.newTaskScope.id : nil) { if paired { run.loadProjects(); run.loadProviders() } }
     .sheet(isPresented: $showProjects) { projectPicker }
     .sheet(isPresented: $showProviders) { providerPicker }
+    .sheet(isPresented: $showTargets) { targetPicker }
   }
 
-  private var displayHost: String { run.hasConnection ? "已配对的 Mac" : "未连接" }
+  private var displayHost: String { run.hasConnection ? targets.newTaskScope.label : ConnectionCopy.unconnected }
+
+  private var targetPicker: some View {
+    SelectionSheet(title: ConnectionCopy.selectExecutionHost, subtitle: ConnectionCopy.targetPickerSubtitle, onRefresh: {
+      Task { await targets.refreshTargets() }
+    }) {
+      VStack(spacing: 0) {
+        SelectionRow(title: targets.localScope.label, detail: ConnectionCopy.localExecutionHost, selected: targets.newTaskScope.isLocal) {
+          targets.selectNewTask(targets.localScope); showTargets = false
+        }
+        ForEach(targets.discoveredTargets) { target in
+          SelectionRow(title: target.label, detail: ConnectionCopy.throughGateway,
+                       selected: target.id == targets.newTaskScope.id) {
+            targets.selectNewTask(target); showTargets = false
+          }
+        }
+      }
+    }
+  }
 
   private func contextRow(symbol: String, eyebrow: String, value: String, enabled: Bool,
                           connected: Bool? = nil, action: @escaping () -> Void = {}) -> some View {

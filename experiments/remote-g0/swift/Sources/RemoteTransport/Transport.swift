@@ -9,11 +9,20 @@ import NIOTLS
 enum ProbeError: Error { case invalidArguments, invalidFrame, oversized, disconnected, unexpectedReply }
 
 public enum RelayTransportError: Error, Sendable {
+  public enum TLSLayer: Sendable, Equatable { case relay, host }
+  case tlsHandshake(layer: TLSLayer, detail: String)
   case closed(code: UInt16?, reason: String)
   case timedOut(stage: String)
   // The peer sent a WebSocket frame above the 1.5 MiB device limit. Older Mac
   // hosts sent a whole history page as one frame; newer hosts split it.
   case frameTooLarge
+
+  // Only handshake failures acquire a layer. Preserve other errors and the
+  // original TLS diagnostic; neither an EOF nor this label proves revocation.
+  static func identifyingHandshake(_ error: Error, layer: TLSLayer) -> Error {
+    guard let tls = error as? NIOSSLError, case .handshakeFailed = tls else { return error }
+    return RelayTransportError.tlsHandshake(layer: layer, detail: String(describing: tls))
+  }
 }
 
 // Converts the outer WebSocket's binary frames into the inner TLS byte stream.
@@ -210,6 +219,46 @@ public enum G0Transport {
   // code) for the inner TLS 1.3 mTLS and skips leaf hostname verification
   // because the per-launch host server cert carries no SAN (chain-to-anchor is
   // the only trust decision). Outer TLS is used only when a relay CA is given.
+  public struct ExecutionTargetBinding: Codable, Equatable, Hashable, Sendable {
+    public let id: String
+    public let binding: String
+
+    public init(id: String, binding: String) {
+      self.id = id
+      self.binding = binding
+    }
+
+    public var isValid: Bool {
+      !id.isEmpty && id.utf16.count <= 300 && binding.utf8.count == 64 && binding.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+    }
+  }
+
+  public struct ExecutionTargetRef: Codable, Equatable, Hashable, Sendable {
+    public let id: String
+    public let binding: String
+    public let hostId: String
+    public let label: String
+    public let state: String
+
+    public init(id: String, binding: String, hostId: String, label: String, state: String) {
+      self.id = id; self.binding = binding; self.hostId = hostId; self.label = label; self.state = state
+    }
+  }
+
+  public struct ExecutionTargetCatalog: Codable, Equatable, Hashable, Sendable {
+    public struct Gateway: Codable, Equatable, Hashable, Sendable {
+      public let hostId: String
+      public let label: String
+      public init(hostId: String, label: String) { self.hostId = hostId; self.label = label }
+    }
+    public let version: Int
+    public let gateway: Gateway
+    public let targets: [ExecutionTargetRef]
+    public init(version: Int, gateway: Gateway, targets: [ExecutionTargetRef]) {
+      self.version = version; self.gateway = gateway; self.targets = targets
+    }
+  }
+
   public struct RelayEndpoint: Sendable {
     // Outer transport TLS to the relay. This is NOT the security root: the inner
     // TLS 1.3 mTLS to the host (pinned to the anchor) is. Outer TLS only stops a
@@ -224,16 +273,20 @@ public enum G0Transport {
     public let hostId: String
     public let relayServerName: String?
     public let outerTLS: OuterTLS
+    // When present, run requests are wrapped for this approved desktop target.
+    // The gateway hostId and this binding are immutable for the endpoint lifetime.
+    public let executionTarget: ExecutionTargetBinding?
     // When present, run-mode exchanges reuse this session's persistent lanes
     // instead of dialing one tunnel per request. Pairing never uses it.
     public let session: RelaySession?
     public init(host: String, port: Int, hostId: String, relayServerName: String? = nil, outerTLS: OuterTLS = .plaintext,
-                session: RelaySession? = nil) {
+                session: RelaySession? = nil, executionTarget: ExecutionTargetBinding? = nil) {
       self.host = host
       self.port = port
       self.hostId = hostId
       self.relayServerName = relayServerName
       self.outerTLS = outerTLS
+      self.executionTarget = executionTarget
       self.session = session
     }
   }
@@ -478,6 +531,11 @@ public enum G0Transport {
     }
   }
 
+  private struct ExecutionTargetsRequest: Encodable { let op = "executionTargets" }
+  private struct ExecutionTargetsResponse: Decodable {
+    let executionTargets: ExecutionTargetCatalog?
+    let error: String?
+  }
   private struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
   private struct RunIntentStatusRequest: Encodable { let op = "intentStatus"; let intentId: String }
   private struct RunIntentBody: Decodable { let runId: String; let state: String }
@@ -499,18 +557,21 @@ public enum G0Transport {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
     var keepAlive: Bool? = nil
   }
-  private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String }
-  private struct RunHistoryVersionRequest: Encodable { let op = "historyVersion"; let providerId: String; let cwd: String; let externalSessionId: String }
+  private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
+  private struct RunHistoryVersionRequest: Encodable { let op = "historyVersion"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
   private struct RunHistoryPreviewRequest: Encodable {
+    var agentProfileId = HistoryProfileValue(value: nil)
     let op = "historyPreview"; let providerId: String; let cwd: String; let externalSessionId: String
     var keepAlive: Bool? = nil
   }
   struct RunHistoryTurnsPageRequest: Encodable {
+    var agentProfileId = HistoryProfileValue(value: nil)
     let op = "historyTurnsPage"; let providerId: String; let cwd: String; let externalSessionId: String
     let before: Int?; let limit: Int?; let snapshot: String?
     var keepAlive: Bool? = nil
   }
   struct RunHistoryPageRequest: Encodable {
+    var agentProfileId = HistoryProfileValue(value: nil)
     let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
     let cursor: Int; let limit: Int?; let snapshot: String?
     var keepAlive: Bool? = nil
@@ -518,9 +579,27 @@ public enum G0Transport {
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
   private struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
-  private struct LiveRunsHistory: Encodable { let providerId: String; let cwd: String; let externalSessionId: String; let known: String? }
+  private struct LiveRunsHistory: Encodable { let providerId: String; let cwd: String; let externalSessionId: String; let known: String?; var agentProfileId = HistoryProfileValue(value: nil) }
   private struct LiveRunsRequest: Encodable { let op = "liveRuns"; let revision: String?; let waitMs: Int; let history: LiveRunsHistory? }
+  struct HistoryProfileValue: Encodable, Equatable, Sendable {
+    let value: String?
+    func encode(to encoder: Encoder) throws {
+      var container = encoder.singleValueContainer()
+      if let value { try container.encode(value) } else { try container.encodeNil() }
+    }
+  }
+  private struct HistoryProfileStamp: Decodable {
+    let agentProfileId: String?
+    enum CodingKeys: CodingKey { case agentProfileId }
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      guard container.contains(.agentProfileId) else { throw HistoryProfileError.unverified }
+      agentProfileId = try container.decodeIfPresent(String.self, forKey: .agentProfileId)
+    }
+  }
+  public enum HistoryProfileError: Error { case unverified }
   private struct RunResponse: Decodable {
+    let historyProfile: HistoryProfileStamp?
     let runId: String?
     let status: String?
     let poll: RunPollBody?
@@ -544,6 +623,7 @@ public enum G0Transport {
     let stop: RunStopBody?
     let liveRuns: LiveRunsOutcome?
     let intent: RunIntentBody?
+    let executionTarget: ExecutionTargetBinding?
     let error: String?
   }
   private struct RunWatchBody: Decodable {
@@ -553,10 +633,57 @@ public enum G0Transport {
   private struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
   private struct RunOutputBody: Decodable { let chunks: [RunOutputChunk]; let cursor: Int }
 
-  private static func decodeRun(_ bytes: Data) throws -> RunResponse {
+  private static func decodeRun(_ bytes: Data, expectedTarget: ExecutionTargetBinding? = nil, expectedProfile: HistoryProfileValue? = nil) throws -> RunResponse {
     let response = try JSONDecoder().decode(RunResponse.self, from: bytes)
     if let error = response.error { throw RunError.host(code: error) }
+    if let expectedTarget, response.executionTarget != expectedTarget { throw ProbeError.unexpectedReply }
+    if let expectedProfile, response.historyProfile == nil || response.historyProfile?.agentProfileId != expectedProfile.value { throw HistoryProfileError.unverified }
     return response
+  }
+
+  static func verifyHistoryResponse(_ bytes: Data, expectedProfile: String?) throws {
+    _ = try decodeRun(bytes, expectedProfile: HistoryProfileValue(value: expectedProfile))
+  }
+
+  static func verifyRunResponse(_ bytes: Data, expectedTarget: ExecutionTargetBinding?) throws {
+    _ = try decodeRun(bytes, expectedTarget: expectedTarget)
+  }
+
+  static func wrapExecutionTargetRequest(_ request: Data, target: ExecutionTargetBinding) throws -> Data {
+    guard target.isValid, request.first == UInt8(ascii: "{"), request.last == UInt8(ascii: "}") else { throw ProbeError.invalidArguments }
+    guard let object = try JSONSerialization.jsonObject(with: request) as? [String: Any],
+          let operation = object["op"] as? String, operation != "target", operation != "executionTargets" else {
+      throw ProbeError.invalidArguments
+    }
+    var inner = object
+    // keepAlive and deviceLabel belong to the Mac1 lane. They must not become
+    // authority metadata for the forwarded Mac2 request.
+    inner.removeValue(forKey: "keepAlive")
+    inner.removeValue(forKey: "deviceLabel")
+    // Preserve Foundation's JSON scalar types: NSNumber(0/1) can bridge to
+    // Bool through `as? Bool`, which would corrupt cursors and page limits.
+    return try JSONSerialization.data(withJSONObject: [
+      "op": "target", "target": ["id": target.id, "binding": target.binding], "request": inner
+    ], options: [.sortedKeys])
+  }
+
+  public static func relayExecutionTargets(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> ExecutionTargetCatalog {
+    let request = try JSONEncoder().encode(ExecutionTargetsRequest())
+    let bytes = try await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request,
+                                         responseLimit: 256 * 1024, wrapTarget: false, useSession: false)
+    return try decodeExecutionTargets(bytes, expectedGatewayId: endpoint.hostId)
+  }
+
+  static func decodeExecutionTargets(_ bytes: Data, expectedGatewayId: String) throws -> ExecutionTargetCatalog {
+    let response = try JSONDecoder().decode(ExecutionTargetsResponse.self, from: bytes)
+    if let error = response.error { throw RunError.host(code: error) }
+    guard let catalog = response.executionTargets, catalog.version == 1,
+          catalog.gateway.hostId == expectedGatewayId, catalog.gateway.label.utf16.count <= 256, catalog.targets.count <= 32,
+          Set(catalog.targets.map(\.id)).count == catalog.targets.count,
+          catalog.targets.allSatisfy({ ExecutionTargetBinding(id: $0.id, binding: $0.binding).isValid &&
+            !$0.hostId.isEmpty && $0.hostId.utf16.count <= 128 && $0.label.utf16.count <= 256 && ["connected", "disconnected"].contains($0.state) })
+    else { throw ProbeError.unexpectedReply }
+    return catalog
   }
 
   public enum RunError: Error, Equatable { case host(code: String) }
@@ -566,7 +693,7 @@ public enum G0Transport {
   // runId; the device polls the ledger for the real lifecycle.
   public static func relayRunSubmit(endpoint: RelayEndpoint, identity: G0ProbeIdentity, intentId: String, detail: String) async throws -> RunSubmitOutcome {
     let request = try JSONEncoder().encode(RunSubmitRequest(intentId: intentId, detail: detail))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
     guard let runId = response.runId, let status = response.status else { throw ProbeError.unexpectedReply }
     return RunSubmitOutcome(runId: runId, status: status)
   }
@@ -578,7 +705,7 @@ public enum G0Transport {
     let request = try JSONEncoder().encode(RunIntentStatusRequest(intentId: intentId))
     let response: RunResponse
     do {
-      response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+      response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     } catch RunError.host(code: "unknown_intent") {
       return nil
     }
@@ -589,7 +716,7 @@ public enum G0Transport {
   // Poll ledger events strictly after `cursor` (server-authoritative sequence).
   public static func relayRunPoll(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int) async throws -> RunPollOutcome {
     let request = try JSONEncoder().encode(RunPollRequest(cursor: cursor))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let poll = response.poll else { throw ProbeError.unexpectedReply }
     return RunPollOutcome(events: poll.events, cursor: poll.cursor)
   }
@@ -598,13 +725,13 @@ public enum G0Transport {
   // for this device.
   public static func relayRunState(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> String? {
     let request = try JSONEncoder().encode(RunStateRequest(runId: runId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     return response.state
   }
 
   public static func relayRunQuestions(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> [RunQuestionRequest] {
     let request = try JSONEncoder().encode(RunQuestionsRequest(runId: runId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let questions = response.questions else { throw ProbeError.unexpectedReply }
     return questions
   }
@@ -612,7 +739,7 @@ public enum G0Transport {
   public static func relayRunAnswerQuestion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,
                                             answerId: String, response answer: RunQuestionResponse) async throws -> RunQuestionAnswerOutcome {
     let request = try JSONEncoder().encode(RunAnswerQuestionRequest(runId: runId, answerId: answerId, response: answer))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
     guard let outcome = response.answer else { throw ProbeError.unexpectedReply }
     return outcome
   }
@@ -622,7 +749,7 @@ public enum G0Transport {
   // revoked device gets RunError.host(code: "device_not_authorized").
   public static func relayRunProjects(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProjectRef] {
     let request = try JSONEncoder().encode(RunProjectsRequest())
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let projects = response.projects else { throw ProbeError.unexpectedReply }
     return projects
   }
@@ -631,14 +758,14 @@ public enum G0Transport {
   // supplied path is re-authorized by the host and cannot escape those roots.
   public static func relayRunDirectories(endpoint: RelayEndpoint, identity: G0ProbeIdentity, path: String?) async throws -> RunDirectoryListing {
     let request = try JSONEncoder().encode(RunDirectoriesRequest(path: path))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let directories = response.directories else { throw ProbeError.unexpectedReply }
     return directories
   }
 
   public static func relayRunDirectoriesPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, path: String?, cursor: Int, limit: Int = 100, snapshot: String? = nil) async throws -> RunDirectoryPage {
     let request = try JSONEncoder().encode(RunDirectoriesPageRequest(path: path, cursor: cursor, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let page = response.directoriesPage else { throw ProbeError.unexpectedReply }
     return page
   }
@@ -647,7 +774,7 @@ public enum G0Transport {
   // like every run op; a revoked device gets device_not_authorized.
   public static func relayRunProviders(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProviderRef] {
     let request = try JSONEncoder().encode(RunProvidersRequest())
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let providers = response.providers else { throw ProbeError.unexpectedReply }
     return providers
   }
@@ -655,7 +782,7 @@ public enum G0Transport {
   // Provider-native slash commands for this exact provider/workspace context.
   public static func relayRunCommands(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, agentProfileId: String? = nil) async throws -> RunCommandCatalog {
     let request = try JSONEncoder().encode(RunCommandsRequest(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let commands = response.commands else { throw ProbeError.unexpectedReply }
     return commands
   }
@@ -664,14 +791,14 @@ public enum G0Transport {
   // every run op; a revoked device gets device_not_authorized.
   public static func relayRunSessions(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunSessionRef] {
     let request = try JSONEncoder().encode(RunSessionsRequest())
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget)
     guard let sessions = response.sessions else { throw ProbeError.unexpectedReply }
     return sessions
   }
 
   public static func relayRunSessionsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int, limit: Int = 100, snapshot: String? = nil) async throws -> RunSessionPage {
     let request = try JSONEncoder().encode(RunSessionsPageRequest(cursor: cursor, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget)
     guard let page = response.sessionsPage else { throw ProbeError.unexpectedReply }
     return page
   }
@@ -680,25 +807,35 @@ public enum G0Transport {
   // run. It closes and settles its queued reads when the scope ends/cancels.
   public final class HistoryConnection: Sendable {
     private let send: @Sendable (Data, Int) async throws -> Data
-    fileprivate init(send: @escaping @Sendable (Data, Int) async throws -> Data) { self.send = send }
-    private func response(_ request: Data, limit: Int) async throws -> RunResponse {
-      try decodeRun(await send(request, limit))
+    private let expectedTarget: ExecutionTargetBinding?
+    fileprivate init(send: @escaping @Sendable (Data, Int) async throws -> Data, expectedTarget: ExecutionTargetBinding? = nil) {
+      self.send = send
+      self.expectedTarget = expectedTarget
     }
-    public func preview(providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
-      let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, keepAlive: true))
-      let reply = try await response(request, limit: 17 * 1_024)
+    private func response(_ request: Data, limit: Int, expectedProfile: HistoryProfileValue? = nil) async throws -> RunResponse {
+      try decodeRun(await send(request, limit), expectedTarget: expectedTarget, expectedProfile: expectedProfile)
+    }
+    public func preview(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> RunHistoryPreview {
+      var query = RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, keepAlive: true)
+      query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+      let request = try JSONEncoder().encode(query)
+      let reply = try await response(request, limit: 17 * 1_024, expectedProfile: HistoryProfileValue(value: agentProfileId))
       guard let preview = reply.historyPreview else { throw ProbeError.unexpectedReply }
       return preview
     }
-    public func turnsPage(providerId: String, cwd: String, externalSessionId: String, before: Int?, limit: Int, snapshot: String?) async throws -> RunHistoryTurnsPage {
-      let request = try JSONEncoder().encode(RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot, keepAlive: true))
-      let reply = try await response(request, limit: 8 * 1024 * 1024)
+    public func turnsPage(providerId: String, cwd: String, externalSessionId: String, before: Int?, limit: Int, snapshot: String?, agentProfileId: String? = nil) async throws -> RunHistoryTurnsPage {
+      var query = RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot, keepAlive: true)
+      query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+      let request = try JSONEncoder().encode(query)
+      let reply = try await response(request, limit: 8 * 1024 * 1024, expectedProfile: HistoryProfileValue(value: agentProfileId))
       guard let page = reply.historyTurnsPage else { throw ProbeError.unexpectedReply }
       return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
     }
-    public func page(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?) async throws -> RunHistoryPage {
-      let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: 256 * 1_024, snapshot: snapshot, keepAlive: true))
-      let reply = try await response(request, limit: 512 * 1_024)
+    public func page(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?, agentProfileId: String? = nil) async throws -> RunHistoryPage {
+      var query = RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: 256 * 1_024, snapshot: snapshot, keepAlive: true)
+      query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+      let request = try JSONEncoder().encode(query)
+      let reply = try await response(request, limit: 512 * 1_024, expectedProfile: HistoryProfileValue(value: agentProfileId))
       guard let page = reply.historyPage else { throw ProbeError.unexpectedReply }
       return page
     }
@@ -713,9 +850,10 @@ public enum G0Transport {
   public static func withHistoryConnection<T: Sendable>(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
     body: @Sendable (HistoryConnection) async throws -> T) async throws -> T {
     if let session = endpoint.session {
-      return try await body(HistoryConnection { request, limit in
-        try await session.exchange(request, lane: .bulk, limit: limit, replayable: true)
-      })
+      return try await body(HistoryConnection(send: { request, limit in
+        let routed = try endpoint.executionTarget.map { try wrapExecutionTargetRequest(request, target: $0) } ?? request
+        return try await session.exchange(routed, lane: .bulk, limit: limit, replayable: true)
+      }, expectedTarget: endpoint.executionTarget))
     }
     return try await withRelayChannel(endpoint: endpoint, mode: "run", identity: identity) { channel, innerContext in
       let handler = HistoryReadHandler()
@@ -723,32 +861,39 @@ public enum G0Transport {
         try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
         try channel.pipeline.syncOperations.addHandler(handler)
       }.get()
-      return try await body(HistoryConnection { request, limit in
-        try await channel.eventLoop.flatSubmit { handler.request(request, limit: limit, on: channel) }.get()
-      })
+      return try await body(HistoryConnection(send: { request, limit in
+        let routed = try endpoint.executionTarget.map { try wrapExecutionTargetRequest(request, target: $0) } ?? request
+        return try await channel.eventLoop.flatSubmit { handler.request(routed, limit: limit, on: channel) }.get()
+      }, expectedTarget: endpoint.executionTarget))
     }
   }
 
   // Small first-screen evidence. Unavailable is explicit and is not decoded as an empty transcript.
-  public static func relayRunHistoryVersion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryVersion {
-    let request = try JSONEncoder().encode(RunHistoryVersionRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
+  public static func relayRunHistoryVersion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> RunHistoryVersion {
+    var query = RunHistoryVersionRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+    let request = try JSONEncoder().encode(query)
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
     guard let version = response.historyVersion else { throw ProbeError.unexpectedReply }
     return version
   }
 
-  public static func relayRunHistoryPreview(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> RunHistoryPreview {
-    let request = try JSONEncoder().encode(RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024, lane: .bulk))
+  public static func relayRunHistoryPreview(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> RunHistoryPreview {
+    var query = RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+    let request = try JSONEncoder().encode(query)
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
     guard let preview = response.historyPreview else { throw ProbeError.unexpectedReply }
     return preview
   }
 
   // The REAL conversation content of one session so the device can OPEN it.
   // Same owner-device authorization; an unknown/unauthorized session returns [].
-  public static func relayRunHistory(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String) async throws -> [RunHistoryTurn] {
-    let request = try JSONEncoder().encode(RunHistoryRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
+  public static func relayRunHistory(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> [RunHistoryTurn] {
+    var query = RunHistoryRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+    let request = try JSONEncoder().encode(query)
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
     guard let history = response.history else { throw ProbeError.unexpectedReply }
     return history
   }
@@ -757,16 +902,20 @@ public enum G0Transport {
   // snapshot and accumulated bytes across disconnects; a changed source fails
   // explicitly instead of combining two transcript versions.
   // Omit the limit by default: the host owns the frame budget and page size.
-  public static func relayRunHistoryTurnsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, before: Int? = nil, limit: Int = 3, snapshot: String? = nil) async throws -> RunHistoryTurnsPage {
-    let request = try JSONEncoder().encode(RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
+  public static func relayRunHistoryTurnsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, before: Int? = nil, limit: Int = 3, snapshot: String? = nil, agentProfileId: String? = nil) async throws -> RunHistoryTurnsPage {
+    var query = RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot)
+    query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+    let request = try JSONEncoder().encode(query)
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
     guard let page = response.historyTurnsPage else { throw ProbeError.unexpectedReply }
     return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
   }
 
-  public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int? = nil, snapshot: String? = nil) async throws -> RunHistoryPage {
-    let request = try JSONEncoder().encode(RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk))
+  public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int? = nil, snapshot: String? = nil, agentProfileId: String? = nil) async throws -> RunHistoryPage {
+    var query = RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot)
+    query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+    let request = try JSONEncoder().encode(query)
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
     guard let page = response.historyPage else { throw ProbeError.unexpectedReply }
     return page
   }
@@ -783,7 +932,7 @@ public enum G0Transport {
   public static func relayRunWatch(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,
                                    cursor: Int, outputCursor: Int, waitMs: Int) async throws -> RunWatchOutcome {
     let request = try JSONEncoder().encode(RunWatchRequest(runId: runId, cursor: cursor, outputCursor: outputCursor, waitMs: waitMs))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .watch))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .watch), expectedTarget: endpoint.executionTarget)
     guard let watch = response.watch else { throw ProbeError.unexpectedReply }
     return RunWatchOutcome(poll: RunPollOutcome(events: watch.poll.events, cursor: watch.poll.cursor),
                            questions: watch.questions,
@@ -795,11 +944,11 @@ public enum G0Transport {
   // version). Returns when either differs from what the caller holds, or after
   // `waitMs` (host-capped at 20 s). A read on its own lane.
   public static func relayLiveRuns(endpoint: RelayEndpoint, identity: G0ProbeIdentity, revision: String?, waitMs: Int,
-                                   history: (providerId: String, cwd: String, externalSessionId: String, known: String?)? = nil) async throws -> LiveRunsOutcome {
+                                   history: (providerId: String, cwd: String, externalSessionId: String, known: String?)? = nil, historyAgentProfileId: String? = nil) async throws -> LiveRunsOutcome {
     let request = try JSONEncoder().encode(LiveRunsRequest(revision: revision, waitMs: waitMs, history: history.map {
-      LiveRunsHistory(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId, known: $0.known)
+      LiveRunsHistory(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId, known: $0.known, agentProfileId: HistoryProfileValue(value: historyAgentProfileId))
     }))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .status))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .status), expectedTarget: endpoint.executionTarget, expectedProfile: history == nil ? nil : HistoryProfileValue(value: historyAgentProfileId))
     guard let live = response.liveRuns else { throw ProbeError.unexpectedReply }
     return live
   }
@@ -808,7 +957,7 @@ public enum G0Transport {
   // request receipt; the lifecycle still settles from the real Provider result.
   public static func relayRunStop(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> String {
     let request = try JSONEncoder().encode(RunStopRequest(runId: runId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
     guard let stop = response.stop else { throw ProbeError.unexpectedReply }
     return stop.status
   }
@@ -818,7 +967,7 @@ public enum G0Transport {
   // every run op; an unknown/evicted run yields an honest empty page.
   public static func relayRunOutput(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String, cursor: Int) async throws -> RunOutputPage {
     let request = try JSONEncoder().encode(RunOutputRequest(runId: runId, cursor: cursor))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let output = response.output else { throw ProbeError.unexpectedReply }
     return RunOutputPage(chunks: output.chunks, cursor: output.cursor)
   }
@@ -921,10 +1070,17 @@ public enum G0Transport {
   // Do not replay exchanges by matching error strings. A lost response is not
   // evidence that a request did not run; explicit UI reconciliation owns retry.
   static func exchangeRelay(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity, request: Data, responseLimit: Int? = nil,
-                            lane: RelaySession.Lane = .control, replayable: Bool = true) async throws -> Data {
+                            lane: RelaySession.Lane = .control, replayable: Bool = true, wrapTarget: Bool = true,
+                            useSession: Bool = true) async throws -> Data {
     guard request.count < 1_250_000 else { throw ProbeError.invalidArguments }
-    if mode == "run", let session = endpoint.session {
-      return try await session.exchange(request, lane: lane, limit: responseLimit ?? 8 * 1_024 * 1_024, replayable: replayable)
+    let routedRequest: Data
+    if mode == "run", wrapTarget, let target = endpoint.executionTarget {
+      routedRequest = try wrapExecutionTargetRequest(request, target: target)
+    } else {
+      routedRequest = request
+    }
+    if mode == "run", useSession, let session = endpoint.session {
+      return try await session.exchange(routedRequest, lane: lane, limit: responseLimit ?? 8 * 1_024 * 1_024, replayable: replayable)
     }
     return try await withRelayChannel(endpoint: endpoint, mode: mode, identity: identity) { channel, innerContext in
       let result = channel.eventLoop.makePromise(of: Data.self)
@@ -932,7 +1088,7 @@ public enum G0Transport {
         try await channel.eventLoop.submit {
           try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
           let limit = responseLimit ?? (mode == "run" ? 8 * 1_024 * 1_024 : 65_536)
-          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result, maxResponseBytes: limit))
+          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: routedRequest, result: result, maxResponseBytes: limit))
         }.get()
       } catch { result.fail(error); throw error }
       return try await result.futureResult.get()
@@ -952,7 +1108,10 @@ public enum G0Transport {
           try Task.checkCancellation()
           return try await body(channel, innerContext)
         } onCancel: { channel.close(promise: nil) }
-      } catch { try? await channel.close(); throw error }
+      } catch {
+        try? await channel.close()
+        throw RelayTransportError.identifyingHandshake(error, layer: .host)
+      }
       try? await channel.close()
       try await group.shutdownGracefully()
       return reply
@@ -1038,6 +1197,9 @@ public enum G0Transport {
         }
       let channel = try await upgrade.get()
       return (channel, innerContext)
+    } catch {
+      // An HTTP WebSocket upgrade cannot complete before outer TLS succeeds.
+      throw RelayTransportError.identifyingHandshake(error, layer: .relay)
     }
   }
 

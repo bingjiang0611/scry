@@ -842,6 +842,10 @@ struct SessionStatusLine {
     if !run.pendingQuestions.isEmpty {
       return .init(text: "需要你决定", tone: .attention, action: .init(title: "回答", perform: onAnswer))
     }
+    if run.hasUncertainSubmission {
+      return .init(text: ConnectionCopy.targetResultUnknown, tone: .warning,
+                   action: .init(title: ConnectionCopy.reconcileResult, perform: { run.reconcileUncertain() }))
+    }
     let stopAction: Action? = run.canStop && !run.stopRequested
       ? .init(title: "停止", destructive: true, disabled: run.stopRequesting, perform: onStop) : nil
     if run.observationReconnecting {

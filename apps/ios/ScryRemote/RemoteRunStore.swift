@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 import RemoteTransport
 #if canImport(UIKit)
 import UIKit
@@ -95,18 +96,53 @@ final class RemoteRunStore: ObservableObject {
   // reports an external Provider session id.
   struct SessionIdentity: Codable, Hashable, Equatable {
     let providerId: String
+    let agentProfileId: String?
     let cwd: String
     let externalSessionId: String?
     let localId: String?
+    let gatewayHostId: String?
+    let gatewayIdentity: String?
+    let targetHostId: String?
+    let targetId: String?
+    let targetBinding: String?
 
-    static func opened(providerId: String, cwd: String, externalSessionId: String) -> SessionIdentity {
-      SessionIdentity(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, localId: nil)
+    var scope: ExecutionTargetScope? {
+      guard let gatewayHostId, let targetId, let targetBinding else { return nil }
+      return ExecutionTargetScope(gatewayHostId: gatewayHostId, targetId: targetId,
+                                  binding: targetBinding, hostId: targetHostId ?? targetId, label: targetId, gatewayIdentity: gatewayIdentity)
     }
 
-    static func new(providerId: String, cwd: String) -> SessionIdentity {
-      SessionIdentity(providerId: providerId, cwd: cwd, externalSessionId: nil, localId: UUID().uuidString.lowercased())
+    static func opened(providerId: String, agentProfileId: String? = nil, cwd: String, externalSessionId: String,
+                       scope: ExecutionTargetScope? = nil) -> SessionIdentity {
+      SessionIdentity(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd,
+        externalSessionId: externalSessionId, localId: nil, gatewayHostId: scope?.gatewayHostId,
+        gatewayIdentity: scope?.gatewayIdentity, targetHostId: scope?.isLocal == false ? scope?.hostId : nil,
+        targetId: scope?.targetId, targetBinding: scope?.binding)
+    }
+
+    static func new(providerId: String, agentProfileId: String? = nil, cwd: String,
+                    scope: ExecutionTargetScope? = nil) -> SessionIdentity {
+      SessionIdentity(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd,
+        externalSessionId: nil, localId: UUID().uuidString.lowercased(), gatewayHostId: scope?.gatewayHostId,
+        gatewayIdentity: scope?.gatewayIdentity, targetHostId: scope?.isLocal == false ? scope?.hostId : nil,
+        targetId: scope?.targetId, targetBinding: scope?.binding)
     }
   }
+
+  struct QuestionIdentity: Hashable {
+    let gatewayIdentity: String?
+    let target: G0Transport.ExecutionTargetBinding?
+    let session: SessionIdentity?
+    let runId: String
+    let questionId: String
+  }
+
+  func questionIdentity(_ request: G0Transport.RunQuestionRequest) -> QuestionIdentity {
+    QuestionIdentity(gatewayIdentity: targetScope?.gatewayIdentity ?? loadConnection().map { RemoteHistoryCache.catalogKey(connection: $0) },
+      target: targetScope?.targetBinding, session: activeSessionIdentity, runId: request.runId, questionId: request.questionId)
+  }
+
+  var focusedQuestionIdentity: QuestionIdentity? { pendingQuestions.first.map(questionIdentity) }
 
   struct CompletedLiveTurn: Identifiable, Equatable {
     let id: String
@@ -121,21 +157,27 @@ final class RemoteRunStore: ObservableObject {
     var hostRunId: String? = nil
   }
 
-  // A message the host has not acknowledged yet. It stays in the persisted
-  // outbox and is resent with the same intentId until the host answers; the
-  // host ledger dedupes by intentId, so a lost reply never creates a second run.
+  // A message the host has not acknowledged yet. A never-attempted item is
+  // delivered automatically; once submit may have crossed the transport
+  // boundary, the same intent remains retryable in-process but pauses on relaunch
+  // until its result is reconciled. The host ledger still dedupes by intentId.
   // `failure` is set only by a definitive host rejection, never by the network.
   struct PendingSubmission: Codable, Equatable, Identifiable {
     let intentId: String
     let routing: RemoteRunClient.Routing
     let identity: SessionIdentity
     var failure: String? = nil
+    var uncertainty: String? = nil
+    // false is a new, never-attempted item; nil is an older unknown state.
+    // true remains retryable in-process but pauses after relaunch.
+    var attempted: Bool? = false
     var id: String { intentId }
   }
 
   enum DeliveryResult<Outcome> {
     case accepted(Outcome)
     case rejected(String)
+    case uncertain(String)
   }
 
   private struct RecoveryCheckpoint: Codable {
@@ -210,6 +252,7 @@ final class RemoteRunStore: ObservableObject {
     case cacheWrite(String)
     case authorization(String)
     case protocolMismatch(String)
+    case target(label: String, detail: String)
 
     var summary: String {
       switch self {
@@ -219,6 +262,7 @@ final class RemoteRunStore: ObservableObject {
       case .transport: return ConnectionCopy.refreshFailure
       case .authorization: return ConnectionCopy.authorizationFailure
       case .protocolMismatch: return ConnectionCopy.protocolFailure
+      case let .target(label, _): return ConnectionCopy.targetRefreshFailure(label)
       }
     }
 
@@ -232,6 +276,7 @@ final class RemoteRunStore: ObservableObject {
       case let .transport(detail), let .partial(detail), let .cacheRead(detail), let .cacheWrite(detail),
            let .authorization(detail), let .protocolMismatch(detail): return detail
       case .cacheWriteRejected: return ConnectionCopy.cacheWriteRejectedTechnical
+      case let .target(_, detail): return detail
       }
     }
   }
@@ -274,6 +319,9 @@ final class RemoteRunStore: ObservableObject {
   // exchange proves it. nil = not tried yet. This is the honest source of the
   // connection status (fixes "shows offline while sending works").
   @Published private(set) var reachable: Bool?
+  // Remote targets require a fresh catalog capability/state before new writes;
+  // the legacy local lane remains usable when reachability has not been proven.
+  @Published private(set) var executionTargetAvailable = true
   // `reachable` is retained for the existing link indicator; this richer value
   // prevents an authenticated business/protocol reply from being rendered as
   // transport-offline (or as a successful connected state).
@@ -323,6 +371,7 @@ final class RemoteRunStore: ObservableObject {
   // Questions the host acknowledged as answered; hidden until the list catches up.
   @Published private(set) var liveAnsweredQuestions: Set<String> = []
   private var liveRunsTask: Task<Void, Never>?
+  private var liveRunsForegroundEligible = false
   private var liveRunsRevision: String?
   private var liveHistoryTarget: SessionIdentity?
   private var liveAnswerIds: [String: String] = [:]
@@ -357,9 +406,15 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private let connections: RemoteConnectionStore
+  let targetScope: ExecutionTargetScope?
+  private let boundGatewayIdentity: String?
+  private let prefetchEnabled: Bool
   private var pollTask: Task<Void, Never>?
   private var deliveryTasks: [String: Task<Void, Never>] = [:]
   private var pausedDeliveries = Set<String>()
+  // MainActor-local mirror of markers already written or reserved for write.
+  // It prevents a later stale snapshot from erasing another item's marker.
+  private var attemptedDeliveryIntentIds = Set<String>()
   private var catalogTask: Task<Void, Never>?
   private var catalogRequestID = 0
   private var historyTask: Task<Void, Never>?
@@ -417,20 +472,40 @@ final class RemoteRunStore: ObservableObject {
     var beforePersist: @Sendable () async -> Void = {}
   }
   private var catalogFixture: CatalogFixture?
+  private var workspaceReaderFixture: ((RemoteRunClient, G0Transport.WorkspaceQuery) async throws -> G0Transport.WorkspaceResult)?
   #endif
 
   let historyOnly: Bool
 
   convenience init(historyFor owner: RemoteRunStore) {
-    self.init(connections: owner.connections, historyDisk: owner.historyDisk, historyOnly: true)
+    self.init(connections: owner.connections, historyDisk: owner.historyDisk, historyOnly: true,
+              targetScope: owner.targetScope, prefetchEnabled: false)
   }
 
   init(connections: RemoteConnectionStore = RemoteConnectionStore(), historyDisk: RemoteHistoryCache = RemoteHistoryCache(), historyOnly: Bool = false,
-       stateDirectory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ScryRemote", isDirectory: true)) {
+       stateDirectory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ScryRemote", isDirectory: true),
+       targetScope: ExecutionTargetScope? = nil, prefetchEnabled: Bool = true) {
+    let expectedGateway = targetScope?.isLocal == false
+      ? targetScope?.gatewayIdentity ?? connections.load().map { RemoteHistoryCache.catalogKey(connection: $0) }
+      : nil
+    let namespacedDirectory: URL?
+    if let stateDirectory, let targetScope, !targetScope.isLocal {
+      let fields = [expectedGateway ?? "", targetScope.gatewayHostId, targetScope.targetId ?? "", targetScope.binding ?? "", targetScope.hostId]
+      let data = try! JSONEncoder().encode(fields)
+      let namespace = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+      namespacedDirectory = stateDirectory.appendingPathComponent("targets", isDirectory: true)
+        .appendingPathComponent(namespace, isDirectory: true)
+    } else {
+      namespacedDirectory = stateDirectory
+    }
     self.connections = connections
     self.historyDisk = historyDisk
-    self.stateDirectory = stateDirectory
+    self.targetScope = targetScope
+    self.boundGatewayIdentity = expectedGateway
+    self.prefetchEnabled = prefetchEnabled
+    self.stateDirectory = namespacedDirectory
     self.historyOnly = historyOnly
+    self.executionTargetAvailable = targetScope?.isLocal != false
     if historyOnly { return }
     #if DEBUG
     let args = ProcessInfo.processInfo.arguments
@@ -438,7 +513,7 @@ final class RemoteRunStore: ObservableObject {
     #endif
     restoreOutbox()
     restoreRecoveryCheckpoint()
-    for pending in outbox where pending.failure == nil { startDelivery(pending) }
+    for pending in outbox where pending.failure == nil && pending.uncertainty == nil && pending.attempted != true { startDelivery(pending) }
   }
 
   // A persisted PUBLIC connection descriptor means this device is paired and may
@@ -467,12 +542,36 @@ final class RemoteRunStore: ObservableObject {
     #if DEBUG
     if mockMode || ProcessInfo.processInfo.arguments.contains("-uiPreview") { return nil }
     #endif
-    return connections.load()
+    guard let connection = connections.load() else { return nil }
+    if let targetScope, !targetScope.isLocal {
+      guard targetScope.targetBinding != nil,
+            boundGatewayIdentity == RemoteHistoryCache.catalogKey(connection: connection) else { return nil }
+    }
+    return connection
   }
 
   private func makeClient() -> RemoteRunClient? {
     guard let connection = loadConnection() else { return nil }
-    return RemoteRunClient(connection: connection)
+    return RemoteRunClient(connection: connection, executionTarget: targetScope?.targetBinding)
+  }
+
+  func readWorkspace(_ query: G0Transport.WorkspaceQuery) async throws -> G0Transport.WorkspaceResult {
+    guard let client = makeClient() else { throw RemoteRunClient.ClientError.missingCredentials }
+    let requestGeneration = dataGeneration
+    let result: G0Transport.WorkspaceResult
+    #if DEBUG
+    if let workspaceReaderFixture { result = try await workspaceReaderFixture(client, query) }
+    else { result = try await client.workspace(query) }
+    #else
+    result = try await client.workspace(query)
+    #endif
+    try Task.checkCancellation()
+    guard dataGeneration == requestGeneration, loadConnection() == client.connection else { throw CancellationError() }
+    return result
+  }
+
+  func updateTargetAvailability(_ available: Bool) {
+    executionTargetAvailable = targetScope?.isLocal == false ? available : true
   }
 
   private var recoveryURL: URL? {
@@ -530,13 +629,22 @@ final class RemoteRunStore: ObservableObject {
       if items.isEmpty {
         do { try FileManager.default.removeItem(at: url) }
         catch let error as CocoaError where error.code == .fileNoSuchFile { }
+        attemptedDeliveryIntentIds = []
         return true
       }
       guard let connection = loadConnection() else {
         submitError = "无法保存待发送消息：尚未配对"
         return false
       }
-      try Self.writeProtected(JSONEncoder().encode(OutboxFile(version: 1, hostId: connection.hostId, items: items)), to: url)
+      // State writes are synchronous on the MainActor, but an older snapshot
+      // can still be supplied by another outbox operation. Never let such a
+      // snapshot erase a durable attempt marker for an item it retains.
+      var protectedItems = items
+      for index in protectedItems.indices where attemptedDeliveryIntentIds.contains(protectedItems[index].intentId) {
+        protectedItems[index].attempted = true
+      }
+      try Self.writeProtected(JSONEncoder().encode(OutboxFile(version: 1, hostId: connection.hostId, items: protectedItems)), to: url)
+      attemptedDeliveryIntentIds.formIntersection(Set(items.map(\.intentId)))
       return true
     } catch {
       submitError = "无法保存待发送消息：\(Self.describe(error))"
@@ -552,7 +660,14 @@ final class RemoteRunStore: ObservableObject {
         submitError = "本地待发送消息不属于当前已配对主机，未发送"
         return
       }
-      outbox = file.items
+      outbox = file.items.map { item in
+        var restored = item
+        if restored.attempted != false && restored.uncertainty == nil {
+          restored.uncertainty = restored.attempted == true ? "delivery_attempted" : "legacy_delivery_state_unknown"
+        }
+        return restored
+      }
+      attemptedDeliveryIntentIds = Set(outbox.compactMap { $0.attempted != false ? $0.intentId : nil })
     } catch {
       submitError = "本地待发送消息损坏，未发送：\(Self.describe(error))"
     }
@@ -600,13 +715,17 @@ final class RemoteRunStore: ObservableObject {
           submitError = "已恢复运行标识，但当前配对凭据不可用"
         }
       } else if let intentId = checkpoint.intentId, let routing = checkpoint.routing {
+        // The outbox owns delivery state; a focus checkpoint alone cannot
+        // prove that an earlier request was never submitted.
         let pending = outbox.first { $0.intentId == intentId }
-          ?? PendingSubmission(intentId: intentId, routing: routing, identity: checkpoint.identity)
-        // A checkpoint from a build without the outbox still names an unsent intent.
-        if !outbox.contains(where: { $0.intentId == intentId }) {
+          ?? PendingSubmission(intentId: intentId, routing: routing, identity: checkpoint.identity,
+                               uncertainty: "legacy_delivery_state_unknown", attempted: nil)
+        if let index = outbox.firstIndex(where: { $0.intentId == intentId }) {
+          outbox[index] = pending
+        } else {
           outbox.append(pending)
-          _ = persistOutbox(outbox)
         }
+        _ = persistOutbox(outbox)
         pendingSubmission = pending
         terminalDrainCompleted = false
         lifecycle = .submitting
@@ -632,6 +751,12 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private func recordFailure(_ error: Error, since revision: Int? = nil) {
+    if error is G0Transport.HistoryProfileError {
+      connectionSuccessRevision += 1
+      reachable = nil
+      connectionObservation = .protocolFailure(code: "history_profile_unverified")
+      return
+    }
     if let runError = error as? G0Transport.RunError, case let .host(code) = runError {
       connectionSuccessRevision += 1
       if code == "unknown_op" || ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code) {
@@ -647,6 +772,16 @@ final class RemoteRunStore: ObservableObject {
     if let revision, connectionSuccessRevision > revision { return }
     reachable = false
     connectionObservation = .transportFailure
+  }
+
+  func resetNewTaskContext() {
+    // Only composer choices change. Existing runs/outbox already carry frozen
+    // routing and must keep observing their original target and Provider.
+    chosen = nil; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil
+    permissionMode = "default"; latestProviderPreference = (nil, nil)
+    restoredControlErrors = [:]; contextNeedsRestore = false
+    commandsRequestGeneration += 1
+    commandsTask?.cancel(); commandsTask = nil; commands = .idle
   }
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) {
@@ -711,7 +846,7 @@ final class RemoteRunStore: ObservableObject {
     catalogRefreshFailure = nil
     let requestDataGeneration = dataGeneration
     let disk = historyDisk
-    let diskKey = RemoteHistoryCache.catalogKey(connection: client.connection)
+    let diskKey = RemoteHistoryCache.catalogKey(connection: client.connection, target: targetScope)
     let requestConnectionRevision = connectionSuccessRevision
     let progress = CatalogProgress()
     catalogTask = Task { [weak self] in
@@ -789,7 +924,11 @@ final class RemoteRunStore: ObservableObject {
           guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
           self.recordFailure(error, since: requestConnectionRevision)
           let detail = Self.describe(error)
-          if case let G0Transport.RunError.host(code) = error,
+          if let scope = self.targetScope, !scope.isLocal, case G0Transport.RunError.host = error {
+            // The error may be from either authenticated hop. It is not proof
+            // that the phone must replace its Mac1 grant.
+            self.catalogRefreshFailure = .target(label: scope.label, detail: detail)
+          } else if case let G0Transport.RunError.host(code) = error,
              ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code) {
             self.catalogRefreshFailure = .authorization(detail)
           } else if case G0Transport.RunError.host(code: "unknown_op") = error {
@@ -815,6 +954,16 @@ final class RemoteRunStore: ObservableObject {
   }
 
   #if DEBUG
+  // Replace only the network reader, and only in an existing isolated mock.
+  // The Details regression then runs the real refresh/cache completion path.
+  func prepareRefreshDetailsFixture() -> Bool {
+    guard mockMode else { return false }
+    let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "details-fixture", anchorPEM: "fixture-anchor", deviceId: "fixture-grant")
+    catalogFixture = CatalogFixture(connection: connection, fetch: { _ in [] })
+    return true
+  }
+
   // A bounded DEBUG-only projection fixture exercises the feedback state's
   // page-to-complete sequence. It does not execute loadSessions or disk I/O,
   // and is not evidence for transport, partial, or cache failure behavior.
@@ -847,13 +996,13 @@ final class RemoteRunStore: ObservableObject {
   // An established readonly tunnel closes on cancellation, so foreground reads
   // take priority. Before channel establishment, NIO/upgrade deadlines still apply.
   private func prefetchHistory(_ sessions: [G0Transport.RunSessionRef]) {
-    guard prefetchTask == nil, historyTask == nil, !historyCacheClearing, !hasUnresolvedRun,
+    guard prefetchEnabled, prefetchTask == nil, historyTask == nil, !historyCacheClearing, !hasUnresolvedRun,
           let connection = loadConnection() else { return }
     let recent = Array(sessions.filter { $0.externalSessionId?.isEmpty == false }
       .sorted { $0.ts > $1.ts }.prefix(2))
     let keys = Set(recent.compactMap { session -> String? in
       guard let external = session.externalSessionId else { return nil }
-      return RemoteHistoryCache.key(connection: connection, providerId: session.providerId, cwd: session.cwd, sessionId: external)
+      return RemoteHistoryCache.key(connection: connection, target: targetScope, providerId: session.providerId, cwd: session.cwd, sessionId: external, agentProfileId: session.agentProfileId)
     })
     warmedScreens = warmedScreens.filter { keys.contains($0.key) }
     let requestDataGeneration = dataGeneration
@@ -871,7 +1020,7 @@ final class RemoteRunStore: ObservableObject {
         guard !Task.isCancelled, self.dataGeneration == requestDataGeneration,
               self.prefetchGeneration == warmingGeneration,
               self.loadConnection() == connection, let external = session.externalSessionId else { break }
-        let key = RemoteHistoryCache.key(connection: connection, providerId: session.providerId, cwd: session.cwd, sessionId: external)
+        let key = RemoteHistoryCache.key(connection: connection, target: targetScope, providerId: session.providerId, cwd: session.cwd, sessionId: external, agentProfileId: session.agentProfileId)
         do {
           let cached = try await disk.readPreview(key)
           guard !Task.isCancelled, self.prefetchGeneration == warmingGeneration,
@@ -893,10 +1042,10 @@ final class RemoteRunStore: ObservableObject {
       if current(), !missing.isEmpty {
         let epoch = await disk.epoch
         do {
-          try await RemoteRunClient(connection: connection).withHistoryConnection { [missing] reader in
+          try await RemoteRunClient(connection: connection, executionTarget: targetScope?.targetBinding).withHistoryConnection { [missing] reader in
             for (session, key) in missing {
               guard current(), let external = session.externalSessionId else { return }
-              let preview = try await reader.preview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external)
+              let preview = try await reader.preview(providerId: session.providerId, cwd: session.cwd, externalSessionId: external, agentProfileId: session.agentProfileId)
               guard current() else { return }
               if preview.available {
                 self.warmScreen(preview, key: key)
@@ -922,13 +1071,13 @@ final class RemoteRunStore: ObservableObject {
   // host response can mark it current/reachable. The single memory entry keeps
   // large transcripts bounded; other conversations reopen from disk off-main.
   func loadHistory(providerId: String, cwd: String, externalSessionId: String, force: Bool = false, legacyFull: Bool = false,
-                   onlyWhileFollowing: Bool = false) {
+                   onlyWhileFollowing: Bool = false, agentProfileId: String? = nil) {
     #if DEBUG
     if mockMode { return }
     #endif
     guard !historyCacheClearing, !onlyWhileFollowing || historyFollowingLatest else { return }
     prefetchTask?.cancel()
-    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let identity = SessionIdentity.opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd, externalSessionId: externalSessionId, scope: targetScope)
     // The legacy history contract has no canonical turn ids. Keep the base of
     // a locally extended conversation stable rather than deduplicating by text
     // or double-rendering the same run after an archive refresh.
@@ -950,8 +1099,8 @@ final class RemoteRunStore: ObservableObject {
       history = .idle
     } else if historyTask != nil { return }
     guard let connection = loadConnection() else { history = .failed("尚未配对"); return }
-    let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
-    let client = RemoteRunClient(connection: connection)
+    let key = RemoteHistoryCache.key(connection: connection, target: targetScope, providerId: providerId, cwd: cwd, sessionId: externalSessionId, agentProfileId: agentProfileId)
+    let client = RemoteRunClient(connection: connection, executionTarget: targetScope?.targetBinding)
     let disk = historyDisk
     let requestConnectionRevision = connectionSuccessRevision
     let retainedWindow: RemoteHistoryCache.StructuredWindow? = historyWindowKey == key ? historyWindow.flatMap { page in
@@ -1040,7 +1189,7 @@ final class RemoteRunStore: ObservableObject {
             // A first-screen preview remains explicitly partial. It also gives
             // an oversized turn a readable surface before the capacity reply.
             if case .loading = self.history {
-              let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+              let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
               guard current() else { return }
               if preview.available {
                 self.showPreview(preview, key: key, cached: false)
@@ -1048,7 +1197,7 @@ final class RemoteRunStore: ObservableObject {
               }
             }
             do {
-              let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil)
+              let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil, agentProfileId: agentProfileId)
               guard current() else { return }
               self.recordSuccess()
               // An older Mac (or a transcript-only window) gives no run ids, so
@@ -1076,7 +1225,7 @@ final class RemoteRunStore: ObservableObject {
             }
           }
           do {
-            let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+            let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
             guard current() else { return }
             if preview.available {
               if cached == nil, cachedWindow == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
@@ -1102,7 +1251,7 @@ final class RemoteRunStore: ObservableObject {
           let started = Date()
           do {
             let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
-              externalSessionId: externalSessionId, cached: cached, connection: reader, progress: { [weak self] received, total in
+              externalSessionId: externalSessionId, cached: cached, connection: reader, agentProfileId: agentProfileId, progress: { [weak self] received, total in
                 guard let self else { return }
                 await MainActor.run {
                   guard self.historyRequestGeneration == request,
@@ -1134,8 +1283,8 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  func loadCompleteHistory(providerId: String, cwd: String, externalSessionId: String) {
-    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, legacyFull: true)
+  func loadCompleteHistory(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) {
+    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, legacyFull: true, agentProfileId: agentProfileId)
   }
 
   private func showHistoryFailure(_ error: Error, cached: RemoteHistorySnapshot?, since revision: Int? = nil) {
@@ -1195,15 +1344,15 @@ final class RemoteRunStore: ObservableObject {
     historyFetchedAt = snapshot.fetchedAt
   }
 
-  func loadOlderHistory(providerId: String, cwd: String, externalSessionId: String) {
+  func loadOlderHistory(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) {
     guard let window = historyWindow, window.hasOlder,
           let connection = loadConnection(), historyTask == nil else { return }
-    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let identity = SessionIdentity.opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd, externalSessionId: externalSessionId, scope: targetScope)
     let requestConnectionRevision = connectionSuccessRevision
     let requestGeneration = generation
     historyRequestGeneration += 1
     let request = historyRequestGeneration
-    let key = RemoteHistoryCache.key(connection: connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    let key = RemoteHistoryCache.key(connection: connection, target: targetScope, providerId: providerId, cwd: cwd, sessionId: externalSessionId, agentProfileId: agentProfileId)
     guard historyWindowKey == key else { return }
     historySyncing = true
     historyTask = Task { [weak self] in
@@ -1213,9 +1362,9 @@ final class RemoteRunStore: ObservableObject {
       }
       let epoch = await self.historyDisk.epoch
       do {
-        let page = try await RemoteRunClient(connection: connection).withHistoryConnection { reader in
+        let page = try await RemoteRunClient(connection: connection, executionTarget: targetScope?.targetBinding).withHistoryConnection { reader in
           try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
-            before: window.offset, limit: 3, snapshot: window.snapshot)
+            before: window.offset, limit: 3, snapshot: window.snapshot, agentProfileId: agentProfileId)
         }
         guard !Task.isCancelled, self.isCurrent(requestGeneration, identity: identity),
               self.loadConnection() == connection, self.historyRequestGeneration == request else { return }
@@ -1261,7 +1410,7 @@ final class RemoteRunStore: ObservableObject {
     try await historyDisk.clear()
   }
 
-  func refreshHistory(providerId: String, cwd: String, externalSessionId: String) async {
+  func refreshHistory(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async {
     #if DEBUG
     if mockMode {
       if ProcessInfo.processInfo.arguments.contains("-uiMockMacStartsLater"), case let .loaded(turns) = history {
@@ -1276,20 +1425,20 @@ final class RemoteRunStore: ObservableObject {
       return
     }
     #endif
-    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let identity = SessionIdentity.opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd, externalSessionId: externalSessionId, scope: targetScope)
     let requestGeneration = generation
     await historyTask?.value
     guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity),
           let client = makeClient() else { return }
-    let key = RemoteHistoryCache.key(connection: client.connection, providerId: providerId, cwd: cwd, sessionId: externalSessionId)
+    let key = RemoteHistoryCache.key(connection: client.connection, target: targetScope, providerId: providerId, cwd: cwd, sessionId: externalSessionId, agentProfileId: agentProfileId)
     if let windowKey = historyWindowKey, windowKey != key {
-      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true)
+      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, agentProfileId: agentProfileId)
       await historyTask?.value
       return
     }
     let requestConnectionRevision = connectionSuccessRevision
     do {
-      let version = try await client.historyVersion(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+      let version = try await client.historyVersion(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
       guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
       recordSuccess()
       guard historyNeedsRefresh(version.version) else {
@@ -1297,7 +1446,7 @@ final class RemoteRunStore: ObservableObject {
         if historyPageSnapshot == version.version { historyRefreshError = nil }
         return
       }
-      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, onlyWhileFollowing: true)
+      loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, onlyWhileFollowing: true, agentProfileId: agentProfileId)
       await historyTask?.value
     } catch {
       guard !Task.isCancelled, isCurrent(requestGeneration, identity: identity) else { return }
@@ -1319,17 +1468,17 @@ final class RemoteRunStore: ObservableObject {
 
   // Re-opening the same session does not discard its live observation. If the
   // view was left while a run was active, resume its poll using the known run id.
-  func prepareForSession(providerId: String, cwd: String, externalSessionId: String) {
-    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+  func prepareForSession(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) {
+    let identity = SessionIdentity.opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd, externalSessionId: externalSessionId, scope: targetScope)
     if activeSessionIdentity == identity {
       if let runId, pollTask == nil,
          observationInterrupted || !isTerminal(generation: generation, identity: identity) {
         resumeObservation(runId: runId)
       }
-      if !hasUnresolvedRun { loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId) }
+      if !hasUnresolvedRun { loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId) }
       return
     }
-    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
   }
 
   func completedTurns(for identity: SessionIdentity, historyRendered: Bool = true) -> [CompletedLiveTurn] {
@@ -1699,8 +1848,13 @@ final class RemoteRunStore: ObservableObject {
     #if DEBUG
     if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); return true }
     #endif
+    guard targetScope?.isLocal != false || executionTargetAvailable else {
+      submitError = ConnectionCopy.targetSendUnavailable
+      return false
+    }
     guard makeClient() != nil else { submitError = "尚未配对"; return false }
-    let identity = SessionIdentity.new(providerId: providerId, cwd: cwd)
+    let identity = SessionIdentity.new(providerId: providerId, agentProfileId: chosenProvider?.agentProfileId,
+                                       cwd: cwd, scope: targetScope)
     let routing = RemoteRunClient.Routing(cwd: cwd, providerId: providerId,
                                           agentProfileId: chosenProvider?.agentProfileId, prompt: trimmed,
                                           modelId: chosenModel?.id, modelProviderId: chosenModel?.providerId,
@@ -1732,33 +1886,57 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private func startDelivery(_ pending: PendingSubmission) {
-    guard deliveryTasks[pending.intentId] == nil, let client = makeClient() else { return }
+    guard pending.uncertainty == nil, deliveryTasks[pending.intentId] == nil, let client = makeClient() else { return }
+    // Reserve the intent durably before its first submit. An already-marked
+    // item is a normal in-process retry after foreground wake, not a new send.
+    if pending.attempted != true {
+      guard markDeliveryAttempted(pending) else { return }
+    }
+    guard let attempted = outbox.first(where: { $0.intentId == pending.intentId }),
+          attempted.uncertainty == nil else { return }
     let requestGeneration = dataGeneration
+    let targeted = targetScope?.isLocal == false
     deliveryTasks[pending.intentId] = Task { [weak self] in
       let result = await Self.deliver(
-        submit: { try await client.submit(routing: pending.routing, intentId: pending.intentId) },
-        status: { try await client.intentStatus(intentId: pending.intentId) },
+        submit: { try await client.submit(routing: attempted.routing, intentId: attempted.intentId) },
+        status: { try await client.intentStatus(intentId: attempted.intentId) },
         transportFailed: { error in
           guard let self, self.dataGeneration == requestGeneration else { return }
           self.recordFailure(error)
         },
         pause: { attempt in
-          self?.pausedDeliveries.insert(pending.intentId)
-          defer { self?.pausedDeliveries.remove(pending.intentId) }
+          self?.pausedDeliveries.insert(attempted.intentId)
+          defer { self?.pausedDeliveries.remove(attempted.intentId) }
           try await Self.deliveryPause(attempt)
-        })
+        }, targeted: targeted)
       guard !Task.isCancelled, let self, self.dataGeneration == requestGeneration, let result else { return }
-      self.deliveryFinished(pending, result: result, client: client)
+      self.deliveryFinished(attempted, result: result, client: client)
     }
   }
 
-  // Resend until the host answers. Only an authenticated host reply ends the
-  // loop: a receipt (new or duplicate of this intentId) or a definitive
-  // rejection. nil means the task was cancelled; a newer attempt owns the intent.
+  private func markDeliveryAttempted(_ pending: PendingSubmission) -> Bool {
+    guard let index = outbox.firstIndex(where: { $0.intentId == pending.intentId }),
+          outbox[index].failure == nil, outbox[index].uncertainty == nil else { return false }
+    var marked = outbox
+    marked[index].attempted = true
+    let newlyReserved = attemptedDeliveryIntentIds.insert(pending.intentId).inserted
+    // MainActor writes are synchronous: publish only after the marker is
+    // durable. Otherwise a later retry could skip a failed first write.
+    guard persistOutbox(marked) else {
+      if newlyReserved { attemptedDeliveryIntentIds.remove(pending.intentId) }
+      return false
+    }
+    outbox = marked
+    return true
+  }
+
+  // Retry transport loss under the same intent. A receipt resolves delivery;
+  // forwarded errors or lost authority pause without claiming nonexecution.
+  // nil means cancellation; a newer attempt owns the intent.
   static func deliver<Outcome>(submit: () async throws -> Outcome,
                                status: () async throws -> Outcome?,
                                transportFailed: (Error) -> Void,
-                               pause: (Int) async throws -> Void) async -> DeliveryResult<Outcome>? {
+                               pause: (Int) async throws -> Void, targeted: Bool = false) async -> DeliveryResult<Outcome>? {
     var attempt = 0
     while !Task.isCancelled {
       do {
@@ -1768,17 +1946,20 @@ final class RemoteRunStore: ObservableObject {
         // update between attempts): adopt that run instead of failing.
         do {
           if let found = try await status() { return .accepted(found) }
-          return .rejected("intent_payload_conflict")
+          return .uncertain("intent_payload_conflict")
         } catch let G0Transport.RunError.host(code) {
-          return .rejected(code)
+          return .uncertain(code)
         } catch {
           if Task.isCancelled { return nil }
           transportFailed(error)
         }
       } catch let G0Transport.RunError.host(code) {
-        return .rejected(code)
+        // A gateway rejection cannot prove that an earlier downstream attempt
+        // did not execute. Only a receipt can resolve a forwarded intent.
+        let authorityLost = ["device_not_authorized", "grant_expired", "grant_revoked", "unknown_op"].contains(code)
+        return targeted || authorityLost ? .uncertain(code) : .rejected(code)
       } catch RemoteRunClient.ClientError.missingCredentials {
-        return .rejected("missing_credentials")
+        return .uncertain("missing_credentials")
       } catch {
         if Task.isCancelled { return nil }
         transportFailed(error)
@@ -1803,7 +1984,7 @@ final class RemoteRunStore: ObservableObject {
       deliveryTasks.removeValue(forKey: intentId)?.cancel()
     }
     pausedDeliveries = []
-    for pending in outbox where pending.failure == nil { startDelivery(pending) }
+    for pending in outbox where pending.failure == nil && pending.uncertainty == nil { startDelivery(pending) }
   }
 
   private func deliveryFinished(_ pending: PendingSubmission, result: DeliveryResult<G0Transport.RunSubmitOutcome>,
@@ -1818,6 +1999,14 @@ final class RemoteRunStore: ObservableObject {
       recordSuccess()
       remaining.remove(at: index)
       if focused { adoptSubmission(outcome, pending: pending, client: client) }
+    case let .uncertain(code):
+      if code == "missing_credentials" { reachable = nil; connectionObservation = .unverified }
+      else { recordFailure(G0Transport.RunError.host(code: code)) }
+      remaining[index].uncertainty = code
+      if focused {
+        observationInterrupted = true
+        submitError = ConnectionCopy.targetResultUnknown
+      }
     case let .rejected(code):
       // A definitive host reply is connection evidence even when it rejects
       // execution. Missing local credentials are not a reply from the Mac.
@@ -1971,7 +2160,7 @@ final class RemoteRunStore: ObservableObject {
             // The host archives the run before its settled marker. Read the
             // host record now so the local copy can give way to it.
             if let externalSessionId = identity.externalSessionId {
-              self.loadHistory(providerId: identity.providerId, cwd: identity.cwd, externalSessionId: externalSessionId, force: true)
+              self.loadHistory(providerId: identity.providerId, cwd: identity.cwd, externalSessionId: externalSessionId, force: true, agentProfileId: identity.agentProfileId)
             }
           }
           self.pollTask = nil
@@ -2058,7 +2247,33 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
+  var hasUncertainSubmission: Bool {
+    guard let id = pendingSubmission?.intentId else { return false }
+    return outbox.contains { $0.intentId == id && $0.uncertainty != nil }
+  }
+
+  func reconcileUncertain(intentId: String? = nil) {
+    guard let id = intentId ?? pendingSubmission?.intentId,
+          let pending = outbox.first(where: { $0.intentId == id && $0.uncertainty != nil }),
+          deliveryTasks[id] == nil, let client = makeClient() else { return }
+    let requestGeneration = dataGeneration
+    deliveryTasks[id] = Task { [weak self] in
+      guard let self else { return }
+      defer { self.deliveryTasks.removeValue(forKey: id) }
+      do {
+        let receipt = try await client.intentStatus(intentId: id)
+        guard !Task.isCancelled, self.dataGeneration == requestGeneration else { return }
+        if let receipt { self.deliveryFinished(pending, result: .accepted(receipt), client: client) }
+        else { self.submitError = ConnectionCopy.targetResultUnknown }
+      } catch {
+        guard !Task.isCancelled, self.dataGeneration == requestGeneration else { return }
+        self.submitError = ConnectionCopy.targetResultUnknown
+      }
+    }
+  }
+
   func retryObservation() {
+    if hasUncertainSubmission { reconcileUncertain(); return }
     guard observationInterrupted, let runId else { return }
     resumeObservation(runId: runId)
   }
@@ -2067,6 +2282,7 @@ final class RemoteRunStore: ObservableObject {
   // transport loss had stopped observation of an unfinished run, resume it.
   // Resuming is a read; it never re-sends a prompt or answer.
   func foregrounded() {
+    liveRunsForegroundEligible = true
     guard !historyOnly, let client = makeClient() else { return }
     Task { try? await client.prewarm() }
     startLiveRuns()
@@ -2077,9 +2293,9 @@ final class RemoteRunStore: ObservableObject {
   // Resume a known host run after a view rebuild. The caller supplies the
   // session identity obtained from the host catalog, so a run id from another
   // session cannot attach to the current transcript.
-  func resumeObservation(runId: String, providerId: String, cwd: String, externalSessionId: String) {
+  func resumeObservation(runId: String, providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) {
     guard !historyOnly else { return }
-    let identity = SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
+    let identity = SessionIdentity.opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd, externalSessionId: externalSessionId, scope: targetScope)
     if activeSessionIdentity != identity {
       guard resetRun() else { return }
       activeSessionIdentity = identity
@@ -2137,10 +2353,15 @@ final class RemoteRunStore: ObservableObject {
   }
 
   nonisolated private static func followUpIdentity(current: SessionIdentity?, providerId: String,
-                                                    cwd: String, originalResume: String) -> SessionIdentity {
+                                                    cwd: String, originalResume: String,
+                                                    scope: ExecutionTargetScope? = nil,
+                                                    agentProfileId: String? = nil) -> SessionIdentity {
     current.flatMap { identity in
-      identity.providerId == providerId && identity.cwd == cwd ? identity : nil
-    } ?? SessionIdentity.opened(providerId: providerId, cwd: cwd, externalSessionId: originalResume)
+      identity.providerId == providerId && identity.agentProfileId == agentProfileId && identity.cwd == cwd &&
+        identity.gatewayIdentity == scope?.gatewayIdentity && identity.gatewayHostId == scope?.gatewayHostId &&
+        identity.targetId == scope?.targetId && identity.targetBinding == scope?.binding ? identity : nil
+    } ?? SessionIdentity.opened(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd,
+                                 externalSessionId: originalResume, scope: scope)
   }
 
   private func isCurrent(_ requestGeneration: Int, identity: SessionIdentity) -> Bool {
@@ -2290,8 +2511,13 @@ final class RemoteRunStore: ObservableObject {
   }
 
   enum ConnectionReplacementError: LocalizedError {
-    case pendingWork
-    var errorDescription: String? { "仍有消息在发送或任务未结束，完成后再重新配对。" }
+    case pendingWork, recoveryUnavailable
+    var errorDescription: String? {
+      switch self {
+      case .pendingWork: return ConnectionCopy.pendingBeforePair
+      case .recoveryUnavailable: return ConnectionCopy.targetRecoveryUnavailable
+      }
+    }
   }
 
   func prepareConnectionReplacement(_ connection: RemoteConnection) throws {
@@ -2323,7 +2549,7 @@ final class RemoteRunStore: ObservableObject {
     liveActionRunId = nil; liveActionError = nil; liveAnsweredQuestions = []; liveAnswerIds = [:]
     pollTask?.cancel(); pollTask = nil
     for task in deliveryTasks.values { task.cancel() }
-    deliveryTasks = [:]; pausedDeliveries = []
+    deliveryTasks = [:]; pausedDeliveries = []; attemptedDeliveryIntentIds = []
     // Persisted files were removed successfully before releasing their state.
     outbox = []
     catalogTask?.cancel(); catalogTask = nil
@@ -2377,14 +2603,19 @@ final class RemoteRunStore: ObservableObject {
     #if DEBUG
     if mockMode { applyMockRun(prompt: trimmed, attachments: attachments); liveExternalSessionId = resume; return true }
     #endif
+    guard targetScope?.isLocal != false || executionTargetAvailable else {
+      submitError = ConnectionCopy.targetSendUnavailable
+      return false
+    }
     guard makeClient() != nil else { submitError = "尚未配对"; return false }
-    let resumeId = liveExternalSessionId ?? resume
     // The routing resume id may advance after each Provider turn, but the UI
     // identity must remain the originally opened conversation. Otherwise every
     // new native id moves completed turns to a key the current transcript view
     // does not query, making the previous exchange disappear again.
     let identity = Self.followUpIdentity(current: activeSessionIdentity, providerId: providerId,
-                                         cwd: cwd, originalResume: resume)
+                                         cwd: cwd, originalResume: resume, scope: targetScope,
+                                         agentProfileId: agentProfileId)
+    let resumeId = activeSessionIdentity == identity ? liveExternalSessionId ?? resume : resume
     let matchingProvider = chosenProvider?.id == providerId && chosenProvider?.agentProfileId == agentProfileId ? chosenProvider : nil
     guard let matchingProvider, controlsReady else {
       submitError = agentProfileId == nil ? "当前 Provider 控件不可用" : "原 Agent Profile 当前不可用，已阻止切换身份继续会话"
@@ -2729,7 +2960,7 @@ final class RemoteRunStore: ObservableObject {
   static func selfTestInteractionState() -> [(String, Bool)] {
     // -selfTest skips restoring disk state; mockMode prevents any checkpoint
     // deletion. Exercise the real admission and projection methods in memory.
-    let store = RemoteRunStore()
+    let store = RemoteRunStore(stateDirectory: nil)
     store.mockMode = true
     var checks: [(String, Bool)] = []
     let identity = SessionIdentity.new(providerId: "codex", cwd: "/fixture")
@@ -2746,7 +2977,7 @@ final class RemoteRunStore: ObservableObject {
       store.backgroundSend(for: identity)?.routing.prompt == "same prompt"))
     store.discardRejectedSend("keep-this-intent")
     checks.append(("pending.unansweredSendNotDiscardable", store.outbox.count == 1))
-    store.outbox[0].failure = "grant_revoked"
+    store.outbox[0].failure = "invalid_request"
     store.discardRejectedSend("keep-this-intent")
     checks.append(("pending.rejectedSendDiscardable", store.outbox.isEmpty))
     let file = OutboxFile(version: 1, hostId: "host", items: [PendingSubmission(intentId: "a", routing: routing, identity: identity, failure: "x")])
@@ -2757,8 +2988,8 @@ final class RemoteRunStore: ObservableObject {
     for code in ["grant_revoked", "missing_credentials"] {
       let pending = PendingSubmission(intentId: code, routing: routing, identity: identity)
       store.outbox = [pending]; store.reachable = true; store.connectionObservation = .reachable
-      store.deliveryFinished(pending, result: .rejected(code), client: client)
-      checks.append(("connection.rejection.\(code)", store.reachable == nil &&
+      store.deliveryFinished(pending, result: .uncertain(code), client: client)
+      checks.append(("connection.uncertainty.\(code)", store.outbox.first?.uncertainty == code && store.outbox.first?.failure == nil && store.reachable == nil &&
         store.connectionObservation == (code == "missing_credentials" ? .unverified : .hostReply(code: code))))
     }
     store.pendingSubmission = nil
@@ -2922,6 +3153,332 @@ final class RemoteRunStore: ObservableObject {
 
   // Executes loadSessions and the real protected cache in a temporary directory.
   // Only the network reader is replaced; mockMode disables all other transports.
+  static func selfTestExecutionTargets(directory: URL) async throws -> [(String, Bool)] {
+    let suite = "ScryTargetsFixture.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let connections = RemoteConnectionStore(defaults: defaults)
+    let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "gateway", anchorPEM: "fixture-anchor", deviceId: "phone-grant")
+    connections.save(connection)
+    let disk = RemoteHistoryCache(directory: directory.appendingPathComponent("history"))
+    let gateway = RemoteHistoryCache.catalogKey(connection: connection)
+    let a = ExecutionTargetScope(gatewayHostId: connection.hostId, targetId: "a", binding: String(repeating: "a", count: 64), hostId: "mac2", label: "Mac2", gatewayIdentity: gateway)
+    let b = ExecutionTargetScope(gatewayHostId: connection.hostId, targetId: "b", binding: String(repeating: "b", count: 64), hostId: "mac3", label: "Mac3", gatewayIdentity: gateway)
+    let renewed = ExecutionTargetScope(gatewayHostId: connection.hostId, targetId: "a", binding: String(repeating: "c", count: 64), hostId: "mac2", label: "Mac2", gatewayIdentity: gateway)
+    defaults.set(try JSONEncoder().encode([a, b]), forKey: "com.scry.remote.execution-targets." + gateway)
+    let model = AppModel(connections: connections, historyDisk: disk, stateDirectory: directory)
+    let coordinator = model.targetCoordinator
+    coordinator.select(a)
+    coordinator.selectNewTask(b)
+    var checks: [(String, Bool)] = [("selection.doesNotMoveConversation", coordinator.selectedScope == a && coordinator.newTaskScope == b)]
+    let draftA = model.composerDraft(for: .newTask(a))
+    draftA.wrappedValue.text = "private Mac2 draft"
+    coordinator.selectNewTask(a)
+    coordinator.selectNewTask(b)
+    checks.append(("draft.staysOnOriginalTarget", draftA.wrappedValue.text == "private Mac2 draft" && model.composerDraft(for: .newTask(b)).wrappedValue.text.isEmpty))
+    checks.append(("draft.renewedGrantIsSeparate", model.composerDraft(for: .newTask(renewed)).wrappedValue.text.isEmpty))
+    let store = coordinator.store(for: a)
+    let other = coordinator.store(for: b)
+    store.catalog = .loaded([.init(sessionId: "same", externalSessionId: "same", providerId: "pi", agentProfileId: "profile-a", cwd: "/repo", label: "Mac2 session", ts: 1)])
+    other.catalog = .loaded([.init(sessionId: "same", externalSessionId: "same", providerId: "pi", agentProfileId: "profile-b", cwd: "/repo", label: "Mac3 session", ts: 2)])
+    coordinator.rebuildHomeSessions()
+    checks.append(("catalog.aggregatesIdenticalSessionIdsWithoutCollision", coordinator.homeSessions.count == 2 && Set(coordinator.homeSessions.map(\.id)).count == 2))
+    coordinator.selectFilter(.target(a))
+    checks.append(("catalog.filterKeepsOriginalScope", coordinator.homeSessions.count == 1 && coordinator.homeSessions.first?.scope == a))
+    coordinator.selectFilter(.all)
+    store.chosen = .init(path: "/repo", label: "repo")
+    store.chosenProvider = .init(id: "pi", label: "Pi", available: true)
+    coordinator.selectNewTask(a)
+    checks.append(("selection.requiresFreshProjectAndProvider", store.chosen == nil && store.chosenProvider == nil && other !== store))
+    let identity = SessionIdentity.opened(providerId: "pi", agentProfileId: "profile-a", cwd: "/repo", externalSessionId: "same-session", scope: a)
+    let profileB = SessionIdentity.opened(providerId: "pi", agentProfileId: "profile-b", cwd: "/repo", externalSessionId: "same-session", scope: a)
+    model.composerDraft(for: .conversation(identity)).wrappedValue.text = "private profile A"
+    model.bindDraft(externalSessionId: "same-session", to: identity)
+    checks.append(("draft.profilesIsolated", model.composerDraft(for: .conversation(profileB)).wrappedValue.text.isEmpty))
+    checks.append(("followUp.doesNotReuseAnotherProfile", followUpIdentity(current: identity, providerId: "pi", cwd: "/repo", originalResume: "same-session", scope: a, agentProfileId: "profile-b") == profileB))
+    checks.append(("identity.restoresFinalHostNotGateway", identity.scope?.hostId == a.hostId && identity.scope?.gatewayIdentity == gateway))
+    let followUp = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: directory.appendingPathComponent("follow-up"), targetScope: a)
+    followUp.activeSessionIdentity = identity; followUp.liveExternalSessionId = "old-profile-a-session"
+    followUp.chosenProvider = .init(id: "pi", label: "Pi B", available: true, agentProfileId: "profile-b")
+    followUp.updateTargetAvailability(true)
+    let queued = followUp.submitFollowUp(prompt: "offline fixture", providerId: "pi", agentProfileId: "profile-b", cwd: "/repo", resume: "same-session")
+    for task in followUp.deliveryTasks.values { task.cancel() }
+    followUp.deliveryTasks = [:]
+    checks.append(("followUp.routingDoesNotResumeAnotherProfile", queued && followUp.outbox.first?.routing.resume == "same-session" && followUp.activeSessionIdentity == profileB))
+    let listing = try JSONDecoder().decode(G0Transport.WorkspaceResult.self,
+      from: Data(#"{"action":"list","listing":{"entries":[],"truncated":false}}"#.utf8))
+    var workspaceTargets: [G0Transport.ExecutionTargetBinding?] = []
+    store.workspaceReaderFixture = { client, _ in workspaceTargets.append(client.executionTarget); return listing }
+    _ = try await store.readWorkspace(.init(action: .list, cwd: "/repo", path: ""))
+    let readOnly = RemoteRunStore(historyFor: store)
+    readOnly.workspaceReaderFixture = { client, _ in workspaceTargets.append(client.executionTarget); return listing }
+    _ = try await readOnly.readWorkspace(.init(action: .list, cwd: "/repo", path: ""))
+    checks.append(("workspace.browserAndReadonlyRetainTargetBinding", workspaceTargets == [a.targetBinding, a.targetBinding]))
+    store.workspaceReaderFixture = { _, _ in
+      var replaced = connection; replaced.deviceId = "changed-during-file-read"
+      connections.save(replaced)
+      return listing
+    }
+    do { _ = try await store.readWorkspace(.init(action: .list, cwd: "/repo", path: "")); checks.append(("workspace.changedGrantCannotPublishFile", false)) }
+    catch is CancellationError { checks.append(("workspace.changedGrantCannotPublishFile", true)) }
+    connections.save(connection)
+    store.workspaceReaderFixture = nil
+    let keyA = RemoteHistoryCache.key(connection: connection, target: a, providerId: "pi", cwd: "/repo", sessionId: "same-session", agentProfileId: "profile-a")
+    let keyB = RemoteHistoryCache.key(connection: connection, target: a, providerId: "pi", cwd: "/repo", sessionId: "same-session", agentProfileId: "profile-b")
+    checks.append(("cache.profilesIsolated", keyA != keyB))
+    checks.append(("cache.localLegacyNamespacePreserved", RemoteHistoryCache.catalogKey(connection: connection) == RemoteHistoryCache.catalogKey(connection: connection, target: coordinator.localScope)))
+    store.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in throw G0Transport.RunError.host(code: "grant_revoked") })
+    _ = await store.refreshSessions()
+    checks.append(("catalog.targetAuthDoesNotRequestPhonePairing", store.catalogRefreshFailure?.requiresPairing == false && store.catalogRefreshFailure?.summary.contains(a.label) == true))
+    store.historyTestOffline = true
+    store.prepareForSession(providerId: "pi", cwd: "/repo", externalSessionId: "same-session", agentProfileId: "profile-a")
+    await store.historyTask?.value
+    checks.append(("history.keepsProfile", store.activeSessionIdentity == identity))
+    let question = try JSONDecoder().decode(G0Transport.RunQuestionRequest.self,
+      from: Data(#"{"runId":"00000000-0000-4000-8000-000000000001","questionId":"same-question","questions":[]}"#.utf8))
+    other.activeSessionIdentity = .opened(providerId: "pi", agentProfileId: "profile-a", cwd: "/repo", externalSessionId: "same-session", scope: b)
+    let firstQuestion = store.questionIdentity(question)
+    checks.append(("question.identicalRunAndQuestionIdsStayOnTheirTarget", firstQuestion != other.questionIdentity(question)))
+    store.activeSessionIdentity = profileB
+    checks.append(("question.profileChangeDoesNotReuseAnswerState", firstQuestion != store.questionIdentity(question)))
+    store.activeSessionIdentity = identity
+    let routing = RemoteRunClient.Routing(cwd: "/repo", providerId: "pi", agentProfileId: "profile-a", prompt: "keep this unknown message")
+    let pending = PendingSubmission(intentId: "immutable-intent", routing: routing, identity: identity)
+    store.outbox = [pending]; store.pendingSubmission = pending
+    store.activeSessionIdentity = identity; store.activeRouting = routing; store.lifecycle = .submitting
+    guard store.persistOutbox([pending]), store.saveRecoveryCheckpoint(intentId: pending.intentId, routing: routing, identity: identity, runId: nil) else { throw CocoaError(.fileWriteUnknown) }
+    let codes = ["target_delivery_unknown", "device_not_authorized", "grant_expired", "grant_revoked", "execution_target_binding_changed", "unknown_connection", "unknown_op"]
+    for code in codes {
+      var attempts = 0
+      let result: DeliveryResult<G0Transport.RunSubmitOutcome>? = await deliver(submit: {
+        attempts += 1
+        throw G0Transport.RunError.host(code: code)
+      }, status: { nil }, transportFailed: { _ in }, pause: { _ in throw CancellationError() }, targeted: true)
+      if case let .uncertain(pausedCode) = result { checks.append(("delivery.\(code)PausesWithoutResend", attempts == 1 && pausedCode == code)) }
+      else { checks.append(("delivery.\(code)PausesWithoutResend", false)) }
+    }
+    let localRevocation: DeliveryResult<String>? = await deliver(submit: { throw G0Transport.RunError.host(code: "grant_revoked") }, status: { nil }, transportFailed: { _ in }, pause: { _ in throw CancellationError() })
+    checks.append(("delivery.localAuthorityLossDoesNotClaimNonexecution", { if case .uncertain("grant_revoked") = localRevocation { return true }; return false }()))
+    let localCredentials: DeliveryResult<String>? = await deliver(submit: { throw RemoteRunClient.ClientError.missingCredentials }, status: { nil }, transportFailed: { _ in }, pause: { _ in throw CancellationError() })
+    checks.append(("delivery.localMissingCredentialsKeepsUnconfirmedIntent", { if case .uncertain("missing_credentials") = localCredentials { return true }; return false }()))
+    store.deliveryFinished(pending, result: .uncertain("target_delivery_unknown"), client: RemoteRunClient(connection: connection, executionTarget: a.targetBinding))
+    checks.append(("delivery.unknownRetainsIntentAndRecovery", store.outbox.first?.identity == identity && store.outbox.first?.intentId == pending.intentId && store.hasUncertainSubmission && FileManager.default.fileExists(atPath: store.recoveryURL!.path) && !(store.submitError ?? "").contains("未执行")))
+    let restored = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: directory, targetScope: a)
+    checks.append(("delivery.restartKeepsPausedOriginalBinding", restored.outbox.first?.uncertainty == "target_delivery_unknown" && restored.pendingSubmission?.identity == identity && restored.deliveryTasks.isEmpty))
+
+    let firstAttemptDirectory = directory.appendingPathComponent("delivery-first-attempt-failure")
+    try Data("not-a-directory".utf8).write(to: firstAttemptDirectory)
+    let firstAttempt = RemoteRunStore(connections: connections, historyDisk: disk,
+      stateDirectory: firstAttemptDirectory, targetScope: a)
+    firstAttempt.chosen = .init(path: "/repo", label: "repo")
+    firstAttempt.chosenProvider = .init(id: "pi", label: "Pi", available: true)
+    let initialSubmit = firstAttempt.submit(prompt: "must not submit", providerId: "pi")
+    checks.append(("delivery.firstOutboxPersistenceFailurePreventsSubmission",
+      !initialSubmit && firstAttempt.outbox.isEmpty && firstAttempt.deliveryTasks.isEmpty))
+    let firstPending = PendingSubmission(intentId: "first-attempt-persistence-failure", routing: routing, identity: identity)
+    firstAttempt.outbox = [firstPending]
+    firstAttempt.startDelivery(firstPending)
+    checks.append(("delivery.attemptMarkerPersistenceFailurePreventsSubmission",
+      firstAttempt.deliveryTasks.isEmpty && firstAttempt.outbox.first?.attempted == false && firstAttempt.outbox.first?.uncertainty == nil))
+    if let retry = firstAttempt.outbox.first { firstAttempt.startDelivery(retry) }
+    checks.append(("delivery.failedAttemptPersistenceCannotBeBypassedOnRetry",
+      firstAttempt.deliveryTasks.isEmpty && firstAttempt.outbox.first?.attempted == false && firstAttempt.attemptedDeliveryIntentIds.isEmpty))
+
+    let wakeStore = RemoteRunStore(connections: connections, historyDisk: disk,
+      stateDirectory: directory.appendingPathComponent("delivery-wake"), targetScope: a)
+    let wakePending = PendingSubmission(intentId: "foreground-wake", routing: routing, identity: identity, attempted: true)
+    wakeStore.outbox = [wakePending]
+    wakeStore.pausedDeliveries.insert(wakePending.intentId)
+    wakeStore.deliveryTasks[wakePending.intentId] = Task { try? await Task.sleep(for: .seconds(60)) }
+    wakeStore.wakeDelivery()
+    checks.append(("delivery.foregroundWakeRestartsAttemptedBackoff",
+      wakeStore.deliveryTasks[wakePending.intentId] != nil && wakeStore.pausedDeliveries.isEmpty))
+    for task in wakeStore.deliveryTasks.values { task.cancel() }
+    wakeStore.deliveryTasks = [:]
+
+    let multiStore = RemoteRunStore(connections: connections, historyDisk: disk,
+      stateDirectory: directory.appendingPathComponent("delivery-multiple"), targetScope: a)
+    let focusedPending = PendingSubmission(intentId: "focused-message", routing: routing, identity: identity)
+    let backgroundPending = PendingSubmission(intentId: "background-message", routing: routing, identity: identity)
+    multiStore.outbox = [focusedPending, backgroundPending]
+    multiStore.pendingSubmission = focusedPending
+    guard multiStore.persistOutbox(multiStore.outbox),
+          multiStore.saveRecoveryCheckpoint(intentId: focusedPending.intentId, routing: routing,
+            identity: identity, runId: nil) else { throw CocoaError(.fileWriteUnknown) }
+    guard multiStore.markDeliveryAttempted(backgroundPending) else { throw CocoaError(.fileWriteUnknown) }
+    let staleSnapshot = [focusedPending, backgroundPending]
+    guard multiStore.persistOutbox(staleSnapshot), let multiURL = multiStore.outboxURL,
+          let multiData = try? Data(contentsOf: multiURL),
+          let multiFile = try? JSONDecoder().decode(OutboxFile.self, from: multiData),
+          let multiRecoveryURL = multiStore.recoveryURL,
+          let multiRecoveryData = try? Data(contentsOf: multiRecoveryURL),
+          let multiRecovery = try? JSONDecoder().decode(RecoveryCheckpoint.self, from: multiRecoveryData) else {
+      throw CocoaError(.fileReadUnknown)
+    }
+    checks.append(("delivery.multipleItemsRetainAttemptMarkerAcrossLaterPersistence",
+      multiFile.items.count == 2 && multiFile.items.first?.attempted == false && multiFile.items.last?.attempted == true &&
+      multiRecovery.intentId == focusedPending.intentId))
+
+    let finalFailureDirectory = directory.appendingPathComponent("delivery-final-persistence-failure")
+    try FileManager.default.createDirectory(at: finalFailureDirectory, withIntermediateDirectories: true)
+    let finalFailure = RemoteRunStore(connections: connections, historyDisk: disk,
+      stateDirectory: finalFailureDirectory, targetScope: a)
+    let finalPending = PendingSubmission(intentId: "final-persistence-failure", routing: routing, identity: identity)
+    finalFailure.outbox = [finalPending]; finalFailure.pendingSubmission = finalPending
+    finalFailure.activeSessionIdentity = identity; finalFailure.activeRouting = routing; finalFailure.lifecycle = .submitting
+    guard finalFailure.persistOutbox([finalPending]),
+          finalFailure.saveRecoveryCheckpoint(intentId: finalPending.intentId, routing: routing,
+            identity: identity, runId: nil) else { throw CocoaError(.fileWriteUnknown) }
+    guard finalFailure.markDeliveryAttempted(finalPending) else { throw CocoaError(.fileWriteUnknown) }
+    let blockedOutbox = finalFailure.outboxURL!
+    let stateParent = blockedOutbox.deletingLastPathComponent()
+    let heldParent = stateParent.appendingPathExtension("held")
+    // Make the directory temporarily unavailable without changing the older
+    // durable outbox. Restore that same directory before relaunching the store.
+    try FileManager.default.moveItem(at: stateParent, to: heldParent)
+    try Data("unavailable-directory".utf8).write(to: stateParent)
+    finalFailure.deliveryFinished(finalPending, result: .uncertain("target_delivery_unknown"),
+      client: RemoteRunClient(connection: connection, executionTarget: a.targetBinding))
+    try FileManager.default.removeItem(at: stateParent)
+    try FileManager.default.moveItem(at: heldParent, to: stateParent)
+    let restoredAfterFinalFailure = RemoteRunStore(connections: connections, historyDisk: disk,
+      stateDirectory: finalFailureDirectory, targetScope: a)
+    checks.append(("delivery.failedFinalPersistenceRestoresPausedIntent",
+      restoredAfterFinalFailure.outbox.first?.attempted == true &&
+      restoredAfterFinalFailure.outbox.first?.uncertainty == "delivery_attempted" &&
+      restoredAfterFinalFailure.deliveryTasks.isEmpty &&
+      FileManager.default.fileExists(atPath: blockedOutbox.path)))
+
+    let legacyDirectory = directory.appendingPathComponent("delivery-legacy")
+    let legacyStore = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: legacyDirectory, targetScope: a)
+    let legacyPending = PendingSubmission(intentId: "legacy-intent", routing: routing, identity: identity, attempted: nil)
+    guard legacyStore.persistOutbox([legacyPending]) else { throw CocoaError(.fileWriteUnknown) }
+    let restoredLegacy = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: legacyDirectory, targetScope: a)
+    checks.append(("delivery.legacyUnknownAttemptIsPaused", restoredLegacy.outbox.first?.uncertainty == "legacy_delivery_state_unknown" && restoredLegacy.deliveryTasks.isEmpty))
+
+    let queuedDirectory = directory.appendingPathComponent("delivery-never-attempted")
+    let queuedStore = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: queuedDirectory, targetScope: a)
+    let queuedPending = PendingSubmission(intentId: "never-attempted", routing: routing, identity: identity)
+    guard queuedStore.persistOutbox([queuedPending]) else { throw CocoaError(.fileWriteUnknown) }
+    let restoredQueued = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: queuedDirectory, targetScope: a)
+    checks.append(("delivery.neverAttemptedQueueStillStarts", restoredQueued.deliveryTasks[queuedPending.intentId] != nil))
+    for task in restoredQueued.deliveryTasks.values { task.cancel() }
+    restoredQueued.deliveryTasks = [:]
+    guard multiStore.persistOutbox([]) else { throw CocoaError(.fileWriteUnknown) }
+    checks.append(("delivery.attemptMarkersReleasedWithOutbox", multiStore.attemptedDeliveryIntentIds.isEmpty))
+
+    let differentGrant = RemoteRunStore(connections: connections, historyDisk: disk, stateDirectory: directory, targetScope: renewed)
+    checks.append(("delivery.changedGrantDoesNotAdoptOldIntent", differentGrant.outbox.isEmpty && differentGrant.stateDirectory != restored.stateDirectory))
+    do { try coordinator.prepareConnectionReplacement(connection); checks.append(("pairing.pendingOnAnyTargetBlocksReplacement", false)) }
+    catch { checks.append(("pairing.pendingOnAnyTargetBlocksReplacement", store.outbox.first?.intentId == pending.intentId)) }
+    let startupSuite = suite + ".startup"
+    let startupDefaults = UserDefaults(suiteName: startupSuite)!
+    defer { startupDefaults.removePersistentDomain(forName: startupSuite) }
+    let startup = ExecutionTargetCoordinator(connections: connections, historyDisk: disk, defaults: startupDefaults,
+      stateDirectory: directory.appendingPathComponent("startup"))
+    let unmocked = RemoteRunStore(connections: connections, historyDisk: disk,
+      stateDirectory: directory.appendingPathComponent("unmocked"))
+    checks.append(("catalog.detailsFixtureRequiresMockIsolation", !unmocked.prepareRefreshDetailsFixture() && unmocked.catalogFixture == nil))
+    startup.localStore.mockMode = true
+    let localGate = CatalogTestGate(), discoveryGate = CatalogTestGate()
+    let localSession = G0Transport.RunSessionRef(sessionId: "local", externalSessionId: "local", providerId: "pi", cwd: "/repo", label: "local", ts: 1)
+    startup.localStore.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in await localGate.pause(); return [localSession] })
+    startup.targetCatalogFixture = { await discoveryGate.pause(); throw G0Transport.RunError.host(code: "unknown_op") }
+    let refresh = Task { await startup.refreshHome() }
+    await discoveryGate.waitForArrival()
+    await localGate.waitForArrival()
+    await localGate.release()
+    await startup.localStore.catalogTask?.value
+    startup.rebuildHomeSessions()
+    checks.append(("catalog.localContentDoesNotWaitForDiscovery", startup.homeSessions.first?.session == localSession && startup.homeLoading))
+    await discoveryGate.release()
+    _ = await refresh.value
+    checks.append(("catalog.localRefreshNotDuplicatedAfterDiscovery", startup.localStore.catalogRefreshRevision == 1 && !startup.homeLoading))
+    checks.append(("catalog.discoveryPreservesUnsupportedOperation", startup.homeFailure?.technicalDetail.contains("unknown_op") == true && startup.homeFailure == startup.discoveryIssue))
+    startup.localStore.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in [localSession] })
+    for (error, evidence) in [(RelayTransportError.timedOut(stage: "target-discovery-upgrade"), "target-discovery-upgrade"),
+                              (.closed(code: 1006, reason: "fixture-close"), "1006 fixture-close")] {
+      startup.targetCatalogFixture = { throw error }
+      let completed = await startup.refreshHome()
+      checks.append(("catalog.discoveryDiagnostic.\(evidence)", !completed && startup.homeFailure == startup.discoveryIssue &&
+        startup.homeFailure?.technicalDetail.contains(evidence) == true &&
+        startup.homeFailure?.technicalDetail.contains("执行主机发现失败") == true && startup.lastFullRefresh == nil))
+    }
+    startup.targetCatalogFixture = { .init(version: 1, gateway: .init(hostId: connection.hostId, label: "gateway"), targets: []) }
+    let recovered = await startup.refreshHome()
+    checks.append(("catalog.discoverySuccessClearsDiagnostic", recovered && startup.homeFailure == nil && startup.discoveryIssue == nil && startup.lastFullRefresh != nil))
+    let lastComplete = startup.lastFullRefresh
+    let lastLocalRevision = startup.localStore.catalogRefreshRevision
+    startup.targetCatalogFixture = { throw RelayTransportError.timedOut(stage: "after-complete") }
+    let failedAgain = await startup.refreshHome()
+    checks.append(("catalog.failedDiscoveryDoesNotAdvanceCompleteTimestamp", !failedAgain && startup.lastFullRefresh == lastComplete && startup.localStore.catalogRefreshRevision > lastLocalRevision))
+
+    let delayedSuite = suite + ".delayed"
+    let delayedDefaults = UserDefaults(suiteName: delayedSuite)!
+    defer { delayedDefaults.removePersistentDomain(forName: delayedSuite) }
+    let delayedCoordinator = ExecutionTargetCoordinator(connections: connections, historyDisk: disk,
+      defaults: delayedDefaults, stateDirectory: directory.appendingPathComponent("delayed"))
+    checks.append(("catalog.initialLivePollingWaitsForForeground", delayedCoordinator.localStore.liveRunsTask == nil))
+    let delayedDiscoveryGate = CatalogTestGate()
+    delayedCoordinator.foregrounded()
+    let delayedTarget = G0Transport.ExecutionTargetRef(id: "delayed", binding: String(repeating: "d", count: 64),
+      hostId: "mac-delayed", label: "Delayed Mac", state: "connected")
+    delayedCoordinator.targetCatalogFixture = {
+      await delayedDiscoveryGate.pause()
+      return .init(version: 1, gateway: .init(hostId: connection.hostId, label: "gateway"), targets: [delayedTarget])
+    }
+    let delayedDiscovery = Task { await delayedCoordinator.refreshTargets() }
+    await delayedDiscoveryGate.waitForArrival()
+    delayedCoordinator.backgrounded()
+    await delayedDiscoveryGate.release()
+    await delayedDiscovery.value
+    let delayedScope = ExecutionTargetScope(gatewayHostId: connection.hostId, target: delayedTarget, gatewayIdentity: gateway)
+    let delayedStore = delayedCoordinator.store(for: delayedScope)
+    checks.append(("catalog.backgroundedDiscoveryCannotStartLivePolling", delayedStore.liveRunsTask == nil && !delayedStore.liveRunsForegroundEligible))
+    delayedCoordinator.foregrounded()
+    checks.append(("catalog.foregroundedResumesLivePollingEligibility", delayedStore.liveRunsForegroundEligible && delayedStore.liveRunsTask != nil))
+    delayedStore.watchHistory(identity)
+    checks.append(("catalog.foregroundHistoryChangeRestartsPolling", delayedStore.liveRunsForegroundEligible && delayedStore.liveRunsTask != nil && delayedStore.liveHistoryTarget == identity))
+    delayedStore.stopLiveRuns()
+    delayedStore.startLiveRuns()
+    checks.append(("catalog.foregroundCancellationCanRestartPolling", delayedStore.liveRunsForegroundEligible && delayedStore.liveRunsTask != nil))
+    delayedCoordinator.backgrounded()
+
+    let corruptSuite = suite + ".corrupt"
+    let corruptDefaults = UserDefaults(suiteName: corruptSuite)!
+    defer { corruptDefaults.removePersistentDomain(forName: corruptSuite) }
+    let descriptorKey = "com.scry.remote.execution-targets." + gateway
+    let unreadable = Data("unreadable target index".utf8)
+    corruptDefaults.set(unreadable, forKey: descriptorKey)
+    let corrupt = ExecutionTargetCoordinator(connections: connections, historyDisk: disk, defaults: corruptDefaults,
+      stateDirectory: directory.appendingPathComponent("corrupt"))
+    var replacementBlocked = false, unpairBlocked = false
+    do { try corrupt.prepareConnectionReplacement(connection) }
+    catch ConnectionReplacementError.recoveryUnavailable { replacementBlocked = true }
+    do { try await corrupt.clearAllState() }
+    catch ConnectionReplacementError.recoveryUnavailable { unpairBlocked = true }
+    checks.append(("recovery.unreadableIndexBlocksAuthorityChanges", corrupt.recoveryUnavailable && !corrupt.hasPendingWork && replacementBlocked && unpairBlocked))
+    corrupt.localStore.catalogVerifiedAt = Date()
+    corrupt.targetCatalogFixture = { .init(version: 1, gateway: .init(hostId: connection.hostId, label: "gateway"), targets: []) }
+    await corrupt.refreshTargets()
+    checks.append(("recovery.discoveryDoesNotEraseUnreadableIndex", corrupt.recoveryUnavailable && corrupt.lastFullRefresh == nil && corruptDefaults.data(forKey: descriptorKey) == unreadable))
+    let localIdentity = SessionIdentity.new(providerId: "pi", cwd: "/repo")
+    let localDraft = model.composerDraft(for: .conversation(localIdentity))
+    localDraft.wrappedValue.text = "private local gateway draft"
+    model.bindDraft(externalSessionId: "local-shared-session", to: localIdentity)
+    let localOpened = SessionIdentity.opened(providerId: "pi", cwd: "/repo", externalSessionId: "local-shared-session")
+    checks.append(("draft.localAliasFindsOriginalGrantDraft", model.composerDraft(for: .conversation(localOpened)).wrappedValue.text == localDraft.wrappedValue.text))
+    var replacement = connection; replacement.deviceId = "new-phone-grant"
+    connections.save(replacement)
+    checks.append(("draft.localGrantChangeDoesNotMoveOrDiscardDraft", model.composerDraft(for: .conversation(localOpened)).wrappedValue.text.isEmpty && localDraft.wrappedValue.text == "private local gateway draft"))
+    checks.append(("delivery.phoneGrantChangeCannotReuseStore", store.makeClient() == nil))
+    for value in [store, other, restored, differentGrant, coordinator.localStore] {
+      value.historyTask?.cancel(); value.catalogTask?.cancel(); value.stopLiveRuns()
+    }
+    return checks
+  }
+
   static func selfTestCatalogRefreshFlow(directory: URL) async throws -> [(String, Bool)] {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
@@ -3391,8 +3948,11 @@ final class RemoteRunStore: ObservableObject {
     return "观察中断：\(detail)。运行结果未知。"
   }
 
-  private static func describe(_ error: Error) -> String {
+  static func describe(_ error: Error) -> String {
+    if error is G0Transport.HistoryProfileError { return ConnectionCopy.historyProfileUnverified }
     if let runError = error as? G0Transport.RunError, case let .host(code) = runError {
+      if code == "history_profile_unavailable" { return ConnectionCopy.historyProfileUnavailable }
+      if code == "history_profile_required" { return ConnectionCopy.historyProfileUnverified }
       if code == "unknown_op" {
         return "Mac 端不支持当前读取协议（unknown_op）。请更新 Scry，并完全退出后重新打开 Mac 端；仅覆盖安装不会更新正在运行的进程。"
       }
@@ -3401,6 +3961,11 @@ final class RemoteRunStore: ObservableObject {
     // Relay close/timeout reasons are untrusted diagnostics, shown as such.
     if let relay = error as? RelayTransportError {
       switch relay {
+      case let .tlsHandshake(layer, detail):
+        switch layer {
+        case .relay: return ConnectionCopy.relayTLSHandshakeFailure(detail)
+        case .host: return ConnectionCopy.hostTLSHandshakeFailure(detail)
+        }
       case let .closed(code, reason):
         return "中继连接已关闭（\(code.map(String.init) ?? "无关闭码")\(reason.isEmpty ? "" : " \(reason)")）"
       case let .timedOut(stage):
@@ -3440,8 +4005,13 @@ extension RemoteRunStore {
     #if DEBUG
     if mockMode { return }
     #endif
-    guard !historyOnly, liveRunsTask == nil, liveRunsStatus != .unsupported, hasConnection else { return }
+    guard liveRunsForegroundEligible, !historyOnly, liveRunsTask == nil, liveRunsStatus != .unsupported, hasConnection else { return }
     liveRunsTask = Task { [weak self] in await self?.runLiveRunsLoop() }
+  }
+
+  func setLiveRunsForegroundEligible(_ eligible: Bool) {
+    liveRunsForegroundEligible = eligible
+    if !eligible { stopLiveRuns() }
   }
 
   func stopLiveRuns() {
@@ -3475,7 +4045,7 @@ extension RemoteRunStore {
         current.externalSessionId.map { (providerId: current.providerId, cwd: current.cwd, externalSessionId: $0, known: known) }
       }
       do {
-        let outcome = try await client.liveRuns(revision: liveRunsRevision, history: history)
+        let outcome = try await client.liveRuns(revision: liveRunsRevision, history: history, historyAgentProfileId: target?.agentProfileId)
         if Task.isCancelled { return }
         failures = 0
         recordSuccess()
@@ -3490,7 +4060,7 @@ extension RemoteRunStore {
            let version = outcome.historyVersion?.version, version != known {
           seen = (target, version)
           // refreshHistory re-checks the version and skips an unchanged source.
-          await refreshHistory(providerId: target.providerId, cwd: target.cwd, externalSessionId: externalSessionId)
+          await refreshHistory(providerId: target.providerId, cwd: target.cwd, externalSessionId: externalSessionId, agentProfileId: target.agentProfileId)
         }
       } catch is CancellationError {
         return
@@ -3508,15 +4078,15 @@ extension RemoteRunStore {
   }
 
   // Any live run in this session, including the one this store is watching.
-  func liveRun(providerId: String, cwd: String, externalSessionId: String?) -> G0Transport.LiveRun? {
+  func liveRun(providerId: String, cwd: String, externalSessionId: String?, agentProfileId: String? = nil) -> G0Transport.LiveRun? {
     guard let externalSessionId else { return nil }
-    return liveRuns.first { $0.providerId == providerId && $0.cwd == cwd && $0.externalSessionId == externalSessionId }
+    return liveRuns.first { $0.providerId == providerId && $0.agentProfileId == agentProfileId && $0.cwd == cwd && $0.externalSessionId == externalSessionId }
   }
 
   // A live run in this session that this store is not already watching.
   func otherLiveRun(for identity: SessionIdentity?) -> G0Transport.LiveRun? {
     guard let identity, let run = liveRun(providerId: identity.providerId, cwd: identity.cwd,
-                                          externalSessionId: identity.externalSessionId),
+                                          externalSessionId: identity.externalSessionId, agentProfileId: identity.agentProfileId),
           run.runId != runId else { return nil }
     return run
   }

@@ -11,7 +11,7 @@ The current desktop host implementation is under `src/main/remote/`; this README
 
 The base structure and interaction decisions live in `designs/scry-ios-remote/brief-v5.md` and `design-notes-v5.md`; the three-way comparison is `Scry iOS Remote v5 Directions.html`.
 
-The current native UI uses the reference-led dark workbench styling: compact tool/reasoning disclosure rows and a flat, two-level composer. See [the design delta and verification limits](../../designs/scry-ios-remote/reference-workbench-2026-10-09.md). `ScryRemote` now includes a native XCTest UI target; run `xcodebuild test` with the scheme and an isolated Simulator destination below. UI test compilation is verified; the first runtime attempts were blocked by Xcode device-service startup, not a passing interaction suite.
+The current native UI uses the reference-led dark workbench styling: compact tool/reasoning disclosure rows and a flat, two-level composer. See [the design delta and verification limits](../../designs/scry-ios-remote/reference-workbench-2026-10-09.md). `ScryRemote` includes a native XCTest UI target. Current phone interaction acceptance uses an authorized physical device through iCTRL, never a simulator. Compilation, offline native checks and real-device interaction results are separate evidence.
 
 Honesty invariants (enforced by the model and host, not decoration):
 
@@ -22,20 +22,30 @@ Honesty invariants (enforced by the model and host, not decoration):
 - QR pairing is the only onboarding path; no Apple account or manual-code entry is required/offered. Existing Keychain grants and cached history survive an app update. DEBUG visual fixtures never create a host grant.
 - Session headers show current observed run state (including unavailable/unknown); historical-session checks are scoped by provider, profile, canonical cwd and external session ID. “No observed run” is not “completed”.
 - The header folder button opens read-only project files and current-worktree vs HEAD diff, including untracked files. File pages are 64 KiB with snapshot-fenced continuation; diff previews are capped at 64 KiB and explicitly marked when incomplete. Device grants and canonical project/path containment are rechecked for every request.
-- Live runs use persistent control/watch/bulk inner-mTLS lanes, host long-poll `watch`, explicit `stop` receipts and automatic read-only reconnect that keeps retrying transport loss (capped backoff) until the host answers. The lane never replays a written answer/stop. Messages go to a persisted outbox (`outbox.json`) first and the store resends each with the same intentId (backoff 1/2/4/8 s, woken on foreground) until the host returns a receipt or a definitive rejection; the host ledger dedupes by device + intentId, so a lost reply cannot create a second run. The UI only shows "发送中": there is no retry/verify button. Leaving a conversation or starting a new task does not wait for the send; unsent messages stay listed on the home screen and become live runs once recorded. Limit: a message is resent only while the app runs (foreground or relaunch); iOS background execution is not requested.
+- Live runs use persistent control/watch/bulk inner-mTLS lanes, host long-poll `watch`, explicit `stop` receipts and bounded read-only reconnect. Backgrounding disables polling; delayed discovery cannot restart it. Ordinary foreground history-watch changes can still cancel and restart a poll.
+- Messages enter the durable outbox (`outbox.json`) before delivery. A durable attempt marker must succeed before a request starts. In-process transport retries keep the same intentId and backoff; foreground wake preserves those retries. After relaunch, attempted/unconfirmed messages and legacy entries without attempt evidence pause for receipt reconciliation rather than automatic submission. Explicitly never-attempted queued messages still deliver automatically. Unknown outcomes are not proof of nonexecution; host deduplication does not replace this recovery contract. Background deliveries cannot replace the focused message's recovery record. iOS background execution is not requested.
 - Pairing scans a real short-lived code, proves device-key possession over inner TLS 1.3/mTLS, waits for Mac confirmation, and only then stores the public connection descriptor.
 
-Build (Simulator, unsigned) and signed device build:
+Focused offline checks (no phone, credentials or Provider execution):
+
+```sh
+python3 apps/ios/Checks/new-task-readiness.py
+python3 apps/ios/Checks/catalog-refresh.py
+swift test --package-path experiments/remote-g0/swift -j 4
+```
+
+The native checker explicitly seals and verifies its temporary executable with an ad-hoc test signature. If local execution policy requires a CMS development signature, set `SCRY_IOS_CHECK_SIGN_IDENTITY` to an available local development identity. Signing or verification failure stops the check; no system security policy is changed.
+
+Signed physical-device build (supply device and team at invocation):
 
 ```sh
 xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
-  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /tmp/scry-remote-build CODE_SIGNING_ALLOWED=NO build
-# Signed device build (pass the team at invocation; never committed):
-xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
-  -sdk iphoneos -destination 'generic/platform=iOS' -allowProvisioningUpdates \
-  DEVELOPMENT_TEAM=<personal-team-id> CODE_SIGN_STYLE=Automatic build
+  -sdk iphoneos -destination "id=$SCRY_IOS_DEVICE_ID" \
+  -derivedDataPath /tmp/scry-remote-device-build \
+  DEVELOPMENT_TEAM="$SCRY_IOS_DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Automatic build
 ```
+
+The simulator observations below are historical, not current phone acceptance.
 
 Visual verification (2026-09-15): v5 was built and launched on the iPhone 17 Pro simulator. Home/pair/new-task plus live-chat and transcript layouts were replayed from the **DEBUG-only** harness. Chat verification covers rendered Markdown, collapsed/expanded reasoning, collapsed/expanded long tool output, compact short tool results, attachment bubbles and the Composer. The launch arguments (`-uiPreview [-connected] -route home|new|chat|pair|settings|transcript [-uiMockData] [-uiMockSlash]`) affect screenshots only; they are not authentication, and mock conversation data is compiled out of Release builds.
 
