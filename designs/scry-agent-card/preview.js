@@ -1,12 +1,12 @@
 const copy = {
-  title: 'Agent 卡片', version: 'A · 精简版 v3', demo: '静态示例',
+  title: 'Agent 卡片', version: 'A · 精简版 v4', demo: '静态示例',
   theme: '切换明暗主题', stateLabel: '示例状态',
   states: { running: '等待结果', unknown: '状态未知', completed: '已完成', failed: '失败' },
   eyebrow: '会话 / Pi', session: '实现 M0 初版',
   message: 'M0 初版代码已写入 worktree，正在完成静态检查。尚未运行测试或构建，也未提交、安装；写入结束后由我统一验证。',
   worker: 'worker', provider: 'Pi', age: '已观测 14m',
   ageLabel: '从收到启动回执起计时，不是精确进程运行时间',
-  details: '详情', detailsLabel: '任务详情', capability: '不可单独停止',
+  details: '详情', detailsLabel: '任务详情',
   fields: { task: '任务 ID', receipt: '回执时间' },
   id: 'f7cb2107-7306-41f0-9ca7-fb2b975ab7ba', receipt: '20:04:54',
   files: '本轮文件', toolEvidence: '工具证据', fileRead: 'R', fileCount: '9',
@@ -48,7 +48,7 @@ function render() {
             <span class="elapsed" title="${copy.ageLabel}">${copy.age}</span>
           </header>
           <details class="evidence" ${expanded ? 'open' : ''}>
-            <summary aria-label="${copy.detailsLabel}"><span class="capability">${copy.capability}</span><span class="details-label">${copy.details}${icon('chevron')}</span></summary>
+            <summary aria-label="${copy.detailsLabel}"><span class="details-label">${copy.details}${icon('chevron')}</span></summary>
             <dl>
               <div><dt>${copy.fields.task}</dt><dd><code>${copy.id}</code></dd></div>
               <div><dt>${copy.fields.receipt}</dt><dd><time>${copy.receipt}</time></dd></div>

@@ -28,12 +28,16 @@ async function exercise() {
   check(!document.querySelector('.model-text.streaming'), 'Background wait still shows streaming cursor')
   check(document.querySelectorAll('.background-work-task').length === 2, 'Missing observed tasks')
   const panel = document.querySelector('.background-work-panel')
-  check(panel.getBoundingClientRect().height <= (innerWidth > 700 ? 80 : 140), 'Task list is not compact')
+  // The approved design uses two-row cards rather than the old single-line list.
+  for (const card of panel.querySelectorAll('.background-work-task')) {
+    const height = card.getBoundingClientRect().height
+    check(height <= (innerWidth > 600 ? 80 : 110), `Two-row task card is not compact: ${height}px`)
+  }
   check(!panel.innerText.includes('启动回执') && !panel.innerText.includes('清单'), 'Technical evidence is visible by default')
   const details = panel.querySelector('details')
   details.querySelector('summary').click()
   await wait(() => details.open)
-  check(details.innerText.includes('清单可能不完整'), 'Expanded evidence lost partial coverage')
+  check(details.querySelectorAll('dt').length === 2 && details.innerText.includes('回执时间'), 'Expanded details must contain only task ID and receipt time')
   details.querySelector('summary').click()
   await wait(() => !details.open)
   const input = document.querySelector('textarea')
@@ -74,7 +78,7 @@ async function exercise() {
   check(!unsupported.innerText.includes('未验证'), 'Unavailable-control explanation is still permanently visible')
   unsupported.querySelector('summary').click()
   await wait(() => unsupported.querySelector('details').open)
-  check(unsupported.innerText.includes('单任务停止未验证'), 'Capability evidence is missing from details')
+  check(unsupported.querySelector('details').querySelectorAll('dt').length === 2, 'Task details contain more than ID and receipt time')
   unsupported.querySelector('summary').click()
   await wait(() => !unsupported.querySelector('details').open)
   click('#pi-wait')
@@ -84,12 +88,115 @@ async function exercise() {
   check(!document.querySelector('.skeleton'), 'Pi waiting looks like model generation')
   document.querySelector('.background-work-details summary').click()
   await wait(() => document.querySelector('.background-work-details').open)
-  check(document.querySelector('.background-work-panel').innerText.includes('不保证后台子 Agent 已停止'), 'Pi stop overclaims child termination')
+  check(!document.querySelector('.background-work-panel').innerText.includes('不可单独停止'), 'Pi still shows the removed capability explanation')
   click('#resume')
   await wait(() => status() === '运行中')
   click('#done')
   await wait(() => !document.querySelector('.run-status') && !document.querySelector('.background-work-panel'))
   return { compactDisclosure: true, viewport: [innerWidth, innerHeight], waitingWithoutSkeleton: true, stopAcknowledgmentNotTerminal: true, targetedStop: true, quietNotFailure: true, resumeAndArchive: true, unknownVersion: true, piWaitAndResume: true }
+}
+
+async function exerciseCompactCard(win) {
+  const evaluate = (fn) => win.webContents.executeJavaScript(`(${fn.toString()})()`)
+  const settle = () => evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const click = async (selector) => {
+    const point = await win.webContents.executeJavaScript(`(async () => {
+      const target = document.querySelector(${JSON.stringify(selector)})
+      if (!target) throw new Error('Missing native input target')
+      target.scrollIntoView({ block: 'center' })
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      const rect = target.getBoundingClientRect()
+      const x = Math.round(rect.x + rect.width / 2), y = Math.round(rect.y + rect.height / 2)
+      if (!target.contains(document.elementFromPoint(x, y))) throw new Error('Native input target is obscured')
+      return { x, y }
+    })()`)
+    win.webContents.focus()
+    win.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+    win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+    win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
+    await settle()
+  }
+  const check = (ok, message) => { if (!ok) throw new Error(`Compact task card: ${message}`) }
+  await click('#new-run')
+  const longName = await evaluate(() => {
+    const name = document.querySelector('.background-work-name')
+    return { truncated: name.scrollWidth > name.clientWidth, overflow: getComputedStyle(name).textOverflow }
+  })
+  check(longName.truncated && longName.overflow === 'ellipsis', 'Long task name does not truncate safely')
+  const stopSnapshot = () => evaluate(() => ({
+    calls: Number(document.querySelector('#fixture').dataset.stops),
+    disabled: document.querySelector('[aria-label="停止任务 a"]').disabled,
+    status: document.querySelector('.background-work-state').textContent
+  }))
+  const stopsBefore = (await stopSnapshot()).calls
+  await click('[aria-label="停止任务 a"]')
+  const stopped = await stopSnapshot()
+  check(stopped.calls === stopsBefore + 1 && stopped.disabled && stopped.status === '已请求停止', 'Native targeted stop lost its acknowledgment boundary')
+  await click('#new-run')
+  await click('#stop-rejected')
+  await click('[aria-label="停止任务 a"]')
+  const rejected = await stopSnapshot()
+  check(!rejected.disabled && rejected.status === '停止请求被拒绝', 'An explicit rejection incorrectly locked out a new stop request')
+  await click('[aria-label="停止任务 a"]')
+  check((await stopSnapshot()).calls === rejected.calls + 1, 'Explicit rejection did not allow a subsequent user request')
+  await click('#new-run')
+  await click('#stop-throws')
+  await click('[aria-label="停止任务 a"]')
+  const unknown = await stopSnapshot()
+  check(unknown.disabled && unknown.status === '停止待确认', 'Rejected transport promise did not preserve the unknown stop boundary')
+  await click('[aria-label="停止任务 a"]')
+  check((await stopSnapshot()).calls === unknown.calls, 'Unknown stop result permitted a repeated write')
+  await click('#pi-wait')
+  const compact = await evaluate(() => {
+    const panel = document.querySelector('.background-work-panel')
+    return {
+      text: panel.innerText,
+      status: panel.querySelector('.background-work-state').textContent,
+      provider: panel.querySelector('.background-work-provider').textContent,
+      age: panel.querySelector('.background-work-age')?.textContent,
+      detailsClosed: !panel.querySelector('details').open,
+      unsupportedButton: !!panel.querySelector('button')
+    }
+  })
+  check(compact.status === '等待结果' && compact.provider === 'Pi' && compact.detailsClosed && !compact.unsupportedButton, 'Pi identity, state or supported controls are incorrect')
+  check(compact.age === '已观测 <1m', 'Freshly received task did not show its observation age immediately')
+  for (const removed of ['不可单独停止', '计时依据', '状态依据', '停止限制', '观测范围']) {
+    check(!compact.text.includes(removed), `Removed copy is still visible: ${removed}`)
+  }
+  await click('.background-work-details summary')
+  const opened = await evaluate(() => ({
+    open: document.querySelector('.background-work-details').open,
+    fields: [...document.querySelectorAll('.background-work-evidence dt')].map(node => node.textContent),
+    id: document.querySelector('.background-work-evidence code').textContent
+  }))
+  check(opened.open && JSON.stringify(opened.fields) === JSON.stringify(['任务 ID', '回执时间']) && opened.id === 'child', 'Native disclosure did not expose exactly the requested evidence')
+  check(await evaluate(() => document.activeElement === document.querySelector('.background-work-details summary')), 'Native disclosure click did not focus its summary')
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+  win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+  await settle()
+  check(await evaluate(() => !document.querySelector('.background-work-details').open), 'Keyboard Enter did not collapse the focused disclosure')
+  const colors = []
+  for (const theme of ['light', 'dark']) {
+    await win.webContents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`)
+    win.setSize(640, 700)
+    await settle()
+    const layout = await evaluate(() => {
+      const card = document.querySelector('.background-work-task')
+      const header = card.querySelector('.background-work-head')
+      return {
+        background: getComputedStyle(card).backgroundColor,
+        overflow: card.scrollWidth > card.clientWidth || header.scrollWidth > header.clientWidth,
+        focus: document.activeElement === card.querySelector('summary')
+      }
+    })
+    check(!layout.overflow && layout.focus, `${theme} narrow card overflows or lost keyboard focus`)
+    colors.push(layout.background)
+  }
+  check(colors[0] !== colors[1], 'Light and dark themes did not use distinct project surfaces')
+  win.setSize(960, 800)
+  await settle()
+  return { nativeDisclosure: true, keyboardCollapse: true, nativeTargetedStop: true, rejectionAllowsUserRetry: true, transportUnknownLocked: true, piUnavailableControlHidden: true, onlyIdAndReceipt: true, longNameEllipsis: true, narrowThemes: ['light', 'dark'] }
 }
 
 async function exerciseClock() {
@@ -220,6 +327,7 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         const wide = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+        const compactCard = await (${exerciseCompactCard.toString()})(win)
         if (${JSON.stringify(process.env.SCRY_BACKGROUND_UI_SCREENSHOT ?? '')}) {
           const bounds = await win.webContents.executeJavaScript('JSON.stringify(document.querySelector(".background-work-panel").getBoundingClientRect().toJSON())')
           const rect = JSON.parse(bounds)
@@ -235,7 +343,7 @@ try {
         }
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode: 'clock' } })
         const clock = await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseClock.toString()})()`)})
-        console.log('SCRY_BACKGROUND_UI_RESULT=' + JSON.stringify({ wide, narrow, recovery, clock }))
+        console.log('SCRY_BACKGROUND_UI_RESULT=' + JSON.stringify({ wide, narrow, compactCard, recovery, clock }))
         app.exit(0)
       } catch (error) { console.error(error); app.exit(1) }
     })

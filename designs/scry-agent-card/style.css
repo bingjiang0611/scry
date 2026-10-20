@@ -48,7 +48,7 @@ main { max-width: 1040px; padding: 56px 40px 40px; margin: 0 auto; }
 [data-status='failed'] .status { color: var(--bad); }
 [data-status='unknown'] .status { color: var(--warn); }
 .evidence { margin-left: 32px; }
-.evidence summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 30px; list-style: none; font-size: 11px; color: var(--faint); border-radius: 3px; }
+.evidence summary { display: flex; align-items: center; justify-content: flex-end; gap: 16px; min-height: 30px; list-style: none; font-size: 11px; color: var(--faint); border-radius: 3px; }
 .evidence summary::-webkit-details-marker { display: none; }
 .details-label { display: flex; align-items: center; gap: 6px; }
 .evidence summary:hover .details-label { color: var(--text); }
