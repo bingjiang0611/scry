@@ -1,3 +1,26 @@
+export const BACKGROUND_WORK_COPY = {
+  regionLabel: '后台任务',
+  provider: { pi: 'Pi', qoder: 'Qoder' },
+  waiting: '等待结果',
+  unknown: '状态未知',
+  stopping: '请求停止中…',
+  stopRequested: '已请求停止',
+  stopUnconfirmed: '停止待确认',
+  stopUnavailable: '单任务停止不可用',
+  stopRejected: '停止请求被拒绝',
+  stopUnknownMessage: '停止结果未确认，不会自动重复请求。',
+  stop: '停止任务',
+  stopLabel: (taskId: string) => `停止任务 ${taskId}`,
+  details: '详情',
+  detailsLabel: (name: string) => `${name} 任务详情`,
+  taskId: '任务 ID',
+  receipt: '回执时间',
+  age: (value: string) => `已观测 ${value}`,
+  ageTitle: '自收到启动回执起计时，非精确进程运行时间',
+  empty: '等待后续结果',
+  quiet: '长时间无新进展；文件可能已写入，重试前请先核验。'
+} as const
+
 export const OVERVIEW_SESSION_COPY = {
   heading: '会话',
   id: 'ID',

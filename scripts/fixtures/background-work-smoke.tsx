@@ -47,6 +47,7 @@ function Fixture() {
   const [startedAt, setStartedAt] = useState(() => new Date(Date.now()).toISOString())
   const [stops, setStops] = useState(0)
   const [wholeStops, setWholeStops] = useState(0)
+  const [stopMode, setStopMode] = useState<'requested' | 'rejected' | 'throw'>('requested')
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
@@ -54,19 +55,23 @@ function Fixture() {
       stopBackgroundTask: async ({ runId, taskId }: { runId: string; taskId: string }) => {
         if (runId !== run) throw new Error('Wrong run identity')
         setStops((count) => count + 1)
+        if (stopMode === 'throw') throw new Error('Synthetic transport failure')
+        if (stopMode === 'rejected') return { status: 'rejected', message: 'Synthetic stop rejection' }
         setWork((work) => ({ ...work, tasks: work.tasks.map((task) => task.taskId === taskId ? { ...task, stopState: 'requested' } : task) }))
         return { status: 'requested', message: '已请求停止；等待 Qoder 返回任务终态。' }
       }
     } })
-  }, [run])
+  }, [run, stopMode])
   return <div id="fixture" data-stops={stops} data-whole-stops={wholeStops}>
     <nav>
       <button id="quiet" onClick={() => setWork((work) => ({ ...work, quiet: true }))}>quiet</button>
       <button id="terminal-a" onClick={() => setWork((work) => ({ ...work, tasks: work.tasks.filter((task) => task.taskId !== 'a') }))}>terminal a</button>
       <button id="resume" onClick={() => setWork((work) => ({ ...work, phase: 'working', quiet: false }))}>resume</button>
       <button id="done" onClick={() => setDone(true)}>done</button>
-      <button id="new-run" onClick={() => { setDone(false); setRun('fixture-next'); setStartedAt(new Date(Date.now()).toISOString()); setWork(initial) }}>new run</button>
+      <button id="new-run" onClick={() => { setDone(false); setRun((current) => `${current}-next`); setStopMode('requested'); setStartedAt(new Date(Date.now()).toISOString()); setWork(initial) }}>new run</button>
       {clockScenario && <button id="unknown-start" onClick={() => setStartedAt('unknown')}>unknown start</button>}
+      <button id="stop-rejected" onClick={() => setStopMode('rejected')}>reject stop</button>
+      <button id="stop-throws" onClick={() => setStopMode('throw')}>throw stop</button>
       <button id="unsupported" onClick={() => setWork((work) => ({ ...work, taskStop: 'unavailable' }))}>unsupported</button>
       <button id="pi-wait" onClick={() => { setDone(false); setWork({ ...initial, providerId: 'pi', taskStop: 'unavailable',
         tasks: [{ taskId: 'child', toolUseId: 'child', tool: 'Agent', description: 'worker', observedAt: Date.now() }] }) }}>Pi wait</button>

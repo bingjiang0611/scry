@@ -38,10 +38,10 @@
 
 UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 vendor ID、原生权限交互不受规划框阻挡、完成规划不抢父输入焦点、批准前不执行、连按不重复开始、未知停止不伪装成功、重挂载只观察。它使用明确的假主进程 API，不等于完整 App 或真实 Provider 验收。
 
-本轮本地结果：focused 12 文件 / 88 tests、五 Provider 的受控回归 339 tests、typecheck、build、独立工作流 Electron UI、shell 和 trace.delivery 计数检查通过。计数测试时机器高负载，不据此作毫秒或用户体感结论。
+同步 `be907ef`（0.2.210）后：focused 13 文件 / 100 tests、typecheck、build、独立工作流 UI 和新版后台卡片 UI 通过。同步前本地结果：focused 12 文件 / 88 tests、五 Provider 的受控回归 339 tests、typecheck、build、独立工作流 Electron UI、shell 和 trace.delivery 计数检查通过。计数测试时机器高负载，不据此作毫秒或用户体感结论。
 
 完整门禁仍未通过，不能称 M0 已交付：默认并发全量 unit 为 3462 passed / 11 failed / 4 skipped，失败位于四个原有文件；相同四文件在本分支与无 M0 改动的 `c405df0` 基线均串行通过 39 tests，未增加测试超时，不能用串行结果抹去首次全量失败。完整 UI 先发现并修正了全 App fixture 缺少新 workflow API 的问题；随后在原有 compaction 场景失败。无 M0 的基线 UI 同样失败，但在不同的 reduced-motion / scrollbar-color 场景，尚不能据此宣布两者根因相同。完整打包 gate 与真实 App 重放未通过/未执行。
 
 尚未执行付费模型或生产 userData/`.scry` 验收。需要明确账号、模型、费用和数据范围授权后，再做真实混合 Provider、停止和证据收口验收。
 
-本 worktree 基线版本为 0.2.204；本次检查时 `/Applications/Scry.app` 已为 0.2.210。不能用较旧的隔离分支覆盖安装来丢失并行功能。最新已提交 main 为 `be907ef`（0.2.210）。先协调集成源代码及当前运行构建，再安装；不自动重启用户 App。
+实现检查点 `32a70bd` 基于 `c405df0`（0.2.204），明确标注未完成验收。经用户授权，本分支已同步 `be907ef`（0.2.210），未包含或修改原工作区的未提交改动。尚未安装本分支，也不自动重启用户 App。完整门禁及真实 Provider 验收仍待完成，不能把主线版本号相同当作本分支已部署。

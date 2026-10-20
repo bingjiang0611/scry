@@ -47,7 +47,9 @@ it('shows Pi child waiting consistently without advertising Qoder task controls'
   const html = renderToStaticMarkup(<AssistantTurn turn={piTurn} selectedId={null} onSelect={() => {}} />)
   expect(html).toContain('等待子 Agent')
   expect(html).toContain('worker')
-  expect(html).toContain('不保证后台子 Agent 已停止')
+  expect(html).toContain('等待结果')
+  expect(html).not.toContain('不可单独停止')
+  expect(html).not.toContain('不保证后台子 Agent 已停止')
   expect(html).not.toContain('停止任务 task-1')
   expect(html).not.toContain('当前 Qoder')
   const overview = renderToStaticMarkup(<OverviewPanel turns={[piTurn]} busy sessionId="pi-session"
@@ -69,16 +71,33 @@ it('selects revision evidence rather than array position after trimmed snapshot 
   expect(latestBackgroundWork([{ backgroundWork: ended }, { backgroundWork: recent }])).toBe(ended)
 })
 
-it('keeps technical evidence behind a collapsed task disclosure and exposes only supported actions', () => {
+it('keeps the approved compact identity and only two evidence fields, without explanatory copy', () => {
   const html = renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work, taskStop: 'unavailable' }} />)
   const summary = html.match(/<summary[^>]*>(.*?)<\/summary>/)?.[1] ?? ''
-  expect(summary).toContain('append journal')
-  expect(summary).toContain('执行中')
+  expect(html).toContain('class="background-work-head"')
+  expect(html).toContain('append journal</strong>')
+  expect(html).toContain('Qoder')
+  expect(html).toContain('等待结果')
+  expect(summary).toContain('详情')
   expect(summary).not.toContain('task-1')
-  expect(summary).not.toContain('未验证')
   expect(html).toContain('<details class="background-work-details">')
-  expect(html).toContain('清单可能不完整')
+  expect(html.match(/<dt>/g)).toHaveLength(2)
+  expect(html).toContain('<dt>任务 ID</dt>')
+  expect(html).toContain('<code>task-1</code>')
+  expect(html).toContain('<dt>回执时间</dt>')
+  for (const removed of ['计时依据', '状态依据', '停止限制', '观测范围', '不可单独停止', '清单可能不完整']) {
+    expect(html).not.toContain(removed)
+  }
   expect(html).not.toContain('<button')
+})
+
+it('marks a task without confirmed runtime state as unknown instead of claiming execution or completion', () => {
+  const html = renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work,
+    tasks: [{ ...work.tasks[0], status: 'unconfirmed' }] }} />)
+  expect(html).toContain('data-status="unknown"')
+  expect(html).toContain('状态未知')
+  expect(html).not.toContain('执行中')
+  expect(html).not.toContain('已完成')
 })
 
 it('keeps quiet warnings and unconfirmed stop evidence visible without claiming termination', () => {
@@ -88,6 +107,10 @@ it('keeps quiet warnings and unconfirmed stop evidence visible without claiming 
   expect(html).toContain('重试前请先核验')
   expect(html).not.toContain('已停止')
   expect(html).toContain('disabled=""')
+})
+
+it('does not render live task cards or controls for an inactive snapshot', () => {
+  expect(renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work, phase: 'inactive' }} />)).toBe('')
 })
 
 it('keeps an unassociated wait honest without inventing task details or controls', () => {
