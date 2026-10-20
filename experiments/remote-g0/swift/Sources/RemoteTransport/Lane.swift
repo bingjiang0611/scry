@@ -235,7 +235,7 @@ final class LaneConnection: Sendable {
   }
 
   private static func openOnce(endpoint: G0Transport.RelayEndpoint, identity: G0ProbeIdentity) async throws -> LaneConnection {
-    let (channel, innerContext) = try await G0Transport.connectRelayChannel(
+    let (channel, innerContext, tunnel) = try await G0Transport.connectRelayChannel(
       endpoint: endpoint, mode: "run", identity: identity, group: MultiThreadedEventLoopGroup.singleton)
     let handler = LaneHandler(ready: channel.eventLoop.makePromise(of: Void.self))
     do {
@@ -248,8 +248,9 @@ final class LaneConnection: Sendable {
       } onCancel: { channel.close(promise: nil) }
       return LaneConnection(channel: channel, handler: handler)
     } catch {
+      let failure = try await channel.eventLoop.submit { tunnel.retainingCloseCause(for: error) }.get()
       channel.close(promise: nil)
-      throw RelayTransportError.identifyingHandshake(error, layer: .host)
+      throw RelayTransportError.identifyingHandshake(failure, layer: .host)
     }
   }
 }
