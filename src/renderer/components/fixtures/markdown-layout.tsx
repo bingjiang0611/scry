@@ -95,6 +95,7 @@ async function run(): Promise<void> {
         document.body.dataset.opened = String(Number(document.body.dataset.opened ?? 0) + 1)
       }}>
         <MarkdownImpl>{'| 字段 | 内容 |\n| --- | --- |\n| Resource name | `rate-aigc-image-udtf.jar` |\n| Resource file | `/Users/example/myNote/resources/rate-aigc-image-udtf.jar` |\n| Comment | 保持 `IFD` |'}</MarkdownImpl>
+        <MarkdownImpl>{'```\n/Users/example/Downloads/rate-aigc-image-udtf.jar\n```'}</MarkdownImpl>
       </WorkspaceFileLinkProvider>
     </article>
   )

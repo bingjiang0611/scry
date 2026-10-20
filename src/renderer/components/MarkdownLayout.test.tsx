@@ -87,6 +87,18 @@ it('keeps Markdown readable, selectable and file links operable in real Chromium
           contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
           await settle()
           check(await evaluate('Number(document.body.dataset.opened ?? 0)') === 2, 'Keyboard activation must still open the file')
+          const codePoint = await evaluate(\`(() => {
+            const rect = document.querySelector('pre code').getBoundingClientRect()
+            return { x: Math.round(rect.x + 8), y: Math.round(rect.y + 8) }
+          })()\`)
+          contents.sendInputEvent({ type: 'mouseDown', ...codePoint, button: 'left', clickCount: 3 })
+          contents.sendInputEvent({ type: 'mouseUp', ...codePoint, button: 'left', clickCount: 3 })
+          await settle()
+          const expectedPath = '/Users/example/Downloads/rate-aigc-image-udtf.jar'
+          check(await evaluate('window.getSelection().toString()') === expectedPath, 'Selecting a code block line must not include a synthetic trailing separator')
+          contents.copy()
+          await settle()
+          check(await evaluate('document.body.dataset.copied') === expectedPath, 'Native code block copy must contain only the path')
           await evaluate("document.body.dataset.selectionTest = 'done'")
         }
         contents.on('console-message', (event) => {
