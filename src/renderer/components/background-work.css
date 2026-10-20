@@ -128,6 +128,8 @@
 .background-work-result { margin-left: 26px; }
 .background-work-warning { color: var(--warn); }
 .background-work-empty { display: flex; align-items: center; gap: 6px; }
+.run-status[data-background-waiting] .run-status-dot { animation: none; background: #b98b36; }
+.sb-running[data-background-waiting] { animation: none; border: 0; background: var(--dim2); border-radius: 50%; }
 @media (max-width: 600px) {
   .background-work-head { flex-wrap: wrap; gap: 6px 10px; }
   .background-work-identity { flex-basis: calc(100% - 26px); }
