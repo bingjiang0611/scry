@@ -39,7 +39,8 @@ const wait = (check: () => boolean, label: string): Promise<void> => {
 }
 
 async function run(): Promise<void> {
-  createRoot(document.getElementById('root')!).render(
+  const root = createRoot(document.getElementById('root')!)
+  root.render(
     <div className="right-panel-slot" style={{ width: 420, height: 700 }}>
       <section className="workspace-panel">
         <div className="workspace-editor markdown">
@@ -86,6 +87,25 @@ async function run(): Promise<void> {
 
   const browserLink = document.querySelector<HTMLAnchorElement>(`a[href="${browserUrl}"]`)
   assert(browserLink?.target === '_blank', 'HTTP code span must be an external browser link')
+
+  // Exercise selection with Chromium input, not Range.addRange(), which bypasses user-select.
+  root.render(
+    <article className="md" style={{ width: 760 }}>
+      <WorkspaceFileLinkProvider workspaces={workspaces} onOpen={() => {
+        document.body.dataset.opened = String(Number(document.body.dataset.opened ?? 0) + 1)
+      }}>
+        <MarkdownImpl>{'| 字段 | 内容 |\n| --- | --- |\n| Resource name | `rate-aigc-image-udtf.jar` |\n| Resource file | `/Users/example/myNote/resources/rate-aigc-image-udtf.jar` |\n| Comment | 保持 `IFD` |'}</MarkdownImpl>
+      </WorkspaceFileLinkProvider>
+    </article>
+  )
+  await wait(() => document.querySelectorAll('td .md-file-ref').length === 2, 'table file links')
+  document.addEventListener('copy', (event) => {
+    // Observe the native copy command without overwriting the developer's clipboard.
+    document.body.dataset.copied = window.getSelection()?.toString() ?? ''
+    event.preventDefault()
+  })
+  console.log('SCRY_MARKDOWN_SELECTION_READY')
+  await wait(() => document.body.dataset.selectionTest === 'done', 'native selection checks')
   console.log('SCRY_MARKDOWN_LAYOUT_TEST_READY')
   browserLink?.click()
 }
