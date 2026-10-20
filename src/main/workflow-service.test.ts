@@ -19,16 +19,30 @@ function fixture(store = new MemoryWorkflowStore(), changes: Partial<WorkflowSer
   const plan = vi.fn(async () => ({ output }))
   const execute = vi.fn<WorkflowServiceOptions['execute']>(() => ({ result: Promise.resolve({ runId: 'fixture', status: 'completed' as const, output: 'final', archiveRef: 'fixture/archive', settled: true }), stop: () => true }))
   const slots = new WorkflowSlots(2)
-  const service = new WorkflowService({ store, slots, describeProviders: async () => [descriptor('pi'), descriptor('codex')], providerRegistered: () => true,
-    runControls: async () => ({ model: true, stop: true, identity: 'fixture-runtime', independentRun: true, terminalOutput: true }), plan, execute, ...changes })
+  const service = new WorkflowService({ store, slots, providerRegistered: () => true,
+    runControls: async role => ({ descriptor: descriptor(role.providerId), model: true, stop: true, identity: 'fixture-runtime', independentRun: true, terminalOutput: true }), plan, execute, ...changes })
   return { service, plan, execute, slots, store }
 }
 
 describe('workflow service receipts, capabilities and recovery', () => {
   it('does not invent execution capability from a matching model catalog', async () => {
-    const { service, plan } = fixture(undefined, { runControls: async () => ({ model: true, stop: false, identity: 'catalog-only', independentRun: false, terminalOutput: false }) })
+    const { service, plan } = fixture(undefined, { runControls: async role => ({ descriptor: descriptor(role.providerId), model: true, stop: false, identity: 'catalog-only', independentRun: false, terminalOutput: false }) })
     await expect(service.planCommand(request)).rejects.toThrow()
     expect(plan).not.toHaveBeenCalled()
+  })
+  it('uses the catalog operation health snapshot and never promotes unknown health', async () => {
+    let state: 'unknown' | 'ready' = 'unknown'
+    const { service, plan } = fixture(undefined, { runControls: async role => ({
+      descriptor: { ...descriptor(role.providerId), health: { state, transport: 'fixture' } },
+      model: true, stop: true, identity: 'fixture-runtime', independentRun: true, terminalOutput: true
+    }) })
+    await expect(service.planCommand(request)).rejects.toThrow('准入状态未知')
+    expect(plan).not.toHaveBeenCalled()
+    state = 'ready'
+    const preview = await service.planCommand({ ...request, commandId: 'fresh-health' })
+    expect(preview.state).toBe('ready')
+    expect(preview.roles.every(role => role.state === 'available')).toBe(true)
+    expect(plan).toHaveBeenCalledTimes(1)
   })
   it('queued planning and durably settled planning never become phantom unknown slots on restart', async () => {
     const store = new MemoryWorkflowStore()
@@ -88,12 +102,17 @@ describe('workflow service receipts, capabilities and recovery', () => {
     const record = (await store.load(preview.workflowId))!
     record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId: 'root:scan', attemptId: 'pending-attempt', role: 'worker', providerId: 'pi', createdAt: 1 })
     record.progress.dispatchAttempts = 1
+    record.progress.slots = { limit: 256, inUse: 99, queued: 88 }
     await store.save(record)
     const first = fixture(store)
-    expect((await first.service.snapshot(preview.workflowId))?.state).toBe('unknown')
+    const recovered = await first.service.snapshot(preview.workflowId)
+    expect(recovered?.state).toBe('unknown')
     expect(first.slots.active).toBe(1)
+    expect(recovered?.slots).toEqual({ limit: 2, inUse: 1, queued: 0 })
+    expect((await first.service.list('/fixture')).records[0].slots).toEqual(recovered?.slots)
     const second = fixture(store)
     expect((await second.service.snapshot(preview.workflowId))?.state).toBe('unknown')
+    expect((await second.service.snapshot(preview.workflowId))?.slots).toEqual(recovered?.slots)
     expect(second.slots.active).toBe(1)
     expect(second.execute).not.toHaveBeenCalled()
   })
@@ -109,7 +128,7 @@ describe('workflow service receipts, capabilities and recovery', () => {
   })
   it('a changed capability refuses dispatch even after a valid preview', async () => {
     let available = true
-    const { service, execute } = fixture(undefined, { runControls: async () => ({ model: available, stop: available, identity: 'fixture-runtime', independentRun: available, terminalOutput: available }) })
+    const { service, execute } = fixture(undefined, { runControls: async role => ({ descriptor: descriptor(role.providerId), model: available, stop: available, identity: 'fixture-runtime', independentRun: available, terminalOutput: available }) })
     const preview = await service.planCommand(request)
     const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: Date.now() }
     await service.approve(approval)

@@ -133,6 +133,7 @@ import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { FileWorkflowStore } from './workflow-store'
 import { WorkflowService } from './workflow-service'
+import { workflowPlanningPrompt } from './workflow-program'
 import { registerWorkflowIpc } from './workflow-ipc'
 import { workflowPermissionResponse } from './workflow-question'
 import { workflowBindingControls } from './workflow-capability'
@@ -4584,18 +4585,25 @@ function workflowStartRequest(role: WorkflowRoleBinding, prompt: string, cwd: st
   }
 }
 
-const workflowCatalogReads = new Map<string, ReturnType<typeof providerRegistry.runControls>>()
-async function workflowRunControls(role: WorkflowRoleBinding, workspace: string, descriptor?: Awaited<ReturnType<typeof providerRegistry.describe>>[number]) {
+const workflowCatalogReads = new Map<string, Promise<{
+  controls: Awaited<ReturnType<typeof providerRegistry.runControls>>
+  descriptor: Awaited<ReturnType<typeof providerRegistry.describe>>[number]
+}>>()
+async function workflowRunControls(role: WorkflowRoleBinding, workspace: string) {
   const adapter = providerRegistry.get(role.providerId)
   const context = { providerId: role.providerId, cwd: workspace, agentProfileId: role.agentProfileId }
   const key = providerContextKey(role.providerId, workspace, role.agentProfileId)
   let pending = workflowCatalogReads.get(key)
   if (!pending) {
-    pending = withProviderOperation(role.providerId, () => providerRegistry.runControls(context), role.agentProfileId)
-      .finally(() => { workflowCatalogReads.delete(key) })
+    pending = withProviderOperation(role.providerId, async () => {
+      const controls = await providerRegistry.runControls(context)
+      // A cold catalog read can establish transport health (notably Codex).
+      // Freeze health only afterwards, in the same deduplicated operation.
+      return { controls, descriptor: await adapter.describe() }
+    }, role.agentProfileId).finally(() => { workflowCatalogReads.delete(key) })
     workflowCatalogReads.set(key, pending)
   }
-  const [controls, entry] = await Promise.all([pending, descriptor ?? adapter.describe()])
+  const { controls, descriptor: entry } = await pending
   return workflowBindingControls(role, context, entry, controls, adapter.workflowExecution, !providerRegistry.isDisabled(role.providerId))
 }
 
@@ -4605,7 +4613,6 @@ const workflowService = new WorkflowService({
   store: workflowStore,
   slots: workflowSlots,
   loadConcurrency: () => workflowStore.readConcurrency(),
-  describeProviders: async providerId => providerId ? [await providerRegistry.get(providerId).describe()] : providerRegistry.describe(),
   providerRegistered: (providerId) => providerRegistry.isRegistered(providerId) && !providerRegistry.isDisabled(providerId),
   runControls: workflowRunControls,
   plan: async ({ workflowId, role, roles, goal, workspace, signal }) => {
@@ -4615,7 +4622,7 @@ const workflowService = new WorkflowService({
     const completion = new Promise<{ output: string; actualModel?: string; archiveRef?: string }>((res, rej) => { resolve = res; reject = rej })
     try {
       await startAppRun(workflowStartRequest(role,
-        `Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.\nYou are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, and exactly one final return. Every node must include kind and a unique blockId. A call is {kind:"call",blockId,role,prompt,inputRefs?}; role must be one of orchestrator, worker, reviewer, summarizer. inputRefs may reference only an earlier committed call output by {nodeId}; never reference a parallel sibling or future node. The final root return is {kind:"return",blockId,ref:{nodeId:"..."}} and must reference one completed call output. No JavaScript, eval, imports, shell, command, path, loops, conditionals, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Never exceed 1000 Agent calls. Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}. Goal:\n${goal}`,
+        workflowPlanningPrompt(roles, goal),
         workspace), {
         origin: 'workflow', runId, stopSignal: signal, expectedWorkflowCapability: role.runtimeIdentity,
         onTerminal: (terminal) => {

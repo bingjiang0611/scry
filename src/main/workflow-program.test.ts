@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { capabilityForRole, makePlanPreview, validateWorkflowProgram } from './workflow-program'
+import { capabilityForRole, makePlanPreview, validateWorkflowProgram, workflowPlanningPrompt } from './workflow-program'
 import { WORKFLOW_SCHEMA_VERSION, parseWorkflowRunCommand } from '../shared/workflow'
 
 const role = { role: 'worker' as const, providerId: 'codex' as const, requestedModel: { id: 'fixture-model' } }
@@ -17,6 +17,21 @@ const program = {
 }
 
 describe('WorkflowProgram M0 contract', () => {
+  it('gives the real planner a complete, valid grammar example and rejects children', () => {
+    const orchestrator = { ...role, role: 'orchestrator' as const }
+    const prompt = workflowPlanningPrompt([orchestrator], 'Synthetic goal')
+    const line = prompt.split('\n').find(line => line.startsWith('Grammar example: '))!
+    const example = JSON.parse(line.slice('Grammar example: '.length))
+    const candidate = { ...program, roles: [orchestrator], body: example.body }
+    const validated = validateWorkflowProgram(candidate)
+    expect(validated.body).toEqual(example.body)
+    expect(JSON.stringify(example.body)).toContain('"kind":"parallel"')
+    expect(JSON.stringify(example.body)).toContain('"inputRefs"')
+    const { blocks, ...container } = example.body
+    expect(() => validateWorkflowProgram({ ...candidate, body: { ...container, children: blocks } })).toThrow('children')
+    expect(prompt).toContain('Goal:\nSynthetic goal')
+  })
+
   it('parses only the explicit run command', () => {
     expect(parseWorkflowRunCommand('/scry-workflow run inspect the repo')).toEqual({ goal: 'inspect the repo' })
     expect(parseWorkflowRunCommand('/scry-workflow run')).toBeNull()

@@ -32,6 +32,30 @@ export interface WorkflowCapabilityInput {
   canConfirmStop: boolean
 }
 
+export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], goal: string): string {
+  // Keep a typed, validator-tested example for every M0 node, including the
+  // container field that models otherwise commonly guess as `children`.
+  const example: WorkflowBlock = { kind: 'sequence', blockId: 'root', blocks: [
+    { kind: 'parallel', blockId: 'parallel', blocks: [
+      { kind: 'call', blockId: 'left', role: 'orchestrator', prompt: 'First task' },
+      { kind: 'call', blockId: 'right', role: 'orchestrator', prompt: 'Second task' }
+    ] },
+    { kind: 'call', blockId: 'combine', role: 'orchestrator', prompt: 'Combine prior evidence', inputRefs: [{ nodeId: 'left' }, { nodeId: 'right' }] },
+    { kind: 'return', blockId: 'result', ref: { nodeId: 'combine' } }
+  ] }
+  return [
+    "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
+    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, and exactly one final return. Every node must include kind and a unique blockId.',
+    'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
+    'A call is {kind:"call",blockId,role,prompt,inputRefs?}; role must be one of the configured roles. inputRefs may reference only an earlier committed call output by {nodeId}; never reference a parallel sibling or future node.',
+    'The final root return is {kind:"return",blockId,ref:{nodeId:"..."}} and must reference one completed call output. No JavaScript, eval, imports, shell, command, path, loops, conditionals, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs.',
+    `Never exceed ${WORKFLOW_MAX_ATTEMPTS} Agent calls. The following example illustrates grammar only; do not copy its tasks or role choices instead of planning the user's goal.`,
+    `Grammar example: ${JSON.stringify({ schemaVersion: WORKFLOW_SCHEMA_VERSION, body: example })}`,
+    `Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}`,
+    `Goal:\n${goal}`
+  ].join('\n')
+}
+
 export function workflowRevision(program: Omit<WorkflowProgram, 'programRevision'>): string {
   const canonical = JSON.stringify(program)
   return createHash('sha256').update(canonical).digest('hex')

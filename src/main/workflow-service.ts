@@ -18,9 +18,8 @@ export interface WorkflowPlanProvider {
 }
 export interface WorkflowServiceOptions {
   store: WorkflowStore
-  describeProviders: (providerId?: ProviderId) => Promise<ProviderDescriptor[]>
   providerRegistered: (providerId: ProviderId) => boolean
-  runControls: (role: WorkflowRoleBinding, workspace: string, descriptor?: ProviderDescriptor) => Promise<{ model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
+  runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
   plan: WorkflowPlanProvider
   execute: (request: { workflowId: string; taskId: string; attemptId: string; role: WorkflowRoleBinding; prompt: string; workspace: string }) => WorkflowProviderExecution
   slots?: WorkflowSlots
@@ -49,18 +48,28 @@ export class WorkflowService {
     this.runner = new WorkflowRunner({ store: options.store, slots: this.options.slots,
       execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd }),
       beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true) },
-      onProgress: progress => options.onProgress?.(workflowProgressSnapshot(progress)) })
+      onProgress: progress => options.onProgress?.(this.progressSnapshot(progress)) })
     // A corrupt journal disables workflows, not the whole desktop application.
     this.ready = this.initialize().catch(error => { this.initializationError = error })
+  }
+  private progressSnapshot(progress: WorkflowProgress): WorkflowProgress {
+    // Dispatch/outcomes are durable per-root facts. Slots belong to the current
+    // shared kernel, not the historical counter stored with one root's update.
+    const slots = this.options.slots
+    return workflowProgressSnapshot({ ...progress, slots: { limit: slots.limit, inUse: slots.active, queued: slots.queued } })
   }
   private async ensureReady(): Promise<void> {
     await this.ready
     if (this.initializationError) throw this.initializationError
   }
-  private async capability(role: WorkflowRoleBinding, workspace: string, required = false, descriptors?: ProviderDescriptor[]) {
-    const descriptor = (descriptors ?? await this.options.describeProviders(role.providerId)).find(item => item.id === role.providerId)
+  private async capability(role: WorkflowRoleBinding, workspace: string, required = false) {
+    let descriptor: ProviderDescriptor | undefined
     let controls = { model: false, stop: false, identity: '', independentRun: false, terminalOutput: false }
-    try { controls = await this.options.runControls(role, workspace, descriptor) } catch { /* refusal, never a replacement Provider */ }
+    try {
+      const snapshot = await this.options.runControls(role, workspace)
+      descriptor = snapshot.descriptor
+      controls = snapshot
+    } catch { /* refusal, never a replacement Provider */ }
     const capability = capabilityForRole(role, { descriptor, adapterRegistered: this.options.providerRegistered(role.providerId),
       hasIndependentRun: controls.model && controls.independentRun && Boolean(controls.identity), canObserveOutput: controls.terminalOutput, canConfirmStop: controls.stop })
     if (required && (!role.runtimeIdentity || role.runtimeIdentity !== controls.identity)) throw new Error('Provider 入口或模型/权限目录已变化，必须重新规划并确认')
@@ -168,8 +177,7 @@ export class WorkflowService {
   private async plan(id: string, request: WorkflowPlanRequest, goal: string, fingerprint: string): Promise<WorkflowPlanPreview> {
     let roles = [request.orchestrator, ...request.roles]
     if (roles.length > 4 || new Set(roles.map(role => role.role)).size !== roles.length) throw new Error('工作流角色重复或超过四个')
-    const descriptors = await this.options.describeProviders()
-    const capabilities = await Promise.all(roles.map(role => this.capability(role, request.workspace, false, descriptors)))
+    const capabilities = await Promise.all(roles.map(role => this.capability(role, request.workspace)))
     if (capabilities[0].state !== 'available') throw new Error(`编排角色不可用：${capabilities[0].reason}`)
     roles = roles.map((role, index) => ({ ...role, runtimeIdentity: capabilities[index].runtimeIdentity }))
     if (this.closed || (request.commandId && this.cancelled.has(request.commandId))) throw new Error('工作流规划已取消')
@@ -245,17 +253,16 @@ export class WorkflowService {
       const preview = await this.loadPreview(id)
       const record = (await this.options.store.load(id))!
       if (record.receipt) {
-        if (record.receipt.commandId === commandId && record.receipt.fingerprint === fingerprint) return workflowProgressSnapshot(record.progress)
+        if (record.receipt.commandId === commandId && record.receipt.fingerprint === fingerprint) return this.progressSnapshot(record.progress)
         throw new Error('工作流已有启动收据，不允许重新派发')
       }
-      const descriptors = await this.options.describeProviders()
-      await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true, descriptors)))
+      await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
       if (this.closed) throw new Error('工作流服务正在退出')
       if (commandId) {
         record.receipt = { commandId, fingerprint, status: 'accepted' }
         await this.options.store.save(record)
       }
-      return workflowProgressSnapshot(await this.runner.start(preview, approval))
+      return this.progressSnapshot(await this.runner.start(preview, approval))
     }
     return commandId ? this.receipt(this.starts, commandId, fingerprint, start) : start()
   }
@@ -272,13 +279,13 @@ export class WorkflowService {
   async snapshot(id: string): Promise<WorkflowProgress | undefined> {
     await this.ensureReady()
     const progress = this.runner.snapshot(id) ?? (await this.options.store.load(id))?.progress
-    return progress && workflowProgressSnapshot(progress)
+    return progress && this.progressSnapshot(progress)
   }
   async list(workspace: string, cursor?: string): Promise<WorkflowProgressPage> {
     await this.ensureReady()
     const page = await this.options.store.listPage(cursor, 20)
     return { records: page.records.filter(record => record.preview.workspace === workspace)
-      .map(record => workflowProgressSnapshot(this.runner.snapshot(record.preview.workflowId) ?? record.progress)),
+      .map(record => this.progressSnapshot(this.runner.snapshot(record.preview.workflowId) ?? record.progress)),
       nextCursor: page.nextCursor, unresolvedPlanning: this.unresolvedPlanning }
   }
 }

@@ -9,7 +9,7 @@ export function workflowBindingControls(role: WorkflowRoleBinding, context: Prov
   descriptor: ProviderDescriptor, envelope: CapabilityEnvelope<AgentRunControlCatalog>,
   execution: ProviderAdapter['workflowExecution'], enabled: boolean) {
   if (!enabled || envelope.state !== 'ready' || !envelope.data || !descriptor.available) {
-    return { model: false, stop: false, identity: '', independentRun: false, terminalOutput: false }
+    return { descriptor, model: false, stop: false, identity: '', independentRun: false, terminalOutput: false }
   }
   const catalog = envelope.data
   const requested = role.requestedModel
@@ -17,7 +17,7 @@ export function workflowBindingControls(role: WorkflowRoleBinding, context: Prov
     ? catalog.models.some(option => option.model.id === requested.id && (!requested.providerId || option.model.providerId === requested.providerId))
     : catalog.models.length > 0
   const permission = catalog.permissions.some(option => option.id === (role.permissionMode ?? 'default'))
-  return { model: model && permission, stop: execution?.scopedStop === true && execution.scopeSettlement,
+  return { descriptor, model: model && permission, stop: execution?.scopedStop === true && execution.scopeSettlement,
     independentRun: execution?.independentRun === true, terminalOutput: execution?.terminalOutput === true,
     identity: workflowCapabilityFingerprint(context, descriptor, catalog, execution) }
 }

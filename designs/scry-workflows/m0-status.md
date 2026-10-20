@@ -1,6 +1,6 @@
 # M0 实现与验收边界
 
-状态：独立分支 `feat/workflow-m0` 中的实验实现。受控检查不等于真实账号验收，不代表 v10 或 M5 管理界面已交付。
+状态：独立分支 `feat/workflow-m0` 中的实验实现。已有指定账号/模型的真实完成与停止证据，但仍有故障现场 unknown / pending，不代表完整 M0、v10 或 M5 产品验收已交付。最新范围与逐构建证据见 [真实 Provider 验收记录](m0-real-acceptance.md)。
 
 ## 已接入的路径
 
@@ -40,7 +40,7 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 
 同步 `be907ef`（0.2.210）后：focused 13 文件 / 100 tests、typecheck、build、独立工作流 UI 和新版后台卡片 UI 通过。同步前本地结果：focused 12 文件 / 88 tests、五 Provider 的受控回归 339 tests、typecheck、build、独立工作流 Electron UI、shell 和 trace.delivery 计数检查通过。计数测试时机器高负载，不据此作毫秒或用户体感结论。
 
-### 本轮最终本地结果
+### 81e4b63 的本地结果（真实调用前）
 
 验证对象为同步 `be907ef` 后的 M0 与本次测试修复，环境为 macOS arm64、Node 24.18.0、Electron 42.10.1。没有修改生产 Git 实现、测试超时、预算或像素断言。
 
@@ -68,8 +68,14 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - 一次完整 UI 在 steer 检查后被取消，没有计为整套通过；分段检查完成后，最终另行执行了上述单次完整 UI 命令。
 - Credits 首次因独立 worktree 缺少 SQLite 原生 binding 失败；仅重建已锁定的 `better-sqlite3` / `node-pty` 并执行现有 helper 准备，未更改依赖或全局放行安装脚本。证据：`/tmp/scry-workflow-m0-native-rebuild.log`。
 
-### 仍待真实验收
+### 真实 Provider 验收进展
 
-尚未执行付费模型或生产 userData/`.scry` 验收。需要用户明确账号/profile、模型、费用上限和临时数据范围授权后，由后续验收执行真实混合 Provider、停止和证据收口检查。隐藏 fixture 不证明前台 OS 焦点行为、真实账号能力矩阵或生产 App 上的完整工作流。
+用户随后明确授权当前 Pi·Rotom / Codex 账号和默认模型、预算无上限、Pi 本机完全访问，并在故障后批准另开独立 Codex 停止现场。真实目录为 Pi 上游 `qoder/ultimate` 与 Codex `gpt-6.1-sol`，没有静默替换。实际调用使用临时 workspace/HOME/userData，不触碰生产会话。完整记录见 [m0-real-acceptance.md](m0-real-acceptance.md)。
 
-实现检查点 `32a70bd` 基于 `c405df0`（0.2.204），明确标注未完成验收。经用户授权，本分支已同步 `be907ef`（0.2.210），未包含或修改原工作区的未提交改动。本地代码门禁已通过，但真实 Provider 验收仍未完成，不能称完整 M0 产品验收已交付。尚未安装本分支，不自动重启用户 App，也未 push；不能把主线版本号相同当作本分支已部署。
+真实调用发现并修复三个问题：规划提示遗漏容器 `blocks`、冷目录初始化前抓取旧健康状态、公共进度返回历史槽位计数。最新代码默认 `npm test` 为 3478 passed / 4 skipped（shell 通过），typecheck、打包安全 gate、相关原生输入 UI 和 trace.delivery 计数 ratchet 通过。机器高负载，不作毫秒提升结论。
+
+已核对真实混合完成链的 3 个子调用和独立 session / 显式报告，以及最终产物上 Pi、Codex 各自生成后的 `stopped + settled`；5 个关键 outcome 均连接到原生 archive 与 exact provider-result canonical record。12 个 canonical JSON / 13 个 archive 已解析，CLI verify 通过，但新身份/role/task-link 字段仍有 legacy_unset advisory，费用没有 costUsd，均不冒充完整或零费用。
+
+旧停止控制器断连后的现场保留 2 个 unknown reservation 和 1 个 pending managed turn，不清空、不降级证据、不重发。经用户批准的独立 Codex 停止现场 pending 为 0；两处临时凭据副本已清理、隔离进程已关闭，记录和冻结产物保留。混合完成证据属于 readiness-fix 构建；最终 projection-fix 的直接真实范围是恢复观察与两个分别停止，尚未重复完整混合完成链。前台 OS 焦点、完整 UI 操作和五 Provider 能力矩阵也不在本次真实验收范围。
+
+实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。
