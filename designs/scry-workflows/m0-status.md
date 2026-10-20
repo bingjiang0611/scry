@@ -42,6 +42,8 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 
 完整门禁仍未通过，不能称 M0 已交付：默认并发全量 unit 为 3462 passed / 11 failed / 4 skipped，失败位于四个原有文件；相同四文件在本分支与无 M0 改动的 `c405df0` 基线均串行通过 39 tests，未增加测试超时，不能用串行结果抹去首次全量失败。完整 UI 先发现并修正了全 App fixture 缺少新 workflow API 的问题；随后在原有 compaction 场景失败。无 M0 的基线 UI 同样失败，但在不同的 reduced-motion / scrollbar-color 场景，尚不能据此宣布两者根因相同。完整打包 gate 与真实 App 重放未通过/未执行。
 
+同步后的全量串行 unit（相同测试超时，仅 `--maxWorkers=1` 控制争用）为 3474 passed / 1 failed / 4 skipped；唯一失败在原有 `subprocesses.counters.test.ts` 的 5000 文件终端 diff 场景，生产 `beginGitTurnDiff` 返回 timeout。该 collector 与 `src/core/turn-recorder/git.ts` 相对 `be907ef` 未修改。随后机器观测为 10 核、load average 23.00 / 37.60 / 40.68；负载是已观测限制，但没有把剩余失败当作已证实无关，也没有扩大超时。同步后 `--overview-only` 的六组主题/宽度检查通过，不等于之前失败的完整 compaction 场景已经通过。
+
 尚未执行付费模型或生产 userData/`.scry` 验收。需要明确账号、模型、费用和数据范围授权后，再做真实混合 Provider、停止和证据收口验收。
 
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204），明确标注未完成验收。经用户授权，本分支已同步 `be907ef`（0.2.210），未包含或修改原工作区的未提交改动。尚未安装本分支，也不自动重启用户 App。完整门禁及真实 Provider 验收仍待完成，不能把主线版本号相同当作本分支已部署。
