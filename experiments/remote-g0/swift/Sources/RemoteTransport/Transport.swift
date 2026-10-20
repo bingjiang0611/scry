@@ -28,11 +28,21 @@ public enum RelayTransportError: Error, Sendable {
 // Converts the outer WebSocket's binary frames into the inner TLS byte stream.
 // Text, fragmentation and overflow terminate the stream; never skip bytes and
 // continue an allegedly reliable TLS connection after a gap.
-final class TunnelCodec: ChannelDuplexHandler {
+// All mutable state is confined to this connection's channel event loop.
+final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
   typealias InboundIn = WebSocketFrame
   typealias InboundOut = ByteBuffer
   typealias OutboundIn = ByteBuffer
   typealias OutboundOut = WebSocketFrame
+  private var closeCause: RelayTransportError?
+
+  // The upgrade can deliver a close before the inner consumer exists. Retain
+  // that bounded diagnostic even after pipeline teardown. Never replace a real
+  // TLS failure: doing so could turn a certificate rejection into a retry.
+  func retainingCloseCause(for error: Error) -> Error {
+    if case ProbeError.disconnected = error, let closeCause { return closeCause }
+    return error
+  }
 
   func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let frame = unwrapInboundIn(data)
@@ -53,7 +63,9 @@ final class TunnelCodec: ChannelDuplexHandler {
       let reason = payload.readString(length: min(payload.readableBytes, 123)) ?? ""
       // Preserve the relay's close cause before TLS sees an anonymous EOF.
       // This is untrusted diagnostic text, never authentication evidence.
-      context.fireErrorCaught(RelayTransportError.closed(code: code, reason: reason))
+      let cause = RelayTransportError.closed(code: code, reason: reason)
+      if closeCause == nil { closeCause = cause }
+      context.fireErrorCaught(cause)
       context.close(promise: nil)
     default:
       context.fireErrorCaught(ProbeError.invalidFrame)
@@ -1099,7 +1111,7 @@ public enum G0Transport {
     body: @Sendable (Channel, NIOSSLContext) async throws -> T) async throws -> T {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     do {
-      let (channel, innerContext) = try await connectRelayChannel(endpoint: endpoint, mode: mode, identity: identity, group: group)
+      let (channel, innerContext, tunnel) = try await connectRelayChannel(endpoint: endpoint, mode: mode, identity: identity, group: group)
       // Cancel an established tunnel immediately. Bootstrap retains its
       // bounded 10-second deadline, rather than leaving a detached connection.
       let reply: T
@@ -1109,8 +1121,9 @@ public enum G0Transport {
           return try await body(channel, innerContext)
         } onCancel: { channel.close(promise: nil) }
       } catch {
+        let failure = try await channel.eventLoop.submit { tunnel.retainingCloseCause(for: error) }.get()
         try? await channel.close()
-        throw RelayTransportError.identifyingHandshake(error, layer: .host)
+        throw RelayTransportError.identifyingHandshake(failure, layer: .host)
       }
       try? await channel.close()
       try await group.shutdownGracefully()
@@ -1123,9 +1136,10 @@ public enum G0Transport {
 
   // Dials the relay and completes the outer WebSocket upgrade. Returns the
   // channel (TunnelCodec installed, no inner TLS yet) and the inner mTLS context
-  // pinned to the host anchor. The caller owns the channel and the group.
+  // pinned to the host anchor. Retain the codec to recover an early close cause
+  // after pipeline teardown. The caller owns the channel and the group.
   static func connectRelayChannel(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
-                                  group: EventLoopGroup) async throws -> (Channel, NIOSSLContext) {
+                                  group: EventLoopGroup) async throws -> (Channel, NIOSSLContext, TunnelCodec) {
     guard (1...65535).contains(endpoint.port), ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     do {
@@ -1167,6 +1181,7 @@ public enum G0Transport {
         throw ProbeError.invalidArguments
       }
       let innerContext = try NIOSSLContext(configuration: inner)
+      let tunnel = TunnelCodec()
       let uri = "/?host=\(endpoint.hostId)&mode=\(mode)"
       let hostHeader = endpoint.relayServerName ?? endpoint.host
       let upgrade: EventLoopFuture<Channel> = try await ClientBootstrap(group: group)
@@ -1180,7 +1195,7 @@ public enum G0Transport {
             }
             let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 1_572_864, upgradePipelineHandler: { channel, _ in
               channel.eventLoop.makeCompletedFuture {
-                try channel.pipeline.syncOperations.addHandler(TunnelCodec())
+                try channel.pipeline.syncOperations.addHandler(tunnel)
                 return channel
               }
             })
@@ -1196,7 +1211,7 @@ public enum G0Transport {
           }
         }
       let channel = try await upgrade.get()
-      return (channel, innerContext)
+      return (channel, innerContext, tunnel)
     } catch {
       // An HTTP WebSocket upgrade cannot complete before outer TLS succeeds.
       throw RelayTransportError.identifyingHandshake(error, layer: .relay)
