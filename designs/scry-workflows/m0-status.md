@@ -88,4 +88,12 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - trace.delivery 计数为 2 IPC / 165996 bytes，5 次一致，ratchet 通过；该场景不代表新拒绝分支的端到端耗时。测速锁报告 highLoad，不作毫秒提升结论。
 - 本次证据：`/tmp/scry-workflow-no-dispatch.LEItDb/`；旧现场只读调查：`/tmp/scry-workflow-pending-audit.uvf8wW/report.md`。没有新真实 Provider 验收、App 安装/重启或 push；旧冻结产物不包含这次新代码。
 
+### Pi 间歇超时独立复核（未定位根因）
+
+- 在用户授权的独立排查中，Pi 文件 113 项全部通过；原并发全套检查两次均为 **3487 passed / 4 skipped**，最终 `npm test` 同时通过 shell 检查。保留上节的历史失败，不把本轮通过当作间歇问题已修复。
+- 原失败没有保留 RPC 阶段日志，fixture 退出时会删除临时现场。本轮未再次捕获原超时，不能判定它卡在进程启动、请求响应、命令处理还是结果清理；不猜测修改 Provider 逻辑。
+- 仅在该测试失败时、停止子进程和删除 fixture 之前，输出 `PI_COMMAND_DIAGNOSTIC`：terminal 状态、最后 32 条事件的 kind/stage/ts、命令日志末尾 4096 字符及启动 PID。输出仅来自隔离的假 Provider，不读取真实账号数据；原异常继续抛出。3 秒等待、15 秒测试上限及全部原断言均未改变。
+- 人为破坏终态断言的负对照按预期失败且输出诊断，恢复后全套通过。该负对照只证明诊断路径有效，不是原超时复现。
+- 日志：`/tmp/scry-pi-command-convergence.ekAvy5/`。若该分支再次失败，保留 `PI_COMMAND_DIAGNOSTIC` 行后由维护 Agent 继续定位；当前仍不宣称根因修复。没有新增真实 Provider 调用，也没有修改旧 pending/unknown 或安装/重启现有 App。
+
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。

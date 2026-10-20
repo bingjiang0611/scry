@@ -1745,6 +1745,15 @@ describe('Pi RPC Provider', () => {
         expect(await handle.promise).toMatchObject({ status: 'completed' })
         expect(events.some((event) => event.kind === 'model')).toBe(false)
         expect(events.find((event) => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
+      } catch (error) {
+        // Fixture cleanup deletes the protocol evidence. Capture it before interrupting the child.
+        const commands = join(cwd, 'fixture-commands')
+        console.error('PI_COMMAND_DIAGNOSTIC', JSON.stringify({ cwd, terminal,
+          events: events.slice(-32).map(event => ({ kind: event.kind, stage: event.stage, ts: event.ts })),
+          commands: existsSync(commands) ? readFileSync(commands, 'utf8').slice(-4096) : null,
+          starts: existsSync(join(cwd, 'fixture-starts')) ? readFileSync(join(cwd, 'fixture-starts'), 'utf8') : null
+        }))
+        throw error
       } finally {
         handle.forceKill()
         await handle.promise.catch(() => {})
