@@ -65,6 +65,10 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
       // This is untrusted diagnostic text, never authentication evidence.
       let cause = RelayTransportError.closed(code: code, reason: reason)
       if closeCause == nil { closeCause = cause }
+      // NIOSSL batches authenticated plaintext until readComplete. A close in
+      // the same socket read must not overtake a complete response already
+      // received in binary records. Partial responses still fail below.
+      context.fireChannelReadComplete()
       context.fireErrorCaught(cause)
       context.close(promise: nil)
     default:
@@ -74,6 +78,9 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
   }
 
   func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
+    // Draining plaintext can settle a response and wake queued work. The peer
+    // has already closed: no new ciphertext may leave during that drain.
+    if let closeCause { promise?.fail(closeCause); return }
     let bytes = unwrapOutboundIn(data)
     guard bytes.readableBytes <= 1_572_864, context.channel.isWritable else {
       promise?.fail(ProbeError.oversized)
