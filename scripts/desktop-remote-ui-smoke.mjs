@@ -47,7 +47,8 @@ const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyPrompts: ['older remote prompt', 'latest remote prompt'],
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
-  catalogCalls: 0, holdHistory: false,
+  catalogCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
+  providerControlsFailure: null, legacyProviderHost: false,
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
@@ -119,8 +120,19 @@ const api = {
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
       sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs } : session),
-      providers: state.hideProvider ? [beta] : catalog.providers, directorySelection: state.oldDirectoryHost ? undefined : true
+      providers: (state.hideProvider ? [beta] : catalog.providers).map(provider => state.legacyProviderHost ? provider
+        : ({ id: provider.id, label: provider.label, available: provider.available, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
+      providerDiscovery: state.legacyProviderHost ? undefined : 2,
+      providerEvidence: state.legacyProviderHost ? 'legacy_host' : 'host_snapshot',
+      directorySelection: state.oldDirectoryHost ? undefined : true
     })
+  },
+  async providerControls(id, context) {
+    state.providerControlsCalls.push({ id, context: contextFor({ context }) })
+    if (state.holdProviderControls) await new Promise(resolve => state.providerControlWaiters.push(resolve))
+    const match = catalog.providers.find(provider => provider.id === context.providerId && (provider.agentProfileId ?? '') === (context.agentProfileId ?? ''))
+    if (!match || state.providerControlsFailure === 'throw') throw new Error('fixture provider controls unavailable')
+    return structuredClone(state.providerControlsFailure === 'unavailable' ? { id: match.id, label: match.label, available: false } : match)
   },
   async commands(id, context) {
     state.commandCalls.push({ id, context })
@@ -331,6 +343,41 @@ async function exercise(contents, pointer, capture, options) {
   check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation remains')
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  if (options.openingOnly || options.measureOpening) {
+  // Selected controls are demand-loaded. A delayed response for a previous
+  // session Provider must not publish after the user switches context.
+  await read('window.desktopRemoteFixture.holdProviderControls = true')
+  await click('[data-remote-session="other-native"]')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.some(call => call.context.providerId === "qoder")', 'selected Beta controls request')
+  await click('[data-remote-session="old-native"]')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.some(call => call.context.providerId === "claude")', 'selected Alpha controls request after switch')
+  await read('window.desktopRemoteFixture.providerControlWaiters.shift()()')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.at(-1)?.context.providerId === "claude"', 'selected Alpha context after switch')
+  check(!await read('document.querySelector(".chat")?.textContent.includes("Beta Default")'), 'Stale Provider controls were published')
+  await read('window.desktopRemoteFixture.holdProviderControls = false; window.desktopRemoteFixture.providerControlWaiters.splice(0).forEach(resolve => resolve())')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Alpha Default"', 'selected controls settle after stale switch')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "unavailable"')
+  await click('[data-remote-session="other-native"]')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'unavailable controls are visible')
+  await click('textarea[aria-label="描述任务"]'); await insert('control-load-check')
+  check(await read(sendDisabled), 'Unavailable controls enabled send')
+  await read('window.desktopRemoteFixture.providerControlsFailure = null')
+  await click('.composer-notice button')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'explicit controls retry restores send')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const beforeLegacy = (await fixture()).providerControlsCalls.length
+  await read('window.desktopRemoteFixture.legacyProviderHost = true')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("旧版主机能力快照")', 'negotiated legacy snapshot is labelled')
+  await click('textarea[aria-label="描述任务"]'); await insert('legacy-control-check')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'legacy host preserves its existing send contract')
+  check((await fixture()).providerControlsCalls.length === beforeLegacy, 'Legacy host received a selected-controls query')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  await read('window.desktopRemoteFixture.legacyProviderHost = false')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new-host controls restored')
+  await click('.sb-new')
+  await wait('document.querySelector(".location-button") != null', 'new remote draft after stale switch')
+  }
   if (options.openingOnly || options.measureOpening) {
     const bottom = '(() => { const el = document.querySelector(".chat"); return el && el.scrollHeight - el.scrollTop - el.clientHeight <= 2 })()'
     const samples = []
