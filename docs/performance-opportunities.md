@@ -2,6 +2,10 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
+
+完整 CLI gate 588 项、App unit 3463 项（另 4 opt-in skipped）、shell、类型检查和构建已通过；源码冻结 `a868251`。构建目录的签名包在私有 CLI/GUI 启动时收到 SIGKILL，尚未完成 packaged smoke，未执行安装。相同字节诊断副本与已安装 0.2.215 的对照结果、首次失败及日志见[实验记录](performance-experiments/20261021-desktop-ui-fluidity.md#0216-发布验证续跑2026-10-21)。下一步由发布/系统诊断 owner 定位该启动问题，不再重复全量测试碰运气；不修改系统防护或直接安装未通过门禁的包。
+
 ## Mac UI 流畅性续轮（2026-10-21，Pi 历史打开重复归档读取）
 
 - 固定调用链复核确认：Pi 历史打开先用 `readTraceArchivePageAsync` 读取最近页；若同时存在 Pi 原生历史，随后无条件再次 `readTraceArchiveAsync` 以做 ID 对账。最近页已是 complete（`hasOlder=false`）时，这次完整读取是重复工作；超过 40 轮的 partial 页仍必须完整读取，不能把分页证据当成全量证据。
