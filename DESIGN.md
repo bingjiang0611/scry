@@ -247,6 +247,24 @@ MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
 
 验证：`npx vitest run src/renderer` 849 项通过；`npm run typecheck:web` 通过；`node scripts/session-capability-ui-smoke.mjs --overview-only` 深浅两主题 × 380/340/535 通过，`firstTurnTop` 430.34（契约 ≤460，比上一版矮约 19px）、`headerHeight` 44、间距 14/10/8、双列、三格指标、无横向溢出；`--summary-only` 通过（`.ctx-copy` 文本仍为「100.0k / 272.0k」这类原样比值，改用 `.ctx-track` 后 aria 校验同步更新）。另用临时 fixture 渲染真实数值（26%、70.5k / 272.0k、1.7M、$31.81）逐张比对深浅主题与三种宽度，并确认空态（— + 空轨道 + 暂无上下文数据）。对比度：轨道填充与底色 5.72:1（深）/ 3.72:1（浅），单看填充与面板底色的 3:1 图形下限通过；主证据数值 5.72:1 / 3.72:1（26px）。已知限制：指标标签仍是全应用约定的 10px `--dim2`，浅色主题 3.52:1，属既有标签色决定，本次未改。
 
+### 已回答问答块：台账式记录（2026-10-23）
+
+范围只有 `AskUserQuestionResult` 渲染的 `.question-result` 内层块：状态行、问题与答案、`查看原始输入与输出` 折叠。外层工具组行、工具卡行与待回答的内联表单都不动。设计稿先出四稿（`designs/scry-question-result-bolder`，A 裸渲染现状 / B 倒置 / C 台账 / D 单行），用户选定 C。
+
+前置事实：这块从 `ab5601b` 起就没有任何样式——`.question-result*` 规则在该提交里从 `styles.css` 整段删除且没有补回，真实界面渲染的是浏览器默认的 `<dl>`（上边距 1em）、`<dd>`（缩进 40px）与 `<summary>`。所以这一轮是重建而不是再加一层装饰。
+
+| 决定 | 理由 | 落地 |
+| --- | --- | --- |
+| 状态与等待压成一行等宽小字 | 「已回答」是判词，问题数与等待是附注，三者不该占同等视觉重量 | `--ok` 10px/650 等宽配 11px 对勾图标（未完成类判词改 `--bad` 与预警图标），问题数与等待 10.5px `--dim2`，等待靠右 |
+| 问答成行、答案落在右轨 | 问题与答案同行才读得出对应关系；短答案需要锚点 | 两列 grid（`1fr` / `minmax(84px, 38%)`），问题 12.5px `--dim`、答案 13px/600 `--fg` 右对齐；等待时长与答案共用同一条右边缘 |
+| 只用发丝线分隔 | 旧版（已删除）给每条问答套了 `--panel2` 卡片，与工具卡形成嵌套容器 | 块顶、列表顶、行间、折叠前各一条 `--border3` 发丝线，无新容器、无新圆角 |
+| 窄栏退化为上下两行 | 右栏打开时两列会被挤到读不出对应关系 | `@container main-pane (max-width: 640px)` 转单列，答案改左对齐 |
+| 缺答案单独标记 | 「没拿到答案」不能与「用户选了某项」同形 | `dd.missing` 用 `--dim2` 与 500 字重；没有 duration 时不渲染等待 |
+
+保留的既有决定：判词文案（已回答 / 用户取消 / Provider 取消 / 未完成）、`<dl>/<dt>/<dd>` 语义、`question-result-fallback` 与 `<details>` 折叠、`aria-label` 都不变，未新增文案与颜色。原始输入输出区沿用 `--surface-inset` 底、11.5px 等宽与 280px 上限，与 `.tool-detail` 同一写法。
+
+验证：`npx vitest run src/renderer/components/AskUserQuestionDialog.test.tsx` 14 项、`src/renderer/components/render.test.tsx` 244 项通过；`npm run typecheck:web` 与 `npm run build` 通过。新增 `node scripts/session-capability-ui-smoke.mjs --question-result-only`：在隔离 Electron fixture 里用真实 React + 真实 CSS 断言 `dl` 不再带浏览器边距、行是两列 grid、答案 600 字重右对齐、等待与答案右边缘相差 ≤1px、判词取 `--ok` 变量而非字面色、取消态渲染 `dd.missing` 且不编造等待、`summary` 可键盘聚焦且展开后箭头旋转、560px 容器下退化为单列左对齐；把本轮 CSS 注释掉重跑该检查会失败（已作为对照执行一次）。深色与浅色截图（`SCRY_QUESTION_RESULT_SCREENSHOT`）各看一次。已知限制：右对齐的长答案（如 4 行）左侧参差，这是台账方向的已知代价；桌面打包版内未用真实会话重放（需要一次真实 Provider 的回答），本轮只做到隔离 Electron fixture 与真实 CSS。
+
 ## Do's and Don'ts
 
 ### Do

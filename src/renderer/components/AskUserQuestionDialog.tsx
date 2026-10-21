@@ -2,6 +2,7 @@ import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } 
 import type { AgentIntervention, AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
 import Markdown from './MarkdownImpl'
+import { Icon } from './primitives/Icon'
 import { QUESTIONNAIRE_COPY } from '../constants/copy'
 
 const providerLabels = {
@@ -378,24 +379,35 @@ export function AskUserQuestionResult({
         : '已回答'
   return (
     <div className={`question-result ${incomplete ? 'error' : ''}`} aria-label={`AskUserQuestion ${status}`}>
+      {/* 已回答的问答是人工决定记录：状态与等待压成一行等宽小字，问题与答案按行对齐，
+          答案落在右轨（与等待时长同一条右边）。判词、问题数与等待来源都不变。 */}
       <div className="question-result-head">
-        <span>{status}</span>
-        <small>
-          {request.questions.length} 个问题
-          {durationMs != null ? ` · 等待 ${(durationMs / 1000).toFixed(1)}s` : ''}
-        </small>
+        <span>
+          <Icon name={incomplete ? 'alert' : 'check'} />
+          {status}
+        </span>
+        <small>{request.questions.length} 个问题</small>
+        {durationMs != null && <small className="question-result-wait">等待 {(durationMs / 1000).toFixed(1)}s</small>}
       </div>
       <dl className="question-result-list">
-        {request.questions.map((question) => (
-          <div key={question.question}>
-            <dt>{question.question}</dt>
-            <dd>{answers?.[question.question] ?? (incomplete ? '未获得答案' : '答案已提交')}</dd>
-          </div>
-        ))}
+        {request.questions.map((question) => {
+          const answer = answers?.[question.question]
+          return (
+            <div key={question.question}>
+              <dt>{question.question}</dt>
+              <dd className={answer == null ? 'missing' : undefined}>
+                {answer ?? (incomplete ? '未获得答案' : '答案已提交')}
+              </dd>
+            </div>
+          )
+        })}
       </dl>
       {!answers && output && <div className="question-result-fallback">{output}</div>}
       <details className="question-raw">
-        <summary>查看原始输入与输出</summary>
+        <summary>
+          <Icon name="chevronRight" />
+          <span>查看原始输入与输出</span>
+        </summary>
         <div className="lbl">input</div>
         <pre>{JSON.stringify({ source, questions: request.questions }, null, 2)}</pre>
         {output && (
