@@ -44,7 +44,8 @@ describe('OverviewPanel request-level context', () => {
     { quality: undefined, description: '旧记录：证据质量未标记' }
   ])('shows only the live token ratio while retaining $quality evidence in the tooltip', ({ quality, description }) => {
     const html = render([sample('current', 2100, { contextUsageQuality: quality })])
-    expect(html).toContain('<div class="ctx-copy"><div class="v">2.1k / 272.0k</div></div>')
+    // 已用量与窗口总量分开渲染以便用字级区分主次，可见文本仍是「已用 / 窗口」。
+    expect(html).toContain('<div class="ctx-copy"><div class="v"><b>2.1k</b><span> / 272.0k</span></div></div>')
     expect(html).toContain(`title="上下文 · ultimate · 已占 1% · 残余 269.9k · ${description} · 随请求用量上报更新，非逐 token"`)
     expect(html).toContain('aria-label="上下文占用 1%"')
   })
@@ -61,15 +62,15 @@ describe('OverviewPanel request-level context', () => {
       runId: 'old', userText: 'old', done: true,
       items: [sample('result', 100000, { stage: 'result', runId: 'old', tokensIn: 10, tokensOut: 4 })]
     }
-    expect(render([], [previous])).toContain('100.0k / 272.0k')
+    expect(render([], [previous])).toContain('<b>100.0k</b><span> / 272.0k</span>')
     const first = render([sample('first', 150000)], [previous])
-    expect(first).toContain('150.0k / 272.0k')
+    expect(first).toContain('<b>150.0k</b><span> / 272.0k</span>')
     const next = render([sample('first', 150000), sample('second', 201600)], [previous])
-    expect(next).toContain('201.6k / 272.0k')
+    expect(next).toContain('<b>201.6k</b><span> / 272.0k</span>')
     expect(next).toContain('随请求用量上报更新，非逐 token')
     expect(next).toContain('<strong>14</strong>')
     expect(next).not.toContain('<span>输入 / 输出</span>')
-    expect(next).not.toContain('100.0k / 272.0k')
+    expect(next).not.toContain('<b>100.0k</b><span> / 272.0k</span>')
   })
 
   it('keeps canonical context when resultOf merges several results and ignores transcript shadows', () => {
@@ -78,8 +79,8 @@ describe('OverviewPanel request-level context', () => {
       sample('result-2', 150000, { stage: 'result', tokensIn: 20 }),
       sample('shadow', 90000, { stage: 'result', text: 'transcript assistant usage', tokensIn: 30 })
     ])
-    expect(html).toContain('150.0k / 272.0k')
-    expect(html).not.toContain('90.0k / 272.0k')
+    expect(html).toContain('<b>150.0k</b><span> / 272.0k</span>')
+    expect(html).not.toContain('<b>90.0k</b><span> / 272.0k</span>')
   })
 
   it('invalidates pre-compaction usage until the next sample, then permits a decrease', () => {
@@ -87,7 +88,7 @@ describe('OverviewPanel request-level context', () => {
     const afterCompact = render(items)
     expect(afterCompact).toContain('暂无上下文数据')
     expect(afterCompact).toContain('<strong class="overview-session-count">1</strong>')
-    expect(render([...items, sample('after', 20000)])).toContain('20.0k / 272.0k')
+    expect(render([...items, sample('after', 20000)])).toContain('<b>20.0k</b><span> / 272.0k</span>')
   })
 
   it('does not inherit a stale percentage when the latest model window is unknown', () => {
@@ -127,7 +128,7 @@ describe('OverviewPanel request-level context', () => {
     for (const patch of [{ aborted: true }, { result: undefined }, { errorMessage: 'failed' }]) {
       const failed = { ...legacy, runtimeMetadata: { ...legacy.runtimeMetadata, ...patch } }
       expect(contextCompactionOf(failed)).toBeNull()
-      expect(render([sample('first', 201600), failed])).toContain('201.6k / 272.0k')
+      expect(render([sample('first', 201600), failed])).toContain('<b>201.6k</b><span> / 272.0k</span>')
     }
     expect(contextCompactionOf({ ...legacy, stage: 'compaction_start' })).toBeNull()
   })

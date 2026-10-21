@@ -990,7 +990,10 @@ function OverviewPanelBody({
             <span>{ctx ? `${ctx.pct}%` : '—'}</span>
           </div>
           <div className="ctx-copy">
-            <div className="v">{ctx ? `${fmtTok(ctx.used)} / ${fmtTok(ctx.win)}` : '暂无上下文数据'}</div>
+            {/* 显示用量是主证据，窗口总量是参照：同一行内用字级区分，文本内容保持原样。 */}
+            <div className="v">{ctx
+              ? <><b>{fmtTok(ctx.used)}</b><span> / {fmtTok(ctx.win)}</span></>
+              : '暂无上下文数据'}</div>
           </div>
         </div>
       )}
@@ -1005,7 +1008,7 @@ function OverviewPanelBody({
             <em>{calls.totalCalls} calls</em>
           </header>
           <div className="overview-metric-grid">
-            <div className="overview-metric accent">
+            <div className="overview-metric accent lead">
               <span>{billing.tokenFormulaLabel}</span>
               <strong>{billingTokenText}</strong>
             </div>
