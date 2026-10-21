@@ -1799,6 +1799,8 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
+  // These verify command completion/evidence, not a three-second cold-start budget.
+  // Await the native result within the existing 15-second test timeout.
   it('preserves visible custom command messages without inventing a model turn', async () => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
@@ -1807,10 +1809,7 @@ describe('Pi RPC Provider', () => {
         runId: 'command-status', prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
       })
-      let terminal = false
-      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
       try {
-        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
         expect(await handle.promise).toMatchObject({ status: 'completed' })
         expect(events.some((event) => event.kind === 'model')).toBe(false)
         expect(events.find((event) => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
@@ -1830,10 +1829,7 @@ describe('Pi RPC Provider', () => {
         runId: 'menu-error', prompt: '/fixture-menu error', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
       })
-      let terminal = false
-      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
       try {
-        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
         expect(await handle.promise).toMatchObject({ status: 'failed' })
         expect(events.find((event) => event.stage === 'result')).toMatchObject({ isError: true, text: 'menu failed' })
       } finally {
