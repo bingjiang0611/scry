@@ -2,12 +2,13 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
-## 方案 A：按需 Provider 发现（2026-10-21，部分实现、验证未收口）
+## 方案 A：按需 Provider 发现（2026-10-21，按需层本地收口，全量验收未通过）
 
 - 在隔离分支实现 metadata/selected 协议及能力协商；定时元数据不再初始化全部 Provider，仅选中 Provider/Profile/canonical cwd 才读取能力。同上下文只合并在途查询，沿用 Provider 已有实例机制；未新增 Pi settled cache 或统一常驻池。
 - 固定三个上下文的 **adapter 入口计数**：metadata 0、两个重叠 selected 请求 1、显式 legacy 全量 3，五轮一致。注入 metadata 全量探测后回归确定性失败。这不是 CLI 进程数或 L2/L3 提速结论。
-- 132 项定向检查、类型/build、Swift 全量 53 项、iOS 真机 SDK 编译通过；完整 renderer UI 曾通过，最终构建的 A 专项通过，但默认桌面回放在输出业务结果后触发 55 秒退出期限。默认全量 unit 最后仍有一个未修改的性能夹具子进程超时；全量 collector 的 runtime-evidence 也超时。保留全部失败，不扩大超时；未完成完整 gate/propose/L2，不合入、安装或 push。
-- 仍缺少选中能力的来源时间与配置失效/重读链路，不视为完整 A。性能 owner 下一轮先补齐该链路，再在低负载下定位/复核剩余全量失败及锁内冷/热 L2；安装与真机交互仍待用户确认。范围、原始日志及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
+- 第二轮源码 `a742d62`、测试/诊断 `1588832`：补齐主机观察时间、独立发布版本、已知配置失效栅栏；旧在途数据不发布/不回填缓存，可见、focus 与成功手动重读保留用户选择，失败不复用旧成功值。底层 SDK 缓存/重载仍逐 Provider 决定，不承诺外部配置即时全部生效，不视为完整常驻 A。
+- 当前类型/build、iPhoneOS unsigned SDK 编译、完整 renderer UI、25 项缓存/失效 focused 和三指标 scoped ratchet 通过。最终全量 unit：3490 pass / 1 fail / 4 既有 opt-in skipped，Rename Electron fixture 30 秒超时；候选/基线单跑均通过，不能抹掉完整运行失败。Swift 新协议组 5 项通过，完整 package 再次命中基线已复现的 TLS leaked promise。未扩大期限，未完成完整 gate/propose/L2；不合入、安装或 push。
+- 性能 owner 下一步先在可控空闲环境复核 Rename 完整运行与独立 TLS 失败，再做相同负载锁内冷/热 L2；真机交互及安装仍未授权。范围、各轮原始失败及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
 
 ## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
 
