@@ -313,6 +313,13 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var historyRefreshError: String?
   @Published private(set) var historyStorageNotice: String?
   @Published private(set) var historyCapacityLimit = false
+  // A failed history read is remembered for a short window so leaving and
+  // re-entering a session does not re-pay a whole doomed round trip (14s on a
+  // stale host, 30s on a dead network). A host-contract failure is remembered
+  // longer than a transport failure because repeating it cannot succeed until
+  // the Mac runs current code.
+  private struct HistoryReadBackoff { let message: String; let until: Date; let attempts: Int }
+  private var historyReadBackoff: [String: HistoryReadBackoff] = [:]
   @Published private(set) var historyCacheClearing = false
   // Whether the host was actually reached on the LAST attempt. Paired != reachable:
   // a persisted grant only means we MAY reach the host; only a real successful
@@ -1215,7 +1222,17 @@ final class RemoteRunStore: ObservableObject {
       }
       @MainActor func failed(_ error: Error) {
         guard current() else { return }
+        self.recordHistoryReadBackoff(key: key, error: error)
         self.showHistoryFailure(error, cached: cached, since: requestConnectionRevision)
+      }
+      if !force, let backoff = self.historyReadBackoff[key], backoff.until > Date() {
+        // Re-entering a session whose read just failed paints the remembered
+        // reason immediately. Retrying inside the window cannot succeed and only
+        // burns connectivity the user may not have; the visible retry (force)
+        // and the background poll still bypass it.
+        self.historyRefreshError = backoff.message
+        if case .loading = self.history { self.history = .failed(backoff.message) }
+        return
       }
       do {
         #if DEBUG
@@ -1223,21 +1240,33 @@ final class RemoteRunStore: ObservableObject {
           throw NSError(domain: "ScryHistoryFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "isolated offline fixture"])
         }
         #endif
-        try await client.withHistoryConnection { [cached, persisted] reader in
-          // Preview and structured recent pages share one fresh, readonly mTLS tunnel.
+        // First screen reads ride the warm bulk lane: a fresh read-only transfer
+        // tunnel per open paid DNS + TCP + outer TLS + relay rendezvous + inner
+        // mTLS before the first byte of history, which is exactly the wait this
+        // flow cannot afford on a slow network. The complete download below may
+        // still open its own bounded tunnel; the recent window never does.
+        do {
           if !legacyFull {
             // A first-screen preview remains explicitly partial. It also gives
             // an oversized turn a readable surface before the capacity reply.
             if case .loading = self.history {
-              let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
+              let preview = try await client.historyPreview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
               guard current() else { return }
               if preview.available {
                 self.showPreview(preview, key: key, cached: false)
                 self.recordSuccess()
+                self.historyReadBackoff[key] = nil
+                do {
+                  _ = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
+                } catch {
+                  // The network answer already rendered; a mirror failure only
+                  // costs the next cold open, so it never blocks this one.
+                  if current() { self.historyStorageNotice = "首屏镜像未保存到手机缓存：\(Self.describe(error))" }
+                }
               }
             }
             do {
-              let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil, agentProfileId: agentProfileId)
+              let recent = try await client.historyTurnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil, agentProfileId: agentProfileId)
               guard current() else { return }
               self.recordSuccess()
               // Session display may legitimately mix transcript-only legacy/fork
@@ -1246,6 +1275,7 @@ final class RemoteRunStore: ObservableObject {
               if hasLocalTurns, !recent.turns.contains(where: { $0.runId != nil }) {
                 self.historyStorageNotice = "主机历史含未标识的 legacy/fork 轮次；已保留显示，无法据文本去重本机运行。"
               }
+              self.historyReadBackoff[key] = nil
               self.showHistoryWindow(recent, key: key, cached: false, fetchedAt: Date())
               do {
                 let saved = try await disk.writeWindow(recent, key: key, epoch: diskEpoch)
@@ -1265,7 +1295,7 @@ final class RemoteRunStore: ObservableObject {
             }
           }
           do {
-            let preview = try await reader.preview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
+            let preview = try await client.historyPreview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
             guard current() else { return }
             if preview.available {
               if cached == nil, cachedWindow == nil, !hasLocalTurns { self.showPreview(preview, key: key, cached: false) }
@@ -1291,7 +1321,7 @@ final class RemoteRunStore: ObservableObject {
           let started = Date()
           do {
             let snapshot = try await client.historySnapshot(providerId: providerId, cwd: cwd,
-              externalSessionId: externalSessionId, cached: cached, connection: reader, agentProfileId: agentProfileId, progress: { [weak self] received, total in
+              externalSessionId: externalSessionId, cached: cached, agentProfileId: agentProfileId, progress: { [weak self] received, total in
                 guard let self else { return }
                 await MainActor.run {
                   guard self.historyRequestGeneration == request,
@@ -1301,6 +1331,7 @@ final class RemoteRunStore: ObservableObject {
               })
             guard current() else { return }
             self.recordSuccess()
+            self.historyReadBackoff[key] = nil
             let alreadySaved = persisted && cached?.fingerprint == snapshot.fingerprint
             self.showHistory(snapshot, key: key, cached: false, persisted: alreadySaved)
             self.historySyncing = false
@@ -1325,6 +1356,18 @@ final class RemoteRunStore: ObservableObject {
 
   func loadCompleteHistory(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) {
     loadHistory(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, force: true, legacyFull: true, agentProfileId: agentProfileId)
+  }
+
+  // Transport trouble clears quickly; a host contract mismatch cannot succeed
+  // until the Mac is updated, so it is remembered for longer instead of
+  // retrying the same doomed read on every visit.
+  private func recordHistoryReadBackoff(key: String, error: Error) {
+    let attempts = min((historyReadBackoff[key]?.attempts ?? 0) + 1, 4)
+    let contractFailure = error is G0Transport.HistoryProfileError
+      || (error as? G0Transport.RunError).map { if case .host = $0 { return true }; return false } ?? false
+    let window: TimeInterval = contractFailure ? 120 : min(30, 4 * Double(attempts))
+    historyReadBackoff[key] = HistoryReadBackoff(message: Self.describe(error),
+      until: Date().addingTimeInterval(window), attempts: attempts)
   }
 
   private func showHistoryFailure(_ error: Error, cached: RemoteHistorySnapshot?, since revision: Int? = nil) {
@@ -2714,6 +2757,61 @@ final class RemoteRunStore: ObservableObject {
       !shouldContinueDrain(cursor: cursor, next: next, chunkCount: 0)
   }
 
+  #if DEBUG
+  // Opt-in FLOW probe (`-openFlowProbe`): replays the exact user loop — open a
+  // session, leave the screen, open it again — against the real persisted cache
+  // and the paired host, and prints how long until content is on screen versus
+  // how long the background refresh takes. Paint (what the user waits for) is
+  // separated from settle (network) because a slow network must never delay the
+  // repaint of history this device already verified.
+  static func runOpenFlowProbeIfRequested() {
+    guard ProcessInfo.processInfo.arguments.contains("-openFlowProbe") else { return }
+    func argumentValue(_ name: String) -> String? {
+      guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(name + "=") }) else { return nil }
+      return String(argument.dropFirst(name.count + 1))
+    }
+    Task { @MainActor in
+      guard let provider = argumentValue("-provider"), let cwd = argumentValue("-cwd"),
+            let external = argumentValue("-session") else {
+        print("OPENFLOW FAIL reason=missing-target")
+        exit(1)
+      }
+      @MainActor func describe(_ state: HistoryState) -> String {
+        switch state {
+        case .idle: return "idle"
+        case .loading: return "loading"
+        case .empty: return "empty"
+        case .baseUnavailable: return "baseUnavailable"
+        case .failed(let message): return "failed(\(message.prefix(30)))"
+        case .partial(let turns): return "partial(\(turns.count))"
+        case .loaded(let turns): return "loaded(\(turns.count))"
+        }
+      }
+      @MainActor func open(_ store: RemoteRunStore, _ label: String) async {
+        let start = Date()
+        store.loadHistory(providerId: provider, cwd: cwd, externalSessionId: external)
+        let paint = describe(store.history)
+        let paintMs = Int(Date().timeIntervalSince(start) * 1000)
+        let settleStart = Date()
+        await store.historyTask?.value
+        let settleMs = Int(Date().timeIntervalSince(settleStart) * 1000)
+        print("OPENFLOW \(label) paintMs=\(paintMs) paint=\(paint) window=\(store.historyWindow?.turns.count ?? -1)"
+          + " settleMs=\(settleMs) after=\(describe(store.history)) error=\(store.historyRefreshError ?? "-")"
+          + " notice=\(store.historyStorageNotice ?? "-") cache=\(store.historyFromCache)")
+      }
+      let store = RemoteRunStore()
+      await open(store, "cold-open")
+      await open(store, "reopen-after-back")
+      await open(store, "reopen-again")
+      // A fresh store shares only the on-disk mirror, like a relaunched app.
+      await open(RemoteRunStore(), "relaunch-open")
+      print("OPENFLOW DONE")
+      exit(0)
+    }
+    RunLoop.current.run()
+  }
+  #endif
+
   static func selfTestHistoryStore(directory: URL, snapshot: RemoteHistorySnapshot) async throws -> [(String, Bool)] {
     let suite = "ScryHistoryFixture.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -2743,8 +2841,16 @@ final class RemoteRunStore: ObservableObject {
       ("store.warmingDoesNotSwitchSession", store.activeSessionIdentity == beforeIdentity && store.prompt == nil),
       ("store.warmingUsesBoundedMirror", store.warmedScreens[key]?.available == true && ((try? JSONEncoder().encode(store.warmedScreens[key]).count) ?? Int.max) <= 16 * 1024),
       ("store.offlineKeepsDiskHistory", store.history == .loaded(snapshot.turns) && store.historyFromCache && store.reachable == false),
-      ("store.offlineUpdateErrorVisible", store.historyRefreshError != nil)
+      ("store.offlineUpdateErrorVisible", store.historyRefreshError != nil),
+      ("store.failedReadIsRemembered", store.historyReadBackoff[key]?.attempts == 1)
     ]
+    // Leaving and re-entering a session must not re-pay a read that just failed,
+    // and must not drop the verified turns it already shows.
+    store.historyTestOffline = false
+    store.loadHistory(providerId: "pi", cwd: "/fixture", externalSessionId: "session")
+    await store.historyTask?.value
+    checks.append(("store.retryInsideWindowSkipsNetwork",
+      store.historyReadBackoff[key]?.attempts == 1 && store.history == .loaded(snapshot.turns)))
     // Pending work does not prove reachability; a newer authenticated reply does.
     let transportError = NSError(domain: "ScryHistoryFixture", code: 9)
     store.reachable = true; store.connectionObservation = .reachable

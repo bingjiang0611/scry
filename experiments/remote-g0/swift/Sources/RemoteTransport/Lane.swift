@@ -54,10 +54,15 @@ public final class RelaySession: Sendable {
     try await lanes[lane]!.exchange(Self.keepAliveRequest(request, deviceLabel: deviceLabel), limit: limit, replayable: replayable)
   }
 
-  // Opens the control lane ahead of the first user action. Errors are returned
-  // to the caller; a failed prewarm is not evidence that the host is offline.
+  // Opens the lanes a first user action needs before it is taken: the control
+  // lane for commands, and the bulk lane because opening a session reads history
+  // there. Paying DNS + TCP + outer TLS + rendezvous + inner mTLS at tap time is
+  // the difference between an instant first screen and a multi-second one.
+  // Errors are returned to the caller; a failed prewarm is not evidence that the
+  // host is offline.
   public func prewarm() async throws {
     try await lanes[.control]!.prewarm()
+    try await lanes[.bulk]!.prewarm()
   }
 
   // Drops every tunnel (app backgrounded, network path changed). In-flight
@@ -248,7 +253,13 @@ final class LaneConnection: Sendable {
       } onCancel: { channel.close(promise: nil) }
       return LaneConnection(channel: channel, handler: handler)
     } catch {
-      let failure = try await channel.eventLoop.submit { tunnel.retainingCloseCause(for: error) }.get()
+      let failure = try await channel.eventLoop.submit {
+        // A lane that failed to become ready never fulfils this promise; leaving
+        // it unfulfilled makes NIO report a leaked promise (a fatal error in
+        // debug builds) instead of the real handshake failure.
+        handler.ready.fail(error)
+        return tunnel.retainingCloseCause(for: error)
+      }.get()
       channel.close(promise: nil)
       throw RelayTransportError.identifyingHandshake(failure, layer: .host)
     }
