@@ -19,6 +19,7 @@ const negativeWorkspaceControl = process.argv.includes('--negative-workspace-con
 const negativePromptControl = process.argv.includes('--negative-prompt-control')
 const negativeSettingsControl = process.argv.includes('--negative-settings-control')
 const negativeHistorySlashControl = process.argv.includes('--negative-history-slash-control')
+const negativeProviderRevisionControl = process.argv.includes('--negative-provider-revision-control')
 const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
@@ -57,7 +58,8 @@ const state = {
   catalogFailure: false, sessionActive: false, sessionTs: 1700000000000,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
-  phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0
+  phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
+  providerMetadataObservedAt: 1700000000000, providerControlsObservedAt: 1700000000000, providerMetadataRevision: 1
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
@@ -121,7 +123,7 @@ const api = {
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
       sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs } : session),
       providers: (state.hideProvider ? [beta] : catalog.providers).map(provider => state.legacyProviderHost ? provider
-        : ({ id: provider.id, label: provider.label, available: provider.available, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
+        : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
       providerDiscovery: state.legacyProviderHost ? undefined : 2,
       providerEvidence: state.legacyProviderHost ? 'legacy_host' : 'host_snapshot',
       directorySelection: state.oldDirectoryHost ? undefined : true
@@ -132,7 +134,7 @@ const api = {
     if (state.holdProviderControls) await new Promise(resolve => state.providerControlWaiters.push(resolve))
     const match = catalog.providers.find(provider => provider.id === context.providerId && (provider.agentProfileId ?? '') === (context.agentProfileId ?? ''))
     if (!match || state.providerControlsFailure === 'throw') throw new Error('fixture provider controls unavailable')
-    return structuredClone(state.providerControlsFailure === 'unavailable' ? { id: match.id, label: match.label, available: false } : match)
+    return structuredClone(state.providerControlsFailure === 'unavailable' ? { id: match.id, label: match.label, available: false } : { ...match, observedAt: state.providerControlsObservedAt })
   },
   async commands(id, context) {
     state.commandCalls.push({ id, context })
@@ -375,6 +377,41 @@ async function exercise(contents, pointer, capture, options) {
   await read('window.desktopRemoteFixture.legacyProviderHost = false')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
   await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new-host controls restored')
+  if (options.openingOnly) {
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("主机读取于")', 'selected host observation time')
+  const readLabel = await read('document.querySelector(".composer-notice span").textContent')
+  const beforeMetadataRefresh = (await fixture()).providerControlsCalls.length
+  await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeMetadataRefresh, 'same-context metadata invalidates selected controls')
+  await wait('document.querySelector(".composer-notice span")?.textContent !== ' + JSON.stringify(readLabel) + ' && !document.querySelector(".composer-notice button").disabled', 'selected observation time advances')
+  check(await read('document.querySelector(".model-effort-model")?.textContent === "Beta Default"'), 'Refresh silently changed selected model')
+  const beforeManualRefresh = (await fixture()).providerControlsCalls.length
+  await click('.composer-notice button')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeManualRefresh, 'successful controls remain explicitly refreshable')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("主机读取于") && !document.querySelector(".composer-notice button").disabled', 'manual refresh settles')
+  await click('textarea[aria-label="描述任务"]'); await insert('same-context-observation')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'known selected snapshot can send')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "throw"')
+  await click('.composer-notice button')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'failed reread discards old successful catalog')
+  check(await read(sendDisabled), 'Failed reread silently reused old controls')
+  await read('window.desktopRemoteFixture.providerControlsFailure = null')
+  await click('.composer-notice button')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'same-context retry restores valid choices')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const beforeFocus = (await fixture()).providerControlsCalls.length
+  check(await read('document.visibilityState === "visible"'), 'Focus control requires unchanged visible state')
+  await read('window.dispatchEvent(new Event("focus"))')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeFocus, 'visible window focus rereads selected controls')
+  await wait('!document.querySelector(".composer-notice button").disabled', 'focused controls settle')
+  const beforeHidden = (await fixture()).providerControlsCalls.length
+  const catalogBeforeHidden = (await fixture()).catalogCalls
+  await read('Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('window.desktopRemoteFixture.catalogCalls > ' + catalogBeforeHidden, 'hidden metadata observation')
+  check((await fixture()).providerControlsCalls.length === beforeHidden, 'Hidden composer initialized a Provider')
+  await read('delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange"))')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeHidden, 'visible composer reobserves its selected controls')
+  }
   await click('.sb-new')
   await wait('document.querySelector(".location-button") != null', 'new remote draft after stale switch')
   }
@@ -518,7 +555,7 @@ async function exercise(contents, pointer, capture, options) {
       await read(`window.desktopRemoteFixture.historyPrompts = ${JSON.stringify(prompts)}; window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()`)
       await wait('document.querySelector(".composer-notice")?.textContent.includes("未连接")', 'history refresh disconnect')
       await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
-      await wait(`window.desktopRemoteFixture.historyCalls.length > ${reads} && !document.querySelector(".composer-notice")`, 'history refresh reconnect')
+      await wait(`window.desktopRemoteFixture.historyCalls.length > ${reads} && !document.querySelector(".composer-notice:not(.is-info)")`, 'history refresh reconnect')
       await wait(`document.querySelector(".chat-transcript")?.textContent.includes(${JSON.stringify(prompts.at(-1))})`, 'updated remote history')
     }
     await refreshHistory(['older remote prompt', 'latest remote prompt', 'arrived while browsing'])
@@ -933,12 +970,12 @@ async function exercise(contents, pointer, capture, options) {
 
   await capture('remote-workspace')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.hideProvider = true')
-  await wait('document.querySelector(".composer-notice button") != null', 'offline before Provider removal')
+  await wait('document.querySelector(".composer-notice:not(.is-info) button") != null', 'offline before Provider removal')
   await click('.composer-notice button')
   await wait('document.querySelector(".clibtn")?.textContent.includes("原 Provider")', 'missing Provider is not replaced')
   check(await read(sendDisabled), 'Missing Provider allowed submission')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.hideProvider = false')
-  await wait('document.querySelector(".composer-notice button") != null', 'offline before Provider restore')
+  await wait('document.querySelector(".composer-notice:not(.is-info) button") != null', 'offline before Provider restore')
   await click('.composer-notice button')
   await wait(`!${sendDisabled}`, 'original Provider restored')
 
@@ -1027,7 +1064,7 @@ async function exercise(contents, pointer, capture, options) {
   await wait('document.querySelector(".clibtn")?.disabled === true', 'bound session context')
   check(!(await read('document.querySelector(".location-button")')), 'Bound session exposed the location picker')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.catalogRevision = 1')
-  await wait('document.querySelector(".composer-notice button") != null', 'bound session disconnect')
+  await wait('document.querySelector(".composer-notice:not(.is-info) button") != null', 'bound session disconnect')
   await click('.composer-notice button')
   await wait('document.querySelector(".sb-remote-proj .pname")?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
 
@@ -1076,7 +1113,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeHistorySlashControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeHistorySlashControl || negativeProviderRevisionControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeProviderRevisionControl && id.endsWith('/RemoteChat.tsx')) {
+        const dependency = ', provider?.metadataRevision'
+        if (!source.includes(dependency)) throw new Error('Provider metadata revision dependency not found')
+        return source.replace(dependency, '')
+      }
       if (negativeHistorySlashControl && id.endsWith('/ChatView.tsx')) {
         const guard = 'const slashOpen = slashRequested && !historyNavigation'
         if (!source.includes(guard)) throw new Error('history slash guard not found')
@@ -1141,7 +1183,7 @@ try {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
         }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
-        process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
+        process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => { console.log('SCRY_DESKTOP_REMOTE_UI_EXIT_REQUEST'); app.exit(0) })
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
@@ -1150,19 +1192,27 @@ try {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home'), SCRY_TEST_APP: '1' }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
+    const startedAt = performance.now()
+    const lifecycle = { resultAtMs: null, exitRequestAtMs: null, exitAtMs: null, closeAtMs: null }
     let cleanupTimer
     const timer = setTimeout(() => {
       failed = true
-      const failure = new Error(`DesktopRemote UI timed out (pid=${child.pid}, fixture=${temp}):\\n${output.slice(-8000)}`)
+      const failure = new Error(`DesktopRemote UI timed out (pid=${child.pid}, fixture=${temp}, lifecycle=${JSON.stringify(lifecycle)}):\\n${output.slice(-8000)}`)
       console.error(failure.message)
       cleanupTimer = stopOwnedApp(child).then(() => reject(failure), (error) => { cleanupUnknown = true; reject(new Error(`DesktopRemote cleanup unknown; fixture preserved: ${temp}`, { cause: error })) })
     // Includes three 3s background catalog transitions plus recorded/unknown/
     // dispatched run polls. Per-condition deadlines stay unchanged at 7s.
     }, 55_000)
-    child.stdout.on('data', (chunk) => { output += chunk.toString() })
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString()
+      if (lifecycle.resultAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_RESULT=')) lifecycle.resultAtMs = Math.round(performance.now() - startedAt)
+      if (lifecycle.exitRequestAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_EXIT_REQUEST')) lifecycle.exitRequestAtMs = Math.round(performance.now() - startedAt)
+    })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
+    child.once('exit', () => { lifecycle.exitAtMs = Math.round(performance.now() - startedAt) })
     child.once('error', (error) => { clearTimeout(timer); failed = true; reject(error) })
     child.once('close', (code, signal) => {
+      lifecycle.closeAtMs = Math.round(performance.now() - startedAt)
       clearTimeout(timer)
       if (cleanupTimer) return
       const result = output.match(/^SCRY_DESKTOP_REMOTE_UI_RESULT=(.+)$/m)?.[1]
