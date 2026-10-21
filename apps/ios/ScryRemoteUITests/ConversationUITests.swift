@@ -33,6 +33,51 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 10))
   }
 
+  func testGroupedSessionOmitsRepeatedProjectContext() {
+    launchHome()
+    let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "完成 iOS 工作目录选择器和附件发送")).firstMatch
+    XCTAssertTrue(row.waitForExistence(timeout: 5))
+    XCTAssertTrue(row.label.contains("CODEX"))
+    XCTAssertFalse(row.label.contains("scry"))
+  }
+
+  func testHomeRemainsOperableAtAccessibilityTextSize() {
+    app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXL",
+                           "-uiPreview", "-connected", "-uiMockData", "-route", "home"]
+    app.launch()
+    XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["新任务"].isHittable)
+    XCTAssertTrue(app.staticTexts["项目"].exists)
+  }
+
+  func testPairingParseFailureIsActionableWithCollapsedTechnicalDetail() {
+    app.launchArguments = ["-uiPreview", "-route", "pair", "-pairCode", "not-a-scry-code"]
+    app.launch()
+    XCTAssertTrue(app.staticTexts["这不是 Scry 配对码。请在 Mac 的 Scry 中重新打开“连接 iPhone”并扫描二维码。"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["badPrefix"].exists)
+    XCTAssertTrue(app.buttons["技术详情"].exists)
+    app.buttons["技术详情"].tap()
+    XCTAssertTrue(app.staticTexts["badPrefix"].waitForExistence(timeout: 5))
+  }
+
+  func testHistoryFailureExposesEvidenceDetailsFromStatusStrip() {
+    launch("transcript", extra: ["-uiMockHistoryFailure"])
+    XCTAssertTrue(app.staticTexts["历史同步失败，显示上次内容，正在重试"].waitForExistence(timeout: 5))
+    app.buttons["详情"].tap()
+    XCTAssertTrue(app.navigationBars["历史证据"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["中继连接已关闭（1009 message too big）"].exists)
+  }
+
+  func testSettingsGroupsConnectionLocalDataAndSecurity() {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "settings"]
+    app.launch()
+    XCTAssertTrue(app.staticTexts["连接"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["本地数据"].exists)
+    XCTAssertTrue(app.staticTexts["安全"].exists)
+    XCTAssertTrue(app.buttons["清除本机会话缓存"].exists)
+    XCTAssertTrue(app.buttons["清除本机配对"].exists)
+  }
+
   func testHomeManualRefreshShowsShortSuccessFeedback() {
     launchHome(extra: ["-uiRefreshFeedback"])
     XCTAssertTrue(app.buttons["刷新会话"].waitForExistence(timeout: 5))

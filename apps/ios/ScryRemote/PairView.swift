@@ -6,34 +6,35 @@ import SwiftUI
 struct PairView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @State private var technicalExpanded = false
 
   var body: some View {
     VStack(spacing: 0) {
-      RemoteHeader(title: "连接 Mac", backAction: model.canGoBack ? { model.goBack() } : nil) {
+      RemoteHeader(title: ConnectionCopy.connectMac, backAction: model.canGoBack ? { model.goBack() } : nil) {
         Color.clear.frame(width: 44, height: 44)
       }
       ScrollView {
         VStack(spacing: 0) {
           pairMark.padding(.top, 34).padding(.bottom, 25)
-          Text("让 iPhone 安全连接 Scry")
-            .font(.system(size: 25, weight: .bold)).tracking(-0.6).multilineTextAlignment(.center)
-          Text("在 Mac 的 Scry 中打开“连接 iPhone”，然后扫描一次性配对码。")
-            .font(.system(size: 14)).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+          Text(ConnectionCopy.pairHeading)
+            .font(.title.bold()).tracking(-0.6).multilineTextAlignment(.center)
+          Text(ConnectionCopy.pairLead)
+            .font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
             .padding(.top, 9).padding(.horizontal, 22)
 
           VStack(spacing: 0) {
-            step(1, "扫描 Mac 上显示的二维码")
-            step(2, "核对两端显示的设备指纹")
-            step(3, "在 Mac 上确认访问权限")
+            step(1, ConnectionCopy.pairStepScan)
+            step(2, ConnectionCopy.pairStepVerify)
+            step(3, ConnectionCopy.pairStepApprove)
           }
           .padding(.top, 26)
 
           pairingStatus.padding(.top, 18)
 
           HStack(alignment: .top, spacing: 9) {
-            Image(systemName: Symbol.shield).font(.system(size: 16)).foregroundStyle(Palette.positive)
-            Text("中继只传输端到端加密字节。设备私钥、Provider 凭据与执行都留在你的设备上。")
-              .font(.system(size: 11)).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: Symbol.shield).font(.body).foregroundStyle(Palette.positive)
+            Text(ConnectionCopy.pairTrust)
+              .font(.footnote).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
           }
           .padding(13).background(Palette.noticeBg, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
           .padding(.top, 18)
@@ -44,15 +45,11 @@ struct PairView: View {
 
       VStack(spacing: 8) {
         Button { model.pairing = .scanning } label: {
-          Label("扫描配对码", systemImage: "qrcode.viewfinder")
-            .font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 48)
+          Label(ConnectionCopy.scanPairingCode, systemImage: "qrcode.viewfinder")
+            .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(Palette.surface).background(Palette.blue, in: Capsule())
         }
         .buttonStyle(.plain)
-        if model.canGoBack {
-          Button("返回") { model.goBack() }.frame(minHeight: 44)
-            .buttonStyle(.plain).foregroundStyle(Palette.muted)
-        }
       }
       .padding(.horizontal, 20).padding(.bottom, 18)
     }
@@ -60,20 +57,21 @@ struct PairView: View {
     .fullScreenCover(isPresented: scanning) {
       ZStack(alignment: .topTrailing) {
         QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code, runStore: run) },
-                  onFailure: { message in model.pairing = .failed(message) }).ignoresSafeArea()
-        Button("取消") { model.pairing = .idle }
-          .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)
+                  onFailure: { message in model.pairing = .failed(.init(message: message)) }).ignoresSafeArea()
+        Button(ConnectionCopy.cancel) { model.pairing = .idle }
+          .font(.subheadline.weight(.semibold)).foregroundStyle(.white).padding(16)
       }
     }
+    .onChange(of: model.pairing) { technicalExpanded = false }
   }
 
   private var pairMark: some View {
     ZStack(alignment: .bottomTrailing) {
-      Image(systemName: Symbol.laptop).font(.system(size: 35, weight: .light)).foregroundStyle(Palette.ink)
+      Image(systemName: Symbol.laptop).font(.largeTitle.weight(.light)).controlIconScale().foregroundStyle(Palette.ink)
         .frame(width: 88, height: 88).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(Palette.line))
         .shadow(color: .black.opacity(0.07), radius: 18, y: 10)
-      Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundStyle(Palette.surface)
+      Image(systemName: "iphone").font(.title3.weight(.medium)).controlIconScale().foregroundStyle(Palette.surface)
         .frame(width: 40, height: 40).background(Palette.blue, in: Circle()).offset(x: 8, y: 8)
     }
   }
@@ -87,13 +85,13 @@ struct PairView: View {
     case .idle, .scanning:
       EmptyView()
     case .proving:
-      statusCard("正在验证设备密钥…", tint: Palette.blue, progress: true)
+      statusCard(ConnectionCopy.pairingProving, tint: Palette.blue, progress: true)
     case let .awaitingConfirmation(fingerprint):
-      statusCard("等待 Mac 确认\n指纹 \(fingerprint.prefix(16).uppercased())…", tint: Palette.amber)
+      statusCard(ConnectionCopy.pairingAwaiting(fingerprint), tint: Palette.amber)
     case let .paired(deviceId):
-      statusCard("已配对 · 设备 \(deviceId.prefix(8))…", tint: Palette.green)
-    case let .failed(message):
-      statusCard(message, tint: Palette.negative)
+      statusCard(ConnectionCopy.pairingPaired(deviceId), tint: Palette.green)
+    case let .failed(failure):
+      failureCard(failure)
     }
   }
 
@@ -101,17 +99,36 @@ struct PairView: View {
     HStack(alignment: .top, spacing: 10) {
       if progress { ProgressView().controlSize(.small) }
       else { Circle().fill(tint).frame(width: 8, height: 8).padding(.top, 5) }
-      Text(text).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+      Text(text).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
     }
     .foregroundStyle(Palette.ink).padding(13)
     .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
   }
 
+  private func failureCard(_ failure: PairingFailure) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top, spacing: 10) {
+        Circle().fill(Palette.negative).frame(width: 8, height: 8).padding(.top, 5)
+        Text(failure.message).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+      }
+      if let detail = failure.technicalDetail {
+        DisclosureGroup(ConnectionCopy.technicalDetails, isExpanded: $technicalExpanded) {
+          Text(detail).font(.caption.monospaced()).foregroundStyle(Palette.muted)
+            .textSelection(.enabled).padding(.top, 6)
+        }
+        .font(.footnote)
+      }
+    }
+    .foregroundStyle(Palette.ink).padding(13)
+    .background(Palette.negative.opacity(0.09), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .accessibilityIdentifier("pairing-failure")
+  }
+
   private func step(_ number: Int, _ text: String) -> some View {
     HStack(spacing: 12) {
-      Text("\(number)").font(.system(size: 11, weight: .bold)).foregroundStyle(Palette.ink)
-        .frame(width: 27, height: 27).background(Palette.canvas, in: Circle())
-      Text(text).font(.system(size: 14.5)).foregroundStyle(Palette.ink)
+      Text("\(number)").font(.caption.weight(.bold)).foregroundStyle(Palette.ink)
+        .padding(7).frame(minWidth: 27, minHeight: 27).background(Palette.canvas, in: Circle())
+      Text(text).font(.body).foregroundStyle(Palette.ink)
       Spacer()
     }
     .frame(minHeight: 48)

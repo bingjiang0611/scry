@@ -53,15 +53,25 @@ struct OpenedSession: Equatable {
 
 // Honest pairing UI state. A fingerprint means the device PROVED possession and
 // is waiting for the Mac operator to confirm; it is NOT paired yet. Only a
-// host-issued grant flips to .paired. Failures surface verbatim, never as a
-// fake success.
+// host-issued grant flips to .paired. Failures keep the technical evidence for
+// disclosure without making internal codes the primary instruction.
+struct PairingFailure: Equatable {
+  let message: String
+  let technicalDetail: String?
+
+  init(message: String, technicalDetail: String? = nil) {
+    self.message = message
+    self.technicalDetail = technicalDetail
+  }
+}
+
 enum PairingUIState: Equatable {
   case idle
   case scanning
   case proving
   case awaitingConfirmation(fingerprint: String)
   case paired(deviceId: String)
-  case failed(String)
+  case failed(PairingFailure)
 }
 
 @MainActor
@@ -257,15 +267,17 @@ final class AppModel: ObservableObject {
   // the Mac operator confirms and a grant is issued. Runs the PROVEN
   // RemotePairingClient; no state is faked.
   func beginPair(scanned: String, runStore: RemoteRunStore) {
-    guard !targetCoordinator.recoveryUnavailable else { pairing = .failed(ConnectionCopy.targetRecoveryUnavailable); return }
+    guard !targetCoordinator.recoveryUnavailable else {
+      pairing = .failed(.init(message: ConnectionCopy.targetRecoveryUnavailable)); return
+    }
     guard !targetCoordinator.hasPendingWork, !runStore.hasUnsentMessages, !runStore.hasUnresolvedRun else {
-      pairing = .failed(RemoteRunStore.ConnectionReplacementError.pendingWork.localizedDescription)
+      pairing = .failed(.init(message: RemoteRunStore.ConnectionReplacementError.pendingWork.localizedDescription))
       return
     }
     pairingTask?.cancel()
     let code: PairingCode
     do { code = try PairingCode.parse(scanned) }
-    catch { pairing = .failed("配对码无法识别：\(error)"); return }
+    catch { pairing = .failed(Self.pairingCodeFailure(error)); return }
     pairing = .proving
     link = .pairing
     route = .pair // Keep the grant receipt visible when QR-only onboarding unlocks the workspace.
@@ -305,19 +317,46 @@ final class AppModel: ObservableObject {
               try await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated, runStore: runStore)
               return
             }
-            await self?.setPairing(.failed("Mac 拒绝了配对：\(reason)"))
+            await self?.setPairing(.failed(Self.pairingDeniedFailure(reason)))
             return
           case let .revoked(deviceId):
-            await self?.setPairing(.failed("该设备已被吊销：\(deviceId)"))
+            await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingRevoked,
+                                                  technicalDetail: "deviceId=\(deviceId)")))
             return
           }
         }
-        await self?.setPairing(.failed("等待 Mac 确认超时，请重试。"))
+        await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingTimeout)))
       } catch {
         if Task.isCancelled { return }
-        await self?.setPairing(.failed("配对失败：\(error)"))
+        await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingConnectionFailed,
+                                             technicalDetail: String(reflecting: error))))
       }
     }
+  }
+
+  private static func pairingCodeFailure(_ error: Error) -> PairingFailure {
+    let message: String
+    switch error as? PairingCode.ParseError {
+    case .badPrefix: message = ConnectionCopy.pairingCodeWrongApp
+    case .badBase64, .badJSON, .invalidField: message = ConnectionCopy.pairingCodeInvalid
+    case nil: message = ConnectionCopy.pairingCodeInvalid
+    }
+    return .init(message: message, technicalDetail: String(describing: error))
+  }
+
+  private static func pairingDeniedFailure(_ code: String) -> PairingFailure {
+    let message: String
+    switch code {
+    case "pairing_expired", "pairing_not_active", "unknown_pairing", "invalid_pairing_proof":
+      message = ConnectionCopy.pairingCodeExpired
+    case "device_key_already_registered":
+      message = ConnectionCopy.pairingAlreadyRegistered
+    case "pairing_candidate_changed", "device_proof_required", "channel_key_mismatch":
+      message = ConnectionCopy.pairingProofChanged
+    default:
+      message = ConnectionCopy.pairingDenied
+    }
+    return .init(message: message, technicalDetail: code)
   }
 
   private func setPairing(_ state: PairingUIState) {
