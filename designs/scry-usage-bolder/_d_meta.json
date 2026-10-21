@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry 用量 · Bolder": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-21T10:10:01.491Z",
+          "status": "needs-review",
+          "subtitle": "保留黑白灰，以成本分布和主趋势重建层级",
+          "viewport": {
+            "width": 1512,
+            "height": 1000
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-21T10:10:01.492Z",
+  "updatedAt": "2026-10-21T10:10:01.492Z"
+}
