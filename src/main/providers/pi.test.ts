@@ -1,5 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import { channel } from 'node:diagnostics_channel'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -507,14 +509,33 @@ function withRotomFixture<T>(run: (profile: ReturnType<typeof piProfileForExecut
   return withFixture(run, 'rotom')
 }
 
-const withCommandFixture = withRotomFixture
+type CommandStage = { step: string; at: number; pid?: number }
+
+async function withCommandFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string, launchStages: CommandStage[]) => Promise<T>): Promise<T> {
+  return withRotomFixture(async (profile, cwd) => {
+    const launchStages: CommandStage[] = []
+    const created = channel('child_process')
+    const observe = (message: unknown): void => {
+      const child = (message as { process: ChildProcessWithoutNullStreams }).process
+      const constructedAt = Date.now()
+      child.once('spawn', () => {
+        if (child.spawnfile !== profile.executable) return
+        launchStages.push({ step: 'process.constructed', at: constructedAt, pid: child.pid }, { step: 'spawn.ready', at: Date.now(), pid: child.pid })
+        child.stdout.once('data', () => { launchStages.push({ step: 'stdout.first', at: Date.now(), pid: child.pid }) })
+        child.once('close', () => { launchStages.push({ step: 'process.close', at: Date.now(), pid: child.pid }) })
+      })
+    }
+    created.subscribe(observe)
+    try { return await run(profile, cwd, launchStages) } finally { created.unsubscribe(observe) }
+  })
+}
 
 function commandFailureEvidence(cwd: string, terminal: boolean, events: TraceEvent[], startedAt: number,
-  recorderStages: readonly { step: string; at: number }[] = []): void {
+  recorderStages: readonly CommandStage[] = [], launchStages: readonly CommandStage[] = []): void {
   // Fixture cleanup deletes the protocol evidence. Capture it before interrupting the child.
   const commands = join(cwd, 'fixture-commands')
   console.error('PI_COMMAND_DIAGNOSTIC', JSON.stringify({ test: expect.getState().currentTestName, cwd, terminal,
-    startedAt, elapsedMs: Date.now() - startedAt, recorderStages,
+    startedAt, elapsedMs: Date.now() - startedAt, recorderStages, launchStages: launchStages.slice(-16),
     lastCommandAt: existsSync(commands) ? statSync(commands).mtimeMs : null,
     childStartedAt: existsSync(join(cwd, 'fixture-starts')) ? statSync(join(cwd, 'fixture-starts')).mtimeMs : null,
     events: events.slice(-32).map(event => ({ kind: event.kind, stage: event.stage, ts: event.ts })),
@@ -1660,13 +1681,16 @@ describe('Pi RPC Provider', () => {
   }, 15_000)
 
   it.each([false, true])('finishes a menu-only command (cancelled=%s), clears its provisional record and accepts the next turn', async (cancelled) => {
-    await withCommandFixture(async (profile, cwd) => {
+    await withCommandFixture(async (profile, cwd, launchStages) => {
       writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({
         schemaVersion: 1, enabled: true, workspaceId: 'pi-menu-fixture', dataDir: '.scry',
         repositories: { mode: 'workspace-only' },
         capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
       }))
-      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => {
+        launchStages.push({ step: 'profile.resolved', at: Date.now() })
+        return profile
+      } })
       const events: TraceEvent[] = []
       const questions: string[] = []
       const recorderStages: { step: string; at: number }[] = []
@@ -1719,7 +1743,7 @@ describe('Pi RPC Provider', () => {
         expect(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim().split('\n')).toHaveLength(1)
         expect(recorderStages.map(stage => stage.step)).toEqual(['start.enter', 'start.exit', 'cancel.enter', 'cancel.exit'])
       } catch (error) {
-        commandFailureEvidence(cwd, terminal, events, startedAt, recorderStages)
+        commandFailureEvidence(cwd, terminal, events, startedAt, recorderStages, launchStages)
         throw error
       } finally {
         try {
@@ -1777,7 +1801,7 @@ describe('Pi RPC Provider', () => {
   }, 15_000)
 
   it.each(['profile', 'prompt-response', 'idle-response'] as const)('locates a pending custom command at the controlled %s gate', async phase => {
-    await withCommandFixture(async (profile, cwd) => {
+    await withCommandFixture(async (profile, cwd, launchStages) => {
       if (phase !== 'profile') writeFileSync(join(cwd, 'status-gate'), phase)
       let release!: () => void
       const gate = new Promise<void>(resolve => { release = resolve })
@@ -1826,6 +1850,8 @@ describe('Pi RPC Provider', () => {
         // This is the original Rotom fixture: completion retains the RPC, rather than waiting for exit.
         const pid = Number(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim())
         expect(() => process.kill(pid, 0)).not.toThrow()
+        expect(launchStages.map(stage => stage.step)).toEqual(['process.constructed', 'spawn.ready', 'stdout.first'])
+        expect(launchStages.every(stage => stage.pid === pid)).toBe(true)
       } finally {
         release()
         handle.forceKill()
@@ -1834,12 +1860,16 @@ describe('Pi RPC Provider', () => {
       }
       const pid = Number(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim())
       expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+      expect(launchStages.at(-1)?.step).toBe('process.close')
     })
   }, 15_000)
 
   it('preserves visible custom command messages without inventing a model turn', async () => {
-    await withCommandFixture(async (profile, cwd) => {
-      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+    await withCommandFixture(async (profile, cwd, launchStages) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => {
+        launchStages.push({ step: 'profile.resolved', at: Date.now() })
+        return profile
+      } })
       const events: TraceEvent[] = []
       const startedAt = Date.now()
       const handle = adapter.run({
@@ -1854,7 +1884,7 @@ describe('Pi RPC Provider', () => {
         expect(events.some((event) => event.kind === 'model')).toBe(false)
         expect(events.find((event) => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
       } catch (error) {
-        commandFailureEvidence(cwd, terminal, events, startedAt)
+        commandFailureEvidence(cwd, terminal, events, startedAt, [], launchStages)
         throw error
       } finally {
         handle.forceKill()

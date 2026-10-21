@@ -107,4 +107,12 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - 最新验证：**Pi 范围 166 passed**、typecheck、build、diff check；不以本次 focused 范围冒充最新全套。原现场 16 份源证据哈希不变。证据目录 `/tmp/scry-pi-controlled.CMumpp/`；没有安装、重启现有 App 或 push。
 - 当前能证明“这条 3 秒断言覆盖多个阶段”，不能证明历史失败具体发生在哪个阶段。下一次自然失败时由维护 Agent 根据新的 `PI_COMMAND_DIAGNOSTIC` 继续定位；现在不以猜测修改 Provider 或放宽验收口径。
 
+### 进程启动边界观测（诊断，不是生产修复）
+
+- 测试通过标准 `diagnostics_channel('child_process')` 旁观原 spawn，不替换函数、argv、环境或解释器。仅匹配隔离 fixture 的 executable，记录 profile 返回、进程构造、spawn 事件、首个 stdout 和 close；构造时间在 spawn 事件后补记，缺失标记不能反推“从未构造”。输出最多保留 16 条启动标记，现有三个门控回归验证标记与 PID、退出一致。
+- 限定 6 轮、每轮只跑两个 menu 和一个 custom 用例，18 个自然样本均通过。临时在成功后导出时间线，采样结束已撤掉成功日志。该组数据主要等待在 spawn 到脚本首条记录之间，而非后续 RPC；仍未捕获原自然失败的对应时间线。
+- 另在临时目录、相同隔离环境中，仅发送 get_state，比较完整/最小假脚本和 shebang/直接 Node 两种启动方式。入口前 stderr 标记、文件 mtime 和 Node 自身 nodeTiming/uptime 将“进入 JS 之前”与“首个文件写入”分开。测量串行且经过 timing-run 锁，全部为 highLoad；数值只用于这次故障阶段诊断，不作为可信性能基线、提升结论或修改启动器的依据。
+- 自有合成进程的 sample 只捕获到 env/dyld 起步及同步通知等待，并有跨 exec 的采样警告；采样本身可能扰动加载，不用它认定系统 bug 或历史超时根因。没有检查/停止其他用户进程。
+- 最新 Pi 相关 **166 passed**，typecheck、build、diff check；生产 pi.ts 与原 3 秒/15 秒断言未改，不重复整套。证据 `/tmp/scry-pi-launch-trace.pLUO3F/`，旧现场源文件哈希保持不变；无真实 Provider 调用、push、安装或现有 App 重启。
+
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。
