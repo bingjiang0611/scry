@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { vi } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 import { piProfileForExecutable, type PiAgentProfile } from '../pi-agent-profiles'
 import * as locate from '../claude-locate'
 
@@ -106,10 +106,16 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   const environment = vi.spyOn(locate, 'shellEnv').mockReturnValue({
     PATH: dirname(process.execPath), HOME: cwd, PI_AGENT_NODE: process.execPath
   })
-  try {
-    await run(piProfileForExecutable(executable), cwd, () => readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string))
-  } finally {
-    environment.mockRestore()
-    rmSync(cwd, { recursive: true, force: true })
-  }
+  const work = (async () => {
+    try {
+      await run(piProfileForExecutable(executable), cwd, () => readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string))
+    } finally {
+      environment.mockRestore()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })()
+  // A runner timeout does not cancel the async body. Keep its finalizer owned
+  // until complete, before another test installs a shellEnv spy.
+  onTestFinished(() => work)
+  await work
 }

@@ -2,6 +2,21 @@
 
 状态：独立分支 `feat/workflow-m0` 中的实验实现。已有指定账号/模型的真实完成与停止证据，但仍有故障现场 unknown / pending，不代表完整 M0、v10 或 M5 产品验收已交付。最新范围与逐构建证据见 [真实 Provider 验收记录](m0-real-acceptance.md)。
 
+## 当前收口快照
+
+以下是本分支当前本地验证，不是完整产品或发布验收：
+
+| 范围 | 当前结果与边界 |
+| --- | --- |
+| Workflow 核心 | 9 文件 **64 passed**；离线执行、预算、持久化、审批、未知保留与不重放合同 |
+| 隔离 Workflow UI | 通过；真实键鼠输入、焦点保留、权限点击、停止与 rehydrate 不重放；隐藏窗口与假 bridge，不等于完整 App 前台验收 |
+| Pi adapter 与 lifecycle | 默认文件并行 **6 文件 / 174 passed**；本地假 CLI，不是新一轮真实账号验收 |
+| 共享 probe counter 调用方 | **1 passed**，保留 5 次原 workload、四个应答及 graceful exit；不宣称性能提升 |
+| 真实 Pi/Codex | 既有冻结构建证据仍有效，但不代表当前所有新增代码已做真实探针；详见真实验收文档 |
+| 尚未覆盖 | 完整 App 前台、人类操作验收与五 Provider 真实矩阵；完整全仓 CI 本轮未重跑 |
+
+最新证据：`/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
+
 ## 已接入的路径
 
 - 本地经典聊天和统一对话：`/scry-workflow run <目标>`；工作流按钮可独立创建目标。远程聊天未开放此入口。
@@ -124,6 +139,16 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - 负对照：恢复“先开始 3 秒等待再等就绪”被回归抓住；临时将整项上限缩短至 100 ms，runner 在原生启动阶段触发失败，清理仍完成。均已还原；最终没有 100 ms 上限或跳过 ready 等待的注入。它们证明计时保护的敏感性，不证明历史自然失败根因。
 - 当前版本相关 **13 passed**（含三门、四个命令场景及新增回归）、typecheck、build、diff check 通过。首次接线发现 `it.each` 不提供 TestContext，改用已安装 Vitest 的 `it.for`，并按其 API 将仍为 15 秒的 options 放在第二参数；保留该轮失败日志。
 - 较大验证未通过：Pi 五文件轮次在未修改的 lifecycle 路径出现 **17 项超时**，命令 300 秒截止，没有完整汇总；当时机器 load 约 120/10 核，不据此单独认定原因。按 helper 实际调用方缩到 35 项后为 **32 passed / 3 failed**：managed fork fence 5 秒、questionnaire/custom-preview 15 秒、受控 idle checkpoint 3 秒。最后一项按本次新口径拆分并在上述 13 项中验证；前两项路径和期限未改，仍未解决。没有用重复整套或扩大期限抹掉失败，低负载下的较大范围确认由维护 Agent 后续补做。
-- 证据 `/tmp/scry-pi-stage-contract.qoQX7W/`。旧现场 16 个源文件哈希不变，没有遗留 Pi fixture 进程；无真实模型调用、push、安装或现有 App 重启。原始间歇故障仍未定因，不能把本次验收口径调整说成已修复生产故障。
+- 证据 `/tmp/scry-pi-stage-contract.qoQX7W/`。旧现场 16 个源文件哈希不变，当时未发现 command-fixture 前缀的存活进程（未覆盖其他 fixture 前缀）；无真实模型调用、push、安装或现有 App 重启。原始间歇故障仍未定因，不能把本次验收口径调整说成已修复生产故障。
+
+### M0 收口与 probe fixture 清理修复
+
+- 先单独补查 managed fork fence 与 questionnaire/custom-preview，两项通过；当时仍是高负载，不将其称为低负载确认。随后仅一轮串行 Pi 五文件完整收集为 **156 passed / 16 failed**，失败集中于 lifecycle；`pi.test.ts` 的 122 项全部通过。首次结果保留 `pi-serial.log`，不是把重跑当成首次成功。
+- 发现并独立复现一个测试隔离缺陷：Vitest 超时不会取消原异步 body；旧 `withProbeFixture` 的 finally 晚到时，会恢复下一项刚安装的 `shellEnv` spy。新增顺序回归的第一项用 `it.fails` 故意触发 50 ms runner timeout，不替换或弱化任何旧测试；第二项确认原因确为该 timeout、原精确 PID 已退出、原临时目录已移除，而且自身 mock 未被旧清理破坏。旧实现 **1 passed / 1 failed**，修复后 **2 passed**。
+- 修复只把 callback 与既有 finally 绑定为同一个 Promise，交给公共 `onTestFinished` 等待；没有增加启动工作、重试、sleep、Provider 生产逻辑或测试期限。没有把“延长操作成功预算”当成清理等待。fixture 另一个 probe-counter 调用方也通过。沿用 Vitest 既有 hook 上限；这不是任意 callback 的强制取消能力。若 cleanup hook 本身超时，仍应失败并保留现场，必要时升级为每项进程隔离，不再增大期限。
+- 修复后 lifecycle + 新回归 **25 passed**；默认文件并行 Pi 六文件 **174 passed**。Workflow **64 passed**、隔离 UI smoke、typecheck、build、diff check 均通过。UI 输出 `nativeInput/focusRetained/rehydratedWithoutReplay=true, visible=false`；新的截图存入证据目录，原同名历史截图已恢复。
+- 这是可证明的 fixture 清理污染修复，不能认定历史 custom-message、最初 lifecycle timeout 或上述 16 项自然失败全由它引起。高负载仍可能影响启动 deadline；没有据前后耗时宣称性能改善，也没有重跑全仓 CI。
+- 本轮扩大进程检查前缀后发现两条更早的孤立假 CLI：PID 2284（20:57:53）与 10229（20:23:11），都早于本轮 20:59 开始，无法核实原登记归属，未停止。前节“无遗留”的旧检查仅覆盖 command-fixture，不能解释为全机没有测试遗留；本轮回归另行确认了自身精确 PID 退出。
+- 证据 `/tmp/scry-m0-closeout.sfrQzy/`；当前验收范围见顶部快照。没有真实模型调用、安装或现有 App 重启；完整前台与五 Provider 真验收需另行安排。
 
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。历史门禁结果不等于上述剩余范围已交付，当前范围以上述分项结果为准。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。
