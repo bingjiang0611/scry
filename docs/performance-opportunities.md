@@ -10,11 +10,11 @@
 - 性能级别：L1 代码路径/读取次数推导；本轮未做高负载下毫秒结论，也没有 L3 日常收益结论。减少的工作是 complete archive 的第二次读取，未移到后台、未缓存过期证据、未改变 workload。
 - 限制与下一步：partial/legacy archive 仍可能读取完整源；需在并行工作冻结且机器负载正常时，以现有 history-opening native fixture 记录 archive read count 与点击→首个可用历史分段，再决定是否继续改动。`performance:measure --scenario navigation.catalog` 仍因无匹配 collector 不作为本轮证据。
 
-## Mac UI 流畅性首轮（2026-10-21，源码已验证、安装受阻）
+## Mac UI 流畅性首轮（2026-10-21，源码已验证；首轮安装门禁受阻）
 
 - 固定 277 会话原生 UI fixture：切换行执行 **555 → 2**，hover **280 → 5**；20 次流式更新仍不重绘 Sidebar。存档 277 行两次渲染的新建日期格式化器 **554 → 0**（复用模块实例）。均为 **L1**，不等于用户日常端到端耗时下降。
 - 保留视觉与交互；取消 hover owner 的列表级 context 广播，memo 隔离无关行；减少动态效果时真正禁用 transition。完整 renderer UI、typecheck、build 通过。
-- 两轮安装门禁的 unit 分别有 1/13 个失败（高负载下后端超时、清理失败及一个 Codex fixture SIGABRT）；未绕过门禁，未安装、未替换用户实例。修改隔离在分支，不混入主工作区并行 WIP。
+- 两轮安装门禁的 unit 分别有 1/13 个失败（高负载下后端超时、清理失败及一个 Codex fixture SIGABRT）；未绕过门禁，未安装、未替换用户实例。修改隔离在分支，不混入主工作区并行 WIP。已安装 0.2.215 与当时源码 0.2.214 的版本差异本身不是阻碍；安装策略要求从已提交源码构建，后续恢复已确认 repair commit 已在提交树中。
 - 下一优先：集成 owner 在并行工作冻结、负载正常后重验安装；性能 owner 单独测历史打开与 Provider 能力加载，现有等待不能靠动画修复。iPhone 留待真机轮次。
 - 固定负载、负对照、首次失败和限制见 [实验记录](performance-experiments/20261021-desktop-ui-fluidity.md)。
 
