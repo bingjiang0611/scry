@@ -13,8 +13,11 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
+import { providerIdForAgentId } from '../shared/runtime'
+import type { DetectedAgent } from './claude-locate'
 
 export interface PiAgentProfile {
   id: string
@@ -28,6 +31,20 @@ const validProfile = (value: unknown): value is PiAgentProfile => {
   return typeof profile.id === 'string' && /^pi:[a-f0-9]{16}$/.test(profile.id) &&
     typeof profile.label === 'string' && profile.label.length > 0 && profile.label.length <= 120 &&
     typeof profile.executable === 'string' && profile.executable.startsWith('/') && profile.executable.length <= 4_096
+}
+
+// Picker equivalence uses canonical launchers, not labels or versions. Keep IDs intact:
+// historical sessions still resolve their saved profile independently of discovery.
+export async function canonicalizePiAgentPaths(agents: DetectedAgent[]): Promise<DetectedAgent[]> {
+  return Promise.all(agents.map(async (agent) => {
+    if (providerIdForAgentId(agent.id) !== 'pi') return agent
+    try {
+      return { ...agent, path: await realpath(agent.path) }
+    } catch {
+      // Discovery can race with an uninstall. Preserve the entry and its health evidence.
+      return agent
+    }
+  }))
 }
 
 // Session history persists profile IDs, so profiles sharing a launcher remain distinct.

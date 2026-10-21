@@ -1,8 +1,8 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles } from './pi-agent-profiles'
+import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles } from './pi-agent-profiles'
 
 describe('Pi Agent Profile store', () => {
   it('uses the canonical executable path as stable identity and persists profiles', () => {
@@ -40,6 +40,40 @@ describe('Pi Agent Profile store', () => {
 })
 
 describe('Pi profile discovery identity', () => {
+  it('canonicalizes Pi launchers without losing built-in or saved history IDs', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-alias-'))
+    try {
+      const executable = join(dir, 'default.sh')
+      const launcher = join(dir, 'rotom')
+      writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+      symlinkSync(executable, launcher)
+      const store = createPiAgentProfileStore(dir)
+      const saved = store.add(piProfileForExecutable(launcher))
+      const detected = { id: 'pi:rotom', name: 'Rotom', bin: 'rotom', path: launcher }
+      const claude = { id: 'claude', name: 'Claude', bin: 'claude', path: launcher }
+      const agents = await canonicalizePiAgentPaths([detected, claude])
+
+      expect(agents[0]).toEqual({ ...detected, path: realpathSync(executable) })
+      expect(agents[0].path).toBe(saved.executable)
+      expect(agents[1]).toBe(claude)
+      expect(undetectedPiProfiles(store.load(), agents)).toEqual([saved])
+      expect(store.resolve(saved.id)).toEqual(saved)
+      expect(detected.path).toBe(launcher)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves discovery evidence when a launcher disappears before canonicalization', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-missing-'))
+    try {
+      const agent = { id: 'pi:rotom', name: 'Rotom', bin: 'rotom', path: join(dir, 'missing') }
+      expect(await canonicalizePiAgentPaths([agent])).toEqual([agent])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('retains a saved historical profile when Rotom is detected under its built-in ID', () => {
     const saved = { id: 'pi:564f7a994e4e34da', label: 'Pi · Rotom', executable: '/bin/rotom' }
     expect(undetectedPiProfiles([saved], [{ id: 'pi:rotom' }])).toEqual([saved])

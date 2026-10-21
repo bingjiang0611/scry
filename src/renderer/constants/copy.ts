@@ -1,3 +1,11 @@
+export const PI_PICKER_COPY = {
+  nativePi: '原生 Pi',
+  detail: (detected: boolean, version?: string) =>
+    `${detected ? '系统检测' : '自定义 Profile'} · ${version ?? '版本未知'}`,
+  removeTitle: '从 Scry 移除；不会删除启动器文件',
+  removeLabel: (name: string) => `移除 Pi Profile：${name}`
+} as const
+
 export const TURN_DIFF_REVIEW_COPY = {
   turnTitle: '本轮改动',
   sessionTitle: '本会话净改动',
