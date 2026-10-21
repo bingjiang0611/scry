@@ -1,6 +1,6 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
@@ -123,7 +123,7 @@ export const Sidebar = memo(function Sidebar({
   onArchivedRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
 }) {
   const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)
-  const openSessionMenu = (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta): void => {
+  const openSessionMenu = useCallback((event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta): void => {
     event.preventDefault()
     setProjectMenu(null)
     const rect = event.currentTarget.getBoundingClientRect()
@@ -133,7 +133,7 @@ export const Sidebar = memo(function Sidebar({
       left: Math.max(8, Math.min(context ? event.clientX : rect.left, window.innerWidth - 208)),
       top: Math.max(8, Math.min(context ? event.clientY : rect.bottom, window.innerHeight - 64))
     })
-  }
+  }, [])
   const [q, setQ] = useState('')
   const [view, setView] = useState<'projects' | 'activity'>('projects')
   const remoteGroups = useRemoteProjectGroups(q)
@@ -318,6 +318,7 @@ export const Sidebar = memo(function Sidebar({
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
               onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />
             : <SessionRow cwd={entry.project.cwd} projectName={entry.project.name} session={entry.session} draftStore={draftStore}
+              relativeTime={relTime(entry.session.mtime)}
               active={isActive(entry.project.cwd, entry.session)}
               running={Boolean(entry.session.runId && runningRunIds.has(entry.session.runId))}
               waitingForAnswer={Boolean(entry.session.runId && waitingQuestionRunIds.has(entry.session.runId))}
@@ -339,6 +340,7 @@ export const Sidebar = memo(function Sidebar({
                 return <SessionRow
                   key={sessionKey(cwd, session)}
                   session={session}
+                  relativeTime={relTime(session.mtime)}
                   draftStore={draftStore}
                   cwd={cwd}
                   projectName={name}
@@ -432,6 +434,7 @@ export const Sidebar = memo(function Sidebar({
                     <SessionRow
                       key={sessionKey(p.cwd, s)}
                       session={s}
+                      relativeTime={relTime(s.mtime)}
                       draftStore={draftStore}
                       cwd={p.cwd}
                       projectName={p.name}
@@ -612,7 +615,7 @@ function ProjectDialog({
 }
 
 // 行是 wrapper + 内部 button：会话按钮里不能再嵌按钮，操作区必须是它的兄弟节点。
-function SessionRow({
+const SessionRow = memo(function SessionRow({
   session,
   cwd,
   projectName,
@@ -629,6 +632,8 @@ function SessionRow({
   onMenu
 }: {
   session: SessionMeta
+  // Invalidate memo on parent refreshes; local hover/focus renders also refresh the age below.
+  relativeTime: string
   cwd: string
   projectName?: string
   showProjectName?: boolean
@@ -722,4 +727,4 @@ function SessionRow({
       </span>
     </div>
   )
-}
+})

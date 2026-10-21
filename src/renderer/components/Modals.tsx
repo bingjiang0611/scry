@@ -244,16 +244,17 @@ export function SettingsModal({
   )
 }
 
+const archivedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+})
 const archivedAtLabel = (ms?: number): string =>
   ms == null
     ? '存档时间未知'
-    : `存档于 ${new Intl.DateTimeFormat('zh-CN', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }).format(new Date(ms))}`
+    : `存档于 ${archivedAtFormatter.format(new Date(ms))}`
 
 const DELETE_FAILURE_LABEL: Record<NonNullable<DeleteArchivedSessionsResult['failures'][number]['reason']>, string> = {
   invalid_request: '缺少 Provider 会话 id，无法删除',

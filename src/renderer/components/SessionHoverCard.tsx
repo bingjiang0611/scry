@@ -12,11 +12,25 @@ const providerNames = {
 
 // Focus and pointer hover may belong to different rows. Ownership is shared so
 // stale leave timers or a still-focused row can never render a second card.
-const HoverOwner = createContext<{ id: string | null; claim: (id: string) => void } | null>(null)
+type HoverClaim = { id: string; dismiss: () => void }
+const HoverOwner = createContext<{
+  claim: (next: HoverClaim) => void
+  release: (id: string) => void
+} | null>(null)
 
 export function SessionHoverProvider({ children }: { children: ReactNode }) {
-  const [id, claim] = useState<string | null>(null)
-  const value = useMemo(() => ({ id, claim }), [id])
+  const current = useRef<HoverClaim | null>(null)
+  // Ownership is coordination, not list state. Only the previous card needs to close.
+  const value = useMemo(() => ({
+    claim(next: HoverClaim) {
+      const previous = current.current
+      current.current = next
+      if (previous?.id !== next.id) previous?.dismiss()
+    },
+    release(id: string) {
+      if (current.current?.id === id) current.current = null
+    }
+  }), [])
   return <HoverOwner.Provider value={value}>{children}</HoverOwner.Provider>
 }
 
@@ -28,7 +42,7 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const frame = useRef<number>()
   const [visible, setOpen] = useState(false)
-  const open = visible && owner?.id === id
+  const open = visible && owner !== null
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const clear = (): void => {
     clearTimeout(timer.current)
@@ -39,21 +53,22 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   const enter = (): void => {
     clear()
     setOpen(false)
-    owner?.claim(id)
+    owner?.claim({ id, dismiss })
     timer.current = setTimeout(show, 350)
   }
   const leave = (): void => { clear(); timer.current = setTimeout(() => setOpen(false), 120) }
   const focus = (): void => {
     clear()
     setOpen(false)
-    owner?.claim(id)
+    owner?.claim({ id, dismiss })
     // Let the browser scroll a keyboard-focused row into view before opening.
     frame.current = requestAnimationFrame(show)
   }
   useEffect(() => () => {
     clearTimeout(timer.current)
     if (frame.current !== undefined) cancelAnimationFrame(frame.current)
-  }, [])
+    owner?.release(id)
+  }, [owner, id])
   useBrowserLayoutEffect(() => {
     if (!open || !anchor.current || !card.current) return
     const row = anchor.current.getBoundingClientRect()
