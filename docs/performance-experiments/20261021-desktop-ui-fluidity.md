@@ -71,6 +71,18 @@
 ### 结论与限制
 
 这是 **L1** 读取次数优化，不作高负载毫秒或 L3 日常提速结论。减少的工作是 complete archive 的第二次源读取，不是后台搬移或不诚实缓存。高负载下未做毫秒比较；partial/legacy archive 仍可能需要完整读取。版本与安装策略是 committed-main-only：版本号只用于生成新安装包，不能用磁盘上的 App 版本反推源码内容；本次目标是从当前已提交树生成 0.2.216，再由标准安装器验证。
+## 0.2.216 发布验证续跑（2026-10-21）
+
+源码冻结在 `a868251`，不混入 main 工作区 WIP。CLI gate 首次 587/588 通过，受控 Git 快照返回 deadline；隔离同一用例通过后，完整 gate 588/588 通过，CLI package smoke 通过。随后标准 `install:mac:dev` 的 typecheck、App unit **3463 通过 / 4 opt-in skipped**、shell、App/CLI build、签名完成。旧失败不被这次通过抹去。
+
+当前阻碍已不是单元测试：`check:packaged-app` 的私有 CLI 启动收到 SIGKILL；深度签名验证通过。字节一致的 `ditto` 诊断副本曾通过私有 CLI 和完整隔离 App smoke，但构建目录版本的 packaged GUI 启动仍收到 SIGKILL，流水线因此没有执行安装。再次在独立临时 worktree 检查同一字节产物时，私有 CLI 也收到 SIGKILL。不能把一次换目录成功当作整个包稳定或门禁通过。
+
+- 对照：现有 `/Applications/Scry.app` 0.2.215 的私有 CLI 和同一隔离 App smoke 均通过；没有操作用户正在运行的实例。
+- 产物一致性：457 项文件/目录/符号链接清单一致，摘要 `cc14e219dd80bb0ea4989ba7043d70a88e776816a5703d580d5a2ce57afd7497`，见 `/tmp/scry-ui-fluidity-artifact-identity.json`。未改签名、未删除安全属性、未关闭防护、未扩大 timeout，也未安装诊断副本。
+- 系统日志未确定 SIGKILL 发送者或根因。仓库 0.2.196 实验曾记录类似 provenance/启动异常，只能作为线索，不能代替本次根因证明。
+- 证据：`/tmp/scry-ui-fluidity-treehouse-cli-release-final.log`、`/tmp/scry-ui-fluidity-treehouse-install-final.log`、`/tmp/scry-ui-fluidity-treehouse-smoke-final.log`、`/tmp/scry-ui-fluidity-installed-control.log`、`/tmp/scry-ui-fluidity-copied-app-control.log`、`/tmp/scry-ui-fluidity-fresh-package.log`。源码 Treehouse、拒绝启动的原包、诊断副本与临时验证 worktree 保留；失败 fixture 的 descendant cleanup 曾报告 unknown，不删其现场。
+- **未安装**：磁盘 App 仍 0.2.215。本轮发布/系统诊断 owner 下一步应定位路径相关的包启动终止，再验证尚未完成的 packaged smoke 和原安装器；不重复已通过的完整测试碰运气，不以单次副本成功绕过发布验证。
+
 ## 尚未解决与下一步
 
 只读日常日志先快照再分析。build `59f234869922131601d6ecf860bcedc94cb35f56173e093f884101e60b68b1fe`、0.2.214、3697 条、一个尚未关闭会话，仅为 provisional 线索：历史加载 IPC 34 样本 p50 401.5ms / p95 2341.3ms；Pi 能力探测存在约 12–25 秒等待。这不能用本次减少行渲染的计数宣称已解决。
