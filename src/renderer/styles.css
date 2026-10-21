@@ -4602,11 +4602,14 @@ button.turn-call-group:focus-visible {
 .modal-overlay:has(.image-lightbox) {
   padding: 16px;
 }
+/* 预览本身是「检查证据」的表面：工具条给出图片身份，图片带边框浮在背板上，缩放盘单独一条。
+   顶部 40px 内边距是几何保险：macOS 窗口标题栏前 52px 是拖拽带，关闭按钮不能落在里面。 */
 .image-lightbox.modal {
-  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(1200px, calc(100vw - 32px));
   height: calc(100dvh - 32px);
-  padding: 52px 0 58px;
+  padding: 40px 0 0;
   max-width: none;
   max-height: none;
   overflow: hidden;
@@ -4614,6 +4617,51 @@ button.turn-call-group:focus-visible {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+.image-lightbox-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+}
+.image-lightbox-name {
+  min-width: 0;
+  max-width: min(70%, 640px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 12px/1.4 var(--font-ui);
+  color: var(--fg);
+}
+.image-lightbox-dims {
+  flex: none;
+  color: var(--dim2);
+  font: 500 var(--text-compact-size)/1 var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.image-lightbox-close {
+  position: absolute;
+  top: 7px;
+  right: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border2);
+  background: var(--panel2);
+  color: var(--dim);
+  cursor: pointer;
+}
+.image-lightbox-close:hover {
+  border-color: var(--dim2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+.image-lightbox-close:not(:disabled):active {
+  transform: scale(0.96);
 }
 .image-lightbox-stage {
   width: 100%;
@@ -4631,62 +4679,47 @@ button.turn-call-group:focus-visible {
   max-width: none;
   max-height: none;
   object-fit: contain;
+  border-radius: var(--r-lg);
+  outline: 1px solid var(--image-outline);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
 }
-.image-lightbox-close,
+.image-lightbox-zoom {
+  justify-self: center;
+  display: grid;
+  grid-template-columns: 34px 64px 34px;
+  align-items: center;
+  height: 34px;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-pill);
+  background: var(--panel2);
+  color: var(--dim);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
 .image-lightbox-zoom button {
   display: inline-grid;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: #17191d;
-  background: rgba(255, 255, 255, 0.94);
-  cursor: pointer;
-}
-.image-lightbox-close {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  right: 0;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-}
-.image-lightbox-close .ico,
-.image-lightbox-zoom .ico {
-  width: 18px;
-  height: 18px;
-}
-.image-lightbox-zoom {
-  position: absolute;
-  z-index: 1;
-  left: 50%;
-  bottom: 0;
-  display: grid;
-  grid-template-columns: 42px 68px 42px;
-  align-items: center;
-  transform: translateX(-50%);
-  overflow: hidden;
-  border-radius: 24px;
-  color: #17191d;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
-}
-.image-lightbox-zoom button {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   border: 0;
   background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.image-lightbox-zoom button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--fg);
 }
 .image-lightbox-zoom button:disabled {
   opacity: 0.35;
   cursor: default;
 }
-.image-lightbox-zoom span {
-  text-align: center;
-  font: 600 12px/1 var(--font-mono);
-}
-.image-lightbox-close:not(:disabled):active,
-.image-lightbox-zoom button:not(:disabled):active {
-  transform: scale(0.96);
+.image-lightbox-zoom .image-lightbox-reset {
+  width: 100%;
+  font: 600 var(--text-compact-size)/1 var(--font-mono);
+  letter-spacing: 0.02em;
 }
 .who {
   display: flex;
@@ -11541,6 +11574,14 @@ button.turn-id.turn-call-open:focus-visible {
 :root[data-platform='macos'] .surface-topbar textarea,
 :root[data-platform='macos'] .surface-topbar a,
 :root[data-platform='macos'] .surface-topbar [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+/* 覆盖整个窗口的弹层画在窗口拖拽带之上，但拖拽带仍然吞掉原生鼠标命中：
+   不加 no-drag，落在标题栏 52px 内的点击变成拖动窗口，弹层里的按钮收不到 click。 */
+:root[data-platform='macos'] .modal-overlay,
+:root[data-platform='macos'] .workspace-dialog-backdrop,
+:root[data-platform='macos'] .ctx-overlay {
   -webkit-app-region: no-drag;
 }
 

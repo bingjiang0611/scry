@@ -23,6 +23,7 @@ import {
   type RunTerminationReason
 } from '@shared/runtime'
 import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionDialog'
+import { IMAGE_PREVIEW_COPY } from '../constants/copy'
 import { ModalFrame } from './Modals'
 import {
   aggregateCalls,
@@ -96,6 +97,8 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
   const stageRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null)
+  // 像素尺寸只在图片真正解码后出现：attachment 元数据不保证带尺寸，缺证据就不显示数字。
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
   useEffect(() => {
     const stage = stageRef.current
     const image = imageRef.current
@@ -104,6 +107,11 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
       if (!image.naturalWidth || !image.naturalHeight) return
       const ratio = Math.min(1, stage.clientWidth / image.naturalWidth, stage.clientHeight / image.naturalHeight)
       setFit({ width: image.naturalWidth * ratio, height: image.naturalHeight * ratio })
+      setNatural((prev) =>
+        prev && prev.width === image.naturalWidth && prev.height === image.naturalHeight
+          ? prev
+          : { width: image.naturalWidth, height: image.naturalHeight }
+      )
     }
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
@@ -119,10 +127,16 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
   return createPortal(
     <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} className="image-lightbox" onClose={onClose}>
       <h2 id={titleId} className="visually-hidden">{attachment.name}</h2>
-      <button ref={closeRef} type="button" className="image-lightbox-close" onClick={onClose} aria-label="关闭图片预览">
-        <Icon name="x" />
-      </button>
-      <div ref={stageRef} className="image-lightbox-stage" tabIndex={0} aria-label="图片内容，可滚动查看">
+      <div className="image-lightbox-bar">
+        <span className="image-lightbox-name" title={attachment.name}>{attachment.name}</span>
+        {natural && (
+          <span className="image-lightbox-dims">{IMAGE_PREVIEW_COPY.dimensions(natural.width, natural.height)}</span>
+        )}
+        <button ref={closeRef} type="button" className="image-lightbox-close" onClick={onClose} aria-label={IMAGE_PREVIEW_COPY.close}>
+          <Icon name="x" />
+        </button>
+      </div>
+      <div ref={stageRef} className="image-lightbox-stage" tabIndex={0} aria-label={IMAGE_PREVIEW_COPY.stage}>
         <img
           ref={imageRef}
           src={attachmentSrc(attachment)}
@@ -131,12 +145,19 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
           style={{ width: fit ? fit.width * zoom : undefined, height: fit ? fit.height * zoom : undefined, visibility: fit ? 'visible' : 'hidden' }}
         />
       </div>
-      <div className="image-lightbox-zoom" aria-label="图片缩放（相对于适应窗口）">
-        <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))} disabled={zoom <= 0.5} aria-label="缩小图片">
+      <div className="image-lightbox-zoom" role="group" aria-label={IMAGE_PREVIEW_COPY.zoomGroup}>
+        <button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))} disabled={zoom <= 0.5} aria-label={IMAGE_PREVIEW_COPY.zoomOut}>
           <Icon name="minus" />
         </button>
-        <span>{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.25))} disabled={zoom >= 2} aria-label="放大图片">
+        <button
+          type="button"
+          className="image-lightbox-reset"
+          onClick={() => setZoom(1)}
+          aria-label={IMAGE_PREVIEW_COPY.resetZoom(Math.round(zoom * 100))}
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.25))} disabled={zoom >= 2} aria-label={IMAGE_PREVIEW_COPY.zoomIn}>
           <Icon name="plus" />
         </button>
       </div>
