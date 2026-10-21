@@ -2,6 +2,14 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## Mac UI 流畅性续轮（2026-10-22，Pi 历史打开重复归档读取）
+
+- 固定调用链复核确认：Pi 历史打开先用 `readTraceArchivePageAsync` 读取最近页；若同时存在 Pi 原生历史，随后无条件再次 `readTraceArchiveAsync` 以做 ID 对账。最近页已是 complete（`hasOlder=false`）时，这次完整读取是重复工作；超过 40 轮的 partial 页仍必须完整读取，不能把分页证据当成全量证据。
+- 最小修复：native-history 对账复用已证明 complete 的首个 archive page；partial 页保留权威完整读取。不会改变 native/Scry ID 对账、cwd/provider/session 栅栏、附件 hydration 或错误状态。
+- 证据：`src/main/session-history.test.ts` 新增 callback 负对照，complete page 不调用 full-read，partial page 调用一次；31 项通过。Pi 原生历史隔离 Electron 验收通过，验证 41 轮分页、archive reconciliation、无 Provider 执行。`npm run typecheck` 与 `npm run build` 通过。
+- 性能级别：L1 代码路径/读取次数推导；本轮未做高负载下毫秒结论，也没有 L3 日常收益结论。减少的工作是 complete archive 的第二次读取，未移到后台、未缓存过期证据、未改变 workload。
+- 限制与下一步：partial/legacy archive 仍可能读取完整源；需在并行工作冻结且机器负载正常时，以现有 history-opening native fixture 记录 archive read count 与点击→首个可用历史分段，再决定是否继续改动。`performance:measure --scenario navigation.catalog` 仍因无匹配 collector 不作为本轮证据。
+
 ## Mac UI 流畅性首轮（2026-10-21，源码已验证、安装受阻）
 
 - 固定 277 会话原生 UI fixture：切换行执行 **555 → 2**，hover **280 → 5**；20 次流式更新仍不重绘 Sidebar。存档 277 行两次渲染的新建日期格式化器 **554 → 0**（复用模块实例）。均为 **L1**，不等于用户日常端到端耗时下降。

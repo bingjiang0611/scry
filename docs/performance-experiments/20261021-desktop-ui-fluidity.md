@@ -46,6 +46,24 @@
 
 安装两次都停在 unit gate，未进入打包/安装，`/Applications/Scry.app` 未由本任务替换；用户运行实例未重启。交付检查时现有安装版本已变为 0.2.215，这不是本任务的安装结果，也不能证明它包含本次优化；后续必须集成到最新代码再验收，不能用本分支 0.2.214 覆盖较新版本。源码保留在独立分支，未推送、未合并到有并行暂存/WIP 的主工作区。
 
+## 续轮：Pi 历史打开的重复归档读取（2026-10-22）
+
+### 复现与判断
+
+`agent:loadSession` 对 Pi 先请求 `readTraceArchivePageAsync`。当原生 Pi 历史同时存在时，为了按 Provider turn ID 对账，旧路径随后无条件再次 `readTraceArchiveAsync`。当首个页的 `hasOlder=false` 时，该页已经包含完整 archive；第二次读取是可证明的重复工作。首个页为 partial 时仍需要完整 archive，不能用页数据替代全量证据。
+
+### 实现与验证
+
+- `src/main/session-history.ts` 新增 `readCompleteArchiveForNativeReconciliation`：complete page 直接复用，partial page 才调用 full-reader。
+- `src/main/index.ts` 只在需要时读取完整 archive；cwd/provider/session 身份、Pi 原生 ID 对账、分页和失败路径不变。
+- `src/main/session-history.test.ts` 增加 read callback 回归与负对照：complete page 不读 full archive，partial page 恰好读一次；31 项通过。
+- `npm run typecheck`、`npm run build` 通过。
+- `node .agents/skills/scry-performance-climb/scripts/timing-run.mjs pi-history-final -- node scripts/electron-security-smoke.mjs --dev-pi-history-only` 通过：41 轮分页与 archive reconciliation 通过；负载约 43→42，`highLoad=true`。
+
+### 结论与限制
+
+这是 **L1** 读取次数优化，不作高负载毫秒或 L3 日常提速结论。减少的工作是 complete archive 的第二次源读取，不是后台搬移或不诚实缓存。高负载下未做毫秒比较；partial/legacy archive 仍可能需要完整读取。下一步应在机器负载正常时用现有 history-opening fixture 记录 archive read count 与点击→首个可用历史分段，再决定是否继续优化。
+
 ## 尚未解决与下一步
 
 只读日常日志先快照再分析。build `59f234869922131601d6ecf860bcedc94cb35f56173e093f884101e60b68b1fe`、0.2.214、3697 条、一个尚未关闭会话，仅为 provisional 线索：历史加载 IPC 34 样本 p50 401.5ms / p95 2341.3ms；Pi 能力探测存在约 12–25 秒等待。这不能用本次减少行渲染的计数宣称已解决。
