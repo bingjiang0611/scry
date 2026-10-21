@@ -28,6 +28,15 @@ final class ProviderDiscoveryTests: XCTestCase {
     XCTAssertEqual(try G0Transport.decodeProviderDiscovery(legacy, detail: nil).providers.count, 1)
   }
 
+  func testObservationTimeIsPreservedAndInvalidTimesAreRejected() throws {
+    let current = Data(#"{"providerDiscovery":2,"providers":[{"id":"pi","label":"Pi","available":true,"observedAt":1700000000000}]}"#.utf8)
+    XCTAssertEqual(try G0Transport.decodeProviderDiscovery(current, detail: "selected").providers.first?.observedAt, 1700000000000)
+    for invalid in ["-1", "1.5", "1e300"] {
+      let data = Data("{\"providerDiscovery\":2,\"providers\":[{\"id\":\"pi\",\"label\":\"Pi\",\"available\":true,\"observedAt\":\(invalid)}]}".utf8)
+      XCTAssertThrowsError(try G0Transport.decodeProviderDiscovery(data, detail: "selected"))
+    }
+  }
+
   func testAuthorizationErrorsRemainErrorsInsteadOfLegacyFallback() throws {
     let denied = Data(#"{"error":"device_not_authorized"}"#.utf8)
     XCTAssertThrowsError(try G0Transport.providerDiscoveryCapability(denied))
