@@ -75,6 +75,7 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
+  @State private var showHistoryDetails = false
   @State private var olderReadRequest = 0
   @State private var latestReadRequest = 0
   @State private var followingLatest = true
@@ -155,6 +156,10 @@ struct SessionTranscriptView: View {
     .background(Palette.surface)
     .sheet(isPresented: $showFiles) {
       if let session { WorkspaceBrowserView(cwd: session.cwd).id(session.cwd) }
+    }
+    .sheet(isPresented: $showHistoryDetails) {
+      HistoryEvidenceDetails(status: historyStatus, lastChecked: run.historyFetchedAt,
+                             refreshError: run.historyRefreshError, storageNotice: run.historyStorageNotice)
     }
     .macLocalLinks(cwd: session?.cwd)
     .onChange(of: otherLiveQuestion?.questionId, initial: true) { _, id in showLiveQuestion = id != nil }
@@ -245,8 +250,8 @@ struct SessionTranscriptView: View {
       ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
     case .empty:
       ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
-      Text("这条会话没有可读取的历史记录，你仍可以在下方继续对话。")
-        .font(.system(size: 13)).foregroundStyle(Palette.muted)
+      Text(ConnectionCopy.noReadableHistory)
+        .font(.footnote).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case .baseUnavailable:
       // The missing record is reported once, in the status strip.
@@ -305,14 +310,14 @@ struct SessionTranscriptView: View {
   }
 
   private var header: some View {
-    RemoteHeader(title: session?.label.isEmpty == false ? session!.label : "会话",
-                 subtitle: headerSubtitle,
-                 link: model.link, backAction: { model.goBack() }) {
+    RemoteHeader(title: session?.label.isEmpty == false ? session!.label : ConnectionCopy.session,
+                 subtitle: headerSubtitle, link: model.link, titleLineLimit: 2,
+                 backAction: { model.goBack() }) {
       Button { showFiles = true } label: {
-        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
-      }.accessibilityLabel("项目文件与 Diff").disabled(session == nil)
+        Image(systemName: "folder").font(.title3).controlIconScale().frame(width: 44, height: 44)
+      }.accessibilityLabel(ConnectionCopy.projectFilesAndDiff).disabled(session == nil)
       MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
-        Section("历史状态") {
+        Section(ConnectionCopy.historyStatus) {
           Text(historyStatus)
           if let date = run.historyFetchedAt { Text("上次核对 \(date.formatted(date: .abbreviated, time: .shortened))") }
           if let reason = run.historyRefreshError { Text(reason) }
@@ -320,7 +325,7 @@ struct SessionTranscriptView: View {
         }
         if let s = session {
           Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) } label: {
-            Label("刷新会话", systemImage: "arrow.clockwise")
+            Label(ConnectionCopy.historyRefresh, systemImage: "arrow.clockwise")
           }
         }
         if !readOnly {
@@ -408,15 +413,26 @@ struct SessionTranscriptView: View {
     guard run.activeSessionIdentity == sessionIdentity else { return nil }
     // The exact reason stays in the header menu (历史状态); the paced
     // refresh keeps retrying while this error stands (historyIsWatched).
+    let details = SessionStatusLine.Action(title: ConnectionCopy.details, perform: { showHistoryDetails = true })
     if historyReadyForDisplay || run.history == .baseUnavailable, run.historyRefreshError != nil {
-      return .init(text: run.history == .baseUnavailable ? "无法读取 Mac 上的会话记录，正在重试"
-                                                          : "历史同步失败，显示上次内容，正在重试",
-                   tone: .warning, busy: true)
+      return .init(text: run.history == .baseUnavailable ? ConnectionCopy.historyUnavailable
+                                                          : ConnectionCopy.historySyncFailed,
+                   tone: .warning, busy: true, action: details)
+    }
+    if run.historyStorageNotice != nil {
+      return .init(text: ConnectionCopy.historyStorageLimited, tone: .warning, action: details)
+    }
+    if case .partial = run.history {
+      return .init(text: ConnectionCopy.historyPartial, tone: .warning, action: details)
+    }
+    if run.historyFromCache {
+      return .init(text: run.historySyncing ? ConnectionCopy.historyCheckingCache : ConnectionCopy.historyFromCache,
+                   busy: run.historySyncing, action: details)
     }
     guard run.history == .baseUnavailable else { return nil }
-    if run.historySyncing { return .init(text: "正在读取 Mac 上的会话记录", busy: true) }
-    return .init(text: "未读到 Mac 上更早的记录（不代表没有）",
-                 action: .init(title: "重新读取", perform: {
+    if run.historySyncing { return .init(text: ConnectionCopy.historyReading, busy: true) }
+    return .init(text: ConnectionCopy.historyEarlierUnavailable,
+                 action: .init(title: ConnectionCopy.retry, perform: {
                    if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) }
                  }))
   }
@@ -426,12 +442,14 @@ struct SessionTranscriptView: View {
   }
 
   private var historyStatus: String {
-    if let source = run.historyPageSource, run.historyOlderBefore != nil { return "最近完整历史 · \(source) · 可继续加载更早轮次" }
-    if case .partial = run.history { return "部分历史 · 完整性尚未核对" }
-    if run.historyFromCache { return "本地历史 · 尚未重新核对主机" }
-    if run.historySyncing { return "正在读取历史" }
-    if run.historyFetchedAt != nil { return "历史快照已核对；文件 diff 需在 Mac 查看" }
-    return "历史状态不可用"
+    if let source = run.historyPageSource, run.historyOlderBefore != nil {
+      return ConnectionCopy.historyRecentComplete(source)
+    }
+    if case .partial = run.history { return ConnectionCopy.historyPartial }
+    if run.historyFromCache { return ConnectionCopy.historyFromCache }
+    if run.historySyncing { return ConnectionCopy.historyReading }
+    if run.historyFetchedAt != nil { return ConnectionCopy.historyVerified }
+    return ConnectionCopy.historyStateUnavailable
   }
 
   private func projectName(_ cwd: String?) -> String {
@@ -447,7 +465,7 @@ struct SessionTranscriptView: View {
       TurnOutputList(lines: run.detachedOutput)
       // This cache can omit or truncate chunks; it is not the archive.
       Text("实时输出可能不完整；运行结束后以会话记录为准。")
-        .font(.system(size: 12.5)).foregroundStyle(Palette.muted)
+        .font(.footnote).foregroundStyle(Palette.muted)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -485,5 +503,42 @@ struct SessionTranscriptView: View {
     .padding(.horizontal, 14).padding(.bottom, 4)
     .background(Palette.surface)
     .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
+  }
+}
+
+private struct HistoryEvidenceDetails: View {
+  let status: String
+  let lastChecked: Date?
+  let refreshError: String?
+  let storageNotice: String?
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    NavigationStack {
+      List {
+        Section(ConnectionCopy.historyStatus) {
+          Text(status)
+          Text(lastChecked.map(ConnectionCopy.historyLastCheckedText) ?? ConnectionCopy.historyNotChecked)
+            .font(.footnote).foregroundStyle(Palette.muted)
+        }
+        if let refreshError {
+          Section(ConnectionCopy.historySyncIssue) {
+            Text(refreshError).font(.footnote).textSelection(.enabled)
+          }
+        }
+        if let storageNotice {
+          Section(ConnectionCopy.historyStorageIssue) {
+            Text(storageNotice).font(.footnote).textSelection(.enabled)
+          }
+        }
+      }
+      .navigationTitle(ConnectionCopy.historyDetailsTitle)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button(ConnectionCopy.done) { dismiss() }
+        }
+      }
+    }
   }
 }

@@ -64,11 +64,12 @@ struct ChatView: View {
   }
 
   private var header: some View {
-    RemoteHeader(title: completedTurns.first?.prompt ?? run.prompt ?? "会话", subtitle: sessionContext, link: model.link,
+    RemoteHeader(title: completedTurns.first?.prompt ?? run.prompt ?? ConnectionCopy.session,
+                 subtitle: sessionContext, link: model.link, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
       Button { showFiles = true } label: {
-        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
-      }.accessibilityLabel("项目文件与 Diff").disabled(projectCwd == nil)
+        Image(systemName: "folder").font(.title3).controlIconScale().frame(width: 44, height: 44)
+      }.accessibilityLabel(ConnectionCopy.projectFilesAndDiff).disabled(projectCwd == nil)
       MoreMenu {
         // Leaving keeps an unsent message sending and a run running on the Mac.
         Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
@@ -257,7 +258,7 @@ struct RemoteQuestionSheet: View {
 
   private func optionRow(_ option: G0Transport.RunQuestionOption, selected: Bool, symbol: String) -> some View {
     HStack(alignment: .top, spacing: 12) {
-      Image(systemName: symbol).font(.system(size: 18))
+      Image(systemName: symbol).font(.title3).controlIconScale()
         .foregroundStyle(selected ? Palette.blue : Palette.muted).padding(.top, 1)
       optionLabel(option)
       Spacer(minLength: 0)

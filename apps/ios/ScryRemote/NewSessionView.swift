@@ -49,8 +49,8 @@ struct NewSessionView: View {
       .scrollDismissesKeyboard(.interactively)
 
       if run.chosen == nil || run.chosenProvider == nil {
-        Text(run.chosen == nil ? "先选择工作目录，再选择 Provider" : "选择 Provider 后即可发送")
-          .font(.system(size: 13)).foregroundStyle(Palette.muted).padding(.horizontal, 20)
+        Text(run.chosen == nil ? ConnectionCopy.chooseWorkspaceFirst : ConnectionCopy.chooseProviderToSend)
+          .font(.footnote).foregroundStyle(Palette.muted).padding(.horizontal, 20)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       MessageComposer(text: composer.text, attachments: composer.attachments,
@@ -115,16 +115,16 @@ struct NewSessionView: View {
                           connected: Bool? = nil, action: @escaping () -> Void = {}) -> some View {
     Button(action: action) {
       HStack(spacing: 13) {
-        Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Palette.muted).frame(width: 22)
+        Image(systemName: symbol).font(.body).controlIconScale().foregroundStyle(Palette.muted).frame(width: 22)
         VStack(alignment: .leading, spacing: 2) {
-          Text(eyebrow).font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(Palette.muted)
-          Text(value).font(.system(size: 15, weight: .medium)).foregroundStyle(enabled || connected != nil ? Palette.ink : Palette.muted).lineLimit(1)
+          Text(eyebrow).font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(Palette.muted)
+          Text(value).font(.subheadline.weight(.medium)).foregroundStyle(enabled || connected != nil ? Palette.ink : Palette.muted).lineLimit(2)
         }
         Spacer()
         if let connected {
           Circle().fill(connected ? Palette.green : Palette.faint).frame(width: 7, height: 7)
         } else if enabled {
-          Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.faint)
+          Image(systemName: Symbol.chevron).font(.caption.weight(.semibold)).controlIconScale().foregroundStyle(Palette.faint)
         }
       }
       .frame(minHeight: 59).contentShape(Rectangle())
@@ -148,8 +148,8 @@ struct NewSessionView: View {
               run.loadDirectories(path: listing.parent?.path)
             } label: {
               HStack(spacing: 9) {
-                Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
-                Text(listing.parent?.label ?? "已授权项目").font(.system(size: 14, weight: .medium))
+                Image(systemName: "chevron.left").font(.caption.weight(.semibold)).controlIconScale()
+                Text(listing.parent?.label ?? ConnectionCopy.authorizedProjects).font(.subheadline.weight(.medium))
                 Spacer()
               }
               .foregroundStyle(Palette.blue).frame(minHeight: 44).contentShape(Rectangle())
@@ -157,12 +157,12 @@ struct NewSessionView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
-              Text(current.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.ink)
-              Text(current.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
+              Text(current.label).font(.title3.weight(.semibold)).foregroundStyle(Palette.ink)
+              Text(current.path).font(.caption).foregroundStyle(Palette.muted).lineLimit(3)
               Button {
                 run.chooseProject(current); showProjects = false
               } label: {
-                Text("选择此文件夹").font(.system(size: 15, weight: .medium))
+                Text(ConnectionCopy.chooseThisFolder).font(.subheadline.weight(.medium))
                   .foregroundStyle(Palette.ink).frame(maxWidth: .infinity, minHeight: 44)
                   .background(Palette.surface, in: RoundedRectangle(cornerRadius: 6))
                   .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
@@ -172,9 +172,9 @@ struct NewSessionView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
 
-            Text("子文件夹").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted).padding(.top, 8).padding(.bottom, 4)
+            Text(ConnectionCopy.subfolders).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted).padding(.top, 8).padding(.bottom, 4)
             if listing.directories.isEmpty {
-              Text("此文件夹没有子文件夹").font(.system(size: 14)).foregroundStyle(Palette.muted).padding(.vertical, 18)
+              Text(ConnectionCopy.noSubfolders).font(.subheadline).foregroundStyle(Palette.muted).padding(.vertical, 18)
             } else {
               ForEach(listing.directories, id: \.path) { ref in
                 FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path) {
@@ -242,7 +242,7 @@ private struct SelectionSheet<Content: View>: View {
           ToolbarItem(placement: .primaryAction) { Button("刷新", action: onRefresh) }
         }
         .safeAreaInset(edge: .top) {
-          Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
+          Text(subtitle).font(.caption).foregroundStyle(Palette.muted)
             .frame(maxWidth: .infinity).padding(.vertical, 8).background(Palette.noticeBg)
         }
     }
@@ -258,14 +258,14 @@ private struct FolderBrowseRow: View {
   var body: some View {
     Button(action: onOpen) {
       HStack(spacing: 12) {
-        Image(systemName: Symbol.folder).font(.system(size: 16)).foregroundStyle(Palette.muted).frame(width: 22)
+        Image(systemName: Symbol.folder).font(.body).controlIconScale().foregroundStyle(Palette.muted).frame(width: 22)
         VStack(alignment: .leading, spacing: 3) {
-          Text(ref.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink).lineLimit(1)
-          Text(ref.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+          Text(ref.label).font(.body.weight(.medium)).foregroundStyle(Palette.ink).lineLimit(2)
+          Text(ref.path).font(.caption).foregroundStyle(Palette.muted).lineLimit(2)
         }
         Spacer()
-        if selected { Image(systemName: Symbol.check).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.blue) }
-        Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.faint)
+        if selected { Image(systemName: Symbol.check).font(.subheadline.weight(.semibold)).controlIconScale().foregroundStyle(Palette.blue) }
+        Image(systemName: Symbol.chevron).font(.caption.weight(.semibold)).controlIconScale().foregroundStyle(Palette.faint)
       }
       .frame(minHeight: 58).contentShape(Rectangle())
     }
@@ -283,11 +283,11 @@ private struct SelectionRow: View {
     Button(action: action) {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink)
-          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+          Text(title).font(.body.weight(.medium)).foregroundStyle(Palette.ink)
+          Text(detail).font(.caption).foregroundStyle(Palette.muted).lineLimit(2)
         }
         Spacer()
-        if selected { Image(systemName: Symbol.check).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.blue) }
+        if selected { Image(systemName: Symbol.check).font(.subheadline.weight(.semibold)).controlIconScale().foregroundStyle(Palette.blue) }
       }
       .frame(minHeight: 56).contentShape(Rectangle())
     }
