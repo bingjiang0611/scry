@@ -38,6 +38,13 @@ export interface RemoteProviderRef {
   models?: RemoteModelOption[]
   efforts?: RemoteControlOption[]
   permissions?: RemoteControlOption[]
+  /** Host observation time, not the Provider's underlying catalog update time. */
+  observedAt?: number
+  /** Publication sequence for metadata; independent of wall-clock adjustments. */
+  metadataRevision?: number
+}
+export function isRemoteProviderObservationTime(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && Number.isFinite(new Date(value).getTime())
 }
 export type RemoteProviderQuery =
   | { detail: 'metadata' }

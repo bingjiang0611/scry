@@ -166,6 +166,12 @@ enum ConnectionCopy {
   static let chooseTaskContext = "发送前请在“新任务”中选择项目与 Provider"
   static let chooseProviderToSend = "选择 Provider 后即可发送"
   static let providerControlsUnavailable = "所选 Provider 设置不可用"
+  static let refreshProviderControls = "重新读取设置"
+  static func providerControlsObserved(_ observedAt: Double?) -> String {
+    guard let observedAt else { return "主机快照；读取时间未知" }
+    let date = Date(timeIntervalSince1970: observedAt / 1000)
+    return "主机读取于 \(date.formatted(date: .abbreviated, time: .shortened))"
+  }
   static let providerControlsLoading = "正在读取所选 Provider 设置…"
   static let legacyProviderControls = "旧版主机能力快照；发送时由主机重验"
   static let restoredModelUnavailable = "恢复的 Model 当前不可用，已阻止静默替换"

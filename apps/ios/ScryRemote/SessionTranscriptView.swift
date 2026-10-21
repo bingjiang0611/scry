@@ -71,6 +71,8 @@ struct ReadOnlySessionTranscriptView: View {
 }
 
 struct SessionTranscriptView: View {
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var controlsVisible = false
   var readOnly = false
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
@@ -183,6 +185,7 @@ struct SessionTranscriptView: View {
       }
     }
     .onAppear {
+      controlsVisible = true
       guard let s = session else { return }
       // Keep a live run when leaving and re-opening this same session. A
       // different session identity invalidates old history/poll callbacks.
@@ -190,7 +193,10 @@ struct SessionTranscriptView: View {
       if !readOnly && historyAllowsControls { loadSessionControls() }
       if !readOnly { run.watchHistory(sessionIdentity) }
     }
-    .onDisappear { if !readOnly { run.watchHistory(nil); run.followDetached(nil) } }
+    .onDisappear { controlsVisible = false; if !readOnly { run.watchHistory(nil); run.followDetached(nil) } }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active, controlsVisible, !readOnly, historyAllowsControls, !runBusy, !run.providerControlsLoading { reloadProviders() }
+    }
     .onChange(of: otherLive?.runId, initial: true) { _, _ in run.followDetached(otherLive) }
     .onChange(of: historyAllowsControls) {
       if !readOnly && historyAllowsControls { loadSessionControls() }
@@ -403,7 +409,7 @@ struct SessionTranscriptView: View {
     if let history = historyIssue { return history }
     if !runBusy, historyAllowsControls, let notice = run.providerControlsNotice {
       return .init(text: notice, busy: run.providerControlsLoading,
-                   action: run.providerControlsLoading || controlsMatch ? nil : .init(title: ConnectionCopy.retry, perform: reloadProviders))
+                   action: run.providerControlsLoading ? nil : .init(title: controlsMatch ? ConnectionCopy.refreshProviderControls : ConnectionCopy.retry, perform: reloadProviders))
     }
     if !runBusy, historyAllowsControls, !controlsMatch, run.providers != .loading {
       return .init(text: ConnectionCopy.providerControlsUnavailable,
@@ -441,7 +447,9 @@ struct SessionTranscriptView: View {
   }
 
   private func reloadProviders() {
-    if let s = session { run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId, force: true) }
+    guard let s = session else { return }
+    if controlsMatch { run.retryProviderControls() }
+    else { run.loadSessionProviderControls(providerId: s.providerId, agentProfileId: s.agentProfileId, cwd: s.cwd, force: true) }
   }
 
   private var historyStatus: String {

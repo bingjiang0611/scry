@@ -1,4 +1,4 @@
-import type { CapabilityEnvelope, ProviderContext, ProviderDescriptor } from '../../shared/provider'
+import type { CapabilityEnvelope, ProviderContext, ProviderDescriptor, ProviderId } from '../../shared/provider'
 import type { AgentPermissionMode, AgentRunControlCatalog } from '../../shared/runtime'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { createCachedAsyncLoader } from '../provider-detection'
@@ -19,8 +19,12 @@ export function createProviderDiscovery(options: {
   onError: (error: unknown) => void
   now?: () => number
 }) {
+  const now = options.now ?? Date.now
   let metadata: RemoteProviderRef[] = []
-  const pending = new Map<string, Promise<RemoteProviderRef>>()
+  let metadataRevision = 0
+  let metadataInvalidation = 0
+  const contextRevisions = new Map<ProviderId, number>()
+  const pending = new Map<string, { revision: number; request: Promise<RemoteProviderRef> }>()
 
   const contexts = async () => {
     const descriptors = await options.descriptors()
@@ -32,8 +36,13 @@ export function createProviderDiscovery(options: {
   }
 
   const refreshMetadata = async (): Promise<void> => {
+    const startedInvalidation = metadataInvalidation
     try {
-      metadata = (await contexts()).map((context) => remoteProviderMetadata(context))
+      const entries = await contexts()
+      if (startedInvalidation !== metadataInvalidation) return
+      const observedAt = now()
+      metadataRevision += 1
+      metadata = entries.map((context) => ({ ...remoteProviderMetadata(context), observedAt, metadataRevision }))
     } catch (error) {
       // Metadata is an observational snapshot, not execution authority. Retain its
       // last value while a selected request still performs fresh validation.
@@ -50,19 +59,29 @@ export function createProviderDiscovery(options: {
     if ((descriptor.id === 'pi' && (!profile || profile.id !== query.agentProfileId)) ||
         (descriptor.id !== 'pi' && query.agentProfileId !== undefined)) throw new Error('invalid_provider_context')
     const permissionOverride = options.permissionOverride()
-    const key = JSON.stringify([descriptor.id, profile, cwd, permissionOverride])
+    const key = JSON.stringify([descriptor.id, profile?.id, profile?.executable, cwd, permissionOverride])
+    const revision = contextRevisions.get(descriptor.id) ?? 0
     const existing = pending.get(key)
-    if (existing) return existing
+    if (existing) {
+      if (existing.revision === revision) return existing.request
+      // Let the adapter finish and remove its own in-flight entry before a fresh
+      // read. Revalidate profile and workspace authority after this await.
+      await existing.request
+      return selected(query)
+    }
     const request = Promise.resolve().then(async () => {
       try {
         const controls = await options.controls({ providerId: descriptor.id, cwd, ...(profile ? { agentProfileId: profile.id } : {}) })
-        return remoteProviderEntry({ descriptor, ...(profile ? { profile } : {}), controls, previous: [], permissionOverride })
+        if ((contextRevisions.get(descriptor.id) ?? 0) !== revision) {
+          return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false, observedAt: now() }
+        }
+        return { ...remoteProviderEntry({ descriptor, ...(profile ? { profile } : {}), controls, previous: [], permissionOverride }), observedAt: now() }
       } catch (error) {
         options.onError(error)
-        return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false }
+        return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false, observedAt: now() }
       }
-    }).finally(() => { if (pending.get(key) === request) pending.delete(key) })
-    pending.set(key, request)
+    }).finally(() => { if (pending.get(key)?.request === request) pending.delete(key) })
+    pending.set(key, { revision, request })
     return request
   }
 
@@ -81,6 +100,11 @@ export function createProviderDiscovery(options: {
     metadata: () => metadata,
     refreshMetadata,
     selected,
+    invalidate: (providerId: ProviderId) => {
+      metadataInvalidation += 1
+      contextRevisions.set(providerId, (contextRevisions.get(providerId) ?? 0) + 1)
+      legacy.invalidate()
+    },
     legacy: () => legacy.load()
   }
 }

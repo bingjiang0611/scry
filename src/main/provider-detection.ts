@@ -37,25 +37,34 @@ export function createCachedAsyncLoader<T>(
   const now = options.now ?? Date.now
   const ttlMs = Math.max(0, options.ttlMs)
   let cached: { value: T; observedAt: number } | undefined
-  let pending: Promise<T> | undefined
+  let revision = 0
+  let pending: { revision: number; request: Promise<T> } | undefined
+
+  const load = (): Promise<T> => {
+    if (cached && now() - cached.observedAt < ttlMs) return Promise.resolve(cached.value)
+    if (pending) {
+      // A caller explicitly requesting a new generation must not receive or
+      // cache the superseded read, even when that older read fails.
+      return pending.revision === revision ? pending.request : pending.request.then(load, load)
+    }
+    const startedRevision = revision
+    const request = Promise.resolve()
+      .then(loader)
+      .then((value) => {
+        if (revision === startedRevision) cached = { value, observedAt: now() }
+        return value
+      })
+      .finally(() => {
+        if (pending?.request === request) pending = undefined
+      })
+    pending = { revision: startedRevision, request }
+    return request
+  }
 
   return {
-    load(): Promise<T> {
-      if (cached && now() - cached.observedAt < ttlMs) return Promise.resolve(cached.value)
-      if (pending) return pending
-      const request = Promise.resolve()
-        .then(loader)
-        .then((value) => {
-          cached = { value, observedAt: now() }
-          return value
-        })
-        .finally(() => {
-          if (pending === request) pending = undefined
-        })
-      pending = request
-      return request
-    },
+    load,
     invalidate(): void {
+      revision += 1
       cached = undefined
     }
   }

@@ -181,6 +181,11 @@ export const REMOTE_ACCESS_COPY = {
   legacyProviderControls: '旧版主机能力快照；发送时由主机重验',
   providerControlsUnavailable: (host: string) => `${host} 未能读取所选 Provider 设置；暂时无法发送`,
   retryProviderControls: '重试读取 Provider 设置',
+  refreshProviderControls: '重新读取设置',
+  providerControlsObserved: (observedAt?: number, refreshing = false) => {
+    const source = observedAt === undefined ? '主机快照；读取时间未知' : `主机读取于 ${new Date(observedAt).toLocaleString()}`
+    return refreshing ? `重新读取中 · ${source}` : source
+  },
   noProjects: '没有项目。',
   newSession: '新建会话',
   removeHost: '移除主机',

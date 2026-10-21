@@ -9,6 +9,8 @@ import RemoteTransport
 // incomplete/truncated). Token/cost come only from the ledger `result` marker.
 // Nothing is fabricated; with no active run it shows a truthful empty state.
 struct ChatView: View {
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var controlsVisible = false
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @State private var showFiles = false
@@ -55,7 +57,11 @@ struct ChatView: View {
     } message: {
       Text("请求 Agent 停止，结果以 Agent 实际结束为准。")
     }
-    .onAppear { run.loadActiveContext() }
+    .onAppear { controlsVisible = true; run.loadActiveContext() }
+    .onDisappear { controlsVisible = false }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active, controlsVisible, !runBusy, !run.providerControlsLoading { run.retryProviderControls() }
+    }
 #if DEBUG
     .onAppear {
       if draft.isEmpty, ProcessInfo.processInfo.arguments.contains("-uiMockSlash") { composer.wrappedValue.text = "/" }
@@ -96,7 +102,7 @@ struct ChatView: View {
     }
     if !runBusy, let notice = run.providerControlsNotice {
       return .init(text: notice, busy: run.providerControlsLoading,
-                   action: run.providerControlsLoading || run.controlsReady ? nil : .init(title: ConnectionCopy.retry, perform: run.retryProviderControls))
+                   action: run.providerControlsLoading ? nil : .init(title: run.controlsReady ? ConnectionCopy.refreshProviderControls : ConnectionCopy.retry, perform: run.retryProviderControls))
     }
     return nil
   }

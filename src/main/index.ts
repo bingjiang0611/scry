@@ -1381,6 +1381,7 @@ handleTrusted('agent:addPiProfile', async () => {
     })
     await probePiAgent(profile, currentCwd)
     const stored = piProfileStore().add(profile)
+    invalidateRemoteProviderMetadata('pi')
     const descriptor = (await providerRegistry.describe()).find((entry) => entry.id === 'pi')
     if (!descriptor) throw new Error('Pi Provider 未注册')
     return {
@@ -1411,6 +1412,7 @@ handleTrusted('agent:addPiProfile', async () => {
 handleTrusted('agent:removePiProfile', (_event, id: unknown) => {
   if (typeof id !== 'string' || !/^pi:[a-f0-9]{16}$/.test(id)) throw new Error('无效的 Pi Agent Profile')
   piProfileStore().remove(id)
+  invalidateRemoteProviderMetadata('pi')
   return true as const
 })
 
@@ -1735,7 +1737,15 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
 
 handleTrusted('agent:invalidateProviderContext', async (_event, context: ProviderContext) => {
   const normalizedContext = { ...context, cwd: context.cwd ?? currentCwd }
-  await providerRegistry.invalidateContext(normalizedContext)
+  providerRegistry.get(normalizedContext.providerId)
+  await withProviderOperation(normalizedContext.providerId, async () => {
+    remoteProviderDiscovery.invalidate(normalizedContext.providerId)
+    try {
+      await providerRegistry.invalidateContext(normalizedContext)
+    } finally {
+      refreshInvalidatedRemoteProviderMetadata()
+    }
+  }, normalizedContext.agentProfileId)
   return true
 })
 handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
@@ -4776,6 +4786,17 @@ const remoteProviderDiscovery = createProviderDiscovery({
 // owned by a selected context (or an explicit legacy full-snapshot request).
 const remoteProviderSnapshotRefresh = createCachedAsyncLoader(() => remoteProviderDiscovery.refreshMetadata(), { ttlMs: 60_000 })
 const refreshRemoteProviderSnapshot = (): Promise<void> => remoteProviderSnapshotRefresh.load()
+
+function invalidateRemoteProviderMetadata(providerId: ProviderId): void {
+  remoteProviderDiscovery.invalidate(providerId)
+  refreshInvalidatedRemoteProviderMetadata()
+}
+
+function refreshInvalidatedRemoteProviderMetadata(): void {
+  if (!remoteHostService) return
+  remoteProviderSnapshotRefresh.invalidate()
+  void refreshRemoteProviderSnapshot()
+}
 
 async function startRemoteHostIfEnabled(): Promise<void> {
   if (remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return

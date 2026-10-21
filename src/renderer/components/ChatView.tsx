@@ -116,7 +116,7 @@ interface ChatViewProps {
   remoteHost?: string
   // A location-level notice (offline host, unavailable Provider) that stays visible
   // without a draft, unlike sendBlockedReason which explains a disabled send.
-  composerNotice?: { text: string; tone: 'blocked' | 'error'; action?: { label: string; onClick: () => void; disabled?: boolean } } | null
+  composerNotice?: { text: string; tone: 'blocked' | 'error' | 'info'; action?: { label: string; onClick: () => void; disabled?: boolean } } | null
 }
 
 // Subscribe at the composer boundary, not App: ordinary typing must not render the sidebar,
@@ -812,7 +812,7 @@ export function ChatView({
         {composerNotice && (
           <div className={`composer-notice is-${composerNotice.tone}`} role={composerNotice.tone === 'error' ? 'alert' : 'status'}>
             <Icon name={composerNotice.tone === 'error' ? 'alert' : 'info'} />
-            <span>{composerNotice.text}</span>
+            <span title={composerNotice.text}>{composerNotice.text}</span>
             {composerNotice.action && (
               <button type="button" onClick={composerNotice.action.onClick} disabled={composerNotice.action.disabled}>
                 {composerNotice.action.label}

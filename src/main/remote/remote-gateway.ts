@@ -1,5 +1,6 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
+import { isRemoteProviderObservationTime } from '../../shared/desktop-remote'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
 import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteProviderQuery, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
@@ -589,7 +590,9 @@ export class RemoteGateway {
       ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
       ...(models.length > 0 ? { models } : {}),
       ...(efforts.length > 0 ? { efforts } : {}),
-      ...(permissions.length > 0 ? { permissions } : {})
+      ...(permissions.length > 0 ? { permissions } : {}),
+      ...(isRemoteProviderObservationTime(entry.observedAt) ? { observedAt: entry.observedAt } : {}),
+      ...(typeof entry.metadataRevision === 'number' && Number.isSafeInteger(entry.metadataRevision) && entry.metadataRevision >= 0 ? { metadataRevision: entry.metadataRevision } : {})
     }
   }
 

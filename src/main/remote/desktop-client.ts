@@ -4,7 +4,7 @@ import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, isRemoteProviderObservationTime } from '../../shared/desktop-remote'
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
@@ -726,7 +726,12 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     }
   }
   #project(value: unknown): RemoteProjectRef { if (!record(value) || !text(value.path, 16_384) || !text(value.label, 512)) fail('invalid_catalog_response'); return { path: value.path as string, label: value.label as string } }
-  #provider(value: unknown): RemoteProviderRef { if (!record(value) || !text(value.id, 256) || !text(value.label, 512) || typeof value.available !== 'boolean') fail('invalid_catalog_response'); return value as unknown as RemoteProviderRef }
+  #provider(value: unknown): RemoteProviderRef {
+    if (!record(value) || !text(value.id, 256) || !text(value.label, 512) || typeof value.available !== 'boolean' ||
+        (value.observedAt !== undefined && !isRemoteProviderObservationTime(value.observedAt)) ||
+        (value.metadataRevision !== undefined && (typeof value.metadataRevision !== 'number' || !Number.isSafeInteger(value.metadataRevision) || value.metadataRevision < 0))) fail('invalid_catalog_response')
+    return value as unknown as RemoteProviderRef
+  }
   #session(value: unknown): RemoteSessionRef {
     if (!record(value) || !text(value.sessionId, 256) || !text(value.providerId, 256) || !text(value.cwd, 16_384) || !text(value.label, 512) || !Number.isSafeInteger(value.ts) ||
         (value.externalSessionId !== undefined && !text(value.externalSessionId, 256)) ||
