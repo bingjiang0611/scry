@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { LlmMetric, LlmMetricPoint, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary, LlmRunningSession } from '@shared/llm-performance'
+import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary, LlmRunningSession } from '@shared/llm-performance'
 import { groupRunningLlmSessions, llmMetricSamples, quantile, smoothLlmMetric } from '@shared/llm-performance'
 import { ModalFrame } from './Modals'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
@@ -82,21 +82,6 @@ function MetricHelp({ label, text }: { label: string; text: string }) {
       <p>{text}</p>
     </details>
   )
-}
-
-/** Fully measured portions share the continuous path; only the visual idle/transition layer is faded. */
-function measuredSpans(points: LlmMetricPoint[]): Array<[number, number]> {
-  const spans: Array<[number, number]> = []
-  let start: number | undefined
-  points.forEach((point, index) => {
-    const measured = point.value != null && point.drawn === point.value
-    if (measured && start == null) start = index
-    if (start != null && (!measured || index === points.length - 1)) {
-      spans.push([start, measured ? index : index - 1])
-      start = undefined
-    }
-  })
-  return spans
 }
 
 export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -206,7 +191,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
                       <span className={`llm-perf-state${state.streaming ? ' gen' : ''}`}>{state.label}</span>
                     </div>
                     <div className="llm-perf-run-speed"><span>{runningCopy.average}</span>
-                      <div>{group.tokensPerSecond != null ? <><strong>{formatSpeed(group.tokensPerSecond)}</strong><small>{runningCopy.speedUnit}</small></> : copy.missing}</div>
+                      <div>{group.tokensPerSecond != null ? <><strong style={group.model ? { color: colorOf(group.model) } : undefined}>{formatSpeed(group.tokensPerSecond)}</strong><small>{runningCopy.speedUnit}</small></> : copy.missing}</div>
                     </div>
                     <div className="llm-perf-run-speed"><span>{runningCopy.firstToken}</span>
                       <div>{group.firstTokenMs != null ? <><strong>{formatSeconds(group.firstTokenMs / 1000)}</strong><small>{runningCopy.seconds}</small></> : copy.missing}</div>
@@ -277,7 +262,6 @@ function MetricChart({ samples, metric, from, to, hours, selected, colorOf }: {
   colorOf: (model: string) => string
 }) {
   const box = useRef<HTMLDivElement>(null)
-  const chartId = useId()
   const tipId = useId()
   const [width, setWidth] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
@@ -293,7 +277,7 @@ function MetricChart({ samples, metric, from, to, hours, selected, colorOf }: {
     for (const sample of samples) byModel.set(sample.model, [...byModel.get(sample.model) ?? [], sample])
     return [...byModel].map(([model, own]) => {
       const points = smoothLlmMetric(own, from, to, BANDWIDTH_MINUTES[hours] * 60_000, GRID)
-      return { model, points, measured: measuredSpans(points) }
+      return { model, points }
     })
   }, [samples, from, to, hours])
   const measured = series.flatMap(item => item.points.flatMap(point => point.value == null ? [] : [point.value]))
@@ -301,7 +285,7 @@ function MetricChart({ samples, metric, from, to, hours, selected, colorOf }: {
   const yMax = metric === 'speed'
     ? Math.max(10, Math.ceil(quantile(measured, 0.98) * 1.1 / 20) * 20)
     : niceCeil(Math.max(1, quantile(measured, 0.98) * 1.1))
-  const H = 240, L = 30, R = 12, T = 12, B = 22
+  const H = 208, L = 30, R = 12, T = 12, B = 22
   const x = (ts: number): number => L + (ts - from) / (to - from) * (width - L - R)
   const y = (value: number): number => T + (1 - Math.min(value, yMax) / yMax) * (H - T - B)
   const label = (ts: number): string => hours > 24 ? day(ts) : clock(ts)
@@ -337,22 +321,11 @@ function MetricChart({ samples, metric, from, to, hours, selected, colorOf }: {
             ))}
             {ticks.map(ts => <text key={ts} x={x(ts)} y={H - 5} textAnchor="middle">{label(ts)}</text>)}
           </g>
-          {series.map((item, index) => {
-            const path = smoothPath(item.points.map(point => [x(point.ts), y(point.drawn)]))
-            const clipId = `${chartId}-${index}`
-            const dim = selected && item.model !== selected ? ' dim' : ''
-            return <g key={item.model}>
-              <defs><clipPath id={clipId}>
-                {item.measured.map(([start, end]) => {
-                  const left = x(item.points[start].ts) - (width - L - R) / (GRID - 1) / 2
-                  const right = x(item.points[end].ts) + (width - L - R) / (GRID - 1) / 2
-                  return <rect key={start} x={left} y={0} width={right - left} height={H} />
-                })}
-              </clipPath></defs>
-              <path className={`llm-perf-line${dim}`} d={path} stroke={colorOf(item.model)} strokeWidth={selected === item.model ? 2.6 : 2} />
-              <path className={`llm-perf-measured${dim}`} d={path} clipPath={`url(#${clipId})`} stroke={colorOf(item.model)} strokeWidth={selected === item.model ? 2.6 : 2} />
-            </g>
-          })}
+          {series.map(item => (
+            <path key={item.model} className={`llm-perf-line${selected && item.model !== selected ? ' dim' : ''}`}
+              d={smoothPath(item.points.map(point => [x(point.ts), y(point.drawn)]))}
+              stroke={colorOf(item.model)} strokeWidth={selected === item.model ? 2.8 : 2.4} />
+          ))}
           {hover != null && <>
             <line className="llm-perf-cross" x1={x(hoverTs)} x2={x(hoverTs)} y1={T} y2={H - B} />
             {hits.map(item => <circle key={item.model} cx={x(hoverTs)} cy={y(item.points[hover].drawn)} r={3.5}

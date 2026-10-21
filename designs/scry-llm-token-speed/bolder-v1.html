@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<style>
+:root {
+  color-scheme: dark;
+  --page: #0d0d0d; --panel: #1c1c1c; --surface: #242424; --selected: #333332;
+  --fg: #f1f1ef; --dim: #b5b5af; --line: #333331; --grid: #30302e;
+  --blue: #5b9cff; --pink: #d37ec8; --yellow: #efb958; --orange: #efa84f; --green: #69cc93; --purple: #ab9cf2;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --page: #e9e9e5; --panel: #fff; --surface: #f5f5f1; --selected: #e5e5df;
+  --fg: #20211e; --dim: #62635e; --line: #dcded7; --grid: #e9eae5;
+  --blue: #2f6fd6; --pink: #a94a9d; --yellow: #a46d08; --orange: #b56912; --green: #237a4b; --purple: #7761bd;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--page); color: var(--fg); -webkit-font-smoothing: antialiased; font-size: 13px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+::selection { background: #5b9cff55; }
+button svg, summary svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.workspace { min-height: 100vh; display: grid; place-items: center; padding: 28px 24px 58px; }
+.panel { width: min(920px, 100%); border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 24px 72px #0004; overflow: hidden; }
+.header { display: flex; align-items: center; gap: 22px; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
+.range { display: flex; gap: 2px; margin-left: auto; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.range button { border: 0; background: none; color: var(--dim); padding: 6px 12px; border-radius: 7px; }
+.range button[aria-pressed='true'] { color: var(--fg); background: var(--selected); font-weight: 600; }
+.theme { display: grid; place-items: center; width: 28px; height: 28px; border: 0; background: none; color: var(--dim); border-radius: 5px; }
+.theme:hover { color: var(--fg); background: var(--surface); }
+.content { padding: 22px; }
+h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin: 0; }
+.dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color, var(--green)); }
+.running { margin-top: 12px; border-radius: 10px; background: var(--surface); }
+.running summary { display: grid; grid-template-columns: minmax(180px, 1fr) 166px 140px 16px; gap: 22px; align-items: center; padding: 18px; cursor: pointer; list-style: none; }
+.running summary::-webkit-details-marker { display: none; }
+.identity { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.identity b { font-size: 20px; font-weight: 650; letter-spacing: -.025em; }
+.count { margin-left: 6px; color: var(--dim); font-size: 13px; white-space: nowrap; }
+.state { display: block; color: var(--dim); margin-top: 6px; font-size: 12px; }
+.reading { text-align: right; }
+.reading > span { display: block; margin-bottom: 6px; color: var(--dim); font-size: 12px; }
+.value { display: flex; align-items: baseline; justify-content: flex-end; gap: 5px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.value strong { font-size: 42px; font-weight: 650; letter-spacing: -.035em; color: var(--blue); }
+.value small { color: var(--dim); font-size: 12px; }
+.wait .value strong { color: var(--fg); font-size: 30px; }
+.disclosure { color: var(--dim); }
+.running[open] .disclosure { transform: rotate(180deg); }
+.member { margin: 0 18px; padding: 13px 0; border-top: 1px solid var(--line); display: flex; gap: 16px; color: var(--dim); font-size: 12px; }
+.member b { color: var(--fg); font-weight: 500; }
+.history { margin-top: 28px; }
+.section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.scope { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 12px; }
+.info { width: 12px; height: 12px; display: inline-block; fill: none; stroke: currentColor; stroke-width: 1; }
+.metric-row { display: flex; align-items: center; margin-top: 16px; border-bottom: 1px solid var(--line); }
+.metrics { display: flex; gap: 24px; }
+.metrics button { position: relative; padding: 0 0 11px; border: 0; background: none; font-size: 14px; font-weight: 600; color: var(--dim); }
+.metrics button[aria-pressed='true'] { color: var(--fg); }
+.metrics button[aria-pressed='true']::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--blue); }
+.unit { margin-left: auto; padding-bottom: 11px; color: var(--dim); font-size: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 6px; }
+.legend button { display: flex; align-items: center; gap: 7px; padding: 3px 0; background: none; border: 0; color: var(--dim); font-size: 12px; }
+.legend button[aria-pressed='true'] { color: var(--fg); }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 208px; overflow: visible; }
+.chart text { fill: var(--dim); font-size: 10px; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .curve { fill: none; stroke: var(--color); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.chart .muted { opacity: .14; }
+.chart .selected { stroke-width: 2.8; }
+.comparison { margin-top: 23px; padding-top: 18px; border-top: 1px solid var(--line); }
+.table { margin-top: 12px; overflow-x: auto; scrollbar-color: var(--dim) var(--surface); scrollbar-width: thin; }
+.table-head, .model-row { display: grid; grid-template-columns: minmax(190px, 1.3fr) minmax(160px, 1.6fr) 114px 124px 80px; gap: 16px; align-items: center; min-width: 770px; }
+.table-head { color: var(--dim); font-size: 11px; padding: 0 6px 10px; }
+.table-head > :nth-child(n+3), .model-row > :nth-child(n+3) { text-align: right; }
+.model-row { width: 100%; border: 0; border-top: 1px solid var(--line); padding: 13px 6px; background: none; text-align: left; font-variant-numeric: tabular-nums; }
+.model-row:hover, .model-row[aria-pressed='true'] { background: var(--surface); }
+.model { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.distribution { height: 18px; position: relative; }
+.track { position: absolute; top: 8px; width: 100%; height: 2px; background: var(--line); }
+.iqr { position: absolute; top: 3px; height: 12px; border-radius: 4px; background: var(--color); opacity: .4; }
+.median { position: absolute; top: 0; width: 3px; height: 18px; border-radius: 2px; background: var(--color); }
+.number { white-space: nowrap; }
+.number strong { font-size: 20px; letter-spacing: -.025em; font-weight: 600; }
+.number small { font-size: 11px; color: var(--dim); margin-left: 3px; }
+.rounds { color: var(--dim); font-size: 14px; }
+.draft-toolbar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 18px; padding: 12px; color: var(--dim); background: var(--page); font-size: 11px; }
+.draft-toolbar button { padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--dim); font-size: 11px; }
+@media (max-width: 720px) {
+  .workspace { padding: 16px 12px 66px; }
+  .header { padding: 14px; gap: 10px; }
+  h1 { font-size: 17px; }
+  .range button { padding: 5px 8px; font-size: 12px; }
+  .content { padding: 16px 14px; }
+  .running summary { grid-template-columns: 1fr 16px; gap: 14px; padding: 16px; }
+  .identity { grid-column: 1; }
+  .reading { grid-column: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .reading > span { margin: 0; }
+  .value strong { font-size: 34px; }
+  .wait .value strong { font-size: 26px; }
+  .disclosure { grid-column: 2; grid-row: 1; }
+  .scope { font-size: 11px; }
+  .draft-toolbar { flex-wrap: wrap; gap: 6px 14px; }
+}
+</style>
+</head>
+<body>
+<main class="workspace" id="root"></main>
+<footer class="draft-toolbar" id="draft-toolbar"></footer>
+<script>
+// Standalone visual draft. The numbers quote the supplied screenshot; curves are illustrative.
+const copy = {
+  title: 'LLM 性能', rangeLabel: '时间范围', ranges: ['1 小时', '24 小时', '7 天'],
+  live: '运行中 · 1 个会话', sessions: '· 1 个会话', state: '工具执行 1',
+  speed: '会话平均速度', wait: '平均首 token', speedUnit: 'token/s', seconds: '秒',
+  history: range => `历史表现 · 最近 ${range}`, scope: '含运行中数据',
+  metrics: ['输出速度', '首 token'], comparison: '模型对比', model: '模型',
+  distribution: '速度分布', medianSpeed: '中位速度', medianWait: '首 token 中位数', rounds: '测速轮次',
+  details: 'scry', detailState: '工具执行', detailStats: '1 个有速度数据的会话 · 1 个有首 token 数据的会话',
+  draft: '设计稿 v1 · 数字取自参考图，曲线为示意', theme: '切换深浅主题', reset: '取消模型选择',
+  close: '关闭', show: '显示设计稿', actualSize: '查看原尺寸', fit: '适应窗口',
+  chart: '各模型性能趋势示意图', chartHint: '设计示意，不是实时测量',
+}
+const icons = {
+  chevron: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>',
+  info: '<svg class="info" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4m0-6v1"/></svg>',
+}
+const models = [
+  { name: 'gpt-6-astra', color: 'pink', values: [23,23,21,20,20,20,19,19,23,28,28,28,22,23,25,22,24,25,25,20,19,20,22,22] },
+  { name: 'gpt-6.1-sol', color: 'blue', values: [17,19,29,26,27,29,30,30,32,31,33,40,17,34,33,33,39,34,31,30,25,27,24,22] },
+  { name: 'gpt-5.6-sol', color: 'yellow', median: 35.5, first: 3.9, rounds: 2, lo: 35.5, hi: 35.5, values: [64,64,0,60,63,64,67,64,58,48,0,0,68,64,64,0,0,64,64,65,80,82,0,35.5] },
+  { name: 'claude-opus-5-5', color: 'orange', median: 67.4, first: 5.0, rounds: 135, lo: 60, hi: 76, values: [64,64,0,60,63,64,67,64,58,48,0,0,68,64,64,0,0,64,64,65,80,82,0,0] },
+  { name: 'ultimate', color: 'green', median: 71.6, first: 2.3, rounds: 21, lo: 53, hi: 96, values: [35,35,0,0,0,0,0,0,0,0,0,0,59,60,64,72,0,96,99,94,86,0,0,0] },
+  { name: 'claude-opus-5', color: 'purple', median: 67.0, first: 2.8, rounds: 6, lo: 62, hi: 70, values: [55,56,68,68,67,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+]
+let selected = null
+let metric = 0
+let range = 2
+const root = document.querySelector('#root')
+document.title = copy.title
+root.innerHTML = `
+<article class="panel" aria-label="${copy.title}">
+  <header class="header"><h1>${copy.title}</h1>
+    <div class="range" role="group" aria-label="${copy.rangeLabel}">${copy.ranges.map((name, index) => `<button data-range="${index}" aria-pressed="${index === range}">${name}</button>`).join('')}</div>
+    <button class="theme" id="close" aria-label="${copy.close}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
+  </header>
+  <div class="content">
+    <section><h2><i class="dot"></i>${copy.live}</h2>
+      <details class="running"><summary>
+        <div class="identity"><i class="dot" style="--color:var(--blue)"></i><div><b>${models[1].name}</b><span class="count">${copy.sessions}</span><span class="state">${copy.state}</span></div></div>
+        <div class="reading"><span>${copy.speed}</span><div class="value"><strong>23.7</strong><small>${copy.speedUnit}</small></div></div>
+        <div class="reading wait"><span>${copy.wait}</span><div class="value"><strong>3.3</strong><small>${copy.seconds}</small></div></div>
+        <span class="disclosure">${icons.chevron}</span>
+      </summary><div class="member"><b>${copy.details}</b><span>${copy.detailState}</span><span>${copy.detailStats}</span></div></details>
+    </section>
+    <section class="history">
+      <div class="section-head"><h2 id="history-title"></h2><span class="scope" title="${copy.chartHint}">${copy.scope}${icons.info}</span></div>
+      <div class="metric-row"><div class="metrics" role="group">${copy.metrics.map((name, index) => `<button data-metric="${index}" aria-pressed="${index === metric}">${name}</button>`).join('')}</div><span class="unit" id="unit"></span></div>
+      <div class="legend">${models.map(model => `<button data-model="${model.name}" aria-pressed="false"><i class="dot" style="--color:var(--${model.color})"></i>${model.name}</button>`).join('')}</div>
+      <div class="chart" id="chart"></div>
+    </section>
+    <section class="comparison"><h2>${copy.comparison}</h2><div class="table">
+      <div class="table-head"><span>${copy.model}</span><span>${copy.distribution} ${icons.info}</span><span>${copy.medianSpeed}</span><span>${copy.medianWait}</span><span>${copy.rounds} ${icons.info}</span></div>
+      ${models.filter(model => model.median).sort((a, b) => b.median - a.median).map(model => `
+        <button class="model-row" data-model="${model.name}" aria-pressed="false" style="--color:var(--${model.color})">
+          <span class="model"><i class="dot"></i>${model.name}</span>
+          <span class="distribution"><i class="track"></i><i class="iqr" style="left:${model.lo}%;width:${Math.max(1, model.hi - model.lo)}%"></i><i class="median" style="left:${model.median}%"></i></span>
+          <span class="number"><strong>${model.median.toFixed(1)}</strong><small>${copy.speedUnit}</small></span>
+          <span class="number"><strong>${model.first.toFixed(1)}</strong><small>${copy.seconds}</small></span><span class="rounds">${model.rounds}</span>
+        </button>`).join('')}
+    </div></section>
+  </div>
+</article>`
+document.querySelector('#draft-toolbar').innerHTML = `<span>${copy.draft}</span><button id="theme">${copy.theme}</button><button id="reset">${copy.reset}</button><button id="size">${copy.actualSize}</button><button id="show" hidden>${copy.show}</button>`
+function renderChart() {
+  const width = 876, height = 208, left = 30, top = 10, bottom = 184
+  const maximum = metric ? 8 : 120
+  const y = value => bottom - value / maximum * (bottom - top)
+  const x = index => left + index / 23 * (width - left - 12)
+  const ticks = [0, maximum / 2, maximum]
+  const labels = range === 2 ? ['10/15', '10/16', '10/17', '10/18', '10/19', '10/20', '10/21'] : range === 1 ? ['00:00', '06:00', '12:00', '18:00', '24:00'] : ['14:00', '14:15', '14:30', '14:45', '15:00']
+  const curves = models.map(model => {
+    const values = model.values.map(value => metric ? (value ? (model.first || 3.3) * (.9 + value / 240) : 0) : value)
+    const muted = selected && model.name !== selected
+    const paths = values.slice(1).map((value, index) => {
+      const middle = (x(index) + x(index + 1)) / 2
+      return `<path class="curve ${muted ? 'muted' : ''} ${model.name === selected ? 'selected' : ''}" style="--color:var(--${model.color})" d="M${x(index)},${y(values[index])} C${middle},${y(values[index])} ${middle},${y(value)} ${x(index + 1)},${y(value)}"/>`
+    }).join('')
+    return paths
+  }).join('')
+  document.querySelector('#chart').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${copy.chart}">
+    ${ticks.map(value => `<line class="grid" x1="${left}" x2="${width - 12}" y1="${y(value)}" y2="${y(value)}"/><text x="${left - 10}" y="${y(value) + 3}" text-anchor="end">${value}</text>`).join('')}
+    ${curves}${labels.map((label, index) => `<text x="${left + index / (labels.length - 1) * (width - left - 12)}" y="204" text-anchor="middle">${label}</text>`).join('')}
+  </svg>`
+  document.querySelector('#history-title').textContent = copy.history(copy.ranges[range])
+  document.querySelector('#unit').textContent = metric ? copy.seconds : copy.speedUnit
+  document.querySelectorAll('[data-model]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.model === selected)))
+  document.querySelectorAll('[data-metric]').forEach(button => button.setAttribute('aria-pressed', String(+button.dataset.metric === metric)))
+  document.querySelectorAll('[data-range]').forEach(button => button.setAttribute('aria-pressed', String(+button.dataset.range === range)))
+}
+root.addEventListener('click', event => {
+  const button = event.target.closest('button')
+  if (!button) return
+  if (button.dataset.model) selected = selected === button.dataset.model ? null : button.dataset.model
+  if (button.dataset.metric != null) metric = +button.dataset.metric
+  if (button.dataset.range != null) range = +button.dataset.range
+  renderChart()
+})
+document.querySelector('#close').onclick = () => { document.querySelector('.panel').hidden = true; document.querySelector('#show').hidden = false }
+document.querySelector('#show').onclick = () => { document.querySelector('.panel').hidden = false; document.querySelector('#show').hidden = true }
+document.querySelector('#theme').onclick = () => { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }
+document.querySelector('#reset').onclick = () => { selected = null; renderChart() }
+renderChart()
+const panel = document.querySelector('.panel')
+let fitToWindow = true
+function fitPreview() {
+  panel.style.zoom = fitToWindow && window.innerWidth > 720 ? Math.min(1, (window.innerHeight - 100) / panel.offsetHeight) : 1
+}
+document.querySelector('#size').onclick = () => {
+  fitToWindow = !fitToWindow
+  document.querySelector('#size').textContent = fitToWindow ? copy.actualSize : copy.fit
+  fitPreview()
+}
+window.addEventListener('resize', fitPreview)
+document.querySelector('.running').addEventListener('toggle', fitPreview)
+fitPreview()
+</script>
+</body>
+</html>

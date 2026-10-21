@@ -103,3 +103,22 @@
 - Delivery：App 0.2.215 已通过 `install:mac:dev` 构建、开发签名、产物与打包 smoke 并安装到 `/Applications/Scry.app`；安装目录与受测产物的 app.asar SHA-256 一致。最终安装流程的 unit 为 3519 passed／4 显式 skipped，shell 通过；完整 `test:renderer:ui`（含 Credits）及打包产物的 `--performance-only` smoke 通过。安装来自当前工作区，包含原有远程功能 WIP；本任务提交只包含性能面板相关改动及 App 版本。未重启用户日常实例。
 - Validation history：首个安装候选在 3516 项 unit 及完整 renderer UI 检查通过后安装。补充缺失数据修复后的默认并发全量检查出现 12 项失败（6 个非面板 suite；等待超时和后续目录清理错误），现场为 10 核、load 138.75；失败场景单 worker 定向复核 13 项通过。最后以 `VITEST_MAX_FORKS=1 VITEST_MIN_FORKS=1 VITEST_MAX_THREADS=1 VITEST_MIN_THREADS=1 npm run install:mac:dev` 完整复跑通过并重新安装，未删测试、未改断言或超时。完整 renderer UI 与打包性能面板 smoke 随后通过。失败历史保留，不以复跑抹去。
 - Acceptance：需求与方案确认；自动测试和隔离渲染证据不等于用户已认可最终视觉。
+
+## 2026-10-21 · Bolder 设计稿 v1（设计方向已确认）
+
+- 用户要求：对截图中的 LLM 性能弹窗做 bolder，随后明确「先出设计稿」。该阶段仅交付独立视觉原型；用户修正曲线亮度后要求「落地吧」，实现与交付状态见下。
+- 原型：[`bolder-v1.html`](./bolder-v1.html)。采用 Operate 模式，保留深色身份、系统字体、各模型配色、连续曲线与零轴空闲；提供浅色主题预览。
+- 来源与动作：参考图各层数字视觉权重接近 → 将当前运行速度做成 42px、对应模型的蓝色读数，首 token 为 30px，中位数为 20px；不增加新指标或排名徽章。指标切换采用下划线，比较表用细行分隔和更清楚的分布带，不添加装饰性卡片。
+- 用户反馈：同一模型的曲线必须保持统一亮度。已去掉空闲与过渡段的分段透明度；选择模型时，其他模型仍按整条曲线统一淡化，不改变数值或连续曲线形状。
+- 原型边界：数字取自用户截图，曲线为示意；时间、指标和模型选择只用于展示交互，不表示真实过滤或测量。页外工具条明确标注设计稿，并支持主题与适应窗口／原尺寸切换。
+- 检查：原型 JavaScript 语法通过；已查看 1512×764 深浅主题的完整渲染，图例与表格选择同步、指标与单位切换通过浏览器实际点击核对。这些是原型检查，不是 App 或真实 Provider 验收。
+- 状态：早前应用源码与测试的本地试改已撤回；默认安装流程在 unit 阶段被主动停止，未进入打包或安装。实现草案保存在 `/tmp/scry-llm-bolder-implementation.patch`，不作为已交付能力。该记录描述设计稿阶段的暂停状态，后续落地情况见下。
+
+## 2026-10-21 · Bolder 落地（源码交付，安装暂缓）
+
+- Applied：`LlmPerformancePanel.tsx`、`llm-performance.css`。实时速度 42px 并跟随模型色，首 token 30px；标题、下划线指标切换、20px 表格读数与分布带遵循确认稿。紧凑窗口改为纵排实时读数，比较表保留局部横向滚动，520px／700px 均检查无溢出。
+- 曲线：每模型只渲染一条完整路径，移除 measured overlay、clipPath、measuredSpans 与原有分段透明度；选中模型时只整体淡化其他模型。保留连续曲线、零轴空闲、缺失与暂计语义，以及原采集、平滑、平均数、中位数计算。空闲 tooltip 仍明确写空闲，不冒充测得 0 token/s。
+- Regression：`session-capability-ui-smoke.mjs --performance-only` 共 23 项检查通过，覆盖两项指标、深浅主题、选择／键盘／详情、错误、清理、字号与模型色，以及 520px／700px。旧实现先在新检查 `Model curve brightness varies between measured, transition and idle segments` 上失败；修复后通过。检查到的辅助标签最低对比度为深色 7.63:1、浅色 4.99:1。
+- Other checks：相关 unit 17 项通过；最初 `npm run typecheck && npm run build` 通过。当前构建的生产 main／preload `--dev-performance-only` smoke 通过（隔离数据与测试 adapter，两个运行会话、两条历史记录、弹窗焦点和命名）；另查看了生产渲染组件的深浅主题与比较表，不以独立设计稿代替代码验证。未执行真实付费 Provider、VoiceOver、需显示窗口的原生隐藏／恢复，未跑完整 renderer UI 套件。
+- Delivery blocker：随后默认安装流程在 typecheck 阶段退出，报并行 WIP `src/main/remote/inner-mtls-host.ts:300–338` 的 `RemoteHistoryScope.historyScope` 类型错误；未打包、未安装，未修改该远程模块。此前通过的类型检查不当作最新全工作区成功。用户明确选择「提交 UI，暂缓安装」，因此撤回本次未发布的版本号提升，保留 0.2.216；不重启当前 App、不 push。
+- Next：并行远程模块的维护任务先修复上述类型错误；之后再执行安装流程及其完整验证。当前仅交付本任务源码、针对性回归、确认稿与记录，不包含其他 WIP。
