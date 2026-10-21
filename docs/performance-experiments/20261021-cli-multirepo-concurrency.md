@@ -72,6 +72,17 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs cli-19-repos-c
 
 新增纯临时合同测试证明：配置身份 ACK 1；同路径无 fingerprint 的 host override 得到 ACK null；还原配置身份恢复 ACK 1 且状态文件不变；同一身份下回调 exit 7 仍不推进 ACK；修改 bundle 后旧 ACK 仍不得复用。测试从未调用真实项目脚本或 uploader。
 
+## 项目桥接离线修复（2026-10-21）
+
+用户随后授权独立分支修复，不切换 daemon、不触发补发。`rate-native` 本地提交 `106dc3f8e86b6dd1ee1404c695ca4944719b4edf` 删除了 `scry-recorder.sh` 合成的 host override，保留真正继承的 entry/fingerprint。Scry core、配置、ACK 和现有运行环境未改；该提交没有合入真实工作区或推送，没有实际生效，也不是 L2/L3 性能结果。
+
+- 新增断言先在旧实现上失败，修复后通过。覆盖五 Provider 的普通直连、带/不带 fingerprint 的继承 override、managed、显式空 entry、后台冷回退，以及未绑定 session 不采集。
+- 两组原有 fixture 缺少当前必需的 REQ 绑定，先出现 launcher 0 次调用、managed 1 failure/1 error；补齐真实 resolver 和临时绑定，没有绕过生产 gate、删断言或增超时。
+- launcher smoke、6 项 managed bridge、2 个 mock subprocess 的 record-commit helper、27 文件 Python 语法、Bash 语法、workflow dry-run 和 147 文件生成一致性通过。
+- 较大 sync 门禁的 event-router / telemetry-reliability 共 32 条 failure/error 与干净基线 `5940086c` 完全一致；dual-id 同样在两侧因缺少 `tool-starts.json` 失败。本次未扩大修复。完整 runtime smoke 会启动实际 Provider CLI，未运行；只调用上述两个离线 helper。
+- 为遵守离线授权，本地提交仅在该次 Git 命令中禁用了会启动真实 Qoder tracker 的 post-commit hook；没有修改持久 Git 配置或 recorder trust。
+- 部署仍需要单独决定：真实工作区集成、现有 daemon 环境切换，以及是否允许处理剩余积压/外部上传。历史 callback 的具体失败原因仍未还原。
+
 ## 验证与下一步
 
 - `node --check scripts/cli-multirepo-experiment.mjs`：通过。
@@ -80,5 +91,5 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs cli-19-repos-c
 - `npm run typecheck`、`npm run build:cli`、`git diff --check`：通过。
 - 原台账与当前台账 `performance-ratchet.mjs guard`：通过，无变更。没有改生产代码，因此没有运行 full unit、App/UI/发布或安装 gate。
 - 后续 owner（性能）：机器低负载且没有其他测速时，按同一负载重测；只有确认轮首/轮尾不回归且 fallback 改善，才考虑最小生产调度变更并运行完整相关验证。
-- 后续 owner（项目集成）：先在独立分支修桥接并补“无 override / 真正 host override 保留”的离线回归；实际 daemon 切换、积压补发及上传需要用户单独决定。
+- 后续 owner（项目集成）：离线修复见上节；保持真实环境不变，先处置既有门禁失败与 callback 失败诊断。实际工作区集成、daemon 切换、积压补发及上传需要用户单独决定。
 - 对 callback 失败的下一步应是隔离复现或有界失败分类（exit/signal/spawn/input/timeout），不是持久化原始 stderr、无限重试或替用户重放外部操作。
