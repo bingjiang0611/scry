@@ -3,7 +3,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, w
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RECORDER_VERSION, listRecords } from '../core/turn-recorder/store'
+import { RECORDER_VERSION, listRecords, stableHash } from '../core/turn-recorder/store'
 import { readRecorderContent } from '../core/turn-recorder/content-store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { parseArgs, runScryCli } from './scry'
@@ -668,6 +668,11 @@ describe('scry records archive and maintenance', () => {
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
     await writeFile(join(root, 'uploader.sh'), '#!/bin/sh\nexit 0\n')
     await chmod(join(root, 'uploader.sh'), 0o700)
+    const notifications = join(root, '.scry', 'notifications')
+    await mkdir(join(notifications, 'commit-hooks'), { recursive: true })
+    const other = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'other-app', ackedThrough: 2 })
+    await writeFile(join(notifications, 'commit-hook-state.json'), other)
+    await writeFile(join(notifications, 'commit-hooks', `${stableHash('other-app')}.json`), other)
     process.env.SCRY_GRANT_DIR = join(root, 'grants')
     try {
       const stdout = captureStdout()
