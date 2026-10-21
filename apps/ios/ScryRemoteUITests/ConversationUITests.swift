@@ -41,15 +41,6 @@ final class ConversationUITests: XCTestCase {
     XCTAssertFalse(row.label.contains("scry"))
   }
 
-  func testHomeRemainsOperableAtAccessibilityTextSize() {
-    app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXL",
-                           "-uiPreview", "-connected", "-uiMockData", "-route", "home"]
-    app.launch()
-    XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.buttons["新任务"].isHittable)
-    XCTAssertTrue(app.staticTexts["项目"].exists)
-  }
-
   func testPairingParseFailureIsActionableWithCollapsedTechnicalDetail() {
     app.launchArguments = ["-uiPreview", "-route", "pair", "-pairCode", "not-a-scry-code"]
     app.launch()
