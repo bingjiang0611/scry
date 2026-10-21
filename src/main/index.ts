@@ -5035,7 +5035,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         try {
           const bound = bindRemoteHistory({ providerId, cwd, externalSessionId, historyScope, agentProfileId })
           canonical = bound.canonical
-          if (historyScope !== undefined) return readRemoteProfilePreview({
+          if (historyScope !== undefined || agentProfileId !== undefined) return readRemoteProfilePreview({
             cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
             userDataDir: app.getPath('userData'), historyScope: bound.scope,
             ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {})
@@ -5072,18 +5072,27 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // not just list it. Side-effect-free (no dock badge / cwd / baseline like
       // agent:loadSession): resolve+authorize the cwd to a device-visible project,
       // read the SAME trace archive (+ claude transcript) a local load uses, merge,
-      // and flatten each turn to the device content shape. Unknown/unauthorized/
-      // unreadable => empty (honest: no content, never a fabricated transcript).
+      // and flatten each turn to the device content shape. Only the unscoped
+      // compatibility path retains empty-list fallback; explicit sources keep errors.
       readHistory: async ({ providerId, cwd, externalSessionId, historyScope, agentProfileId }) => {
-        if (!providerId || !externalSessionId) return []
+        const scoped = historyScope !== undefined || agentProfileId !== undefined
+        if (!providerId || !externalSessionId) {
+          if (scoped) throw new Error('invalid_history_query')
+          return []
+        }
         let canonical: string
         let scope: 'session' | 'profile'
         let profile: string | null | undefined
         try {
           const bound = bindRemoteHistory({ providerId, cwd, externalSessionId, historyScope, agentProfileId })
-          canonical = bound.canonical; scope = bound.scope; profile = bound.profile
-        } catch { return [] }
-        if (historyScope !== undefined) return readRemoteProfileHistory({
+          canonical = bound.canonical
+          scope = bound.scope
+          profile = bound.profile
+        } catch (error) {
+          if (scoped) throw error
+          return []
+        }
+        if (scoped) return readRemoteProfileHistory({
           cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
           userDataDir: app.getPath('userData'), historyScope: scope,
           ...(profile !== undefined ? { agentProfileId: profile } : {}),

@@ -276,6 +276,20 @@ async function main() {
     directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
+  // Explicit history scope is an authority claim, not permission to convert
+  // an unknown session into a successfully verified empty transcript.
+  for (const op of ['history', 'historyPage']) {
+    const unknown = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+      op, providerId: 'codex', cwd: canonicalWorkspace, externalSessionId: 'not-in-catalog',
+      historyScope: 'session', agentProfileId: null
+    })
+    assert.equal(unknown.error, 'history_session_not_found', `${op} must reject an invented catalog session`)
+  }
+  const strictUnknown = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+    op: 'historyPage', providerId: 'codex', cwd: canonicalWorkspace,
+    externalSessionId: 'desktop-remote-bootstrap', agentProfileId: 'unproven-profile'
+  })
+  assert.equal(strictUnknown.error, 'history_profile_unavailable', 'legacy explicit Profile must not become empty session history')
   const customDirectory = join(temp, 'custom project ')
   mkdirSync(customDirectory)
   const canonicalCustom = realpathSync(customDirectory)
@@ -517,6 +531,7 @@ async function main() {
   }
   assert.ok(!JSON.parse(readFileSync(join(userDataDir, 'recent-folders.json'), 'utf8')).includes(realpathSync(temp)), 'revoked selection must not persist a grant')
   console.log(JSON.stringify({
+    historyAuthority: { unknownSessionRejected: true, legacyProfileUnavailable: true },
     sessionActions: { hostStoreRename: true, pinUnpin: true, archiveRestore: true, archiveStopsActiveRun: true, unauthorizedWorkspaceDenied: true, revokedOwnerDenied: true, mobileArchivesRemainHidden: true },
     workbench: { realFileWrite: true, staleRevisionDenied: true, createRename: true, realGitStageCommit: true, realPtyCwdAndInput: true, cumulativeAckDuplicateSafe: true, detachedLargeOutputContinues: true, recordingCatchUp: true, staleWriterDenied: true },
     directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
