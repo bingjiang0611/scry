@@ -4995,7 +4995,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).toContain('role="radiogroup" aria-label="界面主题"')
     expect(html).toContain('class="theme-option active" role="radio" aria-checked="true"')
     expect(html).toContain('浅色')
-    expect(html).toContain('立即应用到全部视图')
+    expect(html).not.toContain('立即应用到全部视图')
   })
 
   it('设置弹窗用左侧 tab 分区，默认停在外观', () => {

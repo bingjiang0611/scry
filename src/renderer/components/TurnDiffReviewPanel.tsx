@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { TurnDiffPatchReason } from '@shared/trace'
 import { displayDiffPath as displayPath, type TurnDiffReview } from '../turn-diff'
 import { Icon } from './primitives/Icon'
+import { TURN_DIFF_REVIEW_COPY as copy } from '../constants/copy'
 
 interface DiffLine {
   kind: 'meta' | 'hunk' | 'add' | 'del' | 'context'
@@ -63,23 +64,19 @@ export function TurnDiffReviewPanel({ review, onClose }: { review: TurnDiffRevie
   const preview = review.preview === true
   // baseline='resumed' 表示会话首轮前的基线不在本次运行内，是恢复该会话时重锚的：
   // 净 diff 只覆盖「自恢复以来」，不能冒充整段会话。
-  const sessionRangeText = turnDiff.baseline === 'resumed' ? '自恢复以来 → 当前' : '第一轮前基线 → 当前'
+  const sessionRangeText = copy.sessionRange(turnDiff.baseline === 'resumed', preview)
 
   return (
-    <aside className="panel diff-review-panel" aria-label={sessionScope ? '本会话净改动 Review' : '本轮改动 Review'}>
+    <aside className="panel diff-review-panel" aria-label={sessionScope ? copy.sessionLabel : copy.turnLabel}>
       <header className="diff-review-head">
         <div className="diff-review-title">
           <Icon name="file" />
           <div>
-            <b>Review</b>
-            {sessionScope ? (
-              <span>本会话净改动（{sessionRangeText}）{preview ? ' · 运行中预览' : ''}</span>
-            ) : (
-              <span title={review.runId}>{preview ? '本轮改动（运行中预览）' : '本轮改动'} · {review.runId}</span>
-            )}
+            <b title={review.runId}>{sessionScope ? copy.sessionTitle : copy.turnTitle}</b>
+            {sessionScope ? <span>{sessionRangeText}</span> : preview && <span>{copy.preview}</span>}
           </div>
         </div>
-        <button type="button" className="diff-review-close" onClick={onClose} title="关闭 Review（Esc）" aria-label="关闭 Review">
+        <button type="button" className="diff-review-close" onClick={onClose} title={copy.closeTitle} aria-label={copy.closeLabel}>
           <Icon name="x" />
         </button>
       </header>

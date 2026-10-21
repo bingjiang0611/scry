@@ -91,7 +91,6 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
                 {vm === null ? readError ? copy.status.unknown : copy.loadingHosts : vm.kind === 'disabled' ? copy.disabled : vm.relayReady ? copy.relayOnline : copy.relayDormant}
               </span>
             </div>
-            {vm?.kind === 'disabled' && <p className="remote-access-card-note">{copy.phoneDisabled}</p>}
             {vm?.kind === 'enabled' && !vm.relayReady && <p className="remote-access-card-note">{copy.relayDormantEffect}</p>}
             {vm?.kind === 'enabled' && (
               <div className="remote-access-actions">

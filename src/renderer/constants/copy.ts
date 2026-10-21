@@ -1,3 +1,15 @@
+export const TURN_DIFF_REVIEW_COPY = {
+  turnTitle: '本轮改动',
+  sessionTitle: '本会话净改动',
+  preview: '运行中预览',
+  sessionRange: (resumed: boolean, preview: boolean) =>
+    `${resumed ? '自恢复以来 → 当前' : '第一轮前基线 → 当前'}${preview ? ' · 运行中预览' : ''}`,
+  turnLabel: '本轮改动 Review',
+  sessionLabel: '本会话净改动 Review',
+  closeTitle: '关闭 Review（Esc）',
+  closeLabel: '关闭 Review'
+} as const
+
 export const MODAL_COPY = {
   close: '关闭',
   closeRename: '关闭重命名',
@@ -186,7 +198,6 @@ export const REMOTE_ACCESS_COPY = {
   relayOnline: '中继已配置',
   relayDormant: '中继休眠',
   relayDormantEffect: '中继休眠，暂时无法接入。',
-  phoneDisabled: '手机访问未启用。',
   generateSshInvite: '生成 SSH 邀请',
   sshInvite: 'SSH 邀请',
   copyInvite: '复制邀请',
@@ -214,9 +225,7 @@ export const REMOTE_ACCESS_COPY = {
   unnamedDevice: '未命名设备',
   awaitingFingerprint: '等待确认指纹',
   deviceConnecting: '设备连接中…',
-  paired: '已配对',
-  settingsAppearanceFooter: '选择会保存在此设备，并立即应用到全部视图。',
-  settingsArchiveFooter: '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'
+  paired: '已配对'
 } as const
 
 export const QUESTIONNAIRE_COPY = {

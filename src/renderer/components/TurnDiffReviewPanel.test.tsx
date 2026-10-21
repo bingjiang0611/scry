@@ -46,7 +46,8 @@ it('resets line provenance at the next file boundary', () => {
 describe('TurnDiffReviewPanel 会话基线文案', () => {
   it('baseline=resumed 终态：说「自恢复以来」，不说「第一轮前基线」', () => {
     const html = markup({ turnDiff: snapshot('resumed'), scope: 'session' })
-    expect(html).toContain('本会话净改动（自恢复以来 → 当前）')
+    expect(html).toContain('<b title="run-1">本会话净改动</b>')
+    expect(html).toContain('<span>自恢复以来 → 当前</span>')
     expect(html).not.toContain('第一轮前基线')
   })
 
@@ -59,7 +60,8 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
 
   it('baseline=session_start：仍然是「第一轮前基线 → 当前」', () => {
     const html = markup({ turnDiff: snapshot('session_start'), scope: 'session' })
-    expect(html).toContain('本会话净改动（第一轮前基线 → 当前）')
+    expect(html).toContain('<b title="run-1">本会话净改动</b>')
+    expect(html).toContain('<span>第一轮前基线 → 当前</span>')
     expect(html).not.toContain('自恢复以来')
   })
 
@@ -71,7 +73,9 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
 
   it('单轮 scope 不受基线来源影响：仍是「本轮改动」', () => {
     const html = markup({ turnDiff: snapshot('resumed') })
-    expect(html).toContain('本轮改动')
+    expect(html).toContain('<b title="run-1">本轮改动</b>')
+    expect(html).not.toContain('本轮改动 · run-1')
+    expect(html).not.toContain('>run-1<')
     expect(html).not.toContain('自恢复以来')
     expect(html).not.toContain('第一轮前基线')
   })

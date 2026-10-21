@@ -11396,21 +11396,6 @@ button.turn-id.turn-call-open:focus-visible {
   line-height: 1.55;
 }
 
-.agents-evidence-note {
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 10px;
-  border-top: 1px solid var(--border3);
-  color: var(--dim3);
-  font: var(--text-supporting-size)/1.4 var(--font-mono);
-}
-
-.agents-evidence-note .ico {
-  flex: none;
-}
-
 @media (hover: hover) and (pointer: fine) {
   .surface-tab:hover,
   .right-surface-panel .icon-button:hover,

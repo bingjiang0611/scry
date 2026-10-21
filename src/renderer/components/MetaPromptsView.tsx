@@ -89,7 +89,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
   return (
     <section className="meta-prompts-view" aria-label="Meta Prompts 提示词库">
       <header className="mp-header">
-        <div><h1>Meta Prompts</h1><p>常用提示词，随取随用。</p></div>
+        <div><h1>Meta Prompts</h1></div>
         <div className="mp-actions">
           <button type="button" className="mp-button mp-back" onClick={onBack}>返回会话</button>
           <button type="button" className="mp-button" disabled={library.status !== 'ready'} onClick={() => { setNotice(null); setEditor({ prompt: null }) }}><Icon name="plus" /> 新建提示词</button>
@@ -119,7 +119,6 @@ export function MetaPromptsView({ onBack, onInsert }: {
                 <div className="mp-empty"><Icon name={prompts.length === 0 ? 'terminal' : 'search'} /><strong>{prompts.length === 0 ? '还没有提示词' : '没有匹配的提示词'}</strong><p>{prompts.length === 0 ? '把第一条常用指令保存下来。' : '试试标题或正文中的关键词。'}</p></div>
               )}
             </div>
-            <div className="mp-list-foot">个人提示词库 · 保存在本机</div>
           </aside>
           <article className="mp-detail" aria-label="提示词详情">
             {selected ? <>
@@ -132,7 +131,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
                 <button type="button" className="mp-button" onClick={() => onInsert(selected.body)}>放入当前会话</button>
                 <button type="button" className="mp-button mp-primary" onClick={() => { void copy(selected) }}><Icon name="copy" /> 复制提示词</button>
               </div></footer>
-            </> : <div className="mp-empty mp-detail-empty"><strong>{prompts.length === 0 ? '保存常用指令，下次直接使用' : '没有可预览的提示词'}</strong><p>{prompts.length === 0 ? '只需标题和正文，不必创建 Skill。' : '调整搜索后再选择一条。'}</p>{prompts.length === 0 && <button type="button" className="mp-button" onClick={() => setEditor({ prompt: null })}><Icon name="plus" /> 新建提示词</button>}</div>}
+            </> : <div className="mp-empty mp-detail-empty"><strong>{prompts.length === 0 ? '保存常用指令，下次直接使用' : '没有可预览的提示词'}</strong>{prompts.length === 0 && <button type="button" className="mp-button" onClick={() => setEditor({ prompt: null })}><Icon name="plus" /> 新建提示词</button>}</div>}
           </article>
         </div>
       )}
@@ -171,7 +170,7 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
         <div className="mp-editor-fields">
           <label>标题<input ref={inputRef} required maxLength={META_PROMPT_TITLE_LIMIT} value={title} placeholder="例如：先写方案，再开始实现" onChange={event => setTitle(event.target.value)} /></label>
           <label>提示词正文<textarea required value={body} placeholder="写下你希望重复使用的指令…" onChange={event => setBody(event.target.value)} /></label>
-          <div className="mp-editor-meta"><span>纯文本 · 不执行工具</span><span>{Array.from(body).length} 字</span></div>
+          <div className="mp-editor-meta"><span>{Array.from(body).length} 字</span></div>
           {error && <p className="mp-form-error" role="alert">{error}</p>}
           {discarding && <div className="mp-discard" role="alert"><strong>放弃未保存的修改？</strong><p>放弃后，本次修改不会保存。</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>继续编辑</button><button type="button" className="mp-button mp-danger" onClick={onClose}>放弃修改</button></div></div>}
         </div>
