@@ -87,6 +87,16 @@ export const MODAL_COPY = {
   closeLlmPerformance: '关闭 LLM 性能'
 } as const
 
+export const IMAGE_PREVIEW_COPY = {
+  close: '关闭图片预览',
+  stage: '图片内容，可滚动查看',
+  zoomGroup: '图片缩放（相对于适应窗口）',
+  zoomOut: '缩小图片',
+  zoomIn: '放大图片',
+  resetZoom: (percent: number) => `${percent}%，重置为适应窗口`,
+  dimensions: (width: number, height: number) => `${width} × ${height}`
+} as const
+
 export const BACKGROUND_WORK_COPY = {
   regionLabel: '后台任务',
   provider: { pi: 'Pi', qoder: 'Qoder' },

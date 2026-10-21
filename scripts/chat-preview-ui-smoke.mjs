@@ -56,7 +56,7 @@ async function exercise() {
     check(document.querySelector('.image-lightbox') === dialog, 'Image click dismissed preview')
     for (let i = 0; i < 4; i++) {
       query('放大图片').click()
-      await waitFor(() => dialog.querySelector('.image-lightbox-zoom span').textContent === `${125 + i * 25}%`)
+      await waitFor(() => dialog.querySelector('.image-lightbox-reset').textContent === `${125 + i * 25}%`)
     }
     check(query('放大图片').disabled, 'Zoom upper bound missing')
     check(stage.scrollHeight > stage.clientHeight || stage.scrollWidth > stage.clientWidth, 'Zoom is clipped instead of scrollable')
@@ -65,15 +65,18 @@ async function exercise() {
     check(visible(close) && visible(query('缩小图片')), 'Zoom moved controls off screen')
     for (let i = 0; i < 6; i++) {
       query('缩小图片').click()
-      await waitFor(() => dialog.querySelector('.image-lightbox-zoom span').textContent === `${175 - i * 25}%`)
+      await waitFor(() => dialog.querySelector('.image-lightbox-reset').textContent === `${175 - i * 25}%`)
     }
     check(query('缩小图片').disabled, 'Zoom lower bound missing')
+    dialog.querySelector('.image-lightbox-reset').click()
+    await waitFor(() => dialog.querySelector('.image-lightbox-reset').textContent === '100%')
+    check(!query('缩小图片').disabled, 'Reset zoom did not restore the zoom range')
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await waitFor(() => !document.querySelector('.image-lightbox'))
     check(document.activeElement === thumb, 'Escape did not restore thumbnail focus')
     thumb.click()
     await waitFor(() => document.querySelector('.image-lightbox-stage img')?.style.visibility === 'visible')
-    check(document.querySelector('.image-lightbox-zoom span').textContent === '100%', 'Reopen retained stale zoom')
+    check(document.querySelector('.image-lightbox-reset').textContent === '100%', 'Reopen retained stale zoom')
     query('关闭图片预览').click()
     await waitFor(() => !document.querySelector('.image-lightbox'))
     thumb.click()
@@ -82,6 +85,21 @@ async function exercise() {
     await waitFor(() => !document.querySelector('.image-lightbox'))
     check(document.activeElement === thumb, 'Backdrop close did not restore focus')
   }
+  // macOS 标题栏前 52px 是 -webkit-app-region 拖拽带：落在那里的原生点击会变成窗口拖动，
+  // 按钮收不到 click。关闭按钮必须整块在拖拽带下方，覆盖层自己也要声明 no-drag。
+  document.documentElement.dataset.platform = 'macos'
+  thumbs[0].click()
+  await waitFor(() => document.querySelector('.image-lightbox-stage img')?.style.visibility === 'visible')
+  const platformDialog = document.querySelector('.image-lightbox')
+  const platformClose = query('关闭图片预览')
+  check(rect(platformClose).top >= 52, 'Preview close button sits inside the macOS titlebar drag strip')
+  check(
+    getComputedStyle(platformDialog.parentElement).getPropertyValue('-webkit-app-region') === 'no-drag',
+    'Preview overlay does not claim no-drag over the titlebar drag strip'
+  )
+  delete document.documentElement.dataset.platform
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await waitFor(() => !document.querySelector('.image-lightbox'))
   const piTurns = document.querySelectorAll('#pi-feedback-fixture .turn-assistant')
   check(piTurns.length === 2, 'Pi live/history feedback fixtures did not mount')
   for (const turn of piTurns) {
