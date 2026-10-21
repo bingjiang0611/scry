@@ -164,6 +164,7 @@ enum ConnectionCopy {
 
   static let chooseWorkspaceFirst = "先选择工作目录，再选择 Provider"
   static let chooseProviderToSend = "选择 Provider 后即可发送"
+  static let providerControlsUnavailable = "所选 Provider 设置不可用"
   static let authorizedProjects = "已授权项目"
   static let chooseThisFolder = "选择此文件夹"
   static let subfolders = "子文件夹"

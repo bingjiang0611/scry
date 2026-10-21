@@ -8,7 +8,7 @@ import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../sh
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
-  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
+  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProviderQuery, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
 import { isAgentPermissionMode, type AgentQuestionResponse } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
@@ -298,7 +298,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
 
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
     const rawProjects = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'projects' }, 'projects')
-    const rawProviders = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'providers' }, 'providers')
+    const rawProviders = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'providers', detail: 'metadata' satisfies RemoteProviderQuery['detail'] }, 'providers')
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
     const sessions: RemoteSessionRef[] = []; let cursor = 0; let snapshot: string | undefined
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -317,6 +317,19 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     const item = this.#connection(state, connectionIdValue)
     const capabilities = validateInfo({ desktop: info }, item.hostId)
     return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...capabilities }
+  }
+
+  async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {
+    const query = context(value)
+    const raw = await this.#catalogRequest<unknown>(connectionIdValue, {
+      op: 'providers', detail: 'selected', providerId: query.providerId, cwd: query.cwd,
+      ...(query.agentProfileId ? { agentProfileId: query.agentProfileId } : {})
+    }, 'providers')
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ITEMS) fail('provider_controls_unavailable')
+    const refs = raw.map((item) => this.#provider(item))
+    const selected = refs.find((item) => item.id === query.providerId && (item.agentProfileId ?? '') === (query.agentProfileId ?? ''))
+    if (!selected) fail('provider_controls_unavailable')
+    return selected
   }
 
   async commands(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteCommandCatalog> {

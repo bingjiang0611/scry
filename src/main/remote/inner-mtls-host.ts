@@ -218,9 +218,19 @@ export class InnerMtlsHost {
         }) }
       }
       if (request.op === 'providers') {
-        // Same owner-device authorization; the run path still validates the
-        // chosen providerId, so this is a display-only chooser snapshot.
-        return { providers: controller.listProviders(fingerprint) }
+        // Metadata is cheap. Controls are resolved only for an explicitly
+        // selected, host-authorized context. An omitted detail preserves the
+        // legacy all-controls request for older clients.
+        if (request.detail === 'metadata') return { providers: controller.listProviders(fingerprint) }
+        if (request.detail === 'selected') {
+          if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' ||
+              (request.agentProfileId !== undefined && typeof request.agentProfileId !== 'string')) return { error: 'invalid_request' }
+          return { providers: [await controller.listProviderControls(fingerprint, {
+            detail: 'selected', providerId: request.providerId, cwd: request.cwd,
+            ...(typeof request.agentProfileId === 'string' ? { agentProfileId: request.agentProfileId } : {})
+          })] }
+        }
+        return { providers: await controller.listProvidersFull(fingerprint) }
       }
       if (request.op === 'commands') {
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string') return { error: 'invalid_request' }

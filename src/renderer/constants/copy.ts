@@ -176,6 +176,8 @@ export const REMOTE_ACCESS_COPY = {
   connectForProjects: '连接后可查看项目。',
   projectReadError: (detail: string) => `无法读取项目：${detail}`,
   loadingProjects: '正在读取项目…',
+  loadingProviderControls: '正在读取所选 Provider 设置…',
+  providerControlsUnavailable: (host: string) => `${host} 未能读取所选 Provider 设置；暂时无法发送`,
   noProjects: '没有项目。',
   newSession: '新建会话',
   removeHost: '移除主机',

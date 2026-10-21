@@ -66,6 +66,8 @@ export interface HostControllerFactoryDependencies {
   listProjects?(): RemoteProjectRef[]
   listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
+  listProvidersFull?: HostControllerDependencies['listProvidersFull']
+  listProviderControls?: HostControllerDependencies['listProviderControls']
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   sessionAction?: HostControllerDependencies['sessionAction']
   listSessions?(): RemoteSessionRef[]
@@ -163,6 +165,8 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
     ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
+    ...(deps.listProvidersFull ? { listProvidersFull: deps.listProvidersFull } : {}),
+    ...(deps.listProviderControls ? { listProviderControls: deps.listProviderControls } : {}),
     ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
     ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),

@@ -14,6 +14,19 @@ function contextLabel(provider: string, profile: string): string {
 
 // One phone picker entry for one available Provider context (Pi profiles are
 // separate contexts). Pure so the probe-failure rule below is testable.
+export function remoteProviderMetadata(input: {
+  descriptor: { id: string; label: string; available?: boolean }
+  profile?: { id: string; label: string }
+}): RemoteProviderRef {
+  const label = input.profile ? contextLabel(input.descriptor.label, input.profile.label) : input.descriptor.label
+  return {
+    id: input.descriptor.id,
+    label,
+    available: input.descriptor.available !== false,
+    ...(input.profile ? { agentProfileId: input.profile.id } : {})
+  }
+}
+
 export function remoteProviderEntry(input: {
   descriptor: { id: string; label: string }
   profile?: { id: string; label: string }

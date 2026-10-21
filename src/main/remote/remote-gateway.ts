@@ -2,8 +2,8 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
-import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
-export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
+import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteProviderQuery, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
+export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteProviderQuery, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
 
 // G1 application service: the device-facing surface that a verified remote peer
 // reaches once its inner-mTLS identity is established. It composes the two host
@@ -73,9 +73,12 @@ export interface RemoteDirectorySource {
 // reflects whether the host currently has that Provider authenticated/usable.
 // The device still cannot invent a provider - the run path validates it.
 export interface RemoteProviderSource {
-  // Snapshot of the host's Providers. Called per request so a newly
-  // authenticated (or disabled) Provider is reflected without a reconnect.
-  list(): RemoteProviderRef[]
+  // Metadata is cheap and never probes Provider controls.
+  list?(): RemoteProviderRef[]
+  // Explicit legacy requests may still ask for the old all-controls response.
+  listFull?(): Promise<RemoteProviderRef[]>
+  // A selected context is the only new path that may read Provider controls.
+  selected?(query: Extract<RemoteProviderQuery, { detail: 'selected' }>): Promise<RemoteProviderRef>
 }
 
 export interface RemoteCommandQuery {
@@ -515,7 +518,7 @@ export class RemoteGateway {
   // share the canonical Provider id but carry distinct agentProfileId values.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
     this.#authorize(peerCertSHA256)
-    const raw = this.#providers?.list() ?? []
+    const raw = this.#providers?.list?.() ?? []
     const seen = new Set<string>()
     const out: RemoteProviderRef[] = []
     for (const entry of raw) {
@@ -526,22 +529,65 @@ export class RemoteGateway {
       const contextKey = `${entry.id}\0${agentProfileId ?? ''}`
       if (seen.has(contextKey)) continue
       seen.add(contextKey)
-      const models = this.modelOptions(entry.models)
-      const efforts = this.controlOptions(entry.efforts)
-      const permissions = this.controlOptions(entry.permissions)
       out.push({
         id: entry.id,
         label: entry.label.slice(0, 128),
         available: entry.available === true,
-        ...(agentProfileId ? { agentProfileId } : {}),
-        ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
-        ...(models.length > 0 ? { models } : {}),
-        ...(efforts.length > 0 ? { efforts } : {}),
-        ...(permissions.length > 0 ? { permissions } : {})
+        ...(agentProfileId ? { agentProfileId } : {})
       })
       if (out.length >= MAX_PROVIDERS) break
     }
     return out
+  }
+
+  async listProviderControls(peerCertSHA256: string, query: Extract<RemoteProviderQuery, { detail: 'selected' }>): Promise<RemoteProviderRef> {
+    this.#authorize(peerCertSHA256)
+    if (!query || query.detail !== 'selected' || typeof query.providerId !== 'string' || query.providerId.length === 0 || query.providerId.length > 64 ||
+        typeof query.cwd !== 'string' || query.cwd.length === 0 || query.cwd.length > MAX_PATH ||
+        (query.agentProfileId !== undefined && (typeof query.agentProfileId !== 'string' || query.agentProfileId.length === 0 || query.agentProfileId.length > 128))) {
+      throw new RemoteGatewayError('invalid_provider_context')
+    }
+    if (!this.#providers?.selected) throw new RemoteGatewayError('provider_controls_unavailable')
+    const listed = this.#providers.list?.() ?? []
+    const selected = listed.find((entry) => entry.id === query.providerId && (entry.agentProfileId ?? '') === (query.agentProfileId ?? ''))
+    if (!selected || selected.available !== true) throw new RemoteGatewayError('provider_not_authorized')
+    return this.#providerRef(await this.#providers.selected(query))
+  }
+
+  async listProvidersFull(peerCertSHA256: string): Promise<RemoteProviderRef[]> {
+    this.#authorize(peerCertSHA256)
+    const raw = this.#providers?.listFull ? await this.#providers.listFull() : this.#providers?.list?.() ?? []
+    return this.providerRefs(raw)
+  }
+
+  private providerRefs(raw: RemoteProviderRef[]): RemoteProviderRef[] {
+    const seen = new Set<string>()
+    const out: RemoteProviderRef[] = []
+    for (const entry of raw) {
+      const ref = this.#providerRef(entry)
+      const contextKey = `${ref.id}\0${ref.agentProfileId ?? ''}`
+      if (seen.has(contextKey)) continue
+      seen.add(contextKey)
+      out.push(ref)
+      if (out.length >= MAX_PROVIDERS) break
+    }
+    return out
+  }
+
+  #providerRef(entry: RemoteProviderRef): RemoteProviderRef {
+    if (!entry || typeof entry.id !== 'string' || typeof entry.label !== 'string') throw new RemoteGatewayError('invalid_provider_response')
+    if (entry.id.length === 0 || entry.id.length > 64) throw new RemoteGatewayError('invalid_provider_response')
+    const agentProfileId = typeof entry.agentProfileId === 'string' && entry.agentProfileId.length > 0 && entry.agentProfileId.length <= 128 ? entry.agentProfileId : undefined
+    return {
+      id: entry.id,
+      label: entry.label.slice(0, 128),
+      available: entry.available === true,
+      ...(agentProfileId ? { agentProfileId } : {}),
+      ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
+      ...(this.modelOptions(entry.models).length > 0 ? { models: this.modelOptions(entry.models) } : {}),
+      ...(this.controlOptions(entry.efforts).length > 0 ? { efforts: this.controlOptions(entry.efforts) } : {}),
+      ...(this.controlOptions(entry.permissions).length > 0 ? { permissions: this.controlOptions(entry.permissions) } : {})
+    }
   }
 
   async listCommands(peerCertSHA256: string, query: RemoteCommandQuery): Promise<RemoteCommandCatalog> {

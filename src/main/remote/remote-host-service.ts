@@ -50,6 +50,8 @@ export interface RemoteHostServiceDependencies {
   listProjects?(): RemoteProjectRef[]
   listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
+  listProvidersFull?(): Promise<RemoteProviderRef[]>
+  listProviderControls?(query: Extract<import('../../shared/desktop-remote').RemoteProviderQuery, { detail: 'selected' }>): Promise<RemoteProviderRef>
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   sessionAction?: (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => Promise<boolean> | boolean
   listSessions?(): RemoteSessionRef[]
@@ -133,6 +135,8 @@ export class RemoteHostService {
       ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
       ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
+      ...(deps.listProvidersFull ? { listProvidersFull: deps.listProvidersFull } : {}),
+      ...(deps.listProviderControls ? { listProviderControls: deps.listProviderControls } : {}),
       ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
       ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
