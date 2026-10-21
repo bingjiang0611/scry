@@ -44,8 +44,7 @@ struct CircleButton: View {
   var body: some View {
     Button(action: action) {
       Image(systemName: symbol)
-        .font(filled ? .title3.weight(.medium) : .body.weight(.medium))
-        .controlIconScale()
+        .font(.system(size: filled ? 18 : 17, weight: .medium))
         .frame(width: filled ? 46 : 44, height: filled ? 46 : 44)
         .foregroundStyle(filled ? Palette.surface : Palette.ink)
         .background(filled ? AnyShapeStyle(Palette.blue) : AnyShapeStyle(Color.clear), in: Circle())
@@ -66,8 +65,7 @@ struct MoreMenu<Content: View>: View {
   var body: some View {
     Menu(content: content) {
       Image(systemName: Symbol.more)
-        .font(.body.weight(.medium))
-        .controlIconScale()
+        .font(.system(size: 17, weight: .medium))
         .frame(width: 44, height: 44)
     }
     .accessibilityLabel(label)
@@ -83,8 +81,7 @@ struct PlainIcon: View {
   var body: some View {
     Button(action: action) {
       Image(systemName: symbol)
-        .font(.body.weight(.medium))
-        .controlIconScale()
+        .font(.system(size: 17, weight: .medium))
         .frame(minWidth: 44, minHeight: 44)
         .foregroundStyle(tint)
         .contentShape(Rectangle())
@@ -102,8 +99,8 @@ struct Notice: View {
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
       Image(systemName: warning ? "exclamationmark.circle" : "info.circle")
-        .font(.footnote.weight(.medium)).padding(.top, 1)
-      Text(text).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+        .font(.system(size: 13, weight: .medium)).padding(.top, 1)
+      Text(text).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
     }
     .foregroundStyle(warning ? Palette.warnInk : Palette.noticeInk)
     .padding(.vertical, 10).padding(.horizontal, 12)
@@ -118,9 +115,9 @@ struct EmptyState: View {
   var symbol: String = "bubble.left.and.bubble.right"
   var body: some View {
     VStack(spacing: 10) {
-      Image(systemName: symbol).font(.title.weight(.light)).foregroundStyle(Palette.faint)
-      Text(title).font(.headline).multilineTextAlignment(.center)
-      Text(detail).font(.footnote).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+      Image(systemName: symbol).font(.system(size: 27, weight: .light)).foregroundStyle(Palette.faint)
+      Text(title).font(.system(size: 16, weight: .semibold)).multilineTextAlignment(.center)
+      Text(detail).font(.system(size: 13)).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity)
     .padding(.vertical, 54).padding(.horizontal, 26)
@@ -155,14 +152,14 @@ struct RemoteHeader<Right: View>: View {
         if let backAction { backAction() } else { menuAction?() }
       }
       VStack(alignment: .leading, spacing: 3) {
-        Text(title).font(.headline).lineLimit(titleLineLimit)
+        Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(titleLineLimit)
           .fixedSize(horizontal: false, vertical: true)
         if let subtitle {
           HStack(spacing: 5) {
             if let link { StatusDot(link: link) }
             Text(subtitle).lineLimit(titleLineLimit == 1 ? 1 : 2)
           }
-          .font(.caption).foregroundStyle(Palette.muted)
+          .font(.system(size: 11.5)).foregroundStyle(Palette.muted)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,7 +253,7 @@ struct ConversationScrollView<Content: View>: View {
               withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo("bottom", anchor: .bottom) }
             } label: {
               Label(ConnectionCopy.returnToLatest, systemImage: "arrow.down")
-                .font(.subheadline.weight(.semibold)).padding(.horizontal, 14).frame(minHeight: 44)
+                .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 14).frame(minHeight: 44)
                 .background(Palette.surface, in: Capsule())
                 .overlay(Capsule().stroke(Palette.line))
             }
@@ -473,7 +470,8 @@ enum ConversationMarkdownParser {
 private struct ConversationMarkdownInline: View {
   let source: String
   var muted = false
-  var font: Font = .body
+  var size: CGFloat = 16
+  var weight: Font.Weight = .regular
   var alignment: TextAlignment = .leading
 
   private var rendered: AttributedString {
@@ -486,7 +484,7 @@ private struct ConversationMarkdownInline: View {
 
   var body: some View {
     Text(rendered)
-      .font(font)
+      .font(.system(size: size, weight: weight))
       .foregroundStyle(muted ? Palette.muted : Palette.ink)
       .lineSpacing(muted ? 3 : 5)
       .textSelection(.enabled)
@@ -520,8 +518,8 @@ private struct ConversationMarkdownTableView: View {
   private func tableRow(_ cells: [String], header: Bool) -> some View {
     HStack(alignment: .top, spacing: 0) {
       ForEach(cells.indices, id: \.self) { column in
-        ConversationMarkdownInline(source: cells[column], muted: muted,
-                                   font: (muted ? Font.footnote : .body).weight(header ? .semibold : .regular),
+        ConversationMarkdownInline(source: cells[column], muted: muted, size: muted ? 14 : 16,
+                                   weight: header ? .semibold : .regular,
                                    alignment: textAlignment(table.alignments[column]))
           .monospacedDigit()
           .padding(12)
@@ -564,37 +562,38 @@ struct ConversationMarkdownText: View {
   @ViewBuilder private func blockView(_ block: ConversationMarkdownBlock) -> some View {
     switch block.kind {
     case .paragraph:
-      ConversationMarkdownInline(source: block.text, muted: muted, font: muted ? .footnote : .body)
+      ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
     case let .heading(level):
-      ConversationMarkdownInline(source: block.text, muted: muted, font: headingFont(level))
+      ConversationMarkdownInline(source: block.text, muted: muted,
+                                 size: headingSize(level), weight: level <= 2 ? .bold : .semibold)
         .padding(.top, level <= 2 ? 4 : 1)
     case .unordered:
       HStack(alignment: .firstTextBaseline, spacing: 9) {
-        Text("•").font((muted ? Font.footnote : .body).weight(.bold)).foregroundStyle(Palette.blue)
+        Text("•").font(.system(size: muted ? 14 : 16, weight: .bold)).foregroundStyle(Palette.blue)
           .frame(width: 10, alignment: .center)
-        ConversationMarkdownInline(source: block.text, muted: muted, font: muted ? .footnote : .body)
+        ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
       }
     case let .ordered(marker):
       HStack(alignment: .firstTextBaseline, spacing: 9) {
-        Text(marker).font((muted ? Font.footnote : .subheadline).weight(.semibold)).foregroundStyle(Palette.blue)
+        Text(marker).font(.system(size: muted ? 13 : 15, weight: .semibold)).foregroundStyle(Palette.blue)
           .frame(minWidth: 22, alignment: .trailing)
-        ConversationMarkdownInline(source: block.text, muted: muted, font: muted ? .footnote : .body)
+        ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
       }
     case .quote:
       HStack(alignment: .top, spacing: 10) {
         RoundedRectangle(cornerRadius: 1.5).fill(Palette.blue.opacity(0.55)).frame(width: 3)
-        ConversationMarkdownInline(source: block.text, muted: true, font: muted ? .footnote : .subheadline)
+        ConversationMarkdownInline(source: block.text, muted: true, size: muted ? 14 : 15)
       }
       .padding(.vertical, 2)
     case let .code(language):
       VStack(alignment: .leading, spacing: 0) {
         if let language {
-          Text(language.uppercased()).font(.caption2.weight(.semibold))
+          Text(language.uppercased()).font(.system(size: 9.5, weight: .semibold))
             .foregroundStyle(Palette.muted).padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 4)
         }
         ScrollView(.horizontal, showsIndicators: false) {
           Text(verbatim: block.text)
-            .font(.footnote.monospaced())
+            .font(.system(size: 12.5, design: .monospaced))
             .foregroundStyle(Palette.ink)
             .textSelection(.enabled)
             .padding(.horizontal, 12).padding(.vertical, language == nil ? 11 : 7)
@@ -610,12 +609,12 @@ struct ConversationMarkdownText: View {
     }
   }
 
-  private func headingFont(_ level: Int) -> Font {
+  private func headingSize(_ level: Int) -> CGFloat {
     switch level {
-    case 1: return muted ? .headline.bold() : .title2.bold()
-    case 2: return muted ? .headline.bold() : .title3.bold()
-    case 3: return (muted ? Font.subheadline : .headline).weight(.semibold)
-    default: return (muted ? Font.footnote : .body).weight(.semibold)
+    case 1: return muted ? 18 : 22
+    case 2: return muted ? 17 : 20
+    case 3: return muted ? 16 : 18
+    default: return muted ? 14.5 : 16.5
     }
   }
 }
@@ -680,15 +679,15 @@ struct ConversationChunk: View {
       Button { expanded.toggle() } label: {
         HStack(spacing: 10) {
           Image(systemName: kind == "reasoning" ? "sparkle" : "terminal")
-            .controlIconScale().frame(width: 18)
+            .frame(width: 18)
           Text(detailLabel)
-            .font(kind == "tool" ? .footnote.monospaced() : .footnote)
+            .font(kind == "tool" ? .system(size: 13, design: .monospaced) : .system(size: 13))
             .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
           if let result {
-            Text("\(Self.lines(result)) 行").font(.caption).monospacedDigit()
+            Text("\(Self.lines(result)) 行").font(.system(size: 11)).monospacedDigit()
           }
           Image(systemName: expanded ? "chevron.down" : Symbol.chevron)
-            .font(.caption.weight(.medium)).controlIconScale()
+            .font(.system(size: 11, weight: .medium))
         }
         .foregroundStyle(Palette.muted)
         .frame(minHeight: 44).contentShape(Rectangle())
@@ -702,12 +701,12 @@ struct ConversationChunk: View {
           ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10)
         } else {
           VStack(alignment: .leading, spacing: 8) {
-            Text(text).font(.footnote.monospaced())
+            Text(text).font(.system(size: 13, design: .monospaced))
               .foregroundStyle(Palette.ink).textSelection(.enabled)
             if let result {
               Rectangle().fill(Palette.line).frame(height: 0.5)
-              Text(ConnectionCopy.result).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted)
-              Text(result).font(.caption.monospaced())
+              Text(ConnectionCopy.result).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted)
+              Text(result).font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Palette.ink).textSelection(.enabled)
             }
           }
@@ -720,7 +719,7 @@ struct ConversationChunk: View {
 
   private var truncated: some View {
     Label(text, systemImage: "exclamationmark.triangle")
-      .font(.caption)
+      .font(.system(size: 12))
       .foregroundStyle(Palette.warnInk)
       .padding(.vertical, 8).padding(.horizontal, 10)
       .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -747,7 +746,7 @@ struct TurnUserBubble: View {
       Spacer(minLength: 40)
       VStack(alignment: .leading, spacing: 8) {
         if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
-        Text(text).font(.body).lineSpacing(3)
+        Text(text).font(.system(size: 16)).lineSpacing(3)
       }
       .foregroundStyle(Palette.ink)
       .padding(.vertical, 10).padding(.horizontal, 14)
@@ -798,7 +797,7 @@ struct TurnOutcomeNote: View {
 
   var body: some View {
     Label(text, systemImage: "exclamationmark.circle")
-      .font(.footnote.weight(.medium))
+      .font(.system(size: 12.5, weight: .medium))
       .foregroundStyle(failed ? Palette.negative : Palette.warnInk)
       .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
       .accessibilityIdentifier("turn-outcome")
@@ -909,19 +908,19 @@ struct SessionStatusStrip: View {
   var body: some View {
     HStack(spacing: 9) {
       if status.busy { ProgressView().controlSize(.mini).tint(color) }
-      else { Image(systemName: symbol).font(.footnote.weight(.medium)).controlIconScale() }
+      else { Image(systemName: symbol).font(.system(size: 13, weight: .medium)) }
       Text(status.text).fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let action = status.action {
         Button(action.title, action: action.perform)
-          .font(.footnote.weight(.semibold))
+          .font(.system(size: 13, weight: .semibold))
           .foregroundStyle(action.destructive ? Palette.negative : color)
           .disabled(action.disabled)
           .frame(minWidth: 44, minHeight: 44)
           .accessibilityIdentifier("session-status-action")
       }
     }
-    .font(.footnote.weight(.medium))
+    .font(.system(size: 13, weight: .medium))
     .foregroundStyle(color)
     .padding(.leading, 12).padding(.trailing, status.action == nil ? 12 : 4)
     .frame(minHeight: 44)
@@ -1049,7 +1048,7 @@ struct AttachmentImagePreview: View {
         Text("无法显示该图片").foregroundStyle(Palette.muted).frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       Button { dismiss() } label: {
-        Image(systemName: "xmark").font(.subheadline.weight(.semibold)).controlIconScale().foregroundStyle(.white)
+        Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
           .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
       }
       .accessibilityLabel("关闭预览").padding(16)
@@ -1084,7 +1083,7 @@ struct SentAttachmentList: View {
       #endif
       ForEach(others) { item in
         Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
-          .font(.caption.weight(.medium)).lineLimit(1)
+          .font(.system(size: 11, weight: .medium)).lineLimit(1)
       }
     }
     #if canImport(UIKit)
@@ -1165,7 +1164,7 @@ struct MessageComposer: View {
         // Stop lives in the session status strip, so send never changes meaning.
         Button(action: onSend) {
           Image(systemName: Symbol.send)
-            .font(.subheadline.weight(.bold)).controlIconScale()
+            .font(.system(size: 15, weight: .bold))
             .foregroundStyle(disabled || sendDisabled ? Palette.muted : Palette.surface)
             .frame(width: 32, height: 32)
             .background(disabled || sendDisabled ? Palette.muted.opacity(0.35) : Palette.ink, in: Circle())
@@ -1184,7 +1183,7 @@ struct MessageComposer: View {
         }
       }
       if let attachmentError {
-        Text(attachmentError).font(.caption).foregroundStyle(Palette.negative)
+        Text(attachmentError).font(.system(size: 11)).foregroundStyle(Palette.negative)
       }
     }
     .padding(.horizontal, 4)
@@ -1206,12 +1205,12 @@ struct MessageComposer: View {
   private var slashMenu: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack {
-        Text(ConnectionCopy.slashCommands).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted)
+        Text(ConnectionCopy.slashCommands).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted)
         Spacer()
         if slashCommandsLoading { ProgressView().controlSize(.mini) }
         if let onRefreshSlashCommands {
           Button(action: onRefreshSlashCommands) {
-            Image(systemName: "arrow.clockwise").font(.caption.weight(.semibold)).controlIconScale()
+            Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
           }
           .buttonStyle(.plain).accessibilityLabel(ConnectionCopy.refreshSlashCommands)
         }
@@ -1225,14 +1224,14 @@ struct MessageComposer: View {
           } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
               Text("/\(command.name)")
-                .font(.footnote.monospaced().weight(.semibold))
+                .font(.system(size: 13.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Palette.blue)
               VStack(alignment: .leading, spacing: 2) {
                 if !command.description.isEmpty {
-                  Text(command.description).font(.footnote).foregroundStyle(Palette.ink).lineLimit(2)
+                  Text(command.description).font(.system(size: 12.5)).foregroundStyle(Palette.ink).lineLimit(2)
                 }
                 if let hint = command.argumentHint, !hint.isEmpty {
-                  Text(hint).font(.caption.monospaced()).foregroundStyle(Palette.muted)
+                  Text(hint).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Palette.muted)
                 }
               }
               Spacer(minLength: 0)
@@ -1245,7 +1244,7 @@ struct MessageComposer: View {
         }
       } else if !slashCommandsLoading {
         Text(slashCommandsReason ?? (slashCommands.isEmpty ? ConnectionCopy.noProviderCommands : ConnectionCopy.noMatchingCommands))
-          .font(.caption).foregroundStyle(Palette.muted)
+          .font(.system(size: 12)).foregroundStyle(Palette.muted)
           .padding(.horizontal, 11).padding(.bottom, 10)
       }
     }
@@ -1275,7 +1274,7 @@ struct MessageComposer: View {
       }
     } label: {
       Image(systemName: Symbol.plus)
-        .font(.title2).controlIconScale()
+        .font(.system(size: 21, weight: .regular))
         .foregroundStyle(Palette.ink)
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
@@ -1325,9 +1324,9 @@ struct MessageComposer: View {
       HStack(spacing: 4) {
         Text(modelLabel).lineLimit(1)
         if !effortOptions.isEmpty { Text(effortLabel).foregroundStyle(Palette.faint) }
-        Image(systemName: "chevron.down").font(.caption2.weight(.bold)).controlIconScale()
+        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
       }
-      .font(.caption).foregroundStyle(Palette.muted)
+      .font(.system(size: 12)).foregroundStyle(Palette.muted)
       .frame(minHeight: 44).contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(disabled)
@@ -1335,7 +1334,7 @@ struct MessageComposer: View {
   }
 
   private func controlCapsule(_ label: String, symbol: String) -> some View {
-    Label(label, systemImage: symbol).font(.caption)
+    Label(label, systemImage: symbol).font(.system(size: 12))
       .foregroundStyle(Palette.muted).lineLimit(1)
       .frame(minHeight: 44)
   }
@@ -1365,15 +1364,15 @@ struct MessageComposer: View {
             Image(systemName: Symbol.file)
           }
           VStack(alignment: .leading, spacing: 1) {
-            Text(item.name).font(.caption.weight(.medium)).lineLimit(1)
-            Text(item.detail).font(.caption2).foregroundStyle(Palette.muted)
+            Text(item.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            Text(item.detail).font(.system(size: 9)).foregroundStyle(Palette.muted)
           }
         }
       }
       .buttonStyle(.plain).disabled(item.kind != .image)
       .accessibilityLabel(item.kind == .image ? ConnectionCopy.viewAttachment(item.name) : item.name)
       Button { attachments.removeAll { $0.id == item.id } } label: {
-        Image(systemName: "xmark").font(.caption2.weight(.bold)).controlIconScale().frame(width: 22, height: 22)
+        Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).frame(width: 22, height: 22)
       }
       .buttonStyle(.plain).accessibilityLabel(ConnectionCopy.removeAttachment(item.name))
     }

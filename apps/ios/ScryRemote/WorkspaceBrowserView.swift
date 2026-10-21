@@ -50,7 +50,7 @@ private struct WorkspaceDirectoryView: View {
               }
             } label: {
               Label(entry.name, systemImage: entry.kind == .directory ? "folder" : "doc.text")
-                .font(.subheadline).padding(.vertical, 5)
+                .font(.system(size: 15)).padding(.vertical, 5)
             }
           }
         }.listStyle(.plain)

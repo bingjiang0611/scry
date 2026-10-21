@@ -64,7 +64,7 @@ struct RootView: View {
       if model.canShowWorkspace, !run.pendingQuestions.isEmpty, !model.showRunQuestion, !focusedRunOnScreen {
         Button { model.showRunQuestion = true } label: {
           Label(ConnectionCopy.focusedTaskNeedsDecision, systemImage: "hand.raised")
-            .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
             .background(Palette.warnBg)
         }
       } else if model.canShowWorkspace, let waiting = waitingElsewhere.first, let external = waiting.externalSessionId {
@@ -76,7 +76,7 @@ struct RootView: View {
                                    scope: targets.selectedScope.isLocal ? nil : targets.selectedScope), run: run)
         } label: {
           Label(ConnectionCopy.otherTasksNeedDecision(waitingElsewhere.count), systemImage: "hand.raised")
-            .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
             .background(Palette.warnBg)
         }
       }
