@@ -55,6 +55,8 @@ node node_modules/electron/install.js
 npm run dev
 ```
 
+- **修改后验证**：修改代码后需要验证 App 行为时，应启动基于当前代码、使用独立 `userData` 和临时工作区的 test 实例进行验证，不要求用户重启当前 App，也不停止或干扰用户正在使用的实例。
+
 常用检查：
 
 ```bash
