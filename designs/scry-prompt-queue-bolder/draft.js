@@ -1,7 +1,7 @@
 // Scry · 等待队列 · Bolder 设计稿
 // 全部数据为模拟：文本来自截图与自拟示例，Steer 回执不是真实 Provider 证据。
 
-const MESSAGES = [
+const SEED = [
   { id: 'm1', text: '都覆盖了哪些交互场景', attachments: 0 },
   { id: 'm2', text: '顺便把队列在 720px 下的换行也过一遍，别让 Steer 按钮压住正文。', attachments: 0 },
   { id: 'm3', text: '再补一张截图：附件只保留文件名，不要读图内容。', attachments: 1 }
@@ -27,7 +27,7 @@ const VARIANTS = [
   {
     id: 'a',
     name: 'A · 现状',
-    subtitle: '当前产品实现，作为对照',
+    subtitle: '当前产品实现，加了编辑动作',
     notes: [
       '三行等高、同字重：序号 10px、正文 12.5px、按钮 10.5px，「下一个」和「第 3 条」之间没有层级差。',
       '12px 圆角加 <code>--shadow-pop</code>：一个内联块读成浮层，边界比内容更响。'
@@ -40,7 +40,8 @@ const VARIANTS = [
     notes: [
       '序号并进 1px 竖轨：11.5px 灰 → 15px 琥珀，琥珀段只给第一条，队列头一眼可读。',
       '第一条铺 <code>--surface-hover</code> 加内描边；其余退成 1px 发丝行，不再每行一个盒子。',
-      '去掉 <code>--shadow-pop</code>，改成 <code>--surface-inset-soft</code> 内嵌面；Steer 在次要行降到 dim2，悬停才变蓝。'
+      '去掉 <code>--shadow-pop</code>，改成 <code>--surface-inset-soft</code> 内嵌面；Steer 在次要行降到 dim，悬停才转蓝。',
+      '竖轨同时报状态：琥珀 = 未决，红 = 明确拒绝，蓝 = 正在输入框里编辑。'
     ]
   },
   {
@@ -48,7 +49,7 @@ const VARIANTS = [
     name: 'C · 状态列',
     subtitle: '每行固定说明自己在等什么',
     notes: [
-      '保留逐行卡片，右侧加 62px 状态列：下一个 / 等待 / 提交中 / 结果未知 / 已拒绝。',
+      '保留逐行卡片，右侧加 62px 状态列：下一个 / 等待 / 提交中 / 结果未知 / 已拒绝 / 编辑中。',
       '状态词右对齐成一条可扫的竖列，未决状态带色点，不再只靠禁用按钮暗示。',
       '代价：正文可用宽度少 62px，窄窗口更早截断。'
     ]
@@ -59,8 +60,8 @@ const VARIANTS = [
     subtitle: '只展开下一条，其余收成一行',
     notes: [
       '当前任务结束后真正会先跑的只有一条，其余折叠成 <code>展开后面 2 条</code>。',
-      '收起的行里只要有未决状态，尾行就用 warn 徽标写出来——不能让折叠把「结果未知」藏掉。',
-      '代价：给第 3 条 Steer 要多一次点击。'
+      '收起的行里只要有未决状态或正在编辑的行，尾行就用徽标写出来——不能让折叠把「结果未知」「编辑中」藏掉。',
+      '代价：给第 3 条 Steer 或多一次点击，编辑它也要先展开。'
     ]
   }
 ]
@@ -71,10 +72,13 @@ const state = {
   theme: 'dark',
   width: 960,
   compare: false,
-  removed: new Set(),
+  messages: SEED.map((m) => ({ ...m })),
   overrides: {},
   receipts: [],
-  open: false
+  open: false,
+  draft: '',
+  editingId: null,
+  justMovedId: null
 }
 
 // 深链接：index.html#s=unknown&theme=light&compare=1&v=c&w=720
@@ -89,6 +93,7 @@ const state = {
 
 const $ = (sel, root = document) => root.querySelector(sel)
 const numeric = 'numeric'
+const draftText = () => state.draft.trim()
 
 function currentScenario() {
   const base = SCENARIOS[state.scenario]
@@ -97,17 +102,24 @@ function currentScenario() {
 
 function rows() {
   const { states } = currentScenario()
-  return MESSAGES.filter((m) => !state.removed.has(m.id)).map((message, index) => ({
-    message,
-    index,
-    next: index === 0,
-    status: states[message.id]?.status ?? 'idle',
-    reason: states[message.id]?.message ?? null
-  }))
+  const editing = state.editingId
+  return state.messages.map((message, index) => {
+    const steer = states[message.id]
+    const editingHere = editing === message.id
+    return {
+      message,
+      index,
+      next: index === 0,
+      editing: editingHere,
+      status: editingHere ? 'editing' : steer?.status ?? 'idle',
+      reason: steer?.message ?? null
+    }
+  })
 }
 
 function statusWord(row) {
   switch (row.status) {
+    case 'editing': return '编辑中'
     case 'pending': return '提交中'
     case 'unknown': return '结果未知'
     case 'rejected': return '已拒绝'
@@ -120,8 +132,8 @@ const icon = (id, cls = '') => `<svg class="ico ${cls}" aria-hidden="true"><use 
 const esc = (value) => String(value).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
 function steerDisabled(row, anyPending, capability) {
-  return row.status === 'pending' || row.status === 'unknown' || row.status === 'unavailable' ||
-    Boolean(capability) || (anyPending && !row.status.startsWith('pending'))
+  return row.status === 'pending' || row.status === 'editing' || row.status === 'unknown' ||
+    row.status === 'unavailable' || Boolean(capability) || (anyPending && row.status !== 'pending')
 }
 
 function steerLabel(row) {
@@ -131,6 +143,7 @@ function steerLabel(row) {
 }
 
 function steerTitle(row, capability) {
+  if (row.status === 'editing') return '正在输入框里编辑这条消息；发送或取消后再操作'
   if (row.status === 'pending') return 'Steer 正在提交；完成前不能重复提交或移除'
   if (row.status === 'unknown') return '结果未知；不能重发或移除'
   if (row.status === 'rejected') return 'Provider 明确拒绝；点击重试'
@@ -138,44 +151,64 @@ function steerTitle(row, capability) {
   return '不中断模型，将这条消息补充给当前任务'
 }
 
+const DRAFT_EDIT_BLOCKED = '输入框里已有内容：先发送或清空，再编辑队列消息'
+
+function statusEditBlock(row) {
+  if (row.status === 'editing') return '这条消息正在输入框里编辑'
+  if (row.status === 'pending') return 'Steer 正在提交，不能编辑'
+  if (row.status === 'unknown') return '结果未知的 Steer 不能编辑，先核对 Provider 回执'
+  return null
+}
+
 function rowMarkup(row, anyPending, capability) {
   const disabled = steerDisabled(row, anyPending, capability)
-  // 行内只写法这条消息自己的状态。能力原因属于整个 Composer，只在块底部说一次，
+  const statusBlock = statusEditBlock(row)
+  const editBlocked = statusBlock ?? (draftText() ? DRAFT_EDIT_BLOCKED : null)
+  // 行内只写这条消息自己的状态。能力原因属于整个 Composer，只在块底部说一次，
   // 不复制到每一行（那是噪音，不是证据）。
-  const reason = row.reason
-  const showReason = reason && row.status !== 'idle'
+  const showReason = row.reason && row.status !== 'idle'
+  const moved = state.justMovedId === row.message.id
   return `
-    <div class="qrow${row.next ? ' next' : ''}" role="listitem" data-state="${capability && row.status === 'idle' ? 'unavailable' : row.status}" data-id="${row.message.id}">
+    <div class="qrow${row.next ? ' next' : ''}" role="listitem" data-state="${capability && row.status === 'idle' ? 'unavailable' : row.status}" data-id="${row.message.id}" data-moved="${moved}">
       <span class="qidx ${numeric}" aria-hidden="true">${row.index + 1}</span>
       <span class="qbody">
         <span class="qtext" title="${esc(row.message.text)}">${esc(row.message.text)}</span>
-        ${showReason ? `<span class="qreason">${icon('alert')}${esc(reason)}</span>` : ''}
+        ${showReason ? `<span class="qreason">${icon('alert')}${esc(row.reason)}</span>` : ''}
+        ${moved ? '<span class="qmoved">编辑后已移到队尾</span>' : ''}
       </span>
       <span class="qstate">${statusWord(row)}</span>
       ${row.message.attachments > 0 ? `<span class="qattach" title="${row.message.attachments} 张附件（示例）">${icon('image')}${row.message.attachments}</span>` : '<span></span>'}
-      <button type="button" class="qsteer" data-act="steer" data-id="${row.message.id}"
-        ${disabled ? 'disabled aria-disabled="true"' : ''}
-        aria-label="${steerLabel(row)}：队列第 ${row.index + 1} 条消息" title="${esc(steerTitle(row, capability))}">
-        ${row.status === 'pending' ? '' : icon('steer')}${steerLabel(row)}
-      </button>
-      <button type="button" class="qremove" data-act="remove" data-id="${row.message.id}"
-        ${row.status === 'pending' || row.status === 'unknown' ? 'disabled' : ''}
-        aria-label="移除队列第 ${row.index + 1} 条消息"
-        title="${row.status === 'pending' ? 'Steer 正在提交，不能移除' : row.status === 'unknown' ? '结果未知的 Steer 不能移除' : '移除排队消息'}">
-        ${icon('x')}
-      </button>
+      ${row.status === 'editing'
+        ? `<button type="button" class="qedit-cancel" data-act="cancel-edit">取消编辑</button>`
+        : `<button type="button" class="qsteer" data-act="steer" data-id="${row.message.id}"
+            ${disabled ? 'disabled aria-disabled="true"' : ''}
+            aria-label="${steerLabel(row)}：队列第 ${row.index + 1} 条消息" title="${esc(steerTitle(row, capability))}">
+            ${row.status === 'pending' ? '' : icon('steer')}${steerLabel(row)}
+          </button>
+          <button type="button" class="qedit" data-act="edit" data-id="${row.message.id}"
+            data-status-block="${statusBlock ? 'true' : 'false'}" data-status-reason="${esc(statusBlock ?? '')}"
+            ${editBlocked ? 'disabled aria-disabled="true"' : ''}
+            aria-label="编辑队列第 ${row.index + 1} 条消息"
+            title="${esc(editBlocked ?? '把这条消息放回输入框修改；发送后移到队尾')}">
+            ${icon('pencil')}
+          </button>
+          <button type="button" class="qremove" data-act="remove" data-id="${row.message.id}"
+            ${row.status === 'pending' || row.status === 'unknown' ? 'disabled' : ''}
+            aria-label="移除队列第 ${row.index + 1} 条消息"
+            title="${row.status === 'pending' ? 'Steer 正在提交，不能移除' : row.status === 'unknown' ? '结果未知的 Steer 不能移除' : '移除排队消息'}">
+            ${icon('x')}
+          </button>`}
     </div>`
 }
 
 function tailMarkup(list) {
   const hidden = list.slice(1)
   const badges = []
-  const unknown = hidden.filter((r) => r.status === 'unknown').length
-  const rejected = hidden.filter((r) => r.status === 'rejected').length
-  const pending = hidden.filter((r) => r.status === 'pending').length
-  if (unknown) badges.push(`${unknown} 条结果未知`)
-  if (pending) badges.push(`${pending} 条提交中`)
-  if (rejected) badges.push(`${rejected} 条已拒绝`)
+  const count = (status) => hidden.filter((r) => r.status === status).length
+  if (count('unknown')) badges.push(`${count('unknown')} 条结果未知`)
+  if (count('editing')) badges.push(`${count('editing')} 条编辑中`)
+  if (count('pending')) badges.push(`${count('pending')} 条提交中`)
+  if (count('rejected')) badges.push(`${count('rejected')} 条已拒绝`)
   const label = state.open ? '收起' : `展开后面 ${hidden.length} 条`
   return `
     <button type="button" class="qtail" data-act="tail" aria-expanded="${state.open}">
@@ -192,7 +225,6 @@ function queueMarkup(variantId) {
     return `<div class="queue qempty" data-v="${variantId}" role="note">队列已清空（原型结束状态，点设计栏的「重置」继续）</div>`
   }
   const anyPending = list.some((r) => r.status === 'pending')
-  const hiddenBadge = variantId === 'd' ? tailMarkup(list) : ''
   return `
   <section class="queue" data-v="${variantId}" data-open="${state.open}" aria-label="排队中的消息，共 ${list.length} 条">
     <div class="qhead">
@@ -202,9 +234,21 @@ function queueMarkup(variantId) {
     <div class="qlist" role="list">
       ${list.map((row) => rowMarkup(row, anyPending, capability)).join('')}
     </div>
-    ${hiddenBadge}
+    ${variantId === 'd' ? tailMarkup(list) : ''}
     ${capability ? `<div class="qnote" role="note">${icon('alert')}Steer 不可用：${esc(capability)}</div>` : ''}
   </section>`
+}
+
+function editHintMarkup() {
+  if (!state.editingId) return ''
+  const row = rows().find((r) => r.message.id === state.editingId)
+  if (!row) return ''
+  return `
+    <div class="edit-hint" role="status">
+      ${icon('pencil')}
+      <span>编辑队列第 <b class="${numeric}">${row.index + 1}</b> 条 · 发送后移到队尾 · 自动发送已暂停</span>
+      <button type="button" class="edit-cancel" data-act="cancel-edit">取消编辑</button>
+    </div>`
 }
 
 function frameMarkup(variant) {
@@ -240,13 +284,15 @@ function frameMarkup(variant) {
         </div>
         <div class="composer-shell">
           <label class="sr-only" for="draft-${variant.id}">新消息</label>
-          <textarea id="draft-${variant.id}" placeholder="补充要求，或添加下一条消息…"></textarea>
+          ${editHintMarkup()}
+          <textarea id="draft-${variant.id}" placeholder="补充要求，或添加下一条消息…">${esc(state.draft)}</textarea>
           <div class="composer-bar">
             <span class="chip">＋</span>
             <span class="chip">Codex</span>
             <span class="chip">gpt-5.4</span>
             <span class="chip">High</span>
-            <span class="send" aria-hidden="true">↑</span>
+            <button type="button" class="send" data-act="send" aria-label="加入队列" title="加入队列"
+              data-armed="${draftText() ? 'true' : 'false'}" ${draftText() ? '' : 'disabled'}>↑</button>
           </div>
         </div>
       </div>
@@ -259,14 +305,47 @@ function notesMarkup() {
   const shown = state.compare ? VARIANTS : [variant]
   return `
     ${shown.map((v) => `<h2>${v.name} · ${v.subtitle}</h2><ul>${v.notes.map((n) => `<li>${n}</li>`).join('')}</ul>`).join('')}
+    <h2>新增：编辑队列消息</h2>
+    <ul>
+      <li>每行在 <b>Steer 与移除之间</b>多一个铅笔按钮；点它把该条文本与附件放回输入框，光标落在末尾。</li>
+      <li>队列里的原条目<b>不立刻消失</b>，标记为 <code>编辑中</code>：状态词/竖轨转蓝，Steer 与移除暂时禁用。取消编辑则原样保留。</li>
+      <li>发送后该条<b>移到队尾</b>，并用「编辑后已移到队尾」标出（见原型）。队尾是真实位置，不是视觉假动作。</li>
+      <li><b>编辑中的行暂停自动出队</b>：否则当前任务结束时，会把你改了一半的旧文本发出去。这是行为变化，必须在界面上说清楚。</li>
+      <li>输入框已有内容时铅笔按钮禁用并给出原因，不做静默覆盖。</li>
+      <li><code>提交中</code> 与 <code>结果未知</code> 的行不能编辑——它们的文本已经在 Provider 那一侧，改了也不能撤回。</li>
+    </ul>
     <h2>四稿共同约束</h2>
     <ul>
-      <li>只动 <code>.prompt-queue</code> 块。运行状态条、输入区、会话区保持不变；顺序仍是队列 → 运行中 → 输入框。</li>
-      <li>不新增颜色、字体、阴影或图标：只用 <code>styles.css</code> 现有 token；琥珀表示等待，蓝色表示动作，红色只给明确拒绝。</li>
+      <li>只动 <code>.prompt-queue</code> 块；运行状态条、输入区、会话区布局不变，顺序仍是队列 → 运行中 → 输入框。</li>
+      <li>不新增颜色、字体、阴影或图标尺寸：只用 <code>styles.css</code> 现有 token；琥珀表示等待，蓝色表示动作或编辑，红色只给明确拒绝。</li>
       <li>证据语义不放松：提交中不可重复提交、结果未知不可重发也不可移除、明确拒绝可重试、能力不可用要写原因。</li>
-      <li>序号与计数用等宽 + <code>tabular-nums</code>；<code>Steer</code> 与移除按钮始终可聚焦，焦点环 2px <code>--accent</code>。</li>
-      <li>示例文本、运行时长与 Steer 回执都是模拟，不代表真实 Provider 行为或验收结果。</li>
+      <li>序号与计数用等宽 + <code>tabular-nums</code>；Steer、编辑、移除始终可聚焦，焦点环 2px <code>--accent</code>。</li>
+      <li>示例文本、运行时长、Steer 回执与「自动发送已暂停」都是原型行为，不代表真实 Provider 验收结果。</li>
     </ul>`
+}
+
+function syncSend() {
+  const armed = draftText() ? 'true' : 'false'
+  for (const button of document.querySelectorAll('#stage .send')) {
+    button.dataset.armed = armed
+    button.disabled = armed !== 'true'
+  }
+  syncEditAvailability()
+}
+
+// 打字不重渲染（会丢光标），所以铅笔按钮的可用性要单独同步，
+// 否则「输入框有内容时不能编辑」只会存在于点了之后的失败里。
+function syncEditAvailability() {
+  const draftBlocked = draftText() !== ''
+  for (const button of document.querySelectorAll('#stage .qedit')) {
+    if (button.dataset.statusBlock === 'true') {
+      button.disabled = true
+      button.title = button.dataset.statusReason
+      continue
+    }
+    button.disabled = draftBlocked
+    button.title = draftBlocked ? DRAFT_EDIT_BLOCKED : '把这条消息放回输入框修改；发送后移到队尾'
+  }
 }
 
 function render() {
@@ -274,6 +353,7 @@ function render() {
   target.classList.toggle('single', !state.compare)
   target.classList.toggle('compare', state.compare)
   const list = state.compare ? VARIANTS : VARIANTS.filter((v) => v.id === state.variant)
+  const focused = document.activeElement?.closest?.('.composer-shell')
   target.innerHTML = list.map(frameMarkup).join('')
   $('#notes').innerHTML = notesMarkup()
   document.documentElement.dataset.theme = state.theme
@@ -291,6 +371,54 @@ function render() {
     button.setAttribute('aria-selected', String(button.dataset.theme === state.theme))
   }
   $('#compare').setAttribute('aria-pressed', String(state.compare))
+  syncSend()
+  if (state.editingId && !state.compare && focused) {
+    const textarea = $('#stage .composer-shell textarea')
+    textarea?.focus()
+    textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
+  }
+}
+
+function startEdit(id) {
+  if (draftText()) return
+  const message = state.messages.find((m) => m.id === id)
+  if (!message) return
+  const row = rows().find((r) => r.message.id === id)
+  if (!row || ['pending', 'unknown', 'unavailable', 'editing'].includes(row.status)) return
+  state.editingId = id
+  state.draft = message.text
+  state.justMovedId = null
+  render()
+  const textarea = $('#stage .composer-shell textarea')
+  textarea?.focus()
+  textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
+}
+
+function cancelEdit() {
+  state.editingId = null
+  state.draft = ''
+  render()
+}
+
+// 编辑后发送：该条离开原位置，作为新消息排到队尾。不静默复制成两条。
+function send() {
+  const text = draftText()
+  if (!text) return
+  if (state.editingId) {
+    const index = state.messages.findIndex((m) => m.id === state.editingId)
+    const [moved] = state.messages.splice(index, 1)
+    delete state.overrides[moved.id]
+    state.messages.push({ ...moved, text })
+    state.justMovedId = moved.id
+    state.editingId = null
+    // 被移动的行现在在队尾；折叠的 D 稿要先展开，否则用户看不到它到底去哪了。
+    state.open = true
+  } else {
+    state.messages.push({ id: `new-${Date.now()}`, text, attachments: 0 })
+    state.justMovedId = null
+  }
+  state.draft = ''
+  render()
 }
 
 function mountControls() {
@@ -310,13 +438,15 @@ function mountControls() {
     if (!button) return
     state.scenario = button.dataset.scenario
     state.overrides = {}
+    state.editingId = null
+    state.draft = ''
+    state.justMovedId = null
     render()
   })
 
   for (const button of document.querySelectorAll('[data-width]')) {
     button.addEventListener('click', () => {
       state.width = Number(button.dataset.width)
-      for (const other of document.querySelectorAll('[data-width]')) other.setAttribute('aria-selected', String(other === button))
       render()
     })
   }
@@ -324,7 +454,6 @@ function mountControls() {
   for (const button of document.querySelectorAll('[data-theme]')) {
     button.addEventListener('click', () => {
       state.theme = button.dataset.theme
-      for (const other of document.querySelectorAll('[data-theme]')) other.setAttribute('aria-selected', String(other === button))
       render()
     })
   }
@@ -332,6 +461,25 @@ function mountControls() {
   $('#compare').addEventListener('click', () => {
     state.compare = !state.compare
     render()
+  })
+
+  $('#stage').addEventListener('input', (event) => {
+    const textarea = event.target.closest('textarea')
+    if (!textarea) return
+    state.draft = textarea.value
+    // 对比视图里四个 composer 共用同一份草稿，输入时同步其余输入框，避免看起来像四份状态。
+    if (state.compare) {
+      for (const other of document.querySelectorAll('#stage textarea')) {
+        if (other !== textarea) other.value = textarea.value
+      }
+    }
+    syncSend()
+  })
+
+  $('#stage').addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !state.editingId) return
+    event.preventDefault()
+    cancelEdit()
   })
 
   $('#stage').addEventListener('click', (event) => {
@@ -343,17 +491,31 @@ function mountControls() {
       render()
       return
     }
+    if (act === 'cancel-edit') {
+      cancelEdit()
+      return
+    }
+    if (act === 'send') {
+      send()
+      return
+    }
     if (act === 'remove') {
-      state.removed.add(id)
+      state.messages = state.messages.filter((m) => m.id !== id)
+      state.justMovedId = null
       render()
       return
     }
+    if (act === 'edit') {
+      startEdit(id)
+      return
+    }
     if (act !== 'steer' || button.disabled) return
-    const message = MESSAGES.find((m) => m.id === id)
+    const message = state.messages.find((m) => m.id === id)
     state.overrides[id] = { status: 'pending' }
+    state.justMovedId = null
     render()
     window.setTimeout(() => {
-      state.removed.add(id)
+      state.messages = state.messages.filter((m) => m.id !== id)
       delete state.overrides[id]
       state.receipts.push({ text: message.text })
       render()
@@ -365,11 +527,14 @@ function mountControls() {
   reset.id = 'reset'
   reset.textContent = '重置'
   reset.addEventListener('click', () => {
-    state.removed = new Set()
+    state.messages = SEED.map((m) => ({ ...m }))
     state.overrides = {}
     state.receipts = []
     state.open = false
     state.scenario = 'normal'
+    state.draft = ''
+    state.editingId = null
+    state.justMovedId = null
     render()
   })
   $('.chrome-controls').append(reset)

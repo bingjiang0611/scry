@@ -9,7 +9,7 @@
           "path": "index.html",
           "createdAt": "2026-10-21T00:00:00.000Z",
           "status": "needs-review",
-          "subtitle": "四稿（A 现状 / B 阶梯 / C 状态列 / D 单峰），深色浅色、960·720 宽度与五种 Steer 状态可切",
+          "subtitle": "四稿（A 现状 / B 阶梯 / C 状态列 / D 单峰）+ 队列消息编辑；深色浅色、960·720 宽度、五种 Steer 状态与编辑流程可切",
           "viewport": {
             "width": 1512,
             "height": 708

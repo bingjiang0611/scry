@@ -344,6 +344,38 @@ button svg { pointer-events: none; }
 
 .composer-shell textarea::placeholder { color: var(--dim3); }
 
+/* 编辑队列消息时的输入区提示：把「移到队尾」和「暂停自动发送」两个后果写在用的地方 */
+.edit-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 5px 6px 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border3));
+  border-radius: var(--r-lg);
+  background: var(--accent-soft);
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.edit-hint .ico { width: 12px; height: 12px; color: var(--accent); }
+.edit-hint b { color: var(--fg); font-family: var(--font-mono); font-weight: 600; }
+
+.edit-cancel {
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.edit-cancel:hover { background: var(--surface-raised); }
+
 .composer-bar { display: flex; align-items: center; gap: 6px; min-height: 28px; }
 .chip {
   display: inline-flex;
@@ -366,6 +398,9 @@ button svg { pointer-events: none; }
   background: var(--panel3);
   color: var(--dim3);
 }
+
+.send[data-armed="true"] { background: var(--fg); color: var(--main-surface); }
+.send[data-armed="true"]:hover { background: color-mix(in srgb, var(--fg) 86%, var(--dim2)); }
 
 /* ── A · 现状（与当前产品一致） ──────────────────────────────── */
 
@@ -417,7 +452,7 @@ button svg { pointer-events: none; }
 
 .qrow {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto 30px;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto 30px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -507,6 +542,51 @@ button svg { pointer-events: none; }
   color: var(--dim2);
 }
 
+/* 编辑：把这条消息放回输入框。和移除并排但不同色，避免两个图标按钮互相抢。 */
+.qedit,
+.qedit-cancel {
+  display: inline-grid;
+  place-items: center;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.qedit {
+  width: 28px;
+  padding: 0;
+  color: var(--dim2);
+}
+
+.qedit .ico { width: 13px; height: 13px; }
+.qedit:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+.qedit:disabled { color: var(--dim3); opacity: .55; }
+
+.qedit-cancel {
+  grid-column: 4 / -1;
+  justify-self: end;
+  padding: 0 9px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.qedit-cancel:hover { border-color: var(--accent); }
+.queue[data-v="c"] .qedit-cancel { grid-column: 5 / -1; }
+
+/* 编辑中：整行进入「内容在输入框里」的状态，颜色只用强调色 */
+.qrow[data-state="editing"] { border-color: var(--accent-line); }
+.qrow[data-state="editing"] .qtext { color: var(--fg); }
+
+.qmoved {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dim2);
+  font-size: 10.5px;
+}
+
 .qremove:hover:not(:disabled) { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
 .qremove:disabled { color: var(--dim3); opacity: .6; }
 .qremove .ico { width: 13px; height: 13px; }
@@ -548,7 +628,7 @@ button svg { pointer-events: none; }
 .queue[data-v="b"] .qlist { gap: 0; }
 
 .queue[data-v="b"] .qrow {
-  grid-template-columns: 34px minmax(0, 1fr) auto auto 28px;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto auto 28px;
   gap: 10px;
   min-height: 36px;
   padding: 5px 5px 5px 0;
@@ -603,6 +683,11 @@ button svg { pointer-events: none; }
   color: var(--bad);
 }
 
+.queue[data-v="b"] .qrow[data-state="editing"] .qidx {
+  border-right-color: color-mix(in srgb, var(--accent) 55%, var(--border3));
+  color: var(--accent);
+}
+
 .queue[data-v="b"] .qtext { color: var(--dim); font-size: 12px; }
 .queue[data-v="b"] .qrow.next .qtext { color: var(--fg); font-size: 13.5px; font-weight: 500; letter-spacing: -0.05px; }
 
@@ -639,6 +724,9 @@ button svg { pointer-events: none; }
 
 .queue[data-v="b"] .qremove { width: 28px; height: 28px; color: var(--dim2); }
 .queue[data-v="b"] .qrow:hover .qremove { color: var(--dim); }
+.queue[data-v="b"] .qedit { color: var(--dim); }
+.queue[data-v="b"] .qrow:hover .qedit:not(:disabled) { color: var(--fg); }
+.queue[data-v="b"] .qrow[data-state="editing"] .qedit-cancel { grid-column: 4 / -1; }
 .queue[data-v="b"] .qrow.next .qremove { color: var(--dim2); }
 
 .queue[data-v="b"] .qreason { color: var(--dim2); font-size: 10.5px; margin-top: 2px; }
@@ -657,7 +745,7 @@ button svg { pointer-events: none; }
 .queue[data-v="c"] .qhead-main { color: var(--fg); font-size: 11.5px; font-weight: 650; }
 
 .queue[data-v="c"] .qrow {
-  grid-template-columns: 18px minmax(0, 1fr) 62px auto auto 28px;
+  grid-template-columns: 18px minmax(0, 1fr) 62px auto auto auto 28px;
   gap: 9px;
   min-height: 40px;
   padding: 5px 6px;
@@ -704,6 +792,7 @@ button svg { pointer-events: none; }
 .queue[data-v="c"] .qrow[data-state="unknown"] .qstate { color: var(--warn); }
 .queue[data-v="c"] .qrow[data-state="rejected"] .qstate,
 .queue[data-v="c"] .qrow[data-state="unavailable"] .qstate { color: var(--bad); }
+.queue[data-v="c"] .qrow[data-state="editing"] .qstate { color: var(--accent); }
 .queue[data-v="c"] .qrow[data-state="rejected"] { border-color: color-mix(in srgb, var(--bad) 38%, var(--border3)); }
 .queue[data-v="c"] .qremove { width: 28px; height: 28px; }
 
@@ -724,7 +813,7 @@ button svg { pointer-events: none; }
 .queue[data-v="d"] .qlist { gap: 0; }
 
 .queue[data-v="d"] .qrow {
-  grid-template-columns: 22px minmax(0, 1fr) auto auto 26px;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto auto 26px;
   gap: 8px;
   min-height: 34px;
   padding: 4px 6px;
@@ -764,6 +853,9 @@ button svg { pointer-events: none; }
 .queue[data-v="d"] .qrow[data-state="rejected"] .qsteer { border-color: color-mix(in srgb, var(--bad) 42%, var(--border3)); background: transparent; color: var(--bad); opacity: 1; }
 .queue[data-v="d"] .qsteer:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .queue[data-v="d"] .qremove { width: 26px; height: 26px; color: var(--dim2); }
+.queue[data-v="d"] .qedit { width: 26px; height: 26px; color: var(--dim2); }
+.queue[data-v="d"] .qrow.next .qedit:not(:disabled) { color: var(--dim); }
+.queue[data-v="d"] .qrow[data-state="editing"] { box-shadow: inset 0 0 0 1px var(--accent-line); }
 
 .queue[data-v="d"][data-open="false"] .qrow:not(.next) { display: none; }
 
