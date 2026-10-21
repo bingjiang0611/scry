@@ -17,6 +17,13 @@ describe('remote prompt queue', () => {
     expect(store.claim(key)?.submission).toEqual(request)
     expect(store.claim(key)).toBeUndefined()
   })
+  it('retains image attachments while queued and copies them into the display entry', () => {
+    const store = new RemotePromptQueueStore()
+    const image = { kind: 'image' as const, name: 'queued.png', mimeType: 'image/png' as const, dataBase64: 'aQ==', size: 1 }
+    store.enqueue(key, 'mac2', { ...request, prompt: '', attachments: [image] })
+    expect(store.get(key).prompts[0]).toMatchObject({ text: '', attachments: [image], submission: { attachments: [image] } })
+  })
+
   it('rebinds remaining entries to the newly submitted receipt', () => {
     const store = new RemotePromptQueueStore()
     store.enqueue(key, 'mac2', request, 'running')

@@ -1,9 +1,11 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, unlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 import { createDesktopHostReader, parseDesktopHostRead } from './desktop-host-reader'
+import { bindRemoteHistoryContext } from './history-context'
+import { prepareRunAttachments, storeAttachmentReference } from '../attachment-store'
 import { upsertTraceArchiveTurn } from '../transcript-archive'
 import type { ActiveRun } from '../../shared/trace'
 
@@ -20,19 +22,90 @@ function fixture() {
   const read = createDesktopHostReader({
     userDataDir, hostId: () => 'host-fixture',
     authorizeWorkspace: (path) => { if (!allowed || path !== cwd) throw new Error('workspace_not_authorized'); return cwd },
+    authorizeSession: (value) => { bindRemoteHistoryContext({ ...value, externalSessionId: value.externalSessionId!, historyScope: 'session' },
+      [{ sessionId: context.externalSessionId, cwd, providerId: 'codex' }], path => path) },
     getRun: () => run
   })
   const context = { cwd, providerId: 'codex', externalSessionId: 'native-session' }
-  return { read, context, setRun: (value: ActiveRun) => { run = value }, revoke: () => { allowed = false },
+  return { read, context, userDataDir, root, setRun: (value: ActiveRun) => { run = value }, revoke: () => { allowed = false },
     archive: (index: number, text = `answer ${index}`) => upsertTraceArchiveTurn({
       cwd, userDataDir, sessionId: context.externalSessionId, providerId: 'codex', runtimeProvider: 'codex_cli',
-      turn: { runId: `run-${index}`, userText: `prompt ${index}`, done: true, items: [{
+      turn: { runId: `run-${index}`, agentProfileId: null, userText: `prompt ${index}`, done: true, items: [{
         id: `event-${index}`, runId: `run-${index}`, ts: `2026-10-14T00:00:0${index}Z`, kind: 'model', stage: 'text', text
       }] }
     }) }
 }
 
 describe('desktop authenticated evidence source', () => {
+  it('preserves unknown fork-prefix turns and their exact archived images under catalog-bound session display', async () => {
+    const f = fixture()
+    f.archive(0)
+    const bytes = Buffer.from('iVBORw0KGgo=', 'base64')
+    const runId = 'fork-legacy'
+    const [image] = prepareRunAttachments(f.userDataDir, runId, [{ kind: 'image', name: 'legacy.png', mimeType: 'image/png', dataBase64: bytes.toString('base64') }])
+    expect(upsertTraceArchiveTurn({ userDataDir: f.userDataDir, cwd: f.context.cwd, providerId: 'codex', sessionId: f.context.externalSessionId,
+      turn: { runId, userText: 'unknown fork prefix', ts: Date.now(), items: [], done: true,
+        attachments: [storeAttachmentReference(f.userDataDir, runId, image)] } })).toBe(true)
+    await expect(f.read({ kind: 'history', context: f.context })).rejects.toThrow('history_profile_unavailable')
+    const query = parseDesktopHostRead({ kind: 'history', historyScope: 'session', context: f.context, images: true })
+    const page = await f.read(query)
+    if (page.kind !== 'history') throw new Error('wrong response')
+    expect(page.history.historyScope).toBe('session')
+    expect(page.history.turns.map(turn => turn.userText)).toEqual(expect.arrayContaining(['prompt 0', 'unknown fork prefix']))
+    expect(page.history.imageCounts).toEqual({ [runId]: 1 })
+    await expect(f.read({ kind: 'image', historyScope: 'session', context: f.context, runId, index: 0 }))
+      .resolves.toMatchObject({ kind: 'image_chunk', historyScope: 'session', data: bytes.toString('base64') })
+    await expect(f.read({ kind: 'history', historyScope: 'session', context: { ...f.context, externalSessionId: 'invented' } }))
+      .rejects.toThrow('history_session_not_found')
+    expect(() => parseDesktopHostRead({ kind: 'trace', historyScope: 'session', context: f.context, runId })).toThrow('invalid_request')
+  })
+  it('keeps a multi-megabyte image out of trace polling and binds image chunks to the authorized context', async () => {
+    const f = fixture()
+    const bytes = Buffer.alloc(5 * 1024 * 1024)
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes)
+    const runId = 'run-image-1'
+    f.setRun({ runId, cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId, userText: '', items: [], done: false,
+      attachments: [{ kind: 'image', name: 'large.png', mimeType: 'image/png', dataBase64: bytes.toString('base64'), size: bytes.length }] })
+    const trace = await f.read({ kind: 'trace', context: f.context, runId, images: true })
+    expect(trace).toMatchObject({ kind: 'trace', imageCount: 1 })
+    expect(JSON.stringify(trace).length).toBeLessThan(1024)
+    const query = { kind: 'image' as const, context: f.context, runId, index: 0 }
+    const first = await f.read(query)
+    if (first.kind !== 'image_chunk') throw new Error('wrong response')
+    expect(first.totalBytes).toBe(bytes.length)
+    expect(Buffer.from(first.data, 'base64')).toEqual(bytes.subarray(0, DESKTOP_HISTORY_CHUNK_BYTES))
+    const chunk = { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES }
+    await expect(f.read({ ...query, chunk, context: { ...f.context, agentProfileId: 'different' } })).rejects.toThrow('invalid_image_chunk')
+    await expect(f.read({ ...query, chunk, providerTurnId: 'different' })).rejects.toThrow('invalid_image_chunk')
+    f.revoke()
+    await expect(f.read({ ...query, chunk })).rejects.toThrow('workspace_not_authorized')
+  })
+
+  it.each([undefined, 'native-image-turn'])('reads archived image bytes after restart with native turn ID %s and refuses a symlink replacement', async (providerTurnId) => {
+    const f = fixture()
+    const bytes = Buffer.from('iVBORw0KGgo=', 'base64')
+    const runId = 'run-image-2'
+    const [image] = prepareRunAttachments(f.userDataDir, runId, [{ kind: 'image', name: 'image.png', mimeType: 'image/png', dataBase64: bytes.toString('base64') }])
+    expect(upsertTraceArchiveTurn({ userDataDir: f.userDataDir, cwd: f.context.cwd, providerId: 'codex', sessionId: f.context.externalSessionId,
+      turn: { runId, providerTurnId, agentProfileId: null, userText: '', done: true, items: [], attachments: [storeAttachmentReference(f.userDataDir, runId, image)] } })).toBe(true)
+    const history = await f.read({ kind: 'history', context: f.context, images: true })
+    expect(history).toMatchObject({ history: { imageCounts: { [runId]: 1 } } })
+    if (history.kind !== 'history') throw new Error('wrong response')
+    const query = parseDesktopHostRead({ kind: 'image', context: f.context, runId, providerTurnId: history.history.turns[0].providerTurnId, index: 0 })
+    if (query.kind !== 'image') throw new Error('wrong query')
+    await expect(f.read(query)).resolves.toMatchObject({ kind: 'image_chunk', data: bytes.toString('base64'), name: image.name })
+    await expect(f.read({ ...query, context: { ...f.context, agentProfileId: 'different' } })).rejects.toThrow('history_profile_unavailable')
+    if (providerTurnId) {
+      await expect(f.read(parseDesktopHostRead({ ...query, runId: 'different-run' }))).rejects.toThrow('唯一匹配')
+      await expect(f.read(parseDesktopHostRead({ ...query, providerTurnId: 'different-turn' }))).rejects.toThrow('归档不存在')
+    }
+    const outside = join(f.root, 'not-an-owned-image.png')
+    writeFileSync(outside, bytes)
+    unlinkSync(image.path!)
+    symlinkSync(outside, image.path!)
+    await expect(f.read(query)).rejects.toThrow()
+  })
+
   it('pages real structured archive turns and rejects a stale page snapshot', async () => {
     const f = fixture()
     for (let i = 0; i < 3; i++) expect(f.archive(i)).toBe(true)
@@ -138,6 +211,11 @@ describe('desktop authenticated evidence source', () => {
     const context = { cwd: '/repo', providerId: 'pi', externalSessionId: 'session' }
     const chunked = { kind: 'history', context, byteChunks: true, chunk: { id: 'page', offset: DESKTOP_HISTORY_CHUNK_BYTES } }
     expect(parseDesktopHostRead(chunked)).toEqual(chunked)
+    const image = { kind: 'image', context, runId: 'run-image', providerTurnId: 'native-turn', index: 0 }
+    expect(parseDesktopHostRead(image)).toEqual(image)
+    for (const providerTurnId of ['', 'x'.repeat(257), 'native\0turn', 1, null]) {
+      expect(() => parseDesktopHostRead({ ...image, providerTurnId })).toThrow('invalid_request')
+    }
     for (const query of [
       { ...chunked, byteChunks: false }, { ...chunked, byteChunks: undefined },
       ...[-1, 0, 1.5, DESKTOP_HISTORY_MAX_BYTES].map(offset => ({ ...chunked, chunk: { id: 'page', offset } })),

@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry 总览证据块 · Bolder": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-22T00:00:00.000Z",
+          "status": "needs-review",
+          "subtitle": "v1：四稿（A 现状 / B 台账 / C 刻度 / D 单峰），深色浅色与 380·340 宽度可切",
+          "viewport": {
+            "width": 1512,
+            "height": 708
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-22T00:00:00.000Z",
+  "updatedAt": "2026-10-22T00:00:00.000Z"
+}

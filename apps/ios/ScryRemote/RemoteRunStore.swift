@@ -442,6 +442,7 @@ final class RemoteRunStore: ObservableObject {
   var historyOlderBefore: Int? { historyWindow.flatMap { $0.hasOlder ? $0.offset : nil } }
   var historyPageSnapshot: String? { historyWindow?.snapshot }
   var historyPageSource: String? { historyWindow?.source }
+  var historyNativeUnavailable: Bool { historyWindow?.sourceWarning == "native_unavailable" }
   var historyPageOffset: Int { historyWindow?.offset ?? 0 }
   private var historyRequestGeneration = 0
   private var historyPreviewKey: String?
@@ -553,6 +554,45 @@ final class RemoteRunStore: ObservableObject {
   private func makeClient() -> RemoteRunClient? {
     guard let connection = loadConnection() else { return nil }
     return RemoteRunClient(connection: connection, executionTarget: targetScope?.targetBinding)
+  }
+
+  func downloadFile(cwd: String, target: String,
+                    progress: @escaping @MainActor (Int, Int?) -> Void) async throws -> URL {
+    guard let client = makeClient() else { throw RemoteRunClient.ClientError.missingCredentials }
+    let generation = dataGeneration
+    let sink = RemoteFileDownloadSink()
+    var id: String?
+    do {
+      var result = try await client.fileDownload(.open(cwd: cwd, target: target))
+      var offset = 0
+      var total: Int?
+      var name: String?
+      while true {
+        try Task.checkCancellation()
+        guard dataGeneration == generation, loadConnection() == client.connection else { throw CancellationError() }
+        guard case let .page(page) = result else { throw RemoteRunClient.ClientError.invalidFileDownload }
+        let bytes = try page.bytes(expectedOffset: offset, expectedID: id)
+        guard name == nil || name == page.name,
+              total == nil || total == page.totalBytes else { throw RemoteRunClient.ClientError.invalidFileDownload }
+        if id == nil { try await sink.start(name: page.name, mimeType: page.mimeType) }
+        id = page.id; name = page.name; total = page.totalBytes
+        try await sink.write(bytes)
+        offset = page.nextOffset
+        guard dataGeneration == generation, loadConnection() == client.connection else { throw CancellationError() }
+        progress(offset, total)
+        if !page.hasMore {
+          let url = try await sink.finish()
+          try Task.checkCancellation()
+          guard dataGeneration == generation, loadConnection() == client.connection else { throw CancellationError() }
+          return url
+        }
+        result = try await client.fileDownload(.read(cwd: cwd, id: page.id, offset: offset))
+      }
+    } catch {
+      await sink.remove()
+      if let id { _ = try? await client.fileDownload(.close(cwd: cwd, id: id)) }
+      throw error
+    }
   }
 
   func readWorkspace(_ query: G0Transport.WorkspaceQuery) async throws -> G0Transport.WorkspaceResult {
@@ -1200,11 +1240,11 @@ final class RemoteRunStore: ObservableObject {
               let recent = try await reader.turnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil, agentProfileId: agentProfileId)
               guard current() else { return }
               self.recordSuccess()
-              // An older Mac (or a transcript-only window) gives no run ids, so
-              // overlap with local runs cannot be proven; never risk a duplicate.
+              // Session display may legitimately mix transcript-only legacy/fork
+              // turns with structured archive turns. Keep that evidence visible;
+              // only a proven host runId can suppress a local overlay.
               if hasLocalTurns, !recent.turns.contains(where: { $0.runId != nil }) {
-                self.historyStorageNotice = "主机历史未带运行标识，无法与本机运行去重；更新 Mac Scry 后可显示完整历史。"
-                return
+                self.historyStorageNotice = "主机历史含未标识的 legacy/fork 轮次；已保留显示，无法据文本去重本机运行。"
               }
               self.showHistoryWindow(recent, key: key, cached: false, fetchedAt: Date())
               do {
@@ -1377,7 +1417,8 @@ final class RemoteRunStore: ObservableObject {
         let complete = page.offset == 0 && turns.count == window.totalTurns && window.source != "active_memory"
         let combined = G0Transport.RunHistoryTurnsPage(turns: turns, offset: page.offset,
           totalTurns: window.totalTurns, hasOlder: page.hasOlder, snapshot: window.snapshot,
-          source: window.source, completeness: complete ? "complete" : "partial")
+          source: window.source, completeness: complete ? "complete" : "partial",
+          sourceWarning: window.sourceWarning ?? page.sourceWarning)
         self.showHistoryWindow(combined, key: key, cached: false, fetchedAt: Date())
         do {
           let saved = try await self.historyDisk.writeWindow(combined, key: key, epoch: epoch)

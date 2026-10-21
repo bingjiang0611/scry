@@ -11,6 +11,7 @@ import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
+import type { DesktopAttachmentStore } from './desktop-attachments'
 
 // Production binding for the remote subsystem. It gives HostController the real
 // durable persistence (exclusive-lease JSONL ledger + fsynced pairing state) and
@@ -62,12 +63,16 @@ export interface HostControllerFactoryDependencies {
   // Tests and embedded hosts may inject an equivalent store. Production omits this
   // and always owns the file store inside the dedicated worker.
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
+  attachmentStore?: DesktopAttachmentStore
+  attachmentDirectory?: string
   // Snapshot of host-authorized project directories offered to devices.
   listProjects?(): RemoteProjectRef[]
   listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   sessionAction?: HostControllerDependencies['sessionAction']
+  sessionFork?: HostControllerDependencies['sessionFork']
+  sessionDelete?: HostControllerDependencies['sessionDelete']
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerDependencies['readSessionStatus']
@@ -159,12 +164,16 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     outputStore,
     workspace,
     gate: deps.gate,
+    ...(deps.attachmentStore ? { attachmentStore: deps.attachmentStore } : {}),
+    ...(deps.attachmentDirectory ? { attachmentDirectory: deps.attachmentDirectory } : {}),
     runProvider: deps.startRun,
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
     ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
     ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
     ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
+    ...(deps.sessionFork ? { sessionFork: deps.sessionFork } : {}),
+    ...(deps.sessionDelete ? { sessionDelete: deps.sessionDelete } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
     ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
     ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
@@ -180,6 +189,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     // Orphaned dispatched runs close as failed (outcome unknown, never re-run);
     // only recorded-but-undispatched intents may start.
     controller.recover()
+    await controller.cleanupAttachments()
   } catch (error) {
     try { await outputStore.close() } finally {
       try { ledgerStore.close() } finally { pairingStore.close() }
@@ -193,7 +203,8 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     close: async () => {
       if (closed) return
       closed = true
-      // End only desktop-owned shells before releasing host lifecycle leases.
+      // End only desktop-owned shells and ephemeral reads before releasing leases.
+      controller.closeReadResources()
       try { await deps.desktopWorkbench?.dispose() } finally {
         try { await outputStore.close() } finally {
           try { ledgerStore.close() } finally { pairingStore.close() }

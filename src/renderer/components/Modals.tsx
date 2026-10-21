@@ -16,8 +16,11 @@ import type { CapabilityEnvelope, DeleteArchivedSessionsResult, McpSnapshot } fr
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
+import { ArchivedRemoteChatsPanel } from './ArchivedRemoteChatsPanel'
+import { useRemoteProjectGroups } from './SidebarRemoteProjects'
+import './archived-sessions.css'
 import { RemotePairing } from './RemotePairing'
-import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
+import { ARCHIVED_SESSIONS_COPY as archivedCopy, REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
 import type { AppTheme } from '../theme'
 
 export function ModalFrame({
@@ -61,9 +64,10 @@ export function ModalFrame({
       if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) focusInitial()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      // A settings action can open a nested dialog. Only that dialog owns
-      // Escape and Tab; its parent must not close or move focus as well.
-      if (document.activeElement instanceof Element && document.activeElement.closest('[role="dialog"][aria-modal="true"]') !== dialogRef.current) return
+      // Only the innermost dialog owns Escape and Tab. Removing the last
+      // archive row can leave focus on body; the remaining dialog still owns keys.
+      const focusedDialog = document.activeElement instanceof Element ? document.activeElement.closest('[role="dialog"][aria-modal="true"]') : null
+      if ((focusedDialog && focusedDialog !== dialogRef.current) || dialogRef.current?.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (event.key === 'Escape') {
         event.preventDefault()
         onCloseRef.current()
@@ -144,7 +148,9 @@ export function SettingsModal({
   useEffect(() => {
     void refreshArchived()
   }, [refreshArchived])
-  const archivedCount = archived?.reduce((sum, project) => sum + project.sessions.length, 0)
+  const remoteArchived = useRemoteProjectGroups('', true)
+  const archivedCount = archived == null ? undefined : archived.reduce((sum, project) => sum + project.sessions.length, 0)
+    + remoteArchived.reduce((sum, group) => sum + group.sessions.length, 0)
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
@@ -224,11 +230,14 @@ export function SettingsModal({
               </div>
             </div>
           ) : tab === 'archived' ? (
-            <ArchivedChatsPanel
-              projects={archived}
-              onRefresh={refreshArchived}
-              onSessionsChanged={onSessionsChanged}
-            />
+            <div className="arch-sections">
+              <ArchivedChatsPanel
+                projects={archived}
+                onRefresh={refreshArchived}
+                onSessionsChanged={onSessionsChanged}
+              />
+              <ArchivedRemoteChatsPanel groups={remoteArchived} />
+            </div>
           ) : (
             <RemotePairing onNewSession={onNewRemoteSession} />
           )}
@@ -352,7 +361,7 @@ export function ArchivedChatsPanel({
     <>
       <div className="arch-head">
         <div className="settings-copy">
-          <b>已存档会话</b>
+          <b>{archivedCopy.localTitle}</b>
         </div>
         <button
           type="button"
@@ -360,7 +369,7 @@ export function ArchivedChatsPanel({
           disabled={total === 0 || busy}
           onClick={() => void deleteAll()}
         >
-          <Icon name="trash" /> 全部删除
+          <Icon name="trash" /> {archivedCopy.deleteAllLocal}
         </button>
       </div>
 
@@ -408,7 +417,7 @@ export function ArchivedChatsPanel({
       <div className="arch-list">
         {total === 0 && (
           <div className="arch-empty">
-            <b>没有已存档会话</b>
+            <b>{archivedCopy.localEmpty}</b>
             <span>在左侧列表把鼠标移到会话上，点存档图标就会收进这里。</span>
           </div>
         )}

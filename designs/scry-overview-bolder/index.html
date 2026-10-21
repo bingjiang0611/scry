@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scry · 总览证据块 · Bolder 设计稿</title>
+  <link rel="stylesheet" href="./style.css?v=1">
+</head>
+<body>
+  <header class="chrome">
+    <div>
+      <h1>Scry · 总览证据块</h1>
+      <p>Bolder 设计稿 · 示例数据来自你的截图，不是真实会话；深色 / 浅色与 380 / 340 宽度可切换</p>
+    </div>
+    <div class="chrome-controls">
+      <div class="seg" id="variants" role="tablist" aria-label="设计稿"></div>
+      <div class="seg" role="group" aria-label="主题">
+        <button data-theme="dark" aria-selected="true">深色</button>
+        <button data-theme="light" aria-selected="false">浅色</button>
+      </div>
+      <div class="seg" role="group" aria-label="面板宽度">
+        <button data-width="380" aria-selected="true">380px</button>
+        <button data-width="340" aria-selected="false">340px</button>
+      </div>
+      <button id="compare" aria-pressed="false">同屏对比</button>
+    </div>
+  </header>
+  <main id="stage" class="stage single"></main>
+  <footer class="notes" id="notes"></footer>
+  <script src="./draft.js?v=1"></script>
+</body>
+</html>

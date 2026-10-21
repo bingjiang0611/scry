@@ -129,6 +129,7 @@ const desktopChannels = {
   list: 'desktopRemote:list', pair: 'desktopRemote:pair', finishPairing: 'desktopRemote:finishPairing',
   updateSsh: 'desktopRemote:updateSsh', connect: 'desktopRemote:connect', disconnect: 'desktopRemote:disconnect', forget: 'desktopRemote:forget',
   catalog: 'desktopRemote:catalog', commands: 'desktopRemote:commands', sessionAction: 'desktopRemote:sessionAction', directories: 'desktopRemote:directories', selectDirectory: 'desktopRemote:selectDirectory', history: 'desktopRemote:history', trace: 'desktopRemote:trace',
+  forkSession: 'desktopRemote:forkSession', deleteSession: 'desktopRemote:deleteSession',
   intents: 'desktopRemote:intents', submit: 'desktopRemote:submit', intentStatus: 'desktopRemote:intentStatus',
   runStatus: 'desktopRemote:runStatus', stop: 'desktopRemote:stop', answer: 'desktopRemote:answer',
   files: 'desktopRemote:files', file: 'desktopRemote:file', workbench: 'desktopRemote:workbench'
@@ -245,7 +246,7 @@ describe('preload IPC boundary', () => {
     }
     const context = { providerId: 'codex', cwd: '/remote', externalSessionId: 'native-session' }
     await api.desktopRemote.trace('host', context, 'canonical-run')
-    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:trace', 'host', context, 'canonical-run')
+    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:trace', 'host', context, 'canonical-run', undefined)
     await api.desktopRemote.history('host', context, 2, 'snapshot')
     expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:history', 'host', context, 2, 'snapshot')
     await api.desktopRemote.file('host', context, 'README.md', 5, 'file-snapshot')

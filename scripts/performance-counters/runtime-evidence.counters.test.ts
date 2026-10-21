@@ -2,9 +2,11 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { describe, expect, it, vi } from 'vitest'
-import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import { defaultRepeats, measured, writeCollector } from '../performance-counters.mjs'
 import type { LlmPerformanceHistoryRow } from '../../src/shared/llm-performance'
+import { piRpcEnvironment } from '../../src/main/providers/pi'
+import { appendLlmPerformance, readUsageStats, usageJsonlPath } from '../../src/main/usage-jsonl'
 
 const meter = vi.hoisted(() => ({ active: false, file: '', probes: 0, reads: 0, bytes: 0 }))
 vi.mock('node:child_process', async (importOriginal) => {
@@ -34,7 +36,6 @@ const sample: LlmPerformanceHistoryRow = {
 }
 
 async function nodeEnvironmentWorkload(calls: number): Promise<{ probes: number; durationMs: number }> {
-  const { piRpcEnvironment } = await import('../../src/main/providers/pi')
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-node-counter-')))
   symlinkSync(process.execPath, join(root, 'node'))
   meter.probes = 0
@@ -55,7 +56,6 @@ async function nodeEnvironmentWorkload(calls: number): Promise<{ probes: number;
 }
 
 async function usageWorkload(): Promise<{ reads: number; bytes: number; durationMs: number }> {
-  const { appendLlmPerformance, readUsageStats, usageJsonlPath } = await import('../../src/main/usage-jsonl')
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-usage-counter-')))
   const file = usageJsonlPath(root)
   const line = JSON.stringify({ providerId: 'pi', cwd: '/offline', cost: 1, tin: 2, tout: 3, ts: timestamp }) + '\n'
@@ -83,30 +83,34 @@ async function usageWorkload(): Promise<{ reads: number; bytes: number; duration
 }
 
 describe('runtime and evidence fixed workloads', () => {
-  it('counts real Node probes and usage rereads without changing the workloads', async () => {
-    const nodeTimes: number[] = []
-    const usageTimes: number[] = []
-    const node = await repeatCounters(defaultRepeats, async () => {
-      const result = await nodeEnvironmentWorkload(5)
-      nodeTimes.push(result.durationMs)
-      return { probes: result.probes }
-    })
-    const usage = await repeatCounters(defaultRepeats, async () => {
-      const result = await usageWorkload()
-      usageTimes.push(result.durationMs)
-      return { reads: result.reads, bytes: result.bytes }
-    })
+  // Each cold repeat has its own test deadline; all original workloads and
+  // counters must complete before the collector can emit a measurement.
+  const nodeResults: Awaited<ReturnType<typeof nodeEnvironmentWorkload>>[] = []
+  const usageResults: Awaited<ReturnType<typeof usageWorkload>>[] = []
+  const repeats = Array.from({ length: defaultRepeats }, (_, index) => index)
+
+  it.each(repeats)('counts cold Node environment workload %i', async () => {
+    nodeResults.push(await nodeEnvironmentWorkload(5))
+  })
+
+  it.each(repeats)('counts unchanged mixed usage workload %i', async () => {
+    usageResults.push(await usageWorkload())
+  })
+
+  afterAll(() => {
+    expect(nodeResults).toHaveLength(defaultRepeats)
+    expect(usageResults).toHaveLength(defaultRepeats)
     const source = 'pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read'
     writeCollector('runtime-evidence', [
       measured({ scenario: 'providers.pi-environment', metric: 'subprocess.node', layer: 'main', unit: 'count',
-        workload: 'native-node=1;environment-resolutions=5;cold-first=1', source }, node.probes),
+        workload: 'native-node=1;environment-resolutions=5;cold-first=1', source }, nodeResults.map(result => result.probes)),
       measured({ scenario: 'analytics.usage-mixed-append', metric: 'io.read.calls', layer: 'io', unit: 'count',
-        workload: 'usage-rows=10000;warm-cache=1;performance-append-and-stats=5', source }, usage.reads),
+        workload: 'usage-rows=10000;warm-cache=1;performance-append-and-stats=5', source }, usageResults.map(result => result.reads)),
       measured({ scenario: 'analytics.usage-mixed-append', metric: 'io.read.bytes', layer: 'io', unit: 'bytes',
-        workload: 'usage-rows=10000;warm-cache=1;performance-append-and-stats=5', source }, usage.bytes)
+        workload: 'usage-rows=10000;warm-cache=1;performance-append-and-stats=5', source }, usageResults.map(result => result.bytes))
     ])
     if (process.env.SCRY_RUNTIME_EVIDENCE_TIMINGS) writeFileSync(process.env.SCRY_RUNTIME_EVIDENCE_TIMINGS,
-      JSON.stringify({ nodeEnvironmentMs: nodeTimes, usageMixedAppendMs: usageTimes }, null, 2))
+      JSON.stringify({ nodeEnvironmentMs: nodeResults.map(result => result.durationMs), usageMixedAppendMs: usageResults.map(result => result.durationMs) }, null, 2))
   })
 
   it('observes an additional real child process', async () => {

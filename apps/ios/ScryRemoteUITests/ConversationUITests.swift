@@ -192,8 +192,14 @@ final class ConversationUITests: XCTestCase {
     app.buttons["项目文件与 Diff"].tap()
     XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
     app.buttons["README.md"].tap()
-    XCTAssertTrue(app.staticTexts["# Project fixture"].waitForExistence(timeout: 10))
-    XCTAssertLessThan(app.staticTexts["# Project fixture"].frame.minY, app.navigationBars.firstMatch.frame.maxY + 40)
+    let source = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "# Project fixture")).firstMatch
+    XCTAssertTrue(source.waitForExistence(timeout: 10))
+    XCTAssertTrue(source.label.contains("Read-only preview"))
+    let export = app.buttons["remote-file-export"]
+    XCTAssertTrue(export.exists)
+    // The new export toolbar sits above the source; the body still starts
+    // immediately below it rather than being vertically centered.
+    XCTAssertLessThan(source.frame.minY, export.frame.maxY + 40)
     capture("workspace-file")
     app.navigationBars.buttons.element(boundBy: 0).tap()
     app.buttons["未提交 Diff"].tap()

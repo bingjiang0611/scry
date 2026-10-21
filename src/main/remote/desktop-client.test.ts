@@ -14,6 +14,8 @@ import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { listDesktopDirectories, selectDesktopDirectory } from './desktop-directory-picker'
 import { createDesktopHostReader } from './desktop-host-reader'
+import type { ActiveRun } from '../../shared/trace'
+import { prepareRunAttachments, storeAttachmentReference } from '../attachment-store'
 import { upsertTraceArchiveTurn } from '../transcript-archive'
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 
@@ -21,7 +23,7 @@ const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-async function setup(setupOptions: { submitResponse?: () => unknown; unknownIntent?: boolean; encrypt?: typeof encrypt } = {}) {
+async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; unknownIntent?: boolean; encrypt?: typeof encrypt } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -53,6 +55,7 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
     }
+    if ((request as { op?: string }).op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
     if ((request as { op?: string }).op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
     if ((request as { op?: string }).op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
     return { error: 'unexpected_request' }
@@ -63,6 +66,79 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
 }
 
 describe('DesktopRemoteClient', () => {
+  it('persists before concurrent duplicates can dispatch and preserves uncertainty across repeated lost replies', async () => {
+    const fixture = await setup({ submitResponse: () => { throw new Error('reply_lost') }, unknownIntent: true })
+    let release!: () => void
+    let arrived!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const writing = new Promise<void>((resolve) => { arrived = resolve })
+    let writeSpy: MockInstance | undefined
+    try {
+      const pending = await fixture.client.pair({ label: 'Target', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const target = (await fixture.client.executionTargets())[0]!
+      const phoneIntentId = randomUUID()
+      const input = { target, phonePeerFingerprint: 'a'.repeat(64), phoneIntentId, payloadHash: 'b'.repeat(64),
+        request: { op: 'submit', intentId: phoneIntentId, detail: '{"cwd":"/workspace","providerId":"pi"}' } }
+      const original = fs.writeFile.bind(fs)
+      writeSpy = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (...args) => { arrived(); await blocked; return original(...args) })
+      const first = fixture.client.mobileSubmit(input)
+      await writing
+      const duplicate = fixture.client.mobileSubmit(input)
+      await Promise.resolve()
+      expect(fixture.tlsRequest.mock.calls.filter((call) => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(0)
+      release()
+      await expect(first).resolves.toEqual({ error: 'target_delivery_unknown' })
+      await expect(duplicate).resolves.toEqual({ error: 'target_delivery_unknown' })
+      const calls = fixture.tlsRequest.mock.calls.filter((call) => (call[0].request as { op?: string }).op === 'submit')
+      expect(calls).toHaveLength(2)
+      expect((calls[0][0].request as { intentId: string }).intentId).toBe((calls[1][0].request as { intentId: string }).intentId)
+      expect(await fixture.client.intents(id)).toHaveLength(1)
+    } finally {
+      release?.(); writeSpy?.mockRestore()
+      await fixture.client.dispose(); await fs.rm(fixture.directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps one downstream key for equal target retries and target intent status, rejecting payload changes', async () => {
+    const runId = randomUUID()
+    const fixture = await setup({
+      submitResponse: () => ({ runId, status: 'recorded' }),
+      intentStatusResponse: () => ({ intent: { runId, state: 'recorded' } })
+    })
+    let reloaded: DesktopRemoteClient | undefined
+    try {
+      const pending = await fixture.client.pair({ label: 'Target', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const target = (await fixture.client.executionTargets())[0]!
+      const phoneIntentId = randomUUID()
+      const request = { op: 'submit', intentId: phoneIntentId, detail: '{"cwd":"/workspace","providerId":"pi"}' }
+      const input = { target, phonePeerFingerprint: 'a'.repeat(64), phoneIntentId, payloadHash: 'b'.repeat(64), request }
+      await expect(fixture.client.mobileSubmit(input)).resolves.toEqual({ runId, status: 'recorded' })
+      // Simulate a Mac1 restart after the receipt was committed. The same
+      // encrypted receipt supplies the downstream key; no fresh UUID is made.
+      await fixture.client.dispose()
+      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
+      await reloaded.connect(id)
+      const reloadedTarget = (await reloaded.executionTargets())[0]!
+      await expect(reloaded.mobileSubmit({ ...input, target: reloadedTarget })).resolves.toEqual({ runId, status: 'duplicate' })
+      await expect(reloaded.mobileIntentStatus({ target: reloadedTarget, phonePeerFingerprint: input.phonePeerFingerprint, phoneIntentId })).resolves.toEqual({ intent: { runId, state: 'recorded' } })
+      const submitCalls = fixture.tlsRequest.mock.calls.filter((call) => (call[0].request as { op?: string }).op === 'submit')
+      // A proven receipt needs no second submit. The persisted downstream key
+      // is still used for reconciliation after the Mac1 process restarts.
+      expect(submitCalls).toHaveLength(1)
+      const downstreamId = (submitCalls[0][0].request as { intentId: string }).intentId
+      expect(downstreamId).not.toBe(phoneIntentId)
+      expect((await reloaded.intents(id))[0].intentId).toBe(downstreamId)
+      await expect(reloaded.mobileSubmit({ ...input, target: reloadedTarget, payloadHash: 'c'.repeat(64) })).rejects.toThrow('intent_payload_conflict')
+      expect(fixture.tlsRequest.mock.calls.filter((call) => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
+    } finally { await reloaded?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('reassembles bounded history chunks and rejects malformed or non-progressing pages', async () => {
     const fixture = await setup()
     try {
@@ -71,7 +147,7 @@ describe('DesktopRemoteClient', () => {
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       const context = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'session' }
-      const history = { turns: [{ userText: 'prompt', items: [{ id: 'event', ts: '2026-10-14', runId: 'run', kind: 'model', stage: 'text', text: 'x'.repeat(DESKTOP_HISTORY_CHUNK_BYTES) }] }], hasOlder: true, before: 5, snapshot: 'stamp', source: 'trace_archive', status: 'available' }
+      const history = { historyScope: 'session', turns: [{ userText: 'prompt', items: [{ id: 'event', ts: '2026-10-14', runId: 'run', kind: 'model', stage: 'text', text: 'x'.repeat(DESKTOP_HISTORY_CHUNK_BYTES) }] }], hasOlder: true, before: 5, snapshot: 'stamp', source: 'trace_archive', status: 'available' }
       const result = { kind: 'history', history }
       const bytes = Buffer.from(JSON.stringify(result))
       const first = { kind: 'history_chunk', id: randomUUID(), offset: 0, totalBytes: bytes.length, data: bytes.subarray(0, DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
@@ -79,10 +155,12 @@ describe('DesktopRemoteClient', () => {
       fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: second })
       const loaded = await fixture.client.history(id, context, 7, 'stamp')
       expect(loaded).toMatchObject(history)
-      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktop', query: { kind: 'history', context, before: 7, snapshot: 'stamp', byteChunks: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
-      // Hosts that do not know byteChunks still return their original envelope.
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktop', query: { kind: 'history', historyScope: 'session', context, before: 7, snapshot: 'stamp', byteChunks: true, images: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
+      // The scope stamp is required even when no byte chunking is needed.
       fixture.tlsRequest.mockResolvedValueOnce({ desktop: result })
       await expect(fixture.client.history(id, context)).resolves.toMatchObject(history)
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { ...result, history: { ...history, historyScope: undefined } } })
+      await expect(fixture.client.history(id, context)).rejects.toThrow('history_scope_unverified')
       for (const invalid of [
         { ...first, id: 'invalid' }, { ...first, totalBytes: DESKTOP_HISTORY_MAX_BYTES + 1 },
         { ...first, totalBytes: 0 }, { ...first, offset: 1 },
@@ -434,20 +512,247 @@ describe('DesktopRemoteClient', () => {
   })
 })
 
+describe('DesktopRemoteClient session write acknowledgements', () => {
+  it.each(['fork', 'delete'])('keeps a malformed %s acknowledgement unknown without retrying', async (operation) => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'sessions', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      const original = fixture.tlsRequest.getMockImplementation()!
+      fixture.tlsRequest.mockImplementation(async (options) => {
+        const request = options.request as { op?: string }
+        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', sessionFork: true, sessionDelete: true } }
+        if (request.op === 'sessionFork' || request.op === 'sessionDelete') return {}
+        return original(options)
+      })
+      await fixture.client.connect(pending.connection.id)
+      const request = operation === 'fork'
+        ? fixture.client.forkSession(pending.connection.id, { providerId: 'claude', cwd: '/workspace', sourceSessionId: 'session', sourceRunId: 'run', sourceProviderTurnId: 'turn', sourceForkTurnId: 'boundary' })
+        : fixture.client.deleteSession(pending.connection.id, { providerId: 'claude', cwd: '/workspace', externalSessionId: 'session', confirmed: true })
+      await expect(request).rejects.toThrow('desktop_session_operation_unknown')
+      expect(fixture.tlsRequest.mock.calls.filter(([options]) => ['sessionFork', 'sessionDelete'].includes((options.request as { op: string }).op))).toHaveLength(1)
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+})
+
+describe('DesktopRemoteClient attachment submission fence', () => {
+  it('does not persist an unknown intent during upload or after an upload failure', async () => {
+    const fixture = await setup()
+    let entered!: () => void
+    let release!: () => void
+    const uploading = new Promise<void>((resolve) => { entered = resolve })
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    try {
+      const pending = await fixture.client.pair({ label: 'images', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      const original = fixture.tlsRequest.getMockImplementation()!
+      fixture.tlsRequest.mockImplementation(async (options) => {
+        const request = options.request as { op?: string }
+        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 } } }
+        if (request.op === 'attachmentStart') { entered(); await blocked; throw new Error('network_down') }
+        return original(options)
+      })
+      await fixture.client.connect(pending.connection.id)
+      const request = { context: { cwd: '/workspace', providerId: 'claude' }, prompt: '', attachments: [{ kind: 'image' as const, name: 'image.png', mimeType: 'image/png' as const, dataBase64: 'iVBORw0KGgo=' }] }
+      const sending = fixture.client.submit(pending.connection.id, request)
+      const rejected = expect(sending).rejects.toThrow('attachment_transfer_failed')
+      await uploading
+      await expect(fixture.client.submit(pending.connection.id, request)).rejects.toThrow('submission_in_progress')
+      expect(JSON.parse(decrypt(await readFile(join(fixture.directory, 'desktop-client.state')))).intents).toEqual([])
+      release()
+      await rejected
+      await expect(fixture.client.intents(pending.connection.id)).resolves.toEqual([])
+      expect(fixture.tlsRequest.mock.calls.some(([options]) => (options.request as { op?: string }).op === 'submit')).toBe(false)
+    } finally { release(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+})
+
+describe('DesktopRemoteClient startup restoration', () => {
+  async function pairedFixture() {
+    const fixture = await setup({ unknownIntent: true })
+    const pending = await fixture.client.pair({ label: 'Saved host', ssh, invitation: fixture.invitation })
+    await fixture.client.finishPairing(pending.connection.id)
+    await fixture.client.dispose()
+    fixture.openTunnel.mockClear()
+    fixture.tlsRequest.mockClear()
+    return { ...fixture, id: pending.connection.id }
+  }
+
+  function reopen(fixture: Awaited<ReturnType<typeof pairedFixture>>) {
+    return new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, fixture)
+  }
+
+  it('restores a legacy paired host once after restart without submitting work', async () => {
+    const fixture = await pairedFixture()
+    const client = reopen(fixture)
+    try {
+      await expect(client.list()).resolves.toMatchObject([{ state: 'disconnected' }])
+      await Promise.all([client.restoreConnections(), client.restoreConnections()])
+      await expect(client.list()).resolves.toMatchObject([{ id: fixture.id, state: 'connected' }])
+      expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
+      expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([{ op: 'desktop', query: { kind: 'info' } }])
+    } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('persists manual disconnect across restart and opts back in after a successful manual connection', async () => {
+    const fixture = await pairedFixture()
+    let client = reopen(fixture)
+    try {
+      await client.restoreConnections()
+      await client.disconnect(fixture.id)
+      await client.dispose()
+      fixture.openTunnel.mockClear()
+      client = reopen(fixture)
+      await client.restoreConnections()
+      expect(fixture.openTunnel).not.toHaveBeenCalled()
+      await expect(client.list()).resolves.toMatchObject([{ state: 'disconnected' }])
+      await client.connect(fixture.id)
+      await client.dispose()
+      fixture.openTunnel.mockClear()
+      client = reopen(fixture)
+      await client.restoreConnections()
+      expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
+      await expect(client.list()).resolves.toMatchObject([{ state: 'connected' }])
+    } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('skips pending and expired grants, isolates an offline host, and allows a manual retry', async () => {
+    const fixture = await pairedFixture()
+    const statePath = join(fixture.directory, 'desktop-client.state')
+    const state = JSON.parse(decrypt(await readFile(statePath)))
+    const saved = state.connections[0]
+    state.connections = [
+      { ...saved, id: 'pending', pending: { pairingId: randomUUID(), secret: 'pending', expiresAt: Date.now() + 60_000, publicKeySHA256: state.identity.publicKeySHA256 } },
+      { ...saved, id: 'expired', certificateExpiresAt: Date.now() - 1 },
+      { ...saved, id: 'offline' },
+      saved
+    ]
+    await fs.writeFile(statePath, encrypt(JSON.stringify(state)))
+    fixture.openTunnel.mockRejectedValueOnce(new Error('ssh_tunnel_exited:255'))
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = reopen(fixture)
+    try {
+      await client.restoreConnections()
+      await expect(client.list()).resolves.toMatchObject([
+        { id: 'pending', state: 'pairing' }, { id: 'expired', state: 'disconnected' },
+        { id: 'offline', state: 'disconnected' }, { id: fixture.id, state: 'connected' }
+      ])
+      expect(fixture.openTunnel).toHaveBeenCalledTimes(2)
+      expect(warning).toHaveBeenCalledWith('[scry] desktop connection restore failed:', 'offline', expect.objectContaining({ message: 'ssh_tunnel_exited:255' }))
+      await client.restoreConnections()
+      expect(fixture.openTunnel).toHaveBeenCalledTimes(2)
+      await client.connect('offline')
+      await expect(client.list()).resolves.toContainEqual(expect.objectContaining({ id: 'offline', state: 'connected' }))
+    } finally { warning.mockRestore(); await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('rechecks a queued manual disconnect before restoring the next host', async () => {
+    const fixture = await pairedFixture()
+    const statePath = join(fixture.directory, 'desktop-client.state')
+    const state = JSON.parse(decrypt(await readFile(statePath)))
+    state.connections.push({ ...state.connections[0], id: 'next-host' })
+    await fs.writeFile(statePath, encrypt(JSON.stringify(state)))
+    let entered!: () => void
+    let release!: () => void
+    const opening = new Promise<void>((resolve) => { entered = resolve })
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const open = fixture.openTunnel.getMockImplementation()!
+    fixture.openTunnel.mockImplementationOnce(async (options) => { entered(); await blocked; return open(options) })
+    const client = reopen(fixture)
+    try {
+      const restoring = client.restoreConnections()
+      await opening
+      const disconnecting = client.disconnect('next-host')
+      release()
+      await Promise.all([restoring, disconnecting])
+      expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
+      await expect(client.list()).resolves.toMatchObject([{ state: 'connected' }, { id: 'next-host', state: 'disconnected' }])
+    } finally { release(); await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('does not reconnect later hosts after disposal and closes the active tunnel', async () => {
+    const fixture = await pairedFixture()
+    const statePath = join(fixture.directory, 'desktop-client.state')
+    const state = JSON.parse(decrypt(await readFile(statePath)))
+    state.connections.push({ ...state.connections[0], id: 'next-host' })
+    await fs.writeFile(statePath, encrypt(JSON.stringify(state)))
+    let entered!: () => void
+    let release!: () => void
+    const opening = new Promise<void>((resolve) => { entered = resolve })
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const open = fixture.openTunnel.getMockImplementation()!
+    fixture.openTunnel.mockImplementationOnce(async (options) => { entered(); await blocked; return open(options) })
+    const client = reopen(fixture)
+    try {
+      const restoring = client.restoreConnections()
+      await opening
+      const disposing = client.dispose()
+      release()
+      await Promise.all([restoring, disposing])
+      expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
+      expect((await fixture.openTunnel.mock.results[0].value).alive).toBe(false)
+    } finally { release(); await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('preserves unknown receipts without replaying a submit on startup', async () => {
+    const fixture = await pairedFixture()
+    let client = reopen(fixture)
+    try {
+      await client.connect(fixture.id)
+      const receipt = await client.submit(fixture.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'send once' })
+      expect(receipt.status).toBe('unknown')
+      await client.dispose()
+      fixture.tlsRequest.mockClear()
+      client = reopen(fixture)
+      await client.restoreConnections()
+      await expect(client.intents(fixture.id)).resolves.toMatchObject([{ intentId: receipt.intentId, status: 'unknown' }])
+      expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
+        { op: 'desktop', query: { kind: 'info' } }, { op: 'intentStatus', intentId: receipt.intentId }
+      ])
+    } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it.each([
+    { error: 'device_not_authorized' },
+    { desktop: { kind: 'info', protocol: 1, hostId: randomUUID(), execution: 'canonical' } }
+  ])('does not publish a restored connection when peer authorization fails: %j', async (response) => {
+    const fixture = await pairedFixture()
+    fixture.tlsRequest.mockResolvedValueOnce(response)
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = reopen(fixture)
+    try {
+      await client.restoreConnections()
+      await expect(client.list()).resolves.toMatchObject([{ state: 'disconnected' }])
+      expect((await fixture.openTunnel.mock.results[0].value).alive).toBe(false)
+      expect(warning).toHaveBeenCalledOnce()
+    } finally { warning.mockRestore(); await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+})
+
 describe('DesktopRemoteClient over real host TLS', () => {
   it.each([false, true])('completes production wire lifecycle independently of output capture failure (%s)', async (captureFailure) => {
     const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-real-'))
     const identity = await ensureHostIdentity(join(directory, 'identity'))
     const rememberDirectory = vi.fn()
+    const imageBytes = Buffer.alloc(600 * 1024)
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(imageBytes)
+    let receivedImage: string | undefined
+    let liveRun: ActiveRun | null = null
     let outputReads: MockInstance | undefined
     const binding = await createHostController({
       stateDirectory: directory,
+      attachmentDirectory: join(directory, 'upload-staging'),
       hostId: identity.hostId,
       anchorSHA256: identity.anchorSHA256,
       verifyCSR: identity.verifyCSR,
       issue: identity.issue,
       authorizeWorkspace: (cwd) => cwd,
-      startRun: async ({ progress, runId, output }) => {
+      startRun: async ({ progress, runId, output, routing }) => {
+        receivedImage = routing.attachments?.[0]?.dataBase64
+        const attachments = prepareRunAttachments(directory, 'run-real-1', [{ kind: 'image', name: 'screenshot.png', mimeType: 'image/png', dataBase64: receivedImage! }])
+        liveRun = { runId: 'run-real-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-real', userText: '', attachments, items: [], done: true }
+        expect(upsertTraceArchiveTurn({ userDataDir: directory, cwd: '/workspace', providerId: 'claude', sessionId: 'session-real',
+          turn: { runId: 'run-real-1', providerTurnId: 'native-real-1', agentProfileId: null, userText: '', attachments: attachments.map(image => storeAttachmentReference(directory, 'run-real-1', image)), items: [], done: true } })).toBe(true)
         progress(JSON.stringify({ event: 'bound', ledgerRunId: runId, scryRunId: 'run-real-1', providerId: 'claude', cwd: '/workspace' }))
         progress(JSON.stringify({ event: 'session', externalSessionId: 'session-real' }))
         if (captureFailure) {
@@ -467,7 +772,15 @@ describe('DesktopRemoteClient over real host TLS', () => {
       listProviders: () => [{ id: 'claude', label: 'Claude', available: true }],
       listSessions: () => [{ sessionId: 'session-real', externalSessionId: 'session-real', providerId: 'claude', cwd: '/workspace', label: 'real', ts: Date.now() }],
       sessionCatalogRevision: () => 'revision-real',
-      readDesktop: createDesktopHostReader({ userDataDir: directory, hostId: () => identity.hostId, authorizeWorkspace: cwd => cwd, getRun: () => null })
+      readDesktop: createDesktopHostReader({
+        userDataDir: directory, hostId: () => identity.hostId, authorizeWorkspace: cwd => cwd,
+        authorizeSession: (context) => {
+          const known = context.cwd === '/workspace' && context.providerId === 'claude' && context.externalSessionId === 'session-real'
+            || context.cwd === directory && context.providerId === 'pi' && context.externalSessionId === 'large-session'
+          if (!known) throw new Error('history_session_not_found')
+        },
+        getRun: () => liveRun
+      })
     })
     const server = await identity.issueHostServer()
     const pairingTransport = new PairingTransport({ authority: binding.controller.authority, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM })
@@ -484,7 +797,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
       return response
     }
     const openTunnel = async (): Promise<DesktopSshTunnel> => ({ pairPath: `pair:${pairAddress.port}`, runPath: `run:${runAddress.port}`, alive: true, close: async () => {} })
-    const client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
+    let client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
     try {
       const pairing = await binding.controller.authority.begin()
       const invitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: identity.hostId, anchorPEM: identity.caCertificatePEM, pairPort: pairAddress.port, runPort: runAddress.port, pairingId: pairing.pairingId, secret: pairing.secret, expiresAt: pairing.expiresAt })).toString('base64url')}`
@@ -492,7 +805,10 @@ describe('DesktopRemoteClient over real host TLS', () => {
       await binding.controller.authority.confirmLocal(pairing.pairingId, pending.publicKeySHA256)
       const paired = await client.finishPairing(pending.connection.id)
       expect(paired.state).toBe('paired')
-      await client.connect(pending.connection.id)
+      await client.dispose()
+      client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
+      await client.restoreConnections()
+      await expect(client.list()).resolves.toMatchObject([{ id: pending.connection.id, state: 'connected' }])
       const catalog = await client.catalog(pending.connection.id)
       expect(catalog.projects).toEqual([{ path: '/workspace', label: 'workspace' }])
       expect(catalog.sessions[0].externalSessionId).toBe('session-real')
@@ -515,7 +831,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
         const text = '中文🙂\"\n'.repeat(400_000)
         for (let i = 0; i < 3; i++) expect(upsertTraceArchiveTurn({
           cwd: directory, userDataDir: directory, sessionId: context.externalSessionId, providerId: 'pi',
-          turn: { runId: `history-${i}`, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
+          turn: { runId: `history-${i}`, agentProfileId: null, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
         })).toBe(true)
         const history = await client.history(pending.connection.id, context)
         expect(history.turns.map(turn => turn.userText)).toEqual(['prompt 1', 'prompt 2'])
@@ -527,11 +843,28 @@ describe('DesktopRemoteClient over real host TLS', () => {
       }
       await expect(client.trace(pending.connection.id, { cwd: '/workspace', providerId: 'claude' }, 'run-real-1')).resolves.toBeNull()
       expect(wire).toContainEqual(expect.objectContaining({ op: 'desktop', query: expect.objectContaining({ kind: 'trace', runId: 'run-real-1' }) }))
-      const unknownIntent = await client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'real wire' })
+      const unknownIntent = await client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: '', attachments: [
+        { kind: 'image', name: 'screenshot.png', mimeType: 'image/png', size: imageBytes.length, dataBase64: imageBytes.toString('base64') }
+      ] })
       expect(unknownIntent.status).toBe('unknown')
       const intent = await client.intentStatus(pending.connection.id, unknownIntent.intentId)
       expect(intent.status).toBe('recorded')
       await binding.controller.idle()
+      expect(Buffer.from(receivedImage ?? '', 'base64')).toEqual(imageBytes)
+      expect(wire.filter(request => (request as { op?: string }).op === 'attachmentChunk')).toHaveLength(3)
+      const submitted = wire.find(request => (request as { op?: string }).op === 'submit') as { detail: string }
+      expect(submitted.detail.length).toBeLessThan(2048)
+      expect(JSON.parse(submitted.detail).attachments[0].dataBase64).toBe('')
+      const imageContext = { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' }
+      const trace = await client.trace(pending.connection.id, imageContext, 'run-real-1')
+      expect(Buffer.from(trace!.attachments![0].dataBase64, 'base64')).toEqual(imageBytes)
+      const imageReads = () => wire.filter(request => (request as { query?: { kind?: string } }).query?.kind === 'image').length
+      const initialImageReads = imageReads()
+      await client.trace(pending.connection.id, imageContext, 'run-real-1', 1)
+      expect(imageReads()).toBe(initialImageReads)
+      liveRun = null
+      const imageHistory = await client.history(pending.connection.id, imageContext)
+      expect(Buffer.from(imageHistory.turns[0].attachments![0].dataBase64, 'base64')).toEqual(imageBytes)
       const expectedState = captureFailure ? 'failed' : 'settled'
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })

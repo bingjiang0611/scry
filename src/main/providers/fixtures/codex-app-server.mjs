@@ -18,9 +18,14 @@ input.on('line', (line) => {
     }
     if (mode === 'close-stdin-once' && marker && !existsSync(marker)) {
       writeFileSync(marker, 'closed')
-      closeSync(0)
-      setTimeout(() => send({ id: message.id, result: { userAgent: 'codex-test/1' } }), 300)
-      setTimeout(() => process.exit(0), 1_500)
+      // Detach libuv's reader before closing the special stdin descriptor.
+      // Keep the child alive so only the client's teardown ends this generation.
+      setInterval(() => {}, 60_000)
+      process.stdin.once('close', () => {
+        closeSync(0)
+        send({ id: message.id, result: { userAgent: 'codex-test/1' } })
+      })
+      process.stdin.destroy()
       return
     }
     send({ id: message.id, result: { userAgent: 'codex-test/1', codexHome: '/tmp/codex', platformFamily: 'unix', platformOs: 'macos' } })

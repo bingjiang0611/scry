@@ -167,7 +167,7 @@ async function locatePiNativeSession(args: {
   sessionId: string
   signal?: AbortSignal
   maxBytes?: number
-}): Promise<{ canonical: string; size: number } | null> {
+}): Promise<{ canonical: string; size: number; revision: string } | null> {
   if (!/^[a-f0-9-]{36}$/i.test(args.sessionId)) return null
   const directory = join(args.sessionRoot, `--${resolve(args.cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
   let names: string[]
@@ -185,7 +185,30 @@ async function locatePiNativeSession(args: {
     throw new Error('Pi 原生会话路径越界或不是普通文件')
   }
   if (args.maxBytes != null && info.size > args.maxBytes) throw new Error('Pi metering aggregate byte budget reached')
-  return { canonical, size: info.size }
+  return { canonical, size: info.size, revision: [canonical, info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs].join(':') }
+}
+
+// Version/watch checks inspect the source identity, not its complete message tree.
+export async function readPiNativeHistoryRevision(args: Parameters<typeof locatePiNativeSession>[0]): Promise<string | null> {
+  return (await locatePiNativeSession(args))?.revision ?? null
+}
+
+// Desktop and phone share the same recovery authority. The live registry owns
+// in-flight native tails; an unreadable native file cannot hide intact archives.
+export async function readPiDisplayHistory(
+  args: Parameters<typeof locatePiNativeSession>[0] & { active: boolean },
+  readArchive?: () => Promise<LoadedSessionTurn[]>
+): Promise<{ turns: LoadedSessionTurn[] | null; error?: Error }> {
+  if (args.active) return { turns: null }
+  let native: LoadedSessionTurn[] | null
+  try { native = await readPiNativeHistory(args) }
+  catch (error) {
+    args.signal?.throwIfAborted()
+    if (!readArchive) throw error
+    return { turns: null, error: error instanceof Error ? error : new Error(String(error)) }
+  }
+  if (!native) return { turns: null }
+  return { turns: readArchive ? reconcilePiNativeHistory(native, await readArchive()) : native }
 }
 
 // Metering still consumes a whole string and retains its independent byte budget.

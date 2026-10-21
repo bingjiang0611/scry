@@ -579,6 +579,22 @@ describe('RemoteGateway', () => {
     })).rejects.toThrow('history_snapshot_changed')
   })
 
+  it('binds immutable byte snapshots and source requests to the explicit Profile, including default', async () => {
+    const { authority } = await grantedAuthority()
+    const read = vi.fn(async ({ agentProfileId }: { agentProfileId?: string | null }) => [{ userText: agentProfileId ?? 'default', items: [] }])
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), history: { read } })
+    const query = { providerId: 'pi', cwd: '/w', externalSessionId: 'same' }
+    const a = await gw.readHistoryPage(CERT, { ...query, agentProfileId: 'A', cursor: 0 })
+    await expect(gw.readHistoryPage(CERT, { ...query, agentProfileId: 'B', cursor: 0, snapshot: a.snapshot })).rejects.toThrow('history_snapshot_changed')
+    const b = await gw.readHistoryPage(CERT, { ...query, agentProfileId: 'B', cursor: 0 })
+    const base = await gw.readHistoryPage(CERT, { ...query, agentProfileId: null, cursor: 0 })
+    expect(JSON.parse(Buffer.from(a.dataBase64, 'base64').toString())[0].userText).toBe('A')
+    expect(JSON.parse(Buffer.from(b.dataBase64, 'base64').toString())[0].userText).toBe('B')
+    expect(JSON.parse(Buffer.from(base.dataBase64, 'base64').toString())[0].userText).toBe('default')
+    expect(read).toHaveBeenCalledWith({ ...query, agentProfileId: null })
+    expect((await gw.readHistoryPage(CERT, { ...query, agentProfileId: 'A', cursor: 0, snapshot: a.snapshot })).snapshot).toBe(a.snapshot)
+  })
+
   it('pages complete recent and older structured turns with an exact snapshot fence', async () => {
     const { authority } = await grantedAuthority()
     let version = 'v1'

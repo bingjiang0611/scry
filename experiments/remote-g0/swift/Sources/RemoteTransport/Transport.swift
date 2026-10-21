@@ -480,15 +480,17 @@ public enum G0Transport {
   public struct RunHistoryTurnsPage: Sendable, Equatable, Codable {
     public let turns: [RunHistoryTurn]; public let offset: Int; public let totalTurns: Int
     public let hasOlder: Bool; public let snapshot: String; public let source: String; public let completeness: String
+    public let sourceWarning: String?
     public init(turns: [RunHistoryTurn], offset: Int, totalTurns: Int, hasOlder: Bool,
-                snapshot: String, source: String, completeness: String) {
+                snapshot: String, source: String, completeness: String, sourceWarning: String? = nil) {
       self.turns = turns; self.offset = offset; self.totalTurns = totalTurns; self.hasOlder = hasOlder
-      self.snapshot = snapshot; self.source = source; self.completeness = completeness
+      self.snapshot = snapshot; self.source = source; self.completeness = completeness; self.sourceWarning = sourceWarning
     }
     public func validate() throws {
       guard offset >= 0, totalTurns >= offset, turns.count <= totalTurns - offset,
             hasOlder == (offset > 0), !snapshot.isEmpty, snapshot.utf8.count <= 256,
-            ["active_memory", "indexed_archive", "index_rebuild", "monolithic", "claude_transcript"].contains(source),
+            ["active_memory", "indexed_archive", "index_rebuild", "monolithic", "claude_transcript", "pi_native"].contains(source),
+            sourceWarning == nil || sourceWarning == "native_unavailable",
             ["partial", "complete"].contains(completeness),
             completeness != "complete" || (offset == 0 && turns.count == totalTurns && source != "active_memory") else {
         throw ProbeError.unexpectedReply
@@ -576,29 +578,29 @@ public enum G0Transport {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
     var keepAlive: Bool? = nil
   }
-  private struct RunHistoryRequest: Encodable { let op = "history"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
-  private struct RunHistoryVersionRequest: Encodable { let op = "historyVersion"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
+  private struct RunHistoryRequest: Encodable { let op = "history"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
+  private struct RunHistoryVersionRequest: Encodable { let op = "historyVersion"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
   private struct RunHistoryPreviewRequest: Encodable {
     var agentProfileId = HistoryProfileValue(value: nil)
-    let op = "historyPreview"; let providerId: String; let cwd: String; let externalSessionId: String
+    let op = "historyPreview"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String
     var keepAlive: Bool? = nil
   }
   struct RunHistoryTurnsPageRequest: Encodable {
     var agentProfileId = HistoryProfileValue(value: nil)
-    let op = "historyTurnsPage"; let providerId: String; let cwd: String; let externalSessionId: String
+    let op = "historyTurnsPage"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String
     let before: Int?; let limit: Int?; let snapshot: String?
     var keepAlive: Bool? = nil
   }
   struct RunHistoryPageRequest: Encodable {
     var agentProfileId = HistoryProfileValue(value: nil)
-    let op = "historyPage"; let providerId: String; let cwd: String; let externalSessionId: String
+    let op = "historyPage"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String
     let cursor: Int; let limit: Int?; let snapshot: String?
     var keepAlive: Bool? = nil
   }
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
   private struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
-  private struct LiveRunsHistory: Encodable { let providerId: String; let cwd: String; let externalSessionId: String; let known: String?; var agentProfileId = HistoryProfileValue(value: nil) }
+  private struct LiveRunsHistory: Encodable { let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; let known: String?; var agentProfileId = HistoryProfileValue(value: nil) }
   private struct LiveRunsRequest: Encodable { let op = "liveRuns"; let revision: String?; let waitMs: Int; let history: LiveRunsHistory? }
   struct HistoryProfileValue: Encodable, Equatable, Sendable {
     let value: String?
@@ -608,17 +610,20 @@ public enum G0Transport {
     }
   }
   private struct HistoryProfileStamp: Decodable {
+    let historyScope: String?
     let agentProfileId: String?
-    enum CodingKeys: CodingKey { case agentProfileId }
+    enum CodingKeys: CodingKey { case agentProfileId, historyScope }
     init(from decoder: Decoder) throws {
       let container = try decoder.container(keyedBy: CodingKeys.self)
       guard container.contains(.agentProfileId) else { throw HistoryProfileError.unverified }
       agentProfileId = try container.decodeIfPresent(String.self, forKey: .agentProfileId)
+      historyScope = try container.decodeIfPresent(String.self, forKey: .historyScope)
     }
   }
   public enum HistoryProfileError: Error { case unverified }
   private struct RunResponse: Decodable {
     let historyProfile: HistoryProfileStamp?
+    let historyScope: String?
     let runId: String?
     let status: String?
     let poll: RunPollBody?
@@ -652,11 +657,12 @@ public enum G0Transport {
   private struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
   private struct RunOutputBody: Decodable { let chunks: [RunOutputChunk]; let cursor: Int }
 
-  private static func decodeRun(_ bytes: Data, expectedTarget: ExecutionTargetBinding? = nil, expectedProfile: HistoryProfileValue? = nil) throws -> RunResponse {
+  private static func decodeRun(_ bytes: Data, expectedTarget: ExecutionTargetBinding? = nil, expectedProfile: HistoryProfileValue? = nil, expectedHistoryScope: String? = nil) throws -> RunResponse {
     let response = try JSONDecoder().decode(RunResponse.self, from: bytes)
     if let error = response.error { throw RunError.host(code: error) }
     if let expectedTarget, response.executionTarget != expectedTarget { throw ProbeError.unexpectedReply }
     if let expectedProfile, response.historyProfile == nil || response.historyProfile?.agentProfileId != expectedProfile.value { throw HistoryProfileError.unverified }
+    if let expectedHistoryScope, response.historyScope != expectedHistoryScope { throw HistoryProfileError.unverified }
     return response
   }
 
@@ -831,14 +837,14 @@ public enum G0Transport {
       self.send = send
       self.expectedTarget = expectedTarget
     }
-    private func response(_ request: Data, limit: Int, expectedProfile: HistoryProfileValue? = nil) async throws -> RunResponse {
-      try decodeRun(await send(request, limit), expectedTarget: expectedTarget, expectedProfile: expectedProfile)
+    private func response(_ request: Data, limit: Int, expectedProfile: HistoryProfileValue? = nil, expectedHistoryScope: String? = nil) async throws -> RunResponse {
+      try decodeRun(await send(request, limit), expectedTarget: expectedTarget, expectedProfile: expectedProfile, expectedHistoryScope: expectedHistoryScope)
     }
     public func preview(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> RunHistoryPreview {
       var query = RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, keepAlive: true)
       query.agentProfileId = HistoryProfileValue(value: agentProfileId)
       let request = try JSONEncoder().encode(query)
-      let reply = try await response(request, limit: 17 * 1_024, expectedProfile: HistoryProfileValue(value: agentProfileId))
+      let reply = try await response(request, limit: 17 * 1_024, expectedHistoryScope: "session")
       guard let preview = reply.historyPreview else { throw ProbeError.unexpectedReply }
       return preview
     }
@@ -846,7 +852,7 @@ public enum G0Transport {
       var query = RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot, keepAlive: true)
       query.agentProfileId = HistoryProfileValue(value: agentProfileId)
       let request = try JSONEncoder().encode(query)
-      let reply = try await response(request, limit: 8 * 1024 * 1024, expectedProfile: HistoryProfileValue(value: agentProfileId))
+      let reply = try await response(request, limit: 8 * 1024 * 1024, expectedHistoryScope: "session")
       guard let page = reply.historyTurnsPage else { throw ProbeError.unexpectedReply }
       return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
     }
@@ -854,7 +860,7 @@ public enum G0Transport {
       var query = RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: 256 * 1_024, snapshot: snapshot, keepAlive: true)
       query.agentProfileId = HistoryProfileValue(value: agentProfileId)
       let request = try JSONEncoder().encode(query)
-      let reply = try await response(request, limit: 512 * 1_024, expectedProfile: HistoryProfileValue(value: agentProfileId))
+      let reply = try await response(request, limit: 512 * 1_024, expectedHistoryScope: "session")
       guard let page = reply.historyPage else { throw ProbeError.unexpectedReply }
       return page
     }
@@ -892,7 +898,7 @@ public enum G0Transport {
     var query = RunHistoryVersionRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     query.agentProfileId = HistoryProfileValue(value: agentProfileId)
     let request = try JSONEncoder().encode(query)
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedHistoryScope: "session")
     guard let version = response.historyVersion else { throw ProbeError.unexpectedReply }
     return version
   }
@@ -901,7 +907,7 @@ public enum G0Transport {
     var query = RunHistoryPreviewRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     query.agentProfileId = HistoryProfileValue(value: agentProfileId)
     let request = try JSONEncoder().encode(query)
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, responseLimit: 17 * 1_024, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedHistoryScope: "session")
     guard let preview = response.historyPreview else { throw ProbeError.unexpectedReply }
     return preview
   }
@@ -912,7 +918,7 @@ public enum G0Transport {
     var query = RunHistoryRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId)
     query.agentProfileId = HistoryProfileValue(value: agentProfileId)
     let request = try JSONEncoder().encode(query)
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedHistoryScope: "session")
     guard let history = response.history else { throw ProbeError.unexpectedReply }
     return history
   }
@@ -925,7 +931,7 @@ public enum G0Transport {
     var query = RunHistoryTurnsPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: before, limit: limit, snapshot: snapshot)
     query.agentProfileId = HistoryProfileValue(value: agentProfileId)
     let request = try JSONEncoder().encode(query)
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedHistoryScope: "session")
     guard let page = response.historyTurnsPage else { throw ProbeError.unexpectedReply }
     return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
   }
@@ -934,7 +940,7 @@ public enum G0Transport {
     var query = RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: limit, snapshot: snapshot)
     query.agentProfileId = HistoryProfileValue(value: agentProfileId)
     let request = try JSONEncoder().encode(query)
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedProfile: HistoryProfileValue(value: agentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedHistoryScope: "session")
     guard let page = response.historyPage else { throw ProbeError.unexpectedReply }
     return page
   }
@@ -967,7 +973,7 @@ public enum G0Transport {
     let request = try JSONEncoder().encode(LiveRunsRequest(revision: revision, waitMs: waitMs, history: history.map {
       LiveRunsHistory(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId, known: $0.known, agentProfileId: HistoryProfileValue(value: historyAgentProfileId))
     }))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .status), expectedTarget: endpoint.executionTarget, expectedProfile: history == nil ? nil : HistoryProfileValue(value: historyAgentProfileId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .status), expectedTarget: endpoint.executionTarget, expectedHistoryScope: history == nil ? nil : "session")
     guard let live = response.liveRuns else { throw ProbeError.unexpectedReply }
     return live
   }

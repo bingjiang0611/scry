@@ -3,6 +3,7 @@
 // Session actions execute on the owning host; cached/offline rows cannot mutate it.
 import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { DesktopRemoteAPI, RemoteSessionRef } from '@shared/desktop-remote'
+import { REMOTE_SESSION_COPY as copy } from '../constants/copy'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
 import { providerIdForAgentId } from '@shared/runtime'
 import { basename, relTime } from '../format'
@@ -24,7 +25,7 @@ export interface ActiveRemoteLocation {
 export type RemoteProjectGroup = ReturnType<typeof useRemoteProjectGroups>[number]
 
 // Only projects that have sessions are listed; empty host projects stay in the location picker.
-export function useRemoteProjectGroups(query: string) {
+export function useRemoteProjectGroups(query: string, archived = false) {
   const { connections, error: readError } = useDesktopConnections()
   const catalogs = useRemoteCatalogs()
   const ql = query.trim().toLowerCase()
@@ -36,7 +37,7 @@ export function useRemoteProjectGroups(query: string) {
     const labels = new Map(catalog.projects.map((project) => [project.path, project.label]))
     const byProject = new Map<string, RemoteSessionRef[]>()
     for (const session of catalog.sessions) {
-      if (!session.externalSessionId) continue
+      if (!session.externalSessionId || Boolean(session.archivedAt) !== archived) continue
       const name = labels.get(session.cwd) ?? basename(session.cwd)
       if (ql && !session.label.toLowerCase().includes(ql) && !name.toLowerCase().includes(ql) && !connection.label.toLowerCase().includes(ql)) continue
       byProject.set(session.cwd, [...(byProject.get(session.cwd) ?? []), session])
@@ -49,9 +50,11 @@ export function useRemoteProjectGroups(query: string) {
       name: labels.get(cwd) ?? basename(cwd),
       mtime: Math.max(...sessions.map((session) => session.ts)),
       canManage: catalog.sessionActions === true && state === 'connected',
+      canDelete: catalog.sessionDelete === true && state === 'connected',
+      needsUpgrade: catalog.sessionActions !== true && state === 'connected',
       sessions: sessions.sort((left, right) => (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0) || right.ts - left.ts)
     }))
-  }), [connections, catalogs, ql, readError])
+  }), [connections, catalogs, ql, readError, archived])
 }
 
 export function SidebarRemoteProjects({
@@ -81,7 +84,6 @@ export function SidebarRemoteProjects({
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const writing = useRef(false)
-  const [showArchived, setShowArchived] = useState(false)
   const closeMenu = (): void => {
     const trigger = menu?.target.trigger
     setMenu(null)
@@ -124,8 +126,6 @@ export function SidebarRemoteProjects({
   return (
     <>
       {error && <div className="sb-catalog-warning" role="alert">{error}</div>}
-      {(showArchived || groups.some(group => group.sessions.some(session => session.archivedAt))) && <button type="button" className="sb-archive-toggle"
-        aria-expanded={showArchived} onClick={() => setShowArchived(value => !value)}>已归档远程会话</button>}
       {groups.map((group) => {
         const open = layout === 'activity' || !collapsed.has(group.key)
         const projectSelected = active?.connectionId === group.connection.id && active.cwd === group.cwd && !active.externalSessionId
@@ -157,7 +157,8 @@ export function SidebarRemoteProjects({
             </div>}
             {open && (
               <div className="sb-sess-list">
-                {group.sessions.filter(session => showArchived ? Boolean(session.archivedAt) : !session.archivedAt).map((session) => {
+                {group.needsUpgrade && <p className="sb-empty" role="status">{copy.upgrade(group.connection.label)}</p>}
+                {group.sessions.map((session) => {
                   const selected = active?.connectionId === group.connection.id && active.cwd === group.cwd && active.externalSessionId === session.externalSessionId
                   const provider = providerIdForAgentId(session.providerId)
                   const running = group.state === 'connected' && session.isActive === true
@@ -185,16 +186,16 @@ export function SidebarRemoteProjects({
                         </span>
                         {running && <span className="sb-running" role="status" aria-label="正在运行" title="正在运行" />}
                       </button>
-                      <span className="sb-sess-acts" title={!group.canManage ? '主机未连接或需要更新远端 Scry' : undefined}>
+                      <span className="sb-sess-acts" title={!group.canManage ? copy.upgrade(group.connection.label) : undefined}>
                         <button type="button" className="sb-act" aria-haspopup="menu" disabled={!group.canManage || pending}
                           aria-label={`会话操作：${session.label}`} onClick={event => openMenu(event, group, session)}>···</button>
                         <button type="button" className={`sb-act ${session.pinnedAt ? 'on' : ''}`} disabled={!group.canManage || pending}
                           aria-label={`${session.pinnedAt ? '取消置顶' : '置顶'}：${session.label}`} aria-pressed={Boolean(session.pinnedAt)}
                           onClick={() => dispatch(group, session, { kind: 'pin', pinned: !session.pinnedAt })}><Icon name="pin" /></button>
                         <button type="button" className="sb-act" disabled={!group.canManage || pending}
-                          aria-label={`${session.archivedAt ? '恢复会话' : '存档会话'}：${session.label}`}
-                          title={session.archivedAt ? '恢复会话' : '存档并停止运行，取消排队消息'}
-                          onClick={() => dispatch(group, session, { kind: 'archive', archived: !session.archivedAt })}><Icon name={session.archivedAt ? 'undo' : 'archive'} /></button>
+                          aria-label={copy.archiveLabel(session.label)}
+                          title={copy.archiveHint}
+                          onClick={() => dispatch(group, session, { kind: 'archive', archived: true })}><Icon name="archive" /></button>
                       </span>
                     </div>
                   )

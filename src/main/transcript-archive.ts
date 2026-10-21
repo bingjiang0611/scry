@@ -65,6 +65,8 @@ export function archivedTranscriptPath(userDataDir: string, cwd: string, session
 }
 
 export interface TraceArchiveTurn {
+  /** null = proven default runtime; absent = legacy/unknown Profile provenance. */
+  agentProfileId?: string | null
   toolContentPolicy?: ToolContentPolicy
   runId: string
   providerTurnId?: string
@@ -476,6 +478,7 @@ const TRACE_ARCHIVE_TURN_FILE = /^turn-[a-f0-9]{64}\.json$/
 const TRACE_ARCHIVE_TEMP_FILE = /^turn-[a-f0-9]{64}\.json\.tmp$/
 
 interface TraceArchiveIndexEntry {
+  agentProfileId?: string | null
   file: string
   runId: string
   ts: number
@@ -488,7 +491,7 @@ interface TraceArchiveDirectoryStamp {
 }
 
 interface TraceArchiveIndex {
-  version: 1
+  version: 1 | 2
   cwd: string
   sessionId: string
   providerId: ProviderId
@@ -883,7 +886,7 @@ function isTraceArchiveIndex(value: unknown, args: {
 }): value is TraceArchiveIndex {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const index = value as Partial<TraceArchiveIndex>
-  if (index.version !== 1 || index.cwd !== args.cwd || index.sessionId !== args.sessionId || index.providerId !== args.providerId ||
+  if ((index.version !== 1 && index.version !== 2) || index.cwd !== args.cwd || index.sessionId !== args.sessionId || index.providerId !== args.providerId ||
       !index.directory || typeof index.directory.mtimeMs !== 'number' || !Number.isFinite(index.directory.mtimeMs) ||
       typeof index.directory.ctimeMs !== 'number' || !Number.isFinite(index.directory.ctimeMs) ||
       typeof index.directory.ino !== 'number' || !Number.isFinite(index.directory.ino) || !Array.isArray(index.entries) ||
@@ -892,7 +895,8 @@ function isTraceArchiveIndex(value: unknown, args: {
   return index.entries.every((entry) => {
     if (!entry || typeof entry !== 'object' || !TRACE_ARCHIVE_TURN_FILE.test(entry.file) ||
         typeof entry.runId !== 'string' || !entry.runId || typeof entry.ts !== 'number' || !Number.isFinite(entry.ts) ||
-        files.has(entry.file)) return false
+        files.has(entry.file) || (entry.agentProfileId !== undefined && entry.agentProfileId !== null &&
+          (typeof entry.agentProfileId !== 'string' || !entry.agentProfileId))) return false
     files.add(entry.file)
     return true
   })
@@ -912,13 +916,14 @@ function archiveIndexFromArchives(
   archives: TraceArchive[]
 ): TraceArchiveIndex {
   return {
-    version: 1,
+    version: 2,
     cwd: args.cwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
     directory,
     entries: archives.flatMap((archive) => archive.turns.map((turn) => ({
       file: `${traceArchiveTurnKey(turn)}.json`,
+      ...(turn.agentProfileId !== undefined ? { agentProfileId: turn.agentProfileId } : {}),
       runId: turn.runId,
       ts: turn.ts
     }))).sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
@@ -992,7 +997,7 @@ function updateTraceArchivePageIndexAfterWrite(args: {
   sessionId: string
   providerId: ProviderId
 }, previous: TraceArchiveIndex | null, turn: TraceArchiveTurn): void {
-  if (!previous) {
+  if (!previous || previous.version !== 2) {
     invalidateTraceArchiveIndex(args)
     return
   }
@@ -1001,7 +1006,8 @@ function updateTraceArchivePageIndexAfterWrite(args: {
   if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error('trace archive directory is invalid')
   const file = `${traceArchiveTurnKey(turn)}.json`
   const entries = previous.entries.filter((entry) => entry.file !== file)
-  entries.push({ file, runId: turn.runId, ts: turn.ts })
+  entries.push({ file, runId: turn.runId, ts: turn.ts,
+    ...(turn.agentProfileId !== undefined ? { agentProfileId: turn.agentProfileId } : {}) })
   entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
   writeTraceArchiveIndex(args, {
     ...previous,
@@ -1181,7 +1187,7 @@ export async function readTraceArchiveAsync(args: {
   sessionId: string
   userDataDir: string
   providerId: ProviderId
-}, signal?: AbortSignal): Promise<TraceArchive | null> {
+}, signal?: AbortSignal, requireComplete = false): Promise<TraceArchive | null> {
   signal?.throwIfAborted()
   const current = await inspectArchiveFileAsync(
     args.userDataDir,
@@ -1192,6 +1198,9 @@ export async function readTraceArchiveAsync(args: {
     signal
   )
   const segmented = await inspectSegmentedArchivesAsync(args, signal)
+  if (requireComplete && (current.status === 'invalid' || segmented.invalid.length)) {
+    throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+  }
   return mergeArchives((current.status === 'valid' ? [current.archive] : []).concat(segmented.valid))
 }
 
@@ -1242,7 +1251,7 @@ export interface TraceArchiveVersion {
  * next page read may materialize the whole file.
  */
 export async function readTraceArchiveVersionAsync(
-  args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId }
+  args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId; agentProfileId?: string | null }
 ): Promise<TraceArchiveVersion> {
   const paths = [
     traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
@@ -1261,7 +1270,7 @@ export async function readTraceArchiveVersionAsync(
   return {
     // The index is a rebuildable cache, not source evidence. Building it during
     // the first page read must not invalidate the unchanged archive snapshot.
-    version: createHash('sha256').update(stats.slice(0, 2).join('\0')).digest('hex'),
+    version: createHash('sha256').update(JSON.stringify([stats.slice(0, 2), Object.hasOwn(args, 'agentProfileId') ? [args.agentProfileId] : []])).digest('hex'),
     readMode: hasMonolithic ? 'monolithic' : hasIndex ? 'indexed' : 'index_rebuild'
   }
 }
@@ -1278,10 +1287,29 @@ export interface TraceArchivePage {
 }
 
 export interface TraceArchivePageRequest {
+  /** Presence selects strict Profile evidence; null selects the default runtime. */
+  agentProfileId?: string | null
+  /** Session display permits unknown Profiles, never unreadable canonical turns. */
+  requireComplete?: boolean
   before?: number
   limit?: number
   /** Freeze ordinal paging to the total observed by the initial page while later turns append. */
   snapshotTotalTurns?: number
+}
+
+function selectArchiveProfile<T extends { agentProfileId?: string | null }>(turns: T[], request: TraceArchivePageRequest): T[] {
+  if (!Object.hasOwn(request, 'agentProfileId')) return turns
+  if (request.agentProfileId === undefined || turns.some((turn) => turn.agentProfileId === undefined ||
+      (turn.agentProfileId !== null && (typeof turn.agentProfileId !== 'string' || !turn.agentProfileId)))) {
+    throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+  }
+  return turns.filter((turn) => turn.agentProfileId === request.agentProfileId)
+}
+
+function profileArchive(archive: TraceArchive | null, request: TraceArchivePageRequest): TraceArchive | null {
+  if (!archive) return null
+  const turns = selectArchiveProfile(archive.turns, request)
+  return Object.hasOwn(request, 'agentProfileId') && !turns.length ? null : { ...archive, turns }
 }
 
 function traceArchivePageBounds(availableTurns: number, request: TraceArchivePageRequest): {
@@ -1308,6 +1336,7 @@ export async function readTraceArchivePageAsync(
   signal?: AbortSignal
 ): Promise<TraceArchivePage> {
   signal?.throwIfAborted()
+  const strictStorage = Object.hasOwn(request, 'agentProfileId') || request.requireComplete === true
   const current = await inspectArchiveFileAsync(
     args.userDataDir,
     traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
@@ -1316,21 +1345,26 @@ export async function readTraceArchivePageAsync(
     args.providerId,
     signal
   )
+  if (current.status === 'invalid' && strictStorage) {
+    throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+  }
   if (current.status === 'valid') {
-    const archive = await readTraceArchiveAsync(args, signal)
+    const original = await readTraceArchiveAsync(args, signal, strictStorage)
+    const archive = profileArchive(original, request)
     const { offset, end, totalTurns } = traceArchivePageBounds(archive?.turns.length ?? 0, request)
     return {
       archive: archive ? { ...archive, turns: archive.turns.slice(offset, end) } : null,
       offset,
       totalTurns,
       hasOlder: offset > 0,
-      turnFilesRead: totalTurns,
+      turnFilesRead: original?.turns.length ?? 0,
       readMode: 'monolithic'
     }
   }
 
   const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   let index = await readValidTraceArchiveIndex(args, signal)
+  if (Object.hasOwn(request, 'agentProfileId') && index?.version === 1) index = null
   if (!index) {
     let before: TraceArchiveDirectoryStamp | null = null
     try { before = archiveDirectoryStamp(await lstat(dir)) } catch { /* inspection below owns absence/corruption semantics */ }
@@ -1348,7 +1382,9 @@ export async function readTraceArchivePageAsync(
     }
     // A rebuild already parsed every canonical turn body, so slice that result directly instead of
     // reading the selected page twice. The next healthy request will use the persisted index.
-    const archive = mergeArchives(inspected.valid)
+    if (strictStorage && inspected.invalid.length) throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+    const merged = mergeArchives(inspected.valid)
+    const archive = profileArchive(merged, request)
     const { offset, end, totalTurns } = traceArchivePageBounds(archive?.turns.length ?? 0, request)
     return {
       archive: archive ? { ...archive, turns: archive.turns.slice(offset, end) } : null,
@@ -1360,19 +1396,23 @@ export async function readTraceArchivePageAsync(
     }
   }
 
-  const { offset, end, totalTurns } = traceArchivePageBounds(index.entries.length, request)
-  const selected = index.entries.slice(offset, end)
+  const scopedEntries = selectArchiveProfile(index.entries, request)
+  const { offset, end, totalTurns } = traceArchivePageBounds(scopedEntries.length, request)
+  const selected = scopedEntries.slice(offset, end)
   const archives = await Promise.all(selected.map(async (entry) => {
     const inspected = await inspectArchiveFileAsync(
       args.userDataDir, join(dir, entry.file), args.cwd, args.sessionId, args.providerId, signal
     )
     if (inspected.status !== 'valid' || inspected.archive.turns.length !== 1) return null
     const turn = inspected.archive.turns[0]
-    return turn.runId === entry.runId && turn.ts === entry.ts ? inspected.archive : null
+    return turn.runId === entry.runId && turn.ts === entry.ts &&
+      (!Object.hasOwn(request, 'agentProfileId') || turn.agentProfileId === request.agentProfileId) ? inspected.archive : null
   }))
   if (archives.some((archive) => archive == null)) {
     const rebuilt = await inspectSegmentedArchivesAsync(args, signal)
-    const archive = mergeArchives(rebuilt.valid)
+    if (strictStorage && rebuilt.invalid.length) throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+    const merged = mergeArchives(rebuilt.valid)
+    const archive = profileArchive(merged, request)
     const { offset: rebuiltOffset, end: rebuiltEnd, totalTurns: rebuiltTotal } = traceArchivePageBounds(
       archive?.turns.length ?? 0,
       request

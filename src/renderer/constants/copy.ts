@@ -292,6 +292,52 @@ export const REMOTE_ACCESS_COPY = {
   paired: '已配对'
 } as const
 
+export const SLASH_COMMAND_COPY = {
+  heading: (host: string | undefined, loading: boolean) => {
+    const source = host ? `${host} 上的命令` : 'Commands'
+    return loading ? `${source} · 读取中…` : source
+  },
+  refresh: '刷新',
+  retry: '重试',
+  refreshTitle: (host?: string) => host ? `重新读取 ${host} 的命令清单` : '重新拉取命令清单',
+  empty: '命令清单为空——当前 Provider 未返回命令；可刷新或查看诊断',
+  noMatches: '无匹配命令'
+} as const
+
+export const ARCHIVED_SESSIONS_COPY = {
+  localTitle: '本机已存档会话',
+  deleteAllLocal: '删除全部本机会话',
+  localEmpty: '没有本机已存档会话'
+} as const
+
+export const REMOTE_SESSION_COPY = {
+  archivedTitle: '远程已存档会话',
+  archivedDescription: '恢复会话会将其放回远程项目。删除仅移除对应主机上的 Scry 副本。',
+  restore: '取消存档',
+  deleteUnsupported: '此历史会话缺少可用的 Provider 身份，无法删除。',
+  restoreLabel: (label: string) => `取消存档：${label}`,
+  archiveLabel: (label: string) => `存档会话：${label}`,
+  archiveHint: '存档并停止运行，取消排队消息',
+  manageUnavailable: (host: string) => `请连接 ${host} 并确认远端 Scry 支持此操作。`,
+  updateUnconfirmed: '远端未确认会话更新，请刷新后核对。',
+  upgrade: (host: string) => `请更新并重启 ${host} 上的 Scry，以启用会话操作。`,
+  delete: '删除 Scry 副本',
+  deleting: '正在删除…',
+  cancel: '取消',
+  deleteTitle: (host: string) => `删除 ${host} 上的会话`,
+  deleteWarning: (label: string) => `将永久删除「${label}」的 Scry 会话副本、附件和用量数据。工作区 .scry 记录与 Provider 原始数据保留。此操作不可撤销。`,
+  deleteFailed: (detail: string) => `未能完整删除远端会话：${detail}`,
+  operationUnknown: '远端操作结果未确认。请刷新会话列表核对，不要直接重复操作。',
+  forkBoundaryMissing: '当前轮次缺少可验证的 Provider 会话边界。',
+  forkUnsupported: '此远端或 Provider 不支持创建分支，请更新远端 Scry 后确认能力。'
+} as const
+
+export const REMOTE_ATTACHMENTS_COPY = {
+  unsupported: '这台远端 Scry 不支持当前图片附件传输。请更新远端 Scry 后重试；图片草稿仍会保留。',
+  tooLarge: '图片附件超过这台远端 Scry 的传输限制。请缩小图片或更新远端 Scry；图片草稿仍会保留。',
+  tooMany: '图片附件数量超过这台远端 Scry 的传输限制。请移除部分图片或更新远端 Scry。'
+} as const
+
 export const QUESTIONNAIRE_COPY = {
   pending: (count: number) => `还有 ${count} 题待回答`,
   review: '可修改任意答案，确认后提交',

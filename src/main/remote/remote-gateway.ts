@@ -2,6 +2,7 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
+import { parseRemoteFileDownloadQuery, type RemoteFileDownloads, type RemoteFileDownloadResult } from './remote-file-download'
 import type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
 export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
 
@@ -130,7 +131,14 @@ export interface RemoteHistoryTurn {
   items: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }[]
 }
 
+export type RemoteHistoryScope = 'session' | 'profile'
+
 export interface RemoteHistoryQuery {
+  // `session` is the mobile display scope: one catalog-bound Provider session
+  // may contain legacy/fork turns whose Profile provenance is unknown or mixed.
+  // `profile` retains the old strict evidence contract for compatibility.
+  historyScope?: RemoteHistoryScope
+  agentProfileId?: string | null
   providerId: string
   cwd: string
   externalSessionId: string
@@ -150,7 +158,7 @@ export interface RemoteHistoryPreviewTurn {
 }
 
 export type RemoteHistoryPreview =
-  | { status: 'available'; source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic'; turns: RemoteHistoryPreviewTurn[]; partial: true; truncated: boolean; bytes: number }
+  | { status: 'available'; source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic' | 'pi_native'; turns: RemoteHistoryPreviewTurn[]; partial: true; truncated: boolean; bytes: number }
   | { status: 'unavailable'; reason: 'no_fast_evidence' | 'session_not_found' | 'provider_unsupported' }
 
 export interface RemoteHistoryPreviewSource {
@@ -192,8 +200,9 @@ export interface RemoteHistoryTurnsPage {
   totalTurns: number
   hasOlder: boolean
   snapshot: string
-  source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic' | 'claude_transcript'
+  source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic' | 'claude_transcript' | 'pi_native'
   completeness: 'partial' | 'complete'
+  sourceWarning?: 'native_unavailable'
 }
 
 export interface RemoteHistoryTurnsPageSource {
@@ -216,6 +225,7 @@ export interface RemoteGatewayDependencies {
   authority: DeviceAuthorizer
   ledger: SessionLedger
   workspace?: { read(query: RemoteWorkspaceQuery): Promise<RemoteWorkspaceResult> }
+  fileDownloads?: RemoteFileDownloads
   // Absent => the device sees an empty (honest) authorized-project list.
   projects?: RemoteProjectSource
   // Absent => hierarchical browsing is unavailable (honest empty root list).
@@ -247,9 +257,27 @@ export interface SubmitIntentResult {
 
 const HASH = /^[0-9a-f]{64}$/
 
-function scopedIntentId(peerCertSHA256: string, intentId: string): string {
+export function scopedIntentId(peerCertSHA256: string, intentId: string): string {
   const hex = createHash('sha256').update(`${peerCertSHA256}\0${intentId}`).digest('hex').slice(0, 32)
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`
+}
+
+export function historyScopeSelection(query: { historyScope?: unknown }, required = false): Pick<RemoteHistoryQuery, 'historyScope'> {
+  if (!Object.hasOwn(query, 'historyScope')) {
+    if (required) throw new RemoteGatewayError('history_scope_required')
+    return {}
+  }
+  if (query.historyScope !== 'session' && query.historyScope !== 'profile') throw new RemoteGatewayError('invalid_history_scope')
+  return { historyScope: query.historyScope }
+}
+
+export function historyProfileSelection(query: { agentProfileId?: unknown }, required = false): Pick<RemoteHistoryQuery, 'agentProfileId'> {
+  if (!Object.hasOwn(query, 'agentProfileId')) {
+    if (required) throw new RemoteGatewayError('history_profile_required')
+    return {}
+  }
+  if (query.agentProfileId !== null && (typeof query.agentProfileId !== 'string' || !query.agentProfileId || query.agentProfileId.length > 128)) throw new RemoteGatewayError('invalid_history_profile')
+  return { agentProfileId: query.agentProfileId }
 }
 
 export class RemoteGatewayError extends Error {
@@ -312,6 +340,7 @@ export class RemoteGateway {
   #historyTurnsPage?: RemoteHistoryTurnsPageSource
   #output?: RemoteOutputReader
   #workspace?: RemoteGatewayDependencies['workspace']
+  #fileDownloads?: RemoteFileDownloads
   #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
   #historyBuilds = new Map<string, Promise<{ bytes: Buffer; snapshot: string }>>()
   // A catalog page is a frozen view. Keep the materialized source only for the
@@ -333,12 +362,20 @@ export class RemoteGateway {
     this.#historyTurnsPage = deps.historyTurnsPage
     this.#output = deps.output
     this.#workspace = deps.workspace
+    this.#fileDownloads = deps.fileDownloads
   }
 
   // Fail closed on anything that is not a currently-authorized owner device.
   #authorize(peerCertSHA256: string): void {
     if (typeof peerCertSHA256 !== 'string' || !HASH.test(peerCertSHA256)) throw new RemoteGatewayError('device_not_authorized')
     if (!this.#authority.authorizesCertificate(peerCertSHA256)) throw new RemoteGatewayError('device_not_authorized')
+  }
+
+  async readFileDownload(peerCertSHA256: string, query: unknown): Promise<RemoteFileDownloadResult> {
+    this.#authorize(peerCertSHA256)
+    const parsed = parseRemoteFileDownloadQuery(query)
+    if (!this.#fileDownloads) throw new RemoteGatewayError('file_download_unavailable')
+    return this.#fileDownloads.read(peerCertSHA256, parsed, () => this.#authorize(peerCertSHA256))
   }
 
   async readWorkspace(peerCertSHA256: string, query: unknown): Promise<RemoteWorkspaceResult> {
@@ -644,7 +681,8 @@ export class RemoteGateway {
       throw new RemoteGatewayError('invalid_history_preview_query')
     }
     const raw = (await this.#historyPreview?.read({
-      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH), externalSessionId: query.externalSessionId.slice(0, 128)
+      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH), externalSessionId: query.externalSessionId.slice(0, 128),
+      ...historyScopeSelection(query), ...historyProfileSelection(query)
     })) ?? { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
     if (raw.status === 'unavailable') return raw
     const turns: RemoteHistoryPreviewTurn[] = []
@@ -682,7 +720,8 @@ export class RemoteGateway {
     }
     if (!this.#historyVersion) throw new RemoteGatewayError('history_unavailable')
     return this.#historyVersion.read({
-      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH), externalSessionId: query.externalSessionId.slice(0, 128)
+      providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH), externalSessionId: query.externalSessionId.slice(0, 128),
+      ...historyScopeSelection(query), ...historyProfileSelection(query)
     })
   }
 
@@ -698,7 +737,8 @@ export class RemoteGateway {
     if (!this.#historyTurnsPage) throw new RemoteGatewayError('history_unavailable')
     let result = await this.#historyTurnsPage.read({
       providerId: query.providerId.slice(0, 64), cwd: query.cwd.slice(0, MAX_PATH),
-      externalSessionId: query.externalSessionId.slice(0, 128), before, limit, snapshot: query.snapshot
+      externalSessionId: query.externalSessionId.slice(0, 128), before, limit, snapshot: query.snapshot,
+      ...historyScopeSelection(query), ...historyProfileSelection(query)
     })
     if (!Array.isArray(result.turns) || !Number.isSafeInteger(result.offset) || !Number.isSafeInteger(result.totalTurns) ||
         result.offset < 0 || result.totalTurns < 0 || result.turns.length > limit ||
@@ -731,7 +771,8 @@ export class RemoteGateway {
     const raw = (await this.#history?.read({
       providerId: query.providerId.slice(0, 64),
       cwd: typeof query.cwd === 'string' ? query.cwd.slice(0, MAX_PATH) : '',
-      externalSessionId: query.externalSessionId.slice(0, 128)
+      externalSessionId: query.externalSessionId.slice(0, 128),
+      ...historyScopeSelection(query), ...historyProfileSelection(query)
     })) ?? []
     const out: RemoteHistoryTurn[] = []
     // Track the exact JSON byte contribution while preserving chronological
@@ -781,7 +822,9 @@ export class RemoteGateway {
     const providerId = query.providerId.slice(0, 64)
     const cwd = typeof query.cwd === 'string' ? query.cwd.slice(0, MAX_PATH) : ''
     const externalSessionId = query.externalSessionId.slice(0, 128)
-    const scope = `${providerId}\0${cwd}\0${externalSessionId}`
+    const historyScope = historyScopeSelection(query)
+    const profile = historyProfileSelection(query)
+    const scope = JSON.stringify([providerId, cwd, externalSessionId, historyScope, profile])
     const now = Date.now()
     for (const [key, value] of this.#historySnapshots) {
       if (value.expiresAt <= now) this.#historySnapshots.delete(key)
@@ -799,7 +842,7 @@ export class RemoteGateway {
     } else {
       let build = this.#historyBuilds.get(scope)
       if (!build) {
-        build = this.#buildHistory({ providerId, cwd, externalSessionId })
+        build = this.#buildHistory({ providerId, cwd, externalSessionId, ...historyScope, ...profile })
         this.#historyBuilds.set(scope, build)
       }
       try { ({ bytes, snapshot } = await build) }

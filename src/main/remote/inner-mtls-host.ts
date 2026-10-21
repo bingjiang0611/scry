@@ -2,6 +2,8 @@ import { createServer, type TLSSocket, type Server } from 'node:tls'
 import { constants, createHash } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { HostController } from './host-controller'
+import { historyProfileSelection, historyScopeSelection } from './remote-gateway'
+import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
 // paired device reaches (through the outer WSS byte relay, which never sees
@@ -27,6 +29,8 @@ export interface InnerMtlsHostOptions {
   caPEM: string
   // Bytes cap for a single framed request.
   maxFrameBytes?: number
+  // Optional Mac1 -> Mac2 target route. Local mobile operations never use it.
+  executionTargets?: ExecutionTargetRouter
 }
 
 // Remote prompts may carry a small, explicitly bounded image/text attachment.
@@ -54,7 +58,7 @@ export class InnerMtlsHost {
       minVersion: 'TLSv1.3',
       maxVersion: 'TLSv1.3',
       secureOptions: constants.SSL_OP_NO_TICKET
-    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller))
+    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets))
     this.#server.on('tlsClientError', (err) => {
       // Rejected handshakes are not host errors. Optional diagnostics only.
       if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] tlsClientError: ${(err as Error)?.message}`)
@@ -69,7 +73,7 @@ export class InnerMtlsHost {
     this.#server.emit('connection', stream)
   }
 
-  #onConnection(socket: TLSSocket, controller: HostController): void {
+  #onConnection(socket: TLSSocket, controller: HostController, executionTargets?: ExecutionTargetRouter): void {
     // Fail closed on anything but a fresh, fully-verified TLS 1.3 session.
     if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] onConnection authorized=${socket.authorized} authErr=${socket.authorizationError} proto=${socket.getProtocol()} reused=${socket.isSessionReused()}`)
     if (!socket.authorized || socket.getProtocol() !== 'TLSv1.3' || socket.isSessionReused()) { socket.destroy(); return }
@@ -117,7 +121,7 @@ export class InnerMtlsHost {
       kept ||= keepAlive
       busy = true
       socket.setTimeout(0)
-      void this.#dispatch(controller, fingerprint, frame)
+      void this.#dispatch(controller, fingerprint, frame, executionTargets)
         .then((res) => {
           busy = false
           if (keepAlive) {
@@ -138,15 +142,37 @@ export class InnerMtlsHost {
     }
   }
 
-  async #dispatch(controller: HostController, fingerprint: string, line: Buffer): Promise<unknown> {
-    let request: { op?: string; deviceLabel?: unknown; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; answerId?: string; response?: unknown; query?: unknown; revision?: string; history?: unknown; context?: unknown; action?: unknown; includeArchived?: unknown }
+  async #dispatch(controller: HostController, fingerprint: string, line: Buffer, executionTargets?: ExecutionTargetRouter): Promise<unknown> {
+    let request: { op?: string; keepAlive?: unknown; deviceLabel?: unknown; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; historyScope?: string; answerId?: string; response?: unknown; query?: unknown; revision?: string; history?: unknown; context?: unknown; action?: unknown; includeArchived?: unknown; target?: unknown; request?: unknown; attachmentId?: string; offset?: number; dataBase64?: string; name?: string; mimeType?: string; size?: number; sha256?: string; index?: number; totalCount?: number }
     try { request = JSON.parse(line.toString('utf8')) }
     catch { return { error: 'invalid_request' } }
     try {
+      if (request.op === 'executionTargets') {
+        if (Object.keys(request).some((key) => key !== 'op')) return { error: 'invalid_request' }
+        if (!executionTargets) return { error: 'execution_targets_unavailable' }
+        try { return await executionTargets.discovery(fingerprint) } catch (error) { return executionTargetError(error) }
+      }
+      if (request.op === 'target') {
+        if (!executionTargets) return { error: 'execution_targets_unavailable' }
+        if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
+        // These describe the authenticated phone's Mac1 transport, not the
+        // forwarded operation or Mac2's desktop peer. Keep business validation exact.
+        const { keepAlive: _keepAlive, deviceLabel: _deviceLabel, ...envelope } = request
+        try { return await executionTargets.dispatch(fingerprint, envelope) } catch (error) { return executionTargetError(error) }
+      }
       if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
+      if (request.op === 'attachmentStart') {
+        return await controller.attachmentStart(fingerprint, request)
+      }
+      if (request.op === 'attachmentChunk') {
+        return await controller.attachmentChunk(fingerprint, request)
+      }
+      if (request.op === 'attachmentCommit') {
+        return await controller.attachmentCommit(fingerprint, request)
+      }
       if (request.op === 'submit') {
         if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
-        return controller.submitIntent(fingerprint, { intentId: request.intentId, detail: request.detail })
+        return await controller.submitReceivedIntent(fingerprint, { intentId: request.intentId, detail: request.detail })
       }
       if (request.op === 'intentStatus') {
         if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
@@ -168,7 +194,7 @@ export class InnerMtlsHost {
             (typeof request.revision !== 'string' || request.revision.length > 64))) return { error: 'invalid_request' }
         const history = parseLiveRunsHistory(request.history)
         if (history === false) return { error: 'invalid_request' }
-        return { liveRuns: await controller.liveRuns(fingerprint, {
+        return { ...(history ? { historyScope: history.query.historyScope, ...(history.query.historyScope === 'profile' ? { historyProfile: historyProfileSelection(history.query) } : {}) } : {}), liveRuns: await controller.liveRuns(fingerprint, {
           waitMs: request.waitMs as number,
           ...(request.revision !== undefined ? { revision: request.revision } : {}),
           ...(history ? { history } : {})
@@ -233,6 +259,12 @@ export class InnerMtlsHost {
       if (request.op === 'sessionAction') {
         return { sessionAction: await controller.sessionAction(fingerprint, { context: request.context, action: request.action }) }
       }
+      if (request.op === 'sessionFork') {
+        return { sessionFork: await controller.sessionFork(fingerprint, request.request) }
+      }
+      if (request.op === 'sessionDelete') {
+        return { sessionDelete: await controller.sessionDelete(fingerprint, request.request) }
+      }
       if (request.op === 'sessions') {
         // Same owner-device authorization; display-only catalog metadata.
         return { sessions: controller.listSessions(fingerprint) }
@@ -252,6 +284,9 @@ export class InnerMtlsHost {
       if (request.op === 'workspace') {
         return { workspace: await controller.readWorkspace(fingerprint, request.query) }
       }
+      if (request.op === 'fileDownload') {
+        return { fileDownload: await controller.readFileDownload(fingerprint, request.query) }
+      }
       if (request.op === 'desktop') {
         return { desktop: await controller.readDesktop(fingerprint, request.query) }
       }
@@ -262,19 +297,26 @@ export class InnerMtlsHost {
         return { directory: controller.desktopDirectory(fingerprint, request.query) }
       }
       if (request.op === 'historyPreview') {
+        const scope = historyScopeSelection(request).historyScope ?? 'profile'
+        const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
-        return { historyPreview: await controller.readHistoryPreview(fingerprint, { providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
+        return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyPreview: await controller.readHistoryPreview(fingerprint, { ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile, providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
       }
       if (request.op === 'historyVersion') {
+        const scope = historyScopeSelection(request).historyScope ?? 'profile'
+        const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
-        return { historyVersion: await controller.readHistoryVersion(fingerprint, { providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
+        return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyVersion: await controller.readHistoryVersion(fingerprint, { ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile, providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
       }
       if (request.op === 'historyTurnsPage') {
+        const scope = historyScopeSelection(request).historyScope ?? 'profile'
+        const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
         if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string' ||
             (request.before !== undefined && !Number.isSafeInteger(request.before)) ||
             (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
             (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
-        return { historyTurnsPage: await controller.readHistoryTurnsPage(fingerprint, {
+        return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyTurnsPage: await controller.readHistoryTurnsPage(fingerprint, {
+          ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile,
           providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId,
           ...(typeof request.before === 'number' ? { before: request.before } : {}),
           ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
@@ -282,16 +324,21 @@ export class InnerMtlsHost {
         }) }
       }
       if (request.op === 'history') {
+        const scope = historyScopeSelection(request).historyScope ?? 'profile'
+        const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
         // Legacy bounded response retained for older clients.
         if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
-        return { history: await controller.readHistory(fingerprint, { providerId: request.providerId, cwd: typeof request.cwd === 'string' ? request.cwd : '', externalSessionId: request.externalSessionId }) }
+        return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), history: await controller.readHistory(fingerprint, { ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile, providerId: request.providerId, cwd: typeof request.cwd === 'string' ? request.cwd : '', externalSessionId: request.externalSessionId }) }
       }
       if (request.op === 'historyPage') {
+        const scope = historyScopeSelection(request).historyScope ?? 'profile'
+        const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
         if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string' ||
             (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
             (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
             (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
-        return { historyPage: await controller.readHistoryPage(fingerprint, {
+        return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyPage: await controller.readHistoryPage(fingerprint, {
+          ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile,
           providerId: request.providerId,
           cwd: typeof request.cwd === 'string' ? request.cwd : '',
           externalSessionId: request.externalSessionId,
@@ -331,12 +378,14 @@ export class InnerMtlsHost {
 
 // `history` joins one opened session's version to the liveRuns long-poll.
 // Returns undefined when absent and false when malformed.
-function parseLiveRunsHistory(value: unknown): { query: { providerId: string; cwd: string; externalSessionId: string }; known?: string } | undefined | false {
+function parseLiveRunsHistory(value: unknown): { query: { providerId: string; cwd: string; externalSessionId: string; historyScope: 'session' | 'profile'; agentProfileId?: string | null }; known?: string } | undefined | false {
   if (value === undefined) return undefined
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const h = value as Record<string, unknown>
   const text = (field: unknown, max: number): field is string => typeof field === 'string' && field.length > 0 && field.length <= max
   if (!text(h.providerId, 128) || !text(h.cwd, 4096) || !text(h.externalSessionId, 256)) return false
   if (h.known !== undefined && !text(h.known, 512)) return false
-  return { query: { providerId: h.providerId, cwd: h.cwd, externalSessionId: h.externalSessionId }, ...(h.known !== undefined ? { known: h.known as string } : {}) }
+  const scope = historyScopeSelection(h).historyScope ?? 'profile'
+  const profile = scope === 'profile' ? historyProfileSelection(h, true) : historyProfileSelection(h)
+  return { query: { providerId: h.providerId, cwd: h.cwd, externalSessionId: h.externalSessionId, historyScope: scope, ...profile }, ...(h.known !== undefined ? { known: h.known as string } : {}) }
 }

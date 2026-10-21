@@ -22,6 +22,7 @@ export function remoteProviderEntry(input: {
   previous: readonly RemoteProviderRef[]
   // Owner-set SCRY_REMOTE_PERMISSION_MODE override.
   permissionOverride?: AgentPermissionMode
+  forkSession?: boolean
 }): RemoteProviderRef {
   const { descriptor, profile, controls, permissionOverride } = input
   const label = profile ? contextLabel(descriptor.label, profile.label) : descriptor.label
@@ -54,6 +55,7 @@ export function remoteProviderEntry(input: {
     ...(model?.model.id ? { modelId: model.model.id } : {}),
     ...(models.length ? { models } : {}),
     ...(model?.efforts.length ? { efforts: model.efforts } : {}),
+    ...(input.forkSession ? { forkSession: true as const } : {}),
     ...(controls.data?.permissions.length || permissionOverride ? {
       // An owner-set override is authoritative. Advertise only the mode
       // that will really execute so the phone renders it as locked rather

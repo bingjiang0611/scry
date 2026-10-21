@@ -1,21 +1,24 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction } from '../../shared/desktop-remote'
+import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest } from '../../shared/desktop-remote'
+import type { DeleteSessionResult } from '../../shared/provider'
 import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
 import { parseDesktopHostRead } from './desktop-host-reader'
 import { parseDesktopWorkbenchQuery } from './desktop-workbench'
 import { PairingAuthority, type PairingDependencies } from './pairing'
 import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
+import { RemoteGateway, scopedIntentId, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
 import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
 export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview, RemoteHistoryVersion, RemoteHistoryTurnsPage, RemoteHistoryTurnsPageQuery } from './remote-gateway'
 export type { RunOutputPage, OutputChunk } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
 import { readRemoteWorkspace, type RemoteSessionStatus, type RemoteSessionStatusQuery } from './remote-workspace'
+import { RemoteFileDownloads } from './remote-file-download'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { decodedBase64ByteLength, isAgentPermissionMode, isSupportedImageMimeType, type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { RemoteInteractionBroker, RemoteInteractionError, type RemoteQuestionAnswerReceipt } from './remote-interaction-broker'
+import { attachmentCapability, DesktopAttachmentStore, DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, type DesktopAttachmentReference } from './desktop-attachments'
 
 // Trusted-local composition root for the remote subsystem. It wires the six
 // modules proven in isolation (PairingAuthority, SessionLedger, RemoteGateway,
@@ -39,6 +42,11 @@ export interface RemoteIntentAttachment {
   mimeType: string
   dataBase64: string
   size: number
+  attachmentId?: string
+  sha256?: string
+  index?: number
+  totalCount?: number
+  intentId?: string
 }
 
 export interface RemoteIntentRouting extends RemoteRunTarget {
@@ -47,9 +55,10 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   modelProviderId?: string
   effort?: string
   permissionMode?: AgentPermissionMode
-  // Bounded, encrypted attachment payloads from the paired device. Images are
-  // forwarded as native Provider attachments; UTF-8 text/code files become
-  // explicit context blocks. The parser below validates every byte before the
+  // Inline payloads are retained for older peers; current desktop peers send
+  // persistent, hash-bound host attachment references. Images are forwarded as
+  // native Provider attachments; UTF-8 text/code files become explicit context
+  // blocks. The parser and attachment store validate every byte before the
   // Provider can see it.
   attachments?: RemoteIntentAttachment[]
   // The Provider's own session id to CONTINUE (resume) instead of starting a
@@ -57,6 +66,8 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   // session; absent for a brand-new session. Authorization is unchanged (still by
   // cwd + provider); resume only selects which conversation the run continues.
   resume?: string
+  // Host-injected owner identity for persisted attachment references.
+  attachmentPeer?: string
 }
 
 // A run the owner started in the Mac UI (RunRegistry), as the host proves it
@@ -147,6 +158,8 @@ export interface HostControllerDependencies {
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   // Host-owned session metadata writes. The callback must use the host store.
   sessionAction?(context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void): Promise<boolean> | boolean
+  sessionFork?(request: DesktopRemoteForkSessionRequest, authorize: () => void): Promise<{ externalSessionId: string }>
+  sessionDelete?(request: DesktopRemoteDeleteSessionRequest, authorize: () => void): Promise<DeleteSessionResult>
   // Snapshot of the host session catalog a device may browse. Absent => empty.
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
@@ -160,6 +173,8 @@ export interface HostControllerDependencies {
   // Optional shared operation gate (auth vs run mutual exclusion). A fresh one
   // is created when omitted; production passes the app-wide gate.
   gate?: ProviderOperationGate
+  attachmentStore?: DesktopAttachmentStore
+  attachmentDirectory?: string
 }
 
 const REMOTE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -169,13 +184,14 @@ const MAC_RUN_ID = /^run-[0-9a-z]{1,16}-[0-9]{1,12}$/
 const WATCH_MAX_WAIT_MS = 20_000
 const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 const MAX_REMOTE_PROMPT_CHARS = 128_000
-const MAX_REMOTE_ATTACHMENTS = 4
 const MAX_REMOTE_ATTACHMENT_BYTES = 512 * 1024
 const MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES = 700 * 1024
+const ATTACHMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const SHA256 = /^[a-f0-9]{64}$/
 
 function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[] {
   if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > MAX_REMOTE_ATTACHMENTS) throw new RemoteRunDenied('invalid_target')
+  if (!Array.isArray(value) || value.length > DESKTOP_ATTACHMENT_MAX_COUNT) throw new RemoteRunDenied('invalid_target')
   let total = 0
   return value.map((raw) => {
     if (!raw || typeof raw !== 'object') throw new RemoteRunDenied('invalid_target')
@@ -186,6 +202,13 @@ function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[] {
     }
     if (typeof item.mimeType !== 'string' || item.mimeType.length === 0 || item.mimeType.length > 100 || typeof item.dataBase64 !== 'string') {
       throw new RemoteRunDenied('invalid_target')
+    }
+    const reference = item.attachmentId !== undefined
+    if (reference) {
+      if (item.kind !== 'image' || !isSupportedImageMimeType(item.mimeType) || typeof item.attachmentId !== 'string' || !ATTACHMENT_ID.test(item.attachmentId) || item.dataBase64 !== '' || !SHA256.test(String(item.sha256)) || !Number.isSafeInteger(item.size) || Number(item.size) < 1 || Number(item.size) > DESKTOP_ATTACHMENT_MAX_BYTES || !Number.isSafeInteger(item.index) || Number(item.index) < 0 || !Number.isSafeInteger(item.totalCount) || Number(item.totalCount) < 1 || Number(item.totalCount) > DESKTOP_ATTACHMENT_MAX_COUNT || Number(item.index) >= Number(item.totalCount) || typeof item.intentId !== 'string' || !ATTACHMENT_ID.test(item.intentId)) throw new RemoteRunDenied('invalid_target')
+      total += item.size as number
+      if (total > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES) throw new RemoteRunDenied('invalid_target')
+      return { kind: 'image', name: item.name, mimeType: item.mimeType, dataBase64: '', size: item.size as number, attachmentId: item.attachmentId, sha256: item.sha256 as string, index: item.index as number, totalCount: item.totalCount as number, intentId: item.intentId }
     }
     const bytes = decodedBase64ByteLength(item.dataBase64)
     if (bytes == null || bytes > MAX_REMOTE_ATTACHMENT_BYTES || item.size !== bytes) throw new RemoteRunDenied('invalid_target')
@@ -201,6 +224,16 @@ function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[] {
     if (total > MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES) throw new RemoteRunDenied('invalid_target')
     return { kind: item.kind, name: item.name, mimeType: item.mimeType, dataBase64: item.dataBase64, size: bytes }
   })
+}
+
+function stampAttachmentPeer(peer: string, detail: string | undefined): { detail: string | undefined; referenced: boolean } {
+  if (typeof detail !== 'string') return { detail, referenced: false }
+  try {
+    const value = JSON.parse(detail) as Record<string, unknown>
+    const attachments = value && Array.isArray(value.attachments) ? value.attachments : []
+    if (!attachments.some((item) => item && typeof item === 'object' && 'attachmentId' in item)) return { detail, referenced: false }
+    return { detail: JSON.stringify({ ...value, attachmentPeer: peer }), referenced: true }
+  } catch { return { detail, referenced: false } }
 }
 
 function parseRouting(detail: string | undefined): RemoteIntentRouting {
@@ -225,7 +258,10 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
   if (routing.permissionMode !== undefined && !isAgentPermissionMode(routing.permissionMode)) {
     throw new RemoteRunDenied('invalid_target')
   }
+  if (routing.attachmentPeer !== undefined && (typeof routing.attachmentPeer !== 'string' || !SHA256.test(routing.attachmentPeer))) throw new RemoteRunDenied('invalid_target')
   const attachments = parseRemoteAttachments(routing.attachments)
+  if (routing.prompt !== undefined && typeof routing.prompt !== 'string') throw new RemoteRunDenied('invalid_target')
+  if (routing.prompt === '' && attachments.length === 0) throw new RemoteRunDenied('invalid_target')
   return {
     cwd: routing.cwd,
     providerId: routing.providerId,
@@ -236,7 +272,8 @@ function parseRouting(detail: string | undefined): RemoteIntentRouting {
     ...(typeof routing.effort === 'string' ? { effort: routing.effort } : {}),
     ...(isAgentPermissionMode(routing.permissionMode) ? { permissionMode: routing.permissionMode } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
-    ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {})
+    ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {}),
+    ...(typeof routing.attachmentPeer === 'string' ? { attachmentPeer: routing.attachmentPeer } : {})
   }
 }
 
@@ -256,11 +293,15 @@ export class HostController {
   // restart no executor exists, and the ledger already reports the run as ended.
   #live = new Map<string, { routing: RemoteIntentRouting; externalSessionId?: string }>()
   #workspace: WorkspaceAuthorizer
+  #fileDownloads: RemoteFileDownloads
   #macRuns?: MacRunSource
   #readDesktop?: HostControllerDependencies['readDesktop']
   #desktopWorkbench?: HostControllerDependencies['desktopWorkbench']
   #desktopDirectories?: HostControllerDependencies['desktopDirectories']
   #sessionAction?: HostControllerDependencies['sessionAction']
+  #sessionFork?: HostControllerDependencies['sessionFork']
+  #sessionDelete?: HostControllerDependencies['sessionDelete']
+  #attachmentStore?: DesktopAttachmentStore
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
   #changeSeq = 0
@@ -269,12 +310,18 @@ export class HostController {
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
     this.#workspace = deps.workspace
+    this.#fileDownloads = new RemoteFileDownloads(deps.workspace)
     this.#macRuns = deps.macRuns
     this.#readDesktop = deps.readDesktop
     this.#desktopWorkbench = deps.desktopWorkbench
     this.#desktopDirectories = deps.desktopDirectories
     this.#sessionAction = deps.sessionAction
+    this.#sessionFork = deps.sessionFork
+    this.#sessionDelete = deps.sessionDelete
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
+    this.#attachmentStore = deps.attachmentStore ?? (deps.attachmentDirectory
+      ? new DesktopAttachmentStore(deps.attachmentDirectory, (peer, id) => this.#ledger.intentRun(scopedIntentId(peer, id))?.lifecycle)
+      : undefined)
     this.#output = new RunOutputLog({ store: deps.outputStore })
     this.#interactions = new RemoteInteractionBroker((runId, detail) => {
       this.#ledger.markProgress(runId, detail)
@@ -288,6 +335,7 @@ export class HostController {
       ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
       ...(deps.listCommands ? { commands: { list: deps.listCommands } as RemoteCommandSource } : {}),
       workspace: { read: (query) => readRemoteWorkspace(deps.workspace, query, deps.readSessionStatus) },
+      fileDownloads: this.#fileDownloads,
       ...(deps.listSessions ? { sessions: { list: deps.listSessions, ...(deps.sessionCatalogRevision ? { revision: deps.sessionCatalogRevision } : {}) } } : {}),
       ...(deps.readHistory ? { history: { read: deps.readHistory } as RemoteHistorySource } : {}),
       ...(deps.readHistoryPreview ? { historyPreview: { read: deps.readHistoryPreview } as RemoteHistoryPreviewSource } : {}),
@@ -299,7 +347,8 @@ export class HostController {
     const base: RemoteExecutor = {
       execute: async (input: RemoteExecutorInput) => {
         const stop = new AbortController()
-        const routing = parseRouting(input.detail)
+        const parsed = parseRouting(input.detail)
+        const routing = await this.#resolveAttachments(parsed)
         const live: { routing: RemoteIntentRouting; externalSessionId?: string } = { routing }
         this.#stops.set(input.runId, stop)
         this.#live.set(input.runId, live)
@@ -328,7 +377,14 @@ export class HostController {
     const output = this.#output
     this.#dispatcher = new RemoteDispatcher({
       ledger: this.#ledger,
-      executor: gated,
+      executor: { execute: async (input) => {
+        const routing = parseRouting(input.detail)
+        try { await gated.execute(input) }
+        finally {
+          try { await this.#releaseAttachments(routing) }
+          catch (error) { console.warn('[scry] remote attachment cleanup failed:', error) }
+        }
+      } },
       outputSink: {
         append: (runId, chunk) => { output.append(runId, chunk); this.#notifyChange() },
         flush: (runId) => output.flush(runId)
@@ -348,10 +404,59 @@ export class HostController {
     this.#dispatcher.pump()
   }
 
+  async cleanupAttachments(): Promise<void> { await this.#attachmentStore?.cleanup() }
+
+  attachmentStart(peer: string, input: unknown): Promise<{ status: 'ready' }> {
+    this.authorizeDevice(peer)
+    if (!this.#attachmentStore || !input || typeof input !== 'object') throw new Error('desktop_remote_attachments_unsupported')
+    const value = input as Record<string, unknown>
+    return this.#attachmentStore.begin(peer, {
+      attachmentId: value.attachmentId as string, intentId: value.intentId as string, name: value.name as string,
+      mimeType: value.mimeType as never, size: value.size as number, sha256: value.sha256 as string,
+      index: value.index as number, totalCount: value.totalCount as number
+    }).then(() => { this.authorizeDevice(peer); return { status: 'ready' as const } })
+  }
+
+  attachmentChunk(peer: string, input: unknown): Promise<{ offset: number }> {
+    this.authorizeDevice(peer)
+    if (!this.#attachmentStore || !input || typeof input !== 'object') throw new Error('desktop_remote_attachments_unsupported')
+    const value = input as Record<string, unknown>
+    return this.#attachmentStore.chunk(peer, { attachmentId: value.attachmentId as string, offset: value.offset as number, dataBase64: value.dataBase64 as string }).then((result) => { this.authorizeDevice(peer); return result })
+  }
+
+  async attachmentCommit(peer: string, input: unknown): Promise<{ attachment: DesktopAttachmentReference }> {
+    this.authorizeDevice(peer)
+    if (!this.#attachmentStore || !input || typeof input !== 'object') throw new Error('desktop_remote_attachments_unsupported')
+    const value = input as Record<string, unknown>
+    const attachment = await this.#attachmentStore.commit(peer, value.attachmentId as string)
+    this.authorizeDevice(peer)
+    return { attachment }
+  }
+
   // Device-facing (inner-mTLS): submit a durable intent, then drive the
   // dispatcher so the gated executor picks it up exactly once.
   submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): { runId: string; status: 'recorded' | 'duplicate' } {
-    const result = this.#gateway.submitIntent(peerCertSHA256, input)
+    if (stampAttachmentPeer(peerCertSHA256, input.detail).referenced) throw new Error('attachment_requires_validated_submit')
+    return this.#recordIntent(peerCertSHA256, input)
+  }
+
+  async submitReceivedIntent(peer: string, input: { intentId: string; detail?: string }): Promise<{ runId: string; status: 'recorded' | 'duplicate' }> {
+    this.authorizeDevice(peer)
+    const { detail, referenced } = stampAttachmentPeer(peer, input.detail)
+    if (referenced && !this.#ledger.intentRun(scopedIntentId(peer, input.intentId))) {
+      const routing = parseRouting(detail)
+      if (!this.#attachmentStore) throw new Error('desktop_remote_attachments_unsupported')
+      const references = (routing.attachments ?? []).map((item) => ({ ...item, peer })) as DesktopAttachmentReference[]
+      await this.#attachmentStore.validateReferences(peer, input.intentId, references)
+    }
+    // Existing receipts are compared by the ledger, even after terminal cleanup
+    // removed their blobs. A lost acknowledgement must remain idempotent.
+    this.authorizeDevice(peer)
+    return this.#recordIntent(peer, { ...input, detail })
+  }
+
+  #recordIntent(peer: string, input: { intentId: string; detail?: string }): { runId: string; status: 'recorded' | 'duplicate' } {
+    const result = this.#gateway.submitIntent(peer, input)
     this.#dispatcher.pump()
     return result
   }
@@ -416,8 +521,8 @@ export class HostController {
     const result = await this.#readDesktop(parseDesktopHostRead(input))
     this.authorizeDevice(peerCertSHA256)
     if (result.kind !== 'info') return result
-    const { sessionActions: _reportedSessionActions, ...info } = result
-    return { ...info, ...(this.#desktopDirectories ? { directorySelection: true as const } : {}), ...(this.#desktopWorkbench ? { workbench: 1 as const } : {}), ...(this.#sessionAction ? { sessionActions: true as const } : {}) }
+    const { sessionActions: _reportedSessionActions, sessionFork: _reportedSessionFork, sessionDelete: _reportedSessionDelete, ...info } = result
+    return { ...info, ...(this.#desktopDirectories ? { directorySelection: true as const } : {}), ...(this.#desktopWorkbench ? { workbench: 1 as const } : {}), ...(this.#sessionAction ? { sessionActions: true as const } : {}), ...(this.#sessionFork ? { sessionFork: true as const } : {}), ...(this.#sessionDelete ? { sessionDelete: true as const } : {}), ...(this.#attachmentStore ? { attachments: attachmentCapability() } : {}) }
   }
 
   releaseDesktopPeer(peer: string): Promise<void> { return this.#desktopWorkbench?.release(peer) ?? Promise.resolve() }
@@ -449,6 +554,10 @@ export class HostController {
       throw new RemoteInteractionError('device_not_authorized')
     }
   }
+
+  // Narrow target routing needs the same verified-peer check as every existing
+  // mobile operation. It deliberately exposes no pairing or workspace state.
+  authorizeDevicePeer(peerCertSHA256: string): void { this.authorizeDevice(peerCertSHA256) }
 
   // Device-facing: the host-authorized project directories this device may
   // target, authorized by the same verified peer certificate as every method.
@@ -515,6 +624,63 @@ export class HostController {
     return result
   }
 
+  async sessionFork(peerCertSHA256: string, input: unknown): Promise<{ externalSessionId: string }> {
+    this.authorizeDevice(peerCertSHA256)
+    if (!this.#sessionFork) throw new Error('desktop_session_fork_unsupported')
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_session_fork')
+    const value = input as Record<string, unknown>
+    const text = (candidate: unknown, max = 256): candidate is string => typeof candidate === 'string' && candidate.length > 0 && candidate.length <= max && !candidate.includes('\0')
+    if (!text(value.providerId) || !text(value.cwd, 16_384) || !text(value.sourceSessionId) || !text(value.sourceRunId) ||
+        !text(value.sourceProviderTurnId) || !text(value.sourceForkTurnId) ||
+        (value.agentProfileId !== undefined && !text(value.agentProfileId)) ||
+        (value.model !== undefined && (!value.model || typeof value.model !== 'object' || Array.isArray(value.model)))) throw new Error('invalid_session_fork')
+    const canonicalCwd = this.#workspace.authorize(value.cwd)
+    const request = {
+      providerId: value.providerId,
+      cwd: canonicalCwd,
+      sourceSessionId: value.sourceSessionId,
+      sourceRunId: value.sourceRunId,
+      sourceProviderTurnId: value.sourceProviderTurnId,
+      sourceForkTurnId: value.sourceForkTurnId,
+      ...(typeof value.agentProfileId === 'string' ? { agentProfileId: value.agentProfileId } : {}),
+      ...(value.model !== undefined ? { model: value.model } : {})
+    } as DesktopRemoteForkSessionRequest
+    const authorize = (): void => {
+      this.authorizeDevice(peerCertSHA256)
+      if (this.#workspace.authorize(canonicalCwd) !== canonicalCwd) throw new Error('workspace_context_mismatch')
+    }
+    const result = await this.#sessionFork(request, authorize)
+    authorize()
+    if (!result || typeof result.externalSessionId !== 'string' || result.externalSessionId.length === 0) throw new Error('invalid_session_fork_response')
+    return result
+  }
+
+  async sessionDelete(peerCertSHA256: string, input: unknown): Promise<DeleteSessionResult> {
+    this.authorizeDevice(peerCertSHA256)
+    if (!this.#sessionDelete) throw new Error('desktop_session_delete_unsupported')
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_session_delete')
+    const value = input as Record<string, unknown>
+    if (value.confirmed !== true || typeof value.providerId !== 'string' || value.providerId.length === 0 || value.providerId.length > 256 ||
+        typeof value.cwd !== 'string' || value.cwd.length === 0 || value.cwd.length > 16_384 ||
+        typeof value.externalSessionId !== 'string' || value.externalSessionId.length === 0 || value.externalSessionId.length > 256 ||
+        (value.agentProfileId !== undefined && (typeof value.agentProfileId !== 'string' || value.agentProfileId.length === 0 || value.agentProfileId.length > 256))) throw new Error('invalid_session_delete')
+    const canonicalCwd = this.#workspace.authorize(value.cwd)
+    const request = {
+      providerId: value.providerId,
+      cwd: canonicalCwd,
+      externalSessionId: value.externalSessionId,
+      confirmed: true as const,
+      ...(typeof value.agentProfileId === 'string' ? { agentProfileId: value.agentProfileId } : {})
+    } satisfies DesktopRemoteDeleteSessionRequest
+    const authorize = (): void => {
+      this.authorizeDevice(peerCertSHA256)
+      if (this.#workspace.authorize(canonicalCwd) !== canonicalCwd) throw new Error('workspace_context_mismatch')
+    }
+    const result = await this.#sessionDelete(request, authorize)
+    authorize()
+    return result
+  }
+
   // Device-facing: the host session catalog this device may browse, authorized
   // by the same verified peer certificate as every method.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
@@ -529,6 +695,14 @@ export class HostController {
   // same verified peer certificate. Async (reads the trace archive/transcript).
   readWorkspace(peerCertSHA256: string, query: unknown) {
     return this.#gateway.readWorkspace(peerCertSHA256, query)
+  }
+
+  readFileDownload(peerCertSHA256: string, query: unknown) {
+    return this.#gateway.readFileDownload(peerCertSHA256, query)
+  }
+
+  closeReadResources(): void {
+    this.#fileDownloads.dispose()
   }
 
   readHistoryPreview(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryPreview> {
@@ -659,6 +833,23 @@ export class HostController {
       })
     }
     return runs.sort((a, b) => a.runId.localeCompare(b.runId))
+  }
+
+  async #resolveAttachments(routing: RemoteIntentRouting): Promise<RemoteIntentRouting> {
+    const references = (routing.attachments ?? []).filter((item): item is RemoteIntentAttachment & { attachmentId: string; sha256: string } => typeof item.attachmentId === 'string' && typeof item.sha256 === 'string')
+    if (references.length === 0) return routing
+    if (!this.#attachmentStore || typeof routing.attachmentPeer !== 'string') throw new RemoteRunDenied('invalid_target')
+    const hydrated = await Promise.all((routing.attachments ?? []).map(async (item) => {
+      if (!item.attachmentId || !item.sha256) return item
+      const loaded = await this.#attachmentStore!.read({ ...item, peer: routing.attachmentPeer! } as unknown as DesktopAttachmentReference)
+      return { ...item, ...loaded } as unknown as RemoteIntentAttachment
+    }))
+    return { ...routing, attachments: hydrated as RemoteIntentAttachment[] }
+  }
+
+  async #releaseAttachments(routing: RemoteIntentRouting): Promise<void> {
+    if (!this.#attachmentStore || typeof routing.attachmentPeer !== 'string') return
+    await Promise.all((routing.attachments ?? []).filter((item): item is RemoteIntentAttachment & { attachmentId: string } => typeof item.attachmentId === 'string').map((item) => this.#attachmentStore!.remove(routing.attachmentPeer!, item.attachmentId)))
   }
 
   #authorizedCwd(cwd: string): string | undefined {

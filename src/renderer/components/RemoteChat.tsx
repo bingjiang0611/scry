@@ -3,8 +3,8 @@
 // install, credentials, files and archive, so this view never falls back to local
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
-import { runtimeProviderForAgentId } from '@shared/runtime'
-import type { AgentModelRef, AgentPermissionMode, AgentQuestionResponse, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
+import { providerIdForAgentId, runtimeProviderForAgentId } from '@shared/runtime'
+import type { AgentInputAttachment, AgentModelRef, AgentPermissionMode, AgentQuestionResponse, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import { createPortal } from 'react-dom'
 import { RightSurfacePanel } from './RightSurfacePanel'
@@ -27,7 +27,16 @@ import type {
 } from '@shared/desktop-remote'
 import type { DetectedAgent } from '../env'
 import type { Turn } from '../format'
-import type { ComposerDraftStore } from '../composer-drafts'
+import {
+  attachmentsAfterSuccessfulSubmit,
+  clipboardAttachmentToDraft,
+  fileToDraftAttachment,
+  inputAttachments,
+  updateComposerDraft,
+  type ComposerDraftAttachment,
+  type ComposerDraftStore
+} from '../composer-drafts'
+import { REMOTE_ATTACHMENTS_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
 import { RemotePromptQueueStore, remoteQueueKey } from '../remote-prompt-queue'
 import type { SlashCmd } from '@shared/trace'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
@@ -38,8 +47,7 @@ import './desktop-remote.css'
 import './remote-location.css'
 
 const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
-
-const NO_ATTACHMENTS: never[] = []
+const EMPTY_DRAFT_ATTACHMENTS: ComposerDraftAttachment[] = []
 
 export function remoteDraftKey(connectionId: string, cwd: string, externalSessionId?: string): string {
   return JSON.stringify(['remote', connectionId, cwd, externalSessionId ?? 'new'])
@@ -88,7 +96,8 @@ function initialControls(provider: RemoteProviderRef | undefined): AgentRunContr
 }
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('desktop_session_operation_unknown') ? REMOTE_SESSION_COPY.operationUnknown : message
 }
 
 export interface RemoteChatProps {
@@ -149,6 +158,8 @@ export function RemoteChat({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
+  const activeRunRef = useRef(activeRun)
+  activeRunRef.current = activeRun
   const [runStatus, setRunStatus] = useState<(DesktopRemoteRunStatus & { runId: string }) | null>(null)
   const [intents, setIntents] = useState<DesktopRemoteIntent[]>([])
   const [status, setStatus] = useState<string | null>(null)
@@ -173,6 +184,20 @@ export function RemoteChat({
   const draftKey = remoteDraftKey(connectionId, cwd, sessionId)
   const readInput = () => draftStore.getSnapshot().get(draftKey)?.input ?? ''
   const input = useSyncExternalStore(draftStore.subscribe, readInput, readInput)
+  const readDraftAttachments = () => draftStore.getSnapshot().get(draftKey)?.attachments ?? EMPTY_DRAFT_ATTACHMENTS
+  const draftAttachments = useSyncExternalStore(draftStore.subscribe, readDraftAttachments, readDraftAttachments)
+  const releaseAttachments = useCallback((attachments: readonly ComposerDraftAttachment[]): void => {
+    for (const attachment of attachments) {
+      if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+    }
+  }, [])
+  const updateDraft = useCallback((key: string, update: (current: { input: string; attachments: ComposerDraftAttachment[] }) => { input: string; attachments: ComposerDraftAttachment[] }): void => {
+    draftStore.update((drafts) => {
+      const result = updateComposerDraft(drafts, key, update)
+      for (const evicted of result.evicted) releaseAttachments(evicted.attachments)
+      return result.drafts
+    })
+  }, [draftStore, releaseAttachments])
   const queueKey = remoteQueueKey(draftKey, providerSelection)
   const readQueue = () => queueStore.get(queueKey)
   const queue = useSyncExternalStore(queueStore.subscribe, readQueue, readQueue)
@@ -282,11 +307,22 @@ export function RemoteChat({
           adoptingSession.current = true
           // Text typed while the first run was starting belongs to the adopted session.
           const pendingKey = remoteDraftKey(connectionId, cwd)
-          const pendingDraft = draftStore.getSnapshot().get(pendingKey)?.input
-          if (pendingDraft) {
-            onDraftInput(remoteDraftKey(connectionId, cwd, nextStatus.externalSessionId), pendingDraft)
-            onDraftInput(pendingKey, '')
-          }
+          const adoptedKey = remoteDraftKey(connectionId, cwd, nextStatus.externalSessionId)
+          draftStore.update((drafts) => {
+            const pendingDraft = drafts.get(pendingKey)
+            if (!pendingDraft || pendingKey === adoptedKey) return drafts
+            const targetDraft = drafts.get(adoptedKey)
+            const merged = targetDraft
+              ? {
+                  input: pendingDraft.input || targetDraft.input,
+                  attachments: [...pendingDraft.attachments, ...targetDraft.attachments.filter((candidate) => !pendingDraft.attachments.some((item) => item.id === candidate.id))]
+                }
+              : pendingDraft
+            const next = new Map(drafts)
+            next.delete(pendingKey)
+            next.set(adoptedKey, merged)
+            return next
+          })
           setSessionId(nextStatus.externalSessionId)
           if (provider) onSessionAdopted(nextStatus.externalSessionId, provider)
         }
@@ -297,9 +333,12 @@ export function RemoteChat({
           void refreshRemoteCatalog(connectionId)
         }
         if (nextStatus.scryRunId) {
-          const run = await api.trace(connectionId, context, nextStatus.scryRunId)
+          const previous = activeRunRef.current
+          const knownCount = previous?.runId === nextStatus.scryRunId ? previous.attachments?.length : undefined
+          const run = await api.trace(connectionId, context, nextStatus.scryRunId, knownCount)
           if (cancelled || sequence !== pollSequence.current) return
-          setActiveRun(run)
+          setActiveRun(run && previous?.runId === run.runId && run.attachments === undefined
+            ? { ...run, attachments: previous.attachments } : run)
         } else setActiveRun(null)
         setPollError(null)
       } catch (reason) { if (!cancelled && sequence === pollSequence.current) setPollError(errorText(reason)) }
@@ -394,13 +433,14 @@ export function RemoteChat({
               ? `${provider.label} 在 ${host} 上不可用`
               : null
 
-  const submission = (text: string) => ({
+  const submission = (text: string, attachments: AgentInputAttachment[] = []) => ({
     context, prompt: text,
+    ...(attachments.length ? { attachments } : {}),
     ...(chosenModel ? { modelId: chosenModel.id, modelProviderId: chosenModel.providerId } : {}),
     ...(validEffort ? { effort: validEffort } : {}),
     ...(validPermissionMode ? { permissionMode: validPermissionMode } : {})
   })
-  const execute = async (request: ReturnType<typeof submission>, queued: boolean): Promise<void> => {
+  const execute = async (request: ReturnType<typeof submission>, queued: boolean, submittedAttachments: ComposerDraftAttachment[] = []): Promise<void> => {
     if (submissionInFlight.current) return
     submissionInFlight.current = true
     const submittedGeneration = contextGeneration.current
@@ -412,7 +452,17 @@ export function RemoteChat({
       acknowledged = true
       if (queued) queueStore.submitted(queueKey, intent)
       // Preserve edits made while the network write was pending.
-      else if (draftStore.getSnapshot().get(submittedKey)?.input.trim() === request.prompt) onDraftInput(submittedKey, '')
+      else {
+        const current = draftStore.getSnapshot().get(submittedKey)
+        if (current) {
+          const unchangedText = current.input.trim() === request.prompt
+          const remaining = attachmentsAfterSuccessfulSubmit(current.attachments, new Set(submittedAttachments.map(attachment => attachment.id)))
+          if (unchangedText || remaining.length !== current.attachments.length) {
+            updateDraft(submittedKey, (draft) => ({ input: unchangedText ? '' : draft.input, attachments: remaining }))
+          }
+        }
+        releaseAttachments(submittedAttachments.filter(attachment => !draftStore.getSnapshot().get(submittedKey)?.attachments.some(current => current.id === attachment.id)))
+      }
       if (submittedGeneration !== contextGeneration.current) return
       setIntents((current) => [...current.filter((item) => item.intentId !== intent.intentId), intent])
       if (shouldQueryUnknownIntent(intent)) {
@@ -422,20 +472,40 @@ export function RemoteChat({
       }
     } catch (reason) {
       if (queued && !acknowledged) queueStore.fail(queueKey)
-      if (submittedGeneration === contextGeneration.current) { setError(errorText(reason)); setStatus(null) }
+      if (submittedGeneration === contextGeneration.current) {
+        const detail = errorText(reason)
+        setError(detail.includes('desktop_remote_attachments_unsupported') ? REMOTE_ATTACHMENTS_COPY.unsupported : detail)
+        setStatus(null)
+      }
     } finally { submissionInFlight.current = false; setSubmitting(false) }
   }
+  const attachmentBytes = (attachment: AgentInputAttachment): number => attachment.size ?? Math.floor(attachment.dataBase64.length * 3 / 4)
+  const attachmentError = (attachments: readonly AgentInputAttachment[]): string | null => {
+    const capability = catalog?.attachments
+    const maxBytes = capability?.maxBytes ?? 512 * 1024
+    const maxTotalBytes = capability?.maxTotalBytes ?? 700 * 1024
+    if (attachments.length > (capability?.maxCount ?? 16)) return REMOTE_ATTACHMENTS_COPY.tooMany
+    if (attachments.some(attachment => attachmentBytes(attachment) > maxBytes) || attachments.reduce((total, attachment) => total + attachmentBytes(attachment), 0) > maxTotalBytes) return REMOTE_ATTACHMENTS_COPY.tooLarge
+    return null
+  }
   const submit = async (): Promise<void> => {
-    const text = input.trim()
-    if (!contextAvailable || !text || submitting) return
+    const draft = draftStore.getSnapshot().get(draftKey)
+    const text = (draft?.input ?? '').trim()
+    const submittedAttachments = draft?.attachments ?? []
+    const attachments = inputAttachments(submittedAttachments)
+    if (!contextAvailable || (!text && attachments.length === 0) || submitting) return
+    const limitError = attachmentError(attachments)
+    if (limitError) { setError(limitError); return }
+    const request = submission(text, attachments)
     if (runActive || queue.prompts.length > 0) {
       try {
-        queueStore.enqueue(queueKey, connectionId, submission(text), currentIntent?.intentId)
-        onDraftInput(draftKey, '')
+        queueStore.enqueue(queueKey, connectionId, request, currentIntent?.intentId)
+        updateDraft(draftKey, () => ({ input: '', attachments: [] }))
+        releaseAttachments(submittedAttachments)
       } catch (reason) { setError(errorText(reason)) }
       return
     }
-    await execute(submission(text), false)
+    await execute(request, false, submittedAttachments)
   }
   useEffect(() => {
     if (!contextAvailable || runActive || submitting || pollError || submissionInFlight.current) return
@@ -565,7 +635,7 @@ export function RemoteChat({
           ? { status: 'unavailable', detail: historyEvidence.reason ?? `${host} 未提供这条会话的归档` }
           : null}
         busy={runActive && Boolean(currentIntent?.runId)}
-        draftAttachments={NO_ATTACHMENTS}
+        draftAttachments={draftAttachments}
         queuedPrompts={queue.prompts}
         queueWhileBusy
         slashOpen={slashOpen}
@@ -579,6 +649,22 @@ export function RemoteChat({
           : null}
         onLoadOlderTurns={connected ? () => { void loadOlderHistory() } : undefined}
         onSelect={setSelected}
+        onForkTurn={catalog?.sessionFork && provider?.forkSession && connected && !sessionArchived ? async (turn) => {
+          const id = providerIdForAgentId(provider.id)
+          const boundary = turn.forkTurnId ?? turn.providerTurnId
+          if (!sessionId || !turn.providerTurnId || !boundary) throw new Error(REMOTE_SESSION_COPY.forkBoundaryMissing)
+          if (!id) throw new Error(REMOTE_SESSION_COPY.forkUnsupported)
+          const sourceGeneration = generation.current
+          const forked = await api.forkSession(connectionId, {
+            providerId: id, agentProfileId: provider.agentProfileId, cwd, sourceSessionId: sessionId,
+            sourceRunId: turn.runId, sourceProviderTurnId: turn.providerTurnId, sourceForkTurnId: boundary,
+            model: controls.model, permissionMode: validPermissionMode as AgentPermissionMode | undefined
+          }).catch(reason => { throw new Error(errorText(reason)) })
+          await refreshRemoteCatalog(connectionId)
+          if (generation.current !== sourceGeneration) return
+          setSessionId(forked.externalSessionId)
+          onSessionAdopted(forked.externalSessionId, provider)
+        } : undefined}
         onOpenDiff={() => dispatchSurface({ type: 'open', kind: 'diff' })}
         onOpenFile={(target) => {
           setFileRequest({ ...target, id: Date.now() })
@@ -599,9 +685,22 @@ export function RemoteChat({
         onHideSlash={() => setSlashHidden(true)}
         onSend={() => { void submit() }}
         onStop={() => { void stop() }}
-        onPasteImages={() => setError('远程会话暂不支持图片附件；请改为发送文本。')}
-        onPasteClipboardImage={() => setError('远程会话暂不支持图片附件；请改为发送文本。')}
-        onRemoveDraftAttachment={() => {}}
+        onPasteImages={(files) => {
+          void Promise.all(files.map((file, index) => fileToDraftAttachment(file, index))).then((next) => {
+            const attachments = next.filter((attachment): attachment is ComposerDraftAttachment => attachment != null)
+            if (attachments.length) updateDraft(draftKey, (draft) => ({ ...draft, attachments: [...draft.attachments, ...attachments] }))
+          }).catch((reason) => setError(errorText(reason)))
+        }}
+        onPasteClipboardImage={() => {
+          void window.scry.clipboardImage().then((attachment) => {
+            if (attachment) updateDraft(draftKey, (draft) => ({ ...draft, attachments: [...draft.attachments, clipboardAttachmentToDraft(attachment)] }))
+          }).catch((reason) => setError(errorText(reason)))
+        }}
+        onRemoveDraftAttachment={(id) => {
+          const removed = draftAttachments.filter(attachment => attachment.id === id)
+          updateDraft(draftKey, (draft) => ({ ...draft, attachments: draft.attachments.filter(attachment => attachment.id !== id) }))
+          releaseAttachments(removed)
+        }}
         onRemoveQueuedPrompt={(messageId) => {
           if (queue.writeUnknown && queue.prompts[0]?.messageId === messageId) setError(null)
           queueStore.remove(queueKey, messageId)
