@@ -207,7 +207,8 @@ final class RemoteRunStore: ObservableObject {
     if providerControlsLoading { return ConnectionCopy.providerControlsLoading }
     if let providerControlsError { return providerControlsError }
     if let restoredControlsError { return restoredControlsError }
-    return providerDiscoverySupported == false ? ConnectionCopy.legacyProviderControls : nil
+    if providerDiscoverySupported == false { return ConnectionCopy.legacyProviderControls }
+    return controlsReady ? ConnectionCopy.providerControlsObserved(chosenProvider?.observedAt) : nil
   }
   var effortOptions: [G0Transport.RunControlOption] {
     if let chosenModelId, let model = modelOptions.first(where: { $0.selectionId == chosenModelId }) {
@@ -841,13 +842,13 @@ final class RemoteRunStore: ObservableObject {
     }
   }
 
-  func loadSessionProviderControls(providerId: String, agentProfileId: String?, cwd: String) {
+  func loadSessionProviderControls(providerId: String, agentProfileId: String?, cwd: String, force: Bool = false) {
     // Session identity is presentation context, never a workspace grant. The
     // selected lookup and subsequent submit both revalidate it on the host.
     chosen = .init(path: cwd, label: URL(fileURLWithPath: cwd).lastPathComponent)
-    loadProviders(preferredId: providerId, preferredAgentProfileId: agentProfileId)
+    loadProviders(preferredId: providerId, preferredAgentProfileId: agentProfileId, force: force)
     if let provider = chosenProvider, provider.id == providerId, provider.agentProfileId == agentProfileId,
-       !providerControlsLoading, !controlsMatch(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd) {
+       !force, !providerControlsLoading, !controlsMatch(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd) {
       loadProviderControls(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
     }
   }

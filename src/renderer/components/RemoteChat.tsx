@@ -153,13 +153,33 @@ export function RemoteChat({
   const host = connection?.label ?? '远程主机'
   const catalog = useRemoteCatalogs().get(connectionId)?.catalog
   const catalogReady = catalog !== undefined
-  const [providerSelection, setProviderSelection] = useState(session ? desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId }) : '')
+  const [providerSelection, setProviderSelection] = useState(() => {
+    if (session) return desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId })
+    const first = catalog?.providers.find((item) => item.available) ?? catalog?.providers[0]
+    return first ? desktopProviderKey(first) : ''
+  })
   const [sessionId, setSessionId] = useState<string | undefined>(session?.externalSessionId)
   const [controls, setControls] = useState<AgentRunControls>({ permissionMode: 'default' })
   const [selectedProvider, setSelectedProvider] = useState<RemoteProviderRef | undefined>()
   const [selectedProviderContextKey, setSelectedProviderContextKey] = useState<string | undefined>()
   const [providerControlsError, setProviderControlsError] = useState<string | null>(null)
+  const [providerControlsLoading, setProviderControlsLoading] = useState(false)
   const [providerControlsRevision, setProviderControlsRevision] = useState(0)
+  const [controlsVisible, setControlsVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible')
+  useEffect(() => {
+    const changed = (): void => setControlsVisible(document.visibilityState === 'visible')
+    const focused = (): void => {
+      if (document.visibilityState !== 'visible') return
+      setControlsVisible(true)
+      if (!providerControlsLoading) setProviderControlsRevision(value => value + 1)
+    }
+    document.addEventListener('visibilitychange', changed)
+    window.addEventListener('focus', focused)
+    return () => {
+      document.removeEventListener('visibilitychange', changed)
+      window.removeEventListener('focus', focused)
+    }
+  }, [providerControlsLoading])
   const initializedControlsContext = useRef<string | undefined>(undefined)
   const [turns, setTurns] = useState<Turn[]>([])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
@@ -253,32 +273,47 @@ export function RemoteChat({
       setSelectedProvider(undefined)
       setSelectedProviderContextKey(undefined)
       setProviderControlsError(null)
+      setProviderControlsLoading(false)
       return
     }
+    if (!controlsVisible) return
     if (catalog?.providerDiscovery !== 2) {
       setSelectedProvider(undefined)
       setSelectedProviderContextKey(undefined)
       setProviderControlsError(null)
+      setProviderControlsLoading(false)
       return
     }
     let cancelled = false
-    setSelectedProvider(undefined)
-    setSelectedProviderContextKey(undefined)
+    // A same-context observation can refresh without removing known choices.
+    // Its timestamp stays visible; failure must discard it, never reuse it as current.
+    if (selectedProviderContextKey !== controlContextKey) {
+      setSelectedProvider(undefined)
+      setSelectedProviderContextKey(undefined)
+    }
     setProviderControlsError(null)
+    setProviderControlsLoading(true)
     const selectedContext: DesktopRemoteContext = { cwd, providerId, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) }
     void api.providerControls(connectionId, selectedContext).then((next) => {
       if (!cancelled) {
         setSelectedProvider(next)
         setSelectedProviderContextKey(controlContextKey)
+        setProviderControlsLoading(false)
       }
     }).catch((reason) => {
-      if (!cancelled) setProviderControlsError(errorText(reason))
+      if (!cancelled) {
+        setSelectedProvider(undefined)
+        setSelectedProviderContextKey(undefined)
+        setProviderControlsError(errorText(reason))
+        setProviderControlsLoading(false)
+      }
     })
     return () => { cancelled = true }
-  }, [api, catalogReady, catalog?.providerDiscovery, connected, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, providerId, providerControlsRevision])
+  }, [api, catalogReady, catalog?.providerDiscovery, connected, controlsVisible, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, provider?.observedAt, provider?.metadataRevision, providerId, providerControlsRevision])
 
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
+  const controlsObserved = useMemo(() => copy.providerControlsObserved(controlProvider?.observedAt, providerControlsLoading), [controlProvider?.observedAt, providerControlsLoading])
   // Initialize once per execution context. Refresh validates rather than silently
   // replacing a user's selected model, effort, or permission with new defaults.
   useEffect(() => {
@@ -687,7 +722,9 @@ export function RemoteChat({
               ? { tone: 'blocked', text: copy.providerControlsChanged }
               : catalog?.providerDiscovery !== 2 && controlProvider
                 ? { tone: 'blocked', text: copy.legacyProviderControls }
-                : null)}
+                : controlProvider && !runActive
+                  ? { tone: 'info', text: controlsObserved, action: { label: copy.refreshProviderControls, disabled: providerControlsLoading, onClick: () => setProviderControlsRevision(value => value + 1) } }
+                  : null)}
       />
       {surface.target && createPortal(
         <RightSurfacePanel

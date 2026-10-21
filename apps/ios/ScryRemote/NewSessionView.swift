@@ -5,6 +5,8 @@ import RemoteTransport
 // Provider are full-width controls backed only by host-authorized data. The +
 // control stages real, bounded image/text attachments for the encrypted request.
 struct NewSessionView: View {
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var controlsVisible = false
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @EnvironmentObject var targets: ExecutionTargetCoordinator
@@ -56,8 +58,8 @@ struct NewSessionView: View {
       if run.chosenProvider != nil, let notice = run.providerControlsNotice {
         HStack {
           Text(notice).font(.system(size: 13)).foregroundStyle(Palette.muted)
-          if !run.providerControlsLoading, !run.controlsReady {
-            Button(ConnectionCopy.retry) { run.retryProviderControls() }
+          if !run.providerControlsLoading {
+            Button(run.controlsReady ? ConnectionCopy.refreshProviderControls : ConnectionCopy.retry) { run.retryProviderControls() }
           }
         }
         .padding(.horizontal, 20).frame(maxWidth: .infinity, alignment: .leading)
@@ -95,6 +97,11 @@ struct NewSessionView: View {
     .background(Palette.surface)
     // A discovered target can become ready without changing its identity.
     .task(id: paired ? targets.newTaskScope.id : nil) { if paired { run.loadProjects(); run.loadProviders() } }
+    .onAppear { controlsVisible = true }
+    .onDisappear { controlsVisible = false }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active, controlsVisible, paired, !run.isBusy, !run.providerControlsLoading { run.retryProviderControls() }
+    }
     .sheet(isPresented: $showProjects) { projectPicker }
     .sheet(isPresented: $showProviders) { providerPicker }
     .sheet(isPresented: $showTargets) { targetPicker }

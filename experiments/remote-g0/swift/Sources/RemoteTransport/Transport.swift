@@ -416,11 +416,13 @@ public enum G0Transport {
     public let id: String; public let label: String; public let available: Bool; public let agentProfileId: String?
     public let modelId: String?; public let models: [RunModelOption]?
     public let efforts: [RunControlOption]?; public let permissions: [RunControlOption]?
+    public let observedAt: Double?
     public init(id: String, label: String, available: Bool, agentProfileId: String? = nil, modelId: String? = nil,
                 models: [RunModelOption]? = nil, efforts: [RunControlOption]? = nil,
-                permissions: [RunControlOption]? = nil) {
+                permissions: [RunControlOption]? = nil, observedAt: Double? = nil) {
       self.id = id; self.label = label; self.available = available; self.agentProfileId = agentProfileId
       self.modelId = modelId; self.models = models; self.efforts = efforts; self.permissions = permissions
+      self.observedAt = observedAt
     }
   }
   public struct RunCommandRef: Sendable, Equatable, Codable, Identifiable {
@@ -836,6 +838,10 @@ public enum G0Transport {
   static func decodeProviderDiscovery(_ bytes: Data, detail: String?, expectedTarget: ExecutionTargetBinding? = nil) throws -> RunProviderDiscovery {
     let response = try decodeRun(bytes, expectedTarget: expectedTarget)
     guard let providers = response.providers, detail == nil || response.providerDiscovery == 2 else { throw ProbeError.unexpectedReply }
+    guard providers.allSatisfy({ provider in
+      guard let time = provider.observedAt else { return true }
+      return time.isFinite && time >= 0 && time <= 8_640_000_000_000_000 && time.rounded() == time
+    }) else { throw ProbeError.unexpectedReply }
     return RunProviderDiscovery(providers: providers, capability: response.providerDiscovery)
   }
 
