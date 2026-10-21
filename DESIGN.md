@@ -189,6 +189,31 @@ iOS 使用 Circle、Capsule 与 continuous RoundedRectangle。Notice 为 12pt �
 
 **原生组件：** 复用 CircleButton、PlainIcon、Notice、EmptyState、StatusDot 和 RemoteHeader。连接点的 green 仅对应 connected；pairing 为 amber；offline／notPaired 为 faint。标签、空状态和错误说明保留具体语义，不能只靠颜色传达。
 
+### 可复用实现（2026-10-21 提取）
+
+本轮不新增颜色、尺寸或圆角 token；继续使用现有 CSS 与 `Palette`。提取只集中同用途的重复结构，不重设计外观。
+
+| 实现 | 已迁移范围 | 使用合同 |
+| --- | --- | --- |
+| `src/renderer/components/primitives/ModalCloseButton.tsx` | 9 个文件中的 14 处弹窗关闭按钮 | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。默认使用现有 X 图标；两处字符外观通过 children 保留。继续使用 `.modal-x`，不承担弹窗焦点陷阱或确认关闭逻辑。 |
+| `apps/ios/ScryRemote/Components.swift` 的 `MoreMenu` | `HomeView`、`ChatView`、`SessionTranscriptView` | 原生 `Menu`、17pt medium 省略号、44 × 44pt 区域；默认名称来自 `ConnectionCopy.more`。历史页通过 `moreWithStatus` 保留当前历史状态；菜单操作与可用条件仍由页面提供。 |
+
+桌面示例：
+
+```tsx
+<ModalCloseButton ref={closeRef} aria-label={MODAL_COPY.closeMcp} onClick={onClose} />
+```
+
+iOS 示例：
+
+```swift
+MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
+  Button(ConnectionCopy.settings) { model.route = .settings }
+}
+```
+
+验证：桌面静态渲染对照保留原 DOM，隔离 Electron 以原生坐标和键盘验证关闭、禁用、ref、非提交行为，并查看深浅主题。iPhone 13 已安装本轮真机构建，核对主页与历史页菜单的展开、44pt 区域、状态文案和进入设置；没有发送或停止 Agent。`ChatView` 的真机入口需要手机发起的任务，本轮未发起该任务，因此该调用方只有编译验证。以上不替代安装后完整桌面 App 的重启验收。
+
 ## Do's and Don'ts
 
 ### Do

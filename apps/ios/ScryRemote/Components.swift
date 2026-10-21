@@ -57,6 +57,21 @@ struct CircleButton: View {
   }
 }
 
+/// Header overflow actions keep their native menu behavior and 44pt label area.
+struct MoreMenu<Content: View>: View {
+  var label = ConnectionCopy.more
+  @ViewBuilder var content: () -> Content
+
+  var body: some View {
+    Menu(content: content) {
+      Image(systemName: Symbol.more)
+        .font(.system(size: 17, weight: .medium))
+        .frame(width: 44, height: 44)
+    }
+    .accessibilityLabel(label)
+  }
+}
+
 struct PlainIcon: View {
   let symbol: String
   let label: String

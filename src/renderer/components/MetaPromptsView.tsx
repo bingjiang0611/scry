@@ -8,6 +8,8 @@ import {
 } from '../meta-prompts'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { MODAL_COPY } from '../constants/copy'
 import './meta-prompts.css'
 
 type LibraryState = { status: 'ready'; prompts: MetaPrompt[] } | { status: 'error'; error: string }
@@ -137,7 +139,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
       {notice && !editor && !deleting && <p className={`mp-notice${notice.error ? ' error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
       {editor && <PromptEditor prompt={editor.prompt} error={notice?.error ? notice.text : null} onSave={save} onClose={() => { setEditor(null); setNotice(null) }} />}
       {deleting && <ModalFrame labelledBy={deleteTitleId} className="mp-delete-modal" onClose={() => { setDeleting(null); setNotice(null) }}>
-        <div className="modal-head"><b id={deleteTitleId}>删除这条提示词？</b><button type="button" className="modal-x" aria-label="取消删除" onClick={() => setDeleting(null)}><Icon name="x" /></button></div>
+        <div className="modal-head"><b id={deleteTitleId}>删除这条提示词？</b><ModalCloseButton aria-label={MODAL_COPY.cancelDelete} onClick={() => setDeleting(null)} /></div>
         <div className="mp-delete-content"><p>「{deleting.title}」将从本机提示词库移除，无法撤销。</p>{notice?.error && <p className="mp-form-error" role="alert">{notice.text}</p>}</div>
         <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => setDeleting(null)}>取消</button><button type="button" className="mp-button mp-danger" onClick={remove}>删除</button></footer>
       </ModalFrame>}
@@ -165,7 +167,7 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={inputRef} className="mp-editor-modal" onClose={close}>
       <form onSubmit={submit}>
-        <div className="modal-head"><b id={titleId}>{prompt ? '编辑提示词' : '新建提示词'}</b><button type="button" className="modal-x" aria-label="关闭提示词编辑器" onClick={close}><Icon name="x" /></button></div>
+        <div className="modal-head"><b id={titleId}>{prompt ? '编辑提示词' : '新建提示词'}</b><ModalCloseButton aria-label={MODAL_COPY.closePromptEditor} onClick={close} /></div>
         <div className="mp-editor-fields">
           <label>标题<input ref={inputRef} required maxLength={META_PROMPT_TITLE_LIMIT} value={title} placeholder="例如：先写方案，再开始实现" onChange={event => setTitle(event.target.value)} /></label>
           <label>提示词正文<textarea required value={body} placeholder="写下你希望重复使用的指令…" onChange={event => setBody(event.target.value)} /></label>

@@ -49,7 +49,7 @@ struct HomeView: View {
           } else {
             PlainIcon(symbol: "arrow.clockwise", label: ConnectionCopy.refresh) { manualRefresh() }
           }
-          Menu {
+          MoreMenu {
             Button { targets.selectFilter(.all) } label: {
               Label(ConnectionCopy.allHosts, systemImage: targets.homeFilter == .all ? Symbol.check : Symbol.laptop)
             }
@@ -61,9 +61,7 @@ struct HomeView: View {
             Divider()
             Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
             Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
-          } label: {
-            Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
-          }.accessibilityLabel(ConnectionCopy.more)
+          }
         }
       }
       if let failure { refreshFailure(failure) }

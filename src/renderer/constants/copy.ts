@@ -1,3 +1,16 @@
+export const MODAL_COPY = {
+  close: '关闭',
+  closeRename: '关闭重命名',
+  closeRemoteDirectory: '关闭远程目录选择',
+  closeSettings: '关闭设置',
+  closeSkills: '关闭 Skills',
+  closeMcp: '关闭 MCP',
+  closeCapabilities: '关闭能力面板',
+  cancelDelete: '取消删除',
+  closePromptEditor: '关闭提示词编辑器',
+  closeLlmPerformance: '关闭 LLM 性能'
+} as const
+
 export const BACKGROUND_WORK_COPY = {
   regionLabel: '后台任务',
   provider: { pi: 'Pi', qoder: 'Qoder' },
