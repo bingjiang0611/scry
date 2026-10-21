@@ -509,9 +509,7 @@ async function writeTargetedSnapshotTree(options: {
   await rm(targetIndex, { force: true })
   await rm(`${targetIndex}.lock`, { force: true })
   await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', baseTree]), { cwd, env, deadline })
-  if (pathspec.length > 0) {
-    await gitCommand(snapshotGitArgs(filterOverrides, ['add', '-A', '--', ...pathspec]), { cwd, env, deadline })
-  }
+  await gitCommand(snapshotGitArgs(filterOverrides, ['add', '-A', '--', ...pathspec]), { cwd, env, deadline })
   return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
 }
 
@@ -639,15 +637,23 @@ async function computeGitTurnDiff(
       if (!fallbackReason) {
         const targetedStarted = Date.now()
         try {
-          afterTree = await writeTargetedSnapshotTree({
-            cwd: capture.repoRoot,
-            baseTree: capture.beforeTree,
-            pathspec: targetPathspec,
-            env,
-            deadline: preFallbackDeadline,
-            filterOverrides,
-            targetIndex: afterIndex
-          })
+          if (targetPathspec.length === 0) {
+            // Successful discovery already reset/refreshed this index against beforeTree.
+            // With no candidates, rebuilding that same tree cannot add evidence. Retain
+            // the discovery index so a paired session still gets an owned after-view.
+            afterTree = capture.beforeTree
+            env.GIT_INDEX_FILE = join(capture.tempDir, 'discovery.index')
+          } else {
+            afterTree = await writeTargetedSnapshotTree({
+              cwd: capture.repoRoot,
+              baseTree: capture.beforeTree,
+              pathspec: targetPathspec,
+              env,
+              deadline: preFallbackDeadline,
+              filterOverrides,
+              targetIndex: afterIndex
+            })
+          }
         } catch {
           fallbackReason = 'targeted_failed'
         } finally {
@@ -698,6 +704,13 @@ async function computeGitTurnDiff(
       tree: afterTree, afterAt, indexFile: env.GIT_INDEX_FILE!, objectDir: capture.objectDir,
       alternateObjectDirs: capture.alternateObjectDirs, filterOverrides, collection
     })
+
+    if (capture.beforeTree === afterTree) {
+      return terminalSnapshot(
+        capture, 'captured', undefined, [], afterAt, Date.now() - started,
+        consume ? await cleanupCapture(capture) : 'ok', collection
+      )
+    }
 
     const [numstat, nameStatus] = await Promise.all([
       gitCommand(
