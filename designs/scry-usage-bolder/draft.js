@@ -41,6 +41,7 @@ document.querySelector('#app').innerHTML = `
               <dl>${COPY.metrics.map(m => `<div><dt>${m.label}</dt><dd>${m.note}</dd></div>`).join('')}</dl>
               <p>${COPY.coverage} ${COPY.coverageValue}<br>${COPY.coverageNote}</p>
               <p>${COPY.metricNote}</p>
+              <p>${COPY.detailsSnapshot}</p>
             </div>
           </details>
         </div>
@@ -63,9 +64,30 @@ document.querySelector('#app').innerHTML = `
       </section>
       <section class="providers" aria-labelledby="providers-title">
         <div class="section-heading"><h2 id="providers-title">${COPY.providerHeading}</h2></div>
-        <div class="provider-list">${COPY.providers.map(p => `<article class="provider ${p.id}"><div class="provider-line"><h3>${dot(p.id)}${p.name}</h3><div class="provider-numbers"><span class="provider-share">${p.share}</span><strong>${p.cost}</strong></div></div></article>`).join('')}</div>
+        <div class="provider-list">${COPY.providers.map(p => `<article class="provider ${p.id}"><div class="provider-line"><h3>${dot(p.id)}${p.name}</h3><div class="provider-numbers">${p.width === null ? '' : `<span class="provider-share">${p.share}</span>`}<strong>${p.cost}</strong></div></div></article>`).join('')}</div>
       </section>
     </div>
     <section class="tokens" aria-labelledby="tokens-title"><h2 id="tokens-title">${COPY.metricHeading}</h2><dl class="metrics">${COPY.metrics.map(m => `<div class="metric"><dt>${m.label}</dt><dd>${m.value}<span>${m.unit}</span></dd></div>`).join('')}</dl></section>
+    <section class="breakdown" aria-labelledby="details-title">
+      <div class="section-heading">
+        <h2 id="details-title">${COPY.detailsHeading}</h2>
+        <div class="metric-toggle" role="group" aria-label="${COPY.detailsDimension}">
+          <button disabled class="active" aria-pressed="true">${COPY.detailsModel}</button>
+          <button disabled aria-pressed="false" title="${COPY.detailsDateDisabled}">${COPY.detailsDay}</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table aria-labelledby="details-title">
+          <colgroup><col class="model-column"><col class="cost-column"><col><col></colgroup>
+          <thead><tr><th scope="col">${COPY.detailsModel}</th><th scope="col">${COPY.detailsCost}</th><th scope="col">${COPY.detailsShare}</th><th scope="col">${COPY.token}</th></tr></thead>
+          <tbody>${COPY.detailRows.map(row => `
+            <tr>
+              <th scope="row"><span class="model-name">${dot(row.provider)}${row.model}</span></th>
+              <td class="detail-cost">${row.cost}</td><td>${row.share}</td><td>${row.tokens}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    </section>
   </div>
 `

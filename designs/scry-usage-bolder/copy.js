@@ -1,6 +1,6 @@
 const COPY = {
   title: 'Scry · 用量设计稿',
-  preview: '设计预览 · 金额与指标沿用截图，曲线仅示意；未连接真实数据',
+  preview: '设计预览 · 总览与明细来自不同截图，曲线仅示意；未连接真实数据',
   heading: '用量',
   period: 'Sep 22 — Oct 21',
   back: '返回（设计稿未连接导航）',
@@ -32,6 +32,21 @@ const COPY = {
   coverage: 'Token 覆盖',
   coverageValue: '1,447 / 1,458',
   coverageNote: '11 条明细缺少 Token 证据',
+  detailsHeading: '明细',
+  detailsDimension: '明细维度',
+  detailsModel: '模型',
+  detailsDay: '日期',
+  detailsCost: '成本（USD）',
+  detailsShare: '占比',
+  detailsDateDisabled: '设计稿未连接日期明细数据',
+  detailsSnapshot: '模型明细沿用补充截图，与总览来自不同快照；不按总览金额重算其占比。日期明细尚未接入。',
+  detailRows: [
+    { provider: 'codex', model: 'gpt-6-astra', cost: '$1,343.43', share: '53.9%', tokens: '29.7M' },
+    { provider: 'codex', model: 'gpt-6.1-sol', cost: '$573.60', share: '23.0%', tokens: '60.7M' },
+    { provider: 'cc', model: 'claude-opus-5-5', cost: '$507.19', share: '20.4%', tokens: '2.04M' },
+    { provider: 'qoder', model: 'Qoder', cost: '$44.46', share: '1.8%', tokens: '9.31M' },
+    { provider: 'codex', model: 'gpt-5.6-sol', cost: '$22.91', share: '0.9%', tokens: '1.99M' }
+  ],
   metricHeading: 'Token 明细',
   metricNote: '缓存输入与缓存写入单列，不与已处理 Token 简单相加。',
   metrics: [
