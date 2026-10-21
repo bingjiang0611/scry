@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, readTranscriptWindow, recoverRecorder, resetTranscriptSnapshotCache, transcriptSnapshotCacheStats } from './recorder'
 import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, recordStoreIndexStats, redeliverLatestCommitNotification, resetRecordStoreIndex, safeKey, verifyStore } from './store'
-import { inspectCommitHookBundle, readCommitHookGrant, writeCommitHookGrant } from './commit-hook-grant'
+import { commitHookEnv, inspectCommitHookBundle, readCommitHookGrant, resolveCommitHookActivation, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 import { syncDirectory } from './io'
 import { HOOK_LOCK_WAIT_MS, recorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state'
@@ -3174,6 +3174,55 @@ describe('record store cursor and recovery semantics', () => {
     })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
     await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
+  })
+
+  it('通知身份不一致只使 ACK 不适用，不能解释同一身份下 callback 不 ACK', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'identity-1')
+    await completeTurn(root, 'identity-2')
+    const hook = await commitHook(root)
+    const failure = join(root, 'fail-callback')
+    const hookSource = `#!/bin/sh\ncat >> ${JSON.stringify(hook.capture)}\n[ ! -f ${JSON.stringify(failure)} ] || exit 7\nexit 0\n`
+    await writeFile(hook.path, hookSource)
+    const configPath = join(root, 'scry.config.json')
+    await writeFile(configPath, JSON.stringify({
+      ...JSON.parse(await readFile(configPath, 'utf8')),
+      commitHook: { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
+    }))
+    const location = await resolveRecorderLocation(root)
+    if (!location.valid) throw new Error('invalid fixture config')
+    const env = { PATH: '/usr/bin:/bin', SCRY_GRANT_DIR: join(root, 'grants') }
+    const activate = () => resolveCommitHookActivation(root, location.config, env)
+    const configured = commitHookEnv(await activate(), env)
+    const dataRoot = join(root, '.scry')
+    const statePath = join(dataRoot, 'notifications', 'commit-hook-state.json')
+
+    await expect(drainCommitNotifications(dataRoot, configured, { maxRecords: 1 }))
+      .resolves.toEqual({ delivered: 1, pending: 1, truncated: true })
+    const saved = await readFile(statePath, 'utf8')
+    const hosted = { ...env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
+    await expect(resolveCommitHookActivation(root, location.config, hosted))
+      .resolves.toEqual({ status: 'host-provided' })
+    await expect(commitNotificationStatus(dataRoot, hosted))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 2 })
+    expect(await readFile(statePath, 'utf8')).toBe(saved)
+
+    const restored = commitHookEnv(await activate(), env)
+    await expect(commitNotificationStatus(dataRoot, restored))
+      .resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
+    await writeFile(failure, '')
+    expect(commitHookEnv(await activate(), env)).toEqual(restored)
+    await expect(drainCommitNotifications(dataRoot, restored))
+      .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    expect(await readFile(statePath, 'utf8')).toBe(saved)
+
+    await appendFile(hook.path, '# changed bundle identity\n')
+    const changed = commitHookEnv(await activate(), env)
+    expect(changed.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
+      .not.toBe(restored.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
+    await expect(commitNotificationStatus(dataRoot, changed))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 2 })
+    expect(await readFile(statePath, 'utf8')).toBe(saved)
   })
 
   it('duplicate commit 只重试既有未 ACK 通知，不创建第二条 sequence', async () => {
