@@ -982,18 +982,24 @@ function OverviewPanelBody({
 
       {(
         <div className={`ctx-gauge ${ctx ? (ctx.pct >= 80 ? 'hot' : ctx.pct >= 50 ? 'warm' : '') : 'empty'}`} title={contextDescription}>
+          <div className="ctx-head">
+            <span>{OVERVIEW_SESSION_COPY.context}</span>
+            <b>{ctx ? `${ctx.pct}%` : '—'}</b>
+          </div>
+          {/* 占用用横向刻度表达：长度比环直接可比，高度也回到一行。 */}
           <div
-            className="ring"
+            className="ctx-track"
+            role="img"
             style={ctx ? ({ '--p': Math.min(ctx.pct, 100) } as CSSProperties) : undefined}
             aria-label={ctx ? `上下文占用 ${ctx.pct}%` : '暂无上下文占用数据'}
           >
-            <span>{ctx ? `${ctx.pct}%` : '—'}</span>
+            {ctx && <span />}
           </div>
           <div className="ctx-copy">
             {/* 显示用量是主证据，窗口总量是参照：同一行内用字级区分，文本内容保持原样。 */}
             <div className="v">{ctx
               ? <><b>{fmtTok(ctx.used)}</b><span> / {fmtTok(ctx.win)}</span></>
-              : '暂无上下文数据'}</div>
+              : OVERVIEW_SESSION_COPY.contextUnavailable}</div>
           </div>
         </div>
       )}

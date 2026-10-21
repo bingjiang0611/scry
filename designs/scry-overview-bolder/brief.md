@@ -2,7 +2,7 @@
 
 ## D-20261022-scry-overview-bolder
 
-- 状态：needs-review，四稿待你选方向；只改 `designs/`，不动 App 运行代码。
+- 状态：用户已选 **C · 横向刻度条**，并已落地到 App（`commit` 见 git log，`OverviewPanel.tsx` + `session-evidence.css` + `OVERVIEW_SESSION_COPY`）。本目录仍是设计稿，用于对照其余三稿。
 - Surface mode：Operate。目标是让「当前占用了多少上下文、这一轮花了多少」一眼分主次，而不是把四五个数字摆成同级。
 - 入口：`index.html`。预览：`python3 -m http.server 8768 --bind 127.0.0.1 --directory designs/scry-overview-bolder` → `http://127.0.0.1:8768/index.html`。
 - 面板宽 380 / 340 可切，深色 / 浅色可切，`同屏对比` 一次看四稿。示例数据取自你的截图（26% · 70.5k / 272.0k · 263 calls · 875.8k · 100.0% · $31.81 · Compact 1），不是真实会话。

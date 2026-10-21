@@ -112,6 +112,8 @@ export const BACKGROUND_WORK_COPY = {
 
 export const OVERVIEW_SESSION_COPY = {
   heading: '会话',
+  context: '上下文占用',
+  contextUnavailable: '暂无上下文数据',
   id: 'ID',
   compact: 'Compact',
   scopeLabel: '查看压缩统计范围',
