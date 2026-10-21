@@ -591,7 +591,15 @@
           "files": 9,
           "contract": "Required accessible name, non-submitting native button, forwarded DOM ref, disabled and local classes preserved; default X icon with existing glyph children retained.",
           "verified": ["static markup parity", "negative disabled-state control", "Electron native coordinate and keyboard activation", "ref and non-submitting behavior", "dark/light fixture rendering"],
-          "fullAppAfterInstall": "not yet verified for this extraction"
+          "fullAppAfterInstall": "After the user's restart, the installed artifact was verified in the real desktop App: dark Settings dialog rendered, the close button was clicked, and a fresh read-only observation confirmed the dialog was gone and the workspace returned. Scope is this representative caller, not every modal; keyboard/disabled/ref/non-submit checks remain fixture evidence.",
+          "postRestartCheck": {
+            "date": "2026-10-21",
+            "installedArchiveSha256": "3435a7424da053be7fe4ddbfb0f08f0d65e775e998fcfcac97bfcf4c48ba7512",
+            "buildIdentityEvidence": "Process started after installation and runs from /Applications/Scry.app; installed archive hash matches the extraction artifact.",
+            "windowPoints": [1512, 885],
+            "appearance": "dark; left unchanged",
+            "safety": "No text or attachment edited; no Agent task sent or stopped. No private screenshots committed."
+          }
         },
         "ios": {
           "implementation": "apps/ios/ScryRemote/Components.swift#MoreMenu",
