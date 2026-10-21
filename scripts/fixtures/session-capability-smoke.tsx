@@ -8,6 +8,7 @@ import '../../src/renderer/codex-alignment.css'
 import { PinnedSummaryHost, usePinnedSummaryVisibility } from '../../src/renderer/components/PinnedSummary'
 import { OverviewPanel } from '../../src/renderer/components/OverviewPanel'
 import { AssistantTurn } from '../../src/renderer/components/ChatTurn'
+import { AskUserQuestionResult } from '../../src/renderer/components/AskUserQuestionDialog'
 import { CliPicker, ModelEffortPicker, RunControlSelect } from '../../src/renderer/components/Pickers'
 import { ViewChrome } from '../../src/renderer/components/ViewChrome'
 import { qoderSkillSessionFixture } from '../../src/renderer/__fixtures__/session-capabilities'
@@ -17,6 +18,15 @@ import { SidebarArchiveFixture } from './sidebar-archive-smoke'
 import { PiCommandFixture } from './pi-command-smoke'
 
 const piPickerFixtureCopy = { restore: '恢复历史 Profile' }
+
+const answeredQuestionRequest = {
+  runId: 'answered-run',
+  questionId: 'answered-tool',
+  questions: [
+    { question: '是否继续修复 App 与独立 CLI 的 ACK 共存问题?', header: 'ACK', multiSelect: false, options: [{ label: '1', description: '继续修复' }] },
+    { question: 'ACK 冲突时按哪个优先？', header: 'ACK', multiSelect: false, options: [{ label: '2', description: '按仓库' }] }
+  ]
+}
 
 const thinkingTurn: Turn = {
   runId: 'thinking-run',
@@ -117,6 +127,26 @@ function Fixture() {
       />
     </section>
     <section id="thinking"><AssistantTurn turn={thinkingTurn} selectedId={null} onSelect={() => undefined} /></section>
+    <section id="question-result" className="main-area" style={{ width: 820 }}>
+      <div className="chat-body">
+        <div className="tool-group-body">
+          <div className="tool-card">
+            <AskUserQuestionResult
+              request={answeredQuestionRequest}
+              answers={{
+                '是否继续修复 App 与独立 CLI 的 ACK 共存问题?': '1',
+                'ACK 冲突时按哪个优先？': '按 canonical cwd 优先：同一个仓库只认 App 写入的那一份，CLI 只读取并在缺失时补写；跨仓库的临时目录不共享 ACK，避免 /tmp 下不同 repo 的锁互相覆盖。'
+              }}
+              output='{"behavior":"answered"}'
+              durationMs={409000}
+            />
+          </div>
+          <div className="tool-card">
+            <AskUserQuestionResult request={answeredQuestionRequest} resolution="user_cancelled" />
+          </div>
+        </div>
+      </div>
+    </section>
     <PiCommandFixture />
     <section id="model-effort" className="runtime-composer">
       <div className="composer-controls">

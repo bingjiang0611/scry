@@ -231,6 +231,7 @@ describe('AskUserQuestionInline', () => {
         request={request}
         answers={{ '选择流程？': '全量', '启用哪些能力？': 'MCP, Skill' }}
         output="Your questions have been answered."
+        durationMs={409_000}
       />
     )
 
@@ -239,6 +240,27 @@ describe('AskUserQuestionInline', () => {
     expect(html).toContain('MCP, Skill')
     expect(html).toContain('查看原始输入与输出')
     expect(html).toContain('Your questions have been answered.')
+    // 状态与等待分行渲染，等待不上拼到状态或问题数后面。
+    expect(html).toContain('<small>2 个问题</small>')
+    expect(html).toContain('question-result-wait')
+    expect(html).toContain('等待 409.0s')
+    // 问答必须保留定义列表语义，样式不能把它降成纯视觉文本。
+    expect(html).toContain('<dl class="question-result-list">')
+    expect(html).toContain('<dt>选择流程？</dt>')
+    expect(html).toContain('<dd>全量</dd>')
+  })
+
+  it('marks answers the provider never returned instead of showing them as chosen', () => {
+    const html = renderToStaticMarkup(
+      <AskUserQuestionResult request={request} resolution="user_cancelled" answers={undefined} />
+    )
+
+    expect(html).toContain('用户取消')
+    expect(html).toContain('question-result error')
+    expect(html).toContain('<dd class="missing">未获得答案</dd>')
+    // 没有 duration 时不补时长。
+    expect(html).not.toContain('等待 ')
+    expect(html).not.toContain('question-result-wait')
   })
 
   it('serializes multi-select and free text using the SDK answers map contract', () => {

@@ -19,13 +19,15 @@ const modelsOnly = process.argv.includes('--models-only')
 const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
 const summaryOnly = process.argv.includes('--summary-only')
+const questionResultOnly = process.argv.includes('--question-result-only')
 const workspaceDiffOnly = process.argv.includes('--workspace-diff-only')
 const performanceOnly = process.argv.includes('--performance-only')
 // Opt-in only: this native hide/show check necessarily displays a window.
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
+const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+  : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
@@ -336,7 +338,43 @@ async function exercise() {
   document.querySelector('#empty').click()
   await waitFor(() => !text('#overview').includes('20.0k / 272.0k'))
   check(!document.querySelector('#overview .overview-session-summary'), 'Empty new session retained the previous session metadata')
-  return { compactContextCopy: true, contextEvidenceTooltip: true, liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
+
+  // 已回答问答块：基础规则曾被整段删除且无人补回，这里直接对真实 CSS 断言层级与右轨。
+  const answeredBlock = document.querySelector('#question-result')
+  const ledgerRows = answeredBlock.querySelectorAll('.question-result-list > div')
+  const ledgerRow = ledgerRows[0]
+  const answerCell = ledgerRow.querySelector('dd')
+  const questionList = answeredBlock.querySelector('.question-result-list')
+  const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  check(getComputedStyle(questionList).display === 'grid' && getComputedStyle(questionList).marginTop === '6px', 'Answered question list does not use the ledger rhythm')
+  check(getComputedStyle(questionList).borderTopWidth === '1px', 'Answered question list lost its hairline')
+  check(getComputedStyle(answerCell).marginLeft === '0px', 'Answered answer kept the browser <dd> indent')
+  check(getComputedStyle(ledgerRow).display === 'grid' && getComputedStyle(ledgerRow).gridTemplateColumns.split(' ').length === 2, 'Answered question rows are not a two-column ledger')
+  check(getComputedStyle(answerCell).textAlign === 'right' && getComputedStyle(answerCell).fontWeight === '600', 'Answer is not the right-aligned ledger value')
+  const waitCell = answeredBlock.querySelector('.question-result-wait')
+  check(waitCell != null && Math.abs(waitCell.getBoundingClientRect().right - answerCell.getBoundingClientRect().right) <= 1, 'Wait time and answer do not share a right rail')
+  const probe = document.createElement('span')
+  probe.style.color = 'var(--ok)'
+  answeredBlock.append(probe)
+  const okColor = getComputedStyle(probe).color
+  probe.remove()
+  check(getComputedStyle(answeredBlock.querySelector('.question-result-head > span')).color === okColor, 'Answered stamp does not use the verdict token')
+  const cancelledBlock = answeredBlock.querySelectorAll('.question-result')[1]
+  const missingCell = cancelledBlock.querySelector('dd.missing')
+  check(cancelledBlock.className.includes('error') && missingCell != null && getComputedStyle(missingCell).fontWeight !== '600', 'Cancelled answers were rendered as chosen values')
+  check(cancelledBlock.querySelector('.question-result-wait') == null, 'Cancelled question invented a wait duration')
+  const rawDetails = answeredBlock.querySelector('details.question-raw')
+  rawDetails.querySelector('summary').focus()
+  check(document.activeElement === rawDetails.querySelector('summary'), 'Raw evidence disclosure is not keyboard focusable')
+  rawDetails.open = true
+  await frame()
+  check(getComputedStyle(rawDetails.querySelector('summary .ico')).transform !== 'none', 'Raw evidence chevron did not rotate open')
+  document.querySelector('#question-result').style.width = '560px'
+  await frame()
+  check(getComputedStyle(ledgerRow).gridTemplateColumns.split(' ').length === 1, 'Answered ledger did not stack in a narrow pane')
+  check(getComputedStyle(answerCell).textAlign === 'left', 'Stacked answer stayed right-aligned')
+  document.querySelector('#question-result').style.width = '820px'
+  return { compactContextCopy: true, contextEvidenceTooltip: true, liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true, answeredQuestionLedger: true }
 }
 
 async function exercisePiCommands(contents) {
@@ -1611,6 +1649,27 @@ try {
         if (${summaryOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()`)}))
+          finish(result)
+          return
+        }
+        if (${questionResultOnly}) {
+          // 已回答问答块的层级检查（真实 React + 真实 CSS），只跑这一个页面。
+          win.setSize(1000, 760)
+          await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
+          Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()`)}))
+          const questionShot = ${JSON.stringify(process.env.SCRY_QUESTION_RESULT_SCREENSHOT ?? '')}
+          if (questionShot) {
+            // 只为截图：其它 fixture 区段会被隐藏，避免浮层盖住这块。
+            await win.webContents.executeJavaScript("(() => { for (const section of document.querySelectorAll('#root > *')) section.style.display = section.id === 'question-result' ? '' : 'none'; const block = document.querySelector('#question-result'); block.style.width = '820px'; document.documentElement.scrollTop = 0 })()")
+            for (const theme of ['dark', 'light']) {
+              const bounds = await win.webContents.executeJavaScript(\`document.documentElement.setAttribute('data-theme', '\${theme}'); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+                const { x, y, width, height } = document.querySelector('#question-result').getBoundingClientRect()
+                resolve({ x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)), width: Math.ceil(width), height: Math.ceil(height + 40) })
+              })))\`)
+              const image = await win.webContents.capturePage(bounds)
+              require('node:fs').writeFileSync(questionShot + '-' + theme + '.png', image.toPNG())
+            }
+          }
           finish(result)
           return
         }
