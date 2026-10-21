@@ -19,6 +19,7 @@ measuredSidebar.type = (props) => {
 }
 
 const noop = () => {}
+const asyncNoop = async () => {}
 const projects: ProjectMeta[] = [{
   cwd: '/fixture', name: 'Performance fixture', mtime: 1, sessions: Array.from({ length: 277 }, (_, index) => ({
     sessionId: `session-${index}`, providerId: 'pi', agentProfileId: 'pi-fixture',
@@ -52,6 +53,7 @@ function Fixture() {
   const [historyLimit, setHistoryLimit] = useState(40)
   const [heavy, setHeavy] = useState(false)
   const [running, setRunning] = useState(false)
+  const [activeSessionId, setActiveSessionId] = useState('session-0')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [focused, setFocused] = useState<string | undefined>()
   const refs = useRef(new Map<string, HTMLDivElement>())
@@ -59,7 +61,10 @@ function Fixture() {
     if (element) refs.current.set(id, element)
     else refs.current.delete(id)
   })
-  const onPick = useEventCallback(() => { document.body.dataset.pickedTick = String(tick) })
+  const onPick = useEventCallback((_cwd: string, sessionId: string) => {
+    document.body.dataset.pickedTick = String(tick)
+    setActiveSessionId(sessionId)
+  })
   const runningRunIds = useMemo(() => new Set(running ? Array.from({ length: 8 }, (_, index) => `run-${index}`) : []), [running])
   useLayoutEffect(() => {
     if (focused) refs.current.get(focused)?.scrollIntoView({ block: 'start' })
@@ -77,8 +82,8 @@ function Fixture() {
     <main style={{ display: 'flex', height: 600 }}>
       <div style={{ width: 260, flexShrink: 0, display: 'flex' }}>
         <Sidebar projects={projects} activeCwd="/fixture" activeProviderId="pi" activeAgentProfileId="pi-fixture"
-          activeSessionId="session-0" runningRunIds={runningRunIds}
-          onNewChat={noop} onPick={onPick} onTogglePin={noop} onArchive={noop} />
+          activeSessionId={activeSessionId} runningRunIds={runningRunIds}
+          onNewChat={noop} onPick={onPick} onTogglePin={noop} onArchive={noop} onRenameSession={asyncNoop} />
       </div>
       <div className="body chat-body" style={{ height: 600, flex: 1, minWidth: 0 }}>
         <div className="chat chat-transcript" style={{ height: 600, overflow: 'auto' }}>
