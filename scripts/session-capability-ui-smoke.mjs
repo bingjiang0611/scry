@@ -335,7 +335,7 @@ async function exercise() {
   await waitFor(() => text('#overview .ctx-copy').trim() === '20.0k / 272.0k')
   document.querySelector('#empty').click()
   await waitFor(() => !text('#overview').includes('20.0k / 272.0k'))
-  check(text('#overview .overview-session-count') === '0', 'New session inherited the previous compaction count')
+  check(!document.querySelector('#overview .overview-session-summary'), 'Empty new session retained the previous session metadata')
   return { compactContextCopy: true, contextEvidenceTooltip: true, liveContext: true, compactionInvalidation: true, contextSessionReset: true, normalizedWire: true, summaryHiddenByDefault: true, hooksAutoExpand: true, originalEvidenceClicks: 3, collapse: true, thinkingDisclosure: true, modelEffortPicker: true, newSession: true, lateSuccess: true, failedRead: true, multipleTurns: true, sidebarCoordinates: true, sidebarCascade: true, archiveWhileCatalogPending: true, archiveAfterCatalogFailure: true, archiveUndo: true, backgroundArchive: true }
 }
 
@@ -368,6 +368,43 @@ async function exercisePiCommands(contents) {
     await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   }
   contents.focus()
+  const field = (index) => `#pi-questionnaire .question-field:nth-child(${index})`
+  const batchAnswers = `JSON.parse(document.querySelector('#pi-questionnaire-answers').textContent)`
+  await wait(`document.querySelectorAll('#pi-questionnaire .question-field').length === 3 && document.querySelector('#pi-questionnaire .question-submit').textContent.includes('提交全部答案') && document.querySelector('#pi-questionnaire .question-status').textContent.includes('还有 3 题待回答')`)
+  await click(`${field(1)} .question-option:nth-child(1)`)
+  await wait(`document.querySelector('${field(1)} .question-option:nth-child(1) input').checked`)
+  await click(`${field(2)} .question-option:nth-child(1)`)
+  await wait(`document.querySelector('${field(2)} .question-option:nth-child(1) input').checked`)
+  await click(`${field(2)} .question-option:nth-child(2)`)
+  await wait(`document.querySelectorAll('${field(2)} .question-option.selected').length === 2`)
+  await click(`${field(3)} .question-other`)
+  await wait(`document.activeElement === document.querySelector('${field(3)} .question-other-input')`)
+  await contents.insertText('1')
+  await wait(`document.querySelector('${field(3)} .question-other-input').value === '1'`)
+  // Revisit the first answer after completing the later questions, using real pointer input.
+  await click(`${field(1)} .question-option:nth-child(2)`)
+  await wait(`document.querySelector('${field(1)} .question-option:nth-child(2) input').checked`)
+  if (!await contents.executeJavaScript(`${batchAnswers}.length === 0 && document.querySelectorAll('${field(2)} .question-option.selected').length === 2 && document.querySelector('${field(3)} .question-other-input').value === '1'`)) throw new Error('Review submitted early or lost later questionnaire drafts')
+  // Native Pi multi-select accepts indices OR custom text, never a mixed response.
+  await click(`${field(2)} .question-other`)
+  await wait(`document.activeElement === document.querySelector('${field(2)} .question-other-input')`)
+  await contents.insertText('Custom scope')
+  await wait(`document.querySelector('${field(2)} .question-other-input').value === 'Custom scope'`)
+  if (!await contents.executeJavaScript(`document.querySelectorAll('${field(2)} .question-option.selected:not(.question-other)').length === 0`)) throw new Error('Native multi-select retained incompatible custom and indexed answers')
+  await click(`${field(2)} .question-option:nth-child(1)`)
+  await wait(`document.querySelector('${field(2)} .question-other-input') == null && document.querySelector('${field(2)} .question-option:nth-child(1) input').checked`)
+  await click(`${field(2)} .question-option:nth-child(2)`)
+  await wait(`document.querySelectorAll('${field(2)} .question-option.selected').length === 2 && !document.querySelector('#pi-questionnaire .question-submit').disabled`)
+  await click('#pi-questionnaire .question-submit')
+  await wait(`${batchAnswers}.length === 1`)
+  const batch = await contents.executeJavaScript(`${batchAnswers}[0]`)
+  if (JSON.stringify(batch.answers) !== JSON.stringify({ 'What matters?': '2', 'Which parts?': '1,2', 'When to review?': '1' }) || JSON.stringify(batch.nativeCustomAnswers) !== JSON.stringify(['When to review?'])) throw new Error('Grouped questionnaire did not submit the reviewed answers with custom intent')
+  await click('#pi-questionnaire-restart')
+  await wait(`${batchAnswers}.length === 0 && document.querySelectorAll('#pi-questionnaire .question-option.selected').length === 0`)
+  await click(`${field(1)} .question-option:nth-child(1)`)
+  await click('#pi-questionnaire .question-cancel')
+  await wait(`${batchAnswers}.length === 1 && ${batchAnswers}[0].behavior === 'cancelled'`)
+
   await click('#pi-command .question-option')
   await wait(`document.querySelector('#pi-command .question-option.selected') != null`)
   await click('#pi-command .question-submit')
@@ -441,7 +478,7 @@ async function exercisePiCommands(contents) {
     const customAnswers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
     if (customAnswers.length !== 1 || customAnswers[0].answers['Choose an action'] !== customAnswer || customAnswers[0].nativeCustomAnswer !== true) throw new Error('Native custom-answer submission lost text')
   }
-  return { piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
+  return { piGroupedReview: true, piGroupedDraftRetention: true, piGroupedSubmitOnce: true, piGroupedCancel: true, piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
 }
 
 async function exerciseSessionSelection(contents, scenario) {
@@ -1378,6 +1415,7 @@ try {
           metaWin.destroy()
           diagnosticContents = win.webContents
           ipcMain.removeHandler('app:copyText')
+          ipcMain.removeHandler('desktopRemote:list')
           if (${metaPromptsOnly}) {
             finish(result)
             return

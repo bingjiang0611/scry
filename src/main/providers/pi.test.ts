@@ -178,6 +178,19 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'extension_ui_request', id: 'question-select', method: 'select', title: '[复现动作] Continue?' + preview, options: ['1. Continue', '2. Type something.'] })
         continue
       }
+      if (command.message.startsWith('/fixture-menu batch')) {
+        acknowledgePrompt = response
+        const entry = { type: 'message', id: 'pi-user-' + (++entrySeq), parentId: leafId, timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: command.message }] } }
+        entries.push(entry)
+        persistEntries()
+        leafId = entry.id
+        send({ type: 'tool_execution_start', toolCallId: 'batch-tool', toolName: 'ask_user_question', args: { questions: [
+          { header: 'Goal', question: 'What matters?', multiSelect: false, options: [{ label: 'Control', description: 'Stay in control' }, { label: 'Speed', description: 'Finish sooner' }] },
+          { header: 'Review', question: 'When to review?', multiSelect: false, options: [{ label: 'Now', description: 'Before continuing' }, { label: 'Later', description: 'At the end' }] }
+        ] } })
+        send({ type: 'extension_ui_request', id: 'batch-first', method: 'select', title: '[Goal] What matters?', options: ['1. Control — Stay in control', '2. Speed — Finish sooner', '3. Type something.'] })
+        continue
+      }
       if (command.message === '/fixture-menu status') {
         const message = { role: 'custom', customType: 'fixture-status', display: true, content: 'Custom command status' }
         send({ type: 'message_start', message })
@@ -431,6 +444,18 @@ process.stdin.on('data', (chunk) => {
         if (promptMessage === 'steer-active' || promptMessage === 'steer-end-race') {
           setTimeout(() => send({ type: 'agent_settled' }), 10)
         }
+      }
+    } else if (command.type === 'extension_ui_response' && command.id.startsWith('batch-')) {
+      require('node:fs').appendFileSync(process.cwd() + '/batch-responses', JSON.stringify(command) + '\\n')
+      if (!command.cancelled && command.id === 'batch-first') {
+        send({ type: 'extension_ui_request', id: 'batch-second', method: 'select', title: promptMessage.endsWith('-changed') ? 'Unrelated secret' : '[Review] When to review?', options: ['1. Now — Before continuing', '2. Later — At the end', '3. Type something.'] })
+      } else if (!command.cancelled && command.id === 'batch-second' && command.value === '3. Type something.') {
+        send({ type: 'extension_ui_request', id: 'batch-custom', method: 'input', title: '[Review] When to review?\\n\\nType your answer:', placeholder: '' })
+      } else {
+        send({ type: 'tool_execution_end', toolCallId: 'batch-tool', toolName: 'ask_user_question', result: { content: [{ type: 'text', text: command.cancelled ? 'Declined' : 'Answered' }] }, isError: false })
+        send({ type: 'agent_end' })
+        send({ type: 'agent_settled' })
+        acknowledgePrompt()
       }
     } else if (command.type === 'extension_ui_response' && command.id.startsWith('question-')) {
       require('node:fs').appendFileSync(process.cwd() + '/question-responses', JSON.stringify(command) + '\\n')
@@ -1722,6 +1747,48 @@ describe('Pi RPC Provider', () => {
         if (scenario.startsWith('custom')) expect(responses.map((response) => response.value)).toEqual(['2. Type something.', customAnswer])
         if (scenario === 'option') expect(responses[0].value).toBe('1. Continue')
         if (scenario === 'cancel-select' || scenario.startsWith('unrelated')) expect(responses.at(-1)).toMatchObject({ cancelled: true })
+      } finally {
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
+  it.each(['option', 'custom', 'cancel', 'changed'])('reviews the whole native question group before replying: %s', async (scenario) => {
+    await withCommandFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const asked: string[] = []
+      const handle = adapter.run({
+        runId: 'batch-run', prompt: `/fixture-menu batch${scenario === 'changed' ? '-changed' : ''}`, cwd,
+        agentProfileId: profile.id, attachments: [], permissionMode: 'full_access', emit: () => {},
+        requestUserInput: async (request) => {
+          asked.push(request.questionId)
+          if (request.questionId === 'batch-second') {
+            expect(request.questions[0].question).toBe('Unrelated secret')
+            return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+          }
+          expect(request.questionId).toBe('batch-tool')
+          expect(request.questions.map((question) => question.question)).toEqual(['What matters?', 'When to review?'])
+          expect(existsSync(join(cwd, 'batch-responses'))).toBe(false)
+          if (scenario === 'cancel') return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+          return {
+            runId: request.runId, questionId: request.questionId, behavior: 'answered',
+            answers: { 'What matters?': '2', 'When to review?': scenario === 'custom' ? '1' : '2' },
+            nativeCustomAnswers: scenario === 'custom' ? ['When to review?'] : []
+          }
+        }
+      })
+      try {
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+        expect(asked).toEqual(scenario === 'changed' ? ['batch-tool', 'batch-second'] : ['batch-tool'])
+        const replies = readFileSync(join(cwd, 'batch-responses'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+        if (scenario === 'cancel') expect(replies).toEqual([{ type: 'extension_ui_response', id: 'batch-first', cancelled: true }])
+        else {
+          expect(replies[0].value).toBe('2. Speed — Finish sooner')
+          if (scenario === 'changed') expect(replies[1]).toMatchObject({ cancelled: true })
+          else expect(replies.map((reply) => reply.value)).toEqual(scenario === 'custom' ? ['2. Speed — Finish sooner', '3. Type something.', '1'] : ['2. Speed — Finish sooner', '2. Later — At the end'])
+        }
       } finally {
         handle.forceKill()
         await handle.promise.catch(() => {})

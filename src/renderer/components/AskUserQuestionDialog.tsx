@@ -2,6 +2,7 @@ import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } 
 import type { AgentIntervention, AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
 import Markdown from './MarkdownImpl'
+import { QUESTIONNAIRE_COPY } from '../constants/copy'
 
 const providerLabels = {
   claude: 'Claude',
@@ -104,12 +105,16 @@ export function AskUserQuestionInline({
   onRespond: (response: AgentQuestionResponse) => Promise<void>
   onSubmitted?: (answers: Record<string, string>) => void
 }) {
+  const groupedPiQuestionnaire = request.providerId === 'pi' && request.source === 'pi_questionnaire'
   const submittingRef = useRef(false)
   const [drafts, setDrafts] = useState<QuestionDrafts>(() => initialQuestionDrafts(request))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const answers = useMemo(() => buildQuestionAnswers(request, drafts), [drafts, request])
   const missing = request.questions.filter((question) => !buildQuestionAnswers({ ...request, questions: [question] }, drafts)).length
+  const statusCopy = groupedPiQuestionnaire
+    ? missing > 0 ? QUESTIONNAIRE_COPY.pending(missing) : QUESTIONNAIRE_COPY.review
+    : missing > 0 ? QUESTIONNAIRE_COPY.selectToContinue : QUESTIONNAIRE_COPY.ready
   const id = useId()
   const titleId = `${id}-title`
   const statusId = `${id}-status`
@@ -139,7 +144,10 @@ export function AskUserQuestionInline({
       answers,
       ...(request.providerId === 'pi' && request.source === 'pi_extension_ui:select' &&
         request.questions.length === 1 && drafts[request.questions[0].question].useOther
-        ? { nativeCustomAnswer: true } : {})
+        ? { nativeCustomAnswer: true } : {}),
+      ...(groupedPiQuestionnaire ? {
+        nativeCustomAnswers: request.questions.filter((question) => drafts[question.question].useOther).map((question) => question.question)
+      } : {})
     })
   }
 
@@ -155,7 +163,7 @@ export function AskUserQuestionInline({
           ? draft.selected.filter((item) => item !== label)
           : [...draft.selected, label]
         : [label]
-      return { ...current, [questionText]: { ...draft, selected, useOther: multiSelect ? draft.useOther : false } }
+      return { ...current, [questionText]: { ...draft, selected, useOther: multiSelect && !groupedPiQuestionnaire ? draft.useOther : false } }
     })
   }
 
@@ -165,7 +173,8 @@ export function AskUserQuestionInline({
       const useOther = !draft.useOther
       return {
         ...current,
-        [questionText]: { ...draft, useOther, selected: multiSelect ? draft.selected : [] }
+        // Pi's native multi-select accepts either indices or custom text, not a mixture.
+        [questionText]: { ...draft, useOther, selected: multiSelect && !groupedPiQuestionnaire ? draft.selected : [] }
       }
     })
   }
@@ -326,14 +335,14 @@ export function AskUserQuestionInline({
           className={`question-status ${error ? 'error' : missing > 0 ? 'incomplete' : 'complete'}`}
           aria-live="polite"
         >
-          {error ? <span className="question-error">{error}</span> : missing > 0 ? '选择后即可继续' : '已选择，可继续'}
+          {error ? <span className="question-error">{error}</span> : statusCopy}
         </div>
         <div className="question-actions">
           <button type="button" className="btn question-cancel" disabled={submitting} onClick={cancel}>
-            取消
+            {QUESTIONNAIRE_COPY.cancel}
           </button>
           <button type="submit" className="btn primary question-submit" disabled={!answers || submitting}>
-            {submitting ? '正在提交…' : '提交并继续'}
+            {submitting ? QUESTIONNAIRE_COPY.submitting : groupedPiQuestionnaire ? QUESTIONNAIRE_COPY.submitAll : QUESTIONNAIRE_COPY.submit}
             <span className="question-shortcut" aria-hidden="true">⌘↵</span>
           </button>
         </div>

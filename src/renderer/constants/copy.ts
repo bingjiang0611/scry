@@ -171,6 +171,17 @@ export const REMOTE_ACCESS_COPY = {
   settingsArchiveFooter: '取消存档会把会话放回原项目分组；删除会同时移除 Scry 的 catalog、archive、附件、SQLite 与 usage 记录，不可恢复。'
 } as const
 
+export const QUESTIONNAIRE_COPY = {
+  pending: (count: number) => `还有 ${count} 题待回答`,
+  review: '可修改任意答案，确认后提交',
+  submitAll: '提交全部答案',
+  selectToContinue: '选择后即可继续',
+  ready: '已选择，可继续',
+  cancel: '取消',
+  submitting: '正在提交…',
+  submit: '提交并继续'
+} as const
+
 export const CONVERSATION_COPY = {
   handoffScope: '缺失文字按预算补齐，其余可检索。只发送当前图片，不重放历史图片。原生命令和 Steer 暂不支持。'
 } as const
