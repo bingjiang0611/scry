@@ -9,6 +9,13 @@
 - 测量源码 `3f30987`；10 核机器负载 75.25→45.48，L2 unavailable，不据此改生产并发值或宣布提速。未优化、未合入、未安装、未推送，台账不变。
 - 后续：性能 owner 在低负载下重测同一负载，不改变原 workload 或 deadline。范围与原始结果见[实验记录](performance-experiments/20261021-cli-multirepo-concurrency.md)。
 
+## 零候选快照复用（2026-10-21，L1 已验证，未部署）
+
+- `9391016` 在完整 Git 发现成功且无候选时复用同一不可变基线和 discovery index，不再重建并比较相同快照。没有跨轮缓存，没有缩小采集范围，没有改生产并发。
+- 沿用原 19 仓库 × 512 文件负载及 19/4/1 路调度：无变化轮 Git 190→114（−40%）；单仓改动轮 192→120，所有证据及完整 patch 断言通过。峰值仍为 38/8/2。
+- 270 项 focused、typecheck、CLI build、3480 项 full unit（4 个既有 opt-in skipped）通过；现有 source-control.diff 计数仍为 8，ratchet 通过。先前全量测试不稳定不据本次通过宣称根治。
+- 两次 timing-run 均 highLoad，L2 unavailable、L3 未验证；未安装、合入、推送或发布。性能 owner 在低负载时对同一完整负载补两侧 L2，发布 owner 再确认分发；详见[实验记录](performance-experiments/20261021-cli-empty-candidates.md)。历史读取/汇总优化仍待下一批。
+
 ## 通知身份隔离（2026-10-21，已部署独立 CLI 0.2.50）
 
 - 经另行在线授权，发现 App 与 CLI 不同指纹共用一个 ACK 文件，成功投递仍反复擦除另一身份进度。项目 bridge 合成 override 的问题已修复，但不是完整根因；没有改变 host 优先级或把两个指纹强行归一。
