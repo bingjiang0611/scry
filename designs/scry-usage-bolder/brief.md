@@ -40,6 +40,17 @@
 
 验证：两个 JS 文件通过 `node --check`。Node vm 新旧对照中旧稿失败，新稿可见文本没有 Credits、4,577.12 或已知下界，仍有三项 Provider、五项指标与五行模型明细。Chrome Relay 在 1512 × 708 下目视确认两处均移除，无残留边框或空行。
 
+## v7 · 平滑曲线与悬停详情
+
+- 曲线复用当前 `AnalyticsView.tsx:smoothPath` 的中点三次贝塞尔插值，不再使用直线连接。线宽 2px、各 Provider 面积填充透明度 0.13，与当前 App 样式一致；不改变示意日数据的峰值。
+- 图表按指针横坐标吸附到最近日期，显示虚线、系列圆点及详情浮层；详情为日期与三项 Provider 每日成本。离开、失焦或 Esc 时收起。浮层左右边缘限制在图内。
+- 支持键盘聚焦、左右方向键、Home/End 与 Esc。不会把鼠标选中的日期在点击聚焦时跳到最后一天。
+- 不伪造截图中的每日覆盖条数。设计样本 Oct 9 中，Qoder 的 0 显示为 $0.00，cc-switch 的 null 显示 — / 当日无记录；null 仅为绘图连续沿基线连接，不会被当作零上报。
+- 本轮只接通成本悬停。Token 切换仍按原设计禁用，没有虚构另一套 Token 日数据。数据均为明确标注的设计示例，不是实际账单。
+- 资源版本为 v7.1；独立回归脚本：`node --test designs/scry-usage-bolder/draft.test.mjs`。
+
+验证：5 个测试通过，覆盖与生产插值函数对照、日期吸附、0/null 区分、左右边界、键盘与收起，以及清理后的概览和五行模型明细。首次追加“鼠标聚焦不得覆盖日期”断言时为 4 通过 / 1 失败，定位并修复 focus 强制跳到末日问题后 5/5 通过，没有弱化断言。Chrome Relay 在 1512 × 764 下检查平滑曲线和浮层；通过指针移入图表的鼠标派发，回读 Oct 7 及对应三项数值，截图确认弹层、虚线与圆点；Esc 后回读确认弹层已收起。pointerleave、方向键和左右边界由单元测试验证，未逐项通过浏览器输入重放。
+
 ## 事实与示意的边界
 
 - 总额、Provider 金额/比例、Credits、Token 指标与覆盖范围均沿用用户截图，不读取用户 DB、会话或真实账单。
@@ -65,6 +76,7 @@
 | 全文遍历 | 通过 | snapshot：contentCoverage=scroll-end，contentComplete=true，truncated=false，scrolledContainers=1，无分页游标遗漏。 |
 | 数据说明交互 | 通过 | v2 点击后回读完整的 Provider 来源、Token 完整性、指标口径及覆盖范围；默认闭合状态不显示这些说明。 |
 | v4 回归检查 | 通过 | Node vm 新旧对照：旧稿失败，新稿 Provider 列表恰好三行且没有 unknown；五行模型明细仍保留。Chrome Relay 在 1512 × 708 下目视确认列表已移除整行，没有第四行占位。 |
+| v7 图表回归 | 通过 | `node --test designs/scry-usage-bolder/draft.test.mjs`：5/5；与实际 App 的 smoothPath 对照，并验证悬停、缺失状态、键盘、边界与原有页面内容。 |
 | JS 语法 | 通过 | `node --check` 检查 `copy.js`、`draft.js`。 |
 | 数据与渲染检查 | 通过 | v1 验证金额合计 458706 美分、占比合计 100%。v2 用 Node vm 运行新旧两个版本：旧稿无法通过去小字检查，新稿通过；常驻说明被移除，详细证据与五项数值保留，无 undefined/NaN。 |
 | v3 回归检查 | 通过 | Node vm 对比新旧版本：旧稿失败，新稿通过；主界面不含“成本不可用”，存在四列表格与五行截图数值，unknown 保留 —，未恢复指标或 Provider 的常驻说明。 |

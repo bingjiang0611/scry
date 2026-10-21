@@ -7,12 +7,26 @@ const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const dot = (id) => `<span class="series-dot ${id}" aria-hidden="true"></span>`
 const series = {
   codex: [0,0,0,0,0,0,0,0,0,43,0,0,0,24,0,0,88,228,805,146,32,154,171,465,188,93,271,367,379,123],
-  cc: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,31,149,178,186,0,46,62,18,0],
+  cc: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,null,0,0,96,31,149,178,186,0,46,62,18,0],
   qoder: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,6,0,0,0,0,0,24,7,8,0]
 }
-const coords = (values) => values.map((v,i) => [i * 900 / (values.length - 1), 300 - v * 0.3])
-const line = (values) => coords(values).map(([x,y],i) => `${i ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ')
-const path = line(series.codex)
+const coords = (values) => values.map((value, index) => ({
+  x: index * 900 / (values.length - 1),
+  y: 300 - (value ?? 0) * 0.3
+}))
+// Same midpoint cubic interpolation as AnalyticsView.tsx: smoothPath.
+function smoothPath(points) {
+  if (points.length === 0) return ''
+  return points.slice(1).reduce((path, point, index) => {
+    const previous = points[index]
+    const middle = (previous.x + point.x) / 2
+    return `${path} C ${middle},${previous.y} ${middle},${point.y} ${point.x},${point.y}`
+  }, `M ${points[0].x},${points[0].y}`)
+}
+const line = values => smoothPath(coords(values))
+const dayCount = series.codex.length
+const dateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+const costFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 const known = COPY.providers.filter(p => p.width !== null)
 document.title = COPY.title
 document.querySelector('#app').innerHTML = `
@@ -37,9 +51,18 @@ document.querySelector('#app').innerHTML = `
       <section class="trend" aria-labelledby="chart-title">
         <div class="section-heading"><h2 id="chart-title">${COPY.chartHeading}</h2><div class="metric-toggle"><button disabled class="active" aria-pressed="true">${COPY.cost}</button><button disabled aria-pressed="false" title="${COPY.tokenDisabled}">${COPY.token}</button></div></div>
         <div class="chart-legend">${known.map(p => `<span>${dot(p.id)}${p.name}</span>`).join('')}</div>
-        <div class="chart" role="img" aria-label="${COPY.chartDescription}">
+        <div class="chart">
           <div class="y-labels">${COPY.yAxis.map(v => `<span>${v}</span>`).join('')}</div>
-          <div class="plot"><svg viewBox="0 0 900 300" preserveAspectRatio="none" aria-hidden="true"><path class="grid" d="M0 1H900M0 150H900M0 299H900"/><path class="area" d="${path} L900 300H0Z"/><path class="line cc" d="${line(series.cc)}"/><path class="line qoder" d="${line(series.qoder)}"/><path class="line codex" d="${path}"/></svg><div class="x-labels">${COPY.dates.map(d => `<span>${d}</span>`).join('')}</div></div>
+          <div class="plot">
+            <svg class="chart-surface" viewBox="0 0 900 300" preserveAspectRatio="none" role="img" tabindex="0" aria-label="${COPY.chartDescription}" aria-description="${COPY.chartInstructions}">
+              <path class="grid" d="M0 1H900M0 150H900M0 299H900"/>
+              ${known.map(p => `<path class="area ${p.id}" d="${line(series[p.id])} L900 300H0Z"/>`).join('')}
+              ${known.slice().reverse().map(p => `<path class="line ${p.id}" d="${line(series[p.id])}"/>`).join('')}
+              <g class="chart-hover" hidden aria-hidden="true"></g>
+            </svg>
+            <div class="chart-tooltip" role="status" aria-live="polite" hidden></div>
+            <div class="x-labels">${COPY.dates.map(d => `<span>${d}</span>`).join('')}</div>
+          </div>
         </div>
       </section>
       <section class="providers" aria-labelledby="providers-title">
@@ -71,3 +94,58 @@ document.querySelector('#app').innerHTML = `
     </section>
   </div>
 `
+
+const chartSurface = document.querySelector('.chart-surface')
+const hover = document.querySelector('.chart-hover')
+const tooltip = document.querySelector('.chart-tooltip')
+let hoverIndex = null
+
+function hideDay() {
+  hoverIndex = null
+  hover.setAttribute('hidden', '')
+  tooltip.hidden = true
+}
+
+function showDay(index, bounds = chartSurface.getBoundingClientRect()) {
+  if (hoverIndex === index) return
+  hoverIndex = index
+  const x = index * 900 / (dayCount - 1)
+  const day = dateFormatter.format(new Date(Date.UTC(2026, 8, 22 + index)))
+  hover.innerHTML = `<line x1="${x}" x2="${x}" y1="0" y2="300"/>${known.map(p => {
+    const value = series[p.id][index]
+    return value === null ? '' : `<circle class="${p.id}" cx="${x}" cy="${300 - value * 0.3}" r="4"/>`
+  }).join('')}`
+  tooltip.innerHTML = `<b>${day}</b>${known.map(p => {
+    const value = series[p.id][index]
+    return `<div class="tooltip-row">${dot(p.id)}<span>${p.name}</span><strong>${value === null ? COPY.chartMissingValue : costFormatter.format(value)}</strong>${value === null ? `<small>${COPY.chartNoRecord}</small>` : ''}</div>`
+  }).join('')}`
+  const tooltipWidth = Math.min(232, bounds.width - 16)
+  const pointX = index * bounds.width / (dayCount - 1)
+  const left = pointX + 12 + tooltipWidth > bounds.width ? pointX - tooltipWidth - 12 : pointX + 12
+  tooltip.style.left = `${Math.max(8, Math.min(bounds.width - tooltipWidth - 8, left))}px`
+  hover.removeAttribute('hidden')
+  tooltip.hidden = false
+}
+
+chartSurface.addEventListener('pointermove', event => {
+  const bounds = chartSurface.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width))
+  showDay(Math.round(ratio * (dayCount - 1)), bounds)
+})
+chartSurface.addEventListener('pointerleave', hideDay)
+chartSurface.addEventListener('focus', () => {
+  if (hoverIndex === null) showDay(dayCount - 1)
+})
+chartSurface.addEventListener('blur', hideDay)
+chartSurface.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    hideDay()
+    return
+  }
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const current = hoverIndex ?? dayCount - 1
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? dayCount - 1 : current + (event.key === 'ArrowLeft' ? -1 : 1)
+  showDay(Math.max(0, Math.min(dayCount - 1, index)))
+})
+window.addEventListener('resize', hideDay)

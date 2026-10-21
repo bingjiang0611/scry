@@ -9,7 +9,7 @@
           "path": "index.html",
           "createdAt": "2026-10-21T10:10:01.491Z",
           "status": "needs-review",
-          "subtitle": "v6：移除 Qoder Credits 行与已知下界标记",
+          "subtitle": "v7：恢复当前 App 平滑曲线，加入每日成本悬停详情",
           "viewport": {
             "width": 1512,
             "height": 1000
@@ -19,5 +19,5 @@
     }
   },
   "createdAt": "2026-10-21T10:10:01.492Z",
-  "updatedAt": "2026-10-21T11:22:33.391Z"
+  "updatedAt": "2026-10-21T11:30:07.500Z"
 }
