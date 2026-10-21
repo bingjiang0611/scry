@@ -66,12 +66,11 @@
 - 独立重跑 31 项 session-history 测试、typecheck、build、隔离 Electron Pi-history smoke，均通过。回归分别断言完整页和空归档不调用 full reader。
 - 临时将 helper 改回无条件 full read，新回归失败；随后恢复生产代码并确认无 diff，31 项重新通过。负对照不保留在提交中。
 - 日志：`/tmp/scry-ui-fluidity-treehouse-{unit,typecheck,build,native,negative}.log`。原生检查仍 highLoad=true，不作毫秒改善结论。
-- 主仓库最新已提交版本仍为 0.2.214，已安装 App 是 0.2.215。安装仍受源码版本不一致阻碍；后续集成 owner 必须先取得 0.2.215 对应的已提交源码，不能降级覆盖，也不能把主工作区并行 WIP 混入本提交。
+- 当时的 0.2.214 源码与已安装 0.2.215 记录的是历史状态，不构成版本号单独的安装阻碍。真实约束是安装包必须从已提交源码构建；本次恢复已确认 0bd5427 修复、cb9272f 优化、d70f222 验证和 09069d4 合并均在当前提交树中，不混入原工作区 WIP。
 
 ### 结论与限制
 
-这是 **L1** 读取次数优化，不作高负载毫秒或 L3 日常提速结论。减少的工作是 complete archive 的第二次源读取，不是后台搬移或不诚实缓存。高负载下未做毫秒比较；partial/legacy archive 仍可能需要完整读取。下一步应在机器负载正常时用现有 history-opening fixture 记录 archive read count 与点击→首个可用历史分段，再决定是否继续优化。
-
+这是 **L1** 读取次数优化，不作高负载毫秒或 L3 日常提速结论。减少的工作是 complete archive 的第二次源读取，不是后台搬移或不诚实缓存。高负载下未做毫秒比较；partial/legacy archive 仍可能需要完整读取。版本与安装策略是 committed-main-only：版本号只用于生成新安装包，不能用磁盘上的 App 版本反推源码内容；本次目标是从当前已提交树生成 0.2.216，再由标准安装器验证。
 ## 尚未解决与下一步
 
 只读日常日志先快照再分析。build `59f234869922131601d6ecf860bcedc94cb35f56173e093f884101e60b68b1fe`、0.2.214、3697 条、一个尚未关闭会话，仅为 provisional 线索：历史加载 IPC 34 样本 p50 401.5ms / p95 2341.3ms；Pi 能力探测存在约 12–25 秒等待。这不能用本次减少行渲染的计数宣称已解决。
