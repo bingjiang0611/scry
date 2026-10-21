@@ -46,7 +46,7 @@
 
 安装两次都停在 unit gate，未进入打包/安装，`/Applications/Scry.app` 未由本任务替换；用户运行实例未重启。交付检查时现有安装版本已变为 0.2.215，这不是本任务的安装结果，也不能证明它包含本次优化；后续必须集成到最新代码再验收，不能用本分支 0.2.214 覆盖较新版本。源码保留在独立分支，未推送、未合并到有并行暂存/WIP 的主工作区。
 
-## 续轮：Pi 历史打开的重复归档读取（2026-10-22）
+## 续轮：Pi 历史打开的重复归档读取（2026-10-21）
 
 ### 复现与判断
 
@@ -59,6 +59,14 @@
 - `src/main/session-history.test.ts` 增加 read callback 回归与负对照：complete page 不读 full archive，partial page 恰好读一次；31 项通过。
 - `npm run typecheck`、`npm run build` 通过。
 - `node .agents/skills/scry-performance-climb/scripts/timing-run.mjs pi-history-final -- node scripts/electron-security-smoke.mjs --dev-pi-history-only` 通过：41 轮分页与 archive reconciliation 通过；负载约 43→42，`highLoad=true`。
+
+### 父任务复核
+
+- 核对实际调用方仅传首个 archive 页（没有 before 游标），确认首个页的 hasOlder=false 才在这里代表完整快照。
+- 独立重跑 31 项 session-history 测试、typecheck、build、隔离 Electron Pi-history smoke，均通过。回归分别断言完整页和空归档不调用 full reader。
+- 临时将 helper 改回无条件 full read，新回归失败；随后恢复生产代码并确认无 diff，31 项重新通过。负对照不保留在提交中。
+- 日志：`/tmp/scry-ui-fluidity-treehouse-{unit,typecheck,build,native,negative}.log`。原生检查仍 highLoad=true，不作毫秒改善结论。
+- 主仓库最新已提交版本仍为 0.2.214，已安装 App 是 0.2.215。安装仍受源码版本不一致阻碍；后续集成 owner 必须先取得 0.2.215 对应的已提交源码，不能降级覆盖，也不能把主工作区并行 WIP 混入本提交。
 
 ### 结论与限制
 
