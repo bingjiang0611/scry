@@ -18,6 +18,25 @@ describe('WorkflowLiveObservationTracker', () => {
     expect(tracker.snapshot().status).toBe('unavailable')
   })
 
+  it('accepts only Claude model progress for claude_native and rejects wrong pairs', () => {
+    const claude = new WorkflowLiveObservationTracker({ ...identity('claude-root'), providerId: 'claude' })
+    expect(claude.observe({ source: 'claude_native', kind: 'model_progress', channel: 'text' })).toBe(true)
+    expect(claude.observe({ source: 'claude_native', kind: 'model_progress', channel: 'thinking' })).toBe(true)
+    expect(claude.observe({ source: 'claude_native', kind: 'tool_started', toolCallId: 'tool-not-supported' } as never)).toBe(false)
+    expect(claude.snapshot()).toMatchObject({ source: ['claude_native'], status: 'model_progress', modelProgressCount: 2 })
+
+    const pi = new WorkflowLiveObservationTracker(identity('wrong-claude-source'))
+    expect(pi.observe({ source: 'claude_native', kind: 'model_progress', channel: 'text' })).toBe(false)
+    expect(pi.snapshot().status).toBe('unavailable')
+  })
+
+  it('ignores late Claude observations after the attempt closes', () => {
+    const tracker = new WorkflowLiveObservationTracker({ ...identity('claude-late'), providerId: 'claude' })
+    tracker.close()
+    expect(tracker.observe({ source: 'claude_native', kind: 'model_progress', channel: 'text' })).toBe(false)
+    expect(tracker.snapshot()).toMatchObject({ status: 'unavailable', modelProgressCount: 0, source: [] })
+  })
+
   it('bounds native ID bytes and reports the observation gap rather than leaking the payload', () => {
     const tracker = new WorkflowLiveObservationTracker(identity('oversize'))
     tracker.observe({ source: 'pi_native', kind: 'tool_started', toolCallId: 'x'.repeat(1024 * 1024) })

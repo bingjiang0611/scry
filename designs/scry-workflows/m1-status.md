@@ -94,6 +94,26 @@ App **0.2.210** / CLI **0.2.49**，asar **`25ff05a75c5d75903ac4243ab0f3b3a860694
 
 PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时间校验关闭，登记离线进程无存活。没有对用户 App 发停止或启动命令，没有清空旧 unknown/pending。
 
+## Claude 主线程原生进度增量（仍不是完整 M1）
+
+- Claude 现在仅从 SDK raw `stream_event` 的 root（`parent_tool_use_id === null`）非空 `text_delta.text` 与 `thinking_delta.thinking` 提供 `claude_native` `model_progress` 诊断；不会把 assistant 快照、缓冲替换、签名、心跳、重试或子 agent 帧算作进展。
+- 该 callback 仅是 fail-open 诊断旁路；正常 transcript/trace/native recording、输出、usage 与结果收敛不变。Tracker 只接受 `claude_native` 与 Claude 的 `model_progress` 配对；Claude tool lifecycle 仍不支持，PreToolUse admission 与 PostToolUse/Failure 返回需要单独的 denied/cancel/background 分析，PostToolUse 不是物理后台任务结算。
+- 这只是 root-thread Claude 原生模型进度覆盖，不能称 Claude observability 完整、工具阶段覆盖或完整 M1；仍保持 `partial` coverage、`automaticStall: 'unsupported'`，不启用 model-wait/quota 推断、自动重启或 settlement/capacity authority。
+- 普通非 Workflow run 不解析新的 delta 观测；回调异常每个 run 最多警告一次，但后续原生输出继续处理。SDK hooks、权限和用量逻辑未改动。
+
+证据：`/tmp/scry-m1-claude-review.jl3lYZ/`，SDK **0.3.251**、App **0.2.210**。精确 asar 快照 hash **`02df677f90eb506d78d697627451e0605881f5cb8faf966434223d2d163e99d4`**，四个生产源码 hash 在 `scope.json`。未安装、未推送，未升级版本。
+
+| 检查 | 结果与边界 | 证据 |
+| --- | --- | --- |
+| 改前负对照 | 新观测行为 4 failed / 51 passed；父会话再以实际 SDK loop 证明普通 run 多做解析、持续异常写出 3 次警告，2 failed；不削弱原断言 | `/tmp/scry-m1-claude-negative.ByVsfZ/pre-change.log`、`before.log` |
+| SDK / adapter / tracker | 3 文件 **56 passed**；只计非空主线程 delta，拒绝错 Provider/Claude tool events/关闭后事件；普通 run 解析计数更低，持续异常只警告一次且输出仍完整 | `focused.log` |
+| 扩大受影响范围 | 9 文件 **127 passed**，包含 canonical stop、持久退出、live 存储隔离与 renderer 合并；上述数字重叠不累计 | `affected.log` |
+| 类型 / 包 | Node/web typecheck 与完整 `pack:artifact` 通过，含后台隐藏与安全/remote/文件 smoke。包 smoke 不是 Claude workflow 验收 | `typecheck.log`、`pack.log` |
+| 固定工作量 | trace.delivery 5 次均 2 messages / 165996 bytes，ratchet 通过；不代表 Claude delta CPU 或端到端延迟下降 | `performance/measure.json` |
+| 旧现场 | 16 个真实故障现场源 hash 不变；unknown/pending 未清除、退款或重放 | `scope.json` |
+
+本轮 Claude 证据来自 mock SDK/query 的原生结构流、真实 adapter 转交与 tracker 代码，不是实际 Claude CLI transport、完整 App 中 Claude workflow 或真账号验收。未运行真实 Provider/账号、未复制凭据。后续由维护 Agent 补 Claude denied/cancel/background 的原生工具生命周期合同与离线 transport 验收；真实探针须用户先明确账号、模型和费用授权。
+
 ## 尚未完成与下一段
 
 - 普通 App 退出已新增本页记录的 durable preparation gate；内部其他错误清理/stopAll 仍是原 best-effort 路径，不能把退出保证外推给它们。历史不可用分支仍 fail-closed，缺少是否允许明确确认退出的产品决定。

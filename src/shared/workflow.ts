@@ -112,6 +112,7 @@ export type WorkflowLiveObservation =
   | { source: 'pi_native'; kind: 'tool_started'; toolCallId: string }
   | { source: 'pi_native'; kind: 'tool_ended'; toolCallId: string }
   | { source: 'pi_native'; kind: 'model_progress'; channel: 'text' | 'thinking' }
+  | { source: 'claude_native'; kind: 'model_progress'; channel: 'text' | 'thinking' }
   | { source: 'main_permission'; kind: 'permission_started'; permissionId: string }
   | { source: 'main_permission'; kind: 'permission_ended'; permissionId: string }
 
@@ -123,7 +124,7 @@ export interface WorkflowLiveAttempt {
   runId: string
   providerId: ProviderId
   epoch: string
-  source: Array<'pi_native' | 'main_permission'>
+  source: Array<'pi_native' | 'claude_native' | 'main_permission'>
   status: WorkflowLiveStatus
   /** Count of tracked IDs, not proof that the Provider has no other active tools. */
   trackedToolCount: number

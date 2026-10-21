@@ -6,6 +6,7 @@ import { query, type HookInput, type PermissionUpdate, type SDKUserMessage } fro
 import { open } from 'node:fs/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
+import type { WorkflowLiveObservation } from '../shared/workflow'
 import {
   agentPermissionDecision,
   agentPermissionQuestion,
@@ -56,6 +57,8 @@ export interface RunOpts {
   mcpServers?: Record<string, Record<string, unknown>>
   /** 双流事件日志的原生侧入口；未启用日志时调用方不传。 */
   recordNative?: (type: string, payload: unknown) => void
+  /** Root Claude native model deltas only; diagnostic failures must not fail the run. */
+  onWorkflowObservation?: (observation: WorkflowLiveObservation) => void
 }
 
 export interface RunHandle {
@@ -87,6 +90,24 @@ function isSyntheticPromptHook(input: Record<string, unknown>): boolean {
     : undefined
   const prompt = hookString(input, 'prompt')
   return originKind === 'task-notification' || prompt?.trimStart().startsWith('<task-notification>') === true
+}
+
+function nativeClaudeWorkflowObservation(message: Record<string, unknown>): WorkflowLiveObservation | undefined {
+  if (message.type !== 'stream_event' || message.parent_tool_use_id !== null) return undefined
+  const event = message.event
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return undefined
+  const eventRecord = event as Record<string, unknown>
+  if (eventRecord.type !== 'content_block_delta') return undefined
+  const delta = eventRecord.delta
+  if (!delta || typeof delta !== 'object' || Array.isArray(delta)) return undefined
+  const deltaRecord = delta as Record<string, unknown>
+  if (deltaRecord.type === 'text_delta' && typeof deltaRecord.text === 'string' && deltaRecord.text.length > 0) {
+    return { source: 'claude_native', kind: 'model_progress', channel: 'text' }
+  }
+  if (deltaRecord.type === 'thinking_delta' && typeof deltaRecord.thinking === 'string' && deltaRecord.thinking.length > 0) {
+    return { source: 'claude_native', kind: 'model_progress', channel: 'thinking' }
+  }
+  return undefined
 }
 
 function nativeProviderTurnId(input: Record<string, unknown>): string | undefined {
@@ -233,6 +254,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   let transcriptPath: string | undefined
   let frozenTranscriptBaseline: TranscriptBaseline | undefined
   let stderrDiagnostic = ''
+  let observationWarningLogged = false
   let spawnedChild: ChildProcessWithoutNullStreams | undefined
   let spawnedIdentity: ProcessIdentity | undefined
   const captureSessionId = (next: string | undefined): void => {
@@ -487,6 +509,19 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
           providerStatus = 'failed'
         }
         opts.recordNative?.(m.type ?? 'unknown', msg)
+        if (opts.onWorkflowObservation) {
+          const workflowObservation = nativeClaudeWorkflowObservation(msg as unknown as Record<string, unknown>)
+          if (workflowObservation) {
+            try {
+              opts.onWorkflowObservation(workflowObservation)
+            } catch (error) {
+              if (!observationWarningLogged) {
+                observationWarningLogged = true
+                console.warn(`[scry] Claude workflow observation failed (${runId}):`, error)
+              }
+            }
+          }
+        }
         const events = normalizeSdkMessage(msg, ctx)
         if (m.type === 'stream_event') {
           for (const event of events) {

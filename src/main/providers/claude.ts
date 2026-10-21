@@ -445,7 +445,8 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           permissionMode: request.permissionMode,
           mcpServers,
           historyReader: request.historyReader,
-          recordNative: request.recordNative
+          recordNative: request.recordNative,
+          onWorkflowObservation: request.onWorkflowObservation
         }
       )
       return {

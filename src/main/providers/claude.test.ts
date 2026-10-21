@@ -450,6 +450,27 @@ describe('Claude provider adapter', () => {
     }
   })
 
+  it('passes the workflow observation callback through to the Claude runner', () => {
+    const onWorkflowObservation = vi.fn()
+    runner.runAgent.mockReturnValue({
+      promise: Promise.resolve({}),
+      interrupt: vi.fn(),
+      forceKill: vi.fn(),
+      getSessionId: vi.fn()
+    })
+
+    createClaudeAdapter('/tmp/scry-home').run({
+      runId: 'run-observation',
+      prompt: 'probe',
+      cwd: '/repo',
+      attachments: [],
+      emit: vi.fn(),
+      onWorkflowObservation
+    })
+
+    expect(runner.runAgent.mock.calls.at(-1)?.[3]).toEqual(expect.objectContaining({ onWorkflowObservation }))
+  })
+
   it('forwards an explicit setting-source allowlist without changing the default', async () => {
     process.env.SCRY_CLAUDE_SETTING_SOURCES = 'project,local'
     runner.runAgent.mockReturnValue({

@@ -89,6 +89,64 @@ describe('Claude Agent SDK launch options', () => {
     expect(emitted.filter((event) => event.kind === 'model').map((event) => event.text).join('')).toBe('OK')
   })
 
+  it('observes only nonempty root Claude text and thinking deltas without changing output or native recording', async () => {
+    sdk.query.mockReturnValue(completedQuery(
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'root' } } },
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'reason' } } },
+      { type: 'stream_event', parent_tool_use_id: 'tool-parent', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'child' } } },
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '' } } },
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '' } } },
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_delta', delta: { type: 'text_delta', text: 'not-progress' } } },
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'signature_delta', signature: 'sig' } } },
+      { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'root' }] } }
+    ))
+    const emitted: Array<{ kind: string; text?: string }> = []
+    const observations: string[] = []
+    const nativeTypes: string[] = []
+
+    await runAgent('probe', 'run-native-observation', (event) => emitted.push(event), {
+      recordNative: (type) => nativeTypes.push(type),
+      onWorkflowObservation: (observation) => {
+        if (observation.kind === 'model_progress') observations.push(observation.channel)
+      }
+    }).promise
+
+    expect(observations).toEqual(['text', 'thinking'])
+    expect(emitted.filter((event) => event.kind === 'model').map((event) => event.text).join('')).toBe('rootchildroot')
+    expect(nativeTypes).toEqual(['stream_event', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'assistant', 'result'])
+  })
+
+  it('does not parse workflow delta observations for ordinary non-workflow runs', async () => {
+    const deltaReads = async (observe: boolean) => {
+      let reads = 0
+      const event = { type: 'content_block_delta', get delta() { reads++; return { type: 'text_delta', text: 'root' } } }
+      sdk.query.mockReturnValue(completedQuery({ type: 'stream_event', parent_tool_use_id: null, event }))
+      await runAgent('probe', 'run-delta-read-count', () => {}, observe ? { onWorkflowObservation: () => {} } : {}).promise
+      return reads
+    }
+    const ordinary = await deltaReads(false)
+    expect(await deltaReads(true)).toBeGreaterThan(ordinary)
+  })
+
+  it('fails open and bounds warnings when the workflow observation callback repeatedly throws', async () => {
+    sdk.query.mockReturnValue(completedQuery(
+      ...['root', ' next', ' last'].map(text => ({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } }))
+    ))
+    const emitted: Array<{ kind: string; text?: string }> = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await expect(runAgent('probe', 'run-observation-failure', (event) => emitted.push(event), {
+        onWorkflowObservation: () => { throw new Error('diagnostic callback failure') }
+      }).promise).resolves.toMatchObject({ status: 'completed' })
+      expect(emitted.some((event) => event.kind === 'model' && event.text === 'root')).toBe(true)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Claude workflow observation failed (run-observation-failure):'), expect.any(Error))
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(emitted.filter(event => event.kind === 'model').map(event => event.text).join('')).toBe('root next last')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('propagates a non-success SDK result as a failed Provider run', async () => {
     sdk.query.mockReturnValue({
       async *[Symbol.asyncIterator]() {

@@ -22,7 +22,7 @@ export class WorkflowLiveObservationTracker {
   readonly epoch = randomUUID()
   private readonly tools = new Set<string>()
   private readonly permissions = new Set<string>()
-  private readonly sources = new Set<'pi_native' | 'main_permission'>()
+  private readonly sources = new Set<'pi_native' | 'claude_native' | 'main_permission'>()
   private observedAt: number
   private modelProgressCount = 0
   private lastGenuineProgressAt: number | undefined
@@ -35,7 +35,9 @@ export class WorkflowLiveObservationTracker {
   }
 
   observe(observation: WorkflowLiveObservation): boolean {
-    if (this.closed || (observation.source === 'pi_native' && this.identity.providerId !== 'pi')) return false
+    if (this.closed) return false
+    if (observation.source === 'pi_native' && this.identity.providerId !== 'pi') return false
+    if (observation.source === 'claude_native' && (this.identity.providerId !== 'claude' || observation.kind !== 'model_progress')) return false
     const at = this.now()
     switch (observation.kind) {
       case 'tool_started':
