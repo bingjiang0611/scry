@@ -20,6 +20,23 @@ final class HistoryTurnsPageTests: XCTestCase {
     XCTAssertNoThrow(try page(completeness: "complete").validate())
   }
 
+  // The host stamps the page with its signed source-version token:
+  // `<archive>:<transcript>:<0|1>:<active>:<native>:<signature>` = 294 chars.
+  // A 256-byte bound rejected every real session-scope page, so the device could
+  // only ever paint the 2-turn preview and never the recent window.
+  func testRealSignedSourceVersionTokenIsAccepted() throws {
+    let hex = String(repeating: "a", count: 64)
+    let token = [hex, hex, "0", hex, hex, String(repeating: "b", count: 32)].joined(separator: ":")
+    XCTAssertEqual(token.count, 294)
+    let stamped = G0Transport.RunHistoryTurnsPage(turns: [.init(userText: "real question",
+      items: [.init(kind: "output", text: "real answer")])], offset: 0, totalTurns: 1, hasOlder: false,
+      snapshot: token, source: "pi_native", completeness: "complete")
+    XCTAssertNoThrow(try stamped.validate())
+    XCTAssertThrowsError(try G0Transport.RunHistoryTurnsPage(turns: stamped.turns, offset: 0, totalTurns: 1,
+      hasOlder: false, snapshot: String(repeating: "a", count: 1_024), source: "pi_native",
+      completeness: "complete").validate())
+  }
+
   func testInvalidBoundsAndProvenanceFailClosed() throws {
     XCTAssertThrowsError(try page(offset: -1).validate())
     XCTAssertThrowsError(try page(total: 0).validate())

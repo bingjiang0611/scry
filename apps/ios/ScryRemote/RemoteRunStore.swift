@@ -1247,31 +1247,16 @@ final class RemoteRunStore: ObservableObject {
         // still open its own bounded tunnel; the recent window never does.
         do {
           if !legacyFull {
-            // A first-screen preview remains explicitly partial. It also gives
-            // an oversized turn a readable surface before the capacity reply.
-            if case .loading = self.history {
-              let preview = try await client.historyPreview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
-              guard current() else { return }
-              if preview.available {
-                self.showPreview(preview, key: key, cached: false)
-                self.recordSuccess()
-                self.historyReadBackoff[key] = nil
-                do {
-                  _ = try await disk.writePreview(preview, key: key, epoch: diskEpoch)
-                } catch {
-                  // The network answer already rendered; a mirror failure only
-                  // costs the next cold open, so it never blocks this one.
-                  if current() { self.historyStorageNotice = "首屏镜像未保存到手机缓存：\(Self.describe(error))" }
-                }
-              }
-            }
+            // One request, not two. The recent window already carries the turns
+            // this screen shows, and on a slow link each round trip costs most of
+            // a second, so fetching a 2-turn preview first only delayed the same
+            // content. The preview stays for the oversized-window case below.
             do {
               let recent = try await client.historyTurnsPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, before: nil, limit: 3, snapshot: nil, agentProfileId: agentProfileId)
               guard current() else { return }
               self.recordSuccess()
               // Session display may legitimately mix transcript-only legacy/fork
-              // turns with structured archive turns. Keep that evidence visible;
-              // only a proven host runId can suppress a local overlay.
+              // turns with run-id turns; a page without run ids cannot dedupe.
               if hasLocalTurns, !recent.turns.contains(where: { $0.runId != nil }) {
                 self.historyStorageNotice = "主机历史含未标识的 legacy/fork 轮次；已保留显示，无法据文本去重本机运行。"
               }
@@ -1287,6 +1272,16 @@ final class RemoteRunStore: ObservableObject {
             } catch let error as G0Transport.RunError {
               guard case .host(code: "history_capacity_exceeded") = error else { throw error }
               guard current() else { return }
+              // The window is too large to frame. A bounded preview is the only
+              // readable surface; the notice keeps the choice explicit.
+              if case .loading = self.history {
+                if let preview = try? await client.historyPreview(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId),
+                   preview.available, current() {
+                  self.showPreview(preview, key: key, cached: false)
+                  _ = try? await disk.writePreview(preview, key: key, epoch: diskEpoch)
+                  self.recordSuccess()
+                }
+              }
               self.historyCapacityLimit = true
               self.historyStorageNotice = "最近窗口超过传输容量；可明确选择加载完整历史。"
               self.recordFailure(error, since: requestConnectionRevision)
@@ -2787,9 +2782,10 @@ final class RemoteRunStore: ObservableObject {
         case .loaded(let turns): return "loaded(\(turns.count))"
         }
       }
+      let profile = argumentValue("-profile")
       @MainActor func open(_ store: RemoteRunStore, _ label: String) async {
         let start = Date()
-        store.loadHistory(providerId: provider, cwd: cwd, externalSessionId: external)
+        store.loadHistory(providerId: provider, cwd: cwd, externalSessionId: external, agentProfileId: profile)
         let paint = describe(store.history)
         let paintMs = Int(Date().timeIntervalSince(start) * 1000)
         let settleStart = Date()
@@ -2800,7 +2796,12 @@ final class RemoteRunStore: ObservableObject {
           + " notice=\(store.historyStorageNotice ?? "-") cache=\(store.historyFromCache)")
       }
       let store = RemoteRunStore()
-      await open(store, "cold-open")
+      // What a launched app looks like: the scene-active prewarm has run, so the
+      // bulk lane is open before the first tap.
+      store.foregrounded()
+      try? await Task.sleep(nanoseconds: 2_500_000_000)
+      await open(store, "warm-launch-open")
+      await open(RemoteRunStore(), "cold-open")
       await open(store, "reopen-after-back")
       await open(store, "reopen-again")
       // A fresh store shares only the on-disk mirror, like a relaunched app.

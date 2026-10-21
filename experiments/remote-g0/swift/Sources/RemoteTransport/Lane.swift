@@ -57,12 +57,23 @@ public final class RelaySession: Sendable {
   // Opens the lanes a first user action needs before it is taken: the control
   // lane for commands, and the bulk lane because opening a session reads history
   // there. Paying DNS + TCP + outer TLS + rendezvous + inner mTLS at tap time is
-  // the difference between an instant first screen and a multi-second one.
+  // the difference between an instant first screen and a multi-second one. Both
+  // lanes open concurrently — serially they doubled the warm-up for no reason.
   // Errors are returned to the caller; a failed prewarm is not evidence that the
-  // host is offline.
+  // host is offline, and one lane's failure must not cancel the other.
   public func prewarm() async throws {
-    try await lanes[.control]!.prewarm()
-    try await lanes[.bulk]!.prewarm()
+    var firstError: Error?
+    await withTaskGroup(of: Error?.self) { group in
+      for lane in [Lane.control, Lane.bulk] {
+        let lane = lanes[lane]!
+        group.addTask {
+          do { try await lane.prewarm(); return nil }
+          catch { return error }
+        }
+      }
+      for await error in group where firstError == nil { firstError = error }
+    }
+    if let firstError { throw firstError }
   }
 
   // Drops every tunnel (app backgrounded, network path changed). In-flight

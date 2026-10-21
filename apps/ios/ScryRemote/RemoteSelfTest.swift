@@ -520,7 +520,7 @@ enum RemoteSelfTest {
       do {
         let catalog = try await client.sessions()
         let ref = catalog.first { $0.providerId == provider && $0.cwd == cwd && ($0.externalSessionId ?? $0.sessionId) == external }
-        print("CONTRACTPROBE catalog sessions=\(catalog.count) profile=" + (ref?.agentProfileId != nil ? "present" : "absent"))
+        print("CONTRACTPROBE catalog sessions=\(catalog.count) profile=\(ref?.agentProfileId ?? "absent")")
         func attempt(_ name: String, _ body: () async throws -> String) async {
           let started = Date()
           do {
