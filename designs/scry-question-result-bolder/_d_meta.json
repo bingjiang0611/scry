@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry 会话已回答问答块 · Bolder": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-23T00:00:00.000Z",
+          "status": "needs-review",
+          "subtitle": "v1：四稿（A 现状 / B 倒置 / C 台账 / D 单行），深色浅色与 800·620 宽度可切",
+          "viewport": {
+            "width": 1512,
+            "height": 708
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-23T00:00:00.000Z",
+  "updatedAt": "2026-10-23T00:00:00.000Z"
+}

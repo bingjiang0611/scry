@@ -1,0 +1,632 @@
+/* Scry · 已回答问答块 · Bolder 设计稿
+   token 全部来自 src/renderer/styles.css 的现有主题变量；不新增颜色、阴影、字体或圆角。
+   目标块内不引入新的图形原语：只复用发丝线、等宽小字、状态色与阅读声部的字号层级。 */
+
+:root {
+  color-scheme: dark;
+  --bg: #07090d;
+  --panel: #0b0f15;
+  --panel2: #10151e;
+  --panel3: #151b26;
+  --border: #202633;
+  --border2: #303949;
+  --border3: #171c26;
+  --fg: #f4f6fa;
+  --dim: #b7bfcc;
+  --dim2: #7f899a;
+  --dim3: #535d6e;
+  --accent: #6aa8ff;
+  --ok: #69cc93;
+  --warn: #efb958;
+  --bad: #f36c67;
+  --surface-inset: rgba(0, 0, 0, 0.18);
+  --surface-subtle: rgba(255, 255, 255, 0.025);
+  --main-surface: #090c11;
+  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --panel2: #f6f7f9;
+  --panel3: #eceff3;
+  --border: #d9dee5;
+  --border2: #c5ccd6;
+  --border3: #e7eaee;
+  --fg: #1d2229;
+  --dim: #4d5662;
+  --dim2: #6d7682;
+  --dim3: #929aa4;
+  --accent: #3f72b7;
+  --ok: #18794e;
+  --warn: #94620b;
+  --bad: #bf3f3a;
+  --surface-inset: rgba(0, 0, 0, 0.04);
+  --surface-subtle: rgba(0, 0, 0, 0.022);
+  --main-surface: #f3f5f7;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--main-surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+.ico {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- 稿纸外壳（非产品样式） ---------- */
+.chrome {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--main-surface) 92%, var(--panel));
+  backdrop-filter: blur(8px);
+}
+.chrome h1 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.chrome p {
+  margin: 5px 0 0;
+  max-width: 74ch;
+  color: var(--dim2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.chrome-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+.seg button {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim2);
+  font: 500 11.5px/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg button[aria-selected='true'] {
+  background: var(--panel3);
+  color: var(--fg);
+}
+.seg button:focus-visible,
+#compare:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+}
+#compare {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  background: var(--panel2);
+  color: var(--fg);
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+#compare[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border2));
+  color: var(--accent);
+}
+
+.stage {
+  display: grid;
+  gap: 26px;
+  padding: 26px 24px 10px;
+  justify-content: center;
+}
+.stage.compare { justify-items: stretch; }
+
+.sheet { display: grid; gap: 8px; }
+.sheet-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--dim2);
+  font: 500 11.5px/1 var(--font-ui);
+}
+.sheet-caption b {
+  padding: 2px 5px;
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--fg);
+  font: 650 10.5px/1 var(--font-mono);
+}
+.sheet-caption small {
+  color: var(--dim3);
+  font: 400 11px/1.4 var(--font-ui);
+}
+.sheet-note {
+  margin: 0;
+  max-width: 84ch;
+  color: var(--dim2);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.sheet-note b { color: var(--dim); font-weight: 600; }
+
+/* ---------- 会话上下文（现状，不改） ---------- */
+.transcript {
+  width: 100%;
+  padding: 14px 18px 18px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+}
+.turn { width: min(820px, 100%); }
+.model-text {
+  margin: 0;
+  max-width: 72ch;
+  color: var(--fg);
+  font-size: 14.5px;
+  line-height: 1.72;
+}
+.turn-flow {
+  position: relative;
+  margin: 12px 0 4px;
+  padding-left: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.turn-flow::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--border);
+}
+.turn > .model-text + .model-text { margin-top: 14px; }
+.turn-flow + .model-text { margin-top: 14px; }
+
+.tool-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+}
+.tg-pill {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  color: var(--dim2);
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font: 600 10px/1 var(--font-mono);
+}
+.tg-label {
+  min-width: 0;
+  color: var(--dim3);
+  font: 11.5px/1 var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tg-rule {
+  flex: 1 1 24px;
+  min-width: 16px;
+  height: 1px;
+  background: var(--border3);
+}
+.tg-dur {
+  color: var(--dim3);
+  font: 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tool-group-body {
+  margin-top: 8px;
+  padding: 0 8px;
+  background: var(--panel);
+  border: 1px solid var(--border3);
+}
+.tool-card {
+  margin: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--border3);
+}
+.tool-card:first-child { border-top: 0; }
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 18px;
+}
+.tool-row .st { display: grid; place-items: center; color: var(--ok); }
+.tool-row .st.err { color: var(--bad); }
+.tool-row .st .ico { width: 13px; height: 13px; }
+.tool-row .name {
+  color: var(--fg);
+  font: 600 12.5px/1 var(--font-mono);
+  letter-spacing: -0.005em;
+}
+.tool-row .arg {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--dim);
+  font: 12px/1 var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-row .meta {
+  flex: 0 0 200px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim2);
+  font: 11px/1 var(--font-mono);
+}
+.tool-row .dur {
+  flex: 0 0 6ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tool-row .bar {
+  flex: 0 0 54px;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel3);
+}
+.tool-row .bar i { display: block; height: 100%; background: var(--dim3); }
+.tool-row .bar.slow i { background: var(--warn); }
+.chev { color: var(--dim2); width: 13px; height: 13px; }
+
+/* 目标块的范围标注：稿纸标注，不属于产品样式。
+   用卡片左侧留白里的虚线括号，避免虚线横穿工具卡行。 */
+.target { position: relative; }
+.target::before {
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 62%, transparent);
+  border-right: 0;
+  border-radius: 3px 0 0 3px;
+  pointer-events: none;
+}
+
+/* ---------- 目标块公共部分 ---------- */
+.qb-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font: 650 10.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+}
+.qb-stamp .ico { width: 11px; height: 11px; stroke-width: 2.2; }
+.qblock.error .qb-stamp { color: var(--bad); }
+.qb-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim3);
+  font: 400 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.qb-meta .sep { color: var(--dim3); opacity: 0.6; }
+
+.qb-raw {
+  margin-top: 10px;
+  border-top: 1px solid var(--border3);
+  padding-top: 8px;
+}
+.qb-raw > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  color: var(--dim3);
+  font: 400 10.5px/1.4 var(--font-mono);
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.qb-raw > summary::-webkit-details-marker { display: none; }
+.qb-raw > summary:hover { color: var(--dim2); }
+.qb-raw > summary:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+}
+.qb-raw > summary .ico {
+  width: 10px;
+  height: 10px;
+  transition: transform 0.14s var(--ease-out);
+}
+.qb-raw[open] > summary .ico { transform: rotate(90deg); }
+.qb-raw .lbl {
+  margin: 8px 0 4px;
+  color: var(--dim3);
+  font: 400 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.qb-raw pre {
+  margin: 0;
+  padding: 8px 9px;
+  overflow: auto;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  color: var(--dim);
+  font: 11px/1.55 var(--font-mono);
+}
+.qb-fallback {
+  margin-top: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  color: var(--dim);
+  font: 11.5px/1.6 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- A · 现状：块内没有任何样式规则 ---------- */
+/* .question-result 的基础规则在 ab5601b 被删除，且没有补回；真实 App 里这里渲染的是
+   浏览器默认的 <dl>/<dd>/<summary>，只继承正文的 14px 与 --fg。下面按 UA 默认值复现。 */
+.qblock.v-a {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.v-a .qb-head { display: block; }
+.v-a .qb-head > * { font-size: inherit; color: inherit; }
+.v-a .qb-head small { font-size: 11.67px; }
+.v-a .qb-list { margin: 1em 0; }
+.v-a .qb-list dt { margin: 0; }
+.v-a .qb-list dd { margin: 0 0 0 40px; }
+.v-a .qb-raw { margin: 0; border-top: 0; padding-top: 0; }
+.v-a .qb-raw > summary {
+  display: list-item;
+  color: inherit;
+  font: 700 13.33px/1.5 var(--font-ui);
+}
+.v-a .qb-raw .lbl { margin: 1em 0 0; color: inherit; font: 400 13.33px/1 var(--font-mono); }
+.v-a .qb-raw pre { margin: 1em 0; padding: 0; border: 0; background: none; font-size: 13px; }
+
+/* ---------- B · 倒置：人工决定回到阅读声部 ---------- */
+.qblock.v-b {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border3);
+}
+.v-b .qb-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+.v-b .qb-decision + .qb-decision { margin-top: 14px; }
+.v-b .qb-q {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--dim2);
+  font: 400 12.5px/1.6 var(--font-ui);
+}
+.v-b .qb-a {
+  margin: 2px 0 0;
+  max-width: 68ch;
+  color: var(--fg);
+  font: 650 16px/1.45 var(--font-ui);
+  letter-spacing: -0.012em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.v-b .qb-a.missing { color: var(--dim2); font-weight: 500; }
+
+/* ---------- C · 台账：所有值对齐到同一条右轨 ---------- */
+.qblock.v-c {
+  margin-top: 6px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border3);
+}
+.v-c .qb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.v-c .qb-stamp {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.v-c .qb-head .qb-meta { font-size: 10px; }
+.v-c .qb-head .qb-meta:last-child { margin-left: auto; }
+.v-c .qb-rows {
+  margin-top: 4px;
+  border-top: 1px solid var(--border3);
+}
+.v-c .qb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(84px, 38%);
+  align-items: baseline;
+  gap: 20px;
+  padding: 8px 0;
+}
+.v-c .qb-row + .qb-row { border-top: 1px solid var(--border3); }
+.v-c .qb-q {
+  margin: 0;
+  color: var(--dim);
+  font: 400 12.5px/1.55 var(--font-ui);
+  overflow-wrap: anywhere;
+}
+.v-c .qb-a {
+  margin: 0;
+  color: var(--fg);
+  font: 600 13px/1.5 var(--font-ui);
+  text-align: right;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.v-c .qb-a.missing { color: var(--dim2); font-weight: 500; }
+.v-c .qb-fallback { margin: 0 0 8px; text-align: left; }
+
+/* ---------- D · 单行：一条时间线记录 ---------- */
+.qblock.v-d {
+  margin-top: 6px;
+  border-top: 1px solid var(--border3);
+}
+.v-d .qb-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 5px 0;
+}
+.v-d .qb-line + .qb-line { border-top: 1px solid var(--border3); }
+.v-d .qb-q {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 46%;
+  margin: 0;
+  color: var(--dim2);
+  font: 400 12px/1.4 var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v-d .qb-a {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 34%;
+  margin: 0;
+  color: var(--fg);
+  font: 600 12px/1.4 var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v-d .qb-a.missing { color: var(--dim2); font-weight: 500; }
+.v-d .qb-line.qb-head .qb-meta:last-child { margin-left: auto; flex: none; }
+.v-d .qb-raw {
+  margin-top: 0;
+  padding: 6px 0 7px;
+}
+
+/* ---------- 边界与状态 ---------- */
+.states {
+  width: 100%;
+  padding: 22px 24px 30px;
+  border-top: 1px solid var(--border);
+}
+.states-inner { margin: 0 auto; }
+.states h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+.states-note {
+  margin: 6px 0 16px;
+  color: var(--dim2);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.state-grid {
+  display: grid;
+  gap: 14px;
+}
+.state-case { display: grid; gap: 6px; }
+.state-label {
+  color: var(--dim3);
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.05em;
+}
+.state-frame {
+  padding: 2px 8px 8px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+/* ---------- 脚注 ---------- */
+.notes {
+  padding: 18px 24px 40px;
+  border-top: 1px solid var(--border);
+}
+.notes dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  max-width: 96ch;
+}
+.notes dl > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+}
+.notes dt {
+  color: var(--dim3);
+  font: 500 10.5px/1.6 var(--font-mono);
+  letter-spacing: 0.06em;
+}
+.notes dd {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ---------- 窄正文：右栏打开时的真实宽度 ---------- */
+@media (max-width: 900px) {
+  .chrome { flex-direction: column; }
+  .chrome-controls { justify-content: flex-start; }
+}
+.width-620 .tool-row .meta { flex-basis: 148px; }
+.width-620 .target::before { left: -12px; width: 5px; }
+.width-620 .v-b .qb-a { font-size: 15.5px; }
+.width-620 .v-c .qb-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+.width-620 .v-c .qb-a { text-align: left; }
+.width-620 .v-d .qb-q { max-width: 52%; }
+.width-620 .v-d .qb-a { max-width: 40%; }

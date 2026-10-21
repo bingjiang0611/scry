@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scry · 已回答问答块 · Bolder 设计稿</title>
+  <link rel="stylesheet" href="./style.css?v=9">
+</head>
+<body>
+  <header class="chrome">
+    <div>
+      <h1>Scry · 会话里的「已回答」问答块</h1>
+      <p>Bolder 设计稿 · 卡片左侧虚线括号内是要改的块，其余（工具组行、工具卡行、相邻 bash）保持现状 · 示例数据取自你的截图，外加 5 个边界状态</p>
+    </div>
+    <div class="chrome-controls">
+      <div class="seg" id="variants" role="tablist" aria-label="设计稿"></div>
+      <div class="seg" role="group" aria-label="主题">
+        <button data-theme="dark" aria-selected="true">深色</button>
+        <button data-theme="light" aria-selected="false">浅色</button>
+      </div>
+      <div class="seg" role="group" aria-label="正文宽度">
+        <button data-width="800" aria-selected="true">800px</button>
+        <button data-width="620" aria-selected="false">620px</button>
+      </div>
+      <button id="compare" aria-pressed="false">同屏对比</button>
+    </div>
+  </header>
+  <main id="stage" class="stage single"></main>
+  <footer class="notes" id="notes"></footer>
+  <script src="./draft.js?v=9"></script>
+</body>
+</html>
