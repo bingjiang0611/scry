@@ -65,6 +65,52 @@ describe('Pi grouped questionnaire', () => {
     expect(ask).toHaveBeenCalledTimes(1)
   })
 
+  it('translates the existing iOS label-only single and multi-select payloads', async () => {
+    const { group } = setup()
+    const ask = vi.fn(async (): Promise<AgentQuestionResponse> => ({ runId: 'run', questionId: 'tool', behavior: 'answered', answers: {
+      'What matters?': 'Speed', 'Which parts?': 'UI, Core', 'When to review?': 'Later'
+    } }))
+    expect(await group.reply(first, ask)).toMatchObject({ value: '2. Speed — Finish sooner' })
+    expect(await group.reply(second, ask)).toMatchObject({ value: '1,2' })
+    expect(await group.reply(third, ask)).toMatchObject({ value: '2. Later — At the end' })
+    expect(ask).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reinterpret explicit custom multi-select text as label selections', async () => {
+    const { group } = setup()
+    const ask = async (): Promise<AgentQuestionResponse> => ({ runId: 'run', questionId: 'tool', behavior: 'answered', answers: {
+      'What matters?': '2', 'Which parts?': 'UI, Core', 'When to review?': '2'
+    }, nativeCustomAnswers: ['Which parts?'] })
+    await group.reply(first, ask)
+    expect(await group.reply(second, ask)).toMatchObject({ value: 'UI, Core' })
+  })
+
+  it('keeps legacy numeric labels distinct from desktop option indices', async () => {
+    const input = { questions: questionnaireInput.questions.map((question, index) => index === 0
+      ? { ...question, options: question.options.map((option, optionIndex) => ({ ...option, label: String(2 - optionIndex) })) }
+      : question) }
+    const ask = (nativeCustomAnswers?: string[]): Promise<AgentQuestionResponse> => Promise.resolve({
+      runId: 'run', questionId: 'tool', behavior: 'answered', answers: { 'What matters?': '1', 'Which parts?': '1,2', 'When to review?': '2' },
+      ...(nativeCustomAnswers ? { nativeCustomAnswers } : {})
+    })
+    const legacy = PiQuestionnaire.fromTool('run', 'tool', input)!
+    expect(await legacy.reply(first, () => ask())).toMatchObject({ value: '2. 1 — Finish sooner' })
+    const desktop = PiQuestionnaire.fromTool('run', 'tool', input)!
+    expect(await desktop.reply(first, () => ask([]))).toMatchObject({ value: '1. 2 — Stay in control' })
+  })
+
+  it('cancels ambiguous legacy label lists rather than guessing a subset', async () => {
+    const input = { questions: questionnaireInput.questions.map((question, index) => index === 1
+      ? { ...question, options: [{ label: 'UI, Core', description: 'Both' }, ...question.options] }
+      : question) }
+    const ask = async (): Promise<AgentQuestionResponse> => ({ runId: 'run', questionId: 'tool', behavior: 'answered', answers: {
+      'What matters?': '2', 'Which parts?': 'UI, Core', 'When to review?': '2'
+    } })
+    const group = PiQuestionnaire.fromTool('run', 'tool', input)!
+    await group.reply(first, ask)
+    expect(await group.reply(second, ask)).toEqual({ type: 'extension_ui_response', id: 'second', cancelled: true })
+  })
+
   it('cancels without sending any partial answer', async () => {
     const { group } = setup()
     expect(await group.reply(first, async () => ({ runId: 'run', questionId: 'tool', behavior: 'cancelled' })))
