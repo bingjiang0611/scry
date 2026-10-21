@@ -544,7 +544,33 @@
           "sha256": "c30b471e9d1aee3ba7591469c5ca5a91a1bd0684904ced0954dd52931e3aace8"
         }
       ],
-      "visualCoverage": "Current desktop accessibility tree observed; visual capture timed out. Committed dark/light performance screenshots have identical hashes and both show dark UI. Six extracted desktop specimens visually checked in dark and light at a 1512x764 Chrome viewport; search focus confirmed by readback after an interaction timeout, without redispatch. This is not current App light-theme, full-state, or iOS real-device visual acceptance.",
+      "visualCoverage": "On 2026-10-21, real desktop dark/light workspaces and iPhone home/settings screens were visually inspected. This supersedes the earlier desktop capture timeout, but does not establish current-source build identity or full-state acceptance. Six extracted desktop specimens were separately checked in dark/light at a 1512x764 Chrome viewport, including search focus readback. Historical committed dark/light performance images remain identical dark captures, not light-theme evidence. Private live screenshots are not committed.",
+      "realDeviceVisualCheck": {
+        "date": "2026-10-21",
+        "desktop": {
+          "windowPoints": [1512, 885],
+          "surfaces": ["dark session workspace", "light session workspace"],
+          "installedVersion": "0.2.212",
+          "workingTreeVersion": "0.2.213",
+          "runningBuildIdentity": "unconfirmed: process started before the latest installation",
+          "restoration": "dark appearance restored and visually confirmed; settings dialog closed"
+        },
+        "ios": {
+          "device": "iPhone 13",
+          "osVersion": "26.5.2",
+          "screenPoints": [390, 844],
+          "bundleId": "com.scry.remote.local",
+          "version": "0.1.15",
+          "build": "22",
+          "control": "iCTRL on the physical device",
+          "surfaces": ["fixed-dark home", "settings"],
+          "sourceBuildIdentity": "unconfirmed",
+          "restoration": "returned to the original settings screen"
+        },
+        "assessment": "Observed palette direction, hierarchy and component forms match the documented design language; screenshots do not prove exact tokens or contrast compliance.",
+        "excluded": ["current-source build acceptance", "iOS session detail", "keyboard behavior", "Dynamic Type", "landscape", "full workflow and accessibility acceptance"],
+        "safety": "No Agent task sent or stopped; no permission, pairing, cache or application-installation changes. Desktop appearance was temporarily changed and restored."
+      },
       "specimenScope": "Six desktop style specimens, not app workflows. Search outer margin omitted for embedding. Native components documented in prose, not imitated in HTML.",
       "tonalRampScope": "Generated OKLCH lightness previews, not source tokens or approved production colors; gamut clipping may occur."
     }
