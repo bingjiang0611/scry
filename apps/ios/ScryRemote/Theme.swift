@@ -46,4 +46,8 @@ struct GlassBackground: ViewModifier {
 
 extension View {
   func glass(cornerRadius: CGFloat) -> some View { modifier(GlassBackground(cornerRadius: cornerRadius)) }
+
+  // Controls keep a stable visual footprint while their labels continue to
+  // scale through the accessibility categories.
+  func controlIconScale() -> some View { dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
 }

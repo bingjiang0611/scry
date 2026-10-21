@@ -63,8 +63,8 @@ struct RootView: View {
       // A screen that shows the focused run puts this in its status strip instead.
       if model.canShowWorkspace, !run.pendingQuestions.isEmpty, !model.showRunQuestion, !focusedRunOnScreen {
         Button { model.showRunQuestion = true } label: {
-          Label("任务正在等待你的决定 · 查看", systemImage: "hand.raised")
-            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
+          Label(ConnectionCopy.focusedTaskNeedsDecision, systemImage: "hand.raised")
+            .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
             .background(Palette.warnBg)
         }
       } else if model.canShowWorkspace, let waiting = waitingElsewhere.first, let external = waiting.externalSessionId {
@@ -75,9 +75,8 @@ struct RootView: View {
                                    externalSessionId: external, label: waiting.prompt, isActive: true,
                                    scope: targets.selectedScope.isLocal ? nil : targets.selectedScope), run: run)
         } label: {
-          Label(waitingElsewhere.count > 1 ? "\(waitingElsewhere.count) 个任务等待你的决定 · 查看" : "另一个任务等待你的决定 · 查看",
-                systemImage: "hand.raised")
-            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
+          Label(ConnectionCopy.otherTasksNeedDecision(waitingElsewhere.count), systemImage: "hand.raised")
+            .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
             .background(Palette.warnBg)
         }
       }
