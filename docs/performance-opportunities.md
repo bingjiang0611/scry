@@ -2,6 +2,13 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## 方案 A：按需 Provider 发现（2026-10-21，部分实现、验证未收口）
+
+- 在隔离分支实现 metadata/selected 协议及能力协商；定时元数据不再初始化全部 Provider，仅选中 Provider/Profile/canonical cwd 才读取能力。同上下文只合并在途查询，沿用 Provider 已有实例机制；未新增 Pi settled cache 或统一常驻池。
+- 固定三个上下文的 **adapter 入口计数**：metadata 0、两个重叠 selected 请求 1、显式 legacy 全量 3，五轮一致。注入 metadata 全量探测后回归确定性失败。这不是 CLI 进程数或 L2/L3 提速结论。
+- 132 项定向检查、类型/build、Swift 全量 53 项、iOS 真机 SDK 编译通过；完整 renderer UI 曾通过，最终构建的 A 专项通过，但默认桌面回放在输出业务结果后触发 55 秒退出期限。默认全量 unit 最后仍有一个未修改的性能夹具子进程超时；全量 collector 的 runtime-evidence 也超时。保留全部失败，不扩大超时；未完成完整 gate/propose/L2，不合入、安装或 push。
+- 仍缺少选中能力的来源时间与配置失效/重读链路，不视为完整 A。性能 owner 下一轮先补齐该链路，再在低负载下定位/复核剩余全量失败及锁内冷/热 L2；安装与真机交互仍待用户确认。范围、原始日志及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
+
 ## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
 
 完整 CLI gate 588 项、App unit 3463 项（另 4 opt-in skipped）、shell、类型检查和构建已通过；源码冻结 `a868251`。构建目录的签名包在私有 CLI/GUI 启动时收到 SIGKILL，尚未完成 packaged smoke，未执行安装。相同字节诊断副本与已安装 0.2.215 的对照结果、首次失败及日志见[实验记录](performance-experiments/20261021-desktop-ui-fluidity.md#0216-发布验证续跑2026-10-21)。下一步由发布/系统诊断 owner 定位该启动问题，不再重复全量测试碰运气；不修改系统防护或直接安装未通过门禁的包。
