@@ -1,0 +1,24 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Scry 等待队列 · Bolder": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-21T00:00:00.000Z",
+          "status": "needs-review",
+          "subtitle": "四稿（A 现状 / B 阶梯 / C 状态列 / D 单峰），深色浅色、960·720 宽度与五种 Steer 状态可切",
+          "viewport": {
+            "width": 1512,
+            "height": 708
+          },
+          "section": "Composer"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "updatedAt": "2026-10-21T00:00:00.000Z"
+}
