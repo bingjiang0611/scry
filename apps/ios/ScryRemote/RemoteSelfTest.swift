@@ -496,6 +496,64 @@ enum RemoteSelfTest {
     RunLoop.current.run()
   }
 
+  // Opt-in CONTRACT probe (`-historyContractProbe`): reports which history
+  // contract the paired host actually answers, per request shape, so a device
+  // failure can be attributed to the host build instead of to the network. It
+  // reads one real session and never writes anything.
+  static func runHistoryContractProbeIfRequested() {
+    guard ProcessInfo.processInfo.arguments.contains("-historyContractProbe") else { return }
+    func argumentValue(_ name: String) -> String? {
+      guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(name + "=") }) else { return nil }
+      return String(argument.dropFirst(name.count + 1))
+    }
+    Task {
+      guard let connection = RemoteConnectionStore().load() else {
+        print("CONTRACTPROBE FAIL reason=no-persisted-connection")
+        exit(1)
+      }
+      guard let provider = argumentValue("-provider"), let cwd = argumentValue("-cwd"),
+            let external = argumentValue("-session") else {
+        print("CONTRACTPROBE FAIL reason=missing-target")
+        exit(1)
+      }
+      let client = RemoteRunClient(connection: connection)
+      do {
+        let catalog = try await client.sessions()
+        let ref = catalog.first { $0.providerId == provider && $0.cwd == cwd && ($0.externalSessionId ?? $0.sessionId) == external }
+        print("CONTRACTPROBE catalog sessions=\(catalog.count) profile=" + (ref?.agentProfileId != nil ? "present" : "absent"))
+        func attempt(_ name: String, _ body: () async throws -> String) async {
+          let started = Date()
+          do {
+            let detail = try await body()
+            print("CONTRACTPROBE \(name) OK ms=\(Int(Date().timeIntervalSince(started) * 1000)) \(detail)")
+          } catch {
+            print("CONTRACTPROBE \(name) FAIL ms=\(Int(Date().timeIntervalSince(started) * 1000)) error=\(error)")
+          }
+        }
+        await attempt("scoped-preview-nil-profile") {
+          let preview = try await client.historyPreview(providerId: provider, cwd: cwd, externalSessionId: external, agentProfileId: nil)
+          return "status=\(preview.status) turns=\(preview.turns.count)"
+        }
+        if let profile = ref?.agentProfileId {
+          await attempt("scoped-preview-catalog-profile") {
+            let preview = try await client.historyPreview(providerId: provider, cwd: cwd, externalSessionId: external, agentProfileId: profile)
+            return "status=\(preview.status) turns=\(preview.turns.count)"
+          }
+        }
+        await attempt("scoped-turns-page") {
+          let page = try await client.historyTurnsPage(providerId: provider, cwd: cwd, externalSessionId: external, before: nil, limit: 3, snapshot: nil, agentProfileId: ref?.agentProfileId)
+          return "turns=\(page.turns.count) total=\(page.totalTurns) source=\(page.source)"
+        }
+        print("CONTRACTPROBE DONE")
+        exit(0)
+      } catch {
+        print("CONTRACTPROBE FAIL error=\(error)")
+        exit(1)
+      }
+    }
+    RunLoop.current.run()
+  }
+
   // Opt-in real catalog/history probe. It verifies that the paired device can
   // read host session metadata and one authentic archived conversation.
   static func runSessionReadProbeIfRequested() {

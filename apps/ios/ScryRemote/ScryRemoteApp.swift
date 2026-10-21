@@ -14,6 +14,8 @@ struct ScryRemoteApp: App {
     RemoteSelfTest.runLiveProviderProbeIfRequested()
     RemoteSelfTest.runDirectoryAttachmentProbeIfRequested()
     RemoteSelfTest.runSessionReadProbeIfRequested()
+    RemoteSelfTest.runHistoryContractProbeIfRequested()
+    RemoteRunStore.runOpenFlowProbeIfRequested()
     #endif
   }
   var body: some Scene {
