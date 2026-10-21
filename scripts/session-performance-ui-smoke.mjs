@@ -83,6 +83,36 @@ async function exercise(webContents, pointer) {
   webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
   webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
   await wait(`document.querySelector('.session-hover-card') == null`)
+  // A focused card is open before ownership transfers to a different hovered row.
+  await read(`document.querySelector('.sb-sess-row:nth-child(4) .sb-sess').focus()`)
+  await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 3'`)
+  const transferPoint = await read(`(${pointer.toString()})('.sb-sess-row:nth-child(6) .sb-sess', { timeoutMs: 8000, scroll: false })`)
+  webContents.sendInputEvent({ type: 'mouseMove', ...transferPoint })
+  await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 5'`)
+  if (await read(`document.querySelectorAll('.session-hover-card').length`) !== 1) throw new Error('Ownership transfer retained a stale card')
+  // Pending pointer-open must be cancelled when keyboard focus claims another row.
+  webContents.sendInputEvent({ type: 'mouseMove', ...hoverPoint })
+  await wait(`document.querySelector('.sb-sess-row:nth-child(3) .sb-sess').matches(':hover')`)
+  await read(`document.querySelector('.sb-sess-row:nth-child(5) .sb-sess').focus()`)
+  await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 4'`)
+  await read(`new Promise(resolve => {
+    const until = performance.now() + 400;
+    const check = () => performance.now() >= until ? resolve() : requestAnimationFrame(check);
+    requestAnimationFrame(check);
+  })`)
+  if (!await read(`document.querySelectorAll('.session-hover-card').length === 1 && document.querySelector('.session-hover-heading strong')?.textContent === 'Question 4'`)) throw new Error('A cancelled pending hover reopened')
+  await read(`(() => { globalThis.originalDateNow = Date.now; Date.now = () => globalThis.originalDateNow() + 31 * 24 * 60 * 60 * 1000; })()`)
+  await read(`document.querySelector('.sb-sess-row:nth-child(6) .sb-sess').focus()`)
+  await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 5'`)
+  if (!await read(`document.querySelector('.sb-sess-row:nth-child(6) .sb-sesstime').textContent === document.querySelector('.session-hover-age').textContent`)) throw new Error('Memoized row age disagrees with its tooltip after idle time')
+  await read(`(() => { Date.now = globalThis.originalDateNow; delete globalThis.originalDateNow; })()`)
+  // Collapsing the project unmounts the owner. Reopening must not resurrect its card.
+  await click('.sb-proj-head')
+  await wait(`document.querySelector('.sb-sess') == null && document.querySelector('.session-hover-card') == null`)
+  await click('.sb-proj-head')
+  await wait(`document.querySelectorAll('.sb-sess').length === 277`)
+  await read(`document.querySelector('.sb-sess-row:nth-child(7) .sb-sess').focus()`)
+  await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 6' && document.querySelectorAll('.session-hover-card').length === 1`)
   // Exercise both motion modes explicitly rather than inheriting the runner's OS preference.
   await webContents.debugger.attach('1.3')
   await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
@@ -225,6 +255,7 @@ async function exercise(webContents, pointer) {
   if (mountedAtEnd >= 40) throw new Error(`Scroll/focus retained ${mountedAtEnd} mounted turns`)
   return { historicalSessions: 277, streamCommits: 20, sidebarStreamRenders: streamRenders,
     selectionRowRenders, hoverRowRenders, singleHoverOwner: true, hoverEscapeDismissed: true,
+    keyboardHoverOwnership: true, pendingHoverCancelled: true, hoverOwnerUnmounted: true, relativeAgeRefreshed: true,
     latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners, runningRingThemes,
     rotatingTransform: true, reducedMotion: true, completedIndicatorsRemoved: true, neutralBackgroundWaiting: true,
     viewport, initialPageMounted, shortHeavyMounted, shortHeavyHistoryRecovered: true,
