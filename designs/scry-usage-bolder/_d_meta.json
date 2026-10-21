@@ -9,7 +9,7 @@
           "path": "index.html",
           "createdAt": "2026-10-21T10:10:01.491Z",
           "status": "needs-review",
-          "subtitle": "保留黑白灰，以成本分布和主趋势重建层级",
+          "subtitle": "v2：移除常驻说明小字，详细证据收进数据说明",
           "viewport": {
             "width": 1512,
             "height": 1000
@@ -19,5 +19,5 @@
     }
   },
   "createdAt": "2026-10-21T10:10:01.492Z",
-  "updatedAt": "2026-10-21T10:10:01.492Z"
+  "updatedAt": "2026-10-21T11:09:13.455Z"
 }

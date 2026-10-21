@@ -27,29 +27,45 @@ document.querySelector('#app').innerHTML = `
       <div class="total">
         <div class="total-label"><h2>${COPY.costLabel}</h2><span class="evidence">${COPY.lowerBound}</span></div>
         <div class="amount" aria-label="${COPY.totalRaw}"><span class="currency">${COPY.currency}</span>${COPY.totalWhole}<span class="fraction">${COPY.totalFraction}</span></div>
-        <div class="total-footer"><span>${COPY.notBill}</span><span class="separator"></span><span>${COPY.turns}</span><details class="basis"><summary>${COPY.basisSummary}${icon('chevron')}</summary><p>${COPY.basis}</p></details></div>
+        <div class="total-footer">
+          <span>${COPY.notBill}</span><span class="separator"></span><span>${COPY.turns}</span>
+          <details class="basis">
+            <summary>${COPY.basisSummary}${icon('chevron')}</summary>
+            <div class="basis-content">
+              <p>${COPY.basis}</p>
+              <h3>${COPY.providerHeading}</h3>
+              <dl>${COPY.providers.map(p => `
+                <div><dt>${p.name}</dt><dd>${p.evidence}${p.token ? `<br>${p.token}` : `<br>${p.share}<br>${COPY.costUnknown}`}</dd></div>
+              `).join('')}</dl>
+              <h3>${COPY.metricHeading}</h3>
+              <dl>${COPY.metrics.map(m => `<div><dt>${m.label}</dt><dd>${m.note}</dd></div>`).join('')}</dl>
+              <p>${COPY.coverage} ${COPY.coverageValue}<br>${COPY.coverageNote}</p>
+              <p>${COPY.metricNote}</p>
+            </div>
+          </details>
+        </div>
       </div>
       <div class="composition">
-        <div class="composition-title"><h2>${COPY.sourceHeading}</h2><span>${COPY.concentration}</span></div>
+        <div class="composition-title"><h2>${COPY.sourceHeading}</h2></div>
         <div class="share-bar" role="img" aria-label="${COPY.distributionLabel}">${known.map(p => `<span class="${p.id}" style="flex-basis:${p.width}%"></span>`).join('')}</div>
         <div class="share-key">${known.map(p => `<div><span>${dot(p.id)}${p.name}</span><strong>${p.share}</strong></div>`).join('')}</div>
-        <div class="credit-row"><span>${COPY.credits}</span><span>${COPY.creditsEvidence}</span></div>
+        <div class="credit-row"><span>${COPY.credits}</span></div>
       </div>
     </section>
     <div class="analysis">
       <section class="trend" aria-labelledby="chart-title">
         <div class="section-heading"><h2 id="chart-title">${COPY.chartHeading}</h2><div class="metric-toggle"><button disabled class="active" aria-pressed="true">${COPY.cost}</button><button disabled aria-pressed="false" title="${COPY.tokenDisabled}">${COPY.token}</button></div></div>
-        <div class="chart-legend">${known.map(p => `<span>${dot(p.id)}${p.name}</span>`).join('')}<span class="illustration">${COPY.plotNote}</span></div>
+        <div class="chart-legend">${known.map(p => `<span>${dot(p.id)}${p.name}</span>`).join('')}</div>
         <div class="chart" role="img" aria-label="${COPY.chartDescription}">
           <div class="y-labels">${COPY.yAxis.map(v => `<span>${v}</span>`).join('')}</div>
           <div class="plot"><svg viewBox="0 0 900 300" preserveAspectRatio="none" aria-hidden="true"><path class="grid" d="M0 1H900M0 150H900M0 299H900"/><path class="area" d="${path} L900 300H0Z"/><path class="line cc" d="${line(series.cc)}"/><path class="line qoder" d="${line(series.qoder)}"/><path class="line codex" d="${path}"/></svg><div class="x-labels">${COPY.dates.map(d => `<span>${d}</span>`).join('')}</div></div>
         </div>
       </section>
       <section class="providers" aria-labelledby="providers-title">
-        <div class="section-heading"><h2 id="providers-title">${COPY.providerHeading}</h2><span>${COPY.providerCaption}</span></div>
-        <div class="provider-list">${COPY.providers.map(p => `<article class="provider ${p.id}"><div class="provider-line"><h3>${dot(p.id)}${p.name}</h3><strong>${p.cost}</strong></div><div class="provider-evidence"><span>${p.evidence}</span><span class="provider-share">${p.share}</span></div>${p.token ? `<span class="token-status">${p.token}</span>` : `<span class="token-status">${COPY.costUnknown}</span>`}</article>`).join('')}</div>
+        <div class="section-heading"><h2 id="providers-title">${COPY.providerHeading}</h2></div>
+        <div class="provider-list">${COPY.providers.map(p => `<article class="provider ${p.id}"><div class="provider-line"><h3>${dot(p.id)}${p.name}</h3><div class="provider-numbers"><span class="provider-share">${p.share}</span><strong>${p.cost}</strong></div></div></article>`).join('')}</div>
       </section>
     </div>
-    <section class="tokens" aria-labelledby="tokens-title"><div class="tokens-heading"><h2 id="tokens-title">${COPY.metricHeading}</h2><div class="coverage"><span>${COPY.coverage}</span><strong>${COPY.coverageValue}</strong><span>${COPY.coverageNote}</span></div></div><dl class="metrics">${COPY.metrics.map(m => `<div class="metric ${m.primary ? 'primary' : ''}"><dt>${m.label}</dt><dd>${m.value}<span>${m.unit}</span></dd><p>${m.note}</p></div>`).join('')}</dl><p class="token-note">${COPY.metricNote}</p></section>
+    <section class="tokens" aria-labelledby="tokens-title"><h2 id="tokens-title">${COPY.metricHeading}</h2><dl class="metrics">${COPY.metrics.map(m => `<div class="metric"><dt>${m.label}</dt><dd>${m.value}<span>${m.unit}</span></dd></div>`).join('')}</dl></section>
   </div>
 `
