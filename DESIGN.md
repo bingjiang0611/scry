@@ -116,7 +116,17 @@ components:
 
 桌面入口 `src/renderer/main.tsx` 依次导入 styles、analytics-evidence、inventory-evidence、session-evidence、codex-alignment 的 CSS。最后一层覆盖基础变量，但仍须遵守选择器优先级和组件局部样式。iOS 依据 `apps/ios/ScryRemote/Theme.swift`、`Components.swift` 和 `HomeView.swift`。原始代码路径与内容指纹见配套 `.impeccable/design.json`。
 
-当前 App 的可访问性树证明存在会话导航和主工作区；截图请求超时，未取得当前完整视觉证据。仓库 `artifacts/llm-performance-dark.png` 与 `artifacts/llm-performance-light.png` 的 SHA-256 相同，均呈现深色性能页；仅可作局部深色参考，不证明浅色主题。本文未进行 iOS 真机验收。另在 Chrome 的 1512 × 764 视口核对了六种提取标本的深浅主题默认外观，并确认搜索输入可聚焦；这不是当前 App 的双主题或全状态验收。
+2026-10-21 补充了真实运行界面的视觉抽查，替代此前截图超时的证据缺口：
+
+| 对象 | 实际观察 | 版本与范围 |
+| --- | --- | --- |
+| 桌面深色 | 会话导航、正文、工具状态、详情区与输入区的真实渲染 | macOS 窗口 1512 × 885；当前进程启动早于最近安装，运行构建身份未确认 |
+| 桌面浅色 | 经外观设置切换后的同类工作区；随后恢复深色并以截图确认 | 磁盘安装包为 0.2.212，工作区为 0.2.213；不视为最新源码验收 |
+| iOS 固定深色 | 真机主页与设置页；系统文字、列表层级、底部搜索和圆形操作按钮 | iPhone 13、iOS 26.5.2、390 × 844 pt；com.scry.remote.local 0.1.15 (22)，通过 iCTRL 操作 |
+
+所见配色方向、层次与组件形态符合本文记录；未据截图推断精确色值、对比度合规或所有状态可用。未发送或停止 Agent 任务，未改权限或配对；手机回到原设置页。此次不覆盖 iOS 会话详情、键盘、动态字体、横屏及全流程。手机安装包与当前源码的构建对应关系未确认；最新源码验收须在版本对齐后另行执行，桌面重启由用户操作。
+
+仓库 `artifacts/llm-performance-dark.png` 与 `artifacts/llm-performance-light.png` 的 SHA-256 相同，均呈现深色性能页，仍不能用作浅色证据。另在 Chrome 的 1512 × 764 视口核对过六种提取标本的深浅主题默认外观，并确认搜索输入可聚焦；标本检查不等于 App 全状态验收。真实界面含私人会话信息，截图未写入仓库。
 
 ## Colors
 
