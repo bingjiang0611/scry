@@ -25,7 +25,7 @@ import { backgroundWorkStatus } from '../background-work-status'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
 import type { ComposerDraftStore } from '../composer-drafts'
 import { steerStateForMessage } from '../steer'
-import { SLASH_COMMAND_COPY } from '../constants/copy'
+import { QUEUE_COPY, SLASH_COMMAND_COPY } from '../constants/copy'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 
@@ -65,6 +65,12 @@ interface ChatViewProps {
   steerEvidenceByMessageId?: ReadonlyMap<string, AgentSteerEvidence & { eventId: string }>
   steerInFlightMessageIds?: ReadonlySet<string>
   onSteerQueuedPrompt?: (messageId: string) => void
+  /** 正在输入框里改写的队列条目；它不参与自动出队。 */
+  editingQueuedId?: string | null
+  /** 刚编辑完排到队尾的那条，短暂标出来。 */
+  movedQueuedId?: string | null
+  onEditQueuedPrompt?: (messageId: string) => void
+  onCancelQueuedPromptEdit?: () => void
   slashOpen: boolean
   slashLoading: boolean
   slashCmds: SlashCmd[]
@@ -431,6 +437,10 @@ export function ChatView({
   steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(),
   onSteerQueuedPrompt,
+  editingQueuedId = null,
+  movedQueuedId = null,
+  onEditQueuedPrompt,
+  onCancelQueuedPromptEdit,
   slashOpen: slashRequested,
   slashLoading,
   slashCmds,
@@ -498,6 +508,15 @@ export function ChatView({
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
   const promptHistory = useMemo(() => composerPromptHistory(turns, queuedPrompts), [turns, queuedPrompts])
+  // 编辑中的行不参与自动出队，所以「下一个」是第一条没在编辑中的消息——
+  // 高亮必须跟着真实发送顺序走，否则界面在骗人。
+  const nextQueuedMessageId = useMemo(
+    () => queuedPrompts.find((prompt) => prompt.messageId !== editingQueuedId)?.messageId ?? null,
+    [queuedPrompts, editingQueuedId]
+  )
+  const editingQueuedIndex = editingQueuedId == null
+    ? -1
+    : queuedPrompts.findIndex((prompt) => prompt.messageId === editingQueuedId)
   // Browse one snapshot until returning to the draft. Remote refreshes, older-page
   // loads and queue dispatch must not invalidate the cursor on a recalled prompt.
   const promptHistoryRef = useRef<{ scopeKey?: string; history: string[]; position: number } | null>(null)
@@ -699,14 +718,14 @@ export function ChatView({
           </div>
         )}
         {queuedPrompts.length > 0 && (
-          <div className="prompt-queue" aria-label={`排队中的消息，共 ${queuedPrompts.length} 条`}>
+          <div className="prompt-queue" aria-label={QUEUE_COPY.listLabel(queuedPrompts.length)}>
             <div className="queue-title">
               <span className="queue-title-main">
                 <Icon name="clock" />
-                <span>等待运行</span>
+                <span>{QUEUE_COPY.title}</span>
                 <span className="queue-count">{queuedPrompts.length}</span>
               </span>
-              <span className="queue-hint">当前任务结束后依次发送</span>
+              <span className="queue-hint">{QUEUE_COPY.hint}</span>
             </div>
             <div className="queue-list" role="list">
               {queuedPrompts.map((prompt, index) => {
@@ -714,69 +733,111 @@ export function ChatView({
                 const steerState = steerStateForMessage(prompt.steer, evidence)
                 const pending = steerState?.status === 'pending'
                 const unknown = steerState?.status === 'unknown'
+                const rejected = steerState?.status === 'rejected'
+                const editing = editingQueuedId === prompt.messageId
                 const hasConcurrentSteer = steerInFlightMessageIds.size > 0
                 const capabilityReason = !busy
-                  ? '当前任务已结束，Steer 仅可发送给运行中的任务'
+                  ? QUEUE_COPY.steerTitleEnded
                   : steerCapability == null
-                    ? '正在等待运行时 Steer 能力证据'
+                    ? QUEUE_COPY.steerTitleWaiting
                     : steerCapability.status === 'unavailable'
                       ? steerCapability.reason
                       : prompt.attachments.length > 0 && !steerCapability.attachments
-                        ? '当前运行不支持 Steer 图片附件'
+                        ? QUEUE_COPY.steerTitleNoAttachments
                         : undefined
                 const steerDisabled = pending || unknown || steerState?.status === 'unavailable' ||
-                  capabilityReason != null || hasConcurrentSteer
-                const steerLabel = pending ? '提交中' : steerState?.status === 'rejected' ? '重试 Steer' : '↳ Steer'
+                  capabilityReason != null || hasConcurrentSteer || editing
+                const steerLabel = pending ? QUEUE_COPY.steerPending : rejected ? QUEUE_COPY.steerRetry : QUEUE_COPY.steer
                 const steerTitle = pending
-                  ? 'Steer 正在提交；完成前不能重复提交或移除'
+                  ? QUEUE_COPY.steerTitlePending
                   : unknown
-                    ? `结果未知：${steerState.message ?? '请先核对 Provider 回执'}；不能重发或移除`
-                    : steerState?.status === 'rejected'
-                      ? `Provider 明确拒绝：${steerState.message ?? '未提供原因'}；点击重试`
+                    ? QUEUE_COPY.steerTitleUnknown(steerState.message)
+                    : rejected
+                      ? QUEUE_COPY.steerTitleRejected(steerState.message)
                       : steerState?.status === 'unavailable'
-                        ? steerState.message ?? '当前运行不支持 Steer'
-                        : capabilityReason ?? '不中断模型，将这条消息补充给当前任务'
+                        ? steerState.message ?? QUEUE_COPY.steerUnavailable('')
+                        : capabilityReason ?? QUEUE_COPY.steerTitle
+                const editDraftBlocked = input.trim().length > 0 || draftAttachments.length > 0
+                const editDisabled = editing || pending || unknown || editDraftBlocked || !onEditQueuedPrompt
+                const editTitle = pending
+                  ? QUEUE_COPY.editTitlePending
+                  : unknown
+                    ? QUEUE_COPY.editTitleUnknown
+                    : editDraftBlocked
+                      ? QUEUE_COPY.editTitleDraft
+                      : QUEUE_COPY.editTitle
+                // 下一个真正会跑的是第一条没在编辑中的消息：跳过编辑中的行。
+                const next = nextQueuedMessageId === prompt.messageId
                 return (
-                  <div className={`queue-item${pending ? ' is-steer-pending' : ''}${unknown ? ' is-steer-unknown' : ''}`} role="listitem" key={prompt.messageId}>
+                  <div
+                    className={`queue-item${next ? ' is-next' : ''}${editing ? ' is-editing' : ''}${pending ? ' is-steer-pending' : ''}${unknown ? ' is-steer-unknown' : ''}${rejected ? ' is-steer-rejected' : ''}`}
+                    role="listitem"
+                    key={prompt.messageId}
+                  >
                     <span className="queue-index" aria-hidden="true">{index + 1}</span>
                     <span className="queue-text" title={prompt.text}>
-                      {prompt.text || `${prompt.attachments.length} 张图片`}
-                      {steerState?.status === 'rejected' && <small className="queue-steer-reason">{steerState.message ?? 'Provider 已拒绝'}</small>}
-                      {steerState?.status === 'unavailable' && <small className="queue-steer-reason">{steerState.message ?? 'Steer 不可用'}</small>}
-                      {unknown && <small className="queue-steer-reason">{steerState.message ?? '结果未知；暂不重发或自动出队'}</small>}
+                      {prompt.text || QUEUE_COPY.imagesOnly(prompt.attachments.length)}
+                      {rejected && <small className="queue-steer-reason">{steerState.message ?? QUEUE_COPY.reasonRejected}</small>}
+                      {steerState?.status === 'unavailable' && <small className="queue-steer-reason">{steerState.message ?? QUEUE_COPY.reasonUnavailable}</small>}
+                      {unknown && <small className="queue-steer-reason">{steerState.message ?? QUEUE_COPY.reasonUnknown}</small>}
+                      {movedQueuedId === prompt.messageId && <small className="queue-moved">{QUEUE_COPY.editedMoved}</small>}
                     </span>
                     {prompt.attachments.length > 0 && (
-                      <span className="queue-attach" title={prompt.attachments.map((a) => a.name).join('\n')}>
+                      <span className="queue-attach" title={QUEUE_COPY.attachmentsTitle(prompt.attachments.map((a) => a.name))}>
                         <Icon name="image" /> {prompt.attachments.length}
                       </span>
                     )}
-                    <button
-                      type="button"
-                      className={`queue-steer${pending ? ' is-pending' : ''}`}
-                      onClick={() => onSteerQueuedPrompt?.(prompt.messageId)}
-                      disabled={steerDisabled || !onSteerQueuedPrompt}
-                      title={steerTitle}
-                      aria-label={`${steerLabel}：队列第 ${index + 1} 条消息`}
-                      aria-busy={pending}
-                    >
-                      <span aria-hidden="true">↳</span> {steerLabel.replace('↳ ', '')}
-                    </button>
-                    <button
-                      type="button"
-                      className="queue-remove"
-                      onClick={() => onRemoveQueuedPrompt(prompt.messageId)}
-                      disabled={pending || unknown}
-                      title={pending ? 'Steer 正在提交，不能移除' : unknown ? '结果未知的 Steer 不能移除' : '移除排队消息'}
-                      aria-label={`移除队列第 ${index + 1} 条消息`}
-                    >
-                      <Icon name="x" />
-                    </button>
+                    {editing ? (
+                      <button
+                        type="button"
+                        className="queue-edit-cancel"
+                        onClick={() => onCancelQueuedPromptEdit?.()}
+                        aria-label={`${QUEUE_COPY.cancelEdit}：队列第 ${index + 1} 条消息`}
+                        title={QUEUE_COPY.cancelEdit}
+                      >
+                        {QUEUE_COPY.cancelEdit}
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className={`queue-steer${pending ? ' is-pending' : ''}`}
+                          onClick={() => onSteerQueuedPrompt?.(prompt.messageId)}
+                          disabled={steerDisabled || !onSteerQueuedPrompt}
+                          title={steerTitle}
+                          aria-label={QUEUE_COPY.steerLabel(steerLabel, index + 1)}
+                          aria-busy={pending}
+                        >
+                          <span aria-hidden="true">↳</span> {steerLabel}
+                        </button>
+                        <button
+                          type="button"
+                          className="queue-edit"
+                          onClick={() => onEditQueuedPrompt?.(prompt.messageId)}
+                          disabled={editDisabled}
+                          title={editTitle}
+                          aria-label={QUEUE_COPY.editLabel(index + 1)}
+                        >
+                          <Icon name="edit" />
+                        </button>
+                        <button
+                          type="button"
+                          className="queue-remove"
+                          onClick={() => onRemoveQueuedPrompt(prompt.messageId)}
+                          disabled={pending || unknown}
+                          title={pending ? QUEUE_COPY.removeTitlePending : unknown ? QUEUE_COPY.removeTitleUnknown : QUEUE_COPY.remove}
+                          aria-label={QUEUE_COPY.removeLabel(index + 1)}
+                        >
+                          <Icon name="x" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 )
               })}
             </div>
             {steerCapability?.status === 'unavailable' && (
-              <div className="queue-steer-capability" role="note">Steer 不可用：{steerCapability.reason}</div>
+              <div className="queue-steer-capability" role="note">{QUEUE_COPY.steerUnavailable(steerCapability.reason)}</div>
             )}
           </div>
         )}
@@ -842,6 +903,15 @@ export function ChatView({
                 <Icon name="square" /> 停止本轮
               </button>
             </span>
+          </div>
+        )}
+        {editingQueuedIndex >= 0 && (
+          <div className="composer-edit-hint" role="status">
+            <Icon name="edit" />
+            <span>{QUEUE_COPY.editingHint(editingQueuedIndex + 1)}</span>
+            <button type="button" className="composer-edit-cancel" onClick={() => onCancelQueuedPromptEdit?.()}>
+              {QUEUE_COPY.cancelEdit}
+            </button>
           </div>
         )}
         <textarea
@@ -947,6 +1017,12 @@ export function ChatView({
               if (sessionLoading || sendBlockedReason) return
               resetPromptHistory()
               onSend()
+              return
+            }
+            // Esc 退出编辑态，行与原文本原样保留。放在 slash 之后，保留先关菜单的旧行为。
+            if (event.key === 'Escape' && editingQueuedIndex >= 0) {
+              event.preventDefault()
+              onCancelQueuedPromptEdit?.()
             }
           }}
         />

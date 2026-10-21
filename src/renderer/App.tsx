@@ -48,6 +48,7 @@ import { providerCompatibilityNotice, recordedSessionModel, runControlSendBlocke
 import { useAgentSession } from './hooks/useAgentSession'
 import { useEventCallback } from './hooks/useEventCallback'
 import { applyTheme, browserThemeStorage, persistTheme, readStoredTheme, type AppTheme } from './theme'
+import { QUEUE_COPY } from './constants/copy'
 import packageJson from '../../package.json'
 import { requestDockBadgePermission } from './dock-badge-permission'
 import { selectedExternalSessionId, sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
@@ -305,10 +306,6 @@ export function enqueuePrompt(
   }]
 }
 
-export function takeNextQueuedPrompt(queue: QueuedPrompt[]): { next: QueuedPrompt | null; rest: QueuedPrompt[] } {
-  return { next: queue[0] ?? null, rest: queue.slice(1) }
-}
-
 export function shouldQueuePrompt(busy: boolean, queuedCount: number, queuedStartPending: boolean): boolean {
   return busy || queuedCount > 0 || queuedStartPending
 }
@@ -323,6 +320,34 @@ export function resetQueuedPromptControl(generation: number): {
 
 export function dequeueStartedPrompt(queue: QueuedPrompt[], started: QueuedPrompt): QueuedPrompt[] {
   return queue[0] === started ? queue.slice(1) : queue
+}
+
+/**
+ * 编辑队列消息后重新排队：从原位置移除，作为新意图追加到队尾。
+ * 必须换新的 messageId：旧 id 上可能挂着 rejected/unknown 的 Steer 证据，
+ * 复用会让旧回执审到一条新消息上。附件跟着这条消息一起走到队尾，编辑期间新加的附件合并进去。
+ */
+export function editedPromptToTail(
+  queue: QueuedPrompt[],
+  messageId: string,
+  text: string,
+  extraAttachments: AgentInputAttachment[] = []
+): { queue: QueuedPrompt[]; next: QueuedPrompt | null } {
+  const index = queue.findIndex((prompt) => prompt.messageId === messageId)
+  if (index < 0) return { queue, next: null }
+  const source = queue[index]
+  const rest = [...queue.slice(0, index), ...queue.slice(index + 1)]
+  const nextQueue = enqueuePrompt(rest, text, [...source.attachments, ...extraAttachments], source.request)
+  if (nextQueue === rest) return { queue, next: null }
+  return { queue: nextQueue, next: nextQueue[nextQueue.length - 1] ?? null }
+}
+
+/**
+ * 编辑中的行不参与自动出队，其余消息照常按 FIFO 继续。否则当前任务一结束，
+ * 就会把用户改了一半的旧文本发出去。
+ */
+export function nextDrainableQueuedPrompt(queue: QueuedPrompt[], editingMessageId: string | null): QueuedPrompt | null {
+  return queue.find((prompt) => prompt.messageId !== editingMessageId) ?? null
 }
 
 export type SessionPromptQueues = ReadonlyMap<string, QueuedPrompt[]>
@@ -833,6 +858,10 @@ export function App() {
       typeof update === 'function' ? update(currentQueue) : update
     ))
   }, [draftKey])
+  // 正在输入框里改写的队列条目；编辑期间它不参与自动出队。
+  const [editingQueuedPromptId, setEditingQueuedPromptId] = useState<string | null>(null)
+  // 编辑后重新排队的那条，短暂标出「已移到队尾」，让位置变化可验证而不是只靠记忆。
+  const [movedQueuedPromptId, setMovedQueuedPromptId] = useState<string | null>(null)
   const releaseDraft = useCallback((discarded: SessionComposerDraft): void => {
     for (const attachment of discarded.attachments) {
       if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
@@ -1462,7 +1491,7 @@ export function App() {
     if (sessionLoading || session.busy) return
     const queueKey = draftKey
     if (queuedStartPendingRef.current) return
-    const { next: queued } = takeNextQueuedPrompt(queuedPrompts)
+    const queued = nextDrainableQueuedPrompt(queuedPrompts, editingQueuedPromptId)
     if (!queued) return
     // Preserve FIFO and pause barriers, including the render before ACK removal commits.
     if (pausedQueuedPromptsRef.current.has(queued.messageId) || steerInFlightRef.current.has(queued.messageId) ||
@@ -1492,9 +1521,23 @@ export function App() {
         // head is the explicit "skip" action, so later prompts can never overtake it.
         queuedStartInFlightRef.current = false
         queuedStartPendingRef.current = true
-        setComposerError(`${error instanceof Error ? error.message : String(error)}；队首消息仍保留，队列已暂停`)
+        setComposerError(`${error instanceof Error ? error.message : String(error)}；这条消息仍保留在队列，队列已暂停`)
       })
-  }, [draftKey, integrations.agents, queuedPrompts, session.busy, sessionLoading, startPrompt, steerEvidenceByMessageId])
+  }, [draftKey, editingQueuedPromptId, integrations.agents, queuedPrompts, session.busy, sessionLoading, startPrompt, steerEvidenceByMessageId])
+
+  // 队列项离开队列（移除、Steer 被接受、被自动出队）后，编辑态必须跟着结束，
+  // 否则输入框会停在一个已经不存在的队列条目上。
+  useEffect(() => {
+    if (!editingQueuedPromptId) return
+    if (queuedPrompts.some((prompt) => prompt.messageId === editingQueuedPromptId)) return
+    setEditingQueuedPromptId(null)
+  }, [editingQueuedPromptId, queuedPrompts])
+
+  useEffect(() => {
+    if (!movedQueuedPromptId) return
+    const timer = window.setTimeout(() => setMovedQueuedPromptId(null), 2500)
+    return () => window.clearTimeout(timer)
+  }, [movedQueuedPromptId])
 
   // Agent / 目录就绪后立即预取；用户输入 / 时只展示缓存，不再现场等 Provider。
   useEffect(() => {
@@ -1572,7 +1615,21 @@ export function App() {
     void requestDockBadgePermission()
     if (shouldQueuePrompt(session.busy, queuedPrompts.length, queuedStartPendingRef.current)) {
       const request = currentRunRequest()
-      setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))
+      if (editingQueuedPromptId) {
+        const editingId = editingQueuedPromptId
+        const moved = editedPromptToTail(queuedPrompts, editingId, text, attachments)
+        // 队列在点击与提交之间变了（例如刚自动出队）时不能丢文本：退回普通入队。
+        if (moved.next) {
+          setQueuedPrompts(moved.queue)
+          setMovedQueuedPromptId(moved.next.messageId)
+        } else {
+          setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))
+        }
+        pausedQueuedPromptsRef.current.delete(editingId)
+        setEditingQueuedPromptId(null)
+      } else {
+        setQueuedPrompts((queue) => enqueuePrompt(queue, text, attachments, request))
+      }
       setInput('')
       clearDraftAttachments()
       setSlashHidden(true)
@@ -2317,6 +2374,44 @@ export function App() {
     const removed = queuedPrompts[index]
     if (removed) pausedQueuedPromptsRef.current.delete(removed.messageId)
   }
+  // 编辑队列消息：把这条文本放回输入框，原条目留在队列里并标为编辑中。
+  // 附件不回到输入框（原 DraftAttachment 的预览已释放），仍随这条消息留在队列项上。
+  const editQueuedPrompt = (messageId: string): void => {
+    const index = queuedPrompts.findIndex((candidate) => candidate.messageId === messageId)
+    if (index < 0) return
+    const prompt = queuedPrompts[index]
+    if (index === 0 && queuedStartInFlightRef.current) {
+      setComposerError(QUEUE_COPY.editTitleStarting)
+      return
+    }
+    const state = steerStateForMessage(prompt.steer, steerEvidenceByMessageId.get(messageId))
+    if (steerInFlightRef.current.has(messageId) || state?.status === 'pending') {
+      setComposerError(QUEUE_COPY.editTitlePending)
+      return
+    }
+    if (state?.status === 'unknown') {
+      setComposerError(QUEUE_COPY.editTitleUnknown)
+      return
+    }
+    // 不静默覆盖用户正在打的字：输入框非空时不进入编辑态。
+    const currentDraft = draftStore.getSnapshot().get(draftKey)
+    if ((currentDraft?.input ?? '').trim() || (currentDraft?.attachments ?? EMPTY_DRAFT_ATTACHMENTS).length > 0) {
+      setComposerError(QUEUE_COPY.editTitleDraft)
+      return
+    }
+    setComposerError(null)
+    setEditingQueuedPromptId(messageId)
+    setMovedQueuedPromptId(null)
+    setInput(prompt.text)
+    setSlashHidden(true)
+    window.setTimeout(() => taRef.current?.focus(), 0)
+  }
+  const cancelQueuedPromptEdit = (): void => {
+    setEditingQueuedPromptId(null)
+    setInput('')
+    setSlashHidden(true)
+    window.setTimeout(() => taRef.current?.focus(), 0)
+  }
   const removeDraftAttachment = (id: string): void => {
     setDraftAttachments((prev) => {
       const next = prev.filter((attachment) => attachment.id !== id)
@@ -2414,6 +2509,10 @@ export function App() {
     steerEvidenceByMessageId,
     steerInFlightMessageIds: steerInFlightRef.current,
     onSteerQueuedPrompt: steerQueuedPrompt,
+    editingQueuedId: editingQueuedPromptId,
+    movedQueuedId: movedQueuedPromptId,
+    onEditQueuedPrompt: editQueuedPrompt,
+    onCancelQueuedPromptEdit: cancelQueuedPromptEdit,
     slashOpen,
     slashLoading,
     slashCmds,

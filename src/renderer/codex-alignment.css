@@ -1201,13 +1201,21 @@ select:focus-visible,
   color: var(--dim);
 }
 
-.runtime-composer .prompt-queue,
 .runtime-composer .draft-attachments,
 .runtime-composer .slash-menu {
   border-color: var(--border);
   border-radius: 12px;
   background: var(--panel);
   box-shadow: var(--shadow-pop);
+}
+
+/* 排队块是贴着输入框的内联证据块，不是浮层：内嵌面 + 发丝边框，
+   --shadow-pop 的 64px 投影会让它读成弹窗。 */
+.runtime-composer .prompt-queue {
+  border-color: var(--border3);
+  border-radius: 12px;
+  background: var(--surface-inset-soft);
+  box-shadow: none;
 }
 
 /* Dock the Surface into the window chrome, matching Codex's split workspace. */

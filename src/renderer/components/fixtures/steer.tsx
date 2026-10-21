@@ -41,6 +41,7 @@ function Fixture() {
   const [lastSteer, setLastSteer] = useState('')
   const [sends, setSends] = useState(0)
   const [busy, setBusy] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const turns = useMemo<Turn[]>(() => [{
@@ -77,11 +78,25 @@ function Fixture() {
           setLastSteer(messageId)
           updateSteer(messageId, { status: 'pending' })
         }}
+        editingQueuedId={editingId}
+        onEditQueuedPrompt={(messageId) => {
+          const prompt = queue.find((candidate) => candidate.messageId === messageId)
+          if (!prompt) return
+          setEditingId(messageId)
+          draftStore.update((current) => new Map(current).set(draftKey, { input: prompt.text, attachments: [] }))
+        }}
+        onCancelQueuedPromptEdit={() => {
+          setEditingId(null)
+          draftStore.update((current) => new Map(current).set(draftKey, { input: '', attachments: [] }))
+        }}
         slashOpen={false} slashLoading={false} slashCmds={[]} slashSel={0}
         onSelect={() => {}} onInput={(value) => draftStore.update((current) => new Map(current).set(draftKey, { input: value, attachments: [] }))}
         onChooseFolder={() => {}} onPickRecent={() => {}} onRemoveRecent={() => {}}
         onRetrySlash={() => {}} onPickSlash={() => {}} onSlashSel={() => {}} onHideSlash={() => {}}
-        onSend={() => setSends((count) => count + 1)} onStop={() => {
+        onSend={() => {
+          setSends((count) => count + 1)
+          draftStore.update((current) => new Map(current).set(draftKey, { input: '', attachments: [] }))
+        }} onStop={() => {
           setQueue(current => retainProtectedSteerPrompts(current, evidenceByMessageId, new Set()))
           setBusy(false)
         }} onPasteImages={() => {}} onPasteClipboardImage={() => {}}
