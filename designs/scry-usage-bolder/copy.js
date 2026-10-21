@@ -13,11 +13,8 @@ const COPY = {
   totalFraction: '.06',
   totalRaw: '$4,587.06',
   lowerBound: '已知下界',
-  notBill: '非实际账单',
-  basisSummary: '数据说明',
   basis: '汇总 Provider 报告成本、估算成本与官方 API 标准价换算。已知 Token 下界；缓存写入按 5 分钟计算。不同来源并非同一计费口径，不代表实际支付金额。',
   credits: 'Qoder 4,577.12 Credits',
-  turns: '1,458 轮',
   sourceHeading: '成本构成',
   distributionLabel: '已知成本分布：Codex 81.8%，cc-switch 17.2%，Qoder 1.0%；unknown 成本不可用，不计入比例',
   chartHeading: '每日成本',
@@ -28,10 +25,6 @@ const COPY = {
   yAxis: ['$1,000', '$500', '$0'],
   dates: ['Sep 22', 'Oct 1', 'Oct 7', 'Oct 14', 'Oct 21'],
   providerHeading: 'Provider',
-  costUnknown: '不计入已知成本占比',
-  coverage: 'Token 覆盖',
-  coverageValue: '1,447 / 1,458',
-  coverageNote: '11 条明细缺少 Token 证据',
   detailsHeading: '明细',
   detailsDimension: '明细维度',
   detailsModel: '模型',
@@ -39,7 +32,6 @@ const COPY = {
   detailsCost: '成本（USD）',
   detailsShare: '占比',
   detailsDateDisabled: '设计稿未连接日期明细数据',
-  detailsSnapshot: '模型明细沿用补充截图，与总览来自不同快照；不按总览金额重算其占比。日期明细尚未接入。',
   detailRows: [
     { provider: 'codex', model: 'gpt-6-astra', cost: '$1,343.43', share: '53.9%', tokens: '29.7M' },
     { provider: 'codex', model: 'gpt-6.1-sol', cost: '$573.60', share: '23.0%', tokens: '60.7M' },
@@ -48,7 +40,6 @@ const COPY = {
     { provider: 'codex', model: 'gpt-5.6-sol', cost: '$22.91', share: '0.9%', tokens: '1.99M' }
   ],
   metricHeading: 'Token 明细',
-  metricNote: '缓存输入与缓存写入单列，不与已处理 Token 简单相加。',
   metrics: [
     { label: '已处理 Token', value: '232.5', unit: 'M', note: '已知下界' },
     { label: '缓存输入', value: '5.86', unit: 'B', note: '1,447 / 1,458 条已上报' },

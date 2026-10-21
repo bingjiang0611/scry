@@ -1,8 +1,7 @@
 /* Screenshot-derived values live in copy.js. Daily curves below are illustrative only. */
 const icons = {
   back: '<path d="m14 6-6 6 6 6"/>',
-  refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/>',
-  chevron: '<path d="m9 5 7 7-7 7"/>'
+  refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/>'
 }
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`
 const dot = (id) => `<span class="series-dot ${id}" aria-hidden="true"></span>`
@@ -23,28 +22,10 @@ document.querySelector('#app').innerHTML = `
       <div class="page-title"><button class="icon-button" disabled aria-label="${COPY.back}">${icon('back')}</button><h1>${COPY.heading}</h1><span class="period">${COPY.period}</span></div>
       <div class="page-actions"><div class="range" role="group" aria-label="${COPY.unconnected}">${COPY.periods.map((p,i) => `<button disabled class="${i === 1 ? 'active' : ''}" aria-pressed="${i === 1}">${p}</button>`).join('')}</div><button class="icon-button" disabled aria-label="${COPY.refresh}">${icon('refresh')}</button></div>
     </header>
-    <section class="summary" aria-label="${COPY.costLabel}">
+    <section class="summary" aria-label="${COPY.costLabel}" aria-description="${COPY.basis}">
       <div class="total">
         <div class="total-label"><h2>${COPY.costLabel}</h2><span class="evidence">${COPY.lowerBound}</span></div>
         <div class="amount" aria-label="${COPY.totalRaw}"><span class="currency">${COPY.currency}</span>${COPY.totalWhole}<span class="fraction">${COPY.totalFraction}</span></div>
-        <div class="total-footer">
-          <span>${COPY.notBill}</span><span class="separator"></span><span>${COPY.turns}</span>
-          <details class="basis">
-            <summary>${COPY.basisSummary}${icon('chevron')}</summary>
-            <div class="basis-content">
-              <p>${COPY.basis}</p>
-              <h3>${COPY.providerHeading}</h3>
-              <dl>${COPY.providers.map(p => `
-                <div><dt>${p.name}</dt><dd>${p.evidence}${p.token ? `<br>${p.token}` : `<br>${p.share}<br>${COPY.costUnknown}`}</dd></div>
-              `).join('')}</dl>
-              <h3>${COPY.metricHeading}</h3>
-              <dl>${COPY.metrics.map(m => `<div><dt>${m.label}</dt><dd>${m.note}</dd></div>`).join('')}</dl>
-              <p>${COPY.coverage} ${COPY.coverageValue}<br>${COPY.coverageNote}</p>
-              <p>${COPY.metricNote}</p>
-              <p>${COPY.detailsSnapshot}</p>
-            </div>
-          </details>
-        </div>
       </div>
       <div class="composition">
         <div class="composition-title"><h2>${COPY.sourceHeading}</h2></div>
