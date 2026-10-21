@@ -127,8 +127,43 @@ describe('Pi grouped questionnaire', () => {
     expect(group.matches(first)).toBe(false)
   })
 
-  it('leaves single questions and invalid payloads on the existing native path', () => {
-    expect(PiQuestionnaire.fromTool('run', 'tool', { questions: [questionnaireInput.questions[0]] })).toBeNull()
+  it.each([false, true])('uses structured single-question metadata with multiSelect=%s', async (multiSelect) => {
+    const question = {
+      ...questionnaireInput.questions[1],
+      question: '你想优先改哪些方向？可多选；提交前可调整。',
+      multiSelect
+    }
+    const group = PiQuestionnaire.fromTool('run', 'tool', { questions: [question] })
+    expect(group).not.toBeNull()
+    expect(group!.request.questions[0]).toMatchObject(question)
+    const title = `[Scope] ${question.question}`
+    const event = multiSelect
+      ? { id: 'single', method: 'input', title: `${title}\n\n1. UI — Interface\n2. Core — Runtime\n\nEnter numbers`, placeholder: '1,3' }
+      : { id: 'single', method: 'select', title, options: ['1. UI — Interface', '2. Core — Runtime', '3. Type something.'] }
+    expect(group!.matches(event)).toBe(true)
+    const ask = vi.fn(async (): Promise<AgentQuestionResponse> => ({
+      runId: 'run', questionId: 'tool', behavior: 'answered',
+      answers: { [question.question]: multiSelect ? '1,2' : '2' }, nativeCustomAnswers: []
+    }))
+    expect(await group!.reply(event, ask)).toEqual({
+      type: 'extension_ui_response', id: 'single', value: multiSelect ? '1,2' : '2. Core — Runtime'
+    })
+    expect(ask).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves custom text and cancellation for a single multi-select question', async () => {
+    const question = questionnaireInput.questions[1]
+    const group = () => PiQuestionnaire.fromTool('run', 'tool', { questions: [question] })!
+    const ask = async (): Promise<AgentQuestionResponse> => ({
+      runId: 'run', questionId: 'tool', behavior: 'answered',
+      answers: { [question.question]: 'Custom scope' }, nativeCustomAnswers: [question.question]
+    })
+    expect(await group().reply(second, ask)).toEqual({ type: 'extension_ui_response', id: 'second', value: 'Custom scope' })
+    expect(await group().reply(second, async () => ({ runId: 'run', questionId: 'tool', behavior: 'cancelled' })))
+      .toEqual({ type: 'extension_ui_response', id: 'second', cancelled: true })
+  })
+
+  it('leaves invalid payloads on the existing native path', () => {
     expect(PiQuestionnaire.fromTool('run', 'tool', { questions: [questionnaireInput.questions[0], questionnaireInput.questions[0]] })).toBeNull()
     expect(PiQuestionnaire.fromTool('run', 'tool', {})).toBeNull()
   })
