@@ -46,7 +46,7 @@ export function registerWorkflowIpc({ register, service, resolveWorkspace, asser
     const commandId = (payload as Record<string, unknown>).commandId
     return service.start(accepted.workflowId, accepted, commandId === undefined ? undefined : identity(commandId))
   })
-  register('workflow:stop', workflowId => service.stop(identity(workflowId)))
+  register('workflow:stop', (workflowId, commandId) => service.stop(identity(workflowId), identity(commandId)))
   register('workflow:snapshot', async workflowId => {
     const progress = await service.snapshot(identity(workflowId))
     if (progress) resolveWorkspace(progress.workspace)

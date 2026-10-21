@@ -10,7 +10,7 @@ function fixture() {
   const sender = { mainFrame: frame }
   const win = { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
   const event = { sender, senderFrame: frame } as unknown as IpcMainInvokeEvent
-  const service = { planCommand: vi.fn(async () => null), approve: vi.fn(async () => true), start: vi.fn(async () => null), stop: vi.fn(() => true),
+  const service = { planCommand: vi.fn(async () => null), approve: vi.fn(async () => true), start: vi.fn(async () => null), stop: vi.fn(async () => true),
     snapshot: vi.fn(async () => undefined), list: vi.fn(async () => ({ records: [] })), cancelPlanning: vi.fn(() => true) }
   const resolveWorkspace = vi.fn((cwd: string) => { if (cwd !== '/authorized') throw new Error('unauthorized'); return cwd })
   registerWorkflowIpc({
@@ -26,11 +26,21 @@ const plan = { command: '/scry-workflow run inspect', commandId: 'command-test',
   roles: [{ role: 'worker', providerId: 'pi', agentProfileId: 'pi:default', requestedModel: { providerId: 'openai', id: 'fixture' } }] }
 const approval = { workflowId: 'workflow-test', programRevision: 'revision', approvedAt: 1 }
 const commands: Array<[string, unknown[]]> = [
-  ['plan', [plan]], ['approve', [approval]], ['start', ['workflow-test', approval]], ['stop', ['workflow-test']],
+  ['plan', [plan]], ['approve', [approval]], ['start', ['workflow-test', approval]], ['stop', ['workflow-test', 'stop-command']],
   ['snapshot', ['workflow-test']], ['list', ['/authorized']], ['cancelPlanning', ['command-test']]
 ]
 
 describe('workflow production IPC registrations', () => {
+  it('validates both stop identities before the production privileged listener', async () => {
+    const { handlers, event, service } = fixture()
+    const invoke = async (id: unknown, commandId: unknown) => handlers.get('workflow:stop')!(event, id, commandId)
+    for (const [id, commandId] of [['workflow-test', undefined], ['workflow-test', '../command'], ['../workflow', 'stop-command'], ['workflow-test', 'x'.repeat(97)]]) {
+      await expect(invoke(id, commandId)).rejects.toThrow('身份无效')
+    }
+    expect(service.stop).not.toHaveBeenCalled()
+    await expect(invoke('workflow-test', 'stop-command')).resolves.toBe(true)
+    expect(service.stop).toHaveBeenCalledWith('workflow-test', 'stop-command')
+  })
   it.each(commands)('rejects non-owner sender, frame and origin before %s privileged listener', async (channel, args) => {
     const { handlers, event, frame, sender, service, resolveWorkspace } = fixture()
     const handler = handlers.get(`workflow:${channel}`)!

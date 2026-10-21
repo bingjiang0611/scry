@@ -26,7 +26,7 @@
 
 所有控制都是v7允许的运行控制，不是向执行中Agent补充业务目标。修改计划、模型、验证标准或输入仍需收口旧运行，确认新版本并建立新执行实例。按 [v10版本隔离](template-lifecycle.md#6-模板与运行实例隔离)，“修订后恢复”保留原rootExecutionId、逻辑身份及预算/重启次数；“作为全新运行”必须另行明确选择，不能自动重置额度。模板编辑/保存本身不修改或重启旧实例。
 
-**现有接缝的真实限制**：`src/main/run-stop-lifecycle.ts` 的 `RunStopLifecycle.request()` 当前会对重复请求仅重播状态，不重发信号。实现需要显式新增“用户再次停止”的路径，不能宣称重复调用现有 request 就已支持。继续复用其优雅停止窗口、run-scoped forceKill 校验和 provider_unsettled 表达；新动作不重置升级窗口、不跳过优雅取消、不硬杀共享 transport，也不使用模糊 pkill。adapter 无安全的重发控制时返回 unavailable。
+**现有接缝与边界**：`RunStopLifecycle.request()` 对重复请求只重播状态；显式 `repeat()` 与 main 的 `requestRunStopAgain()` 已提供再次停止路径，重验当前 run 身份且不重置升级窗口。M1 现已为 Workflow API 加持久 commandId 收据，先存意图再调用该链，重复投递不重复发信号；ACK 只证明意图持久化，不证明原生接受或终止。继续复用优雅停止窗口、run-scoped forceKill 校验和 provider_unsettled 表达，不硬杀共享 transport、不用模糊 pkill。内部 best-effort stopAll 尚未升级为安全退出合同；原生不支持安全重发时也不能冒充已停止。当前验证与剩余项见 [M1 进展](m1-status.md)。
 
 ## 3. 依赖恢复：哪些复用，哪些重跑
 

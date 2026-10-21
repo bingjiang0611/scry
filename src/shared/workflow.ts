@@ -4,6 +4,7 @@ import type { AgentModelRef, AgentPermissionMode, RuntimeProvider } from './runt
 export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
 export const WORKFLOW_MAX_ATTEMPTS = 1000
+export const WORKFLOW_MAX_STOP_REQUESTS = 256
 export const WORKFLOW_DEFAULT_SLOTS = 16
 export const WORKFLOW_MIN_SLOTS = 1
 export const WORKFLOW_MAX_SLOTS = 256
@@ -132,6 +133,8 @@ export interface WorkflowProgress {
   attempts: WorkflowAttemptOutcome[]
   outcomeCount?: number
   dispatchAttempts: number
+  /** A user stop was requested; neither signal acknowledgement nor scope settlement. */
+  stopRequestedAt?: number
   slots: { limit: number; inUse: number; queued: number }
   finalReport?: string
   finalReportStatus?: 'available' | 'unavailable'

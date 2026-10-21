@@ -1,6 +1,6 @@
 # M0 实现与验收边界
 
-状态：独立分支 `feat/workflow-m0` 中的实验实现。已有指定账号/模型的真实完成与停止证据，但仍有故障现场 unknown / pending，不代表完整 M0、v10 或 M5 产品验收已交付。逐构建证据见 [真实 Provider 验收记录](m0-real-acceptance.md)与[后台完整 App 离线验收](m0-offline-acceptance.md)，两种范围不能混同。
+状态：独立分支 `feat/workflow-m0` 中的 M0 与 M1 控制子集实验实现。已继续推进[停止命令持久收据](m1-status.md)，并非停在 M0；完整 M1–M6 尚未完成。已有指定账号/模型的真实完成与停止证据，但仍有故障现场 unknown / pending，不代表完整产品验收已交付。逐构建证据见 [真实 Provider 验收记录](m0-real-acceptance.md)与[后台完整 App 离线验收](m0-offline-acceptance.md)，两种范围不能混同。
 
 ## 当前收口快照
 
@@ -8,16 +8,17 @@
 
 | 范围 | 当前结果与边界 |
 | --- | --- |
-| Workflow 核心 | 9 文件 **64 passed**；离线执行、预算、持久化、审批、未知保留与不重放合同 |
+| Workflow 核心 | 当前 9 文件 **74 passed**；加 canonical stop 生命周期共 **86 passed**，包含本轮新增 10 项控制回归 |
 | 隔离 Workflow UI | 通过；真实键鼠输入、焦点保留、权限点击、停止与 rehydrate 不重放；隐藏窗口与假 bridge，不等于完整 App 前台验收 |
-| Pi adapter 与 lifecycle | 默认文件并行 **6 文件 / 181 passed**，包含缺失 usage / 显式零 / 早停 / reasoning 覆盖回归；本地假 CLI |
+| Pi adapter 与 lifecycle | 上一 usage 阶段默认并行 **6 文件 / 181 passed**，本轮未重跑；不当成本轮真实账号验收 |
 | 完整 App 后台离线 | 同包完成、输出后停止、重启只观察均通过；新六条 usage unavailable、CLI/SQLite 为 null，旧六条错误对照原样保留；不是前台或真实模型验收 |
-| 当前相关后端门禁 | Pi/recorder/billing 等 **545 passed**；CLI 门禁 **589 passed**（重叠不累计）；Node/web typecheck、构建/打包与安全 smoke 通过 |
+| M1 停止控制 | 先保存意图再发信号；重复 ID 不重发，明确再次停止用新 ID；重启后只读收据。布尔 ACK 不证明原生接受或终止，内部安全退出仍未完成 |
+| 当前相关后端检查 | 本轮 **86 passed**、Node/web typecheck、构建/产物与安全 smoke 分项通过；此前 usage 阶段 545 / CLI 589 是历史范围（重叠不累计） |
 | 共享 probe counter 调用方 | 先前 **1 passed**，保留 5 次原 workload、四个应答及 graceful exit；本轮 trace.delivery ratchet 通过，仍不宣称性能提升 |
 | 真实 Pi/Codex | 既有冻结构建证据仍有效，但不代表当前所有新增代码已做真实探针；详见真实验收文档 |
 | 尚未覆盖/未通过 | 完整 App 前台、人类操作与五 Provider 真实矩阵；本轮整仓 npm test 600 秒未完成，三个未改动文件上已见七个失败，shell 未执行 |
 
-最新证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
+最新 M1 证据：`/tmp/scry-m1-stop.7jb82s/`，逐包与未完成边界见 [M1 进展](m1-status.md)。M0 usage 证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
 
 ## 已接入的路径
 

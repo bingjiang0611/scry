@@ -38,6 +38,7 @@ export class WorkflowService {
   private initializationError: unknown
   private readonly plans = new Map<string, Receipt<WorkflowPlanPreview>>()
   private readonly starts = new Map<string, Receipt<WorkflowProgress>>()
+  private readonly stops = new Map<string, Receipt<boolean>>()
   private readonly planning = new Map<string, { commandId?: string; stop: () => void }>()
   private readonly cancelled = new Set<string>()
   private unresolvedPlanning = 0
@@ -268,7 +269,10 @@ export class WorkflowService {
     return commandId ? this.receipt(this.starts, commandId, fingerprint, start) : start()
   }
   async preview(id: string): Promise<WorkflowPlanPreview> { await this.ensureReady(); return this.loadPreview(id) }
-  stop(id: string): boolean { return this.runner.stop(id) }
+  async stop(id: string, commandId: string): Promise<boolean> {
+    await this.ensureReady()
+    return this.receipt(this.stops, commandId, id, () => this.runner.requestStop(id, commandId))
+  }
   cancelPlanning(commandId: string): boolean {
     if (this.cancelled.size >= 256) this.cancelled.delete(this.cancelled.values().next().value!)
     this.cancelled.add(commandId)

@@ -5,7 +5,9 @@ export interface WorkflowApi {
   preview(workflowId: string): Promise<WorkflowPlanPreview>
   approve(approval: WorkflowApproval): Promise<true>
   start(workflowId: string, approval: WorkflowApproval, commandId?: string): Promise<WorkflowProgress>
-  stop(workflowId: string): Promise<boolean>
+  /** true acknowledges a durable stop intent, not a native signal or scope settlement.
+   * Re-delivery must reuse commandId; an explicit stop-again uses a new identity. */
+  stop(workflowId: string, commandId: string): Promise<boolean>
   cancelPlanning(commandId: string): Promise<boolean>
   list(cwd: string, cursor?: string): Promise<WorkflowProgressPage>
   snapshot(workflowId: string): Promise<WorkflowProgress | null>

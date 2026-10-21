@@ -214,6 +214,8 @@ export const WORKFLOW_COPY = {
   missingSnapshot: '找不到运行记录；不会自动重跑',
   snapshotError: (message: string) => `无法恢复工作流进度：${message}`,
   stopAgain: '再次停止',
+  stopPending: '已请求停止，等待收敛',
+  stopUnavailable: '当前没有可安全控制的运行句柄，未发送新的停止信号',
   count: (used: number, limit: number, active: number, queued: number) => `Agent 尝试 ${used}/1000 · 共享槽位 ${active}/${limit} · 排队 ${queued}`,
   attemptColumns: ['节点', '角色', 'Agent', '状态', '模型证据', '运行引用'],
   attemptCount: (visible: number, total: number) => `节点状态 ${visible}/${total}`,

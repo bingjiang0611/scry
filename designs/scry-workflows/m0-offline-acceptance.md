@@ -1,5 +1,7 @@
 # M0 后台完整 App 离线验收 · 2026-10-21
 
+本页是历史逐包记录。原 `dist` 路径已被后续 [M1 构建](m1-status.md)替换；13017… 是本页执行时的 hash，不能拿当前该路径的文件冒充旧包。原 records、archive 与 scope 证据仍保留。
+
 ## 范围与身份
 
 本轮验证生产 App → preload → trusted IPC → canonical `startAppRun` → Pi adapter → recorder/archive 的集成。模型端是固定本地假 CLI，不是实际模型，不替代[既有真实 Pi/Codex 验收](m0-real-acceptance.md)、前台人工操作或五 Provider 真实矩阵。

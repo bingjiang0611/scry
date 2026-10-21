@@ -265,7 +265,7 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
       {unresolvedPlanning > 0 && <p role="alert">{copy.unresolvedPlanning(unresolvedPlanning)}</p>}
       {nextCursor && <button disabled={loadingHistory} type="button" onClick={() => loadHistory(nextCursor)}>{copy.loadMore}</button>}
       {progresses.map(progress => <details key={progress.workflowId} data-workflow-id={progress.workflowId}>
-        <summary>{progress.goal} · {copy.status[progress.state]}</summary>
+        <summary>{progress.goal} · {progress.stopRequestedAt !== undefined && ['queued', 'running'].includes(progress.state) ? copy.stopPending : copy.status[progress.state]}</summary>
         <code>{progress.workflowId}</code>
         {progress.state === 'awaiting_approval' && <button type="button" onClick={() => {
           const epoch = ++previewEpoch.current
@@ -286,8 +286,11 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
         {progress.finalReportStatus === 'available' && <><h4>{copy.observedResult}</h4><pre>{progress.finalReport}</pre></>}
         {progress.finalReportStatus === 'unavailable' && <p>{copy.finalReportUnavailable}</p>}
         {['queued', 'running', 'unknown'].includes(progress.state) && <button type="button" onClick={() => {
-          void window.scry.workflow.stop(progress.workflowId).then(() => read(progress.workflowId)).catch(error => setError(message(error)))
-        }}>{progress.state === 'unknown' ? copy.stopAgain : copy.stop}</button>}
+          void window.scry.workflow.stop(progress.workflowId, crypto.randomUUID()).then(accepted => {
+            if (!accepted) setError(copy.stopUnavailable)
+            read(progress.workflowId)
+          }).catch(error => setError(message(error)))
+        }}>{progress.state === 'unknown' || progress.stopRequestedAt !== undefined ? copy.stopAgain : copy.stop}</button>}
       </details>)}
     </section>}
   </>

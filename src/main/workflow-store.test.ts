@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { FileWorkflowStore } from './workflow-store'
 import type { WorkflowStoreRecord } from './workflow-store'
+import { WORKFLOW_MAX_STOP_REQUESTS } from '../shared/workflow'
 
 const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -19,6 +20,17 @@ function record(id: string): WorkflowStoreRecord {
     progress: { workflowId: id, programRevision: 'rev', workspace: '/fixture', goal: 'goal', state: 'queued', attempts: [], dispatchAttempts: 0, slots: { limit: 1, inUse: 0, queued: 0 }, updatedAt: 1 }, intents: [], outcomes: [] }
 }
 describe('actual workflow filesystem', () => {
+  it.each(['identity', 'duplicate', 'limit'] as const)('fails closed for corrupt stop receipts: %s', async kind => {
+    const { store } = await fixture()
+    const value = record('stop-corrupt')
+    value.stopRequests = kind === 'limit'
+      ? Array.from({ length: WORKFLOW_MAX_STOP_REQUESTS + 1 }, (_, index) => ({ commandId: `stop-${index}`, requestedAt: 1 }))
+      : kind === 'duplicate' ? [{ commandId: 'same', requestedAt: 1 }, { commandId: 'same', requestedAt: 2 }]
+        : [{ commandId: '../invalid', requestedAt: 1 }]
+    await store.save(value)
+    await expect(store.load('stop-corrupt')).rejects.toThrow('停止收据合同无效')
+  })
+
   it('commits the immutable planning body before its small durable receipt', async () => {
     const { path, store } = await fixture()
     await store.savePlanningIntent({ workflowId: 'plan', role: 'orchestrator', providerId: 'pi', workspace: '/fixture', goal: 'inspect',

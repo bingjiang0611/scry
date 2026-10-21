@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { workflowControlCopy } from '../shared/constants/copy'
 import { availableParallelism } from 'node:os'
 import type { AgentPermissionMode } from '../shared/runtime'
 import type {
@@ -9,7 +10,7 @@ import type {
   WorkflowProgress,
   WorkflowRoleBinding
 } from '../shared/workflow'
-import { WORKFLOW_MAX_ATTEMPTS, workflowSlotLimit, workflowProgressSnapshot } from '../shared/workflow'
+import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_STOP_REQUESTS, workflowSlotLimit, workflowProgressSnapshot } from '../shared/workflow'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 
 export interface WorkflowProviderExecutionRequest {
@@ -221,7 +222,7 @@ export class WorkflowRunner {
   private readonly onProgress?: (progress: WorkflowProgress) => void
   private readonly beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
   private readonly approvals = new Map<string, WorkflowApproval>()
-  private readonly active = new Map<string, { progress: WorkflowProgress; stop: () => void }>()
+  private readonly active = new Map<string, { record: WorkflowStoreRecord; progress: WorkflowProgress; initialized: Promise<boolean>; halt: () => void; stop: () => void }>()
   private reservationTail = Promise.resolve()
   private persistTail = Promise.resolve()
 
@@ -259,9 +260,14 @@ export class WorkflowRunner {
     const record: WorkflowStoreRecord = { preview, progress, intents: [], outcomes: [], executionStarted: this.now() }
     const controller: { stopped: boolean; returnNode?: string } = { stopped: false }
     const activeStops = new Set<() => boolean>()
-    this.active.set(preview.workflowId, { progress, stop: () => {
+    let initialized!: (accepted: boolean) => void
+    const initialization = new Promise<boolean>(resolve => { initialized = resolve })
+    const halt = () => {
       controller.stopped = true
       this.slots.cancelQueued(preview.workflowId)
+    }
+    this.active.set(preview.workflowId, { record, progress, initialized: initialization, halt, stop: () => {
+      halt()
       for (const stop of activeStops) stop()
     } })
     this.approvals.delete(preview.workflowId)
@@ -272,7 +278,9 @@ export class WorkflowRunner {
       }
       if (existing?.receipt) record.receipt = existing.receipt
       await this.store.save(record)
+      initialized(true)
     } catch (error) {
+      initialized(false)
       this.active.delete(preview.workflowId)
       throw error
     }
@@ -317,6 +325,36 @@ export class WorkflowRunner {
     const entry = this.active.get(workflowId)
     if (!entry) return false
     entry.stop()
+    return true
+  }
+
+  /** Service coalesces concurrent delivery by commandId before entering this method.
+   * A recovered intent is observational: never replay a signal whose dispatch is unknown. */
+  async requestStop(workflowId: string, commandId: string): Promise<boolean> {
+    const entry = this.active.get(workflowId)
+    const record = entry?.record ?? await this.store.load(workflowId)
+    if (record?.stopRequests?.some(request => request.commandId === commandId)) {
+      // A failed save leaves an in-memory candidate. Cache eviction must not
+      // turn it into an ACK or replay a possibly dispatched control command.
+      const durable = entry ? await this.store.load(workflowId) : record
+      if (!durable?.stopRequests?.some(request => request.commandId === commandId)) throw new Error(workflowControlCopy.unconfirmedStopReceipt)
+      return true
+    }
+    if (!entry) return false
+    // Fence admission synchronously, including dispatches awaiting capability/storage.
+    // A failed journal write must not allow the next Agent to start or emit a signal.
+    entry.halt()
+    // Do not let a stop write race the initial prior-execution check and make
+    // this start reject its own newly persisted execution record.
+    if (!await entry.initialized) return false
+    if ((entry.record.stopRequests?.length ?? 0) >= WORKFLOW_MAX_STOP_REQUESTS) throw new Error(workflowControlCopy.stopLimit)
+    const requestedAt = this.now()
+    entry.progress.stopRequestedAt ??= requestedAt
+    const requests = entry.record.stopRequests ??= []
+    requests.push({ commandId, requestedAt })
+    await this.persist(entry.record, entry.progress)
+    entry.stop()
+    // true acknowledges the persisted intent, not Provider acceptance or termination.
     return true
   }
 

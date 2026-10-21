@@ -11,6 +11,7 @@ import '../../src/renderer/codex-alignment.css'
 const counters = { plans: 0, approvals: 0, starts: 0, stops: 0, catalogs: 0, permissionClicks: 0 }
 let notify = () => {}
 const keys: string[] = []
+const stopCommands: string[] = []
 document.addEventListener('keydown', event => { keys.push(`${event.key}:${(event.target as HTMLElement).tagName}:${event.isTrusted}`); if (keys.length > 12) keys.shift() })
 let finishPlan: (() => void) | undefined
 let finishApproval: (() => void) | undefined
@@ -42,13 +43,20 @@ const api: WorkflowApi = {
   start: async () => {
     counters.starts++
     progress = { workflowId: preview.workflowId, programRevision: preview.programRevision, workspace: preview.workspace,
-      goal: preview.userGoal, state: 'unknown', dispatchAttempts: 1, revision: 2, updatedAt: Date.now(), finalReportStatus: 'unavailable',
-      attempts: [{ attemptId: 'attempt', taskId: 'task', nodeId: 'report', role: 'worker', providerId: 'codex', actualModelStatus: 'unknown', state: 'unknown', settled: false }],
+      goal: preview.userGoal, state: 'running', dispatchAttempts: 1, revision: 2, updatedAt: Date.now(), finalReportStatus: 'unavailable',
+      attempts: [{ attemptId: 'attempt', taskId: 'task', nodeId: 'report', role: 'worker', providerId: 'codex', actualModelStatus: 'unknown', state: 'running', settled: false }],
       slots: { limit: 2, inUse: 1, queued: 0 } }
     notify()
     return progress
   },
-  stop: async () => { counters.stops++; notify(); return false },
+  stop: async (_id, commandId) => {
+    if (!/^[A-Za-z0-9_-]{1,96}$/.test(commandId)) throw new Error('Missing stop command identity')
+    stopCommands.push(commandId)
+    counters.stops++
+    if (progress) progress = { ...progress, stopRequestedAt: Date.now(), revision: (progress.revision ?? 0) + 1 }
+    notify()
+    return true
+  },
   snapshot: async () => progress ?? null,
   list: async () => ({ records: progress ? [progress] : [], unresolvedPlanning: 0 }),
   cancelPlanning: async () => true,
@@ -65,7 +73,8 @@ Object.defineProperty(window, 'scry', { configurable: true, value: { workflow: a
     } }
   }
 } })
-Object.assign(window, { workflowFixture: { counters, keys, finishPlan: () => finishPlan?.(), finishApproval: () => finishApproval?.(),
+Object.assign(window, { workflowFixture: { counters, keys, stopCommands,
+  markUnknown: () => { if (progress) progress = { ...progress, state: 'unknown', revision: (progress.revision ?? 0) + 1 } }, finishPlan: () => finishPlan?.(), finishApproval: () => finishApproval?.(),
   rehydrate: () => { document.dispatchEvent(new Event('fixture-remount')) } } })
 
 function Fixture() {

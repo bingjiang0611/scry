@@ -1,8 +1,9 @@
 import { mkdir, open, opendir, rename, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { workflowControlCopy } from '../shared/constants/copy'
 import type { WorkflowAttemptOutcome, WorkflowPlanPreview, WorkflowProgress } from '../shared/workflow'
-import { workflowProgressSnapshot } from '../shared/workflow'
+import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
 
 export interface WorkflowIntent {
   workflowId: string
@@ -17,6 +18,8 @@ export interface WorkflowIntent {
 export interface WorkflowStoreRecord {
   preview: WorkflowPlanPreview
   executionStarted?: number
+  /** Durable user intents only. Presence never proves a native signal or settlement. */
+  stopRequests?: Array<{ commandId: string; requestedAt: number }>
   receipt?: { commandId: string; fingerprint: string; status: 'accepted' | 'completed' | 'failed' | 'unknown' }
   progress: WorkflowProgress
   intents: WorkflowIntent[]
@@ -162,6 +165,9 @@ export class FileWorkflowStore implements WorkflowStore {
     if (!value || typeof value !== 'object') throw new Error('工作流记录已损坏')
     const record = value as WorkflowStoreRecord
     if (record.preview?.workflowId !== id || record.progress?.workflowId !== id || !Array.isArray(record.intents) || !Array.isArray(record.outcomes)) throw new Error('工作流记录合同无效')
+    if (record.stopRequests !== undefined && (!Array.isArray(record.stopRequests) || record.stopRequests.length > WORKFLOW_MAX_STOP_REQUESTS || record.stopRequests.some(request =>
+      !request || typeof request.commandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.commandId) || !Number.isFinite(request.requestedAt) || request.requestedAt < 0) ||
+      new Set(record.stopRequests.map(request => request.commandId)).size !== record.stopRequests.length)) throw new Error(workflowControlCopy.invalidStopReceipt)
     return record
   }
   async listPage(cursor?: string, limit = 64): Promise<WorkflowStorePage> {

@@ -29,6 +29,12 @@ function detail(result: WorkspaceDiffState): string {
 
 const count = (value: number): string => `${value} 个工作区文件的 Git 净改动`
 
+export const workflowControlCopy = {
+  stopLimit: '工作流停止命令已达上限；请检查未收敛作用域，不会重发或清空收据',
+  invalidStopReceipt: '工作流停止收据合同无效',
+  unconfirmedStopReceipt: '停止请求尚未确认持久化，不会重发；修复存储后请再次停止'
+}
+
 export const workspaceDiffCopy = {
   invalidDirectory: '无效的工作目录',
   heading: 'Changes',
