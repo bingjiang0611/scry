@@ -3780,7 +3780,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
   it('上下文段：最近一轮占用 ÷ 窗口（诚实单条，不伪造三色分段）', () => {
     expect(html).toContain('上下文')
     expect(html).toContain('claude-opus-4-8')
-    expect(html).toContain('87.0k / 200.0k')
+    expect(html).toContain('<b>87.0k</b><span> / 200.0k</span>')
     expect(html).toContain('已占 44%')
   })
 
@@ -3803,7 +3803,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       <OverviewPanel turns={[inferred]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(inferredHtml).toContain('103.2k / 1.0M')
+    expect(inferredHtml).toContain('<b>103.2k</b><span> / 1.0M</span>')
     expect(inferredHtml).toContain('推断：Provider usage 比例换算')
   })
 
@@ -3861,7 +3861,7 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     )
 
     expect(unknownHtml).toContain('暂无上下文数据')
-    expect(unknownHtml).not.toContain('50.0k / 200.0k')
+    expect(unknownHtml).not.toContain('<b>50.0k</b><span> / 200.0k</span>')
     expect(unknownHtml).not.toContain('已占 25%')
   })
 
