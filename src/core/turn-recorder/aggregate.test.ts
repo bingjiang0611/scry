@@ -4,6 +4,25 @@ import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 
 describe('aggregateTurnEvidence', () => {
+  it('does not turn status or model metadata alone into available usage', () => {
+    const evidence = aggregateTurnEvidence({ userText: 'test', events: [{
+      id: 'result', runId: 'r', ts: '2026-10-21T00:00:00Z', kind: 'harness', stage: 'result',
+      durationMs: 100, modelUsage: [{ model: 'observed-model' }]
+    }] })
+    expect(evidence.usage.status).toBe('unavailable')
+    expect(evidence.usage.value).toBeUndefined()
+  })
+
+  it('preserves explicitly reported zero usage as available evidence', () => {
+    const evidence = aggregateTurnEvidence({ userText: 'test', events: [{
+      id: 'result', runId: 'r', ts: '2026-10-21T00:00:00Z', kind: 'harness', stage: 'result',
+      tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0
+    }] })
+    expect(evidence.usage).toMatchObject({ status: 'available', quality: 'exact', value: {
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0
+    } })
+  })
+
   it('preserves Steer admission evidence without rewriting the canonical root prompt or double counting usage', () => {
     const bytes = Buffer.from('image payload')
     const steer = { messageId: 'message-1', prompt: '补充要求', attachments: [{ kind: 'image' as const, name: 'screen.png', mimeType: 'image/png' as const, dataBase64: bytes.toString('base64') }] }

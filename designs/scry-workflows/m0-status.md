@@ -1,6 +1,6 @@
 # M0 实现与验收边界
 
-状态：独立分支 `feat/workflow-m0` 中的实验实现。已有指定账号/模型的真实完成与停止证据，但仍有故障现场 unknown / pending，不代表完整 M0、v10 或 M5 产品验收已交付。最新范围与逐构建证据见 [真实 Provider 验收记录](m0-real-acceptance.md)。
+状态：独立分支 `feat/workflow-m0` 中的实验实现。已有指定账号/模型的真实完成与停止证据，但仍有故障现场 unknown / pending，不代表完整 M0、v10 或 M5 产品验收已交付。逐构建证据见 [真实 Provider 验收记录](m0-real-acceptance.md)与[后台完整 App 离线验收](m0-offline-acceptance.md)，两种范围不能混同。
 
 ## 当前收口快照
 
@@ -10,12 +10,14 @@
 | --- | --- |
 | Workflow 核心 | 9 文件 **64 passed**；离线执行、预算、持久化、审批、未知保留与不重放合同 |
 | 隔离 Workflow UI | 通过；真实键鼠输入、焦点保留、权限点击、停止与 rehydrate 不重放；隐藏窗口与假 bridge，不等于完整 App 前台验收 |
-| Pi adapter 与 lifecycle | 默认文件并行 **6 文件 / 174 passed**；本地假 CLI，不是新一轮真实账号验收 |
-| 共享 probe counter 调用方 | **1 passed**，保留 5 次原 workload、四个应答及 graceful exit；不宣称性能提升 |
+| Pi adapter 与 lifecycle | 默认文件并行 **6 文件 / 181 passed**，包含缺失 usage / 显式零 / 早停 / reasoning 覆盖回归；本地假 CLI |
+| 完整 App 后台离线 | 同包完成、输出后停止、重启只观察均通过；新六条 usage unavailable、CLI/SQLite 为 null，旧六条错误对照原样保留；不是前台或真实模型验收 |
+| 当前相关后端门禁 | Pi/recorder/billing 等 **545 passed**；CLI 门禁 **589 passed**（重叠不累计）；Node/web typecheck、构建/打包与安全 smoke 通过 |
+| 共享 probe counter 调用方 | 先前 **1 passed**，保留 5 次原 workload、四个应答及 graceful exit；本轮 trace.delivery ratchet 通过，仍不宣称性能提升 |
 | 真实 Pi/Codex | 既有冻结构建证据仍有效，但不代表当前所有新增代码已做真实探针；详见真实验收文档 |
-| 尚未覆盖 | 完整 App 前台、人类操作验收与五 Provider 真实矩阵；完整全仓 CI 本轮未重跑 |
+| 尚未覆盖/未通过 | 完整 App 前台、人类操作与五 Provider 真实矩阵；本轮整仓 npm test 600 秒未完成，三个未改动文件上已见七个失败，shell 未执行 |
 
-最新证据：`/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
+最新证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
 
 ## 已接入的路径
 
@@ -150,5 +152,14 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - 这是可证明的 fixture 清理污染修复，不能认定历史 custom-message、最初 lifecycle timeout 或上述 16 项自然失败全由它引起。高负载仍可能影响启动 deadline；没有据前后耗时宣称性能改善，也没有重跑全仓 CI。
 - 本轮扩大进程检查前缀后发现两条更早的孤立假 CLI：PID 2284（20:57:53）与 10229（20:23:11），都早于本轮 20:59 开始，无法核实原登记归属，未停止。前节“无遗留”的旧检查仅覆盖 command-fixture，不能解释为全机没有测试遗留；本轮回归另行确认了自身精确 PID 退出。
 - 证据 `/tmp/scry-m0-closeout.sfrQzy/`；当前验收范围见顶部快照。没有真实模型调用、安装或现有 App 重启；完整前台与五 Provider 真验收需另行安排。
+
+### 后台完整 App 离线验收与 usage 缺失修复
+
+- 用户改为后台操作后，使用隔离 HOME/userData、当前完整 App 和固定假 CLI；不是假 preload bridge，没有真实模型或凭据。四角色显式绑定同一获准的离线 profile/model/full_access，仅限当前临时项目。
+- 首轮发现假 CLI 的缺 usage 完成帧被写成精确零；官方完成消息必须有 usage，这是异常字段注入。合法的 usage 前中断也不能补零。冻结六条错误记录及 SHA-256，不回填或伪装成原生报告。Pi 累计器保留缺失字段/partial 覆盖，recorder 不再把 terminal/model metadata 当用量；明确零值保持有效。
+- 新增定向检查先红 **4 failed / 2 passed**，最终 **9 项**通过；相关 **545 passed**、当前 Workflow **64 passed**、CLI 门禁 **589 passed**、Node/web typecheck 与 pack:artifact 通过。各组存在交集，不累计。原历史启动间歇失败并未因此定因。
+- 修复后同一打包 App：3-call 并行汇总（peak 2 → 0）与输出后停止（settled、slots 0）通过。6 个新 prompt/session/record/archive 一一对应，3 个产物内容地址、2 条上游引用及最终返回核对。新六条 usage unavailable，CLI/SQLite 缺失数值为 null；仍有 canonical identity/role/task-link legacy_unset advisory。
+- 同包关闭再开，四个历史 workflow 恢复，只观察而不执行；12 prompts 和 12 条 record 哈希不变。最终关闭自有 App，登记离线 CLI PID 均无存活，旧真实现场 16 个 source hash 不变。没有安装、推送、用户 App 重启或旧 unknown 清理。
+- 扩大门禁未收口：一轮 npm test 在 600 秒截止，无完整汇总、未到 shell；source-control/service 3、git-terminal-pair 3、performance-baseline 1 项失败。均保留原断言/期限；load 59.83/10 核不是根因证明，不称它们一定与本次无关，也没有循环重跑。后续由维护 Agent 单独定位这组失败并补完整门禁。详见[后台离线记录](m0-offline-acceptance.md)。
 
 实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。历史门禁结果不等于上述剩余范围已交付，当前范围以上述分项结果为准。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。

@@ -1229,13 +1229,14 @@ function extensionResponse(
 }
 
 interface UsageAggregate {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  reasoning: number
+  input?: number
+  output?: number
+  cacheRead?: number
+  cacheWrite?: number
+  reasoning?: number
   cost: number
   allCostKnown: boolean
+  allTokensKnown: boolean
   byModel: Map<string, ModelUsageRow>
   lastContextTokens?: number
   lastContextModel?: string
@@ -1270,6 +1271,14 @@ function piLlmCall(message: JsonRecord, endedAtMs: number, firstContentAtMs: num
   } }
 }
 
+function sumReported(previous: number | undefined, reported: number | undefined): number | undefined {
+  return reported === undefined ? previous : (previous ?? 0) + reported
+}
+
+function sumComplete(previous: number | undefined, reported: number | undefined): number | undefined {
+  return previous === undefined || reported === undefined ? undefined : previous + reported
+}
+
 function addAssistantUsage(
   aggregate: UsageAggregate,
   message: JsonRecord,
@@ -1289,15 +1298,19 @@ function addAssistantUsage(
   const catalogueCost = number(record(usage.cost).total)
   const cost = provider === 'qoder' || catalogueCost === 0 ? undefined : catalogueCost
   const key = `${provider ?? ''}\0${model}`
-  aggregate.input += input ?? 0
-  aggregate.output += output ?? 0
-  aggregate.cacheRead += cacheRead ?? 0
-  aggregate.cacheWrite += cacheWrite ?? 0
-  aggregate.reasoning += reasoning ?? 0
-  const contextEvidence = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
-  // Pi normalizes input/cacheRead/cacheWrite into disjoint counts, including for OpenAI/Codex.
-  // Cached tokens still occupy context. All-zero transport failures are not context samples.
-  if (contextEvidence > 0) {
+  aggregate.input = sumReported(aggregate.input, input)
+  aggregate.output = sumReported(aggregate.output, output)
+  aggregate.cacheRead = sumReported(aggregate.cacheRead, cacheRead)
+  aggregate.cacheWrite = sumReported(aggregate.cacheWrite, cacheWrite)
+  // Reasoning is optional in Pi's wire contract. A breakdown is complete only
+  // when every observed assistant message supplies it; output already includes it.
+  aggregate.reasoning = aggregate.byModel.size === 0 ? reasoning : sumComplete(aggregate.reasoning, reasoning)
+  if (input == null || output == null || cacheRead == null || cacheWrite == null) aggregate.allTokensKnown = false
+  const contextEvidence = input != null && cacheRead != null && cacheWrite != null
+    ? input + cacheRead + cacheWrite : undefined
+  // Pi normalizes these into disjoint counts. Missing components are not zero;
+  // all-zero transport failures are not new context samples either.
+  if (contextEvidence != null && contextEvidence > 0) {
     aggregate.lastContextTokens = contextEvidence
     aggregate.lastContextModel = model
     aggregate.lastContextProvider = provider
@@ -1306,18 +1319,19 @@ function addAssistantUsage(
   }
   if (cost == null) aggregate.allCostKnown = false
   else aggregate.cost += cost
-  const existing = aggregate.byModel.get(key) ?? {
+  const previous = aggregate.byModel.get(key)
+  const existing = previous ?? {
     model,
     billingProvider: billingProviderForUpstream(provider),
     upstreamProvider: provider,
     usageSource: 'pi_rpc'
   }
   existing.contextWindow = contextWindows.get(key) ?? existing.contextWindow
-  existing.inputTokens = (existing.inputTokens ?? 0) + (input ?? 0)
-  existing.outputTokens = (existing.outputTokens ?? 0) + (output ?? 0)
-  existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + (cacheRead ?? 0)
-  existing.cacheCreationTokens = (existing.cacheCreationTokens ?? 0) + (cacheWrite ?? 0)
-  existing.reasoningTokens = (existing.reasoningTokens ?? 0) + (reasoning ?? 0)
+  existing.inputTokens = sumReported(existing.inputTokens, input)
+  existing.outputTokens = sumReported(existing.outputTokens, output)
+  existing.cacheReadTokens = sumReported(existing.cacheReadTokens, cacheRead)
+  existing.cacheCreationTokens = sumReported(existing.cacheCreationTokens, cacheWrite)
+  existing.reasoningTokens = previous ? sumComplete(previous.reasoningTokens, reasoning) : reasoning
   if (cost != null) {
     existing.costUsd = (existing.costUsd ?? 0) + cost
     existing.costSource = 'price_table'
@@ -1339,7 +1353,7 @@ function addAssistantUsage(
       }
     }
   }
-  return contextEvidence > 0
+  return contextEvidence != null && contextEvidence > 0
 }
 
 async function runPiAgent(
@@ -1395,13 +1409,9 @@ async function runPiAgent(
   let retainRpc = false
   let historyReaderReady = false
   const usage: UsageAggregate = {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    reasoning: 0,
     cost: 0,
     allCostKnown: true,
+    allTokensKnown: true,
     byModel: new Map()
   }
   const modelContextWindows = new Map<string, number>()
@@ -1766,7 +1776,7 @@ async function runPiAgent(
         model: usage.model ?? null, provider: usage.upstreamProvider ?? null,
         stderrTail: rpc.stderrTail() || null, transportError: usage.lastTransportError ?? null,
         shellEnvError: launchShellEnvError ?? null,
-        ...(partial ? { usageCoverage: 'partial' } : {})
+        ...(partial || state.stopped || !usage.allTokensKnown ? { usageCoverage: 'partial', usageComplete: false } : {})
       },
       ...fields
     }))

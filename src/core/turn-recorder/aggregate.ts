@@ -183,7 +183,7 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const models = new Set(results.flatMap((event) => event.modelUsage ?? []).map((row) => row.model).filter(Boolean))
   const contextResult = [...results].reverse().find((event) => event.contextTokens != null)
   const context = contextResult ? contextUsageEvidence(contextResult) : null
-  return {
+  const usage: TurnUsage = {
     inputTokens: sumObserved(results, (event) => event.tokensIn),
     outputTokens: sumObserved(results, (event) => event.tokensOut),
     cacheReadTokens: sumObserved(results, (event) => event.cacheReadTokens),
@@ -206,6 +206,9 @@ function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
     } : {}),
     ...(models.size === 1 ? { model: [...models][0] } : {})
   }
+  // Terminal status and model identity are not measurements. Preserve explicit
+  // zero counters, but do not label a metadata-only result as available usage.
+  return Object.entries(usage).some(([key, value]) => key !== 'model' && value !== undefined) ? usage : undefined
 }
 
 export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {

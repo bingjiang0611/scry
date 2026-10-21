@@ -283,6 +283,14 @@ process.stdin.on('data', (chunk) => {
         send({ type: 'agent_settled' })
         continue
       }
+      if (command.message.startsWith('mixed-reasoning-')) {
+        const breakdowns = command.message.endsWith('first') ? [2, undefined] : [undefined, 2]
+        for (const reasoning of breakdowns) send({ type: 'message_end', message: {
+          role: 'assistant', provider: 'test-provider', model: 'test-model', stopReason: 'stop', content: [],
+          usage: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, ...(reasoning !== undefined ? { reasoning } : {}) }
+        } })
+        send({ type: 'agent_end' }); send({ type: 'agent_settled' }); continue
+      }
       if (command.message === 'mixed-billing' || command.message === 'mixed-billing-crash') {
         for (const [provider, model, stopReason, input, output, cost] of [
           ['cc-switch', 'claude-opus-5', 'error', 10, 2, 0],
@@ -403,12 +411,17 @@ process.stdin.on('data', (chunk) => {
       send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'subagent', args: { task: 'inspect' } })
       send({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'subagent', result: { content: [{ type: 'text', text: 'done' }] }, isError: false })
       const providerAborted = command.message === 'provider-aborted'
+      let reportedUsage = { input: 10, output: 4, cacheRead: 2, cacheWrite: 1, cost: { total: 0.01 } }
+      // Missing usage is a malformed completed frame; an adapter must not invent counters for it.
+      if (command.message === 'missing-usage') reportedUsage = undefined
+      if (command.message === 'partial-usage') reportedUsage = { input: 10, output: 4, cost: { total: 0.01 } }
+      if (command.message === 'zero-usage') reportedUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0 } }
       send({ type: 'message_end', message: {
         role: 'assistant', provider: 'openai-codex', model: 'test-model',
         stopReason: providerAborted ? 'aborted' : 'stop',
         ...(providerAborted ? { errorMessage: 'Qoder: aborted' } : {}),
         content: providerAborted ? [] : [{ type: 'text', text: 'hello world' }],
-        usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 1, cost: { total: 0.01 } }
+        ...(reportedUsage ? { usage: reportedUsage } : {})
       } })
       if (command.message === 'large-snapshots') {
         const message = { role: 'toolResult', content: [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024) }] }
@@ -1133,6 +1146,82 @@ describe('Pi RPC Provider', () => {
       } finally {
         await adapter.dispose?.()
       }
+    })
+  }, 15_000)
+
+  it.each(['missing-usage', 'zero-usage', 'reported-usage', 'partial-usage'] as const)('keeps absent token dimensions distinct from reported zero: %s', async mode => {
+    await withCommandFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({ runId: `usage-${mode}`, prompt: mode, cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => events.push(event) })
+      try {
+        expect(await handle.promise).toMatchObject({ status: 'completed' })
+        const terminal = events.find(event => event.stage === 'result')!
+        const evidence = aggregateTurnEvidence({ userText: mode, events, source: 'scry_provider_adapter' })
+        const ledger = billingRowsFromItems({ runId: `usage-${mode}`, items: events, nowMs: Date.now(), runtimeProvider: 'pi_rpc' }).usageLedger
+        const row = Object.fromEntries(USAGE_LEDGER_COLS.map((column, index) => [column, ledger[0][index]]))
+        if (mode === 'missing-usage') {
+          for (const key of ['tokensIn', 'tokensOut', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens'] as const) expect(terminal[key]).toBeUndefined()
+          expect(evidence.usage.status).toBe('unavailable')
+          expect(row).toMatchObject({ input_tokens: null, output_tokens: null, reasoning_tokens: null })
+        } else if (mode === 'zero-usage') {
+          for (const key of ['tokensIn', 'tokensOut', 'cacheReadTokens', 'cacheCreationTokens', 'reasoningTokens'] as const) expect(terminal[key]).toBe(0)
+          expect(evidence.usage).toMatchObject({ status: 'available', value: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 } })
+        } else if (mode === 'partial-usage') {
+          expect(terminal).toMatchObject({ tokensIn: 10, tokensOut: 4, runtimeMetadata: { usageComplete: false } })
+          expect(terminal.cacheReadTokens).toBeUndefined()
+          expect(terminal.cacheCreationTokens).toBeUndefined()
+          expect(terminal.contextTokens).toBeUndefined()
+          expect(evidence.usage).toMatchObject({ status: 'partial', value: { inputTokens: 10, outputTokens: 4 } })
+        } else {
+          expect(terminal).toMatchObject({ tokensIn: 10, tokensOut: 4, cacheReadTokens: 2, cacheCreationTokens: 1 })
+          expect(terminal.reasoningTokens).toBeUndefined()
+          expect(terminal.modelUsage?.[0].reasoningTokens).toBeUndefined()
+          expect(evidence.usage).toMatchObject({ status: 'available', value: { inputTokens: 10, outputTokens: 4 } })
+          expect(evidence.usage.value?.reasoningTokens).toBeUndefined()
+          expect(row.reasoning_tokens).toBeNull()
+        }
+      } finally { handle.forceKill(); await handle.promise.catch(() => {}); await adapter.dispose?.() }
+    })
+  }, 15_000)
+
+  it('keeps usage unavailable when stopped after partial text but before an assistant usage report', async ({ signal }) => {
+    await withCommandFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const ready = new EventEmitter()
+      const partialText = once(ready, 'text', { signal })
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({ runId: 'stop-without-usage', prompt: 'stop-before-final-state', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => {
+          events.push(event)
+          if (event.kind === 'model' && event.text === 'started') ready.emit('text')
+        } })
+      try {
+        await Promise.race([partialText, handle.promise.then(() => { throw new Error('Fixture completed before partial text') })])
+        handle.interrupt()
+        expect(await handle.promise).toMatchObject({ status: 'interrupted' })
+        const terminal = events.find(event => event.stage === 'result')!
+        expect(terminal.tokensIn).toBeUndefined()
+        expect(terminal.tokensOut).toBeUndefined()
+        expect(aggregateTurnEvidence({ userText: 'stop-before-final-state', events }).usage.status).toBe('unavailable')
+      } finally { handle.forceKill(); await handle.promise.catch(() => {}); await adapter.dispose?.() }
+    })
+  }, 15_000)
+
+  it.each(['first', 'last'])('does not claim a complete reasoning total when one message omits it: reported %s', async order => {
+    await withCommandFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      try {
+        await adapter.run({ runId: `reasoning-${order}`, prompt: `mixed-reasoning-${order}`, cwd, agentProfileId: profile.id,
+          attachments: [], permissionMode: 'full_access', emit: event => events.push(event) }).promise
+        const terminal = events.find(event => event.stage === 'result')!
+        expect(terminal).toMatchObject({ tokensIn: 20, tokensOut: 4, cacheReadTokens: 0, cacheCreationTokens: 0 })
+        expect(terminal.reasoningTokens).toBeUndefined()
+        expect(terminal.modelUsage).toHaveLength(1)
+        expect(terminal.modelUsage?.[0].reasoningTokens).toBeUndefined()
+      } finally { await adapter.dispose?.() }
     })
   }, 15_000)
 
