@@ -35,7 +35,9 @@ describe('archive source paging', () => {
     const archive: TraceArchive = { version: 3, cwd: '/repo', sessionId: 'pi-session', providerId: 'pi', turns: [] }
     const readFullArchive = vi.fn(async () => archive)
     await expect(readCompleteArchiveForNativeReconciliation({ archive, hasOlder: false }, readFullArchive)).resolves.toBe(archive)
+    expect(readFullArchive).not.toHaveBeenCalled()
     await expect(readCompleteArchiveForNativeReconciliation({ archive: null, hasOlder: false }, readFullArchive)).resolves.toBeNull()
+    expect(readFullArchive).not.toHaveBeenCalled()
     await expect(readCompleteArchiveForNativeReconciliation({ archive, hasOlder: true }, readFullArchive)).resolves.toBe(archive)
     expect(readFullArchive).toHaveBeenCalledOnce()
   })

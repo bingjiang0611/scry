@@ -2,7 +2,7 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
-## Mac UI 流畅性续轮（2026-10-22，Pi 历史打开重复归档读取）
+## Mac UI 流畅性续轮（2026-10-21，Pi 历史打开重复归档读取）
 
 - 固定调用链复核确认：Pi 历史打开先用 `readTraceArchivePageAsync` 读取最近页；若同时存在 Pi 原生历史，随后无条件再次 `readTraceArchiveAsync` 以做 ID 对账。最近页已是 complete（`hasOlder=false`）时，这次完整读取是重复工作；超过 40 轮的 partial 页仍必须完整读取，不能把分页证据当成全量证据。
 - 最小修复：native-history 对账复用已证明 complete 的首个 archive page；partial 页保留权威完整读取。不会改变 native/Scry ID 对账、cwd/provider/session 栅栏、附件 hydration 或错误状态。
