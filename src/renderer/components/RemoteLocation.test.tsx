@@ -81,7 +81,7 @@ describe('saved host projection', () => {
     expect(html).toContain(copy.loadingDesktopStatus)
     expect(html).not.toContain(copy.noAuthorizedDevices)
     expect(html).not.toContain(copy.relayOnline)
-    expect(html).not.toContain(copy.settingsAppearanceFooter)
+    expect(html).not.toContain('modal-foot')
   })
 
   it('does not present a failed saved-host read as an empty list', async () => {

@@ -135,10 +135,6 @@ export function AgentsSurface({ turns, busy }: { turns: Turn[]; busy: boolean })
         </div>
       )}
 
-      <footer className="agents-evidence-note">
-        <Icon name="info" />
-        <span>状态来自 TraceEvent；未采集到终态时显示“状态未知”，不补 Token 或进度。</span>
-      </footer>
     </section>
   )
 }

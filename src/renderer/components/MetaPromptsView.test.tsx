@@ -17,6 +17,10 @@ describe('Meta Prompts view', () => {
     expect(html).toContain('0 条提示词')
     expect(html).not.toContain('收藏')
     expect(html).not.toContain('先写方案，再开始实现')
+    expect(html).not.toContain('常用提示词，随取随用')
+    expect(html).not.toContain('个人提示词库 · 保存在本机')
+    expect(html).not.toContain('不必创建 Skill')
+    expect(html).toContain('新建提示词')
   })
 
   it('renders stored prompts as plain text with copy, edit and insert actions', () => {

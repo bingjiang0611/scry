@@ -298,6 +298,9 @@ describe('deriveAgentRows', () => {
 
     expect(rows[0]).toMatchObject({ status: 'unknown', statusSource: 'missing_terminal' })
     expect(rows[0].terminalEvent).toBeUndefined()
+    const html = renderToStaticMarkup(createElement(AgentsSurface, { turns: [historical], busy: true }))
+    expect(html).toContain('状态未知')
+    expect(html).not.toContain('已完成')
   })
 
   it('仅把当前未结束 turn 中有真实事件的 Agent 标为 running，并渲染反假数据口径', () => {
@@ -315,7 +318,7 @@ describe('deriveAgentRows', () => {
     expect(rows[0]).toMatchObject({ status: 'running', statusSource: 'active_turn', toolCount: 1 })
     expect(html).toContain('运行中')
     expect(html).toContain('1 个工具调用')
-    expect(html).toContain('未采集到终态时显示“状态未知”')
+    expect(html).not.toContain('agents-evidence-note')
     expect(html).not.toContain('0 Token')
     expect(html).not.toContain('100%')
   })

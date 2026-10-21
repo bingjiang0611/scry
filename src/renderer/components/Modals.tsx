@@ -187,7 +187,6 @@ export function SettingsModal({
             <div className="settings-body">
               <div className="settings-copy">
                 <b>外观</b>
-                <span>选择 Scry 的全局界面主题。</span>
               </div>
               <div className="theme-options" role="radiogroup" aria-label="界面主题">
                 <button
@@ -203,7 +202,6 @@ export function SettingsModal({
                   </span>
                   <span className="theme-option-copy">
                     <b>深色</b>
-                    <small>低光环境</small>
                   </span>
                   <span className="theme-check" aria-hidden="true"><Icon name="check" /></span>
                 </button>
@@ -220,7 +218,6 @@ export function SettingsModal({
                   </span>
                   <span className="theme-option-copy">
                     <b>浅色</b>
-                    <small>明亮环境</small>
                   </span>
                   <span className="theme-check" aria-hidden="true"><Icon name="check" /></span>
                 </button>
@@ -237,9 +234,6 @@ export function SettingsModal({
           )}
         </div>
       </div>
-      {tab !== 'remote' && <div className="modal-foot dim">
-        {tab === 'appearance' ? remoteCopy.settingsAppearanceFooter : remoteCopy.settingsArchiveFooter}
-      </div>}
     </ModalFrame>
   )
 }
@@ -359,7 +353,6 @@ export function ArchivedChatsPanel({
       <div className="arch-head">
         <div className="settings-copy">
           <b>已存档会话</b>
-          <span>存档后会话从左侧列表移出，Scry 记录的轮次、用量与 trace 都保留。在这里可以取消存档放回原项目，或永久删除。</span>
         </div>
         <button
           type="button"
@@ -1225,7 +1218,6 @@ export function CapabilitiesModal({
           )) : (
             <div className="capabilities-empty" role="status">
               <strong>{skillsRefreshing && skills.length === 0 ? '正在读取 Skill…' : '当前来源没有 Skill'}</strong>
-              <span>{skillsRefreshing && skills.length === 0 ? '等待当前 Provider 返回发现结果。' : '切换其他来源查看。'}</span>
             </div>
           )}
         </div>
@@ -1313,7 +1305,6 @@ export function CapabilitiesModal({
           }) : (
             <div className="capabilities-empty" role="status">
               <strong>{loadingMcpConfig ? '正在读取 MCP 配置…' : '当前来源没有 MCP'}</strong>
-              <span>{loadingMcpConfig ? '等待当前 Provider 返回配置清单。' : '切换其他来源查看。'}</span>
             </div>
           )}
         </div>
