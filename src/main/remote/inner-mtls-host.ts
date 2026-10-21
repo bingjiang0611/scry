@@ -221,15 +221,16 @@ export class InnerMtlsHost {
         // Metadata is cheap. Controls are resolved only for an explicitly
         // selected, host-authorized context. An omitted detail preserves the
         // legacy all-controls request for older clients.
-        if (request.detail === 'metadata') return { providers: controller.listProviders(fingerprint) }
+        if (request.detail === 'metadata') return { providers: controller.listProviders(fingerprint), providerDiscovery: 2 as const }
         if (request.detail === 'selected') {
           if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' ||
               (request.agentProfileId !== undefined && typeof request.agentProfileId !== 'string')) return { error: 'invalid_request' }
           return { providers: [await controller.listProviderControls(fingerprint, {
             detail: 'selected', providerId: request.providerId, cwd: request.cwd,
             ...(typeof request.agentProfileId === 'string' ? { agentProfileId: request.agentProfileId } : {})
-          })] }
+          })], providerDiscovery: 2 as const }
         }
+        if (request.detail !== undefined) return { error: 'invalid_request' }
         return { providers: await controller.listProvidersFull(fingerprint) }
       }
       if (request.op === 'commands') {

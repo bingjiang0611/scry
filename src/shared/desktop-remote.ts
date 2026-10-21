@@ -110,7 +110,10 @@ export interface DesktopRemoteCatalog {
   providers: RemoteProviderRef[]
   sessions: RemoteSessionRef[]
   // A cached Provider picker is not a current authentication/capability proof.
-  providerEvidence: 'host_snapshot'
+  providerEvidence: 'host_snapshot' | 'legacy_host'
+  // Selected controls are exact for the requested Provider/profile/cwd only when
+  // this negotiated capability is present. Older hosts expose legacy snapshots.
+  providerDiscovery?: 2
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
@@ -135,7 +138,7 @@ export type DesktopHostRead =
   | { kind: 'history'; context: DesktopRemoteContext; before?: number; snapshot?: string; byteChunks?: true; chunk?: { id: string; offset: number } }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true; workbench?: 1; sessionActions?: true }
+  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
   | { kind: 'trace'; run: ActiveRun | null }

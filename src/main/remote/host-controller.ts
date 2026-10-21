@@ -264,6 +264,7 @@ export class HostController {
   #readDesktop?: HostControllerDependencies['readDesktop']
   #desktopWorkbench?: HostControllerDependencies['desktopWorkbench']
   #desktopDirectories?: HostControllerDependencies['desktopDirectories']
+  #providerControls?: HostControllerDependencies['listProviderControls']
   #sessionAction?: HostControllerDependencies['sessionAction']
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
@@ -277,6 +278,7 @@ export class HostController {
     this.#readDesktop = deps.readDesktop
     this.#desktopWorkbench = deps.desktopWorkbench
     this.#desktopDirectories = deps.desktopDirectories
+    this.#providerControls = deps.listProviderControls
     this.#sessionAction = deps.sessionAction
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#output = new RunOutputLog({ store: deps.outputStore })
@@ -427,7 +429,7 @@ export class HostController {
     this.authorizeDevice(peerCertSHA256)
     if (result.kind !== 'info') return result
     const { sessionActions: _reportedSessionActions, ...info } = result
-    return { ...info, ...(this.#desktopDirectories ? { directorySelection: true as const } : {}), ...(this.#desktopWorkbench ? { workbench: 1 as const } : {}), ...(this.#sessionAction ? { sessionActions: true as const } : {}) }
+    return { ...info, ...(this.#providerControls ? { providerDiscovery: 2 as const } : {}), ...(this.#desktopDirectories ? { directorySelection: true as const } : {}), ...(this.#desktopWorkbench ? { workbench: 1 as const } : {}), ...(this.#sessionAction ? { sessionActions: true as const } : {}) }
   }
 
   releaseDesktopPeer(peer: string): Promise<void> { return this.#desktopWorkbench?.release(peer) ?? Promise.resolve() }

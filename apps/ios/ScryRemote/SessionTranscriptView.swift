@@ -116,8 +116,7 @@ struct SessionTranscriptView: View {
   }
   private var controlsMatch: Bool {
     guard let session else { return false }
-    return run.controlsReady && run.chosenProvider?.id == session.providerId &&
-      run.chosenProvider?.agentProfileId == session.agentProfileId
+    return run.controlsMatch(providerId: session.providerId, agentProfileId: session.agentProfileId, cwd: session.cwd)
   }
   private var historyAllowsControls: Bool {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
@@ -338,7 +337,7 @@ struct SessionTranscriptView: View {
 
   private func loadSessionControls() {
     guard let s = session else { return }
-    run.loadProviders(preferredId: s.providerId, preferredAgentProfileId: s.agentProfileId)
+    run.loadSessionProviderControls(providerId: s.providerId, agentProfileId: s.agentProfileId, cwd: s.cwd)
     run.loadCommands(providerId: s.providerId, cwd: s.cwd, agentProfileId: s.agentProfileId)
   }
 
@@ -402,9 +401,13 @@ struct SessionTranscriptView: View {
       return .init(text: ConnectionCopy.sending, busy: true)
     }
     if let history = historyIssue { return history }
+    if !runBusy, historyAllowsControls, let notice = run.providerControlsNotice {
+      return .init(text: notice, busy: run.providerControlsLoading,
+                   action: run.providerControlsLoading || controlsMatch ? nil : .init(title: ConnectionCopy.retry, perform: reloadProviders))
+    }
     if !runBusy, historyAllowsControls, !controlsMatch, run.providers != .loading {
-      return .init(text: "未读到原 Provider 设置，暂时无法发送",
-                   action: .init(title: "重新读取", perform: reloadProviders))
+      return .init(text: ConnectionCopy.providerControlsUnavailable,
+                   action: .init(title: ConnectionCopy.retry, perform: reloadProviders))
     }
     return nil
   }

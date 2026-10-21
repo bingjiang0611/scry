@@ -578,15 +578,18 @@ export class RemoteGateway {
     if (!entry || typeof entry.id !== 'string' || typeof entry.label !== 'string') throw new RemoteGatewayError('invalid_provider_response')
     if (entry.id.length === 0 || entry.id.length > 64) throw new RemoteGatewayError('invalid_provider_response')
     const agentProfileId = typeof entry.agentProfileId === 'string' && entry.agentProfileId.length > 0 && entry.agentProfileId.length <= 128 ? entry.agentProfileId : undefined
+    const models = this.modelOptions(entry.models)
+    const efforts = this.controlOptions(entry.efforts)
+    const permissions = this.controlOptions(entry.permissions)
     return {
       id: entry.id,
       label: entry.label.slice(0, 128),
       available: entry.available === true,
       ...(agentProfileId ? { agentProfileId } : {}),
       ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
-      ...(this.modelOptions(entry.models).length > 0 ? { models: this.modelOptions(entry.models) } : {}),
-      ...(this.controlOptions(entry.efforts).length > 0 ? { efforts: this.controlOptions(entry.efforts) } : {}),
-      ...(this.controlOptions(entry.permissions).length > 0 ? { permissions: this.controlOptions(entry.permissions) } : {})
+      ...(models.length > 0 ? { models } : {}),
+      ...(efforts.length > 0 ? { efforts } : {}),
+      ...(permissions.length > 0 ? { permissions } : {})
     }
   }
 
