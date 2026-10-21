@@ -529,7 +529,7 @@ async function main() {
       const deadline = Date.now() + 5000
       while (Date.now() < deadline) {
         const dialog = document.querySelector('.llm-perf-modal[role="dialog"]')
-        if (dialog?.contains(document.activeElement) && dialog.textContent.includes('2 个会话运行中') && dialog.querySelectorAll('.llm-perf-run').length === 2)
+        if (dialog?.contains(document.activeElement) && dialog.querySelector('.llm-perf-running h3')?.textContent === '运行中 · 2 个会话' && dialog.querySelectorAll('.llm-perf-run').length === 2)
           return { focused: true, labelled: !!dialog.getAttribute('aria-labelledby') }
         await new Promise(requestAnimationFrame)
       }

@@ -70,15 +70,50 @@ export const OVERVIEW_COST_COPY = {
 
 export const LLM_RUNNING_MODELS_COPY = {
   region: '运行中的模型',
+  heading: (count: number) => `运行中 · ${count} 个会话`,
   unknownProvider: '未知 Provider',
+  unknownWorkspace: '工作区未提供',
   sessions: (count: number) => ` · ${count} 个会话`,
-  average: '平均',
+  average: '会话平均速度',
   speedUnit: 'token/s',
   firstToken: '平均首 token',
   seconds: '秒',
-  mixedState: '多种状态',
-  stateCount: (label: string, count: number) => `${label} ${count}`,
+  stateSummary: (counts: Array<[string, number]>) => counts.map(([label, count]) => `${label} ${count}`).join(' · '),
+  coverage: (speed: number, wait: number, total: number) => `速度 ${speed}/${total} 个会话有数据；首 token ${wait}/${total} 个会话有数据。分别对有数据的会话取平均，缺失不计为零。`,
   states: { streaming: '生成中', tool: '工具执行', complete: '收尾中', waiting: '等待模型', firstOutput: '等待首次输出' }
+} as const
+
+export const LLM_PERFORMANCE_COPY = {
+  title: 'LLM 性能',
+  providers: { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi' },
+  ranges: { 1: '1 小时', 24: '24 小时', 168: '7 天' },
+  rangeLabel: '时间范围',
+  history: (range: string) => `历史表现 · 最近 ${range}`,
+  metricLabel: '指标',
+  metrics: {
+    speed: { label: '输出速度', unit: 'token/s', chartLabel: '各模型输出速度曲线。左右方向键查看时间点，Home 和 End 跳到两端。' },
+    firstToken: { label: '首 token', unit: '秒', chartLabel: '各模型首 token 等待曲线。左右方向键查看时间点，Home 和 End 跳到两端。' }
+  },
+  noSessions: '无运行中的会话',
+  reading: '读取中',
+  summaryUnknown: '会话状态未知',
+  summaryError: (detail: string) => `运行中会话读取失败：${detail}`,
+  historyError: (detail: string) => `历史读取失败：${detail}`,
+  truncated: (count: number) => `只含最近 ${count} 轮`,
+  provisional: '含运行中数据',
+  provisionalHelp: '运行中的轮次只使用已完成调用的数据，结束前会更新；结束后由最终记录替换，不重复计数。',
+  emptyRange: '这个时间范围内没有数据',
+  selectedEmpty: (model: string, metric: string) => `当前时间范围内没有 ${model} 的${metric}数据`,
+  empty: '还没有数据',
+  idle: '空闲',
+  missing: '—',
+  legend: '选择模型',
+  comparison: '模型对比',
+  columns: { model: '模型', distribution: '速度分布', speed: '中位速度', firstToken: '首 token 中位数', rounds: '测速轮次' },
+  distributionHelp: '色带表示 P25–P75，竖线表示中位数。只统计有速度数据的成功轮次，不代表受控性能评测。',
+  roundsHelp: '只计入有速度数据的轮次。加号前是已完成轮次，带星号的是运行中的暂计轮次；结束后替换为最终记录。',
+  rounds: (complete: number, running: number) => running ? `${complete} + ${running}*` : String(complete),
+  roundsLabel: (complete: number, running: number) => `有速度数据：已完成 ${complete} 轮，运行中暂计 ${running} 轮`
 } as const
 
 export const SESSION_DRAFT_LABEL = '草稿'
