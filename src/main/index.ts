@@ -138,9 +138,7 @@ import { createRelayConnectWS } from './remote/relay-connect-ws'
 import { ensureHostIdentity } from './remote/host-identity'
 import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
-import { remoteProviderEntry, remoteProviderMetadata } from './remote/remote-provider-snapshot'
-import { createInFlightDeduper } from './remote/provider-discovery'
-import type { RemoteProviderRef } from './remote/remote-gateway'
+import { createProviderDiscovery } from './remote/provider-discovery'
 import type { DesktopRemoteContext, DesktopRemoteSessionAction } from '../shared/desktop-remote'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
@@ -4756,12 +4754,6 @@ async function resolveRemoteRelay(stateDirectory: string): Promise<RemoteRelayRe
   const token = ensureRelayCredential(join(stateDirectory, 'relay'), identity.hostId)
   return createRemoteWssResolution(endpoint, token, true)
 }
-// Cached snapshot of the host's Providers for the device new-session picker.
-// providerRegistry.describe() is async but the device op reads synchronously, so
-// we keep a periodically-refreshed snapshot (id/label/available). Availability
-// mirrors the real describe() result; nothing is fabricated, and the run path
-// still validates the chosen providerId on submit.
-let remoteProviderSnapshot: RemoteProviderRef[] = []
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
@@ -4769,72 +4761,20 @@ function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
   return isAgentPermissionMode(raw) ? raw : undefined
 }
 
-async function loadRemoteProviderSnapshot(): Promise<void> {
-  try {
-    const descriptors = await providerRegistry.describe()
-    const contexts = await Promise.all(descriptors.map(async (descriptor) => {
-      if (!descriptor.available) return [remoteProviderMetadata({ descriptor })]
-      const profiles = descriptor.id === 'pi' ? await listPiProfiles() : []
-      const targets = profiles.length > 0 ? profiles.map((profile) => ({ id: profile.id, label: profile.label })) : [undefined]
-      return targets.map((profile) => remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }))
-    }))
-    remoteProviderSnapshot = contexts.flat()
-  } catch { /* keep the last good snapshot rather than fabricate */ }
-}
+const remoteProviderDiscovery = createProviderDiscovery({
+  descriptors: () => providerRegistry.describe(),
+  profiles: listPiProfiles,
+  resolveProfile: resolvePiProfile,
+  authorizeWorkspace: resolveRemoteProjectDirectory,
+  controls: (context) => withProviderOperation(context.providerId, () => providerRegistry.runControls(context), context.agentProfileId),
+  defaultWorkspace: () => remoteProjectRoots()[0],
+  permissionOverride: configuredRemotePermissionMode,
+  onError: (error) => console.warn('[scry] remote Provider discovery failed:', error)
+})
 
-const remoteProviderControlReads = createInFlightDeduper<RemoteProviderRef>()
-async function loadSelectedRemoteProvider(query: { providerId: string; cwd: string; agentProfileId?: string }): Promise<RemoteProviderRef> {
-  const canonical = resolveRemoteProjectDirectory(query.cwd)
-  const descriptors = await providerRegistry.describe()
-  const descriptor = descriptors.find((entry) => entry.id === query.providerId)
-  if (!descriptor || !descriptor.available) throw new Error('invalid_provider_context')
-  let profile: PiAgentProfile | undefined
-  if (query.providerId === 'pi') {
-    profile = await resolvePiProfile(query.agentProfileId ?? 'pi:default')
-    if (!profile || (query.agentProfileId && profile.id !== query.agentProfileId)) throw new Error('invalid_provider_context')
-  } else if (query.agentProfileId) {
-    throw new Error('invalid_provider_context')
-  }
-  const key = JSON.stringify([query.providerId, profile?.id ?? '', canonical])
-  return remoteProviderControlReads.load(key, async () => {
-    try {
-      const controls = await withProviderOperation(query.providerId as ProviderId, () => providerRegistry.runControls({
-        providerId: descriptor.id,
-        cwd: canonical,
-        ...(profile ? { agentProfileId: profile.id } : {})
-      }), profile?.id)
-      return remoteProviderEntry({
-        descriptor,
-        ...(profile ? { profile } : {}),
-        controls,
-        previous: [],
-        permissionOverride: configuredRemotePermissionMode()
-      })
-    } catch {
-      return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false }
-    }
-  })
-}
-
-async function loadLegacyRemoteProviders(): Promise<RemoteProviderRef[]> {
-  const descriptors = await providerRegistry.describe()
-  const contexts = await Promise.all(descriptors.map(async (descriptor) => {
-    if (!descriptor.available) return [remoteProviderMetadata({ descriptor })]
-    const controlsCwd = remoteProjectRoots()[0]
-    if (!controlsCwd) return [remoteProviderMetadata({ descriptor })]
-    const profiles = descriptor.id === 'pi' ? await listPiProfiles() : []
-    const targets = profiles.length > 0 ? profiles.map((profile) => ({ id: profile.id, label: profile.label })) : [undefined]
-    return Promise.all(targets.map((profile) => loadSelectedRemoteProvider({
-      providerId: descriptor.id,
-      cwd: controlsCwd,
-      ...(profile ? { agentProfileId: profile.id } : {})
-    })))
-  }))
-  return contexts.flat()
-}
-// A slow Provider control probe may exceed the timer interval. Coalesce those ticks and keep the
-// last successful picker snapshot for one minute instead of probing every Provider every 15 seconds.
-const remoteProviderSnapshotRefresh = createCachedAsyncLoader(loadRemoteProviderSnapshot, { ttlMs: 60_000 })
+// Timed refresh only observes descriptors/profile labels. Runtime initialization is
+// owned by a selected context (or an explicit legacy full-snapshot request).
+const remoteProviderSnapshotRefresh = createCachedAsyncLoader(() => remoteProviderDiscovery.refreshMetadata(), { ttlMs: 60_000 })
 const refreshRemoteProviderSnapshot = (): Promise<void> => remoteProviderSnapshotRefresh.load()
 
 async function startRemoteHostIfEnabled(): Promise<void> {
@@ -4918,11 +4858,11 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       listDirectories: (path) => listRemoteDirectories(path, knownProjectDirectories()),
       // Metadata is a cheap picker snapshot; Provider controls are loaded only
       // after the device selects a Provider/profile and authorized cwd.
-      listProviders: () => remoteProviderSnapshot,
-      listProviderControls: (query) => loadSelectedRemoteProvider(query),
+      listProviders: () => remoteProviderDiscovery.metadata(),
+      listProviderControls: (query) => remoteProviderDiscovery.selected(query),
       // Compatibility for clients that explicitly omit the discovery detail.
       // This is on-demand and therefore cannot gate metadata or selected reads.
-      listProvidersFull: () => loadLegacyRemoteProviders(),
+      listProvidersFull: () => remoteProviderDiscovery.legacy(),
       // Resolve the same native Provider command catalog used by the desktop
       // composer. The cwd is re-authorized before project-local commands/skills
       // are inspected; unsupported Providers return an honest reason.

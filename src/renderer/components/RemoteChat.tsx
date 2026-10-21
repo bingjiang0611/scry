@@ -88,6 +88,18 @@ function initialControls(provider: RemoteProviderRef | undefined): AgentRunContr
   }
 }
 
+export function remoteControlsValid(provider: RemoteProviderRef | undefined, controls: AgentRunControls): boolean {
+  if (!provider?.available) return false
+  const model = controls.model
+    ? provider.models?.find((option) => option.id === controls.model?.id && option.providerId === controls.model?.providerId)
+    : provider.models?.find((option) => option.id === provider.modelId || option.isDefault)
+  if (controls.model && !model) return false
+  if (controls.effort && !(model?.efforts ?? provider.efforts ?? []).some((option) => option.id === controls.effort)) return false
+  return provider.permissions?.length
+    ? provider.permissions.some((option) => option.id === controls.permissionMode)
+    : controls.permissionMode === 'default'
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -147,6 +159,8 @@ export function RemoteChat({
   const [selectedProvider, setSelectedProvider] = useState<RemoteProviderRef | undefined>()
   const [selectedProviderContextKey, setSelectedProviderContextKey] = useState<string | undefined>()
   const [providerControlsError, setProviderControlsError] = useState<string | null>(null)
+  const [providerControlsRevision, setProviderControlsRevision] = useState(0)
+  const initializedControlsContext = useRef<string | undefined>(undefined)
   const [turns, setTurns] = useState<Turn[]>([])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(null)
@@ -241,6 +255,12 @@ export function RemoteChat({
       setProviderControlsError(null)
       return
     }
+    if (catalog?.providerDiscovery !== 2) {
+      setSelectedProvider(undefined)
+      setSelectedProviderContextKey(undefined)
+      setProviderControlsError(null)
+      return
+    }
     let cancelled = false
     setSelectedProvider(undefined)
     setSelectedProviderContextKey(undefined)
@@ -255,11 +275,15 @@ export function RemoteChat({
       if (!cancelled) setProviderControlsError(errorText(reason))
     })
     return () => { cancelled = true }
-  }, [api, catalogReady, connected, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, providerId])
+  }, [api, catalogReady, catalog?.providerDiscovery, connected, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, providerId, providerControlsRevision])
 
-  const controlProvider = selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
-  // Do not expose a fabricated default while the selected controls are loading.
+  const controlProvider = catalog?.providerDiscovery !== 2 ? provider
+    : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
+  // Initialize once per execution context. Refresh validates rather than silently
+  // replacing a user's selected model, effort, or permission with new defaults.
   useEffect(() => {
+    if (!controlProvider?.available || initializedControlsContext.current === contextKey) return
+    initializedControlsContext.current = contextKey
     setControls(initialControls(controlProvider))
   }, [controlProvider, contextKey])
 
@@ -402,7 +426,7 @@ export function RemoteChat({
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
   const sessionArchived = Boolean(catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
     item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? ''))?.archivedAt)
-  const contextAvailable = connected && Boolean(provider?.available) && Boolean(controlProvider?.available) && projectAvailable && !sessionArchived
+  const contextAvailable = connected && Boolean(provider?.available) && remoteControlsValid(controlProvider, controls) && projectAvailable && !sessionArchived
   useEffect(() => {
     if (sessionArchived) queueStore.clearSession(draftKey)
   }, [sessionArchived, queueStore, draftKey])
@@ -421,11 +445,13 @@ export function RemoteChat({
             ? '原 Provider / profile 在主机上已不可用；不会代选其他运行环境'
             : !provider.available
               ? `${provider.label} 在 ${host} 上不可用`
-              : providerControlsError
+              : providerControlsError || (controlProvider && !controlProvider.available)
                 ? copy.providerControlsUnavailable(host)
                 : !controlProvider
                   ? copy.loadingProviderControls
-                  : null
+                  : !remoteControlsValid(controlProvider, controls)
+                    ? copy.providerControlsChanged
+                    : null
 
   const submission = (text: string) => ({
     context, prompt: text,
@@ -646,14 +672,22 @@ export function RemoteChat({
         unavailableAgentIds={unavailableAgentIds}
         agentScopeLabel={`${host} 上的 Agent`}
         onRunModel={(model: AgentModelRef | undefined) => {
-          const option = provider?.models?.find((item) => item.id === model?.id && (item.providerId ?? '') === (model?.providerId ?? ''))
-          setControls((current) => ({ ...current, model, effort: defaultOption(option?.efforts ?? provider?.efforts) }))
+          const option = controlProvider?.models?.find((item) => item.id === model?.id && (item.providerId ?? '') === (model?.providerId ?? ''))
+          setControls((current) => ({ ...current, model, effort: defaultOption(option?.efforts ?? controlProvider?.efforts) }))
         }}
         onRunEffort={(effort) => setControls((current) => ({ ...current, effort }))}
         onPermissionMode={(permissionMode) => setControls((current) => ({ ...current, permissionMode }))}
         renderLocationPicker={renderLocationPicker}
         remoteHost={host}
-        composerNotice={notice}
+        composerNotice={notice ?? (providerControlsError || (controlProvider && !controlProvider.available)
+          ? { tone: 'blocked', text: copy.providerControlsUnavailable(host), action: { label: copy.retryProviderControls, onClick: () => setProviderControlsRevision(value => value + 1) } }
+          : !controlProvider && provider && connected
+            ? { tone: 'blocked', text: copy.loadingProviderControls }
+            : controlProvider && !remoteControlsValid(controlProvider, controls)
+              ? { tone: 'blocked', text: copy.providerControlsChanged }
+              : catalog?.providerDiscovery !== 2 && controlProvider
+                ? { tone: 'blocked', text: copy.legacyProviderControls }
+                : null)}
       />
       {surface.target && createPortal(
         <RightSurfacePanel

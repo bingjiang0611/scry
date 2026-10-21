@@ -92,7 +92,11 @@ struct ChatView: View {
       return focused
     }
     if !runBusy, run.chosen == nil || run.chosenProvider == nil {
-      return .init(text: "发送前请在“新任务”中选择项目与 Provider")
+      return .init(text: ConnectionCopy.chooseTaskContext)
+    }
+    if !runBusy, let notice = run.providerControlsNotice {
+      return .init(text: notice, busy: run.providerControlsLoading,
+                   action: run.providerControlsLoading || run.controlsReady ? nil : .init(title: ConnectionCopy.retry, perform: run.retryProviderControls))
     }
     return nil
   }

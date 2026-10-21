@@ -151,13 +151,15 @@ function validatePairingResponse(response: unknown, requestId: string, pairingId
   return response
 }
 
-function validateInfo(response: unknown, hostId: string): { directorySelection?: true; workbench?: 1; sessionActions?: true } {
+function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
       response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
+      (response.desktop.providerDiscovery !== undefined && response.desktop.providerDiscovery !== 2) ||
       (response.desktop.directorySelection !== undefined && response.desktop.directorySelection !== true) ||
       (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
       (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true)) fail('desktop_capability_unavailable')
   return {
+    ...(response.desktop.providerDiscovery === 2 ? { providerDiscovery: 2 as const } : {}),
     ...(response.desktop.directorySelection === true ? { directorySelection: true as const } : {}),
     ...(response.desktop.workbench === 1 ? { workbench: 1 as const } : {}),
     ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {})
@@ -297,8 +299,14 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   }
 
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    const state = await this.#state()
+    const item = this.#connection(state, connectionIdValue)
+    const capabilities = validateInfo({ desktop: info }, item.hostId)
     const rawProjects = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'projects' }, 'projects')
-    const rawProviders = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'providers', detail: 'metadata' satisfies RemoteProviderQuery['detail'] }, 'providers')
+    const rawProviders = await this.#catalogRequest<unknown>(connectionIdValue, {
+      op: 'providers', ...(capabilities.providerDiscovery === 2 ? { detail: 'metadata' satisfies RemoteProviderQuery['detail'] } : {})
+    }, 'providers')
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
     const sessions: RemoteSessionRef[] = []; let cursor = 0; let snapshot: string | undefined
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -312,15 +320,16 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       cursor = response.cursor as number; snapshot = response.snapshot as string
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
-    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
-    const state = await this.#state()
-    const item = this.#connection(state, connectionIdValue)
-    const capabilities = validateInfo({ desktop: info }, item.hostId)
-    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...capabilities }
+    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities }
   }
 
   async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {
     const query = context(value)
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    const state = await this.#state()
+    const item = this.#connection(state, connectionIdValue)
+    const capabilities = validateInfo({ desktop: info }, item.hostId)
+    if (capabilities.providerDiscovery !== 2) fail('provider_controls_unavailable')
     const raw = await this.#catalogRequest<unknown>(connectionIdValue, {
       op: 'providers', detail: 'selected', providerId: query.providerId, cwd: query.cwd,
       ...(query.agentProfileId ? { agentProfileId: query.agentProfileId } : {})

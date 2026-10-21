@@ -569,7 +569,12 @@ public enum G0Transport {
   private struct RunDirectoriesPageRequest: Encodable {
     let op = "directoriesPage"; let path: String?; let cursor: Int; let limit: Int; let snapshot: String?
   }
-  private struct RunProvidersRequest: Encodable {
+  struct RunProviderCapabilityRequest: Encodable {
+    struct Query: Encodable { let kind = "info" }
+    let op = "desktop"
+    let query = Query()
+  }
+  struct RunProvidersRequest: Encodable {
     let op = "providers"
     let detail: String?
     let providerId: String?
@@ -623,7 +628,14 @@ public enum G0Transport {
     }
   }
   public enum HistoryProfileError: Error { case unverified }
+  private struct ProviderDiscoveryInfo: Decodable {
+    let kind: String
+    let `protocol`: Int
+    let execution: String
+    let providerDiscovery: Int?
+  }
   private struct RunResponse: Decodable {
+    let desktop: ProviderDiscoveryInfo?
     let historyProfile: HistoryProfileStamp?
     let runId: String?
     let status: String?
@@ -635,6 +647,7 @@ public enum G0Transport {
     let directories: RunDirectoryListing?
     let directoriesPage: RunDirectoryPage?
     let providers: [RunProviderRef]?
+    let providerDiscovery: Int?
     let commands: RunCommandCatalog?
     let sessions: [RunSessionRef]?
     let sessionsPage: RunSessionPage?
@@ -797,13 +810,46 @@ public enum G0Transport {
 
   // The Providers this device may target for a new session. Authorized exactly
   // like every run op; a revoked device gets device_not_authorized.
+  public struct RunProviderDiscovery: Sendable {
+    public let providers: [RunProviderRef]
+    public let capability: Int?
+  }
+
+  public static func relayRunProvidersWithCapability(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
+                                                      detail: String? = nil, providerId: String? = nil,
+                                                      cwd: String? = nil, agentProfileId: String? = nil) async throws -> RunProviderDiscovery {
+    var negotiatedDetail = detail
+    if detail != nil {
+      let infoRequest = try JSONEncoder().encode(RunProviderCapabilityRequest())
+      let capability = try providerDiscoveryCapability(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: infoRequest), expectedTarget: endpoint.executionTarget)
+      if capability != 2 {
+        guard detail == "metadata" else { throw RunError.host(code: "provider_controls_unavailable") }
+        // A known legacy host receives only its original full-snapshot request,
+        // never new fields that it might silently ignore.
+        negotiatedDetail = nil
+      }
+    }
+    let request = try JSONEncoder().encode(RunProvidersRequest(detail: negotiatedDetail, providerId: providerId, cwd: cwd, agentProfileId: agentProfileId))
+    return try decodeProviderDiscovery(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), detail: negotiatedDetail, expectedTarget: endpoint.executionTarget)
+  }
+
+  static func decodeProviderDiscovery(_ bytes: Data, detail: String?, expectedTarget: ExecutionTargetBinding? = nil) throws -> RunProviderDiscovery {
+    let response = try decodeRun(bytes, expectedTarget: expectedTarget)
+    guard let providers = response.providers, detail == nil || response.providerDiscovery == 2 else { throw ProbeError.unexpectedReply }
+    return RunProviderDiscovery(providers: providers, capability: response.providerDiscovery)
+  }
+
+  static func providerDiscoveryCapability(_ bytes: Data, expectedTarget: ExecutionTargetBinding? = nil) throws -> Int? {
+    let response = try decodeRun(bytes, expectedTarget: expectedTarget)
+    guard let info = response.desktop, info.kind == "info", info.protocol == 1, info.execution == "canonical",
+          info.providerDiscovery == nil || info.providerDiscovery == 2 else { throw ProbeError.unexpectedReply }
+    return info.providerDiscovery
+  }
+
   public static func relayRunProviders(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
                                         detail: String? = nil, providerId: String? = nil,
                                         cwd: String? = nil, agentProfileId: String? = nil) async throws -> [RunProviderRef] {
-    let request = try JSONEncoder().encode(RunProvidersRequest(detail: detail, providerId: providerId, cwd: cwd, agentProfileId: agentProfileId))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
-    guard let providers = response.providers else { throw ProbeError.unexpectedReply }
-    return providers
+    try await relayRunProvidersWithCapability(endpoint: endpoint, identity: identity, detail: detail, providerId: providerId, cwd: cwd, agentProfileId: agentProfileId).providers
   }
 
   // Provider-native slash commands for this exact provider/workspace context.

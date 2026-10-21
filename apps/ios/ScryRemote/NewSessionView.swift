@@ -53,6 +53,15 @@ struct NewSessionView: View {
           .font(.system(size: 13)).foregroundStyle(Palette.muted).padding(.horizontal, 20)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
+      if run.chosenProvider != nil, let notice = run.providerControlsNotice {
+        HStack {
+          Text(notice).font(.system(size: 13)).foregroundStyle(Palette.muted)
+          if !run.providerControlsLoading, !run.controlsReady {
+            Button(ConnectionCopy.retry) { run.retryProviderControls() }
+          }
+        }
+        .padding(.horizontal, 20).frame(maxWidth: .infinity, alignment: .leading)
+      }
       MessageComposer(text: composer.text, attachments: composer.attachments,
                       placeholder: paired ? "描述任务，或粘贴错误信息…" : "连接后可输入",
                       disabled: !paired, sendDisabled: !canSend,

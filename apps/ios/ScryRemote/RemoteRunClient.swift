@@ -190,14 +190,24 @@ struct RemoteRunClient {
   // The phone picks among these; the host re-validates the chosen providerId on
   // submit. It can never invent a provider the host does not have.
   func providers() async throws -> [G0Transport.RunProviderRef] {
-    try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity(), detail: "metadata")
+    try await providersWithCapability().providers
+  }
+
+  func providersWithCapability() async throws -> (providers: [G0Transport.RunProviderRef], capability: Int?) {
+    let result = try await G0Transport.relayRunProvidersWithCapability(endpoint: endpoint(), identity: try identity(), detail: "metadata")
+    return (result.providers, result.capability)
   }
 
   // Resolve controls only after this exact Provider/profile and authorized cwd
-  // have been selected. Older hosts may return their legacy full list; selecting
-  // the matching context keeps that compatibility explicit.
+  // have been selected. Older hosts are reported unavailable rather than
+  // treating their legacy full list as proof for this context.
   func providerControls(providerId: String, cwd: String, agentProfileId: String? = nil) async throws -> G0Transport.RunProviderRef {
-    let refs = try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity(), detail: "selected", providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+    let result = try await G0Transport.relayRunProvidersWithCapability(endpoint: endpoint(), identity: try identity(), detail: "selected", providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+    guard result.capability == 2 else {
+      throw NSError(domain: "ScryRemote.ProviderControls", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Provider controls unavailable on this host"])
+    }
+    let refs = result.providers
     guard let ref = refs.first(where: { $0.id == providerId && $0.agentProfileId == agentProfileId }) else {
       throw NSError(domain: "ScryRemote.ProviderControls", code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Provider controls unavailable"])
