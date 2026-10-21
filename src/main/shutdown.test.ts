@@ -1,11 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
-import { enforceShutdownDeadline, settleRunsForShutdown, type ShutdownRunControl } from './shutdown'
+import { enforceShutdownDeadline, runWorkflowPreparationGate, settleRunsForShutdown, type ShutdownRunControl } from './shutdown'
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = (): void => {}
   const promise = new Promise<void>((done) => { resolve = done })
   return { promise, resolve }
 }
+
+describe('workflow preparation quit gate', () => {
+  it('does not invoke destructive cleanup after a preparation veto', async () => {
+    const cleanup = vi.fn().mockResolvedValue(undefined)
+    const veto = vi.fn().mockResolvedValue(undefined)
+    const result = await runWorkflowPreparationGate({
+      prepare: async () => ({ state: 'unconfirmed' as const, workflowIds: [], reason: 'fixture' }),
+      onVeto: veto,
+      proceed: cleanup
+    })
+    expect(result).toBe('vetoed')
+    expect(veto).toHaveBeenCalledOnce()
+    expect(cleanup).not.toHaveBeenCalled()
+  })
+
+  it('runs destructive cleanup only after a ready preparation', async () => {
+    const cleanup = vi.fn().mockResolvedValue(undefined)
+    const result = await runWorkflowPreparationGate({
+      prepare: async () => ({ state: 'ready' as const, workflowCount: 0 }),
+      onVeto: vi.fn(),
+      proceed: cleanup
+    })
+    expect(result).toBe('ready')
+    expect(cleanup).toHaveBeenCalledOnce()
+  })
+})
 
 describe('settleRunsForShutdown', () => {
   it('force-kills every managed run when graceful cleanup misses the deadline', async () => {

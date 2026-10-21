@@ -214,6 +214,7 @@ export interface WorkflowRunnerOptions {
   execute: WorkflowProviderExecutor
   now?: () => number
   onProgress?: (progress: WorkflowProgress) => void
+  onLifecycle?: () => void
   beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
 }
 
@@ -223,6 +224,7 @@ export class WorkflowRunner {
   private readonly execute: WorkflowProviderExecutor
   private readonly now: () => number
   private readonly onProgress?: (progress: WorkflowProgress) => void
+  private readonly onLifecycle?: () => void
   private readonly beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
   private readonly approvals = new Map<string, WorkflowApproval>()
   private readonly active = new Map<string, {
@@ -231,6 +233,8 @@ export class WorkflowRunner {
     initialized: Promise<boolean>
     liveEpoch: string
     liveRevision: number
+    finished: boolean
+    activeStops: Set<() => boolean>
     halt: () => void
     stop: () => void
   }>()
@@ -245,6 +249,7 @@ export class WorkflowRunner {
     this.execute = options.execute
     this.now = options.now ?? (() => Date.now())
     this.onProgress = options.onProgress
+    this.onLifecycle = options.onLifecycle
     this.beforeDispatch = options.beforeDispatch
   }
 
@@ -279,7 +284,7 @@ export class WorkflowRunner {
       controller.stopped = true
       this.slots.cancelQueued(preview.workflowId)
     }
-    this.active.set(preview.workflowId, { record, progress, initialized: initialization, liveEpoch: randomUUID(), liveRevision: 0, halt, stop: () => {
+    this.active.set(preview.workflowId, { record, progress, initialized: initialization, liveEpoch: randomUUID(), liveRevision: 0, finished: false, activeStops, halt, stop: () => {
       halt()
       for (const stop of activeStops) stop()
     } })
@@ -300,6 +305,7 @@ export class WorkflowRunner {
     this.publish(progress)
     progress.state = 'running'
     this.publish(progress)
+    let finalCommitted = false
     try {
       const outcomes = await this.runBlock(preview, preview.program.body, record, controller, activeStops)
       progress.state = outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : outcomes.some(outcome => outcome.state === 'blocked') ? 'blocked' : controller.stopped ? 'stopped' : outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
@@ -312,6 +318,7 @@ export class WorkflowRunner {
       const final = report ?? ''
       if (final && final.length <= 64 * 1024) { progress.finalReport = final; progress.finalReportStatus = 'available' } else progress.finalReportStatus = 'unavailable'
       await this.persist(record, progress)
+      finalCommitted = true
       return structuredClone(progress)
     } catch (error) {
       const userStopped = controller.stopped
@@ -323,19 +330,35 @@ export class WorkflowRunner {
       delete progress.finalReport
       progress.error = error instanceof Error ? error.message : String(error)
       await this.persist(record, progress)
+      finalCommitted = true
       throw error
     } finally {
-      if (progress.state !== 'unknown' || (activeStops.size === 0 && !this.hasUnsettledIntents(record) && !this.slots.hasQueued(preview.workflowId))) {
-        this.active.delete(preview.workflowId)
-        for (const tracker of this.liveAttempts.get(preview.workflowId)?.values() ?? []) tracker.close()
-        this.liveAttempts.delete(preview.workflowId)
-        const timer = this.livePublishTimers.get(preview.workflowId)
-        if (timer) clearTimeout(timer)
-        this.livePublishTimers.delete(preview.workflowId)
-      }
+      this.active.get(preview.workflowId)!.finished = finalCommitted
+      this.finishSettledRoot(preview.workflowId)
       this.publish(progress)
     }
   }
+
+  /** Business outcome can remain unknown after every native scope and required
+   * write converges. Only that proof retires controls, never a stop ACK. */
+  private finishSettledRoot(workflowId: string): void {
+    const entry = this.active.get(workflowId)
+    if (!entry?.finished || entry.activeStops.size || this.hasUnsettledIntents(entry.record) || this.slots.hasQueued(workflowId)) return
+    this.active.delete(workflowId)
+    for (const tracker of this.liveAttempts.get(workflowId)?.values() ?? []) tracker.close()
+    this.liveAttempts.delete(workflowId)
+    const timer = this.livePublishTimers.get(workflowId)
+    if (timer) clearTimeout(timer)
+    this.livePublishTimers.delete(workflowId)
+    this.onLifecycle?.()
+  }
+
+  /** Fence already-admitted work without replaying native stop before its journal. */
+  freezeAdmission(): void {
+    for (const entry of this.active.values()) entry.halt()
+  }
+
+  activeWorkflowIds(): string[] { return [...this.active.keys()] }
 
   stopAll(): void {
     for (const workflowId of this.active.keys()) this.stop(workflowId)
@@ -350,7 +373,7 @@ export class WorkflowRunner {
 
   /** Service coalesces concurrent delivery by commandId before entering this method.
    * A recovered intent is observational: never replay a signal whose dispatch is unknown. */
-  async requestStop(workflowId: string, commandId: string): Promise<boolean> {
+  async requestStop(workflowId: string, commandId: string, canSignal?: () => boolean): Promise<boolean> {
     const entry = this.active.get(workflowId)
     const record = entry?.record ?? await this.store.load(workflowId)
     if (record?.stopRequests?.some(request => request.commandId === commandId)) {
@@ -373,6 +396,7 @@ export class WorkflowRunner {
     const requests = entry.record.stopRequests ??= []
     requests.push({ commandId, requestedAt })
     await this.persist(entry.record, entry.progress)
+    if (canSignal && !canSignal()) return true
     entry.stop()
     // true acknowledges the persisted intent, not Provider acceptance or termination.
     return true
@@ -504,6 +528,7 @@ export class WorkflowRunner {
             activeStops.delete(stop)
             releaseLive()
             await this.persist(record, record.progress)
+            this.finishSettledRoot(preview.workflowId)
           }) }
         } finally {
           if (result?.settled) { activeStops.delete(stop); releaseLive() }
@@ -520,6 +545,7 @@ export class WorkflowRunner {
           activeStops.delete(stop)
           releaseLive()
           await this.persist(record, record.progress)
+          this.finishSettledRoot(preview.workflowId)
         }) }
       }
     })

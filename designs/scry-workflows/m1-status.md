@@ -1,6 +1,35 @@
-# M1 进展：工作流停止命令收据
+# M1 进展：停止收据、可信观测与安全退出准备
+
+## 本次新增：安全退出准备（仍不是完整 M1）
+
+- 在 Electron `before-quit` 的既有清理之前，WorkflowService 先冻结新的工作流规划、确认和派发。并发退出请求共用一次准备流程；被阻止后保持工作流可检查、可再次停止，不自动恢复旧任务。
+- 对当前仍由 main 持有控制的执行和规划，先写入有界、确定性的 shutdown stop command/规划停止意图，再调用现有 canonical stop/abort 链。持久化失败（包括写入后 ACK 丢失）不发未知控制信号、不退款、不清除未知预约。
+- ready 要求当前作用域已得到真实收敛证据且必要结果已持久化。业务结果仍可为 `unknown`，不能因此伪造 completed；迟到的真实 scope settlement 与结果写入确认后才退休控制。停止 ACK、普通 Provider 返回、缺少 PID、实时观测不可用、超时或仍无作用域证据的恢复 unknown 不会放行；存储/初始化失败与未确认分别返回 typed preparation 结果。
+- 复用既有 6 秒有界策略；准备失败不会进入 remote/terminal/provider 等破坏性清理。冻结是同步的，收敛等待依赖 runner/planner 生命周期通知而不是重复历史扫描；deadline 覆盖初始化、扫描和停止 journal，取消后旧 generation 不能碰新 workflow；规划 journal 按 workflow 串行写入并以最终成功写入为 commit proof。所有调用者共用包含 deadline 的最终准备结果；超时后即使原子写入迟到，也不能发新信号。生产 host gate 已抽出并补回归，父会话完成当前包后台离线验收；没有未确认工作流作用域时仍走原清理路径。
+- **明确未完成**：这不是完整 M1，也没有增加强制丢数据退出、后台 daemon、Provider 能力统一、自动恢复、完整 UI 管理面或真账号/全场景 App 验收。恢复后的 unknown 仍需用户检查/处理；历史不可用时“是否允许桌面退出”的最终产品决策仍未批准，本轮只 fail-closed 阻止安全退出，不把它宣称为已解决。没有发现用户历史实际损坏，不能保证磁盘故障或外部改写永不发生；不会用空数据或伪成功掩盖。未推送、未安装。
 
 本轮是在 M0 之后推进 M1 的一个交付块，不代表 M1–M6 或完整 Workflow 功能已完成。用户明确先不处理此前整仓七项门禁失败；本轮没有重跑整仓门禁、放宽期限或修改那些路径。
+
+### 安全退出的父会话证据（2026-10-21）
+
+代码检查 `/tmp/scry-m1-safequit-review.uPqakG/`；最终独立离线 App 现场 `/tmp/scry-m1-quit-final.nTJ6cR/`。没有复用旧 workflow、账号或旧 userData。离线脚本是原获准脚本的逐字副本，hash 相同；新临时项目，四角色显式选择该脚本、offline-fixture/deterministic、full_access。仅此离线路径，不代表其他 Profile 或真实账号授权。
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| 父会话负对照 | 同步冻结/历史扫描、取消后旧规划复活、超时旧准备停止新根、内存停止候选假确认均先红；再补超时尚未关闭提示时迟到发信号、并发调用不共用 deadline、迟到真实 scope 不退休、分页读取期间未处理拒绝，先红后修正 | `before-final.log`、`repair-before.log`、`planning-ack-before.log`、`final-boundaries-before.log`、`unhandled-before.log` |
+| 最终 focused | 5 文件 **58 passed**；包括真实 FileWorkflowStore、必要写入前后与失败控制、错误类型拒绝且原文件不改，unknown 业务状态未被提升；1000 派发边界单列如下 | `parent-final.log` |
+| 扩大范围首轮 | 14 文件 158 passed / 1 failed：1000 次派发边界 5 秒超时；保留首次失败，不算整组通过 | `affected-final.log` |
+| 相同边界的串行对照 | HEAD 原 runner 与当前 runner 各单独通过，负载 75–103 / 10 cores，均 highLoad=true；不作耗时优劣或失败原因归属结论。未加时、缩负载、skip 或修改原断言 | `cap-baseline.log`、`cap-current.log` |
+| 类型 / 构建 / 包 | Node/web typecheck 与完整 `pack:artifact` 通过，含生产安全、remote、文件等 smoke；未安装 | `typecheck-final.log`、`pack-final.log` |
+| trace.delivery | 5 次均 2 messages / 165996 bytes；固定计数门禁通过，不是退出延迟测量 | `performance-final/measure.json` |
+| 完整 App 的真实存储故障 | 只读新 fixture 工作流目录，停止写入失败后普通退出被阻止；原文件 hash 不变、native abort 0、scope/slot 仍活、snapshot 可用。提示待确认期间再次退出只有一条提示；恢复权限、明确再次停止后才 native abort 1，终态收敛 | `veto-result.json`、`case.log` |
+| 新批准根的普通退出 | 新根运行中从真实 main `app.quit()` 进入生产 before-quit；先落 stop receipt，再 native abort，4 条 canonical records 持久化且 scope 均 settled 后退出；无 force kill | `before-quit.json`、`quit-result.json` |
+| 冷重开 | 2 历史只读观察、4 prompts / 2 abort 不增加、4 records hash 不变、slots 0；原生窗口不可见且未聚焦 | `cold-result.json`、`closed.json` |
+| CLI / 现场完整性 | 私有 CLI doctor healthy，turns verify 4 records / errors [] / pending 0；旧真实现场 16 源 hash 未改、18 个最终 fixture CLI 均已退出 | `doctor.json`、`verify.json`、`integrity.json` |
+
+App **0.2.210** / CLI **0.2.49**，asar **`25ff05a75c5d75903ac4243ab0f3b3a860694ad558335fb476cdffd880f3b1eb`**，快照 `app.asar`，生产源码与 `scope.json` 绑定。App PID 35271、36638 已退出，未操作用户 App。受控 OS 警告由测试 main inspector 拦截并延迟应答，以保持后台不抢焦点；验收了生产分支与清理门控，不冒充警告窗口视觉或人工验收。正常发送/批准使用隔离 renderer 原生输入；无真实模型。该脚本省略 upstream usage 是既有故障注入，不代表正常 SDK 协议；CLI 的 4 项 legacy_unset 元数据仍不完整，不把结构有效当作身份完整。
+
+前置现场 `/tmp/scry-m1-quit-app.KvnRah/` 首次尚未产生 workflows 目录，测试枚举提前失败，native prompts 为 0；明确建立空 fixture 目录并只从已完成的项目选择继续，没有重发计划。该现场冷重开首次只等 URL 未等 title，连接失败；仅重连登记的同一实例，不重启或重发。旧 `case.log` / `failure.json`、`cold-case.log` 保留，不当作生产失败或隐去。最终删去未消费的 planner Promise、修正初始化失败提示不再声称未知状态可查看后，重新完整打包，并在上述最终新现场从头验证；没有复用旧工作流或覆盖旧证据。
 
 ## 已接通
 
@@ -67,7 +96,7 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 
 ## 尚未完成与下一段
 
-- 此处只覆盖用户通过 Workflow API 发出的停止命令。**内部退出/错误清理仍沿用原 best-effort stopAll**；“真正安全退出：停止意图持久化并等待全 scope 收敛”尚未完成，不能从本节推断它已有保证。
+- 普通 App 退出已新增本页记录的 durable preparation gate；内部其他错误清理/stopAll 仍是原 best-effort 路径，不能把退出保证外推给它们。历史不可用分支仍 fail-closed，缺少是否允许明确确认退出的产品决定。
 - 原生控制的详细 accepted/unavailable/unknown 反馈仍由既有 run-control 链表达；本次 boolean 不是逐 Provider 停止成功证明。
-- typed 可信实时观测子集已接通；下一段由维护 Agent 推进 M1 安全退出与收口接缝，并补实际 Provider 的原生阶段覆盖。不能从沉默、turn start、retry intent 或快照文本推断模型/配额等待。
+- typed 可信实时观测子集已接通；下一段由维护 Agent 推进 M1 剩余管理控制与历史异常策略，并补实际 Provider 的原生阶段覆盖。不能从沉默、turn start、retry intent 或快照文本推断模型/配额等待。
 - 当前五 Provider 都没有已证明完整的“模型等待＋工具/权限/配额排除”合同；自动停滞 watchdog 与自动重启继续 unavailable，不因新增部分阶段观测而开启。其后再推进 M2 程序/模板和 M3 持久解释器，不把本轮叫完整功能交付。

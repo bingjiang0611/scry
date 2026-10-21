@@ -40,6 +40,9 @@ export interface WorkflowPlanningIntent {
   status?: 'queued' | 'running' | 'completed' | 'failed' | 'unknown' | 'stopped'
   scopeSettled?: boolean
   providerDispatch?: 'not_attempted'
+  /** Durable shutdown/cancel intent. It does not prove planner settlement. */
+  stopCommandId?: string
+  stopRequestedAt?: number
   result?: { output?: string; outputRef?: string; actualModel?: string; archiveRef?: string }
   error?: string
 }
@@ -146,7 +149,10 @@ export class FileWorkflowStore implements WorkflowStore {
     const value = await this.readJson(`${fileSafe(id)}.planning.json`)
     if (value === undefined) return undefined
     if (!value || typeof value !== 'object' || (value as WorkflowPlanningIntent).workflowId !== id) throw new Error('工作流规划记录已损坏')
-    return value as WorkflowPlanningIntent
+    const intent = value as WorkflowPlanningIntent
+    if ((intent.stopCommandId !== undefined && (typeof intent.stopCommandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(intent.stopCommandId))) ||
+      (intent.stopRequestedAt !== undefined && (typeof intent.stopRequestedAt !== 'number' || !Number.isFinite(intent.stopRequestedAt) || intent.stopRequestedAt < 0))) throw new Error(workflowControlCopy.invalidPlanningStopReceipt)
+    return intent
   }
   async *planningIntents(): AsyncIterable<WorkflowPlanningIntent> {
     let directory

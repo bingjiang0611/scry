@@ -20,6 +20,21 @@ function record(id: string): WorkflowStoreRecord {
     progress: { workflowId: id, programRevision: 'rev', workspace: '/fixture', goal: 'goal', state: 'queued', attempts: [], dispatchAttempts: 0, slots: { limit: 1, inUse: 0, queued: 0 }, updatedAt: 1 }, intents: [], outcomes: [] }
 }
 describe('actual workflow filesystem', () => {
+  it('rejects coerced planning stop identities and timestamps without rewriting the journal', async () => {
+    const { path, store } = await fixture()
+    const intent = { workflowId: 'stop-plan', role: 'orchestrator' as const, providerId: 'pi' as const,
+      workspace: '/fixture', goal: 'goal', createdAt: 1, status: 'running' as const, stopCommandId: 'shutdown_1', stopRequestedAt: 1 }
+    await store.savePlanningIntent(intent)
+    expect(await store.loadPlanningIntent('stop-plan')).toMatchObject(intent)
+    const file = join(path, 'workflows', 'stop-plan.planning.json')
+    for (const invalid of [{ stopCommandId: null }, { stopCommandId: 17 }, { stopRequestedAt: '1' }]) {
+      const bytes = JSON.stringify({ ...intent, ...invalid })
+      await writeFile(file, bytes)
+      await expect(store.loadPlanningIntent('stop-plan')).rejects.toThrow('工作流规划停止收据合同无效')
+      expect(await readFile(file, 'utf8')).toBe(bytes)
+    }
+  })
+
   it('never persists live epochs and strips stale observations from historical files', async () => {
     const { path, store } = await fixture()
     const value = record('live')

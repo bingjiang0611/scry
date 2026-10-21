@@ -134,6 +134,7 @@ import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { FileWorkflowStore } from './workflow-store'
 import { WorkflowService } from './workflow-service'
+import { workflowShutdownCopy } from '../shared/constants/copy'
 import { workflowPlanningPrompt } from './workflow-program'
 import { registerWorkflowIpc } from './workflow-ipc'
 import { workflowPermissionResponse } from './workflow-question'
@@ -268,7 +269,7 @@ import { liveConversationDeletionCatalog, planConversationDeletion, resolveConve
 import { parseConversationLegacySource, prepareConversationAdoption } from './conversation-adoption'
 import { conversationItemsFromTrace, deleteConversationHistory, readConversationHistoryItem } from './conversation-history'
 import { ensureFailedTerminalResult, terminalOutcomeLabel } from './run-outcome'
-import { enforceShutdownDeadline, settleRunsForShutdown } from './shutdown'
+import { enforceShutdownDeadline, runWorkflowPreparationGate, settleRunsForShutdown } from './shutdown'
 import {
   ContextAdmission,
   canRestartInterruptedLocalOnlySession,
@@ -5388,31 +5389,54 @@ app.on('before-quit', (event) => {
   if (!primaryInstance || quitCleanupFinished) return
   event.preventDefault()
   if (quitCleanupStarted) return
-  isShuttingDown = true
   quitCleanupStarted = true
-  workflowService.close()
-  // Release the remote subsystem's durable leases; a restart re-acquires and
-  // replays any recorded-but-undispatched intents.
-  const remoteCleanup = Promise.all([remoteHostService?.dispose(), desktopRemoteClient?.dispose()]).then(() => undefined)
-  terminalOutput.close()
-  const terminalCleanup = terminalManager?.shutdown().catch((error) => {
-    console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
-  }) ?? Promise.resolve()
-  runStopLifecycle.close()
-  traceOutput.close()
-  performanceResourceMonitor?.stop()
-  performanceResourceMonitor = null
-  sessionDiffBaselines.disposeAll()
-  const controls = runs.unsettledControls()
-  const runCleanup = settleRunsForShutdown(controls, {
-    cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
-    mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
-    disposeProviders: () => providerRegistry.dispose()
-  })
-  const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser(), sourceControl.dispose()]).then(() => stopPerformanceRecording())
-  void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
-    quitCleanupFinished = true
-    app.quit()
+  isShuttingDown = true
+  void runWorkflowPreparationGate({
+    prepare: () => workflowService.prepareForShutdown(),
+    onVeto: async preparation => {
+      const options = preparation.state === 'storage_failure'
+        ? { type: 'error' as const, title: workflowShutdownCopy.title, message: workflowShutdownCopy.storageFailure, detail: preparation.reason }
+        : preparation.state === 'initialization_failure'
+          ? { type: 'error' as const, title: workflowShutdownCopy.title, message: workflowShutdownCopy.initializationFailure, detail: preparation.reason }
+          : { type: 'warning' as const, title: workflowShutdownCopy.title, message: workflowShutdownCopy.unconfirmed, detail: `${workflowShutdownCopy.detail(preparation.workflowIds)}\n${preparation.reason}` }
+      try {
+        if (win && !win.isDestroyed()) await dialog.showMessageBox(win, options)
+        else await dialog.showMessageBox(options)
+      } catch (error) { console.warn('[scry] workflow shutdown warning failed:', error) }
+      workflowService.cancelShutdownPreparation()
+      isShuttingDown = false
+      quitCleanupStarted = false
+    },
+    proceed: async () => {
+      workflowService.close()
+      // Release the remote subsystem's durable leases; a restart re-acquires and
+      // replays any recorded-but-undispatched intents.
+      const remoteCleanup = Promise.all([remoteHostService?.dispose(), desktopRemoteClient?.dispose()]).then(() => undefined)
+      terminalOutput.close()
+      const terminalCleanup = terminalManager?.shutdown().catch((error) => {
+        console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
+      }) ?? Promise.resolve()
+      runStopLifecycle.close()
+      traceOutput.close()
+      performanceResourceMonitor?.stop()
+      performanceResourceMonitor = null
+      sessionDiffBaselines.disposeAll()
+      const controls = runs.unsettledControls()
+      const runCleanup = settleRunsForShutdown(controls, {
+        cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
+        mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
+        disposeProviders: () => providerRegistry.dispose()
+      })
+      const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser(), sourceControl.dispose()]).then(() => stopPerformanceRecording())
+      void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
+        quitCleanupFinished = true
+        app.quit()
+      })
+    }
+  }).catch(error => {
+    quitCleanupStarted = false
+    isShuttingDown = false
+    console.warn('[scry] workflow shutdown preparation failed:', error)
   })
 })
 

@@ -32,7 +32,25 @@ const count = (value: number): string => `${value} 个工作区文件的 Git 净
 export const workflowControlCopy = {
   stopLimit: '工作流停止命令已达上限；请检查未收敛作用域，不会重发或清空收据',
   invalidStopReceipt: '工作流停止收据合同无效',
-  unconfirmedStopReceipt: '停止请求尚未确认持久化，不会重发；修复存储后请再次停止'
+  unconfirmedStopReceipt: '停止请求尚未确认持久化，不会重发；修复存储后请再次停止',
+  invalidPlanningStopReceipt: '工作流规划停止收据合同无效'
+}
+
+export const workflowShutdownCopy = {
+  title: 'Scry',
+  unconfirmed: '工作流尚未全部收敛，已阻止安全退出；请检查工作流状态并再次停止。',
+  storageFailure: '工作流停止意图未能确认持久化，已阻止安全退出；不会重发未知控制命令。',
+  initializationFailure: '工作流历史初始化失败，无法确认工作流状态，已阻止安全退出。',
+  admissionClosed: '工作流服务正在退出',
+  admissionGenerationChanged: '工作流退出准备已开始',
+  planningCancelled: '工作流规划已取消',
+  planningJournalUnavailable: (id: string) => `工作流规划停止意图无法定位：${id}`,
+  recoveredScopeUnavailable: '恢复的工作流作用域没有可用控制，不能证明安全退出',
+  convergenceTimeout: '工作流在安全退出期限内未完成有证据的收敛',
+  preparationTimeout: '工作流安全退出准备期限已到；未完成的存储或初始化工作仍保持冻结',
+  planningJournalMissing: (id: string) => `工作流规划记录缺失：${id}`,
+  planningStopIdentityConflict: (id: string) => `工作流规划停止身份冲突：${id}`,
+  detail: (ids: readonly string[]) => ids.length ? `未收敛工作流：${ids.join('、')}` : '未收敛工作流状态未知'
 }
 
 export const workspaceDiffCopy = {

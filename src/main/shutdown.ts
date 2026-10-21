@@ -1,3 +1,24 @@
+import type { WorkflowShutdownPreparation } from './workflow-service'
+
+export const SHUTDOWN_DEADLINE_MS = 6_000
+
+export interface WorkflowPreparationGate {
+  prepare: () => Promise<WorkflowShutdownPreparation>
+  onVeto: (result: Exclude<WorkflowShutdownPreparation, { state: 'ready' }>) => Promise<void>
+  proceed: () => Promise<void>
+}
+
+/** Production quit coordination: destructive cleanup is unreachable after a veto. */
+export async function runWorkflowPreparationGate(gate: WorkflowPreparationGate): Promise<'ready' | 'vetoed'> {
+  const result = await gate.prepare()
+  if (result.state !== 'ready') {
+    await gate.onVeto(result)
+    return 'vetoed'
+  }
+  await gate.proceed()
+  return 'ready'
+}
+
 export interface ShutdownRunControl {
   runId: string
   resume?: string
@@ -36,7 +57,7 @@ export async function enforceShutdownDeadline(
   cleanup: Promise<void>,
   runs: readonly ShutdownRunControl[],
   disposeProviders: () => void | Promise<void>,
-  timeoutMs = 6_000
+  timeoutMs = SHUTDOWN_DEADLINE_MS
 ): Promise<'graceful' | 'forced'> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const forced = new Promise<'forced'>((resolve) => {
