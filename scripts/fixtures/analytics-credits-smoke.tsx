@@ -4,6 +4,9 @@ import { AnalyticsView } from '../../src/renderer/components/AnalyticsView'
 import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../src/shared/trace'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/analytics-evidence.css'
+import '../../src/renderer/inventory-evidence.css'
+import '../../src/renderer/session-evidence.css'
+import '../../src/renderer/codex-alignment.css'
 
 declare global {
   interface Window { setCreditsFixture: (analytics: UsageAnalytics) => void }
