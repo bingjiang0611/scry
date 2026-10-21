@@ -190,7 +190,19 @@ struct RemoteRunClient {
   // The phone picks among these; the host re-validates the chosen providerId on
   // submit. It can never invent a provider the host does not have.
   func providers() async throws -> [G0Transport.RunProviderRef] {
-    try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity())
+    try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity(), detail: "metadata")
+  }
+
+  // Resolve controls only after this exact Provider/profile and authorized cwd
+  // have been selected. Older hosts may return their legacy full list; selecting
+  // the matching context keeps that compatibility explicit.
+  func providerControls(providerId: String, cwd: String, agentProfileId: String? = nil) async throws -> G0Transport.RunProviderRef {
+    let refs = try await G0Transport.relayRunProviders(endpoint: endpoint(), identity: try identity(), detail: "selected", providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+    guard let ref = refs.first(where: { $0.id == providerId && $0.agentProfileId == agentProfileId }) else {
+      throw NSError(domain: "ScryRemote.ProviderControls", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Provider controls unavailable"])
+    }
+    return ref
   }
 
   // Provider-native slash commands for this exact project context. The host

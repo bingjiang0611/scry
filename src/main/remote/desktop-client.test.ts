@@ -49,6 +49,7 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
     if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical' } }
+    if ((request as { op?: string }).op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
     if ((request as { op?: string }).op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
@@ -63,6 +64,21 @@ async function setup(setupOptions: { submitResponse?: () => unknown; unknownInte
 }
 
 describe('DesktopRemoteClient', () => {
+  it('requests selected Provider controls with the exact context', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Controls', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const context = { cwd: '/workspace', providerId: 'claude' as const }
+      await expect(fixture.client.providerControls(id, context)).resolves.toMatchObject({ id: 'claude', permissions: [{ id: 'default' }] })
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: {
+        op: 'providers', detail: 'selected', providerId: 'claude', cwd: '/workspace'
+      } }))
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('reassembles bounded history chunks and rejects malformed or non-progressing pages', async () => {
     const fixture = await setup()
     try {

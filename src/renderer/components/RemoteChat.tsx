@@ -34,6 +34,7 @@ import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDe
 import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { ChatView } from './ChatView'
 import { bridge, defaultOption, desktopProviderKey, historyTurns, RemoteFiles, shouldQueryUnknownIntent } from './DesktopRemote'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import './desktop-remote.css'
 import './remote-location.css'
 
@@ -143,6 +144,9 @@ export function RemoteChat({
   const [providerSelection, setProviderSelection] = useState(session ? desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId }) : '')
   const [sessionId, setSessionId] = useState<string | undefined>(session?.externalSessionId)
   const [controls, setControls] = useState<AgentRunControls>({ permissionMode: 'default' })
+  const [selectedProvider, setSelectedProvider] = useState<RemoteProviderRef | undefined>()
+  const [selectedProviderContextKey, setSelectedProviderContextKey] = useState<string | undefined>()
+  const [providerControlsError, setProviderControlsError] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(null)
@@ -163,6 +167,7 @@ export function RemoteChat({
   const provider = catalog?.providers.find((item) => desktopProviderKey(item) === providerSelection)
   const providerId = provider?.id ?? ''
   const context = useMemo<DesktopRemoteContext>(() => ({ cwd, providerId, ...(provider?.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}), ...(sessionId ? { externalSessionId: sessionId } : {}) }), [cwd, provider?.agentProfileId, providerId, sessionId])
+  const controlContextKey = JSON.stringify([cwd, providerSelection])
   const contextKey = JSON.stringify([providerSelection, sessionId ?? ''])
   const previousContextKey = useRef<string | undefined>()
   const contextGeneration = useRef(0)
@@ -227,12 +232,36 @@ export function RemoteChat({
     if (!preserveAdoptedRun) { adoptedIntent.current = undefined; setActiveRun(null); setRunStatus(null) }
     setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
   }, [contextKey])
-  // Controls start from host defaults whenever the context changes or its Provider
-  // first resolves from the catalog; later catalog refreshes keep the user's choice.
-  const providerResolved = provider !== undefined
+  // Controls are a separate selected-context read. A late response may only
+  // publish for the exact Provider/profile/cwd that requested it.
   useEffect(() => {
-    setControls(initialControls(provider))
-  }, [contextKey, providerResolved])
+    if (!connected || !catalogReady || !provider?.available || !providerId) {
+      setSelectedProvider(undefined)
+      setSelectedProviderContextKey(undefined)
+      setProviderControlsError(null)
+      return
+    }
+    let cancelled = false
+    setSelectedProvider(undefined)
+    setSelectedProviderContextKey(undefined)
+    setProviderControlsError(null)
+    const selectedContext: DesktopRemoteContext = { cwd, providerId, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) }
+    void api.providerControls(connectionId, selectedContext).then((next) => {
+      if (!cancelled) {
+        setSelectedProvider(next)
+        setSelectedProviderContextKey(controlContextKey)
+      }
+    }).catch((reason) => {
+      if (!cancelled) setProviderControlsError(errorText(reason))
+    })
+    return () => { cancelled = true }
+  }, [api, catalogReady, connected, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, providerId])
+
+  const controlProvider = selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
+  // Do not expose a fabricated default while the selected controls are loading.
+  useEffect(() => {
+    setControls(initialControls(controlProvider))
+  }, [controlProvider, contextKey])
 
   useEffect(() => {
     if (!connected || !catalogReady || !providerId || !sessionId) {
@@ -309,11 +338,11 @@ export function RemoteChat({
     return () => { cancelled = true; pollSequence.current += 1; window.clearInterval(timer) }
   }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore])
 
-  const runControlCatalog = useMemo(() => remoteRunControlCatalog(provider, host), [host, provider])
-  const chosenModel = provider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
-  const availableEfforts = chosenModel?.efforts ?? provider?.efforts
+  const runControlCatalog = useMemo(() => remoteRunControlCatalog(controlProvider, host), [host, controlProvider])
+  const chosenModel = controlProvider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
+  const availableEfforts = chosenModel?.efforts ?? controlProvider?.efforts
   const validEffort = controls.effort && availableEfforts?.some((option) => option.id === controls.effort) ? controls.effort : undefined
-  const validPermissionMode = provider?.permissions?.some((option) => option.id === controls.permissionMode) ? controls.permissionMode : undefined
+  const validPermissionMode = controlProvider?.permissions?.some((option) => option.id === controls.permissionMode) ? controls.permissionMode : undefined
   const displayTurns = useMemo(() => {
     if (!activeRun) return turns
     const active: Turn = {
@@ -373,7 +402,7 @@ export function RemoteChat({
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
   const sessionArchived = Boolean(catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
     item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? ''))?.archivedAt)
-  const contextAvailable = connected && Boolean(provider?.available) && projectAvailable && !sessionArchived
+  const contextAvailable = connected && Boolean(provider?.available) && Boolean(controlProvider?.available) && projectAvailable && !sessionArchived
   useEffect(() => {
     if (sessionArchived) queueStore.clearSession(draftKey)
   }, [sessionArchived, queueStore, draftKey])
@@ -392,7 +421,11 @@ export function RemoteChat({
             ? '原 Provider / profile 在主机上已不可用；不会代选其他运行环境'
             : !provider.available
               ? `${provider.label} 在 ${host} 上不可用`
-              : null
+              : providerControlsError
+                ? copy.providerControlsUnavailable(host)
+                : !controlProvider
+                  ? copy.loadingProviderControls
+                  : null
 
   const submission = (text: string) => ({
     context, prompt: text,

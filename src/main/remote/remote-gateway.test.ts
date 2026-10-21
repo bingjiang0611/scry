@@ -299,18 +299,30 @@ describe('RemoteGateway', () => {
     const providers = gw.listProviders(CERT)
     expect(providers.length).toBe(32) // MAX_PROVIDERS bound
     expect(providers.slice(0, 3)).toEqual([
-      { id: 'qoder', label: 'Qoder', available: true, modelId: 'qoder-default',
-        models: [
-          { id: 'qoder-default', providerId: 'upstream-a', label: 'Qoder A', isDefault: true,
-            efforts: [{ id: 'high', label: '高', isDefault: true }] },
-          { id: 'qoder-default', providerId: 'upstream-b', label: 'Qoder B' }
-        ],
-        efforts: [{ id: 'high', label: '高', isDefault: true }],
-        permissions: [{ id: 'default', label: '默认审批', description: '由 Provider 决定' }] },
+      { id: 'qoder', label: 'Qoder', available: true },
       { id: 'qoder', agentProfileId: 'profile-a', label: 'Qoder · Profile A', available: true },
       { id: 'claude', label: 'Claude', available: false }
     ])
     expect(providers.some((p) => p.id === '')).toBe(false)
+  })
+
+  it('resolves controls only for the selected authorized context', async () => {
+    const { authority } = await grantedAuthority()
+    const selected = vi.fn(async (query: { detail: 'selected'; providerId: string; cwd: string; agentProfileId?: string }) => ({
+      id: query.providerId, label: 'Selected', available: true,
+      agentProfileId: query.agentProfileId,
+      permissions: [{ id: 'default', label: 'Default' }]
+    }))
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), providers: {
+      list: () => [{ id: 'claude', label: 'Claude', available: true }], selected
+    } })
+    expect(gw.listProviders(CERT)).toEqual([{ id: 'claude', label: 'Claude', available: true }])
+    expect(selected).not.toHaveBeenCalled()
+    await expect(gw.listProviderControls(CERT, { detail: 'selected', providerId: 'claude', cwd: '/authorized' })).resolves.toMatchObject({ id: 'claude', permissions: [{ id: 'default' }] })
+    expect(selected).toHaveBeenCalledExactlyOnceWith({ detail: 'selected', providerId: 'claude', cwd: '/authorized' })
+    await expect(gw.listProviderControls(CERT, { detail: 'selected', providerId: 'claude', cwd: '' })).rejects.toMatchObject({ code: 'invalid_provider_context' })
+    await expect(gw.listProviderControls(CERT, { detail: 'selected', providerId: 'qoder', cwd: '/authorized' })).rejects.toMatchObject({ code: 'provider_not_authorized' })
+    expect(selected).toHaveBeenCalledTimes(1)
   })
 
   it('returns an honest empty provider list when no source is configured', async () => {

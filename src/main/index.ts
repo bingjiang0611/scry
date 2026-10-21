@@ -138,7 +138,8 @@ import { createRelayConnectWS } from './remote/relay-connect-ws'
 import { ensureHostIdentity } from './remote/host-identity'
 import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
-import { remoteProviderEntry } from './remote/remote-provider-snapshot'
+import { remoteProviderEntry, remoteProviderMetadata } from './remote/remote-provider-snapshot'
+import { createInFlightDeduper } from './remote/provider-discovery'
 import type { RemoteProviderRef } from './remote/remote-gateway'
 import type { DesktopRemoteContext, DesktopRemoteSessionAction } from '../shared/desktop-remote'
 import type { RemoteStatus } from '../shared/remote'
@@ -4772,27 +4773,64 @@ async function loadRemoteProviderSnapshot(): Promise<void> {
   try {
     const descriptors = await providerRegistry.describe()
     const contexts = await Promise.all(descriptors.map(async (descriptor) => {
-      if (!descriptor.available) return [{ id: descriptor.id, label: descriptor.label, available: false }]
+      if (!descriptor.available) return [remoteProviderMetadata({ descriptor })]
       const profiles = descriptor.id === 'pi' ? await listPiProfiles() : []
       const targets = profiles.length > 0 ? profiles.map((profile) => ({ id: profile.id, label: profile.label })) : [undefined]
-      return Promise.all(targets.map(async (profile) => {
-        const controlsCwd = remoteProjectRoots()[0]
-        const controls = await providerRegistry.runControls({
-          providerId: descriptor.id,
-          ...(controlsCwd ? { cwd: controlsCwd } : {}),
-          ...(profile ? { agentProfileId: profile.id } : {})
-        })
-        return remoteProviderEntry({
-          descriptor,
-          ...(profile ? { profile } : {}),
-          controls,
-          previous: remoteProviderSnapshot,
-          permissionOverride: configuredRemotePermissionMode()
-        })
-      }))
+      return targets.map((profile) => remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }))
     }))
     remoteProviderSnapshot = contexts.flat()
   } catch { /* keep the last good snapshot rather than fabricate */ }
+}
+
+const remoteProviderControlReads = createInFlightDeduper<RemoteProviderRef>()
+async function loadSelectedRemoteProvider(query: { providerId: string; cwd: string; agentProfileId?: string }): Promise<RemoteProviderRef> {
+  const canonical = resolveRemoteProjectDirectory(query.cwd)
+  const descriptors = await providerRegistry.describe()
+  const descriptor = descriptors.find((entry) => entry.id === query.providerId)
+  if (!descriptor || !descriptor.available) throw new Error('invalid_provider_context')
+  let profile: PiAgentProfile | undefined
+  if (query.providerId === 'pi') {
+    profile = await resolvePiProfile(query.agentProfileId ?? 'pi:default')
+    if (!profile || (query.agentProfileId && profile.id !== query.agentProfileId)) throw new Error('invalid_provider_context')
+  } else if (query.agentProfileId) {
+    throw new Error('invalid_provider_context')
+  }
+  const key = JSON.stringify([query.providerId, profile?.id ?? '', canonical])
+  return remoteProviderControlReads.load(key, async () => {
+    try {
+      const controls = await withProviderOperation(query.providerId as ProviderId, () => providerRegistry.runControls({
+        providerId: descriptor.id,
+        cwd: canonical,
+        ...(profile ? { agentProfileId: profile.id } : {})
+      }), profile?.id)
+      return remoteProviderEntry({
+        descriptor,
+        ...(profile ? { profile } : {}),
+        controls,
+        previous: [],
+        permissionOverride: configuredRemotePermissionMode()
+      })
+    } catch {
+      return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false }
+    }
+  })
+}
+
+async function loadLegacyRemoteProviders(): Promise<RemoteProviderRef[]> {
+  const descriptors = await providerRegistry.describe()
+  const contexts = await Promise.all(descriptors.map(async (descriptor) => {
+    if (!descriptor.available) return [remoteProviderMetadata({ descriptor })]
+    const controlsCwd = remoteProjectRoots()[0]
+    if (!controlsCwd) return [remoteProviderMetadata({ descriptor })]
+    const profiles = descriptor.id === 'pi' ? await listPiProfiles() : []
+    const targets = profiles.length > 0 ? profiles.map((profile) => ({ id: profile.id, label: profile.label })) : [undefined]
+    return Promise.all(targets.map((profile) => loadSelectedRemoteProvider({
+      providerId: descriptor.id,
+      cwd: controlsCwd,
+      ...(profile ? { agentProfileId: profile.id } : {})
+    })))
+  }))
+  return contexts.flat()
 }
 // A slow Provider control probe may exceed the timer interval. Coalesce those ticks and keep the
 // last successful picker snapshot for one minute instead of probing every Provider every 15 seconds.
@@ -4878,9 +4916,13 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // The paired phone may choose a narrower cwd, but cannot navigate to or
       // submit a parent/sibling outside the Mac's existing canonical grants.
       listDirectories: (path) => listRemoteDirectories(path, knownProjectDirectories()),
-      // The Providers the device may pick for a new session. Snapshot mirrors the
-      // real registry describe() (id/label/available); the run path re-validates.
+      // Metadata is a cheap picker snapshot; Provider controls are loaded only
+      // after the device selects a Provider/profile and authorized cwd.
       listProviders: () => remoteProviderSnapshot,
+      listProviderControls: (query) => loadSelectedRemoteProvider(query),
+      // Compatibility for clients that explicitly omit the discovery detail.
+      // This is on-demand and therefore cannot gate metadata or selected reads.
+      listProvidersFull: () => loadLegacyRemoteProviders(),
       // Resolve the same native Provider command catalog used by the desktop
       // composer. The cwd is re-authorized before project-local commands/skills
       // are inspected; unsupported Providers return an honest reason.

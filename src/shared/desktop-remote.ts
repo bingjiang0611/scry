@@ -39,6 +39,9 @@ export interface RemoteProviderRef {
   efforts?: RemoteControlOption[]
   permissions?: RemoteControlOption[]
 }
+export type RemoteProviderQuery =
+  | { detail: 'metadata' }
+  | { detail: 'selected'; providerId: string; cwd: string; agentProfileId?: string }
 export interface RemoteCommandRef {
   name: string
   description: string
@@ -171,6 +174,7 @@ export interface DesktopRemoteAPI {
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
   catalog(connectionId: string): Promise<DesktopRemoteCatalog>
+  providerControls(connectionId: string, context: DesktopRemoteContext): Promise<RemoteProviderRef>
   commands(connectionId: string, context: DesktopRemoteContext): Promise<RemoteCommandCatalog>
   sessionAction(connectionId: string, context: DesktopRemoteContext, action: DesktopRemoteSessionAction): Promise<boolean>
   directories(connectionId: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage>

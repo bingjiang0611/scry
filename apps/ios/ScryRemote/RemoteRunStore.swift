@@ -211,7 +211,7 @@ final class RemoteRunStore: ObservableObject {
     return modelOptions.first(where: { $0.selectionId == chosenModelId })
   }
   var controlsReady: Bool {
-    guard restoredControlsError == nil, let provider = chosenProvider else { return false }
+    guard restoredControlsError == nil, providerControlsLoaded, let provider = chosenProvider else { return false }
     if let permissions = provider.permissions {
       guard permissions.contains(where: { $0.id == permissionMode }) else { return false }
     } else if permissionMode != "default" {
@@ -419,6 +419,9 @@ final class RemoteRunStore: ObservableObject {
   private var catalogRequestID = 0
   private var historyTask: Task<Void, Never>?
   private var providersTask: Task<Void, Never>?
+  private var providerControlsTask: Task<Void, Never>?
+  private var providerControlsRequestID = 0
+  private var providerControlsLoaded = false
   private var commandsTask: Task<Void, Never>?
   private var projectsTask: Task<Void, Never>?
   private var directoriesTask: Task<Void, Never>?
@@ -781,22 +784,62 @@ final class RemoteRunStore: ObservableObject {
     permissionMode = "default"; latestProviderPreference = (nil, nil)
     restoredControlErrors = [:]; contextNeedsRestore = false
     commandsRequestGeneration += 1
+    providerControlsRequestID += 1
+    providerControlsTask?.cancel(); providerControlsTask = nil; providerControlsLoaded = false
     commandsTask?.cancel(); commandsTask = nil; commands = .idle
   }
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) {
     chosen = ref
     if let provider = chosenProvider {
+      loadProviderControls(providerId: provider.id, cwd: ref.path, agentProfileId: provider.agentProfileId)
       loadCommands(providerId: provider.id, cwd: ref.path, agentProfileId: provider.agentProfileId)
     }
   }
   func chooseProvider(_ ref: G0Transport.RunProviderRef) {
     restoredControlErrors = [:]
+    providerControlsLoaded = false
+    providerControlsRequestID += 1
+    providerControlsTask?.cancel(); providerControlsTask = nil
     chosenProvider = ref
     chosenModelId = nil
     chosenEffort = nil
     permissionMode = ref.permissions?.first(where: { $0.id == "default" })?.id ?? ref.permissions?.first?.id ?? "default"
-    if let cwd = chosen?.path { loadCommands(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId) }
+    if let cwd = chosen?.path {
+      loadProviderControls(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId)
+      loadCommands(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId)
+    }
+  }
+
+  private func loadProviderControls(providerId: String, cwd: String, agentProfileId: String?) {
+    #if DEBUG
+    if mockMode { providerControlsLoaded = true; return }
+    #endif
+    providerControlsRequestID += 1
+    let requestID = providerControlsRequestID
+    providerControlsTask?.cancel()
+    guard let client = makeClient() else { return }
+    providerControlsTask = Task { [weak self] in
+      do {
+        let controls = try await client.providerControls(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+        await MainActor.run {
+          guard let self, self.providerControlsRequestID == requestID,
+                self.chosen?.path == cwd, self.chosenProvider.map({ Self.sameProviderContext($0, controls) }) == true else { return }
+          self.providerControlsTask = nil
+          self.providerControlsLoaded = true
+          self.restoredControlErrors = [:]
+          self.chosenProvider = controls
+          self.permissionMode = controls.permissions?.first(where: { $0.id == "default" })?.id ?? controls.permissions?.first?.id ?? "default"
+        }
+      } catch {
+        await MainActor.run {
+          guard let self, self.providerControlsRequestID == requestID else { return }
+          self.providerControlsTask = nil
+          self.providerControlsLoaded = false
+          self.restoredControlErrors[.permission] = ConnectionCopy.providerControlsUnavailable
+        }
+      }
+    }
   }
   func chooseModel(_ id: String?) {
     guard id == nil || modelOptions.contains(where: { $0.selectionId == id }) else { return }
@@ -1590,6 +1633,9 @@ final class RemoteRunStore: ObservableObject {
           self.applyPreferredProvider(self.latestProviderPreference.id,
                                       agentProfileId: self.latestProviderPreference.agentProfileId)
           self.restoreActiveContext()
+          if let provider = self.chosenProvider, let cwd = self.chosen?.path {
+            self.loadProviderControls(providerId: provider.id, cwd: cwd, agentProfileId: provider.agentProfileId)
+          }
         }
       } catch {
         await MainActor.run {
@@ -1783,6 +1829,9 @@ final class RemoteRunStore: ObservableObject {
           self.projectsLoadedAt = Date()
           self.projects = list.isEmpty ? .empty : .loaded(list)
           _ = self.restoreActiveContext()
+          if let provider = self.chosenProvider, let cwd = self.chosen?.path {
+            self.loadProviderControls(providerId: provider.id, cwd: cwd, agentProfileId: provider.agentProfileId)
+          }
         }
       } catch {
         await MainActor.run {
@@ -2557,6 +2606,8 @@ final class RemoteRunStore: ObservableObject {
     prefetchTask?.cancel(); prefetchTask = nil; warmedScreens.removeAll()
     historyTask?.cancel(); historyTask = nil
     providersTask?.cancel(); providersTask = nil
+    providerControlsRequestID += 1
+    providerControlsTask?.cancel(); providerControlsTask = nil; providerControlsLoaded = false
     commandsTask?.cancel(); commandsTask = nil
     projectsTask?.cancel(); projectsTask = nil
     directoriesTask?.cancel(); directoriesTask = nil
@@ -3645,6 +3696,7 @@ final class RemoteRunStore: ObservableObject {
     ]
     providers = .loaded(availableProviders)
     chooseProvider(availableProviders[0])
+    providerControlsLoaded = true
     commands = .loaded([
       .init(name: "review", description: "审查当前改动", argumentHint: "[范围]", source: "builtin"),
       .init(name: "compact", description: "压缩当前会话上下文", source: "builtin"),

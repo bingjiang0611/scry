@@ -465,8 +465,9 @@ enum RemoteSelfTest {
           print("LIVEPROBE FAIL reason=no-authorized-project-or-provider projects=\(projects.count) providers=\(providers.count)")
           exit(1)
         }
-        print("LIVEPROBE selected cwd=\(project.path) provider=\(provider.id)")
-        let routing = RemoteRunClient.Routing(cwd: project.path, providerId: provider.id, agentProfileId: nil,
+        let selected = try await client.providerControls(providerId: provider.id, cwd: project.path, agentProfileId: provider.agentProfileId)
+        print("LIVEPROBE selected cwd=\(project.path) provider=\(selected.id)")
+        let routing = RemoteRunClient.Routing(cwd: project.path, providerId: selected.id, agentProfileId: selected.agentProfileId,
           prompt: "只回复 SCRY_REMOTE_OK，不要调用工具，不要修改任何文件。")
         let submit = try await client.submit(routing: routing)
         print("LIVEPROBE submit runId=\(submit.runId) status=\(submit.status)")
@@ -615,9 +616,10 @@ enum RemoteSelfTest {
           print("DIRATTACH FAIL reason=no-available-provider")
           exit(1)
         }
-        let effortCatalog = (provider.efforts ?? []).map { "\($0.id):\($0.isDefault == true ? "default" : "option")" }.joined(separator: ",")
-        let permissionCatalog = (provider.permissions ?? []).map { "\($0.id):\($0.isDefault == true ? "default" : "option")" }.joined(separator: ",")
-        print("DIRATTACH catalog provider=\(provider.id) model=\(provider.modelId ?? "native-default") efforts=[\(effortCatalog)] permissions=[\(permissionCatalog)]")
+        let selected = try await client.providerControls(providerId: provider.id, cwd: child.path, agentProfileId: provider.agentProfileId)
+        let effortCatalog = (selected.efforts ?? []).map { "\($0.id):\($0.isDefault == true ? "default" : "option")" }.joined(separator: ",")
+        let permissionCatalog = (selected.permissions ?? []).map { "\($0.id):\($0.isDefault == true ? "default" : "option")" }.joined(separator: ",")
+        print("DIRATTACH catalog provider=\(selected.id) model=\(selected.modelId ?? "native-default") efforts=[\(effortCatalog)] permissions=[\(permissionCatalog)]")
         if catalogOnly {
           print("DIRATTACH CATALOG DONE failures=0")
           exit(0)
@@ -632,11 +634,11 @@ enum RemoteSelfTest {
           RemoteRunClient.Attachment(kind: .text, name: "scry-probe.txt", mimeType: "text/plain", dataBase64: textData.base64EncodedString(), size: textData.count),
           RemoteRunClient.Attachment(kind: .image, name: "scry-probe.png", mimeType: "image/png", dataBase64: imageData.base64EncodedString(), size: imageData.count)
         ]
-        let effort = provider.efforts?.first(where: { $0.isDefault == true })?.id
-        let permission = provider.permissions?.first(where: { $0.id == "default" })?.id
-        let routing = RemoteRunClient.Routing(cwd: child.path, providerId: provider.id, agentProfileId: nil,
+        let effort = selected.efforts?.first(where: { $0.isDefault == true })?.id
+        let permission = selected.permissions?.first(where: { $0.id == "default" })?.id
+        let routing = RemoteRunClient.Routing(cwd: child.path, providerId: selected.id, agentProfileId: selected.agentProfileId,
           prompt: "读取随附文本，并只回复 SCRY_DESCENDANT_ATTACHMENT_OK；图片无需描述；不要调用工具，不要修改文件。",
-          modelId: provider.modelId, effort: effort, permissionMode: permission, attachments: attachments)
+          modelId: selected.modelId, effort: effort, permissionMode: permission, attachments: attachments)
         let submit = try await client.submit(routing: routing)
         print("DIRATTACH submit runId=\(submit.runId) status=\(submit.status) cwd=\(child.path) attachments=\(attachments.count) effort=\(effort ?? "native-default") permission=\(permission ?? "native-default")")
         var cursor = 0

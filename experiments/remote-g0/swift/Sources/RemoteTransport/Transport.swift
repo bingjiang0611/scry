@@ -569,7 +569,13 @@ public enum G0Transport {
   private struct RunDirectoriesPageRequest: Encodable {
     let op = "directoriesPage"; let path: String?; let cursor: Int; let limit: Int; let snapshot: String?
   }
-  private struct RunProvidersRequest: Encodable { let op = "providers" }
+  private struct RunProvidersRequest: Encodable {
+    let op = "providers"
+    let detail: String?
+    let providerId: String?
+    let cwd: String?
+    let agentProfileId: String?
+  }
   private struct RunCommandsRequest: Encodable { let op = "commands"; let providerId: String; let cwd: String; let agentProfileId: String? }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
   private struct RunSessionsPageRequest: Encodable {
@@ -791,8 +797,10 @@ public enum G0Transport {
 
   // The Providers this device may target for a new session. Authorized exactly
   // like every run op; a revoked device gets device_not_authorized.
-  public static func relayRunProviders(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProviderRef] {
-    let request = try JSONEncoder().encode(RunProvidersRequest())
+  public static func relayRunProviders(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
+                                        detail: String? = nil, providerId: String? = nil,
+                                        cwd: String? = nil, agentProfileId: String? = nil) async throws -> [RunProviderRef] {
+    let request = try JSONEncoder().encode(RunProvidersRequest(detail: detail, providerId: providerId, cwd: cwd, agentProfileId: agentProfileId))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let providers = response.providers else { throw ProbeError.unexpectedReply }
     return providers

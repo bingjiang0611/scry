@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction } from '../../shared/desktop-remote'
+import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction, RemoteProviderQuery } from '../../shared/desktop-remote'
 import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
 import { parseDesktopHostRead } from './desktop-host-reader'
 import { parseDesktopWorkbenchQuery } from './desktop-workbench'
@@ -141,8 +141,12 @@ export interface HostControllerDependencies {
   // Immediate child folders under an authorized project path. The source must
   // canonicalize and reject paths outside the original host grant.
   listDirectories?(path?: string): RemoteDirectoryListing
-  // Snapshot of the host's Providers a device may target. Absent => honest empty.
+  // Metadata snapshot; it must not probe Provider controls.
   listProviders?(): RemoteProviderRef[]
+  // Explicit legacy all-controls request.
+  listProvidersFull?(): Promise<RemoteProviderRef[]>
+  // Controls for one already-selected, authorized context.
+  listProviderControls?(query: Extract<RemoteProviderQuery, { detail: 'selected' }>): Promise<RemoteProviderRef>
   // Provider-native slash commands for one authorized workspace context.
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   // Host-owned session metadata writes. The callback must use the host store.
@@ -285,7 +289,13 @@ export class HostController {
       output: this.#output,
       ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
       ...(deps.listDirectories ? { directories: { list: deps.listDirectories } } : {}),
-      ...(deps.listProviders ? { providers: { list: deps.listProviders } } : {}),
+      ...(deps.listProviders || deps.listProvidersFull || deps.listProviderControls ? {
+        providers: {
+          ...(deps.listProviders ? { list: deps.listProviders } : {}),
+          ...(deps.listProvidersFull ? { listFull: deps.listProvidersFull } : {}),
+          ...(deps.listProviderControls ? { selected: deps.listProviderControls } : {})
+        }
+      } : {}),
       ...(deps.listCommands ? { commands: { list: deps.listCommands } as RemoteCommandSource } : {}),
       workspace: { read: (query) => readRemoteWorkspace(deps.workspace, query, deps.readSessionStatus) },
       ...(deps.listSessions ? { sessions: { list: deps.listSessions, ...(deps.sessionCatalogRevision ? { revision: deps.sessionCatalogRevision } : {}) } } : {}),
@@ -470,6 +480,14 @@ export class HostController {
   // verified peer certificate as every method.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
     return this.#gateway.listProviders(peerCertSHA256)
+  }
+
+  async listProvidersFull(peerCertSHA256: string): Promise<RemoteProviderRef[]> {
+    return this.#gateway.listProvidersFull(peerCertSHA256)
+  }
+
+  async listProviderControls(peerCertSHA256: string, query: Extract<RemoteProviderQuery, { detail: 'selected' }>): Promise<RemoteProviderRef> {
+    return this.#gateway.listProviderControls(peerCertSHA256, query)
   }
 
   // Device-facing: Provider-native slash commands for this exact workspace.
