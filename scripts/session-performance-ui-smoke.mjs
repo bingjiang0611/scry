@@ -68,6 +68,21 @@ async function exercise(webContents, pointer) {
   if (streamRenders !== 0) throw new Error(`Streaming rerendered Sidebar ${streamRenders} times`)
   await click('.sb-sess')
   await wait(`document.body.dataset.pickedTick === '20'`)
+  const rowRendersBeforePick = await read('Number(document.body.dataset.sessionRowRenders)')
+  await click('.sb-sess-row:nth-child(2) .sb-sess')
+  await wait(`document.querySelector('.sb-sess-row:nth-child(2) .sb-sess').getAttribute('aria-current') === 'true'`)
+  const selectionRowRenders = await read('Number(document.body.dataset.sessionRowRenders)') - rowRendersBeforePick
+  const rowRendersBeforeHover = await read('Number(document.body.dataset.sessionRowRenders)')
+  const hoverPoint = await read(`(${pointer.toString()})('.sb-sess-row:nth-child(3) .sb-sess', { timeoutMs: 8000, scroll: false })`)
+  webContents.sendInputEvent({ type: 'mouseMove', ...hoverPoint })
+  await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 2'`)
+  const hoverRowRenders = await read('Number(document.body.dataset.sessionRowRenders)') - rowRendersBeforeHover
+  console.log('SCRY_SIDEBAR_ROW_WORK=' + JSON.stringify({ selectionRowRenders, hoverRowRenders }))
+  if (selectionRowRenders > 8 || hoverRowRenders > 8) throw new Error('Unrelated session rows rerendered: ' + JSON.stringify({ selectionRowRenders, hoverRowRenders }))
+  if (await read(`document.querySelectorAll('.session-hover-card').length`) !== 1) throw new Error('Multiple session hover cards opened')
+  webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+  webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+  await wait(`document.querySelector('.session-hover-card') == null`)
   // Exercise both motion modes explicitly rather than inheriting the runner's OS preference.
   await webContents.debugger.attach('1.3')
   await webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
@@ -209,6 +224,7 @@ async function exercise(webContents, pointer) {
   const mountedAtEnd = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   if (mountedAtEnd >= 40) throw new Error(`Scroll/focus retained ${mountedAtEnd} mounted turns`)
   return { historicalSessions: 277, streamCommits: 20, sidebarStreamRenders: streamRenders,
+    selectionRowRenders, hoverRowRenders, singleHoverOwner: true, hoverEscapeDismissed: true,
     latestCallbackState: 20, runningIndicators: 8, animatedSpinners: activeSpinners, runningRingThemes,
     rotatingTransform: true, reducedMotion: true, completedIndicatorsRemoved: true, neutralBackgroundWaiting: true,
     viewport, initialPageMounted, shortHeavyMounted, shortHeavyHistoryRecovered: true,
@@ -221,6 +237,12 @@ try {
   await Promise.all(['home', 'userData', 'sessionData'].map(name => mkdir(join(temp, name))))
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    plugins: [{ name: 'count-session-row-executions', enforce: 'pre', transform(code, id) {
+      if (id !== join(root, 'src/renderer/components/Sidebar.tsx')) return
+      const marker = '  const pinned = Boolean(session.pinnedAt)'
+      if (code.split(marker).length !== 2) throw new Error('SessionRow instrumentation anchor changed')
+      return code.replace(marker, `  document.body.dataset.sessionRowRenders = String(Number(document.body.dataset.sessionRowRenders ?? 0) + 1)\n${marker}`)
+    } }],
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
     define: { 'process.env.NODE_ENV': '"production"' },
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
