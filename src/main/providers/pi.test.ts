@@ -1755,7 +1755,7 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each(['option', 'custom', 'cancel', 'changed'])('reviews the whole native question group before replying: %s', async (scenario) => {
+  it.each(['option', 'custom', 'labels', 'cancel', 'changed'])('reviews the whole native question group before replying: %s', async (scenario) => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const asked: string[] = []
@@ -1774,8 +1774,10 @@ describe('Pi RPC Provider', () => {
           if (scenario === 'cancel') return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
           return {
             runId: request.runId, questionId: request.questionId, behavior: 'answered',
-            answers: { 'What matters?': '2', 'When to review?': scenario === 'custom' ? '1' : '2' },
-            nativeCustomAnswers: scenario === 'custom' ? ['When to review?'] : []
+            answers: scenario === 'labels'
+              ? { 'What matters?': 'Speed', 'When to review?': 'Later' }
+              : { 'What matters?': '2', 'When to review?': scenario === 'custom' ? '1' : '2' },
+            ...(scenario === 'labels' ? {} : { nativeCustomAnswers: scenario === 'custom' ? ['When to review?'] : [] })
           }
         }
       })

@@ -341,7 +341,10 @@ export type AgentQuestionResponse =
       answers: Record<string, string>
       /** Pi's single select → input answer is text, even when it equals a listed value. */
       nativeCustomAnswer?: true
-      /** Pi's grouped single-select answers keep custom text distinct from option indices. */
+      /**
+       * Pi questionnaire replies use option values, with custom text for the listed questions.
+       * Absent on legacy clients that submit option labels instead.
+       */
       nativeCustomAnswers?: string[]
     }
   | {
