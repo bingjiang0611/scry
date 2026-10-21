@@ -326,7 +326,7 @@ async function exercise() {
   check(text('#overview').includes('未观测到'), 'Missing compaction evidence was displayed as zero')
   document.querySelector('#context-update').click()
   await waitFor(() => text('#overview .ctx-copy').trim() === '201.6k / 272.0k')
-  check(document.querySelector('#overview .ring').getAttribute('aria-label') === '上下文占用 74%', 'Live context gauge did not update')
+  check(document.querySelector('#overview .ctx-track').getAttribute('aria-label') === '上下文占用 74%', 'Live context gauge did not update')
   check(text('#overview').includes('等待 result'), 'Context snapshots leaked into billing totals')
   document.querySelector('#context-compact').click()
   await waitFor(() => text('#overview .ctx-copy').trim() === '暂无上下文数据')

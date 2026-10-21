@@ -881,28 +881,61 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 
 .overview-dossier .ctx-gauge {
+  display: flex;
   min-height: 0;
-  grid-template-columns: 66px minmax(0, 1fr);
-  gap: 14px;
+  flex-direction: column;
+  gap: 0;
+  align-items: stretch;
   margin: 6px 12px 0;
   padding: 6px 0 8px;
   border-bottom: 0;
   background: transparent;
 }
 
-.overview-dossier .ctx-gauge .ring {
-  width: 66px;
-  height: 66px;
-  font-size: 12.5px;
-  letter-spacing: -0.02em;
+/* 占用率用横向刻度：长度比圆环更直接可比，也不占 66px 高度。 */
+.overview-dossier .ctx-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--dim2);
+  font: 10px/1 var(--font-mono);
 }
-.overview-dossier .ctx-gauge .ring::before { inset: 5px; background: var(--overview-surface); }
+.overview-dossier .ctx-head b {
+  color: var(--fg);
+  font: 650 15px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.overview-dossier .ctx-track {
+  height: 8px;
+  margin: 9px 0 7px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border3);
+}
+.overview-dossier .ctx-track > span {
+  display: block;
+  width: calc(var(--p, 0) * 1%);
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+/* 占用接近窗口上限时与判词同一套阈值，不在环上另造一套颜色。 */
+.overview-dossier .ctx-gauge.warm .ctx-track > span { background: var(--warn); }
+.overview-dossier .ctx-gauge.hot .ctx-track > span { background: var(--bad); }
+.overview-dossier .ctx-gauge.empty .ctx-track > span { width: 0; }
 .overview-dossier .ctx-copy .lbl { font-size: 10px; letter-spacing: 0; }
-/* 主证据是已用量，窗口总量是参照；显示文本仍是「已用 / 窗口」。 */
-.overview-dossier .ctx-copy .v { margin-top: 0; font-size: 21px; font-weight: 600; letter-spacing: -0.03em; }
-.overview-dossier .ctx-copy .v b { font-weight: 650; }
-.overview-dossier .ctx-copy .v span { margin-left: 2px; color: var(--dim); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
-.overview-dossier .ctx-gauge.empty .ctx-copy .v { color: var(--dim2); font-size: 15px; letter-spacing: 0; }
+/* 显示用量是主证据，窗口总量是参照；显示文本仍是「已用 / 窗口」。 */
+.overview-dossier .ctx-copy .v {
+  margin-top: 0;
+  color: var(--dim2);
+  font: 500 13px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+.overview-dossier .ctx-copy .v b { color: var(--fg); font-weight: 650; }
+.overview-dossier .ctx-copy .v span { color: var(--dim2); }
+.overview-dossier .ctx-gauge.empty .ctx-copy .v { font-size: 11px; }
 .overview-dossier .ctx-copy .sub { margin-top: 5px; font-size: 10.5px; line-height: 1.5; }
 
 .overview-dossier .overview-verdict,
@@ -928,26 +961,31 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .overview-dossier .overview-verdict.bad .overview-verdict-line .sdot { box-shadow: 0 0 0 2px var(--bad-soft); }
 
 .overview-dossier .overview-metric-grid {
-  margin: 4px 12px 0;
-  border: 0;
+  margin: 10px 12px 0;
+  border-top: 1px solid var(--border3);
   background: transparent;
-  gap: 6px;
+  gap: 0;
 }
 
+/* 指标不再是卡片：一条主证据行 + 一条并排派生指标，只用发丝线分组。 */
 .overview-dossier .overview-metric {
   min-height: 0;
   gap: 0;
   justify-content: flex-start;
-  padding: 9px 11px;
-  border: 1px solid var(--border3);
-  border-radius: 9px;
-  background: var(--surface-subtle);
+  padding: 11px 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-/* Token 总量是主证据，通栏先读；命中率与成本是它的派生指标，并排在后。 */
 .overview-dossier .overview-metric.lead {
   grid-column: 1 / -1;
-  padding: 9px 12px 10px;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border3);
 }
 
 .overview-dossier .overview-metric > span { margin-bottom: 4px; font-size: 10px; }
@@ -955,17 +993,22 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   font-size: clamp(14px, 4.2cqi, 17px);
   letter-spacing: -0.025em;
 }
-.overview-dossier .overview-metric.lead > span { margin-bottom: 6px; }
+/* 两列派生指标用一条竖线分隔，保持左右两侧同一基线。 */
+.overview-dossier .overview-metric:nth-child(2) { padding-right: 13px; }
+.overview-dossier .overview-metric:nth-child(3) {
+  padding-left: 13px;
+  border-left: 1px solid var(--border3);
+}
+.overview-dossier .overview-metric.lead > span { margin-bottom: 0; }
 .overview-dossier .overview-metric.lead > strong {
-  font-size: 22px;
-  line-height: 1.05;
-  letter-spacing: -0.035em;
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: -0.04em;
 }
 
-/* 指标格不可点击：悬停不抬升、不改边框，避免伪造操作反馈。 */
+/* 指标格不可点击：悬停不抬升、不改底色，避免伪造操作反馈。 */
 .overview-dossier .overview-metric:hover {
-  border-color: var(--border3);
-  background: var(--surface-subtle);
+  background: transparent;
   transform: none;
 }
 
