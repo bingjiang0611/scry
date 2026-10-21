@@ -544,7 +544,7 @@
           "sha256": "c30b471e9d1aee3ba7591469c5ca5a91a1bd0684904ced0954dd52931e3aace8"
         }
       ],
-      "visualCoverage": "On 2026-10-21, real desktop dark/light workspaces and iPhone home/settings screens were visually inspected. This supersedes the earlier desktop capture timeout, but does not establish current-source build identity or full-state acceptance. Six extracted desktop specimens were separately checked in dark/light at a 1512x764 Chrome viewport, including search focus readback. Historical committed dark/light performance images remain identical dark captures, not light-theme evidence. Private live screenshots are not committed.",
+      "visualCoverage": "On 2026-10-21, real desktop dark/light workspaces and iPhone home/settings screens were visually inspected. A later desktop check after user restart verified the installed 0.2.214 artifact in both themes; the initial uncertain desktop identity is retained below as history. iOS source-build identity and full-state acceptance remain unverified. Six extracted desktop specimens were separately checked in dark/light at a 1512x764 Chrome viewport, including search focus readback. Historical committed dark/light performance images remain identical dark captures, not light-theme evidence. Private live screenshots are not committed.",
       "realDeviceVisualCheck": {
         "date": "2026-10-21",
         "desktop": {
@@ -570,6 +570,18 @@
         "assessment": "Observed palette direction, hierarchy and component forms match the documented design language; screenshots do not prove exact tokens or contrast compliance.",
         "excluded": ["current-source build acceptance", "iOS session detail", "keyboard behavior", "Dynamic Type", "landscape", "full workflow and accessibility acceptance"],
         "safety": "No Agent task sent or stopped; no permission, pairing, cache or application-installation changes. Desktop appearance was temporarily changed and restored."
+      },
+      "desktopPostRestartCheck": {
+        "checkedAt": "2026-10-21T05:50:32Z",
+        "installedVersion": "0.2.214",
+        "installedArchiveSha256": "67ffe082f4cff8cfb3d42c2e4d855a7c649ef5fd9c61606d6ebcee4176e8b27e",
+        "buildIdentityEvidence": "Installed archive matches the verified package; the user-restarted process launched after installation and runs from /Applications/Scry.app.",
+        "windowPoints": [1280, 880],
+        "surfaces": ["dark session workspace", "light session workspace"],
+        "assessment": "Visible sidebar, text/code content, tool statuses and composer render without obvious misalignment or theme mixing; not a contrast or full-state audit.",
+        "themeSelection": "User switched to light; left unchanged after inspection.",
+        "validationScope": "Build, package validation and Electron smoke checks passed. Earlier full unit runs had Pi timeouts; direct artifact build/install was explicitly requested. No claim that the full unit gate passed for this working tree.",
+        "safety": "Read-only post-restart inspection; no Agent task sent or stopped, permission changes, or private screenshots committed."
       },
       "specimenScope": "Six desktop style specimens, not app workflows. Search outer margin omitted for embedding. Native components documented in prose, not imitated in HTML.",
       "tonalRampScope": "Generated OKLCH lightness previews, not source tokens or approved production colors; gamut clipping may occur."
