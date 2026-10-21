@@ -418,8 +418,9 @@ export function normalizeBlocks(
   return out
 }
 
-// SDK message → TraceEvent[]
-export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent[] {
+// SDK message → TraceEvent[]. The optional native-ID tap shares this parse;
+// its caller owns live/session/replay guards and fail-open delivery.
+export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx, onToolReturn?: (toolUseId: string) => void): TraceEvent[] {
   const m = msg as Record<string, unknown>
   if (!m || typeof m !== 'object') return []
   if (m.type === 'system') return normalizeHookMessage(m, ctx)
@@ -452,6 +453,9 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
           const toolUseId = String(b.tool_use_id)
           const started = ctx.toolUseById?.get(toolUseId)
           ctx.toolUseById?.delete(toolUseId)
+          // Preserve legacy trace coercion, but observations only accept the
+          // SDK's native string identity. Never reparse output text for IDs.
+          if (onToolReturn && typeof b.tool_use_id === 'string') onToolReturn(b.tool_use_id)
           const output = typeof b.content === 'string' ? b.content : JSON.stringify(b.content)
           const outerResultToolUseId = stringValue(outerResult?.toolUseId ?? outerResult?.tool_use_id)
           const resultMetadataApplies = outerResultToolUseId

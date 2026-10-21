@@ -114,6 +114,32 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 
 本轮 Claude 证据来自 mock SDK/query 的原生结构流、真实 adapter 转交与 tracker 代码，不是实际 Claude CLI transport、完整 App 中 Claude workflow 或真账号验收。未运行真实 Provider/账号、未复制凭据。后续由维护 Agent 补 Claude denied/cancel/background 的原生工具生命周期合同与离线 transport 验收；真实探针须用户先明确账号、模型和费用授权。
 
+## Claude 原生 pending-call 诊断（仍不是工具生命周期）
+
+此处 `tool_wait` 仅指“观察到 SDK 工具调用活动、尚未观察到 model-facing 返回”，不证明整个模型/工作流被阻塞。
+
+- SDK `tool_progress` 只在当前 SDK session、已归一化且仍待返回的 root `tool_use` 上产生 `claude_native/tool_activity`。它证明 Provider 报告了一个等待 model-facing return 的调用活动，不证明物理启动、后台资源或模型进度；重复 heartbeat 由 live tracker 幂等去重。
+- root、非 replay 的 SDK user `tool_result` 在既有解析循环中以原生字符串 ID 旁路产生 `claude_native/tool_returned`；不二次解析回包、不使用归一化的字符串强转作为原生身份。缺少 SDK 可选 `session_id` 时以当前 query 和已观察 ID 为作用域；存在但错误或 malformed 的 session、replay、subagent 不产生返回观察。Tracker 只移除已观察集合中的匹配 ID，未知 ID 不改变等待。
+- 诊断只读 normalizer 的 pending map，不能备份/回填或改变其既有行为。回放/错误会话导致相关表缺失时，不伪造后续活动；已经观察到的等待仍保留，直到有效的同 ID 原生返回或 canonical scope 关闭。回包后的迟到 heartbeat 因相关条目不存在而不重开等待。错误回包 `is_error` 只表示前台交换返回，不是后台资源收敛。
+- `tool_wait` 仅表示“已观察到 SDK call，正在等待 model-facing return”；coverage 仍为 `partial`，`automaticStall` 始终 `unsupported`。没有 result 只保留 unknown/未确认诊断，不驱动停止、重试、容量、canonical settlement 或后台任务结算。Pi 原生 `tool_started/tool_ended` 语义不变。
+- 本段覆盖 mock SDK/query 经实际 `runAgent`、normalize map 与 tracker 的受控测试；没有真实 Provider、完整 Claude 工具生命周期或物理执行验收。新增诊断仍是 callback fail-open旁路，普通非 workflow run 不解析新增 tool observation。
+
+### pending-call 父会话验收证据
+
+`/tmp/scry-m1-tool-review.QTxKGD/`，SDK **0.3.251** / App **0.2.210**。精确 asar **`62880bc20689a64e26ea6084fb851f6850e589868af1d646fb72b72f244f20ed`** 与四个生产源码 hash 绑定于 `scope.json`，快照 `app.asar`。未安装、未推送。
+
+| 检查 | 结果与范围 | 证据 |
+| --- | --- | --- |
+| 初版负对照 | 缺少新事件时故意失败；不是完整 lifecycle 证明 | `/tmp/scry-m1-tool-pending-prechange.GF7lwC/pre-change.log` |
+| 父会话审查负对照 | 2 failed：开启诊断改变 trace 工具关联；观察单个回包扫描整张 pending map。已删除回填与重复解析，恢复正常 trace/recording 不受观察开关影响 | `review-before.log`、`noninterference-before.log` |
+| 修正合同 | 初次移除回填后旧新测试对“相关性丢失仍继续观察活动”的假设失败，保留 `first-repair.log`；改为更强的等待状态断言：回放/外来回包不能闭合已观察调用，但相关表缺失不伪造新活动，有效原生 ID 返回仍可关闭 | `first-repair.log`、`agent-runner-options.test.ts` |
+| 最终相关测试 | **11 文件 202 passed**：包括 SDK/query mock 流、native ID 严格类型、无全表扫描、trace/native recording 非干扰、heartbeat 幂等/子 Agent/错 session/回放隔离、拒绝返回、未知后台状态/迟到活动与 SDK run 不提前完成、Claude 32-ID/256-byte 截断、既有控制与持久化 | `affected-final.log` |
+| 类型 / 包 | Node/web typecheck 与完整 pack:artifact 通过，含隐藏 App、安全、remote 与文件 smoke；这不是完整 App 的 Claude workflow 验收 | `typecheck.log`、`pack.log` |
+| 固定计数 | trace.delivery 5 次均 2 messages / 165996 bytes，ratchet 通过；不作 Claude 工具延迟或真实负载结论 | `performance/measure.json` |
+| CLI / 原现场 | 当前私有 CLI 校验旧离线 4 条记录 errors [] / pending 0，4 条 hash 不变；旧真实故障现场 16 源 hash 不变，未退款、清空或重放 unknown | `cli-verify.json`、`scope.json` |
+
+未验证实际 Claude CLI transport、真实账号与完整 App 中 Claude workflow；没有网络/账号/凭据执行。下一个验证缺口由维护 Agent 先核对离线 CLI transport fixture 可行性；真实探针仍先由用户选择账号、模型并授权费用。不得拿 generic packaged smoke 或 SDK mocks 冒充真实 Provider 验收。
+
 ## 尚未完成与下一段
 
 - 普通 App 退出已新增本页记录的 durable preparation gate；内部其他错误清理/stopAll 仍是原 best-effort 路径，不能把退出保证外推给它们。历史不可用分支仍 fail-closed，缺少是否允许明确确认退出的产品决定。

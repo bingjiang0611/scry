@@ -10,6 +10,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: sdk.query }))
 import { runAgent } from './agent-runner'
 import { ProviderEventLog } from './provider-event-log'
 import type { AgentQuestionRequest } from '../shared/runtime'
+import { WorkflowLiveObservationTracker } from './workflow-live-observation'
 
 const successResult = (sessionId = 'claude-session') => ({
   type: 'result',
@@ -114,6 +115,168 @@ describe('Claude Agent SDK launch options', () => {
     expect(observations).toEqual(['text', 'thinking'])
     expect(emitted.filter((event) => event.kind === 'model').map((event) => event.text).join('')).toBe('rootchildroot')
     expect(nativeTypes).toEqual(['stream_event', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'assistant', 'result'])
+  })
+
+  it('does not enumerate all pending calls to observe one native tool result', async () => {
+    const entries = Map.prototype.entries
+    let enumerated = 0
+    const spy = vi.spyOn(Map.prototype, 'entries').mockImplementation(function (this: Map<unknown, unknown>) {
+      if (this.has('call-no-scan')) enumerated++
+      return entries.call(this)
+    })
+    try {
+      sdk.query.mockReturnValue(completedQuery(
+        { type: 'system', subtype: 'init', session_id: 'claude-session' },
+        { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'call-no-scan', name: 'Read', input: { file_path: '/fixture/file' } }] } },
+        { type: 'tool_progress', tool_use_id: 'call-no-scan', parent_tool_use_id: null, session_id: 'claude-session' },
+        { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'call-no-scan', content: 'ok' }] } }
+      ))
+      await runAgent('probe', 'run-no-scan', () => {}, { onWorkflowObservation: () => {} }).promise
+      expect(enumerated).toBe(0)
+    } finally { spy.mockRestore() }
+  })
+
+  it('does not change normalized trace correlation when workflow observation is enabled', async () => {
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'claude-session' },
+      { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'call-root', name: 'Read', input: { file_path: '/fixture/file' } }] } },
+      { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'claude-session' },
+      { type: 'user', parent_tool_use_id: null, session_id: 'wrong-session', message: { content: [{ type: 'tool_result', tool_use_id: 'call-root', content: 'foreign' }] } },
+      { type: 'user', parent_tool_use_id: null, session_id: 'claude-session', message: { content: [{ type: 'tool_result', tool_use_id: 'call-root', content: 'actual' }] } }
+    ]
+    const execute = async (observed: boolean) => {
+      sdk.query.mockReturnValue(completedQuery(...messages))
+      const trace: unknown[] = []
+      const native: string[] = []
+      await runAgent('probe', 'run-observer-noninterference', event => trace.push({
+        kind: event.kind, stage: event.stage, toolUseId: event.toolUseId,
+        tool: event.tool, name: event.name, parentToolUseId: event.parentToolUseId,
+        output: event.output, text: event.text
+      }), { recordNative: (type, payload) => native.push(JSON.stringify({ type, payload })),
+        ...(observed ? { onWorkflowObservation: () => {} } : {}) }).promise
+      return { trace, native }
+    }
+    const ordinary = await execute(false)
+    expect(await execute(true)).toEqual(ordinary)
+  })
+
+  it('observes root Claude pending-call activity and matching returns through the normalized tool ID map', async () => {
+    sdk.query.mockReturnValue(completedQuery(
+      { type: 'system', subtype: 'init', session_id: 'claude-session' },
+      { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'call-root', name: 'Bash', input: { command: 'true' } }] } },
+      { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'claude-session', heartbeat: true },
+      { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'claude-session', heartbeat: true },
+      { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'call-root', content: 'ok' }] } },
+      { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'claude-session', heartbeat: true }
+    ))
+    const observations: Array<{ kind: string; toolCallId?: string }> = []
+    const tracker = new WorkflowLiveObservationTracker({ taskId: 'task', attemptId: 'attempt', runId: 'run-tool-pending', providerId: 'claude' })
+    await runAgent('probe', 'run-tool-pending', () => {}, {
+      onWorkflowObservation: observation => { observations.push(observation); tracker.observe(observation) }
+    }).promise
+    expect(observations).toEqual([
+      { source: 'claude_native', kind: 'tool_activity', toolCallId: 'call-root' },
+      { source: 'claude_native', kind: 'tool_activity', toolCallId: 'call-root' },
+      { source: 'claude_native', kind: 'tool_returned', toolCallId: 'call-root' }
+    ])
+    expect(tracker.snapshot()).toMatchObject({ status: 'unknown', activeToolIds: [], trackedToolCount: 0 })
+  })
+
+  it('keeps an observed call pending across replay and foreign results without restoring trace correlation', async () => {
+    const tracker = new WorkflowLiveObservationTracker({ taskId: 'task', attemptId: 'attempt', runId: 'run-tool-gates', providerId: 'claude' })
+    const pendingSnapshots: string[][] = []
+    const observations: Array<{ kind: string; toolCallId?: string }> = []
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'system', subtype: 'init', session_id: 'claude-session' }
+        yield { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'call-root', name: 'Bash', input: { command: 'true' } }] } }
+        yield { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'claude-session' }
+        yield { type: 'assistant', parent_tool_use_id: 'call-root', message: { content: [{ type: 'tool_use', id: 'call-child', name: 'Bash', input: { command: 'true' } }] } }
+        yield { type: 'tool_progress', tool_use_id: 'call-child', parent_tool_use_id: 'call-root', session_id: 'claude-session' }
+        yield { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'wrong-session' }
+        yield { type: 'tool_progress', tool_use_id: 'unknown', parent_tool_use_id: null, session_id: 'claude-session' }
+        yield { type: 'user', parent_tool_use_id: null, isReplay: true, message: { content: [{ type: 'tool_result', tool_use_id: 'call-root', content: 'replayed' }] } }
+        pendingSnapshots.push(tracker.snapshot().activeToolIds)
+        // The shared normalizer has consumed its correlation entry. A diagnostic
+        // observer must not restore it or invent further activity from that gap.
+        yield { type: 'tool_progress', tool_use_id: 'call-root', parent_tool_use_id: null, session_id: 'claude-session' }
+        yield { type: 'user', parent_tool_use_id: null, session_id: 'wrong-session', message: { content: [{ type: 'tool_result', tool_use_id: 'call-root', content: 'wrong' }] } }
+        yield { type: 'system', subtype: 'task_notification', session_id: 'claude-session', task_id: 'task-1', status: 'completed' }
+        pendingSnapshots.push(tracker.snapshot().activeToolIds)
+        yield { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'call-root', is_error: true, content: 'denied' }] } }
+        yield successResult()
+      }
+    })
+    await runAgent('probe', 'run-tool-gates', () => {}, {
+      onWorkflowObservation: observation => { observations.push(observation); tracker.observe(observation) }
+    }).promise
+    expect(pendingSnapshots).toEqual([['call-root'], ['call-root']])
+    expect(observations).toEqual([
+      { source: 'claude_native', kind: 'tool_activity', toolCallId: 'call-root' },
+      { source: 'claude_native', kind: 'tool_returned', toolCallId: 'call-root' }
+    ])
+    expect(tracker.snapshot()).toMatchObject({ status: 'unknown', activeToolIds: [] })
+  })
+
+  it('does not coerce a malformed native return identity into a matching observed call', async () => {
+    const tracker = new WorkflowLiveObservationTracker({ taskId: 'task', attemptId: 'attempt', runId: 'run-strict-return', providerId: 'claude' })
+    let afterMalformed: string[] = []
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'system', subtype: 'init', session_id: 'claude-session' }
+        yield { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: '17', name: 'Read', input: { file_path: '/fixture/file' } }] } }
+        yield { type: 'tool_progress', tool_use_id: '17', parent_tool_use_id: null, session_id: 'claude-session' }
+        yield { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 17, content: 'malformed' }] } }
+        afterMalformed = tracker.snapshot().activeToolIds
+        yield { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: '17', content: 'actual' }] } }
+        yield successResult()
+      }
+    })
+    await runAgent('probe', 'run-strict-return', () => {}, { onWorkflowObservation: observation => { tracker.observe(observation) } }).promise
+    expect(afterMalformed).toEqual(['17'])
+    expect(tracker.snapshot()).toMatchObject({ activeToolIds: [], trackedToolCount: 0 })
+  })
+
+  it('does not complete the SDK run when a background launcher returns or sends a task notification', async () => {
+    let release!: () => void
+    let returned!: () => void
+    const terminal = new Promise<void>(resolve => { release = resolve })
+    const waiting = new Promise<void>(resolve => { returned = resolve })
+    const tracker = new WorkflowLiveObservationTracker({ taskId: 'task', attemptId: 'attempt', runId: 'run-background-return', providerId: 'claude' })
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'system', subtype: 'init', session_id: 'claude-session' }
+        yield { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'call-background', name: 'Bash', input: { command: 'fixture', run_in_background: true } }] } }
+        yield { type: 'tool_progress', tool_use_id: 'call-background', parent_tool_use_id: null, session_id: 'claude-session', task_id: 'task-background', heartbeat: true }
+        yield { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'call-background', content: 'opaque response' }] }, tool_use_result: { task_id: 'task-background', status: 'running' } }
+        yield { type: 'tool_progress', tool_use_id: 'call-background', parent_tool_use_id: null, session_id: 'claude-session', task_id: 'task-background', heartbeat: true }
+        yield { type: 'system', subtype: 'task_notification', session_id: 'claude-session', task_id: 'task-background', status: 'completed' }
+        returned()
+        await terminal
+        yield successResult()
+      }
+    })
+    let completed = false
+    const handle = runAgent('probe', 'run-background-return', () => {}, { onWorkflowObservation: observation => { tracker.observe(observation) } })
+    const done = handle.promise.then(result => { completed = true; return result })
+    try {
+      await waiting
+      expect(completed).toBe(false)
+      expect(tracker.snapshot()).toMatchObject({ status: 'unknown', trackedToolCount: 0, modelProgressCount: 0 })
+    } finally { release(); await done }
+    expect(completed).toBe(true)
+  })
+
+  it('does not emit activity for a root tool_use without native progress', async () => {
+    sdk.query.mockReturnValue(completedQuery(
+      { type: 'system', subtype: 'init', session_id: 'claude-session' },
+      { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'call-root', name: 'Bash', input: { command: 'true' } }] } }
+    ))
+    const observations: unknown[] = []
+    await runAgent('probe', 'run-tool-no-progress', () => {}, {
+      onWorkflowObservation: observation => observations.push(observation)
+    }).promise
+    expect(observations).toEqual([])
   })
 
   it('does not parse workflow delta observations for ordinary non-workflow runs', async () => {

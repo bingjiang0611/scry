@@ -113,6 +113,10 @@ export type WorkflowLiveObservation =
   | { source: 'pi_native'; kind: 'tool_ended'; toolCallId: string }
   | { source: 'pi_native'; kind: 'model_progress'; channel: 'text' | 'thinking' }
   | { source: 'claude_native'; kind: 'model_progress'; channel: 'text' | 'thinking' }
+  // Claude activity/return describe an observed model-facing exchange only,
+  // never physical start/end or background resource settlement.
+  | { source: 'claude_native'; kind: 'tool_activity'; toolCallId: string }
+  | { source: 'claude_native'; kind: 'tool_returned'; toolCallId: string }
   | { source: 'main_permission'; kind: 'permission_started'; permissionId: string }
   | { source: 'main_permission'; kind: 'permission_ended'; permissionId: string }
 

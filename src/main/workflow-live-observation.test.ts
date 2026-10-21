@@ -18,7 +18,7 @@ describe('WorkflowLiveObservationTracker', () => {
     expect(tracker.snapshot().status).toBe('unavailable')
   })
 
-  it('accepts only Claude model progress for claude_native and rejects wrong pairs', () => {
+  it('accepts Claude model progress and rejects wrong provider/lifecycle pairs', () => {
     const claude = new WorkflowLiveObservationTracker({ ...identity('claude-root'), providerId: 'claude' })
     expect(claude.observe({ source: 'claude_native', kind: 'model_progress', channel: 'text' })).toBe(true)
     expect(claude.observe({ source: 'claude_native', kind: 'model_progress', channel: 'thinking' })).toBe(true)
@@ -28,6 +28,34 @@ describe('WorkflowLiveObservationTracker', () => {
     const pi = new WorkflowLiveObservationTracker(identity('wrong-claude-source'))
     expect(pi.observe({ source: 'claude_native', kind: 'model_progress', channel: 'text' })).toBe(false)
     expect(pi.snapshot().status).toBe('unavailable')
+  })
+
+  it('tracks Claude pending-call activity without claiming physical start, and closes only a returned ID', () => {
+    const tracker = new WorkflowLiveObservationTracker({ ...identity('claude-pending'), providerId: 'claude' })
+    expect(tracker.observe({ source: 'claude_native', kind: 'tool_activity', toolCallId: 'call-1' })).toBe(true)
+    expect(tracker.observe({ source: 'claude_native', kind: 'tool_activity', toolCallId: 'call-1' })).toBe(false)
+    expect(tracker.snapshot()).toMatchObject({ status: 'tool_wait', activeToolIds: ['call-1'], trackedToolCount: 1 })
+    expect(tracker.observe({ source: 'claude_native', kind: 'tool_returned', toolCallId: 'call-1' })).toBe(true)
+    expect(tracker.observe({ source: 'claude_native', kind: 'tool_returned', toolCallId: 'call-1' })).toBe(false)
+    expect(tracker.snapshot()).toMatchObject({ status: 'unknown', activeToolIds: [] })
+  })
+
+  it('bounds Claude pending-call IDs and preserves uncertainty after overflowed calls return', () => {
+    const oversized = new WorkflowLiveObservationTracker({ ...identity('claude-oversized'), providerId: 'claude' })
+    oversized.observe({ source: 'claude_native', kind: 'tool_activity', toolCallId: 'x'.repeat(1024 * 1024) })
+    expect(JSON.stringify(oversized.snapshot()).length).toBeLessThan(4096)
+    expect(oversized.snapshot()).toMatchObject({ status: 'unknown', truncated: true, trackedToolCount: 0 })
+    const tracker = new WorkflowLiveObservationTracker({ ...identity('claude-overflow'), providerId: 'claude' })
+    for (let index = 0; index < 33; index++) tracker.observe({ source: 'claude_native', kind: 'tool_activity', toolCallId: `call-${index}` })
+    for (let index = 0; index < 32; index++) tracker.observe({ source: 'claude_native', kind: 'tool_returned', toolCallId: `call-${index}` })
+    expect(tracker.snapshot()).toMatchObject({ status: 'unknown', truncated: true, trackedToolCount: 0 })
+  })
+
+  it('rejects Claude lifecycle-shaped aliases and cross-provider activity', () => {
+    const claude = new WorkflowLiveObservationTracker({ ...identity('claude-gates'), providerId: 'claude' })
+    expect(claude.observe({ source: 'claude_native', kind: 'tool_started', toolCallId: 'call-1' } as never)).toBe(false)
+    expect(claude.observe({ source: 'pi_native', kind: 'tool_activity', toolCallId: 'call-1' } as never)).toBe(false)
+    expect(claude.snapshot().activeToolIds).toEqual([])
   })
 
   it('ignores late Claude observations after the attempt closes', () => {

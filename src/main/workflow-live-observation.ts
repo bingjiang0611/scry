@@ -37,16 +37,31 @@ export class WorkflowLiveObservationTracker {
   observe(observation: WorkflowLiveObservation): boolean {
     if (this.closed) return false
     if (observation.source === 'pi_native' && this.identity.providerId !== 'pi') return false
-    if (observation.source === 'claude_native' && (this.identity.providerId !== 'claude' || observation.kind !== 'model_progress')) return false
+    if (observation.source === 'claude_native' && (this.identity.providerId !== 'claude' || (observation.kind !== 'model_progress' && observation.kind !== 'tool_activity' && observation.kind !== 'tool_returned'))) return false
     const at = this.now()
     switch (observation.kind) {
+      case 'tool_activity':
+        if (observation.source !== 'claude_native') return false
+        if (!observation.toolCallId || this.tools.has(observation.toolCallId)) return false
+        if (observation.toolCallId.length > WORKFLOW_LIVE_MAX_ID_LENGTH || this.tools.size >= WORKFLOW_LIVE_MAX_IDS) return this.markTruncated(observation.source, at)
+        this.tools.add(observation.toolCallId)
+        this.lastActivityStatus = 'tool_wait'
+        break
+      case 'tool_returned':
+        if (observation.source !== 'claude_native') return false
+        if (observation.toolCallId.length > WORKFLOW_LIVE_MAX_ID_LENGTH) return this.markTruncated(observation.source, at)
+        if (!this.tools.delete(observation.toolCallId)) return false
+        this.lastActivityStatus = 'unknown'
+        break
       case 'tool_started':
+        if (observation.source !== 'pi_native') return false
         if (!observation.toolCallId || this.tools.has(observation.toolCallId)) return false
         if (observation.toolCallId.length > WORKFLOW_LIVE_MAX_ID_LENGTH || this.tools.size >= WORKFLOW_LIVE_MAX_IDS) return this.markTruncated(observation.source, at)
         this.tools.add(observation.toolCallId)
         this.lastActivityStatus = 'tool_wait'
         break
       case 'tool_ended':
+        if (observation.source !== 'pi_native') return false
         if (observation.toolCallId.length > WORKFLOW_LIVE_MAX_ID_LENGTH) return this.markTruncated(observation.source, at)
         if (!this.tools.delete(observation.toolCallId)) return false
         this.lastActivityStatus = 'unknown'
