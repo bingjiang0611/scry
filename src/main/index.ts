@@ -37,6 +37,7 @@ import {
 } from './transcript-archive'
 import { readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
 import {
+  readCompleteArchiveForNativeReconciliation,
   hydrateSessionHistoryPage,
   mergeSessionTurns,
   readSessionHistoryAfterCompletedRuns,
@@ -2210,7 +2211,10 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       else if (native) {
         // A successful continuation must not hide the previously recovered prefix.
         // Reconcile only Provider-native turn IDs, never prompts or output text.
-        const completeArchive = await readTraceArchiveAsync(archiveArgs, signal)
+        const completeArchive = await readCompleteArchiveForNativeReconciliation(
+          archivePage,
+          () => readTraceArchiveAsync(archiveArgs, signal)
+        )
         nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
           { userDataDir }, { hydrateAttachments: false }))
       }

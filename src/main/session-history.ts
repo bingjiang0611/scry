@@ -2,7 +2,7 @@ import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '.
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
 import type { SessionProviderId } from '../shared/provider'
-import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
+import type { TraceArchive, TraceArchivePage, TraceArchiveTurn } from './transcript-archive'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
 import { waitForCompletedRuns } from './context-admission'
 import {
@@ -41,6 +41,18 @@ export function sessionArchiveIsPageable(providerId: SessionProviderId, transcri
  */
 export const DEFAULT_SESSION_HISTORY_PAGE_SIZE = 40
 export const MAX_SESSION_HISTORY_PAGE_SIZE = 200
+
+/**
+ * A page with no older turns already contains the complete archive snapshot.
+ * Reuse it for native-history reconciliation instead of rereading the same archive;
+ * partial pages still require the authoritative full read.
+ */
+export async function readCompleteArchiveForNativeReconciliation(
+  page: Pick<TraceArchivePage, 'archive' | 'hasOlder'> | null,
+  readFullArchive: () => Promise<TraceArchive | null>
+): Promise<TraceArchive | null> {
+  return page && !page.hasOlder ? page.archive : readFullArchive()
+}
 
 export interface SessionHistoryPageRequest {
   /** 只取序号小于 before 的更早轮次；缺省从最新一轮往回取。 */

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readTraceArchiveAsync, readTraceArchivePageAsync, upsertTraceArchiveTurn, type TraceArchive } from './transcript-archive'
 import {
+  readCompleteArchiveForNativeReconciliation,
   DEFAULT_SESSION_HISTORY_PAGE_SIZE,
   MAX_SESSION_HISTORY_PAGE_SIZE,
   hydrateSessionHistoryPage,
@@ -28,6 +29,15 @@ describe('archive source paging', () => {
     expect(sessionArchiveIsPageable('claude', null)).toBe(true)
     expect(sessionArchiveIsPageable('qoder', null)).toBe(false)
     expect(sessionArchiveIsPageable('claude', '/transcript.jsonl')).toBe(false)
+  })
+
+  it('native history reuses a complete archive page without rereading the archive', async () => {
+    const archive: TraceArchive = { version: 3, cwd: '/repo', sessionId: 'pi-session', providerId: 'pi', turns: [] }
+    const readFullArchive = vi.fn(async () => archive)
+    await expect(readCompleteArchiveForNativeReconciliation({ archive, hasOlder: false }, readFullArchive)).resolves.toBe(archive)
+    await expect(readCompleteArchiveForNativeReconciliation({ archive: null, hasOlder: false }, readFullArchive)).resolves.toBeNull()
+    await expect(readCompleteArchiveForNativeReconciliation({ archive, hasOlder: true }, readFullArchive)).resolves.toBe(archive)
+    expect(readFullArchive).toHaveBeenCalledOnce()
   })
 
   it('Pi 热索引只读请求页，逐页恢复所有旧轮次而不保留全会话 cache', async () => {
