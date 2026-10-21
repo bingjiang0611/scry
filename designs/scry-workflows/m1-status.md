@@ -154,7 +154,23 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 
 最终现场：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-claude-wire-9lTEw2/`；外层审查 `/tmp/scry-claude-wire-review.tFzIIq/`。scope 绑定 harness/helper/SDK 文件 hash，旧真实故障现场16源 hash 未变。首轮沙箱内 ps 被拒（SDK 尚未 import），次轮真实 SDK prompt 编成 text-block 数组而非字符串，两次日志保留；已修正，未加时或重试默认成功。期限仍8秒，无忙轮询。Node/web typecheck、两文件 node --check、App build 和 diff check 通过；未重跑全仓门禁、未安装或推送。
 
-仍缺生产 runAgent + 实际 SDK transport、完整 App/canonical recorder 与真账号验收；SDK hook_callback 不等于私有 recorder CLI 的真实 hook 执行。维护 Agent 下一步先核对最小离线生产 runner 接缝，真实账号仍需用户授权。
+该轮未覆盖生产 runAgent + 实际 SDK transport；后续补充见下一节。完整 App/canonical recorder 与真账号验收仍缺；SDK hook_callback 不等于私有 recorder CLI 的真实 hook 执行。
+
+## 生产 runAgent + 真实 SDK 的独立离线验收
+
+仅扩展上述夹具，无生产代码、依赖或权限语义改动。现有 esbuild 编译真实 runAgent/normalizer/tracker；SDK 保持 external，在系统禁网 harness 内加载，仍连接 synthetic CLI。生产默认 tools/setting sources 没有被夹具强行改为空；独立 HOME/cwd、空 MCP、默认权限、显式 fake 路径/hash 和无危险 flags 均核对。
+
+| 场景 | 父会话实测 | 不外推的能力 |
+| --- | --- | --- |
+| runner-complete | native 7 条、trace 4 条、可信诊断 4 条；原生 session/prompt ID 与 completed | 不是实际模型或工具执行 |
+| runner-interrupt | 观察 tool_activity 后请求 interrupt；ACK 后 promise 仍 pending、无终态；gate 后 interrupted、EOF/exit0 | 不使用 forceKill，ACK/工具返回不证明整个资源树收敛 |
+| runner-plain | native 7 条、trace 4 条、观测 0；与开启观测的稳定内容相等，保留工具/消息 ID、输入输出及用量 | 不是 canonical recorder |
+
+原三条 SDK codec 场景继续通过，共六场景。所有 SDK harness/假 CLI 均实际被系统拒绝 loopback 连接 EPERM，外层正对照成功；期限8秒不变。最终现场 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-claude-wire-z0vPlx/`，审查 `/tmp/scry-runner-wire-review.FIhtVT/`；scope 绑定14输入文件、bundle/SDK/harness/helper hash。12个登记进程已退出，16份旧故障源 hash 不变。两脚本 node --check、Node/web typecheck、App build 通过；未运行延后的全仓门禁，未安装/推送/升版本。
+
+首轮 `first-run.log` 保留：runner completed 后 fake 身份未登记，清理拒绝且覆盖原始异常，不能断言最初异常精确原因；8个已启动 PID 后续均确认退出。假 CLI 现等待外层出生身份登记后才握手；原始错误和清理错误分开保存，未放宽身份检查。中间五场景成功与最终六场景成功分别保留，不抹去首轮失败。详细边界、非干扰剔除字段与证据见[夹具说明](../../docs/research/claude-sdk-transport-fixture.md)。
+
+仍缺完整 App、真实 native transcript、managed recorder 生命周期与 canonical records；recordNative callback 和 SDK hook_callback 均不能替代它们。下一步由维护 Agent 核对这个最小离线集成接缝，真实账号/模型费用仍须用户先授权。
 
 ## 尚未完成与下一段
 

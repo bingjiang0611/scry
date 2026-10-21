@@ -32,7 +32,7 @@ const emitContent = () => {
     usage: { input_tokens: 0, output_tokens: 0 } } }))
   send(frame({ type: 'tool_progress', tool_use_id: toolId, tool_name: 'FixtureTool', parent_tool_use_id: null, elapsed_time_seconds: 0 }))
   send(frame({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: 'synthetic reply' }] } }))
-  if (mode === 'complete') finish()
+  if (mode === 'complete' || mode === 'runner-complete' || mode === 'runner-plain') finish()
 }
 const handle = packet => {
   log('received', { packet })
@@ -44,7 +44,7 @@ const handle = packet => {
       send(frame({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: [], mcp_servers: [], model: 'offline-fixture',
         permissionMode: 'default', capabilities: {}, apiKeySource: 'none', claude_code_version: 'synthetic-transport', slash_commands: [], output_style: 'default' }))
     } else if (packet.request.subtype === 'interrupt') {
-      assert.equal(mode, 'interrupt')
+      assert(mode === 'interrupt' || mode === 'runner-interrupt')
       // Register the filesystem gate BEFORE ACK, avoiding a lost release event.
       watcher = fs.watch(root, (_event, name) => {
         if (name !== 'release') return
@@ -76,7 +76,21 @@ const handle = packet => {
   } else throw new Error('Unexpected input frame: ' + packet.type)
 }
 async function main() {
+  // Hold the child alive until the outside owner has obtained its OS birth.
+  // Install before publishing cli-start so a fast owner cannot lose the ACK.
+  const registered = new Promise(resolve => {
+    const accept = () => {
+      const file = path.join(root, 'fake-registered')
+      if (!fs.existsSync(file)) return
+      assert.equal(fs.readFileSync(file, 'utf8'), 'registered\n')
+      registrationWatcher.close()
+      resolve()
+    }
+    const registrationWatcher = fs.watch(root, accept)
+    accept()
+  })
   log('cli-start', { pid: process.pid, executable: process.execPath, argv: process.argv, cwd: process.cwd() })
+  await registered
   const code = await new Promise(resolve => {
     const socket = net.connect({ host: '127.0.0.1', port: Number(process.env.SCRY_WIRE_PORT) })
     socket.once('connect', () => { socket.destroy(); resolve('CONNECTED') })
@@ -91,4 +105,5 @@ async function main() {
   lines.once('close', () => { log('stdin-eof', { ended }); assert(ended, 'EOF before terminal evidence') })
 }
 process.on('SIGTERM', () => { log('signal', { signal: 'SIGTERM' }); process.exit(143) })
+process.on('exit', code => { log('cli-exit', { code }) })
 main().catch(error => { log('fatal', { message: error.message }); process.stderr.write(error.stack + '\n'); process.exit(2) })
