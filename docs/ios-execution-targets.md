@@ -323,12 +323,14 @@ The maintainer approved session-wide historical display without rewriting unknow
 | --- | --- | --- |
 | Original workflow archive | 39/39 run IDs retained, including 9 unknown-Profile prefixes | Read-only temporary copy; legacy strict scope rejects the same input |
 | Original localhost link | 17,832 HTTP bytes match the actual served file | Original URL fetched from the Mac; the guessed project-root file does not exist |
-| App install gate | Typecheck, 3,563 Node tests, shell and packaged checks passed; 4 tests skipped | Development build 0.2.217; final host smoke and installer resumed against the same signature-checked frozen bundle after the outer 600-second command deadline |
+| App install gate | Complete `npm run install:mac:dev` passed: typecheck, 3,563 Node tests, shell and all packaged checks; 4 tests skipped | Development build 0.2.217 installed; production host checks reject unknown sessions and unproven legacy Profile scope |
 | Renderer UI | Full `npm run test:renderer:ui` passed | Isolated Electron, native input, including Credits and remote session flows |
 | Swift transport | 25 focused tests passed | Bytes, bounds, source scope and history connection behavior |
 | Physical iPhone | App installed; normal home observed | Text/HTML/source and the native share sheet replayed with explicit DEBUG fixtures during this task; no real Provider invocation or completed Files export claimed |
 
-Final desktop bundle: `/tmp/scry-final-install-20261021.CFRE54/dist/mac-arm64/Scry.app`; ASAR SHA-256 `f4bfe98a75078d32841e59e3824f6e543e44cbd6a7adaccef40f2af9766517e4`. Installation used the existing validated installer and did not restart the user's running desktop app.
+Final installed desktop bundle: `/Applications/Scry.app` 0.2.217; installed and packaged ASAR SHA-256 both `6a955fbb4422ddc6663c08abc0bb9da7cf3202a9c05e68e0f8862b84e125692c`. The complete install pipeline includes the final history-authority fix. It did not restart the user's running desktop app.
+
+An earlier interrupted attempt resumed its remaining checks against the signature-checked frozen bundle in `/tmp/scry-final-install-20261021.CFRE54` after the outer 600-second command deadline. Its ASAR SHA-256 was `f4bfe98a75078d32841e59e3824f6e543e44cbd6a7adaccef40f2af9766517e4`; this is retained as intermediate evidence, not the final installed artifact.
 
 Earlier failures remain evidence: the first full run encountered a concurrently changing Pi discovery implementation and deadline failures; isolated controls and a later full run passed without weakening assertions or timeouts. UI fixtures exposed process teardown and moving-target pointer-readiness problems; those were fixed in the fixture/shared input helper and the complete UI gate then passed. Phone installation initially hit the free-profile app limit, then developer online verification; the approved same-bundle update preserved data. The final phone build compiled and installed; after the transient verification denial, normal Scry launch was observed.
 
