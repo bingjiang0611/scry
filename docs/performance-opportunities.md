@@ -2,6 +2,14 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## 独立 CLI 多仓库采集（2026-10-21，受控实验；未改生产）
+
+- 独立 CLI 日常样本提示每轮通常采集 18–19 个仓库；不能用 App journal 替代其热点证据。当前优先多仓库采集与通知重复工作，暂缓用户级服务和内容存储重建。
+- 固定 19 仓库 × 512 文件、每种调度 4 轮：19/4/1 路峰值子进程为 38/8/2，全部证据断言通过；正常无变化轮均需 190 次 Git。19 路有一轮出现 16 次 discovery_failed fallback、额外 31 次 Git，其他调度本轮没有。
+- 测量源码 `3f30987`；10 核机器负载 75.25→45.48，L2 unavailable，不据此改生产并发值或宣布提速。未优化、未合入、未安装、未推送，台账不变。
+- 通知身份不一致定位到项目定制 bridge 自行注入 host override；core 不应改变 host 优先级。临时回调对照区分了身份失配与真实 callback 失败，149 项相关测试通过；真实 daemon 与上传未操作。
+- 后续：性能 owner 在低负载下重测同一负载；项目集成 owner 离线修 bridge，daemon 切换和积压补发另需用户授权。范围、原始结果及交付状态见[实验记录](performance-experiments/20261021-cli-multirepo-concurrency.md)。
+
 ## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
 
 完整 CLI gate 588 项、App unit 3463 项（另 4 opt-in skipped）、shell、类型检查和构建已通过；源码冻结 `a868251`。构建目录的签名包在私有 CLI/GUI 启动时收到 SIGKILL，尚未完成 packaged smoke，未执行安装。相同字节诊断副本与已安装 0.2.215 的对照结果、首次失败及日志见[实验记录](performance-experiments/20261021-desktop-ui-fluidity.md#0216-发布验证续跑2026-10-21)。下一步由发布/系统诊断 owner 定位该启动问题，不再重复全量测试碰运气；不修改系统防护或直接安装未通过门禁的包。
