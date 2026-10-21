@@ -24,6 +24,7 @@ import type {
   RuntimeProvider
 } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
+import type { WorkflowLiveObservation } from '../../shared/workflow'
 import type { ParsedTurn } from '../normalize'
 import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { CodexHookInspection, CodexHookTrustGrant } from '../codex-hook-trust'
@@ -144,6 +145,8 @@ export interface ProviderRunRequest {
    * 调用它；没有调用就表示该 Provider 这一轮没有可观测的原生流，而不是流是空的。
    */
   recordNative?: (type: string, payload: unknown) => void
+  /** Trusted, bounded native phase evidence. Adapters omit it when coverage is unavailable. */
+  onWorkflowObservation?: (observation: WorkflowLiveObservation) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
 }

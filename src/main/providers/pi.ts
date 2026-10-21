@@ -1510,10 +1510,12 @@ async function runPiAgent(
       const delta = record(event.assistantMessageEvent)
       const messageId = currentAssistantMessageId()
       if (delta.type === 'text_delta' && typeof delta.delta === 'string') {
-        streamedText = true
+        streamedText ||= delta.delta.length > 0
+        if (delta.delta.length > 0) request.onWorkflowObservation?.({ source: 'pi_native', kind: 'model_progress', channel: 'text' })
         request.emit(piEvent(request.runId, { kind: 'model', stage: 'text_delta', text: delta.delta, messageId }))
       } else if (delta.type === 'thinking_delta' && typeof delta.delta === 'string') {
-        streamedThinking = true
+        streamedThinking ||= delta.delta.length > 0
+        if (delta.delta.length > 0) request.onWorkflowObservation?.({ source: 'pi_native', kind: 'model_progress', channel: 'thinking' })
         request.emit(piEvent(request.runId, { kind: 'model', stage: 'thinking', thinking: delta.delta, messageId }))
       }
       return
@@ -1581,6 +1583,9 @@ async function runPiAgent(
       const classified = classifyTool(toolName, input)
       toolNames.set(toolUseId, toolName)
       toolStarts.set(toolUseId, Date.now())
+      if (typeof event.toolCallId === 'string' && event.toolCallId.length > 0) {
+        request.onWorkflowObservation?.({ source: 'pi_native', kind: 'tool_started', toolCallId: event.toolCallId })
+      }
       request.emit(piEvent(request.runId, {
         kind: classified.kind,
         stage: `${classified.kind}:${classified.name}`,
@@ -1626,6 +1631,9 @@ async function runPiAgent(
       if (toolUseId) {
         toolNames.delete(toolUseId)
         toolStarts.delete(toolUseId)
+      }
+      if (typeof event.toolCallId === 'string' && event.toolCallId.length > 0) {
+        request.onWorkflowObservation?.({ source: 'pi_native', kind: 'tool_ended', toolCallId: event.toolCallId })
       }
       return
     }

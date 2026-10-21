@@ -38,7 +38,12 @@ export function mergeWorkflowProgress(current: WorkflowProgress[], incoming: Wor
   const combined = new Map(current.map(progress => [progress.workflowId, progress]))
   for (const progress of incoming) {
     const prior = combined.get(progress.workflowId)
-    if (!prior || (prior.revision ?? 0) <= (progress.revision ?? 0)) combined.set(progress.workflowId, progress)
+    const durableRevision = progress.revision ?? 0
+    const priorRevision = prior?.revision ?? 0
+    if (prior && durableRevision < priorRevision) continue
+    if (prior?.live && durableRevision === priorRevision && (!progress.live ||
+      (prior.live.epoch === progress.live.epoch && progress.live.revision < prior.live.revision))) continue
+    combined.set(progress.workflowId, progress)
   }
   return [...combined.values()]
 }

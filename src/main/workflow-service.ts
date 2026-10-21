@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
-import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage } from '../shared/workflow'
+import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowLiveObservation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage } from '../shared/workflow'
 import { parseWorkflowRunCommand, workflowProgressSnapshot } from '../shared/workflow'
 import { capabilityForRole, makePlanPreview, validateWorkflowProgram, workflowRevision } from './workflow-program'
 import { WorkflowRunner, WorkflowSlots, WorkflowScopeError, type WorkflowProviderExecution, type WorkflowProviderExecutionResult } from './workflow-runner'
@@ -21,7 +21,7 @@ export interface WorkflowServiceOptions {
   providerRegistered: (providerId: ProviderId) => boolean
   runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
   plan: WorkflowPlanProvider
-  execute: (request: { workflowId: string; taskId: string; attemptId: string; role: WorkflowRoleBinding; prompt: string; workspace: string }) => WorkflowProviderExecution
+  execute: (request: { workflowId: string; taskId: string; attemptId: string; role: WorkflowRoleBinding; prompt: string; workspace: string; onObservation?: (observation: WorkflowLiveObservation) => void }) => WorkflowProviderExecution
   slots?: WorkflowSlots
   loadConcurrency?: () => Promise<number | undefined>
   onProgress?: (progress: WorkflowProgress) => void
@@ -47,7 +47,7 @@ export class WorkflowService {
   constructor(options: WorkflowServiceOptions) {
     this.options = { ...options, slots: options.slots ?? new WorkflowSlots() }
     this.runner = new WorkflowRunner({ store: options.store, slots: this.options.slots,
-      execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd }),
+      execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd, onObservation: request.onObservation }),
       beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true) },
       onProgress: progress => options.onProgress?.(this.progressSnapshot(progress)) })
     // A corrupt journal disables workflows, not the whole desktop application.

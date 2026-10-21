@@ -37,9 +37,37 @@
 
 自有完整 App PID 13681、25157、65458 已按 executable、userData 和出生时间重验后关闭，关闭前 scope 已收敛。没有对用户 App 发送停止或启动命令。
 
+## 本次可信实时阶段观测（仍不是完整 M1）
+
+- Provider 请求新增了可选、typed 的 Workflow live observation callback。Pi adapter 只从真实 native `tool_execution_start/end`（必须有原生 `toolCallId`）和非空 `text_delta`/`thinking_delta` 发出 `pi_native` 证据；buffered fallback、快照、心跳、turn/agent start、retry intent、空增量不建立模型进展或模型/配额等待。其他 Provider 暂无原生工具/增量映射；其真实权限请求仍可被 main 观测，不能因此声称原生阶段 parity。
+- canonical `startAppRun` 把观察 callback 绑定到 workflow 的 `workflowId/taskId/attemptId/runId`；runner 通过 epoch-scoped、主进程拥有的 bounded projection 路径发布，不依赖 renderer 可见性或 `isRemoteRun`。重叠 tool/permission ID 独立计数，结束一个不会清掉其他项；最后一个可信等待结束后状态回到 `unknown`，不猜模型已恢复。终态、停止、recording 和 slot settlement 没有改用 live 事件驱动。
+- progress 推送、snapshot 与 list 共用活跃内存投影，只暴露 source、coverage、status、bounded counts/IDs、epoch、观察时间，不带中间文本。live revision 独立于持久 revision，迟到的同版观测/历史回包不覆盖新数据；每个 root 32 ms 合批、每千次同步增量不新增磁盘写入。File/Memory store 均剥离 live，历史读取也剥离残留字段；重启不恢复旧 epoch。确认 scope 收敛立即关闭观测，即使随后记录写入被阻塞，槽位仍等持久化才释放。
+- 明确上限：每 attempt 各 32 个 tool/permission ID、每 ID 256 字符、进展计数饱和于 10000；root 最多展示 32 个 attempt 并提供总数。超限显式 truncated，不把采样 ID 全部结束当成没有其他等待，不将截断后的阶段当完整证据。trackedToolCount 是被跟踪的 ID 数，不是 Provider 全部工具数。若真实负载超过上限，先增加分页/有界身份摘要并保留 gap，再评估上限，不通过取消限制让数据看似完整。
+- 当前仅开放 typed 实时诊断字段与现有 UI 的数据合并，不宣称完整阶段可视化/管理页面已交付。`automaticStall` 对五 Provider 都是 `unsupported`；没有 watchdog、stall 计时器、自动重试或新设置。
+- `workflowPermissionResponse` 先验证闭合权限形状，再围绕实际 broker promise 发 main-owned permission start/end，在 finally 清理；错误形状和业务 clarification 不产生权限观测，generic extension confirm 不冒充权限等待。Pi 来源与实际 Provider 不匹配时拒绝。
+- 子任务交回后，父会话复核新增先红后绿：四项失败分别抓到 snapshot 缺 live、超长 ID 无界、截断未标、错 Provider 证据；另一个负对照抓到空 delta 抢占 streamed 标记而吞掉 buffered 正文。现在空增量既不算进展，也不影响最终正文保留。原子任务快结束后仍在提交结果的快照测试改为 held live stream，避免把已收敛的过时阶段当实时成功。
+
+### 本段父会话验证
+
+证据 `/tmp/scry-m1-observation.dNdytc/`，与前节停止收据的 `/tmp/scry-m1-stop.7jb82s/` 分开，不累计成一次验收。
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| review 负对照 | 初版 4 failed / 9 passed；空 delta 正文检查再独立先红后绿 | `review-before.log`、`empty-delta-before.log`、`empty-delta-after.log` |
+| 当前相关测试 | 18 文件 **285 passed**：Pi 六文件、Workflow、canonical stop、renderer 合并；没有重跑旧七项整仓失败 | `affected-final.log` |
+| typecheck / build / 产物 / 安全 smoke | Node/web、完整 pack:artifact 均通过；未安装 | `typecheck-final.log`、`pack.log` |
+| 隔离 UI | 原生输入、权限、两次独立 stop ID、未知与 rehydrate 检查通过。首轮输入失效保留；补显式焦点与 insertText 完成屏障，未延长上限或改产品代码。四张历史截图恢复 | `ui.log`、`ui-focused.log`、`ui-current/` |
+| 性能计数 | trace.delivery 5 次均 2 IPC / 165996 bytes；仅该固定计数门禁，不代表新增 workflow live IPC 无额外成本或用户路径毫秒提速 | `performance/measure.json` |
+| 完整 App 后台离线 | 当前包在没有聚焦 child run 时，经 native Pi delta 获得 model_progress / partial / automaticStall unsupported；snapshot/list 同 epoch，历史文件无 live；停止后 slots 0、live 消失 | `case.json`、`live-snapshot.json` |
+| 同包重开 | 六个历史 workflow 只恢复观察；16 prompts 与 16 条 record 哈希不变，不恢复旧 epoch；旧真实现场 16 源 hash 未变 | `reopen-check.log`、`reopen-result.json` |
+
+本段完整 App asar **`ed8a00b1ef7a8cb0e4a2b3db7c72b23fa6b7e7bd285d7fa834e453acb9ed0e7f`**，快照 `app.asar`；源码 SHA-256 与 `scope.json` 绑定，仍 App 0.2.210 / CLI 0.2.49，无部署。独立 HOME/userData、同一获准的固定离线脚本与临时项目，四角色显式同一 profile/model/full_access，未调用真实模型或复制凭据。workflow `workflow-2e8d1774420d16acc63c5251b5c1b08a36f40399cfed74d5907b1e8b2d50e0b2` 的 child `workflow-726ffb88-1ad2-4d62-a262-961125ebee20` 在 focusedRunId=null 时仍有真实增量观测。此脚本不发工具/权限事件，因此这两类只由 native adapter fixture / 实际权限 helper 的受控测试覆盖，不能称真账号或完整 App 工具/权限验收通过。
+
+PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时间校验关闭，登记离线进程无存活。没有对用户 App 发停止或启动命令，没有清空旧 unknown/pending。
+
 ## 尚未完成与下一段
 
 - 此处只覆盖用户通过 Workflow API 发出的停止命令。**内部退出/错误清理仍沿用原 best-effort stopAll**；“真正安全退出：停止意图持久化并等待全 scope 收敛”尚未完成，不能从本节推断它已有保证。
 - 原生控制的详细 accepted/unavailable/unknown 反馈仍由既有 run-control 链表达；本次 boolean 不是逐 Provider 停止成功证明。
-- 下一段由维护 Agent 实现 M1 **可信等待阶段观测**：从原生 tool 生命周期与真实 permission promise 取证、隔离 run/attempt、保留重叠工具状态；不能从沉默、turn start、retry intent 或快照文本推断模型/配额等待。
+- typed 可信实时观测子集已接通；下一段由维护 Agent 推进 M1 安全退出与收口接缝，并补实际 Provider 的原生阶段覆盖。不能从沉默、turn start、retry intent 或快照文本推断模型/配额等待。
 - 当前五 Provider 都没有已证明完整的“模型等待＋工具/权限/配额排除”合同；自动停滞 watchdog 与自动重启继续 unavailable，不因新增部分阶段观测而开启。其后再推进 M2 程序/模板和 M3 持久解释器，不把本轮叫完整功能交付。

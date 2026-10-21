@@ -8,17 +8,18 @@
 
 | 范围 | 当前结果与边界 |
 | --- | --- |
-| Workflow 核心 | 当前 9 文件 **74 passed**；加 canonical stop 生命周期共 **86 passed**，包含本轮新增 10 项控制回归 |
+| Workflow 核心 | 当前 10 文件 **87 passed**；包含控制与实时观测边界，和 Pi/stop/renderer 相关范围共 18 文件 **285 passed** |
 | 隔离 Workflow UI | 通过；真实键鼠输入、焦点保留、权限点击、停止与 rehydrate 不重放；隐藏窗口与假 bridge，不等于完整 App 前台验收 |
-| Pi adapter 与 lifecycle | 上一 usage 阶段默认并行 **6 文件 / 181 passed**，本轮未重跑；不当成本轮真实账号验收 |
+| Pi adapter 与 lifecycle | 当前六文件 **182 passed**，新增原生增量/工具观测及空增量不吞正文回归；假 CLI，不是真实账号矩阵 |
 | 完整 App 后台离线 | 同包完成、输出后停止、重启只观察均通过；新六条 usage unavailable、CLI/SQLite 为 null，旧六条错误对照原样保留；不是前台或真实模型验收 |
 | M1 停止控制 | 先保存意图再发信号；重复 ID 不重发，明确再次停止用新 ID；重启后只读收据。布尔 ACK 不证明原生接受或终止，内部安全退出仍未完成 |
-| 当前相关后端检查 | 本轮 **86 passed**、Node/web typecheck、构建/产物与安全 smoke 分项通过；此前 usage 阶段 545 / CLI 589 是历史范围（重叠不累计） |
+| M1 实时观测 | 原生 Pi 工具/非空增量与 main 验证后的真实权限等待可观测；snapshot/list/推送同源、epoch 不恢复，自动停滞仍 unsupported；详见 M1 记录 |
+| 当前相关后端检查 | 本轮 **285 passed**、Node/web typecheck、pack:artifact 完整通过；此前 usage 阶段 545 / CLI 589 是历史范围（重叠不累计） |
 | 共享 probe counter 调用方 | 先前 **1 passed**，保留 5 次原 workload、四个应答及 graceful exit；本轮 trace.delivery ratchet 通过，仍不宣称性能提升 |
 | 真实 Pi/Codex | 既有冻结构建证据仍有效，但不代表当前所有新增代码已做真实探针；详见真实验收文档 |
 | 尚未覆盖/未通过 | 完整 App 前台、人类操作与五 Provider 真实矩阵；本轮整仓 npm test 600 秒未完成，三个未改动文件上已见七个失败，shell 未执行 |
 
-最新 M1 证据：`/tmp/scry-m1-stop.7jb82s/`，逐包与未完成边界见 [M1 进展](m1-status.md)。M0 usage 证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
+最新 M1 实时观测证据：`/tmp/scry-m1-observation.dNdytc/`；停止控制证据：`/tmp/scry-m1-stop.7jb82s/`，逐包与未完成边界见 [M1 进展](m1-status.md)。M0 usage 证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
 
 ## 已接入的路径
 

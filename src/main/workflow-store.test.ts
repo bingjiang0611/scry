@@ -20,6 +20,19 @@ function record(id: string): WorkflowStoreRecord {
     progress: { workflowId: id, programRevision: 'rev', workspace: '/fixture', goal: 'goal', state: 'queued', attempts: [], dispatchAttempts: 0, slots: { limit: 1, inUse: 0, queued: 0 }, updatedAt: 1 }, intents: [], outcomes: [] }
 }
 describe('actual workflow filesystem', () => {
+  it('never persists live epochs and strips stale observations from historical files', async () => {
+    const { path, store } = await fixture()
+    const value = record('live')
+    value.progress.live = { epoch: 'stale-epoch', revision: 1, observedAt: 1, status: 'tool_wait', coverage: 'partial',
+      automaticStall: 'unsupported', attempts: [], attemptCount: 0, truncated: false }
+    await store.save(value)
+    const file = join(path, 'workflows', 'live.json')
+    expect(JSON.parse(await readFile(file, 'utf8')).progress.live).toBeUndefined()
+    // A prior producer must not be able to revive a previous process's epoch.
+    await writeFile(file, JSON.stringify(value))
+    expect((await new FileWorkflowStore(path).load('live'))?.progress.live).toBeUndefined()
+  })
+
   it.each(['identity', 'duplicate', 'limit'] as const)('fails closed for corrupt stop receipts: %s', async kind => {
     const { store } = await fixture()
     const value = record('stop-corrupt')

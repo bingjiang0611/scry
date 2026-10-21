@@ -6,12 +6,14 @@ import type {
   WorkflowApproval,
   WorkflowAttemptOutcome,
   WorkflowBlock,
+  WorkflowLiveObservation,
   WorkflowPlanPreview,
   WorkflowProgress,
   WorkflowRoleBinding
 } from '../shared/workflow'
 import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_STOP_REQUESTS, workflowSlotLimit, workflowProgressSnapshot } from '../shared/workflow'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
+import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
 export interface WorkflowProviderExecutionRequest {
   workflowId: string
@@ -21,6 +23,7 @@ export interface WorkflowProviderExecutionRequest {
   prompt: string
   cwd: string
   permissionMode?: AgentPermissionMode
+  onObservation?: (observation: WorkflowLiveObservation) => void
 }
 
 export interface WorkflowProviderExecutionResult {
@@ -222,7 +225,17 @@ export class WorkflowRunner {
   private readonly onProgress?: (progress: WorkflowProgress) => void
   private readonly beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
   private readonly approvals = new Map<string, WorkflowApproval>()
-  private readonly active = new Map<string, { record: WorkflowStoreRecord; progress: WorkflowProgress; initialized: Promise<boolean>; halt: () => void; stop: () => void }>()
+  private readonly active = new Map<string, {
+    record: WorkflowStoreRecord
+    progress: WorkflowProgress
+    initialized: Promise<boolean>
+    liveEpoch: string
+    liveRevision: number
+    halt: () => void
+    stop: () => void
+  }>()
+  private readonly liveAttempts = new Map<string, Map<string, WorkflowLiveObservationTracker>>()
+  private readonly livePublishTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private reservationTail = Promise.resolve()
   private persistTail = Promise.resolve()
 
@@ -266,7 +279,7 @@ export class WorkflowRunner {
       controller.stopped = true
       this.slots.cancelQueued(preview.workflowId)
     }
-    this.active.set(preview.workflowId, { record, progress, initialized: initialization, halt, stop: () => {
+    this.active.set(preview.workflowId, { record, progress, initialized: initialization, liveEpoch: randomUUID(), liveRevision: 0, halt, stop: () => {
       halt()
       for (const stop of activeStops) stop()
     } })
@@ -312,7 +325,14 @@ export class WorkflowRunner {
       await this.persist(record, progress)
       throw error
     } finally {
-      if (progress.state !== 'unknown' || (activeStops.size === 0 && !this.hasUnsettledIntents(record) && !this.slots.hasQueued(preview.workflowId))) this.active.delete(preview.workflowId)
+      if (progress.state !== 'unknown' || (activeStops.size === 0 && !this.hasUnsettledIntents(record) && !this.slots.hasQueued(preview.workflowId))) {
+        this.active.delete(preview.workflowId)
+        for (const tracker of this.liveAttempts.get(preview.workflowId)?.values() ?? []) tracker.close()
+        this.liveAttempts.delete(preview.workflowId)
+        const timer = this.livePublishTimers.get(preview.workflowId)
+        if (timer) clearTimeout(timer)
+        this.livePublishTimers.delete(preview.workflowId)
+      }
       this.publish(progress)
     }
   }
@@ -360,7 +380,7 @@ export class WorkflowRunner {
 
   snapshot(workflowId: string): WorkflowProgress | undefined {
     const entry = this.active.get(workflowId)
-    return entry ? structuredClone(entry.progress) : undefined
+    return entry ? this.liveSnapshot(entry.progress) : undefined
   }
 
   private async runBlock(preview: WorkflowPlanPreview, block: WorkflowBlock, record: WorkflowStoreRecord, controller: { stopped: boolean; returnNode?: string }, activeStops: Set<() => boolean>): Promise<WorkflowAttemptOutcome[]> {
@@ -435,7 +455,25 @@ export class WorkflowRunner {
           return { outcome }
         }
         let execution: WorkflowProviderExecution
-        try { execution = this.execute({ workflowId: preview.workflowId, taskId, attemptId, role, prompt, cwd: preview.workspace, permissionMode: role.permissionMode }) } catch (error) {
+        const liveOwner = this.active.get(preview.workflowId)!
+        const tracker = new WorkflowLiveObservationTracker({ taskId, attemptId, runId: `workflow-${attemptId}`, providerId: role.providerId }, this.now)
+        const workflowTrackers = this.liveAttempts.get(preview.workflowId) ?? new Map<string, WorkflowLiveObservationTracker>()
+        workflowTrackers.set(attemptId, tracker)
+        this.liveAttempts.set(preview.workflowId, workflowTrackers)
+        const releaseLive = (): void => {
+          tracker.close()
+          if (!workflowTrackers.delete(attemptId)) return
+          if (workflowTrackers.size === 0) this.liveAttempts.delete(preview.workflowId)
+          liveOwner.liveRevision++
+          this.scheduleLivePublish(record)
+        }
+        const observe = (observation: WorkflowLiveObservation): void => {
+          if (this.active.get(preview.workflowId) !== liveOwner || !tracker.observe(observation)) return
+          liveOwner.liveRevision++
+          this.scheduleLivePublish(record)
+        }
+        try { execution = this.execute({ workflowId: preview.workflowId, taskId, attemptId, role, prompt, cwd: preview.workspace, permissionMode: role.permissionMode, onObservation: observe }) } catch (error) {
+          releaseLive()
           const outcome = this.outcome(preview, block, 'unknown', { attemptId, taskId, settled: false, error: String(error) })
           await this.commitOutcome(record, outcome)
           return { outcome, hold: new Promise<void>(() => {}) }
@@ -444,6 +482,9 @@ export class WorkflowRunner {
         if (pending) pending.state = 'dispatched'
         record.progress.revision = (record.progress.revision ?? 0) + 1
         this.publish(record.progress)
+        // Scope settlement is independent of recording success. Discard late
+        // observations even when the subsequent outcome write cannot finish.
+        if (execution.settled) void execution.settled.then(releaseLive, error => console.warn('[workflow] live settlement unavailable', error))
         const stop = (): boolean => execution.stop()
         activeStops.add(stop)
         if (controller.stopped) stop()
@@ -454,16 +495,18 @@ export class WorkflowRunner {
             attemptId, taskId, runId: execution.runId, settled: notAttempted, error: String(error),
             ...(notAttempted ? { providerDispatch: 'not_attempted' as const } : {})
           })
+          if (notAttempted) releaseLive()
           await this.commitOutcome(record, outcome)
           if (notAttempted) { activeStops.delete(stop); return { outcome } }
           const hold = execution.settled ?? new Promise<void>(() => {})
           return { outcome, hold: hold.then(async () => {
             outcome.settled = true
             activeStops.delete(stop)
+            releaseLive()
             await this.persist(record, record.progress)
           }) }
         } finally {
-          if (result?.settled) activeStops.delete(stop)
+          if (result?.settled) { activeStops.delete(stop); releaseLive() }
         }
         const outcome = this.outcome(preview, block, result.status, {
           attemptId, taskId, runId: result.runId, output: result.output, actualModel: result.actualModel,
@@ -475,6 +518,7 @@ export class WorkflowRunner {
         return { outcome, hold: hold.then(async () => {
           outcome.settled = true
           activeStops.delete(stop)
+          releaseLive()
           await this.persist(record, record.progress)
         }) }
       }
@@ -549,9 +593,32 @@ export class WorkflowRunner {
     } finally { release() }
   }
 
+  private scheduleLivePublish(record: WorkflowStoreRecord): void {
+    const id = record.preview.workflowId
+    if (this.livePublishTimers.has(id)) return
+    const owner = this.active.get(id)
+    // Coalesce live metadata, never persist or publish each model token.
+    const timer = setTimeout(() => {
+      if (this.livePublishTimers.get(id) !== timer) return
+      this.livePublishTimers.delete(id)
+      if (owner && this.active.get(id) === owner) this.publish(record.progress)
+    }, 32)
+    this.livePublishTimers.set(id, timer)
+  }
+
+  private liveSnapshot(progress: WorkflowProgress): WorkflowProgress {
+    const snapshot = workflowProgressSnapshot(progress)
+    const owner = this.active.get(progress.workflowId)
+    if (owner) snapshot.live = workflowLiveDiagnostics(
+      [...(this.liveAttempts.get(progress.workflowId)?.values() ?? [])].map(tracker => tracker.snapshot()),
+      { epoch: owner.liveEpoch, revision: owner.liveRevision, observedAt: this.now() })
+    else delete snapshot.live
+    return snapshot
+  }
+
   private publish(progress: WorkflowProgress): void {
     // Window/IPC delivery is observational. It must not replace durable outcome
     // settlement with an unknown scope if the window is destroyed during quit.
-    try { this.onProgress?.(workflowProgressSnapshot(progress)) } catch (error) { console.warn('[workflow] progress delivery failed', error) }
+    try { this.onProgress?.(this.liveSnapshot(progress)) } catch (error) { console.warn('[workflow] progress delivery failed', error) }
   }
 }

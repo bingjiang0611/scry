@@ -377,6 +377,20 @@ process.stdin.on('data', (chunk) => {
         continue
       }
       if (command.message === 'hang') continue
+      if (command.message === 'buffered-only' || command.message === 'empty-delta') {
+        send({ type: 'message_start', message: { role: 'assistant' } })
+        if (command.message === 'empty-delta') {
+          send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '' } })
+          send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: '' } })
+        }
+        send({ type: 'message_end', message: {
+          role: 'assistant', provider: 'openai-codex', model: 'test-model', stopReason: 'stop',
+          content: [{ type: 'text', text: 'buffered response' }], usage: { input: 10, output: 1, cost: { total: 0 } }
+        } })
+        send({ type: 'agent_end', willRetry: false })
+        setTimeout(() => send({ type: 'agent_settled' }), 20)
+        continue
+      }
       if (command.message === 'stop-before-final-state') {
         send({ type: 'message_start', message: { role: 'assistant' } })
         send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'started' } })
@@ -1285,9 +1299,26 @@ describe('Pi RPC Provider', () => {
     })
   })
 
+  it('does not count buffered snapshots or empty native deltas as live model progress', async () => {
+    await withFixture(async (profile, cwd) => {
+      for (const prompt of ['buffered-only', 'empty-delta']) {
+        const observations: unknown[] = []
+        const events: TraceEvent[] = []
+        const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+        await expect(adapter.run({ runId: `run-${prompt}`, prompt, cwd, agentProfileId: profile.id,
+          attachments: [], permissionMode: 'full_access', emit: event => events.push(event), onWorkflowObservation: observation => observations.push(observation) }).promise)
+          .resolves.toMatchObject({ status: 'completed' })
+        expect(observations).toEqual([])
+        expect(events.some(event => event.kind === 'model' && event.text === 'buffered response')).toBe(true)
+        await adapter.dispose?.()
+      }
+    })
+  }, 15_000)
+
   it('records the authoritative native session and root entry with model/effort controls', async () => {
     await withFixture(async (profile, cwd) => {
       const events: TraceEvent[] = []
+      const observations: Array<{ kind: string; toolCallId?: string; channel?: string }> = []
       const onSession = vi.fn()
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const handle = adapter.run({
@@ -1300,6 +1331,7 @@ describe('Pi RPC Provider', () => {
         effort: 'high',
         permissionMode: 'full_access',
         emit: (event) => events.push(event),
+        onWorkflowObservation: observation => observations.push(observation),
         onExternalSessionId: onSession
       })
 
@@ -1332,6 +1364,15 @@ describe('Pi RPC Provider', () => {
         .toEqual(['think', 'ing'])
       const messageIds = [...new Set(streamedModelEvents.map((event) => event.messageId))]
       expect(messageIds).toHaveLength(1)
+      expect(observations).toEqual([
+        { source: 'pi_native', kind: 'model_progress', channel: 'thinking' },
+        { source: 'pi_native', kind: 'model_progress', channel: 'thinking' },
+        { source: 'pi_native', kind: 'model_progress', channel: 'text' },
+        { source: 'pi_native', kind: 'tool_started', toolCallId: 'tool-read' },
+        { source: 'pi_native', kind: 'tool_ended', toolCallId: 'tool-read' },
+        { source: 'pi_native', kind: 'tool_started', toolCallId: 'tool-1' },
+        { source: 'pi_native', kind: 'tool_ended', toolCallId: 'tool-1' }
+      ])
       expect(messageIds[0]).toMatch(/^pi:run-1:assistant-\d+$/)
     })
   }, 15_000)

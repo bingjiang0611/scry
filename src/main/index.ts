@@ -87,6 +87,7 @@ import {
   type AgentSteerResult,
   type RuntimeProvider
 } from '../shared/runtime'
+import type { WorkflowLiveObservation } from '../shared/workflow'
 import { capabilityUnavailable, type DeleteArchivedSessionsResult, type DeleteSessionResult, type ProviderContext, type ProviderId, type SessionProviderId } from '../shared/provider'
 import { parseDisabledProviders, ProviderRegistry } from './providers/registry'
 import { ProviderCompatibilityStore } from './provider-compatibility-manifest'
@@ -2793,6 +2794,7 @@ interface AppRunStartOptions {
   permissionModeOverride?: AgentPermissionMode
   providerPrompt?: string
   onTraceEvent?: (event: TraceEvent) => void
+  onWorkflowObservation?: (observation: WorkflowLiveObservation) => void
   onSession?: (externalSessionId: string) => void
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
@@ -3830,6 +3832,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       } : {}),
       mcpExecution,
       recordNative: eventLog && ((type, payload) => eventLog.record('native', type, payload)),
+      onWorkflowObservation: options.onWorkflowObservation,
       emit: (event) => {
         eventLog?.record('canonical', `${event.kind}/${event.stage}`, event)
         // The input-attempt diagnostic precedes the native call, not a Provider response.
@@ -3847,7 +3850,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       requestUserInput: async (question, signal) => {
         if (isWorkflowRun) return workflowPermissionResponse(question, signal,
           (request, permissionSignal) => userQuestionBroker.request({ ...request, providerId }, permissionSignal),
-          () => { workflowInteractionBlocked = true; requestRemoteStop() })
+          () => { workflowInteractionBlocked = true; requestRemoteStop() }, options.onWorkflowObservation)
         if (!isRemoteRun) return userQuestionBroker.request({ ...question, providerId }, signal)
         if (!options.requestUserInput) throw new Error('remote_interactive_input_unsupported')
         const openedAtMs = Date.now()
@@ -4639,7 +4642,7 @@ const workflowService = new WorkflowService({
     } catch (error) { reject?.(dispatch.rejected(error)) }
     return completion
   },
-  execute: ({ attemptId, role, prompt, workspace }) => {
+  execute: ({ attemptId, role, prompt, workspace, onObservation }) => {
     const runId = `workflow-${attemptId}`
     const dispatch = new WorkflowDispatch()
     let startedRunId: string | undefined
@@ -4650,6 +4653,7 @@ const workflowService = new WorkflowService({
     const result = new Promise<import('./workflow-runner').WorkflowProviderExecutionResult>((res, rej) => { resolve = res; reject = rej })
     void startAppRun(workflowStartRequest(role, prompt, workspace), {
       origin: 'workflow', runId, stopSignal: stopController.signal, expectedWorkflowCapability: role.runtimeIdentity,
+      onWorkflowObservation: onObservation,
       onProviderDispatchAttempt: dispatch.onProviderDispatchAttempt,
       onTerminal: (terminal) => {
         const observed = workflowOutput(terminal.items)

@@ -124,6 +124,7 @@ export class FileWorkflowStore implements WorkflowStore {
       delete outcome.output
     }
     snapshot.progress = workflowProgressSnapshot(snapshot.progress)
+    delete snapshot.progress.live
     await this.atomic(`${id}.json`, snapshot)
   }
 
@@ -168,6 +169,9 @@ export class FileWorkflowStore implements WorkflowStore {
     if (record.stopRequests !== undefined && (!Array.isArray(record.stopRequests) || record.stopRequests.length > WORKFLOW_MAX_STOP_REQUESTS || record.stopRequests.some(request =>
       !request || typeof request.commandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.commandId) || !Number.isFinite(request.requestedAt) || request.requestedAt < 0) ||
       new Set(record.stopRequests.map(request => request.commandId)).size !== record.stopRequests.length)) throw new Error(workflowControlCopy.invalidStopReceipt)
+    // Historical observations are not live authority, including files written
+    // by an older or interrupted producer that accidentally persisted the field.
+    delete record.progress.live
     return record
   }
   async listPage(cursor?: string, limit = 64): Promise<WorkflowStorePage> {
@@ -196,7 +200,11 @@ export class FileWorkflowStore implements WorkflowStore {
 export class MemoryWorkflowStore implements WorkflowStore {
   private readonly records = new Map<string, WorkflowStoreRecord>()
   private readonly planning = new Map<string, WorkflowPlanningIntent>()
-  async save(record: WorkflowStoreRecord): Promise<void> { this.records.set(record.preview.workflowId, structuredClone(record)) }
+  async save(record: WorkflowStoreRecord): Promise<void> {
+    const snapshot = structuredClone(record)
+    delete snapshot.progress.live
+    this.records.set(record.preview.workflowId, snapshot)
+  }
   async savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void> { this.planning.set(intent.workflowId, structuredClone(intent)) }
   async loadPlanningIntent(id: string): Promise<WorkflowPlanningIntent | undefined> { const value = this.planning.get(id); return value && structuredClone(value) }
   async *planningIntents(): AsyncIterable<WorkflowPlanningIntent> { for (const intent of this.planning.values()) yield structuredClone(intent) }

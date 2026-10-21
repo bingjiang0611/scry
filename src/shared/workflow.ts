@@ -104,6 +104,61 @@ export interface WorkflowApproval {
 export type WorkflowExecutionState = 'awaiting_approval' | 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped' | 'unknown'
 export type WorkflowAttemptState = 'intent_persisted' | 'dispatched' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped' | 'unknown'
 
+export const WORKFLOW_LIVE_MAX_IDS = 32
+export const WORKFLOW_LIVE_MAX_ID_LENGTH = 256
+
+/** Bounded, non-content evidence from a live Provider run. A missing native callback is not an empty stream. */
+export type WorkflowLiveObservation =
+  | { source: 'pi_native'; kind: 'tool_started'; toolCallId: string }
+  | { source: 'pi_native'; kind: 'tool_ended'; toolCallId: string }
+  | { source: 'pi_native'; kind: 'model_progress'; channel: 'text' | 'thinking' }
+  | { source: 'main_permission'; kind: 'permission_started'; permissionId: string }
+  | { source: 'main_permission'; kind: 'permission_ended'; permissionId: string }
+
+export type WorkflowLiveStatus = 'unavailable' | 'unknown' | 'model_progress' | 'tool_wait' | 'permission_wait'
+
+export interface WorkflowLiveAttempt {
+  taskId: string
+  attemptId: string
+  runId: string
+  providerId: ProviderId
+  epoch: string
+  source: Array<'pi_native' | 'main_permission'>
+  status: WorkflowLiveStatus
+  /** Count of tracked IDs, not proof that the Provider has no other active tools. */
+  trackedToolCount: number
+  truncated: boolean
+  activeToolIds: string[]
+  activePermissionIds: string[]
+  modelProgressCount: number
+  observedAt: number
+  lastGenuineProgressAt?: number
+}
+
+export interface WorkflowLiveDiagnostics {
+  epoch: string
+  revision: number
+  attemptCount: number
+  truncated: boolean
+  status: WorkflowLiveStatus
+  coverage: 'unavailable' | 'partial'
+  automaticStall: 'unsupported'
+  attempts: WorkflowLiveAttempt[]
+  observedAt: number
+}
+
+export function workflowLiveDiagnosticsSnapshot(diagnostics: WorkflowLiveDiagnostics): WorkflowLiveDiagnostics {
+  return {
+    ...diagnostics,
+    attempts: diagnostics.attempts.slice(-WORKFLOW_LIVE_MAX_IDS).map(attempt => ({
+      ...attempt,
+      activeToolIds: attempt.activeToolIds.slice(0, WORKFLOW_LIVE_MAX_IDS),
+      activePermissionIds: attempt.activePermissionIds.slice(0, WORKFLOW_LIVE_MAX_IDS),
+      source: [...attempt.source]
+    }))
+  }
+}
+
 export interface WorkflowAttemptOutcome {
   attemptId: string
   taskId: string
@@ -139,6 +194,8 @@ export interface WorkflowProgress {
   finalReport?: string
   finalReportStatus?: 'available' | 'unavailable'
   error?: string
+  /** Ephemeral live evidence. It is deliberately absent from persisted recovery authority. */
+  live?: WorkflowLiveDiagnostics
   updatedAt: number
   revision?: number
 }
@@ -146,7 +203,12 @@ export interface WorkflowProgress {
 /** Renderer progress never contains intermediate Agent output. */
 export function workflowProgressSnapshot(progress: WorkflowProgress): WorkflowProgress {
   const attempts = progress.attempts.slice(-32).map(({ output: _output, ...attempt }) => attempt)
-  return { ...progress, outcomeCount: progress.attempts.length, attempts }
+  return {
+    ...progress,
+    outcomeCount: progress.attempts.length,
+    attempts,
+    ...(progress.live ? { live: workflowLiveDiagnosticsSnapshot(progress.live) } : {})
+  }
 }
 
 export interface WorkflowProgressPage {
