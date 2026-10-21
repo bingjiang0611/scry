@@ -1264,6 +1264,12 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await click('.sb-navitem[title="LLM 性能"]')
   await wait(`document.querySelector('.llm-perf-modal') != null`)
   const modal = `document.querySelector('.llm-perf-modal')`
+  const assertUniformCurves = async () => {
+    if (!await read(`Array.from(${modal}.querySelectorAll('.llm-perf-line')).every(node => {
+      const style = getComputedStyle(node)
+      return node.getAttribute('d').startsWith('M') && node.getAttribute('d').includes('C') && !node.getAttribute('d').includes('NaN') && style.opacity === (node.classList.contains('dim') ? '0.14' : '1') && style.clipPath === 'none' && style.strokeOpacity === '1'
+    }) && ${modal}.querySelector('.llm-perf-measured') == null`)) throw new Error('Model curve brightness varies between measured, transition and idle segments')
+  }
   const runs = `Array.from(${modal}.querySelectorAll('.llm-perf-run-summary')).map(node => node.textContent)`
   await wait(`${modal}.querySelector('.llm-perf-running h3')?.textContent === '运行中 · 3 个会话' && ${runs}.length === 3`)
   if (!await read(`${runs}.every(text => text.includes('等待首次输出 1') && text.includes('—') && !text.includes('token/s'))`)) throw new Error('Waiting sessions fabricated speed or output')
@@ -1277,8 +1283,9 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   if (!models[0].includes('2.0秒') || !models[1].includes('—') || models[1].includes('0.0秒')) throw new Error('First-token column wrong: ' + JSON.stringify(models))
   if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('unmeasured-model')`)) throw new Error('Failed or unmeasured history leaked into speed')
   if (await read(`${modal}.textContent.includes('字符/s') || ${modal}.textContent.includes('数据口径')`)) throw new Error('Legacy character/definition UI leaked into the modal')
-  // The baseline remains continuous, but measured portions are a separate clipped, full-opacity layer.
-  if (!await read(`${modal}.querySelectorAll('.llm-perf-measured[clip-path]').length === 2 && Array.from(${modal}.querySelectorAll('.llm-perf-line')).every(node => node.getAttribute('d').startsWith('M') && !node.getAttribute('d').includes('NaN') && getComputedStyle(node).opacity === '0.3') && ${modal}.querySelector('clipPath rect') != null`)) throw new Error('Continuous idle baseline is indistinguishable from measured speed')
+  // The approved design keeps each model's entire continuous curve at one brightness.
+  // Idle remains a tooltip state, not a fabricated 0 token/s measurement.
+  await assertUniformCurves()
   // Click + native keyboard: help must be discoverable and usable without hover.
   await click('.llm-perf-mhead .llm-perf-help:nth-child(2) summary')
   await wait(`${modal}.querySelector('.llm-perf-mhead .llm-perf-help:nth-child(2)').open`)
@@ -1300,11 +1307,12 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await wait(`${modal}.querySelector('.llm-perf-tip') == null`)
   await click('.llm-perf-mrow:nth-of-type(1)')
   await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 1 && ${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]')?.textContent.includes('fast-model')`)
+  await assertUniformCurves()
   await wait(`${modal}.querySelector('.llm-perf-legend button[aria-pressed="true"]')?.textContent.includes('fast-model')`)
   await click('.llm-perf-legend button[aria-pressed="true"]')
   await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 0 && ${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]') == null`)
   key('Return')
-  await wait(`${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]')?.textContent.includes('fast-model') && ${modal}.querySelectorAll('.llm-perf-measured.dim').length === 1`)
+  await wait(`${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]')?.textContent.includes('fast-model') && ${modal}.querySelectorAll('.llm-perf-line.dim').length === 1`)
   key('Return')
   await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 0`)
   await click('.llm-perf-range button:nth-child(1)')
@@ -1314,6 +1322,7 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await click('.llm-perf-metric button:nth-child(2)')
   await wait(`${modal}.querySelector('.llm-perf-metric button[aria-pressed="true"]')?.textContent === '首 token' && ${modal}.querySelector('.llm-perf-chart svg')?.getAttribute('aria-label').includes('首 token') && ${modal}.querySelectorAll('.llm-perf-line').length === 1`)
   if (!await read(`${modal}.querySelector('.llm-perf-unit').textContent === '秒' && ${modal}.querySelectorAll('.llm-perf-legend button').length === 1`)) throw new Error('First-token chart kept the speed unit or unmeasured legend')
+  await assertUniformCurves()
   await hover('.llm-perf-chart svg', 0.94)
   await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('fast-model') && !${modal}.querySelector('.llm-perf-tip')?.textContent.includes('slow-model')`)
   const waitTip = await read(`Number(${modal}.querySelector('.llm-perf-tip b').textContent)`)
@@ -1361,6 +1370,18 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   const contrastByTheme = {}
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
+    await assertUniformCurves()
+    const liveHierarchy = await read(`(() => {
+      const row = Array.from(${modal}.querySelectorAll('.llm-perf-run-summary')).find(node => node.textContent.includes('pi-live-model'))
+      return {
+        speed: parseFloat(getComputedStyle(row.querySelector('.llm-perf-run-speed strong')).fontSize),
+        wait: parseFloat(getComputedStyle(row.querySelector('.llm-perf-run-speed + .llm-perf-run-speed strong')).fontSize),
+        model: parseFloat(getComputedStyle(row.querySelector('.llm-perf-run-model b')).fontSize),
+        color: getComputedStyle(row.querySelector('.llm-perf-run-speed strong')).color,
+        modelColor: getComputedStyle(row.querySelector(':scope > i')).backgroundColor
+      }
+    })()`)
+    if (liveHierarchy.speed !== 42 || liveHierarchy.wait !== 30 || liveHierarchy.speed < liveHierarchy.model * 2 || liveHierarchy.color !== liveHierarchy.modelColor) throw new Error('Live metric hierarchy differs from the approved draft: ' + JSON.stringify(liveHierarchy))
     contrastByTheme[theme] = await read(`(() => {
       const luminance = color => color.match(/[\\d.]+/g).slice(0, 3).map(Number).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
       const nodes = Array.from(${modal}.querySelectorAll('.llm-perf-run-speed > span, .llm-perf-state, .llm-perf-unit, .llm-perf-legend button, .llm-perf-axis text, .llm-perf-mhead > span, .llm-perf-help summary'))
@@ -1383,6 +1404,27 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   if (!await read(`${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth`)) throw new Error('Running performance samples overflow the narrow modal')
   await capture('-running-narrow')
+  win.setSize(520, 800)
+  await wait(`innerWidth === 520`)
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  const compactLayout = await read(`(() => {
+    const body = ${modal}.querySelector('.llm-perf-body')
+    const range = ${modal}.querySelector('.llm-perf-range').getBoundingClientRect()
+    const close = ${modal}.querySelector('.modal-x').getBoundingClientRect()
+    const rowsFit = Array.from(${modal}.querySelectorAll('.llm-perf-run-summary')).every(row => {
+      const bounds = row.getBoundingClientRect()
+      return Array.from(row.children).every(node => {
+        const child = node.getBoundingClientRect()
+        return child.left >= bounds.left && child.right <= bounds.right + 1 && node.scrollWidth <= node.clientWidth + 1
+      })
+    })
+    return { bodyFits: body.scrollWidth <= body.clientWidth, rowsFit, controlsFit: range.right <= close.left }
+  })()`)
+  if (!compactLayout.bodyFits || !compactLayout.rowsFit || !compactLayout.controlsFit) throw new Error('Compact performance layout overflows or overlaps: ' + JSON.stringify(compactLayout))
+  await capture('-running-compact-dark')
+  await read(`document.documentElement.setAttribute('data-theme', 'light')`)
+  await capture('-running-compact-light')
+  await read(`document.documentElement.setAttribute('data-theme', 'dark')`)
   win.setSize(1000, 800)
   await wait(`innerWidth === 1000`)
   await click('#performance-ungroup')
@@ -1436,7 +1478,7 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
   if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch + selected missing evidence', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'one row per model across projects/providers', 'independent metric means omit missing evidence', 'visible state counts + member disclosure + independent denominators', 'live/history scopes separated', 'legend/table keyboard selection synchronized', 'native help keyboard access', 'continuous baseline visually separates measured spans', 'chart keyboard navigation', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', contrastByTheme, themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch + selected missing evidence', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'one row per model across projects/providers', 'independent metric means omit missing evidence', 'visible state counts + member disclosure + independent denominators', 'live/history scopes separated', 'legend/table keyboard selection synchronized', 'native help keyboard access', 'uniform model curve brightness in both metrics and themes', 'chart keyboard navigation', 'approved live metric hierarchy and model color', 'running samples fit narrow + compact windows', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', contrastByTheme, themes: ['dark', 'light'] }
 }
 
 try {
