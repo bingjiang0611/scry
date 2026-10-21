@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
 
 const io = vi.hoisted(() => ({
@@ -154,8 +154,11 @@ function metrics(counts: IoCounts): Record<string, number> {
 }
 
 describe('fixed production file work counters', () => {
+  let production: Awaited<ReturnType<typeof imports>>
+  // Production module transforms were never part of the metered I/O workload.
+  beforeAll(async () => { production = await imports() })
+
   it('counts fixed file workloads with complete functional results', async () => {
-    const production = await imports()
     const runs = await repeatCounters(defaultRepeats, async (index) => {
       const fixture = await tempRoot()
       const { mkdir, writeFile, rm } = await import('node:fs/promises')
@@ -228,7 +231,7 @@ describe('fixed production file work counters', () => {
   })
 
   it('is sensitive to duplicated production reads', async () => {
-    const { listWorkspace } = await imports()
+    const { listWorkspace } = production
     const fixture = await tempRoot()
     const { writeFile, rm } = await import('node:fs/promises')
     await writeFile(`${fixture.workspace}/fixed.txt`, 'fixed content')

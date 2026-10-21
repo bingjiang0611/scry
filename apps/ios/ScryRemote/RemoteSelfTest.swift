@@ -122,15 +122,16 @@ enum RemoteSelfTest {
     check("markdown.tableInvalidIsText", !invalid.contains { if case .table = $0.kind { return true }; return false })
     let emptyTable = ConversationMarkdownParser.parse("| A |\n---")
     check("markdown.tableHeaderOnly", emptyTable.count == 1 && { if case let .table(table) = emptyTable[0].kind { return table.rows.isEmpty }; return false }())
-    // Mac-local links: only loopback HTTP(S) is intercepted; paths map like a static server.
+    // HTTP paths remain URLs, never guessed project-relative filenames.
     let local = URL(string: "http://127.0.0.1:4311/designs/scry-steer/")!
     check("link.loopbackIntercepted", MacLocalLink.isLoopback(local) && MacLocalLink.isLoopback(URL(string: "http://localhost:5173/a")!))
     check("link.remoteKeepsSystemAction", !MacLocalLink.isLoopback(URL(string: "https://example.com/designs/")!) &&
-      !MacLocalLink.isLoopback(URL(string: "file:///tmp/a.html")!))
-    check("link.directoryMapsToIndex", MacLocalLink.workspacePath(for: local) == "designs/scry-steer/index.html" &&
-      MacLocalLink.workspacePath(for: URL(string: "http://127.0.0.1:4311/designs/scry-steer")!) == "designs/scry-steer/index.html")
-    check("link.fileKeepsName", MacLocalLink.workspacePath(for: URL(string: "http://127.0.0.1:4311/a/b%20c.html?x=1#y")!) == "a/b c.html")
-    check("link.dotSegmentsRejected", MacLocalLink.workspacePath(for: URL(string: "http://127.0.0.1:4311/a/%2E%2E/b.html")!) == nil)
+      !MacLocalLink.isLoopback(URL(string: "http://127.evil.com/")!))
+    check("link.directoryRemainsURL", MacLocalLink.downloadTarget(for: local) == local.absoluteString)
+    let exact = URL(string: "http://127.0.0.1:4311/bolder-v1.html?x=1#y")!
+    check("link.preservesURLAndQuery", MacLocalLink.downloadTarget(for: exact) == exact.absoluteString)
+    let file = URL(string: "file:///tmp/a%20b.pdf")!
+    check("link.explicitFileRemainsFileURL", MacLocalLink.downloadTarget(for: file) == file.absoluteString)
     check("run.recoveryCheckpointRoundTrip", RemoteRunStore.selfTestRecoveryCheckpointRoundTrip())
     check("run.generationSessionIsolation", RemoteRunStore.selfTestGenerationIsolation())
     check("run.followUpIdentityStable", RemoteRunStore.selfTestFollowUpIdentity())

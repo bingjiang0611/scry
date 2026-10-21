@@ -1,9 +1,10 @@
 import type { DesktopRemoteIntent, DesktopRemoteSubmit } from '@shared/desktop-remote'
+import type { AgentInputAttachment } from '@shared/runtime'
 
 export interface RemoteQueuedPrompt {
   messageId: string
   text: string
-  attachments: never[]
+  attachments: AgentInputAttachment[]
   request: Record<string, never>
   submission: DesktopRemoteSubmit
 }
@@ -36,7 +37,7 @@ export class RemotePromptQueueStore {
     const queue = this.get(key)
     if (queue.prompts.length >= 32) throw new Error('队列最多保留 32 条消息，请先处理已有消息。')
     this.set(key, { ...queue, connectionId, waitingFor: queue.waitingFor ?? waitingFor,
-      prompts: [...queue.prompts, { messageId: crypto.randomUUID(), text: submission.prompt, attachments: [], request: {}, submission }] })
+      prompts: [...queue.prompts, { messageId: crypto.randomUUID(), text: submission.prompt, attachments: submission.attachments?.map(attachment => ({ ...attachment })) ?? [], request: {}, submission }] })
   }
   remove(key: string, messageId: string): void {
     const queue = this.get(key)

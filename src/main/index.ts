@@ -35,7 +35,7 @@ import {
   type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
-import { readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
+import { readPiDisplayHistory } from './pi-native-history'
 import {
   readCompleteArchiveForNativeReconciliation,
   hydrateSessionHistoryPage,
@@ -140,7 +140,7 @@ import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
 import { remoteProviderEntry } from './remote/remote-provider-snapshot'
 import type { RemoteProviderRef } from './remote/remote-gateway'
-import type { DesktopRemoteContext, DesktopRemoteSessionAction } from '../shared/desktop-remote'
+import type { DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest } from '../shared/desktop-remote'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
 import { sessionAttentionKey } from '../shared/session-attention'
@@ -194,7 +194,8 @@ import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import { assertTrustedIpcEvent as assertTrustedIpcEventForWindow, registerTrustedIpcHandler } from './ipc-trust'
 import { writeClipboardText } from './clipboard-text'
 import { canonicalRemoteProjectRoots, listRemoteDirectories, resolveCanonicalRemoteProjectDirectory, resolveRemoteProjectDirectory as resolveRemoteDescendant } from './remote/remote-directory-browser'
-import { readRemoteHistoryTurnsPage, readRemoteHistoryVersion } from './remote/history-reader'
+import { readRemoteHistoryTurnsPage, readRemoteHistoryVersion, readRemoteProfileHistory, readRemoteProfilePreview } from './remote/history-reader'
+import { bindRemoteHistoryContext } from './remote/history-context'
 import { observeSessionStatus } from './remote/remote-workspace'
 import type {
   TerminalCloseRequest,
@@ -928,6 +929,7 @@ async function mirrorSessionTranscript(providerId: ProviderId, cwd: string | und
 }
 
 interface ArchiveTraceTurnArgs {
+  agentProfileId: string | null
   providerId: ProviderId
   runtimeProvider: RuntimeProvider
   cwd: string | undefined
@@ -977,6 +979,8 @@ function cloneForkArchiveTurns(args: {
         runtimeProvider: args.runtimeProvider,
         userDataDir,
         turn: {
+          // A copied prefix retains its original Profile evidence; legacy
+          // unknown provenance must not be relabeled from the fork target.
           ...source,
           runId,
           attachments,
@@ -1026,6 +1030,7 @@ function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
   return {
     timing,
     turn: {
+      agentProfileId: args.agentProfileId,
       runId: args.runId,
       ...(args.providerTurnId ? { providerTurnId: args.providerTurnId } : {}),
       ...(args.forkTurnId ? { forkTurnId: args.forkTurnId } : {}),
@@ -1667,8 +1672,7 @@ async function forkManagedConversation(input: Parameters<NonNullable<Conversatio
   } finally { lease.release() }
 }
 
-handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<AgentForkSessionResult> => {
-  const request = normalizeAgentForkSessionRequest(payload)
+async function forkSessionWithAuthority(request: DesktopRemoteForkSessionRequest, authorize?: () => void): Promise<AgentForkSessionResult> {
   const providerId = request.providerId
   const cwd = request.cwd ? resolveKnownProjectDirectory(request.cwd) : currentCwd
   const catalogCwd = cwd ?? ''
@@ -1699,6 +1703,7 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
         ? null
         : await ensureMcpExecutionAuthorized({ providerId, cwd }, 'run')
       await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
+      authorize?.()
       const forked = await forkSession.fork({
         ...request,
         cwd,
@@ -1732,7 +1737,10 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
   } finally {
     lease.release()
   }
-})
+}
+
+handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<AgentForkSessionResult> =>
+  forkSessionWithAuthority(normalizeAgentForkSessionRequest(payload)))
 
 handleTrusted('agent:invalidateProviderContext', async (_event, context: ProviderContext) => {
   const normalizedContext = { ...context, cwd: context.cwd ?? currentCwd }
@@ -2197,27 +2205,17 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     // An in-flight native tail has no Scry run ID; the live RunRegistry owns that
     // display. Do not add an unmatchable second copy while the Provider is running.
     if (payload.providerId === 'pi' && matchingRuns.length === 0) {
-      let native: LoadedSessionTurn[] | null = null
-      try {
-        native = await readPiNativeHistory({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
-          cwd, sessionId: payload.externalSessionId, signal })
-      } catch (error) {
-        signal.throwIfAborted()
-        if (!archived) throw error
-        // A truncated/unsupported native file must not hide an intact Scry archive.
-        nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${error instanceof Error ? error.message : String(error)}`
-      }
-      if (native && !archived) nativeTurns = native
-      else if (native) {
-        // A successful continuation must not hide the previously recovered prefix.
-        // Reconcile only Provider-native turn IDs, never prompts or output text.
+      const native = await readPiDisplayHistory({
+        sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'), cwd,
+        sessionId: payload.externalSessionId, signal, active: false
+      }, archived ? async () => {
         const completeArchive = await readCompleteArchiveForNativeReconciliation(
-          archivePage,
-          () => readTraceArchiveAsync(archiveArgs, signal)
+          archivePage, () => readTraceArchiveAsync(archiveArgs, signal)
         )
-        nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
-          { userDataDir }, { hydrateAttachments: false }))
-      }
+        return mergeSessionTurns([], completeArchive, { userDataDir }, { hydrateAttachments: false })
+      } : undefined)
+      nativeTurns = native.turns
+      if (native.error) nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${native.error.message}`
     }
     signal.throwIfAborted()
     perf.mark('native_history', { nativeTurns: nativeTurns?.length ?? 0 })
@@ -2374,7 +2372,7 @@ type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { providerId
 // confirm / notifyFailure 由调用方决定：单条删除各弹一次系统弹窗，批量删除只在批次首尾各弹一次。
 async function deleteOneSession(
   p: SessionDeletionRequest,
-  options: { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[] }
+  options: { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
 ): Promise<DeleteSessionResult> {
     const empty = (): Pick<DeleteSessionResult, 'deleted' | 'retained' | 'failed'> => ({
       deleted: [],
@@ -2480,6 +2478,7 @@ async function deleteOneSession(
       // A catalog/native alias can reference a run whose SQLite identity is a
       // different scope in this same deletion. Its own target cleans run artifacts.
       for (const runId of otherOwnedRunIds) initialRunIds.delete(runId)
+      options.authorize?.()
       const result = await deleteOwnedSessionData(initialRunIds, {
         resolveRunIds: (runIds) => resolveSessionRunIds({ providerId, cwd, externalSessionId, runIds }),
         deleteDatabase: (runIds) => deleteSessionData({ providerId, cwd, externalSessionId, runIds }),
@@ -4063,6 +4062,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       await persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
       const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
       const completionArchiveArgs: ArchiveTraceTurnArgs = {
+        agentProfileId: agentProfileId ?? null,
         providerId,
         runtimeProvider,
         cwd,
@@ -4258,6 +4258,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         console.warn('[scry] Provider recording failure getter failed at terminal boundary:', runId, error)
       }
       terminalArchiveArgs = {
+        agentProfileId: agentProfileId ?? null,
         providerId,
         runtimeProvider,
         cwd,
@@ -4787,6 +4788,7 @@ async function loadRemoteProviderSnapshot(): Promise<void> {
           ...(profile ? { profile } : {}),
           controls,
           previous: remoteProviderSnapshot,
+          forkSession: providerRegistry.get(descriptor.id).forkSession !== undefined,
           permissionOverride: configuredRemotePermissionMode()
         })
       }))
@@ -4816,6 +4818,11 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     const remotePermissionMode = configuredRemotePermissionMode()
     if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
+    // History is display-only and side-effect free. The session catalog is the
+    // binding authority: a request cannot substitute another Provider/cwd/id,
+    // while session scope deliberately retains mixed/unknown Profile provenance.
+    const bindRemoteHistory = (input: Parameters<typeof bindRemoteHistoryContext>[0]) =>
+      bindRemoteHistoryContext(input, appSessionStore().load(), resolveRemoteProjectDirectory)
     remoteHostService = await RemoteHostService.create({
       stateDirectory,
       desktopWorkbench: createDesktopWorkbench({
@@ -4828,6 +4835,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         userDataDir: app.getPath('userData'),
         hostId: () => requireRemoteHost().hostId,
         authorizeWorkspace: (cwd) => resolveRemoteProjectDirectory(cwd),
+        authorizeSession: (context) => { bindRemoteHistory({ ...context, externalSessionId: context.externalSessionId!, historyScope: 'session' }) },
         getRun: (runId) => {
           const state = runs.get(runId)?.state
           return state ? boundedLiveRun(state) : null
@@ -4846,6 +4854,10 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       gate: providerOperationGate,
       createTransport: relay.createTransport,
       relayAdvertisement: relay.relayAdvertisement,
+      // Target routing reuses the existing encrypted desktop client and remains
+      // lazy; discovery/forwarding is the only path that initializes it.
+      desktopRemoteClient: () => requireDesktopRemoteClient(),
+      gatewayLabel: 'Mac1',
       // Remote execution enters the same full lifecycle as agent:start. The
       // binding only adapts the authenticated device intent and output stream;
       // trust, attachments, diff, recorder, archive and DB settlement stay here.
@@ -4920,6 +4932,21 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             : appSessionStore().setArchived(ref, false)
         })
       },
+      sessionFork: async (request: DesktopRemoteForkSessionRequest, authorize: () => void) =>
+        forkSessionWithAuthority(request, authorize),
+      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
+        const ref = sessionRefFromRequest(request)
+        if (!ref) throw new Error('无效的远程会话删除请求')
+        const authorizeArchived = (): void => {
+          authorize()
+          const current = appSessionStore().load().find((session) =>
+            session.providerId === ref.providerId && session.agentProfileId === ref.agentProfileId &&
+            session.cwd === ref.cwd && (session.sessionId === ref.externalSessionId || session.externalSessionId === ref.externalSessionId))
+          if (!current?.archivedAt) throw new Error('远程删除只允许已存档会话')
+        }
+        authorizeArchived()
+        return deleteOneSession(ref, { confirm: false, notifyFailure: false, authorize: authorizeArchived })
+      },
       // The host session catalog the device may browse, so the phone shows the
       // SAME conversations the Mac lists. Filtered to device-visible authorized
       // projects (a session whose cwd is not an authorized project dir is not
@@ -4974,28 +5001,47 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // First-screen evidence avoids the complete-history reader. Indexed
       // archives read only two turns; legacy/index-rebuild paths can still
       // materialize older data, and their provenance stays explicit.
-      readHistoryVersion: async ({ providerId, cwd, externalSessionId }) => {
-        const canonical = resolveRemoteProjectDirectory(cwd)
+      readHistoryVersion: async ({ providerId, cwd, externalSessionId, historyScope, agentProfileId }) => {
+        const bound = bindRemoteHistory({ providerId, cwd, externalSessionId, historyScope, agentProfileId })
+        const canonical = bound.canonical
         return readRemoteHistoryVersion({
           cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
-          userDataDir: app.getPath('userData')
+          userDataDir: app.getPath('userData'),
+          historyScope: bound.scope,
+          ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {}),
+          ...(providerId === 'pi' ? { piSessionRoot: join(homeDir, '.pi', 'agent', 'sessions') } : {})
         }, () => runs.activeStates().find((run) =>
           run.providerId === providerId && run.cwd === canonical &&
+          (bound.profile === undefined || (run.agentProfileId ?? null) === bound.profile) &&
           (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
       },
-      readHistoryTurnsPage: async ({ providerId, cwd, externalSessionId, before, limit = 3, snapshot }) => {
-        const canonical = resolveRemoteProjectDirectory(cwd)
+      readHistoryTurnsPage: async ({ providerId, cwd, externalSessionId, historyScope, agentProfileId, before, limit = 3, snapshot }) => {
+        const bound = bindRemoteHistory({ providerId, cwd, externalSessionId, historyScope, agentProfileId })
+        const canonical = bound.canonical
         return readRemoteHistoryTurnsPage({
           cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
-          userDataDir: app.getPath('userData')
+          userDataDir: app.getPath('userData'),
+          historyScope: bound.scope,
+          ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {}),
+          ...(providerId === 'pi' ? { piSessionRoot: join(homeDir, '.pi', 'agent', 'sessions') } : {})
         }, { before, limit, snapshot }, () => runs.activeStates().find((run) =>
           run.providerId === providerId && run.cwd === canonical &&
+          (bound.profile === undefined || (run.agentProfileId ?? null) === bound.profile) &&
           (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
       },
-      readHistoryPreview: async ({ providerId, cwd, externalSessionId }) => {
+      readHistoryPreview: async ({ providerId, cwd, externalSessionId, historyScope, agentProfileId }) => {
         if (!providerId || !externalSessionId) return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
         let canonical: string
-        try { canonical = cwd ? resolveRemoteProjectDirectory(cwd) : '' } catch { return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const } }
+        try {
+          const bound = bindRemoteHistory({ providerId, cwd, externalSessionId, historyScope, agentProfileId })
+          canonical = bound.canonical
+          if (historyScope !== undefined) return readRemoteProfilePreview({
+            cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
+            userDataDir: app.getPath('userData'), historyScope: bound.scope,
+            ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {})
+          }, () => runs.activeStates().find((run) => run.providerId === providerId && run.cwd === canonical &&
+            (bound.profile === undefined || (run.agentProfileId ?? null) === bound.profile) && (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
+        } catch { return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const } }
         const activeRun = runs.activeStates().find((run) =>
           run.providerId === providerId && run.cwd === canonical &&
           (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId))
@@ -5028,10 +5074,22 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // read the SAME trace archive (+ claude transcript) a local load uses, merge,
       // and flatten each turn to the device content shape. Unknown/unauthorized/
       // unreadable => empty (honest: no content, never a fabricated transcript).
-      readHistory: async ({ providerId, cwd, externalSessionId }) => {
+      readHistory: async ({ providerId, cwd, externalSessionId, historyScope, agentProfileId }) => {
         if (!providerId || !externalSessionId) return []
         let canonical: string
-        try { canonical = cwd ? resolveRemoteProjectDirectory(cwd) : '' } catch { return [] }
+        let scope: 'session' | 'profile'
+        let profile: string | null | undefined
+        try {
+          const bound = bindRemoteHistory({ providerId, cwd, externalSessionId, historyScope, agentProfileId })
+          canonical = bound.canonical; scope = bound.scope; profile = bound.profile
+        } catch { return [] }
+        if (historyScope !== undefined) return readRemoteProfileHistory({
+          cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
+          userDataDir: app.getPath('userData'), historyScope: scope,
+          ...(profile !== undefined ? { agentProfileId: profile } : {}),
+          ...(providerId === 'pi' ? { piSessionRoot: join(homeDir, '.pi', 'agent', 'sessions') } : {})
+        }, () => runs.activeStates().find((run) => run.providerId === providerId && run.cwd === canonical &&
+          (profile === undefined || (run.agentProfileId ?? null) === profile) && (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
         const userDataDir = app.getPath('userData')
         const archived = await readTraceArchiveAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir })
         let turns: ParsedTurn[] = []
@@ -5134,6 +5192,11 @@ app.whenReady().then(async () => {
   })
   startupPerf.mark('window_created')
   void startRemoteHostIfEnabled()
+  // Outbound restoration is independent of inbound hosting and never gates the
+  // first window. It only reconnects paired hosts; it does not submit work.
+  void requireDesktopRemoteClient().restoreConnections().catch((error) => {
+    console.warn('[scry] desktop connection startup recovery failed:', error)
+  })
   startupManagedRecovery = (async () => {
     // Let the first window render before touching historical recovery trees.
     await new Promise((resolve) => setTimeout(resolve, 250))

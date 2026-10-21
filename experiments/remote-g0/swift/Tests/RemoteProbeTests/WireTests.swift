@@ -57,6 +57,7 @@ final class WireTests: XCTestCase {
     request.agentProfileId = G0Transport.HistoryProfileValue(value: "A")
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
     XCTAssertEqual(json["agentProfileId"] as? String, "A")
+    XCTAssertEqual(json["historyScope"] as? String, "session")
   }
 
   func testHistoryPageLimitUsesHostDefaultOrExplicitOverride() throws {

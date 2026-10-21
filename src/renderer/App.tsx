@@ -4,7 +4,6 @@ import { flushSync } from 'react-dom'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import {
-  isSupportedImageMimeType,
   runtimeProviderForAgentId,
   type AgentForkSessionRequest,
   type AgentInputAttachment,
@@ -63,6 +62,8 @@ import {
   persistComposerDraftStore,
   readComposerDrafts,
   writeComposerDrafts,
+  fileToDraftAttachment,
+  clipboardAttachmentToDraft,
   type ComposerDraft,
   type ComposerDraftAttachment
 } from './composer-drafts'
@@ -396,43 +397,6 @@ export async function commitDraftOnDispatch(start: () => Promise<void>, commit: 
   const pending = start()
   commit()
   await pending
-}
-
-function pastedImageName(file: File, index: number): string {
-  if (file.name) return file.name
-  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/gif' ? 'gif' : file.type === 'image/webp' ? 'webp' : 'png'
-  return `pasted-image-${Date.now().toString(36)}-${index + 1}.${ext}`
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize))
-  }
-  return btoa(binary)
-}
-
-export async function fileToDraftAttachment(file: File, index = 0): Promise<DraftAttachment | null> {
-  if (!isSupportedImageMimeType(file.type)) return null
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  return {
-    id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${index}`,
-    kind: 'image',
-    name: pastedImageName(file, index),
-    mimeType: file.type,
-    dataBase64: bytesToBase64(bytes),
-    size: file.size,
-    previewUrl: URL.createObjectURL(file)
-  }
-}
-
-export function clipboardAttachmentToDraft(attachment: AgentInputAttachment): DraftAttachment {
-  return {
-    ...attachment,
-    id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}`,
-    previewUrl: `data:${attachment.mimeType};base64,${attachment.dataBase64}`
-  }
 }
 
 interface TurnDoneEffects {

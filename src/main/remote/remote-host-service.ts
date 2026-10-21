@@ -6,6 +6,8 @@ import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding, type HostControllerFactoryDependencies } from './host-controller-factory'
 import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
+import { ExecutionTargetRouter } from './execution-targets'
+import type { DesktopRemoteTargetAPI } from '../../shared/desktop-remote'
 import { PairingTransport } from './pairing-transport'
 import { RelayClient, type RelayTransport } from './relay-client'
 import type { PairingAuthority } from './pairing'
@@ -52,6 +54,8 @@ export interface RemoteHostServiceDependencies {
   listProviders?(): RemoteProviderRef[]
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   sessionAction?: (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => Promise<boolean> | boolean
+  sessionFork?: HostControllerFactoryDependencies['sessionFork']
+  sessionDelete?: HostControllerFactoryDependencies['sessionDelete']
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
@@ -63,6 +67,10 @@ export interface RemoteHostServiceDependencies {
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
+  // Lazy access keeps the existing desktop client composition dormant until a
+  // target request actually needs it.
+  desktopRemoteClient?: () => DesktopRemoteTargetAPI
+  gatewayLabel?: string
   // How to reach the relay (deployed ws/net connector). Absent => dormant. Called
   // once per mode ('run' for the granted-device mTLS host, 'pair' for the pairing
   // prove endpoint), so the relay keeps a separate warm pool per mode. The
@@ -129,12 +137,15 @@ export class RemoteHostService {
       authorizeWorkspace: deps.authorizeWorkspace,
       startRun: deps.startRun,
       gate: deps.gate,
+      attachmentDirectory: join(deps.stateDirectory, 'attachments'),
       ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),
       ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
       ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
       ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
       ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
       ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
+      ...(deps.sessionFork ? { sessionFork: deps.sessionFork } : {}),
+      ...(deps.sessionDelete ? { sessionDelete: deps.sessionDelete } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
       ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
       ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
@@ -147,11 +158,19 @@ export class RemoteHostService {
     let pairing: PairingTransport
     try {
       const server = await identity.issueHostServer()
+      const executionTargets = deps.desktopRemoteClient
+        ? new ExecutionTargetRouter({
+          authorizePeer: (peer) => binding.controller.authorizeDevicePeer(peer),
+          client: deps.desktopRemoteClient,
+          gateway: { hostId: identity.hostId, label: deps.gatewayLabel ?? 'Mac1' }
+        })
+        : undefined
       host = new InnerMtlsHost({
         controller: binding.controller,
         serverCertPEM: server.certificatePEM,
         serverKeyPEM: server.privateKeyPEM,
-        caPEM: identity.caCertificatePEM
+        caPEM: identity.caCertificatePEM,
+        ...(executionTargets ? { executionTargets } : {})
       })
       pairing = new PairingTransport({
         authority: binding.controller.authority,

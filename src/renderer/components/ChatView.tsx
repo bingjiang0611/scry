@@ -25,6 +25,7 @@ import { backgroundWorkStatus } from '../background-work-status'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
 import type { ComposerDraftStore } from '../composer-drafts'
 import { steerStateForMessage } from '../steer'
+import { SLASH_COMMAND_COPY } from '../constants/copy'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 
@@ -666,10 +667,10 @@ export function ChatView({
         {slashOpen && (
           <div className="slash-menu" ref={slashMenuRef}>
             <div className="slash-head">
-              <span>Commands{slashLoading ? ' · 读取中…' : ''}</span>
-              {!slashLoading && slashCmds.length === 0 && (
-                <button className="slash-retry" onClick={onRetrySlash} title="重新拉取命令清单">
-                  <Icon name="refresh" /> 重试
+              <span>{SLASH_COMMAND_COPY.heading(remoteHost, slashLoading)}</span>
+              {!slashLoading && (remote || slashCmds.length === 0) && (
+                <button className="slash-retry" onClick={onRetrySlash} title={SLASH_COMMAND_COPY.refreshTitle(remoteHost)}>
+                  <Icon name="refresh" /> {remote ? SLASH_COMMAND_COPY.refresh : SLASH_COMMAND_COPY.retry}
                 </button>
               )}
             </div>
@@ -690,8 +691,8 @@ export function ChatView({
               {!slashLoading && slashMatches.length === 0 && (
                 <div className="slash-empty">
                   {slashCmds.length === 0
-                    ? slashReason ?? '命令清单为空——当前 Provider 未返回命令；可点重试或查看诊断'
-                    : '无匹配命令'}
+                    ? slashReason ?? SLASH_COMMAND_COPY.empty
+                    : SLASH_COMMAND_COPY.noMatches}
                 </div>
               )}
             </div>

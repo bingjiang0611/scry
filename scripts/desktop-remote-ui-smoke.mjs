@@ -18,10 +18,12 @@ const negativeActivityControl = process.argv.includes('--negative-activity-contr
 const negativeWorkspaceControl = process.argv.includes('--negative-workspace-control')
 const negativePromptControl = process.argv.includes('--negative-prompt-control')
 const negativeSettingsControl = process.argv.includes('--negative-settings-control')
+const negativeSlashControl = process.argv.includes('--negative-slash-control')
 const negativeHistorySlashControl = process.argv.includes('--negative-history-slash-control')
 const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
+const lifecycleOnly = process.argv.includes('--session-lifecycle-only')
 const openingOnly = process.argv.includes('--session-opening-only')
 const measureOpening = process.argv.includes('--measure-session-opening')
 const keepArtifacts = process.argv.includes('--keep')
@@ -56,14 +58,16 @@ const state = {
   catalogFailure: false, sessionActive: false, sessionTs: 1700000000000,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
-  phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0
+  phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
+  clipboardImageCalls: 0, forks: [], deletions: [], deleteFailure: false,
+  commandFailure: false, holdCommands: false
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
   ssh: { hostname: 'fixture.invalid', username: 'fixture', port: 22 }, state: 'connected', expiresAt: 4102444800000
 }
 const alpha = {
-  id: 'claude', label: 'Alpha', available: true, modelId: 'alpha-default',
+  id: 'claude', label: 'Alpha', available: true, modelId: 'alpha-default', forkSession: true,
   models: [{ id: 'alpha-default', providerId: 'claude', label: 'Alpha Default', isDefault: true,
     efforts: [{ id: 'alpha-effort', label: 'Alpha effort', isDefault: true }] }],
   permissions: [{ id: 'default', label: 'Default', isDefault: true }, { id: 'full_access', label: 'Full access' }]
@@ -83,7 +87,8 @@ const catalog = {
     { sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 },
     { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
   ],
-  providerEvidence: 'host_snapshot', directorySelection: true, sessionActions: true
+  providerEvidence: 'host_snapshot', directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
+  attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 }
 }
 const contextFor = (input) => ({ ...input.context })
 const activeRun = (runId, externalSessionId, text, question, background = false) => ({
@@ -124,6 +129,8 @@ const api = {
   },
   async commands(id, context) {
     state.commandCalls.push({ id, context })
+    if (state.holdCommands) await new Promise(resolve => { window.releaseCommands = resolve })
+    if (state.commandFailure) throw new Error('fixture host commands unavailable')
     return { commands: [{ name: 'skill:host-only', description: 'Skill from the remote host' }] }
   },
   async sessionAction(id, context, action) {
@@ -134,6 +141,19 @@ const api = {
     if (action.kind === 'pin') session.pinnedAt = action.pinned ? Date.now() : undefined
     if (action.kind === 'archive') session.archivedAt = action.archived ? Date.now() : undefined
     return true
+  },
+  async forkSession(id, request) {
+    state.forks.push({ id, request })
+    catalog.sessions.push({ sessionId: 'forked-native', externalSessionId: 'forked-native', providerId: request.providerId, cwd: request.cwd, label: 'Forked session', ts: Date.now() })
+    return { externalSessionId: 'forked-native' }
+  },
+  async deleteSession(id, request) {
+    state.deletions.push({ id, request })
+    if (state.deleteFailure) throw new Error('fixture deletion failed')
+    const index = catalog.sessions.findIndex(item => item.externalSessionId === request.externalSessionId && item.archivedAt)
+    if (index < 0 || request.confirmed !== true) throw new Error('not archived or confirmed')
+    catalog.sessions.splice(index, 1)
+    return { ok: true, deleted: [], failed: [] }
   },
   async directories(id, path = '/fixture/home', cursor = 0, snapshot) {
     state.directoryReads.push({ id, path, cursor, snapshot })
@@ -160,7 +180,9 @@ const api = {
     const turns = ${composerHistoryOnly} && context.externalSessionId === 'old-native'
       ? state.historyPrompts.map((userText, index) => ({ runId: 'history-' + index, userText, items: [], done: true }))
       : state.firstIntentCleared && context.externalSessionId === 'native-session'
-      ? [{ runId: firstScryRun, userText: 'archived terminal turn', items: [], done: true }] : []
+      ? [{ runId: firstScryRun, userText: 'archived terminal turn', items: [], done: true }]
+      : ${lifecycleOnly} && context.externalSessionId === 'old-native'
+        ? [{ runId: 'old-run', providerTurnId: 'old-provider-turn', forkTurnId: 'old-fork-turn', userText: 'Fork boundary', items: [], done: true }] : []
     return { turns, hasOlder: false, source: 'trace_archive', status: 'available' }
   },
   async trace(_id, context, runId) {
@@ -232,10 +254,12 @@ window.scry = {
     { cwd: '/fixture/recent', name: 'Recent local', mtime: 1700000001000, sessions: [] },
     { cwd: '/fixture/older', name: 'Older local', mtime: 1699999999000, sessions: [] }
   ],
+  listArchivedSessions: async () => [],
   recentFolders: async () => Array.from({ length: 12 }, (_, index) => '/fixture/recent-' + index),
   catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
   detect: async () => [], listSkills: async () => ({ state: 'unavailable', data: null }),
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
+  listCommands: async () => ({ state: 'ready', data: [{ name: 'skill:local-only', description: 'Local skill must never appear remotely' }] }),
   usageStats: async () => null, stats: async () => null, focusRun: async () => true,
   newSession: async () => { state.localNewSessions++; return true },
   start: async () => { state.localStarts++; throw new Error('Local execution must not be reached') },
@@ -246,6 +270,7 @@ window.scry = {
   },
   remoteBeginPairing: async () => { state.phonePairingCalls++; return { pairingId: 'fixture-pairing', secret: 'fixture-secret', hostId: 'local-host', anchorSHA256: 'local-anchor', expiresAt: Date.now() + 120000, deviceCode: 'scry1:fixture' } },
   copyText: async () => {},
+  clipboardImage: async () => { state.clipboardImageCalls++; return { kind: 'image', name: 'clipboard.png', mimeType: 'image/png', dataBase64: 'aQ==', size: 1 } },
   desktopRemote: api, stopBackgroundTask: async () => { state.backgroundStopCalls++; return { status: 'unavailable', message: 'fixture remote task stop trap' } },
   async remoteDesktopHostStatus() { return state.hostEnabled ? { enabled: true, pairPort: 10001, runPort: 10002 } : { enabled: false } },
   async remoteDesktopHostInvite() { state.hostInviteCalls++; state.hostEnabled = true; return 'scry-desktop1:fixture' },
@@ -302,6 +327,7 @@ async function exercise(contents, pointer, capture, options) {
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
   }
   const insert = (text) => send('Input.insertText', { text })
+  const pasteImage = async () => read(`(async () => { const input = document.querySelector('textarea[aria-label="描述任务"]'); const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2; const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png')); const transfer = new DataTransfer(); transfer.items.add(new File([png], 'pasted.png', { type: 'image/png' })); input.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })); return true })()`)
   // Native forms submit on Enter's keypress/default action, not keydown alone.
   const formEnter = async () => {
     const event = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: process.platform === 'darwin' ? 36 : 13 }
@@ -415,7 +441,7 @@ async function exercise(contents, pointer, capture, options) {
   const projectOrder = () => read('Array.from(document.querySelectorAll(".sb-proj .pname"), node => node.textContent)')
   check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Recent local', 'Project A', 'Older local', 'Project B']), 'Remote project was appended instead of sorted by recent activity')
   check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
-  if (!options.parityOnly && !options.composerHistoryOnly) {
+  if (!options.parityOnly && !options.lifecycleOnly && !options.composerHistoryOnly) {
     // Host-side activity changes while the user stays in the local composer.
     // No explicit refresh: the shared loader must observe starts and stops itself.
     await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000')
@@ -523,6 +549,22 @@ async function exercise(contents, pointer, capture, options) {
   await wait(`${composerValue} === 'remote draft\\n\\nhost scoped prompt\\n\\nhost scoped prompt'`, 'auxiliary views retain the remote insertion target')
   await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await insert('/skill')
   await wait('document.querySelector(".slash-item")?.textContent.includes("skill:host-only")', 'host-only slash completion')
+  check(await read('document.querySelector(".slash-head")?.textContent.includes("Fixture desktop 上的命令")'), 'Remote command heading did not identify its host')
+  check(await read('!document.querySelector(".slash-menu")?.textContent.includes("skill:local-only")'), 'Remote commands included the local catalog')
+  await read('window.desktopRemoteFixture.commandFailure = true')
+  await click('.slash-retry', '刷新')
+  await wait('document.querySelector(".slash-empty")?.textContent.includes("fixture host commands unavailable")', 'remote command failure')
+  check(await read('document.querySelectorAll(".slash-item").length === 0'), 'Failed host lookup kept stale/local commands')
+  await read('window.desktopRemoteFixture.commandFailure = false; window.desktopRemoteFixture.holdCommands = true')
+  await click('.slash-retry', '刷新')
+  await wait('typeof window.releaseCommands === "function"', 'pending host command query')
+  await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
+  await wait('!document.querySelector(".slash-head")?.textContent.includes("读取中") && document.querySelectorAll(".slash-item").length === 0', 'disconnected command catalog cleared')
+  await read('window.releaseCommands(); Promise.resolve()')
+  check(await read('document.querySelectorAll(".slash-item").length === 0'), 'Late host response repopulated a disconnected catalog')
+  await read('window.desktopRemoteFixture.holdCommands = false; window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+  await wait('document.querySelector(".slash-item")?.textContent.includes("skill:host-only")', 'reconnected host command catalog')
+  await click('textarea[aria-label="描述任务"]')
   await key('Enter')
   await wait(`${composerValue} === '/skill:host-only '`, 'keyboard slash selection')
   check((await fixture()).commandCalls.at(-1).id === 'fixture-connection' && (await fixture()).commandCalls.at(-1).context.cwd === '/fixture/project-a', 'Slash discovery used the wrong host/project')
@@ -540,16 +582,66 @@ async function exercise(contents, pointer, capture, options) {
   await click('button[aria-label="存档会话：Remote renamed"]')
   await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'host archived row hidden')
   check(await read('!document.querySelector(".clibtn").disabled'), 'Archiving the active remote session did not leave it for a new draft')
-  await click('.sb-archive-toggle', '已归档远程会话')
-  const archivedRowPoint = await pointFor('[data-remote-session="old-native"]')
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...archivedRowPoint })
-  await click('button[aria-label="恢复会话：Remote renamed"]')
-  await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'restored session no longer archived')
-  await click('.sb-archive-toggle', '已归档远程会话')
+  check(!await read('document.querySelector(".sb-archive-toggle")'), 'Archived remote sidebar entry remains')
+  await click('.sb-settings')
+  await click('.settings-tab', '已存档会话')
+  await wait('document.querySelector(\'[data-archived-remote-session="old-native"]\') != null', 'archived session appears in settings')
+  await click('button[aria-label="取消存档：Remote renamed"]')
+  await wait('!document.querySelector(\'[data-archived-remote-session="old-native"]\')', 'restored session no longer archived')
+  await click('button[aria-label="关闭设置"]')
   await wait('document.querySelector(\'[data-remote-session="old-native"]\') != null', 'restored host row visible')
   check((await fixture()).sessionActions.every(call => call.id === 'fixture-connection' && call.context.externalSessionId === 'old-native'), 'Session actions targeted local/wrong session')
   await click('[data-remote-session="old-native"]')
   await wait('document.querySelector(".clibtn").disabled', 'restored remote session selected')
+  if (options.lifecycleOnly) {
+    const hoverOld = async () => send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...await pointFor('[data-remote-session="old-native"]') })
+    await wait('document.querySelector(".turn-branch-btn") != null', 'verified remote fork boundary')
+    await click('.turn-branch-btn')
+    await wait('document.querySelector(\'[data-remote-session="forked-native"]\')?.classList.contains("active")', 'forked remote session selected')
+    const forks = (await fixture()).forks
+    const expectedFork = { providerId: 'claude', cwd: '/fixture/project-a', sourceSessionId: 'old-native', sourceRunId: 'old-run', sourceProviderTurnId: 'old-provider-turn', sourceForkTurnId: 'old-fork-turn', model: { id: 'alpha-default', providerId: 'claude' }, permissionMode: 'default' }
+    check(forks.length === 1 && forks[0].id === 'fixture-connection' && Object.entries(expectedFork).every(([field, value]) => JSON.stringify(forks[0].request[field]) === JSON.stringify(value)), 'Fork did not preserve canonical host/session/turn identity: ' + JSON.stringify(forks))
+    await hoverOld()
+    await click('button[aria-label="存档会话：Remote renamed"]')
+    await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'archived remote session removed from sidebar')
+    check(!await read('document.querySelector(".sb-archive-toggle")'), 'Sidebar still exposes archived remote sessions')
+    await click('.sb-settings')
+    await click('.settings-tab', '已存档会话')
+    await wait('document.querySelector(\'[data-archived-remote-session="old-native"]\') != null', 'archived remote session listed in settings')
+    check(await read('document.querySelector(".arch-head .arch-danger")?.textContent.includes("本机")'), 'Local bulk deletion does not name its scope')
+    await capture('remote-archived-settings')
+    await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
+    await wait('document.querySelector(\'button[aria-label="取消存档：Remote renamed"]\')?.disabled', 'offline restore disabled')
+    check(await read('document.querySelector(\'button[aria-label="删除 Scry 副本"]\')?.disabled'), 'Offline deletion remained enabled')
+    await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+    await wait('document.querySelector(\'button[aria-label="取消存档：Remote renamed"]\')?.disabled === false', 'online restore enabled')
+    await click('button[aria-label="取消存档：Remote renamed"]')
+    await wait('!document.querySelector(\'[data-archived-remote-session="old-native"]\') && document.querySelector(\'[data-remote-session="old-native"]\') != null', 'restore returns session to sidebar')
+    await key('Escape')
+    await hoverOld()
+    await click('button[aria-label="存档会话：Remote renamed"]')
+    await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'restored session can be archived again')
+    await click('.sb-settings')
+    await click('.settings-tab', '已存档会话')
+    await wait('document.querySelector(\'[data-archived-remote-session="old-native"]\') != null', 'rearchived remote session in settings')
+    await click('button[aria-label="删除 Scry 副本"]')
+    await wait('Array.from(document.querySelectorAll(".modal-head")).some(node => node.textContent.includes("Fixture desktop"))', 'delete confirmation names remote host')
+    await click('.modal-foot button', '取消')
+    check((await fixture()).deletions.length === 0, 'Cancel deleted remote data')
+    await click('button[aria-label="删除 Scry 副本"]')
+    await read('window.desktopRemoteFixture.deleteFailure = true')
+    await click('.modal-foot button', '删除 Scry 副本')
+    await wait('document.querySelector(".arch-failures")?.textContent.includes("fixture deletion failed")', 'failed deletion is visible')
+    check((await fixture()).deletions.length === 1, 'Failed deletion was retried automatically')
+    await read('window.desktopRemoteFixture.deleteFailure = false')
+    await click('button[aria-label="删除 Scry 副本"]')
+    await click('.modal-foot button', '删除 Scry 副本')
+    await wait('!document.querySelector(\'[data-archived-remote-session="old-native"]\')', 'deleted archived session removed after host acknowledgement')
+    const calls = (await fixture()).deletions
+    check(calls.length === 2 && calls.every(call => call.id === 'fixture-connection' && call.request.externalSessionId === 'old-native' && call.request.cwd === '/fixture/project-a' && call.request.confirmed === true), 'Deletion used the wrong remote authority')
+    check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'Session operations sent a task')
+    return { remoteSessionLifecycle: { forkBoundary: true, forkSelection: true, archiveRequired: true, settingsArchiveList: true, noSidebarArchiveEntry: true, restoreToSidebar: true, offlineDisabled: true, deleteConfirmation: true, cancelNoWrite: true, failureVisible: true, noAutomaticRetry: true, hostIdentity: true, noTaskSent: true } }
+  }
   if (options.parityOnly) {
     await click('.sb-new')
     await wait(remoteShown, 'new remote session for adoption')
@@ -758,6 +850,8 @@ async function exercise(contents, pointer, capture, options) {
   await click('.permission-mode-option.is-danger')
   await wait('document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'full_access permission selection')
   await click('textarea[aria-label="描述任务"]')
+  await pasteImage()
+  await wait('document.querySelector(".draft-attachments img")?.naturalWidth === 2', 'remote pasted image decoded preview')
   await read(`(() => { const node = document.querySelector('textarea[aria-label="描述任务"]'); node.select() })()`)
   await insert('first prompt')
   await read('window.desktopRemoteFixture.holdSubmit = true')
@@ -772,6 +866,7 @@ async function exercise(contents, pointer, capture, options) {
   check(afterFirstSubmit.submitInputs[0].prompt === 'first prompt', 'Remote submit did not send the composer text')
   check(afterFirstSubmit.submitInputs[0].context.cwd === '/fixture/project-a', 'First submit used the wrong remote project: ' + afterFirstSubmit.submitInputs[0].context.cwd)
   check(afterFirstSubmit.submitInputs[0].permissionMode === 'full_access', 'Selected permission was not submitted')
+  check(afterFirstSubmit.submitInputs[0].attachments?.[0]?.name === 'pasted.png', 'Remote submit lost pasted image attachment')
   check(afterFirstSubmit.submitInputs[0].context.externalSessionId === undefined, 'First message unexpectedly had a native session')
   await wait('window.desktopRemoteFixture.traceCalls.some(call => call.runId === "remote-run-fixture-1")', 'canonical trace lookup')
   await wait('document.querySelector(".question-inline-form") != null', 'remote question')
@@ -1029,11 +1124,16 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeHistorySlashControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeSlashControl || negativeHistorySlashControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
       if (negativeHistorySlashControl && id.endsWith('/ChatView.tsx')) {
         const guard = 'const slashOpen = slashRequested && !historyNavigation'
         if (!source.includes(guard)) throw new Error('history slash guard not found')
         return source.replace(guard, 'const slashOpen = slashRequested')
+      }
+      if (negativeSlashControl && id.endsWith('/ChatView.tsx')) {
+        const heading = 'SLASH_COMMAND_COPY.heading(remoteHost, slashLoading)'
+        if (!source.includes(heading)) throw new Error('slash source control not found')
+        return source.replace(heading, 'SLASH_COMMAND_COPY.heading(undefined, slashLoading)')
       }
       if (negativeSettingsControl && id.endsWith('/App.tsx')) return source.replace("setSettingsTab('remote')", "setSettingsTab('appearance')")
       if (negativePromptControl && id.endsWith('/App.tsx')) {
@@ -1073,7 +1173,7 @@ try {
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
       lib: { entry: join(temp, 'fixture.tsx'), formats: ['iife'], name: 'DesktopRemoteFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data: blob:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     const { join } = require('node:path')
@@ -1093,7 +1193,11 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
+        // Native input and capture have finished. Release their debugger/window
+        // before exit instead of leaving the successful fixture alive on macOS.
+        win.webContents.debugger.detach()
+        win.destroy()
         process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })

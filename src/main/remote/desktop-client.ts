@@ -5,12 +5,14 @@ import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
+import { attachmentSha256, DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, newAttachmentId, normalizeDesktopAttachment, type DesktopAttachmentCapability } from './desktop-attachments'
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
-  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
+  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
-import { isAgentPermissionMode, type AgentQuestionResponse } from '../../shared/runtime'
+import { isAgentPermissionMode, isSupportedImageMimeType, type AgentInputAttachment, type AgentQuestionResponse } from '../../shared/runtime'
+import type { DeleteSessionResult } from '../../shared/provider'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { LoadedSessionTurn } from '../../shared/session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from '../../shared/workspace'
@@ -59,9 +61,11 @@ interface StoredConnection {
   runPort: number
   certificatePEM?: string
   certificateExpiresAt?: number
+  // Existing paired hosts opt in; an explicit disconnect persists an opt-out.
+  autoConnect?: boolean
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
-interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void> }
+interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability }
 interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string }
 
 function fail(code: string): never { throw new Error(code) }
@@ -121,17 +125,23 @@ function validateState(value: unknown): EncryptedState {
     const ssh = validateSsh(item.ssh)
     if (item.certificatePEM !== undefined) validatePem(item.certificatePEM, 'CERTIFICATE')
     if (item.certificateExpiresAt !== undefined && (!Number.isSafeInteger(item.certificateExpiresAt) || (item.certificateExpiresAt as number) <= 0)) fail('desktop_state_corrupt')
+    if (item.autoConnect !== undefined && typeof item.autoConnect !== 'boolean') fail('desktop_state_corrupt')
     if (item.pending !== undefined) {
       const p = item.pending
       if (!record(p) || !uuid(p.pairingId) || !text(p.secret, 512) || !Number.isSafeInteger(p.expiresAt) || !hash(p.publicKeySHA256)) fail('desktop_state_corrupt')
     }
     return { id: item.id as string, label: item.label as string, hostId: item.hostId as string, anchorPEM: item.anchorPEM as string, anchorSHA256: item.anchorSHA256 as string,
+      ...(item.autoConnect !== undefined ? { autoConnect: item.autoConnect as boolean } : {}),
       ssh, pairPort: item.pairPort as number, runPort: item.runPort as number, ...(item.certificatePEM ? { certificatePEM: item.certificatePEM as string } : {}), ...(item.certificateExpiresAt ? { certificateExpiresAt: item.certificateExpiresAt as number } : {}), ...(item.pending ? { pending: item.pending as StoredConnection['pending'] } : {}) }
   })
   const intents = value.intents.map((item): DesktopRemoteIntent => {
     if (!record(item) || !uuid(item.intentId) || !text(item.connectionId, 300) || !record(item.context) ||
         !text(item.context.cwd, 16_384) || !text(item.context.providerId, 256) || !Number.isSafeInteger(item.createdAt) ||
         (item.status !== 'recorded' && item.status !== 'unknown') || (item.runId !== undefined && !uuid(item.runId))) fail('desktop_state_corrupt')
+    if (item.origin !== undefined) {
+      if (!record(item.origin) || !HASH.test(String(item.origin.phonePeerFingerprint)) || !uuid(item.origin.phoneIntentId) ||
+          !HASH.test(String(item.origin.targetBinding)) || !HASH.test(String(item.origin.payloadHash))) fail('desktop_state_corrupt')
+    }
     return structuredClone(item) as unknown as DesktopRemoteIntent
   })
   return { version: 1, identity, connections, intents }
@@ -151,16 +161,31 @@ function validatePairingResponse(response: unknown, requestId: string, pairingId
   return response
 }
 
-function validateInfo(response: unknown, hostId: string): { directorySelection?: true; workbench?: 1; sessionActions?: true } {
+function validateDeleteSessionResult(value: unknown): DeleteSessionResult {
+  if (!record(value) || typeof value.ok !== 'boolean' || !Array.isArray(value.deleted) || !Array.isArray(value.retained) || !Array.isArray(value.failed) ||
+      value.deleted.some((item) => typeof item !== 'string') || value.retained.some((item) => typeof item !== 'string') ||
+      value.failed.some((item) => !record(item) || !text(item.store, 256) || !text(item.error, 16_384)) ||
+      (value.cancelled !== undefined && typeof value.cancelled !== 'boolean') || (value.reason !== undefined && !['invalid_request', 'active_session', 'user_cancelled', 'partial_failure'].includes(String(value.reason)))) fail('invalid_session_delete_response')
+  return value as unknown as DeleteSessionResult
+}
+
+function validateInfo(response: unknown, hostId: string): { directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopAttachmentCapability } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
       response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
       (response.desktop.directorySelection !== undefined && response.desktop.directorySelection !== true) ||
       (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
-      (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true)) fail('desktop_capability_unavailable')
+      (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true) ||
+      (response.desktop.sessionFork !== undefined && response.desktop.sessionFork !== true) ||
+      (response.desktop.sessionDelete !== undefined && response.desktop.sessionDelete !== true)) fail('desktop_capability_unavailable')
+  const attachmentInfo = response.desktop.attachments
+  if (attachmentInfo !== undefined && (!record(attachmentInfo) || attachmentInfo.transport !== 'chunked' || attachmentInfo.maxBytes !== DESKTOP_ATTACHMENT_MAX_BYTES || attachmentInfo.maxTotalBytes !== DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES || attachmentInfo.maxCount !== DESKTOP_ATTACHMENT_MAX_COUNT || attachmentInfo.chunkBytes !== DESKTOP_ATTACHMENT_CHUNK_BYTES)) fail('desktop_capability_unavailable')
   return {
     ...(response.desktop.directorySelection === true ? { directorySelection: true as const } : {}),
     ...(response.desktop.workbench === 1 ? { workbench: 1 as const } : {}),
-    ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {})
+    ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {}),
+    ...(response.desktop.sessionFork === true ? { sessionFork: true as const } : {}),
+    ...(response.desktop.sessionDelete === true ? { sessionDelete: true as const } : {}),
+    ...(attachmentInfo ? { attachments: attachmentInfo as unknown as DesktopAttachmentCapability } : {})
   }
 }
 
@@ -200,9 +225,11 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   readonly #locks = new Map<string, Promise<void>>()
   readonly #runWatch = new Map<string, RunStatusCursor>()
   readonly #answerIds = new Map<string, string>()
+  readonly #submitting = new Set<string>()
   #lifecycle: Promise<void> = Promise.resolve()
   #saveSerial: Promise<void> = Promise.resolve()
   #statePromise: Promise<EncryptedState>
+  #restoration?: Promise<void>
   #disposed = false
 
   constructor(options: { directory: string; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string } & DesktopRemoteClientTransportDeps, deps: DesktopRemoteClientTransportDeps = {}) {
@@ -261,26 +288,56 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     })
   }
 
+  restoreConnections(): Promise<void> {
+    return this.#restoration ??= this.#restoreConnections()
+  }
+
+  async #restoreConnections(): Promise<void> {
+    const state = await this.#state()
+    // One attempt per saved host per launch, not a reconnect loop. Queue hosts
+    // individually so a manual disconnect/forget/quit can run between attempts.
+    for (const id of state.connections.map((item) => item.id)) {
+      await this.#serializeLifecycle(async () => {
+        if (this.#disposed) return
+        const item = state.connections.find((connection) => connection.id === id)
+        if (!item || item.autoConnect === false || item.pending || !item.certificatePEM ||
+            !item.certificateExpiresAt || item.certificateExpiresAt <= Date.now() || this.#active.get(id)?.tunnel.alive) return
+        try { await this.#connect(state, item) }
+        catch (error) { console.warn('[scry] desktop connection restore failed:', id, error) }
+      })
+      if (this.#disposed) break
+    }
+  }
+
   async connect(connectionIdValue: string): Promise<void> {
     return this.#serializeLifecycle(async () => {
-      this.#assertLive(); const state = await this.#state(); const item = this.#connection(state, connectionIdValue)
-      if (item.pending) fail('pairing_in_progress')
-      if (!item.certificatePEM || !item.certificateExpiresAt || item.certificateExpiresAt <= Date.now()) fail('device_certificate_expired')
-      await this.#disconnectActive(connectionIdValue)
-      const tunnel = await this.#transport.openTunnel({ ...item.ssh, pairPort: item.pairPort, runPort: item.runPort })
-      try {
-        const response = await this.#request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } })
-        validateInfo(response, item.hostId)
-        if (this.#disposed) fail('desktop_client_disposed')
-        this.#active.set(item.id, { tunnel, serial: Promise.resolve() })
-        await this.#save(state)
-        await this.#reconcileUnknown(state, item.id)
-      } catch (error) { await tunnel.close(); throw error }
+      const state = await this.#state()
+      await this.#connect(state, this.#connection(state, connectionIdValue))
     })
   }
 
+  async #connect(state: EncryptedState, item: StoredConnection): Promise<void> {
+    if (item.pending) fail('pairing_in_progress')
+    if (!item.certificatePEM || !item.certificateExpiresAt || item.certificateExpiresAt <= Date.now()) fail('device_certificate_expired')
+    await this.#disconnectActive(item.id)
+    const tunnel = await this.#transport.openTunnel({ ...item.ssh, pairPort: item.pairPort, runPort: item.runPort })
+    try {
+      const response = await this.#request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } })
+      const capabilities = validateInfo(response, item.hostId)
+      if (this.#disposed) fail('desktop_client_disposed')
+      await this.#save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
+      this.#active.set(item.id, { tunnel, serial: Promise.resolve(), ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}) })
+      await this.#reconcileUnknown(state, item.id)
+    } catch (error) { await tunnel.close(); throw error }
+  }
+
   async disconnect(connectionIdValue: string): Promise<void> {
-    return this.#serializeLifecycle(async () => { await this.#disconnectActive(connectionIdValue) })
+    return this.#serializeLifecycle(async () => {
+      const state = await this.#state()
+      const item = this.#connection(state, connectionIdValue)
+      await this.#save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: false } : connection))
+      await this.#disconnectActive(item.id)
+    })
   }
 
   async forget(connectionIdValue: string): Promise<void> {
@@ -352,6 +409,34 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     return response.sessionAction
   }
 
+  async forkSession(connectionIdValue: string, request: DesktopRemoteForkSessionRequest): Promise<{ externalSessionId: string }> {
+    if (!record(request) || !text(request.providerId, 256) || !text(request.cwd, 16_384) ||
+        (request.agentProfileId !== undefined && !text(request.agentProfileId, 256)) || !text(request.sourceSessionId, 256) || !text(request.sourceRunId, 256) ||
+        !text(request.sourceProviderTurnId, 256) || !text(request.sourceForkTurnId, 256)) fail('invalid_session_fork')
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    const state = await this.#state(); const item = this.#connection(state, connectionIdValue)
+    if (validateInfo({ desktop: info }, item.hostId).sessionFork !== true) fail('desktop_session_fork_unsupported')
+    let response: unknown
+    try { response = await this.#write(connectionIdValue, { op: 'sessionFork', request }) }
+    catch (error) { if (this.#isUnknown(error)) fail('desktop_session_operation_unknown'); throw error }
+    if (!record(response) || !record(response.sessionFork) || !text(response.sessionFork.externalSessionId, 256)) fail('desktop_session_operation_unknown')
+    return { externalSessionId: response.sessionFork.externalSessionId }
+  }
+
+  async deleteSession(connectionIdValue: string, request: DesktopRemoteDeleteSessionRequest): Promise<DeleteSessionResult> {
+    if (!record(request) || !text(request.providerId, 256) || !text(request.cwd, 16_384) || !text(request.externalSessionId, 256) || request.confirmed !== true ||
+        (request.agentProfileId !== undefined && !text(request.agentProfileId, 256))) fail('invalid_session_delete')
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    const state = await this.#state(); const item = this.#connection(state, connectionIdValue)
+    if (validateInfo({ desktop: info }, item.hostId).sessionDelete !== true) fail('desktop_session_delete_unsupported')
+    let response: unknown
+    try { response = await this.#write(connectionIdValue, { op: 'sessionDelete', request }) }
+    catch (error) { if (this.#isUnknown(error)) fail('desktop_session_operation_unknown'); throw error }
+    if (!record(response) || !record(response.sessionDelete)) fail('desktop_session_operation_unknown')
+    try { return validateDeleteSessionResult(response.sessionDelete) }
+    catch { return fail('desktop_session_operation_unknown') }
+  }
+
   async directories(connectionIdValue: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage> {
     if (path !== undefined && !text(path, 4096) || cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0) || snapshot !== undefined && !HASH.test(snapshot) || Number(cursor) > 0 && snapshot === undefined) fail('invalid_directory_request')
     const result = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'desktopDirectory', query: { action: 'list', ...(path === undefined ? {} : { path }), ...(cursor === undefined ? {} : { cursor }), ...(snapshot === undefined ? {} : { snapshot }) } }, 'directory')
@@ -371,7 +456,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
 
   async history(connectionIdValue: string, value: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory> {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 0) || snapshot !== undefined && !text(snapshot, 256)) fail('invalid_history_cursor')
-    const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', context: context(value), byteChunks: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
+    const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', historyScope: 'session', context: context(value), byteChunks: true, images: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
     let result = await this.#desktop(connectionIdValue, query)
     if (result.kind === 'history_chunk') {
       const { id, totalBytes } = result
@@ -394,19 +479,61 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     }
     const raw = result.history
     if (result.kind !== 'history' || !record(raw) || !Array.isArray(raw.turns) || typeof raw.hasOlder !== 'boolean' || raw.source !== 'trace_archive' || !['available', 'unavailable'].includes(String(raw.status))) fail('invalid_history_response')
+    if (raw.historyScope !== 'session') fail('history_scope_unverified')
     if (raw.turns.length > MAX_ITEMS) fail('history_too_large')
     const turns = raw.turns.map((item) => this.#turn(item))
-    return { turns, hasOlder: raw.hasOlder, ...(Number.isSafeInteger(raw.before) ? { before: raw.before as number } : {}), ...(text(raw.snapshot, 256) ? { snapshot: raw.snapshot } : {}), source: 'trace_archive', status: raw.status as DesktopRemoteHistory['status'], ...(text(raw.reason, 512) ? { reason: raw.reason } : {}) }
+    if (raw.imageCounts !== undefined) {
+      if (!record(raw.imageCounts)) fail('invalid_history_response')
+      let imageBytes = 0
+      for (const turn of turns) {
+        const count = turn.runId ? raw.imageCounts[turn.runId] : undefined
+        if (count === undefined) continue
+        turn.attachments = await this.#readImages(connectionIdValue, value, turn.runId!, count, turn.providerTurnId, 'session')
+        imageBytes += turn.attachments.reduce((sum, image) => sum + (image.size ?? 0), 0)
+        if (imageBytes > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES * 2) fail('history_images_too_large')
+      }
+    }
+    return { historyScope: 'session', turns, hasOlder: raw.hasOlder, ...(Number.isSafeInteger(raw.before) ? { before: raw.before as number } : {}), ...(text(raw.snapshot, 256) ? { snapshot: raw.snapshot } : {}), source: 'trace_archive', status: raw.status as DesktopRemoteHistory['status'], ...(text(raw.reason, 512) ? { reason: raw.reason } : {}) }
   }
 
-  async trace(connectionIdValue: string, value: DesktopRemoteContext, runId: string): Promise<ActiveRun | null> {
+  async trace(connectionIdValue: string, value: DesktopRemoteContext, runId: string, knownAttachmentCount?: number): Promise<ActiveRun | null> {
     if (!validRunId(runId)) fail('invalid_run_id')
-    const result = await this.#desktop(connectionIdValue, { kind: 'trace', context: context(value), runId })
+    if (knownAttachmentCount !== undefined && (!Number.isSafeInteger(knownAttachmentCount) || knownAttachmentCount < 0 || knownAttachmentCount > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_request')
+    const result = await this.#desktop(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true })
     if (result.kind !== 'trace' || (result.run !== null && !record(result.run))) fail('invalid_trace_response')
     if (result.run === null) return null
     const run = result.run
-    if (!text(run.runId, 128) || !text(run.userText, 128_000) || typeof run.done !== 'boolean' || !Array.isArray(run.items) || run.items.length > MAX_ITEMS) fail('invalid_trace_response')
-    return { ...run, runId: run.runId, userText: run.userText, done: run.done, items: run.items.map((item) => this.#traceEvent(item)) } as unknown as ActiveRun
+    if (!text(run.runId, 128) || (typeof run.userText !== 'string' || run.userText.length > 128_000) || typeof run.done !== 'boolean' || !Array.isArray(run.items) || run.items.length > MAX_ITEMS) fail('invalid_trace_response')
+    const attachments = result.imageCount !== undefined && (result.imageCount !== knownAttachmentCount || result.imageCount === 0)
+      ? await this.#readImages(connectionIdValue, value, runId, result.imageCount) : undefined
+    return { ...run, ...(attachments ? { attachments } : {}), runId: run.runId, userText: run.userText, done: run.done, items: run.items.map((item) => this.#traceEvent(item)) } as unknown as ActiveRun
+  }
+
+  async #readImages(id: string, value: DesktopRemoteContext, runId: string, count: unknown, providerTurnId?: string, historyScope?: 'session'): Promise<AgentInputAttachment[]> {
+    if (!Number.isSafeInteger(count) || Number(count) < 0 || Number(count) > DESKTOP_ATTACHMENT_MAX_COUNT) fail('invalid_image_response')
+    const images: AgentInputAttachment[] = []
+    let total = 0
+    for (let index = 0; index < Number(count); index++) {
+      const query = { kind: 'image' as const, context: context(value), runId, index, ...(providerTurnId === undefined ? {} : { providerTurnId }), ...(historyScope ? { historyScope } : {}) }
+      let response = await this.#desktop(id, query)
+      const { id: imageId, totalBytes, name, mimeType } = response
+      if (response.kind !== 'image_chunk' || !uuid(imageId) || !text(name, 160) || !isSupportedImageMimeType(String(mimeType)) || !Number.isSafeInteger(totalBytes) || Number(totalBytes) <= 0 || Number(totalBytes) > DESKTOP_ATTACHMENT_MAX_BYTES) fail('invalid_image_response')
+      total += Number(totalBytes)
+      if (total > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES) fail('images_too_large')
+      const bytes = Buffer.alloc(Number(totalBytes))
+      let offset = 0
+      while (offset < bytes.length) {
+        const length = Math.min(DESKTOP_HISTORY_CHUNK_BYTES, bytes.length - offset)
+        if (response.kind !== 'image_chunk' || (historyScope && response.historyScope !== historyScope) || response.id !== imageId || response.offset !== offset || response.totalBytes !== totalBytes || response.name !== name || response.mimeType !== mimeType || typeof response.data !== 'string' || response.data.length !== 4 * Math.ceil(length / 3)) fail('invalid_image_response')
+        const chunk = Buffer.from(response.data, 'base64')
+        if (chunk.length !== length || chunk.toString('base64') !== response.data) fail('invalid_image_response')
+        chunk.copy(bytes, offset)
+        offset += length
+        if (offset < bytes.length) response = await this.#desktop(id, { ...query, chunk: { id: imageId, offset } })
+      }
+      images.push({ kind: 'image', name, mimeType: mimeType as AgentInputAttachment['mimeType'], dataBase64: bytes.toString('base64'), size: bytes.length })
+    }
+    return images
   }
 
   async intents(connectionIdValue: string): Promise<DesktopRemoteIntent[]> {
@@ -414,18 +541,129 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     return state.intents.filter((item) => item.connectionId === connectionIdValue).map((item) => structuredClone(item))
   }
 
+  async executionTargets(): Promise<import('../../shared/desktop-remote').ExecutionTargetRef[]> {
+    const state = await this.#state()
+    const targets = state.connections.filter((item) => !item.pending).map((item) => ({
+      id: item.id,
+      binding: this.#targetBinding(item),
+      hostId: item.hostId,
+      label: item.label,
+      state: this.#active.get(item.id)?.tunnel.alive === true ? 'connected' as const : 'disconnected' as const
+    }))
+    if (targets.length > 32) fail('execution_target_capacity_exceeded')
+    return targets
+  }
+
+  async mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown> {
+    const state = await this.#state()
+    const item = this.#connection(state, target.id)
+    if (item.pending || this.#targetBinding(item) !== target.binding) fail('execution_target_binding_changed')
+    if (!this.#active.get(item.id)?.tunnel.alive) fail('desktop_not_connected')
+    authorizePeer?.()
+    const authorize = () => this.#authorizeMobileTarget(state, target, authorizePeer)
+    return ['stop', 'answerQuestion', 'sessionAction'].includes(String(request.op))
+      ? this.#write(item.id, request, authorize)
+      : this.#requestForConnection(item.id, request, authorize)
+  }
+
+  async mobileSubmit(input: import('../../shared/desktop-remote').DesktopMobileTargetSubmit & { authorizePeer?: () => void }): Promise<unknown> {
+    // Serialize registration as well as transmission. A concurrent duplicate
+    // must not send the in-memory receipt before its first disk save finishes.
+    return this.#serializeWrite(input.target.id, async () => {
+      const state = await this.#state()
+      const item = this.#connection(state, input.target.id)
+      const authorize = () => this.#authorizeMobileTarget(state, input.target, input.authorizePeer)
+      authorize()
+      if (!HASH.test(input.phonePeerFingerprint) || !uuid(input.phoneIntentId) || !HASH.test(input.target.binding) || !HASH.test(input.payloadHash)) fail('invalid_submit')
+      if (input.request.op !== 'submit' || typeof input.request.detail !== 'string') fail('invalid_submit')
+      const existing = state.intents.find((receipt) => receipt.connectionId === item.id && receipt.origin?.phonePeerFingerprint === input.phonePeerFingerprint &&
+        receipt.origin.phoneIntentId === input.phoneIntentId && receipt.origin.targetBinding === input.target.binding)
+      if (existing?.origin?.payloadHash !== undefined && existing.origin.payloadHash !== input.payloadHash) fail('intent_payload_conflict')
+      if (existing?.runId && existing.status === 'recorded') return { runId: existing.runId, status: 'duplicate' }
+      if (!this.#active.get(item.id)?.tunnel.alive) {
+        if (existing) return { error: 'target_delivery_unknown' }
+        fail('desktop_not_connected')
+      }
+      if (!existing && state.intents.some((receipt) => receipt.connectionId === item.id && receipt.status === 'unknown')) fail('unknown_receipts_pending')
+      if (!existing && state.intents.length >= MAX_RECEIPTS) fail('intent_receipt_capacity_exceeded')
+      const intent: DesktopRemoteIntent = existing ?? {
+        intentId: randomUUID(), connectionId: item.id, context: this.#contextFromDetail(input.request.detail), createdAt: Date.now(), status: 'unknown',
+        origin: { phonePeerFingerprint: input.phonePeerFingerprint, phoneIntentId: input.phoneIntentId, targetBinding: input.target.binding, payloadHash: input.payloadHash }
+      }
+      if (!existing) { state.intents.push(intent); await this.#save(state) }
+      let response: unknown
+      try {
+        response = await this.#requestForConnection(item.id, { ...input.request, intentId: intent.intentId }, authorize)
+      } catch (error) {
+        if (!existing && this.#isPreDispatchRejection(error)) {
+          state.intents = state.intents.filter((receipt) => receipt.intentId !== intent.intentId)
+          await this.#save(state)
+          throw error
+        }
+        // A repeated delivery may have executed on the earlier attempt. Do not
+        // turn another lost reply (or new rejection) into proof of nonexecution.
+        return { error: 'target_delivery_unknown' }
+      }
+      if (!record(response) || !uuid(response.runId) || (response.status !== 'recorded' && response.status !== 'duplicate')) return { error: 'target_delivery_unknown' }
+      intent.runId = response.runId
+      intent.status = 'recorded'
+      await this.#save(state)
+      return response
+    })
+  }
+
+  async mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; authorizePeer?: () => void }): Promise<unknown> {
+    const state = await this.#state()
+    const item = this.#connection(state, input.target.id)
+    if (item.pending || this.#targetBinding(item) !== input.target.binding) fail('execution_target_binding_changed')
+    if (!HASH.test(input.phonePeerFingerprint) || !uuid(input.phoneIntentId)) fail('invalid_intent_id')
+    const intent = state.intents.find((receipt) => receipt.connectionId === item.id && receipt.origin?.phonePeerFingerprint === input.phonePeerFingerprint && receipt.origin.phoneIntentId === input.phoneIntentId && receipt.origin.targetBinding === input.target.binding)
+    if (!intent) fail('unknown_intent')
+    const authorize = () => this.#authorizeMobileTarget(state, input.target, input.authorizePeer)
+    let response: Record<string, unknown>
+    try { response = await this.#requestForConnection(item.id, { op: 'intentStatus', intentId: intent.intentId }, authorize) }
+    catch (error) { if (this.#isExplicitUnknownIntent(error)) throw error; fail('target_delivery_unknown') }
+    if (record(response) && record(response.intent) && uuid(response.intent.runId)) {
+      intent.runId = response.intent.runId; intent.status = 'recorded'; await this.#save(state)
+    }
+    return response
+  }
+
   async submit(connectionIdValue: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent> {
+    if (this.#submitting.has(connectionIdValue)) fail('submission_in_progress')
+    this.#submitting.add(connectionIdValue)
+    try { return await this.#submit(connectionIdValue, input) }
+    finally { this.#submitting.delete(connectionIdValue) }
+  }
+
+  async #submit(connectionIdValue: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent> {
     const state = await this.#state(); const item = this.#connection(state, connectionIdValue); this.#assertSubmit(input)
+    const attachments = (input.attachments ?? []).map(normalizeDesktopAttachment)
+    if (attachments.length > DESKTOP_ATTACHMENT_MAX_COUNT || attachments.reduce((total, attachment) => total + (attachment.size ?? 0), 0) > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES) fail('attachments_too_large')
     if (state.intents.some((receipt) => receipt.connectionId === connectionIdValue && receipt.status === 'unknown')) fail('unknown_receipts_pending')
     if (!this.#active.get(connectionIdValue)?.tunnel.alive) fail('desktop_not_connected')
     const intent: DesktopRemoteIntent = { intentId: randomUUID(), connectionId: item.id, context: structuredClone(input.context), createdAt: Date.now(), status: 'unknown' }
     // A recorded run remains a durable receipt until its terminal state is
     // observed. Never evict active or merely unverified receipts to make room.
     if (state.intents.length >= MAX_RECEIPTS) fail('intent_receipt_capacity_exceeded')
+    let attachmentEntries: unknown[] = []
+    if (attachments.length > 0) {
+        const capability = this.#active.get(connectionIdValue)?.attachments
+        if (capability) {
+          attachmentEntries = await this.#uploadAttachments(connectionIdValue, intent.intentId, attachments)
+        } else {
+          if (attachments.some((attachment) => (attachment.size ?? 0) > 512 * 1024) || attachments.reduce((total, attachment) => total + (attachment.size ?? 0), 0) > 700 * 1024) fail('desktop_remote_attachments_unsupported')
+          attachmentEntries = attachments
+        }
+    }
+    // Uploads cannot execute work. A crash during upload must not leave an
+    // unknown submit receipt that permanently blocks a safely unsent draft.
+    if (state.intents.some((receipt) => receipt.connectionId === connectionIdValue && receipt.status === 'unknown')) fail('unknown_receipts_pending')
+    if (state.intents.length >= MAX_RECEIPTS) fail('intent_receipt_capacity_exceeded')
     state.intents.push(intent)
-    await this.#save(state) // The intent is durable before any network write.
+    await this.#save(state) // Durable fence immediately before the actual submit.
     const detail = canonicalJson({ cwd: input.context.cwd, providerId: input.context.providerId, ...(input.context.agentProfileId ? { agentProfileId: input.context.agentProfileId } : {}), prompt: input.prompt,
-      ...(input.modelId ? { modelId: input.modelId } : {}), ...(input.modelProviderId ? { modelProviderId: input.modelProviderId } : {}), ...(input.effort ? { effort: input.effort } : {}), ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}), ...(input.context.externalSessionId ? { resume: input.context.externalSessionId } : {}) })
+      ...(input.modelId ? { modelId: input.modelId } : {}), ...(input.modelProviderId ? { modelProviderId: input.modelProviderId } : {}), ...(input.effort ? { effort: input.effort } : {}), ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}), ...(input.context.externalSessionId ? { resume: input.context.externalSessionId } : {}), ...(attachmentEntries.length > 0 ? { attachments: attachmentEntries } : {}) })
     let response: unknown
     try { response = await this.#write(connectionIdValue, { op: 'submit', intentId: intent.intentId, detail }) }
     catch (error) {
@@ -631,16 +869,19 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   }
   #pairPort(item: StoredConnection): number { return item.pairPort }
   #runPort(item: StoredConnection): number { return item.runPort }
-  async #requestForConnection(id: string, request: unknown): Promise<Record<string, unknown>> { const state = await this.#state(); const item = this.#connection(state, id); const active = this.#active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.#request(active.tunnel.runPath, item, request) as Record<string, unknown> }
+  async #requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> { const state = await this.#state(); const item = this.#connection(state, id); const active = this.#active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.#request(active.tunnel.runPath, item, request, authorizePeer) as Record<string, unknown> }
   async #desktop(id: string, query: DesktopHostRead): Promise<Record<string, unknown>> {
     const response = await this.#requestForConnection(id, { op: 'desktop', query })
-    if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
+    if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
     return response.desktop
   }
   async #catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.#requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }
-  async #request(path: string, item: StoredConnection, request: unknown): Promise<unknown> {
-    const controller = new AbortController(); this.#controllers.add(controller)
+  async #request(path: string, item: StoredConnection, request: unknown, authorizePeer?: () => void): Promise<unknown> {
+    const controller = new AbortController()
     const identity = (await this.#state()).identity
+    // Check after all awaited state/lock work and immediately before dispatch.
+    authorizePeer?.()
+    this.#controllers.add(controller)
     const promise = this.#transport.tlsRequest({ path, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM, request, signal: controller.signal })
     this.#requests.add(promise)
     try {
@@ -668,11 +909,19 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       }
     }
   }
-  async #write(id: string, request: unknown): Promise<unknown> {
+  async #serializeWrite<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.#locks.get(id) ?? Promise.resolve(); let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve }); const queued = previous.then(() => gate); this.#locks.set(id, queued)
     await previous
-    try { return await this.#requestForConnection(id, request) } finally { release(); if (this.#locks.get(id) === queued) this.#locks.delete(id) }
+    try { return await operation() } finally { release(); if (this.#locks.get(id) === queued) this.#locks.delete(id) }
+  }
+  async #write(id: string, request: unknown, authorizePeer?: () => void): Promise<unknown> {
+    return this.#serializeWrite(id, () => this.#requestForConnection(id, request, authorizePeer))
+  }
+  #authorizeMobileTarget(state: EncryptedState, target: { id: string; binding: string }, authorizePeer?: () => void): void {
+    authorizePeer?.()
+    const current = this.#connection(state, target.id)
+    if (current.pending || this.#targetBinding(current) !== target.binding) fail('execution_target_binding_changed')
   }
   #isUnknown(error: unknown): boolean {
     if (!(error instanceof Error)) return true
@@ -680,13 +929,60 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   }
   #isPreDispatchRejection(error: unknown): boolean {
     if (!(error instanceof Error)) return false
-    return /^(?:desktop_remote_(?:device_not_authorized|invalid_request|invalid_intent_id|intent_payload_conflict|unknown_op|ledger_capacity_exceeded)|desktop_not_connected|desktop_client_disposed)$/i.test(error.message)
+    return /^(?:desktop_remote_(?:device_not_authorized|invalid_request|invalid_intent_id|intent_payload_conflict|unknown_op|ledger_capacity_exceeded|attachments_unsupported)|attachment_transfer_failed|attachments_too_large|attachment_invalid|attachment_path_forbidden|desktop_not_connected|desktop_client_disposed|device_not_authorized|execution_target_binding_changed|unknown_connection)$/i.test(error.message)
   }
   #isExplicitUnknownIntent(error: unknown): boolean { return error instanceof Error && /desktop_remote_unknown_intent$/i.test(error.message) }
-  #assertSubmit(input: DesktopRemoteSubmit): void { if (!record(input) || !text(input.prompt, 128_000)) fail('invalid_submit'); context(input.context); for (const key of ['modelId', 'modelProviderId', 'effort'] as const) if (input[key] !== undefined && !text(input[key], 256)) fail('invalid_submit'); if (input.permissionMode !== undefined && !isAgentPermissionMode(input.permissionMode)) fail('invalid_submit') }
+  async #uploadAttachments(connectionIdValue: string, intentId: string, attachments: ReturnType<typeof normalizeDesktopAttachment>[]): Promise<unknown[]> {
+    const entries: unknown[] = []
+    for (const [index, attachment] of attachments.entries()) {
+      const attachmentId = newAttachmentId()
+      const metadata = { attachmentId, intentId, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size ?? 0, sha256: attachmentSha256(attachment), index, totalCount: attachments.length }
+      try {
+        const started = await this.#write(connectionIdValue, { op: 'attachmentStart', ...metadata })
+        if (!record(started) || started.status !== 'ready') fail('attachment_transfer_failed')
+        const bytes = Buffer.from(attachment.dataBase64, 'base64')
+        for (let offset = 0; offset < bytes.length; offset += DESKTOP_ATTACHMENT_CHUNK_BYTES) {
+          const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + DESKTOP_ATTACHMENT_CHUNK_BYTES))
+          const uploaded = await this.#write(connectionIdValue, { op: 'attachmentChunk', attachmentId, offset, dataBase64: chunk.toString('base64') })
+          if (!record(uploaded) || uploaded.offset !== offset + chunk.length) fail('attachment_transfer_failed')
+        }
+        const response = await this.#write(connectionIdValue, { op: 'attachmentCommit', attachmentId })
+        if (!record(response) || !record(response.attachment) || Object.entries(metadata).some(([key, value]) => (response.attachment as Record<string, unknown>)[key] !== value)) fail('attachment_transfer_failed')
+        entries.push({ kind: 'image', dataBase64: '', ...metadata })
+      } catch (error) {
+        if (error instanceof Error && error.message === 'desktop_remote_unknown_op') fail('desktop_remote_attachments_unsupported')
+        if (error instanceof Error && /desktop_remote_attachment_|attachment_/.test(error.message)) throw error
+        fail('attachment_transfer_failed')
+      }
+    }
+    return entries
+  }
+  #assertSubmit(input: DesktopRemoteSubmit): void {
+    if (!record(input) || typeof input.prompt !== 'string' || input.prompt.length > 128_000 || input.prompt.includes('\0')) fail('invalid_submit')
+    if (input.prompt.length === 0 && (!Array.isArray(input.attachments) || input.attachments.length === 0)) fail('invalid_submit')
+    context(input.context)
+    for (const key of ['modelId', 'modelProviderId', 'effort'] as const) if (input[key] !== undefined && !text(input[key], 256)) fail('invalid_submit')
+    if (input.permissionMode !== undefined && !isAgentPermissionMode(input.permissionMode)) fail('invalid_submit')
+    if (input.attachments !== undefined && (!Array.isArray(input.attachments) || input.attachments.length > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_submit')
+  }
+  #targetBinding(item: StoredConnection): string {
+    if (!item.certificatePEM) return createHash('sha256').update(`${item.hostId}\0${item.anchorSHA256}\0missing`).digest('hex')
+    let certificate: NodeCertificate
+    try { certificate = new NodeCertificate(item.certificatePEM) } catch { fail('execution_target_binding_changed') }
+    return createHash('sha256').update(`${item.hostId}\0${item.anchorSHA256}\0${digest(certificate.raw)}`).digest('hex')
+  }
+  #contextFromDetail(detail: string): DesktopRemoteContext {
+    if (detail.length > 1_310_720) fail('invalid_submit')
+    let value: unknown
+    try { value = JSON.parse(detail) } catch { fail('invalid_submit') }
+    if (!record(value) || !text(value.cwd, 16_384) || !text(value.providerId, 256)) fail('invalid_submit')
+    return { cwd: value.cwd, providerId: value.providerId,
+      ...(text(value.agentProfileId, 256) ? { agentProfileId: value.agentProfileId } : {}),
+      ...(text(value.resume, 256) ? { externalSessionId: value.resume } : {}) }
+  }
   #traceEvent(value: unknown): TraceEvent { if (!record(value) || !text(value.id, 256) || !text(value.ts, 128) || !text(value.runId, 128) || !text(value.kind, 128) || !text(value.stage, 256)) fail('invalid_trace_response'); return value as unknown as TraceEvent }
   #turn(value: unknown): LoadedSessionTurn {
-    if (!record(value) || !text(value.userText, 128_000) || !Array.isArray(value.items) || value.items.length > MAX_ITEMS) fail('invalid_history_response')
+    if (!record(value) || (typeof value.userText !== 'string' || value.userText.length > 128_000) || !Array.isArray(value.items) || value.items.length > MAX_ITEMS) fail('invalid_history_response')
     if (value.runId !== undefined && !text(value.runId, 128) || value.providerTurnId !== undefined && !text(value.providerTurnId, 256) ||
         value.forkTurnId !== undefined && !text(value.forkTurnId, 256) || value.attachments !== undefined && !Array.isArray(value.attachments) ||
         value.done !== undefined && typeof value.done !== 'boolean' || value.error !== undefined && !pathText(value.error, 128_000) ||

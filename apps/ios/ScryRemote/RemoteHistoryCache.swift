@@ -33,7 +33,7 @@ actor RemoteHistoryCache {
     if let target, !target.isLocal { fields += [target.gatewayHostId, target.targetId ?? "", target.binding ?? "", target.hostId] }
     // Old cache entries lack Profile source proof and must not render under
     // the strict protocol, including the default Profile. Outbox/catalog keys stay unchanged.
-    fields += ["profile-history-v1", providerId, cwd, sessionId]
+    fields += ["session-history-v2", providerId, cwd, sessionId]
     if let agentProfileId { fields += [agentProfileId] }
     let bytes = try! JSONEncoder().encode(fields)
     return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()

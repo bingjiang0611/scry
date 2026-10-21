@@ -1,8 +1,45 @@
 import { isSupportedImageMimeType, type AgentInputAttachment } from '@shared/runtime'
 
+function pastedImageName(file: File, index: number): string {
+  if (file.name) return file.name
+  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/gif' ? 'gif' : file.type === 'image/webp' ? 'webp' : 'png'
+  return `pasted-image-${Date.now().toString(36)}-${index + 1}.${ext}`
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
 export interface ComposerDraftAttachment extends AgentInputAttachment {
   id: string
   previewUrl: string
+}
+
+export async function fileToDraftAttachment(file: File, index = 0): Promise<ComposerDraftAttachment | null> {
+  if (!isSupportedImageMimeType(file.type)) return null
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  return {
+    id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${index}`,
+    kind: 'image',
+    name: pastedImageName(file, index),
+    mimeType: file.type,
+    dataBase64: bytesToBase64(bytes),
+    size: file.size,
+    previewUrl: URL.createObjectURL(file)
+  }
+}
+
+export function clipboardAttachmentToDraft(attachment: AgentInputAttachment): ComposerDraftAttachment {
+  return {
+    ...attachment,
+    id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}`,
+    previewUrl: `data:${attachment.mimeType};base64,${attachment.dataBase64}`
+  }
 }
 
 export function inputAttachments(attachments: ComposerDraftAttachment[]): AgentInputAttachment[] {

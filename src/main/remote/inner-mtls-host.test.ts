@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect, type TLSSocket } from 'node:tls'
@@ -13,6 +13,7 @@ import { HostController, type RemoteIntentRouting, type RemoteHistoryPreview } f
 import { createHostController } from './host-controller-factory'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
+import { ExecutionTargetRouter } from './execution-targets'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 
@@ -49,7 +50,8 @@ async function harness(
     directories(path?: string): { current?: { path: string; label: string }; directories: { path: string; label: string }[] }
     sessions(): { sessionId: string; providerId: string; cwd: string; label: string; ts: number }[]
   },
-  readHistoryPreview?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<RemoteHistoryPreview>
+  readHistoryPreview?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<RemoteHistoryPreview>,
+  targetClient?: ConstructorParameters<typeof ExecutionTargetRouter>[0]['client']
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
@@ -68,7 +70,11 @@ async function harness(
   cleanups.push(() => binding.close())
   const controller: HostController = binding.controller
   const server = await identity.issueHostServer()
-  const host = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
+  const executionTargets = targetClient ? new ExecutionTargetRouter({
+    authorizePeer: (peer) => controller.authorizeDevicePeer(peer), client: targetClient,
+    gateway: { hostId: identity.hostId, label: 'Mac1' }
+  }) : undefined
+  const host = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM, ...(executionTargets ? { executionTargets } : {}) })
   const addr = await host.listen()
   cleanups.push(() => host.close())
   return { identity, controller, caPEM: identity.caCertificatePEM, addr, host }
@@ -99,6 +105,43 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
 const routing = (over: Partial<RemoteIntentRouting> = {}) => JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
 describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
+  it('downloads exact arbitrary bytes only for a current owner and the selected workspace through production mTLS', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'scry-file-mtls-')); dirs.push(cwd)
+    const bytes = Buffer.alloc(600_000)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 256
+    writeFileSync(join(cwd, 'arbitrary.bin'), bytes)
+    const identity = await ensureHostIdentity(join(cwd, 'identity'))
+    const startRun = vi.fn(async () => {})
+    const binding = await createHostController({ stateDirectory: join(cwd, 'state'), hostId: identity.hostId,
+      anchorSHA256: identity.anchorSHA256, verifyCSR: identity.verifyCSR, issue: identity.issue,
+      authorizeWorkspace: value => { if (value !== cwd) throw new Error('workspace_not_authorized'); return cwd },
+      startRun, gate: new ProviderOperationGate(), createOutputStore: directory => new RunOutputFileStore(directory) })
+    cleanups.push(() => binding.close())
+    const server = await identity.issueHostServer()
+    const host = new InnerMtlsHost({ controller: binding.controller, serverCertPEM: server.certificatePEM,
+      serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
+    const addr = await host.listen(); cleanups.push(() => host.close())
+    const owner = await pairDevice(identity, binding.controller)
+    const other = await pairDevice(identity, binding.controller)
+    const request = (query: unknown, device = owner) => call(addr, identity.caCertificatePEM, device.certPEM, device.keyPEM, { op: 'fileDownload', query })
+    const first = await request({ action: 'open', cwd, target: 'arbitrary.bin' })
+    expect(first.fileDownload).toMatchObject({ kind: 'page', offset: 0, hasMore: true, totalBytes: bytes.length })
+    const id = first.fileDownload.id
+    const next = { action: 'read', cwd, id, offset: first.fileDownload.nextOffset }
+    expect(await request(next, other)).toEqual({ error: 'file_download_context_mismatch' })
+    expect(await request({ ...next, cwd: '/not-authorized' })).toEqual({ error: 'workspace_not_authorized' })
+    const chunks = [Buffer.from(first.fileDownload.data, 'base64')]
+    let page = first.fileDownload
+    while (page.hasMore) {
+      page = (await request({ action: 'read', cwd, id, offset: page.nextOffset })).fileDownload
+      chunks.push(Buffer.from(page.data, 'base64'))
+    }
+    expect(Buffer.concat(chunks)).toEqual(bytes)
+    await binding.controller.authority.revoke(owner.deviceId)
+    expect(await request({ action: 'open', cwd, target: 'arbitrary.bin' })).toEqual({ error: 'device_not_authorized' })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it('refreshes only the verified peer device label without changing its pairing or authority', async () => {
     const start = vi.fn(async () => {})
     const { identity, controller, caPEM, addr } = await harness(start)
@@ -121,6 +164,53 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       .toEqual({ error: 'device_not_authorized' })
     expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone 17 Pro')
     expect(start).not.toHaveBeenCalled()
+  })
+
+  it('serves execution target discovery and stamped mobile replies through the production mTLS wrapper', async () => {
+    const target = { id: 'mac2-opaque', binding: 'b'.repeat(64) }
+    const client = {
+      executionTargets: vi.fn(async () => [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' as const }]),
+      mobileRequest: vi.fn(async () => ({ projects: [] })),
+      mobileSubmit: vi.fn(async () => ({ runId: 'run', status: 'recorded' })),
+      mobileIntentStatus: vi.fn(async () => ({ intent: { runId: 'run', state: 'recorded' } }))
+    }
+    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, undefined, client)
+    const device = await pairDevice(identity, controller)
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'executionTargets' })).resolves.toEqual({ executionTargets: {
+      version: 1, gateway: { hostId: identity.hostId, label: 'Mac1' },
+      targets: [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' }]
+    } })
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'target', target, request: { op: 'projects' } })).resolves.toEqual({ projects: [], executionTarget: target })
+    expect(client.mobileRequest).toHaveBeenCalledWith(target, { op: 'projects' }, expect.any(Function))
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'target', target, request: { op: 'desktopDirectory', query: {} } })).resolves.toEqual({ error: 'invalid_target_request' })
+    await controller.authority.revoke(device.deviceId)
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'executionTargets' })).resolves.toEqual({ error: 'device_not_authorized' })
+  })
+
+  it('accepts persistent mobile target transport metadata without forwarding it as authority', async () => {
+    const target = { id: 'mac2-opaque', binding: 'b'.repeat(64) }
+    const client = {
+      executionTargets: vi.fn(async () => []),
+      mobileRequest: vi.fn(async () => ({ projects: [] })),
+      mobileSubmit: vi.fn(async () => ({ runId: 'run', status: 'recorded' })),
+      mobileIntentStatus: vi.fn(async () => ({ intent: { runId: 'run', state: 'recorded' } }))
+    }
+    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, undefined, client)
+    const device = await pairDevice(identity, controller)
+    const frame = { op: 'target', target, request: { op: 'projects' }, keepAlive: true, deviceLabel: 'iPhone 13 test' }
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, frame)).resolves.toEqual({ keepAlive: true, projects: [], executionTarget: target })
+    expect(client.mobileRequest).toHaveBeenCalledExactlyOnceWith(target, { op: 'projects' }, expect.any(Function))
+    expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone 13 test')
+    for (const invalid of [
+      { ...frame, arbitraryAuthority: true },
+      { ...frame, request: { op: 'projects', deviceLabel: 'not the desktop peer', keepAlive: true } }
+    ]) {
+      await expect(call(addr, caPEM, device.certPEM, device.keyPEM, invalid)).resolves.toEqual({ keepAlive: true, error: 'invalid_target_request' })
+    }
+    expect(client.mobileRequest).toHaveBeenCalledTimes(1)
+    await controller.authority.revoke(device.deviceId)
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, frame)).resolves.toEqual({ keepAlive: true, error: 'device_not_authorized' })
+    expect(client.mobileRequest).toHaveBeenCalledTimes(1)
   })
 
   it('routes read-only workspace requests through verified TLS and canonical-project authorization', async () => {
@@ -258,13 +348,19 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const readPreview = vi.fn(async () => ({ status: 'available' as const, source: 'indexed_archive' as const, partial: true as const, truncated: true, bytes: 0, turns: [{ userText: 'prompt🙂'.repeat(2_000), userTextTruncated: true, truncated: true, items: [{ kind: 'output' as const, text: 'answer🙂'.repeat(2_000), truncated: true }] }] }))
     const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, readPreview)
     const device = await pairDevice(identity, controller)
-    const malformed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', providerId: 'codex', cwd: AUTHORIZED })
+    const malformed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED })
     expect(malformed.error).toBe('invalid_request')
+    const unscoped = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+    expect(unscoped.error).toBe('history_profile_required')
     expect(readPreview).not.toHaveBeenCalled()
-    const allowed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+    const allowed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
     expect(allowed.historyPreview.status).toBe('available')
+    expect(allowed.historyProfile).toEqual({ agentProfileId: null })
     expect(Buffer.byteLength(JSON.stringify(allowed.historyPreview), 'utf8')).toBeLessThanOrEqual(16 * 1024)
-    expect(readPreview).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+    expect(readPreview).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', agentProfileId: null })
+    const scoped = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', agentProfileId: 'profile-A', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+    expect(scoped.historyProfile).toEqual({ agentProfileId: 'profile-A' })
+    expect(readPreview).toHaveBeenLastCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', agentProfileId: 'profile-A' })
   })
 
   it('reuses one TLS session for reads and writes, marks each reply and rechecks revocation', async () => {
@@ -296,12 +392,12 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       socket.write(JSON.stringify({ ...request as object, keepAlive: true }) + '\n')
     })
     try {
-      expect((await exchange({ op: 'historyPreview', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse' })).historyPreview).toMatchObject({ status: 'unavailable' })
+      expect((await exchange({ op: 'historyPreview', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse' })).historyPreview).toMatchObject({ status: 'unavailable' })
       let cursor = 0
       let snapshot: string | undefined
       const parts: Buffer[] = []
       while (true) {
-        const reply = await exchange({ op: 'historyPage', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', cursor, limit: 256 * 1024, snapshot })
+        const reply = await exchange({ op: 'historyPage', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', cursor, limit: 256 * 1024, snapshot })
         const page = reply.historyPage as { cursor: number; snapshot: string; dataBase64: string; hasMore: boolean }
         snapshot ??= page.snapshot
         expect(page.snapshot).toBe(snapshot)
@@ -324,7 +420,7 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       expect(handshakes).toBe(1)
       await controller.authority.revoke(device.deviceId)
       expect((await exchange({ op: 'liveRuns', waitMs: 0 })).error).toBe('device_not_authorized')
-      expect((await exchange({ op: 'historyPage', providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', snapshot, cursor: 0 })).error).toBe('device_not_authorized')
+      expect((await exchange({ op: 'historyPage', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', snapshot, cursor: 0 })).error).toBe('device_not_authorized')
       expect((await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })).error).toBe('device_not_authorized')
       expect(start).toHaveBeenCalledTimes(1)
       expect(read).toHaveBeenCalledTimes(1)
@@ -392,13 +488,13 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const device = await pairDevice(identity, controller)
 
     const first = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'historyPage', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: 0, limit: 8 })
+      { op: 'historyPage', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: 0, limit: 8 })
     expect(Buffer.from(first.historyPage.dataBase64, 'base64')).toHaveLength(8)
     const second = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'historyPage', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: first.historyPage.cursor, limit: 8, snapshot: first.historyPage.snapshot })
+      { op: 'historyPage', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: first.historyPage.cursor, limit: 8, snapshot: first.historyPage.snapshot })
     expect(second.historyPage.cursor).toBe(16)
     expect(second.historyPage.snapshot).toBe(first.historyPage.snapshot)
-    expect(readHistory).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
+    expect(readHistory).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', agentProfileId: null })
   })
 
   it('routes paged session and directory catalogs over inner mTLS', async () => {

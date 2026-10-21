@@ -442,6 +442,7 @@ struct SessionTranscriptView: View {
   }
 
   private var historyStatus: String {
+    if run.historyNativeUnavailable { return ConnectionCopy.historyNativeUnavailable }
     if let source = run.historyPageSource, run.historyOlderBefore != nil {
       return ConnectionCopy.historyRecentComplete(source)
     }

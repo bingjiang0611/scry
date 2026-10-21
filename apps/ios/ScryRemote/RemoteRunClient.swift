@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Network
 import RemoteTransport
+import UniformTypeIdentifiers
 
 // Device-side RUN client over the POST-PAIRING channel: strict inner TLS 1.3
 // mTLS to the host, presenting the CA-GRANTED device certificate (issued at
@@ -14,6 +15,43 @@ import RemoteTransport
 // records it, the dispatcher drives exactly-once execution through the gated
 // executor, and the device learns the real lifecycle only by polling the ledger.
 // This client never fabricates a lifecycle; it surfaces host/transport errors.
+// Disk IO stays off the UI actor. Each view owns a private directory containing
+// only its downloaded file; WebKit never receives access to shared app storage.
+actor RemoteFileDownloadSink {
+  private var directory: URL?
+  private var url: URL?
+  private var handle: FileHandle?
+
+  func start(name: String, mimeType: String? = nil) throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("scry-download-" + UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    self.directory = directory
+    var url = directory.appendingPathComponent(name, isDirectory: false)
+    if url.pathExtension.isEmpty, let mimeType, let ext = UTType(mimeType: mimeType)?.preferredFilenameExtension {
+      url.appendPathExtension(ext)
+    }
+    guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+    self.url = url
+    handle = try FileHandle(forWritingTo: url)
+  }
+  func write(_ data: Data) throws {
+    guard let handle else { throw RemoteRunClient.ClientError.invalidFileDownload }
+    try handle.write(contentsOf: data)
+  }
+  func finish() throws -> URL {
+    guard let url, let handle else { throw RemoteRunClient.ClientError.invalidFileDownload }
+    try handle.close()
+    self.handle = nil
+    return url
+  }
+  func remove() {
+    try? handle?.close()
+    handle = nil
+    if let directory { try? FileManager.default.removeItem(at: directory) }
+    directory = nil; url = nil
+  }
+}
+
 struct RemoteRunClient {
   let keychain: RemoteKeychain
   let connection: RemoteConnection
@@ -26,7 +64,11 @@ struct RemoteRunClient {
     self.executionTarget = executionTarget
   }
 
-  enum ClientError: Error, Equatable { case missingCredentials }
+  enum ClientError: Error, Equatable { case missingCredentials, invalidFileDownload }
+
+  func fileDownload(_ query: G0Transport.FileDownloadQuery) async throws -> G0Transport.FileDownloadResult {
+    try await G0Transport.relayFileDownload(endpoint: endpoint(), identity: try identity(), query: query)
+  }
 
   func workspace(_ query: G0Transport.WorkspaceQuery) async throws -> G0Transport.WorkspaceResult {
     try await G0Transport.relayWorkspace(endpoint: endpoint(), identity: try identity(), query: query)

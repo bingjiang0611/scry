@@ -1,0 +1,9 @@
+.arch-sections {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.arch-sections .arch-list {
+  overflow: visible;
+}

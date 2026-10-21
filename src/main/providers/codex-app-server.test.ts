@@ -197,10 +197,12 @@ describe('CodexAppServerClient', () => {
   it('tears down a generation rejected during initialize before retrying with a new child', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
     const root = mkdtempSync(join(tmpdir(), 'scry-codex-init-error-'))
+    const timeouts = manualRequestTimeouts()
     const client = new CodexAppServerClient({
       command: process.execPath,
       args: [fixture, 'fail-initialize-once', join(root, 'marker')],
-      requestTimeoutMs: 2_000
+      // This test owns rejection/teardown, not the fixture's wall-clock startup.
+      scheduleRequestTimeout: timeouts.schedule
     })
     try {
       const firstStart = client.start()
@@ -246,10 +248,11 @@ describe('CodexAppServerClient', () => {
   it('tears down a generation when the initialized notification cannot be written', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/codex-app-server.mjs', import.meta.url))
     const root = mkdtempSync(join(tmpdir(), 'scry-codex-init-write-'))
+    const timeouts = manualRequestTimeouts()
     const client = new CodexAppServerClient({
       command: process.execPath,
       args: [fixture, 'close-stdin-once', join(root, 'marker')],
-      requestTimeoutMs: 2_000
+      scheduleRequestTimeout: timeouts.schedule
     })
     try {
       const firstStart = client.start()

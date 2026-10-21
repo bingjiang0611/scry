@@ -13,6 +13,7 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
+import { constants as fsConstants, promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import type { ProviderId } from '../shared/provider'
@@ -348,6 +349,41 @@ export function hydrateStoredAttachment(
   } catch {
     return { attachment: null, warning: `${stored.name} 的本地 blob 不可用` }
   }
+}
+
+// Remote reads select an attachment from an authorized run/archive, never from
+// a renderer-supplied path. Keep disk IO async and allocation bounded per image.
+export async function readStoredAttachmentBytes(userDataDir: string, runId: string, stored: StoredAttachment, maxBytes: number): Promise<Buffer> {
+  if (stored.kind !== 'image' || !isSupportedImageMimeType(stored.mimeType)) throw new Error('attachment_invalid')
+  let bytes: Buffer
+  if (!('storage' in stored) || stored.storage === 'inline') {
+    const size = decodedBase64ByteLength(stored.dataBase64)
+    if (size === null || size <= 0 || size > maxBytes) throw new Error('attachment_invalid')
+    bytes = Buffer.from(stored.dataBase64, 'base64')
+  } else {
+    const runDir = attachmentRunDir(userDataDir, runId)
+    if (!runDir || !stored.blobId || stored.blobId !== basename(stored.blobId)) throw new Error('attachment_reference_invalid')
+    const root = dirname(runDir)
+    const path = join(runDir, stored.blobId)
+    const [rootInfo, runInfo, canonicalRoot, canonicalRun] = await Promise.all([fs.lstat(root), fs.lstat(runDir), fs.realpath(root), fs.realpath(runDir)])
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || !runInfo.isDirectory() || runInfo.isSymbolicLink() || dirname(canonicalRun) !== canonicalRoot) throw new Error('attachment_path_forbidden')
+    const handle = await fs.open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    try {
+      const info = await handle.stat()
+      if (!info.isFile() || info.size <= 0 || info.size > maxBytes) throw new Error('attachment_invalid')
+      const buffer = Buffer.alloc(info.size + 1)
+      let length = 0
+      while (length < buffer.length) {
+        const result = await handle.read(buffer, length, buffer.length - length, length)
+        if (!result.bytesRead) break
+        length += result.bytesRead
+      }
+      if (length !== info.size) throw new Error('attachment_changed')
+      bytes = buffer.subarray(0, length)
+    } finally { await handle.close() }
+  }
+  if (!matchesImageMime(bytes, stored.mimeType)) throw new Error('attachment_mime_mismatch')
+  return bytes
 }
 
 export function hydrateLegacyAttachmentPath(args: {

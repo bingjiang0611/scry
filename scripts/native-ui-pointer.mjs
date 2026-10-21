@@ -19,7 +19,15 @@ export function nativeUiPointer(selector, { text = '', timeoutMs, scroll, captur
         const x = Math.round(box.left + box.width / 2), y = Math.round(box.top + box.height / 2)
         const geometry = JSON.stringify([box.x, box.y, box.width, box.height])
         const hit = box.width > 0 && box.height > 0 && element.contains(document.elementFromPoint(x, y))
-        if (hit && previous === geometry) {
+        // Two equal frames can precede a pending route/layout transition. Wait
+        // for finite animations, not perpetual activity spinners, before input.
+        let moving = false
+        for (let node = element; node && !moving; node = node.parentElement) {
+          moving = node.getAnimations().some(animation =>
+            (animation.pending || animation.playState === 'running') &&
+            Number.isFinite(animation.effect?.getComputedTiming().endTime))
+        }
+        if (hit && !moving && previous === geometry) {
           clearTimeout(timer)
           if (captureReceipt) {
             window.__nativeUiPointerReceipt = null
@@ -35,7 +43,7 @@ export function nativeUiPointer(selector, { text = '', timeoutMs, scroll, captur
           resolve({ x, y })
           return
         }
-        previous = hit ? geometry : undefined
+        previous = hit && !moving ? geometry : undefined
       } else previous = undefined
       frame = requestAnimationFrame(inspect)
     }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { COMPOSER_DRAFT_SAVE_INTERVAL_MS, composerDraftKey, createComposerDraftStore, persistComposerDraftStore, readComposerDrafts, updateComposerDraft, writeComposerDrafts, type ComposerDraft } from './composer-drafts'
+import { COMPOSER_DRAFT_SAVE_INTERVAL_MS, clipboardAttachmentToDraft, composerDraftKey, createComposerDraftStore, fileToDraftAttachment, persistComposerDraftStore, readComposerDrafts, updateComposerDraft, writeComposerDrafts, type ComposerDraft } from './composer-drafts'
 import { migrateSessionComposerDraft, updateSessionComposerDraft } from './App'
 
 afterEach(() => vi.useRealTimers())
@@ -69,6 +69,15 @@ describe('composer drafts', () => {
       .not.toBe(composerDraftKey({ providerId: 'codex', cwd: '/a', sessionId: 'two' }))
     expect(composerDraftKey({ providerId: 'codex', agentProfileId: 'p', cwd: '/a' }))
       .not.toBe(composerDraftKey({ providerId: 'codex', cwd: '/a' }))
+  })
+
+  it('converts pasted files and clipboard attachments into local previews', async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], '', { type: 'image/png' })
+    const draft = await fileToDraftAttachment(file, 0)
+    expect(draft).toMatchObject({ kind: 'image', mimeType: 'image/png', size: 3 })
+    expect(draft?.previewUrl).toMatch(/^blob:/)
+    expect(clipboardAttachmentToDraft({ kind: 'image', name: 'clip.png', mimeType: 'image/png', dataBase64: 'aQ==', size: 1 }).previewUrl)
+      .toBe('data:image/png;base64,aQ==')
   })
 
   it('round-trips raw text and attachments without persisting blob URLs', () => {

@@ -1,11 +1,50 @@
 import Foundation
+import RemoteTransport
 
 // Copy for the connection and catalog feedback surface. Keeping this small
 // vocabulary in one place prevents the home projection from inventing a second
 // set of status meanings.
 enum ConnectionCopy {
+  enum FileOpen {
+    static let saveOrShare = "保存或分享"
+    static let displayMode = "显示方式"
+    static let preview = "预览"
+    static let source = "源码"
+    static let downloading = "正在从 Mac 读取…"
+    static let retry = "重新读取"
+    static let fromStart = "回到开头"
+    static let nextPage = "读取下一页"
+    static let offlineHTML = "只读 HTML 快照；不加载外部样式、脚本或图片。"
+    static let noPreview = "手机不支持预览此格式。可以保存原文件，或用其他 App 打开。"
+    static let noProject = "尚未确定文件所属的项目，请从会话中打开文件。"
+    static let localLinkTitle = "Mac 本机链接"
+    static let fileTitle = "Mac 文件"
+    static func progress(_ received: Int, _ total: Int?) -> String {
+      let read = ByteCountFormatter.string(fromByteCount: Int64(received), countStyle: .file)
+      guard let total else { return read }
+      return "\(read) / \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))"
+    }
+    static func page(_ start: Int, _ end: Int, _ total: Int) -> String { "字节 \(start)–\(end) / \(total)" }
+    static func failure(_ error: Error) -> String {
+      if let host = error as? G0Transport.RunError, case let .host(code) = host {
+        switch code {
+        case "ENOENT", "file_not_found": return "Mac 上未找到这个文件，请检查文件是否仍在原位置。"
+        case "EACCES", "EPERM": return "Mac 没有读取这个文件的权限。"
+        case "not_a_regular_file": return "这是目录或特殊文件，请选择普通文件。"
+        case "file_download_changed": return "文件在传输中发生变化，请重新读取。"
+        case "local_http_404": return "Mac 本机服务未找到这个地址。"
+        case "file_download_timeout": return "读取超时，请确认 Mac 和本机服务仍在运行。"
+        case "unknown_op", "file_download_unavailable": return "Mac 暂不支持文件下载，请更新并重启 Scry。"
+        default: break
+        }
+      }
+      if (error as NSError).code == CocoaError.fileWriteOutOfSpace.rawValue { return "手机空间不足，未保存文件。" }
+      return "无法读取文件。请确认 Mac 在线、文件可读，或本机服务仍在运行。"
+    }
+  }
   static let historyProfileUnavailable = "这份历史缺少可核实的 Profile 来源，未读取其他 Profile 的记录。"
-  static let historyProfileUnverified = "主机未证明历史使用了所选 Profile。请更新并重启 Mac1 与执行主机上的 Scry。"
+  static let historyProfileUnverified = "主机未确认会话历史的读取范围。请更新并重启 Mac1 与执行主机上的 Scry。"
+  static let historyNativeUnavailable = "已显示 Scry 归档；Provider 原生历史未能核对"
   static let homeTitle = "远程"
   static let settings = "设置"
   static let connectMac = "连接 Mac"

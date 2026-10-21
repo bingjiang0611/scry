@@ -271,7 +271,11 @@ async function main() {
   assert.equal(granted.kind, 'pair.granted')
   const deviceCertPEM = granted.certificatePEM
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
-  assert.deepEqual(info.desktop, { kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical', directorySelection: true, workbench: 1, sessionActions: true })
+  assert.deepEqual(info.desktop, {
+    kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical',
+    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true,
+    attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
+  })
   const customDirectory = join(temp, 'custom project ')
   mkdirSync(customDirectory)
   const canonicalCustom = realpathSync(customDirectory)
