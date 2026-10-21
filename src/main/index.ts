@@ -95,7 +95,7 @@ import type { AuthorizedMcpExecution, ProviderRunHandle } from './providers/type
 import { createBuiltInProviderAdapters } from './providers'
 import { createSmokeProviderAdapter } from './providers/smoke'
 import { piRpcEnvironment, probePiAgent } from './providers/pi'
-import { createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles, type PiAgentProfile } from './pi-agent-profiles'
+import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles, type PiAgentProfile } from './pi-agent-profiles'
 import { composeProviderDetectionResults, createCachedAsyncLoader } from './provider-detection'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from './oauth-loopback'
 import { ProviderOperationGate, providerOperationKey } from './provider-operation-gate'
@@ -501,11 +501,11 @@ const listProjectCatalog = async (): Promise<ProjectMeta[]> => {
   }))
 }
 const piProfileStore = () => createPiAgentProfileStore(app.getPath('userData'))
-const fullAgentDetection = createCachedAsyncLoader(() => detectAgents({
+const fullAgentDetection = createCachedAsyncLoader(async () => canonicalizePiAgentPaths(await detectAgents({
   versionProbeEnv: (agent, executable) => providerIdForAgentId(agent.id) === 'pi'
     ? piRpcEnvironment({ id: agent.id, label: agent.name, executable })
     : undefined
-}), { ttlMs: 60_000 })
+})), { ttlMs: 60_000 })
 const detectInstalledAgents = () => fullAgentDetection.load()
 // Provider descriptors and runtime profile resolution only need executable identity. Do not turn
 // their frequent availability reads into version subprocesses for every installed Provider.
@@ -1324,9 +1324,9 @@ handleTrusted('app:reportRendererPerformance', (_event, sample: unknown) => {
   return true
 })
 
-handleTrusted('agent:detectFast', () => {
+handleTrusted('agent:detectFast', async () => {
   if (smokeProviderEnabled) return smokeDetectedAgents
-  const detected = detectAgentsFast().flatMap((agent) => {
+  const detected = (await canonicalizePiAgentPaths(detectAgentsFast())).flatMap((agent) => {
     const providerId = providerIdForAgentId(agent.id)
     if (!providerId) return []
     return [{

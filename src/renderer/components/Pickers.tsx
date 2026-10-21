@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { providerIdForAgentId } from '@shared/runtime'
 import { basename } from '../format'
+import { PI_PICKER_COPY } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
 import type { DetectedAgent } from '../env'
@@ -20,8 +21,12 @@ export function groupAgentsByProvider(agents: DetectedAgent[]): AgentProviderGro
   return [...groups].map(([id, groupedAgents]) => ({ id, agents: groupedAgents }))
 }
 
+function isDetectedPiProfile(id: string): boolean {
+  return id === 'pi' || id === 'pi:default' || id === 'pi:rotom'
+}
+
 export function piProfileName(agent: DetectedAgent): string {
-  if (agent.id === 'pi:default') return '原生 Pi'
+  if (agent.id === 'pi:default') return PI_PICKER_COPY.nativePi
   return agent.name.replace(/^Pi\s*·\s*/, '') || basename(agent.path)
 }
 
@@ -264,7 +269,19 @@ export function CliPicker({
   const menuId = useId()
   const sel = agents.find((a) => a.id === selectedId)
   const selectedProvider = agentGlyphProvider(sel?.id ?? selectedId)
-  const piAgents = agents.filter((agent) => providerIdForAgentId(agent.id) === 'pi')
+  const piProfiles = agents.filter((agent) => providerIdForAgentId(agent.id) === 'pi')
+  const detectedPiByPath = new Map(piProfiles
+    .filter((agent) => agent.id === 'pi:default' || agent.id === 'pi:rotom')
+    .map((agent) => [agent.path, agent]))
+  const selectedPi = piProfiles.find((agent) => agent.id === selectedId)
+  // Main supplies canonical paths. Collapse only detected/saved launcher aliases;
+  // keep a selected historical ID visible without silently switching the session.
+  const piAgents = piProfiles.filter((agent) => {
+    const detected = detectedPiByPath.get(agent.path)
+    if (!detected) return true
+    const representative = selectedPi?.path === agent.path ? selectedPi : detected
+    return agent.id === representative.id
+  })
   const codeAgents = agents.filter((agent) => providerIdForAgentId(agent.id) !== 'pi')
   useEffect(() => {
     if (disabled) setOpen(false)
@@ -332,16 +349,16 @@ export function CliPicker({
                 <span className="agicon"><ProviderGlyph provider="pi" /></span>
                 <span className="agent-option-copy">
                   <b>{piProfileName(agent)}</b>
-                  <small>{agent.id === 'pi:default' || agent.id === 'pi' ? '系统检测' : '自定义 Profile'} · {agent.version ?? '版本未知'}</small>
+                  <small>{PI_PICKER_COPY.detail(isDetectedPiProfile(agent.id), agent.version)}</small>
                 </span>
                 {agent.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
               </button>
-              {agent.id !== 'pi:default' && onRemovePi && (
+              {!isDetectedPiProfile(agent.id) && onRemovePi && (
                 <button
                   type="button"
                   className="agent-option-remove"
-                  title="从 Scry 移除；不会删除启动器文件"
-                  aria-label={`移除 Pi Profile：${piProfileName(agent)}`}
+                  title={PI_PICKER_COPY.removeTitle}
+                  aria-label={PI_PICKER_COPY.removeLabel(piProfileName(agent))}
                   onClick={() => onRemovePi(agent.id)}
                 >
                   <Icon name="x" />

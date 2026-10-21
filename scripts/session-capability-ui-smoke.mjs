@@ -368,6 +368,24 @@ async function exercisePiCommands(contents) {
     await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   }
   contents.focus()
+  const agentTrigger = '#model-effort .clibtn'
+  const piChoice = (id) => `#model-effort .agent-option-pick[data-agent-id="${id}"]`
+  await click(agentTrigger)
+  await wait(`document.querySelectorAll('#model-effort .agent-option-pick').length === 2`)
+  if (!await contents.executeJavaScript(`document.querySelector(${JSON.stringify(piChoice('pi:rotom'))})?.textContent.includes('系统检测') && !document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})`)) throw new Error('Duplicate Rotom picker entry or incorrect detection label')
+  await click(piChoice('pi:rotom'))
+  await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:rotom' && !document.querySelector('#model-effort .climenu')`)
+  await click('#restore-pi-profile')
+  await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:564f7a994e4e34da' && !document.querySelector('#model-effort .climenu')`)
+  await click(agentTrigger)
+  await wait(`document.querySelectorAll('#model-effort .agent-option-pick').length === 2`)
+  if (!await contents.executeJavaScript(`document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.textContent.includes('当前') && !document.querySelector(${JSON.stringify(piChoice('pi:rotom'))})`)) throw new Error('Historical Profile identity was silently switched')
+  await click(piChoice('pi:1234567890abcdef'))
+  await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:1234567890abcdef' && !document.querySelector('#model-effort .climenu')`)
+  await click(agentTrigger)
+  await wait(`document.querySelectorAll('#model-effort .agent-option-pick').length === 2 && document.querySelector(${JSON.stringify(piChoice('pi:rotom'))}) != null`)
+  await click(piChoice('pi:rotom'))
+  await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:rotom' && !document.querySelector('#model-effort .climenu')`)
   const single = '#pi-single-questionnaire'
   const selectedCount = `document.querySelectorAll('${single} input[type="checkbox"]:checked').length`
   await wait(`document.querySelectorAll('${single} input[type="checkbox"]').length === 3 && document.querySelector('${single} .question-submit').disabled`)
@@ -496,7 +514,7 @@ async function exercisePiCommands(contents) {
     const customAnswers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
     if (customAnswers.length !== 1 || customAnswers[0].answers['Choose an action'] !== customAnswer || customAnswers[0].nativeCustomAnswer !== true) throw new Error('Native custom-answer submission lost text')
   }
-  return { piSingleMultiSelect: true, piSingleToggleAndKeyboard: true, piSingleNativeReply: true, piGroupedReview: true, piGroupedDraftRetention: true, piGroupedSubmitOnce: true, piGroupedCancel: true, piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
+  return { piPickerAliases: true, piPickerHistoryIdentity: true, piPickerDistinctLauncher: true, piSingleMultiSelect: true, piSingleToggleAndKeyboard: true, piSingleNativeReply: true, piGroupedReview: true, piGroupedDraftRetention: true, piGroupedSubmitOnce: true, piGroupedCancel: true, piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
 }
 
 async function exerciseSessionSelection(contents, scenario) {

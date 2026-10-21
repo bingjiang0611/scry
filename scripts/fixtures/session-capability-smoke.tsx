@@ -16,6 +16,8 @@ import type { TraceEvent } from '../../src/shared/trace'
 import { SidebarArchiveFixture } from './sidebar-archive-smoke'
 import { PiCommandFixture } from './pi-command-smoke'
 
+const piPickerFixtureCopy = { restore: '恢复历史 Profile' }
+
 const thinkingTurn: Turn = {
   runId: 'thinking-run',
   userText: '这个接口有 mock 能力吗',
@@ -55,6 +57,7 @@ function Fixture() {
   const [model, setModel] = useState('ultimate')
   const [effort, setEffort] = useState('default')
   const [permission, setPermission] = useState('default')
+  const [agentId, setAgentId] = useState('qoder')
   const [composerMenu, setComposerMenu] = useState<'permission' | 'agent' | 'modelEffort' | null>(null)
   const pinnedSummary = usePinnedSummaryVisibility(true, panelVisible)
   const select = (event: TraceEvent) => {
@@ -133,9 +136,14 @@ function Fixture() {
       </div>
       <div className="composer-action-controls">
         <CliPicker
-          agents={[{ id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/fixture/qodercli' }]}
-          selectedId="qoder"
-          onSelect={() => undefined}
+          agents={[
+            { id: 'qoder', name: 'Qoder', bin: 'qodercli', path: '/fixture/qodercli' },
+            { id: 'pi:rotom', name: 'Rotom', bin: 'rotom', path: '/fixture/rotom', version: '0.1.26' },
+            { id: 'pi:564f7a994e4e34da', name: 'Rotom', bin: 'rotom', path: '/fixture/rotom', version: '0.1.26' },
+            { id: 'pi:1234567890abcdef', name: 'Rotom', bin: 'rotom', path: '/fixture/another-rotom', version: '0.1.26' }
+          ]}
+          selectedId={agentId}
+          onSelect={setAgentId}
           onAddPi={() => undefined}
           onRemovePi={() => undefined}
           onRescan={() => undefined}
@@ -168,6 +176,9 @@ function Fixture() {
         />
       </div>
     </section>
+    <button id="restore-pi-profile" onClick={() => { setAgentId('pi:564f7a994e4e34da'); setComposerMenu(null) }}>
+      {piPickerFixtureCopy.restore}
+    </button>
     <SidebarArchiveFixture />
     <section id="overview"><OverviewPanel turns={turns} sessionId={turns[0]?.runId === 'fixture-run' ? '01a10000-1111-7000-8000-00000000abcd' : turns[0]?.runId ?? null} busy={turns.some((turn) => !turn.done)} selected={null} onSelect={select} usage={null} stats={null} /></section>
   </>
