@@ -3176,6 +3176,62 @@ describe('record store cursor and recovery semantics', () => {
       .resolves.toContain('"ackedThrough":1')
   })
 
+  it.each([
+    {
+      name: 'nonzero exit',
+      source: '#!/bin/sh\ncat >/dev/null\nprintf do-not-log-secret >&2\nexit 7\n',
+      expected: { reason: 'exit', exitCode: 7, signal: null }
+    },
+    {
+      name: 'signal',
+      source: '#!/bin/sh\ncat >/dev/null\nkill -TERM "$$"\n',
+      expected: { reason: 'signal', exitCode: null, signal: 'SIGTERM' }
+    },
+    {
+      name: 'spawn error',
+      source: '#!/scry-missing-interpreter\n',
+      expected: { reason: 'spawn_error', errorCode: 'ENOENT' }
+    }
+  ])('callback diagnostics preserve pending work: $name', async ({ source, expected }) => {
+    const root = await workspace()
+    await completeTurn(root, 'diagnostic')
+    const hook = await commitHook(root)
+    await writeFile(hook.path, source)
+    const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path }
+    const dataRoot = join(root, '.scry')
+
+    await expect(drainCommitNotifications(dataRoot, env))
+      .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    await expect(redeliverLatestCommitNotification(dataRoot, env))
+      .resolves.toMatchObject({ delivered: false, reason: 'commit hook did not ACK' })
+    await expect(commitNotificationStatus(dataRoot, env))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 1 })
+    const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
+    const diagnostics = log.trim().split('\n').map(line => JSON.parse(line.split('; diagnostic=')[1]))
+    expect(diagnostics).toHaveLength(2)
+    for (const diagnostic of diagnostics) {
+      expect(diagnostic).toMatchObject({ acknowledged: false, recorderPid: process.pid, ...expected })
+    }
+    expect(log).not.toContain('do-not-log-secret')
+    expect(log).not.toContain(root)
+  })
+
+  it('callback diagnostics distinguish the real deadline from an ordinary signal', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'diagnostic-timeout')
+    const hook = await commitHook(root)
+    // Deliberately block this owned callback to exercise the unchanged 10-second production deadline.
+    await writeFile(hook.path, '#!/bin/sh\ncat >/dev/null\nexec sleep 60\n')
+    const dataRoot = join(root, '.scry')
+    await expect(drainCommitNotifications(dataRoot, {
+      PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path
+    })).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
+    expect(JSON.parse(log.trim().split('; diagnostic=')[1]))
+      .toMatchObject({ acknowledged: false, reason: 'timeout', signal: 'SIGTERM', recorderPid: process.pid })
+    await expect(access(join(dataRoot, 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
+  }, 20_000)
+
   it('通知身份不一致只使 ACK 不适用，不能解释同一身份下 callback 不 ACK', async () => {
     const root = await workspace()
     await completeTurn(root, 'identity-1')

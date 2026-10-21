@@ -331,11 +331,21 @@ function configuredCommitHookFingerprint(env: NodeJS.ProcessEnv): string {
   return fingerprint || 'explicit-environment-v1'
 }
 
+type CommitHookResult =
+  | { acknowledged: true }
+  | {
+    acknowledged: false
+    reason: 'spawn_error' | 'timeout' | 'stdin_error' | 'signal' | 'exit'
+    exitCode?: number | null
+    signal?: NodeJS.Signals | null
+    errorCode?: string
+  }
+
 async function invokeCommitHook(
   path: string,
   notification: RecordCommittedNotification,
   env: NodeJS.ProcessEnv
-): Promise<boolean> {
+): Promise<CommitHookResult> {
   return new Promise((resolvePromise) => {
     const childEnv: NodeJS.ProcessEnv = {}
     for (const key of COMMIT_HOOK_ENV_KEYS) if (env[key] !== undefined) childEnv[key] = env[key]
@@ -343,14 +353,15 @@ async function invokeCommitHook(
     let settled = false
     let timedOut = false
     let inputFailed = false
+    let inputErrorCode: string | undefined
     let terminationRequested = false
     let killTimer: NodeJS.Timeout | undefined
-    const settle = (ok: boolean): void => {
+    const settle = (result: CommitHookResult): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       if (killTimer) clearTimeout(killTimer)
-      resolvePromise(ok)
+      resolvePromise(result)
     }
     const terminate = (): void => {
       if (settled || terminationRequested) return
@@ -366,10 +377,25 @@ async function invokeCommitHook(
       terminate()
     }, COMMIT_HOOK_TIMEOUT_MS)
     timer.unref()
-    child.once('error', () => settle(false))
-    child.once('exit', (code) => settle(!timedOut && !inputFailed && code === 0))
-    child.stdin.on('error', () => {
+    child.once('error', (error: NodeJS.ErrnoException) => settle({
+      acknowledged: false, reason: 'spawn_error', errorCode: error.code
+    }))
+    child.once('exit', (code, signal) => {
+      if (!timedOut && !inputFailed && code === 0) {
+        settle({ acknowledged: true })
+      } else {
+        settle({
+          acknowledged: false,
+          reason: timedOut ? 'timeout' : inputFailed ? 'stdin_error' : signal ? 'signal' : 'exit',
+          exitCode: code,
+          signal,
+          ...(inputFailed ? { errorCode: inputErrorCode } : {})
+        })
+      }
+    })
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
       inputFailed = true
+      inputErrorCode = error.code
       terminate()
     })
     child.stdin.end(`${JSON.stringify(notification)}\n`)
@@ -467,10 +493,12 @@ export async function drainCommitNotifications(
         }
         const record = await readRecordFile(join(dataRoot, 'records', file.name))
         if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-        if (!await invokeCommitHook(hook, commitNotification(record), env)) {
+        const result = await invokeCommitHook(hook, commitNotification(record), env)
+        if (!result.acknowledged) {
+          // Classify failure without retaining callback stderr, argv, paths or error messages.
           await appendRotatingLog(
             join(dataRoot, 'logs', 'recorder.log'),
-            `${new Date().toISOString()} ERROR commit notification: commit hook did not ACK sequence ${record.sequence}`
+            `${new Date().toISOString()} ERROR commit notification: commit hook did not ACK sequence ${record.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
           ).catch(() => undefined)
           return { delivered, pending: pending.length - delivered, truncated: false }
         }
@@ -513,11 +541,12 @@ export async function redeliverLatestCommitNotification(
       if (!latest) return { delivered: false, reason: 'no committed record' }
       const record = await readRecordFile(join(dataRoot, 'records', latest.name))
       if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-      const delivered = await invokeCommitHook(hook, commitNotification(record), env)
+      const result = await invokeCommitHook(hook, commitNotification(record), env)
+      const delivered = result.acknowledged
       if (!delivered) {
         await appendRotatingLog(
           join(dataRoot, 'logs', 'recorder.log'),
-          `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${record.sequence}`
+          `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${record.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
         ).catch(() => undefined)
       }
       return {
