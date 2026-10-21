@@ -89,3 +89,17 @@
 - Preserve：v9 连续彩色曲线与 0 轴空闲规则同样用于首 token 图。
 - Evidence：fixture 截图（深色，首 token 模式与运行中会话）；还没有真实 Pi/Codex 轮次验收。
 - Revisit：首 token 图里 0 轴容易被读成“0 秒很快”；若用户觉得误导，再改空闲画法。
+
+## D-20261021-scry-llm-reading
+
+- Scope / status：Scry 桌面性能弹窗；用户已确认四项统一方案（「没问题 继续吧」），实现后成品待用户目视验收。
+- Rule / reason：先分清当前运行会话的平均值与所选历史范围的中位数；各状态数量直接可见，不用「多种状态」占位；图例靠近曲线；必要统计解释按需展开，不增加常驻说明段。
+- Preserve：暗色身份、深浅主题、多模型配色、连续曲线、零轴空闲，以及既有采集／平均／中位数／轮次替换合同。不是更换视觉世界。
+- Applied：`LlmPerformancePanel.tsx` 明确运行中／历史分区，模型行可展开实际成员和独立指标分母，图例与表格共享选择状态，测速轮次显示已完成与暂计星号；`llm-performance.css` 提高辅助文字可读性，弱化空闲与非测量过渡段，不修改样本。文案集中到既有 `constants/copy.ts`。
+- Reference / reuse：复用 D-20261011-scry-llm-token-speed 与 D-20261011-scry-llm-first-token。定向核对 Artificial Analysis 方法论的 Output Speed／TTFT 定义，采纳速度与等待分开呈现，不套用其不同的计时口径。保留项目已确认的连续曲线，不再次误读参考而改成断线／单色。
+- Evidence：相关采集／历史／分组单元测试 24 项通过。隐藏隔离 Electron fixture 用原生指针和键盘验证分区、图例／表格同步、详情和帮助、指标切换、临时样本、空闲／测量分层、结束／停止、错误与关闭清理；深浅主题和 700px 窗口截图已查看。检查到的辅助标签最低对比度：深色 7.63:1、浅色 4.99:1。故意只保留第一种状态时，回归检查以 `Grouped row hides session states` 失败，恢复实现后通过。新增用例还复现了「首 token 视图选中无该指标的模型」时缺少明确反馈的问题；现已保留可取消的选择并显示缺失，回归通过，不把缺失显示为空闲。当前构建的生产 main／preload IPC 隔离 smoke 通过，使用测试 adapter 而非真实 Provider。
+- Limits：未使用真实付费 Provider 验收，未验证 VoiceOver；未获前台窗口授权，原生隐藏／恢复刷新用例仍标 not-run。性能计数门禁通过，但测量时机器高负载，不作毫秒或提速结论。
+- Next use：出现同模型多个统计值 → 先标清统计对象，再显示数字；用户要求删小字 → 将必要证据解释放到键盘可访问的按需说明，不删除缺失／暂计语义。
+- Delivery：App 0.2.215 已通过 `install:mac:dev` 构建、开发签名、产物与打包 smoke 并安装到 `/Applications/Scry.app`；安装目录与受测产物的 app.asar SHA-256 一致。最终安装流程的 unit 为 3519 passed／4 显式 skipped，shell 通过；完整 `test:renderer:ui`（含 Credits）及打包产物的 `--performance-only` smoke 通过。安装来自当前工作区，包含原有远程功能 WIP；本任务提交只包含性能面板相关改动及 App 版本。未重启用户日常实例。
+- Validation history：首个安装候选在 3516 项 unit 及完整 renderer UI 检查通过后安装。补充缺失数据修复后的默认并发全量检查出现 12 项失败（6 个非面板 suite；等待超时和后续目录清理错误），现场为 10 核、load 138.75；失败场景单 worker 定向复核 13 项通过。最后以 `VITEST_MAX_FORKS=1 VITEST_MIN_FORKS=1 VITEST_MAX_THREADS=1 VITEST_MIN_THREADS=1 npm run install:mac:dev` 完整复跑通过并重新安装，未删测试、未改断言或超时。完整 renderer UI 与打包性能面板 smoke 随后通过。失败历史保留，不以复跑抹去。
+- Acceptance：需求与方案确认；自动测试和隔离渲染证据不等于用户已认可最终视觉。
