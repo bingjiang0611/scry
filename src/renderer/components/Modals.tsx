@@ -14,6 +14,8 @@ import type { SkillMeta, McpMeta, ProjectMeta, SessionMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, DeleteArchivedSessionsResult, McpSnapshot } from '@shared/provider'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { MODAL_COPY } from '../constants/copy'
 import { RemotePairing } from './RemotePairing'
 import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
 import type { AppTheme } from '../theme'
@@ -147,9 +149,7 @@ export function SettingsModal({
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>设置</b>
-        <button className="modal-x" onClick={onClose} aria-label="关闭设置">
-          <Icon name="x" />
-        </button>
+        <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeSettings} />
       </div>
       <div className="settings-shell">
         <nav className="settings-rail" aria-label="设置分区">
@@ -639,7 +639,7 @@ export function SkillsModal({
           <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
             <Icon name="refresh" />
           </button>
-          <button className="modal-x" onClick={onClose} aria-label="关闭 Skills"><Icon name="x" /></button>
+          <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeSkills} />
         </div>
       </div>
 
@@ -892,7 +892,7 @@ export function McpModal({
             {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
             {readsRuntime && <span>{refreshing ? (readsPiSnapshot ? '刷新中…' : '检测中…') : refreshLabel}</span>}
           </button>
-          <button ref={closeRef} className="modal-x" onClick={onClose} aria-label="关闭 MCP"><Icon name="x" /></button>
+          <ModalCloseButton ref={closeRef} onClick={onClose} aria-label={MODAL_COPY.closeMcp} />
         </div>
       </div>
 
@@ -1194,7 +1194,7 @@ export function CapabilitiesModal({
             <span>{mcpRefreshing ? '检测中…' : '刷新'}</span>
           </button>
         )}
-        <button ref={closeRef} className="modal-x capabilities-close" onClick={onClose} aria-label="关闭能力面板"><Icon name="x" /></button>
+        <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={onClose} aria-label={MODAL_COPY.closeCapabilities} />
       </div>
 
       <div className="capabilities-source-bar">

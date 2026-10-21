@@ -311,7 +311,7 @@ struct SessionTranscriptView: View {
       Button { showFiles = true } label: {
         Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
       }.accessibilityLabel("项目文件与 Diff").disabled(session == nil)
-      Menu {
+      MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
         Section("历史状态") {
           Text(historyStatus)
           if let date = run.historyFetchedAt { Text("上次核对 \(date.formatted(date: .abbreviated, time: .shortened))") }
@@ -327,11 +327,7 @@ struct SessionTranscriptView: View {
           Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
         }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
-      } label: {
-        Image(systemName: Symbol.more)
-          .font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
       }
-      .accessibilityLabel("更多选项，\(historyStatus)")
     }
   }
 

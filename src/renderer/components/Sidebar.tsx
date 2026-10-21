@@ -10,6 +10,8 @@ import type { ConversationSummary } from '@shared/conversation-api'
 import { sessionAttentionKey } from '@shared/session-attention'
 import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { MODAL_COPY } from '../constants/copy'
 import { ModalFrame } from './Modals'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
@@ -571,7 +573,7 @@ function ProjectDialog({
     <ModalFrame labelledBy={titleId} initialFocusRef={mode === 'rename' ? inputRef : undefined} className="project-dialog" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>{mode === 'rename' ? '编辑项目名称' : `移除“${project.name}”？`}</b>
-        <button type="button" className="modal-x" aria-label="关闭" onClick={onClose}>×</button>
+        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={onClose}>×</ModalCloseButton>
       </div>
       {mode === 'rename' ? (
         <form

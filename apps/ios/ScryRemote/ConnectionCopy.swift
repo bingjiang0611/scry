@@ -64,6 +64,7 @@ enum ConnectionCopy {
   static let refresh = "刷新会话"
   static let refreshing = "正在刷新会话…"
   static let more = "更多选项"
+  static func moreWithStatus(_ status: String) -> String { "\(more)，\(status)" }
   static let refreshSuccess = "刷新成功"
   static let refreshFailure = "会话列表刷新失败"
   static let partialRefreshFailure = "列表未完整更新"

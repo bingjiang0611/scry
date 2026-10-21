@@ -9,6 +9,7 @@ import { bridge, ClientPairForm } from './DesktopRemote'
 import { HostStateDot, hostState } from './LocationPicker'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
 
 function errorText(error: unknown): string {
@@ -61,7 +62,7 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
         <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setAdding(false)}>
           <div className="modal-head">
             <b id={titleId}>{copy.addHost}</b>
-            <button type="button" className="modal-x" onClick={() => setAdding(false)} aria-label={copy.closeAddHost}><Icon name="x" /></button>
+            <ModalCloseButton onClick={() => setAdding(false)} aria-label={copy.closeAddHost} />
           </div>
           <div className="modal-body">
             <ClientPairForm onPaired={async (id) => { await refreshDesktopConnections(); setExpanded(id) }} />
@@ -196,7 +197,7 @@ function HostAddressEditor({ connection, onClose }: { connection: DesktopRemoteC
     <ModalFrame labelledBy={titleId} initialFocusRef={hostnameRef} className="hosts-add-modal" onClose={close}>
       <div className="modal-head">
         <b id={titleId}>{copy.editAddress}</b>
-        <button type="button" className="modal-x" disabled={saving} onClick={close} aria-label={copy.closeEditAddress}><Icon name="x" /></button>
+        <ModalCloseButton disabled={saving} onClick={close} aria-label={copy.closeEditAddress} />
       </div>
       <form className="modal-body desktop-remote__card hosts-address-form" onSubmit={(event) => void save(event)} aria-describedby={noteId} aria-busy={saving}>
         <p><strong>{connection.label}</strong></p>

@@ -583,6 +583,29 @@
         "validationScope": "Build, package validation and Electron smoke checks passed. Earlier full unit runs had Pi timeouts; direct artifact build/install was explicitly requested. No claim that the full unit gate passed for this working tree.",
         "safety": "Read-only post-restart inspection; no Agent task sent or stopped, permission changes, or private screenshots committed."
       },
+      "sharedControlExtraction": {
+        "date": "2026-10-21",
+        "desktop": {
+          "implementation": "src/renderer/components/primitives/ModalCloseButton.tsx",
+          "uses": 14,
+          "files": 9,
+          "contract": "Required accessible name, non-submitting native button, forwarded DOM ref, disabled and local classes preserved; default X icon with existing glyph children retained.",
+          "verified": ["static markup parity", "negative disabled-state control", "Electron native coordinate and keyboard activation", "ref and non-submitting behavior", "dark/light fixture rendering"],
+          "fullAppAfterInstall": "not yet verified for this extraction"
+        },
+        "ios": {
+          "implementation": "apps/ios/ScryRemote/Components.swift#MoreMenu",
+          "uses": ["HomeView", "ChatView", "SessionTranscriptView"],
+          "contract": "Native Menu, 17pt medium ellipsis, 44x44pt label, centralized default accessible name and history-status variant; callers retain actions and availability.",
+          "device": "iPhone 13 / iOS 26.5.2",
+          "bundleId": "com.scry.remote.local",
+          "version": "0.1.15 (22)",
+          "installedDebugDylibSha256": "899311e6ca6ae43b2fac1d84abb7a34522b18e762e5a9d49cfa8223592f660fe",
+          "verified": ["signed device build", "iCTRL home menu opening and 44pt hit area", "history menu with unavailable provenance state", "settings action and restoration"],
+          "notVerified": "ChatView real-task entry; no Agent task started to reach it."
+        },
+        "tokenChanges": "none; existing CSS and Palette reused"
+      },
       "specimenScope": "Six desktop style specimens, not app workflows. Search outer margin omitted for embedding. Native components documented in prose, not imitated in HTML.",
       "tonalRampScope": "Generated OKLCH lightness previews, not source tokens or approved production colors; gamut clipping may occur."
     }

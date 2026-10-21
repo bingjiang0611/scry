@@ -13,6 +13,7 @@ import type {
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { WorkspacePanel, type ReadOnlyWorkspaceSource } from './WorkspacePanel'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { ModalFrame } from './Modals'
 import './desktop-remote.css'
 
@@ -157,7 +158,7 @@ export function RemoteHostPanel(): JSX.Element {
       {enabled && <button type="button" className="hosts-button is-quiet" onClick={() => void run(async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) })} disabled={busy}>{copy.disableDesktopAccess}</button>}
     </div>}
     {enabled && invite && <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setInvite(null)}>
-      <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><button type="button" className="modal-x" aria-label={copy.closeInvite} onClick={() => setInvite(null)}><Icon name="x" /></button></div>
+      <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><ModalCloseButton aria-label={copy.closeInvite} onClick={() => setInvite(null)} /></div>
       <div className="modal-body"><p className="hosts-muted">{copy.sshInviteEffect}</p><div className="desktop-remote__invite"><code>{invite}</code></div>
         {error && <p className="desktop-remote__error" role="alert">{error}</p>}
         <div className="hosts-address-actions"><button type="button" className="hosts-button" onClick={() => setInvite(null)}>{copy.close}</button><button type="button" className="hosts-button is-primary" onClick={() => { void window.scry.copyText(invite).catch(reason => setError(errorText(reason))) }}><Icon name="copy" />{copy.copyInvite}</button></div>

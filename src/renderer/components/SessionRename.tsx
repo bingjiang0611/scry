@@ -5,6 +5,8 @@ import { ConversationAdoptionDialog } from './ConversationAdoptionDialog'
 import type { SessionMeta } from '../env'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { MODAL_COPY } from '../constants/copy'
 
 export interface SessionMenuTarget {
   cwd: string
@@ -98,7 +100,7 @@ export function SessionRenameDialog({ title, onSave, onClose }: {
     <ModalFrame labelledBy={id} initialFocusRef={inputRef} className="project-dialog session-rename-dialog" onClose={close}>
       <div className="modal-head">
         <b id={id}>重命名会话</b>
-        <button type="button" className="modal-x" aria-label="关闭重命名" disabled={saving} onClick={close}>×</button>
+        <ModalCloseButton aria-label={MODAL_COPY.closeRename} disabled={saving} onClick={close}>×</ModalCloseButton>
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void save() }} aria-busy={saving}>
         <div className="project-dialog-body">

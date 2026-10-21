@@ -69,12 +69,10 @@ struct ChatView: View {
       Button { showFiles = true } label: {
         Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
       }.accessibilityLabel("项目文件与 Diff").disabled(projectCwd == nil)
-      Menu {
+      MoreMenu {
         // Leaving keeps an unsent message sending and a run running on the Mac.
         Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
         Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
-      } label: {
-        Image(systemName: Symbol.more).font(.system(size: 17, weight: .medium)).frame(width: 44, height: 44)
       }
     }
   }

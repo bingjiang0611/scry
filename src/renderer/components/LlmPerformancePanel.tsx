@@ -3,7 +3,8 @@ import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceS
 import { groupRunningLlmSessions, llmMetricSamples, quantile, smoothLlmMetric } from '@shared/llm-performance'
 import type { ProviderId } from '@shared/provider'
 import { ModalFrame } from './Modals'
-import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { MODAL_COPY } from '../constants/copy'
 import { LLM_RUNNING_MODELS_COPY as runningCopy } from '../constants/copy'
 import './llm-performance.css'
 
@@ -162,7 +163,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
             <button key={range.hours} type="button" aria-pressed={hours === range.hours} onClick={() => setHours(range.hours)}>{range.label}</button>
           ))}
         </div>
-        <button type="button" className="modal-x" onClick={onClose} aria-label="关闭 LLM 性能"><Icon name="x" /></button>
+        <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeLlmPerformance} />
       </header>
       <div className="llm-perf-body">
         {summaryError && <p className="llm-perf-alert" role="alert">运行中会话读取失败：{summaryError}</p>}

@@ -133,7 +133,27 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
   await wait(`document.querySelector('.mp-load-error')`)
   check(await read(`document.querySelector('.mp-header .mp-button:not(.mp-back)').disabled && localStorage.getItem('scry.meta-prompts.v1') === '{broken'`), 'Corrupt data was overwritten or allowed editing')
-  return { nativeCoordinateActions: true, storageReload: true, plainText: true, search: true, clipboardExact: true, discard: true, edit: true, draftPreserved: true, notSent: true, deletion: true, corruptDataProtected: true }
+  await read(`window.__showModalCloseButtons()`)
+  await wait(`document.activeElement?.id === 'close-enabled'`)
+  check(await read(`document.activeElement.className === 'modal-x capabilities-close'`), 'Close button lost its local class or forwarded ref')
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+  contents.sendInputEvent({ type: 'char', keyCode: '\r' })
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+  await wait(`document.querySelector('#close-buttons').dataset.closed === '1'`)
+  await click('#close-disabled')
+  // The following native click and counter read also settle the disabled click.
+  await click('#close-glyph')
+  await wait(`document.querySelector('#close-buttons').dataset.closed === '2'`)
+  check(await read(`document.querySelector('#close-buttons').dataset.submitted === '0'`), 'Close button submitted its containing form')
+  check(await read(`document.querySelector('#close-glyph').textContent === '×' && !document.querySelector('#close-glyph svg')`), 'Close button changed the existing glyph variant')
+  if (screenshotPrefix) {
+    for (const theme of ['dark', 'light']) {
+      await read(`document.documentElement.dataset.theme = '${theme}'`)
+      await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+      require('node:fs').writeFileSync(screenshotPrefix + '-close-buttons-' + theme + '.png', (await contents.capturePage()).toPNG())
+    }
+  }
+  return { nativeCoordinateActions: true, storageReload: true, plainText: true, search: true, clipboardExact: true, discard: true, edit: true, draftPreserved: true, notSent: true, deletion: true, corruptDataProtected: true, modalCloseButton: { forwardedRef: true, keyboardActivation: true, disabled: true, nonSubmitting: true, glyphPreserved: true } }
 }
 
 // Full App wiring, with its real main/preload and an isolated smoke Provider.

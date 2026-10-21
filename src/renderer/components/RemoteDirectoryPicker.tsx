@@ -6,6 +6,8 @@ import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import { bridge, errorText } from './DesktopRemote'
 import { ModalFrame } from './Modals'
 import { Icon } from './primitives/Icon'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { MODAL_COPY } from '../constants/copy'
 
 export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose }: {
   connection: DesktopRemoteConnection
@@ -69,7 +71,7 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
     <ModalFrame labelledBy={titleId} initialFocusRef={pathRef} className="remote-directory-modal" onClose={close}>
       <div className="modal-head">
         <b id={titleId}>选择 {connection.label} 上的目录</b>
-        <button type="button" className="modal-x" disabled={selecting} aria-label="关闭远程目录选择" onClick={close}><Icon name="x" /></button>
+        <ModalCloseButton disabled={selecting} aria-label={MODAL_COPY.closeRemoteDirectory} onClick={close} />
       </div>
       <div className="modal-body remote-directory-body" aria-busy={busy}>
         <p className="hosts-muted">这里浏览的是 {connection.label}，不是这台 Mac。浏览不会授权；明确选择后，目录将加入远端可运行项目，已配对设备也可访问。原有 Agent 权限与仓库信任检查保持不变。</p>
