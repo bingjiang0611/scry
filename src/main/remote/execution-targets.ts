@@ -7,6 +7,10 @@ import { historyProfileSelection, historyScopeSelection } from './remote-gateway
 const HASH = /^[a-f0-9]{64}$/
 const MAX_TARGET_ID = 300
 const MAX_FRAME = 1_310_720
+// History snapshots are the signed source-version token
+// `<archive>:<transcript>:<0|1>:<active>:<native>:<signature>` = 294 chars, so a
+// 256-byte bound rejected every real turns page forwarded to an execution target.
+const MAX_HISTORY_SNAPSHOT = 512
 const OPS = new Set([
   'projects', 'directories', 'directoriesPage', 'providers', 'commands', 'sessions', 'sessionsPage', 'sessionAction',
   'workspace', 'fileDownload', 'history', 'historyPage', 'historyPreview', 'historyVersion', 'historyTurnsPage',
@@ -84,8 +88,8 @@ function parseRequest(value: unknown): Record<string, unknown> {
   if (op === 'commands' && (!text(value.providerId, 256) || !text(value.cwd, 16_384) || value.agentProfileId !== undefined && !text(value.agentProfileId, 256))) fail('invalid_target_request')
   if (op === 'sessionsPage' && (value.includeArchived !== undefined && typeof value.includeArchived !== 'boolean' || value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 100) || value.snapshot !== undefined && !text(value.snapshot, 256))) fail('invalid_target_request')
   if (['history', 'historyPage', 'historyPreview', 'historyVersion', 'historyTurnsPage'].includes(op) && (!text(value.providerId, 256) || !text(value.cwd, 16_384) || !text(value.externalSessionId, 256))) fail('invalid_target_request')
-  if (op === 'historyPage' && (value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 256 * 1024) || value.snapshot !== undefined && !text(value.snapshot, 256))) fail('invalid_target_request')
-  if (op === 'historyTurnsPage' && (value.before !== undefined && (!integer(value.before) || value.before < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 100) || value.snapshot !== undefined && !text(value.snapshot, 256))) fail('invalid_target_request')
+  if (op === 'historyPage' && (value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 256 * 1024) || value.snapshot !== undefined && !text(value.snapshot, MAX_HISTORY_SNAPSHOT))) fail('invalid_target_request')
+  if (op === 'historyTurnsPage' && (value.before !== undefined && (!integer(value.before) || value.before < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 100) || value.snapshot !== undefined && !text(value.snapshot, MAX_HISTORY_SNAPSHOT))) fail('invalid_target_request')
   if (op === 'submit' && (!text(value.intentId, 128) || !text(value.detail, MAX_FRAME))) fail('invalid_target_request')
   if (op === 'intentStatus' && !text(value.intentId, 128)) fail('invalid_target_request')
   if (op === 'poll' && (!integer(value.cursor) || value.cursor < 0)) fail('invalid_target_request')

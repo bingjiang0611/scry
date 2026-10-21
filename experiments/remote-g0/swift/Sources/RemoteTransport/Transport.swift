@@ -478,6 +478,12 @@ public enum G0Transport {
     public let hasMore: Bool; public let snapshot: String
   }
   public struct RunHistoryTurnsPage: Sendable, Equatable, Codable {
+    // The host's snapshot is a signed source-version token, not a display id:
+    // `<archive>:<transcript>:<active 0|1>:<active revision>:<native revision>:<signature>`
+    // = 4*64 + 1 + 32 hex chars + 5 ':' = 294. A 256-byte bound rejected every
+    // real session-scope page, so the device could only ever paint the 2-turn
+    // preview. The bound is a framing guard; integrity stays in the signature.
+    public static let maxHistorySnapshotBytes = 512
     public let turns: [RunHistoryTurn]; public let offset: Int; public let totalTurns: Int
     public let hasOlder: Bool; public let snapshot: String; public let source: String; public let completeness: String
     public let sourceWarning: String?
@@ -488,7 +494,7 @@ public enum G0Transport {
     }
     public func validate() throws {
       guard offset >= 0, totalTurns >= offset, turns.count <= totalTurns - offset,
-            hasOlder == (offset > 0), !snapshot.isEmpty, snapshot.utf8.count <= 256,
+            hasOlder == (offset > 0), !snapshot.isEmpty, snapshot.utf8.count <= Self.maxHistorySnapshotBytes,
             ["active_memory", "indexed_archive", "index_rebuild", "monolithic", "claude_transcript", "pi_native"].contains(source),
             sourceWarning == nil || sourceWarning == "native_unavailable",
             ["partial", "complete"].contains(completeness),
@@ -933,7 +939,15 @@ public enum G0Transport {
     let request = try JSONEncoder().encode(query)
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget, expectedHistoryScope: "session")
     guard let page = response.historyTurnsPage else { throw ProbeError.unexpectedReply }
-    return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
+    do { return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot) }
+    catch {
+      #if DEBUG
+      // A rejected page is a contract mismatch, not a transport failure; keep
+      // the host's own fields visible instead of only the enum error.
+      print("[historyTurnsPage] rejected before=\(String(describing: before)) limit=\(limit) offset=\(page.offset) total=\(page.totalTurns) turns=\(page.turns.count) source=\(page.source) completeness=\(page.completeness) hasOlder=\(page.hasOlder) warning=\(String(describing: page.sourceWarning)) snapshot=\(page.snapshot.prefix(12))")
+      #endif
+      throw error
+    }
   }
 
   public static func relayRunHistoryPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String, externalSessionId: String, cursor: Int, limit: Int? = nil, snapshot: String? = nil, agentProfileId: String? = nil) async throws -> RunHistoryPage {

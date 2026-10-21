@@ -81,6 +81,23 @@ describe('execution target production dispatcher', () => {
     expect(fixture.client.mobileRequest).toHaveBeenLastCalledWith(target, root, expect.any(Function))
   })
 
+  // A forwarded turns page carries the host's signed source-version token
+  // (4*64 + 1 + 32 hex chars + 5 ':' = 294). Binding it to 256 bytes rejected
+  // every real page, so a name-conflict lookup could never page a target's
+  // history past the first window.
+  it('forwards the 294-char signed history snapshot and still bounds it', async () => {
+    const fixture = router()
+    const hex = 'a'.repeat(64)
+    const snapshot = [hex, hex, '0', hex, hex, 'b'.repeat(32)].join(':')
+    expect(snapshot.length).toBe(294)
+    const page = { op: 'historyTurnsPage', historyScope: 'session', agentProfileId: null, providerId: 'pi',
+      cwd: '/mac2/project', externalSessionId: 'session', before: 4, limit: 3, snapshot }
+    await fixture.router.dispatch(peer, { op: 'target', target, request: page })
+    expect(fixture.client.mobileRequest).toHaveBeenLastCalledWith(target, page, expect.any(Function))
+    await expect(fixture.router.dispatch(peer, { op: 'target', target,
+      request: { ...page, snapshot: 'a'.repeat(513) } })).rejects.toThrow('invalid_target_request')
+  })
+
   it('treats a question ID named target as answer data, not routing authority', async () => {
     const fixture = router()
     const request = { op: 'answerQuestion', runId: 'run', answerId: 'answer', response: { requestId: 'question', answers: { target: ['Mac2'] } } }
