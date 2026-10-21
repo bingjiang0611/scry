@@ -64,7 +64,7 @@ document.querySelector('#app').innerHTML = `
       </section>
       <section class="providers" aria-labelledby="providers-title">
         <div class="section-heading"><h2 id="providers-title">${COPY.providerHeading}</h2></div>
-        <div class="provider-list">${COPY.providers.map(p => `<article class="provider ${p.id}"><div class="provider-line"><h3>${dot(p.id)}${p.name}</h3><div class="provider-numbers">${p.width === null ? '' : `<span class="provider-share">${p.share}</span>`}<strong>${p.cost}</strong></div></div></article>`).join('')}</div>
+        <div class="provider-list">${known.map(p => `<article class="provider ${p.id}"><div class="provider-line"><h3>${dot(p.id)}${p.name}</h3><div class="provider-numbers"><span class="provider-share">${p.share}</span><strong>${p.cost}</strong></div></div></article>`).join('')}</div>
       </section>
     </div>
     <section class="tokens" aria-labelledby="tokens-title"><h2 id="tokens-title">${COPY.metricHeading}</h2><dl class="metrics">${COPY.metrics.map(m => `<div class="metric"><dt>${m.label}</dt><dd>${m.value}<span>${m.unit}</span></dd></div>`).join('')}</dl></section>
