@@ -1,0 +1,625 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-21T03:20:26.077Z",
+  "title": "Design System: Scry",
+  "extensions": {
+    "colorMeta": {
+      "desktop-dark-bg": {
+        "displayName": "桌面深色 · 画布",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "desktop-dark-panel": {
+        "displayName": "桌面深色 · 面板",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "desktop-dark-panel2": {
+        "displayName": "桌面深色 · 次级面板",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "desktop-dark-border": {
+        "displayName": "桌面深色 · 边界",
+        "tonalRamp": [
+          "oklch(15.00% 0.00348 106.59)",
+          "oklch(26.43% 0.00348 106.59)",
+          "oklch(37.86% 0.00348 106.59)",
+          "oklch(49.29% 0.00348 106.59)",
+          "oklch(60.71% 0.00348 106.59)",
+          "oklch(72.14% 0.00348 106.59)",
+          "oklch(83.57% 0.00348 106.59)",
+          "oklch(95.00% 0.00348 106.59)"
+        ]
+      },
+      "desktop-dark-fg": {
+        "displayName": "桌面深色 · 主文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00266 106.45)",
+          "oklch(26.43% 0.00266 106.45)",
+          "oklch(37.86% 0.00266 106.45)",
+          "oklch(49.29% 0.00266 106.45)",
+          "oklch(60.71% 0.00266 106.45)",
+          "oklch(72.14% 0.00266 106.45)",
+          "oklch(83.57% 0.00266 106.45)",
+          "oklch(95.00% 0.00266 106.45)"
+        ]
+      },
+      "desktop-dark-dim": {
+        "displayName": "桌面深色 · 次文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00839 106.59)",
+          "oklch(26.43% 0.00839 106.59)",
+          "oklch(37.86% 0.00839 106.59)",
+          "oklch(49.29% 0.00839 106.59)",
+          "oklch(60.71% 0.00839 106.59)",
+          "oklch(72.14% 0.00839 106.59)",
+          "oklch(83.57% 0.00839 106.59)",
+          "oklch(95.00% 0.00839 106.59)"
+        ]
+      },
+      "desktop-dark-accent": {
+        "displayName": "桌面深色 · 强调蓝",
+        "tonalRamp": [
+          "oklch(15.00% 0.16076 258.59)",
+          "oklch(26.43% 0.16076 258.59)",
+          "oklch(37.86% 0.16076 258.59)",
+          "oklch(49.29% 0.16076 258.59)",
+          "oklch(60.71% 0.16076 258.59)",
+          "oklch(72.14% 0.16076 258.59)",
+          "oklch(83.57% 0.16076 258.59)",
+          "oklch(95.00% 0.16076 258.59)"
+        ]
+      },
+      "desktop-dark-accent-fg": {
+        "displayName": "桌面深色 · 强调色上的文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "desktop-dark-selected": {
+        "displayName": "桌面深色 · 选中",
+        "tonalRamp": [
+          "oklch(15.00% 0.16076 258.59)",
+          "oklch(26.43% 0.16076 258.59)",
+          "oklch(37.86% 0.16076 258.59)",
+          "oklch(49.29% 0.16076 258.59)",
+          "oklch(60.71% 0.16076 258.59)",
+          "oklch(72.14% 0.16076 258.59)",
+          "oklch(83.57% 0.16076 258.59)",
+          "oklch(95.00% 0.16076 258.59)"
+        ]
+      },
+      "desktop-dark-ok": {
+        "displayName": "桌面深色 · 成功绿",
+        "tonalRamp": [
+          "oklch(15.00% 0.12539 156.51)",
+          "oklch(26.43% 0.12539 156.51)",
+          "oklch(37.86% 0.12539 156.51)",
+          "oklch(49.29% 0.12539 156.51)",
+          "oklch(60.71% 0.12539 156.51)",
+          "oklch(72.14% 0.12539 156.51)",
+          "oklch(83.57% 0.12539 156.51)",
+          "oklch(95.00% 0.12539 156.51)"
+        ]
+      },
+      "desktop-dark-warn": {
+        "displayName": "桌面深色 · 警告琥珀",
+        "tonalRamp": [
+          "oklch(15.00% 0.12959 79.82)",
+          "oklch(26.43% 0.12959 79.82)",
+          "oklch(37.86% 0.12959 79.82)",
+          "oklch(49.29% 0.12959 79.82)",
+          "oklch(60.71% 0.12959 79.82)",
+          "oklch(72.14% 0.12959 79.82)",
+          "oklch(83.57% 0.12959 79.82)",
+          "oklch(95.00% 0.12959 79.82)"
+        ]
+      },
+      "desktop-dark-bad": {
+        "displayName": "桌面深色 · 失败红",
+        "tonalRamp": [
+          "oklch(15.00% 0.16746 24.53)",
+          "oklch(26.43% 0.16746 24.53)",
+          "oklch(37.86% 0.16746 24.53)",
+          "oklch(49.29% 0.16746 24.53)",
+          "oklch(60.71% 0.16746 24.53)",
+          "oklch(72.14% 0.16746 24.53)",
+          "oklch(83.57% 0.16746 24.53)",
+          "oklch(95.00% 0.16746 24.53)"
+        ]
+      },
+      "desktop-light-bg": {
+        "displayName": "桌面浅色 · 画布",
+        "tonalRamp": [
+          "oklch(15.00% 0.00264 106.45)",
+          "oklch(26.43% 0.00264 106.45)",
+          "oklch(37.86% 0.00264 106.45)",
+          "oklch(49.29% 0.00264 106.45)",
+          "oklch(60.71% 0.00264 106.45)",
+          "oklch(72.14% 0.00264 106.45)",
+          "oklch(83.57% 0.00264 106.45)",
+          "oklch(95.00% 0.00264 106.45)"
+        ]
+      },
+      "desktop-light-panel": {
+        "displayName": "桌面浅色 · 面板",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "desktop-light-panel2": {
+        "displayName": "桌面浅色 · 次级面板",
+        "tonalRamp": [
+          "oklch(15.00% 0.00397 106.47)",
+          "oklch(26.43% 0.00397 106.47)",
+          "oklch(37.86% 0.00397 106.47)",
+          "oklch(49.29% 0.00397 106.47)",
+          "oklch(60.71% 0.00397 106.47)",
+          "oklch(72.14% 0.00397 106.47)",
+          "oklch(83.57% 0.00397 106.47)",
+          "oklch(95.00% 0.00397 106.47)"
+        ]
+      },
+      "desktop-light-border": {
+        "displayName": "桌面浅色 · 边界",
+        "tonalRamp": [
+          "oklch(15.00% 0.00670 106.53)",
+          "oklch(26.43% 0.00670 106.53)",
+          "oklch(37.86% 0.00670 106.53)",
+          "oklch(49.29% 0.00670 106.53)",
+          "oklch(60.71% 0.00670 106.53)",
+          "oklch(72.14% 0.00670 106.53)",
+          "oklch(83.57% 0.00670 106.53)",
+          "oklch(95.00% 0.00670 106.53)"
+        ]
+      },
+      "desktop-light-fg": {
+        "displayName": "桌面浅色 · 主文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00370 106.66)",
+          "oklch(26.43% 0.00370 106.66)",
+          "oklch(37.86% 0.00370 106.66)",
+          "oklch(49.29% 0.00370 106.66)",
+          "oklch(60.71% 0.00370 106.66)",
+          "oklch(72.14% 0.00370 106.66)",
+          "oklch(83.57% 0.00370 106.66)",
+          "oklch(95.00% 0.00370 106.66)"
+        ]
+      },
+      "desktop-light-dim": {
+        "displayName": "桌面浅色 · 次文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00625 106.63)",
+          "oklch(26.43% 0.00625 106.63)",
+          "oklch(37.86% 0.00625 106.63)",
+          "oklch(49.29% 0.00625 106.63)",
+          "oklch(60.71% 0.00625 106.63)",
+          "oklch(72.14% 0.00625 106.63)",
+          "oklch(83.57% 0.00625 106.63)",
+          "oklch(95.00% 0.00625 106.63)"
+        ]
+      },
+      "desktop-light-accent": {
+        "displayName": "桌面浅色 · 强调蓝",
+        "tonalRamp": [
+          "oklch(15.00% 0.17327 260.17)",
+          "oklch(26.43% 0.17327 260.17)",
+          "oklch(37.86% 0.17327 260.17)",
+          "oklch(49.29% 0.17327 260.17)",
+          "oklch(60.71% 0.17327 260.17)",
+          "oklch(72.14% 0.17327 260.17)",
+          "oklch(83.57% 0.17327 260.17)",
+          "oklch(95.00% 0.17327 260.17)"
+        ]
+      },
+      "desktop-light-accent-fg": {
+        "displayName": "桌面浅色 · 强调色上的文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "desktop-light-selected": {
+        "displayName": "桌面浅色 · 选中",
+        "tonalRamp": [
+          "oklch(15.00% 0.17327 260.17)",
+          "oklch(26.43% 0.17327 260.17)",
+          "oklch(37.86% 0.17327 260.17)",
+          "oklch(49.29% 0.17327 260.17)",
+          "oklch(60.71% 0.17327 260.17)",
+          "oklch(72.14% 0.17327 260.17)",
+          "oklch(83.57% 0.17327 260.17)",
+          "oklch(95.00% 0.17327 260.17)"
+        ]
+      },
+      "desktop-light-ok": {
+        "displayName": "桌面浅色 · 成功绿",
+        "tonalRamp": [
+          "oklch(15.00% 0.11016 158.44)",
+          "oklch(26.43% 0.11016 158.44)",
+          "oklch(37.86% 0.11016 158.44)",
+          "oklch(49.29% 0.11016 158.44)",
+          "oklch(60.71% 0.11016 158.44)",
+          "oklch(72.14% 0.11016 158.44)",
+          "oklch(83.57% 0.11016 158.44)",
+          "oklch(95.00% 0.11016 158.44)"
+        ]
+      },
+      "desktop-light-warn": {
+        "displayName": "桌面浅色 · 警告琥珀",
+        "tonalRamp": [
+          "oklch(15.00% 0.11078 73.18)",
+          "oklch(26.43% 0.11078 73.18)",
+          "oklch(37.86% 0.11078 73.18)",
+          "oklch(49.29% 0.11078 73.18)",
+          "oklch(60.71% 0.11078 73.18)",
+          "oklch(72.14% 0.11078 73.18)",
+          "oklch(83.57% 0.11078 73.18)",
+          "oklch(95.00% 0.11078 73.18)"
+        ]
+      },
+      "desktop-light-bad": {
+        "displayName": "桌面浅色 · 失败红",
+        "tonalRamp": [
+          "oklch(15.00% 0.16494 26.30)",
+          "oklch(26.43% 0.16494 26.30)",
+          "oklch(37.86% 0.16494 26.30)",
+          "oklch(49.29% 0.16494 26.30)",
+          "oklch(60.71% 0.16494 26.30)",
+          "oklch(72.14% 0.16494 26.30)",
+          "oklch(83.57% 0.16494 26.30)",
+          "oklch(95.00% 0.16494 26.30)"
+        ]
+      },
+      "ios-ink": {
+        "displayName": "iOS · 主文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00417 91.45)",
+          "oklch(26.43% 0.00417 91.45)",
+          "oklch(37.86% 0.00417 91.45)",
+          "oklch(49.29% 0.00417 91.45)",
+          "oklch(60.71% 0.00417 91.45)",
+          "oklch(72.14% 0.00417 91.45)",
+          "oklch(83.57% 0.00417 91.45)",
+          "oklch(95.00% 0.00417 91.45)"
+        ]
+      },
+      "ios-muted": {
+        "displayName": "iOS · 次文字",
+        "tonalRamp": [
+          "oklch(15.00% 0.00721 97.39)",
+          "oklch(26.43% 0.00721 97.39)",
+          "oklch(37.86% 0.00721 97.39)",
+          "oklch(49.29% 0.00721 97.39)",
+          "oklch(60.71% 0.00721 97.39)",
+          "oklch(72.14% 0.00721 97.39)",
+          "oklch(83.57% 0.00721 97.39)",
+          "oklch(95.00% 0.00721 97.39)"
+        ]
+      },
+      "ios-line": {
+        "displayName": "iOS · 边界",
+        "tonalRamp": [
+          "oklch(15.00% 0.00357 106.62)",
+          "oklch(26.43% 0.00357 106.62)",
+          "oklch(37.86% 0.00357 106.62)",
+          "oklch(49.29% 0.00357 106.62)",
+          "oklch(60.71% 0.00357 106.62)",
+          "oklch(72.14% 0.00357 106.62)",
+          "oklch(83.57% 0.00357 106.62)",
+          "oklch(95.00% 0.00357 106.62)"
+        ]
+      },
+      "ios-blue": {
+        "displayName": "iOS · 强调蓝",
+        "tonalRamp": [
+          "oklch(15.00% 0.11275 262.61)",
+          "oklch(26.43% 0.11275 262.61)",
+          "oklch(37.86% 0.11275 262.61)",
+          "oklch(49.29% 0.11275 262.61)",
+          "oklch(60.71% 0.11275 262.61)",
+          "oklch(72.14% 0.11275 262.61)",
+          "oklch(83.57% 0.11275 262.61)",
+          "oklch(95.00% 0.11275 262.61)"
+        ]
+      },
+      "ios-green": {
+        "displayName": "iOS · 状态绿",
+        "tonalRamp": [
+          "oklch(15.00% 0.10420 158.63)",
+          "oklch(26.43% 0.10420 158.63)",
+          "oklch(37.86% 0.10420 158.63)",
+          "oklch(49.29% 0.10420 158.63)",
+          "oklch(60.71% 0.10420 158.63)",
+          "oklch(72.14% 0.10420 158.63)",
+          "oklch(83.57% 0.10420 158.63)",
+          "oklch(95.00% 0.10420 158.63)"
+        ]
+      },
+      "ios-amber": {
+        "displayName": "iOS · 状态琥珀",
+        "tonalRamp": [
+          "oklch(15.00% 0.08859 73.20)",
+          "oklch(26.43% 0.08859 73.20)",
+          "oklch(37.86% 0.08859 73.20)",
+          "oklch(49.29% 0.08859 73.20)",
+          "oklch(60.71% 0.08859 73.20)",
+          "oklch(72.14% 0.08859 73.20)",
+          "oklch(83.57% 0.08859 73.20)",
+          "oklch(95.00% 0.08859 73.20)"
+        ]
+      },
+      "ios-canvas": {
+        "displayName": "iOS · 画布",
+        "tonalRamp": [
+          "oklch(15.00% 0.00379 106.70)",
+          "oklch(26.43% 0.00379 106.70)",
+          "oklch(37.86% 0.00379 106.70)",
+          "oklch(49.29% 0.00379 106.70)",
+          "oklch(60.71% 0.00379 106.70)",
+          "oklch(72.14% 0.00379 106.70)",
+          "oklch(83.57% 0.00379 106.70)",
+          "oklch(95.00% 0.00379 106.70)"
+        ]
+      },
+      "ios-surface": {
+        "displayName": "iOS · 导航背景",
+        "tonalRamp": [
+          "oklch(15.00% 0.00400 106.79)",
+          "oklch(26.43% 0.00400 106.79)",
+          "oklch(37.86% 0.00400 106.79)",
+          "oklch(49.29% 0.00400 106.79)",
+          "oklch(60.71% 0.00400 106.79)",
+          "oklch(72.14% 0.00400 106.79)",
+          "oklch(83.57% 0.00400 106.79)",
+          "oklch(95.00% 0.00400 106.79)"
+        ]
+      },
+      "ios-message": {
+        "displayName": "iOS · 消息背景",
+        "tonalRamp": [
+          "oklch(15.00% 0.00397 84.58)",
+          "oklch(26.43% 0.00397 84.58)",
+          "oklch(37.86% 0.00397 84.58)",
+          "oklch(49.29% 0.00397 84.58)",
+          "oklch(60.71% 0.00397 84.58)",
+          "oklch(72.14% 0.00397 84.58)",
+          "oklch(83.57% 0.00397 84.58)",
+          "oklch(95.00% 0.00397 84.58)"
+        ]
+      },
+      "ios-negative": {
+        "displayName": "iOS · 负向状态",
+        "tonalRamp": [
+          "oklch(15.00% 0.10986 17.23)",
+          "oklch(26.43% 0.10986 17.23)",
+          "oklch(37.86% 0.10986 17.23)",
+          "oklch(49.29% 0.10986 17.23)",
+          "oklch(60.71% 0.10986 17.23)",
+          "oklch(72.14% 0.10986 17.23)",
+          "oklch(83.57% 0.10986 17.23)",
+          "oklch(95.00% 0.10986 17.23)"
+        ]
+      }
+    },
+    "shadows": [
+      {
+        "name": "desktop-dark-pop",
+        "value": "0 32px 88px rgb(0 0 0 / 46%),\n    0 10px 28px rgb(0 0 0 / 24%),\n    inset 0 0 0 1px rgb(255 255 255 / 2.5%)",
+        "purpose": "浮层；局部组件仍可能覆盖。"
+      },
+      {
+        "name": "desktop-dark-card",
+        "value": "0 1px 0 rgb(255 255 255 / 3%),\n    0 10px 30px rgb(0 0 0 / 18%)",
+        "purpose": "共享卡片变量；不代表所有卡片实际使用。"
+      },
+      {
+        "name": "desktop-light-pop",
+        "value": "0 32px 80px rgb(35 35 32 / 16%),\n    0 10px 28px rgb(35 35 32 / 9%),\n    inset 0 0 0 1px rgb(255 255 255 / 74%)",
+        "purpose": "浮层；局部组件仍可能覆盖。"
+      },
+      {
+        "name": "desktop-light-card",
+        "value": "0 1px 2px rgb(35 35 32 / 6%),\n    0 12px 30px rgb(35 35 32 / 7%)",
+        "purpose": "共享卡片变量；不代表所有卡片实际使用。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "基础运动曲线；后置组件存在独立 150ms ease。"
+      },
+      {
+        "name": "button-transition",
+        "value": "background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 160ms var(--ease-out)",
+        "purpose": "通用按钮；不是全局统一动效合同。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "main-pane-compact",
+        "value": "720px"
+      },
+      {
+        "name": "main-pane-title",
+        "value": "560px"
+      },
+      {
+        "name": "composer-pane-wrap",
+        "value": "560px"
+      },
+      {
+        "name": "settings-window",
+        "value": "900px"
+      },
+      {
+        "name": "right-surface-overlay",
+        "value": "1180px"
+      }
+    ],
+    "provenance": {
+      "basis": "Current working-tree shared styles; feature-specific uncommitted changes are not promoted to design-system rules.",
+      "referenceCommit": "d86084d",
+      "sources": [
+        {
+          "path": "src/renderer/styles.css",
+          "sha256": "e8c38bccf24042ba947229ba159988b3d937049eeeb76f648995ac6386aa2716"
+        },
+        {
+          "path": "src/renderer/analytics-evidence.css",
+          "sha256": "c6458731aed7e5996e94d479f3d12ef7aaa6473f614d0d20f4220cebb7972881"
+        },
+        {
+          "path": "src/renderer/inventory-evidence.css",
+          "sha256": "820a346a8c70be01a3c68cd12fc6f67bf9bea9ab6bc2a25f9e6ed2f7aa51ed52"
+        },
+        {
+          "path": "src/renderer/session-evidence.css",
+          "sha256": "bf27cc30bcd891a3674f1df782c4c82150674bbecd278de8e8670c5c7969a859"
+        },
+        {
+          "path": "src/renderer/codex-alignment.css",
+          "sha256": "4a2e2e74aedab8ff724ba525a341df1ff6bdaac5970bccb6913e8fd9342341df"
+        },
+        {
+          "path": "src/renderer/main.tsx",
+          "sha256": "23db0fc55e413e2913bf09fcf58f2c4a48625e85a8ec295b3f3093b77c7bebb1"
+        },
+        {
+          "path": "apps/ios/ScryRemote/Theme.swift",
+          "sha256": "16608ce68268a3136af580d6caebb464179560482f92eff1de7d3b4f38588a50"
+        },
+        {
+          "path": "apps/ios/ScryRemote/Components.swift",
+          "sha256": "3f8476826eafa4bca1c889ac7cb2912f6fd90a2f60aa6bffbca97d5401b140e4"
+        },
+        {
+          "path": "apps/ios/ScryRemote/HomeView.swift",
+          "sha256": "c30b471e9d1aee3ba7591469c5ca5a91a1bd0684904ced0954dd52931e3aace8"
+        }
+      ],
+      "visualCoverage": "Current desktop accessibility tree observed; visual capture timed out. Committed dark/light performance screenshots have identical hashes and both show dark UI. Six extracted desktop specimens visually checked in dark and light at a 1512x764 Chrome viewport; search focus confirmed by readback after an interaction timeout, without redispatch. This is not current App light-theme, full-state, or iOS real-device visual acceptance.",
+      "specimenScope": "Six desktop style specimens, not app workflows. Search outer margin omitted for embedding. Native components documented in prose, not imitated in HTML.",
+      "tonalRampScope": "Generated OKLCH lightness previews, not source tokens or approved production colors; gamut clipping may occur."
+    }
+  },
+  "components": [
+    {
+      "name": "主按钮",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "桌面通用按钮样式标本；不是 composer 的圆形发送按钮。",
+      "html": "<button type=\"button\" class=\"ds-button-primary\">保存 ⌘S</button>",
+      "css": ".ds-button-primary { font-family: var(--font-ui); line-height: 1.55; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 6px 12px; border: 1px solid var(--border2); background: var(--accent); border-radius: var(--r-md); font-size: 12.5px; color: var(--accent-fg); cursor: pointer; transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 160ms var(--ease-out); border-color: var(--accent); font-weight: 600; }.ds-button-primary:hover { border-color: color-mix(in srgb, var(--accent) 88%, white); background: color-mix(in srgb, var(--accent) 88%, white); }.ds-button-primary:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }.ds-button-primary:disabled { opacity: .45; cursor: not-allowed; } .ds-button-primary:not(:disabled):active { transform: scale(.96); }"
+    },
+    {
+      "name": "次按钮",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "桌面通用按钮样式标本；不是 composer 的圆形发送按钮。",
+      "html": "<button type=\"button\" class=\"ds-button-secondary\">取消</button>",
+      "css": ".ds-button-secondary { font-family: var(--font-ui); line-height: 1.55; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 6px 12px; border: 1px solid var(--border2); background: var(--panel); border-radius: var(--r-md); font-size: 12.5px; color: var(--fg); cursor: pointer; transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 160ms var(--ease-out); }.ds-button-secondary:hover { border-color: var(--accent-line); background: var(--panel3); }.ds-button-secondary:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }.ds-button-secondary:disabled { opacity: .45; cursor: not-allowed; } .ds-button-secondary:not(:disabled):active { transform: scale(.96); }"
+    },
+    {
+      "name": "搜索输入",
+      "kind": "input",
+      "refersTo": "search-input",
+      "description": "侧栏搜索的容器和 focus-within 状态。",
+      "html": "<label class=\"ds-search\"><input type=\"search\" aria-label=\"搜索会话\" placeholder=\"搜索会话\"></label>",
+      "css": ".ds-search { display: flex; align-items: center; gap: 6px; border: 0; margin: 0; min-height: 36px; padding: 0 10px; background: var(--panel3); border-color: transparent; border-radius: 10px; height: 36px; flex: none; }.ds-search input { font-family: var(--font-ui); line-height: 1.55; flex: 1; background: none; border: 0; outline: 0; font-size: 13px; color: var(--fg); align-self: center; min-height: 0; }.ds-search input::placeholder { color: var(--dim3); }.ds-search:focus-within { background: var(--panel); border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line),\n    0 0 0 4px var(--accent-soft); }.ds-search input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }"
+    },
+    {
+      "name": "导航项",
+      "kind": "nav",
+      "refersTo": "navigation-item",
+      "description": "使用真实 active 的背景与继承 inset 线；局部按钮样式，不模拟导航业务。",
+      "html": "<nav aria-label=\"主要视图\"><button type=\"button\" class=\"ds-nav\" aria-current=\"page\">分析</button></nav>",
+      "css": ".ds-nav { font-family: var(--font-ui); line-height: 1.55; width: 100%; display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer; font-size: 13.5px; min-height: 34px; padding: 0 10px; border-radius: 9px; transition: color 150ms ease,\n    background-color 150ms ease,\n    border-color 150ms ease,\n    box-shadow 150ms ease,\n    transform 150ms ease; height: 34px; font-weight: 500; }.ds-nav:hover { color: var(--fg); background: var(--surface-hover); }.ds-nav[aria-current=\"page\"] { background: var(--surface-hover); box-shadow: inset 2px 0 0 var(--selected); }.ds-nav:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }@media (prefers-reduced-motion: reduce) { .ds-nav { transition: none; } }"
+    },
+    {
+      "name": "状态标签",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "非交互的文字标签；仅展示样式，不证明真实连接。",
+      "html": "<span class=\"ds-badge\">已连接</span>",
+      "css": ".ds-badge { font-family: var(--font-ui); line-height: 1.55; font-size: 12px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border2); color: var(--dim); white-space: nowrap; }"
+    },
+    {
+      "name": "Surface 入口卡片",
+      "kind": "card",
+      "refersTo": "surface-card",
+      "description": "工作区入口卡片，保留 hover 与按下状态；不是通用内容卡片。",
+      "html": "<button type=\"button\" class=\"ds-card\">会话纵览</button>",
+      "css": ".ds-card { font-family: var(--font-ui); line-height: 1.55; border: 1px solid var(--border); color: var(--fg); font: inherit; cursor: pointer; min-height: 124px; display: flex; flex-direction: column; align-items: flex-start; padding: 15px; border-radius: 12px; background: var(--panel2); text-align: left; transition: border-color 140ms ease, background-color 140ms ease, transform 120ms var(--ease-out); border-color: var(--border); }@media (hover: hover) and (pointer: fine) { .ds-card:hover { border-color: var(--border2); background: var(--panel3); } }.ds-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }.ds-card:active { transform: scale(.97); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "执行观察室",
+    "overview": "以“执行观察室”为比喻：界面帮助用户持续查看 Agent 的执行状态，在需要时检查细节并干预。整体气质是克制、清晰、工具感；内容先于装饰，容器负责组织信息，不代替证据。\n\n桌面采用中性深灰／浅暖灰双主题、多栏工作区与蓝色强调。iOS 使用独立的暖深灰语义色盘、系统字体和 SF Symbols；两端共享产品含义，不强行共享像素值或组件布局。层次以底色和边界为主，阴影辅助；组件以柔和边界表达明确操作。",
+    "keyCharacteristics": [
+      "中性画布与语义强调色。",
+      "桌面多栏、对话正文聚焦、细节按需展开。",
+      "系统字体承载操作与阅读，等宽字体承载代码、路径和数据。",
+      "平台各自保留交互习惯；未知、禁用和失败不能被美化成成功。"
+    ],
+    "rules": [],
+    "dos": [
+      "复用当前主题变量及平台原生组件；先检查最终覆盖层。",
+      "用文字、图标和状态共同说明证据；保留来源和缺失状态。",
+      "复用现有文案模块；保留键盘焦点、禁用态与原生触控标签。",
+      "新增模式前检查桌面双主题和 iOS 原生约束；具体界面再验收。"
+    ],
+    "donts": [
+      "不要把基础 styles.css 的旧色值或 designs/ 原型直接当作当前产品规范。",
+      "不要把 Provider 品牌色、选中态或连接点当作成功、授权或完整性证明。",
+      "不要把 iOS 的 glass helper 描述成已实现的系统材质或背景模糊。",
+      "不要把文档示例、历史截图或代码扫描当作当前 App 的视觉与无障碍验收。"
+    ]
+  }
+}
