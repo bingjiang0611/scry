@@ -26,7 +26,7 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 h2 { font-size: 16px; font-weight: 570; }
 .preview { text-align: center; padding: 7px 20px; font-size: 11px; color: var(--muted); background: #171715; border-bottom: 1px solid var(--line); letter-spacing: .01em; }
 .page { max-width: 1560px; margin: auto; padding: 28px 52px 30px; }
-.page-header, .page-title, .page-actions, .section-heading, .composition-title, .total-label, .provider-line { display: flex; align-items: center; }
+.page-header, .page-title, .page-actions, .section-heading, .composition-title, .provider-line { display: flex; align-items: center; }
 .page-header, .section-heading, .composition-title, .provider-line { justify-content: space-between; }
 .page-title { gap: 18px; }
 h1 { font-size: 26px; letter-spacing: -.035em; font-weight: 620; }
@@ -39,9 +39,7 @@ h1 { font-size: 26px; letter-spacing: -.035em; font-weight: 620; }
 .range button { min-width: 63px; padding: 5px 13px; color: var(--muted); font-size: 13px; border-radius: 5px; }
 .range button.active { background: #30302c; color: var(--fg); }
 .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8%; padding: 33px 0 26px; border-bottom: 1px solid var(--line); }
-.total-label { gap: 14px; }
-.total-label h2 { font-size: 14px; font-weight: 500; color: var(--muted); }
-.evidence { color: var(--muted); font-size: 11px; line-height: 1.5; border: 1px solid #44443e; padding: 1px 7px; border-radius: 4px; }
+.total-label { font-size: 14px; font-weight: 500; color: var(--muted); }
 .amount { font-size: clamp(64px, 6.25vw, 90px); line-height: 1.19; letter-spacing: -.04em; font-weight: 560; font-variant-numeric: tabular-nums; white-space: nowrap; margin: 9px 0 9px; }
 .currency { font-size: .61em; vertical-align: .17em; margin-right: 5px; font-weight: 450; color: #cacac4; }
 .fraction { color: #a2a29b; font-size: .7em; letter-spacing: -.025em; font-weight: 450; }
@@ -59,8 +57,6 @@ h1 { font-size: 26px; letter-spacing: -.035em; font-weight: 620; }
 .share-key strong { display: block; font-size: 20px; font-weight: 500; margin: 4px 0 0 15px; font-variant-numeric: tabular-nums; }
 .series-dot { display: inline-block; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--series); }
 .unknown .series-dot { border: 1px solid var(--series); background: none; }
-.credit-row { display: flex; font-size: 13px; margin-top: 17px; }
-.credit-row > :first-child { color: var(--qoder); }
 .analysis { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 35px; padding: 28px 0 26px; border-bottom: 1px solid var(--line); }
 .trend { min-width: 0; }
 .section-heading { min-height: 30px; gap: 15px; }

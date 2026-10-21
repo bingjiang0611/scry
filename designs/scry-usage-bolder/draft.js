@@ -24,14 +24,13 @@ document.querySelector('#app').innerHTML = `
     </header>
     <section class="summary" aria-label="${COPY.costLabel}" aria-description="${COPY.basis}">
       <div class="total">
-        <div class="total-label"><h2>${COPY.costLabel}</h2><span class="evidence">${COPY.lowerBound}</span></div>
+        <h2 class="total-label">${COPY.costLabel}</h2>
         <div class="amount" aria-label="${COPY.totalRaw}"><span class="currency">${COPY.currency}</span>${COPY.totalWhole}<span class="fraction">${COPY.totalFraction}</span></div>
       </div>
       <div class="composition">
         <div class="composition-title"><h2>${COPY.sourceHeading}</h2></div>
         <div class="share-bar" role="img" aria-label="${COPY.distributionLabel}">${known.map(p => `<span class="${p.id}" style="flex-basis:${p.width}%"></span>`).join('')}</div>
         <div class="share-key">${known.map(p => `<div><span>${dot(p.id)}${p.name}</span><strong>${p.share}</strong></div>`).join('')}</div>
-        <div class="credit-row"><span>${COPY.credits}</span></div>
       </div>
     </section>
     <div class="analysis">

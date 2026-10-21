@@ -9,7 +9,7 @@
           "path": "index.html",
           "createdAt": "2026-10-21T10:10:01.491Z",
           "status": "needs-review",
-          "subtitle": "v5：移除总额下方提示、轮数和数据说明整行",
+          "subtitle": "v6：移除 Qoder Credits 行与已知下界标记",
           "viewport": {
             "width": 1512,
             "height": 1000
@@ -19,5 +19,5 @@
     }
   },
   "createdAt": "2026-10-21T10:10:01.492Z",
-  "updatedAt": "2026-10-21T11:20:50.430Z"
+  "updatedAt": "2026-10-21T11:22:33.391Z"
 }
