@@ -17,9 +17,9 @@ struct PairView: View {
         VStack(spacing: 0) {
           pairMark.padding(.top, 34).padding(.bottom, 25)
           Text(ConnectionCopy.pairHeading)
-            .font(.title.bold()).tracking(-0.6).multilineTextAlignment(.center)
+            .font(.system(size: 25, weight: .bold)).tracking(-0.6).multilineTextAlignment(.center)
           Text(ConnectionCopy.pairLead)
-            .font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+            .font(.system(size: 14)).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
             .padding(.top, 9).padding(.horizontal, 22)
 
           VStack(spacing: 0) {
@@ -32,9 +32,9 @@ struct PairView: View {
           pairingStatus.padding(.top, 18)
 
           HStack(alignment: .top, spacing: 9) {
-            Image(systemName: Symbol.shield).font(.body).foregroundStyle(Palette.positive)
+            Image(systemName: Symbol.shield).font(.system(size: 16)).foregroundStyle(Palette.positive)
             Text(ConnectionCopy.pairTrust)
-              .font(.footnote).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
+              .font(.system(size: 11)).foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
           }
           .padding(13).background(Palette.noticeBg, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
           .padding(.top, 18)
@@ -46,7 +46,7 @@ struct PairView: View {
       VStack(spacing: 8) {
         Button { model.pairing = .scanning } label: {
           Label(ConnectionCopy.scanPairingCode, systemImage: "qrcode.viewfinder")
-            .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 48)
+            .font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(Palette.surface).background(Palette.blue, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -59,7 +59,7 @@ struct PairView: View {
         QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code, runStore: run) },
                   onFailure: { message in model.pairing = .failed(.init(message: message)) }).ignoresSafeArea()
         Button(ConnectionCopy.cancel) { model.pairing = .idle }
-          .font(.subheadline.weight(.semibold)).foregroundStyle(.white).padding(16)
+          .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)
       }
     }
     .onChange(of: model.pairing) { technicalExpanded = false }
@@ -67,11 +67,11 @@ struct PairView: View {
 
   private var pairMark: some View {
     ZStack(alignment: .bottomTrailing) {
-      Image(systemName: Symbol.laptop).font(.largeTitle.weight(.light)).controlIconScale().foregroundStyle(Palette.ink)
+      Image(systemName: Symbol.laptop).font(.system(size: 35, weight: .light)).foregroundStyle(Palette.ink)
         .frame(width: 88, height: 88).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(Palette.line))
         .shadow(color: .black.opacity(0.07), radius: 18, y: 10)
-      Image(systemName: "iphone").font(.title3.weight(.medium)).controlIconScale().foregroundStyle(Palette.surface)
+      Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundStyle(Palette.surface)
         .frame(width: 40, height: 40).background(Palette.blue, in: Circle()).offset(x: 8, y: 8)
     }
   }
@@ -99,7 +99,7 @@ struct PairView: View {
     HStack(alignment: .top, spacing: 10) {
       if progress { ProgressView().controlSize(.small) }
       else { Circle().fill(tint).frame(width: 8, height: 8).padding(.top, 5) }
-      Text(text).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+      Text(text).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
     }
     .foregroundStyle(Palette.ink).padding(13)
     .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
@@ -109,14 +109,14 @@ struct PairView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .top, spacing: 10) {
         Circle().fill(Palette.negative).frame(width: 8, height: 8).padding(.top, 5)
-        Text(failure.message).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+        Text(failure.message).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
       }
       if let detail = failure.technicalDetail {
         DisclosureGroup(ConnectionCopy.technicalDetails, isExpanded: $technicalExpanded) {
-          Text(detail).font(.caption.monospaced()).foregroundStyle(Palette.muted)
+          Text(detail).font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.muted)
             .textSelection(.enabled).padding(.top, 6)
         }
-        .font(.footnote)
+        .font(.system(size: 13))
       }
     }
     .foregroundStyle(Palette.ink).padding(13)
@@ -126,9 +126,9 @@ struct PairView: View {
 
   private func step(_ number: Int, _ text: String) -> some View {
     HStack(spacing: 12) {
-      Text("\(number)").font(.caption.weight(.bold)).foregroundStyle(Palette.ink)
+      Text("\(number)").font(.system(size: 11, weight: .bold)).foregroundStyle(Palette.ink)
         .padding(7).frame(minWidth: 27, minHeight: 27).background(Palette.canvas, in: Circle())
-      Text(text).font(.body).foregroundStyle(Palette.ink)
+      Text(text).font(.system(size: 14.5)).foregroundStyle(Palette.ink)
       Spacer()
     }
     .frame(minHeight: 48)

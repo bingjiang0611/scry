@@ -68,7 +68,7 @@ struct ChatView: View {
                  subtitle: sessionContext, link: model.link, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
       Button { showFiles = true } label: {
-        Image(systemName: "folder").font(.title3).controlIconScale().frame(width: 44, height: 44)
+        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
       }.accessibilityLabel(ConnectionCopy.projectFilesAndDiff).disabled(projectCwd == nil)
       MoreMenu {
         // Leaving keeps an unsent message sending and a run running on the Mac.
@@ -258,7 +258,7 @@ struct RemoteQuestionSheet: View {
 
   private func optionRow(_ option: G0Transport.RunQuestionOption, selected: Bool, symbol: String) -> some View {
     HStack(alignment: .top, spacing: 12) {
-      Image(systemName: symbol).font(.title3).controlIconScale()
+      Image(systemName: symbol).font(.system(size: 18))
         .foregroundStyle(selected ? Palette.blue : Palette.muted).padding(.top, 1)
       optionLabel(option)
       Spacer(minLength: 0)

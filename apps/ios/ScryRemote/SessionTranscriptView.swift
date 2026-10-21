@@ -251,7 +251,7 @@ struct SessionTranscriptView: View {
     case .empty:
       ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
       Text(ConnectionCopy.noReadableHistory)
-        .font(.footnote).foregroundStyle(Palette.muted)
+        .font(.system(size: 13)).foregroundStyle(Palette.muted)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case .baseUnavailable:
       // The missing record is reported once, in the status strip.
@@ -314,7 +314,7 @@ struct SessionTranscriptView: View {
                  subtitle: headerSubtitle, link: model.link, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
       Button { showFiles = true } label: {
-        Image(systemName: "folder").font(.title3).controlIconScale().frame(width: 44, height: 44)
+        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
       }.accessibilityLabel(ConnectionCopy.projectFilesAndDiff).disabled(session == nil)
       MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
         Section(ConnectionCopy.historyStatus) {
@@ -465,7 +465,7 @@ struct SessionTranscriptView: View {
       TurnOutputList(lines: run.detachedOutput)
       // This cache can omit or truncate chunks; it is not the archive.
       Text("实时输出可能不完整；运行结束后以会话记录为准。")
-        .font(.footnote).foregroundStyle(Palette.muted)
+        .font(.system(size: 12.5)).foregroundStyle(Palette.muted)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -519,16 +519,16 @@ private struct HistoryEvidenceDetails: View {
         Section(ConnectionCopy.historyStatus) {
           Text(status)
           Text(lastChecked.map(ConnectionCopy.historyLastCheckedText) ?? ConnectionCopy.historyNotChecked)
-            .font(.footnote).foregroundStyle(Palette.muted)
+            .font(.system(size: 13)).foregroundStyle(Palette.muted)
         }
         if let refreshError {
           Section(ConnectionCopy.historySyncIssue) {
-            Text(refreshError).font(.footnote).textSelection(.enabled)
+            Text(refreshError).font(.system(size: 13)).textSelection(.enabled)
           }
         }
         if let storageNotice {
           Section(ConnectionCopy.historyStorageIssue) {
-            Text(storageNotice).font(.footnote).textSelection(.enabled)
+            Text(storageNotice).font(.system(size: 13)).textSelection(.enabled)
           }
         }
       }

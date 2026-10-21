@@ -69,7 +69,7 @@ struct HomeView: View {
         currentTasks
         backgroundSends
         if targets.visibleScopes.contains(where: { if case .unverifiedCache = targets.store(for: $0).catalogEvidence { return true }; return false }), failure == nil {
-          Text(ConnectionCopy.unverifiedCache).font(.caption).foregroundStyle(Palette.muted)
+          Text(ConnectionCopy.unverifiedCache).font(.system(size: 12)).foregroundStyle(Palette.muted)
             .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 19).padding(.top, 10)
         }
         ForEach(targets.visibleScopes) { scope in liveRuns(scope: scope) }
@@ -89,7 +89,7 @@ struct HomeView: View {
     .background(Palette.surface)
     .overlay(alignment: .top) {
       if refreshToastVisible && failure == nil {
-        Text(ConnectionCopy.refreshSuccess).font(.footnote.weight(.semibold))
+        Text(ConnectionCopy.refreshSuccess).font(.system(size: 13, weight: .semibold))
           .foregroundStyle(Palette.surface).padding(.horizontal, 16).frame(minHeight: 36)
           .background(Palette.ink, in: Capsule()).padding(.top, 64).transition(.opacity)
       }
@@ -144,11 +144,11 @@ struct HomeView: View {
           HStack {
             Image(systemName: store.observationInterrupted ? "wifi.exclamationmark" : "bubble.left.and.bubble.right")
             VStack(alignment: .leading, spacing: 3) {
-              Text(ConnectionCopy.returnToTask(scope.label)).font(.subheadline.weight(.semibold))
+              Text(ConnectionCopy.returnToTask(scope.label)).font(.system(size: 14, weight: .semibold))
               Text(store.hasUncertainSubmission ? ConnectionCopy.targetResultUnknown :
                    store.observationInterrupted ? ConnectionCopy.interruptedRun :
                    store.lifecycle == .submitting ? ConnectionCopy.sending : ConnectionCopy.running)
-                .font(.caption).foregroundStyle(Palette.muted)
+                .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             Spacer()
             Image(systemName: "chevron.right")
@@ -167,11 +167,11 @@ struct HomeView: View {
           ForEach(store.backgroundSends) { pending in
             HStack(alignment: .top, spacing: 10) {
               VStack(alignment: .leading, spacing: 4) {
-                Text(pending.routing.prompt).font(.body).lineLimit(2)
+                Text(pending.routing.prompt).font(.system(size: 15.5)).lineLimit(2)
                 Text(pending.uncertainty != nil ? ConnectionCopy.targetResultUnknown :
                      pending.failure.map(ConnectionCopy.rejectedMessage) ??
                      ConnectionCopy.rowContext(host: nil, project: projectName(pending.routing.cwd), provider: pending.routing.providerId))
-                  .font(.caption).foregroundStyle(pending.failure == nil ? Palette.muted : Palette.negative).lineLimit(2)
+                  .font(.system(size: 11.5)).foregroundStyle(pending.failure == nil ? Palette.muted : Palette.negative).lineLimit(2)
               }
               Spacer(minLength: 8)
               if pending.uncertainty != nil {
@@ -181,7 +181,7 @@ struct HomeView: View {
                 ProgressView().controlSize(.small).accessibilityLabel(ConnectionCopy.sending)
               } else {
                 Button { store.discardRejectedSend(pending.intentId) } label: {
-                  Image(systemName: "xmark").font(.footnote.weight(.semibold)).controlIconScale().frame(width: 44, height: 44)
+                  Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 44, height: 44)
                 }.buttonStyle(.plain).foregroundStyle(Palette.muted).accessibilityLabel(ConnectionCopy.remove)
               }
             }.padding(.vertical, 12)
@@ -195,7 +195,7 @@ struct HomeView: View {
     VStack(spacing: 0) {
       EmptyState(title: ConnectionCopy.noMac, detail: ConnectionCopy.pairInstructions, symbol: Symbol.laptop)
       Button { model.route = .pair } label: {
-        Text(ConnectionCopy.connectMac).font(.subheadline.weight(.semibold)).foregroundStyle(Palette.surface)
+        Text(ConnectionCopy.connectMac).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.surface)
           .padding(.horizontal, 22).frame(minHeight: 46).background(Palette.ink, in: Capsule())
       }
     }.padding(.top, 24)
@@ -232,8 +232,8 @@ struct HomeView: View {
         if !pinned.isEmpty {
           Button { withAnimation(.easeInOut(duration: 0.18)) { pinnedExpanded.toggle() } } label: {
             HStack(spacing: 7) {
-              Text(ConnectionCopy.pinned).font(.title3.weight(.semibold))
-              Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).controlIconScale()
+              Text(ConnectionCopy.pinned).font(.system(size: 18, weight: .semibold))
+              Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
                 .rotationEffect(.degrees(pinnedExpanded ? 0 : -90)).foregroundStyle(Palette.muted)
               Spacer()
             }.frame(minHeight: 44).contentShape(Rectangle())
@@ -251,22 +251,22 @@ struct HomeView: View {
     }.padding(.horizontal, 19).padding(.bottom, 24)
   }
   private func sectionTitle(_ title: String) -> some View {
-    Text(title).font(.title3.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
+    Text(title).font(.system(size: 18, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
       .padding(.top, 17).padding(.bottom, 7)
   }
   private func projectHeader(_ group: ProjectGroup) -> some View {
     HStack(spacing: 11) {
-      Image(systemName: Symbol.folder).font(.title3.weight(.medium)).controlIconScale().frame(width: 25)
+      Image(systemName: Symbol.folder).font(.system(size: 19, weight: .medium)).frame(width: 25)
       Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? group.scope.label : nil,
                                     project: projectName(group.cwd), provider: ""))
-        .font(.body.weight(.semibold)).lineLimit(2)
+        .font(.system(size: 16, weight: .semibold)).lineLimit(2)
       Spacer()
       Button {
         guard targets.beginNewTask(scope: group.scope) else { return }
         targets.newTaskStore.chooseProject(.init(path: group.cwd, label: projectName(group.cwd)))
         model.route = .newSession
       } label: {
-        Image(systemName: Symbol.compose).font(.body.weight(.medium)).controlIconScale().foregroundStyle(Palette.muted)
+        Image(systemName: Symbol.compose).font(.system(size: 17, weight: .medium)).foregroundStyle(Palette.muted)
           .frame(width: 44, height: 44)
       }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.newTaskInProject(projectName(group.cwd)))
     }.frame(minHeight: 52)
@@ -285,19 +285,19 @@ struct HomeView: View {
       HStack(alignment: .top, spacing: 10) {
         if grouped {
           Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-            .font(.body).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(2)
+            .font(.system(size: 15.5)).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(2)
           Spacer(minLength: 8)
           VStack(alignment: .trailing, spacing: 5) {
-            Text(session.providerId.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(Palette.muted)
+            Text(session.providerId.uppercased()).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
             sessionState(session: session, store: store, openable: openable)
           }
         } else {
           VStack(alignment: .leading, spacing: 4) {
             Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-              .font(.body).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(2)
+              .font(.system(size: 15.5)).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(2)
             Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? row.scope.label : nil,
                                           project: projectName(session.cwd), provider: session.providerId))
-              .font(.caption).foregroundStyle(Palette.muted).lineLimit(2)
+              .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(2)
           }
           Spacer(minLength: 8)
           sessionState(session: session, store: store, openable: openable)
@@ -312,9 +312,9 @@ struct HomeView: View {
                                 externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId) {
       LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil)
     } else if session.isActive == true {
-      Text(ConnectionCopy.lastRunning).font(.caption2.weight(.semibold)).foregroundStyle(Palette.muted)
+      Text(ConnectionCopy.lastRunning).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
     } else if !openable {
-      Text(ConnectionCopy.noSession).font(.caption2).foregroundStyle(Palette.muted)
+      Text(ConnectionCopy.noSession).font(.system(size: 10)).foregroundStyle(Palette.muted)
     }
   }
   @ViewBuilder private func liveRuns(scope: ExecutionTargetScope) -> some View {
@@ -341,13 +341,13 @@ struct HomeView: View {
           } label: {
             HStack {
               VStack(alignment: .leading, spacing: 4) {
-                Text(live.prompt.isEmpty ? ConnectionCopy.noPreview : live.prompt).font(.body).lineLimit(2)
+                Text(live.prompt.isEmpty ? ConnectionCopy.noPreview : live.prompt).font(.system(size: 15.5)).lineLimit(2)
                 Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? scope.label : nil,
                                               project: projectName(live.cwd), provider: live.providerId))
-                  .font(.caption).foregroundStyle(Palette.muted).lineLimit(2)
+                  .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(2)
               }
               Spacer()
-              if live.externalSessionId == nil { Text(ConnectionCopy.starting).font(.caption2).foregroundStyle(Palette.muted) }
+              if live.externalSessionId == nil { Text(ConnectionCopy.starting).font(.system(size: 10)).foregroundStyle(Palette.muted) }
               else { LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil) }
             }.padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
           }.buttonStyle(.plain).disabled(live.externalSessionId == nil)
@@ -358,8 +358,8 @@ struct HomeView: View {
   private var dock: some View {
     HStack(spacing: 9) {
       HStack(spacing: 9) {
-        Image(systemName: Symbol.search).font(.subheadline).foregroundStyle(Palette.muted)
-        TextField(ConnectionCopy.searchSessions, text: $model.query).font(.body)
+        Image(systemName: Symbol.search).font(.system(size: 15)).foregroundStyle(Palette.muted)
+        TextField(ConnectionCopy.searchSessions, text: $model.query).font(.system(size: 15))
           .textInputAutocapitalization(.never).autocorrectionDisabled()
       }.padding(.horizontal, 15).frame(minHeight: 48).glass(cornerRadius: 24)
       CircleButton(symbol: Symbol.plus, label: ConnectionCopy.newTask, filled: true, disabled: !run.hasConnection) {
@@ -382,17 +382,17 @@ private struct CatalogRefreshBanner: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
       HStack(alignment: .top, spacing: 8) {
-        Image(systemName: "exclamationmark.circle").font(.subheadline.weight(.medium)).padding(.top, 1)
+        Image(systemName: "exclamationmark.circle").font(.system(size: 14, weight: .medium)).padding(.top, 1)
         VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.footnote.weight(.semibold))
-          Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.caption)
+          Text(title).font(.system(size: 13, weight: .semibold))
+          Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.system(size: 11))
         }
         Spacer(minLength: 4)
       }
       HStack(spacing: 16) {
         Button(failure.requiresPairing ? ConnectionCopy.pairAgain : ConnectionCopy.retry, action: onRetry)
-          .font(.caption.weight(.semibold)).frame(minWidth: 44, minHeight: 44).disabled(refreshing)
-        Button(ConnectionCopy.details, action: onDetails).font(.caption.weight(.medium))
+          .font(.system(size: 12, weight: .semibold)).frame(minWidth: 44, minHeight: 44).disabled(refreshing)
+        Button(ConnectionCopy.details, action: onDetails).font(.system(size: 12, weight: .medium))
           .frame(minWidth: 44, minHeight: 44)
       }
     }
@@ -447,7 +447,7 @@ struct LiveRunBadge: View {
     let origin = live.origin == "mac" ? "Mac · " : ""
     let (text, color): (String, Color) = live.state == "stopping" ? ("停止中", Palette.muted)
       : waiting ? ("等待决定", Palette.amber) : ("运行中", Palette.blue)
-    Text(origin + text).font(.caption2.weight(.semibold)).foregroundStyle(color)
+    Text(origin + text).font(.system(size: 10, weight: .semibold)).foregroundStyle(color)
   }
 }
 
@@ -475,8 +475,8 @@ struct SettingsView: View {
         Section {
           VStack(alignment: .leading, spacing: 4) {
             Label(ConnectionCopy.localHistoryCache, systemImage: "internaldrive")
-              .font(.body.weight(.medium))
-            Text(ConnectionCopy.localHistoryCacheSummary).font(.footnote).foregroundStyle(Palette.muted)
+              .font(.system(size: 14.5, weight: .medium))
+            Text(ConnectionCopy.localHistoryCacheSummary).font(.system(size: 11)).foregroundStyle(Palette.muted)
           }
           .padding(.vertical, 5)
           Button(run.historyCacheClearing ? ConnectionCopy.clearingHistoryCache : ConnectionCopy.clearHistoryCache) {
@@ -491,7 +491,7 @@ struct SettingsView: View {
           }
           .disabled(run.historyCacheClearing).frame(minHeight: 44)
           if let cacheNotice {
-            Text(cacheNotice).font(.footnote).foregroundStyle(Palette.muted)
+            Text(cacheNotice).font(.caption).foregroundStyle(Palette.muted)
           }
         } header: {
           Text(ConnectionCopy.localDataSection)
@@ -506,17 +506,17 @@ struct SettingsView: View {
           }
           if let error = model.destructiveActionError {
             Label(error, systemImage: "exclamationmark.circle")
-              .font(.footnote).foregroundStyle(Palette.warnInk)
+              .font(.system(size: 12)).foregroundStyle(Palette.warnInk)
           }
           Button(role: .destructive) { confirmUnpair = true } label: {
             Text(ConnectionCopy.clearLocalPairing)
-              .font(.body.weight(.medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+              .font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
           }
           .disabled(targets.hasPendingWork || targets.recoveryUnavailable || run.historyCacheClearing)
           if targets.recoveryUnavailable {
-            Text(ConnectionCopy.targetRecoveryUnavailable).font(.footnote).foregroundStyle(Palette.muted)
+            Text(ConnectionCopy.targetRecoveryUnavailable).font(.caption).foregroundStyle(Palette.muted)
           } else if targets.hasPendingWork {
-            Text(ConnectionCopy.pendingBeforeUnpair).font(.footnote).foregroundStyle(Palette.muted)
+            Text(ConnectionCopy.pendingBeforeUnpair).font(.caption).foregroundStyle(Palette.muted)
           }
         }
         .listRowBackground(Palette.canvas)
@@ -539,14 +539,14 @@ struct SettingsView: View {
                           action: @escaping () -> Void) -> some View {
     Button(action: action) {
       HStack(spacing: 12) {
-        Image(systemName: symbol).font(.body).controlIconScale().frame(width: 22)
+        Image(systemName: symbol).font(.system(size: 17)).frame(width: 22)
         VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.body.weight(.medium))
-          Text(detail).font(.footnote).foregroundStyle(Palette.muted).lineLimit(3)
+          Text(title).font(.system(size: 14.5, weight: .medium))
+          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(3)
         }
         Spacer(minLength: 8)
         if let trailing { Circle().fill(trailing).frame(width: 7, height: 7) }
-        Image(systemName: Symbol.chevron).font(.caption.weight(.semibold)).controlIconScale().foregroundStyle(Palette.faint)
+        Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.faint)
       }
       .padding(.vertical, 4).frame(minHeight: 52).contentShape(Rectangle())
     }
