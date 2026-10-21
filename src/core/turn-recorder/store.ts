@@ -7,7 +7,7 @@ import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn
 import { copyRecorderContent, readRecorderContent } from './content-store.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.49'
+export const RECORDER_VERSION = '0.2.50'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -402,6 +402,30 @@ async function invokeCommitHook(
   })
 }
 
+function commitHookStatePath(dataRoot: string, fingerprint: string): string {
+  return join(dataRoot, 'notifications', 'commit-hooks', `${stableHash(fingerprint)}.json`)
+}
+
+async function readCommitHookAck(dataRoot: string, fingerprint: string): Promise<{
+  ackedThrough: number | null
+  isolatedAck: number | null
+}> {
+  // Keep v1 read-only: an old App can still own it while a new CLI writes its own
+  // checkpoint. Only the exact same identity may contribute a prior ACK.
+  const [isolated, legacy] = await Promise.all([
+    readJson<CommitHookState>(commitHookStatePath(dataRoot, fingerprint)),
+    readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
+  ])
+  const validAck = (state: CommitHookState | null): number | null =>
+    state?.schemaVersion === 1 && state.hookFingerprint === fingerprint &&
+      Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
+      ? state.ackedThrough : null
+  const isolatedAck = validAck(isolated)
+  const legacyAck = validAck(legacy)
+  const ackedThrough = isolatedAck === null ? legacyAck : Math.max(isolatedAck, legacyAck ?? 0)
+  return { ackedThrough, isolatedAck }
+}
+
 export interface CommitNotificationStatus {
   ackedThrough: number | null
   notifyBacklog: number
@@ -416,12 +440,7 @@ export async function commitNotificationStatus(
   dataRoot: string,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<CommitNotificationStatus> {
-  const fingerprint = configuredCommitHookFingerprint(env)
-  const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
-  const acked = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint &&
-    Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
-    ? state.ackedThrough
-    : null
+  const { ackedThrough: acked } = await readCommitHookAck(dataRoot, configuredCommitHookFingerprint(env))
   const files = await recordFiles(dataRoot)
   return {
     ackedThrough: acked,
@@ -462,22 +481,20 @@ export async function drainCommitNotifications(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
-    const fingerprint = configuredCommitHookFingerprint(env)
-    const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint ? state.ackedThrough : 0
-    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length, truncated: false }
+    const { ackedThrough } = await readCommitHookAck(dataRoot, configuredCommitHookFingerprint(env))
+    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > (ackedThrough ?? 0)).length, truncated: false }
   }
   if (!hook) return { delivered: 0, pending: 0, truncated: false }
   try {
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
-      const statePath = join(dataRoot, 'notifications', 'commit-hook-state.json')
-      const state = await readJson<CommitHookState>(statePath)
       const hookFingerprint = configuredCommitHookFingerprint(env)
-      const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === hookFingerprint &&
-        Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
-        ? state.ackedThrough
-        : 0
-      const pending = (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough)
+      const statePath = commitHookStatePath(dataRoot, hookFingerprint)
+      const { ackedThrough, isolatedAck } = await readCommitHookAck(dataRoot, hookFingerprint)
+      if (ackedThrough !== null && ackedThrough !== isolatedAck) {
+        // Persist even with no backlog, before another identity replaces the legacy file.
+        await writeJsonAtomic(statePath, { schemaVersion: 1, hookFingerprint, ackedThrough } satisfies CommitHookState)
+      }
+      const pending = (await recordFiles(dataRoot)).filter((file) => file.sequence > (ackedThrough ?? 0))
       const now = options.now ?? Date.now
       const deadline = options.budgetMs != null ? now() + options.budgetMs : null
       let delivered = 0
@@ -514,10 +531,8 @@ export async function drainCommitNotifications(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
-    const fingerprint = configuredCommitHookFingerprint(env)
-    const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint ? state.ackedThrough : 0
-    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length, truncated: false }
+    const { ackedThrough } = await readCommitHookAck(dataRoot, configuredCommitHookFingerprint(env))
+    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > (ackedThrough ?? 0)).length, truncated: false }
   }
 }
 
