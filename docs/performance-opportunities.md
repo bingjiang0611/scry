@@ -7,8 +7,13 @@
 - 独立 CLI 日常样本提示每轮通常采集 18–19 个仓库；不能用 App journal 替代其热点证据。当前优先多仓库采集与通知重复工作，暂缓用户级服务和内容存储重建。
 - 固定 19 仓库 × 512 文件、每种调度 4 轮：19/4/1 路峰值子进程为 38/8/2，全部证据断言通过；正常无变化轮均需 190 次 Git。19 路有一轮出现 16 次 discovery_failed fallback、额外 31 次 Git，其他调度本轮没有。
 - 测量源码 `3f30987`；10 核机器负载 75.25→45.48，L2 unavailable，不据此改生产并发值或宣布提速。未优化、未合入、未安装、未推送，台账不变。
-- 通知身份不一致定位到项目定制 bridge 自行注入 host override；core 不应改变 host 优先级。临时回调对照区分了身份失配与真实 callback 失败，149 项相关测试通过；真实 daemon 与上传未操作。
-- 后续：性能 owner 在低负载下重测同一负载；项目集成 owner 离线修 bridge，daemon 切换和积压补发另需用户授权。范围、原始结果及交付状态见[实验记录](performance-experiments/20261021-cli-multirepo-concurrency.md)。
+- 后续：性能 owner 在低负载下重测同一负载，不改变原 workload 或 deadline。范围与原始结果见[实验记录](performance-experiments/20261021-cli-multirepo-concurrency.md)。
+
+## 通知身份隔离（2026-10-21，已部署独立 CLI 0.2.50）
+
+- 经另行在线授权，发现 App 与 CLI 不同指纹共用一个 ACK 文件，成功投递仍反复擦除另一身份进度。项目 bridge 合成 override 的问题已修复，但不是完整根因；没有改变 host 优先级或把两个指纹强行归一。
+- `6d4b62c` 按指纹持久保存 ACK、只读兼容旧文件。601 项 CLI 门禁与真实双版本进程并发通过，已更新两个实际独立 CLI 入口和 daemon，App 未更新。后续自然新增记录 2435 来自旧版本；App 身份旧文件为 ACK 15，新 CLI 独立文件为 ACK 2435、backlog 0，未互相覆盖。这是有限场景正确性证据，不是 L2/L3 提速证据。
+- 通知任务数不等于未上传记录数，也不把 CLI backlog 0 当作所有身份均已清空。已有队列保留，历史上传死信未重投；测试维护者后续需按全量执行顺序调查 7 项不稳定失败，本次不扩大到 App 修复。详见[交付记录](performance-experiments/20261021-cli-ack-isolation.md)。
 
 ## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
 
