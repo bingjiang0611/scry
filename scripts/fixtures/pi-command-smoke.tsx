@@ -17,6 +17,27 @@ const questions: AgentQuestionRequest[] = [
   ] }
 ]
 
+function SingleQuestionnaireFixture() {
+  const [reply, setReply] = useState<unknown>(null)
+  const questionnaire = PiQuestionnaire.fromTool('pi-single', 'single-tool', { questions: [
+    { header: 'Next focus', question: '你想优先改哪些方向？可多选；提交前可调整。', multiSelect: true, options: [
+      { label: '可读性与大字体', description: '改善文字阅读' },
+      { label: '首页信息密度', description: '提升会话扫描效率' }
+    ] }
+  ] })!
+  const event = {
+    id: 'single-input', method: 'input', placeholder: '1,3',
+    title: '[Next focus] 你想优先改哪些方向？可多选；提交前可调整。\n\n1. 可读性与大字体 — 改善文字阅读\n2. 首页信息密度 — 提升会话扫描效率\n\nEnter numbers'
+  }
+  if (!questionnaire.matches(event)) throw new Error('Single questionnaire did not match its native prompt')
+  return <section id="pi-single-questionnaire">
+    <AskUserQuestionInline request={questionnaire.request} queuedCount={0} onRespond={async (response) => {
+      setReply(await questionnaire.reply(event, async () => response))
+    }} />
+    <output id="pi-single-reply">{JSON.stringify(reply)}</output>
+  </section>
+}
+
 function GroupedQuestionnaireFixture() {
   const [version, setVersion] = useState(0)
   const [answers, setAnswers] = useState<AgentQuestionResponse[]>([])
@@ -41,7 +62,7 @@ export function PiCommandFixture() {
     providerId: 'pi', runtimeProvider: 'pi_rpc', text: 'Command interaction ended; model turn unobserved',
     providerCommand: { name: 'fixture-menu', source: 'extension', modelTurn: 'unobserved' }
   }
-  return <><GroupedQuestionnaireFixture /><section id="pi-command">
+  return <><SingleQuestionnaireFixture /><GroupedQuestionnaireFixture /><section id="pi-command">
     <button id="pi-command-restart" onClick={() => { setStep(0); setAnswers([]) }}>Restart menu</button>
     <AssistantTurn
       turn={{ runId: 'pi-command-ui', userText: '/fixture-menu', done, items: done ? [

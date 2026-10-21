@@ -36,7 +36,7 @@ export class PiQuestionnaire {
 
   static fromTool(runId: string, toolCallId: string, input: unknown): PiQuestionnaire | null {
     const request = normalizeAgentQuestionRequest(runId, toolCallId, input, undefined, 'pi_questionnaire')
-    if (!request || request.questions.length < 2) return null
+    if (!request) return null
     request.providerId = 'pi'
     request.questions = request.questions.map((question) => ({
       ...question,

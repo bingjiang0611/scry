@@ -351,7 +351,7 @@ async function exercisePiCommands(contents) {
   const click = async (selector) => {
     const point = await contents.executeJavaScript(`(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
-      if (!node) throw new Error('Missing Pi command control');
+      if (!node) throw new Error('Missing Pi command control: ' + ${JSON.stringify(selector)});
       node.scrollIntoView({ block: 'center' });
       const rect = node.getBoundingClientRect();
       const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
@@ -368,6 +368,24 @@ async function exercisePiCommands(contents) {
     await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   }
   contents.focus()
+  const single = '#pi-single-questionnaire'
+  const selectedCount = `document.querySelectorAll('${single} input[type="checkbox"]:checked').length`
+  await wait(`document.querySelectorAll('${single} input[type="checkbox"]').length === 3 && document.querySelector('${single} .question-submit').disabled`)
+  await click(`${single} .question-option:nth-child(1)`)
+  await wait(`document.querySelector('${single} .question-option:nth-child(1) input').checked`)
+  await click(`${single} .question-option:nth-child(2)`)
+  await wait(`${selectedCount} === 2`)
+  // Toggling one choice must preserve the other; Space must work on the focused checkbox.
+  await click(`${single} .question-option:nth-child(1)`)
+  await wait(`${selectedCount} === 1 && document.querySelector('${single} .question-option:nth-child(2) input').checked`)
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' })
+  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' })
+  await wait(`${selectedCount} === 2 && document.querySelector('#pi-single-reply').textContent === 'null'`)
+  await click(`${single} .question-submit`)
+  await wait(`JSON.parse(document.querySelector('#pi-single-reply').textContent)?.value === '1,2'`)
+  const singleReply = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-single-reply').textContent)`)
+  if (singleReply.type !== 'extension_ui_response' || singleReply.id !== 'single-input') throw new Error('Single multi-select reply did not use the native Pi protocol')
+
   const field = (index) => `#pi-questionnaire .question-field:nth-child(${index})`
   const batchAnswers = `JSON.parse(document.querySelector('#pi-questionnaire-answers').textContent)`
   await wait(`document.querySelectorAll('#pi-questionnaire .question-field').length === 3 && document.querySelector('#pi-questionnaire .question-submit').textContent.includes('提交全部答案') && document.querySelector('#pi-questionnaire .question-status').textContent.includes('还有 3 题待回答')`)
@@ -478,7 +496,7 @@ async function exercisePiCommands(contents) {
     const customAnswers = await contents.executeJavaScript(`JSON.parse(document.querySelector('#pi-command-answers').textContent)`)
     if (customAnswers.length !== 1 || customAnswers[0].answers['Choose an action'] !== customAnswer || customAnswers[0].nativeCustomAnswer !== true) throw new Error('Native custom-answer submission lost text')
   }
-  return { piGroupedReview: true, piGroupedDraftRetention: true, piGroupedSubmitOnce: true, piGroupedCancel: true, piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
+  return { piSingleMultiSelect: true, piSingleToggleAndKeyboard: true, piSingleNativeReply: true, piGroupedReview: true, piGroupedDraftRetention: true, piGroupedSubmitOnce: true, piGroupedCancel: true, piMenuChain: true, piEditorPrefill: true, piInlineCustomInput: true, piCancelAndReopen: true, piCommandFeedback: true, piCustomAnswerChain: true, piCustomInputCancel: true, piCustomChoiceReversible: true, customAnswerEnter: true, emptyEnterIgnored: true, compositionEnterIgnored: true, multilineEnterPreserved: true, controlEnterSubmit: true }
 }
 
 async function exerciseSessionSelection(contents, scenario) {
