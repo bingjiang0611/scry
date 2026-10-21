@@ -2,6 +2,14 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## Mac UI 流畅性首轮（2026-10-21，源码已验证、安装受阻）
+
+- 固定 277 会话原生 UI fixture：切换行执行 **555 → 2**，hover **280 → 5**；20 次流式更新仍不重绘 Sidebar。存档 277 行两次渲染的新建日期格式化器 **554 → 0**（复用模块实例）。均为 **L1**，不等于用户日常端到端耗时下降。
+- 保留视觉与交互；取消 hover owner 的列表级 context 广播，memo 隔离无关行；减少动态效果时真正禁用 transition。完整 renderer UI、typecheck、build 通过。
+- 两轮安装门禁的 unit 分别有 1/13 个失败（高负载下后端超时、清理失败及一个 Codex fixture SIGABRT）；未绕过门禁，未安装、未替换用户实例。修改隔离在分支，不混入主工作区并行 WIP。
+- 下一优先：集成 owner 在并行工作冻结、负载正常后重验安装；性能 owner 单独测历史打开与 Provider 能力加载，现有等待不能靠动画修复。iPhone 留待真机轮次。
+- 固定负载、负对照、首次失败和限制见 [实验记录](performance-experiments/20261021-desktop-ui-fluidity.md)。
+
 ## 目录观测与传输修复交付（2026-10-20，已安装、待手动重启）
 
 [0.2.211交付记录](performance-experiments/20261020-catalog-observation-0211.json)已冻结本次范围：原样迁移此前 `ee782b4` 的最小脱敏目录观测，并将当前WIP中已有的Mac1连接元数据剥离修复纳入安装包。不实现按需刷新，不改变冷发现、进程退出、模型/权限或Owner/trust语义。
