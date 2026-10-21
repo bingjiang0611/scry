@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '@shared/trace'
-import { enqueuePrompt, migrateSessionPromptQueue, type QueuedPrompt } from './App'
+import { enqueuePrompt, editedPromptToTail, migrateSessionPromptQueue, nextDrainableQueuedPrompt, type QueuedPrompt } from './App'
 import {
   activeSteerIdentityMatches,
   isSteerDrainBlocked,
@@ -30,6 +30,49 @@ describe('renderer Steer queue contract', () => {
     const withSecond = enqueuePrompt(queue, 'second', [], { providerId: 'pi' })
     expect(withSecond[0].messageId).not.toBe(withSecond[1].messageId)
     expect(removeQueuedPromptByMessageId(withSecond, withSecond[1].messageId).map((item) => item.text)).toEqual(['first'])
+  })
+
+  it('编辑后重新入队：原位置移除、换新 id 排到队尾、附件随行、旧 Steer 状态不跟着走', () => {
+    const base = enqueuePrompt([], 'first', [], { providerId: 'pi' })
+    const queue: QueuedPrompt[] = [
+      {
+        ...base[0],
+        attachments: [{ kind: 'image', name: 'a.png', mimeType: 'image/png', dataBase64: 'aQ==' }],
+        steer: { status: 'rejected', message: 'Provider 拒绝' }
+      },
+      { ...prompt('second'), request: base[0].request }
+    ]
+    const moved = editedPromptToTail(queue, queue[0].messageId, 'first edited')
+
+    expect(moved.queue.map((item) => item.text)).toEqual(['second', 'first edited'])
+    expect(moved.next?.messageId).toBe(moved.queue[1].messageId)
+    // 新 id 是必要的：旧 id 上的 rejected 证据不能审到一条新消息上。
+    expect(moved.next?.messageId).not.toBe(queue[0].messageId)
+    expect(moved.next?.steer).toBeUndefined()
+    expect(moved.next?.attachments.map((attachment) => attachment.name)).toEqual(['a.png'])
+    expect(moved.next?.request.providerId).toBe('pi')
+  })
+
+  it('编辑时新加的附件合并到同一队列项，队列项已不存在时不动队列也不丢文本', () => {
+    const queue = enqueuePrompt([], 'only', [], { providerId: 'pi' })
+    const merged = editedPromptToTail(queue, queue[0].messageId, 'edited', [
+      { kind: 'image', name: 'new.png', mimeType: 'image/png', dataBase64: 'aQ==' }
+    ])
+    expect(merged.next?.attachments.map((attachment) => attachment.name)).toEqual(['new.png'])
+
+    const missing = editedPromptToTail(queue, 'gone', 'edited')
+    expect(missing.queue).toBe(queue)
+    expect(missing.next).toBeNull()
+  })
+
+  it('编辑中的行不参与自动出队，其余消息仍按 FIFO 先发', () => {
+    const queue = [prompt('a'), prompt('b'), prompt('c')]
+    expect(nextDrainableQueuedPrompt(queue, 'a')?.messageId).toBe('b')
+    expect(nextDrainableQueuedPrompt(queue, 'b')?.messageId).toBe('a')
+    expect(nextDrainableQueuedPrompt(queue, null)?.messageId).toBe('a')
+    expect(nextDrainableQueuedPrompt([], null)).toBeNull()
+    // 只剩编辑中的那条时宁可不出队，也不提前发未完成的编辑。
+    expect(nextDrainableQueuedPrompt([prompt('a')], 'a')).toBeNull()
   })
 
   it('keeps the original queue object identity across a session-key migration race', () => {

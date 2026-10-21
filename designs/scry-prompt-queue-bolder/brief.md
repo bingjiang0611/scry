@@ -1,96 +1,78 @@
-# Scry · 等待队列 · Bolder + 队列消息编辑 设计稿
+# Scry · 等待队列 Bolder + 队列消息编辑 · 设计与落地记录
 
-## 范围与状态
+## 状态
 
-- 日期：2026-10-21。
-- 用户要求：① 用 `bolder` 提升 composer 上方「等待运行」队列的 UI；② 每条队列消息加编辑按钮，点回输入框改，再次发送后落到队尾。**先出设计稿**。
-- 状态：待你选定方向。本次没有改产品代码，没有升版本、构建或安装。
-- 目标：只动 `.prompt-queue` 这一块（`src/renderer/components/ChatView.tsx:703–805`），以及它自己新增的编辑动作和行状态。
-- 不动：运行状态条（`运行中 · 00:45 · 停止本轮`）、会话区、发送/排队默认语义。截图里那个蓝色外框属于 composer 的 focus 外观，不在本次范围。
-- 入口：直接用浏览器打开 `designs/scry-prompt-queue-bolder/index.html`（相对资源，无需服务）。http 版：`python3 -m http.server 8771 --bind 127.0.0.1 --directory designs/scry-prompt-queue-bolder`。
-- 深链接：`#compare=1`（四稿同屏）、`#s=unknown|pending|rejected|unavailable`、`#theme=light`、`#w=720`、`#v=a|b|c|d`。
+- 设计日期 2026-10-21；同日选定 **B · 阶梯** 并落地到产品代码。
+- 决策：编辑队列消息后**跳过后面的先发**——编辑中的行留在原位，其余消息照常按 FIFO 继续；发送后该条移到队尾。
+- 设计稿（四稿对照）保留在 `designs/scry-prompt-queue-bolder/index.html`，可直接打开；下面是落地后的真实合同。
+- 目标范围只动 `.prompt-queue` 块与它新增的编辑动作；运行状态条、输入区、会话区布局不变。
 
-## 为什么队列读起来是平的
+## 为什么原来是平的
 
-| 现实现 | 观察 |
+| 原实现 | 观察 |
 | --- | --- |
-| `.queue-item` 44px 等高、`--surface-subtle` 底 + 1px `--border3` 框 | 3 行长得一样，队列里唯一真正的信息——**顺序**——只剩一个 22px 圆点数字 |
-| 序号 10px、正文 12.5px、按钮 10.5px（`styles.css:2335–2375`） | 三档字号挤在 2.5px 内，「下一个」和「第 3 条」没有层级差 |
-| 容器 12px 圆角 + `--shadow-pop`（`codex-alignment.css:1204`） | 一个贴着输入框的内联块带 64px 投影，边界比内容更响 |
-| 行状态靠 `disabled` + `title` 暗示 | 「提交中 / 结果未知」默认看不见 |
-| `.queue-hint` 用 `--dim3` `#535d6e` | 对 `--panel` 约 2.95:1，低于 4.5:1；这句正是「任务结束后依次发送」的关键说明 |
+| 每行 44px 等高、`--surface-subtle` 底 + 1px 框 | 三行长得一样，队列里唯一的信息——顺序——只剩一个 22px 圆点数字 |
+| 序号 10px、正文 12.5px、按钮 10.5px | 三档字号挤在 2.5px 内，「下一个」和「第 3 条」没有层级差 |
+| 容器 12px 圆角 + `--shadow-pop` | 贴着输入框的内联块带 64px 投影，边界比内容更响 |
+| 状态靠 `disabled` + `title` | 「提交中 / 结果未知」默认看不见 |
+| `.queue-hint` 用 `--dim3` | 对 `--panel` 约 2.95:1，而这句正是「任务结束后依次发送」 |
 
-## 四稿
+## 落地的 B 稿
 
-| 稿 | 峰值（先看到什么） | 结构装置 | 代价 |
-| --- | --- | --- | --- |
-| A · 现状 | 三行等高，无峰值 | 逐行卡片 | 对照用 |
-| **B · 阶梯** | 第 1 条（15px 琥珀序号 + 抬高面） | 序号并进 1px 竖轨，其余行为发丝线；状态改由竖轨报（琥珀 = 未决，红 = 拒绝，蓝 = 编辑中） | 最小，窄窗不牺牲正文 |
-| C · 状态列 | 状态词竖列 | 保留逐行卡片，右侧固定 62px 状态列（含 `编辑中`） | 正文少 62px，「等待」重复 3 次 |
-| D · 单峰 | 下一条消息本身 | 只展开第 1 条，其余折成 `展开后面 N 条` | 给后面消息 Steer/编辑要多一次点击 |
+- 容器去 `--shadow-pop`，改内嵌面 + 发丝边框（`codex-alignment.css` 里原来的 `.prompt-queue` 覆盖同步拆开）。
+- 序号并进 1px 竖轨（34px 列、右对齐），行间只有发丝线；只有「下一个」抬高（50px、15px 琥珀序号、`--surface-hover` 面、inset 1px 描边）。
+- 状态改由竖轨报：琥珀 = 未决（提交中 / 结果未知），红 = 明确拒绝，蓝 = 正在输入框里编辑。
+- 次要行正文降到 `--dim` 12px，Steer 边框降到 `--border3`；「下一个」的 Steer 才用 `--accent`。
+- 说明文字从 `--dim3` 提到 `--dim2`。
+- 设计阶段的 C（状态列）、D（单峰）没有落地，仍留在设计稿里作对照。
 
-建议 **B > C > D**：B 只用系统已有的东西（mono 序号、琥珀等待色、发丝线）把顺序讲清楚，没有新图形。
+## 编辑队列消息
 
-## 新增：编辑队列消息
+铅笔按钮在 **Steer 与移除之间**（`Icon name="edit"`），点击把该条文本放回输入框。
 
-按钮放在 **Steer 与移除之间**（铅笔图标，`title` 说明后果）。四稿都加，位置一致，不影响既有 Steer 命中区域。
-
-### 交互决定
-
-| 决定 | 理由 |
+| 行为 | 决定与理由 |
 | --- | --- |
-| 点铅笔后，队列里的原条目**不立刻消失**，标为 `编辑中` | 立刻移出会让「这条还在队列里吗」变成猜谜；取消编辑也会变成丢消息 |
-| 编辑中的行，其 Steer / 铅笔 / 移除三个按钮换成单个 `取消编辑` | 内容正在输入框里改，任何行内动作都会制造两个真相 |
-| 输入区上方出现提示条：`编辑队列第 N 条 · 发送后移到队尾 · 自动发送已暂停` | 「移到队尾」和「暂停自动发送」都是行为变化，必须写在用的地方 |
-| 发送后该条**从原位置移除并追加到队尾**，行内标 `编辑后已移到队尾` | 队尾是真实位置，不是视觉假动作；D 稿会自动展开，让你看见它去哪了 |
-| **编辑中的行不进自动出队**；建议整队暂停 | 否则当前任务一结束，就把你改了一半的旧文本发出去 |
-| `提交中` / `结果未知` 的行不能编辑 | 文本已经在 Provider 那一侧，改了也收不回 |
-| 输入框已有内容时铅笔禁用并给出原因 | 不做静默覆盖用户正在打的字 |
-| `Esc` 取消编辑，行与原文本原样保留 | 键盘往返 |
+| 原条目留在队列，标 `is-editing` | 立刻移出会让「这条还在吗」变成猜谜；取消编辑也会变成丢消息 |
+| 编辑中的行只保留 `取消编辑` | 内容正在输入框里改，行内再给 Steer/移除就是两个真相 |
+| 输入区提示条 | `编辑队列第 N 条 · 发送后移到队尾 · 自动发送会先跳过这条`——两个后果都写在用的地方 |
+| 发送 | 原位置移除，作为**新意图**追加到队尾；行内短暂标 `编辑后已移到队尾`（2.5s） |
+| 编辑中的行不进自动出队 | 其余消息照常 FIFO 先发；只剩它一条时宁可不出队，也不提前发未完成的编辑 |
+| 换新的 messageId | 旧 id 上可能挂着 rejected/unknown 的 Steer 证据，复用会把旧回执审到新消息上 |
+| 附件 | **不回到输入框**（原 DraftAttachment 的预览已释放），仍随该条消息走到队尾；编辑期间新加的附件合并进去 |
+| `提交中` / `结果未知` 不可编辑 | 文本已在 Provider 那一侧，改了收不回 |
+| 输入框有内容时铅笔禁用并给原因 | 不静默覆盖用户正在打的字 |
+| `Esc` 取消 | 行与原文本原样保留 |
+| 「下一个」高亮跟着真实发送顺序 | 编辑第 1 条时，高亮落到第 2 条；界面不能骗人 |
 
-### 待你确认的一点
+## 改动清单
 
-「编辑中」时是**整队暂停**，还是**跳过后面的先发**？我按整队暂停画（跳过会破坏用户设定的顺序）。如果你要「后面先走」，第 3 条的编号会在编辑期间变化，需要另一套说法。
+| 文件 | 改动 |
+| --- | --- |
+| `src/renderer/components/ChatView.tsx` | 队列 JSX 重写为竖轨结构、铅笔与取消编辑、编辑提示条、`Esc` 取消；`nextQueuedMessageId` / `editingQueuedIndex` 参与「下一个」判定 |
+| `src/renderer/App.tsx` | `editedPromptToTail`（换 id 重新入队）、`nextDrainableQueuedPrompt`（跳过编辑中）；`editingQueuedPromptId` / `movedQueuedPromptId` 状态、`editQueuedPrompt` / `cancelQueuedPromptEdit`、`send()` 的编辑分支、自动出队改用跳过选择 |
+| `src/renderer/constants/copy.ts` | 新增 `QUEUE_COPY`，队列块与编辑文案集中一处 |
+| `src/renderer/styles.css` | `.prompt-queue` 段按 B 重写；新增 `.queue-edit` / `.queue-edit-cancel` / `.queue-moved` / `.is-next` / `.is-editing` / `.is-steer-rejected` / `.composer-edit-hint` |
+| `src/renderer/codex-alignment.css` | `.prompt-queue` 从浮层组拆出，改内嵌面、去掉 `--shadow-pop` |
+| `scripts/steer-ui-smoke.mjs` + `fixtures/steer.tsx` | 原生坐标点铅笔 → 行变编辑中、文本进输入框、高亮跳到下一条、点 `取消编辑` 复原 |
+| `steer.test.ts` / `render.test.tsx` | 队列项换 id 移到队尾、附件随行、旧 Steer 状态不跟随、跳过语义、编辑态渲染与「有内容时禁用」 |
 
-## 不放松的东西
+## 验证记录
 
-1. 证据语义照旧：`提交中` 不可重复提交/移除；`结果未知` 不可重发、不可移除、不自动出队；`明确拒绝` 才可重试；`能力不可用` 必须写原因。
-2. 能力原因只在整个 composer 底部说一次，不复制到每一行（原型已按此实现）。
-3. 按钮始终可聚焦，焦点环 2px `--accent`；Steer / 编辑 / 移除在视觉上要能看出「可点」，不能只靠 hover。
-4. 只用 `styles.css` / `codex-alignment.css` 现有 token 与 `Icon.tsx` 现有图标路径，不新增颜色、字体、字号。
-5. B/C/D 的说明文字从 `--dim3` 提到 `--dim2`（2.95:1 → 5.45:1）；A 保留上线值作对照。
+| 检查 | 结果 |
+| --- | --- |
+| `npm run typecheck:web` | 通过 |
+| `npm run test:unit -- src/renderer/components/render.test.tsx src/renderer/steer.test.ts src/renderer/remote-prompt-queue.test.ts` | 267 通过（render 245 / steer 12 / remote 10） |
+| `node scripts/steer-ui-smoke.mjs` | 通过，含新增 `queueEditing`：pending 行铅笔禁用、点第 1 条铅笔后 `is-editing`、正文进真实 textarea、`is-next` 落到第 2 条、提示条写明「会先跳过这条」、取消后复原 |
+| `SCRY_STEER_UI_SCREENSHOT` 导出 | 深/浅两版用生产 `styles.css` + `codex-alignment.css` 渲染的队列实图，竖轨、发丝线、抬高行、铅笔、能力说明都正常 |
+| `npm run install:mac:dev` | 打包、`check-packaged-app`、`smoke:electron`（含 steer/session-capability/remote 等）通过，已装到 `/Applications/Scry.app`，备份在 `/Applications/.Scry.app.backup` |
 
-## 选定后的实现合同
-
-- 布局落在 `styles.css` 的 `.prompt-queue` 段；`codex-alignment.css:1204` 的 `--shadow-pop` 覆盖要一并处理，否则新稿会被旧阴影盖回去。
-- 保留 `.queue-item / .queue-text / .queue-steer / .queue-remove / .queue-attach / .queue-steer-capability` 与 `.is-steer-pending / .is-steer-unknown`：`scripts/steer-ui-smoke.mjs` 用它们做原生坐标命中测试。B、C 不改 DOM 结构，可直接跑；**D 必须同步改 fixture**（折叠后行不可命中，要先展开）。
-- 新增类名建议：`.queue-edit`（铅笔）、`.queue-edit-cancel`（行内取消）、`.queue-item.is-editing`、`.composer-edit-hint`。
-- 状态与副作用：
-  - 编辑态存在 renderer state（`editingMessageId` + 输入框草稿），不写 Provider。
-  - 自动出队（`App.tsx:1433–1471` 一带）必须排除 `editingMessageId` 指向的行，并让整队等待；这是本次唯一会改动发送时序的地方。
-  - 发送 = 从队列移除该条 + 用新文本重新入队到队尾；附件一并带过去。顺序变化后 `queuedPrompts` 的 messageId 顺序即事实来源，不要另建影子列表。
-  - `已拒绝` 的行可以编辑：编辑会清掉该条的 Steer 拒绝状态（原拒绝原因仍留在会话/证据里，不静默删除）。
-- 文案：队列文案现在硬编码在 `ChatView.tsx`，实现时按仓库规则集中到 copy 模块；新增键至少包含 `编辑`、`编辑中`、`取消编辑`、`编辑队列第 N 条 · 发送后移到队尾 · 自动发送已暂停`、`编辑后已移到队尾`、`输入框里已有内容：先发送或清空，再编辑队列消息`。
-- 验证：
-  - `npm run test:unit -- src/renderer/components/render.test.tsx src/renderer/remote-prompt-queue.test.ts`
-  - `node scripts/steer-ui-smoke.mjs`：现有 4 行命中检查必须仍过；新增断言——点铅笔 → 行变 `is-editing`、三个动作被 `取消编辑` 替换、输入框拿到文本；发送 → 原位置消失、队尾出现同一 messageId、其余行序号不变序。
-  - `npm run typecheck:web`；真实 App 里看一眼 720 宽度与浅色主题下的截断。
-
-## 检查记录
-
-- Chrome Relay 实渲染，1512×708：A/B/C/D 同屏对比（深/浅各一次）、B 单稿 960 与 720 宽度。
-- 五种状态在四稿中都验证过：正常、`提交中`、`结果未知`、`已拒绝`、`能力不可用`。
-- Steer 流程验证一次（旧版稿）：点第 2 条 Steer → `提交中` → 900ms 后移出、计数 3→2、剩余行重编号、会话区出现模拟回执。
-- 编辑流程验证两次：
-  - B 稿：点第 2 条铅笔 → 该行变 `编辑中`（竖轨转蓝、动作换成 `取消编辑`）、输入区提示条出现、输入框带上原文、发送按钮点得动 → 发送后该条排到第 3 位并标 `编辑后已移到队尾`，计数仍为 3。
-  - C 稿：输入框里打「先不动」后，三个铅笔按钮立刻变成 `disabled=true`（证明「有内容时不能编辑」不是只在点击后失败的假承诺）。
-- 机械检测：`impeccable detect`（`index.html` + `style.css`）0 条 blocking。首轮命中的两条（设计栏 11.5px 正文、分段控件上下内边距 2px）已修设计栏样式；其余 advisory 是 `DESIGN.md` 记录的配色/字号与 `styles.css` 实际值漂移（文档记 `#151515`，实现是 `#07090d`），本次按实现取 token，没有顺手改文档。
+控制实验：编辑按钮的「输入框有内容时禁用」断言第一次是**失败**的——`editDisabled` 漏了 `editDraftBlocked`，单测立刻抓到，补上后才通过。说明这条断言能区分真假实现。
 
 ## 未验证 / 限制
 
-- 没有在真实 App 内替换验证；本次只出稿。
-- 「编辑中整队暂停」只在原型里模拟了提示文案，没有真实出队时序可测。
-- 键盘 Tab 顺序、`aria-live` 朗读、`Esc` 取消后的焦点归位没有在 Electron fixture 里测。
-- 队列超过 5 条时的滚动高度、B 的竖轨在滚动容器内的连续性没有单独截图确认。
-- 附件编辑只做了计数占位（示例数据 1 张），没有真实图片还原流程。
-- Steer 回执、运行时长、自动发送暂停都是模拟行为，不代表任何真实 Provider 验收结果。
+- 真实 App + 真实 Provider 的端到端「排队 → 编辑 → 发送到队尾 → 自动出队跳过」没有跑：需要授权账号与费用，且必须在独立 test 实例里做。
+- `App.tsx` 的编辑分支（`send()` 里的 `editedPromptToTail` 调用、暂停标记清理）只有 helper 级单测覆盖，没有集成测试。
+- 键盘 Tab 顺序、`aria-live` 朗读、`Esc` 后的焦点归位没有在 fixture 里断言。
+- 队列超过约 5 条时 `max-height: 214px` 的滚动、竖轨在滚动容器内的连续性没有截图确认。
+- `RemoteChat.tsx` 有另一套队列实现，本次没动，远端会话看不到铅笔按钮。
+- 编辑期间新加附件只做了合并逻辑，没有真实图片落盘验证。

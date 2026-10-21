@@ -43,12 +43,13 @@ import {
   updateSessionComposerDraft,
   updateSessionPromptQueue,
   dequeueStartedPromptFromSessions,
+  type QueuedPrompt,
   type SessionComposerDraft,
   type SessionEvidenceGap,
   scrollChatTargetIntoView,
   shouldQueuePrompt,
   shouldReloadProjectsForDataUpdate,
-  takeNextQueuedPrompt
+  nextDrainableQueuedPrompt
 } from '../App'
 import { chatBottomDistance, chatBottomStickinessAfterScroll, isChatNearBottom, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { resolveRunControlSelection, shouldResetRunControlCatalog } from '../hooks/useIntegrations'
@@ -3156,6 +3157,42 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(chatHtml).toContain('排队')
   })
 
+  it('编辑队列消息时行内动作让位给取消编辑，并说明会自动跳过这条', () => {
+    const queuedPrompts: QueuedPrompt[] = [
+      { messageId: 'q1', text: '第一条', attachments: [], request: { providerId: 'claude' } },
+      { messageId: 'q2', text: '第二条', attachments: [], request: { providerId: 'claude' } }
+    ]
+    const editing = renderWelcome({
+      busy: true,
+      queuedPrompts,
+      editingQueuedId: 'q1',
+      input: '第一条',
+      onEditQueuedPrompt: () => {},
+      onCancelQueuedPromptEdit: () => {}
+    })
+    expect(editing).toContain('class="queue-item is-editing"')
+    expect(editing).toContain('编辑队列第 1 条 · 发送后移到队尾 · 自动发送会先跳过这条')
+    expect(editing).toContain('取消编辑')
+    // 编辑中的行不再提供行内动作，铅笔跳到下一条；「下一个」高亮跟着真实发送顺序走。
+    expect(editing).not.toContain('aria-label="编辑队列第 1 条消息"')
+    expect(editing).toContain('aria-label="编辑队列第 2 条消息"')
+    expect(editing).toContain('class="queue-item is-next"')
+    expect(editing.indexOf('is-next')).toBeGreaterThan(editing.indexOf('is-editing'))
+
+    const blocked = renderWelcome({
+      busy: true,
+      queuedPrompts,
+      input: '正在输入',
+      movedQueuedId: 'q2',
+      onEditQueuedPrompt: () => {}
+    })
+    // 不静默覆盖用户正在打的字：按钮禁用并在 title 里给出原因。
+    expect(blocked).toContain('输入框里已有内容：先发送或清空，再编辑队列消息')
+    expect(blocked).toMatch(/class="queue-edit"[^>]*disabled/)
+    expect(blocked).toContain('编辑后已移到队尾')
+    expect(blocked).toContain('aria-label="编辑队列第 1 条消息"')
+  })
+
   it('切换会话只重置启动控制，不清除按会话隔离的队列', () => {
     expect(resetQueuedPromptControl(7)).toEqual({ generation: 8, pending: false, inFlight: false })
 
@@ -3218,11 +3255,11 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
         permissionMode: 'default'
       }
     })
-    const first = takeNextQueuedPrompt(queue)
-    expect(first.next?.text).toBe('先做 A')
-    expect(first.rest[0].attachments[0].name).toBe('queued.png')
-    expect(dequeueStartedPrompt(queue, first.next!)).toEqual(first.rest)
-    expect(dequeueStartedPrompt(queue, { ...first.next! })).toBe(queue)
+    const first = nextDrainableQueuedPrompt(queue, null)
+    expect(first?.text).toBe('先做 A')
+    expect(queue.slice(1)[0].attachments[0].name).toBe('queued.png')
+    expect(dequeueStartedPrompt(queue, first!)).toEqual(queue.slice(1))
+    expect(dequeueStartedPrompt(queue, { ...first! })).toBe(queue)
     expect(shouldQueuePrompt(false, queue.length, true)).toBe(true)
     expect(shouldQueuePrompt(false, queue.length, false)).toBe(true)
     expect(shouldQueuePrompt(false, 0, false)).toBe(false)

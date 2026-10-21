@@ -364,3 +364,43 @@ export const QUESTIONNAIRE_COPY = {
 export const CONVERSATION_COPY = {
   handoffScope: '缺失文字按预算补齐，其余可检索。只发送当前图片，不重放历史图片。原生命令和 Steer 暂不支持。'
 } as const
+
+// 排队消息块的全部用户可见文案。Steer 的状态文案与证据语义绑定：
+// pending/unknown 不是「稍后再试」，而是「已经交出去，不能撤销」。
+export const QUEUE_COPY = {
+  title: '等待运行',
+  hint: '当前任务结束后依次发送',
+  listLabel: (count: number) => `排队中的消息，共 ${count} 条`,
+  imagesOnly: (count: number) => `${count} 张图片`,
+  attachmentsTitle: (names: string[]) => names.join('\n'),
+  steer: 'Steer',
+  steerPending: '提交中',
+  steerRetry: '重试 Steer',
+  steerLabel: (label: string, index: number) => `${label}：队列第 ${index} 条消息`,
+  steerTitle: '不中断模型，将这条消息补充给当前任务',
+  steerTitleEnded: '当前任务已结束，Steer 仅可发送给运行中的任务',
+  steerTitleWaiting: '正在等待运行时 Steer 能力证据',
+  steerTitlePending: 'Steer 正在提交；完成前不能重复提交或移除',
+  steerTitleUnknown: (reason?: string) => `结果未知：${reason ?? '请先核对 Provider 回执'}；不能重发或移除`,
+  steerTitleRejected: (reason?: string) => `Provider 明确拒绝：${reason ?? '未提供原因'}；点击重试`,
+  steerTitleNoAttachments: '当前运行不支持 Steer 图片附件',
+  steerUnavailable: (reason: string) => `Steer 不可用：${reason}`,
+  reasonRejected: 'Provider 已拒绝',
+  reasonUnavailable: 'Steer 不可用',
+  reasonUnknown: '结果未知；暂不重发或自动出队',
+  remove: '移除排队消息',
+  removeLabel: (index: number) => `移除队列第 ${index} 条消息`,
+  removeTitlePending: 'Steer 正在提交，不能移除',
+  removeTitleUnknown: '结果未知的 Steer 不能移除',
+  edit: '编辑这条消息',
+  editLabel: (index: number) => `编辑队列第 ${index} 条消息`,
+  editTitle: '把这条消息放回输入框修改；发送后移到队尾',
+  editTitleStarting: '队首消息正在启动，完成前不能编辑',
+  editTitlePending: 'Steer 正在提交，不能编辑',
+  editTitleUnknown: '结果未知的 Steer 不能编辑，先核对 Provider 回执',
+  editTitleDraft: '输入框里已有内容：先发送或清空，再编辑队列消息',
+  // 「移到队尾」和「自动发送会跳过这条」都是行为变化，必须写在用的地方。
+  editingHint: (index: number) => `编辑队列第 ${index} 条 · 发送后移到队尾 · 自动发送会先跳过这条`,
+  cancelEdit: '取消编辑',
+  editedMoved: '编辑后已移到队尾'
+} as const

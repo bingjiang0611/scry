@@ -84,13 +84,26 @@ async function exercise(contents) {
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
   await wait(`document.querySelector('#fixture').dataset.sends === '1'`)
 
+  // 编辑队列消息：行内动作让位给取消编辑，文本进到真实输入框，队列高亮跟真实发送顺序走。
+  // 先断「正在提交的行不能编辑」——文本已经在 Provider 那一侧了。
+  console.log('Steer UI: checking queue message editing')
+  check(await read(`(() => { const button = document.querySelectorAll('.queue-item')[1].querySelector('.queue-edit'); return button.disabled && button.title.includes('Steer 正在提交') })()`), 'Pending Steer row allowed editing')
+  await clickRowButton(0, 'queue-edit')
+  await wait(`document.querySelectorAll('.queue-item')[0].classList.contains('is-editing')`)
+  check(await read(`(() => { const row = document.querySelectorAll('.queue-item')[0]; return document.querySelector('textarea[aria-label="描述任务"]').value === row.querySelector('.queue-text').title && row.querySelector('.queue-edit-cancel') != null && row.querySelector('.queue-steer') == null })()`), 'Editing did not replace the row actions or load the text into the composer')
+  check(await read(`!document.querySelectorAll('.queue-item')[0].classList.contains('is-next') && document.querySelectorAll('.queue-item')[1].classList.contains('is-next')`), 'Editing row still claimed the next highlight')
+  check(await read(`document.querySelector('.composer-edit-hint')?.textContent.includes('自动发送会先跳过这条')`), 'Edit hint did not state that automatic sending skips this message')
+  await clickRowButton(0, 'queue-edit-cancel')
+  await wait(`!document.querySelectorAll('.queue-item')[0].classList.contains('is-editing')`)
+  check(await read(`(() => { const row = document.querySelectorAll('.queue-item')[0]; return row.querySelector('.queue-edit') != null && row.classList.contains('is-next') && document.querySelector('textarea[aria-label="描述任务"]').value === '' })()`), 'Cancel did not restore row actions, highlight and an empty composer')
+
   // Explicit Stop clears ordinary messages, never the unresolved Steer payloads.
   console.log('Steer UI: native actions passed; checking Stop preservation')
   await click('.run-status-stop')
   await wait(`document.querySelectorAll('.queue-item').length === 3 && !document.querySelector('.run-status-stop')`)
   check(await read(`(() => { const rows = [...document.querySelectorAll('.queue-item')]; return rows[0].querySelector('.queue-text').title.includes('对当前任务补充') && rows[1].classList.contains('is-steer-unknown') && rows[2].querySelector('.queue-attach')?.title.includes('diagram.png') && rows.every(row => row.querySelector('.queue-remove').disabled) })()`), 'Stop discarded or unprotected unresolved Steer payloads')
 
-  return { coordinateHit: true, selectedRowOnly: true, pendingActionsDisabled: true, fullAcceptedEvidence: true, unknownBarrier: true, unsupportedReason: true, attachmentReachable: true, nativeKeyboardEnter: true, manualStopKeepsUncertain: true }
+  return { coordinateHit: true, selectedRowOnly: true, pendingActionsDisabled: true, fullAcceptedEvidence: true, unknownBarrier: true, unsupportedReason: true, attachmentReachable: true, nativeKeyboardEnter: true, queueEditing: true, manualStopKeepsUncertain: true }
 }
 
 try {

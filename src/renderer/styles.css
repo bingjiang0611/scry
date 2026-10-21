@@ -2267,23 +2267,25 @@ body.pane-resizing * {
   font-size: 12.5px;
   color: var(--dim);
 }
+/* 排队消息块：顺序是这里唯一真正的信息，所以用序号竖轨当刻度，只把「下一个」抬高。
+   状态也交给竖轨报（琥珀 = 未决，红 = 明确拒绝，蓝 = 正在输入框里编辑），不再每行套一个框。 */
 .prompt-queue {
   margin-bottom: 8px;
-  max-height: 178px;
-  padding: 6px;
+  max-height: 214px;
+  padding: 7px 9px 4px;
   overflow: auto;
   border: 1px solid var(--border3);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface-inset-soft);
 }
 .queue-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 24px;
-  padding: 0 5px 6px;
+  min-height: 22px;
+  padding: 0 3px 7px;
   color: var(--dim2);
-  font: 10.5px/1 var(--font-ui);
+  font: 11.5px/1 var(--font-ui);
 }
 .queue-title-main {
   display: inline-flex;
@@ -2309,75 +2311,153 @@ body.pane-resizing * {
   color: var(--warn);
   font: 10px/1 var(--font-mono);
 }
+/* 这句是「任务结束后依次发送」的关键语义，原来的 --dim3 对 --panel 只有 2.95:1。 */
 .queue-hint {
   margin-left: auto;
   overflow: hidden;
-  color: var(--dim3);
+  color: var(--dim2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .queue-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 .queue-item {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto 30px;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto auto 28px;
   align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 4px 6px;
-  border: 1px solid var(--border3);
-  border-radius: 7px;
-  background: var(--surface-subtle);
+  gap: 10px;
+  min-height: 36px;
+  padding: 5px 5px 5px 0;
+  border: 0;
+  border-top: 1px solid var(--border3);
+  border-radius: 0;
+  background: transparent;
+}
+.queue-item:first-child {
+  border-top: 0;
+}
+.queue-item:hover {
+  background: var(--surface-hover);
+}
+.queue-item.is-next {
+  min-height: 50px;
+  padding: 8px 6px;
+  border-radius: var(--r-lg);
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--border3);
+}
+.queue-item.is-next:hover {
+  background: var(--surface-raised);
 }
 .queue-index {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: var(--r-pill);
-  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: stretch;
+  width: auto;
+  height: auto;
+  padding-right: 8px;
+  border-right: 1px solid var(--border3);
+  border-radius: 0;
+  background: none;
+  color: var(--dim2);
+  font: 500 11.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.queue-item.is-next .queue-index {
+  border-right-color: color-mix(in srgb, var(--warn) 50%, var(--border3));
+  color: var(--warn);
+  font-size: 15px;
+  font-weight: 600;
+}
+.queue-item.is-steer-pending .queue-index,
+.queue-item.is-steer-unknown .queue-index {
+  border-right-color: color-mix(in srgb, var(--warn) 60%, var(--border3));
+  color: var(--warn);
+}
+.queue-item.is-steer-rejected .queue-index {
+  border-right-color: color-mix(in srgb, var(--bad) 60%, var(--border3));
+  color: var(--bad);
+}
+.queue-item.is-editing .queue-index {
+  border-right-color: color-mix(in srgb, var(--accent) 55%, var(--border3));
   color: var(--accent);
-  font: 10px/1 var(--font-mono);
 }
 .queue-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--dim);
+  font-size: 12px;
+}
+.queue-item.is-next .queue-text {
   color: var(--fg);
-  font-size: 12.5px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.queue-item.is-editing .queue-text {
+  color: var(--fg);
 }
 .queue-steer-reason {
   display: block;
   overflow: hidden;
+  margin-top: 2px;
   color: var(--dim2);
-  font-size: 10px;
+  font-size: 10.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.queue-steer-capability {
-  padding: 6px 5px 2px;
+.queue-moved {
+  display: block;
+  margin-top: 2px;
   color: var(--dim2);
   font-size: 10.5px;
 }
+.queue-steer-capability {
+  padding: 6px 3px 2px;
+  color: var(--dim2);
+  font-size: 11px;
+}
 .queue-steer {
-  min-height: 28px;
+  min-height: 26px;
   padding: 0 7px;
   border: 1px solid var(--border3);
   border-radius: 6px;
   background: transparent;
-  color: var(--accent);
+  color: var(--dim);
   cursor: pointer;
   font: 10.5px/1 var(--font-ui);
   white-space: nowrap;
 }
-.queue-steer:hover,
+.queue-item:hover .queue-steer:not(:disabled) {
+  border-color: var(--border2);
+  color: var(--accent);
+}
+.queue-item.is-next .queue-steer:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.queue-item.is-steer-pending .queue-steer {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--border3));
+  background: var(--warn-soft);
+  color: var(--warn);
+  opacity: 1;
+}
+.queue-item.is-steer-rejected .queue-steer {
+  border-color: color-mix(in srgb, var(--bad) 42%, var(--border3));
+  color: var(--bad);
+  opacity: 1;
+}
+.queue-steer:hover:not(:disabled),
 .queue-steer:focus-visible {
   border-color: var(--accent);
   background: var(--accent-soft);
+  color: var(--accent);
   outline: none;
 }
 .queue-steer:disabled {
@@ -2388,12 +2468,6 @@ body.pane-resizing * {
 .queue-steer.is-pending {
   color: var(--warn);
 }
-.queue-item.is-steer-unknown {
-  border-color: color-mix(in srgb, var(--warn) 45%, var(--border3));
-}
-.queue-item.is-steer-pending .queue-text {
-  color: var(--dim);
-}
 .queue-attach {
   display: inline-flex;
   align-items: center;
@@ -2403,17 +2477,63 @@ body.pane-resizing * {
   border-radius: 5px;
   background: rgba(124, 197, 255, 0.08);
   color: var(--dim);
-  font: 11px/1 var(--font-mono);
+  font: 10.5px/1 var(--font-mono);
 }
 .queue-attach .ico {
   width: 12px;
   height: 12px;
   color: var(--accent);
 }
-.queue-remove {
-  width: 30px;
-  height: 30px;
+/* 编辑：把这条消息放回输入框。和移除并排，但只有它在悬停时转成中性色，不抢 Steer 的位置。 */
+.queue-edit {
   display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+}
+.queue-edit .ico {
+  width: 13px;
+  height: 13px;
+}
+.queue-edit:hover:not(:disabled),
+.queue-edit:focus-visible {
+  color: var(--fg);
+  background: var(--surface-subtle);
+  outline: none;
+}
+.queue-edit:disabled {
+  color: var(--dim3);
+  cursor: not-allowed;
+  opacity: .6;
+}
+/* 编辑中的行没有行内动作：内容正在输入框里改，再给 Steer/移除就是两个真相。 */
+.queue-edit-cancel {
+  grid-column: 4 / -1;
+  justify-self: end;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font: 10.5px/1 var(--font-ui);
+  white-space: nowrap;
+}
+.queue-edit-cancel:hover,
+.queue-edit-cancel:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.queue-remove {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
   place-items: center;
   border: 0;
   border-radius: 5px;
@@ -2438,6 +2558,48 @@ body.pane-resizing * {
   color: var(--dim3);
   cursor: not-allowed;
   opacity: .6;
+}
+/* 编辑队列消息时的输入区提示：把「移到队尾」和「自动发送会跳过这条」两个后果写在用的地方。 */
+.composer-edit-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 5px 6px 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border3));
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--dim);
+  font-size: 12px;
+}
+.composer-edit-hint .ico {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--accent);
+}
+.composer-edit-hint span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-edit-cancel {
+  margin-left: auto;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: 11px/1 var(--font-ui);
+  white-space: nowrap;
+}
+.composer-edit-cancel:hover,
+.composer-edit-cancel:focus-visible {
+  background: var(--surface-raised);
+  outline: none;
 }
 .steer-evidence {
   margin: 8px 0;
