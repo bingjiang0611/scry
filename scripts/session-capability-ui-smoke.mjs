@@ -1240,6 +1240,21 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
   const hover = async (selector, fraction) => contents.sendInputEvent({ type: 'mouseMove', ...await pointOf(selector, fraction) })
+  const key = code => {
+    contents.sendInputEvent({ type: 'keyDown', keyCode: code })
+    if (code === 'Return') contents.sendInputEvent({ type: 'char', keyCode: '\r' })
+    contents.sendInputEvent({ type: 'keyUp', keyCode: code })
+  }
+  const capture = async (suffix, end = false) => {
+    if (!screenshot) return
+    await read(`document.querySelector('#performance-fixture-controls').style.visibility = 'hidden'; document.querySelector('.llm-perf-body').scrollTop = ${end ? "document.querySelector('.llm-perf-body').scrollHeight" : '0'}; document.documentElement.scrollTop = 0; document.body.scrollTop = 0; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    try {
+      const bounds = await read(`(() => { const r = document.querySelector('.llm-perf-modal').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
+      require('node:fs').writeFileSync(screenshot + suffix + '.png', (await contents.capturePage(bounds, { stayHidden: true, stayAwake: true })).toPNG())
+    } finally {
+      await read(`document.querySelector('#performance-fixture-controls').style.visibility = ''`)
+    }
+  }
   if (nativeVisibility) win.showInactive()
   contents.focus()
   await wait(`document.querySelector('.sb-navitem[title="LLM 性能"]') != null`)
@@ -1249,9 +1264,10 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await click('.sb-navitem[title="LLM 性能"]')
   await wait(`document.querySelector('.llm-perf-modal') != null`)
   const modal = `document.querySelector('.llm-perf-modal')`
-  const runs = `Array.from(${modal}.querySelectorAll('.llm-perf-run')).map(node => node.textContent)`
-  await wait(`${modal}.textContent.includes('3 个会话运行中') && ${runs}.length === 3`)
-  if (!await read(`${runs}.every(text => text.includes('等待首次输出') && !text.includes('token/s'))`)) throw new Error('Waiting sessions fabricated speed or output')
+  const runs = `Array.from(${modal}.querySelectorAll('.llm-perf-run-summary')).map(node => node.textContent)`
+  await wait(`${modal}.querySelector('.llm-perf-running h3')?.textContent === '运行中 · 3 个会话' && ${runs}.length === 3`)
+  if (!await read(`${runs}.every(text => text.includes('等待首次输出 1') && text.includes('—') && !text.includes('token/s'))`)) throw new Error('Waiting sessions fabricated speed or output')
+  if (!await read(`${modal}.querySelector('.llm-perf-history h3').textContent === '历史表现 · 最近 24 小时'`)) throw new Error('Live and history scopes are not visibly separated')
   // History: failed and unmeasured rounds never become a model, a curve or a 0 token/s value.
   await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2 && ${modal}.querySelectorAll('.llm-perf-mrow').length === 2`)
   const models = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).map(node => node.textContent)`)
@@ -1261,6 +1277,20 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   if (!models[0].includes('2.0秒') || !models[1].includes('—') || models[1].includes('0.0秒')) throw new Error('First-token column wrong: ' + JSON.stringify(models))
   if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('unmeasured-model')`)) throw new Error('Failed or unmeasured history leaked into speed')
   if (await read(`${modal}.textContent.includes('字符/s') || ${modal}.textContent.includes('数据口径')`)) throw new Error('Legacy character/definition UI leaked into the modal')
+  // The baseline remains continuous, but measured portions are a separate clipped, full-opacity layer.
+  if (!await read(`${modal}.querySelectorAll('.llm-perf-measured[clip-path]').length === 2 && Array.from(${modal}.querySelectorAll('.llm-perf-line')).every(node => node.getAttribute('d').startsWith('M') && !node.getAttribute('d').includes('NaN') && getComputedStyle(node).opacity === '0.3') && ${modal}.querySelector('clipPath rect') != null`)) throw new Error('Continuous idle baseline is indistinguishable from measured speed')
+  // Click + native keyboard: help must be discoverable and usable without hover.
+  await click('.llm-perf-mhead .llm-perf-help:nth-child(2) summary')
+  await wait(`${modal}.querySelector('.llm-perf-mhead .llm-perf-help:nth-child(2)').open`)
+  if (!await read(`${modal}.querySelector('.llm-perf-mhead .llm-perf-help:nth-child(2) p').textContent.includes('P25–P75') && document.activeElement.matches('.llm-perf-help summary')`)) throw new Error('Distribution help or focus indicator missing')
+  key('Return')
+  await wait(`!${modal}.querySelector('.llm-perf-mhead .llm-perf-help:nth-child(2)').open`)
+  key('Tab')
+  await wait(`document.activeElement === ${modal}.querySelector('.llm-perf-mhead .llm-perf-help:last-child summary') && getComputedStyle(document.activeElement).outlineStyle === 'solid'`)
+  key('Return')
+  await wait(`${modal}.querySelector('.llm-perf-mhead .llm-perf-help:last-child').open`)
+  key('Return')
+  await wait(`!${modal}.querySelector('.llm-perf-mhead .llm-perf-help:last-child').open`)
   // Real pointer hover: the busy region names measured speed, the idle region says 空闲 instead of 0.
   await hover('.llm-perf-chart svg', 0.94)
   await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('fast-model') && ${modal}.querySelector('.llm-perf-cross') != null`)
@@ -1270,7 +1300,12 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await wait(`${modal}.querySelector('.llm-perf-tip') == null`)
   await click('.llm-perf-mrow:nth-of-type(1)')
   await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 1 && ${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]')?.textContent.includes('fast-model')`)
-  await click('.llm-perf-mrow[aria-pressed="true"]')
+  await wait(`${modal}.querySelector('.llm-perf-legend button[aria-pressed="true"]')?.textContent.includes('fast-model')`)
+  await click('.llm-perf-legend button[aria-pressed="true"]')
+  await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 0 && ${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]') == null`)
+  key('Return')
+  await wait(`${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]')?.textContent.includes('fast-model') && ${modal}.querySelectorAll('.llm-perf-measured.dim').length === 1`)
+  key('Return')
   await wait(`${modal}.querySelectorAll('.llm-perf-line.dim').length === 0`)
   await click('.llm-perf-range button:nth-child(1)')
   await wait(`${modal}.querySelector('.llm-perf-range button[aria-pressed="true"]').textContent === '1 小时' && ${modal}.querySelectorAll('.llm-perf-mrow').length === 2`)
@@ -1278,44 +1313,89 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   // Metric switch: the same chart draws first-token wait in seconds, only for models with that evidence.
   await click('.llm-perf-metric button:nth-child(2)')
   await wait(`${modal}.querySelector('.llm-perf-metric button[aria-pressed="true"]')?.textContent === '首 token' && ${modal}.querySelector('.llm-perf-chart svg')?.getAttribute('aria-label').includes('首 token') && ${modal}.querySelectorAll('.llm-perf-line').length === 1`)
-  if (await read(`${modal}.querySelector('section h3').textContent.includes('token/s') || !${modal}.querySelector('section h3').textContent.includes('秒')`)) throw new Error('First-token chart kept the speed unit')
+  if (!await read(`${modal}.querySelector('.llm-perf-unit').textContent === '秒' && ${modal}.querySelectorAll('.llm-perf-legend button').length === 1`)) throw new Error('First-token chart kept the speed unit or unmeasured legend')
   await hover('.llm-perf-chart svg', 0.94)
   await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('fast-model') && !${modal}.querySelector('.llm-perf-tip')?.textContent.includes('slow-model')`)
   const waitTip = await read(`Number(${modal}.querySelector('.llm-perf-tip b').textContent)`)
   if (!(waitTip >= 1 && waitTip <= 3)) throw new Error('First-token tooltip is not the measured seconds: ' + waitTip)
+  await click('.llm-perf-mrow:nth-of-type(2)')
+  await wait(`${modal}.querySelector('.llm-perf-empty')?.textContent.includes('slow-model') && ${modal}.querySelector('.llm-perf-empty').textContent.includes('首 token') && ${modal}.querySelector('.llm-perf-chart svg') == null && ${modal}.querySelector('.llm-perf-legend button[aria-pressed="true"]')?.textContent.includes('slow-model')`)
+  await capture('-selected-missing')
+  await click('.llm-perf-legend button[aria-pressed="true"]')
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 1 && ${modal}.querySelector('.llm-perf-mrow[aria-pressed="true"]') == null`)
   contents.sendInputEvent({ type: 'mouseMove', x: 2, y: 2 })
   await wait(`${modal}.querySelector('.llm-perf-tip') == null`)
   await click('.llm-perf-metric button:nth-child(1)')
-  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2 && ${modal}.querySelector('section h3').textContent.includes('token/s')`)
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2 && ${modal}.querySelector('.llm-perf-unit').textContent === 'token/s'`)
+  await click('.llm-perf-chart svg')
+  key('Home')
+  await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('空闲') && Number(${modal}.querySelector('.llm-perf-cross')?.getAttribute('x1')) === 30`)
+  key('End')
+  await wait(`Number(${modal}.querySelector('.llm-perf-cross')?.getAttribute('x1')) > 30`)
+  key('Left')
+  if (!await read(`document.activeElement.matches('.llm-perf-chart svg') && ${modal}.querySelector('.llm-perf-cross') != null`)) throw new Error('Chart keyboard navigation lost focus or crosshair')
   // Live sessions: per-call evidence gives token/s; Claude's final-only usage does not while running.
   await click('#performance-stream')
   await wait(`${runs}.some(text => text.includes('pi-live-model') && text.includes('生成中') && text.includes('40.0token/s') && text.includes('首 token1.5秒'))`)
-  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 3 && Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0token/s') && node.textContent.includes('1.5秒') && node.textContent.includes('0 + 1 运行中'))`)
+  await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 3 && Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0token/s') && node.textContent.includes('1.5秒') && node.textContent.includes('0 + 1*'))`)
   await click('.llm-perf-metric button:nth-child(2)')
   await wait(`${modal}.querySelectorAll('.llm-perf-line').length === 2`)
   await click('.llm-perf-metric button:nth-child(1)')
   // Same model across Providers/projects: one row, independent measured-session means, honest mixed state.
   await click('#performance-group')
-  await wait(`${modal}.textContent.includes('6 个会话运行中') && ${runs}.length === 3 && ${runs}.some(text => text.includes('pi-live-model') && text.includes('4 个会话') && text.includes('平均50.0token/s') && text.includes('平均首 token2.0秒') && text.includes('多种状态'))`)
-  const groupedState = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-run')).find(node => node.textContent.includes('pi-live-model')).querySelector('.llm-perf-state').title`)
-  if (!groupedState.includes('生成中 1') || !groupedState.includes('工具执行 1') || !groupedState.includes('等待模型 2')) throw new Error('Grouped row lost session states: ' + groupedState)
+  await wait(`${modal}.textContent.includes('运行中 · 6 个会话') && ${runs}.length === 3 && ${runs}.some(text => text.includes('pi-live-model') && text.includes('4 个会话') && text.includes('会话平均速度50.0token/s') && text.includes('平均首 token2.0秒'))`)
+  const groupedState = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-run')).find(node => node.textContent.includes('pi-live-model')).querySelector('.llm-perf-state').textContent`)
+  if (!groupedState.includes('生成中 1') || !groupedState.includes('工具执行 1') || !groupedState.includes('等待模型 2') || groupedState.includes('多种状态')) throw new Error('Grouped row hides session states: ' + groupedState)
+  // A collapsed native disclosure exposes both denominators and actual member workspaces when opened.
+  const groupedSummary = '.llm-perf-run:nth-of-type(2) .llm-perf-run-summary'
+  await click(groupedSummary)
+  await wait(`${modal}.querySelector('.llm-perf-run:nth-of-type(2)').open`)
+  if (!await read(`${modal}.querySelector('.llm-perf-run:nth-of-type(2) .llm-perf-run-detail').textContent.includes('速度 3/4') && ${modal}.querySelector('.llm-perf-run:nth-of-type(2) .llm-perf-run-detail').textContent.includes('首 token 3/4') && ${modal}.querySelectorAll('.llm-perf-run:nth-of-type(2) li').length === 4`)) throw new Error('Disclosure lost measured-session denominators or members')
+  key('Return')
+  await wait(`!${modal}.querySelector('.llm-perf-run:nth-of-type(2)').open`)
+  await click('.llm-perf-section-head .llm-perf-help summary')
+  await wait(`${modal}.querySelector('.llm-perf-section-head .llm-perf-help').open`)
+  if (!await read(`${modal}.querySelector('.llm-perf-section-head .llm-perf-help p').textContent.includes('最终记录替换') && ${modal}.querySelector('.llm-perf-live-note') == null`)) throw new Error('Provisional evidence lacks accessible replacement explanation')
+  key('Return')
+  await wait(`!${modal}.querySelector('.llm-perf-section-head .llm-perf-help').open`)
+  const contrastByTheme = {}
+  for (const theme of ['dark', 'light']) {
+    await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
+    contrastByTheme[theme] = await read(`(() => {
+      const luminance = color => color.match(/[\\d.]+/g).slice(0, 3).map(Number).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
+      const nodes = Array.from(${modal}.querySelectorAll('.llm-perf-run-speed > span, .llm-perf-state, .llm-perf-unit, .llm-perf-legend button, .llm-perf-axis text, .llm-perf-mhead > span, .llm-perf-help summary'))
+      return Math.min(...nodes.map(node => {
+        const style = getComputedStyle(node)
+        const foreground = luminance(node instanceof SVGElement ? style.fill : style.color)
+        let parent = node
+        while (getComputedStyle(parent).backgroundColor === 'rgba(0, 0, 0, 0)') parent = parent.parentElement
+        const background = luminance(getComputedStyle(parent).backgroundColor)
+        return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
+      }))
+    })()`)
+    if (contrastByTheme[theme] < 4.5) throw new Error('Performance labels lack AA text contrast in ' + theme + ': ' + contrastByTheme[theme])
+    await capture('-running-' + theme)
+    await capture('-running-comparison-' + theme, true)
+  }
+  await read(`document.documentElement.setAttribute('data-theme', 'dark')`)
   win.setSize(700, 700)
   await wait(`innerWidth === 700`)
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   if (!await read(`${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth`)) throw new Error('Running performance samples overflow the narrow modal')
+  await capture('-running-narrow')
   win.setSize(1000, 800)
   await wait(`innerWidth === 1000`)
   await click('#performance-ungroup')
-  await wait(`${modal}.textContent.includes('3 个会话运行中') && ${runs}.some(text => text.includes('pi-live-model') && text.includes('1 个会话') && text.includes('平均40.0token/s') && text.includes('平均首 token1.5秒') && text.includes('生成中'))`)
+  await wait(`${modal}.textContent.includes('运行中 · 3 个会话') && ${runs}.some(text => text.includes('pi-live-model') && text.includes('1 个会话') && text.includes('会话平均速度40.0token/s') && text.includes('平均首 token1.5秒') && text.includes('生成中'))`)
   if (await read(`${runs}.some(text => text.includes('Claude') && text.includes('token/s'))`)) throw new Error('Session without per-call evidence showed speed')
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
-  if (!await read(`${modal}.textContent.includes('3 个会话运行中')`)) throw new Error('Focus changed the global source')
+  if (!await read(`${modal}.textContent.includes('运行中 · 3 个会话')`)) throw new Error('Focus changed the global source')
   await click('#performance-complete')
-  await wait(`${modal}.textContent.includes('2 个会话运行中')`)
+  await wait(`${modal}.textContent.includes('运行中 · 2 个会话')`)
   await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('fixture-model') && node.textContent.includes('20.0'))`)
   await click('#performance-stop')
-  await wait(`${modal}.textContent.includes('1 个会话运行中') && !Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model'))`)
+  await wait(`${modal}.textContent.includes('运行中 · 1 个会话') && !Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model'))`)
   const fixtureState = `JSON.parse(document.querySelector('#performance-fixture-state').textContent)`
   if (nativeVisibility) {
     win.hide()
@@ -1332,8 +1412,8 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
     win.setSize(1000, 800)
     await wait(`innerWidth === 1000`)
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-    const bounds = await read(`(() => { const node = ${modal}, r = node.getBoundingClientRect(); if (node.scrollWidth > node.clientWidth) throw new Error('Performance modal overflows'); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
-    if (screenshot) require('node:fs').writeFileSync(screenshot + '-' + theme + '.png', (await contents.capturePage(bounds)).toPNG())
+    if (!await read(`${modal}.scrollWidth <= ${modal}.clientWidth`)) throw new Error('Performance modal overflows')
+    await capture('-' + theme)
   }
   // setSize is asynchronous: measure and click only after the renderer reports the new viewport.
   win.setSize(700, 700)
@@ -1356,7 +1436,7 @@ async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibilit
   await wait(`Array.from(document.querySelectorAll('.llm-perf-modal [role="alert"]')).some(node => node.textContent.includes('fixture history unavailable'))`)
   if (await read(`document.querySelector('.llm-perf-modal .llm-perf-mrow, .llm-perf-modal .llm-perf-line') != null`)) throw new Error('History error retained apparently successful speed')
   await click('.modal-x')
-  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'one row per model across projects/providers', 'independent metric means omit missing evidence', 'mixed states + departing members', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', themes: ['dark', 'light'] }
+  return { assertions: ['registry sessions across projects/providers', 'waiting sessions show no speed', 'failed/unmeasured history excluded', 'model medians', 'first-token column + metric switch + selected missing evidence', 'pointer hover busy + idle', 'model select dims curves', 'range toggle', 'live per-call speed + curves + provisional comparison', 'one row per model across projects/providers', 'independent metric means omit missing evidence', 'visible state counts + member disclosure + independent denominators', 'live/history scopes separated', 'legend/table keyboard selection synchronized', 'native help keyboard access', 'continuous baseline visually separates measured spans', 'chart keyboard navigation', 'running samples fit narrow window', 'focus independent', 'done/stopped/idle excluded', 'closed refresh stopped', 'read errors clear stale evidence'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (requires --native-visibility and user approval)', contrastByTheme, themes: ['dark', 'light'] }
 }
 
 try {
