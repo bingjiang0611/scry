@@ -8,18 +8,19 @@
 
 | 范围 | 当前结果与边界 |
 | --- | --- |
-| Workflow 核心 | 本轮 Claude pending-call/Workflow/stop/renderer 11 文件 **202 passed**；安全退出轮 5 文件 58、扩大范围首轮 158/159 与派发上限串行对照是前轮证据，保留首次超时；前一观测轮 87 / 285 是历史范围 |
+| Workflow 核心 | 前一生产增量 Claude pending-call/Workflow/stop/renderer 11 文件 **202 passed**；安全退出轮 5 文件 58、扩大范围首轮 158/159 与派发上限串行对照是前轮证据，保留首次超时；前一观测轮 87 / 285 是历史范围 |
 | 隔离 Workflow UI | 通过；真实键鼠输入、焦点保留、权限点击、停止与 rehydrate 不重放；隐藏窗口与假 bridge，不等于完整 App 前台验收 |
 | Pi adapter 与 lifecycle | 前一观测轮六文件 **182 passed**，含原生增量/工具观测及空增量不吞正文回归；本轮未重跑六文件，不是真实账号矩阵 |
 | 完整 App 后台离线 | 新独立现场验证停止存储失败 veto、控件仍活、提示期间退出合并、明确再次停止、运行中普通退出与冷重开；4 canonical records / pending 0，4 prompts / 2 abort 重启不增加。旧 usage 对照不改；不是前台/真账号/原生警告视觉验收 |
 | M1 停止控制 | 先保存意图再发信号；重复 ID 不重发，明确再次停止用新 ID；重启后只读收据。普通退出新增 durable gate，不以 ACK/超时代替真正 scope 收敛；历史不可用退出策略仍未决且 fail-closed，不代表完整 M1 |
 | M1 实时观测 | Pi 原生工具/非空增量、Claude 主线程增量及 SDK 调用 pending/return、main 验证后的权限等待；Claude pending 不是物理/后台生命周期，仅 SDK/query mock 验证，不代表完整 App/真账号。snapshot/list/推送同源、epoch 不恢复，自动停滞仍 unsupported |
-| 当前相关后端检查 | 本轮 11 文件 **202 passed**、Node/web typecheck、完整 pack:artifact 通过；先前增量轮 56 / 127、安全退出 58、观测 285、usage 545 / CLI 589 是历史范围（重叠不累计） |
+| Claude SDK codec | 本轮真实 SDK + 假 CLI 三场景通过，SDK/CLI 系统禁网 EPERM、正常 EOF/退出；无 query mock，但不代表生产 runner/完整 App/recorder/真账号验收，见 M1 与 fixture 说明 |
+| 当前相关后端检查 | 本轮 fixture node --check、Node/web typecheck、App build 通过。前一生产增量 11 文件 **202 passed** / 完整 pack:artifact，以及更早 56 / 127、58、285、usage 545 / CLI 589 是历史范围，不把旧结果升级为本轮全套通过 |
 | 共享 probe counter 调用方 | 先前 **1 passed**，保留 5 次原 workload、四个应答及 graceful exit；本轮 trace.delivery ratchet 通过，仍不宣称性能提升 |
 | 真实 Pi/Codex | 既有冻结构建证据仍有效，但不代表当前所有新增代码已做真实探针；详见真实验收文档 |
 | 尚未覆盖/未通过 | 完整 App 前台、人类操作与五 Provider 真实矩阵；此前整仓 npm test 600 秒未完成、三文件七个失败仍按用户要求延后。安全退出轮扩大检查首轮派发上限用例 5s 超时，75–103 load / 10 cores 下原/当轮版单独均过，不作因果或时延结论；本轮未重跑该重负载 |
 
-最新 Claude pending-call 证据：`/tmp/scry-m1-tool-review.QTxKGD/`（asar `62880bc20689a64e26ea6084fb851f6850e589868af1d646fb72b72f244f20ed`；实际 SDK/query mock 流、非干扰与无全表扫描回归、包 smoke，不是 Claude CLI transport/真账号）。前轮 Claude 主线程增量证据：`/tmp/scry-m1-claude-review.jl3lYZ/`（asar `02df677f90eb506d78d697627451e0605881f5cb8faf966434223d2d163e99d4`；SDK/mock、包 smoke，不是真实 Claude workflow）。M1 安全退出冻结证据：`/tmp/scry-m1-safequit-review.uPqakG/` 与 `/tmp/scry-m1-quit-final.nTJ6cR/`（独立新项目/userData、asar `25ff05a75c5d75903ac4243ab0f3b3a860694ad558335fb476cdffd880f3b1eb`；未安装或推送）。M1 实时观测证据：`/tmp/scry-m1-observation.dNdytc/`；停止控制证据：`/tmp/scry-m1-stop.7jb82s/`，逐包与未完成边界见 [M1 进展](m1-status.md)。M0 usage 证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
+最新独立真实 SDK / 假 CLI codec 证据：[fixture 说明](../../docs/research/claude-sdk-transport-fixture.md)与 `/tmp/scry-claude-wire-review.tFzIIq/`（无账号、无生产代码修改，三场景通过，不是完整 App 验收）。Claude pending-call 冻结证据：`/tmp/scry-m1-tool-review.QTxKGD/`（asar `62880bc20689a64e26ea6084fb851f6850e589868af1d646fb72b72f244f20ed`；实际 SDK/query mock 流、非干扰与无全表扫描回归、包 smoke，不是 Claude CLI transport/真账号）。前轮 Claude 主线程增量证据：`/tmp/scry-m1-claude-review.jl3lYZ/`（asar `02df677f90eb506d78d697627451e0605881f5cb8faf966434223d2d163e99d4`；SDK/mock、包 smoke，不是真实 Claude workflow）。M1 安全退出冻结证据：`/tmp/scry-m1-safequit-review.uPqakG/` 与 `/tmp/scry-m1-quit-final.nTJ6cR/`（独立新项目/userData、asar `25ff05a75c5d75903ac4243ab0f3b3a860694ad558335fb476cdffd880f3b1eb`；未安装或推送）。M1 实时观测证据：`/tmp/scry-m1-observation.dNdytc/`；停止控制证据：`/tmp/scry-m1-stop.7jb82s/`，逐包与未完成边界见 [M1 进展](m1-status.md)。M0 usage 证据：`/tmp/scry-m0-foreground.B7732l/` 与 `/tmp/scry-pi-usage-evidence.iU1MRc/`；上一轮清理证据仍在 `/tmp/scry-m0-closeout.sfrQzy/`。旧 unknown/pending 不清除、不重发；下面各轮首次失败与历史范围继续保留。
 
 ## 已接入的路径
 

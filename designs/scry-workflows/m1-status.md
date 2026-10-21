@@ -138,7 +138,23 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 | 固定计数 | trace.delivery 5 次均 2 messages / 165996 bytes，ratchet 通过；不作 Claude 工具延迟或真实负载结论 | `performance/measure.json` |
 | CLI / 原现场 | 当前私有 CLI 校验旧离线 4 条记录 errors [] / pending 0，4 条 hash 不变；旧真实故障现场 16 源 hash 不变，未退款、清空或重放 unknown | `cli-verify.json`、`scope.json` |
 
-未验证实际 Claude CLI transport、真实账号与完整 App 中 Claude workflow；没有网络/账号/凭据执行。下一个验证缺口由维护 Agent 先核对离线 CLI transport fixture 可行性；真实探针仍先由用户选择账号、模型并授权费用。不得拿 generic packaged smoke 或 SDK mocks 冒充真实 Provider 验收。
+该生产 pending-call 增量仍未验证真实 Claude CLI、真实账号与完整 App 中 Claude workflow；当轮没有网络/账号/凭据执行。随后独立真实 SDK + 假 CLI 的 codec 证据见下一节，不能反推生产 runAgent/recorder 已端到端验收。真实探针仍先由用户选择账号、模型并授权费用。
+
+## 独立真实 SDK / 假 CLI transport 验收
+
+新增 `npm run test:claude-sdk-transport`，macOS-only。没有修改生产代码或依赖；这是真实 SDK0.3.251 `query()`、NDJSON、child-process 与 hook callback codec，不再 mock query，但 CLI 和内容仍是 synthetic。未执行真实模型、工具、账号或 recorder hooks。见[独立 fixture 说明](../../docs/research/claude-sdk-transport-fixture.md)。
+
+| 场景 | 实际结果 | 范围 |
+| --- | --- | --- |
+| complete | SDK 7 帧、hook/prompt ID/argv 边界、text/thinking/tool 帧、终态和 stdin EOF 通过 | 无实际工具执行 |
+| interrupt | SDK 7 帧；并行消费者确认 ACK 后仍无终态，原子 gate 释放后才终态/EOF | ACK 不作收敛证据 |
+| wrong-hook-ID | SDK 2 帧；未注册回调被真实 SDK 拒绝，合法 hook 未执行 | 预期负对照，不是模型成功 |
+
+三场景 SDK 进程与其假 CLI 连接外层活跃 loopback 均为 `EPERM`；外层同连接正对照成功。系统网络限制不被称为 Scry 文件/执行沙箱。每个场景 SDK harness 与 CLI 都正常退出、CLI exit0 / signal null，最终登记 6 PID 均已退出。绝对 fake executable/hash/cwd、default permission、tools/MCP/settings 为空与无危险 flags 均检查，未读取或复制凭据。
+
+最终现场：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-claude-wire-9lTEw2/`；外层审查 `/tmp/scry-claude-wire-review.tFzIIq/`。scope 绑定 harness/helper/SDK 文件 hash，旧真实故障现场16源 hash 未变。首轮沙箱内 ps 被拒（SDK 尚未 import），次轮真实 SDK prompt 编成 text-block 数组而非字符串，两次日志保留；已修正，未加时或重试默认成功。期限仍8秒，无忙轮询。Node/web typecheck、两文件 node --check、App build 和 diff check 通过；未重跑全仓门禁、未安装或推送。
+
+仍缺生产 runAgent + 实际 SDK transport、完整 App/canonical recorder 与真账号验收；SDK hook_callback 不等于私有 recorder CLI 的真实 hook 执行。维护 Agent 下一步先核对最小离线生产 runner 接缝，真实账号仍需用户授权。
 
 ## 尚未完成与下一段
 

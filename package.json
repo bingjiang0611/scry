@@ -52,6 +52,7 @@
     "performance:measure": "node scripts/performance-measure.mjs",
     "performance:propose": "node scripts/performance-propose.mjs",
     "smoke:cli-package": "node scripts/cli-package-smoke.mjs",
+    "test:claude-sdk-transport": "node scripts/claude-sdk-transport-smoke.mjs",
     "pack": "npm run typecheck && npm test && npm run pack:artifact",
     "pack:artifact": "npm run build && npm run build:cli && node scripts/run-electron-builder.mjs && npm run check:packaged-app && npm run smoke:electron",
     "pack:release": "SCRY_RELEASE_BUILD=1 npm run pack",
