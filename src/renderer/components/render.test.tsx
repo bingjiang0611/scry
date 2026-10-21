@@ -5630,7 +5630,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(html).toContain('aria-label="分析时间范围"')
     expect(html).toContain('aria-label="返回对话"')
     expect(html).toContain('aria-label="刷新分析数据"')
-    expect(html).toContain('RAW TOKEN COST')
+    expect(html).toContain('原始 Token 成本')
     expect(html).toContain('$1.25')
     expect(html).toContain('每日成本趋势')
     expect(html).toContain('usage-chart-area')
@@ -5696,7 +5696,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
   it('成本来源使用文案标注，不在数字上追加证据符号', () => {
     expect(html).toContain('Provider 报告成本 + 估算成本')
     expect(html).not.toContain('>P≈</sup>')
-    expect(html).toContain('成本来源与 Token 覆盖状态见行内说明')
+    expect(html).toContain('title="Provider 报告成本 + 估算成本；2 轮；不代表实际账单')
     expect(html).toContain('aria-describedby="usage-chart-instructions"')
   })
 
@@ -5730,8 +5730,8 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(exactHtml).toContain('<small>精确成本 · 2 轮</small>')
-    expect(providerReportedHtml).toContain('<small>Provider 报告成本 · 2 轮</small>')
+    expect(exactHtml).toContain('aria-description="精确成本；2 轮；')
+    expect(providerReportedHtml).toContain('aria-description="Provider 报告成本；2 轮；')
     expect(providerReportedHtml).not.toContain('>P</sup>')
   })
 
@@ -5759,7 +5759,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(mixedHtml).not.toContain('>P≈†</sup>')
   })
 
-  it('部分 Token 在总览、Provider 和明细中都显式显示为已知下界', () => {
+  it('部分 Token 在摘要、Provider 数值提示和明细中保留已知下界证据', () => {
     const partial = {
       ...aggregate,
       outputTokens: null,
@@ -5781,10 +5781,11 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(partialHtml).toContain('<b>1.00K</b>')
+    expect(partialHtml).toContain('<dd>1.00K</dd>')
     expect(partialHtml).not.toContain('≥1.00K')
     expect(partialHtml).toContain('已知下界 · 2/2 条明细有 Token')
-    expect(partialHtml).toContain('Token 已知下界')
+    const providers = partialHtml.slice(partialHtml.indexOf('class="usage-provider-panel"'), partialHtml.indexOf('class="usage-tokens"'))
+    expect(providers).toContain('1.00K Token；已知下界 · 2/2 条明细有 Token')
     expect(partialHtml).toContain('class="is-lower-bound"')
     expect(partialHtml).not.toContain('/ 活跃日')
   })
@@ -5825,7 +5826,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(gapHtml).toContain('无记录日沿基线连接以保持走势连续，但不代表实际值为零')
   })
 
-  it('未知成本不画成零值趋势，小额非零成本不显示成 $0.00 且最大横条占满', () => {
+  it('未知成本不画成零值趋势，小额非零成本不显示成 $0.00 且单一来源占满构成条', () => {
     const unknownAggregate = {
       ...aggregate,
       costUsd: null,
@@ -5872,7 +5873,8 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(unknownHtml).not.toContain('usage-chart-line')
     expect(smallCostHtml).toContain('&lt;$0.01')
     expect(smallCostHtml).toContain('$0.0010')
-    expect(smallCostHtml).toContain('style="width:100%"')
+    expect(smallCostHtml).toContain('style="flex-basis:100%"')
+    expect(unknownHtml).not.toContain('class="usage-provider-row"')
   })
 })
 

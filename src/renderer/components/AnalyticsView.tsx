@@ -10,6 +10,7 @@ import type { ProviderId } from '@shared/provider'
 import { QODER_PRICING_URL, QODER_USD_BASIS } from '@shared/qoder-pricing'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
+import { ANALYTICS_COPY as copy } from '../constants/copy'
 
 type ChartMetric = 'cost' | 'tokens'
 type BreakdownMode = 'model' | 'day'
@@ -17,6 +18,7 @@ type ChartPoint = { x: number; y: number }
 type ChartSample = { value: number | null; display: string; evidence: string }
 
 const ranges: UsageAnalyticsRangeDays[] = [7, 30, 90]
+const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 const providerLabels: Record<BillingProvider, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -45,12 +47,7 @@ function formatTokens(value: number | null): string {
 function formatCost(value: number | null): string {
   if (value == null) return '—'
   if (value > 0 && value < 0.01) return '<$0.01'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value)
-}
-
-function formatCredits(value: number): string {
-  if (value > 0 && value < 0.01) return '<0.01 Credits'
-  return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} Credits`
+  return usdFormatter.format(value)
 }
 
 function creditEvidence(row: UsageAnalyticsAggregate): string {
@@ -59,7 +56,7 @@ function creditEvidence(row: UsageAnalyticsAggregate): string {
   const source = evidence.source === 'qoder_recorded_usage' ? '已记录 Credits'
     : evidence.source === 'pi_qoder_credit_observation' ? 'Pi 请求计量 Credits'
       : evidence.source === 'qoder_mixed_usage' ? '多来源 Credits' : '原生 Credits'
-  return `${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量；${evidence.omissionReason ? `${evidence.omissionReason}；` : ''}${QODER_USD_BASIS}（${QODER_PRICING_URL}）`
+  return `${copy.creditAmount(evidence.credits)}；${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量；${evidence.omissionReason ? `${evidence.omissionReason}；` : ''}${QODER_USD_BASIS}（${QODER_PRICING_URL}）`
 }
 
 function displayCostEvidence(row: UsageAnalyticsAggregate, provider?: BillingProvider): string {
@@ -210,7 +207,7 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
         samples: analytics.days.map((day): ChartSample => {
           const row = rows.get(day)
           if (!row) {
-            return { value: null, display: '—', evidence: '当日无记录' }
+            return { value: null, display: '—', evidence: copy.noDailyRecord }
           }
           return {
             value: metricValue(row, metric),
@@ -240,7 +237,7 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
   }, [analytics, metric])
 
   if (chart.series.length === 0) {
-    return <div className="usage-empty">该时间范围没有可绘制的{metric === 'cost' ? '成本' : ' Token'}数据。</div>
+    return <div className="usage-empty">{metric === 'cost' ? copy.noCostChart : copy.noTokenChart}</div>
   }
 
   const hoveredDay = hoverIndex == null ? null : analytics.days[hoverIndex]
@@ -249,17 +246,22 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
   return (
     <div className="usage-chart-scroller">
       <div className="usage-chart-wrap">
-        <p className="usage-visually-hidden" id="usage-chart-instructions">聚焦图表后，可使用左右方向键逐日查看证据。无记录日沿基线连接以保持走势连续，但不代表实际值为零。</p>
+        <p className="usage-visually-hidden" id="usage-chart-instructions">{copy.chartInstructions}</p>
         <svg
           className="usage-chart"
           viewBox={`0 0 ${chart.width} ${chart.height}`}
+          preserveAspectRatio="none"
           role="img"
-          aria-label={`每日${metric === 'cost' ? '成本' : ' Token'}趋势`}
+          aria-label={metric === 'cost' ? copy.costTrend : copy.tokenTrend}
           aria-describedby="usage-chart-instructions"
           tabIndex={0}
-          onFocus={() => setHoverIndex(analytics.days.length - 1)}
+          onFocus={() => setHoverIndex((current) => current ?? analytics.days.length - 1)}
           onBlur={() => setHoverIndex(null)}
           onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setHoverIndex(null)
+              return
+            }
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
             event.preventDefault()
             if (event.key === 'Home') setHoverIndex(0)
@@ -320,10 +322,10 @@ function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; metric: 
         </div>
         {hoverIndex != null && hoveredDay && (
           <div
-            className={`usage-chart-tooltip ${hoverIndex > analytics.days.length * 0.68 ? 'is-flipped' : ''}`}
+            className="usage-chart-tooltip"
             role="status"
             aria-live="polite"
-            style={{ left: `${(hoveredX / chart.width) * 100}%` }}
+            style={{ left: `clamp(8px, calc(${(hoveredX / chart.width) * 100}% + 12px), max(8px, calc(100% - 312px)))` }}
           >
             <b>{formatDay(hoveredDay)}</b>
             {chart.series.map((series) => {
@@ -359,28 +361,34 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
   const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
 
   if (!analytics && loading) {
-    return <main className="usage-page"><div className="usage-state">正在读取本机用量账本…</div></main>
+    return <main className="usage-page"><div className="usage-state">{copy.loading}</div></main>
   }
   if (!analytics || analytics.status !== 'ready') {
     return (
       <main className="usage-page">
         <div className="usage-state is-error">
           <Icon name="alert" />
-          <div><b>用量分析暂不可用</b><span>{error ?? 'SQLite 尚未初始化，Scry 其他功能不受影响。'}</span></div>
-          <button type="button" onClick={onRefresh}>重试</button>
+          <div><b>{copy.unavailable}</b><span>{error ?? copy.databaseUnavailable}</span></div>
+          <button type="button" onClick={onRefresh}>{copy.retry}</button>
         </div>
       </main>
     )
   }
 
   const totals = analytics.totals
-  const totalTokens = tokensOf(totals)
   const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0 || row.qoderCredits)
+  const costProviders = providers.filter((row) => row.costUsd != null).sort((a, b) => b.costUsd! - a.costUsd!)
   const qoderOnly = providers.length > 0 && providers.every((row) => row.provider === 'qoder')
-  const providerScale = Math.max(0, ...providers.map((row) => row.costUsd ?? 0))
   const chartProviders = providers.filter((row) => metricValue(row, chartMetric) != null)
   const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : analytics.byDay.filter((row) => row.costUsd != null).reverse()
-  const activeDays = analytics.byDay.filter((row) => row.usageRows > 0 || row.costKnownRows > 0).length
+  const totalEvidence = copy.totalEvidence(displayCostEvidence(totals), totals.turns)
+  const metrics = [
+    { label: copy.processedTokens, value: formatAggregateTokens(totals), evidence: tokenEvidence(totals) },
+    { label: copy.cacheRead, value: formatKnownTokens(totals.cacheReadTokens), evidence: copy.tokenCoverage(totals.cacheReadKnownRows, totals.usageRows) },
+    { label: copy.input, value: formatKnownTokens(totals.inputTokens), evidence: copy.tokenCoverage(totals.inputKnownRows, totals.usageRows) },
+    { label: copy.output, value: formatKnownTokens(totals.outputTokens), evidence: copy.outputEvidence(totals.outputKnownRows, totals.usageRows, formatKnownTokens(totals.reasoningTokens)) },
+    { label: copy.cacheWrite, value: formatKnownTokens(totals.cacheWriteTokens), evidence: copy.tokenCoverage(totals.cacheWriteKnownRows, totals.usageRows) }
+  ]
 
   return (
     <main className="usage-page">
@@ -388,22 +396,22 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
         <header className="usage-header">
           <div className="usage-title-group">
             {onBack && (
-              <button className="usage-back" type="button" onClick={onBack} aria-label="返回对话" title="返回对话">
+              <button className="usage-back" type="button" onClick={onBack} aria-label={copy.back} title={copy.back}>
                 <Icon name="chevronRight" />
               </button>
             )}
             <div>
-              <h1>用量</h1>
-              <p title={`${analytics.fromDay} 至 ${analytics.toDay}`}>{formatDay(analytics.fromDay)} – {formatDay(analytics.toDay)}</p>
+              <h1>{copy.title}</h1>
+              <p title={copy.period(analytics.fromDay, analytics.toDay)}>{copy.periodDisplay(formatDay(analytics.fromDay), formatDay(analytics.toDay))}</p>
             </div>
           </div>
           <div className="usage-actions">
-            <div className="usage-segmented" role="group" aria-label="分析时间范围">
+            <div className="usage-segmented" role="group" aria-label={copy.rangeLabel}>
               {ranges.map((days) => (
-                <button type="button" key={days} className={rangeDays === days ? 'active' : ''} aria-pressed={rangeDays === days} onClick={() => onRangeChange(days)}>{days} 天</button>
+                <button type="button" key={days} className={rangeDays === days ? 'active' : ''} aria-pressed={rangeDays === days} onClick={() => onRangeChange(days)}>{copy.range(days)}</button>
               ))}
             </div>
-            <button className={`usage-refresh ${loading ? 'is-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-label="刷新分析数据" title="刷新分析数据">
+            <button className={`usage-refresh ${loading ? 'is-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-label={copy.refresh} title={copy.refresh}>
               <Icon name="refresh" />
             </button>
           </div>
@@ -411,81 +419,102 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
 
         {error && <div className="usage-inline-error" role="status">{error}</div>}
 
-        <section className="usage-overview" aria-label="用量概览">
-          <article className="usage-cost-card">
-            <span className="usage-eyebrow">RAW TOKEN COST</span>
-            <strong>{formatCost(totals.costUsd)}</strong>
-            <small title={totals.qoderCredits ? displayCostEvidence(totals) : undefined}>{costEvidence(totals)} · {totals.turns.toLocaleString()} 轮</small>
-            {totals.qoderCredits?.credits != null && <small title={creditEvidence(totals)}>Qoder {formatCredits(totals.qoderCredits.credits)} · 已知下界</small>}
-            <div className="usage-provider-list">
-              {providers.length === 0 ? <div className="usage-empty-row">当前范围没有用量记录</div> : providers.map((row) => (
-                <div className="usage-provider-row" key={row.provider}>
-                  <div className="usage-provider-main">
-                    <ProviderMark provider={row.provider} />
-                    <b>{providerLabel(row.provider)}</b>
-                    <span title={displayCostEvidence(row, row.provider)}>{formatCost(row.costUsd)}</span>
-                  </div>
-                  <span className={`usage-provider-track ${row.costUsd == null ? 'is-unknown' : ''}`}>
-                    <i className={`is-${row.provider}`} style={{ width: `${row.costUsd == null || row.costUsd === 0 || providerScale === 0 ? 0 : (row.costUsd / providerScale) * 100}%` }} />
-                  </span>
-                  <small>
-                    <span>{formatShare(row.costUsd, totals.costUsd)} 成本 · {formatAggregateTokens(row)} Token</span>
-                    <em title={displayCostEvidence(row, row.provider)}>{row.provider === 'qoder' ? (row.qoderCredits?.credits != null ? 'Credits 已知下界' : 'Credit 不可用') : costEvidence(row)} · {tokenComplete(row) ? 'Token 完整' : 'Token 已知下界'}</em>
-                  </small>
+        <section className="usage-overview" aria-label={copy.overview}>
+          <article className="usage-cost-card" aria-label={copy.totalLabel} aria-description={totalEvidence}>
+            <h2 className="usage-eyebrow">{copy.totalLabel}</h2>
+            <strong title={totalEvidence}>
+              {totals.costUsd == null || (totals.costUsd > 0 && totals.costUsd < 0.01)
+                ? formatCost(totals.costUsd)
+                : usdFormatter.formatToParts(totals.costUsd).map((part, index) => (
+                  <span className={`usage-cost-${part.type}`} key={index}>{part.value}</span>
+                ))}
+            </strong>
+          </article>
+          <article className="usage-composition" aria-label={copy.composition}>
+            <h2>{copy.composition}</h2>
+            <div className="usage-composition-bar" role="img" aria-label={copy.compositionChart}>
+              {costProviders.map((row) => (
+                <span key={row.provider} className={`is-${row.provider}`} title={providerLabel(row.provider)}
+                  style={{ flexBasis: `${totals.costUsd != null && totals.costUsd > 0 ? row.costUsd! / totals.costUsd * 100 : 0}%` }} />
+              ))}
+            </div>
+            <div className="usage-composition-key">
+              {costProviders.map((row) => (
+                <div key={row.provider}>
+                  <span><ProviderMark provider={row.provider} />{providerLabel(row.provider)}</span>
+                  <strong>{formatShare(row.costUsd, totals.costUsd)}</strong>
                 </div>
               ))}
             </div>
           </article>
+        </section>
 
+        <section className="usage-analysis">
           <article className="usage-chart-card">
             <div className="usage-section-head usage-chart-head">
-              <h2>每日{chartMetric === 'cost' ? '成本' : ' Token'}</h2>
-              <div className="usage-chart-controls">
-                <div className="usage-segmented is-compact" role="group" aria-label="趋势指标">
-                  <button type="button" className={chartMetric === 'cost' ? 'active' : ''} aria-pressed={chartMetric === 'cost'} onClick={() => setChartMetric('cost')}>成本</button>
-                  <button type="button" className={chartMetric === 'tokens' ? 'active' : ''} aria-pressed={chartMetric === 'tokens'} onClick={() => setChartMetric('tokens')}>TOKEN</button>
-                </div>
-                <div className="usage-legend" aria-label="Provider 图例">
-                  {chartProviders.map((row) => (
-                    <span key={row.provider} title={metricEvidence(row, chartMetric)}>
-                      <ProviderMark provider={row.provider} />
-                      {providerLabel(row.provider)}
-                    </span>
-                  ))}
-                </div>
+              <h2>{chartMetric === 'cost' ? copy.dailyCost : copy.dailyTokens}</h2>
+              <div className="usage-segmented is-compact" role="group" aria-label={copy.metric}>
+                <button type="button" className={chartMetric === 'cost' ? 'active' : ''} aria-pressed={chartMetric === 'cost'} onClick={() => setChartMetric('cost')}>{copy.cost}</button>
+                <button type="button" className={chartMetric === 'tokens' ? 'active' : ''} aria-pressed={chartMetric === 'tokens'} onClick={() => setChartMetric('tokens')}>{copy.tokenToggle}</button>
               </div>
             </div>
-            <UsageChart analytics={analytics} metric={chartMetric} />
+            <div className="usage-legend" aria-label={copy.legend}>
+              {chartProviders.map((row) => (
+                <span key={row.provider} title={metricEvidence(row, chartMetric)}>
+                  <ProviderMark provider={row.provider} />{providerLabel(row.provider)}
+                </span>
+              ))}
+            </div>
+            <UsageChart key={`${chartMetric}:${analytics.fromDay}:${analytics.toDay}`} analytics={analytics} metric={chartMetric} />
+          </article>
+          <article className="usage-provider-panel" aria-label={copy.byProvider}>
+            <div className="usage-section-head"><h2>{copy.byProvider}</h2></div>
+            <div className="usage-provider-list">
+              {costProviders.length === 0 ? <div className="usage-empty-row">{copy.noCost}</div> : costProviders.map((row) => (
+                <div className="usage-provider-row" key={row.provider}>
+                  <div className="usage-provider-main">
+                    <ProviderMark provider={row.provider} />
+                    <b>{providerLabel(row.provider)}</b>
+                    <span className="usage-provider-share">{formatShare(row.costUsd, totals.costUsd)}</span>
+                    <strong title={copy.providerEvidence(displayCostEvidence(row, row.provider), formatAggregateTokens(row), tokenEvidence(row))}>{formatCost(row.costUsd)}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
           </article>
         </section>
 
-        <section className="usage-metrics" aria-label="用量摘要">
-          <div><span>已处理 Token</span><b>{formatAggregateTokens(totals)}</b><small>{tokenComplete(totals) && activeDays > 0 && totalTokens != null ? `${formatTokens(totalTokens / activeDays)} / 活跃日` : tokenEvidence(totals)}</small></div>
-          <div><span>缓存输入</span><b>{formatKnownTokens(totals.cacheReadTokens)}</b><small>{totals.cacheReadKnownRows}/{totals.usageRows} 条明细已上报</small></div>
-          <div><span>已观测输入</span><b>{formatKnownTokens(totals.inputTokens)}</b><small>{totals.inputKnownRows}/{totals.usageRows} 条明细已上报</small></div>
-          <div><span>输出</span><b>{formatKnownTokens(totals.outputTokens)}</b><small>{totals.outputKnownRows}/{totals.usageRows} 条 · 推理 {formatKnownTokens(totals.reasoningTokens)}</small></div>
-          <div><span>缓存写入</span><b>{formatKnownTokens(totals.cacheWriteTokens)}</b><small>{totals.cacheWriteKnownRows}/{totals.usageRows} 条明细已上报</small></div>
+        <section className="usage-tokens" aria-label={copy.tokens}>
+          <h2>{copy.tokens}</h2>
+          <dl className="usage-metrics">
+            {metrics.map((metric) => (
+              <div key={metric.label} title={metric.evidence}>
+                <dt>{metric.label}</dt><dd>{metric.value}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
 
         <section className="usage-breakdown">
           <div className="usage-section-head">
-            <h2>明细</h2>
-            <div className="usage-segmented is-compact" role="group" aria-label="明细维度">
-              <button type="button" className={breakdownMode === 'model' ? 'active' : ''} aria-pressed={breakdownMode === 'model'} onClick={() => setBreakdownMode('model')}>模型</button>
-              <button type="button" className={breakdownMode === 'day' ? 'active' : ''} aria-pressed={breakdownMode === 'day'} onClick={() => setBreakdownMode('day')}>日期</button>
+            <h2>{copy.details}</h2>
+            <div className="usage-segmented is-compact" role="group" aria-label={copy.detailDimension}>
+              <button type="button" className={breakdownMode === 'model' ? 'active' : ''} aria-pressed={breakdownMode === 'model'} onClick={() => setBreakdownMode('model')}>{copy.model}</button>
+              <button type="button" className={breakdownMode === 'day' ? 'active' : ''} aria-pressed={breakdownMode === 'day'} onClick={() => setBreakdownMode('day')}>{copy.day}</button>
             </div>
           </div>
           <div className="usage-table-wrap">
             <table>
-              <thead><tr><th>{breakdownMode === 'model' ? '模型' : '日期'}</th><th>成本（USD）</th><th>占比</th><th>Token</th></tr></thead>
+              <colgroup><col className="usage-model-column" /><col className="usage-cost-column" /><col /><col /></colgroup>
+              <thead><tr><th scope="col">{breakdownMode === 'model' ? copy.model : copy.day}</th><th scope="col">{copy.costUsd}</th><th scope="col">{copy.share}</th><th scope="col">{copy.token}</th></tr></thead>
               <tbody>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={4}>当前范围没有可展示的明细</td></tr>
+                  <tr><td colSpan={4}>{copy.noDetails}</td></tr>
                 ) : rows.map((row) => {
                   const modelRow = row as UsageAnalyticsBreakdownRow
                   const key = breakdownMode === 'model' ? `${modelRow.provider}:${modelRow.model ?? ''}` : (row as typeof analytics.byDay[number]).day
                   const label = breakdownMode === 'model'
-                    ? modelRow.provider === 'qoder' ? providerLabel('qoder') : modelRow.model ?? '未归因'
+                    ? modelRow.provider === 'qoder' ? providerLabel('qoder') : modelRow.model ?? copy.unattributed
                     : (row as typeof analytics.byDay[number]).day
                   const rowProvider = breakdownMode === 'model' ? modelRow.provider : qoderOnly ? 'qoder' : undefined
                   return (
@@ -507,9 +536,6 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
           </div>
         </section>
 
-        <footer className="usage-footnote">
-          成本来源与 Token 覆盖状态见行内说明；部分覆盖只展示已知下界。缺失美元成本且有对应定价的 Claude 模型，按官方 API 标准价换算已知 Token（缓存写入按 5 分钟），不是实际账单；未知成本或未归因模型不展示在明细中。Qoder 无美元成本时，已知 Credits 按基础套餐 1 Credit = $0.01 换算美元等值，计入总额、占比及成本趋势；这不是实际账单。缺失 Credits 不按 Token 猜价。趋势图为保持连续会将无记录日沿基线连接，悬停仍显示 —，不代表实际值为 0。
-        </footer>
       </div>
     </main>
   )
