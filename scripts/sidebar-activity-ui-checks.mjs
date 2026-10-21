@@ -94,6 +94,32 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await read(`${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('Retry failed webhook delivery')`)
   check(await read(`document.querySelectorAll('.sb-activity-heading').length === 2 && !document.querySelector('.sb-activity-project') && !document.querySelector('.sb-activity-heading span')`), 'Empty groups, project subtitles or counts leaked into the flat list')
+  // The activity view owes the list one peak: live rows stay the brightest, running work
+  // keeps a mark in the same right column as attention and completed rows, and the
+  // finished tail runs denser than the work still in flight.
+  const hierarchy = await read(`(() => {
+    const live = document.querySelector('[data-activity-group="working"] .sb-sess')
+    const done = document.querySelector('[data-activity-group="completed"] .sb-sess')
+    const center = node => { const box = node.getBoundingClientRect(); return Math.round(innerWidth - (box.x + box.width / 2)) }
+    const luminance = node => {
+      const style = getComputedStyle(node)
+      const paint = style.webkitTextFillColor === 'rgba(0, 0, 0, 0)' ? style.backgroundColor : style.color
+      const [r, g, b] = paint.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(Number)
+      const channel = value => value / 255 <= 0.04045 ? value / 255 / 12.92 : ((value / 255 + 0.055) / 1.055) ** 2.4
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
+    return {
+      ringColumn: center(live.querySelector('.sb-running')),
+      markColumn: center(done.closest('[data-activity-group]').querySelector('.sb-activity-status')),
+      liveHeight: live.getBoundingClientRect().height,
+      doneHeight: done.getBoundingClientRect().height,
+      liveTitle: luminance(live.querySelector('.sb-sesstext')),
+      doneTitle: luminance(done.querySelector('.sb-sesstext'))
+    }
+  })()`)
+  check(Math.abs(hierarchy.ringColumn - hierarchy.markColumn) <= 2, `Running mark left the state column: ${JSON.stringify(hierarchy)}`)
+  check(hierarchy.liveHeight > hierarchy.doneHeight, `Finished rows run as tall as live rows: ${JSON.stringify(hierarchy)}`)
+  check(hierarchy.liveTitle > hierarchy.doneTitle + 0.1, `Live titles are not the peak of the list: ${JSON.stringify(hierarchy)}`)
   check(await read(`!document.querySelector('.sb-activity').textContent.includes('未核实的历史')`), 'Unknown history leaked into completed')
   await read(`window.activityRow = document.querySelector(${JSON.stringify(row)}); window.activityHeading = document.getElementById('sidebar-activity-working'); window.activityFixture.setReversed(true)`)
   await wait(`document.querySelector('[data-activity-group="working"] .sb-sess') === window.activityRow`)
@@ -194,6 +220,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await wait(`!document.querySelector('.sidebar')`)
   return { tabsKeyboard: true, nativeSelection: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
     conditionalSections: true, movingHeadings: true, flatAppearance: true, honestCompletion: true, inGroupReorder: true,
+    stateColumn: true, livePeak: true,
     pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,
     sharedTypography: true, workingSweep: true, longTitleSweepContrast: true, staticTerminalTitles: true, forcedColors: true }
 }

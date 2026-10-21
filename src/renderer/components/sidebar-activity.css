@@ -25,13 +25,30 @@
   padding-bottom: 12px;
 }
 
+/* Act bands: the label carries the rule that closes its group, so the list reads
+   as labelled spans rather than one continuous column of titles. The live act owns
+   the brighter label and rule; the finished archive steps back. */
 .sb-activity-heading {
-  margin: 22px 10px 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 10px 8px;
   color: var(--fg);
-  font: 500 var(--text-supporting-size)/20px var(--font-ui);
+  font: 680 13px/18px var(--font-ui);
+  letter-spacing: 0.03em;
 }
 
-.sb-activity-heading:first-child { margin-top: 6px; }
+.sb-activity-heading::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border3);
+}
+
+.sb-activity-heading[data-activity-group='working']::after { background: var(--border2); }
+.sb-activity-heading[data-activity-group='completed'] { color: var(--dim); }
+
+.sb-activity-heading:first-child { margin-top: 8px; }
 .sb-activity-item { position: relative; }
 .sidebar .sb-activity .sb-remote-proj { margin: 0; border: 0; background: transparent; }
 .sidebar .sb-activity .sb-remote-proj .sb-sess-list { padding: 0; }
@@ -51,9 +68,9 @@
   line-height: 20px;
 }
 
-:root .sidebar .sb-activity [data-activity-group='working'] .sb-sess {
+:root .sidebar .sb-activity [data-activity-group='working'] .sb-sess,
+:root .sidebar .sb-activity [data-activity-group='completed'] .sb-sess {
   color: var(--dim);
-  padding-right: 10px;
 }
 
 :root .sidebar .sb-activity .sb-sess-row:hover .sb-sess,
@@ -72,12 +89,23 @@
   color: var(--fg);
 }
 
-/* A narrow highlight crosses only running titles. Keep opaque text as the
-   default so reduced motion and forced colors never depend on text clipping. */
+/* Archive rows run denser than live rows: the list keeps its peak at the work
+   still in flight, and the finished tail reads as one compact ledger. */
+:root .sidebar .sb-activity [data-activity-group='completed'] .sb-sess {
+  height: 28px;
+  min-height: 28px;
+}
+
+:root .sidebar .sb-activity [data-activity-group='completed'] .sb-activity-status { top: 6px; }
+
+/* Live titles rest at full strength and the travelling band modulates toward the
+   mid tone, so running work stays the brightest text in the list and the motion
+   reads as a darker shadow in dark mode and a lighter one in light mode. Keep the
+   resting text opaque so reduced motion and forced colors never depend on clipping. */
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   :root .sidebar .sb-activity [data-activity-group='working'] .sb-sesstext {
-    background-color: var(--dim);
-    background-image: linear-gradient(90deg, transparent, var(--fg), transparent);
+    background-color: var(--fg);
+    background-image: linear-gradient(90deg, transparent, var(--dim2), transparent);
     background-size: 96px 100%;
     background-repeat: no-repeat;
     background-clip: text;
@@ -103,7 +131,24 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.sidebar .sb-activity .sb-running { animation: none; }
+/* State column: running rows keep the spinning ring in the same right slot that
+   marks attention and completed rows, instead of hiding liveness in the title only. */
+:root .sidebar .sb-activity .sb-sess > .sb-running {
+  position: absolute;
+  right: 14px;
+  top: 11px;
+  width: 11px;
+  height: 11px;
+  overflow: visible;
+  clip-path: none;
+  border-color: var(--dim2);
+  border-top-color: var(--fg);
+  animation: sb-running-spin 900ms linear infinite;
+  pointer-events: none;
+}
+
+:root .sidebar .sb-activity .sb-activity-item:hover .sb-sess > .sb-running,
+:root .sidebar .sb-activity .sb-activity-item:focus-within .sb-sess > .sb-running { visibility: hidden; }
 
 .sb-activity-status {
   position: absolute;
@@ -115,6 +160,7 @@
 }
 .sb-activity-status .ico { width: 16px; height: 16px; }
 [data-activity-group='attention'] > .sb-activity-status { color: var(--fg); }
+[data-activity-group='completed'] > .sb-activity-status { color: var(--dim2); }
 .sb-activity-item:hover > .sb-activity-status,
 .sb-activity-item:focus-within > .sb-activity-status { visibility: hidden; }
 .sb-activity .sb-act:not(:hover):not(.on) { color: var(--dim); }

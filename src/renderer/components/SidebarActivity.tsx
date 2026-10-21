@@ -93,7 +93,7 @@ export function SidebarActivity({ entries, renderEntry }: {
     const items = displayed.filter((entry) => entry.group === group.id)
     if (!items.length) continue
     const headingId = `sidebar-activity-${group.id}`
-    children.push(<h3 key={group.id} id={headingId} className="sb-activity-heading" data-motion-key={group.id}>
+    children.push(<h3 key={group.id} id={headingId} className="sb-activity-heading" data-motion-key={group.id} data-activity-group={group.id}>
       {group.label}
     </h3>)
     // Flat keyed siblings preserve each row's DOM/focus as it migrates between groups.
