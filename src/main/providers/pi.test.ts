@@ -2,9 +2,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createHash } from 'node:crypto'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { channel } from 'node:diagnostics_channel'
+import { EventEmitter, once } from 'node:events'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import type { ParsedTurn } from '../normalize'
 import { billingRowsFromItems } from '../billing-ledger'
@@ -512,6 +513,10 @@ function withRotomFixture<T>(run: (profile: ReturnType<typeof piProfileForExecut
 type CommandStage = { step: string; at: number; pid?: number }
 
 async function withCommandFixture<T>(run: (profile: ReturnType<typeof piProfileForExecutable>, cwd: string, launchStages: CommandStage[]) => Promise<T>): Promise<T> {
+  let finish!: () => void
+  const finished = new Promise<void>(resolve => { finish = resolve })
+  // A timed-out readiness wait must still finish owned process/fixture cleanup before the next test.
+  onTestFinished(() => finished)
   return withRotomFixture(async (profile, cwd) => {
     const launchStages: CommandStage[] = []
     const created = channel('child_process')
@@ -527,7 +532,19 @@ async function withCommandFixture<T>(run: (profile: ReturnType<typeof piProfileF
     }
     created.subscribe(observe)
     try { return await run(profile, cwd, launchStages) } finally { created.unsubscribe(observe) }
-  })
+  }).finally(finish)
+}
+
+async function waitForCommandRpcReady(rpcReady: Promise<unknown>, completion: Promise<unknown>): Promise<void> {
+  await Promise.race([
+    rpcReady,
+    completion.then(() => { throw new Error('Pi fixture completed without RPC readiness') })
+  ])
+}
+
+async function expectCommandSettled(rpcReady: Promise<unknown>, completion: Promise<unknown>, terminal: () => boolean): Promise<void> {
+  await waitForCommandRpcReady(rpcReady, completion)
+  await vi.waitFor(() => expect(terminal()).toBe(true), { timeout: 3_000 })
 }
 
 function commandFailureEvidence(cwd: string, terminal: boolean, events: TraceEvent[], startedAt: number,
@@ -543,6 +560,52 @@ function commandFailureEvidence(cwd: string, terminal: boolean, events: TraceEve
     starts: existsSync(join(cwd, 'fixture-starts')) ? readFileSync(join(cwd, 'fixture-starts'), 'utf8').slice(-512) : null
   }))
 }
+
+describe('Pi command timing contract', () => {
+  it('does not start the command deadline before RPC readiness', async () => {
+    vi.useFakeTimers()
+    const wait = vi.spyOn(vi, 'waitFor')
+    let terminal = false
+    try {
+      let ready!: () => void
+      let complete!: () => void
+      const rpcReady = new Promise<void>(resolve => { ready = resolve })
+      const completion = new Promise<void>(resolve => { complete = resolve })
+      const checked = expectCommandSettled(rpcReady, completion, () => terminal)
+      let finished = false
+      void checked.then(() => { finished = true }, () => { finished = true })
+      await vi.advanceTimersByTimeAsync(4_000)
+      expect(finished).toBe(false)
+      expect(wait).not.toHaveBeenCalled()
+      ready()
+      await vi.advanceTimersByTimeAsync(0)
+      terminal = true
+      complete()
+      await vi.advanceTimersByTimeAsync(50)
+      await checked
+      expect(finished).toBe(true)
+      expect(wait).toHaveBeenCalledWith(expect.any(Function), { timeout: 3_000 })
+    } finally { terminal = true; wait.mockRestore(); vi.useRealTimers() }
+  })
+  it('still rejects an unsettled command three seconds after RPC readiness', async () => {
+    await expect(expectCommandSettled(Promise.resolve(), new Promise<void>(() => {}), () => false)).rejects.toThrow()
+  })
+  it.each(['failed', 'completed'] as const)('does not wait indefinitely when the run %s before RPC readiness', async state => {
+    const completion = state === 'failed' ? Promise.reject(new Error('fixture startup failed')) : Promise.resolve()
+    await expect(expectCommandSettled(new Promise<void>(() => {}), completion, () => true)).rejects.toThrow(
+      state === 'failed' ? 'fixture startup failed' : 'completed without RPC readiness')
+  })
+  it('releases a readiness listener when the owning test aborts', async () => {
+    const controller = new AbortController()
+    const events = new EventEmitter()
+    const ready = once(events, 'ready', { signal: controller.signal })
+    const checked = expectCommandSettled(ready, new Promise<void>(() => {}), () => false)
+    const rejected = expect(checked).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort()
+    await rejected
+    expect(events.listenerCount('ready')).toBe(0)
+  })
+})
 
 describe('Pi RPC Provider', () => {
   it('isolates RPC fixtures from the host HOME and pins the current Node runtime', async () => {
@@ -1680,7 +1743,7 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each([false, true])('finishes a menu-only command (cancelled=%s), clears its provisional record and accepts the next turn', async (cancelled) => {
+  it.for([false, true])('finishes a menu-only command (cancelled=%s), clears its provisional record and accepts the next turn', { timeout: 15_000 }, async (cancelled, { signal }) => {
     await withCommandFixture(async (profile, cwd, launchStages) => {
       writeFileSync(join(cwd, 'scry.config.json'), JSON.stringify({
         schemaVersion: 1, enabled: true, workspaceId: 'pi-menu-fixture', dataDir: '.scry',
@@ -1693,6 +1756,9 @@ describe('Pi RPC Provider', () => {
       } })
       const events: TraceEvent[] = []
       const questions: string[] = []
+      const readiness = new AbortController()
+      const rpcEvents = new EventEmitter()
+      const rpcReady = once(rpcEvents, 'ready', { signal: AbortSignal.any([signal, readiness.signal]) })
       const recorderStages: { step: string; at: number }[] = []
       const hooks = await import('../../core/turn-recorder/recorder')
       const managed = await import('../../core/turn-recorder/managed')
@@ -1711,7 +1777,10 @@ describe('Pi RPC Provider', () => {
         runId: 'menu-run', prompt: '/fixture-menu', cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', managedRecorder: true,
         managedRecorderIdentity: { runId: 'menu-run', promptHash: createHash('sha256').update('/fixture-menu').digest('hex') },
-        emit: (event) => events.push(event),
+        emit: event => {
+          events.push(event)
+          if (event.kind === 'harness' && event.stage === 'runtime:init') rpcEvents.emit('ready')
+        },
         requestUserInput: async (request) => {
           questions.push(request.questionId)
           if (request.questionId === 'menu-editor') expect(request.questions[0].initialValue).toBe('Existing objective')
@@ -1723,7 +1792,7 @@ describe('Pi RPC Provider', () => {
       let terminal = false
       void handle.promise.then(() => { terminal = true }, () => { terminal = true })
       try {
-        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        await expectCommandSettled(rpcReady, handle.promise, () => terminal)
         const result = await handle.promise
         expect(result).toMatchObject({ externalSessionId: 'pi-session-1', status: 'completed' })
         expect(result.providerTurnId).toBeUndefined()
@@ -1747,13 +1816,14 @@ describe('Pi RPC Provider', () => {
         throw error
       } finally {
         try {
+          readiness.abort()
           handle.forceKill()
           await handle.promise.catch(() => {})
           await adapter.dispose?.()
         } finally { startSpy.mockRestore(); cancelSpy.mockRestore() }
       }
     })
-  }, 15_000)
+  })
 
   it.each(['custom', 'custom-sentinel', 'custom-option', 'custom-preview', 'custom-legacy', 'option', 'cancel-select', 'unrelated-input', 'unrelated-context'])('round-trips the native questionnaire protocol: %s', async (scenario) => {
     await withCommandFixture(async (profile, cwd) => {
@@ -1800,9 +1870,13 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each(['profile', 'prompt-response', 'idle-response'] as const)('locates a pending custom command at the controlled %s gate', async phase => {
+  it.for(['profile', 'prompt-response', 'idle-response'] as const)('locates a pending custom command at the controlled %s gate', { timeout: 15_000 }, async (phase, { signal }) => {
     await withCommandFixture(async (profile, cwd, launchStages) => {
       if (phase !== 'profile') writeFileSync(join(cwd, 'status-gate'), phase)
+      const readiness = new AbortController()
+      const readySignal = AbortSignal.any([signal, readiness.signal])
+      const rpcEvents = new EventEmitter()
+      let rpcReady: Promise<unknown> | undefined
       let release!: () => void
       const gate = new Promise<void>(resolve => { release = resolve })
       let reached = false
@@ -1813,7 +1887,10 @@ describe('Pi RPC Provider', () => {
       const events: TraceEvent[] = []
       const handle = adapter.run({
         runId: `controlled-${phase}`, prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
-        attachments: [], permissionMode: 'full_access', emit: event => events.push(event),
+        attachments: [], permissionMode: 'full_access', emit: event => {
+          events.push(event)
+          if (event.kind === 'harness' && event.stage === 'runtime:init') rpcEvents.emit('ready')
+        },
         requestUserInput: async request => {
           reached = true
           await gate
@@ -1828,6 +1905,10 @@ describe('Pi RPC Provider', () => {
         return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { type: string }) : []
       }
       try {
+        if (phase !== 'profile') {
+          rpcReady = once(rpcEvents, 'ready', { signal: readySignal })
+          await waitForCommandRpcReady(rpcReady, handle.promise)
+        }
         await vi.waitFor(() => expect(reached).toBe(true), { timeout: 3_000 })
         expect(terminal).toBe(false)
         expect(events.some(event => event.stage === 'result')).toBe(false)
@@ -1835,7 +1916,9 @@ describe('Pi RPC Provider', () => {
         expect(events.some(event => event.stage === 'runtime:extension_message')).toBe(phase !== 'profile')
         expect(commands().at(-1)?.type).toBe(phase === 'profile' ? undefined : phase === 'prompt-response' ? 'prompt' : 'get_state')
         release()
-        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        // The profile gate resumes before native startup; subscribe before its async continuation.
+        rpcReady ??= once(rpcEvents, 'ready', { signal: readySignal })
+        await expectCommandSettled(rpcReady, handle.promise, () => terminal)
         await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
         expect(events.some(event => event.kind === 'model')).toBe(false)
         expect(events.find(event => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
@@ -1853,6 +1936,7 @@ describe('Pi RPC Provider', () => {
         expect(launchStages.map(stage => stage.step)).toEqual(['process.constructed', 'spawn.ready', 'stdout.first'])
         expect(launchStages.every(stage => stage.pid === pid)).toBe(true)
       } finally {
+        readiness.abort()
         release()
         handle.forceKill()
         await handle.promise.catch(() => {})
@@ -1862,24 +1946,71 @@ describe('Pi RPC Provider', () => {
       expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
       expect(launchStages.at(-1)?.step).toBe('process.close')
     })
+  })
+
+  it('closes the owned RPC when its readiness wait is aborted before prompt', async ({ signal }) => {
+    await withCommandFixture(async (profile, cwd) => {
+      writeFileSync(join(cwd, 'hold-startup'), '')
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const controller = new AbortController()
+      const events = new EventEmitter()
+      const ready = once(events, 'ready', { signal: AbortSignal.any([signal, controller.signal]) })
+      let reached!: () => void
+      const startupQuestion = new Promise<void>(resolve => { reached = resolve })
+      const handle = adapter.run({
+        runId: 'abort-command-readiness', prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access',
+        emit: event => { if (event.kind === 'harness' && event.stage === 'runtime:init') events.emit('ready') },
+        requestUserInput: async request => {
+          reached()
+          return { runId: request.runId, questionId: request.questionId, behavior: 'cancelled' }
+        }
+      })
+      let terminal = false
+      void handle.promise.then(() => { terminal = true }, () => { terminal = true })
+      const checked = expectCommandSettled(ready, handle.promise, () => terminal)
+      try {
+        await Promise.race([startupQuestion, checked.then(() => { throw new Error('fixture completed before startup question') })])
+        const rejected = expect(checked).rejects.toMatchObject({ name: 'AbortError' })
+        controller.abort()
+        await rejected
+      } finally {
+        controller.abort()
+        handle.forceKill()
+        await handle.promise.catch(() => {})
+        await adapter.dispose?.()
+      }
+      await expect(handle.promise).resolves.toMatchObject({ status: 'interrupted' })
+      expect(events.listenerCount('ready')).toBe(0)
+      const commands = readFileSync(join(cwd, 'fixture-commands'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as { type: string })
+      expect(commands.some(command => command.type === 'prompt')).toBe(false)
+      const pid = Number(readFileSync(join(cwd, 'fixture-starts'), 'utf8').trim())
+      expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+    })
   }, 15_000)
 
-  it('preserves visible custom command messages without inventing a model turn', async () => {
+  it('preserves visible custom command messages without inventing a model turn', async ({ signal }) => {
     await withCommandFixture(async (profile, cwd, launchStages) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => {
         launchStages.push({ step: 'profile.resolved', at: Date.now() })
         return profile
       } })
       const events: TraceEvent[] = []
+      const readiness = new AbortController()
+      const rpcEvents = new EventEmitter()
+      const rpcReady = once(rpcEvents, 'ready', { signal: AbortSignal.any([signal, readiness.signal]) })
       const startedAt = Date.now()
       const handle = adapter.run({
         runId: 'command-status', prompt: '/fixture-menu status', cwd, agentProfileId: profile.id,
-        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+        attachments: [], permissionMode: 'full_access', emit: event => {
+          events.push(event)
+          if (event.kind === 'harness' && event.stage === 'runtime:init') rpcEvents.emit('ready')
+        }
       })
       let terminal = false
       void handle.promise.then(() => { terminal = true }, () => { terminal = true })
       try {
-        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        await expectCommandSettled(rpcReady, handle.promise, () => terminal)
         expect(await handle.promise).toMatchObject({ status: 'completed' })
         expect(events.some((event) => event.kind === 'model')).toBe(false)
         expect(events.find((event) => event.stage === 'runtime:extension_message')).toMatchObject({ text: 'Custom command status' })
@@ -1887,6 +2018,7 @@ describe('Pi RPC Provider', () => {
         commandFailureEvidence(cwd, terminal, events, startedAt, [], launchStages)
         throw error
       } finally {
+        readiness.abort()
         handle.forceKill()
         await handle.promise.catch(() => {})
         await adapter.dispose?.()
@@ -1894,21 +2026,28 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it('does not turn an extension handler error into a successful command acknowledgement', async () => {
+  it('does not turn an extension handler error into a successful command acknowledgement', async ({ signal }) => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const events: TraceEvent[] = []
+      const readiness = new AbortController()
+      const rpcEvents = new EventEmitter()
+      const rpcReady = once(rpcEvents, 'ready', { signal: AbortSignal.any([signal, readiness.signal]) })
       const handle = adapter.run({
         runId: 'menu-error', prompt: '/fixture-menu error', cwd, agentProfileId: profile.id,
-        attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event)
+        attachments: [], permissionMode: 'full_access', emit: event => {
+          events.push(event)
+          if (event.kind === 'harness' && event.stage === 'runtime:init') rpcEvents.emit('ready')
+        }
       })
       let terminal = false
       void handle.promise.then(() => { terminal = true }, () => { terminal = true })
       try {
-        await vi.waitFor(() => expect(terminal).toBe(true), { timeout: 3_000 })
+        await expectCommandSettled(rpcReady, handle.promise, () => terminal)
         expect(await handle.promise).toMatchObject({ status: 'failed' })
         expect(events.find((event) => event.stage === 'result')).toMatchObject({ isError: true, text: 'menu failed' })
       } finally {
+        readiness.abort()
         handle.forceKill()
         await handle.promise.catch(() => {})
         await adapter.dispose?.()

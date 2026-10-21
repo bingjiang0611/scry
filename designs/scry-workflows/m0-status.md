@@ -115,4 +115,15 @@ UI fixture 验证独立编排 Pi profile / Codex 执行角色、不同模型 ven
 - 自有合成进程的 sample 只捕获到 env/dyld 起步及同步通知等待，并有跨 exec 的采样警告；采样本身可能扰动加载，不用它认定系统 bug 或历史超时根因。没有检查/停止其他用户进程。
 - 最新 Pi 相关 **166 passed**，typecheck、build、diff check；生产 pi.ts 与原 3 秒/15 秒断言未改，不重复整套。证据 `/tmp/scry-pi-launch-trace.pLUO3F/`，旧现场源文件哈希保持不变；无真实 Provider 调用、push、安装或现有 App 重启。
 
-实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。本地代码门禁通过不等于上述剩余范围已交付。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。
+### 用户批准的命令分段验收（改变计时起点，不是生产修复）
+
+- 用户明确选择“启动与命令分段验收”。此前历史检查保留原口径；从本次修改起，menu 成功/取消、可见 custom message、handler error 的 3 秒等待从真实 `harness/runtime:init` 后开始，整项测试仍为 **15 秒**。没有把 spawn 或首个 stdout 当作 RPC 就绪。原状态、可见消息、无模型轮次、provisional record 清理、下一轮与 recorder 断言均保留。
+- 启动前失败或未就绪即结束会直接暴露，不无限等待。就绪等待绑定 Vitest 的整体 timeout/cancel signal；fixture 的 `onTestFinished` 等待其原有 finally 完成，避免超时后下一项先行、旧进程或 spy 尚未清理。超时仍是失败，teardown 不延长操作成功的预算。
+- 三个受控门也按阶段计时：profile 门仍先检查尚未启动；释放后等 RPC 就绪，再检查 3 秒收敛。prompt/idle 门先等 RPC 就绪，保留 checkpoint 到达与释放后收敛的各 3 秒检查。没有放宽断言、跳过真实 recorder 或改生产 `pi.ts`。
+- 新增 **6 项回归**：模拟 4 秒未就绪时尚未创建命令计时、就绪后真实 3 秒仍拒绝未完成命令、启动失败/提前结束不被吞掉、取消移除 listener，以及本机假 CLI 在就绪前取消后确认 interrupted、未发 prompt、精确 PID 已退出。
+- 负对照：恢复“先开始 3 秒等待再等就绪”被回归抓住；临时将整项上限缩短至 100 ms，runner 在原生启动阶段触发失败，清理仍完成。均已还原；最终没有 100 ms 上限或跳过 ready 等待的注入。它们证明计时保护的敏感性，不证明历史自然失败根因。
+- 当前版本相关 **13 passed**（含三门、四个命令场景及新增回归）、typecheck、build、diff check 通过。首次接线发现 `it.each` 不提供 TestContext，改用已安装 Vitest 的 `it.for`，并按其 API 将仍为 15 秒的 options 放在第二参数；保留该轮失败日志。
+- 较大验证未通过：Pi 五文件轮次在未修改的 lifecycle 路径出现 **17 项超时**，命令 300 秒截止，没有完整汇总；当时机器 load 约 120/10 核，不据此单独认定原因。按 helper 实际调用方缩到 35 项后为 **32 passed / 3 failed**：managed fork fence 5 秒、questionnaire/custom-preview 15 秒、受控 idle checkpoint 3 秒。最后一项按本次新口径拆分并在上述 13 项中验证；前两项路径和期限未改，仍未解决。没有用重复整套或扩大期限抹掉失败，低负载下的较大范围确认由维护 Agent 后续补做。
+- 证据 `/tmp/scry-pi-stage-contract.qoQX7W/`。旧现场 16 个源文件哈希不变，没有遗留 Pi fixture 进程；无真实模型调用、push、安装或现有 App 重启。原始间歇故障仍未定因，不能把本次验收口径调整说成已修复生产故障。
+
+实现检查点 `32a70bd` 基于 `c405df0`（0.2.204）；本分支经授权同步 `be907ef`（0.2.210），未包含或修改原工作区的 WIP。历史门禁结果不等于上述剩余范围已交付，当前范围以上述分项结果为准。未安装、未重启用户 App，也未 push；相同版本号不等于已部署。
