@@ -481,6 +481,25 @@ describe('runtime frontdoor mapping', () => {
     expect(normalizeAgentQuestionResponse(request, { ...response, nativeCustomAnswer: false })).toBeNull()
   })
 
+  it('validates per-question custom intent only for a Pi questionnaire', () => {
+    const request = {
+      ...normalizeAgentQuestionRequest('run', 'tool', { questions: [
+        { header: 'First', question: 'First?', options: [{ label: 'A', description: 'Alpha' }, { label: 'B', description: 'Beta' }] },
+        { header: 'Second', question: 'Second?', options: [{ label: 'C', description: 'Gamma' }, { label: 'D', description: 'Delta' }] }
+      ] }, undefined, 'pi_questionnaire')!,
+      providerId: 'pi' as const
+    }
+    const response = { runId: 'run', questionId: 'tool', behavior: 'answered', answers: { 'First?': '1', 'Second?': '2' }, nativeCustomAnswers: ['First?'] }
+    expect(normalizeAgentQuestionResponse(request, response)).toEqual(response)
+    for (const nativeCustomAnswers of [true, ['Missing?'], [1], ['First?', 'Second?', 'Third?']]) {
+      expect(normalizeAgentQuestionResponse(request, { ...response, nativeCustomAnswers })).toBeNull()
+    }
+    expect(normalizeAgentQuestionResponse({ ...request, providerId: 'claude' }, response)).toBeNull()
+    expect(normalizeAgentQuestionResponse({ ...request, source: 'pi_extension_ui:select' }, response)).toBeNull()
+    expect(normalizeAgentQuestionResponse({ ...request, questions: request.questions.map((question) => ({ ...question, allowCustomAnswer: false })) }, response)).toBeNull()
+    expect(normalizeAgentQuestionResponse(request, { ...response, answers: { 'First?': '1' } })).toBeNull()
+  })
+
   it('accepts only complete answers for the matching run and tool call', () => {
     const request = normalizeAgentQuestionRequest('run-1', 'tool-1', {
       questions: [

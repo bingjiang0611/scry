@@ -341,6 +341,8 @@ export type AgentQuestionResponse =
       answers: Record<string, string>
       /** Pi's single select → input answer is text, even when it equals a listed value. */
       nativeCustomAnswer?: true
+      /** Pi's grouped single-select answers keep custom text distinct from option indices. */
+      nativeCustomAnswers?: string[]
     }
   | {
       runId: string
@@ -849,6 +851,12 @@ export function normalizeAgentQuestionResponse(
     response.nativeCustomAnswer !== true || request.providerId !== 'pi' || request.source !== 'pi_extension_ui:select' ||
     request.questions.length !== 1 || request.questions[0].allowCustomAnswer === false
   )) return null
+  if (response.nativeCustomAnswers !== undefined && (
+    request.providerId !== 'pi' || request.source !== 'pi_questionnaire' ||
+    !Array.isArray(response.nativeCustomAnswers) || response.nativeCustomAnswers.length > request.questions.length ||
+    !response.nativeCustomAnswers.every((text) => typeof text === 'string' &&
+      request.questions.some((question) => question.question === text && question.allowCustomAnswer !== false))
+  )) return null
   const rawAnswers = response.answers as Record<string, unknown>
   const answers: Record<string, string> = {}
   for (const question of request.questions) {
@@ -859,6 +867,7 @@ export function normalizeAgentQuestionResponse(
   }
   return {
     runId: request.runId, questionId: request.questionId, behavior: 'answered', answers,
-    ...(response.nativeCustomAnswer === true ? { nativeCustomAnswer: true } : {})
+    ...(response.nativeCustomAnswer === true ? { nativeCustomAnswer: true } : {}),
+    ...(Array.isArray(response.nativeCustomAnswers) ? { nativeCustomAnswers: [...response.nativeCustomAnswers] as string[] } : {})
   }
 }

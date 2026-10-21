@@ -8,6 +8,7 @@ import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { createPiRpcDecoder } from './pi-rpc-decoder'
 import { PiBackgroundWork } from './pi-background-work'
+import { PiQuestionnaire } from './pi-questionnaire'
 import { billingProviderForUpstream } from '../../shared/billing'
 import {
   capabilityReady,
@@ -1428,6 +1429,7 @@ async function runPiAgent(
   const modelContextWindows = new Map<string, number>()
   const abortController = new AbortController()
   let stagedCustomAnswer: { value: string; inputTitle: string } | undefined
+  const questionnaires = new Map<string, PiQuestionnaire>()
   const toolNames = new Map<string, string>()
   const toolStarts = new Map<string, number>()
   let streamedText = false
@@ -1589,6 +1591,10 @@ async function runPiAgent(
       const rawName = typeof event.toolName === 'string' ? event.toolName : 'Tool'
       const toolName = rawName === 'subagent' ? 'Agent' : rawName
       const input = record(event.args)
+      if (rawName === 'ask_user_question') {
+        const questionnaire = PiQuestionnaire.fromTool(request.runId, toolUseId, input)
+        if (questionnaire) questionnaires.set(toolUseId, questionnaire)
+      }
       const classified = classifyTool(toolName, input)
       toolNames.set(toolUseId, toolName)
       toolStarts.set(toolUseId, Date.now())
@@ -1637,6 +1643,7 @@ async function runPiAgent(
       if (toolUseId) {
         toolNames.delete(toolUseId)
         toolStarts.delete(toolUseId)
+        questionnaires.delete(toolUseId)
       }
       return
     }
@@ -1679,6 +1686,18 @@ async function runPiAgent(
       return
     }
     const question = questionFromExtension(request.runId, event)
+    if (question && request.requestUserInput && questionnaires.size > 0) {
+      const matches = [...questionnaires.values()].filter((candidate) => candidate.matches(event))
+      if (matches.length === 1) {
+        void matches[0].reply(event, (group) => request.requestUserInput!(group, abortController.signal))
+          .then((reply) => rpc.notify(abortController.signal.aborted
+            ? { type: 'extension_ui_response', id: event.id, cancelled: true } : reply))
+          .catch(() => rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true }))
+        return
+      }
+      // A different/changed native dialog must never consume answers approved for this group.
+      questionnaires.clear()
+    }
     if (question && stagedCustomAnswer !== undefined) {
       const answer = stagedCustomAnswer
       stagedCustomAnswer = undefined

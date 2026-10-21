@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { AssistantTurn } from '../../src/renderer/components/ChatTurn'
+import { AskUserQuestionInline } from '../../src/renderer/components/AskUserQuestionDialog'
+import { PiQuestionnaire } from '../../src/main/providers/pi-questionnaire'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../src/shared/runtime'
 import type { TraceEvent } from '../../src/shared/trace'
 
@@ -15,6 +17,21 @@ const questions: AgentQuestionRequest[] = [
   ] }
 ]
 
+function GroupedQuestionnaireFixture() {
+  const [version, setVersion] = useState(0)
+  const [answers, setAnswers] = useState<AgentQuestionResponse[]>([])
+  const request = PiQuestionnaire.fromTool('pi-batch', 'batch-tool', { questions: [
+    { header: 'Goal', question: 'What matters?', multiSelect: false, options: [{ label: 'Control', description: 'Stay in control' }, { label: 'Speed', description: 'Finish sooner' }] },
+    { header: 'Scope', question: 'Which parts?', multiSelect: true, options: [{ label: 'UI', description: 'Interface' }, { label: 'Core', description: 'Runtime' }] },
+    { header: 'Review', question: 'When to review?', multiSelect: false, options: [{ label: 'Now', description: 'Before continuing' }, { label: 'Later', description: 'At the end' }] }
+  ] })!.request
+  return <section id="pi-questionnaire">
+    <button id="pi-questionnaire-restart" onClick={() => { setVersion((value) => value + 1); setAnswers([]) }}>Restart questionnaire</button>
+    <AskUserQuestionInline key={version} request={request} queuedCount={1} onRespond={async (response) => { setAnswers((previous) => [...previous, response]) }} />
+    <output id="pi-questionnaire-answers">{JSON.stringify(answers)}</output>
+  </section>
+}
+
 export function PiCommandFixture() {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<AgentQuestionResponse[]>([])
@@ -24,7 +41,7 @@ export function PiCommandFixture() {
     providerId: 'pi', runtimeProvider: 'pi_rpc', text: 'Command interaction ended; model turn unobserved',
     providerCommand: { name: 'fixture-menu', source: 'extension', modelTurn: 'unobserved' }
   }
-  return <section id="pi-command">
+  return <><GroupedQuestionnaireFixture /><section id="pi-command">
     <button id="pi-command-restart" onClick={() => { setStep(0); setAnswers([]) }}>Restart menu</button>
     <AssistantTurn
       turn={{ runId: 'pi-command-ui', userText: '/fixture-menu', done, items: done ? [
@@ -42,5 +59,5 @@ export function PiCommandFixture() {
       }}
     />
     <output id="pi-command-answers">{JSON.stringify(answers)}</output>
-  </section>
+  </section></>
 }
