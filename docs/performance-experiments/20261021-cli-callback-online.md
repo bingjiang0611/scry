@@ -1,5 +1,7 @@
 # 独立 CLI 与 App：通知 ACK 身份互相覆盖
 
+> 本文保留发现问题与暂停诊断 daemon 时的状态。用户随后授权继续修复，0.2.50 已仅部署独立 CLI；最新实现、验证及限制见[ACK 隔离交付记录](20261021-cli-ack-isolation.md)。
+
 这是前一份[离线实验](20261021-cli-multirepo-concurrency.md)之后的在线调查。用户另行授权了真实回调、daemon 切换、自动补发及可能的上传。没有启动付费 Provider、推送、替换全局 CLI 或安装 App。
 
 ## 结论与处置
