@@ -464,7 +464,67 @@ async function main() {
     const oldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
     assert.equal(oldest.turns.length, 1)
     assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
-    console.log('Pi native history >64 MiB: click restores phone conversation; provenance, 41-turn pagination and archive reconciliation verified without Provider execution')
+    const archivePath = join(archiveDir, `sid-${hash(nativeSessionId)}.json`)
+    const mixedArchive = JSON.parse(readFileSync(archivePath, 'utf8'))
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a46kAAAAASUVORK5CYII='
+    mixedArchive.turns.push({ runId: 'archive-only-early', userText: 'older interrupted attempt',
+      done: true, status: 'interrupted', ts: Date.parse('2026-10-13T03:00:00Z'),
+      attachments: [{ storage: 'inline', kind: 'image', name: 'older.png', mimeType: 'image/png', dataBase64: png }],
+      items: [{ id: 'older-tool', runId: 'archive-only-early', kind: 'tool', stage: 'tool_result', tool: 'bash',
+        toolUseId: 'older-call', output: 'canonical older tool output', ts: '2026-10-13T03:00:01Z' },
+      { id: 'older-result', runId: 'archive-only-early', kind: 'harness', stage: 'result', tokensIn: 73, tokensOut: 17,
+        ts: '2026-10-13T03:00:02Z' }] },
+    { runId: 'archive-only-middle', userText: 'interleaved canonical attempt', done: true, status: 'interrupted',
+      ts: Date.parse('2026-10-13T04:50:00Z'), items: [{ id: 'middle-text', runId: 'archive-only-middle',
+        kind: 'model', stage: 'text', text: 'canonical middle payload', ts: '2026-10-13T04:50:01Z' }] })
+    writeFileSync(archivePath, JSON.stringify(mixedArchive))
+    // Unlinked attempts precede their next exact native archive anchor. Timestamps alone
+    // do not reorder native ancestry or establish attempt ownership.
+    const mixed = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 1 })`)
+    assert.equal(mixed.totalTurns, 43)
+    const middle = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 42, limit: 1 })`)
+    assert.equal(middle.offset, 41)
+    assert.equal(middle.totalTurns, 43)
+    assert.equal(middle.turns[0].runId, 'archive-only-middle')
+    assert.ok(middle.turns[0].items.some(item => item.text === 'canonical middle payload'))
+    const early = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 41, limit: 1 })`)
+    assert.equal(early.offset, 40)
+    assert.equal(early.hasOlder, true)
+    assert.equal(early.turns[0].runId, 'archive-only-early')
+    assert.ok(early.turns[0].items.some(item => item.output === 'canonical older tool output'))
+    assert.ok(early.turns[0].items.some(item => item.tokensIn === 73 && item.tokensOut === 17))
+    assert.equal(early.turns[0].attachments[0].name, 'older.png')
+    assert.equal(early.turns[0].attachments[0].dataBase64, png)
+    const segmentDir = join(userDataDir, 'trace-archive-turns-v1', 'pi', `cwd-${hash(canonicalWorkspace)}`, `sid-${hash(nativeSessionId)}`)
+    mkdirSync(segmentDir, { recursive: true })
+    writeFileSync(join(segmentDir, `turn-${hash('run\0unavailable-attempt')}.json`), '{broken')
+    const partial = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 1 })`)
+    assert.equal(partial.sourceComplete, false)
+    const partialOldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
+    assert.equal(partialOldest.offset, 0)
+    assert.equal(partialOldest.hasOlder, false)
+    assert.equal(partialOldest.sourceComplete, false)
+    assert.equal(partialOldest.completeness, 'partial')
+    const nativeText = readFileSync(nativePath, 'utf8')
+    const validReply = JSON.stringify(entries[1])
+    assert.ok(nativeText.includes(validReply))
+    writeFileSync(nativePath, nativeText.replace(validReply, JSON.stringify({ ...entries[1], timestamp: 'invalid-date' })))
+    const stale = await evaluate(`(async () => {
+      try { await window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 }); return { rejected: false }; }
+      catch (error) { return { rejected: true, message: error.message }; }
+    })()`)
+    assert.equal(stale.rejected, true)
+    assert.ok(stale.message.includes('重新打开会话'))
+    const fallback = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 43 })`)
+    assert.equal(fallback.totalTurns, 3)
+    assert.ok(fallback.turns.every(turn => !turn.runId.startsWith('pi-native-')))
+    const fallbackOlder = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
+    assert.equal(fallbackOlder.totalTurns, 3)
+    assert.equal(fallbackOlder.turns[0].runId, 'archive-only-early')
+    assert.equal(fallbackOlder.turns[0].attachments[0].dataBase64, png)
+    assert.equal(fallbackOlder.sourceComplete, false)
+    assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+    console.log('Pi native history: real IPC verifies 43-turn interleaving, older canonical tools/usage/attachments and native-only prefix without Provider execution')
     cdp.close()
     return
   }
