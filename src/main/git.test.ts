@@ -799,7 +799,7 @@ describe('每轮 Git 工作树快照', () => {
       await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
 
       const capture = await beginGitTurnDiff(root)
-      await writeFile(join(root, 'large.txt'), `${'你'.repeat(Math.ceil((1024 * 1024 + 8192) / 3))}\n`)
+      await writeFile(join(root, 'large.txt'), `${'你'.repeat(Math.ceil((17 * 1024 * 1024) / 3))}\n`)
       const result = await finishGitTurnDiff(capture, 10_000)
 
       expect(result.status).toBe('captured')
@@ -811,6 +811,64 @@ describe('每轮 Git 工作树快照', () => {
       expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeGreaterThan(32 * 1024)
       expect(result.files[0].patch).not.toContain('�')
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('批量 patch 以 raw 路径映射奇异文件名，并忽略 hunk 内的伪 header', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      const newline = String.fromCharCode(10)
+      const backslash = String.fromCharCode(92)
+      const names = [
+        'space name.txt',
+        `quote\"single'${backslash}日本.txt`,
+        `line${newline}name.txt`,
+        ...Array.from({ length: 132 }, (_, index) => `batch-${String(index).padStart(3, '0')}.txt`)
+      ]
+      for (const name of names) await writeFile(join(root, name), `old${newline}`)
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      capture = await beginGitTurnDiff(root)
+      for (const name of names) {
+        const content = name === 'batch-000.txt'
+          ? `old${newline}-diff --git fake/a fake/b${newline}+diff --git fake/a fake/b${newline}`
+          : `new${newline}`
+        await writeFile(join(root, name), content)
+      }
+      const result = await finishGitTurnDiff(capture, 20_000)
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(names.length)
+      expect(result.files.every(file => file.patchStatus === 'captured')).toBe(true)
+      expect(result.files.find(file => file.path.endsWith('batch-000.txt'))?.patch).toContain('+diff --git fake/a fake/b')
+      expect(result.files.find(file => file.path.endsWith(`line${newline}name.txt`))?.patch).toContain('+new')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('空文件删除与 mode-only patch 都保留完整边界', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'empty.txt'), '')
+      await writeFile(join(root, 'mode.txt'), 'content\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      await rm(join(root, 'empty.txt'))
+      await chmod(join(root, 'mode.txt'), 0o755)
+      const result = await finishGitTurnDiff(capture, 10_000)
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(2)
+      expect(result.files.every(file => file.patchStatus === 'captured')).toBe(true)
+      expect(result.files.find(file => file.path.endsWith('empty.txt'))?.patch).toContain('deleted file mode')
+      expect(result.files.find(file => file.path.endsWith('mode.txt'))?.patch).toContain('old mode')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)
