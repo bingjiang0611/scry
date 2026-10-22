@@ -65,12 +65,21 @@ for (const size of [8, 5000]) {
     const indexBefore = await readFile(join(root, '.git/index'))
     const samples = []
     for (let round = 0; round <= rounds; round++) {
+      const repositoryObjectDir = join(root, '.git/objects')
+      const objectsBefore = new Set(await readdir(repositoryObjectDir, { recursive: true }))
       active = { spawns: 0, commands: [], objects: new Map() }
       const start = performance.now()
       const result = await core[implementation](root)
       const elapsedMs = performance.now() - start
       const counters = active
       active = undefined
+      // Also catch accidental writes to the actual repo, not just isolated stores.
+      // Enumeration is instrumentation, outside the API's wall-time sample.
+      for (const path of await readdir(repositoryObjectDir, { recursive: true })) {
+        if (objectsBefore.has(path) || !/^[a-f0-9]{2}\/[a-f0-9]+$/.test(path)) continue
+        const object = inflateSync(await readFile(join(repositoryObjectDir, path)))
+        counters.objects.set(join(repositoryObjectDir, path), object.subarray(0, object.indexOf(32)).toString())
+      }
       assert.equal(result.status, 'captured', JSON.stringify(result))
       assert.equal(result.files.length, 5)
       assert.deepEqual(await readFile(join(root, '.git/index')), indexBefore)
