@@ -898,6 +898,54 @@ describe('Qoder provider adapter', () => {
     }
   })
 
+  it.each([0, 1, 2, 3, 4, 5, 6])('honors a refresh barrier established during acquisition (microtask offset %s)', async (offset) => {
+    vi.useFakeTimers()
+    let releaseUsage!: (value: unknown) => void
+    let releaseClose!: () => void
+    const usage = new Promise((resolve) => { releaseUsage = resolve })
+    const closing = new Promise<void>((resolve) => { releaseClose = resolve })
+    const old = {
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getContextUsage: vi.fn().mockReturnValue(usage),
+      supportedCommands: vi.fn().mockResolvedValue([]),
+      getAvailableModels: vi.fn().mockResolvedValue([]),
+      close: vi.fn().mockReturnValue(closing)
+    }
+    sdk.query.mockReturnValueOnce(old).mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getContextUsage: vi.fn().mockResolvedValue({}),
+      supportedCommands: vi.fn().mockResolvedValue([]),
+      getAvailableModels: vi.fn().mockResolvedValue([]),
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+    try {
+      await adapter.runControls!.read(context)
+      const active = adapter.skills!.list(context)
+      await vi.advanceTimersByTimeAsync(30_000)
+      const refresh = adapter.commands!.list(context)
+      for (let index = 0; index < offset; index++) await Promise.resolve()
+      const acquisition = adapter.runControls!.read(context)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sdk.query).toHaveBeenCalledOnce()
+      expect(old.close).not.toHaveBeenCalled()
+      releaseUsage({ skills: { count: 0, items: [] } })
+      await active
+      await vi.advanceTimersByTimeAsync(0)
+      expect(old.close).toHaveBeenCalledOnce()
+      expect(sdk.query).toHaveBeenCalledOnce()
+      releaseClose()
+      await Promise.all([refresh, acquisition])
+      expect(sdk.query).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseUsage({ skills: { count: 0, items: [] } })
+      releaseClose()
+      await adapter.dispose?.()
+      vi.useRealTimers()
+    }
+  })
+
   it('reports a failed SDK close through dispose instead of claiming clean disposal', async () => {
     const close = vi.fn().mockRejectedValue(new Error('close failed'))
     sdk.query.mockReturnValue({
