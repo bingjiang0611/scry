@@ -67,6 +67,35 @@ describe('Pi startup and probe lifecycle', () => {
     })
   })
 
+  it('settles a run when the extension clears async evidence after native idle', async () => {
+    await withProbeFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const events: TraceEvent[] = []
+      const handle = adapter.run({
+        runId: 'background-cleared', prompt: 'background-cleared', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit(event) { events.push(event) }
+      })
+      onTestFailed(() => {
+        const commands = join(cwd, 'commands')
+        console.error('Pi cleared-child lifecycle evidence', JSON.stringify({
+          events: events.map(event => ({ stage: event.stage, text: event.text })).slice(-24),
+          commands: existsSync(commands) ? readFileSync(commands, 'utf8').slice(-2000) : 'not created'
+        }))
+      })
+      try {
+        // Native idle alone keeps the run owned; the extension's clear ends observation.
+        await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
+        expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+          phase: 'inactive', tasks: [{ taskId: 'child-1', status: 'unconfirmed' }]
+        })
+        expect(events.some(event => event.stage === 'result')).toBe(true)
+      } finally {
+        handle.forceKill?.()
+        await handle.promise.catch(() => undefined)
+      }
+    })
+  })
+
   it('shares concurrent capability probes, but refreshes after the flight completes', async () => {
     await withProbeFixture(async (profile, cwd, starts) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })

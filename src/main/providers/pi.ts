@@ -1452,6 +1452,8 @@ async function runPiAgent(
   let extensionCommandError: string | undefined
   let agentSettled = false
   let agentEnded = false
+  /** The Provider reached native idle, so this run waits only for child evidence. */
+  let nativeIdle = false
   let steerCapabilityEmitted = false
   let steerPending = false
   let resolveAgentCycleEnd!: () => void
@@ -1478,6 +1480,7 @@ async function runPiAgent(
       agentEnded = false
       agentCycleEnd = new Promise<void>(resolve => { resolveAgentCycleEnd = resolve })
     }
+    if (event.type === 'agent_start') nativeIdle = false
     if (event.type === 'agent_start' || event.type === 'tool_execution_start' ||
       (event.type === 'message_start' || event.type === 'message_end') &&
       ['user', 'assistant', 'toolResult'].includes(String(record(event.message).role))) {
@@ -1500,8 +1503,21 @@ async function runPiAgent(
       agentEnded = true
       resolveAgentCycleEnd()
       // Native idle does not include detached extension work. Keep this run's
-      // listener/usage/recorder owner until the child result and parent continuation.
-      if (background.pending && !state.stopped && event.aborted !== true) return
+      // listener/usage/recorder owner until the child result and parent continuation —
+      // but only while the Provider still reports child evidence. An extension that
+      // clears its async widget ends observation, so the release below settles the run
+      // instead of holding it open for a terminal row that cannot arrive.
+      if (event.aborted !== true && background.pending && !state.stopped) {
+        nativeIdle = true
+        return
+      }
+      nativeIdle = false
+      agentSettled = true
+      settledResolve?.()
+      return
+    }
+    if (nativeIdle && !agentSettled && !state.stopped && !background.pending) {
+      nativeIdle = false
       agentSettled = true
       settledResolve?.()
       return
