@@ -1,0 +1,311 @@
+{
+  "schema": 1,
+  "scope": "standalone CLI turns verify; synthetic measurements, aggregate private-snapshot equivalence only",
+  "commits": {
+    "initialMeasurement": "aec4a4780398c51471fa17b0e5cb17f6f8e702a5",
+    "optimization": "2a99eb6db07257833c38e21a4054e0e3bb2e27d9",
+    "coldProcessMeasurement": "1643c233c3cbc1af6b91dcbe794cff6d0fef8d00"
+  },
+  "scriptSha256": {
+    "originalL1": "e4bef85bb44bcd78f2725a0c1d6d358ba0da0153c0cecf53fc593be172932538",
+    "withTiming": "24721d7ea8e45c90d94bee9f2d8d5982be9dc5fa23caaa58f0297d455d1d527f"
+  },
+  "candidateSourceSha256": {
+    "src/cli/scry.ts": "729feb11a4ab46b3db4d96736ef59b3fef8ca21093deb0dfb18cb4435f93141a",
+    "src/core/turn-recorder/store.ts": "9f6a57725e8a8bd4c662b998d975d8bcf7db97a6620340e3ea99a9aedb1efd3a",
+    "src/core/turn-recorder/turns-summary.ts": "0c20de5e0e39f50adc6c09006526e56a05592ea8b94ce496abafe5b09d7ac470"
+  },
+  "l1": {
+    "baseline": {
+      "schema": 1,
+      "node": "v24.18.0",
+      "sourceCommit": "b3887b0a307b3e6f5bc709727543008a8a91d120",
+      "workload": {
+        "records": 64,
+        "promptBytes": 65536,
+        "recordBytes": 4307000,
+        "toolsPerRecord": 1,
+        "identityObservedTurns": 32,
+        "pendingOpenTurns": 2
+      },
+      "scope": "canonical readFile calls and returned bytes, JSON parse calls and tool evidence property reads during real turns verify; not physical disk IO or wall time",
+      "inputSha256": "2727a4c637fc48c82377aa2612bad31c1c08ba31a1385aaa53193757b57666db",
+      "outputSha256": "de7068de91afb41641dcad3f87d25259c609d634f5559d3be51531833ef26dad",
+      "exitCode": 0,
+      "counts": {
+        "recordReads": 128,
+        "recordReadBytes": 8614000,
+        "recordParses": 128,
+        "toolEvidenceReads": 1024
+      },
+      "result": {
+        "ok": true,
+        "records": 64,
+        "errors": [],
+        "archivedThrough": 0,
+        "openTurnsPending": 2,
+        "identity": {
+          "model": {
+            "statusCounts": {
+              "legacy_unset": 32,
+              "observed": 32
+            },
+            "sourceCounts": {
+              "provider_model_event": 32
+            },
+            "coverage": {
+              "knownTurns": 32,
+              "totalTurns": 64,
+              "complete": false,
+              "quality": "inferred"
+            }
+          },
+          "role": {
+            "statusCounts": {
+              "unobserved": 32,
+              "observed": 32
+            },
+            "roleCounts": {
+              "main": 32
+            },
+            "coverage": {
+              "knownTurns": 32,
+              "totalTurns": 64,
+              "complete": false,
+              "quality": "inferred"
+            }
+          },
+          "taskLink": {
+            "statusCounts": {
+              "unbound": 32,
+              "bound": 32
+            },
+            "coverage": {
+              "knownTurns": 32,
+              "totalTurns": 64,
+              "complete": false,
+              "quality": "inferred"
+            }
+          }
+        },
+        "advisories": [
+          "model identity incomplete: {\"legacy_unset\":32,\"observed\":32}",
+          "turn role incomplete: {\"unobserved\":32,\"observed\":32}",
+          "task link incomplete: {\"unbound\":32,\"bound\":32}",
+          "open turns pending recovery: 2"
+        ]
+      }
+    },
+    "candidate": {
+      "schema": 1,
+      "node": "v24.18.0",
+      "sourceCommit": "aec4a4780398c51471fa17b0e5cb17f6f8e702a5",
+      "workload": {
+        "records": 64,
+        "promptBytes": 65536,
+        "recordBytes": 4307000,
+        "toolsPerRecord": 1,
+        "identityObservedTurns": 32,
+        "pendingOpenTurns": 2
+      },
+      "scope": "canonical readFile calls and returned bytes, JSON parse calls and tool evidence property reads during real turns verify; not physical disk IO or wall time",
+      "inputSha256": "2727a4c637fc48c82377aa2612bad31c1c08ba31a1385aaa53193757b57666db",
+      "outputSha256": "de7068de91afb41641dcad3f87d25259c609d634f5559d3be51531833ef26dad",
+      "exitCode": 0,
+      "counts": {
+        "recordReads": 64,
+        "recordReadBytes": 4307000,
+        "recordParses": 64,
+        "toolEvidenceReads": 64
+      },
+      "result": {
+        "ok": true,
+        "records": 64,
+        "errors": [],
+        "archivedThrough": 0,
+        "openTurnsPending": 2,
+        "identity": {
+          "model": {
+            "statusCounts": {
+              "legacy_unset": 32,
+              "observed": 32
+            },
+            "sourceCounts": {
+              "provider_model_event": 32
+            },
+            "coverage": {
+              "knownTurns": 32,
+              "totalTurns": 64,
+              "complete": false,
+              "quality": "inferred"
+            }
+          },
+          "role": {
+            "statusCounts": {
+              "unobserved": 32,
+              "observed": 32
+            },
+            "roleCounts": {
+              "main": 32
+            },
+            "coverage": {
+              "knownTurns": 32,
+              "totalTurns": 64,
+              "complete": false,
+              "quality": "inferred"
+            }
+          },
+          "taskLink": {
+            "statusCounts": {
+              "unbound": 32,
+              "bound": 32
+            },
+            "coverage": {
+              "knownTurns": 32,
+              "totalTurns": 64,
+              "complete": false,
+              "quality": "inferred"
+            }
+          }
+        },
+        "advisories": [
+          "model identity incomplete: {\"legacy_unset\":32,\"observed\":32}",
+          "turn role incomplete: {\"unobserved\":32,\"observed\":32}",
+          "task link incomplete: {\"unbound\":32,\"bound\":32}",
+          "open turns pending recovery: 2"
+        ]
+      }
+    },
+    "unchangedAfterTimingHarnessAdded": true
+  },
+  "l2": {
+    "baseline": {
+      "schema": 1,
+      "node": "v24.18.0",
+      "sourceCommit": "aec4a4780398c51471fa17b0e5cb17f6f8e702a5",
+      "scope": "cold Node CLI process through exit and stdout collection; no instrumentation; warm filesystem, fresh process per run",
+      "workload": {
+        "records": 64,
+        "promptBytes": 65536,
+        "recordBytes": 4307000,
+        "toolsPerRecord": 1,
+        "identityObservedTurns": 32,
+        "pendingOpenTurns": 2
+      },
+      "inputSha256": "2727a4c637fc48c82377aa2612bad31c1c08ba31a1385aaa53193757b57666db",
+      "outputSha256": "de7068de91afb41641dcad3f87d25259c609d634f5559d3be51531833ef26dad",
+      "warmups": 3,
+      "samples": [
+        94.4018329999999,
+        98.42716699999994,
+        97.95320900000002,
+        97.45504100000016,
+        106.1917910000002,
+        106.76266600000008,
+        103.2639999999999,
+        105.01475000000005,
+        103.75333299999988
+      ],
+      "p50Ms": 103.2639999999999,
+      "p95Ms": 106.76266600000008,
+      "modules": {
+        "cli/scry.js": "1457bd9e30b87e8617571019ea59112182a77fae0f45255ec587bdcbaab6c274",
+        "core/turn-recorder/store.js": "3cc4cca17b82613502600d462a1bf7ee65ca9ac92f3beeb312ed96c6590a1e7b",
+        "core/turn-recorder/turns-summary.js": "f507a832b527bf8de4740649a4b361125e347f9d5efa98cdd4f6e6ddd4962d3d"
+      }
+    },
+    "candidate": {
+      "schema": 1,
+      "node": "v24.18.0",
+      "sourceCommit": "1643c233c3cbc1af6b91dcbe794cff6d0fef8d00",
+      "scope": "cold Node CLI process through exit and stdout collection; no instrumentation; warm filesystem, fresh process per run",
+      "workload": {
+        "records": 64,
+        "promptBytes": 65536,
+        "recordBytes": 4307000,
+        "toolsPerRecord": 1,
+        "identityObservedTurns": 32,
+        "pendingOpenTurns": 2
+      },
+      "inputSha256": "2727a4c637fc48c82377aa2612bad31c1c08ba31a1385aaa53193757b57666db",
+      "outputSha256": "de7068de91afb41641dcad3f87d25259c609d634f5559d3be51531833ef26dad",
+      "warmups": 3,
+      "samples": [
+        76.31616699999995,
+        78.28541700000005,
+        77.79012499999999,
+        78.29495800000007,
+        78.11037499999998,
+        79.02383299999997,
+        80.27562499999999,
+        78.40158300000007,
+        77.95249999999987
+      ],
+      "p50Ms": 78.28541700000005,
+      "p95Ms": 80.27562499999999,
+      "modules": {
+        "cli/scry.js": "ef57c2c88a4585c5fa814d0edf28fbed26bc5c3f5a631d678926c601594420e3",
+        "core/turn-recorder/store.js": "c85580ab4c72e63fdffbd5cc78d0968c41fe9bcb1fa2f036c24ffd203ac1e21a",
+        "core/turn-recorder/turns-summary.js": "5a01b96e3a95553dd701243123e284f6a484a2ac5338a813e493bb2636e2b3ec"
+      }
+    },
+    "timingRun": [
+      {
+        "label": "cli-verify-baseline",
+        "exit": 0,
+        "wallMs": 2064,
+        "cores": 10,
+        "loadBefore": 7.35,
+        "loadAfter": 7.35,
+        "highLoad": false
+      },
+      {
+        "label": "cli-verify-candidate",
+        "exit": 0,
+        "wallMs": 1836,
+        "cores": 10,
+        "loadBefore": 8.28,
+        "loadAfter": 8.28,
+        "highLoad": false
+      }
+    ],
+    "p50ReductionPercent": 24.189052331887073,
+    "p95ReductionPercent": 24.809272747085643,
+    "limitation": "one 64-record workload; warm filesystem, fresh Node process; 9 samples, not a tail-latency gate"
+  },
+  "realSnapshot": {
+    "records": 2181,
+    "outputByteEqual": true,
+    "recordsUnchanged": true,
+    "exitCode": 4,
+    "identityPresent": true,
+    "integrityErrors": 120,
+    "integrityErrorKinds": {
+      "sequence gap before:": 120
+    },
+    "limitation": "existing gaps preserved; gap report count is not missing-record count; cause not investigated"
+  },
+  "validation": {
+    "focusedPassed": 62,
+    "cliReleasePassed": 609,
+    "packageSmoke": "passed in temporary prefix",
+    "fullUnit": {
+      "passed": 3488,
+      "skipped": 4,
+      "failed": 0
+    },
+    "oldImplementationControl": {
+      "failed": 4,
+      "passed": 2,
+      "notSelected": 36
+    },
+    "ratchetPassedAfterHarnessChange": 10
+  },
+  "delivery": {
+    "merged": false,
+    "pushed": false,
+    "installed": false,
+    "published": false,
+    "l3": "unverified"
+  }
+}
