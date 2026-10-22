@@ -3,7 +3,7 @@
 - 路径：`remote`
 - 假设：隐藏窗口仍运行四条远程轮询链，导致隐藏 60 秒继续发送 IPC；受控隐藏 Electron fixture 可记录真实 renderer hook/component 到 bridge 的调用。
 - 基线提交：见本次 measurement commit（提交后填入哈希）
-- 优化提交：`e585f5dbd3f2582a29d471558e24be4a6b1ff567`
+- 优化提交：`90d07fb27007ca38d19f3bae9d0e84e2c5f345bc`
 
 ## 固定 workload
 
@@ -29,7 +29,7 @@ fixture 使用隐藏、sandbox、contextIsolation 开启的 Electron 窗口，�
 同一命令、同一隐藏 60 秒 workload：`hidden: true`；`before` 与基线相同，`after` 与 `before` 相同，`delta={list:0,catalog:0,remoteStatus:0,intents:0,runStatus:0,trace:0}`。工作被移除在隐藏窗口期间，不是移出计数窗口；回到可见时 hook 立即刷新并恢复定时器。
 
 - 基线 measurement commit：`7bf5a7ec54e630bb7b1012ea65bd4ca327467ce6`
-- 优化 commit：`e585f5dbd3f2582a29d471558e24be4a6b1ff567`
+- 优化 commit：`90d07fb27007ca38d19f3bae9d0e84e2c5f345bc`
 
 ## 护栏与限制
 
