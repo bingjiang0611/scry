@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest } from '../../shared/desktop-remote'
 import type { DeleteSessionResult, McpSnapshot } from '../../shared/provider'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
-import { shapeAnalyticsPanel, shapeLlmPanel, shapeMcpPanel, type ToolPanelPayload } from '../../shared/tool-panel'
+import { shapeAnalyticsPanel, shapeLlmPanel, shapeMcpPanel, shapeMcpScan, type ToolPanelPayload } from '../../shared/tool-panel'
 import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace'
 import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
 import { parseDesktopHostRead } from './desktop-host-reader'
@@ -120,7 +120,14 @@ const LIVE_RUN_PROMPT_CHARS = 200
 export interface ToolPanelSources {
   analytics(rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> | UsageAnalytics
   llmPerformance(): Promise<[LlmPerformanceHistory, LlmPerformanceSummary]> | [LlmPerformanceHistory, LlmPerformanceSummary]
-  mcpSnapshot(query: { providerId: string; refresh: false }): Promise<McpSnapshot | { status: 'unavailable'; reason?: string }>
+  // Read-only: the host runs its own static scan in the Mac's current workspace
+  // and reports why it could not when that is impossible. The device supplies
+  // only a provider id, never a path.
+  mcpTrust(query: { providerId: string }): Promise<{
+    snapshot: McpSnapshot | null
+    scan?: unknown
+    unavailable?: string
+  }>
 }
 
 export interface HostControllerDependencies {
@@ -623,14 +630,15 @@ export class HostController {
     if (value.kind === 'mcpTrust') {
       const providerId = value.providerId
       if (typeof providerId !== 'string' || providerId.length === 0 || providerId.length > 256) throw new Error('invalid_tool_panel')
-      if (!this.#toolPanels?.mcpSnapshot) throw new Error('tool_panel_unavailable')
-      // Background read of already-loaded state: an explicit refresh is never
-      // triggered from a device, so no new MCP execution authority is created.
-      const snapshot = await this.#toolPanels.mcpSnapshot({ providerId, refresh: false })
-      if (snapshot && typeof snapshot === 'object' && 'status' in snapshot && (snapshot as { status?: unknown }).status === 'unavailable') {
-        return { kind: 'mcpTrust', readAt: now, unavailable: String((snapshot as { reason?: unknown }).reason ?? 'mcp_snapshot_unavailable') }
-      }
-      return shapeMcpPanel(providerId, snapshot as McpSnapshot, now)
+      if (!this.#toolPanels?.mcpTrust) throw new Error('tool_panel_unavailable')
+      // The scan is static and read-only: it inspects configuration and tool
+      // fingerprints and never starts, authorizes or connects an MCP server.
+      const result = await this.#toolPanels.mcpTrust({ providerId })
+      if (result.unavailable) return { kind: 'mcpTrust', readAt: now, unavailable: result.unavailable }
+      const scan = shapeMcpScan(result.scan)
+      const snapshot = result.snapshot ?? { configured: [], runtime: null }
+      return shapeMcpPanel(providerId, snapshot, now, scan,
+        scan ? undefined : '这次没有生成可读的扫描报告')
     }
     throw new Error('invalid_tool_panel')
   }
