@@ -1,8 +1,8 @@
 # A1 process identity measurement
 
 - Path: `providers` launch/stop identity capture.
-- Baseline commit: pending (this measurement commit).
-- Candidate/optimization commit: pending.
+- Baseline commit: `c453281`.
+- Candidate/optimization commit: `fabced4`.
 - Scope: local child-process fixtures only. No Claude/Qoder provider, network, account, or paid work was used.
 
 ## Reproducible harness
@@ -36,13 +36,19 @@ console.log(JSON.stringify({command:'captureProcessIdentity equivalent',calls,sa
 NODE
 ```
 
-Observed on this macOS host:
+Observed on this macOS host before optimization:
 
 ```json
 {"command":"captureProcessIdentity equivalent","calls":{"claude":3,"qoder":3},"samples":{"claude":[68.495,38.07,37.335],"qoder":[36.005,36.718,43.113]}}
 ```
 
-This is L1 evidence: six full-table `ps` calls for six controlled spawn-equivalent captures. The sample durations are controlled local measurements, not an L2 user timing claim; no timing-run lock was used because the result is reported as a work/count baseline. The current implementation synchronously scans the complete process table for each capture, while both launch sites need one PID identity.
+The committed Vitest harness was also rerun after the optimization commit. Its wrapper intentionally retains the baseline full-table lister so the historical count remains reproducible:
+
+```text
+A1 baseline {"command":"captureProcessIdentity at controlled Claude/Qoder spawn","measurements":[{"provider":"claude","samplesMs":[54.604,49.538,46.336],"psCalls":3},{"provider":"qoder","samplesMs":[51.61,43.268,43.606],"psCalls":3}]}
+```
+
+This is L1 evidence: six full-table `ps` calls for six controlled spawn-equivalent captures. The sample durations are controlled local measurements, not an L2 user timing claim; no timing-run lock was used because the result is reported as a work/count baseline. Before `fabced4`, the implementation synchronously scanned the complete process table for each capture, while both launch sites needed one PID identity. The candidate now starts one asynchronous targeted lookup per spawn and keeps the full-table diagnostic verifier unchanged.
 
 ## Guardrails
 
