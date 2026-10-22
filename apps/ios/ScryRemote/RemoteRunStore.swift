@@ -296,6 +296,14 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var catalogRefreshInFlight = false
   @Published private(set) var catalogRefreshRevision = 0
 
+  // The archived catalog is a separate, explicitly requested read. It is not
+  // written to the disk cache, so an archived row can never appear as current
+  // state after an offline start.
+  @Published private(set) var archivedCatalog: CatalogState = .idle
+  @Published private(set) var archivedFetchedAt: Date?
+  @Published private(set) var archivedLoading = false
+  @Published private(set) var archivedFailure: String?
+
   enum HistoryPreviewState: Equatable {
     case idle
     case loading
@@ -1058,6 +1066,95 @@ final class RemoteRunStore: ObservableObject {
         }
       }
     }
+  }
+
+  private var archivedTask: Task<Bool, Never>?
+
+  // Archive is reversible and delete is not, so both return the host's verdict
+  // as a message and re-read the catalog rather than projecting a local guess.
+  @discardableResult func refreshArchived() async -> Bool {
+    if let archivedTask { return await archivedTask.value }
+    guard let client = makeClient() else {
+      archivedFailure = ConnectionCopy.notPaired
+      archivedCatalog = .failed(ConnectionCopy.notPaired)
+      return false
+    }
+    archivedLoading = true
+    archivedFailure = nil
+    let task = Task { [weak self] () -> Bool in
+      do {
+        let list = try await client.sessions(includeArchived: true)
+        let archived = list.filter { ($0.archivedAt ?? 0) > 0 }
+        await MainActor.run {
+          guard let self else { return }
+          self.archivedCatalog = archived.isEmpty ? .empty : .loaded(archived)
+          self.archivedFetchedAt = Date()
+        }
+        return true
+      } catch {
+        await MainActor.run {
+          guard let self else { return }
+          self.archivedFailure = Self.describe(error)
+          if !self.archivedCatalog.hasVisibleValue { self.archivedCatalog = .failed(Self.describe(error)) }
+        }
+        return false
+      }
+    }
+    archivedTask = task
+    let result = await task.value
+    archivedTask = nil
+    archivedLoading = false
+    return result
+  }
+
+  private func sessionContext(_ session: G0Transport.RunSessionRef) -> G0Transport.SessionActionContext? {
+    guard let external = session.externalSessionId, !external.isEmpty else { return nil }
+    return G0Transport.SessionActionContext(cwd: session.cwd, providerId: session.providerId,
+                                            externalSessionId: external, agentProfileId: session.agentProfileId)
+  }
+
+  // nil means the host applied the action. Any other value is a message the
+  // caller shows verbatim; the catalog is re-read so the row state stays the
+  // host's, not the phone's.
+  func applySessionAction(_ action: G0Transport.SessionCleanup, to session: G0Transport.RunSessionRef) async -> String? {
+    guard let client = makeClient() else { return ConnectionCopy.notPaired }
+    guard let context = sessionContext(session) else { return ConnectionCopy.noHostSession }
+    do {
+      guard try await client.sessionAction(context: context, action: action) else {
+        return ConnectionCopy.sessionActionRejected
+      }
+      _ = await refreshSessions()
+      if archivedCatalog.hasVisibleValue { _ = await refreshArchived() }
+      return nil
+    } catch { return Self.describe(error) }
+  }
+
+  func renameSession(_ session: G0Transport.RunSessionRef, title: String) async -> String? {
+    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.count <= 256 else { return ConnectionCopy.renameRejected }
+    return await applySessionAction(.rename(title: trimmed), to: session)
+  }
+
+  func setPinned(_ session: G0Transport.RunSessionRef, pinned: Bool) async -> String? {
+    await applySessionAction(.pin(pinned), to: session)
+  }
+
+  // Archiving a running session stops it first on the host, so the caller asks
+  // for confirmation before calling this.
+  func setArchived(_ session: G0Transport.RunSessionRef, archived: Bool) async -> String? {
+    await applySessionAction(.archive(archived), to: session)
+  }
+
+  func deleteArchivedSession(_ session: G0Transport.RunSessionRef) async -> String? {
+    guard let client = makeClient() else { return ConnectionCopy.notPaired }
+    guard let external = session.externalSessionId, !external.isEmpty else { return ConnectionCopy.noHostSession }
+    do {
+      let outcome = try await client.deleteSession(providerId: session.providerId, cwd: session.cwd,
+                                                   externalSessionId: external, agentProfileId: session.agentProfileId)
+      guard outcome.ok else { return ConnectionCopy.sessionDeleteIncomplete(outcome.failed.count) }
+      _ = await refreshArchived()
+      return nil
+    } catch { return Self.describe(error) }
   }
 
   private func isCurrentCatalogRequest(_ requestID: Int, dataGeneration requestDataGeneration: Int) -> Bool {

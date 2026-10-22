@@ -16,7 +16,10 @@ struct HomeView: View {
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @EnvironmentObject var targets: ExecutionTargetCoordinator
-  @State private var pinnedExpanded = true
+  @StateObject private var actions = SessionActionCenter()
+  @State private var drawerOpen = false
+  @State private var drawerTab: DrawerTab = .recent
+  @State private var expandedProjects: Set<String> = []
   @State private var refreshToastVisible = false
   @State private var refreshDetails: CatalogRefreshDetailsSnapshot?
   @State private var manualRefreshing = false
@@ -30,61 +33,18 @@ struct HomeView: View {
     return targets.homeFailure
   }
   private var refreshing: Bool { targets.homeLoading || manualRefreshing }
-  private var filtered: [ExecutionTargetCoordinator.HomeSession] {
-    let needle = model.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    return targets.homeSessions.filter {
-      needle.isEmpty || [$0.session.label, $0.session.cwd, $0.session.providerId, $0.scope.label]
-        .contains { $0.lowercased().contains(needle) }
-    }
-  }
 
   var body: some View {
-    let rows = filtered
-    VStack(spacing: 0) {
-      RemoteHeader(title: ConnectionCopy.homeTitle, subtitle: targets.aggregatesHosts ? targets.filterLabel : nil,
-                   menuAction: { model.route = .settings }) {
-        HStack(spacing: 0) {
-          if refreshing {
-            ProgressView().frame(width: 44, height: 44).accessibilityLabel(ConnectionCopy.refreshing)
-          } else {
-            PlainIcon(symbol: "arrow.clockwise", label: ConnectionCopy.refresh) { manualRefresh() }
-          }
-          MoreMenu {
-            Button { targets.selectFilter(.all) } label: {
-              Label(ConnectionCopy.allHosts, systemImage: targets.homeFilter == .all ? Symbol.check : Symbol.laptop)
-            }
-            ForEach(targets.targetScopes) { target in
-              Button { targets.selectFilter(.target(target)) } label: {
-                Label(target.label, systemImage: targets.homeFilter == .target(target) ? Symbol.check : Symbol.laptop)
-              }
-            }
-            Divider()
-            Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
-            Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
-          }
-        }
+    ZStack(alignment: .leading) {
+      mainColumn
+      if drawerOpen {
+        Color.black.opacity(0.54).ignoresSafeArea()
+          .onTapGesture { closeDrawer() }
+          .accessibilityLabel(ConnectionCopy.drawerClose)
+          .accessibilityAddTraits(.isButton)
+          .transition(.opacity)
+        drawer
       }
-      if let failure { refreshFailure(failure) }
-      ScrollView {
-        currentTasks
-        backgroundSends
-        if targets.visibleScopes.contains(where: { if case .unverifiedCache = targets.store(for: $0).catalogEvidence { return true }; return false }), failure == nil {
-          Text(ConnectionCopy.unverifiedCache).font(.system(size: 12)).foregroundStyle(Palette.muted)
-            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 19).padding(.top, 10)
-        }
-        ForEach(targets.visibleScopes) { scope in liveRuns(scope: scope) }
-        if !rows.isEmpty { sessionSections(rows) }
-        else if !run.hasConnection { notPairedEmpty }
-        else if refreshing { ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 52) }
-        else if !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-          EmptyState(title: ConnectionCopy.noMatches, detail: ConnectionCopy.changeSearch).padding(.top, 24)
-        } else if failure == nil {
-          EmptyState(title: ConnectionCopy.noSessions, detail: ConnectionCopy.createFirstTask).padding(.top, 24)
-        }
-      }
-      .scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively)
-      .refreshable { await showManualRefresh() }
-      dock
     }
     .background(Palette.surface)
     .overlay(alignment: .top) {
@@ -94,7 +54,15 @@ struct HomeView: View {
           .background(Palette.ink, in: Capsule()).padding(.top, 64).transition(.opacity)
       }
     }
+    .overlay(alignment: .bottom) {
+      if let toast = actions.toast {
+        SessionActionToast(toast: toast,
+                           onUndo: { actions.undoArchive(run: targets.localStore) },
+                           onDismiss: { actions.dismissToast() })
+      }
+    }
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: refreshToastVisible)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.24), value: drawerOpen)
     .task(id: refreshToastID) {
       guard refreshToastVisible else { return }
       do { try await Task.sleep(for: .milliseconds(2_600)) } catch { return }
@@ -113,7 +81,194 @@ struct HomeView: View {
         }
         #endif
     }
-    .task { if run.hasConnection { await targets.refreshHome() } }
+    .alert(ConnectionCopy.renameTitle, isPresented: renamePresented) {
+      TextField(ConnectionCopy.renameField, text: $actions.renameText)
+      Button(ConnectionCopy.save) { actions.confirmRename(run: targets.localStore) }
+      Button(ConnectionCopy.cancel, role: .cancel) { actions.renameTarget = nil }
+    }
+    .confirmationDialog(ConnectionCopy.archivedRunningConfirmTitle, isPresented: archiveConfirmPresented, titleVisibility: .visible) {
+      Button(ConnectionCopy.actionArchiveAndStop, role: .destructive) { actions.confirmArchive(run: targets.localStore) }
+      Button(ConnectionCopy.cancel, role: .cancel) { actions.archiveTarget = nil }
+    } message: {
+      Text(ConnectionCopy.archivedRunningConfirmBody)
+    }
+    .confirmationDialog(ConnectionCopy.deleteConfirmTitle, isPresented: deleteConfirmPresented, titleVisibility: .visible) {
+      Button(ConnectionCopy.actionDelete, role: .destructive) { actions.confirmDelete(run: targets.localStore) }
+      Button(ConnectionCopy.cancel, role: .cancel) { actions.deleteTarget = nil }
+    } message: {
+      Text(ConnectionCopy.deleteConfirmBody)
+    }
+    .alert(ConnectionCopy.sessionActionFailedTitle, isPresented: failurePresented) {
+      Button(ConnectionCopy.ok) { actions.failure = nil }
+    } message: {
+      Text(actions.failure ?? "")
+    }
+    .task {
+      if run.hasConnection {
+        await targets.refreshHome()
+        targets.newTaskStore.loadProjects()
+        targets.newTaskStore.loadProviders()
+      }
+    }
+  }
+
+  private var mainColumn: some View {
+    VStack(spacing: 0) {
+      header
+      ScrollView {
+        if let failure { refreshFailure(failure) }
+        currentTasks
+        backgroundSends
+        if targets.visibleScopes.contains(where: { if case .unverifiedCache = targets.store(for: $0).catalogEvidence { return true }; return false }), failure == nil {
+          Text(ConnectionCopy.unverifiedCache).font(.system(size: 12)).foregroundStyle(Palette.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 19).padding(.top, 10)
+        }
+        peek
+        if !run.hasConnection { notPairedEmpty }
+        else if targets.homeSessions.isEmpty && refreshing {
+          ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 52)
+        }
+      }
+      .scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively)
+      .refreshable { await showManualRefresh() }
+      HomeComposer()
+    }
+  }
+
+  private var header: some View {
+    HStack(spacing: 0) {
+      Button { openDrawer() } label: {
+        Image(systemName: Symbol.menu).font(.system(size: 17, weight: .medium)).foregroundStyle(Palette.ink)
+          .frame(width: 44, height: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain).accessibilityLabel(ConnectionCopy.drawerOpen)
+      Spacer(minLength: 4)
+      Menu {
+        Button { targets.selectFilter(.all) } label: {
+          Label(ConnectionCopy.allHosts, systemImage: targets.homeFilter == .all ? Symbol.check : Symbol.laptop)
+        }
+        ForEach(targets.targetScopes) { target in
+          Button { targets.selectFilter(.target(target)) } label: {
+            Label(target.label, systemImage: targets.homeFilter == .target(target) ? Symbol.check : Symbol.laptop)
+          }
+        }
+        Divider()
+        Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
+        Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
+      } label: {
+        hostChip
+      }
+      .accessibilityLabel(ConnectionCopy.filterHosts)
+      Spacer(minLength: 4)
+      if refreshing {
+        ProgressView().frame(width: 44, height: 44).accessibilityLabel(ConnectionCopy.refreshing)
+      } else {
+        PlainIcon(symbol: "arrow.clockwise", label: ConnectionCopy.refresh) { manualRefresh() }
+      }
+    }
+    .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 4)
+  }
+
+  private var hostChip: some View {
+    HStack(spacing: 7) {
+      Circle().fill(run.hasConnection ? Palette.green : Palette.faint).frame(width: 7, height: 7)
+      Text(targets.filterLabel).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+      Image(systemName: Symbol.chevrons).font(.system(size: 9, weight: .semibold)).foregroundStyle(Palette.muted)
+    }
+    .foregroundStyle(Palette.ink)
+    .padding(.horizontal, 14).frame(minHeight: 36)
+    .background(Palette.message, in: Capsule())
+  }
+
+  private var peek: some View {
+    let rows = targets.homeSessions
+    let waiting = rows.filter { row in
+      guard let live = targets.store(for: row.scope).liveRun(
+        providerId: row.session.providerId, cwd: row.session.cwd,
+        externalSessionId: row.session.externalSessionId, agentProfileId: row.session.agentProfileId) else { return false }
+      return targets.store(for: row.scope).openLiveQuestion(live) != nil
+    }
+    let waitingIds = Set(waiting.map(\.id))
+    let recent = rows.filter { !waitingIds.contains($0.id) && $0.session.pinnedAt == nil }.prefix(3)
+    return VStack(alignment: .leading, spacing: 0) {
+      if !waiting.isEmpty {
+        sectionTitle(ConnectionCopy.sectionNeedsYou)
+        ForEach(waiting.prefix(2)) { row in
+          SessionRowView(row: row, showsContext: true, aggregatesHosts: targets.aggregatesHosts,
+                         onOpen: { open(row) }, onAction: { handle(row, $0) })
+        }
+      }
+      if !recent.isEmpty {
+        sectionTitle(ConnectionCopy.tabRecent)
+        ForEach(Array(recent)) { row in
+          SessionRowView(row: row, showsContext: true, aggregatesHosts: targets.aggregatesHosts,
+                         onOpen: { open(row) }, onAction: { handle(row, $0) })
+        }
+        Button { openDrawer() } label: {
+          Text(ConnectionCopy.seeAll).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.blue)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+      } else if rows.isEmpty && !refreshing && run.hasConnection {
+        EmptyState(title: ConnectionCopy.noRecent, detail: ConnectionCopy.noRecentDetail).padding(.top, 20)
+      }
+    }
+    .padding(.horizontal, 19)
+  }
+
+  private var drawer: some View {
+    HomeDrawer(tab: $drawerTab, expandedProjects: $expandedProjects,
+               onClose: { closeDrawer() },
+               onOpen: { row in closeDrawer(); open(row) },
+               onNewTask: { scope, cwd in
+                 closeDrawer()
+                 guard targets.beginNewTask(scope: scope) else { return }
+                 if let cwd { targets.newTaskStore.chooseProject(.init(path: cwd, label: projectName(cwd))) }
+                 model.composerDraft(for: .newTask(scope)).wrappedValue = .init()
+               },
+               onRowAction: { row, action in handle(row, action) })
+      .frame(width: drawerWidth)
+      .frame(maxHeight: .infinity)
+      .transition(.move(edge: .leading))
+      .gesture(DragGesture(minimumDistance: 18).onEnded { value in
+        if value.translation.width < -70 { closeDrawer() }
+      })
+  }
+
+  private var drawerWidth: CGFloat {
+    min(320, UIScreen.main.bounds.width * 0.84)
+  }
+
+  private var renamePresented: Binding<Bool> {
+    Binding(get: { actions.renameTarget != nil }, set: { if !$0 { actions.renameTarget = nil } })
+  }
+  private var archiveConfirmPresented: Binding<Bool> {
+    Binding(get: { actions.archiveTarget != nil }, set: { if !$0 { actions.archiveTarget = nil } })
+  }
+  private var deleteConfirmPresented: Binding<Bool> {
+    Binding(get: { actions.deleteTarget != nil }, set: { if !$0 { actions.deleteTarget = nil } })
+  }
+  private var failurePresented: Binding<Bool> {
+    Binding(get: { actions.failure != nil }, set: { if !$0 { actions.failure = nil } })
+  }
+
+  private func openDrawer() {
+    drawerOpen = true
+    if run.hasConnection { Task { await targets.refreshHome() } }
+    if !targets.homeSessions.isEmpty { _ = Task { await targets.localStore.refreshArchived() } }
+  }
+  private func closeDrawer() { drawerOpen = false }
+
+  private func open(_ row: ExecutionTargetCoordinator.HomeSession) {
+    guard let external = row.session.externalSessionId, !external.isEmpty else { return }
+    targets.select(row.scope)
+    model.open(OpenedSession(providerId: row.session.providerId, agentProfileId: row.session.agentProfileId,
+      cwd: row.session.cwd, externalSessionId: external, label: row.session.label,
+      isActive: row.session.isActive == true, scope: row.scope.isLocal ? nil : row.scope),
+      run: targets.store(for: row.scope))
+  }
+
+  private func handle(_ row: ExecutionTargetCoordinator.HomeSession, _ action: SessionRowAction) {
+    actions.dispatch(action, session: row.session, run: targets.store(for: row.scope))
   }
 
   private func manualRefresh() { Task { await showManualRefresh() } }
@@ -201,172 +356,11 @@ struct HomeView: View {
     }.padding(.top, 24)
   }
 
-  private struct ProjectKey: Hashable { let scope: ExecutionTargetScope; let cwd: String }
-  private struct ProjectGroup: Identifiable {
-    let scope: ExecutionTargetScope
-    let cwd: String
-    let sessions: [ExecutionTargetCoordinator.HomeSession]
-    var id: ProjectKey { .init(scope: scope, cwd: cwd) }
-  }
-  private func groupedByProject(_ rows: [ExecutionTargetCoordinator.HomeSession]) -> [ProjectGroup] {
-    var order: [ProjectKey] = []
-    var groups: [ProjectKey: [ExecutionTargetCoordinator.HomeSession]] = [:]
-    for row in rows {
-      let key = ProjectKey(scope: row.scope, cwd: row.session.cwd)
-      if groups[key] == nil { order.append(key) }
-      groups[key, default: []].append(row)
-    }
-    return order.compactMap { key in
-      guard let rows = groups[key], let first = rows.first else { return nil }
-      return ProjectGroup(scope: first.scope, cwd: first.session.cwd, sessions: rows)
-    }
-  }
-  private func sessionSections(_ rows: [ExecutionTargetCoordinator.HomeSession]) -> some View {
-    let pinned = rows.filter { $0.session.pinnedAt != nil }.sorted { ($0.session.pinnedAt ?? 0) > ($1.session.pinnedAt ?? 0) }
-    let regular = rows.filter { $0.session.pinnedAt == nil }
-    return LazyVStack(alignment: .leading, spacing: 0) {
-      if !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        sectionTitle(ConnectionCopy.searchResults)
-        ForEach(rows) { sessionRow($0) }
-      } else {
-        if !pinned.isEmpty {
-          Button { withAnimation(.easeInOut(duration: 0.18)) { pinnedExpanded.toggle() } } label: {
-            HStack(spacing: 7) {
-              Text(ConnectionCopy.pinned).font(.system(size: 18, weight: .semibold))
-              Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                .rotationEffect(.degrees(pinnedExpanded ? 0 : -90)).foregroundStyle(Palette.muted)
-              Spacer()
-            }.frame(minHeight: 44).contentShape(Rectangle())
-          }.buttonStyle(.plain)
-          if pinnedExpanded { ForEach(pinned) { sessionRow($0) } }
-        }
-        if !regular.isEmpty {
-          sectionTitle(ConnectionCopy.projects).padding(.top, pinned.isEmpty ? 4 : 20)
-          ForEach(groupedByProject(regular)) { group in
-            projectHeader(group)
-            ForEach(group.sessions) { sessionRow($0, indent: 20, grouped: true) }
-          }
-        }
-      }
-    }.padding(.horizontal, 19).padding(.bottom, 24)
-  }
   private func sectionTitle(_ title: String) -> some View {
-    Text(title).font(.system(size: 18, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.top, 17).padding(.bottom, 7)
-  }
-  private func projectHeader(_ group: ProjectGroup) -> some View {
-    HStack(spacing: 11) {
-      Image(systemName: Symbol.folder).font(.system(size: 19, weight: .medium)).frame(width: 25)
-      Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? group.scope.label : nil,
-                                    project: projectName(group.cwd), provider: ""))
-        .font(.system(size: 16, weight: .semibold)).lineLimit(2)
-      Spacer()
-      Button {
-        guard targets.beginNewTask(scope: group.scope) else { return }
-        targets.newTaskStore.chooseProject(.init(path: group.cwd, label: projectName(group.cwd)))
-        model.route = .newSession
-      } label: {
-        Image(systemName: Symbol.compose).font(.system(size: 17, weight: .medium)).foregroundStyle(Palette.muted)
-          .frame(width: 44, height: 44)
-      }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.newTaskInProject(projectName(group.cwd)))
-    }.frame(minHeight: 52)
-  }
-  private func sessionRow(_ row: ExecutionTargetCoordinator.HomeSession, indent: CGFloat = 0,
-                          grouped: Bool = false) -> some View {
-    let session = row.session
-    let store = targets.store(for: row.scope)
-    let openable = session.externalSessionId?.isEmpty == false
-    return Button {
-      guard let external = session.externalSessionId, openable else { return }
-      targets.select(row.scope)
-      model.open(OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId, cwd: session.cwd,
-        externalSessionId: external, label: session.label, isActive: session.isActive == true, scope: row.scope.isLocal ? nil : row.scope), run: store)
-    } label: {
-      HStack(alignment: .top, spacing: 10) {
-        if grouped {
-          Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-            .font(.system(size: 15.5)).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(2)
-          Spacer(minLength: 8)
-          VStack(alignment: .trailing, spacing: 5) {
-            Text(session.providerId.uppercased()).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
-            sessionState(session: session, store: store, openable: openable)
-          }
-        } else {
-          VStack(alignment: .leading, spacing: 4) {
-            Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-              .font(.system(size: 15.5)).foregroundStyle(openable ? Palette.ink : Palette.muted).lineLimit(2)
-            Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? row.scope.label : nil,
-                                          project: projectName(session.cwd), provider: session.providerId))
-              .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(2)
-          }
-          Spacer(minLength: 8)
-          sessionState(session: session, store: store, openable: openable)
-        }
-      }.padding(.leading, indent).padding(.vertical, 13).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-    }.buttonStyle(.plain).disabled(!openable)
+    Text(title).font(.system(size: 11, weight: .bold)).tracking(0.6).foregroundStyle(Palette.muted)
+      .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18).padding(.bottom, 2)
   }
 
-  @ViewBuilder private func sessionState(session: G0Transport.RunSessionRef, store: RemoteRunStore,
-                                          openable: Bool) -> some View {
-    if let live = store.liveRun(providerId: session.providerId, cwd: session.cwd,
-                                externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId) {
-      LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil)
-    } else if session.isActive == true {
-      Text(ConnectionCopy.lastRunning).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
-    } else if !openable {
-      Text(ConnectionCopy.noSession).font(.system(size: 10)).foregroundStyle(Palette.muted)
-    }
-  }
-  @ViewBuilder private func liveRuns(scope: ExecutionTargetScope) -> some View {
-    let store = targets.store(for: scope)
-    let listed = Set(targets.homeSessions.filter { $0.scope == scope }.compactMap { row -> RemoteRunStore.SessionIdentity? in
-      guard let external = row.session.externalSessionId else { return nil }
-      return .opened(providerId: row.session.providerId, agentProfileId: row.session.agentProfileId,
-                     cwd: row.session.cwd, externalSessionId: external, scope: scope)
-    })
-    let unlisted = store.liveRuns.filter { live in
-      guard let external = live.externalSessionId else { return true }
-      return !listed.contains(.opened(providerId: live.providerId, agentProfileId: live.agentProfileId,
-                                      cwd: live.cwd, externalSessionId: external, scope: scope))
-    }
-    if !unlisted.isEmpty {
-      VStack(alignment: .leading, spacing: 0) {
-        sectionTitle(ConnectionCopy.activeRuns)
-        ForEach(unlisted) { live in
-          Button {
-            guard let external = live.externalSessionId else { return }
-            targets.select(scope)
-            model.open(OpenedSession(providerId: live.providerId, agentProfileId: live.agentProfileId, cwd: live.cwd,
-              externalSessionId: external, label: live.prompt, isActive: true, scope: scope.isLocal ? nil : scope), run: store)
-          } label: {
-            HStack {
-              VStack(alignment: .leading, spacing: 4) {
-                Text(live.prompt.isEmpty ? ConnectionCopy.noPreview : live.prompt).font(.system(size: 15.5)).lineLimit(2)
-                Text(ConnectionCopy.rowContext(host: targets.aggregatesHosts ? scope.label : nil,
-                                              project: projectName(live.cwd), provider: live.providerId))
-                  .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(2)
-              }
-              Spacer()
-              if live.externalSessionId == nil { Text(ConnectionCopy.starting).font(.system(size: 10)).foregroundStyle(Palette.muted) }
-              else { LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil) }
-            }.padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-          }.buttonStyle(.plain).disabled(live.externalSessionId == nil)
-        }
-      }.padding(.horizontal, 19)
-    }
-  }
-  private var dock: some View {
-    HStack(spacing: 9) {
-      HStack(spacing: 9) {
-        Image(systemName: Symbol.search).font(.system(size: 15)).foregroundStyle(Palette.muted)
-        TextField(ConnectionCopy.searchSessions, text: $model.query).font(.system(size: 15))
-          .textInputAutocapitalization(.never).autocorrectionDisabled()
-      }.padding(.horizontal, 15).frame(minHeight: 48).glass(cornerRadius: 24)
-      CircleButton(symbol: Symbol.plus, label: ConnectionCopy.newTask, filled: true, disabled: !run.hasConnection) {
-        if targets.beginNewTask() { model.route = .newSession }
-      }
-    }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 16).background(Palette.surface)
-  }
   private func projectName(_ cwd: String) -> String { cwd.split(separator: "/").last.map(String.init) ?? cwd }
 }
 
@@ -457,6 +451,7 @@ struct SettingsView: View {
   @EnvironmentObject var targets: ExecutionTargetCoordinator
   @State private var confirmUnpair = false
   @State private var cacheNotice: String?
+  @State private var showArchived = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -500,6 +495,27 @@ struct SettingsView: View {
         }
         .listRowBackground(Palette.canvas)
 
+        Section {
+          Button { showArchived = true } label: {
+            HStack(spacing: 12) {
+              Image(systemName: Symbol.archive).font(.system(size: 17)).frame(width: 22)
+              VStack(alignment: .leading, spacing: 3) {
+                Text(ConnectionCopy.archivedSessions).font(.system(size: 14.5, weight: .medium))
+                Text(ConnectionCopy.archivedSessionsDetail).font(.system(size: 11)).foregroundStyle(Palette.muted)
+              }
+              Spacer(minLength: 8)
+              Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.faint)
+            }
+            .padding(.vertical, 4).frame(minHeight: 52).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain).disabled(!run.hasConnection)
+        } header: {
+          Text(ConnectionCopy.tabRecent)
+        } footer: {
+          Text(ConnectionCopy.archivedPolicy)
+        }
+        .listRowBackground(Palette.canvas)
+
         Section(ConnectionCopy.securitySection) {
           settingRow(Symbol.link, ConnectionCopy.repairPairing, ConnectionCopy.repairPairingDetail) {
             model.route = .pair
@@ -527,6 +543,7 @@ struct SettingsView: View {
       .tint(Palette.blue)
     }
     .background(Palette.surface)
+    .sheet(isPresented: $showArchived) { ArchivedSessionsView().environmentObject(run) }
     .confirmationDialog(ConnectionCopy.clearPairingTitle, isPresented: $confirmUnpair, titleVisibility: .visible) {
       Button(ConnectionCopy.clearPairingAction, role: .destructive) { Task { await model.destructiveUnpair(runStore: run) } }
       Button(ConnectionCopy.cancel, role: .cancel) {}

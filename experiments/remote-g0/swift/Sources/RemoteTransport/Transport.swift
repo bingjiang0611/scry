@@ -439,11 +439,15 @@ public enum G0Transport {
   public struct RunSessionRef: Sendable, Equatable, Codable {
     public let sessionId: String; public let externalSessionId: String?; public let providerId: String; public let agentProfileId: String?
     public let cwd: String; public let label: String; public let ts: Double; public let pinnedAt: Double?; public let isActive: Bool?
+    // Host-recorded archive time. Only archived catalog reads carry it; nil means
+    // "not archived" in the active catalog, never "unknown".
+    public let archivedAt: Double?
     public init(sessionId: String, externalSessionId: String? = nil, providerId: String, agentProfileId: String? = nil,
-                cwd: String, label: String, ts: Double, pinnedAt: Double? = nil, isActive: Bool? = nil) {
+                cwd: String, label: String, ts: Double, pinnedAt: Double? = nil, isActive: Bool? = nil,
+                archivedAt: Double? = nil) {
       self.sessionId = sessionId; self.externalSessionId = externalSessionId; self.providerId = providerId
       self.agentProfileId = agentProfileId; self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
-      self.isActive = isActive
+      self.isActive = isActive; self.archivedAt = archivedAt
     }
   }
   public struct RunSessionPage: Sendable, Equatable, Codable {
@@ -580,8 +584,9 @@ public enum G0Transport {
   private struct RunProvidersRequest: Encodable { let op = "providers" }
   private struct RunCommandsRequest: Encodable { let op = "commands"; let providerId: String; let cwd: String; let agentProfileId: String? }
   private struct RunSessionsRequest: Encodable { let op = "sessions" }
-  private struct RunSessionsPageRequest: Encodable {
+  struct RunSessionsPageRequest: Encodable {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
+    var includeArchived: Bool? = nil
     var keepAlive: Bool? = nil
   }
   private struct RunHistoryRequest: Encodable { let op = "history"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
@@ -606,6 +611,37 @@ public enum G0Transport {
   private struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   private struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
   private struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
+  public struct SessionActionContext: Encodable, Sendable {
+    public let cwd: String; public let providerId: String; public let externalSessionId: String; public let agentProfileId: String?
+    public init(cwd: String, providerId: String, externalSessionId: String, agentProfileId: String? = nil) {
+      self.cwd = cwd; self.providerId = providerId; self.externalSessionId = externalSessionId
+      self.agentProfileId = agentProfileId
+    }
+  }
+  // Only the fields belonging to one action kind are encoded: the host rejects a
+  // null title/pinned/archived instead of treating it as a value.
+  struct SessionActionWire: Encodable {
+    let kind: String; let title: String?; let pinned: Bool?; let archived: Bool?
+    func encode(to encoder: Encoder) throws {
+      var box = encoder.container(keyedBy: CodingKeys.self)
+      try box.encode(kind, forKey: .kind)
+      try box.encodeIfPresent(title, forKey: .title)
+      try box.encodeIfPresent(pinned, forKey: .pinned)
+      try box.encodeIfPresent(archived, forKey: .archived)
+    }
+    enum CodingKeys: String, CodingKey { case kind, title, pinned, archived }
+  }
+  struct RunSessionActionRequest: Encodable {
+    let op = "sessionAction"; let context: SessionActionContext; let action: SessionActionWire
+  }
+  struct RunSessionDeleteRequest: Encodable {
+    let op = "sessionDelete"
+    let request: Body
+    struct Body: Encodable {
+      let providerId: String; let cwd: String; let externalSessionId: String
+      let agentProfileId: String?; let confirmed: Bool
+    }
+  }
   private struct LiveRunsHistory: Encodable { let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; let known: String?; var agentProfileId = HistoryProfileValue(value: nil) }
   private struct LiveRunsRequest: Encodable { let op = "liveRuns"; let revision: String?; let waitMs: Int; let history: LiveRunsHistory? }
   struct HistoryProfileValue: Encodable, Equatable, Sendable {
@@ -651,6 +687,8 @@ public enum G0Transport {
     let output: RunOutputBody?
     let watch: RunWatchBody?
     let stop: RunStopBody?
+    let sessionAction: Bool?
+    let sessionDelete: DeleteSessionOutcome?
     let liveRuns: LiveRunsOutcome?
     let intent: RunIntentBody?
     let executionTarget: ExecutionTargetBinding?
@@ -827,8 +865,11 @@ public enum G0Transport {
     return sessions
   }
 
-  public static func relayRunSessionsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int, limit: Int = 100, snapshot: String? = nil) async throws -> RunSessionPage {
-    let request = try JSONEncoder().encode(RunSessionsPageRequest(cursor: cursor, limit: limit, snapshot: snapshot))
+  public static func relayRunSessionsPage(endpoint: RelayEndpoint, identity: G0ProbeIdentity, cursor: Int, limit: Int = 100, snapshot: String? = nil,
+                                          includeArchived: Bool = false) async throws -> RunSessionPage {
+    var query = RunSessionsPageRequest(cursor: cursor, limit: limit, snapshot: snapshot)
+    if includeArchived { query.includeArchived = true }
+    let request = try JSONEncoder().encode(query)
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget)
     guard let page = response.sessionsPage else { throw ProbeError.unexpectedReply }
     return page
@@ -870,8 +911,10 @@ public enum G0Transport {
       guard let page = reply.historyPage else { throw ProbeError.unexpectedReply }
       return page
     }
-    public func sessionsPage(cursor: Int, snapshot: String?) async throws -> RunSessionPage {
-      let request = try JSONEncoder().encode(RunSessionsPageRequest(cursor: cursor, limit: 100, snapshot: snapshot, keepAlive: true))
+    public func sessionsPage(cursor: Int, snapshot: String?, includeArchived: Bool = false) async throws -> RunSessionPage {
+      var query = RunSessionsPageRequest(cursor: cursor, limit: 100, snapshot: snapshot, keepAlive: true)
+      if includeArchived { query.includeArchived = true }
+      let request = try JSONEncoder().encode(query)
       let reply = try await response(request, limit: 2 * 1_024 * 1_024)
       guard let page = reply.sessionsPage else { throw ProbeError.unexpectedReply }
       return page
@@ -999,6 +1042,54 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
     guard let stop = response.stop else { throw ProbeError.unexpectedReply }
     return stop.status
+  }
+
+  public enum SessionCleanup: Sendable, Equatable {
+    case rename(title: String)
+    case pin(Bool)
+    case archive(Bool)
+  }
+
+  // Host-reported cleanup result for a confirmed archive delete. `deleted` and
+  // `retained` are what the host actually removed or kept; the phone never
+  // assumes a store was cleared.
+  public struct DeleteSessionOutcome: Sendable, Equatable, Codable {
+    public let ok: Bool
+    public let cancelled: Bool?
+    public let reason: String?
+    public let deleted: [String]
+    public let retained: [String]
+    public let failed: [Failure]
+    public struct Failure: Sendable, Equatable, Codable { public let store: String; public let error: String }
+  }
+
+  // Rename / pin / archive one session on the host. Returns the host verdict;
+  // nil-safe callers must re-read the catalog instead of guessing.
+  public static func relaySessionAction(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
+                                        context: SessionActionContext, action: SessionCleanup) async throws -> Bool {
+    let wire: SessionActionWire
+    switch action {
+    case let .rename(title): wire = SessionActionWire(kind: "rename", title: title, pinned: nil, archived: nil)
+    case let .pin(pinned): wire = SessionActionWire(kind: "pin", title: nil, pinned: pinned, archived: nil)
+    case let .archive(archived): wire = SessionActionWire(kind: "archive", title: nil, pinned: nil, archived: archived)
+    }
+    let request = try JSONEncoder().encode(RunSessionActionRequest(context: context, action: wire))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
+    guard let applied = response.sessionAction else { throw ProbeError.unexpectedReply }
+    return applied
+  }
+
+  // Permanently delete an already-archived session. The host requires an explicit
+  // confirmation flag and re-authorizes the workspace before removing anything.
+  public static func relaySessionDelete(endpoint: RelayEndpoint, identity: G0ProbeIdentity,
+                                        providerId: String, cwd: String, externalSessionId: String,
+                                        agentProfileId: String? = nil) async throws -> DeleteSessionOutcome {
+    let body = RunSessionDeleteRequest.Body(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
+                                            agentProfileId: agentProfileId, confirmed: true)
+    let request = try JSONEncoder().encode(RunSessionDeleteRequest(request: body))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
+    guard let outcome = response.sessionDelete else { throw ProbeError.unexpectedReply }
+    return outcome
   }
 
   // The assistant's real streamed output content for one run, strictly after

@@ -87,8 +87,12 @@ struct NewSessionView: View {
     .background(Palette.surface)
     // A discovered target can become ready without changing its identity.
     .task(id: paired ? targets.newTaskScope.id : nil) { if paired { run.loadProjects(); run.loadProviders() } }
-    .sheet(isPresented: $showProjects) { projectPicker }
-    .sheet(isPresented: $showProviders) { providerPicker }
+    .sheet(isPresented: $showProjects) {
+      ProjectPickerSheet { run.chooseProject($0); showProjects = false }
+    }
+    .sheet(isPresented: $showProviders) {
+      ProviderPickerSheet { run.chooseProvider($0); showProviders = false }
+    }
     .sheet(isPresented: $showTargets) { targetPicker }
   }
 
@@ -133,166 +137,9 @@ struct NewSessionView: View {
     .buttonStyle(.plain).disabled(!enabled)
     .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
   }
-
-  private var projectPicker: some View {
-    SelectionSheet(title: "选择文件夹", subtitle: "可浏览 Mac 已授权项目内的任意文件夹", onRefresh: {
-      if case let .loaded(listing) = run.directories { run.loadDirectories(path: listing.current?.path) }
-      else { run.loadDirectories() }
-    }) {
-      switch run.directories {
-      case .idle, .loading:
-        ProgressView("读取文件夹…").frame(maxWidth: .infinity).padding(.top, 40)
-      case let .loaded(listing):
-        VStack(alignment: .leading, spacing: 0) {
-          if let current = listing.current {
-            Button {
-              run.loadDirectories(path: listing.parent?.path)
-            } label: {
-              HStack(spacing: 9) {
-                Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
-                Text(listing.parent?.label ?? ConnectionCopy.authorizedProjects).font(.system(size: 14, weight: .medium))
-                Spacer()
-              }
-              .foregroundStyle(Palette.blue).frame(minHeight: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 4) {
-              Text(current.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.ink)
-              Text(current.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(3)
-              Button {
-                run.chooseProject(current); showProjects = false
-              } label: {
-                Text(ConnectionCopy.chooseThisFolder).font(.system(size: 15, weight: .medium))
-                  .foregroundStyle(Palette.ink).frame(maxWidth: .infinity, minHeight: 44)
-                  .background(Palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                  .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
-                  .contentShape(Rectangle())
-              }
-              .buttonStyle(.plain).padding(.top, 8)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
-
-            Text(ConnectionCopy.subfolders).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted).padding(.top, 8).padding(.bottom, 4)
-            if listing.directories.isEmpty {
-              Text(ConnectionCopy.noSubfolders).font(.system(size: 14)).foregroundStyle(Palette.muted).padding(.vertical, 18)
-            } else {
-              ForEach(listing.directories, id: \.path) { ref in
-                FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path) {
-                  run.loadDirectories(path: ref.path)
-                }
-              }
-            }
-          } else if listing.directories.isEmpty {
-            EmptyState(title: "没有已授权的项目", detail: "先在 Mac 的 Scry 中授权目录；iPhone 不能自行扩大访问范围。", symbol: Symbol.folder)
-          } else {
-            ForEach(listing.directories, id: \.path) { ref in
-              FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path) {
-                run.loadDirectories(path: ref.path)
-              }
-            }
-          }
-        }
-      case let .failed(reason):
-        EmptyState(title: "无法读取文件夹", detail: reason, symbol: "exclamationmark.triangle")
-      }
-    }
-  }
-
-  private var providerPicker: some View {
-    SelectionSheet(title: "选择 Provider", subtitle: "仅显示主机当前可用的服务", onRefresh: { run.loadProviders(force: true) }) {
-      switch run.providers {
-      case .idle, .loading:
-        ProgressView("读取主机可用的 Provider…").frame(maxWidth: .infinity).padding(.top, 40)
-      case let .loaded(list):
-        VStack(spacing: 0) {
-          ForEach(list, id: \.selectionId) { ref in
-            SelectionRow(title: ref.label, detail: [ref.id.uppercased(), ref.agentProfileId].compactMap { $0 }.joined(separator: " · "),
-                         selected: run.chosenProvider?.id == ref.id && run.chosenProvider?.agentProfileId == ref.agentProfileId) {
-              run.chooseProvider(ref); showProviders = false
-            }
-          }
-        }
-      case .empty:
-        EmptyState(title: "没有可用的 Provider", detail: "先在 Mac 的 Scry 中登录或配置 Provider。", symbol: Symbol.agent)
-      case let .failed(reason):
-        EmptyState(title: "无法读取 Provider", detail: reason, symbol: "exclamationmark.triangle")
-      }
-    }
-  }
 }
 
 extension G0Transport.RunProviderRef {
   // Multiple profiles share a provider ID; SwiftUI row identity must not.
   var selectionId: String { id + "\u{1f}" + (agentProfileId ?? "") }
-}
-
-private struct SelectionSheet<Content: View>: View {
-  let title: String
-  let subtitle: String
-  let onRefresh: () -> Void
-  @ViewBuilder let content: () -> Content
-  @Environment(\.dismiss) private var dismiss
-
-  var body: some View {
-    NavigationStack {
-      ScrollView { content().padding(.horizontal, 16).padding(.top, 8) }
-        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-          ToolbarItem(placement: .primaryAction) { Button("刷新", action: onRefresh) }
-        }
-        .safeAreaInset(edge: .top) {
-          Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
-            .frame(maxWidth: .infinity).padding(.vertical, 8).background(Palette.noticeBg)
-        }
-    }
-    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-  }
-}
-
-private struct FolderBrowseRow: View {
-  let ref: G0Transport.RunProjectRef
-  let selected: Bool
-  let onOpen: () -> Void
-
-  var body: some View {
-    Button(action: onOpen) {
-      HStack(spacing: 12) {
-        Image(systemName: Symbol.folder).font(.system(size: 16)).foregroundStyle(Palette.muted).frame(width: 22)
-        VStack(alignment: .leading, spacing: 3) {
-          Text(ref.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink).lineLimit(2)
-          Text(ref.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
-        }
-        Spacer()
-        if selected { Image(systemName: Symbol.check).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.blue) }
-        Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.faint)
-      }
-      .frame(minHeight: 58).contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
-  }
-}
-
-private struct SelectionRow: View {
-  let title: String
-  let detail: String
-  let selected: Bool
-  let action: () -> Void
-  var body: some View {
-    Button(action: action) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink)
-          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
-        }
-        Spacer()
-        if selected { Image(systemName: Symbol.check).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.blue) }
-      }
-      .frame(minHeight: 56).contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
-  }
 }

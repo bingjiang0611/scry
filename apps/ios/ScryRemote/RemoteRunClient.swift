@@ -243,14 +243,15 @@ struct RemoteRunClient {
 
   // The host session catalog (the SAME conversations the Mac lists) this device
   // may browse. Display metadata only; the host re-authorizes any content read.
-  func sessions(progress: @escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void = { _ in }) async throws -> [G0Transport.RunSessionRef] {
+  func sessions(includeArchived: Bool = false,
+                progress: @escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void = { _ in }) async throws -> [G0Transport.RunSessionRef] {
     try await withHistoryConnection { reader in
       var cursor = 0
       var snapshot: String?
       var total: Int?
       var sessions: [G0Transport.RunSessionRef] = []
       repeat {
-        let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot)
+        let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot, includeArchived: includeArchived)
         let previous = cursor
         if snapshot == nil { snapshot = page.snapshot; total = page.total }
         guard snapshot == page.snapshot, total == page.total, page.total <= 100_000,
@@ -266,6 +267,20 @@ struct RemoteRunClient {
       } while true
       return sessions
     }
+  }
+
+  // Rename / pin / archive on the host. `true` means the host applied it; the
+  // caller still re-reads the catalog because the catalog is the display truth.
+  func sessionAction(context: G0Transport.SessionActionContext, action: G0Transport.SessionCleanup) async throws -> Bool {
+    try await G0Transport.relaySessionAction(endpoint: endpoint(), identity: try identity(), context: context, action: action)
+  }
+
+  // Permanent delete of an archived session; the host re-authorizes and reports
+  // what it actually removed.
+  func deleteSession(providerId: String, cwd: String, externalSessionId: String,
+                     agentProfileId: String? = nil) async throws -> G0Transport.DeleteSessionOutcome {
+    try await G0Transport.relaySessionDelete(endpoint: endpoint(), identity: try identity(), providerId: providerId,
+                                             cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId)
   }
 
   @MainActor
