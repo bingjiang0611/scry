@@ -5,6 +5,13 @@ import os
 import subprocess
 import tempfile
 import shlex
+import argparse
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--check', choices=['catalog-refresh', 'observation'], default='catalog-refresh')
+parser.add_argument('--require-isolation', action='store_true')
+args = parser.parse_args()
+check = args.check
 
 root = Path(__file__).resolve().parents[3]
 package = root / 'experiments/remote-g0/swift'
@@ -29,6 +36,8 @@ with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     executable = Path(temporary) / 'catalog-refresh-checks'
     command = ['xcrun', 'swiftc', '-D', 'DEBUG', '-swift-version', '5', '-parse-as-library',
                '-I', str(build / 'Modules')]
+    if args.require_isolation:
+        command += ['-D', 'REQUIRE_ISOLATION']
     for module_map in module_maps:
         assert module_map.is_file(), module_map
         command += ['-Xcc', '-fmodule-map-file=' + str(module_map)]
@@ -44,9 +53,21 @@ with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     details_snapshot.write_text('import Foundation\n' +
         home[home.index('struct CatalogRefreshDetailsSnapshot:'):home.index('// One projection')])
     command += [str(details_snapshot)]
-    command += [str(root / 'apps/ios/ScryRemote' / (source + '.swift')) for source in sources]
-    command += [str(root / 'apps/ios/ScryRemote/Theme.swift'), str(view_models),
-                str(Path(__file__).with_suffix('.swift')), *objects, '-o', str(executable)]
+    for source in sources:
+        source_path = root / 'apps/ios/ScryRemote' / (source + '.swift')
+        if check == 'observation' and source == 'RemoteRunStore':
+            store_source = source_path.read_text()
+            fixture = Path(temporary) / 'ObservationStore.swift'
+            fixture.write_text(store_source + '\n' + Path(__file__).with_name('observation.swift').read_text())
+            command += [str(fixture)]
+            if 'class RemoteRunStore: ObservableObject' in store_source:
+                command += ['-D', 'LEGACY_OBSERVATION']
+        else:
+            command += [str(source_path)]
+    command += [str(root / 'apps/ios/ScryRemote/Theme.swift'), str(view_models)]
+    if check == 'catalog-refresh':
+        command += [str(Path(__file__).with_suffix('.swift'))]
+    command += [*objects, '-o', str(executable)]
     compiled = subprocess.run(command, cwd=root)
     if compiled.returncode:
         raise SystemExit(compiled.returncode)
