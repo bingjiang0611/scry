@@ -405,6 +405,7 @@ struct RemoteRunClient {
 // fresh session; the old one's tunnels are closed.
 final class RemoteSessionRegistry: @unchecked Sendable {
   static let shared = RemoteSessionRegistry()
+  static let pathChangedNotification = Notification.Name("ScryRemoteNetworkPathChanged")
   private let lock = NSLock()
   private var sessions: [String: RelaySession] = [:]
   private var recentKeys: [String] = []
@@ -417,12 +418,27 @@ final class RemoteSessionRegistry: @unchecked Sendable {
     // its response deadline. Reset on a real interface change instead.
     pathMonitor.pathUpdateHandler = { [weak self] path in
       guard let self else { return }
-      let signature = "\(path.status)|" + path.availableInterfaces.map { "\($0.type)\($0.name)" }.joined(separator: ",")
+      let interfaceTypes: [(NWInterface.InterfaceType, String)] = [
+        (.wifi, "wifi"), (.cellular, "cellular"), (.wiredEthernet, "wired"),
+        (.loopback, "loopback"), (.other, "other")
+      ]
+      let usedInterfaces = interfaceTypes.compactMap { path.usesInterfaceType($0.0) ? $0.1 : nil }
+      let signature = RelayPathSignature.make(
+        status: String(describing: path.status), isExpensive: path.isExpensive, isConstrained: path.isConstrained,
+        supportsDNS: path.supportsDNS, supportsIPv4: path.supportsIPv4, supportsIPv6: path.supportsIPv6,
+        usedInterfaceTypes: usedInterfaces
+      )
       let changed = self.lock.withLock {
         defer { self.lastPath = signature }
         return self.lastPath != nil && self.lastPath != signature
       }
-      if changed { Task { await self.resetAll() } }
+      if changed {
+        let satisfied = path.status == .satisfied
+        Task {
+          await self.resetAll()
+          if satisfied { NotificationCenter.default.post(name: Self.pathChangedNotification, object: nil) }
+        }
+      }
     }
     pathMonitor.start(queue: DispatchQueue(label: "com.scry.remote.path"))
   }

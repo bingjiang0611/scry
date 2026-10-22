@@ -82,17 +82,17 @@ final class ConversationUITests: XCTestCase {
 
   func testHomeRefreshFailureKeepsCacheActionableAndTechnicalDetailsCollapsed() {
     launchHome(extra: ["-uiMockRefreshFailure"])
-    XCTAssertTrue(app.staticTexts["会话列表刷新失败"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Mac1 · 会话列表刷新失败"].waitForExistence(timeout: 5))
     // The failure already carries freshness; do not stack another status line.
     XCTAssertFalse(app.staticTexts["尚未核对 · 下拉刷新"].exists)
-    XCTAssertEqual(app.staticTexts.matching(identifier: "会话列表刷新失败").count, 1)
+    XCTAssertEqual(app.staticTexts.matching(identifier: "Mac1 · 会话列表刷新失败").count, 1)
     XCTAssertTrue(app.staticTexts["上次：运行中"].exists)
     XCTAssertTrue(app.buttons["重试"].exists)
     app.buttons["详情"].tap()
     XCTAssertTrue(app.staticTexts["技术详情"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["fixture transport failure"].exists)
+    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.exists)
     app.buttons["技术详情"].tap()
-    XCTAssertTrue(app.staticTexts["fixture transport failure"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.waitForExistence(timeout: 5))
     capture("home-refresh-failure-details")
   }
 
@@ -109,30 +109,30 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(updatedDone.waitForExistence(timeout: 5))
     XCTAssertTrue(updatedDone.isHittable)
     XCTAssertTrue(app.staticTexts[timestamp].exists)
-    XCTAssertFalse(app.staticTexts["fixture transport failure"].exists)
+    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.exists)
     app.buttons["技术详情"].tap()
-    XCTAssertTrue(app.staticTexts["fixture transport failure"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.waitForExistence(timeout: 5))
     capture("home-details-after-background-recovery")
     app.buttons["完成"].tap()
     XCTAssertTrue(app.buttons["新任务"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["会话列表刷新失败"].exists)
+    XCTAssertFalse(app.staticTexts["Mac1 · 会话列表刷新失败"].exists)
     XCTAssertFalse(app.staticTexts["刷新成功"].exists)
   }
 
   func testHomeFirstFailureHasOneActionableStateAndNoRawError() {
     launchHome(extra: ["-uiMockFirstRefreshFailure"])
-    XCTAssertTrue(app.staticTexts["会话列表刷新失败"].waitForExistence(timeout: 5))
-    XCTAssertEqual(app.staticTexts.matching(identifier: "会话列表刷新失败").count, 1)
+    XCTAssertTrue(app.staticTexts["Mac1 · 会话列表刷新失败"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts.matching(identifier: "Mac1 · 会话列表刷新失败").count, 1)
     XCTAssertTrue(app.buttons["重试"].exists)
     XCTAssertTrue(app.buttons["详情"].exists)
-    XCTAssertFalse(app.staticTexts["fixture transport failure"].exists)
+    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.exists)
     XCTAssertFalse(app.staticTexts["无法读取会话"].exists)
   }
 
   func testHomePartialRefreshFailureIsDistinct() {
     launchHome(extra: ["-uiMockPartialRefreshFailure"])
-    XCTAssertTrue(app.staticTexts["列表未完整更新"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["会话列表刷新失败"].exists)
+    XCTAssertTrue(app.staticTexts["Mac1 · 列表未完整更新"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["Mac1 · 会话列表刷新失败"].exists)
     capture("home-partial-refresh-failure")
   }
 

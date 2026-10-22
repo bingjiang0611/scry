@@ -9,11 +9,11 @@ import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
 import type { DesktopRemoteTargetAPI } from '../../shared/desktop-remote'
 import { PairingTransport } from './pairing-transport'
-import { RelayClient, type RelayTransport } from './relay-client'
+import { RelayClient, type RelayDiagnostics, type RelayTransport } from './relay-client'
 import type { PairingAuthority } from './pairing'
 import type { RunOutputStore } from './run-output-log'
 import type { ProviderOperationGate } from '../provider-operation-gate'
-import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteStatus } from '../../shared/remote'
+import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelayDiagnostics, RemoteStatus } from '../../shared/remote'
 
 // The single object Electron main owns for the remote-access subsystem. It
 // composes the already-proven pieces (persisted host identity + inner CA,
@@ -329,7 +329,17 @@ export class RemoteHostService {
         ? { pairingId: p.pairingId, state: p.state, expiresAt: p.expiresAt, deviceLabel: p.proof.deviceLabel, publicKeySHA256: p.proof.publicKeySHA256 }
         : { pairingId: p.pairingId, state: p.state, expiresAt: p.expiresAt })
     const devices: RemoteDevice[] = state.grants.map((g) => ({ deviceId: g.deviceId, deviceLabel: g.deviceLabel, expiresAt: g.expiresAt, confirmedAt: g.confirmedAt, revoked: g.revokedAt !== null }))
-    return { enabled: true, hostId: this.hostId, anchorSHA256: this.anchorSHA256, relayConfigured: this.relayConfigured, pending, devices }
+    const relayStates = this.#clients.map((client) => client.diagnostics()).filter((value): value is RelayDiagnostics => value !== undefined)
+    const relay: RemoteRelayDiagnostics | undefined = relayStates.length === 0 ? undefined : relayStates.reduce((total, value) => ({
+      waiting: total.waiting + value.waiting,
+      active: total.active + value.active,
+      opening: total.opening + value.opening,
+      limit: total.limit + value.limit
+    }), { waiting: 0, active: 0, opening: 0, limit: 0 })
+    return {
+      enabled: true, hostId: this.hostId, anchorSHA256: this.anchorSHA256, relayConfigured: this.relayConfigured,
+      ...(relay ? { relay } : {}), pending, devices
+    }
   }
 
   // Open the outbound relay leg(s), if a transport was configured. Idempotent;

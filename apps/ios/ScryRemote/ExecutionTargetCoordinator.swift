@@ -46,6 +46,23 @@ final class ExecutionTargetCoordinator: ObservableObject {
     }
   }
   enum HomeFilter: Equatable { case all, target(ExecutionTargetScope) }
+  struct RefreshIssue: Identifiable {
+    let scope: ExecutionTargetScope
+    let discovery: Bool
+    let failure: RemoteRunStore.CatalogRefreshFailure
+    let verifiedAt: Date?
+    var id: String { scope.id + (discovery ? ":discovery" : ":sessions") }
+    var summary: String {
+      if case .target = failure { return failure.summary }
+      return ConnectionCopy.hostRefreshFailure(scope.label, discovery: discovery, summary: failure.summary)
+    }
+    var diagnostic: String {
+      let cache: Bool
+      switch failure { case .cacheRead, .cacheWrite, .cacheWriteRejected: cache = true; default: cache = false }
+      return ConnectionCopy.refreshDiagnostic(host: scope.label, discovery: discovery, cache: cache,
+        verifiedAt: verifiedAt, detail: failure.technicalDetail)
+    }
+  }
 
   @Published private(set) var discoveredTargets: [ExecutionTargetScope] = []
   @Published private(set) var homeSessions: [HomeSession] = []
@@ -73,6 +90,21 @@ final class ExecutionTargetCoordinator: ObservableObject {
   private var discoveryTask: Task<Void, Never>?
   private var refreshTask: Task<Bool, Never>?
   private var authorityRevision = 0
+  private var homeVisible = false
+  private var recoveryTask: Task<Void, Never>?
+  private var recoveryAttempt = 0
+  private var recoveryGeneration = 0
+  private var networkObserver: AnyCancellable?
+  // A short recovery burst, not perpetual background polling. Foreground/path
+  // events start a new burst; authorization/protocol/cache failures never retry.
+  private static let recoveryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
+  #if DEBUG
+  var recoveryWait: ((Duration) async throws -> Void)?
+  func finishRecoveryForCheck() async {
+    while let task = recoveryTask { await task.value }
+    _ = await refreshTask?.value
+  }
+  #endif
   private static let retainedLimit = 64
   #if DEBUG
   var targetCatalogFixture: (() async throws -> G0Transport.ExecutionTargetCatalog)?
@@ -90,6 +122,10 @@ final class ExecutionTargetCoordinator: ObservableObject {
     stores[scope] = localStore
     observe(localStore, scope: scope)
     restoreDescriptors()
+    networkObserver = NotificationCenter.default.publisher(for: RemoteSessionRegistry.pathChangedNotification)
+      .receive(on: RunLoop.main).sink { [weak self] _ in
+        self?.requestHomeRecovery(resetBudget: true)
+      }
   }
 
   var localScope: ExecutionTargetScope {
@@ -107,6 +143,19 @@ final class ExecutionTargetCoordinator: ObservableObject {
     if homeLoading || homeFailure != nil || (homeFilter == .all && discoveryIssue != nil) { return nil }
     let dates = visibleScopes.compactMap { store(for: $0).catalogVerifiedAt }
     return dates.count == visibleScopes.count ? dates.min() : nil
+  }
+  var refreshIssues: [RefreshIssue] {
+    var issues: [RefreshIssue] = []
+    if homeFilter == .all, let discoveryIssue {
+      issues.append(RefreshIssue(scope: localScope, discovery: true, failure: discoveryIssue, verifiedAt: nil))
+    }
+    for scope in visibleScopes {
+      let store = store(for: scope)
+      if let failure = store.catalogRefreshFailure {
+        issues.append(RefreshIssue(scope: scope, discovery: false, failure: failure, verifiedAt: store.catalogVerifiedAt))
+      }
+    }
+    return issues
   }
   var aggregatesHosts: Bool { !discoveredTargets.isEmpty }
   var hasPendingWork: Bool { stores.values.contains { $0.hasUnsentMessages || $0.hasUnresolvedRun } }
@@ -189,7 +238,6 @@ final class ExecutionTargetCoordinator: ObservableObject {
     guard let connection = connections.load() else { discoveryIssue = .transport(ConnectionCopy.notPaired); return }
     let identity = RemoteHistoryCache.catalogKey(connection: connection)
     guard gatewayIdentity == identity else { discoveryIssue = .transport(ConnectionCopy.targetDiscoveryFailure); return }
-    for scope in discoveredTargets { store(for: scope).updateTargetAvailability(false) }
     do {
       let catalog: G0Transport.ExecutionTargetCatalog
       #if DEBUG
@@ -225,39 +273,57 @@ final class ExecutionTargetCoordinator: ObservableObject {
       } else {
         detail = RemoteRunStore.describe(error)
       }
-      discoveryIssue = .transport(ConnectionCopy.targetDiscoveryDiagnostic(detail))
+      let diagnostic = ConnectionCopy.targetDiscoveryDiagnostic(detail)
+      if case let G0Transport.RunError.host(code) = error {
+        discoveryIssue = ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code)
+          ? .authorization(diagnostic) : .protocolMismatch(diagnostic)
+      } else {
+        discoveryIssue = .transport(diagnostic, retryable: RelayTransportError.permitsReadRecovery(error))
+      }
       // A failed discovery cannot redirect an existing conversation/new draft.
     }
   }
 
-  @discardableResult func refreshHome() async -> Bool {
+  @discardableResult func refreshHome(automatic: Bool = false) async -> Bool {
     if let refreshTask { return await refreshTask.value }
+    if !automatic { cancelHomeRecovery(); recoveryAttempt = 0 }
     // Freeze the last complete visible snapshot before any constituent store
     // advances. A partial/local success cannot attest a full host refresh.
     catalogFetchedAt = lastFullRefresh
     homeLoading = true
     let filter = homeFilter
     let revision = authorityRevision
+    let recoveryRevision = recoveryGeneration
     let task = Task { @MainActor [weak self] () -> Bool in
       guard let self else { return false }
       // Local cached content must not wait for optional target discovery. The
       // same single-flight refresh is awaited below, never requested twice.
-      let wantsLocal = filter == .all || filter == .target(self.localScope)
+      guard !automatic || self.recoveryIsCurrent(recoveryRevision) else { return false }
+      let recoveringFailure = automatic && !self.refreshIssues.isEmpty
+      let wantsLocal = (filter == .all || filter == .target(self.localScope)) &&
+        (!recoveringFailure || self.localStore.catalogRefreshFailure?.allowsAutomaticRecovery == true)
       let localRefresh: Task<Bool, Never>? = wantsLocal ? Task { await self.localStore.refreshSessions() } : nil
       defer { localRefresh?.cancel() }
-      await self.refreshTargets()
-      guard !Task.isCancelled, self.authorityRevision == revision else { return false }
+      if filter != .target(self.localScope),
+         !recoveringFailure || self.discoveryIssue?.allowsAutomaticRecovery == true { await self.refreshTargets() }
+      guard !Task.isCancelled, self.authorityRevision == revision,
+            !automatic || self.recoveryIsCurrent(recoveryRevision) else { return false }
       let scopes = self.visibleScopes
-      let remoteScopes = scopes.filter { !$0.isLocal }
-      var succeeded = await localRefresh?.value ?? true
+      let remoteScopes = scopes.filter { !$0.isLocal &&
+        (!recoveringFailure || self.store(for: $0).catalogRefreshFailure?.allowsAutomaticRecovery == true) }
+      var succeeded = true
       for index in stride(from: 0, to: remoteScopes.count, by: 2) {
+        guard !automatic || self.recoveryIsCurrent(recoveryRevision) else { return false }
         let batch = remoteScopes[index..<min(index + 2, remoteScopes.count)].map { self.store(for: $0) }
         await withTaskGroup(of: Bool.self) { group in
           for store in batch { group.addTask { await store.refreshSessions() } }
           for await result in group { succeeded = succeeded && result }
         }
       }
-      guard !Task.isCancelled, self.authorityRevision == revision, self.homeFilter == filter else { return false }
+      let localSucceeded = await localRefresh?.value ?? true
+      succeeded = succeeded && localSucceeded
+      guard !Task.isCancelled, self.authorityRevision == revision, self.homeFilter == filter,
+            !automatic || self.recoveryIsCurrent(recoveryRevision) else { return false }
       self.rebuildHomeSessions()
       let failed = scopes.first { self.store(for: $0).catalogRefreshFailure != nil }
       self.homeFailure = failed.flatMap { self.store(for: $0).catalogRefreshFailure }
@@ -268,7 +334,13 @@ final class ExecutionTargetCoordinator: ObservableObject {
     }
     refreshTask = task
     let result = await task.value
-    if authorityRevision == revision { refreshTask = nil; homeLoading = false }
+    if authorityRevision == revision {
+      refreshTask = nil; homeLoading = false
+      if !automatic || recoveryIsCurrent(recoveryRevision) {
+        if result { recoveryAttempt = 0 }
+        else { scheduleHomeRecovery() }
+      }
+    }
     return result
   }
 
@@ -303,6 +375,7 @@ final class ExecutionTargetCoordinator: ObservableObject {
     discoveryTask?.cancel(); discoveryTask = nil
     refreshTask?.cancel(); refreshTask = nil
     backgrounded()
+    recoveryAttempt = 0
     stores = [:]; observers = [:]
     gatewayIdentity = identity; gatewayLabel = ConnectionCopy.gatewayHost
     discoveredTargets = []; homeSessions = []; homeFailure = nil; discoveryIssue = nil
@@ -317,10 +390,66 @@ final class ExecutionTargetCoordinator: ObservableObject {
     foregroundEligible = true
     for store in stores.values { store.setLiveRunsForegroundEligible(true) }
     for (scope, store) in stores where scope.isLocal || store.executionTargetAvailable || store.hasUnresolvedRun || store.hasUnsentMessages { store.foregrounded() }
+    requestHomeRecovery(resetBudget: true)
   }
   func backgrounded() {
     foregroundEligible = false
+    cancelHomeRecovery()
     for store in stores.values { store.setLiveRunsForegroundEligible(false) }
+  }
+
+  func setHomeVisible(_ visible: Bool) {
+    homeVisible = visible
+    if !visible { cancelHomeRecovery() }
+  }
+
+  private func requestHomeRecovery(resetBudget: Bool) {
+    guard foregroundEligible, homeVisible, connections.load() != nil else { return }
+    if resetBudget { recoveryAttempt = 0 }
+    guard recoveryTask == nil else { return }
+    let generation = recoveryGeneration
+    recoveryTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      _ = await self.refreshHome(automatic: true)
+      guard generation == self.recoveryGeneration else { return }
+      self.recoveryTask = nil
+      if !Task.isCancelled { self.scheduleHomeRecovery() }
+    }
+  }
+
+  private func scheduleHomeRecovery() {
+    let failures = refreshIssues.map(\.failure)
+    guard foregroundEligible, homeVisible, recoveryTask == nil,
+          failures.contains(where: \.allowsAutomaticRecovery),
+          recoveryAttempt < Self.recoveryDelays.count else { return }
+    let delay = Self.recoveryDelays[recoveryAttempt]
+    recoveryAttempt += 1
+    let generation = recoveryGeneration
+    recoveryTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      do {
+        #if DEBUG
+        if let recoveryWait = self.recoveryWait { try await recoveryWait(delay) }
+        else { try await Task.sleep(for: delay) }
+        #else
+        try await Task.sleep(for: delay)
+        #endif
+        try Task.checkCancellation()
+      } catch { return }
+      _ = await self.refreshHome(automatic: true)
+      guard generation == self.recoveryGeneration else { return }
+      self.recoveryTask = nil
+      if !Task.isCancelled { self.scheduleHomeRecovery() }
+    }
+  }
+
+  private func recoveryIsCurrent(_ generation: Int) -> Bool {
+    generation == recoveryGeneration && foregroundEligible && homeVisible
+  }
+
+  private func cancelHomeRecovery() {
+    recoveryGeneration += 1
+    recoveryTask?.cancel(); recoveryTask = nil
   }
 
   private var descriptorKey: String? { gatewayIdentity.map { "com.scry.remote.execution-targets." + $0 } }

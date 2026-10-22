@@ -15,11 +15,22 @@ export interface StreamServer {
 // and the outer TLS/WSS wrapping are the transport's responsibility (injected),
 // not this bridge's.
 
+export interface RelayDiagnostics {
+  // These are transport-observed states, not relay-side admissions. They are
+  // disjoint: an outer leg is opening, waiting for a device, or carrying one.
+  waiting: number
+  active: number
+  opening: number
+  limit: number
+}
+
 export interface RelayTransport {
   // Begin producing device session streams. Each emitted duplex is one device's
   // outer leg; the caller runs inner mTLS over it. Errors that are not fatal to
   // the tunnel are reported but must not tear down the host.
   start(onSession: (stream: Duplex) => void, onError?: (error: Error) => void): Promise<void>
+  // Optional because private/test transports may not expose pool state.
+  diagnostics?(): RelayDiagnostics
   close(): Promise<void>
 }
 
@@ -51,6 +62,10 @@ export class RelayClient {
     }
   }
 
+  diagnostics(): RelayDiagnostics | undefined {
+    return this.#transport.diagnostics?.()
+  }
+
   async close(): Promise<void> {
     if (!this.#started) return
     this.#started = false
@@ -73,11 +88,14 @@ export type OutboundLeg = Duplex
 export class ReverseTunnelTransport implements RelayTransport {
   #connect: () => OutboundLeg
   #poolSize: number
+  #limit: number
   #readyEvent: string
   #idleLegMs?: number
   #closed = false
   #legs = new Set<OutboundLeg>()
+  #opening = new Set<OutboundLeg>()
   #waiting = new Set<OutboundLeg>()
+  #active = new Set<OutboundLeg>()
   #onSession: ((stream: Duplex) => void) | null = null
 
   // readyEvent is the event that signals the outer leg is up and safe to serve
@@ -92,8 +110,13 @@ export class ReverseTunnelTransport implements RelayTransport {
   constructor(deps: { connect: () => OutboundLeg; poolSize?: number; readyEvent?: string; idleLegMs?: number }) {
     this.#connect = deps.connect
     this.#poolSize = Math.max(1, deps.poolSize ?? 2)
+    this.#limit = this.#poolSize * 4
     this.#readyEvent = deps.readyEvent ?? 'connect'
     this.#idleLegMs = deps.idleLegMs
+  }
+
+  diagnostics(): RelayDiagnostics {
+    return { waiting: this.#waiting.size, active: this.#active.size, opening: this.#opening.size, limit: this.#limit }
   }
 
   async start(onSession: (stream: Duplex) => void): Promise<void> {
@@ -103,35 +126,45 @@ export class ReverseTunnelTransport implements RelayTransport {
   }
 
   #fillPool(): void {
-    // Keep idle reserve separate from active transfers. Bound unauthenticated
-    // ciphertext-driven expansion; at capacity the relay can still say busy.
-    // Default: two waiting, at most eight total; raising this needs load evidence.
-    while (!this.#closed && this.#waiting.size < this.#poolSize && this.#legs.size < this.#poolSize * 4) this.#spawn()
+    // Keep idle reserve separate from active transfers. Opening legs count
+    // toward the reserve, so a slow relay cannot cause an opening burst up to
+    // the total limit. At the limit there may be no idle reserve; that is a
+    // measurable capacity condition, not a reason to raise the pool.
+    while (!this.#closed && this.#waiting.size + this.#opening.size < this.#poolSize && this.#legs.size < this.#limit) this.#spawn()
   }
 
   #spawn(): void {
     if (this.#closed || !this.#onSession) return
     const leg = this.#connect()
     this.#legs.add(leg)
-    this.#waiting.add(leg)
+    this.#opening.add(leg)
     leg.once('relaySession', () => {
+      this.#opening.delete(leg)
       this.#waiting.delete(leg)
+      this.#active.add(leg)
       this.#fillPool()
     })
     leg.on('error', () => { /* the bridge/host handles teardown */ })
     if (this.#idleLegMs !== undefined) {
-      const recycle = setTimeout(() => { if (this.#waiting.has(leg)) leg.destroy() }, this.#idleLegMs)
+      const recycle = setTimeout(() => { if (this.#waiting.has(leg) || this.#opening.has(leg)) leg.destroy() }, this.#idleLegMs)
       recycle.unref?.()
       leg.once('relaySession', () => clearTimeout(recycle))
       leg.once('close', () => clearTimeout(recycle))
     }
-    // Hand the leg to the host once the outer connection is up. The inner TLS
-    // server buffers until the device's client hello arrives through the relay.
+    // WSS outer-connect and inner-server readiness are separate: relaySession
+    // starts inner TLS only after device bytes arrive, not while the leg waits.
+    const outerReady = this.#readyEvent === 'relaySession' ? 'connect' : this.#readyEvent
+    leg.once(outerReady, () => {
+      this.#opening.delete(leg)
+      if (!this.#active.has(leg)) this.#waiting.add(leg)
+    })
     leg.once(this.#readyEvent, () => { this.#onSession?.(leg) })
     // Keep the pool warm: replace a consumed/closed leg.
     leg.once('close', () => {
       this.#legs.delete(leg)
+      this.#opening.delete(leg)
       this.#waiting.delete(leg)
+      this.#active.delete(leg)
       this.#fillPool()
     })
   }
@@ -140,6 +173,8 @@ export class ReverseTunnelTransport implements RelayTransport {
     this.#closed = true
     for (const leg of this.#legs) leg.destroy()
     this.#legs.clear()
+    this.#opening.clear()
     this.#waiting.clear()
+    this.#active.clear()
   }
 }

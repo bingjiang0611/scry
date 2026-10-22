@@ -3,6 +3,50 @@ import XCTest
 @testable import RemoteTransport
 
 final class WireTests: XCTestCase {
+  func testReadRecoveryDoesNotRetrySecurityOrProtocolErrors() {
+    XCTAssertTrue(RelayTransportError.permitsReadRecovery(ProbeError.disconnected))
+    XCTAssertTrue(RelayTransportError.permitsReadRecovery(RelayTransportError.timedOut(stage: "lane-response")))
+    XCTAssertTrue(RelayTransportError.permitsReadRecovery(RelayTransportError.closed(code: 1013, reason: "no_host_leg")))
+    XCTAssertFalse(RelayTransportError.permitsReadRecovery(RelayTransportError.tlsHandshake(layer: .host, detail: "verification failed")))
+    XCTAssertFalse(RelayTransportError.permitsReadRecovery(RelayTransportError.closed(code: 1008, reason: "host_unauthorized")))
+    XCTAssertFalse(RelayTransportError.permitsReadRecovery(RelayTransportError.frameTooLarge))
+    XCTAssertFalse(RelayTransportError.permitsReadRecovery(ProbeError.unexpectedReply))
+  }
+
+  func testDiscoveryRollingUpgradeOnlyFallsBackOnExplicitSchemaRejection() async throws {
+    let valid = Data(#"{"executionTargets":{"version":1,"gateway":{"hostId":"mac1","label":"Mac1"},"targets":[]}}"#.utf8)
+    var requests: [Bool] = []
+    _ = try await G0Transport.executionTargetDiscovery(expectedGatewayId: "mac1", pooled: true) { pooled in
+      requests.append(pooled)
+      return pooled ? Data(#"{"error":"invalid_request"}"#.utf8) : valid
+    }
+    XCTAssertEqual(requests, [true, false])
+    for error in [G0Transport.RunError.host(code: "device_not_authorized") as Error,
+                  G0Transport.RunError.host(code: "unknown_op"),
+                  RelayTransportError.tlsHandshake(layer: .host, detail: "verification failed"),
+                  RelayTransportError.timedOut(stage: "lane-response")] {
+      requests = []
+      do {
+        _ = try await G0Transport.executionTargetDiscovery(expectedGatewayId: "mac1", pooled: true) { pooled in
+          requests.append(pooled); throw error
+        }
+        XCTFail("Expected discovery failure")
+      } catch { XCTAssertEqual(requests, [true]) }
+    }
+    requests = []
+    do {
+      _ = try await G0Transport.executionTargetDiscovery(expectedGatewayId: "mac1", pooled: true) { pooled in
+        requests.append(pooled); return Data(#"{"error":"invalid_request"}"#.utf8)
+      }
+      XCTFail("Expected legacy discovery failure")
+    } catch { XCTAssertEqual(requests, [true, false]) }
+    requests = []
+    _ = try await G0Transport.executionTargetDiscovery(expectedGatewayId: "mac1", pooled: true) { pooled in
+      requests.append(pooled); return valid
+    }
+    XCTAssertEqual(requests, [true])
+  }
+
   func testSharedCorpus() throws {
     let source = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent().deletingLastPathComponent()
@@ -109,6 +153,22 @@ final class WireTests: XCTestCase {
     let reply = Data(#"{"executionTargets":{"version":1,"gateway":{"hostId":"mac1","label":"Mac1"},"targets":[]}}"#.utf8)
     XCTAssertNoThrow(try G0Transport.decodeExecutionTargets(reply, expectedGatewayId: "mac1"))
     XCTAssertThrowsError(try G0Transport.decodeExecutionTargets(reply, expectedGatewayId: "another-gateway"))
+  }
+
+  func testRelayPathSignatureContainsOnlyTheSelectedRoute() {
+    let selected = RelayPathSignature.make(
+      status: "satisfied", isExpensive: true, isConstrained: false,
+      supportsDNS: true, supportsIPv4: true, supportsIPv6: false,
+      usedInterfaceTypes: ["cellular"]
+    )
+    XCTAssertEqual(selected, "status=satisfied|expensive=true|constrained=false|dns=true|ipv4=true|ipv6=false|interfaces=cellular")
+    XCTAssertFalse(selected.contains("wifi"), "Available Wi-Fi must not masquerade as the selected route")
+    let changed = RelayPathSignature.make(
+      status: "satisfied", isExpensive: false, isConstrained: false,
+      supportsDNS: true, supportsIPv4: true, supportsIPv6: false,
+      usedInterfaceTypes: ["wifi"]
+    )
+    XCTAssertNotEqual(selected, changed)
   }
 
   func testExecutionTargetDiscoveryRejectsUnsupportedOrMalformedCatalogs() throws {

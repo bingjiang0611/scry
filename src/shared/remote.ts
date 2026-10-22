@@ -42,6 +42,15 @@ export interface RemoteDevice {
   revoked: boolean
 }
 
+// Host-observed relay pool state. The counts describe only outer legs owned by
+// this host; relay-side queueing/admission is intentionally not inferred.
+export interface RemoteRelayDiagnostics {
+  waiting: number
+  active: number
+  opening: number
+  limit: number
+}
+
 // Full snapshot for the pairing screen. `enabled=false` is a real, honest state
 // (the subsystem is not running because SCRY_REMOTE_HOST is unset) and must not
 // be rendered as an empty-but-ready host.
@@ -54,6 +63,7 @@ export type RemoteStatus =
       // Whether an outbound relay leg is configured. When false the host can
       // pair locally but no device can reach it yet (dormant).
       relayConfigured: boolean
+      relay?: RemoteRelayDiagnostics
       pending: RemotePendingPairing[]
       devices: RemoteDevice[]
     }

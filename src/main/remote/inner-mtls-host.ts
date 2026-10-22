@@ -148,8 +148,13 @@ export class InnerMtlsHost {
     catch { return { error: 'invalid_request' } }
     try {
       if (request.op === 'executionTargets') {
-        if (Object.keys(request).some((key) => key !== 'op')) return { error: 'invalid_request' }
+        // Discovery runs on the persistent control lane, so it carries the same
+        // authenticated phone metadata as other run requests. Strip those
+        // transport-only fields here; nothing else may cross this boundary.
+        if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel'].includes(key)) ||
+            (request.keepAlive !== undefined && typeof request.keepAlive !== 'boolean')) return { error: 'invalid_request' }
         if (!executionTargets) return { error: 'execution_targets_unavailable' }
+        if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
         try { return await executionTargets.discovery(fingerprint) } catch (error) { return executionTargetError(error) }
       }
       if (request.op === 'target') {

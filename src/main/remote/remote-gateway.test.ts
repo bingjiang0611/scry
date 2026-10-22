@@ -360,7 +360,7 @@ describe('RemoteGateway', () => {
     expect(gw.listSessionsPage(CERT, {}).sessions).toEqual(sessions)
   })
 
-  it('pages the complete session catalog and rejects a changed snapshot', async () => {
+  it('pages the complete session catalog from its retained immutable snapshot', async () => {
     const { authority } = await grantedAuthority()
     let entries = Array.from({ length: 350 }, (_, index) => ({
       sessionId: `s${index}`, providerId: 'codex', cwd: '/repo', label: `session ${index}`, ts: index
@@ -379,7 +379,10 @@ describe('RemoteGateway', () => {
     } while (true)
     expect(collected).toEqual(entries.map((entry) => entry.sessionId))
     entries = entries.slice(1)
-    expectCode(() => gw.listSessionsPage(CERT, { cursor: 0, snapshot }), 'session_snapshot_changed')
+    // A source without a revision cannot revoke an already-issued display
+    // snapshot; the retained immutable page remains valid until TTL/cap.
+    const retained = gw.listSessionsPage(CERT, { cursor: 0, limit: 41, snapshot })
+    expect(retained.sessions.map((entry) => entry.sessionId)).toEqual(Array.from({ length: 41 }, (_, index) => `s${index}`))
   })
 
   it('freezes a production revision-backed session catalog across pages', async () => {
@@ -397,7 +400,9 @@ describe('RemoteGateway', () => {
     suffix = '-changed'
     revision.mockReturnValue('revision-2')
     expect(() => gw.listSessionsPage(CERT, { cursor: second.cursor, limit: 100, snapshot: first.snapshot })).toThrow('session_snapshot_changed')
-    expect(list).toHaveBeenCalledTimes(2)
+    // The revision fence is authoritative, so a changed revision rejects the
+    // retained walk without re-reading the full catalog.
+    expect(list).toHaveBeenCalledTimes(1)
   })
 
   it('keeps a frozen walk stable across metadata mutation but refreshes cursor zero', async () => {
@@ -412,6 +417,65 @@ describe('RemoteGateway', () => {
     const fresh = gw.listSessionsPage(CERT, { cursor: 0, limit: 1 })
     expect(fresh.sessions[0].label).toBe('after')
     expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains concurrent session refresh snapshots independently', async () => {
+    const { authority } = await grantedAuthority()
+    let entries = [
+      { sessionId: 'before-1', providerId: 'pi', cwd: '/repo', label: 'before 1', ts: 1 },
+      { sessionId: 'before-2', providerId: 'pi', cwd: '/repo', label: 'before 2', ts: 2 }
+    ]
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list: () => entries })
+    const before = gw.listSessionsPage(CERT, { cursor: 0, limit: 1 })
+    entries = [
+      { sessionId: 'after-1', providerId: 'pi', cwd: '/repo', label: 'after 1', ts: 3 },
+      { sessionId: 'after-2', providerId: 'pi', cwd: '/repo', label: 'after 2', ts: 4 }
+    ]
+    const after = gw.listSessionsPage(CERT, { cursor: 0, limit: 1 })
+
+    expect(gw.listSessionsPage(CERT, { cursor: before.cursor, limit: 1, snapshot: before.snapshot }).sessions.map((s) => s.sessionId)).toEqual(['before-2'])
+    expect(gw.listSessionsPage(CERT, { cursor: after.cursor, limit: 1, snapshot: after.snapshot }).sessions.map((s) => s.sessionId)).toEqual(['after-2'])
+  })
+
+  it('evicts old session snapshots at the bounded retention cap', async () => {
+    const { authority } = await grantedAuthority()
+    let generation = 0
+    const { gw } = gateway(authority, undefined, undefined, undefined, {
+      list: () => [{ sessionId: `s-${generation}`, providerId: 'pi', cwd: '/repo', label: `s-${generation}`, ts: generation }]
+    })
+    const first = gw.listSessionsPage(CERT, { limit: 1 })
+    for (generation = 1; generation <= 32; generation++) gw.listSessionsPage(CERT, { limit: 1 })
+    expectCode(() => gw.listSessionsPage(CERT, { cursor: first.cursor, snapshot: first.snapshot }), 'session_snapshot_changed')
+  })
+
+  it('does not let a peer or filter reuse another session snapshot', async () => {
+    const peer = 'e'.repeat(64)
+    const sessions = [
+      { sessionId: 'active', providerId: 'pi', cwd: '/repo', label: 'active', ts: 1 },
+      { sessionId: 'archived', providerId: 'pi', cwd: '/repo', label: 'archived', ts: 2, archivedAt: 3 }
+    ]
+    const { gw } = gateway({ authorizesCertificate: (fingerprint) => fingerprint === CERT || fingerprint === peer }, undefined, undefined, undefined, { list: () => sessions })
+    const first = gw.listSessionsPage(CERT, { limit: 1 })
+    expectCode(() => gw.listSessionsPage(peer, { cursor: first.cursor, snapshot: first.snapshot }), 'session_snapshot_changed')
+    expectCode(() => gw.listSessionsPage(CERT, { includeArchived: true, cursor: first.cursor, snapshot: first.snapshot }), 'session_snapshot_changed')
+  })
+
+  it('rejects expired and revoked session snapshots instead of rebuilding them', async () => {
+    const { authority, deviceId } = await grantedAuthority()
+    const sessions = [{ sessionId: 's', providerId: 'pi', cwd: '/repo', label: 's', ts: 1 }]
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list: () => sessions })
+    const first = gw.listSessionsPage(CERT, { limit: 1 })
+    vi.useFakeTimers()
+    try {
+      vi.advanceTimersByTime(30_001)
+      expectCode(() => gw.listSessionsPage(CERT, { cursor: first.cursor, snapshot: first.snapshot }), 'session_snapshot_changed')
+    } finally {
+      vi.useRealTimers()
+    }
+
+    const retained = gw.listSessionsPage(CERT, { limit: 1 })
+    await authority.revoke(deviceId)
+    expectCode(() => gw.listSessionsPage(CERT, { cursor: retained.cursor, snapshot: retained.snapshot }), 'device_not_authorized')
   })
 
   it('returns an honest empty session catalog when no source is configured', async () => {

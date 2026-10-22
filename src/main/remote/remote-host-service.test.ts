@@ -116,6 +116,11 @@ describe('RemoteHostService (lifecycle facade)', () => {
     cleanups.push(() => service.dispose())
     expect(service.relayConfigured).toBe(true)
     await service.start()
+    const relayStatus = service.status()
+    expect(relayStatus.enabled).toBe(true)
+    if (!relayStatus.enabled) throw new Error('remote disabled')
+    expect(relayStatus.relay).toMatchObject({ limit: 16 })
+    expect(relayStatus.relay!.waiting + relayStatus.relay!.active + relayStatus.relay!.opening).toBeLessThanOrEqual(relayStatus.relay!.limit)
 
     // The scannable code decodes to exactly the fields the Swift PairingCode
     // parser expects, so device<->host is a real cross-language contract.

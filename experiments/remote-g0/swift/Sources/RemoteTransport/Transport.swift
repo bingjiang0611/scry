@@ -8,6 +8,17 @@ import NIOTLS
 
 enum ProbeError: Error { case invalidArguments, invalidFrame, oversized, disconnected, unexpectedReply }
 
+// Keep route identity independent of Network.framework so it is testable without
+// a live path monitor. Callers provide only interfaces selected by the route.
+public enum RelayPathSignature {
+  public static func make(status: String, isExpensive: Bool, isConstrained: Bool,
+                          supportsDNS: Bool, supportsIPv4: Bool, supportsIPv6: Bool,
+                          usedInterfaceTypes: [String]) -> String {
+    let interfaces = usedInterfaceTypes.joined(separator: ",")
+    return "status=\(status)|expensive=\(isExpensive)|constrained=\(isConstrained)|dns=\(supportsDNS)|ipv4=\(supportsIPv4)|ipv6=\(supportsIPv6)|interfaces=\(interfaces)"
+  }
+}
+
 public enum RelayTransportError: Error, Sendable {
   public enum TLSLayer: Sendable, Equatable { case relay, host }
   case tlsHandshake(layer: TLSLayer, detail: String)
@@ -16,6 +27,19 @@ public enum RelayTransportError: Error, Sendable {
   // The peer sent a WebSocket frame above the 1.5 MiB device limit. Older Mac
   // hosts sent a whole history page as one frame; newer hosts split it.
   case frameTooLarge
+
+  // UI recovery is limited to read operations. Never turn TLS, policy,
+  // malformed-frame or decoding failures into periodic retries.
+  public static func permitsReadRecovery(_ error: Error) -> Bool {
+    switch error {
+    case ProbeError.disconnected: return true
+    case RelayTransportError.timedOut: return true
+    case let RelayTransportError.closed(code, _):
+      guard let code else { return true }
+      return [1000, 1001, 1006, 1011, 1012, 1013].contains(code)
+    default: return false
+    }
+  }
 
   // Only handshake failures acquire a layer. Preserve other errors and the
   // original TLS diagnostic; neither an EOF nor this label proves revocation.
@@ -738,9 +762,25 @@ public enum G0Transport {
 
   public static func relayExecutionTargets(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> ExecutionTargetCatalog {
     let request = try JSONEncoder().encode(ExecutionTargetsRequest())
-    let bytes = try await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request,
-                                         responseLimit: 256 * 1024, wrapTarget: false, useSession: false)
-    return try decodeExecutionTargets(bytes, expectedGatewayId: endpoint.hostId)
+    // Discovery is a Mac1 operation. Keep it unwrapped while using the
+    // authenticated control lane, so the gateway remains the authority for
+    // the returned catalog and the request never becomes a Mac2 operation.
+    return try await executionTargetDiscovery(expectedGatewayId: endpoint.hostId, pooled: endpoint.session != nil) { pooled in
+      try await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request,
+        responseLimit: 256 * 1024, lane: .control, wrapTarget: false, useSession: pooled)
+    }
+  }
+
+  static func executionTargetDiscovery(expectedGatewayId: String, pooled: Bool,
+                                       exchange: (Bool) async throws -> Data) async throws -> ExecutionTargetCatalog {
+    do {
+      return try decodeExecutionTargets(try await exchange(pooled), expectedGatewayId: expectedGatewayId)
+    } catch RunError.host(code: "invalid_request") where pooled {
+      // An already-running older gateway accepts only {op:executionTargets}.
+      // Retry this read once without transport metadata during rolling upgrade.
+      // TLS/auth/timeout/unknown-op errors and all writes never enter this path.
+      return try decodeExecutionTargets(try await exchange(false), expectedGatewayId: expectedGatewayId)
+    }
   }
 
   static func decodeExecutionTargets(_ bytes: Data, expectedGatewayId: String) throws -> ExecutionTargetCatalog {

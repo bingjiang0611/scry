@@ -8,6 +8,7 @@ struct CatalogRefreshDetailsSnapshot: Identifiable {
   let lastFullRefresh: Date?
   let address: String?
   let paired: Bool
+  var issues: [ExecutionTargetCoordinator.RefreshIssue] = []
 }
 
 // One projection for local and forwarded rows: all navigation keeps the row's
@@ -27,10 +28,7 @@ struct HomeView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var failure: RemoteRunStore.CatalogRefreshFailure? {
-    for scope in targets.visibleScopes {
-      if let failure = targets.store(for: scope).catalogRefreshFailure { return failure }
-    }
-    return targets.homeFailure
+    targets.refreshIssues.first?.failure ?? targets.homeFailure
   }
   private var refreshing: Bool { targets.homeLoading || manualRefreshing }
 
@@ -68,10 +66,10 @@ struct HomeView: View {
       do { try await Task.sleep(for: .milliseconds(2_600)) } catch { return }
       refreshToastVisible = false
     }
-    .onDisappear { refreshToastVisible = false }
+    .onDisappear { refreshToastVisible = false; targets.setHomeVisible(false) }
     .sheet(item: $refreshDetails) { details in
       CatalogRefreshDetails(failure: details.failure, lastFullRefresh: details.lastFullRefresh,
-                            address: details.address, paired: details.paired)
+                            address: details.address, paired: details.paired, issues: details.issues)
         .presentationDetents([.medium, .large])
         #if DEBUG
         .task {
@@ -104,6 +102,7 @@ struct HomeView: View {
       Text(actions.failure ?? "")
     }
     .task {
+      targets.setHomeVisible(true)
       if run.hasConnection {
         await targets.refreshHome()
         targets.newTaskStore.loadProjects()
@@ -283,11 +282,13 @@ struct HomeView: View {
     let lastFullRefresh = targets.lastFullRefresh
     let address = run.hostLabel
     let paired = run.hasConnection
+    let issues = targets.refreshIssues
     return CatalogRefreshBanner(failure: failure, lastFullRefresh: lastFullRefresh, refreshing: refreshing,
+      summary: issues.first?.summary,
       onRetry: { if failure.requiresPairing { model.route = .pair } else { manualRefresh() } },
       onDetails: {
         refreshDetails = CatalogRefreshDetailsSnapshot(failure: failure, lastFullRefresh: lastFullRefresh,
-                                                       address: address, paired: paired)
+                                                       address: address, paired: paired, issues: issues)
       })
   }
 
@@ -368,10 +369,11 @@ private struct CatalogRefreshBanner: View {
   let failure: RemoteRunStore.CatalogRefreshFailure
   let lastFullRefresh: Date?
   let refreshing: Bool
+  var summary: String? = nil
   let onRetry: () -> Void
   let onDetails: () -> Void
 
-  private var title: String { failure.summary }
+  private var title: String { summary ?? failure.summary }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
@@ -401,6 +403,7 @@ private struct CatalogRefreshDetails: View {
   let lastFullRefresh: Date?
   let address: String?
   let paired: Bool
+  var issues: [ExecutionTargetCoordinator.RefreshIssue] = []
   #if DEBUG
   @EnvironmentObject private var targets: ExecutionTargetCoordinator
   #endif
@@ -419,7 +422,8 @@ private struct CatalogRefreshDetails: View {
       LabeledContent(ConnectionCopy.listRequest, value: failure.summary)
       Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.caption).foregroundStyle(Palette.muted)
       DisclosureGroup(ConnectionCopy.technicalDetails, isExpanded: $technicalExpanded) {
-        Text(failure.technicalDetail).font(.caption.monospaced()).foregroundStyle(Palette.muted)
+        Text(issues.isEmpty ? failure.technicalDetail : issues.map(\.diagnostic).joined(separator: "\n\n"))
+          .font(.caption.monospaced()).foregroundStyle(Palette.muted)
           .textSelection(.enabled).padding(.top, 8)
       }
       Spacer()
