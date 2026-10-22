@@ -1,0 +1,1151 @@
+{
+  "schema": 1,
+  "measurementCommits": [
+    "26cca06",
+    "c2802e1"
+  ],
+  "note": "Only frozen-* uses final production 0dcd7fe, including no-lazy-fetch protection, and the repository-object-aware frozen probe. Earlier implementation attempts and high-load runs are retained, not mixed into final samples.",
+  "runs": {
+    "baseline": {
+      "implementation": "gitNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 215.46608399999997,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 273.4025419999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 236.95495800000003,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 224.68233299999997,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 219.72024999999985,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 248.06549999999993,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 236.95495800000003,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 274.7570420000002,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 275.46679200000017,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 281.8708749999987,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 295.9004589999986,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 277.1287500000017,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 287.2295410000006,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 281.8708749999987,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ],
+      "timing": {
+        "label": "c-workspace-baseline",
+        "command": [
+          "npm",
+          "run",
+          "bench:git-diff",
+          "--",
+          "--workspace-numstat"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 10369,
+        "cores": 8,
+        "loadBefore": 17.39,
+        "loadAfter": 15.96,
+        "highLoad": true
+      }
+    },
+    "candidate": {
+      "implementation": "readWorkspaceNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 223.47037500000005,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 217.5882079999999,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 232.95008300000006,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 217.98245799999995,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 316.8943750000001,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 397.90499999999975,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 232.95008300000006,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 1382.8015419999992,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 1439.1303329999992,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 2160.447875,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 1366.1730000000007,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 1359.7862920000007,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 1462.5873329999995,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 1439.1303329999992,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ],
+      "timing": {
+        "label": "c-workspace-candidate",
+        "command": [
+          "npm",
+          "run",
+          "bench:git-diff",
+          "--",
+          "--workspace-numstat"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 18938,
+        "cores": 8,
+        "loadBefore": 8.03,
+        "loadAfter": 7.34,
+        "highLoad": true
+      }
+    },
+    "index-copy": {
+      "implementation": "readWorkspaceNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 205.32041599999997,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 221.003917,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 201.16441699999996,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 214.760667,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 241.16099999999983,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 216.429709,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 216.429709,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 218.3827080000001,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 236.87162499999977,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 234.80124999999953,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 218.5903329999992,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 214.58791699999983,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 220.15479100000084,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 220.15479100000084,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ],
+      "timing": {
+        "label": "c-workspace-index-copy",
+        "command": [
+          "npm",
+          "run",
+          "bench:git-diff",
+          "--",
+          "--workspace-numstat"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 9423,
+        "cores": 8,
+        "loadBefore": 6.04,
+        "loadAfter": 5.79,
+        "highLoad": false
+      }
+    },
+    "paired-baseline": {
+      "implementation": "gitNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 218.558042,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 219.152917,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 216.351,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 215.68258300000002,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 215.94287500000019,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 215.7304999999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 216.351,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 281.0227909999994,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 363.31995800000004,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 290.67933300000004,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 290.8727079999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 283.2709159999995,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 279.92612499999996,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 290.67933300000004,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ]
+    },
+    "paired-candidate": {
+      "implementation": "readWorkspaceNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 265.44649999999996,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 229.567,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 208.94008299999996,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 212.56183299999998,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 215.02854200000002,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 202.96854099999996,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 215.02854200000002,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 241.25904099999934,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 250.47733299999982,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 242.32458399999996,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 243.8378330000005,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 252.56579200000033,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 233.9028330000001,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 243.8378330000005,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ]
+    },
+    "final-baseline": {
+      "implementation": "gitNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 413.43837500000006,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 230.02779199999986,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 293.20279099999993,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 298.5263339999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 346.24795900000004,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 347.16812500000015,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 346.24795900000004,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 414.67183300000033,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 470.00858399999925,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 460.68362499999785,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 545.960708999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 518.0278749999998,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 303.86133300000074,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 470.00858399999925,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ]
+    },
+    "final-candidate": {
+      "implementation": "readWorkspaceNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 247.43104200000005,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 328.16670899999997,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 410.308,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 259.478834,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 217.58754199999998,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 241.27487499999984,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 259.478834,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 278.3770000000004,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 238.78554099999928,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 227.91862500000025,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 261.8434159999997,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 238.66720800000076,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 246.18304200000057,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 246.18304200000057,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ]
+    },
+    "paired-timing": {
+      "label": "c-workspace-paired",
+      "command": [
+        "bash",
+        "-c",
+        "BENCH_IMPL=gitNumstat npm run bench:git-diff -- --workspace-numstat > /tmp/scry-c-paired-baseline.log && BENCH_IMPL=readWorkspaceNumstat npm run bench:git-diff -- --workspace-numstat > /tmp/scry-c-paired-candidate.log"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 18360,
+      "cores": 8,
+      "loadBefore": 4.81,
+      "loadAfter": 5.64,
+      "highLoad": false
+    },
+    "final-timing": {
+      "label": "c-workspace-final-paired",
+      "command": [
+        "bash",
+        "-c",
+        "BENCH_IMPL=gitNumstat npm run bench:git-diff -- --workspace-numstat > /tmp/scry-c-final-baseline.log && BENCH_IMPL=readWorkspaceNumstat npm run bench:git-diff -- --workspace-numstat > /tmp/scry-c-final-candidate.log"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 32987,
+      "cores": 8,
+      "loadBefore": 7.1,
+      "loadAfter": 6.43,
+      "highLoad": false
+    },
+    "frozen-baseline": {
+      "implementation": "gitNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 247.21295900000007,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 277.289625,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 318.01083300000005,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 355.7964999999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 229.3823749999999,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 230.59362499999975,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 277.289625,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 284.0894580000004,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 319.7799580000001,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 289.8992079999998,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 285.94095899999957,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 285.8141660000001,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            },
+            {
+              "elapsedMs": 293.944125,
+              "spawns": 8,
+              "objectsWritten": 4,
+              "blobsWritten": 3,
+              "treesWritten": 1
+            }
+          ],
+          "p50Ms": 289.8992079999998,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ]
+    },
+    "frozen-candidate": {
+      "implementation": "readWorkspaceNumstat",
+      "rounds": 6,
+      "results": [
+        {
+          "trackedFiles": 9,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 220.31541599999997,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 224.17550000000006,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 232.77983400000005,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 215.91433400000005,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 223.32737499999985,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 225.4521249999998,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 224.17550000000006,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        },
+        {
+          "trackedFiles": 5001,
+          "dirtyPaths": 5,
+          "untrackedFiles": 3,
+          "excluded": "ignored .scry/noise.txt",
+          "samples": [
+            {
+              "elapsedMs": 216.98166599999968,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 219.18787499999962,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 215.29075000000012,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 218.82808399999976,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 254.30766700000004,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            },
+            {
+              "elapsedMs": 217.65724999999838,
+              "spawns": 8,
+              "objectsWritten": 0,
+              "blobsWritten": 0,
+              "treesWritten": 0
+            }
+          ],
+          "p50Ms": 218.82808399999976,
+          "hashOperations": {
+            "availability": "unavailable",
+            "reason": "Git does not expose all content hashes; unique written blob/tree objects counted separately"
+          }
+        }
+      ]
+    },
+    "frozen-timing": {
+      "label": "c-workspace-frozen-paired",
+      "command": [
+        "bash",
+        "-c",
+        "BENCH_IMPL=gitNumstat npm run bench:git-diff -- --workspace-numstat > /tmp/scry-c-frozen-baseline.log && BENCH_IMPL=readWorkspaceNumstat npm run bench:git-diff -- --workspace-numstat > /tmp/scry-c-frozen-candidate.log"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 20394,
+      "cores": 8,
+      "loadBefore": 6.81,
+      "loadAfter": 6.63,
+      "highLoad": false
+    }
+  },
+  "productionCommit": "0dcd7fe"
+}
