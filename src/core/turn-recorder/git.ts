@@ -755,6 +755,7 @@ async function computeGitTurnDiff(
 
 const PATCH_BATCH_MAX_FILES = 128
 const PATCH_BATCH_MAX_ARG_BYTES = 64 * 1024
+let patchOperationSequence = 0
 
 interface RawPatchRecord {
   path: Buffer
@@ -773,6 +774,7 @@ function patchDiffArgs(filterOverrides: string[], command: string[]): string[] {
     '-c', 'core.quotePath=true',
     '-c', 'diff.noprefix=false',
     '-c', 'diff.mnemonicprefix=false',
+    '-c', 'diff.suppressBlankEmpty=false',
     '-c', 'color.ui=false',
     '-c', 'color.diff=false',
     ...command
@@ -823,7 +825,7 @@ function nextPatchLine(bytes: Buffer, offset: number): { line: Buffer; next: num
  * file/order mapping; this parser only uses hunk counts to avoid mistaking header-like hunk text
  * for the next `diff --git` delimiter.
  */
-function parsePatchBody(bytes: Buffer, start: number): ParsedPatchBody | undefined {
+function parsePatchBody(bytes: Buffer, start: number, allowEof: boolean): ParsedPatchBody | undefined {
   let cursor = start
   const first = nextPatchLine(bytes, cursor)
   if (!first || !first.line.toString('ascii').startsWith('diff --git ')) return undefined
@@ -888,8 +890,19 @@ function parsePatchBody(bytes: Buffer, start: number): ParsedPatchBody | undefin
       return undefined
     }
   }
-  if (inHunk || !sawBodyLine || !completeBody()) return undefined
+  if (inHunk || !sawBodyLine || !completeBody() || !allowEof) return undefined
   return { end: bytes.length, complete: true }
+}
+
+function exactGlobPathspec(relPath: string): string {
+  let pattern = ''
+  for (const character of relPath) {
+    if (character === '\\') pattern += '\\\\'
+    else if (character === '*' || character === '?') pattern += `\\${character}`
+    else if (character === '[') pattern += '[[]'
+    else pattern += character
+  }
+  return `:(top,glob)${pattern}`
 }
 
 function patchBatchFiles(
@@ -907,7 +920,7 @@ function patchBatchFiles(
   const pending = files.flatMap((file, index) => {
     if (file.binary || excludedBasenames.has(basename(file.path))) return []
     const relPath = relative(capture.repoRoot!, file.path).split(sep).join('/')
-    return [{ index, file, pathspec: `:(top,literal)${relPath}`, pathBytes: Buffer.from(relPath) }]
+    return [{ index, file, pathspec: exactGlobPathspec(relPath), pathBytes: Buffer.from(relPath) }]
   })
   return { result, pending }
 }
@@ -926,29 +939,49 @@ async function captureTurnPatches(
   const filterOverrides = capture.filterOverrides ?? []
   const { result, pending } = patchBatchFiles(files, capture, excludedBasenames)
   let deadlineReached = false
-  let batchNumber = 0
+  const operationId = patchOperationSequence++
 
-  for (let start = 0; start < pending.length; start += PATCH_BATCH_MAX_FILES) {
+  let start = 0
+  while (start < pending.length) {
     const batch = pending.slice(start, start + PATCH_BATCH_MAX_FILES)
-    const argBytes = batch.reduce((total, item) => total + Buffer.byteLength(item.pathspec) + 1, 0)
     // Keep both the number and encoded size bounded. A pathspec is passed as one argv item, so
     // names containing whitespace/newlines/quotes/backslashes never undergo shell splitting.
-    const bounded = argBytes <= PATCH_BATCH_MAX_ARG_BYTES
-      ? batch
-      : batch.slice(0, Math.max(1, batch.findIndex((_, index) => {
-          return batch.slice(0, index + 1).reduce((sum, value) => sum + Buffer.byteLength(value.pathspec) + 1, 0) > PATCH_BATCH_MAX_ARG_BYTES
-        })))
-    const currentBatch = bounded.length > 0 ? bounded : [batch[0]]
+    const currentBatch: typeof batch = []
+    let argBytes = 0
+    for (const item of batch) {
+      const itemBytes = Buffer.byteLength(item.pathspec) + 1
+      if (currentBatch.length > 0 && argBytes + itemBytes > PATCH_BATCH_MAX_ARG_BYTES) break
+      currentBatch.push(item)
+      argBytes += itemBytes
+    }
+    // A single path can exceed the byte budget; it still must be attempted rather than skipped.
+    if (currentBatch.length === 0) currentBatch.push(batch[0])
     if (deadlineReached || Date.now() >= deadline) {
       deadlineReached = true
       for (const item of currentBatch) result[item.index] = {
         ...item.file, patchStatus: 'unavailable', patchReason: 'deadline'
       }
+      start += currentBatch.length
       continue
     }
 
-    const patchPath = join(capture.tempDir, `patch-batch-${batchNumber++}.diff`)
-    const rawPathspecs = currentBatch.map((item) => item.pathspec)
+    const patchPath = join(capture.tempDir, `patch-operation-${operationId}-batch-${start}.diff`)
+    const currentPathKeys = new Set(currentBatch.map((item) => item.pathBytes.toString('hex')))
+    const currentRelativePaths = currentBatch.map((item) => item.pathBytes.toString())
+    // Git pathspecs use directory-prefix semantics for file-to-directory transitions. Exclude
+    // changed descendants outside this batch, so a positive `a` cannot pull in `a/private.env`
+    // (or a later batch) and turn it into unowned evidence. Do not exclude ancestors: an ancestor
+    // file record must not hide a selected descendant in a later batch.
+    const excludedPathspecs = files.flatMap((file) => {
+      const relPath = relative(capture.repoRoot!, file.path).split(sep).join('/')
+      const pathBytes = Buffer.from(relPath)
+      const isSelected = currentPathKeys.has(pathBytes.toString('hex'))
+      const isSelectedDescendant = currentRelativePaths.some(path => relPath.startsWith(`${path}/`))
+      return isSelected || !isSelectedDescendant
+        ? []
+        : [`:(top,exclude,glob)${exactGlobPathspec(relPath).slice(':(top,glob)'.length)}`]
+    })
+    const rawPathspecs = [...currentBatch.map((item) => item.pathspec), ...excludedPathspecs]
     let commandError: TurnDiffReason | undefined
     try {
       await gitCommand(
@@ -987,22 +1020,32 @@ async function captureTurnPatches(
     let bodyCursor = parsed?.patchStart ?? 0
     const records = parsed?.records ?? []
     const batchByPath = new Map(currentBatch.map((item) => [item.pathBytes.toString('hex'), item]))
-    for (let recordIndex = 0; recordIndex < Math.min(records.length, currentBatch.length); recordIndex++) {
+    const seenRecordPaths = new Set<string>()
+    const rawRecordsMatchBatch = parsed !== undefined && records.length === currentBatch.length && records.every((record) => {
+      const key = record.path.toString('hex')
+      if (seenRecordPaths.has(key) || !batchByPath.has(key)) return false
+      seenRecordPaths.add(key)
+      return true
+    })
+    const capturedIndexes = new Set<number>()
+    const recordLimit = commandError || rawRecordsMatchBatch ? records.length : 0
+    for (let recordIndex = 0; recordIndex < recordLimit; recordIndex++) {
       const record = records[recordIndex]
-      const matching = batchByPath.get(record.path.toString('hex'))
-      const body = parsed && bytes ? parsePatchBody(bytes, bodyCursor) : undefined
-      if (!matching || !body?.complete) break
+      const key = record.path.toString('hex')
+      if (seenRecordPaths.size !== records.length && !commandError) break
+      const matching = batchByPath.get(key)
+      if (!matching || capturedIndexes.has(matching.index)) break
+      const body = parsed && bytes ? parsePatchBody(bytes, bodyCursor, !commandError) : undefined
+      if (!body?.complete) break
       result[matching.index] = {
         ...matching.file,
         patch: new StringDecoder('utf8').write(bytes!.subarray(bodyCursor, body.end)),
         patchStatus: 'captured'
       }
+      capturedIndexes.add(matching.index)
       bodyCursor = body.end
     }
 
-    const capturedIndexes = new Set(result
-      .map((file, index) => file.patchStatus === 'captured' ? index : -1)
-      .filter((index) => index >= 0))
     for (const item of currentBatch) {
       if (capturedIndexes.has(item.index)) continue
       result[item.index] = {
@@ -1011,9 +1054,8 @@ async function captureTurnPatches(
         patchReason: commandError === 'deadline' ? 'deadline' : 'git_error'
       }
     }
-    // If a pathspec-size split left work in this 128-file window, process it as the next bounded
-    // batch. No failed file is retried; only the not-yet-started suffix is processed.
-    if (currentBatch.length < batch.length) start += currentBatch.length - PATCH_BATCH_MAX_FILES
+    // Process the not-yet-started suffix of this 128-file window as the next bounded batch.
+    start += currentBatch.length
   }
 
   if (deadlineReached) {
