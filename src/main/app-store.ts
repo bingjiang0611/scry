@@ -218,11 +218,41 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
   })
 }
 
+function catalogFileKey(file: string): string {
+  try {
+    const stat = lstatSync(file)
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing'
+    throw error
+  }
+}
+
+function cachedCatalogReader<T>(file: string, fallback: T, isValid: JsonValidator<T>) {
+  let cached: { key: string; value: T } | undefined
+  return (): { value: T; health: CatalogHealth } => {
+    let key: string
+    try { key = catalogFileKey(file) } catch {
+      // Cache metadata cannot override the catalog's existing recovery policy.
+      cached = undefined
+      return readJsonRecoverable(file, fallback, isValid)
+    }
+    if (cached?.key === key) {
+      return { value: structuredClone(cached.value), health: { status: 'ready', source: 'primary' } }
+    }
+    const read = readJsonRecoverable(file, fallback, isValid)
+    // Backup recovery must keep observing external repairs to either file.
+    cached = read.health.source === 'primary' ? { key, value: structuredClone(read.value) } : undefined
+    return read
+  }
+}
+
 export function createRecentFoldersStore(userDataDir: string) {
   const file = join(userDataDir, 'recent-folders.json')
-  const load = (): string[] => readJsonRecoverable<string[]>(file, [], isStringArray).value
+  const read = cachedCatalogReader<string[]>(file, [], isStringArray)
+  const load = (): string[] => read().value
   const push = (dir: string): void => {
-    const current = readJsonRecoverable<string[]>(file, [], isStringArray)
+    const current = read()
     const next = [dir, ...current.value.filter((entry) => entry !== dir)].slice(0, 8)
     if (current.health.source === 'primary' && JSON.stringify(next) === JSON.stringify(current.value)) {
       // Repeated selections have no new primary state, but retain the previous
@@ -257,7 +287,8 @@ function isProjectRecordArray(value: unknown): value is ProjectRecord[] {
 
 export function createProjectStore(userDataDir: string) {
   const file = join(userDataDir, 'projects.json')
-  const load = (): ProjectRecord[] => readJsonRecoverable<ProjectRecord[]>(file, [], isProjectRecordArray).value
+  const read = cachedCatalogReader<ProjectRecord[]>(file, [], isProjectRecordArray)
+  const load = (): ProjectRecord[] => read().value
   const save = (projects: ProjectRecord[]): void => writeJsonRecoverable(file, projects, isProjectRecordArray)
   const seed = (observed: Array<{ cwd: string; lastOpenedAt: number }>): void => {
     const projects = load()
@@ -339,15 +370,7 @@ export function createAppSessionStore(userDataDir: string) {
   let cached: { sessions: AppSession[]; primaryKey: string } | undefined
   let lastHealth: CatalogHealth = { status: 'ready', source: 'empty' }
   const clone = (list: AppSession[]): AppSession[] => list.map((session) => ({ ...session }))
-  const primaryKey = (): string => {
-    try {
-      const stat = lstatSync(file)
-      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing'
-      throw error
-    }
-  }
+  const primaryKey = (): string => catalogFileKey(file)
   const normalize = (list: AppSession[]): AppSession[] => list.map((session) => {
     const externalSessionId = session.externalSessionId ?? (session.runId ? undefined : session.sessionId)
     return {
@@ -371,11 +394,15 @@ export function createAppSessionStore(userDataDir: string) {
       throw error
     }
     const sessions = normalize(read.value)
-    cached = { sessions, primaryKey: key }
+    cached = read.health.source === 'primary' ? { sessions, primaryKey: key } : undefined
     return clone(sessions)
   }
   const save = (list: AppSession[]): void => {
-    writeJsonRecoverable(file, list, isAppSessionArray, cached?.sessions)
+    const current = load()
+    // Keep activity timestamps meaningful. Only exact normalized content is a
+    // no-op; later notifications with a different timestamp still persist.
+    if (lastHealth.source === 'primary' && JSON.stringify(normalize(list)) === JSON.stringify(current)) return
+    writeJsonRecoverable(file, list, isAppSessionArray, lastHealth.status === 'ready' ? current : undefined)
     cached = { sessions: normalize(list), primaryKey: primaryKey() }
     lastHealth = { status: 'ready', source: 'primary' }
   }

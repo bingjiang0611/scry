@@ -433,8 +433,10 @@ async function getTerminalManager(): Promise<TerminalManager> {
 
 const homeDir = homedir()
 const homeFileAccess = new HomeFileAccess(homeDir)
-const recentStore = () => createRecentFoldersStore(app.getPath('userData'))
-const projectStore = () => createProjectStore(app.getPath('userData'))
+let recentStoreInstance: ReturnType<typeof createRecentFoldersStore> | undefined
+const recentStore = () => recentStoreInstance ??= createRecentFoldersStore(app.getPath('userData'))
+let projectStoreInstance: ReturnType<typeof createProjectStore> | undefined
+const projectStore = () => projectStoreInstance ??= createProjectStore(app.getPath('userData'))
 const rememberProject = (cwd: string): void => {
   const canonical = canonicalExistingDirectory(cwd)
   recentStore().push(canonical)
