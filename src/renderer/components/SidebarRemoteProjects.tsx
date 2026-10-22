@@ -26,14 +26,14 @@ export type RemoteProjectGroup = ReturnType<typeof useRemoteProjectGroups>[numbe
 
 // Only projects that have sessions are listed; empty host projects stay in the location picker.
 export function useRemoteProjectGroups(query: string, archived = false) {
-  const { connections, error: readError } = useDesktopConnections()
+  const { connections, refreshing, error: readError } = useDesktopConnections()
   const catalogs = useRemoteCatalogs()
   const ql = query.trim().toLowerCase()
   return useMemo(() => connections.flatMap((connection) => {
     const entry = catalogs.get(connection.id)
     const catalog = entry?.catalog
     if (!catalog) return []
-    const state = hostState(connection, readError ?? entry.error ?? null)
+    const state = hostState(connection, readError ?? entry.error ?? null, refreshing || entry.stale)
     const labels = new Map(catalog.projects.map((project) => [project.path, project.label]))
     const byProject = new Map<string, RemoteSessionRef[]>()
     for (const session of catalog.sessions) {
@@ -54,7 +54,7 @@ export function useRemoteProjectGroups(query: string, archived = false) {
       needsUpgrade: catalog.sessionActions !== true && state === 'connected',
       sessions: sessions.sort((left, right) => (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0) || right.ts - left.ts)
     }))
-  }), [connections, catalogs, ql, readError, archived])
+  }), [connections, catalogs, ql, readError, refreshing, archived])
 }
 
 export function SidebarRemoteProjects({

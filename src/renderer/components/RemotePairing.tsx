@@ -41,21 +41,38 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
-  const reading = useRef(false)
+  const [refreshing, setRefreshing] = useState(true)
+  const revision = useRef(0)
+  const reading = useRef<{ revision: number; promise: Promise<void> } | undefined>(undefined)
 
-  const refresh = useCallback(async () => {
-    if (reading.current) return
-    reading.current = true
-    try {
-      setVm(projectRemote(await window.scry.remoteStatus()))
-      setReadError(null)
-    } catch (reason) {
-      setVm(null)
-      setReadError(String((reason as Error)?.message ?? reason))
-    } finally { reading.current = false }
+  const refresh = useCallback(function readStatus(): Promise<void> {
+    const pending = reading.current
+    if (pending) return pending.revision === revision.current ? pending.promise : pending.promise.then(() => {
+      if (!document.hidden) return readStatus()
+    })
+    const request = ++revision.current
+    const promise = (async () => {
+      try {
+        const status = await window.scry.remoteStatus()
+        if (request !== revision.current) return
+        setVm(projectRemote(status))
+        setReadError(null)
+        setRefreshing(false)
+      } catch (reason) {
+        if (request !== revision.current) return
+        setVm(null)
+        setReadError(String((reason as Error)?.message ?? reason))
+        setRefreshing(false)
+      }
+    })().finally(() => { reading.current = undefined })
+    reading.current = { revision: request, promise }
+    return promise
   }, [])
 
-  useVisibilityPolling('remote-pairing', refresh, 2000)
+  useVisibilityPolling('remote-pairing', refresh, 2000, () => {
+    revision.current += 1
+    setRefreshing(true)
+  })
 
   const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true); setError(null)
@@ -84,8 +101,8 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
             <div className="remote-access-card-head">
               <span className="remote-access-icon"><Icon name="laptop" /></span>
               <b>{copy.phone}</b>
-              <span className={`remote-access-status ${vm?.kind === 'enabled' && vm.relayReady ? 'is-ready' : vm?.kind === 'enabled' ? 'is-dormant' : ''}`}>
-                {vm === null ? readError ? copy.status.unknown : copy.loadingHosts : vm.kind === 'disabled' ? copy.disabled : vm.relayReady ? copy.relayOnline : copy.relayDormant}
+              <span className={`remote-access-status ${!refreshing && vm?.kind === 'enabled' && vm.relayReady ? 'is-ready' : !refreshing && vm?.kind === 'enabled' ? 'is-dormant' : ''}`}>
+                {refreshing ? copy.loadingHosts : vm === null ? readError ? copy.status.unknown : copy.loadingHosts : vm.kind === 'disabled' ? copy.disabled : vm.relayReady ? copy.relayOnline : copy.relayDormant}
               </span>
             </div>
             {vm?.kind === 'enabled' && !vm.relayReady && <p className="remote-access-card-note">{copy.relayDormantEffect}</p>}

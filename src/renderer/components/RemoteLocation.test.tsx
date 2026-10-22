@@ -92,15 +92,16 @@ describe('saved host projection', () => {
     expect(html).not.toContain(copy.noHostsHint)
   })
 
-  it('does not let an older connection read erase a newer result', async () => {
-    let resolveOld!: (hosts: DesktopRemoteConnection[]) => void
-    list.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
-    const old = refreshDesktopConnections()
-    list.mockResolvedValue([host])
-    await refreshDesktopConnections()
-    resolveOld([])
-    await old
+  it('coalesces overlapping connection reads instead of issuing competing snapshots', async () => {
+    let resolve!: (hosts: DesktopRemoteConnection[]) => void
+    list.mockClear().mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const first = refreshDesktopConnections()
+    const overlapping = refreshDesktopConnections()
+    expect(list).toHaveBeenCalledTimes(1)
+    resolve([host])
+    await Promise.all([first, overlapping])
     expect(hosts()).toContain('mac2')
+    expect(hosts()).toContain(copy.status.connected)
   })
 })
 

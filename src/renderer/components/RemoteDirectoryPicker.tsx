@@ -23,8 +23,8 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
   const [loading, setLoading] = useState(true)
   const [selecting, setSelecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { connections, error: connectionError } = useDesktopConnections()
-  const connected = !connectionError && connections.some(item => item.id === connection.id && item.state === 'connected')
+  const { connections, refreshing, error: connectionError } = useDesktopConnections()
+  const connected = !refreshing && !connectionError && connections.some(item => item.id === connection.id && item.state === 'connected')
   const busy = loading || selecting
   const close = (): void => { if (!selecting) onClose() }
 

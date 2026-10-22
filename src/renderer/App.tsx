@@ -1014,11 +1014,12 @@ export function App() {
     remoteSurfaces.dispatch(action)
   }
   const desktopConnections = useDesktopConnections()
-  useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error)
+  useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing)
   useEffect(() => {
+    if (desktopConnections.refreshing) return
     const connected = new Set(desktopConnections.error ? [] : desktopConnections.connections.filter(connection => connection.state === 'connected').map(connection => connection.id))
     remoteQueueStore.pauseDisconnected(connected)
-  }, [desktopConnections.connections, desktopConnections.error, remoteQueueStore])
+  }, [desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing, remoteQueueStore])
   const scrollRef = useRef<HTMLDivElement>(null)
   const turnRefs = useRef(new Map<string, HTMLDivElement>())
   const shouldStickToBottomRef = useRef(true)
@@ -2908,7 +2909,7 @@ function RemoteView({
         machine={{
           label: connection?.label ?? '远程主机不可用',
           remote: true,
-          state: connection ? hostState(connection, connections.error) : 'unknown'
+          state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown'
         }}
       />
       <RemoteChat

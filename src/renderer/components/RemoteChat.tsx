@@ -158,12 +158,13 @@ export function RemoteChat({
     if (action.type === 'close' && action.kind === 'files' && workspaceDirty && !window.confirm('当前文件有未保存修改。放弃修改并继续吗？')) return
     surface.onAction(action)
   }
-  const { connections, error: readError } = useDesktopConnections()
+  const { connections, refreshing: connectionRefreshing, error: readError } = useDesktopConnections()
   const connection = connections.find((item) => item.id === connectionId)
-  const connected = !readError && connection?.state === 'connected'
+  const connected = !connectionRefreshing && !readError && connection?.state === 'connected'
   const host = connection?.label ?? '远程主机'
-  const catalog = useRemoteCatalogs().get(connectionId)?.catalog
-  const catalogReady = catalog !== undefined
+  const catalogEntry = useRemoteCatalogs().get(connectionId)
+  const catalog = catalogEntry?.catalog
+  const catalogReady = catalog !== undefined && !catalogEntry?.stale && !catalogEntry?.error
   const [providerSelection, setProviderSelection] = useState(() => {
     if (session) return desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId })
     const first = catalog?.providers.find((item) => item.available) ?? catalog?.providers[0]
@@ -209,6 +210,7 @@ export function RemoteChat({
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pollError, setPollError] = useState<string | null>(null)
+  const [pollFresh, setPollFresh] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -228,7 +230,7 @@ export function RemoteChat({
   const previousContextKey = useRef<string | undefined>()
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
-  const pollInFlight = useRef(false)
+  const pollInFlight = useRef<Promise<void> | undefined>(undefined)
   const pollRef = useRef<(() => Promise<void>) | undefined>(undefined)
   const adoptingSession = useRef(false)
   const adoptedIntent = useRef<DesktopRemoteIntent | undefined>()
@@ -282,8 +284,8 @@ export function RemoteChat({
     return () => { cancelled = true }
   }, [api, connectionId, connected, context, providerId, slashOpen, slashRevision])
   useEffect(() => {
-    if (!connected) queueStore.pause(queueKey)
-  }, [connected, queueKey, queueStore])
+    if (!connected && !connectionRefreshing) queueStore.pause(queueKey)
+  }, [connected, connectionRefreshing, queueKey, queueStore])
 
   // A new draft picks the host's first available Provider once the catalog arrives.
   // An existing session keeps its recorded Provider even when the host removed it.
@@ -384,9 +386,7 @@ export function RemoteChat({
   useEffect(() => {
     if (!connected || !catalogReady) return
     let cancelled = false
-    const poll = async (): Promise<void> => {
-      if (pollInFlight.current) return
-      pollInFlight.current = true
+    const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
       try {
         const pending = await api.intents(connectionId)
@@ -418,6 +418,7 @@ export function RemoteChat({
               ? { ...run, attachments: previous.attachments } : run)
           } else setActiveRun(null)
           setPollError(null)
+          setPollFresh(true)
           return
         }
         setForeignRun(null)
@@ -471,18 +472,28 @@ export function RemoteChat({
             ? { ...run, attachments: previous.attachments } : run)
         } else setActiveRun(null)
         setPollError(null)
-      } catch (reason) { if (!cancelled && sequence === pollSequence.current) setPollError(errorText(reason)) }
-      finally { pollInFlight.current = false }
+        setPollFresh(true)
+      } catch (reason) {
+        if (!cancelled && sequence === pollSequence.current) { setPollError(errorText(reason)); setPollFresh(false) }
+      }
+    }
+    const poll = (): Promise<void> => {
+      if (pollInFlight.current) return pollInFlight.current
+      const request = readPoll().finally(() => { pollInFlight.current = undefined })
+      pollInFlight.current = request
+      return request
     }
     pollRef.current = poll
-    if (!document.hidden) void poll()
     return () => {
       cancelled = true
       pollSequence.current += 1
       if (pollRef.current === poll) pollRef.current = undefined
     }
   }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive])
-  useVisibilityPolling(`remote-chat:${connectionId}:${cwd}`, () => pollRef.current?.(), 1500)
+  useVisibilityPolling(JSON.stringify([connectionId, context, connected, catalogReady, sessionActive]), () => pollRef.current?.(), 1500, () => {
+    pollSequence.current += 1
+    setPollFresh(false)
+  })
 
   const runControlCatalog = useMemo(() => remoteRunControlCatalog(controlProvider, host), [host, controlProvider])
   const chosenModel = controlProvider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
@@ -553,13 +564,19 @@ export function RemoteChat({
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
   const sessionArchived = Boolean(catalogSession?.archivedAt ?? catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
     item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? ''))?.archivedAt)
-  const contextAvailable = connected && Boolean(provider?.available) && remoteControlsValid(controlProvider, controls) && projectAvailable && !sessionArchived
+  const contextAvailable = connected && catalogReady && pollFresh && Boolean(provider?.available) && remoteControlsValid(controlProvider, controls) && projectAvailable && !sessionArchived
   useEffect(() => {
     if (sessionArchived) queueStore.clearSession(draftKey)
   }, [sessionArchived, queueStore, draftKey])
 
+  // An unknown submission receipt blocks sending before any freshness state (main 0c124aa);
+  // otherwise stale or refreshing host evidence blocks it (batch A3).
   const sendBlockedReason = unknownReceiptBlocked
     ? copy.unknownReceiptSendBlocked
+    : catalogEntry?.error || pollError
+    ? catalogEntry?.error ?? pollError
+    : connectionRefreshing || (connected && (!catalogReady || !pollFresh))
+      ? copy.loadingDesktopStatus
     : !connection
     ? '这台主机已不在保存列表中；草稿已保留，不会改用本机执行'
     : !connected
@@ -754,8 +771,10 @@ export function RemoteChat({
   const selectedAgentId = provider ? remoteAgentId(provider) : missingAgentId ?? ''
 
   const unknownIntent = intents.find((intent) => intent.status === 'unknown')
-  const noticeError = error ?? pollError ?? historyError
-  const notice = !connected
+  const noticeError = error ?? pollError ?? historyError ?? catalogEntry?.error
+  const notice = connectionRefreshing || (connected && !noticeError && (!catalogReady || !pollFresh))
+    ? { tone: 'blocked' as const, text: copy.loadingDesktopStatus }
+    : !connected
     ? {
         tone: 'blocked' as const,
         text: !connection
@@ -823,7 +842,7 @@ export function RemoteChat({
         sessionEvidenceGap={sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
           ? { status: 'unavailable', detail: historyEvidence.reason ?? `${host} 未提供这条会话的归档` }
           : null}
-        busy={runActive && Boolean(controlRunId)}
+        busy={pollFresh && runActive && Boolean(controlRunId)}
         draftAttachments={draftAttachments}
         queuedPrompts={queue.prompts}
         editingQueuedId={editingMessageId}
@@ -954,7 +973,7 @@ export function RemoteChat({
               : <OverviewPanel
                   turns={displayTurns} sessionId={sessionId} selected={selected}
                   runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}
-                  busy={runActive} onSelect={setSelected}
+                  busy={pollFresh && runActive} onSelect={setSelected}
                 />,
             files: workspaceAvailable
               ? catalog?.workbench === 1
@@ -966,7 +985,7 @@ export function RemoteChat({
               : <div className="surface-unavailable"><b>文件不可用</b><span>{sendBlockedReason ?? '当前上下文不可读取文件。'}</span></div>,
             'source-control': catalog?.workbench === 1 ? <SourceControlPanel cwd={cwd} api={workbench.sourceControl} active={surface.state.visible && surface.state.activeId === 'source-control'} /> : upgradeWorkbench,
             terminal: catalog?.workbench === 1 ? <Suspense fallback={<div className="surface-unavailable">正在加载终端…</div>}><TerminalSurface cwd={cwd} scopeId={surface.scopeId} api={workbench.terminal} machineLabel={host} active={surface.state.visible && surface.state.activeId === 'terminal'} /></Suspense> : upgradeWorkbench,
-            agents: <AgentsSurface turns={displayTurns} busy={runActive} />,
+            agents: <AgentsSurface turns={displayTurns} busy={pollFresh && runActive} />,
             diff: diffReview ? <TurnDiffReviewPanel review={diffReview} onClose={() => dispatchSurface({ type: 'close', kind: 'diff' })} />
               : <div className="surface-unavailable"><b>本会话还没有可审阅的改动</b><span>某一轮产生 Git 净改动后，这里会显示真实会话改动。</span></div>
           }}

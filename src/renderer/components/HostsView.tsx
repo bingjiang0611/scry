@@ -17,7 +17,7 @@ function errorText(error: unknown): string {
 }
 
 export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }) {
-  const { connections, loaded, error: readError } = useDesktopConnections()
+  const { connections, loaded, refreshing, error: readError } = useDesktopConnections()
   const [adding, setAdding] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const titleId = useId()
@@ -51,6 +51,7 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
               key={connection.id}
               connection={connection}
               readError={readError}
+              refreshing={refreshing}
               expanded={expanded === connection.id}
               onToggle={() => setExpanded((current) => current === connection.id ? null : connection.id)}
               onNewSession={(cwd) => onNewSession(connection.id, cwd)}
@@ -76,17 +77,19 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
 function HostRow({
   connection,
   readError,
+  refreshing,
   expanded,
   onToggle,
   onNewSession
 }: {
   connection: DesktopRemoteConnection
   readError: string | null
+  refreshing: boolean
   expanded: boolean
   onToggle: () => void
   onNewSession: (cwd: string) => void
 }) {
-  const state = hostState(connection, readError)
+  const state = hostState(connection, readError, refreshing)
   const entry = useRemoteCatalogs().get(connection.id)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -109,7 +112,7 @@ function HostRow({
             <code>{connection.ssh.username}@{connection.ssh.hostname}:{connection.ssh.port}</code>
           </span>
         </button>
-        <span className="hosts-state" data-state={state}><HostStateDot state={state} />{desktopConnectionLabel(connection, readError)}</span>
+        <span className="hosts-state" data-state={state}><HostStateDot state={state} />{desktopConnectionLabel(connection, readError, refreshing)}</span>
         <span className="hosts-row-actions">
           {connection.state === 'disconnected' && (
             <button type="button" className="hosts-button" disabled={busy} onClick={() => void run(async () => {

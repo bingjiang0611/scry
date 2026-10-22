@@ -34,8 +34,8 @@ export interface LocationPickerProps {
 
 export type HostState = 'connected' | 'disconnected' | 'pairing' | 'unknown'
 
-export function hostState(connection: DesktopRemoteConnection, readError: string | null): HostState {
-  if (readError) return 'unknown'
+export function hostState(connection: DesktopRemoteConnection, readError: string | null, refreshing = false): HostState {
+  if (readError || refreshing) return 'unknown'
   return connection.state
 }
 
@@ -44,7 +44,7 @@ export function HostStateDot({ state }: { state: HostState }) {
 }
 
 export function LocationPicker(props: LocationPickerProps) {
-  const { connections, error: readError } = useDesktopConnections()
+  const { connections, refreshing, error: readError } = useDesktopConnections()
   const remoteCurrent = props.current.machineId !== LOCAL_MACHINE
   // No saved host: keep the original local picker so local-only users see no change.
   if (connections.length === 0 && !remoteCurrent) {
@@ -59,7 +59,7 @@ export function LocationPicker(props: LocationPickerProps) {
       onOpenChange={props.onOpenChange}
     />
   }
-  return <MachineLocationPicker {...props} connections={connections} readError={readError} />
+  return <MachineLocationPicker {...props} connections={connections} readError={readError} refreshing={refreshing} />
 }
 
 function MachineLocationPicker({
@@ -74,8 +74,9 @@ function MachineLocationPicker({
   open: controlledOpen,
   onOpenChange,
   connections,
-  readError
-}: LocationPickerProps & { connections: DesktopRemoteConnection[]; readError: string | null }) {
+  readError,
+  refreshing
+}: LocationPickerProps & { connections: DesktopRemoteConnection[]; readError: string | null; refreshing: boolean }) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = controlledOpen ?? localOpen
   const setOpen = (value: boolean): void => {
@@ -187,7 +188,7 @@ function MachineLocationPicker({
               connection.id,
               connection.label,
               `${connection.ssh.username}@${connection.ssh.hostname}`,
-              hostState(connection, readError)
+              hostState(connection, readError, refreshing)
             ))}
             {current.machineId !== LOCAL_MACHINE && !currentConnection && machineButton(current.machineId, '远程主机不可用', '已删除或尚未读取', 'unknown')}
             <div className="mdiv" />
@@ -210,7 +211,7 @@ function MachineLocationPicker({
             ) : (
               <RemoteProjects
                 connection={shownConnection}
-                state={shownConnection ? hostState(shownConnection, readError) : 'unknown'}
+                state={shownConnection ? hostState(shownConnection, readError, refreshing) : 'unknown'}
                 entry={catalogs.get(shown)}
                 currentCwd={current.machineId === shown ? current.cwd : null}
                 onConnect={() => connect(shown)}

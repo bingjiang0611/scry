@@ -29,7 +29,7 @@ function Groups({ archived = false }: { archived?: boolean }) {
 }
 
 beforeEach(() => {
-  vi.mocked(useDesktopConnections).mockReturnValue({ connections: [connection], loaded: true, error: null })
+  vi.mocked(useDesktopConnections).mockReturnValue({ connections: [connection], loaded: true, refreshing: false, error: null })
   vi.mocked(useRemoteCatalogs).mockReturnValue(new Map([[connection.id, { catalog, loading: false }]]))
 })
 
@@ -54,10 +54,21 @@ describe('remote archive location', () => {
   })
 
   it('keeps cached archives visible but disables mutation when disconnected', () => {
-    vi.mocked(useDesktopConnections).mockReturnValue({ connections: [{ ...connection, state: 'disconnected' }], loaded: true, error: null })
+    vi.mocked(useDesktopConnections).mockReturnValue({ connections: [{ ...connection, state: 'disconnected' }], loaded: true, refreshing: false, error: null })
     const html = renderToStaticMarkup(<Groups archived />)
     expect(html).toContain('Archived session')
     expect(html.match(/disabled=""/g)).toHaveLength(4)
+  })
+
+  it.each(['connections', 'catalog'] as const)('retains history but withdraws live authority during a %s visibility refresh', (source) => {
+    vi.mocked(useDesktopConnections).mockReturnValue({ connections: [connection], loaded: true, refreshing: source === 'connections', error: null })
+    vi.mocked(useRemoteCatalogs).mockReturnValue(new Map([[connection.id, { catalog, loading: true, stale: source === 'catalog' }]]))
+    const html = renderToStaticMarkup(<Groups />)
+    expect(html).toContain('Live session')
+    expect(html).toContain('&quot;state&quot;:&quot;unknown&quot;')
+    expect(html).toContain('&quot;canManage&quot;:false')
+    const archived = renderToStaticMarkup(<Groups archived />)
+    expect(archived.match(/disabled=""/g)).toHaveLength(4)
   })
 
   it('disables deletion for legacy sessions without a Provider identity instead of silently doing nothing', () => {
