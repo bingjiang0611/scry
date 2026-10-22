@@ -273,7 +273,7 @@ async function main() {
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
   assert.deepEqual(info.desktop, {
     kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical',
-    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true,
+    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
   // Explicit history scope is an authority claim, not permission to convert
