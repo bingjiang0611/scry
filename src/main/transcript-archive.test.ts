@@ -440,11 +440,11 @@ describe('transcript archive mirror', () => {
     })
   })
 
-  it('checkpoints a sidecar-only session once before serving bounded subsequent pages', async () => {
+  it('checkpoints a sidecar-only session once before serving bounded strict profile pages', async () => {
     const userDataDir = join(tempRoot(), 'userData')
     const args = { cwd: '/repo/sidecar-checkpoint', sessionId: 'sidecar-checkpoint', providerId: 'codex' as const, userDataDir }
     for (let index = 0; index < 80; index++) {
-      expect(upsertTraceArchiveTurn({ ...args, turn: { runId: `run-${index}`, userText: `turn ${index}`, items: [], done: true, ts: index + 1 } })).toBe(true)
+      expect(upsertTraceArchiveTurn({ ...args, turn: { runId: `run-${index}`, userText: `turn ${index}`, agentProfileId: null, items: [], done: true, ts: index + 1 } })).toBe(true)
     }
     const indexPath = `${dirname(traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'run-0' }))}.index-v1.json`
     expect(existsSync(indexPath)).toBe(false)
@@ -453,7 +453,7 @@ describe('transcript archive mirror', () => {
     const stamp = statSync(indexPath)
     const parse = vi.spyOn(JSON, 'parse')
     try {
-      await expect(readTraceArchivePageAsync(args, { before: 40, limit: 40 })).resolves.toMatchObject({
+      await expect(readTraceArchivePageAsync(args, { before: 40, limit: 40, agentProfileId: null, requireComplete: true })).resolves.toMatchObject({
         totalTurns: 80, offset: 0, hasOlder: false, sourceComplete: true,
         archive: { turns: expect.arrayContaining([expect.objectContaining({ runId: 'run-0', userText: 'turn 0' })]) }
       })
