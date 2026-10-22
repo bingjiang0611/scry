@@ -402,5 +402,7 @@ export const QUEUE_COPY = {
   // 「移到队尾」和「自动发送会跳过这条」都是行为变化，必须写在用的地方。
   editingHint: (index: number) => `编辑队列第 ${index} 条 · 发送后移到队尾 · 自动发送会先跳过这条`,
   cancelEdit: '取消编辑',
+  editClaimed: '这条消息正在提交，完成前不能编辑',
+  editMissing: '这条消息已不在队列，已作为新消息排到队尾',
   editedMoved: '编辑后已移到队尾'
 } as const

@@ -53,6 +53,7 @@
 | `src/renderer/constants/copy.ts` | 新增 `QUEUE_COPY`，队列块与编辑文案集中一处 |
 | `src/renderer/styles.css` | `.prompt-queue` 段按 B 重写；新增 `.queue-edit` / `.queue-edit-cancel` / `.queue-moved` / `.is-next` / `.is-editing` / `.is-steer-rejected` / `.composer-edit-hint` |
 | `src/renderer/codex-alignment.css` | `.prompt-queue` 从浮层组拆出，改内嵌面、去掉 `--shadow-pop` |
+| `src/renderer/remote-prompt-queue.ts` + `RemoteChat.tsx` | 远端队列同构支持：`claimed` 记录在飞条目、`claim(key, skipMessageId)` 跳过编辑中的行、`enqueueEdited` 移到队尾；写未知提示从「队首」改成「上一条」 |
 | `scripts/steer-ui-smoke.mjs` + `fixtures/steer.tsx` | 原生坐标点铅笔 → 行变编辑中、文本进输入框、高亮跳到下一条、点 `取消编辑` 复原 |
 | `steer.test.ts` / `render.test.tsx` | 队列项换 id 移到队尾、附件随行、旧 Steer 状态不跟随、跳过语义、编辑态渲染与「有内容时禁用」 |
 
@@ -74,5 +75,5 @@
 - `App.tsx` 的编辑分支（`send()` 里的 `editedPromptToTail` 调用、暂停标记清理）只有 helper 级单测覆盖，没有集成测试。
 - 键盘 Tab 顺序、`aria-live` 朗读、`Esc` 后的焦点归位没有在 fixture 里断言。
 - 队列超过约 5 条时 `max-height: 214px` 的滚动、竖轨在滚动容器内的连续性没有截图确认。
-- `RemoteChat.tsx` 有另一套队列实现，本次没动，远端会话看不到铅笔按钮。
+- 远端会话（`RemoteChat.tsx` + `RemotePromptQueueStore`）已同步支持编辑：同一套 ChatView UI，store 增加 `claim(key, skipMessageId)` 跳行提交、`submitted` 按 `claimed` 删条目、`enqueueEdited` 换新 id 排到队尾。只有 store 级单测，没有远端 fixture 走原生点击。
 - 编辑期间新加附件只做了合并逻辑，没有真实图片落盘验证。

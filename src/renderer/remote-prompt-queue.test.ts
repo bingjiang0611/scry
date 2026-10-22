@@ -102,4 +102,51 @@ describe('remote prompt queue', () => {
     store.remove(key, prompt.messageId)
     expect(store.get(key).prompts).toHaveLength(1)
   })
+
+  it('skips the row being edited and still removes the entry it actually submitted', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request)
+    store.enqueue(key, 'mac2', { ...request, prompt: 'second' })
+    const editing = store.get(key).prompts[0].messageId
+
+    const claimed = store.claim(key, editing)
+    expect(claimed?.text).toBe('second')
+    store.submitted(key, receipt)
+
+    // 不能因为跳行就把队首一起切掉。
+    expect(store.get(key).prompts.map(prompt => prompt.messageId)).toEqual([editing])
+    store.settle(key, receipt.intentId)
+    expect(store.claim(key)?.messageId).toBe(editing)
+  })
+
+  it('keeps the claimed entry removable-guarded even when it is not the head', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request)
+    store.enqueue(key, 'mac2', { ...request, prompt: 'second' })
+    const editing = store.get(key).prompts[0].messageId
+    const claimed = store.claim(key, editing)!
+
+    store.remove(key, editing)
+    expect(store.get(key).prompts.map(prompt => prompt.messageId)).toEqual([claimed.messageId])
+    // 正在提交的那条即使不是队首也不能移除。
+    store.remove(key, claimed.messageId)
+    expect(store.get(key).prompts).toHaveLength(1)
+  })
+
+  it('re-enqueues an edited entry at the tail with a fresh id', () => {
+    const store = new RemotePromptQueueStore()
+    store.enqueue(key, 'mac2', request)
+    store.enqueue(key, 'mac2', { ...request, prompt: 'second' })
+    const editing = store.get(key).prompts[0].messageId
+
+    const moved = store.enqueueEdited(key, 'mac2', editing, { ...request, prompt: 'edited' })
+    expect(store.get(key).prompts.map(prompt => prompt.text)).toEqual(['second', 'edited'])
+    expect(moved?.messageId).not.toBe(editing)
+    expect(store.get(key).prompts.some(prompt => prompt.messageId === editing)).toBe(false)
+
+    const queueLength = store.get(key).prompts.length
+    // 队列里已经没有这条时不能凭空改出一份副本，交给调用方回到普通入队。
+    expect(store.enqueueEdited(key, 'mac2', editing, { ...request, prompt: 'again' })).toBeNull()
+    expect(store.get(key).prompts).toHaveLength(queueLength)
+  })
 })
