@@ -139,8 +139,7 @@ struct ToolPanelView: View {
         .foregroundStyle(Palette.muted)
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         if let cost = analytics.totals.costUsd {
-          Text(cost, format: .currency(code: "USD").precision(.fractionLength(2)))
-            .font(.system(size: 30, weight: .semibold))
+          Text(Self.usd(cost)).font(.system(size: 30, weight: .semibold))
         } else {
           Text(ConnectionCopy.unavailable).font(.system(size: 20, weight: .semibold)).foregroundStyle(Palette.muted)
         }
@@ -179,7 +178,8 @@ struct ToolPanelView: View {
             Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.faint)
           }
           Text("\(totals.tokenKnownRows)/\(totals.turns)")
-            .font(.system(size: 10)).foregroundStyle(Palette.faint).frame(width: 46, alignment: .trailing)
+            .font(.system(size: 10)).foregroundStyle(Palette.faint)
+            .lineLimit(1).minimumScaleFactor(0.8).frame(width: 64, alignment: .trailing)
         }
       }
     }
@@ -348,8 +348,14 @@ struct ToolPanelView: View {
     row.provider == "qoder" ? ConnectionCopy.providerLabel("qoder") : (row.model ?? ConnectionCopy.unattributed)
   }
 
+  // A positive cost below a cent is not zero; the Mac prints `<$0.01` and so do we.
+  private static func usd(_ value: Double) -> String {
+    if value > 0 && value < 0.01 { return "<$0.01" }
+    return usdFormatter.string(from: NSNumber(value: value)) ?? ""
+  }
+
   private func costText(_ costUsd: Double?) -> some View {
-    Text(costUsd.map { Self.usdFormatter.string(from: NSNumber(value: $0)) ?? "" } ?? ConnectionCopy.unavailable)
+    Text(costUsd.map(Self.usd) ?? ConnectionCopy.unavailable)
       .font(.system(size: 11))
       .foregroundStyle(costUsd == nil ? Palette.faint : Palette.muted)
       .lineLimit(1)

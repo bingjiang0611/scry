@@ -24,6 +24,13 @@ struct ArchivedSessionsView: View {
             Notice(text: "\(ConnectionCopy.panelLoadFailed)：\(failure)", warning: true)
               .padding(.top, 10)
           }
+          if let failure = actions.failure {
+            HStack(alignment: .top, spacing: 10) {
+              Notice(text: "\(ConnectionCopy.sessionActionFailedTitle)：\(failure)", warning: true)
+              Button(ConnectionCopy.ok) { actions.failure = nil }
+                .font(.system(size: 12, weight: .semibold)).frame(minHeight: 44)
+            }.padding(.top, 10)
+          }
           switch run.archivedCatalog {
           case .idle, .loading:
             ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 44)
@@ -63,24 +70,10 @@ struct ArchivedSessionsView: View {
     } message: {
       Text(ConnectionCopy.deleteConfirmBody)
     }
-    .overlay(alignment: .bottom) {
-      if let toast = actions.toast {
-        SessionActionToast(toast: toast, onUndo: { actions.undoArchive(run: run) },
-                           onDismiss: { actions.dismissToast() })
-      }
-    }
-    .alert(ConnectionCopy.sessionActionFailedTitle, isPresented: failurePresented) {
-      Button(ConnectionCopy.ok) { actions.failure = nil }
-    } message: {
-      Text(actions.failure ?? "")
-    }
   }
 
   private var deletePresented: Binding<Bool> {
     Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } })
-  }
-  private var failurePresented: Binding<Bool> {
-    Binding(get: { actions.failure != nil }, set: { if !$0 { actions.failure = nil } })
   }
 
   private var header: some View {
@@ -96,8 +89,8 @@ struct ArchivedSessionsView: View {
   }
 
   private var provenance: some View {
-    Text(ConnectionCopy.provenance(run.scopeLabel, run.archivedFetchedAt?.formatted(date: .omitted, time: .shortened)
-                                   ?? ConnectionCopy.archivedFetchedNone))
+    Text(ConnectionCopy.panelProvenance(run.scopeLabel,
+                                        readAt: run.archivedFetchedAt?.formatted(date: .omitted, time: .shortened)))
       .font(.system(size: 11)).foregroundStyle(Palette.faint)
       .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
   }

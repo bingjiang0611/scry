@@ -260,16 +260,15 @@ struct HomeDrawer: View {
   }
 
   private var provenance: some View {
-    Text(ConnectionCopy.provenance(targets.filterLabel, readStamp))
+    Text(ConnectionCopy.panelProvenance(targets.filterLabel, readAt: readStamp))
       .font(.system(size: 10)).foregroundStyle(Palette.faint)
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, 16).padding(.bottom, 4)
       .allowsHitTesting(false)
   }
 
-  private var readStamp: String {
-    guard let date = targets.lastFullRefresh else { return ConnectionCopy.archivedFetchedNone }
-    return date.formatted(date: .omitted, time: .shortened)
+  private var readStamp: String? {
+    targets.lastFullRefresh?.formatted(date: .omitted, time: .shortened)
   }
 
   private func rowView(_ row: ExecutionTargetCoordinator.HomeSession, indent: CGFloat = 0) -> some View {

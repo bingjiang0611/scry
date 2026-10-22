@@ -307,7 +307,6 @@ enum ConnectionCopy {
   static let noProvidersDetail = "先在 Mac 的 Scry 中登录或配置 Provider。"
   static let providersUnreadable = "无法读取 Provider"
   static let hostReadAt = "读取"
-  static func provenance(_ host: String, _ time: String) -> String { "来自 \(host) · \(time) \(hostReadAt)" }
   // A panel that has not completed its first read has no timestamp to claim.
   static func panelProvenance(_ host: String, readAt: String?) -> String {
     guard let readAt else { return "来自 \(host) · \(archivedFetchedNone)" }
