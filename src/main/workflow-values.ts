@@ -21,7 +21,7 @@ export function validateWorkflowValueSchema(input: unknown): WorkflowValueSchema
     if (!object(value)) throw new Error(copy.invalidSchema)
     const allowed = value.type === 'array' ? ['type', 'items', 'maxItems']
       : value.type === 'object' ? ['type', 'properties', 'required']
-        : value.type === 'enum' ? ['type', 'values'] : ['type']
+        : value.type === 'enum' ? ['type', 'values'] : value.type === 'union' ? ['type', 'variants'] : ['type']
     for (const field of Object.keys(value)) if (!allowed.includes(field)) throw new Error(copy.unsupportedField(field))
     switch (value.type) {
       case 'string': case 'number': case 'boolean': case 'null': return { type: value.type }
@@ -29,6 +29,10 @@ export function validateWorkflowValueSchema(input: unknown): WorkflowValueSchema
         if (!Array.isArray(value.values) || !value.values.length || value.values.length > WORKFLOW_MAX_BATCH || !value.values.every(scalar)) throw new Error(copy.invalidEnum)
         if (new Set(value.values.map(item => JSON.stringify(item))).size !== value.values.length) throw new Error(copy.invalidEnum)
         return { type: 'enum', values: [...value.values] }
+      }
+      case 'union': {
+        if (!Array.isArray(value.variants) || !value.variants.length) throw new Error(copy.invalidSchema)
+        return { type: 'union', variants: value.variants.map(variant => parse(variant, depth + 1)) }
       }
       case 'array': {
         const maxItems = value.maxItems ?? WORKFLOW_MAX_BATCH
@@ -48,28 +52,40 @@ export function validateWorkflowValueSchema(input: unknown): WorkflowValueSchema
   return parse(input, 0)
 }
 
+class WorkflowValueMismatch extends Error {}
+
 function assertValue(value: unknown, schema: WorkflowValueSchema, path: string): asserts value is WorkflowValue {
   switch (schema.type) {
     case 'null':
-      if (value !== null) throw new Error(copy.valueMismatch(path, schema.type))
+      if (value !== null) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
       return
     case 'string': case 'boolean': case 'number':
-      if (typeof value !== schema.type || (typeof value === 'number' && !Number.isFinite(value))) throw new Error(copy.valueMismatch(path, schema.type))
+      if (typeof value !== schema.type || (typeof value === 'number' && !Number.isFinite(value))) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
       return
     case 'enum':
-      if (!scalar(value) || !schema.values.includes(value)) throw new Error(copy.valueMismatch(path, schema.type))
+      if (!scalar(value) || !schema.values.includes(value)) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
+      return
+    case 'union':
+      if (!schema.variants.some(variant => matchesWorkflowValue(value, variant))) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
       return
     case 'array':
-      if (!Array.isArray(value) || value.length > schema.maxItems) throw new Error(copy.valueMismatch(path, schema.type))
+      if (!Array.isArray(value) || value.length > schema.maxItems) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
       value.forEach((item, index) => assertValue(item, schema.items, `${path}[${index}]`))
       return
     case 'object':
-      if (!object(value)) throw new Error(copy.valueMismatch(path, schema.type))
-      for (const name of schema.required) if (!Object.hasOwn(value, name)) throw new Error(copy.missingProperty(`${path}.${name}`))
+      if (!object(value)) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
+      for (const name of schema.required) if (!Object.hasOwn(value, name)) throw new WorkflowValueMismatch(copy.missingProperty(`${path}.${name}`))
       for (const [name, item] of Object.entries(value)) {
-        if (!Object.hasOwn(schema.properties, name)) throw new Error(copy.unexpectedProperty(`${path}.${name}`))
+        if (!Object.hasOwn(schema.properties, name)) throw new WorkflowValueMismatch(copy.unexpectedProperty(`${path}.${name}`))
         assertValue(item, schema.properties[name], `${path}.${name}`)
       }
+  }
+}
+
+export function matchesWorkflowValue(value: unknown, schema: WorkflowValueSchema): value is WorkflowValue {
+  try { assertValue(value, schema, '$'); return true } catch (error) {
+    if (!(error instanceof WorkflowValueMismatch)) throw error
+    return false
   }
 }
 

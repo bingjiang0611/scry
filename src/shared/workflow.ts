@@ -8,6 +8,10 @@ export const WORKFLOW_MAX_STOP_REQUESTS = 256
 export const WORKFLOW_MAX_OUTPUT_LENGTH = 16 * 1024
 export const WORKFLOW_MAX_SCHEMA_DEPTH = 16
 export const WORKFLOW_MAX_SCHEMA_NODES = 256
+export const WORKFLOW_MAX_VALUE_BYTES = 4 * 1024 * 1024
+export const WORKFLOW_MAX_VALUE_DEPTH = 64
+export const WORKFLOW_MAX_EXPRESSION_NODES = 256
+export const WORKFLOW_MAX_EXPRESSION_DEPTH = 16
 export const WORKFLOW_DEFAULT_SLOTS = 16
 export const WORKFLOW_MIN_SLOTS = 1
 export const WORKFLOW_MAX_SLOTS = 256
@@ -44,6 +48,7 @@ export interface WorkflowRoleCapability {
 
 export interface WorkflowOutputRef {
   nodeId: string
+  path?: string[]
 }
 
 export type WorkflowScalar = string | number | boolean | null
@@ -53,8 +58,65 @@ export type WorkflowValue = WorkflowScalar | WorkflowValue[] | { [key: string]: 
 export type WorkflowValueSchema =
   | { type: 'string' | 'number' | 'boolean' | 'null' }
   | { type: 'enum'; values: WorkflowScalar[] }
+  | { type: 'union'; variants: WorkflowValueSchema[] }
   | { type: 'array'; items: WorkflowValueSchema; maxItems: number }
   | { type: 'object'; properties: Record<string, WorkflowValueSchema>; required: string[] }
+
+export type WorkflowExpression =
+  | { kind: 'literal'; value: WorkflowValue }
+  | { kind: 'ref'; name: string }
+  | { kind: 'field'; source: WorkflowExpression; path: string[] }
+  | { kind: 'compare'; operator: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte'; left: WorkflowExpression; right: WorkflowExpression }
+  | { kind: 'and'; values: WorkflowExpression[] }
+  | { kind: 'or'; values: WorkflowExpression[] }
+  | { kind: 'not'; value: WorkflowExpression }
+  | { kind: 'count'; value: WorkflowExpression }
+  | { kind: 'concat'; values: WorkflowExpression[] }
+  | { kind: 'group'; items: WorkflowExpression; key: string[] }
+  | { kind: 'unique'; items: WorkflowExpression; key: string[] }
+  | { kind: 'filter'; items: WorkflowExpression; item: string; when: WorkflowExpression }
+  | { kind: 'partition'; items: WorkflowExpression; item: string; when: WorkflowExpression }
+
+export type WorkflowEvaluation =
+  | { state: 'known'; value: WorkflowValue; derivedFrom: string[] }
+  | { state: 'unknown'; reason: string; derivedFrom: string[] }
+
+export interface WorkflowValueReference {
+  workflowId: string
+  key: string
+  hash: string
+}
+
+export interface WorkflowControlFrame {
+  schemaVersion: 1
+  workflowId: string
+  programRevision: string
+  frameId: string
+  nodeId: string
+  scopePath: string[]
+  inputKey: string
+  revision: number
+  phase: 'entered' | 'selected' | 'completed' | 'failed' | 'blocked' | 'unknown' | 'stopped' | 'skipped_by_condition'
+  arm?: 'then' | 'else' | 'unknown'
+  decisionRef?: WorkflowValueReference
+  resultRef?: WorkflowValueReference
+  reason?: string
+}
+
+export interface WorkflowBindBlock {
+  kind: 'bind'
+  blockId: string
+  value: WorkflowExpression
+}
+
+export interface WorkflowBranchBlock {
+  kind: 'branch'
+  blockId: string
+  when: WorkflowExpression
+  then: WorkflowBlock
+  else: WorkflowBlock
+  unknown: WorkflowBlock | 'blocked'
+}
 
 export interface WorkflowCallBlock {
   kind: 'call'
@@ -83,7 +145,15 @@ export interface WorkflowReturnBlock {
   ref: WorkflowOutputRef
 }
 
-export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock
+export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock
+
+export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
+  switch (block.kind) {
+    case 'call': case 'return': case 'bind': return []
+    case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
+    case 'sequence': case 'parallel': return block.blocks
+  }
+}
 
 export interface WorkflowProgram {
   schemaVersion: typeof WORKFLOW_SCHEMA_VERSION

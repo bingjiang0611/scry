@@ -37,6 +37,7 @@ export const workflowControlCopy = {
 }
 
 export const workflowValueCopy = {
+  programLimit: '工作流程序文本超过 4 MiB 上限',
   invalidSchema: '工作流结构化输出合同无效',
   schemaLimit: '工作流数据合同超过深度或节点上限',
   unsupportedField: (field: string) => `工作流数据合同字段不受支持：${field}`,
@@ -49,6 +50,36 @@ export const workflowValueCopy = {
   unexpectedProperty: (path: string) => `工作流输出包含未声明字段：${path}`,
   missingProperty: (path: string) => `工作流输出缺少必需字段：${path}`,
   structuredInstruction: 'Return only one complete JSON value matching this frozen data contract. Do not wrap it in Markdown or add commentary. Missing evidence must not be invented or replaced by zero/false. Contract:'
+}
+
+export const workflowExpressionCopy = {
+  invalid: '工作流表达式无效',
+  limit: '工作流表达式超过深度或节点上限',
+  valueLimit: '工作流数据超过大小、深度或集合上限，未继续执行',
+  field: (field: string) => `工作流表达式字段不受支持：${field}`,
+  reference: (name: string) => `工作流绑定不可用：${name}`,
+  missing: (path: string) => `工作流值缺少字段：${path}`,
+  type: (kind: string) => `工作流表达式类型不匹配：${kind}`,
+  key: '工作流集合键必须是有限标量',
+  binding: (name: string) => `工作流绑定已存在：${name}`,
+  trueReason: 'condition_true',
+  falseReason: 'condition_false'
+}
+
+export const workflowFrameCopy = {
+  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、return；其他控制块暂不可用',
+  invalid: '工作流控制帧合同无效',
+  revision: '工作流控制帧修订已变化，不能覆盖',
+  identity: '工作流控制帧输入或身份已变化，不能复用旧状态',
+  terminal: '工作流已提交控制帧不可改写',
+  decision: '工作流已冻结分支选择不可改写',
+  reference: '工作流值引用身份无效',
+  digest: '工作流值引用内容校验失败',
+  missing: '工作流已引用的控制状态或值缺失',
+  branchUnknown: '分支条件证据未知，未选择 true/false 分支',
+  expectedBoolean: '工作流分支条件必须为布尔类型',
+  unknownArm: '工作流分支必须声明 unknown 分支或 blocked',
+  failedValue: '工作流前驱没有可用的已提交输出'
 }
 
 export const workflowShutdownCopy = {

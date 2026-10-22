@@ -1,8 +1,11 @@
 import { mkdir, open, opendir, rename, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { workflowControlCopy } from '../shared/constants/copy'
-import type { WorkflowAttemptOutcome, WorkflowPlanPreview, WorkflowProgress } from '../shared/workflow'
+import { workflowControlCopy, workflowFrameCopy } from '../shared/constants/copy'
+import { withDirectoryLock } from '../core/turn-recorder/io'
+import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
+import { assertWorkflowValue } from './workflow-expressions'
+import type { WorkflowAttemptOutcome, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
 import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
 
 export interface WorkflowIntent {
@@ -49,6 +52,10 @@ export interface WorkflowPlanningIntent {
 export interface WorkflowStorePage { records: WorkflowStoreRecord[]; nextCursor?: string }
 export interface WorkflowStore {
   save(record: WorkflowStoreRecord): Promise<void>
+  saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame>
+  loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined>
+  saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference>
+  loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation>
   savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void>
   loadPlanningIntent(workflowId: string): Promise<WorkflowPlanningIntent | undefined>
   planningIntents(): AsyncIterable<WorkflowPlanningIntent>
@@ -62,6 +69,16 @@ const fileSafe = (id: string): string => {
 }
 const absent = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
 const MAX_RECORD_BYTES = 8 * 1024 * 1024
+const frameName = (id: string, frameId: string): string => `${fileSafe(id)}.${fileSafe(frameId)}.frame.json`
+const valueName = (reference: WorkflowValueReference): string => `${fileSafe(reference.workflowId)}.${createHash('sha256').update(fileSafe(reference.key)).digest('hex')}.${reference.hash}.value.json`
+function validateEvaluation(value: unknown): asserts value is WorkflowEvaluation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(workflowFrameCopy.invalid)
+  const input = value as Record<string, unknown>
+  if (!Array.isArray(input.derivedFrom) || !input.derivedFrom.every(item => typeof item === 'string' && item.length <= 512)) throw new Error(workflowFrameCopy.invalid)
+  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom'] : ['state', 'reason', 'derivedFrom']
+  if (Object.keys(input).some(key => !allowed.includes(key)) || (input.state === 'known' ? !Object.hasOwn(input, 'value') : input.state !== 'unknown' || typeof input.reason !== 'string' || !input.reason || input.reason.length > 4096)) throw new Error(workflowFrameCopy.invalid)
+  if (input.state === 'known') assertWorkflowValue(input.value)
+}
 
 export class FileWorkflowStore implements WorkflowStore {
   private readonly directory: string
@@ -69,13 +86,18 @@ export class FileWorkflowStore implements WorkflowStore {
   private readonly writes = new Map<string, Promise<void>>()
   constructor(userData: string) { this.directory = join(userData, 'workflows') }
 
-  private async readJson(name: string): Promise<unknown | undefined> {
+  private async readText(name: string): Promise<string | undefined> {
     let handle
     try { handle = await open(join(this.directory, name), 'r') } catch (error) { if (absent(error)) return undefined; throw error }
     try {
       if ((await handle.stat()).size > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 读取上限')
-      return JSON.parse(await handle.readFile('utf8')) as unknown
+      return await handle.readFile('utf8')
     } finally { await handle.close() }
+  }
+
+  private async readJson(name: string): Promise<unknown | undefined> {
+    const text = await this.readText(name)
+    return text === undefined ? undefined : JSON.parse(text) as unknown
   }
 
   private atomic(name: string, value: unknown): Promise<void> { return this.atomicText(name, JSON.stringify(value)) }
@@ -88,7 +110,7 @@ export class FileWorkflowStore implements WorkflowStore {
     const write = prior.catch(() => undefined).then(async () => {
       await mkdir(this.directory, { recursive: true })
       const target = join(this.directory, name)
-      const temporary = `${target}.${randomUUID()}.tmp`
+      const temporary = join(this.directory, `.workflow-${randomUUID()}.tmp`)
       try {
         await writeFile(temporary, text, { encoding: 'utf8', mode: 0o600, flush: true })
         await rename(temporary, target)
@@ -98,6 +120,42 @@ export class FileWorkflowStore implements WorkflowStore {
     })
     this.writes.set(name, write)
     try { await write } finally { if (this.writes.get(name) === write) this.writes.delete(name) }
+  }
+
+  async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
+    validateEvaluation(evaluation)
+    const text = JSON.stringify(evaluation)
+    const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
+    const name = valueName(reference)
+    if (!this.outputs.has(name)) {
+      await this.atomicText(name, text)
+      this.outputs.set(name, true)
+      if (this.outputs.size > 1024) this.outputs.delete(this.outputs.keys().next().value!)
+    }
+    return reference
+  }
+  async loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
+    validateWorkflowValueReference(reference, workflowId)
+    const text = await this.readText(valueName(reference))
+    if (text === undefined) throw new Error(workflowFrameCopy.missing)
+    if (createHash('sha256').update(text).digest('hex') !== reference.hash) throw new Error(workflowFrameCopy.digest)
+    const value: unknown = JSON.parse(text)
+    validateEvaluation(value)
+    return value
+  }
+  async loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined> {
+    const frame = await this.readJson(frameName(workflowId, frameId))
+    if (frame === undefined) return undefined
+    validateWorkflowFrame(frame, workflowId, frameId)
+    return frame
+  }
+  async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame> {
+    const name = frameName(input.workflowId, input.frameId)
+    return withDirectoryLock(join(this.directory, 'locks', name + '.lock'), async () => {
+      const next = nextWorkflowFrame(await this.loadFrame(input.workflowId, input.frameId), input, expectedRevision)
+      await this.atomic(name, next)
+      return next
+    })
   }
 
   async readConcurrency(): Promise<number | undefined> {
@@ -206,6 +264,31 @@ export class FileWorkflowStore implements WorkflowStore {
 export class MemoryWorkflowStore implements WorkflowStore {
   private readonly records = new Map<string, WorkflowStoreRecord>()
   private readonly planning = new Map<string, WorkflowPlanningIntent>()
+  private readonly frames = new Map<string, WorkflowControlFrame>()
+  private readonly values = new Map<string, WorkflowEvaluation>()
+  async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
+    validateEvaluation(evaluation)
+    const text = JSON.stringify(evaluation)
+    const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
+    this.values.set(valueName(reference), JSON.parse(text) as WorkflowEvaluation)
+    return reference
+  }
+  async loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
+    validateWorkflowValueReference(reference, workflowId)
+    const value = this.values.get(valueName(reference))
+    if (!value) throw new Error(workflowFrameCopy.missing)
+    return structuredClone(value)
+  }
+  async loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined> {
+    const value = this.frames.get(frameName(workflowId, frameId))
+    return value && structuredClone(value)
+  }
+  async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame> {
+    const key = frameName(input.workflowId, input.frameId)
+    const next = nextWorkflowFrame(this.frames.get(key), input, expectedRevision)
+    this.frames.set(key, next)
+    return structuredClone(next)
+  }
   async save(record: WorkflowStoreRecord): Promise<void> {
     const snapshot = structuredClone(record)
     delete snapshot.progress.live

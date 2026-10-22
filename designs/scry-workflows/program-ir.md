@@ -27,6 +27,7 @@
 ```
 
 - 标量：`string / number / boolean / null`；number必须有限。枚举只包含不重复的标量。
+- union含非空variants；完整值必须符合其中一个合同，不混合不同arm的字段。
 - array含items与0–4096的maxItems，省略上限按4096冻结。
 - object只允许声明属性，省略required按全部声明字段冻结；显式required可指定可选字段。
 - 不支持`$ref`、自定义validator、eval、JS或任意schema扩展；名为command/path的普通数据属性不成为执行权限。
@@ -37,6 +38,42 @@
 
 这属于**宿主验证结构化数据**，只证明格式，不证明模型内容属实；独立检查与复核仍必需。不声称Provider原生强制JSON或禁用了工具。高级模板要求的能力仍须另按Provider合同实现/准入，不能靠这条提示词假装具备。
 
+## 有限表达式、绑定与分支
+
+现有Runner新增`bind`与`branch`，不是另一套执行器。`bind`将有限表达式结果单次绑定到blockId；表达式ref使用`{kind:"ref",name:blockId}`。call.inputRefs和return.ref可带JSON字段`path`，不授予文件访问权限。只有已提交前驱可被引用；parallel兄弟与分支私有绑定不可被外部读取。
+
+```json
+{
+  "kind": "branch",
+  "blockId": "decision",
+  "when": { "kind": "ref", "name": "verified_boolean" },
+  "then": { "kind": "bind", "blockId": "accepted", "value": { "kind": "literal", "value": "accepted report" } },
+  "else": { "kind": "bind", "blockId": "rejected", "value": { "kind": "literal", "value": "rejected report" } },
+  "unknown": "blocked"
+}
+```
+
+- branch条件必须为布尔类型；缺字段、缺证据保持unknown，只执行unknown arm或blocked，绝不按false处理。未选arm根节点持久记录`skipped_by_condition`，不创建Agent session或消耗attempt。
+- 分支结果为`{arm:"then"|"else"|"unknown",value:...}`标签union。显式unknown arm可产出partial报告；Runner执行完成不等于报告证明任务通过。
+- 表达式仅支持literal/ref/field、比较、and/or/not、count/concat、group/unique、filter/partition，不执行JS、回调或任意宿主命令。布尔组合保守传播unknown，不用已知布尔掩盖缺失证据。
+- group/unique保留全部members和原始derivedFrom索引，不因键相同丢掉矛盾成员。filter/partition均保留matched/rejected/unknown三组，含index/value/reason及外部判定来源，不返回一个被静默删减的列表。
+- 只有own JSON字段可读；数据含constructor等名称不成为原型访问。有限数值、false、0、null保持原值。已封口的空集合有效；缺失来源不是空集合。
+- 单表达式深度≤16、指令节点≤256；值≤4MiB UTF-8 JSON、深度≤64、数组≤4096。超过限制整项拒绝，不截尾。集合引用/分页和map/loop等完整控制指令仍待实现，不能只提高上限绕过。
+
+## 控制状态持久化的当前范围
+
+带上述控制/字段投影的程序在原有Runner中写入内容寻址的值artifact与CAS控制帧。帧记录程序修订、作用域、输入来源、分支选择与decision/result引用。值先落盘，再提交引用它的帧；选择帧成功后才派发被选子任务。校验失败、缺artifact、修订/输入不符或已终态帧均拒绝覆盖。unknown帧不可重置为entered/completed。
+
+作用域身份含程序修订及分支选择来源；普通M0程序保留已有任务身份。现有Agent预算/intent与outcome仍由同一Runner提交，不因控制帧退款或重发。
+
+**这不是M3恢复执行完成**：当前只证明独立FileWorkflowStore对象可以读取并校验已写的帧/值。仍没有完整持久控制栈、map迭代、loop carry/最佳候选、恢复调度或sibling复用；根的已有观察式历史恢复仍不自动派发。
+
 ## 证据
 
-相关35条单测、11文件131条Workflow回归、Node/web types及build通过。故意关闭运行时合同检查后6条回归失败，恢复后通过。真实App、真实Provider/费用及M2完整控制指令尚未验收；见目标台账，不将本节当M2完成。
+结构化输出前一阶段：11文件131项Workflow回归、types/build通过；故意关闭输出合同后6项失败。证据范围保留于目标台账。
+
+本阶段命令、源码快照和负对照保留在`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。生产Runner与真实临时文件存储的合同测试证明选择先持久化、未选arm不执行、unknown不当false、跨store CAS、内容hash及不可覆盖终态。故意将unknown路由为else后两条回归失败（错误completed及额外派发），随后恢复原字节并通过。
+
+首轮测试发现长ID的临时文件名超限，已在原atomic writer修复；首轮typecheck发现测试数据的可选undefined推断，已用准确JSON值类型修正。未扩大超时或删断言。最终检查数与日志见证据目录及台账。
+
+真实App、真实Provider/费用、Provider原生JSON/工具禁用及M2/M3完整控制指令尚未验收。性能命令对providers.catalog返回`No counter collector matches`，不是性能通过；尚无Runner专用计数证据，不作更快声明。

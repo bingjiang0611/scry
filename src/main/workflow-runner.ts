@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { workflowControlCopy } from '../shared/constants/copy'
+import { workflowControlCopy, workflowFrameCopy } from '../shared/constants/copy'
 import { availableParallelism } from 'node:os'
 import type { AgentPermissionMode } from '../shared/runtime'
 import type {
   WorkflowApproval,
   WorkflowAttemptOutcome,
   WorkflowBlock,
+  WorkflowControlFrame,
+  WorkflowEvaluation,
+  WorkflowValue,
   WorkflowLiveObservation,
   WorkflowPlanPreview,
   WorkflowProgress,
@@ -13,6 +16,9 @@ import type {
 } from '../shared/workflow'
 import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_OUTPUT_LENGTH, workflowSlotLimit, workflowProgressSnapshot } from '../shared/workflow'
 import { decodeWorkflowOutput, workflowStructuredOutputPrompt } from './workflow-values'
+import { evaluateWorkflowExpression, workflowField } from './workflow-expressions'
+import { workflowFrameId } from './workflow-frames'
+import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
@@ -228,6 +234,7 @@ export class WorkflowRunner {
   private readonly onLifecycle?: () => void
   private readonly beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
   private readonly approvals = new Map<string, WorkflowApproval>()
+  private readonly structuredOutputs = new Map<string, WorkflowValue>()
   private readonly active = new Map<string, {
     record: WorkflowStoreRecord
     progress: WorkflowProgress
@@ -277,7 +284,7 @@ export class WorkflowRunner {
       slots: { limit: this.slots.limit, inUse: this.slots.active, queued: this.slots.queued }, updatedAt: this.now()
     }
     const record: WorkflowStoreRecord = { preview, progress, intents: [], outcomes: [], executionStarted: this.now() }
-    const controller: { stopped: boolean; returnNode?: string } = { stopped: false }
+    const controller: { stopped: boolean; returnNode?: string; returnValue?: WorkflowEvaluation; returnPath?: string[] } = { stopped: false }
     const activeStops = new Set<() => boolean>()
     let initialized!: (accepted: boolean) => void
     const initialization = new Promise<boolean>(resolve => { initialized = resolve })
@@ -308,10 +315,13 @@ export class WorkflowRunner {
     this.publish(progress)
     let finalCommitted = false
     try {
-      const outcomes = await this.runBlock(preview, preview.program.body, record, controller, activeStops)
-      progress.state = outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : outcomes.some(outcome => outcome.state === 'blocked') ? 'blocked' : controller.stopped ? 'stopped' : outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
-      const report = controller.returnNode === undefined ? undefined : outcomes.find(outcome =>
-        outcome.nodeId === controller.returnNode && outcome.state === 'completed' && outcome.settled)?.output
+      const control = new WorkflowControl(this.store, preview)
+      const outcomes = await this.runBlock(preview, preview.program.body, record, controller, activeStops, control, control.root)
+      progress.state = outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : (control.root.blockedReason || outcomes.some(outcome => outcome.state === 'blocked')) ? 'blocked' : controller.stopped ? 'stopped' : outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
+      const legacyReport = controller.returnPath === undefined && controller.returnNode !== undefined ? outcomes.find(outcome =>
+        outcome.nodeId === controller.returnNode && outcome.state === 'completed' && outcome.settled)?.output : undefined
+      const report = legacyReport ?? (controller.returnValue?.state === 'known' ? (typeof controller.returnValue.value === 'string' ? controller.returnValue.value : JSON.stringify(controller.returnValue.value)) : undefined)
+      if (control.root.blockedReason) progress.error = control.root.blockedReason
       if (progress.state === 'completed' && report === undefined) {
         progress.state = 'failed'
         progress.error = '工作流根 return 未产生可验证报告'
@@ -408,43 +418,106 @@ export class WorkflowRunner {
     return entry ? this.liveSnapshot(entry.progress) : undefined
   }
 
-  private async runBlock(preview: WorkflowPlanPreview, block: WorkflowBlock, record: WorkflowStoreRecord, controller: { stopped: boolean; returnNode?: string }, activeStops: Set<() => boolean>): Promise<WorkflowAttemptOutcome[]> {
+  private async runBlock(preview: WorkflowPlanPreview, block: WorkflowBlock, record: WorkflowStoreRecord,
+    controller: { stopped: boolean; returnNode?: string; returnValue?: WorkflowEvaluation; returnPath?: string[] },
+    activeStops: Set<() => boolean>, control: WorkflowControl, scope: WorkflowControlScope): Promise<WorkflowAttemptOutcome[]> {
     if (controller.stopped) return []
-    if (block.kind === 'return') { controller.returnNode = block.ref.nodeId; return [] }
+    let frame = await control.enter(block, scope)
+    const unavailable = (reason = workflowFrameCopy.failedValue): WorkflowEvaluation => ({ state: 'unknown', reason, derivedFrom: [] })
+    const finish = async (value: WorkflowEvaluation, phase: WorkflowControlFrame['phase'] = 'completed') => control.complete(block, scope, frame, value, phase)
+    if (block.kind === 'return') {
+      controller.returnNode = block.ref.nodeId
+      controller.returnPath = block.ref.path
+      const source = scope.bindings.get(block.ref.nodeId) ?? unavailable()
+      controller.returnValue = source.state === 'known' && block.ref.path ? workflowField(source.value, block.ref.path, source.derivedFrom) : source
+      if (control.framed && controller.returnValue.state === 'unknown') scope.blockedReason = controller.returnValue.reason
+      await finish(controller.returnValue, scope.blockedReason ? 'blocked' : 'completed')
+      return []
+    }
+    if (block.kind === 'bind') {
+      const value = evaluateWorkflowExpression(block.value, scope.bindings)
+      if (value.state === 'unknown') scope.blockedReason = value.reason
+      await finish(value, value.state === 'unknown' ? 'blocked' : 'completed')
+      return []
+    }
+    if (block.kind === 'branch') {
+      const decision = evaluateWorkflowExpression(block.when, scope.bindings)
+      const arm = decision.state === 'known' && typeof decision.value === 'boolean' ? decision.value ? 'then' : 'else' : 'unknown'
+      frame = await control.select(frame, arm, decision)
+      const label = (name: string) => block.blockId + ':' + name + ':' + frame!.decisionRef!.hash
+      for (const skipped of ['then', 'else', 'unknown'] as const) {
+        const child = block[skipped]
+        if (skipped !== arm && child !== 'blocked') await control.skip(child, control.child(scope, label(skipped)))
+      }
+      const selected = block[arm]
+      if (selected === 'blocked') {
+        scope.blockedReason = workflowFrameCopy.branchUnknown
+        await finish(decision, 'blocked')
+        return []
+      }
+      const childScope = control.child(scope, label(arm))
+      const outcomes = await this.runBlock(preview, selected, record, controller, activeStops, control, childScope)
+      scope.blockedReason ??= childScope.blockedReason
+      const value = childScope.bindings.get(selected.blockId) ?? unavailable()
+      const result: WorkflowEvaluation = value.state === 'known' ? { state: 'known', value: { arm, value: value.value }, derivedFrom: [...new Set([...decision.derivedFrom, ...value.derivedFrom])] } : value
+      const phase = outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown') ? 'unknown' : controller.stopped ? 'stopped' : scope.blockedReason ? 'blocked' : outcomes.some(outcome => outcome.state !== 'completed') ? 'failed' : 'completed'
+      await finish(result, phase)
+      return outcomes
+    }
     if (block.kind === 'call') {
-      return [await this.dispatch(preview, block, record, controller, activeStops)]
+      const outcome = await this.dispatch(preview, block, record, controller, activeStops, scope)
+      let value: WorkflowEvaluation = { ...unavailable(outcome.error), derivedFrom: ['attempt:' + outcome.attemptId] }
+      if (outcome.state === 'completed' && outcome.settled && outcome.output !== undefined) {
+        const key = preview.workflowId + ':' + preview.programRevision + ':' + outcome.attemptId
+        const data = block.outputSchema ? this.structuredOutputs.get(key) ?? decodeWorkflowOutput(outcome.output, block.outputSchema) : outcome.output
+        value = { state: 'known', value: data, derivedFrom: ['attempt:' + outcome.attemptId] }
+      }
+      const phase = !outcome.settled || outcome.state === 'unknown' ? 'unknown' : outcome.state === 'blocked' ? 'blocked' : outcome.state === 'failed' ? 'failed' : outcome.state === 'stopped' ? 'stopped' : 'completed'
+      await finish(value, phase)
+      return [outcome]
     }
     if (block.kind === 'sequence') {
       const outcomes: WorkflowAttemptOutcome[] = []
+      let value = unavailable()
       for (const child of block.blocks) {
-        const childOutcomes = await this.runBlock(preview, child, record, controller, activeStops)
+        const childOutcomes = await this.runBlock(preview, child, record, controller, activeStops, control, scope)
         outcomes.push(...childOutcomes)
-        if (controller.stopped || childOutcomes.some((outcome) => outcome.state !== 'completed' || !outcome.settled)) break
+        value = scope.bindings.get(child.blockId) ?? unavailable()
+        if (controller.stopped || scope.blockedReason || childOutcomes.some(outcome => outcome.state !== 'completed' || !outcome.settled)) break
       }
+      await finish(value, outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown') ? 'unknown' : controller.stopped ? 'stopped' : scope.blockedReason ? 'blocked' : outcomes.some(outcome => outcome.state !== 'completed') ? 'failed' : 'completed')
       return outcomes
     }
-    const pending = block.blocks.map((child) => this.runBlock(preview, child, record, controller, activeStops)
-      .then((value) => ({ value } as const)).catch((error: unknown) => ({ error } as const)))
+    const childScopes = block.blocks.map(child => control.child(scope, 'parallel:' + child.blockId))
+    const pending = block.blocks.map((child, index) => this.runBlock(preview, child, record, controller, activeStops, control, childScopes[index])
+      .then(value => ({ value } as const)).catch((error: unknown) => ({ error } as const)))
     const unresolved = new Set(pending)
     const outcomes: WorkflowAttemptOutcome[] = []
-    while (unresolved.size > 0) {
-      const next = await Promise.race([...unresolved].map((promise) => promise.then((result) => ({ result, source: promise }))))
+    while (unresolved.size) {
+      const next = await Promise.race([...unresolved].map(promise => promise.then(result => ({ result, source: promise }))))
       unresolved.delete(next.source)
-      if ('error' in next.result) {
-        await Promise.allSettled([...unresolved])
-        throw next.result.error
-      }
+      if ('error' in next.result) { await Promise.allSettled([...unresolved]); throw next.result.error }
       outcomes.push(...next.result.value)
-      if (next.result.value.some((outcome) => outcome.state === 'unknown' || !outcome.settled)) return outcomes
+      if (next.result.value.some(outcome => outcome.state === 'unknown' || !outcome.settled)) {
+        await finish(unavailable(), 'unknown')
+        return outcomes
+      }
     }
+    control.join(scope, childScopes)
+    const values = block.blocks.map(child => scope.bindings.get(child.blockId) ?? unavailable())
+    const value: WorkflowEvaluation = values.every(item => item.state === 'known') ? {
+      state: 'known', value: Object.fromEntries(block.blocks.map((child, index) => [child.blockId, (values[index] as Extract<WorkflowEvaluation, { state: 'known' }>).value])),
+      derivedFrom: [...new Set(values.flatMap(item => item.derivedFrom))]
+    } : unavailable()
+    await finish(value, controller.stopped ? 'stopped' : scope.blockedReason ? 'blocked' : outcomes.some(outcome => outcome.state !== 'completed') ? 'failed' : 'completed')
     return outcomes
   }
 
-  private async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>): Promise<WorkflowAttemptOutcome> {
+  private async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope): Promise<WorkflowAttemptOutcome> {
     if (controller.stopped) return this.outcome(preview, block, 'stopped', { settled: true, error: '工作流已停止' })
     const role = preview.program.roles.find((candidate) => candidate.role === block.role)
     if (!role) throw new Error(`程序引用了未配置角色：${block.role}`)
-    const taskId = `${preview.workflowId}:${block.blockId}`
+    const taskId = scope.path.length ? `${preview.workflowId}:${workflowFrameId(block.blockId, scope.path)}:${block.blockId}` : `${preview.workflowId}:${block.blockId}`
     const attemptId = randomUUID()
     const queued = await this.slots.enqueue({
       ownerId: preview.workflowId, block, resolve: () => undefined as never, reject: () => undefined as never,
@@ -454,9 +527,9 @@ export class WorkflowRunner {
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
-        const prompt = this.promptFor(block, record)
+        const prompt = this.promptFor(block, record, scope)
         if (!prompt) {
-          const outcome = this.outcome(preview, block, 'failed', { attemptId, taskId, settled: true, error: '输入引用尚未提交有效输出' })
+          const outcome = this.outcome(preview, block, scope.blockedReason ? 'blocked' : 'failed', { attemptId, taskId, settled: true, error: scope.blockedReason ?? '输入引用尚未提交有效输出' })
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
@@ -535,8 +608,9 @@ export class WorkflowRunner {
           if (result?.settled) { activeStops.delete(stop); releaseLive() }
         }
         let outputError: string | undefined
+        let decoded: WorkflowValue | undefined
         if (result.status === 'completed' && block.outputSchema) {
-          try { decodeWorkflowOutput(result.output, block.outputSchema) } catch (error) {
+          try { decoded = decodeWorkflowOutput(result.output, block.outputSchema) } catch (error) {
             outputError = error instanceof Error ? error.message : String(error)
           }
         }
@@ -545,6 +619,10 @@ export class WorkflowRunner {
           archiveRef: result.archiveRef, settled: result.settled, error: outputError ?? result.error, providerId: role.providerId
         })
         await this.commitOutcome(record, outcome)
+        if (decoded !== undefined) {
+          this.structuredOutputs.set(preview.workflowId + ':' + preview.programRevision + ':' + attemptId, decoded)
+          if (this.structuredOutputs.size > 128) this.structuredOutputs.delete(this.structuredOutputs.keys().next().value!)
+        }
         if (result.settled) return { outcome }
         const hold = execution.settled ?? new Promise<void>(() => {})
         return { outcome, hold: hold.then(async () => {
@@ -570,9 +648,17 @@ export class WorkflowRunner {
     await this.persist(record, record.progress)
   }
 
-  private promptFor(block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord): string | undefined {
+  private promptFor(block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, scope: WorkflowControlScope): string | undefined {
     const inputs: string[] = []
     for (const ref of block.inputRefs ?? []) {
+      const binding = scope.bindings.get(ref.nodeId)
+      if (scope.path.length || ref.path !== undefined) {
+        if (binding?.state !== 'known') { scope.blockedReason = binding?.reason ?? workflowFrameCopy.failedValue; return undefined }
+        const selected = ref.path ? workflowField(binding.value, ref.path, binding.derivedFrom) : binding
+        if (selected.state === 'unknown') { scope.blockedReason = selected.reason; return undefined }
+        inputs.push(`[committed binding ${ref.nodeId}]\n${typeof selected.value === 'string' ? selected.value : JSON.stringify(selected.value)}`)
+        continue
+      }
       const outcome = [...record.outcomes].reverse().find((candidate) => candidate.nodeId === ref.nodeId)
       if (!outcome || outcome.state !== 'completed' || !outcome.settled || !outcome.output) return undefined
       inputs.push(`[committed output ${ref.nodeId}]\n${outcome.output}`)

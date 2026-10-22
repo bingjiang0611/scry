@@ -30,6 +30,9 @@ describe('WorkflowProgram M0 contract', () => {
     const { blocks, ...container } = example.body
     expect(() => validateWorkflowProgram({ ...candidate, body: { ...container, children: blocks } })).toThrow('children')
     expect(prompt).toContain('Goal:\nSynthetic goal')
+    expect(prompt).toContain('unknown:block|"blocked"')
+    expect(prompt).toContain('Finite expressions:')
+    expect(prompt).not.toContain('loops, conditionals')
   })
 
   it('parses only the explicit run command', () => {

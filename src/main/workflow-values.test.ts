@@ -77,6 +77,19 @@ describe('Workflow finite data contracts', () => {
     expect(Object.hasOwn(Object.prototype, '__proto__')).toBe(true)
   })
 
+  it('validates tagged union arms without combining fields from different variants', () => {
+    const schema = validateWorkflowValueSchema({ type: 'union', variants: [
+      { type: 'object', properties: { arm: { type: 'enum', values: ['then'] }, value: { type: 'boolean' } } },
+      { type: 'object', properties: { arm: { type: 'enum', values: ['unknown'] }, reason: { type: 'string' } } }
+    ] })
+    expect(decodeWorkflowOutput('{"arm":"then","value":false}', schema)).toEqual({ arm: 'then', value: false })
+    expect(decodeWorkflowOutput('{"arm":"unknown","reason":"missing"}', schema)).toEqual({ arm: 'unknown', reason: 'missing' })
+    expect(() => decodeWorkflowOutput('{"arm":"then","reason":"missing"}', schema)).toThrow('union')
+    expect(() => decodeWorkflowOutput('{"arm":"then","value":"false"}', schema)).toThrow('union')
+    expect(() => validateWorkflowValueSchema({ type: 'union', variants: [] })).toThrow()
+    expect(() => validateWorkflowValueSchema({ type: 'union', variants: Array.from({ length: 256 }, () => ({ type: 'boolean' })) })).toThrow('上限')
+  })
+
   it('puts the exact frozen schema into the model instruction', () => {
     const schema: WorkflowValueSchema = { type: 'boolean' }
     expect(workflowStructuredOutputPrompt('review', schema)).toContain(JSON.stringify(schema))

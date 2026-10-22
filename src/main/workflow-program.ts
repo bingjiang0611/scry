@@ -9,10 +9,13 @@ import type {
   WorkflowRole,
   WorkflowRoleBinding,
   WorkflowRoleCapability,
-  WorkflowOutputRef
+  WorkflowOutputRef,
+  WorkflowValueSchema
 } from '../shared/workflow'
-import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState } from '../shared/workflow'
+import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
 import { validateWorkflowValueSchema } from './workflow-values'
+import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema } from './workflow-expressions'
+import { workflowExpressionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/
@@ -46,11 +49,13 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
   ] }
   return [
     "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
-    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, and exactly one final return. Every node must include kind and a unique blockId.',
+    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, and exactly one final return. Every node must include kind and a unique blockId.',
     'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
-    'A call is {kind:"call",blockId,role,prompt,inputRefs?,outputSchema?}; role must be one of the configured roles. inputRefs may reference only an earlier committed call output by {nodeId}; never reference a parallel sibling or future node.',
-    'Optional outputSchema freezes a finite JSON data contract: {type:"string"|"number"|"boolean"|"null"}, {type:"enum",values:[scalar,...]}, {type:"array",items:schema,maxItems:0..4096}, or {type:"object",properties:{field:schema,...},required:[field,...]}. No extra schema keywords or executable validators. Omitted required means all declared fields. Invalid Provider output fails the call, never becomes a successful dependency. Schema depth is at most 16 and total schema nodes at most 256.',
-    'The final root return is {kind:"return",blockId,ref:{nodeId:"..."}} and must reference one completed call output. No JavaScript, eval, imports, shell, command, path, loops, conditionals, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs.',
+    'A call is {kind:"call",blockId,role,prompt,inputRefs?,outputSchema?}; role must be one of the configured roles. inputRefs reference an earlier committed binding by {nodeId,path?:[field,...]}; path means JSON fields, not a filesystem path. Never reference a parallel sibling or future node.',
+    'A bind is {kind:"bind",blockId,value:expression}; it binds its immutable result under blockId. A branch is {kind:"branch",blockId,when:expression,then:block,else:block,unknown:block|"blocked"}. when must be boolean; missing evidence is unknown, never false. Exactly one arm runs; private arm bindings do not escape. The branch binds {arm:"then"|"else"|"unknown",value:chosenOutput}.',
+    'Finite expressions: {kind:"literal",value:JSON}, {kind:"ref",name:blockId}, {kind:"field",source:expression,path:[field,...]}, {kind:"compare",operator:"eq"|"ne"|"gt"|"gte"|"lt"|"lte",left:expression,right:expression}, {kind:"and"|"or"|"concat",values:[expression,...]}, {kind:"not"|"count",value:expression}, {kind:"group"|"unique",items:expression,key:[field,...]}, {kind:"filter"|"partition",items:expression,item:localName,when:expression}. No callbacks or user code. group/unique retain all members and original indexes; filter/partition return matched/rejected/unknown entries with indexes, values and reasons, not a flattened list.',
+    'Optional outputSchema freezes a finite JSON data contract: {type:"string"|"number"|"boolean"|"null"}, {type:"enum",values:[scalar,...]}, {type:"array",items:schema,maxItems:0..4096}, {type:"object",properties:{field:schema,...},required:[field,...]}, or {type:"union",variants:[schema,...]}. No extra schema keywords or executable validators. Omitted required means all declared fields. Invalid Provider output fails the call, never becomes a successful dependency. Schema depth is at most 16 and total schema nodes at most 256.',
+    'The final root return is {kind:"return",blockId,ref:{nodeId:"...",path?:[field,...]}} and must reference one committed binding. No JavaScript, eval, imports, shell execution, map, loops, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Bound data are at most 4 MiB UTF-8 JSON, depth 64 and 4096 collection members; expressions are at most depth 16 and 256 nodes.',
     `Never exceed ${WORKFLOW_MAX_ATTEMPTS} Agent calls. The following example illustrates grammar only; do not copy its tasks or role choices instead of planning the user's goal.`,
     `Grammar example: ${JSON.stringify({ schemaVersion: WORKFLOW_SCHEMA_VERSION, body: example })}`,
     `Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}`,
@@ -124,9 +129,10 @@ function validateRefs(value: unknown, label: string): WorkflowOutputRef[] {
   return value.map((entry) => {
     if (!entry || typeof entry !== 'object') throw new Error(`${label} 引用无效`)
     const input = entry as Record<string, unknown>
-    rejectUnknownFields(input, ['nodeId'])
+    rejectUnknownFields(input, ['nodeId', 'path'])
     assertId(input.nodeId, `${label} 引用节点`)
-    return { nodeId: input.nodeId }
+    if (input.path !== undefined && (!Array.isArray(input.path) || input.path.length > 16 || !input.path.every(part => typeof part === 'string' && part.length <= 256))) throw new Error(workflowFrameCopy.invalid)
+    return { nodeId: input.nodeId, ...(input.path === undefined ? {} : { path: [...input.path] as string[] }) }
   })
 }
 
@@ -147,10 +153,28 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
     assertText(input.prompt, 'Agent 调用提示', MAX_PROMPT_LENGTH)
     const outputSchema = input.outputSchema === undefined ? undefined : validateWorkflowValueSchema(input.outputSchema)
     count.textBytes += Buffer.byteLength(input.prompt) + (outputSchema ? Buffer.byteLength(JSON.stringify(outputSchema)) : 0)
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error('工作流程序文本超过 4 MiB 上限')
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
     const inputRefs = input.inputRefs === undefined ? undefined : validateRefs(input.inputRefs, '输入')
     return { kind: 'call', blockId: input.blockId, role: input.role, prompt: input.prompt,
       ...(inputRefs ? { inputRefs } : {}), ...(outputSchema ? { outputSchema } : {}) }
+  }
+  if (input.kind === 'bind') {
+    rejectUnknownFields(input, ['kind', 'blockId', 'value'])
+    const expression = validateWorkflowExpression(input.value)
+    count.textBytes += Buffer.byteLength(JSON.stringify(expression))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    return { kind: 'bind', blockId: input.blockId, value: expression }
+  }
+  if (input.kind === 'branch') {
+    rejectUnknownFields(input, ['kind', 'blockId', 'when', 'then', 'else', 'unknown'])
+    if (input.unknown === undefined) throw new Error(workflowFrameCopy.unknownArm)
+    const when = validateWorkflowExpression(input.when)
+    count.textBytes += Buffer.byteLength(JSON.stringify(when))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    return { kind: 'branch', blockId: input.blockId, when,
+      then: validateBlock(input.then, seen, depth + 1, count),
+      else: validateBlock(input.else, seen, depth + 1, count),
+      unknown: input.unknown === 'blocked' ? 'blocked' : validateBlock(input.unknown, seen, depth + 1, count) }
   }
   if (input.kind === 'return') {
     rejectUnknownFields(input, ['kind', 'blockId', 'value', 'ref'])
@@ -168,47 +192,66 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
       blocks: input.blocks.map((child) => validateBlock(child, seen, depth + 1, count))
     }
   }
-  throw new Error('M0 仅支持 sequence、parallel、call、return；其他控制块暂不可用')
+  throw new Error(workflowFrameCopy.unsupportedBlock)
 }
 
 function referencedRoles(body: WorkflowBlock, roles = new Set<WorkflowRole>()): Set<WorkflowRole> {
   if (body.kind === 'call') roles.add(body.role)
-  else if (body.kind !== 'return') for (const child of body.blocks) referencedRoles(child, roles)
+  else for (const child of workflowChildBlocks(body)) referencedRoles(child, roles)
   return roles
 }
 
 function validateReferenceDominance(body: WorkflowBlock): void {
   if (body.kind !== 'sequence' || body.blocks.at(-1)?.kind !== 'return') throw new Error('根 sequence 必须以 return 结束')
-  const available = new Set<string>()
+  const available = new Map<string, WorkflowValueSchema>()
   let returnCount = 0
-  const visit = (block: WorkflowBlock, scope: Set<string>): void => {
+  const referenceType = (ref: WorkflowOutputRef, scope: ReadonlyMap<string, WorkflowValueSchema>, label = '输入'): WorkflowValueSchema => {
+    if (!scope.has(ref.nodeId)) throw new Error(`${label}引用不是已提交的前置输出：${ref.nodeId}`)
+    return inferWorkflowExpression(ref.path?.length ? { kind: 'field', source: { kind: 'ref', name: ref.nodeId }, path: ref.path } : { kind: 'ref', name: ref.nodeId }, scope)
+  }
+  const bind = (scope: Map<string, WorkflowValueSchema>, name: string, schema: WorkflowValueSchema): WorkflowValueSchema => {
+    if (scope.has(name)) throw new Error(workflowExpressionCopy.binding(name))
+    scope.set(name, schema)
+    return schema
+  }
+  const visit = (block: WorkflowBlock, scope: Map<string, WorkflowValueSchema>): WorkflowValueSchema => {
     if (block.kind === 'call') {
-      for (const ref of block.inputRefs ?? []) if (!scope.has(ref.nodeId)) throw new Error(`输入引用不是已提交的前置输出：${ref.nodeId}`)
-      scope.add(block.blockId)
-      return
+      for (const ref of block.inputRefs ?? []) referenceType(ref, scope)
+      return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
+    }
+    if (block.kind === 'bind') return bind(scope, block.blockId, inferWorkflowExpression(block.value, scope))
+    if (block.kind === 'branch') {
+      if (!workflowBooleanSchema(inferWorkflowExpression(block.when, scope))) throw new Error(workflowFrameCopy.expectedBoolean)
+      const arms: Array<['then' | 'else' | 'unknown', WorkflowBlock]> = [['then', block.then], ['else', block.else]]
+      if (block.unknown !== 'blocked') arms.push(['unknown', block.unknown])
+      const variants: WorkflowValueSchema[] = arms.map(([arm, child]) => ({
+        type: 'object', properties: { arm: { type: 'enum', values: [arm] }, value: visit(child, new Map(scope)) }, required: ['arm', 'value']
+      }))
+      return bind(scope, block.blockId, { type: 'union', variants })
     }
     if (block.kind === 'return') {
       if (block !== body.blocks.at(-1)) throw new Error('return 只能位于根 sequence 的末尾')
-      returnCount += 1
-      if (block.ref && !scope.has(block.ref.nodeId)) throw new Error(`返回引用不是已提交的前置输出：${block.ref.nodeId}`)
-      return
+      returnCount++
+      return referenceType(block.ref, scope, '返回')
     }
     if (block.kind === 'sequence') {
-      let returned = false
-      for (const child of block.blocks) {
-        if (returned) throw new Error('return 必须是其序列中的最后一个程序块')
-        visit(child, scope)
-        returned = child.kind === 'return'
-      }
-      return
+      let schema: WorkflowValueSchema = { type: 'null' }
+      for (const child of block.blocks) schema = visit(child, scope)
+      return bind(scope, block.blockId, schema)
     }
-    const branchOutputs: string[] = []
+    const inherited = new Map(scope)
+    const exported = new Map<string, WorkflowValueSchema>()
+    const properties: Record<string, WorkflowValueSchema> = Object.create(null) as Record<string, WorkflowValueSchema>
     for (const child of block.blocks) {
-      const branchScope = new Set(scope)
-      visit(child, branchScope)
-      for (const nodeId of branchScope) if (!scope.has(nodeId)) branchOutputs.push(nodeId)
+      const branchScope = new Map(inherited)
+      properties[child.blockId] = visit(child, branchScope)
+      for (const [name, schema] of branchScope) if (!inherited.has(name)) {
+        if (exported.has(name)) throw new Error(workflowExpressionCopy.binding(name))
+        exported.set(name, schema)
+      }
     }
-    for (const nodeId of branchOutputs) scope.add(nodeId)
+    for (const [name, schema] of exported) bind(scope, name, schema)
+    return bind(scope, block.blockId, { type: 'object', properties, required: Object.keys(properties) })
   }
   visit(body, available)
   if (returnCount !== 1) throw new Error('工作流程序必须包含且只能包含一个根 return')
@@ -259,7 +302,7 @@ export function makePlanPreview(programInput: unknown, capabilities: WorkflowRol
   const program = validateWorkflowProgram(programInput)
   const unavailableReasons = capabilities.filter((capability) => capability.state !== 'available')
     .map((capability) => `${capability.role}: ${capability.reason ?? '能力不可用'}`)
-  const plannedCalls = callBlocks(program.body).length
+  const plannedCalls = workflowCallBudget(program.body)
   if (plannedCalls > WORKFLOW_MAX_ATTEMPTS) unavailableReasons.push(`程序包含 ${plannedCalls} 个 Agent 调用，超过单根 ${WORKFLOW_MAX_ATTEMPTS} 次上限`)
   return {
     workflowId: program.workflowId, programRevision: program.programRevision, userGoal: program.userGoal, workspace: program.workspace,
@@ -267,8 +310,13 @@ export function makePlanPreview(programInput: unknown, capabilities: WorkflowRol
   }
 }
 
+export function workflowCallBudget(block: WorkflowBlock): number {
+  if (block.kind === 'call') return 1
+  if (block.kind === 'branch') return Math.max(...workflowChildBlocks(block).map(workflowCallBudget))
+  return workflowChildBlocks(block).reduce((sum, child) => sum + workflowCallBudget(child), 0)
+}
+
 export function callBlocks(block: WorkflowBlock): WorkflowCallBlock[] {
   if (block.kind === 'call') return [block]
-  if (block.kind === 'return') return []
-  return block.blocks.flatMap(callBlocks)
+  return workflowChildBlocks(block).flatMap(callBlocks)
 }
