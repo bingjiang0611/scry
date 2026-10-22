@@ -170,7 +170,24 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 
 首轮 `first-run.log` 保留：runner completed 后 fake 身份未登记，清理拒绝且覆盖原始异常，不能断言最初异常精确原因；8个已启动 PID 后续均确认退出。假 CLI 现等待外层出生身份登记后才握手；原始错误和清理错误分开保存，未放宽身份检查。中间五场景成功与最终六场景成功分别保留，不抹去首轮失败。详细边界、非干扰剔除字段与证据见[夹具说明](../../docs/research/claude-sdk-transport-fixture.md)。
 
-仍缺完整 App、真实 native transcript、managed recorder 生命周期与 canonical records；recordNative callback 和 SDK hook_callback 均不能替代它们。下一步由维护 Agent 核对这个最小离线集成接缝，真实账号/模型费用仍须用户先授权。
+该轮仍未覆盖完整 App、native transcript 与 managed recorder/canonical；下一节补充独立完成路径，不能回填为该轮证据。
+
+## 真实 adapter + 私有 recorder CLI 的独立完成路径
+
+父会话按新增授权执行了 `recorder-complete`，没有恢复/重发暂停的旧 worker。实现中先在另一仓库补严格的登记资源核验（独立提交 `336bd88`）：原 native exit 仍 unknown，业务状态不改，仅核验已封口 roster、已退出 PID/组及已释放 canonical lease；没有热改存活安装。随后由父线程接手本轮夹具。
+
+实际接受现场 `scry-claude-wire-ukSCQN`，只读持久归档 `~/.local/state/rotom/verification-evidence/scry-managed-JGARFz/`。原六场景与新增完成场景均通过；新场景实际调用生产 adapter/runner、真实 SDK、冻结私有 CLI0.2.49 的 Start/Stop、实际生产 aggregate/prepare/commit。native 11 条、trace 8 条，canonical hook 两条、tool 一条；不是 SDK mock 或手写 record。私有 CLI 的43文件 hash、51个实际 bundle 输入、SDK/harness/helper 均绑定。SDK/fake 实测系统禁网，CLI 子进程继承该 profile；不执行自定义提交回调。
+
+| 检查 | 结果 | 范围 |
+| --- | --- | --- |
+| Start/Stop 后 + prepare 后 | records0、仍 pending | Hook/prepare 都不冒充提交 |
+| commit / 重复 commit | 实际 records1 / duplicate，内容不变、pending0 | 独立 core canonical，不是 App 跨存储收敛 |
+| 独立私有 CLI turns verify | ok、records1、errors[]、openTurnsPending0 | model/role/taskLink 仍 legacy_unset advisories |
+| 退出/静态与回归 | 16登记/Hook PID退出；两脚本语法、67 focused、Node/web types、App build、diff check通过 | 无实际模型、账号、工具授权或执行 |
+
+失败现场均保留，不被最终通过抹去：缺 Git 根；CLI Start 实际合同为 started；原始未保护 tool payload 被生产 full-content gate 拒绝；JSON省略 undefined 导致不当深比较。相应修复仅在夹具：真实临时 git init/生产初始化器、精确 started/pending 合同、冻结真实 policy并用生产聚合器保护、从落盘 standalone archive 读取 evidence。未降低断言、补0、删除失败记录、加时或自动重试。初步成功场景还因未提供 native Hook 生命周期而留下 exact 空 hooks，自审后按真实 CLI 子进程结果发 SDK hook_started/response 并断言 canonical 两条 Hook；旧记录不重写。具体日志/中间场景见[夹具说明](../../docs/research/claude-sdk-transport-fixture.md)。
+
+先前 `/tmp` legacy manifest/临时工作区已不在，删除原因未知，旧16源 hash 本轮无法重验。历史 unknown/pending 不据此结算、退款或重发，也不重建旧证据；新受控证据另做私有只读快照。当前只验证独立成功路径，未验证 managed 中断/失败/恢复、真实 transcript fallback、完整 startAppRun / App archive / SQLite 原子提交或真实 Claude 账号。下一步由维护 Agent 补 recorder 的失败/中断边界，再评估完整 App 接缝。Scry 未升版本、未安装、未推送。
 
 ## 尚未完成与下一段
 
