@@ -13,6 +13,8 @@ interface Queue {
   prompts: RemoteQueuedPrompt[]
   waitingFor?: string
   sending: boolean
+  /** 正在提交的那条。跳行发送时它不一定是队首，所以必须按 id 记。 */
+  claimed?: string
   paused: boolean
   writeUnknown?: boolean
 }
@@ -41,24 +43,44 @@ export class RemotePromptQueueStore {
   }
   remove(key: string, messageId: string): void {
     const queue = this.get(key)
-    if (queue.sending && queue.prompts[0]?.messageId === messageId) return
+    // 正在提交的那条不能移除；它不一定是队首，所以按 claimed 判。
+    if (queue.claimed === messageId && (queue.sending || queue.writeUnknown)) return
     this.set(key, { ...queue, prompts: queue.prompts.filter(prompt => prompt.messageId !== messageId),
-      ...(queue.prompts[0]?.messageId === messageId ? { writeUnknown: false } : {}) })
+      ...(queue.claimed === messageId ? { writeUnknown: false, claimed: undefined } : {}) })
   }
   settle(key: string, intentId: string): void {
     const queue = this.get(key)
     if (queue.waitingFor === intentId) this.set(key, { ...queue, waitingFor: undefined })
   }
-  claim(key: string): RemoteQueuedPrompt | undefined {
+  // 编辑中的行跳过不发：其余消息照常按 FIFO 继续，完成后再轮回到它。
+  claim(key: string, skipMessageId?: string): RemoteQueuedPrompt | undefined {
     const queue = this.get(key)
-    if (queue.sending || queue.paused || queue.waitingFor || !queue.prompts.length) return
-    this.set(key, { ...queue, sending: true })
-    return queue.prompts[0]
+    if (queue.sending || queue.paused || queue.waitingFor) return
+    const target = queue.prompts.find(prompt => prompt.messageId !== skipMessageId)
+    if (!target) return
+    this.set(key, { ...queue, sending: true, claimed: target.messageId })
+    return target
   }
   submitted(key: string, intent: DesktopRemoteIntent): void {
     const queue = this.get(key)
-    this.set(key, { ...queue, prompts: queue.prompts.slice(1), sending: false, waitingFor: intent.intentId,
+    this.set(key, { ...queue, prompts: queue.prompts.filter(prompt => prompt.messageId !== queue.claimed),
+      sending: false, claimed: undefined, waitingFor: intent.intentId,
       paused: intent.status === 'unknown' })
+  }
+  // 编辑后重新排队：原位置移除，作为新意图排到队尾。换新 id，避免把旧回执审到一条新消息上。
+  enqueueEdited(key: string, connectionId: string, messageId: string, submission: DesktopRemoteSubmit, waitingFor?: string): RemoteQueuedPrompt | null {
+    const queue = this.get(key)
+    if (!queue.prompts.some(prompt => prompt.messageId === messageId)) return null
+    const next: RemoteQueuedPrompt = {
+      messageId: crypto.randomUUID(),
+      text: submission.prompt,
+      attachments: submission.attachments?.map(attachment => ({ ...attachment })) ?? [],
+      request: {},
+      submission
+    }
+    this.set(key, { ...queue, connectionId, waitingFor: queue.waitingFor ?? waitingFor,
+      prompts: [...queue.prompts.filter(prompt => prompt.messageId !== messageId), next] })
+    return next
   }
   pause(key: string): void {
     const queue = this.get(key)
@@ -71,6 +93,7 @@ export class RemotePromptQueueStore {
   }
   fail(key: string): void {
     const queue = this.get(key)
+    // 保留 claimed：它就是那条结果未知的消息，移除守卫和未知提示都靠它。
     this.set(key, { ...queue, sending: false, paused: true, writeUnknown: true })
   }
   resume(key: string): void {

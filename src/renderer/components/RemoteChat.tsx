@@ -36,7 +36,7 @@ import {
   type ComposerDraftAttachment,
   type ComposerDraftStore
 } from '../composer-drafts'
-import { REMOTE_ATTACHMENTS_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
+import { QUEUE_COPY, REMOTE_ATTACHMENTS_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
 import { RemotePromptQueueStore, remoteQueueKey } from '../remote-prompt-queue'
 import type { SlashCmd } from '@shared/trace'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
@@ -201,6 +201,9 @@ export function RemoteChat({
   const queueKey = remoteQueueKey(draftKey, providerSelection)
   const readQueue = () => queueStore.get(queueKey)
   const queue = useSyncExternalStore(queueStore.subscribe, readQueue, readQueue)
+  // 正在输入框里改写的队列条目；编辑期间它跳过自动出队。
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [movedMessageId, setMovedMessageId] = useState<string | null>(null)
   const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
   const [slashReason, setSlashReason] = useState<string | null>(null)
   const [slashLoading, setSlashLoading] = useState(false)
@@ -499,7 +502,20 @@ export function RemoteChat({
     const request = submission(text, attachments)
     if (runActive || queue.prompts.length > 0) {
       try {
-        queueStore.enqueue(queueKey, connectionId, request, currentIntent?.intentId)
+        if (editingMessageId) {
+          const edited = editingMessageId
+          const moved = queueStore.enqueueEdited(queueKey, connectionId, edited, request, currentIntent?.intentId)
+          // 队列在点击与提交之间变了（例如刚被提交）时不能丢文本：退回普通入队。
+          if (moved) {
+            setMovedMessageId(moved.messageId)
+          } else {
+            setError(QUEUE_COPY.editMissing)
+            queueStore.enqueue(queueKey, connectionId, request, currentIntent?.intentId)
+          }
+          setEditingMessageId(null)
+        } else {
+          queueStore.enqueue(queueKey, connectionId, request, currentIntent?.intentId)
+        }
         updateDraft(draftKey, () => ({ input: '', attachments: [] }))
         releaseAttachments(submittedAttachments)
       } catch (reason) { setError(errorText(reason)) }
@@ -509,9 +525,23 @@ export function RemoteChat({
   }
   useEffect(() => {
     if (!contextAvailable || runActive || submitting || pollError || submissionInFlight.current) return
-    const next = queueStore.claim(queueKey)
+    // 跳过正在编辑的那条：否则远端一空下来就会发出去改了一半的旧文本。
+    const next = queueStore.claim(queueKey, editingMessageId ?? undefined)
     if (next) void execute(next.submission, true)
-  }, [queue, contextAvailable, runActive, submitting, pollError, queueKey])
+  }, [queue, contextAvailable, runActive, submitting, pollError, queueKey, editingMessageId])
+
+  // 队列条目离开队列（移除、被提交、归档）后编辑态必须跟着结束。
+  useEffect(() => {
+    if (!editingMessageId) return
+    if (queue.prompts.some(prompt => prompt.messageId === editingMessageId)) return
+    setEditingMessageId(null)
+  }, [editingMessageId, queue.prompts])
+
+  useEffect(() => {
+    if (!movedMessageId) return
+    const timer = window.setTimeout(() => setMovedMessageId(null), 2500)
+    return () => window.clearTimeout(timer)
+  }, [movedMessageId])
   const checkUnknown = async (intent: DesktopRemoteIntent): Promise<void> => {
     const checkedGeneration = contextGeneration.current
     try {
@@ -589,7 +619,7 @@ export function RemoteChat({
         ? { tone: 'blocked' as const, text: '提交结果未知；Scry 不会盲目重发同一提示词。', action: { label: '检查远端状态', onClick: () => void checkUnknown(unknownIntent) } }
       : queue.paused && queue.prompts.length > 0
         ? { tone: 'blocked' as const,
-            text: queue.writeUnknown ? '队首提交结果未知；不会自动重发。请核对远端记录后移除该条消息。' : '远程队列已暂停；重连不会自动发送。',
+            text: queue.writeUnknown ? '上一条提交结果未知；不会自动重发。请核对远端记录后移除该条消息。' : '远程队列已暂停；重连不会自动发送。',
             ...(!queue.writeUnknown ? { action: { label: '继续队列', onClick: () => queueStore.resume(queueKey) } } : {}) }
       : currentRunStatus?.state === 'unknown'
         ? { tone: 'blocked' as const, text: `远程运行结果未知${currentRunStatus.detail ? ` · ${currentRunStatus.detail}` : ''}；不会自动重试。` }
@@ -637,6 +667,23 @@ export function RemoteChat({
         busy={runActive && Boolean(currentIntent?.runId)}
         draftAttachments={draftAttachments}
         queuedPrompts={queue.prompts}
+        editingQueuedId={editingMessageId}
+        movedQueuedId={movedMessageId}
+        onEditQueuedPrompt={(messageId) => {
+          const prompt = queue.prompts.find(candidate => candidate.messageId === messageId)
+          if (!prompt) return
+          if (queue.claimed === messageId) { setError(QUEUE_COPY.editClaimed); return }
+          setError(null)
+          setEditingMessageId(messageId)
+          setMovedMessageId(null)
+          updateDraft(draftKey, () => ({ input: prompt.text, attachments: [] }))
+          window.setTimeout(() => textareaRef.current?.focus(), 0)
+        }}
+        onCancelQueuedPromptEdit={() => {
+          setEditingMessageId(null)
+          updateDraft(draftKey, () => ({ input: '', attachments: [] }))
+          window.setTimeout(() => textareaRef.current?.focus(), 0)
+        }}
         queueWhileBusy
         slashOpen={slashOpen}
         slashLoading={slashLoading}
@@ -702,7 +749,7 @@ export function RemoteChat({
           releaseAttachments(removed)
         }}
         onRemoveQueuedPrompt={(messageId) => {
-          if (queue.writeUnknown && queue.prompts[0]?.messageId === messageId) setError(null)
+          if (queue.writeUnknown && queue.claimed === messageId) setError(null)
           queueStore.remove(queueKey, messageId)
         }}
         onSelectAgent={(agentId) => {
