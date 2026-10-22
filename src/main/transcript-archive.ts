@@ -1188,6 +1188,7 @@ async function readSegmentedMetadataIndexAsync(args: {
       const value = JSON.parse(await readFile(metadataPath, { encoding: 'utf8', signal })) as TraceArchiveIndexEntry
       if (!value || value.file !== file || !isTraceArchiveIndex({
         version: 2,
+        profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION,
         cwd: args.cwd,
         sessionId: args.sessionId,
         providerId: args.providerId,
@@ -1228,6 +1229,7 @@ async function readTraceArchiveMetadataSidecarAsync(
     const value: unknown = JSON.parse(await readFile(metadataPath, { encoding: 'utf8', signal }))
     if (!value || (value as TraceArchiveIndexEntry).file !== file || !isTraceArchiveIndex({
       version: 2,
+      profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION,
       cwd: args.cwd,
       sessionId: args.sessionId,
       providerId: args.providerId,
@@ -1791,12 +1793,8 @@ export async function readTraceArchivePageAsync(
   if (strictStorage && index?.version === 2 && index.sourceComplete === false) {
     throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
   }
-  if (strictStorage && index?.version === 2) {
-    const inspected = await inspectSegmentedArchivesAsync(args, signal)
-    if (inspected.invalid.length) {
-      throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
-    }
-  }
+  // Index reconciliation checks every canonical member and file stamp. Reject
+  // incomplete coverage above, then hydrate only the selected page's bodies.
   if (!index || index.version !== 2) {
     let before: TraceArchiveDirectoryStamp | null = null
     try { before = archiveDirectoryStamp(await lstat(dir)) } catch { /* inspection below owns absence/corruption semantics */ }
