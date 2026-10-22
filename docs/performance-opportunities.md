@@ -2,6 +2,12 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## Qoder：先修正模型来源，不盲目扩大实例寿命（2026-10-22）
+
+- SDK1.0.17 的 initializationResult/supportedCommands 永久复用初始化快照；reloadPlugins 不构成模型/认证/启动配置的完整刷新合同。保持原5秒空闲回收和30秒catalog缓存，不宣称Qoder长期常驻完成。
+- 修正已有模型刷新链路：cache MISS 始终获取原生 live 模型，保留effort/default，空列表不回退旧初始化值，失败不复用旧成功值；仅发现控制查询设置persistSession:false。源码 `5d11ab5`/调用点简化 `dddc43e`，回归 `36ee5f1`。
+- 新测试对旧代码6项失败；本机87项Qoder focused与完整类型检查通过；mac2冻结`dddc43e`完整unit **3496 pass / 4既有opt-in skipped**、类型/build、完整43项计数ratchet通过。新增live请求是获得当前证据的必要工作，不宣称提速。见[合同、证据与剩余边界](performance-experiments/20261022-qoder-live-controls.md)。后续由性能owner先约束初始化证据寿命/失效，再评估更长保留；Pi维持新进程，未合入、push或安装。
+
 ## OpenCode：有界原生实例跨能力刷新周期复用（2026-10-22）
 
 - 用户限制只修改 Scry，本轮不改 Pi/Rotom。OpenCode 空闲保留60秒与桌面60秒能力读取相撞，生产提交 `06591d9` 改为可续租90秒；请求/测试期限、30秒模型目录缓存、原有指纹重验和活跃操作保护不变，空闲实例仍按原策略淘汰。
