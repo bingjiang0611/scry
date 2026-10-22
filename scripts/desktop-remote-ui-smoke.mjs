@@ -128,7 +128,7 @@ const api = {
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
       sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs } : session),
       providers: (state.hideProvider ? [beta] : catalog.providers).map(provider => state.legacyProviderHost ? provider
-        : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
+        : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.forkSession === true ? { forkSession: true } : {}), ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
       providerDiscovery: state.legacyProviderHost ? undefined : 2,
       providerEvidence: state.legacyProviderHost ? 'legacy_host' : 'host_snapshot',
       directorySelection: state.oldDirectoryHost ? undefined : true
