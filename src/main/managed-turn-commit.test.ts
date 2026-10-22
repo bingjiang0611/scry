@@ -192,14 +192,14 @@ async function startManaged(workspace: string, provider: 'claude' | 'codex' = 'c
 }
 
 // 通知投递在 App 侧是脱钩的（轮次收口不等仓库回调），所以断言“最终投递到”而不是“同步投递到”。
-async function notificationLine(capture: string, workspace: string, timeoutMs = 5_000): Promise<Record<string, unknown>> {
+async function notificationLine(capture: string, workspace: string, fingerprint: string, timeoutMs = 5_000): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     try {
       const text = await readFile(capture, 'utf8')
       if (text.includes('\n')) {
         const notification = JSON.parse(text.split('\n')[0]!) as Record<string, unknown>
-        const receipt = JSON.parse(await readFile(join(workspace, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8')) as { ackedThrough?: number }
+        const receipt = JSON.parse(await readFile(join(workspace, '.scry', 'notifications', 'commit-hooks', `${stableHash(fingerprint)}.json`), 'utf8')) as { ackedThrough?: number }
         // Callback output precedes receipt/lock cleanup. Deleting the fixture at output
         // time races the detached drain and can intermittently fail with ENOTEMPTY.
         if (receipt.ackedThrough === notification.sequence && !existsSync(join(workspace, '.scry', 'locks', 'commit-notification.lock'))) return notification
@@ -457,7 +457,7 @@ describe('managed trace turn coordinator', () => {
       }
     })).resolves.toMatchObject({ recorder: 'committed' })
 
-    await expect(notificationLine(capture, workspace)).resolves.toMatchObject({
+    await expect(notificationLine(capture, workspace, 'test-grant-v1')).resolves.toMatchObject({
       schemaVersion: 1,
       event: 'record-committed',
       workspace,
@@ -497,7 +497,7 @@ describe('managed trace turn coordinator', () => {
         SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'startup-grant-v1'
       }
     })).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
-    await expect(notificationLine(capture, workspace)).resolves.toMatchObject({ workspace, provider: 'codex' })
+    await expect(notificationLine(capture, workspace, 'startup-grant-v1')).resolves.toMatchObject({ workspace, provider: 'codex' })
   })
 
   it('500-turn legacy monolith 后仍以 segment 提交下一轮且不留下 recovery dead-end', async () => {

@@ -24,7 +24,7 @@ import {
   revokeCommitHookGrant,
   writeCommitHookGrant
 } from '../core/turn-recorder/commit-hook-grant.js'
-import { compactModelTiming, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
+import { compactModelTiming, summarizeIdentity, summarizeTurnRecords, turnTimeline } from '../core/turn-recorder/turns-summary.js'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration.js'
 import { workspaceStatus } from './status.js'
 import { collectSupportBundle } from './support-bundle.js'
@@ -563,18 +563,20 @@ async function turnsCommand(args: ParsedArgs): Promise<number> {
     return 0
   }
   if (action === 'verify') {
-    const result = await verifyStore(dataRoot)
+    const identities: Parameters<typeof summarizeIdentity>[0] = []
+    const result = await verifyStore(dataRoot, ({ provider, turnRoleStatus, turnRole, taskLinkStatus }) => {
+      identities.push({ provider, turnRoleStatus, turnRole, taskLinkStatus })
+    })
     // Integrity (sequence/dedup/readability) alone decides `ok` and the exit code — that contract
     // is frozen for team CI. Identity coverage and unsettled open turns are advisory: `turns verify`
     // used to answer only "are the record files internally consistent?", which stays silent about
     // records that are intact yet carry unobserved model/role/task identity, and about a turn that
     // was interrupted before it sealed. Those are surfaced without changing the pass/fail contract.
-    const [records, health] = await Promise.all([
-      listRecords(dataRoot).catch(() => []),
-      readHealth(dataRoot).catch(() => null)
-    ])
-    const identity = records.length > 0
-      ? summarizeTurnRecords(records, undefined, { scope: 'workspace' }).identity
+    const health = await readHealth(dataRoot).catch(() => null)
+    // A failed record read makes identity coverage unknown, not a partial success. Sequence
+    // errors alone do not: readable records still carry identity evidence, as before.
+    const identity = identities.length > 0 && identities.length === result.records
+      ? summarizeIdentity(identities)
       : null
     const advisories: string[] = []
     if (identity) {

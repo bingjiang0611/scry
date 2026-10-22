@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFile, execFileSync } from 'node:child_process'
+import { accessSync, chmodSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageRoot = join(repoRoot, 'packages', 'turn-recorder-cli')
@@ -147,7 +148,32 @@ try {
     run(bin, ['recorder', 'stop', '--workspace', workspace], { cwd: installRoot })
   }
 
-  process.stdout.write(`${JSON.stringify({ package: packageJson.name, version, bin: 'ok', init: 'idempotent', hook: 'recorded', doctor: 'healthy' })}\n`)
+  // Real installed CLI processes share the production lock but retain separate identities.
+  const callback = join(workspace, 'callback.sh')
+  const capture = join(workspace, 'notifications.jsonl')
+  writeFileSync(callback, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
+  chmodSync(callback, 0o700)
+  const deliveryEnv = fingerprint => ({ ...process.env, HOME: temporaryRoot, SCRY_AUTO_UPDATE: '0',
+    SCRY_RECORDER_COMMIT_HOOK: callback, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint })
+  const drainArgs = ['recorder', 'notify-drain', '--workspace', workspace]
+  const execute = promisify(execFile)
+  const deliveries = await Promise.allSettled(['cli', 'app', 'cli'].map(fingerprint =>
+    execute(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint), encoding: 'utf8', timeout: 60_000 })))
+  for (const delivery of deliveries) assert.equal(delivery.status, 'fulfilled', String(delivery.reason))
+  assert.deepEqual(deliveries.map(delivery => JSON.parse(delivery.value.stdout).delivered).sort(), [0, 2, 2])
+  assert.equal(readFileSync(capture, 'utf8').trim().split('\n').length, 4)
+  const { commitNotificationStatus } = await import(pathToFileURL(join(installedRoot, 'dist/core/turn-recorder/store.js')).href)
+  const legacyPath = join(workspace, '.scry/notifications/commit-hook-state.json')
+  const legacy = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'old-app', ackedThrough: 1 })
+  writeFileSync(legacyPath, legacy)
+  for (const fingerprint of ['cli', 'app']) {
+    assert.deepEqual(await commitNotificationStatus(join(workspace, '.scry'), deliveryEnv(fingerprint)),
+      { ackedThrough: 2, notifyBacklog: 0 })
+    assert.equal(JSON.parse(run(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint) })).delivered, 0)
+    assert.equal(readFileSync(legacyPath, 'utf8'), legacy, 'new CLI must not overwrite the old App cursor')
+  }
+
+  process.stdout.write(`${JSON.stringify({ package: packageJson.name, version, bin: 'ok', init: 'idempotent', hook: 'recorded', doctor: 'healthy', concurrentNotifications: 'isolated', legacyCursor: 'preserved' })}\n`)
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true })
 }

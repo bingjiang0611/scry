@@ -7,7 +7,7 @@ import { validateAgentTurnRecord, type AgentTurnRecord } from '../../shared/turn
 import { copyRecorderContent, readRecorderContent } from './content-store.js'
 import { appendRotatingLog, exclusiveWriteTempPath, listFiles, mkdirDurable, readJson, syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io.js'
 
-export const RECORDER_VERSION = '0.2.49'
+export const RECORDER_VERSION = '0.2.51'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -331,11 +331,21 @@ function configuredCommitHookFingerprint(env: NodeJS.ProcessEnv): string {
   return fingerprint || 'explicit-environment-v1'
 }
 
+type CommitHookResult =
+  | { acknowledged: true }
+  | {
+    acknowledged: false
+    reason: 'spawn_error' | 'timeout' | 'stdin_error' | 'signal' | 'exit'
+    exitCode?: number | null
+    signal?: NodeJS.Signals | null
+    errorCode?: string
+  }
+
 async function invokeCommitHook(
   path: string,
   notification: RecordCommittedNotification,
   env: NodeJS.ProcessEnv
-): Promise<boolean> {
+): Promise<CommitHookResult> {
   return new Promise((resolvePromise) => {
     const childEnv: NodeJS.ProcessEnv = {}
     for (const key of COMMIT_HOOK_ENV_KEYS) if (env[key] !== undefined) childEnv[key] = env[key]
@@ -343,14 +353,15 @@ async function invokeCommitHook(
     let settled = false
     let timedOut = false
     let inputFailed = false
+    let inputErrorCode: string | undefined
     let terminationRequested = false
     let killTimer: NodeJS.Timeout | undefined
-    const settle = (ok: boolean): void => {
+    const settle = (result: CommitHookResult): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       if (killTimer) clearTimeout(killTimer)
-      resolvePromise(ok)
+      resolvePromise(result)
     }
     const terminate = (): void => {
       if (settled || terminationRequested) return
@@ -366,14 +377,53 @@ async function invokeCommitHook(
       terminate()
     }, COMMIT_HOOK_TIMEOUT_MS)
     timer.unref()
-    child.once('error', () => settle(false))
-    child.once('exit', (code) => settle(!timedOut && !inputFailed && code === 0))
-    child.stdin.on('error', () => {
+    child.once('error', (error: NodeJS.ErrnoException) => settle({
+      acknowledged: false, reason: 'spawn_error', errorCode: error.code
+    }))
+    child.once('exit', (code, signal) => {
+      if (!timedOut && !inputFailed && code === 0) {
+        settle({ acknowledged: true })
+      } else {
+        settle({
+          acknowledged: false,
+          reason: timedOut ? 'timeout' : inputFailed ? 'stdin_error' : signal ? 'signal' : 'exit',
+          exitCode: code,
+          signal,
+          ...(inputFailed ? { errorCode: inputErrorCode } : {})
+        })
+      }
+    })
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
       inputFailed = true
+      inputErrorCode = error.code
       terminate()
     })
     child.stdin.end(`${JSON.stringify(notification)}\n`)
   })
+}
+
+function commitHookStatePath(dataRoot: string, fingerprint: string): string {
+  return join(dataRoot, 'notifications', 'commit-hooks', `${stableHash(fingerprint)}.json`)
+}
+
+async function readCommitHookAck(dataRoot: string, fingerprint: string): Promise<{
+  ackedThrough: number | null
+  isolatedAck: number | null
+}> {
+  // Keep v1 read-only: an old App can still own it while a new CLI writes its own
+  // checkpoint. Only the exact same identity may contribute a prior ACK.
+  const [isolated, legacy] = await Promise.all([
+    readJson<CommitHookState>(commitHookStatePath(dataRoot, fingerprint)),
+    readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
+  ])
+  const validAck = (state: CommitHookState | null): number | null =>
+    state?.schemaVersion === 1 && state.hookFingerprint === fingerprint &&
+      Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
+      ? state.ackedThrough : null
+  const isolatedAck = validAck(isolated)
+  const legacyAck = validAck(legacy)
+  const ackedThrough = isolatedAck === null ? legacyAck : Math.max(isolatedAck, legacyAck ?? 0)
+  return { ackedThrough, isolatedAck }
 }
 
 export interface CommitNotificationStatus {
@@ -390,12 +440,7 @@ export async function commitNotificationStatus(
   dataRoot: string,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<CommitNotificationStatus> {
-  const fingerprint = configuredCommitHookFingerprint(env)
-  const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
-  const acked = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint &&
-    Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
-    ? state.ackedThrough
-    : null
+  const { ackedThrough: acked } = await readCommitHookAck(dataRoot, configuredCommitHookFingerprint(env))
   const files = await recordFiles(dataRoot)
   return {
     ackedThrough: acked,
@@ -436,22 +481,20 @@ export async function drainCommitNotifications(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
-    const fingerprint = configuredCommitHookFingerprint(env)
-    const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint ? state.ackedThrough : 0
-    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length, truncated: false }
+    const { ackedThrough } = await readCommitHookAck(dataRoot, configuredCommitHookFingerprint(env))
+    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > (ackedThrough ?? 0)).length, truncated: false }
   }
   if (!hook) return { delivered: 0, pending: 0, truncated: false }
   try {
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
-      const statePath = join(dataRoot, 'notifications', 'commit-hook-state.json')
-      const state = await readJson<CommitHookState>(statePath)
       const hookFingerprint = configuredCommitHookFingerprint(env)
-      const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === hookFingerprint &&
-        Number.isSafeInteger(state.ackedThrough) && state.ackedThrough >= 0
-        ? state.ackedThrough
-        : 0
-      const pending = (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough)
+      const statePath = commitHookStatePath(dataRoot, hookFingerprint)
+      const { ackedThrough, isolatedAck } = await readCommitHookAck(dataRoot, hookFingerprint)
+      if (ackedThrough !== null && ackedThrough !== isolatedAck) {
+        // Persist even with no backlog, before another identity replaces the legacy file.
+        await writeJsonAtomic(statePath, { schemaVersion: 1, hookFingerprint, ackedThrough } satisfies CommitHookState)
+      }
+      const pending = (await recordFiles(dataRoot)).filter((file) => file.sequence > (ackedThrough ?? 0))
       const now = options.now ?? Date.now
       const deadline = options.budgetMs != null ? now() + options.budgetMs : null
       let delivered = 0
@@ -467,10 +510,12 @@ export async function drainCommitNotifications(
         }
         const record = await readRecordFile(join(dataRoot, 'records', file.name))
         if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-        if (!await invokeCommitHook(hook, commitNotification(record), env)) {
+        const result = await invokeCommitHook(hook, commitNotification(record), env)
+        if (!result.acknowledged) {
+          // Classify failure without retaining callback stderr, argv, paths or error messages.
           await appendRotatingLog(
             join(dataRoot, 'logs', 'recorder.log'),
-            `${new Date().toISOString()} ERROR commit notification: commit hook did not ACK sequence ${record.sequence}`
+            `${new Date().toISOString()} ERROR commit notification: commit hook did not ACK sequence ${record.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
           ).catch(() => undefined)
           return { delivered, pending: pending.length - delivered, truncated: false }
         }
@@ -486,10 +531,8 @@ export async function drainCommitNotifications(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    const state = await readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
-    const fingerprint = configuredCommitHookFingerprint(env)
-    const ackedThrough = state?.schemaVersion === 1 && state.hookFingerprint === fingerprint ? state.ackedThrough : 0
-    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > ackedThrough).length, truncated: false }
+    const { ackedThrough } = await readCommitHookAck(dataRoot, configuredCommitHookFingerprint(env))
+    return { delivered: 0, pending: (await recordFiles(dataRoot)).filter((file) => file.sequence > (ackedThrough ?? 0)).length, truncated: false }
   }
 }
 
@@ -513,11 +556,12 @@ export async function redeliverLatestCommitNotification(
       if (!latest) return { delivered: false, reason: 'no committed record' }
       const record = await readRecordFile(join(dataRoot, 'records', latest.name))
       if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-      const delivered = await invokeCommitHook(hook, commitNotification(record), env)
+      const result = await invokeCommitHook(hook, commitNotification(record), env)
+      const delivered = result.acknowledged
       if (!delivered) {
         await appendRotatingLog(
           join(dataRoot, 'logs', 'recorder.log'),
-          `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${record.sequence}`
+          `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${record.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
         ).catch(() => undefined)
       }
       return {
@@ -972,7 +1016,10 @@ export async function lastRecordVersion(dataRoot: string): Promise<string | null
   }
 }
 
-export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
+export async function verifyStore(
+  dataRoot: string,
+  onRecord?: (record: AgentTurnRecord) => void
+): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
   // Integrity verification always bypasses disposable projections and scans canonical filenames.
   const files = await recordFiles(dataRoot, { bypassIndex: true })
   const errors: string[] = []
@@ -997,11 +1044,16 @@ export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; reco
     previous = file.sequence
     if (ids.has(file.recordId)) errors.push(`duplicate recordId: ${file.recordId}`)
     ids.add(file.recordId)
+    let record: AgentTurnRecord
     try {
-      await readRecordFile(join(dataRoot, 'records', file.name))
+      record = await readRecordFile(join(dataRoot, 'records', file.name))
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error))
+      continue
     }
+    // Synchronous consumers can reuse validated records without retaining their bodies.
+    // Consumer errors must propagate, not be misreported as corrupt canonical records.
+    onRecord?.(record)
   }
   return { ok: errors.length === 0, records: files.length, errors, archivedThrough }
 }

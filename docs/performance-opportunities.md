@@ -2,6 +2,41 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## 独立 CLI 多仓库采集（2026-10-21，受控实验；未改生产）
+
+- 独立 CLI 日常样本提示每轮通常采集 18–19 个仓库；不能用 App journal 替代其热点证据。当前优先多仓库采集与通知重复工作，暂缓用户级服务和内容存储重建。
+- 固定 19 仓库 × 512 文件、每种调度 4 轮：19/4/1 路峰值子进程为 38/8/2，全部证据断言通过；正常无变化轮均需 190 次 Git。19 路有一轮出现 16 次 discovery_failed fallback、额外 31 次 Git，其他调度本轮没有。
+- 测量源码 `3f30987`；10 核机器负载 75.25→45.48，L2 unavailable，不据此改生产并发值或宣布提速。未优化、未合入、未安装、未推送，台账不变。
+- 后续：性能 owner 在低负载下重测同一负载，不改变原 workload 或 deadline。范围与原始结果见[实验记录](performance-experiments/20261021-cli-multirepo-concurrency.md)。
+
+## 零候选快照复用（2026-10-21，L1 已验证，未部署）
+
+- `9391016` 在完整 Git 发现成功且无候选时复用同一不可变基线和 discovery index，不再重建并比较相同快照。没有跨轮缓存，没有缩小采集范围，没有改生产并发。
+- 沿用原 19 仓库 × 512 文件负载及 19/4/1 路调度：无变化轮 Git 190→114（−40%）；单仓改动轮 192→120，所有证据及完整 patch 断言通过。峰值仍为 38/8/2。
+- 270 项 focused、typecheck、CLI build、3480 项 full unit（4 个既有 opt-in skipped）通过；现有 source-control.diff 计数仍为 8，ratchet 通过。先前全量测试不稳定不据本次通过宣称根治。
+- 两次 timing-run 均 highLoad，L2 unavailable、L3 未验证；未安装、合入、推送或发布。性能 owner 在低负载时对同一完整负载补两侧 L2，发布 owner 再确认分发；详见[实验记录](performance-experiments/20261021-cli-empty-candidates.md)。汇总优化见下节；历史读取优化仍待下一批。
+
+## CLI 汇总按记录分组（2026-10-21，L1 已验证，未部署）
+
+- 测量 `ed5c47f` 与优化 `7e8d481` 分开提交。文件调用只按 record 对象身份分组一次，不再每条记录三次扫描整个时间线；保留 legacy 回退、推断和证据质量。
+- 固定 186 轮 / 3348 调用，OrderedCall.record 读取 1,889,376→24,540（−98.70%），完整输出 hash 不变；单轮 156→120。计数不含所有 Map 工作，不等于总 CPU 或耗时比例。只读快照 2181 条记录、全部 531 个 session 的新旧完整汇总 JSON 相等。
+- 56 项相关测试、typecheck、CLI build 通过。全量 3481 通过、1 个未改动 Git 查询 timeout、4 个既有 opt-in skipped；两侧定向通过不抹掉首次失败，也没有扩大 timeout。现有 source-control.diff 计数仍为 8，ratchet 通过。
+- 两侧计时均 highLoad，单轮原始耗时上升尚不能归因；性能 owner 需在低负载下同时复测 1 / 186 轮，不能以长会话收益抵消小输入风险。未合入、安装、推送或发布，见[实验记录](performance-experiments/20261021-cli-summary-linear.md)。verify 后续优化已完成，见下节；会话选择性读取尚未实施，不预先建设持久索引。
+
+## CLI verify 单次读取（2026-10-21，受控 L1 / L2 已验证，未部署）
+
+- 测量 `aec4a47`、实现 `2a99eb6`、追加冷进程计时 `1643c23` 分开提交。复用 canonical 校验读取，仅计算身份覆盖；不再第二次读取/解析或构造无关汇总。完整性失败仍退出 4，坏记录身份仍为 unknown。
+- 固定 64 条、每条 prompt 64 KiB：读取 / parse 128→64，字节 8,614,000→4,307,000；保留 schema 校验，tools 属性读取 1,024→64。完整输出相同。
+- 真实 CLI 新进程、文件缓存已热，3 预热 / 9 样本：p50 103.264→78.285ms（−24.19%），p95 106.763→80.276ms。10 核 load1 7.35 / 8.28，timing-run 两侧均非 highLoad；只覆盖此固定负载，不是日常 L3 或其他规模结论。
+- 62 项 focused、609 项 CLI gate、临时 package smoke、typecheck / build 通过；全量 3488 通过、4 项既有 opt-in 跳过。旧实现新测试负对照 4 项失败；未削弱断言或门限。旧快照 2181 条记录前后 CLI 输出和退出码相等，均保留原有 120 处序号缺口；后续[只读调查](performance-experiments/20261022-cli-sequence-gaps.md)确认这覆盖 230 个缺号，源目录也缺失，无正常归档凭证；具体移除来源仍 unknown。数据维护者需提供历史备份或清理记录再定位，不能补造记录。
+- 未合入、安装、推送或发布。性能 owner 后续评估会话选择性读取，若需持久索引先征求架构授权；此前两项优化的 L2 仍按原记录补齐。详见[实验记录](performance-experiments/20261021-cli-verify-once.md)。
+
+## 通知身份隔离（2026-10-21，已部署独立 CLI 0.2.50）
+
+- 经另行在线授权，发现 App 与 CLI 不同指纹共用一个 ACK 文件，成功投递仍反复擦除另一身份进度。项目 bridge 合成 override 的问题已修复，但不是完整根因；没有改变 host 优先级或把两个指纹强行归一。
+- `6d4b62c` 按指纹持久保存 ACK、只读兼容旧文件。601 项 CLI 门禁与真实双版本进程并发通过，已更新两个实际独立 CLI 入口和 daemon，App 未更新。后续自然新增记录 2435 来自旧版本；App 身份旧文件为 ACK 15，新 CLI 独立文件为 ACK 2435、backlog 0，未互相覆盖。这是有限场景正确性证据，不是 L2/L3 提速证据。
+- 通知任务数不等于未上传记录数，也不把 CLI backlog 0 当作所有身份均已清空。已有队列保留，历史上传死信未重投；测试维护者后续需按全量执行顺序调查 7 项不稳定失败，本次不扩大到 App 修复。详见[交付记录](performance-experiments/20261021-cli-ack-isolation.md)。
+
 ## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
 
 完整 CLI gate 588 项、App unit 3463 项（另 4 opt-in skipped）、shell、类型检查和构建已通过；源码冻结 `a868251`。构建目录的签名包在私有 CLI/GUI 启动时收到 SIGKILL，尚未完成 packaged smoke，未执行安装。相同字节诊断副本与已安装 0.2.215 的对照结果、首次失败及日志见[实验记录](performance-experiments/20261021-desktop-ui-fluidity.md#0216-发布验证续跑2026-10-21)。下一步由发布/系统诊断 owner 定位该启动问题，不再重复全量测试碰运气；不修改系统防护或直接安装未通过门禁的包。

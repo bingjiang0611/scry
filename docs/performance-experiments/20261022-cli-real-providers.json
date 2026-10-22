@@ -1,0 +1,83 @@
+{
+  "candidateSourceCommit": "c1c2d245e96d2f63a253f952b625eeceb8d3f24b",
+  "codex": {
+    "status": "three-turn-functional-pass-with-isolated-hook-registration",
+    "checks": [
+      {
+        "turn": 1,
+        "toolCount": 1,
+        "diffFiles": 0,
+        "candidatePathCount": 0,
+        "usageMatchesNativeCumulativeDelta": true,
+        "verifyRecords": 1,
+        "recordSha256": "5163250bba987ec9ab434233b26a2182d07dff924757dafb5ba5054095fb8266"
+      },
+      {
+        "turn": 2,
+        "toolCount": 2,
+        "diffFiles": 1,
+        "candidatePathCount": 1,
+        "usageMatchesNativeCumulativeDelta": true,
+        "verifyRecords": 2,
+        "recordSha256": "fb1ae70eb8defb631eb981f2232d4f7df9c71076e8b9e1b515ba8baac0c24048"
+      },
+      {
+        "turn": 3,
+        "toolCount": 1,
+        "diffFiles": 0,
+        "candidatePathCount": 1,
+        "usageMatchesNativeCumulativeDelta": true,
+        "verifyRecords": 3,
+        "recordSha256": "53c685ff397511690a4736b586d6f394d69643a4894524188730dfd082c9a669"
+      }
+    ],
+    "canonicalCliEquivalence": [
+      {
+        "command": "verify",
+        "byteEqual": true,
+        "outputSha256": "787700ddf1bd9f3bcce5e9da217a081aa179e393bb9e4cdc65c59616e05dbc56"
+      },
+      {
+        "command": "summary",
+        "byteEqual": true,
+        "outputSha256": "3ae7dd1083eec33a66894de6605f5e34d9d27d1d829e59ca7fd5b06a993034c6"
+      }
+    ],
+    "canonicalRecordsUnchanged": true,
+    "nativeSessionUsage": {
+      "input_tokens": 185046,
+      "output_tokens": 334,
+      "cached_input_tokens": 163584,
+      "reasoning_output_tokens": 11,
+      "cache_write_input_tokens": 0
+    },
+    "warning": "deprecated codex_hooks flag; accepted by this version"
+  },
+  "pi": {
+    "status": "failed",
+    "pathRuntime": "1.2.0 startup theme failure",
+    "bundledRuntime": "1.3.0-rotom.2 API errors misreported as completed",
+    "checks": [
+      {
+        "turn": 1,
+        "rawStopReason": "error",
+        "recordStatus": "completed",
+        "toolCount": 0,
+        "acceptance": "failed"
+      },
+      {
+        "turn": 2,
+        "rawStopReason": "error",
+        "recordStatus": "completed",
+        "toolCount": 0,
+        "acceptance": "failed"
+      }
+    ]
+  },
+  "qoder": {
+    "status": "blocked",
+    "error": "saved login EPERM",
+    "records": 0
+  },
+  "scope": "standalone CLI, not App, business workflow or performance benchmark"
+}

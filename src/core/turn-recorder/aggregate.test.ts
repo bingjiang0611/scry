@@ -617,6 +617,15 @@ describe('aggregateTurnEvidence', () => {
     ])
   })
 
+  it('保留显式 Provider task_error，但不把它计为工具调用', () => {
+    const events: TraceEvent[] = [
+      { id: 'api-error', ts: '2026-01-01T00:00:00.000Z', runId: 'r', kind: 'harness', stage: 'task_error', isError: true, text: 'model rejected' }
+    ]
+    const evidence = aggregateTurnEvidence({ events })
+    expect(evidence.errors.value).toEqual([{ message: 'model rejected', source: 'task_error', toolUseId: undefined }])
+    expect(evidence.tools.value).toEqual([])
+  })
+
   it('把人工介入作为独立 evidence 保留，不依赖 Provider 文本解析', () => {
     const intervention = {
       kind: 'clarification' as const,
