@@ -14,6 +14,11 @@
 - L2固定API各6样本：p50 **277.29→224.18ms / 289.90→218.83ms**；8核load6.81→6.63、highLoad=false但非空闲机。不是日常L3；完整哈希次数unavailable，不把0对象写入说成0哈希。
 - 最终unit **3711 pass / 4 opt-in skipped**，typecheck/CLI build、真实source-control App/UI、workspace刷新fixture与安全冒烟通过。完整renderer UI仍被基线`bf92d04`同样复现的workspace dirty标记超时阻断，其余11组原命令逐组通过。特殊index、属性/规范化、子模块等不等价范围明确unavailable；不改recorder或台账。
 - 见[实验与全部样本](performance-experiments/20261022-workspace-numstat-readonly.md)、[批次C报告](handoff/perf-2026-10-22/reports/C.md)。未合入、未安装、不要求用户重启；审查方核验后决定合入。
+## 批次 D transcript 观察者（2026-10-23，分支待核验、未安装）
+
+- `perf/d-renderer-transcript` / `3256e68`：1000 轮、30 字原生输入的选择检查 30000→120；IO 1000→1，只有 4 轮正文保留 disclosure 观察。局部选择分发有 L2 证据，不宣称整体输入/流输出更快。
+- App body 已实测，当前不拆 App；全量 unit 与 43 项计数通过，完整 renderer UI 保留改动前同样失败的 workspace dirty 断言。未合入、未安装、无 L3。
+- 方法、前后数字、失败与后续 owner 见 [同一实验记录](performance-experiments/20261023-renderer-transcript-observers.md) 和 [D 报告](handoff/perf-2026-10-22/reports/D.md)。
 
 ## A+B 当前交付（2026-10-22，已合入 main、开发签名版已安装）
 
