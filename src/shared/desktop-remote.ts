@@ -199,6 +199,15 @@ export interface DesktopRemoteRunStatus {
   externalSessionId?: string
   detail?: string
 }
+// A host run on an opened session that this client did not submit (host UI,
+// phone or another desktop). `runId` is the host's stop/answer identity;
+// `scryRunId` is the canonical trace identity once the host has bound it.
+export interface DesktopRemoteLiveRun {
+  runId: string
+  origin: 'remote' | 'mac'
+  state: 'running' | 'waiting' | 'stopping'
+  scryRunId?: string
+}
 export interface ExecutionTargetRef {
   id: string
   binding: string
@@ -241,6 +250,7 @@ export interface DesktopRemoteAPI {
   submit(connectionId: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent>
   intentStatus(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
   runStatus(connectionId: string, runId: string): Promise<DesktopRemoteRunStatus>
+  liveRun(connectionId: string, context: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null>
   stop(connectionId: string, runId: string): Promise<void>
   answer(connectionId: string, runId: string, response: AgentQuestionResponse): Promise<void>
   files(connectionId: string, context: DesktopRemoteContext, path: string, cursor?: string): Promise<WorkspaceListResult>

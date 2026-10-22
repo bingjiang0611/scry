@@ -22,6 +22,7 @@ import type {
   DesktopRemoteHistory,
   DesktopRemoteIntent,
   DesktopRemoteRunStatus,
+  DesktopRemoteLiveRun,
   RemoteProviderRef,
   RemoteSessionRef
 } from '@shared/desktop-remote'
@@ -161,6 +162,10 @@ export function RemoteChat({
   const activeRunRef = useRef(activeRun)
   activeRunRef.current = activeRun
   const [runStatus, setRunStatus] = useState<(DesktopRemoteRunStatus & { runId: string }) | null>(null)
+  // A host run on this session that this client did not submit.
+  const [foreignRun, setForeignRun] = useState<DesktopRemoteLiveRun | null>(null)
+  const foreignRunRef = useRef(foreignRun)
+  foreignRunRef.current = foreignRun
   const [intents, setIntents] = useState<DesktopRemoteIntent[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -175,6 +180,9 @@ export function RemoteChat({
   const providerId = provider?.id ?? ''
   const context = useMemo<DesktopRemoteContext>(() => ({ cwd, providerId, ...(provider?.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}), ...(sessionId ? { externalSessionId: sessionId } : {}) }), [cwd, provider?.agentProfileId, providerId, sessionId])
   const contextKey = JSON.stringify([providerSelection, sessionId ?? ''])
+  const catalogSession = sessionId ? catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
+    item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? '')) : undefined
+  const sessionActive = catalogSession?.isActive === true
   const previousContextKey = useRef<string | undefined>()
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
@@ -253,6 +261,7 @@ export function RemoteChat({
     const preserveAdoptedRun = adoptingSession.current
     adoptingSession.current = false
     if (!preserveAdoptedRun) { adoptedIntent.current = undefined; setActiveRun(null); setRunStatus(null) }
+    setForeignRun(null)
     setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
   }, [contextKey])
   // Controls start from host defaults whenever the context changes or its Provider
@@ -293,7 +302,32 @@ export function RemoteChat({
         const activeIntent = pending.filter((intent) => intentMatches(intent, context) && intent.runId).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
           (adoptedIntent.current ? pending.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
         setIntents(pending)
-        if (!activeIntent?.runId) { setActiveRun(null); setRunStatus(null); setPollError(null); return }
+        if (!activeIntent?.runId) {
+          setRunStatus(null)
+          // Runs started on the host UI, a phone or another desktop leave no
+          // receipt here. Ask only while the catalog marks this session active,
+          // or to observe the end of a run already being followed.
+          const followed = foreignRunRef.current
+          const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context) : null
+          if (cancelled || sequence !== pollSequence.current) return
+          setForeignRun(live)
+          if (followed && live?.runId !== followed.runId) {
+            // The followed run left the host's live set; its turn is now history.
+            setHistoryRevision((revision) => revision + 1)
+            void refreshRemoteCatalog(connectionId)
+          }
+          if (live?.scryRunId) {
+            const previous = activeRunRef.current
+            const knownCount = previous?.runId === live.scryRunId ? previous.attachments?.length : undefined
+            const run = await api.trace(connectionId, context, live.scryRunId, knownCount)
+            if (cancelled || sequence !== pollSequence.current) return
+            setActiveRun(run && previous?.runId === run.runId && run.attachments === undefined
+              ? { ...run, attachments: previous.attachments } : run)
+          } else setActiveRun(null)
+          setPollError(null)
+          return
+        }
+        setForeignRun(null)
         const nextStatus = await api.runStatus(connectionId, activeIntent.runId)
         const boundQueueKey = nextStatus.externalSessionId
           ? remoteQueueKey(remoteDraftKey(connectionId, cwd, nextStatus.externalSessionId), providerSelection) : queueKey
@@ -349,7 +383,7 @@ export function RemoteChat({
     }
     void poll(); const timer = window.setInterval(() => { void poll() }, 1500)
     return () => { cancelled = true; pollSequence.current += 1; window.clearInterval(timer) }
-  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore])
+  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive])
 
   const runControlCatalog = useMemo(() => remoteRunControlCatalog(provider, host), [host, provider])
   const chosenModel = provider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
@@ -410,11 +444,12 @@ export function RemoteChat({
   // A previous turn's status is not evidence for the newly submitted receipt.
   const currentRunStatus = runStatus?.runId === currentIntent?.runId ? runStatus : null
   // Same gate as the host ledger: a listed run or an unknown receipt blocks another send.
-  const runActive = Boolean(currentIntent && (currentIntent.status === 'unknown' ||
+  const runActive = Boolean(foreignRun) || Boolean(currentIntent && (currentIntent.status === 'unknown' ||
     (currentIntent.runId && currentRunStatus?.state !== 'settled' && currentRunStatus?.state !== 'failed')))
+  // Stop/answer go to whichever run owns this session on the host.
+  const controlRunId = currentIntent?.runId ?? foreignRun?.runId
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
-  const sessionArchived = Boolean(catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
-    item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? ''))?.archivedAt)
+  const sessionArchived = Boolean(catalogSession?.archivedAt)
   const contextAvailable = connected && Boolean(provider?.available) && projectAvailable && !sessionArchived
   useEffect(() => {
     if (sessionArchived) queueStore.clearSession(draftKey)
@@ -552,12 +587,12 @@ export function RemoteChat({
     } catch (reason) { if (checkedGeneration === contextGeneration.current) setError(errorText(reason)) }
   }
   const stop = async (): Promise<void> => {
-    const runId = currentIntent?.runId
+    const runId = controlRunId
     if (!runId) { setError('当前没有可停止的远端运行。'); return }
     try { await api.stop(connectionId, runId); setStatus('已请求停止，等待远端确认。') } catch (reason) { setError(errorText(reason)) }
   }
   const answer = async (response: AgentQuestionResponse): Promise<void> => {
-    const runId = currentIntent?.runId
+    const runId = controlRunId
     if (!connected || !runId) { const reason = new Error('远端未连接或问题所属运行已不可用。'); setError(reason.message); throw reason }
     try { await api.answer(connectionId, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
@@ -664,7 +699,7 @@ export function RemoteChat({
         sessionEvidenceGap={sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
           ? { status: 'unavailable', detail: historyEvidence.reason ?? `${host} 未提供这条会话的归档` }
           : null}
-        busy={runActive && Boolean(currentIntent?.runId)}
+        busy={runActive && Boolean(controlRunId)}
         draftAttachments={draftAttachments}
         queuedPrompts={queue.prompts}
         editingQueuedId={editingMessageId}

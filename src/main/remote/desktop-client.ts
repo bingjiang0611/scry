@@ -9,7 +9,7 @@ import { attachmentSha256, DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MA
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
-  DesktopRemoteRunStatus, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
+  DesktopRemoteRunStatus, DesktopRemoteLiveRun, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
 import { isAgentPermissionMode, isSupportedImageMimeType, type AgentInputAttachment, type AgentQuestionResponse } from '../../shared/runtime'
 import type { DeleteSessionResult } from '../../shared/provider'
@@ -742,6 +742,32 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       }
     }
     return { state, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}) }
+  }
+
+  // Finds the host's live run on one opened session, whichever client started
+  // it. Uses the device liveRuns snapshot (waitMs 0, no long-poll): the renderer
+  // already polls, and only while the catalog marks the session active.
+  async liveRun(connectionIdValue: string, value: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null> {
+    const scope = context(value)
+    if (!scope.externalSessionId) fail('session_required')
+    const response = await this.#requestForConnection(connectionIdValue, { op: 'liveRuns', waitMs: 0 })
+    if (!record(response) || !record(response.liveRuns) || !Array.isArray(response.liveRuns.runs) || response.liveRuns.runs.length > MAX_ITEMS) fail('invalid_live_runs_response')
+    for (const item of response.liveRuns.runs) {
+      if (!record(item) || !validRunId(item.runId) || (item.origin !== 'remote' && item.origin !== 'mac') ||
+          (item.state !== 'running' && item.state !== 'waiting' && item.state !== 'stopping') ||
+          !text(item.providerId, 256) || !text(item.cwd, 16_384) ||
+          (item.agentProfileId !== undefined && !text(item.agentProfileId, 256)) ||
+          (item.externalSessionId !== undefined && !text(item.externalSessionId, 256))) fail('invalid_live_runs_response')
+      if (item.providerId !== scope.providerId || item.cwd !== scope.cwd || (item.agentProfileId ?? '') !== (scope.agentProfileId ?? '') ||
+          item.externalSessionId !== scope.externalSessionId) continue
+      const live = { runId: item.runId, origin: item.origin, state: item.state } as const
+      // Host-UI runs are already canonical Scry runs. Device runs carry a ledger
+      // UUID; the trace identity exists only after the host's bound marker.
+      if (item.origin === 'mac') return { ...live, scryRunId: item.runId }
+      const status = await this.runStatus(connectionIdValue, item.runId)
+      return { ...live, ...(status.scryRunId ? { scryRunId: status.scryRunId } : {}) }
+    }
+    return null
   }
 
   async stop(connectionIdValue: string, runId: string): Promise<void> { if (!validRunId(runId)) fail('invalid_run_id'); const response = await this.#write(connectionIdValue, { op: 'stop', runId }); if (!record(response) || !record(response.stop) || (response.stop.status !== 'requested' && response.stop.status !== 'already_requested')) fail('stop_not_confirmed') }

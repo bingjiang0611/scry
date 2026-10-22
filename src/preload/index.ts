@@ -401,6 +401,7 @@ const api = {
     submit: (id, input) => ipcRenderer.invoke('desktopRemote:submit', id, input),
     intentStatus: (id, intentId) => ipcRenderer.invoke('desktopRemote:intentStatus', id, intentId),
     runStatus: (id, runId) => ipcRenderer.invoke('desktopRemote:runStatus', id, runId),
+    liveRun: (id, context) => ipcRenderer.invoke('desktopRemote:liveRun', id, context),
     stop: (id, runId) => ipcRenderer.invoke('desktopRemote:stop', id, runId),
     answer: (id, runId, response) => ipcRenderer.invoke('desktopRemote:answer', id, runId, response),
     files: (id, context, path, cursor) => ipcRenderer.invoke('desktopRemote:files', id, context, path, cursor),
