@@ -30,6 +30,8 @@ const lifecycleOnly = process.argv.includes('--session-lifecycle-only')
 const openingOnly = process.argv.includes('--session-opening-only')
 const measureOpening = process.argv.includes('--measure-session-opening')
 const visibilityPollingBaseline = process.argv.includes('--visibility-polling-baseline')
+const visibilityPollingCheck = process.argv.includes('--visibility-polling-check')
+const negativeVisibilityControl = process.argv.includes('--negative-visibility-control')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -41,9 +43,10 @@ import { createRoot } from 'react-dom/client'
 import { useRef, useState } from 'react'
 import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
 import { RemotePairing } from ${JSON.stringify(join(root, 'src/renderer/components/RemotePairing.tsx'))}
-import { RemoteChat } from ${JSON.stringify(join(root, 'src/renderer/components/RemoteChat.tsx'))}
+import { RemoteChat, remoteDraftKey } from ${JSON.stringify(join(root, 'src/renderer/components/RemoteChat.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
 import { refreshRemoteCatalog, useConnectedCatalogLoader } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
+import { SidebarRemoteProjects, useRemoteProjectGroups } from ${JSON.stringify(join(root, 'src/renderer/components/SidebarRemoteProjects.tsx'))}
 import { refreshDesktopConnections } from ${JSON.stringify(join(root, 'src/renderer/hooks/useDesktopConnections.ts'))}
 import { createComposerDraftStore } from ${JSON.stringify(join(root, 'src/renderer/composer-drafts.ts'))}
 import { RemotePromptQueueStore } from ${JSON.stringify(join(root, 'src/renderer/remote-prompt-queue.ts'))}
@@ -116,8 +119,20 @@ const activeRun = (runId, externalSessionId, text, question, background = false)
 const question = { runId: firstScryRun, questionId: 'fixture-question', providerId: 'claude', source: 'fixture', questions: [{
   question: '继续远程运行？', header: '确认', options: [{ label: '继续', description: '继续执行' }], multiSelect: false, allowCustomAnswer: false
 }] }
+const visibilityWaiters = []
+state.holdVisibilityReads = false
+const holdVisibilityRead = async (kind) => {
+  if (state.holdVisibilityReads) await new Promise((resolve, reject) => visibilityWaiters.push({ kind, resolve, reject }))
+}
+window.visibilityWaiting = () => visibilityWaiters.map(waiter => waiter.kind)
+window.releaseVisibilityReads = (fail = false) => {
+  for (const waiter of visibilityWaiters.splice(0)) {
+    if (fail) waiter.reject(new Error('fixture visibility read failed'))
+    else waiter.resolve()
+  }
+}
 const api = {
-  async list() { state.listCalls++; if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
+  async list() { state.listCalls++; await holdVisibilityRead('list'); if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
   async pair() { throw new Error('pairing is outside this fixture') },
   async finishPairing() { throw new Error('pairing is outside this fixture') },
   async updateSsh(id, ssh) {
@@ -132,6 +147,7 @@ const api = {
   async forget() {},
   async catalog() {
     state.catalogCalls++
+    await holdVisibilityRead('catalog')
     if (state.catalogFailure) throw new Error('fixture catalog unavailable')
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
@@ -306,6 +322,7 @@ window.scry = {
   start: async () => { state.localStarts++; throw new Error('Local execution must not be reached') },
   remoteStatus: async () => {
     state.remoteStatusCalls++
+    await holdVisibilityRead('remoteStatus')
     if (state.phoneStatusFailure) throw new Error('fixture phone status unavailable')
     return state.phoneEnabled ? { enabled: true, hostId: 'local-host', anchorSHA256: 'local-anchor', relayConfigured: state.relayConfigured,
       pending: [], devices: [{ deviceId: 'phone', deviceLabel: 'Fixture iPhone', confirmedAt: 1, expiresAt: 4102444800000, revoked: false }] } : { enabled: false }
@@ -328,13 +345,18 @@ for (const type of ['keydown', 'change', 'mousedown', 'click']) document.addEven
   state.uiEvents.push({ type, key: event.key, value: event.target.value, tag: event.target.tagName, text: event.target.textContent?.slice(0, 100) })
   if (state.uiEvents.length > 24) state.uiEvents.shift()
 }, true)
+function PollingSidebar() {
+  const groups = useRemoteProjectGroups('')
+  return <SidebarRemoteProjects groups={groups} active={null} collapsed={new Set()} onToggle={() => {}} onPickSession={() => {}} onNewProjectChat={() => {}} />
+}
 function VisibilityPollingFixture() {
   const scrollRef = useRef(null)
   const textareaRef = useRef(null)
   useConnectedCatalogLoader([connection], null)
   return <>
     <RemotePairing onNewSession={() => {}} />
-    <RemoteChat connectionId={connection.id} cwd="/fixture/project-a" draftStore={createComposerDraftStore(new Map())}
+    {${visibilityPollingCheck} && <PollingSidebar />}
+    <RemoteChat connectionId={connection.id} cwd="/fixture/project-a" draftStore={createComposerDraftStore(new Map(${visibilityPollingCheck} ? [[remoteDraftKey(connection.id, '/fixture/project-a'), { input: 'visibility draft', attachments: [] }]] : []))}
       queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}} scrollRef={scrollRef} textareaRef={textareaRef}
       renderLocationPicker={() => null} onSessionAdopted={() => {}}
       surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }} />
@@ -342,12 +364,13 @@ function VisibilityPollingFixture() {
 }
 function Fixture() {
   const [fullApp, setFullApp] = useState(false)
-  if (${visibilityPollingBaseline}) return <VisibilityPollingFixture />
+  if (${visibilityPollingBaseline || visibilityPollingCheck}) return <VisibilityPollingFixture />
   if (fullApp) return <App />
   return <><RemoteHostPanel />
     <button data-app-fixture style={{ position: 'fixed', top: 2, right: 2, zIndex: 9999 }} onClick={() => { if (!${unknownReceiptOnly}) state.intent = null; setFullApp(true) }}>Full App</button>
   </>
 }
+if (${visibilityPollingCheck}) state.sessionActive = true
 createRoot(document.getElementById('root')).render(<Fixture />)
 `
 
@@ -369,6 +392,43 @@ async function exercise(contents, pointer, capture, options) {
       if (Date.now() > deadline) throw new Error(`Timed out: ${label}; DOM=${await read('JSON.stringify({ focus: document.activeElement?.tagName, selects: [...document.querySelectorAll("select")].map(node => ({value:node.value, options:[...node.options].map(option => ({text:option.text, value:option.value}))})), text: document.body.innerText.slice(-2000), events: window.desktopRemoteFixture.uiEvents })')}`)
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
+  }
+  if (options.visibilityPollingCheck) {
+    const ready = 'document.querySelector(".hosts-state[data-state=connected]") && document.querySelector(".remote-pairing .remote-access-status.is-ready") && document.querySelector(".sb-running")'
+    const stale = '!document.querySelector(".hosts-state[data-state=connected]") && !document.querySelector(".remote-pairing .remote-access-status.is-ready") && !document.querySelector(".sb-running")'
+    const counters = () => read('({ list: window.desktopRemoteFixture.listCalls, catalog: window.desktopRemoteFixture.catalogCalls, status: window.desktopRemoteFixture.remoteStatusCalls })')
+    await wait(ready, 'initial confirmed live state')
+    await wait('document.querySelector(".runtime-composer button.send")?.disabled === false', 'initial send ready')
+    await read('window.setPollingVisibility = hidden => { Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => hidden ? "hidden" : "visible" }); document.dispatchEvent(new Event("visibilitychange")) }; window.desktopRemoteFixture.holdVisibilityReads = true; window.setPollingVisibility(true); window.setPollingVisibility(false)')
+    await wait('window.visibilityWaiting().length === 3', 'resume status/catalog/connection reads held')
+    check(await read(stale), 'Resume must withdraw stale online/activity confirmation')
+    check(await read('document.body.innerText.includes("Old session")'), 'Retained catalog history must remain visible')
+    check(await read('document.querySelector(".runtime-composer button.send").disabled'), 'Send must wait for fresh live evidence')
+    const pending = await counters()
+    await read('void window.refreshFixtureConnections(); void window.refreshFixtureConnections(); void window.refreshFixtureCatalog(); void window.refreshFixtureCatalog()')
+    check(JSON.stringify(await counters()) === JSON.stringify(pending), 'Direct reads must join pending requests')
+    await read('window.desktopRemoteFixture.holdVisibilityReads = false; window.releaseVisibilityReads()')
+    await wait(ready, 'fresh successful state after resume')
+    await wait('document.querySelector(".runtime-composer button.send").disabled === false', 'send reenabled only after fresh poll')
+
+    // An older read may finish after show; it cannot re-confirm online state.
+    await read('window.desktopRemoteFixture.holdVisibilityReads = true; void window.refreshFixtureConnections(); void window.refreshFixtureCatalog()')
+    await wait('window.visibilityWaiting().length === 3', 'older reads held including pairing interval')
+    const older = await counters()
+    await read('window.setPollingVisibility(true); window.setPollingVisibility(false)')
+    check(await read(stale), 'Pending pre-hide reads must be marked stale')
+    check(JSON.stringify(await counters()) === JSON.stringify(older), 'Resume must not overlap an older request')
+    await read('window.releaseVisibilityReads()')
+    await wait('window.visibilityWaiting().length === 3', 'one queued post-show read per path')
+    const freshPending = await counters()
+    check(Object.keys(older).every(key => freshPending[key] === older[key] + 1), 'Resume must queue exactly one fresh follow-up')
+    check(await read(stale), 'Old completions must not re-confirm online/activity')
+    await read('window.desktopRemoteFixture.holdVisibilityReads = false; window.releaseVisibilityReads(true)')
+    await wait('document.body.innerText.includes("fixture visibility read failed")', 'refresh rejection surfaced')
+    check(await read(stale), 'Failed refresh must not claim online/activity')
+    check(await read('document.body.innerText.includes("Old session")'), 'Read rejection must preserve catalog history')
+    check(await read('window.desktopRemoteFixture.submitInputs.length === 0'), 'Visibility changes must not submit a prompt')
+    return { visibilityPolling: true, staleAuthority: true, deferredSingleFlight: true, rejectionRetainsHistory: true, counters: await counters() }
   }
   const pointFor = (selector, text, captureReceipt = false) => read(`(${pointer.toString()})(${JSON.stringify(selector)}, { text: ${JSON.stringify(text ?? '')}, timeoutMs: 7000, scroll: true, captureReceipt: ${captureReceipt} })`)
   const send = (method, params) => contents.debugger.sendCommand(method, params)
@@ -1298,7 +1358,7 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeSlashControl || negativeHistorySlashControl || negativeProviderRevisionControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeSlashControl || negativeHistorySlashControl || negativeProviderRevisionControl || negativeVisibilityControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
       if (negativeProviderRevisionControl && id.endsWith('/RemoteChat.tsx')) {
         const dependency = ', provider?.metadataRevision'
         if (!source.includes(dependency)) throw new Error('Provider metadata revision dependency not found')
@@ -1323,10 +1383,15 @@ try {
       if (negativeWorkspaceControl && id.endsWith('/DesktopRemote.tsx')) {
         return source.replace('api.file(connectionId, context, path, offset, snapshot)', 'window.scry.workspaceReadPage({ cwd: context.cwd, path, offset, snapshot })')
       }
+      if (negativeVisibilityControl && id.endsWith('/useVisibilityPolling.ts')) {
+        const invalidate = '    invalidate()'
+        if (!source.includes(invalidate)) throw new Error('Visibility negative control target missing')
+        return source.replace(invalidate, '')
+      }
       if (negativeActivityControl && id.endsWith('/useRemoteCatalogs.ts')) {
-        const poll = 'const timer = window.setInterval(refresh, 3000)'
+        const poll = 'then(() => {}), 3000, () => {'
         if (!source.includes(poll)) throw new Error('activity polling control not found')
-        return source.replace(poll, poll + '; window.clearInterval(timer)')
+        return source.replace(poll, poll.replace('3000', '86400000'))
       }
       if (negativeHoverControl && id.endsWith('/remote-location.css')) {
         const height = 'height: min(360px, 40vh);'
@@ -1372,7 +1437,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline}, visibilityPollingCheck: ${visibilityPollingCheck} })
         // Native input and capture have finished. Release their debugger/window
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()
