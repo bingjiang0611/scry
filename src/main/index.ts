@@ -4941,16 +4941,34 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         analytics: (rangeDays: UsageAnalyticsRangeDays) => usageAnalyticsWithCreditsQuery(rangeDays),
         llmPerformance: async () => [await readLlmPerformanceHistory(app.getPath('userData')),
           summarizeRunningLlmSessions(runs.activeStates())] as const,
-        mcpSnapshot: async ({ providerId }: { providerId: string }) => {
+        // Read-only MCP trust: the same static scan the Mac panel runs, driven by
+        // the Mac's current workspace. The device only names a Provider, so it can
+        // never widen the scanned path, and nothing here starts or authorizes a
+        // server — the report is configuration and tool-fingerprint evidence only.
+        mcpTrust: async ({ providerId }: { providerId: string }) => {
+          if (providerRegistry.isDisabled(providerId as ProviderId)) {
+            return { snapshot: null, unavailable: '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用' }
+          }
+          if (providerId === 'pi') {
+            return { snapshot: null, unavailable: 'Pi snapshot 仅返回脱敏后的有效配置与运行态，不包含 MCP Guard 所需的可执行配置和凭据指纹' }
+          }
           const context = { providerId: providerId as ProviderId, cwd: currentCwd ?? '' }
-          if (providerRegistry.isDisabled(context.providerId)) {
-            return { status: 'unavailable' as const, reason: '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用' }
-          }
           const envelope = await providerRegistry.mcpSnapshot(context, false)
-          if (!envelope.data) {
-            return { status: 'unavailable' as const, reason: envelope.reason ?? 'Provider 未提供 MCP 快照' }
+          let scan: unknown
+          try {
+            const built = buildMcpExecutionSnapshot({
+              providerId: context.providerId,
+              cwd: context.cwd,
+              homeDir,
+              settingSources: context.providerId === 'claude' ? process.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
+              env: shellEnv()
+            })
+            if (isMcpGuardReport(built.report)) scan = built.report
+          } catch {
+            // A scan failure is reported as "no scan", not as "no risks".
+            scan = undefined
           }
-          return envelope.data
+          return { snapshot: envelope.data, ...(scan ? { scan } : {}) }
         }
       },
       sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {

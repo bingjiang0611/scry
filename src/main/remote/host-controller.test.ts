@@ -104,24 +104,36 @@ describe('HostController (composition root)', () => {
         reasoningKnownRows: 0, tokenKnownRows: 0, costKnownRows: 0, exactCostRows: 0, providerReportedCostRows: 0, estimatedCostRows: 0, inferredCostRows: 0 },
       byDay: [], dailyByProvider: [], byProvider: [], byModel: []
     }))
-    const mcpSnapshot = vi.fn(async () => ({ configured: [], runtime: null }))
+    const mcpTrust = vi.fn(async () => ({ snapshot: { configured: [], runtime: null }, scan: {
+      summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0, status: 'block' },
+      findings: [{ findingInstanceId: 'f1', title: '未固定版本的 MCP 包', severity: 'critical', confidence: 'high',
+        policy: { decision: 'block' }, rule: { id: 'mcpguard/unpinned-package', version: '1' },
+        affectedTargets: [{ targetId: 't1', role: 'subject' }], recommendation: '固定版本',
+        evidence: [{ path: '/secret/path', keyName: 'TOKEN' }] }]
+    } }))
     const { controller } = await grantedController(vi.fn(async () => {}), undefined, {
-      toolPanels: { analytics, llmPerformance: () => [{ rows: [], invalidLines: 0, truncated: false }, { observedAt: 'now', sessions: [] }], mcpSnapshot }
+      toolPanels: { analytics, llmPerformance: () => [{ rows: [], invalidLines: 0, truncated: false }, { observedAt: 'now', sessions: [] }], mcpTrust }
     })
     await expect(controller.readToolPanel('0'.repeat(64), { kind: 'analytics', rangeDays: 7 })).rejects.toThrow('device_not_authorized')
     expect(analytics).not.toHaveBeenCalled()
     await expect(controller.readToolPanel(CERT, { kind: 'secrets' })).rejects.toThrow('invalid_tool_panel')
     await expect(controller.readToolPanel(CERT, { kind: 'analytics', rangeDays: 14 })).rejects.toThrow('invalid_tool_panel')
     await expect(controller.readToolPanel(CERT, { kind: 'mcpTrust', providerId: '' })).rejects.toThrow('invalid_tool_panel')
-    expect(mcpSnapshot).not.toHaveBeenCalled()
+    expect(mcpTrust).not.toHaveBeenCalled()
 
     const panel = await controller.readToolPanel(CERT, { kind: 'analytics', rangeDays: 30 })
     expect(panel.kind).toBe('analytics')
     expect(panel.analytics?.rangeDays).toBe(7)
     // The panel is a background read: a device can never ask for a refresh.
-    const mcp = await controller.readToolPanel(CERT, { kind: 'mcpTrust', providerId: 'claude' })
+    const mcp = await controller.readToolPanel(CERT, { kind: 'mcpTrust', providerId: 'claude', cwd: '/etc' })
     expect(mcp.kind).toBe('mcpTrust')
-    expect(mcpSnapshot).toHaveBeenCalledExactlyOnceWith({ providerId: 'claude', refresh: false })
+    // The device names a Provider only; a device-supplied path is ignored.
+    expect(mcpTrust).toHaveBeenCalledExactlyOnceWith({ providerId: 'claude' })
+    expect(mcp.mcp?.scan?.status).toBe('block')
+    expect(mcp.mcp?.scan?.findings[0]).toMatchObject({ severity: 'critical', decision: 'block', targets: ['t1'] })
+    // Evidence paths and key names stay on the Mac.
+    expect(JSON.stringify(mcp)).not.toContain('/secret/path')
+    expect(JSON.stringify(mcp)).not.toContain('TOKEN')
   })
 
   it('reports an unavailable panel instead of an empty one when the host has no source', async () => {
