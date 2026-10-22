@@ -72,23 +72,33 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
       send({ type: 'extension_ui_request', id: 'persisted', method: 'setStatus', statusKey: 'persisted', text: 'Persisted' })
       return
     }
-    if (command.message === 'background-child') {
+    if (command.message === 'background-child' || command.message === 'background-cleared') {
       const snapshot = (state) => send({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async',
         widgetLines: ['PI_SUBAGENT_ASYNC_JSON:' + JSON.stringify({ kind: 'pi-subagents.async-status-snapshot', version: 1,
           generatedAt: Date.now(), omitted: { runs: 0, children: 0, byteLimitExceeded: false },
           runs: [{ id: 'child-1', kind: 'subagent', label: 'worker', state }] })] })
       snapshot('running')
-      send({ type: 'agent_end', messages: [] })
-      send({ type: 'agent_settled' })
-      require('node:readline').createInterface({ input: fs.createReadStream(${JSON.stringify(releasePipe)}) }).once('line', (line) => {
-        if (line === 'exit') process.exit(2)
-        snapshot('complete')
-        send({ type: 'agent_start' })
-        send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'Child reviewed; parent continued' }], stopReason: 'stop' } })
+      if (command.message === 'background-cleared') {
+        send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'Work wrapped up' }], stopReason: 'stop' } })
         send({ type: 'agent_end', messages: [] })
         send({ type: 'agent_settled' })
-      })
-      send({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'checkpoint', text: 'child waiting checkpoint' })
+        // The extension clears this widget once no async job is left, and no terminal
+        // row is ever replayed. A run must not wait on that missing row forever.
+        send({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'checkpoint', text: 'child waiting checkpoint' })
+        setTimeout(() => send({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' }), 25)
+      } else {
+        send({ type: 'agent_end', messages: [] })
+        send({ type: 'agent_settled' })
+        require('node:readline').createInterface({ input: fs.createReadStream(${JSON.stringify(releasePipe)}) }).once('line', (line) => {
+          if (line === 'exit') process.exit(2)
+          snapshot('complete')
+          send({ type: 'agent_start' })
+          send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'Child reviewed; parent continued' }], stopReason: 'stop' } })
+          send({ type: 'agent_end', messages: [] })
+          send({ type: 'agent_settled' })
+        })
+        send({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'checkpoint', text: 'child waiting checkpoint' })
+      }
     } else {
       send({ type: 'agent_end', messages: [] })
       send({ type: 'agent_settled' })
