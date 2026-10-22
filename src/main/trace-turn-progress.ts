@@ -8,7 +8,7 @@ import { listFiles, readJson, writeJsonAtomic } from '../core/turn-recorder/io.j
 import { safeKey, stableHash } from '../core/turn-recorder/store.js'
 import {
   findTraceArchiveTurnMatches,
-  upsertTraceArchiveTurn,
+  upsertTraceArchiveTurnAsync,
   type TraceArchiveTurn
 } from './transcript-archive.js'
 
@@ -306,7 +306,7 @@ export async function recoverTraceTurnProgress(
       recovered++
       continue
     }
-    const ok = upsertTraceArchiveTurn({ ...request, userDataDir })
+    const ok = await upsertTraceArchiveTurnAsync({ ...request, userDataDir })
     if (!ok) {
       pending++
       errors.push(`trace turn progress is still pending: ${request.turn.runId}`)

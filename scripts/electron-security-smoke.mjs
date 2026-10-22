@@ -16,7 +16,8 @@ const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
-const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
+const nativeHistoryPerformanceOnly = process.argv[2] === '--dev-pi-history-perf-only'
+const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
 const sourceFileHistory = fileHistoryOnly ? JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8')) : null
 const devMetaPromptsOnly = process.argv[2] === '--dev-meta-prompts-only'
@@ -433,15 +434,56 @@ async function main() {
     const nativePath = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`, `2026-10-13_${nativeSessionId}.jsonl`)
     const entries = []
     let parentId = 'a'
-    for (let i = 0; i < 40; i++) {
+    const continuedTurns = nativeHistoryPerformanceOnly ? 4000 : 40
+    for (let i = 0; i < continuedTurns; i++) {
       entries.push({ type: 'message', id: `continued-user-${i}`, parentId, timestamp: '2026-10-13T05:00:00Z',
         message: { role: 'user', content: [{ type: 'text', text: `continued prompt ${i}` }] } })
       parentId = `continued-reply-${i}`
       entries.push({ type: 'message', id: parentId, parentId: `continued-user-${i}`, timestamp: '2026-10-13T05:00:01Z',
-        message: { role: 'assistant', content: [{ type: 'text', text: `continued reply ${i}` }] } })
+        message: { role: 'assistant', content: [{ type: 'text', text: nativeHistoryPerformanceOnly ? `${'reply'.repeat(410)}-${i}` : `continued reply ${i}` }] } })
     }
     appendFileSync(nativePath, '\n' + entries.map(entry => JSON.stringify(entry)).join('\n'))
     const context = { providerId: 'pi', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
+    if (nativeHistoryPerformanceOnly) {
+      const hash = value => createHash('sha256').update(value).digest('hex')
+      const dir = join(userDataDir, 'trace-archive-turns-v1', 'pi', `cwd-${hash(canonicalWorkspace)}`, `sid-${hash(nativeSessionId)}`)
+      mkdirSync(dir, { recursive: true })
+      for (let i = 0; i < continuedTurns; i++) {
+        const runId = `ipc-perf-${i}`
+        const providerTurnId = `continued-user-${i}`
+        writeFileSync(join(dir, `turn-${hash(`provider\0${providerTurnId}`)}.json`), JSON.stringify({
+          version: 3, cwd: canonicalWorkspace, sessionId: nativeSessionId, providerId: 'pi', runtimeProvider: 'pi_rpc',
+          turns: [{ runId, providerTurnId, userText: `continued prompt ${i}`, done: true, status: 'completed', ts: i + 1,
+            items: [{ id: `text-${i}`, runId, kind: 'model', stage: 'text', text: `${'reply'.repeat(410)}-${i}`, ts: '2026-10-13T05:00:01Z' }] }]
+        }))
+      }
+      const samples = []
+      for (let repeat = 0; repeat < 4; repeat++) {
+        const sample = await evaluate(`(async () => {
+          const started = performance.now();
+          const latest = await window.scry.loadSession(${JSON.stringify(context)}, { limit: 40 });
+          const latestAt = performance.now();
+          const older = await window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: latest.offset, limit: 40 });
+          return { latestMs: latestAt - started, olderMs: performance.now() - latestAt,
+            totalMs: performance.now() - started, totalTurns: latest.totalTurns,
+            latestOffset: latest.offset, olderOffset: older.offset,
+            selected: [...latest.turns, ...older.turns].map(turn => [turn.runId, turn.userText,
+              turn.items.filter(item => item.kind === 'model').map(item => item.text)]) };
+        })()`)
+        assert.equal(sample.totalTurns, continuedTurns + 1)
+        assert.equal(sample.selected.length, 80)
+        assert.equal(sample.olderOffset, sample.latestOffset - 40)
+        assert.equal(sample.selected.at(-1)[0], 'ipc-perf-3959')
+        const selectedPayloadSha256 = hash(JSON.stringify(sample.selected))
+        const { selected: _selected, ...metrics } = sample
+        samples.push({ ...metrics, repeat, phase: repeat === 0 ? 'first-open-after-bulk-append' : 'unchanged-warm', selectedPayloadSha256 })
+      }
+      assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+      console.log(JSON.stringify({ test: 'Pi whole production history IPC', canonicalTurns: continuedTurns,
+        nativeTurns: continuedTurns + 1, pageSize: 40, pagesPerSample: 2, samples, noProviderRuns: true }))
+      cdp.close()
+      return
+    }
     const page = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
     assert.equal(page.totalTurns, 41)
     assert.equal(page.offset, 38)
@@ -464,7 +506,67 @@ async function main() {
     const oldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
     assert.equal(oldest.turns.length, 1)
     assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
-    console.log('Pi native history >64 MiB: click restores phone conversation; provenance, 41-turn pagination and archive reconciliation verified without Provider execution')
+    const archivePath = join(archiveDir, `sid-${hash(nativeSessionId)}.json`)
+    const mixedArchive = JSON.parse(readFileSync(archivePath, 'utf8'))
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a46kAAAAASUVORK5CYII='
+    mixedArchive.turns.push({ runId: 'archive-only-early', userText: 'older interrupted attempt',
+      done: true, status: 'interrupted', ts: Date.parse('2026-10-13T03:00:00Z'),
+      attachments: [{ storage: 'inline', kind: 'image', name: 'older.png', mimeType: 'image/png', dataBase64: png }],
+      items: [{ id: 'older-tool', runId: 'archive-only-early', kind: 'tool', stage: 'tool_result', tool: 'bash',
+        toolUseId: 'older-call', output: 'canonical older tool output', ts: '2026-10-13T03:00:01Z' },
+      { id: 'older-result', runId: 'archive-only-early', kind: 'harness', stage: 'result', tokensIn: 73, tokensOut: 17,
+        ts: '2026-10-13T03:00:02Z' }] },
+    { runId: 'archive-only-middle', userText: 'interleaved canonical attempt', done: true, status: 'interrupted',
+      ts: Date.parse('2026-10-13T04:50:00Z'), items: [{ id: 'middle-text', runId: 'archive-only-middle',
+        kind: 'model', stage: 'text', text: 'canonical middle payload', ts: '2026-10-13T04:50:01Z' }] })
+    writeFileSync(archivePath, JSON.stringify(mixedArchive))
+    // Unlinked attempts precede their next exact native archive anchor. Timestamps alone
+    // do not reorder native ancestry or establish attempt ownership.
+    const mixed = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 1 })`)
+    assert.equal(mixed.totalTurns, 43)
+    const middle = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 42, limit: 1 })`)
+    assert.equal(middle.offset, 41)
+    assert.equal(middle.totalTurns, 43)
+    assert.equal(middle.turns[0].runId, 'archive-only-middle')
+    assert.ok(middle.turns[0].items.some(item => item.text === 'canonical middle payload'))
+    const early = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 41, limit: 1 })`)
+    assert.equal(early.offset, 40)
+    assert.equal(early.hasOlder, true)
+    assert.equal(early.turns[0].runId, 'archive-only-early')
+    assert.ok(early.turns[0].items.some(item => item.output === 'canonical older tool output'))
+    assert.ok(early.turns[0].items.some(item => item.tokensIn === 73 && item.tokensOut === 17))
+    assert.equal(early.turns[0].attachments[0].name, 'older.png')
+    assert.equal(early.turns[0].attachments[0].dataBase64, png)
+    const segmentDir = join(userDataDir, 'trace-archive-turns-v1', 'pi', `cwd-${hash(canonicalWorkspace)}`, `sid-${hash(nativeSessionId)}`)
+    mkdirSync(segmentDir, { recursive: true })
+    writeFileSync(join(segmentDir, `turn-${hash('run\0unavailable-attempt')}.json`), '{broken')
+    const partial = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 1 })`)
+    assert.equal(partial.sourceComplete, false)
+    const partialOldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
+    assert.equal(partialOldest.offset, 0)
+    assert.equal(partialOldest.hasOlder, false)
+    assert.equal(partialOldest.sourceComplete, false)
+    assert.equal(partialOldest.completeness, 'partial')
+    const nativeText = readFileSync(nativePath, 'utf8')
+    const validReply = JSON.stringify(entries[1])
+    assert.ok(nativeText.includes(validReply))
+    writeFileSync(nativePath, nativeText.replace(validReply, JSON.stringify({ ...entries[1], timestamp: 'invalid-date' })))
+    const stale = await evaluate(`(async () => {
+      try { await window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 }); return { rejected: false }; }
+      catch (error) { return { rejected: true, message: error.message }; }
+    })()`)
+    assert.equal(stale.rejected, true)
+    assert.ok(stale.message.includes('重新打开会话'))
+    const fallback = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 43 })`)
+    assert.equal(fallback.totalTurns, 3)
+    assert.ok(fallback.turns.every(turn => !turn.runId.startsWith('pi-native-')))
+    const fallbackOlder = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
+    assert.equal(fallbackOlder.totalTurns, 3)
+    assert.equal(fallbackOlder.turns[0].runId, 'archive-only-early')
+    assert.equal(fallbackOlder.turns[0].attachments[0].dataBase64, png)
+    assert.equal(fallbackOlder.sourceComplete, false)
+    assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+    console.log('Pi native history: real IPC verifies 43-turn interleaving, older canonical tools/usage/attachments and native-only prefix without Provider execution')
     cdp.close()
     return
   }

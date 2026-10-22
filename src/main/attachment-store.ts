@@ -14,6 +14,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { constants as fsConstants, promises as fs } from 'node:fs'
+import { lstat as lstatAsync } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import type { ProviderId } from '../shared/provider'
@@ -247,6 +248,34 @@ export function attachmentSessionRunIds(
     }
   }
   return [...runIds]
+}
+
+async function trustedExistingRunDirAsync(userDataDir: string, runId: string): Promise<string | null> {
+  const candidate = attachmentRunDir(userDataDir, runId)
+  if (!candidate) return null
+  const root = dirname(candidate)
+  try {
+    const [rootStat, runStat] = await Promise.all([lstatAsync(root), lstatAsync(candidate)])
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory() || runStat.isSymbolicLink() || !runStat.isDirectory()) return null
+    return candidate
+  } catch {
+    return null
+  }
+}
+
+export async function storeAttachmentReferenceAsync(
+  userDataDir: string,
+  runId: string,
+  attachment: AgentInputAttachment
+): Promise<StoredAttachmentInline | StoredAttachmentBlobRef> {
+  const runDir = await trustedExistingRunDirAsync(userDataDir, runId)
+  if (runDir && attachment.path && dirname(resolve(attachment.path)) === resolve(runDir)) {
+    const blobId = basename(attachment.path)
+    return { storage: 'blob', kind: 'image', name: attachment.name, mimeType: attachment.mimeType, blobId,
+      size: attachment.size, width: attachment.width, height: attachment.height }
+  }
+  return { storage: 'inline', kind: 'image', name: attachment.name, mimeType: attachment.mimeType,
+    dataBase64: attachment.dataBase64, size: attachment.size, width: attachment.width, height: attachment.height }
 }
 
 export function storeAttachmentReference(

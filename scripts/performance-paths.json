@@ -44,12 +44,13 @@
         "src/main/index.ts",
         "src/main/context-admission.bench.ts",
         "src/main/providers/registry.ts",
-        "src/main/providers/pi.ts"
+        "src/main/providers/pi.ts",
+        "src/main/remote/provider-discovery.ts"
       ],
       "benchmarks": [
         "providers.catalog"
       ],
-      "gap": "已测 handler settle，未测菜单可见；真实认证/网络单独授权，补固定发现与缓存 workload。"
+      "gap": "已测 handler settle 和固定选中上下文的 adapter 入口调用数；菜单冷/热就绪毫秒、真实认证与网络仍需隔离验证。"
     },
     {
       "id": "navigation",

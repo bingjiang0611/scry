@@ -28,14 +28,16 @@ import {
   discoverTraceArchiveSessionsAsync,
   mirrorTranscript,
   readTraceArchiveAsync,
+  readTraceArchiveMetadataAsync,
   readTraceArchivePageAsync,
+  readTraceArchiveTurnsAsync,
   resolveTranscriptPath,
   traceArchiveRunIds,
-  upsertTraceArchiveTurn,
+  upsertTraceArchiveTurnAsync,
   type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
-import { readPiDisplayHistory } from './pi-native-history'
+import { readPiNativeHistorySnapshot, reconcilePiNativeHistory, type PiNativeHistorySnapshot } from './pi-native-history'
 import {
   readCompleteArchiveForNativeReconciliation,
   hydrateSessionHistoryPage,
@@ -70,6 +72,7 @@ import { RunSteering, steerObservedRun } from './run-steering'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isRendererPerformanceSample } from '../shared/performance'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
+import { historyCopy } from '../shared/constants/copy'
 import {
   normalizeAgentForkSessionRequest,
   normalizeAgentStartRequest,
@@ -138,8 +141,7 @@ import { createRelayConnectWS } from './remote/relay-connect-ws'
 import { ensureHostIdentity } from './remote/host-identity'
 import { ensureRelayCredential } from './remote/relay-credential'
 import { DEFAULT_PUBLIC_RELAY_WS, remoteHostEnabled } from './remote/remote-defaults'
-import { remoteProviderEntry } from './remote/remote-provider-snapshot'
-import type { RemoteProviderRef } from './remote/remote-gateway'
+import { createProviderDiscovery } from './remote/provider-discovery'
 import type { DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest } from '../shared/desktop-remote'
 import type { RemoteStatus } from '../shared/remote'
 import { DockBadgeState } from './dock-badge'
@@ -343,7 +345,11 @@ let sessionHistoryCache: {
   archive: TraceArchive | null
   context: { userDataDir: string }
   archiveSource?: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId }
+  archiveProfileId?: string | null
   archiveSnapshotTotalTurns?: number
+  archiveSourceComplete?: boolean
+  archiveSourceIssue?: string
+  nativeHydrator?: (runIds: readonly string[]) => Promise<LoadedSessionTurn[]>
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 } | null = null
 
@@ -950,13 +956,13 @@ interface ArchiveTraceTurnArgs {
   beforePersist?: () => Promise<void>
 }
 
-function cloneForkArchiveTurns(args: {
+async function cloneForkArchiveTurns(args: {
   turns: TraceArchiveTurn[]
   targetSessionId: string
   providerId: ProviderId
   runtimeProvider: RuntimeProvider
   cwd: string
-}): void {
+}): Promise<void> {
   const userDataDir = app.getPath('userData')
   const clonedRunIds: string[] = []
   try {
@@ -972,7 +978,7 @@ function cloneForkArchiveTurns(args: {
         cwd: args.cwd,
         sessionId: args.targetSessionId
       })
-      const ok = upsertTraceArchiveTurn({
+      const ok = await upsertTraceArchiveTurnAsync({
         cwd: args.cwd,
         sessionId: args.targetSessionId,
         providerId: args.providerId,
@@ -1149,7 +1155,7 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
       return
     }
   }
-  const ok = upsertTraceArchiveTurn({
+  const ok = await upsertTraceArchiveTurnAsync({
     cwd: archiveCwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
@@ -1387,6 +1393,7 @@ handleTrusted('agent:addPiProfile', async () => {
     })
     await probePiAgent(profile, currentCwd)
     const stored = piProfileStore().add(profile)
+    invalidateRemoteProviderMetadata('pi')
     const descriptor = (await providerRegistry.describe()).find((entry) => entry.id === 'pi')
     if (!descriptor) throw new Error('Pi Provider 未注册')
     return {
@@ -1417,6 +1424,7 @@ handleTrusted('agent:addPiProfile', async () => {
 handleTrusted('agent:removePiProfile', (_event, id: unknown) => {
   if (typeof id !== 'string' || !/^pi:[a-f0-9]{16}$/.test(id)) throw new Error('无效的 Pi Agent Profile')
   piProfileStore().remove(id)
+  invalidateRemoteProviderMetadata('pi')
   return true as const
 })
 
@@ -1713,7 +1721,7 @@ async function forkSessionWithAuthority(request: DesktopRemoteForkSessionRequest
         mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
       })
       if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
-      cloneForkArchiveTurns({
+      await cloneForkArchiveTurns({
         turns: prefix,
         targetSessionId: forked.externalSessionId,
         providerId,
@@ -1744,7 +1752,15 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
 
 handleTrusted('agent:invalidateProviderContext', async (_event, context: ProviderContext) => {
   const normalizedContext = { ...context, cwd: context.cwd ?? currentCwd }
-  await providerRegistry.invalidateContext(normalizedContext)
+  providerRegistry.get(normalizedContext.providerId)
+  await withProviderOperation(normalizedContext.providerId, async () => {
+    remoteProviderDiscovery.invalidate(normalizedContext.providerId)
+    try {
+      await providerRegistry.invalidateContext(normalizedContext)
+    } finally {
+      refreshInvalidatedRemoteProviderMetadata()
+    }
+  }, normalizedContext.agentProfileId)
   return true
 })
 handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
@@ -2102,6 +2118,18 @@ function pageWithHookCommands(
   }
 }
 
+function markIncompleteArchivePage(page: SessionHistoryPage, issue: string | undefined): SessionHistoryPage {
+  if (issue === undefined && page.sourceComplete !== false) return page
+  if (page.turns.length === 0) return { ...page, sourceComplete: false, completeness: 'partial' }
+  const turns = [...page.turns]
+  const last = turns[turns.length - 1]
+  turns[turns.length - 1] = {
+    ...last,
+    errorHint: [last.errorHint, historyCopy.incompleteArchive].filter(Boolean).join('\n')
+  }
+  return { ...page, turns, sourceComplete: false, completeness: 'partial' }
+}
+
 handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?: SessionHistoryPageRequest) => {
   if (!payload.externalSessionId) return null
   const perf = new PerformanceTrace('session_history.load', { provider: payload.providerId })
@@ -2127,6 +2155,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
     const userDataDir = app.getPath('userData')
     const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
+    const archiveProfile = typeof payload.agentProfileId === 'string' ? { agentProfileId: payload.agentProfileId } : {}
     const fp =
       payload.providerId === 'claude' && cwd
         ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
@@ -2145,7 +2174,7 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     try {
       [archivePage, archived] = await readSessionHistoryAfterCompletedRuns(matchingRuns, signal, async () => {
         const page = archivePaged
-          ? await readTraceArchivePageAsync(archiveArgs, { limit: request?.limit }, signal)
+          ? await readTraceArchivePageAsync(archiveArgs, { ...archiveProfile, limit: request?.limit }, signal)
           : null
         const archive = page?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
         return [page, archive] as const
@@ -2201,21 +2230,48 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     // the Provider returned. Pi's native session is independent durable evidence;
     // read it offline rather than treating a missing Scry archive as no messages.
     let nativeTurns: LoadedSessionTurn[] | null = null
+    let nativeSnapshot: PiNativeHistorySnapshot | null = null
     let nativeReadNotice: string | undefined
     // An in-flight native tail has no Scry run ID; the live RunRegistry owns that
     // display. Do not add an unmatchable second copy while the Provider is running.
     if (payload.providerId === 'pi' && matchingRuns.length === 0) {
-      const native = await readPiDisplayHistory({
-        sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'), cwd,
-        sessionId: payload.externalSessionId, signal, active: false
-      }, archived ? async () => {
-        const completeArchive = await readCompleteArchiveForNativeReconciliation(
-          archivePage, () => readTraceArchiveAsync(archiveArgs, signal)
-        )
-        return mergeSessionTurns([], completeArchive, { userDataDir }, { hydrateAttachments: false })
-      } : undefined)
-      nativeTurns = native.turns
-      if (native.error) nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${native.error.message}`
+      let native: LoadedSessionTurn[] | null = null
+      try {
+        nativeSnapshot = await readPiNativeHistorySnapshot({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
+          cwd, sessionId: payload.externalSessionId, signal })
+        native = nativeSnapshot?.turns ?? null
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!archived) throw error
+        // A truncated/unsupported native file must not hide an intact Scry archive.
+        nativeReadNotice = historyCopy.nativeArchiveFallback(error instanceof Error ? error.message : String(error))
+      }
+      if (native && !archived) nativeTurns = native
+      else if (native) {
+        // A successful continuation must not hide the previously recovered prefix.
+        // Reconcile only Provider-native turn IDs, never prompts or output text.
+        const completeArchive = await readTraceArchiveMetadataAsync(archiveArgs, signal) ??
+          await readCompleteArchiveForNativeReconciliation(
+            archivePage,
+            () => readTraceArchiveAsync(archiveArgs, signal)
+          )
+        if (requestRevision !== loadSessionRevision) return null
+        nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
+          { userDataDir }, { hydrateAttachments: false }))
+      }
+      if (nativeSnapshot && nativeTurns === null) nativeTurns = nativeSnapshot.turns
+      if (nativeSnapshot && nativeTurns) {
+        const nativeByRunId = new Map(nativeSnapshot.turns.map((turn) => [turn.runId!, turn]))
+        const reconciledByRunId = new Map(nativeTurns.map((turn) => [turn.runId!, turn]))
+        const hydrateNative = nativeSnapshot.hydrate
+        nativeSnapshot = {
+          ...nativeSnapshot,
+          hydrate: async (runIds, hydrateSignal) => {
+            const nativeIds = runIds.filter((runId) => nativeByRunId.has(runId) && reconciledByRunId.get(runId) === nativeByRunId.get(runId))
+            return nativeIds.length ? hydrateNative(nativeIds, hydrateSignal) : []
+          }
+        }
+      }
     }
     signal.throwIfAborted()
     perf.mark('native_history', { nativeTurns: nativeTurns?.length ?? 0 })
@@ -2253,6 +2309,11 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
       mergedHistory
     )
+    if (archivePage && !archivePage.sourceComplete && merged.length) {
+      const last = merged[merged.length - 1]
+      last.errorHint = [last.errorHint, historyCopy.incompleteArchive]
+        .filter(Boolean).join('\n')
+    }
     if (nativeReadNotice && merged.length) {
       const last = merged[merged.length - 1]
       last.errorHint = [last.errorHint, nativeReadNotice].filter(Boolean).join('\n')
@@ -2272,10 +2333,14 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       transcriptTurns: turns,
       archive: archived,
       context: historyContext,
-      ...(archivePaged && !nativeTurns ? {
+      archiveSourceComplete: archivePage?.sourceComplete ?? true,
+      archiveSourceIssue: archivePage?.sourceIssue,
+      ...(archiveProfile.agentProfileId !== undefined ? { archiveProfileId: archiveProfile.agentProfileId } : {}),
+      ...(!nativeSnapshot && archivePaged ? {
         archiveSource: archiveArgs,
-        archiveSnapshotTotalTurns: archivePage?.totalTurns ?? 0
+        archiveSnapshotTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0
       } : {}),
+      ...(nativeSnapshot ? { nativeHydrator: (runIds) => nativeSnapshot!.hydrate(runIds) } : {}),
       hookConfig
     }
     const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
@@ -2284,13 +2349,96 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
           offset: archivePage.offset,
           totalTurns: archivePage.totalTurns,
           hasOlder: archivePage.hasOlder,
-          completeness: archivePage.hasOlder ? 'partial' : 'complete'
+          sourceComplete: archivePage.sourceComplete,
+          completeness: archivePage.hasOlder || !archivePage.sourceComplete ? 'partial' : 'complete'
         }
       : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
+    let selectedPage = unhydratedPage
+    let selectedArchive: TraceArchive | null = archived
+    if (nativeSnapshot) {
+      const selectedRunIds = unhydratedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
+      const selectedArchiveTurns = await readTraceArchiveTurnsAsync(archiveArgs, selectedRunIds, signal)
+      if (requestRevision !== loadSessionRevision) return null
+      const selectedArchiveLoaded = mergeSessionTurns([], selectedArchiveTurns.length > 0 ? {
+        version: 3,
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        turns: selectedArchiveTurns
+      } : null, historyContext, { hydrateAttachments: false })
+      const hydratedArchiveByRunId = new Map(selectedArchiveLoaded.map((turn) => [turn.runId!, turn]))
+      let hydratedNative: LoadedSessionTurn[] = []
+      let nativeHydrationFailed = false
+      try {
+        hydratedNative = await nativeSnapshot.hydrate(selectedRunIds, signal)
+        if (requestRevision !== loadSessionRevision) return null
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!archived) throw error
+        nativeHydrationFailed = true
+        nativeReadNotice = [nativeReadNotice, historyCopy.nativeBodyFallback(error instanceof Error ? error.message : String(error))]
+          .filter(Boolean).join('\n')
+      }
+      const hydratedByRunId = new Map(hydratedNative.map((turn) => [turn.runId!, turn]))
+      const canonicalFallbackArchive = archivePage?.archive ?? archived
+      const canonicalFallbackLoaded = mergeSessionTurns([], canonicalFallbackArchive, historyContext, { hydrateAttachments: false })
+      selectedPage = nativeHydrationFailed
+        ? {
+            turns: canonicalFallbackLoaded,
+            offset: archivePage?.offset ?? 0,
+            totalTurns: archivePage?.totalTurns ?? canonicalFallbackLoaded.length,
+            hasOlder: Boolean(archivePage?.hasOlder),
+            sourceComplete: archivePage?.sourceComplete,
+            completeness: archivePage?.hasOlder || archivePage?.sourceComplete === false ? 'partial' : 'complete'
+          }
+        : {
+            ...unhydratedPage,
+            turns: unhydratedPage.turns.map((turn) =>
+              hydratedArchiveByRunId.get(turn.runId!) ?? hydratedByRunId.get(turn.runId!) ?? turn)
+          }
+      selectedArchive = nativeHydrationFailed
+        ? canonicalFallbackArchive
+        : selectedArchiveTurns.length > 0 ? {
+            version: 3,
+            cwd,
+            sessionId: payload.externalSessionId,
+            providerId: payload.providerId,
+            turns: selectedArchiveTurns
+          } : archived
+      if (archivePage && !archivePage.sourceComplete) {
+        selectedPage = markIncompleteArchivePage(selectedPage, archivePage.sourceIssue)
+      }
+      if (nativeHydrationFailed) {
+        if (requestRevision !== loadSessionRevision || sessionHistoryCache?.revision !== requestRevision) return null
+        sessionHistoryCache = {
+          ...sessionHistoryCache,
+          turns: canonicalFallbackLoaded,
+          archive: canonicalFallbackArchive,
+          nativeHydrator: undefined,
+          archiveSource: archiveArgs,
+          archiveSnapshotTotalTurns: selectedPage.totalTurns
+        }
+        if (selectedPage.turns.length && nativeReadNotice) {
+          const last = selectedPage.turns[selectedPage.turns.length - 1]
+          selectedPage.turns[selectedPage.turns.length - 1] = {
+            ...last,
+            errorHint: [last.errorHint, nativeReadNotice].filter(Boolean).join('\n')
+          }
+        }
+      }
+      const enriched = await providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        selectedPage.turns as ParsedTurn[]
+      )
+      if (requestRevision !== loadSessionRevision) return null
+      selectedPage = { ...selectedPage, turns: enriched as LoadedSessionTurn[] }
+    }
+    signal.throwIfAborted()
+    if (requestRevision !== loadSessionRevision || sessionHistoryCache?.revision !== requestRevision) return null
     const page = hydrateSessionHistoryPage(
-      unhydratedPage,
+      selectedPage,
       turns,
-      archived,
+      selectedArchive,
       historyContext
     )
     perf.mark('page_hydration', { returnedTurns: page.turns.length })
@@ -2318,6 +2466,7 @@ handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, req
     if (request?.before == null || !Number.isFinite(request.before) || request.before <= 0) return null
     if (cache.archiveSource) {
       const sourcePage = await readTraceArchivePageAsync(cache.archiveSource, {
+        ...(cache.archiveProfileId !== undefined ? { agentProfileId: cache.archiveProfileId } : {}),
         ...request,
         snapshotTotalTurns: cache.archiveSnapshotTotalTurns
       })
@@ -2328,30 +2477,80 @@ handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, req
         }
         if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
       }
+      const archiveLoaded = mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
       const turns = await providerRegistry.enrichSession(
         { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-        mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+        archiveLoaded
       )
       if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
-      const page = hydrateSessionHistoryPage({
-        turns,
+      const page = markIncompleteArchivePage(hydrateSessionHistoryPage({
+        turns: turns as LoadedSessionTurn[],
         offset: sourcePage.offset,
         totalTurns: sourcePage.totalTurns,
         hasOlder: sourcePage.hasOlder,
-        completeness: sourcePage.hasOlder ? 'partial' : 'complete'
-      }, [], sourcePage.archive, cache.context)
+        sourceComplete: sourcePage.sourceComplete,
+        completeness: sourcePage.hasOlder || !sourcePage.sourceComplete ? 'partial' : 'complete'
+      }, [], sourcePage.archive, cache.context), sourcePage.sourceComplete ? undefined : sourcePage.sourceIssue)
       perf.mark('indexed_archive', {
         returnedTurns: page.turns.length,
-        archiveTurnFilesRead: sourcePage.turnFilesRead
+        archiveTurnFilesRead: sourcePage.turnFilesRead,
+        sourceComplete: sourcePage.sourceComplete ? 1 : 0
       })
       const result = pageWithHookCommands(page, cache.hookConfig)
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
       return result
+
+    }
+    let cachedPage = sessionHistoryPage(cache.turns, request)
+    if (cache.archiveSourceComplete === false) {
+      cachedPage = markIncompleteArchivePage({ ...cachedPage, sourceComplete: false }, cache.archiveSourceIssue)
+    }
+    let pageArchive = cache.archive
+    if (cache.nativeHydrator) {
+      const runIds = cachedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
+      const archiveArgs = {
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        userDataDir: cache.context.userDataDir
+      }
+      const selectedArchiveTurns = await readTraceArchiveTurnsAsync(archiveArgs, runIds)
+      if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+      const selectedArchive = selectedArchiveTurns.length > 0 ? {
+        version: 3 as const,
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        turns: selectedArchiveTurns
+      } : null
+      const selectedArchiveLoaded = mergeSessionTurns([], selectedArchive, cache.context, { hydrateAttachments: false })
+      pageArchive = selectedArchive
+      const archiveByRunId = new Map(selectedArchiveLoaded.map((turn) => [turn.runId!, turn]))
+      let hydratedNative: LoadedSessionTurn[] = []
+      try {
+        hydratedNative = await cache.nativeHydrator(runIds)
+        if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+      } catch (error) {
+        if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+        sessionHistoryCache = null
+        throw new Error(historyCopy.nativePageReload, { cause: error })
+      }
+      const hydratedByRunId = new Map(hydratedNative.map((turn) => [turn.runId!, turn]))
+      cachedPage = {
+        ...cachedPage,
+        turns: cachedPage.turns.map((turn) => archiveByRunId.get(turn.runId!) ?? hydratedByRunId.get(turn.runId!) ?? turn)
+      }
+      const enriched = await providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        cachedPage.turns as ParsedTurn[]
+      )
+      if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+      cachedPage = { ...cachedPage, turns: enriched as LoadedSessionTurn[] }
     }
     const page = hydrateSessionHistoryPage(
-      sessionHistoryPage(cache.turns, request),
+      cachedPage,
       cache.transcriptTurns,
-      cache.archive,
+      pageArchive,
       cache.context
     )
     perf.mark('cached_history', { returnedTurns: page.turns.length })
@@ -3154,7 +3353,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
       })
       if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
-      cloneForkArchiveTurns({
+      await cloneForkArchiveTurns({
         turns: archive.turns.slice(0, -1),
         targetSessionId: forked.externalSessionId,
         providerId,
@@ -4756,12 +4955,6 @@ async function resolveRemoteRelay(stateDirectory: string): Promise<RemoteRelayRe
   const token = ensureRelayCredential(join(stateDirectory, 'relay'), identity.hostId)
   return createRemoteWssResolution(endpoint, token, true)
 }
-// Cached snapshot of the host's Providers for the device new-session picker.
-// providerRegistry.describe() is async but the device op reads synchronously, so
-// we keep a periodically-refreshed snapshot (id/label/available). Availability
-// mirrors the real describe() result; nothing is fabricated, and the run path
-// still validates the chosen providerId on submit.
-let remoteProviderSnapshot: RemoteProviderRef[] = []
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
@@ -4769,37 +4962,32 @@ function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
   return isAgentPermissionMode(raw) ? raw : undefined
 }
 
-async function loadRemoteProviderSnapshot(): Promise<void> {
-  try {
-    const descriptors = await providerRegistry.describe()
-    const contexts = await Promise.all(descriptors.map(async (descriptor) => {
-      if (!descriptor.available) return [{ id: descriptor.id, label: descriptor.label, available: false }]
-      const profiles = descriptor.id === 'pi' ? await listPiProfiles() : []
-      const targets = profiles.length > 0 ? profiles.map((profile) => ({ id: profile.id, label: profile.label })) : [undefined]
-      return Promise.all(targets.map(async (profile) => {
-        const controlsCwd = remoteProjectRoots()[0]
-        const controls = await providerRegistry.runControls({
-          providerId: descriptor.id,
-          ...(controlsCwd ? { cwd: controlsCwd } : {}),
-          ...(profile ? { agentProfileId: profile.id } : {})
-        })
-        return remoteProviderEntry({
-          descriptor,
-          ...(profile ? { profile } : {}),
-          controls,
-          previous: remoteProviderSnapshot,
-          forkSession: providerRegistry.get(descriptor.id).forkSession !== undefined,
-          permissionOverride: configuredRemotePermissionMode()
-        })
-      }))
-    }))
-    remoteProviderSnapshot = contexts.flat()
-  } catch { /* keep the last good snapshot rather than fabricate */ }
-}
-// A slow Provider control probe may exceed the timer interval. Coalesce those ticks and keep the
-// last successful picker snapshot for one minute instead of probing every Provider every 15 seconds.
-const remoteProviderSnapshotRefresh = createCachedAsyncLoader(loadRemoteProviderSnapshot, { ttlMs: 60_000 })
+const remoteProviderDiscovery = createProviderDiscovery({
+  descriptors: () => providerRegistry.describe(),
+  profiles: listPiProfiles,
+  resolveProfile: resolvePiProfile,
+  authorizeWorkspace: resolveRemoteProjectDirectory,
+  controls: (context) => withProviderOperation(context.providerId, () => providerRegistry.runControls(context), context.agentProfileId),
+  defaultWorkspace: () => remoteProjectRoots()[0],
+  permissionOverride: configuredRemotePermissionMode,
+  onError: (error) => console.warn('[scry] remote Provider discovery failed:', error)
+})
+
+// Timed refresh only observes descriptors/profile labels. Runtime initialization is
+// owned by a selected context (or an explicit legacy full-snapshot request).
+const remoteProviderSnapshotRefresh = createCachedAsyncLoader(() => remoteProviderDiscovery.refreshMetadata(), { ttlMs: 60_000 })
 const refreshRemoteProviderSnapshot = (): Promise<void> => remoteProviderSnapshotRefresh.load()
+
+function invalidateRemoteProviderMetadata(providerId: ProviderId): void {
+  remoteProviderDiscovery.invalidate(providerId)
+  refreshInvalidatedRemoteProviderMetadata()
+}
+
+function refreshInvalidatedRemoteProviderMetadata(): void {
+  if (!remoteHostService) return
+  remoteProviderSnapshotRefresh.invalidate()
+  void refreshRemoteProviderSnapshot()
+}
 
 async function startRemoteHostIfEnabled(): Promise<void> {
   if (remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
@@ -4890,9 +5078,13 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       // The paired phone may choose a narrower cwd, but cannot navigate to or
       // submit a parent/sibling outside the Mac's existing canonical grants.
       listDirectories: (path) => listRemoteDirectories(path, knownProjectDirectories()),
-      // The Providers the device may pick for a new session. Snapshot mirrors the
-      // real registry describe() (id/label/available); the run path re-validates.
-      listProviders: () => remoteProviderSnapshot,
+      // Metadata is a cheap picker snapshot; Provider controls are loaded only
+      // after the device selects a Provider/profile and authorized cwd.
+      listProviders: () => remoteProviderDiscovery.metadata(),
+      listProviderControls: (query) => remoteProviderDiscovery.selected(query),
+      // Compatibility for clients that explicitly omit the discovery detail.
+      // This is on-demand and therefore cannot gate metadata or selected reads.
+      listProvidersFull: () => remoteProviderDiscovery.legacy(),
       // Resolve the same native Provider command catalog used by the desktop
       // composer. The cwd is re-authorized before project-local commands/skills
       // are inspected; unsupported Providers return an honest reason.

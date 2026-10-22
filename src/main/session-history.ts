@@ -55,6 +55,8 @@ export async function readCompleteArchiveForNativeReconciliation(
 }
 
 export interface SessionHistoryPageRequest {
+  /** Presence selects strict archive Profile evidence; absent preserves the unscoped display contract. */
+  agentProfileId?: string | null
   /** 只取序号小于 before 的更早轮次；缺省从最新一轮往回取。 */
   before?: number
   limit?: number
@@ -66,6 +68,8 @@ export interface SessionHistoryPage {
   offset: number
   totalTurns: number
   hasOlder: boolean
+  /** Canonical source coverage; false means missing/corrupt evidence remains unknown. */
+  sourceComplete?: boolean
   /** partial 表示更早轮次仍在归档里可取，不是被丢弃也不是不存在。 */
   completeness: 'complete' | 'partial'
 }

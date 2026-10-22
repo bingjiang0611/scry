@@ -556,6 +556,27 @@ describe('managed trace turn coordinator', () => {
       .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
   })
 
+  it('keeps malformed attributed journals visible to scoped recovery without overwriting them', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+    const journal = join(userDataDir, 'managed-turn-commits', 'malformed.json')
+    await mkdir(dirname(journal), { recursive: true })
+    const bytes = JSON.stringify({ schemaVersion: 1, request: {
+      cwd: workspace, sessionId: request.sessionId, providerId: request.providerId
+    } })
+    await writeFile(journal, bytes)
+
+    await expect(recoverManagedTraceTurns(userDataDir, {
+      cwd: workspace, providerId: request.providerId
+    })).resolves.toEqual({
+      recovered: 0, pending: 1, errors: ['invalid managed turn journal: malformed.json']
+    })
+    expect(await readFile(journal, 'utf8')).toBe(bytes)
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: '/another-repo' })).resolves.toEqual({
+      recovered: 0, pending: 0, errors: []
+    })
+  })
+
   it('unattributable malformed artifacts warn globally without blocking an unrelated scoped run', async () => {
     const { userDataDir } = await fixture()
     const progress = join(userDataDir, 'managed-turn-progress', 'malformed.json')
@@ -961,6 +982,39 @@ describe('managed trace turn coordinator', () => {
     const records = await listRecords(join(workspace, '.scry'))
     expect(records).toHaveLength(1)
     expect(records[0].diff).toEqual(rich.turn.turnEvidence?.diff)
+  })
+
+  it('keeps the large v1 intent immutable and recovers honestly when the phase sidecar is corrupt', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await startManaged(workspace)
+    const request = input(workspace, userDataDir)
+    request.turn.userText = 'fixed-large-payload-'.repeat(10_000)
+    request.turn.turnEvidence = aggregateTurnEvidence({
+      userText: request.turn.userText,
+      events: request.turn.items,
+      source: 'scry_provider_adapter'
+    })
+
+    await expect(commitManagedTraceTurn(request, {
+      removeArtifact: async () => { throw new Error('simulated post-commit cleanup crash') }
+    })).rejects.toThrow('simulated post-commit cleanup crash')
+
+    const journalName = (await readdir(join(userDataDir, 'managed-turn-commits'))).find((name) => name.endsWith('.json'))!
+    const journalPath = join(userDataDir, 'managed-turn-commits', journalName)
+    const statePath = join(userDataDir, 'managed-turn-journal-state', journalName)
+    const immutableIntent = await readFile(journalPath)
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, unknown>
+    expect(Buffer.byteLength(JSON.stringify(state))).toBeLessThan(immutableIntent.byteLength / 10)
+
+    await writeFile(statePath, JSON.stringify({ ...state, phase: 'archive_committed', archiveFingerprint: 'wrong' }))
+    expect(await readFile(journalPath)).toEqual(immutableIntent)
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, waitMs: 100 })).resolves.toEqual({
+      recovered: 1,
+      pending: 0,
+      errors: []
+    })
+    expect(existsSync(journalPath)).toBe(false)
+    expect(existsSync(statePath)).toBe(false)
   })
 
   it('disabled recovery discards stale progress without overwriting a richer committed archive', async () => {

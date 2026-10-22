@@ -128,7 +128,7 @@ const invokeChannels = {
 const desktopChannels = {
   list: 'desktopRemote:list', pair: 'desktopRemote:pair', finishPairing: 'desktopRemote:finishPairing',
   updateSsh: 'desktopRemote:updateSsh', connect: 'desktopRemote:connect', disconnect: 'desktopRemote:disconnect', forget: 'desktopRemote:forget',
-  catalog: 'desktopRemote:catalog', commands: 'desktopRemote:commands', sessionAction: 'desktopRemote:sessionAction', directories: 'desktopRemote:directories', selectDirectory: 'desktopRemote:selectDirectory', history: 'desktopRemote:history', trace: 'desktopRemote:trace',
+  catalog: 'desktopRemote:catalog', providerControls: 'desktopRemote:providerControls', commands: 'desktopRemote:commands', sessionAction: 'desktopRemote:sessionAction', directories: 'desktopRemote:directories', selectDirectory: 'desktopRemote:selectDirectory', history: 'desktopRemote:history', trace: 'desktopRemote:trace',
   forkSession: 'desktopRemote:forkSession', deleteSession: 'desktopRemote:deleteSession',
   intents: 'desktopRemote:intents', submit: 'desktopRemote:submit', intentStatus: 'desktopRemote:intentStatus',
   runStatus: 'desktopRemote:runStatus', liveRun: 'desktopRemote:liveRun', stop: 'desktopRemote:stop', answer: 'desktopRemote:answer',

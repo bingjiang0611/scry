@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, open, rm, stat, symlink, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parsePiNativeHistory, readPiNativeHistory, readPiNativeSession, reconcilePiNativeHistory } from './pi-native-history'
+import { parsePiNativeHistory, readPiNativeHistory, readPiNativeHistorySnapshot, readPiNativeSession, reconcilePiNativeHistory } from './pi-native-history'
 import { restoreTraceArchiveTurn, sessionHistoryPage } from './session-history'
 import type { TraceEvent } from '../shared/trace'
 
@@ -237,6 +237,39 @@ describe('offline Pi native history recovery', () => {
   ])('rejects invalid streamed history rather than returning partial success (%#)', async (content, error) => {
     const { args } = await nativeFile(content)
     await expect(readPiNativeHistory(args)).rejects.toThrow(error)
+  })
+
+  it('selects metadata first, hydrates only requested native turns, and validates append prefixes', async () => {
+    const first = encode(user, assistant, result)
+    const { args, path } = await nativeFile(first)
+    const initial = await readPiNativeHistorySnapshot(args)
+    expect(initial?.turns).toHaveLength(1)
+    expect(initial?.turns[0].items.map((item) => item.toolUseId)).toEqual(['call1', 'call1'])
+    expect(initial?.turns[0].items.every((item) => item.text == null && item.output == null)).toBe(true)
+    const hydrated = await initial!.hydrate([initial!.turns[0].runId!])
+    expect(hydrated[0].items).toHaveLength(3)
+
+    const secondUser = { ...user, id: 'u2', parentId: 't' }
+    await writeFile(path, `${first}\n${JSON.stringify(secondUser)}`)
+    const appended = await readPiNativeHistorySnapshot(args)
+    expect(appended?.sourceRevision).not.toBe(initial?.sourceRevision)
+    expect(appended?.turns.map((turn) => turn.runId)).toEqual(['pi-native-u', 'pi-native-u2'])
+    expect(await appended!.hydrate(['pi-native-u'])).toHaveLength(1)
+    expect((await appended!.hydrate(['pi-native-u2']))[0].userText).toBe('phone message')
+
+    await writeFile(path, `${JSON.stringify(header)}\n${JSON.stringify(user)}`)
+    const rewritten = await readPiNativeHistorySnapshot(args)
+    expect(rewritten?.turns.map((turn) => turn.runId)).toEqual(['pi-native-u'])
+  })
+
+  it('rejects equal-length replacement while hydrating an older snapshot and normalizes multiline prompts', async () => {
+    const multilineUser = { ...user, message: { role: 'user', content: [{ type: 'text', text: 'line one' }, { type: 'text', text: 'line two' }] } }
+    const { args, path } = await nativeFile(encode(multilineUser, assistant, result))
+    const snapshot = await readPiNativeHistorySnapshot(args)
+    expect(snapshot?.turns[0].userText).toBe('line one\nline two')
+    const replacement = { ...multilineUser, message: { role: 'user', content: [{ type: 'text', text: 'line aaa' }, { type: 'text', text: 'line bbb' }] } }
+    await writeFile(path, encode(replacement, assistant, result))
+    await expect(snapshot!.hydrate([snapshot!.turns[0].runId!])).rejects.toThrow('读取期间发生变化')
   })
 
   it('handles blank lines, header-only histories and forward references like the string parser', async () => {

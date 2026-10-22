@@ -4,12 +4,12 @@ import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, isRemoteProviderObservationTime } from '../../shared/desktop-remote'
 import { attachmentSha256, DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, newAttachmentId, normalizeDesktopAttachment, type DesktopAttachmentCapability } from './desktop-attachments'
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
-  DesktopRemoteRunStatus, DesktopRemoteLiveRun, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef
+  DesktopRemoteRunStatus, DesktopRemoteLiveRun, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProviderQuery, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
 import { isAgentPermissionMode, isSupportedImageMimeType, type AgentInputAttachment, type AgentQuestionResponse } from '../../shared/runtime'
 import type { DeleteSessionResult } from '../../shared/provider'
@@ -169,9 +169,10 @@ function validateDeleteSessionResult(value: unknown): DeleteSessionResult {
   return value as unknown as DeleteSessionResult
 }
 
-function validateInfo(response: unknown, hostId: string): { directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopAttachmentCapability } {
+function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopAttachmentCapability } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
       response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
+      (response.desktop.providerDiscovery !== undefined && response.desktop.providerDiscovery !== 2) ||
       (response.desktop.directorySelection !== undefined && response.desktop.directorySelection !== true) ||
       (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
       (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true) ||
@@ -180,6 +181,7 @@ function validateInfo(response: unknown, hostId: string): { directorySelection?:
   const attachmentInfo = response.desktop.attachments
   if (attachmentInfo !== undefined && (!record(attachmentInfo) || attachmentInfo.transport !== 'chunked' || attachmentInfo.maxBytes !== DESKTOP_ATTACHMENT_MAX_BYTES || attachmentInfo.maxTotalBytes !== DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES || attachmentInfo.maxCount !== DESKTOP_ATTACHMENT_MAX_COUNT || attachmentInfo.chunkBytes !== DESKTOP_ATTACHMENT_CHUNK_BYTES)) fail('desktop_capability_unavailable')
   return {
+    ...(response.desktop.providerDiscovery === 2 ? { providerDiscovery: 2 as const } : {}),
     ...(response.desktop.directorySelection === true ? { directorySelection: true as const } : {}),
     ...(response.desktop.workbench === 1 ? { workbench: 1 as const } : {}),
     ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {}),
@@ -354,8 +356,14 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   }
 
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
+    const info = await this.#desktop(connectionIdValue, { kind: 'info' })
+    const state = await this.#state()
+    const item = this.#connection(state, connectionIdValue)
+    const capabilities = validateInfo({ desktop: info }, item.hostId)
     const rawProjects = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'projects' }, 'projects')
-    const rawProviders = await this.#catalogRequest<unknown>(connectionIdValue, { op: 'providers' }, 'providers')
+    const rawProviders = await this.#catalogRequest<unknown>(connectionIdValue, {
+      op: 'providers', ...(capabilities.providerDiscovery === 2 ? { detail: 'metadata' satisfies RemoteProviderQuery['detail'] } : {})
+    }, 'providers')
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
     const sessions: RemoteSessionRef[] = []; let cursor = 0; let snapshot: string | undefined
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -369,11 +377,25 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       cursor = response.cursor as number; snapshot = response.snapshot as string
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
+    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities }
+  }
+
+  async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {
+    const query = context(value)
     const info = await this.#desktop(connectionIdValue, { kind: 'info' })
     const state = await this.#state()
     const item = this.#connection(state, connectionIdValue)
     const capabilities = validateInfo({ desktop: info }, item.hostId)
-    return { projects: rawProjects.map((item) => this.#project(item)), providers: rawProviders.map((item) => this.#provider(item)), sessions, providerEvidence: 'host_snapshot', ...capabilities }
+    if (capabilities.providerDiscovery !== 2) fail('provider_controls_unavailable')
+    const raw = await this.#catalogRequest<unknown>(connectionIdValue, {
+      op: 'providers', detail: 'selected', providerId: query.providerId, cwd: query.cwd,
+      ...(query.agentProfileId ? { agentProfileId: query.agentProfileId } : {})
+    }, 'providers')
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ITEMS) fail('provider_controls_unavailable')
+    const refs = raw.map((item) => this.#provider(item))
+    const selected = refs.find((item) => item.id === query.providerId && (item.agentProfileId ?? '') === (query.agentProfileId ?? ''))
+    if (!selected) fail('provider_controls_unavailable')
+    return selected
   }
 
   async commands(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteCommandCatalog> {
@@ -1026,7 +1048,12 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     }
   }
   #project(value: unknown): RemoteProjectRef { if (!record(value) || !text(value.path, 16_384) || !text(value.label, 512)) fail('invalid_catalog_response'); return { path: value.path as string, label: value.label as string } }
-  #provider(value: unknown): RemoteProviderRef { if (!record(value) || !text(value.id, 256) || !text(value.label, 512) || typeof value.available !== 'boolean') fail('invalid_catalog_response'); return value as unknown as RemoteProviderRef }
+  #provider(value: unknown): RemoteProviderRef {
+    if (!record(value) || !text(value.id, 256) || !text(value.label, 512) || typeof value.available !== 'boolean' ||
+        (value.observedAt !== undefined && !isRemoteProviderObservationTime(value.observedAt)) ||
+        (value.metadataRevision !== undefined && (typeof value.metadataRevision !== 'number' || !Number.isSafeInteger(value.metadataRevision) || value.metadataRevision < 0))) fail('invalid_catalog_response')
+    return value as unknown as RemoteProviderRef
+  }
   #session(value: unknown): RemoteSessionRef {
     if (!record(value) || !text(value.sessionId, 256) || !text(value.providerId, 256) || !text(value.cwd, 16_384) || !text(value.label, 512) || !Number.isSafeInteger(value.ts) ||
         (value.externalSessionId !== undefined && !text(value.externalSessionId, 256)) ||

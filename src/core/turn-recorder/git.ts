@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { promisify } from 'node:util'
 import { limitToolContent } from './tool-content.js'
@@ -766,6 +766,177 @@ async function computeGitTurnDiff(
   return terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection)
 }
 
+const PATCH_BATCH_MAX_FILES = 128
+const PATCH_BATCH_MAX_ARG_BYTES = 64 * 1024
+let patchOperationSequence = 0
+
+interface RawPatchRecord {
+  path: Buffer
+}
+
+interface ParsedPatchBody {
+  end: number
+  complete: boolean
+}
+
+function patchDiffArgs(filterOverrides: string[], command: string[]): string[] {
+  // These are deliberately command-line settings rather than repository config. Patch framing
+  // is consumed below, so diff.* and color.* config must not be able to change its markers.
+  return snapshotGitArgs(filterOverrides, [
+    '--no-pager',
+    '-c', 'core.quotePath=true',
+    '-c', 'diff.noprefix=false',
+    '-c', 'diff.mnemonicprefix=false',
+    '-c', 'diff.suppressBlankEmpty=false',
+    '-c', 'color.ui=false',
+    '-c', 'color.diff=false',
+    ...command
+  ])
+}
+
+function splitRawPatchOutput(bytes: Buffer): { records: RawPatchRecord[]; patchStart: number } | undefined {
+  const records: RawPatchRecord[] = []
+  let offset = 0
+  while (offset < bytes.length) {
+    // `--raw -z` emits a colon-prefixed metadata record followed by one NUL-terminated path.
+    // The additional NUL after the final path is Git's native boundary to the patch stream.
+    if (bytes[offset] === 0 && records.length > 0) return { records, patchStart: offset + 1 }
+    if (bytes[offset] !== 0x3a) return undefined
+    const metadataEnd = bytes.indexOf(0, offset)
+    if (metadataEnd < 0) return undefined
+    const metadata = bytes.subarray(offset, metadataEnd).toString('ascii')
+    if (!/^:\d{6} \d{6} [0-9a-f]+ [0-9a-f]+ [A-Z][0-9]*$/.test(metadata)) return undefined
+    const pathStart = metadataEnd + 1
+    const pathEnd = bytes.indexOf(0, pathStart)
+    if (pathEnd < 0) return undefined
+    records.push({ path: bytes.subarray(pathStart, pathEnd) })
+    offset = pathEnd + 1
+  }
+  return records.length === 0 ? { records, patchStart: bytes.length } : undefined
+}
+
+function hunkCounts(line: Buffer): { oldLines: number; newLines: number } | undefined {
+  const text = line.toString('ascii')
+  const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(text)
+  if (!match) return undefined
+  const oldLines = Number(match[2] ?? 1)
+  const newLines = Number(match[4] ?? 1)
+  return Number.isSafeInteger(oldLines) && Number.isSafeInteger(newLines)
+    ? { oldLines, newLines }
+    : undefined
+}
+
+function nextPatchLine(bytes: Buffer, offset: number): { line: Buffer; next: number } | undefined {
+  if (offset >= bytes.length) return undefined
+  const end = bytes.indexOf(0x0a, offset)
+  const next = end < 0 ? bytes.length : end + 1
+  return { line: bytes.subarray(offset, end < 0 ? bytes.length : end), next }
+}
+
+/**
+ * Split Git's patch stream without trusting its quoted headers. Raw -z records determine the
+ * file/order mapping; this parser only uses hunk counts to avoid mistaking header-like hunk text
+ * for the next `diff --git` delimiter.
+ */
+function parsePatchBody(bytes: Buffer, start: number, allowEof: boolean): ParsedPatchBody | undefined {
+  let cursor = start
+  const first = nextPatchLine(bytes, cursor)
+  if (!first || !first.line.toString('ascii').startsWith('diff --git ')) return undefined
+  cursor = first.next
+  let sawBodyLine = false
+  let oldRemaining = 0
+  let newRemaining = 0
+  let inHunk = false
+  let sawHunk = false
+  let sawOldMode = false
+  let sawNewMode = false
+  let sawFileMode = false
+  let sawIndex = false
+  let sawOldFile = false
+  let sawNewFile = false
+
+  const completeBody = (): boolean => sawHunk || (sawOldMode && sawNewMode) ||
+    (sawFileMode && sawIndex) || (sawOldFile && sawNewFile)
+
+  while (cursor < bytes.length) {
+    const currentOffset = cursor
+    const current = nextPatchLine(bytes, cursor)
+    if (!current) break
+    cursor = current.next
+    const line = current.line
+    if (inHunk) {
+      if (line.toString('ascii') === '\\ No newline at end of file') continue
+      const indicator = line[0]
+      if (indicator === 0x20) {
+        oldRemaining--
+        newRemaining--
+      } else if (indicator === 0x2b) {
+        newRemaining--
+      } else if (indicator === 0x2d) {
+        oldRemaining--
+      } else {
+        return undefined
+      }
+      if (oldRemaining < 0 || newRemaining < 0) return undefined
+      if (oldRemaining === 0 && newRemaining === 0) inHunk = false
+      continue
+    }
+
+    if (line.toString('ascii').startsWith('diff --git ')) {
+      return completeBody() ? { end: currentOffset, complete: true } : undefined
+    }
+    sawBodyLine = true
+    const text = line.toString('ascii')
+    sawOldMode ||= text.startsWith('old mode ')
+    sawNewMode ||= text.startsWith('new mode ')
+    sawFileMode ||= text.startsWith('new file mode ') || text.startsWith('deleted file mode ')
+    sawIndex ||= text.startsWith('index ')
+    sawOldFile ||= text.startsWith('--- ')
+    sawNewFile ||= text.startsWith('+++ ')
+    const counts = hunkCounts(line)
+    if (counts) {
+      oldRemaining = counts.oldLines
+      newRemaining = counts.newLines
+      inHunk = true
+      sawHunk = true
+    } else if (text.startsWith('@@ ')) {
+      return undefined
+    }
+  }
+  if (inHunk || !sawBodyLine || !completeBody() || !allowEof) return undefined
+  return { end: bytes.length, complete: true }
+}
+
+function exactGlobPathspec(relPath: string): string {
+  let pattern = ''
+  for (const character of relPath) {
+    // Escaping even ordinary characters forces Git's full glob match rather than its
+    // directory-prefix shortcut. Thus deleted `a` cannot select new `a/private.env`.
+    pattern += character === '/' ? character : `\\${character}`
+  }
+  return `:(top,glob)${pattern}`
+}
+
+function patchBatchFiles(
+  files: DiffFile[],
+  capture: GitTurnDiffCapture,
+  excludedBasenames: ReadonlySet<string>
+): { result: DiffFile[]; pending: Array<{ index: number; file: DiffFile; pathspec: string; pathBytes: Buffer }> } {
+  const result = files.map((file) => {
+    if (file.binary) return { ...file, patchStatus: 'binary' as const }
+    if (excludedBasenames.has(basename(file.path))) {
+      return { ...file, patchStatus: 'unavailable' as const, patchReason: 'policy' as const }
+    }
+    return file
+  })
+  const pending = files.flatMap((file, index) => {
+    if (file.binary || excludedBasenames.has(basename(file.path))) return []
+    const relPath = relative(capture.repoRoot!, file.path).split(sep).join('/')
+    return [{ index, file, pathspec: exactGlobPathspec(relPath), pathBytes: Buffer.from(relPath) }]
+  })
+  return { result, pending }
+}
+
 async function captureTurnPatches(
   capture: GitTurnDiffCapture,
   env: NodeJS.ProcessEnv,
@@ -778,64 +949,122 @@ async function captureTurnPatches(
   if (!capture.repoRoot || !capture.beforeTree || !capture.tempDir) return files
   const deadline = completePatches ? operationDeadline : Date.now() + TURN_DIFF_PATCH_DEADLINE_MS
   const filterOverrides = capture.filterOverrides ?? []
+  const { result, pending } = patchBatchFiles(files, capture, excludedBasenames)
   let deadlineReached = false
-  const out: DiffFile[] = []
+  const operationId = patchOperationSequence++
 
-  for (let index = 0; index < files.length; index++) {
-    const file = files[index]
-    if (file.binary) {
-      out.push({ ...file, patchStatus: 'binary' })
-      continue
+  let start = 0
+  while (start < pending.length) {
+    const batch = pending.slice(start, start + PATCH_BATCH_MAX_FILES)
+    // Keep both the number and encoded size bounded. A pathspec is passed as one argv item, so
+    // names containing whitespace/newlines/quotes/backslashes never undergo shell splitting.
+    const currentBatch: typeof batch = []
+    let argBytes = 0
+    for (const item of batch) {
+      const itemBytes = Buffer.byteLength(item.pathspec) + 1
+      if (currentBatch.length > 0 && argBytes + itemBytes > PATCH_BATCH_MAX_ARG_BYTES) break
+      currentBatch.push(item)
+      argBytes += itemBytes
     }
-    if (excludedBasenames.has(basename(file.path))) {
-      out.push({ ...file, patchStatus: 'unavailable', patchReason: 'policy' })
-      continue
-    }
+    // A single path can exceed the byte budget; it still must be attempted rather than skipped.
+    if (currentBatch.length === 0) currentBatch.push(batch[0])
     if (deadlineReached || Date.now() >= deadline) {
       deadlineReached = true
-      out.push({ ...file, patchStatus: 'unavailable', patchReason: 'deadline' })
+      for (const item of currentBatch) result[item.index] = {
+        ...item.file, patchStatus: 'unavailable', patchReason: 'deadline'
+      }
+      start += currentBatch.length
       continue
     }
 
-    const patchPath = join(capture.tempDir, `patch-${index}.diff`)
-    const relPath = relative(capture.repoRoot, file.path).split('\\').join('/')
+    const patchPath = join(capture.tempDir, `patch-operation-${operationId}-batch-${start}.diff`)
+    const rawPathspecs = currentBatch.map((item) => item.pathspec)
+    let commandError: TurnDiffReason | undefined
     try {
       await gitCommand(
-        snapshotGitArgs(filterOverrides, [
+        patchDiffArgs(filterOverrides, [
           'diff',
           '--no-renames',
           '--no-ext-diff',
           '--no-textconv',
           '--no-color',
+          '--raw',
+          '-z',
+          '--patch',
           '--unified=3',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          '--line-prefix=',
+          '--output-indicator-new=+',
+          '--output-indicator-old=-',
+          '--output-indicator-context= ',
           `--output=${patchPath}`,
           capture.beforeTree,
           afterTree,
           '--',
-          `:(top,literal)${relPath}`
+          ...rawPathspecs
         ]),
         { cwd: capture.repoRoot, env, deadline }
       )
-      const captured = await readFile(patchPath).then((bytes) => {
-        const patch = new StringDecoder('utf8').write(bytes)
-        return { patch, truncated: false }
-      })
-      if (!captured.patch) {
-        out.push({ ...file, patchStatus: 'unavailable', patchReason: 'git_error' })
-      } else {
-        out.push({
-          ...file,
-          patch: captured.patch,
-          patchStatus: captured.truncated ? 'truncated' : 'captured'
-        })
-      }
     } catch (error) {
-      const reason = reasonOf(error) === 'deadline' ? 'deadline' : 'git_error'
-      if (reason === 'deadline') deadlineReached = true
-      out.push({ ...file, patchStatus: 'unavailable', patchReason: reason })
+      commandError = reasonOf(error)
+      if (commandError === 'deadline') deadlineReached = true
+    }
+
+    let bytes: Buffer | undefined
+    try { bytes = await readFile(patchPath) } catch {}
+    // Preview baselines can outlive many operations; do not retain every unique batch file.
+    await rm(patchPath, { force: true })
+    const parsed = bytes ? splitRawPatchOutput(bytes) : undefined
+    let bodyCursor = parsed?.patchStart ?? 0
+    const records = parsed?.records ?? []
+    const batchByPath = new Map(currentBatch.map((item) => [item.pathBytes.toString('hex'), item]))
+    const seenRecordPaths = new Set<string>()
+    const rawRecordsMatchBatch = parsed !== undefined && records.length === currentBatch.length && records.every((record) => {
+      const key = record.path.toString('hex')
+      if (seenRecordPaths.has(key) || !batchByPath.has(key)) return false
+      seenRecordPaths.add(key)
+      return true
+    })
+    const capturedIndexes = new Set<number>()
+    const recordLimit = commandError || rawRecordsMatchBatch ? records.length : 0
+    for (let recordIndex = 0; recordIndex < recordLimit; recordIndex++) {
+      const record = records[recordIndex]
+      const key = record.path.toString('hex')
+      if (seenRecordPaths.size !== records.length && !commandError) break
+      const matching = batchByPath.get(key)
+      if (!matching || capturedIndexes.has(matching.index)) break
+      const body = parsed && bytes ? parsePatchBody(bytes, bodyCursor, !commandError) : undefined
+      if (!body?.complete) break
+      result[matching.index] = {
+        ...matching.file,
+        patch: new StringDecoder('utf8').write(bytes!.subarray(bodyCursor, body.end)),
+        patchStatus: 'captured'
+      }
+      capturedIndexes.add(matching.index)
+      bodyCursor = body.end
+    }
+
+    for (const item of currentBatch) {
+      if (capturedIndexes.has(item.index)) continue
+      result[item.index] = {
+        ...item.file,
+        patchStatus: 'unavailable',
+        patchReason: commandError === 'deadline' ? 'deadline' : 'git_error'
+      }
+    }
+    // Process the not-yet-started suffix of this 128-file window as the next bounded batch.
+    start += currentBatch.length
+  }
+
+  if (deadlineReached) {
+    for (const item of pending) {
+      if (!result[item.index].patchStatus) result[item.index] = {
+        ...item.file, patchStatus: 'unavailable', patchReason: 'deadline'
+      }
     }
   }
-  return out
+  return result
 }
 
 function utf8Prefix(value: string, maxBytes: number): { value: string; bytes: number } {

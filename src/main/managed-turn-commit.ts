@@ -23,7 +23,7 @@ import {
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from '../core/turn-recorder/io.js'
 import { safeKey, stableHash } from '../core/turn-recorder/store.js'
 import {
-  upsertTraceArchiveTurn,
+  upsertTraceArchiveTurnAsync,
   findTraceArchiveTurnMatches,
   type TraceArchiveTurn
 } from './transcript-archive.js'
@@ -49,6 +49,13 @@ interface ManagedTurnProgress {
   schemaVersion: 1
   persistedAt: string
   request: Omit<ManagedTraceTurnCommitInput, 'userDataDir'>
+}
+
+interface ManagedTurnJournalState {
+  schemaVersion: 1
+  phase: ManagedTurnJournal['phase']
+  archiveFingerprint: string
+  recordId?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,6 +92,35 @@ function validJournal(value: ManagedTurnJournal | null): value is ManagedTurnJou
   return value?.schemaVersion === 1 &&
     (value.phase === 'prepared' || value.phase === 'archive_committed') &&
     typeof value.archiveFingerprint === 'string' && validManagedRequest(value.request)
+}
+
+function validJournalState(
+  value: ManagedTurnJournalState | null,
+  journal: ManagedTurnJournal
+): value is ManagedTurnJournalState {
+  return value?.schemaVersion === 1 &&
+    (value.phase === 'prepared' || value.phase === 'archive_committed') &&
+    typeof value.archiveFingerprint === 'string' &&
+    value.archiveFingerprint === journal.archiveFingerprint &&
+    (value.recordId === undefined || (typeof value.recordId === 'string' && value.recordId.length > 0)) &&
+    (value.phase !== 'archive_committed' || value.recordId !== undefined)
+}
+
+function normalizeJournal(
+  journal: ManagedTurnJournal | null,
+  state: ManagedTurnJournalState | null
+): ManagedTurnJournal | null {
+  // Preserve malformed intents so scoped recovery can attribute and report them, and a
+  // new commit cannot mistake an existing corrupt artifact for an absent journal.
+  if (!validJournal(journal)) return journal
+  // The v1 journal remains the immutable intent and is a complete recovery fallback. A
+  // malformed, stale, or missing sidecar is disposable and must never authorize a new phase.
+  if (!validJournalState(state, journal)) return journal
+  return {
+    ...journal,
+    phase: state.phase,
+    ...(state.recordId ? { recordId: state.recordId } : {})
+  }
 }
 
 function managedArtifactIdentity(value: unknown): {
@@ -155,6 +191,10 @@ function journalRoot(userDataDir: string): string {
   return join(userDataDir, 'managed-turn-commits')
 }
 
+function journalStateRoot(userDataDir: string): string {
+  return join(userDataDir, 'managed-turn-journal-state')
+}
+
 function progressRoot(userDataDir: string): string {
   return join(userDataDir, 'managed-turn-progress')
 }
@@ -167,8 +207,37 @@ function journalPath(userDataDir: string, runId: string): string {
   return join(journalRoot(userDataDir), `${safeKey(runId)}.json`)
 }
 
+function journalStatePath(userDataDir: string, runId: string): string {
+  return join(journalStateRoot(userDataDir), `${safeKey(runId)}.json`)
+}
+
 function lockPath(userDataDir: string, runId: string): string {
   return join(journalRoot(userDataDir), 'locks', `${safeKey(runId)}.lock`)
+}
+
+async function readManagedJournalAt(
+  journalFile: string,
+  stateFile: string
+): Promise<ManagedTurnJournal | null> {
+  const journal = await readJson<ManagedTurnJournal>(journalFile)
+  const state = journal ? await readJson<ManagedTurnJournalState>(stateFile) : null
+  return normalizeJournal(journal, state)
+}
+
+async function readManagedJournal(userDataDir: string, runId: string): Promise<ManagedTurnJournal | null> {
+  return readManagedJournalAt(journalPath(userDataDir, runId), journalStatePath(userDataDir, runId))
+}
+
+async function writeJournalState(
+  userDataDir: string,
+  journal: ManagedTurnJournal
+): Promise<void> {
+  await writeJsonAtomic(journalStatePath(userDataDir, journal.request.turn.runId), {
+    schemaVersion: 1,
+    phase: journal.phase,
+    archiveFingerprint: journal.archiveFingerprint,
+    ...(journal.recordId ? { recordId: journal.recordId } : {})
+  } satisfies ManagedTurnJournalState)
 }
 
 function atomicTempPaths(path: string): string[] {
@@ -226,7 +295,11 @@ export async function deleteManagedTurnArtifacts(
     const lock = lockPath(userDataDir, runId)
     try {
       await withDirectoryLock(lock, async () => {
-        const paths = [progressPath(userDataDir, runId), journalPath(userDataDir, runId)]
+        const paths = [
+          progressPath(userDataDir, runId),
+          journalPath(userDataDir, runId),
+          journalStatePath(userDataDir, runId)
+        ]
         for (const path of paths.flatMap((value) => [value, ...atomicTempPaths(value)])) {
           try { rmSync(path, { force: true }) } catch (error) {
             failed.push({ path, error: error instanceof Error ? error.message : String(error) })
@@ -245,7 +318,7 @@ export async function deleteManagedTurnArtifacts(
 }
 
 export function cleanupManagedTurnTemps(userDataDir: string): void {
-  for (const root of [progressRoot(userDataDir), journalRoot(userDataDir)]) {
+  for (const root of [progressRoot(userDataDir), journalRoot(userDataDir), journalStateRoot(userDataDir)]) {
     let names: string[]
     try { names = readdirSync(root) } catch { continue }
     for (const name of names) {
@@ -379,7 +452,7 @@ function assertProgressIdentity(
 async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<ManagedTraceTurnCommitInput> {
   const [progress, journal, location] = await Promise.all([
     readJson<ManagedTurnProgress>(progressPath(input.userDataDir, input.turn.runId)),
-    readJson<ManagedTurnJournal>(journalPath(input.userDataDir, input.turn.runId)),
+    readManagedJournal(input.userDataDir, input.turn.runId),
     resolveRecorderLocation(input.cwd)
   ])
   if (progress) {
@@ -414,7 +487,7 @@ async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<
   return { ...input, turn: protectToolContent(turn, input.cwd) }
 }
 
-function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void {
+async function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): Promise<void> {
   const request = journal.request
   const existing = findTraceArchiveTurnMatches({
     cwd: request.cwd,
@@ -434,7 +507,7 @@ function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void 
   if (existing.byRunId && stableHash(existing.byRunId) !== stableHash(request.turn)) {
     throw new Error(`managed recorder archive collision for ${request.turn.runId}`)
   }
-  const ok = upsertTraceArchiveTurn({
+  const ok = await upsertTraceArchiveTurnAsync({
     cwd: request.cwd,
     sessionId: request.sessionId,
     providerId: request.providerId,
@@ -524,10 +597,10 @@ async function replayJournal(
   // This path only runs for a fingerprint-validated, terminal journal. It may safely rebuild a
   // lifecycle that an older recovery pass discarded before preparing the canonical handoff.
   const prepared = await prepareJournalRecord(journal, waitMs, true)
-  await writeJsonAtomic(path, prepared)
-  archiveJournal(prepared, userDataDir)
+  await writeJournalState(userDataDir, prepared)
+  await archiveJournal(prepared, userDataDir)
   const archiveCommitted: ManagedTurnJournal = { ...prepared, phase: 'archive_committed' }
-  await writeJsonAtomic(path, archiveCommitted)
+  await writeJournalState(userDataDir, archiveCommitted)
   if (!archiveCommitted.recordId) throw new Error('managed recorder journal has no prepared record id')
   const evidence = archiveCommitted.request.turn.turnEvidence
   if (!evidence) throw new Error('managed recorder journal is missing TurnEvidence')
@@ -552,6 +625,8 @@ async function replayJournal(
   }
   await rm(progressPath(userDataDir, journal.request.turn.runId), { force: true })
   await rm(path, { force: true })
+  // The sidecar is disposable. Remove it only after its immutable manifest is gone.
+  await rm(journalStatePath(userDataDir, journal.request.turn.runId), { force: true })
   return 'recovered'
 }
 
@@ -621,7 +696,7 @@ export async function commitManagedTraceTurn(
         return { recorder: 'disabled' }
       }
     }
-    const ok = upsertTraceArchiveTurn({
+    const ok = await upsertTraceArchiveTurnAsync({
       cwd: input.cwd,
       sessionId: input.sessionId,
       providerId: input.providerId,
@@ -639,10 +714,11 @@ export async function commitManagedTraceTurn(
   const removeArtifact = options.removeArtifact ?? ((target: string) => rm(target, { force: true }))
   return withDirectoryLock(lockPath(input.userDataDir, input.turn.runId), async () => {
     const fingerprint = archiveFingerprint(input)
-    const existing = await readJson<ManagedTurnJournal>(path)
+    const existing = await readManagedJournal(input.userDataDir, input.turn.runId)
     if (existing && existing.archiveFingerprint !== fingerprint) {
       throw new Error(`managed recorder journal collision for ${input.turn.runId}`)
     }
+    if (!existing) await rm(journalStatePath(input.userDataDir, input.turn.runId), { force: true })
     const journal: ManagedTurnJournal = existing ?? {
       schemaVersion: 1,
       phase: 'prepared',
@@ -658,12 +734,12 @@ export async function commitManagedTraceTurn(
         status: input.status
       }
     }
-    await writeJsonAtomic(path, journal)
+    if (!existing) await writeJsonAtomic(path, journal)
     const prepared = await prepareJournalRecord(journal, options.waitMs ?? 5_000)
-    await writeJsonAtomic(path, prepared)
-    archiveJournal(prepared, input.userDataDir)
+    await writeJournalState(input.userDataDir, prepared)
+    await archiveJournal(prepared, input.userDataDir)
     const archiveCommitted: ManagedTurnJournal = { ...prepared, phase: 'archive_committed' }
-    await writeJsonAtomic(path, archiveCommitted)
+    await writeJournalState(input.userDataDir, archiveCommitted)
     if (!archiveCommitted.recordId) throw new Error('managed recorder journal has no prepared record id')
     const evidence = archiveCommitted.request.turn.turnEvidence
     if (!evidence) throw new Error('managed recorder journal is missing TurnEvidence')
@@ -687,6 +763,8 @@ export async function commitManagedTraceTurn(
     }
     await removeArtifact(progressPath(input.userDataDir, input.turn.runId))
     await removeArtifact(path)
+    // A state orphan cannot authorize recovery without the manifest and is cleaned second.
+    await removeArtifact(journalStatePath(input.userDataDir, input.turn.runId))
     return { recorder: 'committed' as const, recordId: committed.recordId }
   })
 }
@@ -796,7 +874,10 @@ export async function recoverManagedTraceTurns(
   for (const name of await listFiles(journalRoot(userDataDir))) {
     if (!name.endsWith('.json')) continue
     const path = join(journalRoot(userDataDir), name)
-    const journal = await readJson<ManagedTurnJournal>(path)
+    const journal = await readManagedJournalAt(
+      path,
+      join(journalStateRoot(userDataDir), name)
+    )
     if (!validJournal(journal)) {
       const identity = managedArtifactIdentity(journal)
       if (!scoped || (identity && managedIdentityMatches(identity, options))) {
