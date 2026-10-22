@@ -1,13 +1,13 @@
 # A1 process identity measurement
 
-- Path: `providers` launch/stop identity capture.
-- Baseline commit: `c453281`.
-- Candidate/optimization commit: `fabced4`.
+- Path: provider launch/stop identity capture.
+- Baseline source: `bf92d04` (the original pre-optimization tree).
+- Candidate source: `fabced4` plus the corrected collector in this follow-up.
 - Scope: local child-process fixtures only. No Claude/Qoder provider, network, account, or paid work was used.
 
-## Reproducible harness
+## Reproducible L1 collector
 
-`src/main/process-identity-measurement.test.ts` starts `/bin/sh -c 'sleep 2'` as a detached child for three Claude-labelled and three Qoder-labelled spawn-equivalent samples. It wraps the production `captureProcessIdentity` lister and counts each process-list invocation. The child process group is killed in test cleanup.
+`src/main/process-identity-measurement.test.ts` starts `/bin/sh -c 'sleep 2'` as a detached child for three Claude-labelled and three Qoder-labelled spawn-equivalent samples. It calls the production `captureProcessIdentity(child.pid)` with its default lister. A pass-through `node:child_process` mock records the real executable, argv, whether the call is full-table or target-PID, and returned row count. The child group is killed and its exit is awaited before the fixture is cleaned up.
 
 Run:
 
@@ -15,43 +15,24 @@ Run:
 npx vitest run src/main/process-identity-measurement.test.ts --reporter verbose
 ```
 
-The repository's provided `node_modules` symlink currently points at an install whose `vitest` package has no `package.json`, so the test runner could not load `vitest/config` in this worktree. The equivalent production baseline was run with the Node harness below instead; it uses the same `/bin/ps -axo pid=,ppid=,stat=,lstart=,command=` call and `LC_ALL=C` environment used by the current implementation.
-
-```bash
-node --input-type=module <<'NODE'
-import {spawn, execFileSync} from 'node:child_process'
-import {performance} from 'node:perf_hooks'
-const samples={claude:[],qoder:[]}, calls={claude:0,qoder:0}
-for (const provider of Object.keys(samples)) for(let i=0;i<3;i++) {
- const child=spawn('/bin/sh',['-c','sleep 2'],{detached:true,stdio:'ignore'})
- const started=performance.now()
- try {
-   calls[provider]++
-   const output=execFileSync('/bin/ps',['-axo','pid=,ppid=,stat=,lstart=,command='],{encoding:'utf8',maxBuffer:8*1024*1024,env:{...process.env,LC_ALL:'C'}})
-   if (!output.includes(String(child.pid))) throw new Error('child not found')
-   samples[provider].push(Number((performance.now()-started).toFixed(3)))
- } finally {try{process.kill(-child.pid,'SIGKILL')}catch{}}
-}
-console.log(JSON.stringify({command:'captureProcessIdentity equivalent',calls,samples}))
-NODE
-```
-
-Observed on this macOS host before optimization:
-
-```json
-{"command":"captureProcessIdentity equivalent","calls":{"claude":3,"qoder":3},"samples":{"claude":[68.495,38.07,37.335],"qoder":[36.005,36.718,43.113]}}
-```
-
-The committed Vitest harness was also rerun after the optimization commit. Its wrapper intentionally retains the baseline full-table lister so the historical count remains reproducible:
+The same test file was copied into an isolated worktree at `bf92d04` for the baseline run; it was not committed there. The recorded L1 results were:
 
 ```text
-A1 baseline {"command":"captureProcessIdentity at controlled Claude/Qoder spawn","measurements":[{"provider":"claude","samplesMs":[54.604,49.538,46.336],"psCalls":3},{"provider":"qoder","samplesMs":[51.61,43.268,43.606],"psCalls":3}]}
+baseline bf92d04: 6 execFileSync /bin/ps calls; 6 full-table calls using
+  [-axo, pid=,ppid=,stat=,lstart=,command=]; returned 714–717 rows each;
+  Claude 3 calls, Qoder 3 calls.
+candidate: 6 execFile /bin/ps calls; 6 target calls using
+  [-o, pid=,ppid=,stat=,lstart=,command=, -p, <child pid>]; returned 1 row each;
+  Claude 3 calls, Qoder 3 calls.
 ```
 
-This is L1 evidence: six full-table `ps` calls for six controlled spawn-equivalent captures. The sample durations are controlled local measurements, not an L2 user timing claim; no timing-run lock was used because the result is reported as a work/count baseline. Before `fabced4`, the implementation synchronously scanned the complete process table for each capture, while both launch sites needed one PID identity. The candidate now starts one asynchronous targeted lookup per spawn and keeps the full-table diagnostic verifier unchanged.
+The collector therefore measures the actual default implementation on both sides. It does not inject the baseline full-table lister into the candidate, and it does not include elapsed-time samples.
+
+The earlier committed `samplesMs` values and any timings collected without the `timing-run.mjs` host lock are unlocked historical timings. They are not valid L2 evidence and must not be used as a user-timing claim. This follow-up reports only the reproducible L1 work/count change. No timing run was needed.
 
 ## Guardrails
 
 - `readProcessSnapshot` full-table diagnostics remain out of scope.
-- Identity capture and verification must keep the same `LC_ALL=C` `lstart` format.
+- Identity capture and verification keep the same `LC_ALL=C` `lstart` format.
 - Unknown, timeout, or failed identity must not send a signal, including direct child fallback.
+- Baseline fixture cleanup verifies its own child exits before the temporary worktree is removed.
