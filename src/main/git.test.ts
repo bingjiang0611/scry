@@ -791,29 +791,34 @@ describe('每轮 Git 工作树快照', () => {
     }
   }, 15_000)
 
-  it('大文件 patch 不再按单文件预算截断，且 numstat 保持完整', async () => {
+  it('大文件 patch 保留与 native Git 一致的完整字节，且 numstat 保持完整', async () => {
     const root = await initRepo()
     try {
       await writeFile(join(root, 'base.txt'), 'base\n')
+      await writeFile(join(root, 'large.txt'), 'before\n')
       await pexecFile('git', ['add', '.'], { cwd: root })
       await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
 
       const capture = await beginGitTurnDiff(root)
       await writeFile(join(root, 'large.txt'), `${'你'.repeat(Math.ceil((17 * 1024 * 1024) / 3))}\n`)
       const result = await finishGitTurnDiff(capture, 10_000)
+      const oracle = await pexecFile('git', [
+        '-c', 'core.fsmonitor=false', '-c', 'diff.suppressBlankEmpty=false',
+        'diff', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=3',
+        '--src-prefix=a/', '--dst-prefix=b/', '--line-prefix=',
+        '--output-indicator-new=+', '--output-indicator-old=-', '--output-indicator-context= ',
+        'HEAD', '--', 'large.txt'
+      ], { cwd: root, maxBuffer: 32 * 1024 * 1024 })
 
       expect(result.status).toBe('captured')
-      expect(result.files[0]).toMatchObject({
-        added: 1,
-        deleted: 0,
-        patchStatus: 'captured'
-      })
-      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeGreaterThan(32 * 1024)
+      expect(result.files[0]).toMatchObject({ added: 1, deleted: 1, patchStatus: 'captured' })
+      expect(result.files[0].patch).toBe(oracle.stdout)
+      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeGreaterThan(16 * 1024 * 1024)
       expect(result.files[0].patch).not.toContain('�')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
-  }, 15_000)
+  }, 30_000)
 
   it('批量 patch 以 raw 路径映射奇异文件名，并忽略 hunk 内的伪 header', async () => {
     const root = await initRepo()
@@ -824,6 +829,7 @@ describe('每轮 Git 工作树快照', () => {
       const names = [
         'space name.txt',
         `quote\"single'${backslash}日本.txt`,
+        'glob*?[x].txt',
         `line${newline}name.txt`,
         ...Array.from({ length: 132 }, (_, index) => `batch-${String(index).padStart(3, '0')}.txt`)
       ]
@@ -849,6 +855,26 @@ describe('每轮 Git 工作树快照', () => {
       await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('patch framing pins blank context indicators despite repository config', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'blank.txt'), 'first\n\nold\nlast\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      await pexecFile('git', ['config', 'diff.suppressBlankEmpty', 'true'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      await writeFile(join(root, 'blank.txt'), 'first\n\nnew\nlast\n')
+
+      const result = await finishGitTurnDiff(capture, 10_000)
+      expect(result.files[0]).toMatchObject({ patchStatus: 'captured' })
+      expect(result.files[0].patch).toContain(' \n')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
 
   it('空文件删除与 mode-only patch 都保留完整边界', async () => {
     const root = await initRepo()
@@ -892,6 +918,39 @@ describe('每轮 Git 工作树快照', () => {
       })
       expect(result.files[0].patch).toBeUndefined()
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('文件到目录转换时 exact pathspec 不捕获策略排除的后代文件', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'a'), 'old\n')
+      await writeFile(join(root, 'z'), 'old\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      capture = await beginGitTurnDiff(root)
+      await rm(join(root, 'a'))
+      await mkdir(join(root, 'a'))
+      await writeFile(join(root, 'a', 'private.env'), 'secret\n')
+      await writeFile(join(root, 'z'), 'new\n')
+      const result = await finishGitTurnDiff(capture, 10_000, { patchExcludeBasenames: ['private.env'] })
+      const canonicalRoot = await realpath(root)
+      const byPath = new Map(result.files.map(file => [file.path, file]))
+
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(3)
+      expect(byPath.get(join(canonicalRoot, 'a'))).toMatchObject({ patchStatus: 'captured' })
+      expect(byPath.get(join(canonicalRoot, 'a', 'private.env'))).toMatchObject({
+        patchStatus: 'unavailable', patchReason: 'policy'
+      })
+      expect(byPath.get(join(canonicalRoot, 'z'))).toMatchObject({ patchStatus: 'captured' })
+      expect(byPath.get(join(canonicalRoot, 'z'))?.patch).toContain('+new')
+      expect(result.files.filter(file => file.patchStatus === 'captured')).toHaveLength(2)
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)
