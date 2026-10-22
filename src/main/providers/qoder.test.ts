@@ -13,8 +13,17 @@ const sdk = vi.hoisted(() => ({
   forkSession: vi.fn(),
   runtimeCliEnv: vi.fn((_base?: Record<string, string>, _options: { managedRecorder?: boolean } = {}) => ({}))
 }))
+const diagnostics = vi.hoisted(() => ({ capture: vi.fn(), signal: vi.fn() }))
 
 vi.mock('node:child_process', () => ({ spawn: sdk.spawn }))
+vi.mock('../process-diagnostics', async () => {
+  const actual = await vi.importActual<typeof import('../process-diagnostics')>('../process-diagnostics')
+  return {
+    ...actual,
+    captureProcessIdentity: diagnostics.capture,
+    signalProcessTreeWithIdentity: diagnostics.signal
+  }
+})
 
 vi.mock('@qoder-ai/qoder-agent-sdk', () => ({
   qodercliAuth: () => ({ type: 'qodercli' }),
@@ -43,8 +52,84 @@ import {
 describe('Qoder provider adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    diagnostics.capture.mockReset()
+    diagnostics.signal.mockReset()
     sdk.getSessionMessages.mockReset().mockResolvedValue([])
     sdk.forkSession.mockReset()
+  })
+
+  async function startIdentityRun(identityPromise: Promise<{ pid: number; startedAt?: string; command?: string } | undefined>) {
+    const child = Object.assign(new EventEmitter(), { pid: 901, kill: vi.fn() })
+    sdk.spawn.mockReturnValue(child)
+    diagnostics.capture.mockReturnValue(identityPromise)
+    sdk.query.mockImplementation(({ options }) => {
+      options.spawnQoderCLIProcess({
+        command: '/bin/qodercli', args: [], cwd: '/repo', env: {}, signal: options.abortController.signal
+      })
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'result', subtype: 'success', session_id: 'qoder-identity-test' }
+        },
+        close: vi.fn().mockResolvedValue(undefined),
+        interrupt: vi.fn().mockResolvedValue(undefined)
+      }
+    })
+    const handle = createQoderAdapter().run({
+      runId: 'run-identity-test', prompt: 'work', cwd: '/repo', attachments: [], emit: () => {}
+    })
+    for (let attempt = 0; attempt < 10 && !diagnostics.capture.mock.calls.length; attempt += 1) await Promise.resolve()
+    expect(diagnostics.capture).toHaveBeenCalledWith(901)
+    return handle
+  }
+
+  it.each(['pending', 'rejected', 'unknown'] as const)('does not abort-signal when Qoder identity is %s', async (state) => {
+    let identityPromise: Promise<{ pid: number; startedAt?: string } | undefined>
+    if (state === 'pending') identityPromise = new Promise(() => {})
+    else if (state === 'rejected') identityPromise = Promise.reject(new Error('identity unavailable'))
+    else identityPromise = Promise.resolve({ pid: 901 })
+    const handle = await startIdentityRun(identityPromise)
+
+    handle.interrupt()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(diagnostics.signal).not.toHaveBeenCalled()
+  })
+
+  it('abort-signals Qoder only after its identity promise resolves', async () => {
+    const identity = { pid: 901, startedAt: 'Wed Oct 15 10:00:00 2026', command: 'qoder' }
+    const handle = await startIdentityRun(Promise.resolve(identity))
+
+    handle.interrupt()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(diagnostics.signal).toHaveBeenCalledWith({ identity, signal: 'SIGTERM' })
+  })
+
+  it.each(['pending', 'rejected', 'unknown'] as const)('does not force-kill when Qoder identity is %s', async (state) => {
+    let identityPromise: Promise<{ pid: number; startedAt?: string } | undefined>
+    if (state === 'pending') identityPromise = new Promise(() => {})
+    else if (state === 'rejected') identityPromise = Promise.reject(new Error('identity unavailable'))
+    else identityPromise = Promise.resolve({ pid: 901 })
+    const handle = await startIdentityRun(identityPromise)
+
+    handle.forceKill()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(diagnostics.signal).not.toHaveBeenCalled()
+  })
+
+  it('force-kills Qoder only after its identity promise resolves', async () => {
+    const identity = { pid: 901, startedAt: 'Wed Oct 15 10:00:00 2026', command: 'qoder' }
+    const handle = await startIdentityRun(Promise.resolve(identity))
+
+    handle.forceKill()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(diagnostics.signal).toHaveBeenCalledWith({ identity, signal: 'SIGKILL' })
   })
 
   it('resolves the qodercli symlink to its JavaScript bundle for the SDK launch', async () => {
