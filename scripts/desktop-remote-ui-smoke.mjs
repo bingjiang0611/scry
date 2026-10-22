@@ -577,10 +577,12 @@ async function exercise(contents, pointer, capture, options) {
   await wait('!document.querySelector(".composer-notice button").disabled', 'focused controls settle')
   const beforeHidden = (await fixture()).providerControlsCalls.length
   const catalogBeforeHidden = (await fixture()).catalogCalls
-  await read('Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); window.desktopRemoteFixture.providerMetadataRevision += 1')
-  await wait('window.desktopRemoteFixture.catalogCalls > ' + catalogBeforeHidden, 'hidden metadata observation')
+  await read('Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('document.hidden && document.visibilityState === "hidden"', 'consistent hidden document state')
+  check((await fixture()).catalogCalls === catalogBeforeHidden, 'Hidden composer polled metadata')
   check((await fixture()).providerControlsCalls.length === beforeHidden, 'Hidden composer initialized a Provider')
-  await read('delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange"))')
+  await read('delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange"))')
+  await wait('window.desktopRemoteFixture.catalogCalls > ' + catalogBeforeHidden, 'visible composer catches up metadata')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeHidden, 'visible composer reobserves its selected controls')
   }
   await click('.sb-new')
