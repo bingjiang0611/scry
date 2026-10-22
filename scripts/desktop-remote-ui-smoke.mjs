@@ -29,6 +29,7 @@ const composerHistoryOnly = process.argv.includes('--composer-history-only')
 const lifecycleOnly = process.argv.includes('--session-lifecycle-only')
 const openingOnly = process.argv.includes('--session-opening-only')
 const measureOpening = process.argv.includes('--measure-session-opening')
+const visibilityPollingBaseline = process.argv.includes('--visibility-polling-baseline')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
 let failed = false
@@ -37,11 +38,16 @@ let failed = false
 // Provider, opens a socket, reads credentials, or calls the local run-control API.
 const fixtureSource = `
 import { createRoot } from 'react-dom/client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
+import { RemotePairing } from ${JSON.stringify(join(root, 'src/renderer/components/RemotePairing.tsx'))}
+import { RemoteChat } from ${JSON.stringify(join(root, 'src/renderer/components/RemoteChat.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
-import { refreshRemoteCatalog } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
+import { refreshRemoteCatalog, useConnectedCatalogLoader } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
 import { refreshDesktopConnections } from ${JSON.stringify(join(root, 'src/renderer/hooks/useDesktopConnections.ts'))}
+import { createComposerDraftStore } from ${JSON.stringify(join(root, 'src/renderer/composer-drafts.ts'))}
+import { RemotePromptQueueStore } from ${JSON.stringify(join(root, 'src/renderer/remote-prompt-queue.ts'))}
+import { createRightSurfaceState } from ${JSON.stringify(join(root, 'src/renderer/right-surface.ts'))}
 import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
 import ${JSON.stringify(join(root, 'src/renderer/codex-alignment.css'))}
 
@@ -52,7 +58,7 @@ const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyPrompts: ['older remote prompt', 'latest remote prompt'],
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
-  catalogCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
+  listCalls: 0, catalogCalls: 0, remoteStatusCalls: 0, runStatusCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
   providerControlsFailure: null, legacyProviderHost: false,
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
@@ -111,7 +117,7 @@ const question = { runId: firstScryRun, questionId: 'fixture-question', provider
   question: '继续远程运行？', header: '确认', options: [{ label: '继续', description: '继续执行' }], multiSelect: false, allowCustomAnswer: false
 }] }
 const api = {
-  async list() { if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
+  async list() { state.listCalls++; if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
   async pair() { throw new Error('pairing is outside this fixture') },
   async finishPairing() { throw new Error('pairing is outside this fixture') },
   async updateSsh(id, ssh) {
@@ -235,6 +241,7 @@ const api = {
     return structuredClone(state.intent)
   },
   async runStatus(_id, runId) {
+    state.runStatusCalls++
     if (runId === 'received-active-run') return { state: 'dispatched', detail: 'fixture received active task' }
     if (state.holdRunStatus) await new Promise(resolve => { window.releaseRunStatus = resolve })
     if (state.runStatusFailure) throw new Error('desktop_remote_output_capture_queue_full')
@@ -298,6 +305,7 @@ window.scry = {
   newSession: async () => { state.localNewSessions++; return true },
   start: async () => { state.localStarts++; throw new Error('Local execution must not be reached') },
   remoteStatus: async () => {
+    state.remoteStatusCalls++
     if (state.phoneStatusFailure) throw new Error('fixture phone status unavailable')
     return state.phoneEnabled ? { enabled: true, hostId: 'local-host', anchorSHA256: 'local-anchor', relayConfigured: state.relayConfigured,
       pending: [], devices: [{ deviceId: 'phone', deviceLabel: 'Fixture iPhone', confirmedAt: 1, expiresAt: 4102444800000, revoked: false }] } : { enabled: false }
@@ -320,8 +328,21 @@ for (const type of ['keydown', 'change', 'mousedown', 'click']) document.addEven
   state.uiEvents.push({ type, key: event.key, value: event.target.value, tag: event.target.tagName, text: event.target.textContent?.slice(0, 100) })
   if (state.uiEvents.length > 24) state.uiEvents.shift()
 }, true)
+function VisibilityPollingFixture() {
+  const scrollRef = useRef(null)
+  const textareaRef = useRef(null)
+  useConnectedCatalogLoader([connection], null)
+  return <>
+    <RemotePairing onNewSession={() => {}} />
+    <RemoteChat connectionId={connection.id} cwd="/fixture/project-a" draftStore={createComposerDraftStore(new Map())}
+      queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}} scrollRef={scrollRef} textareaRef={textareaRef}
+      renderLocationPicker={() => null} onSessionAdopted={() => {}}
+      surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }} />
+  </>
+}
 function Fixture() {
   const [fullApp, setFullApp] = useState(false)
+  if (${visibilityPollingBaseline}) return <VisibilityPollingFixture />
   if (fullApp) return <App />
   return <><RemoteHostPanel />
     <button data-app-fixture style={{ position: 'fixed', top: 2, right: 2, zIndex: 9999 }} onClick={() => { if (!${unknownReceiptOnly}) state.intent = null; setFullApp(true) }}>Full App</button>
@@ -332,6 +353,15 @@ createRoot(document.getElementById('root')).render(<Fixture />)
 
 async function exercise(contents, pointer, capture, options) {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
+  if (options.visibilityPollingBaseline) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    await contents.executeJavaScript('Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange"))')
+    const hidden = await contents.executeJavaScript('document.hidden')
+    const before = await contents.executeJavaScript('({ list: window.desktopRemoteFixture.listCalls, catalog: window.desktopRemoteFixture.catalogCalls, remoteStatus: window.desktopRemoteFixture.remoteStatusCalls, intents: window.desktopRemoteFixture.intentsCalls, runStatus: window.desktopRemoteFixture.runStatusCalls, trace: window.desktopRemoteFixture.traceCalls.length })')
+    await new Promise(resolve => setTimeout(resolve, 60_000))
+    const after = await contents.executeJavaScript('({ list: window.desktopRemoteFixture.listCalls, catalog: window.desktopRemoteFixture.catalogCalls, remoteStatus: window.desktopRemoteFixture.remoteStatusCalls, intents: window.desktopRemoteFixture.intentsCalls, runStatus: window.desktopRemoteFixture.runStatusCalls, trace: window.desktopRemoteFixture.traceCalls.length })')
+    return { durationSeconds: 60, hidden, before, after, delta: Object.fromEntries(Object.keys(after).map(key => [key, after[key] - before[key]])) }
+  }
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression, label = expression) => {
     const deadline = Date.now() + 7000
@@ -1342,7 +1372,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline} })
         // Native input and capture have finished. Release their debugger/window
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()
@@ -1366,7 +1396,7 @@ try {
       cleanupTimer = stopOwnedApp(child).then(() => reject(failure), (error) => { cleanupUnknown = true; reject(new Error(`DesktopRemote cleanup unknown; fixture preserved: ${temp}`, { cause: error })) })
     // Includes three 3s background catalog transitions plus recorded/unknown/
     // dispatched run polls. Per-condition deadlines stay unchanged at 7s.
-    }, 55_000)
+    }, visibilityPollingBaseline ? 75_000 : 55_000)
     child.stdout.on('data', (chunk) => {
       output += chunk.toString()
       if (lifecycle.resultAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_RESULT=')) lifecycle.resultAtMs = Math.round(performance.now() - startedAt)
