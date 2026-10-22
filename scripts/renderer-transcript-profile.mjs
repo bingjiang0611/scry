@@ -1,4 +1,4 @@
-// Isolated production-component profile, NOT a full App or Provider benchmark.
+// Isolated production renderer profile (App/component); NOT a main/Provider benchmark.
 // Run with .agents/skills/scry-performance-climb/scripts/timing-run.mjs.
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -11,7 +11,10 @@ import electron from 'electron'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-transcript-profile-'))
 const controls = process.argv.includes('--controls')
+const fullApp = process.argv.includes('--app')
 const anchors = {
+  'App.tsx': [['App', '  const [theme, setTheme] = useState<AppTheme>']],
+  'Sidebar.tsx': [['Sidebar', '  const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)']],
   'ChatView.tsx': [
     ['ChatView', "  const [composerMenu, setComposerMenu] = useState"],
     ['ChatTranscriptTurns', '  const windowed = shouldWindowTranscript(turns)'],
@@ -66,7 +69,7 @@ function bootstrap() {
   }).observe({ type: 'longtask', buffered: true })
 }
 
-async function exercise(contents, controls) {
+async function exercise(contents, controls, fullApp) {
   const read = expression => contents.executeJavaScript(expression, true)
   const frame = () => read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   const wait = expression => read(`(async () => {
@@ -85,6 +88,12 @@ async function exercise(contents, controls) {
   const stats = values => {
     const sorted = [...values].sort((a, b) => a - b)
     return { samples: sorted.length, p50: sorted[Math.ceil(sorted.length * .5) - 1], p95: sorted[Math.ceil(sorted.length * .95) - 1] }
+  }
+  if (fullApp) {
+    await wait('document.querySelector(".sb-sess") != null')
+    const point = await read('(() => { const rect = document.querySelector(".sb-sess").getBoundingClientRect(); return {x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2)}; })()')
+    contents.sendInputEvent({type: 'mouseDown', button: 'left', clickCount: 1, ...point})
+    contents.sendInputEvent({type: 'mouseUp', button: 'left', clickCount: 1, ...point})
   }
   await wait('document.querySelectorAll(".transcript-turn").length > 0 && typeof profileStream === "function"')
   const viewport = await read('(() => { const element = document.querySelector(".chat-transcript"); return {width: element.clientWidth, height: element.clientHeight}; })()')
@@ -129,7 +138,7 @@ async function exercise(contents, controls) {
   if (streamCommits.AssistantTurn !== 30 || streamCommits.TranscriptTurn !== 30) throw new Error(`Unrelated turns rerendered: ${JSON.stringify(streamCommits)}`)
   if (afterStream.mounted >= 40) throw new Error(`Unbounded mounted content: ${afterStream.mounted}`)
   if (controls && (afterSelection.counts.releaseChecks - beforeSelection.counts.releaseChecks) > 400) throw new Error('Selection fanout grows with history')
-  if (controls && (afterSelection.resources.IntersectionObserver !== 1 || afterSelection.resources.MutationObserver > afterSelection.mounted || afterSelection.resources.selectionListeners > 2)) throw new Error('Observer/listener ownership grows with history')
+  if (controls && (afterSelection.resources.IntersectionObserver !== 1 || afterSelection.resources.MutationObserver > afterSelection.mounted + (fullApp ? 1 : 0) || afterSelection.resources.selectionListeners > 2)) throw new Error(`Observer/listener ownership grows with history: ${JSON.stringify({resources: afterSelection.resources, mounted: afterSelection.mounted})}`)
   await read('profileUnmount()')
   await frame()
   const unmounted = await snapshot()
@@ -138,7 +147,7 @@ async function exercise(contents, controls) {
     streaming: { commits: streamCommits, roundTripTwoFrameMs: stats(streamMs) },
     selection: { releaseChecks: afterSelection.counts.releaseChecks - beforeSelection.counts.releaseChecks, resources: afterSelection.resources, dispatchMs: stats(afterSelection.selectionDispatchMs.slice(beforeSelection.selectionDispatchMs.length)) },
     final: afterSelection,
-    app: {availability: 'unavailable', reason: 'Component fixture does not mount App; no App commit/latency conclusion'} }
+    scope: fullApp ? 'production App + offline renderer bridge' : 'production SessionChatView component' }
 }
 
 try {
@@ -147,7 +156,7 @@ try {
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'profile-production-components', enforce: 'pre', transform(source, id) {
       const entries = anchors[id.split('/').at(-1)]
-      if (!entries || !id.startsWith(join(root, 'src/renderer/components/'))) return
+      if (!entries || !id.startsWith(join(root, 'src/renderer/'))) return
       let code = "import { useLayoutEffect as profileCommit } from 'react'\n" + source
       for (const [key, anchor, commit = true] of entries) {
         if (code.split(anchor).length !== 2) throw new Error(`Profile anchor changed: ${key}`)
@@ -179,9 +188,9 @@ try {
           win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({cancel: !details.url.startsWith('file:')}));
           win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
           win.webContents.on('console-message', event => console.error(event.message));
-          await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, {query: {turns: String(turns)}});
+          await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, {query: {turns: String(turns), ...(${fullApp} ? {app: '1'} : {})}});
           win.webContents.focus();
-          const result = await (${exercise.toString()})(win.webContents, ${controls});
+          const result = await (${exercise.toString()})(win.webContents, ${controls}, ${fullApp});
           const memory = app.getAppMetrics().find(metric => metric.pid === win.webContents.getOSProcessId()).memory;
           results.push({turns, ...result, memory});
           win.destroy();

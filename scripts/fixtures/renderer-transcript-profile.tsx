@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { SessionChatView } from '../../src/renderer/components/ChatView'
 import { createComposerDraftStore, updateComposerDraft } from '../../src/renderer/composer-drafts'
 import { applyTraceBatch, type Turn } from '../../src/renderer/format'
+import { App } from '../../src/renderer/App'
+import type { TraceEvent } from '../../src/shared/trace'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 import '../../src/renderer/session-evidence.css'
@@ -45,4 +47,29 @@ function Fixture() {
 
 const root = createRoot(document.getElementById('root')!)
 Object.assign(window, { profileUnmount: () => root.unmount() })
-root.render(<Fixture />)
+if (new URLSearchParams(location.search).has('app')) {
+  localStorage.clear()
+  // Reuse the partial, offline bridge pattern from session-selection-smoke.tsx.
+  // No Provider, credentials, sockets, filesystem or main process APIs are exposed.
+  const listeners = new Set<(events: TraceEvent[]) => void>()
+  const noopSubscribe = () => noop
+  Object.defineProperty(window, 'scry', { value: {
+    activeRun: async () => null, activeRuns: async () => [],
+    onTrace: (listener: (events: TraceEvent[]) => void) => { listeners.add(listener); return () => listeners.delete(listener) },
+    onTurnDone: noopSubscribe, onError: noopSubscribe,
+    listProjects: async () => [{ cwd: '/fixture', name: 'Profile', mtime: 1, sessions: [{
+      sessionId: 'profile-session', externalSessionId: 'profile-session', providerId: 'claude',
+      mtime: 1, preview: 'Transcript profile', count
+    }] }],
+    recentFolders: async () => ['/fixture'], catalogHealth: async () => ({ status: 'ready', source: 'empty' }),
+    detect: async () => [], listSkills: async () => ({ state: 'unavailable', data: null }),
+    mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
+    usageStats: async () => null, stats: async () => null,
+    focusRun: async () => true, setCwd: async (cwd: string | null) => cwd,
+    loadSession: async () => ({ turns: initialTurns, offset: 0, totalTurns: count, hasOlder: false, completeness: 'complete' })
+  } })
+  Object.assign(window, { profileStream: (index: number) => listeners.forEach(listener => listener([{
+    id: `delta-${index}`, runId: `turn-${count - 1}`, ts: '', kind: 'model', stage: 'text_delta', text: ' next'
+  }])) })
+  root.render(<App />)
+} else root.render(<Fixture />)
