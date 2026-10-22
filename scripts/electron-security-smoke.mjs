@@ -16,7 +16,8 @@ const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
-const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
+const nativeHistoryPerformanceOnly = process.argv[2] === '--dev-pi-history-perf-only'
+const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
 const sourceFileHistory = fileHistoryOnly ? JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8')) : null
 const devMetaPromptsOnly = process.argv[2] === '--dev-meta-prompts-only'
@@ -433,15 +434,56 @@ async function main() {
     const nativePath = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`, `2026-10-13_${nativeSessionId}.jsonl`)
     const entries = []
     let parentId = 'a'
-    for (let i = 0; i < 40; i++) {
+    const continuedTurns = nativeHistoryPerformanceOnly ? 4000 : 40
+    for (let i = 0; i < continuedTurns; i++) {
       entries.push({ type: 'message', id: `continued-user-${i}`, parentId, timestamp: '2026-10-13T05:00:00Z',
         message: { role: 'user', content: [{ type: 'text', text: `continued prompt ${i}` }] } })
       parentId = `continued-reply-${i}`
       entries.push({ type: 'message', id: parentId, parentId: `continued-user-${i}`, timestamp: '2026-10-13T05:00:01Z',
-        message: { role: 'assistant', content: [{ type: 'text', text: `continued reply ${i}` }] } })
+        message: { role: 'assistant', content: [{ type: 'text', text: nativeHistoryPerformanceOnly ? `${'reply'.repeat(410)}-${i}` : `continued reply ${i}` }] } })
     }
     appendFileSync(nativePath, '\n' + entries.map(entry => JSON.stringify(entry)).join('\n'))
     const context = { providerId: 'pi', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
+    if (nativeHistoryPerformanceOnly) {
+      const hash = value => createHash('sha256').update(value).digest('hex')
+      const dir = join(userDataDir, 'trace-archive-turns-v1', 'pi', `cwd-${hash(canonicalWorkspace)}`, `sid-${hash(nativeSessionId)}`)
+      mkdirSync(dir, { recursive: true })
+      for (let i = 0; i < continuedTurns; i++) {
+        const runId = `ipc-perf-${i}`
+        const providerTurnId = `continued-user-${i}`
+        writeFileSync(join(dir, `turn-${hash(`provider\0${providerTurnId}`)}.json`), JSON.stringify({
+          version: 3, cwd: canonicalWorkspace, sessionId: nativeSessionId, providerId: 'pi', runtimeProvider: 'pi_rpc',
+          turns: [{ runId, providerTurnId, userText: `continued prompt ${i}`, done: true, status: 'completed', ts: i + 1,
+            items: [{ id: `text-${i}`, runId, kind: 'model', stage: 'text', text: `${'reply'.repeat(410)}-${i}`, ts: '2026-10-13T05:00:01Z' }] }]
+        }))
+      }
+      const samples = []
+      for (let repeat = 0; repeat < 4; repeat++) {
+        const sample = await evaluate(`(async () => {
+          const started = performance.now();
+          const latest = await window.scry.loadSession(${JSON.stringify(context)}, { limit: 40 });
+          const latestAt = performance.now();
+          const older = await window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: latest.offset, limit: 40 });
+          return { latestMs: latestAt - started, olderMs: performance.now() - latestAt,
+            totalMs: performance.now() - started, totalTurns: latest.totalTurns,
+            latestOffset: latest.offset, olderOffset: older.offset,
+            selected: [...latest.turns, ...older.turns].map(turn => [turn.runId, turn.userText,
+              turn.items.filter(item => item.kind === 'model').map(item => item.text)]) };
+        })()`)
+        assert.equal(sample.totalTurns, continuedTurns + 1)
+        assert.equal(sample.selected.length, 80)
+        assert.equal(sample.olderOffset, sample.latestOffset - 40)
+        assert.equal(sample.selected.at(-1)[0], 'ipc-perf-3959')
+        const selectedPayloadSha256 = hash(JSON.stringify(sample.selected))
+        const { selected: _selected, ...metrics } = sample
+        samples.push({ ...metrics, repeat, phase: repeat === 0 ? 'first-open-after-bulk-append' : 'unchanged-warm', selectedPayloadSha256 })
+      }
+      assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+      console.log(JSON.stringify({ test: 'Pi whole production history IPC', canonicalTurns: continuedTurns,
+        nativeTurns: continuedTurns + 1, pageSize: 40, pagesPerSample: 2, samples, noProviderRuns: true }))
+      cdp.close()
+      return
+    }
     const page = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
     assert.equal(page.totalTurns, 41)
     assert.equal(page.offset, 38)
