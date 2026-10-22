@@ -480,6 +480,7 @@ function traceArchiveTurnDir(userDataDir: string, cwd: string, sessionId: string
 
 const TRACE_ARCHIVE_INDEX_SUFFIX = '.index-v1.json'
 const TRACE_ARCHIVE_METADATA_SUFFIX = '.meta-v1.json'
+const TRACE_ARCHIVE_METADATA_FILE = /^turn-[a-f0-9]{64}\.meta-v1\.json$/
 const TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES = 32 * 1024 * 1024
 const TRACE_ARCHIVE_PAGE_INDEX_MAX_ENTRIES = 100_000
 const TRACE_ARCHIVE_TURN_FILE = /^turn-[a-f0-9]{64}\.json$/
@@ -516,6 +517,8 @@ interface TraceArchiveDirectoryStamp {
 
 interface TraceArchiveIndex {
   version: 1 | 2
+  sourceComplete?: boolean
+  sourceIssue?: string
   cwd: string
   sessionId: string
   providerId: ProviderId
@@ -1113,7 +1116,10 @@ async function readSegmentedMetadataIndexAsync(args: {
     const directoryStat = await lstat(dir)
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return null
     const directory = archiveDirectoryStamp(directoryStat)
-    const names = (await readdir(dir)).filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
+    const allNames = await readdir(dir)
+    const names = allNames.filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
+    const metadataNames = allNames.filter((name) => TRACE_ARCHIVE_METADATA_FILE.test(name)).sort()
+    const metadataCoverageComplete = metadataNames.length === names.length && names.every((name) => metadataNames.includes(name.replace(/\.json$/, TRACE_ARCHIVE_METADATA_SUFFIX)))
     // metadata sidecars are disposable; canonical files remain authoritative
     const entries: TraceArchiveIndexEntry[] = []
     for (const file of names) {
@@ -1135,6 +1141,8 @@ async function readSegmentedMetadataIndexAsync(args: {
       entries.push(value)
     }
     return { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory,
+      sourceComplete: metadataCoverageComplete,
+      sourceIssue: metadataCoverageComplete ? undefined : 'canonical archive segment coverage changed',
       entries: entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file)) }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
@@ -1161,6 +1169,9 @@ async function readValidTraceArchiveIndex(args: {
     if (!isTraceArchiveIndex(value, args)) return null
     if (!sameArchiveDirectoryStamp(value.directory, archiveDirectoryStamp(directoryStat))) return null
     if (value.version === 2) {
+      const canonicalNames = (await readdir(dir)).filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
+      const listedNames = new Set(value.entries.map((entry) => entry.file))
+      if (canonicalNames.length !== listedNames.size || canonicalNames.some((name) => !listedNames.has(name))) return null
       for (const entry of value.entries) {
         const stat = await lstat(join(dir, entry.file))
         if (!stat.isFile() || stat.isSymbolicLink() || !sameArchiveSegmentStamp(entry, stat)) return null
@@ -1409,7 +1420,10 @@ export async function readTraceArchiveTurnsAsync(args: {
     args.providerId,
     signal
   )
-  if (monolith.status === 'valid') return monolith.archive.turns.filter((turn) => runIds.includes(turn.runId))
+  if (monolith.status === 'valid') {
+    const merged = await readTraceArchiveAsync(args, signal)
+    return (merged?.turns ?? []).filter((turn) => runIds.includes(turn.runId))
+  }
   const indexed = await readValidTraceArchiveIndex(args, signal) ?? await readSegmentedMetadataIndexAsync(args, signal)
   const index = await upgradeTraceArchiveIndexAsync(args, indexed, signal)
   if (!index || index.version !== 2) {
@@ -1574,7 +1588,8 @@ export async function readTraceArchivePageAsync(
     signal
   )
   if (current.status === 'valid') {
-    const archive = await readTraceArchiveAsync(args, signal)
+    const segmented = await inspectSegmentedArchivesAsync(args, signal)
+    const archive = mergeArchives([current.archive, ...segmented.valid])
     const { offset, end, totalTurns } = traceArchivePageBounds(archive?.turns.length ?? 0, request)
     return {
       archive: archive ? { ...archive, turns: archive.turns.slice(offset, end) } : null,
@@ -1583,7 +1598,8 @@ export async function readTraceArchivePageAsync(
       hasOlder: offset > 0,
       turnFilesRead: totalTurns,
       readMode: 'monolithic',
-      sourceComplete: true
+      sourceComplete: segmented.invalid.length === 0,
+      sourceIssue: segmented.invalid.length ? `${segmented.invalid.length} canonical archive segment(s) unavailable` : undefined
     }
   }
 
@@ -1663,7 +1679,8 @@ export async function readTraceArchivePageAsync(
     hasOlder: offset > 0,
     turnFilesRead: selected.length,
     readMode: 'indexed',
-    sourceComplete: true
+    sourceComplete: index.sourceComplete !== false,
+    sourceIssue: index.sourceIssue
   }
 }
 

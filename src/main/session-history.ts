@@ -66,6 +66,8 @@ export interface SessionHistoryPage {
   offset: number
   totalTurns: number
   hasOlder: boolean
+  /** Canonical source coverage; false means missing/corrupt evidence remains unknown. */
+  sourceComplete?: boolean
   /** partial 表示更早轮次仍在归档里可取，不是被丢弃也不是不存在。 */
   completeness: 'complete' | 'partial'
 }
