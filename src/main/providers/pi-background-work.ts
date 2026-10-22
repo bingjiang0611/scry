@@ -9,7 +9,11 @@ function record(value: unknown): WireEvent {
 }
 
 /** Pi subagents v1 widgets are structured evidence, not a rendered-text heuristic.
- * Missing rows/widget clearing are not task completion (snapshots are capped).
+ * Rows missing from a capped snapshot are an evidence gap, not completion.
+ * An explicit clear is different evidence: the extension clears this widget once it
+ * reports no async jobs left, so observation ends there. Tasks stay visible as
+ * `unconfirmed` — never as completed — and the run may settle, because waiting for a
+ * terminal row that cannot arrive left a real turn owned for hours.
  * Keep ownership through idle and through the completion-to-parent-wakeup gap.
  */
 export class PiBackgroundWork {
@@ -19,15 +23,19 @@ export class PiBackgroundWork {
   private parentIdle = false
   private awaitingContinuation = false
   private observed = false
+  /** Set when the extension cleared the widget: no child can wake this run back up. */
+  private released = false
 
   get pending(): boolean {
-    return this.tasks.size > 0 || this.awaitingContinuation
+    return !this.released && (this.tasks.size > 0 || this.awaitingContinuation)
   }
 
   observe(event: WireEvent, now = Date.now()): BackgroundWork | undefined {
     if (event.type === 'agent_start') {
       this.parentIdle = false
       this.awaitingContinuation = false
+      // A wakeup starts a new cycle; live children in it are tracked again.
+      this.released = false
     } else if (event.type === 'agent_end' || event.type === 'agent_settled') {
       this.parentIdle = true
       if (this.tasks.size > 0) this.awaitingContinuation = true
@@ -37,7 +45,8 @@ export class PiBackgroundWork {
       this.awaitingContinuation = false
     } else if (event.type === 'extension_ui_request' && event.method === 'setWidget' && event.widgetKey === 'subagent-async') {
       const lines = event.widgetLines
-      if (!Array.isArray(lines) || lines.length !== 1 || typeof lines[0] !== 'string' || !lines[0].startsWith(prefix)) return undefined
+      if (!Array.isArray(lines)) return this.release(now)
+      if (lines.length !== 1 || typeof lines[0] !== 'string' || !lines[0].startsWith(prefix)) return undefined
       const json = lines[0].slice(prefix.length)
       if (Buffer.byteLength(json) > 32_768) return undefined
       let snapshot: WireEvent
@@ -56,6 +65,8 @@ export class PiBackgroundWork {
           if (this.tasks.delete(id)) this.awaitingContinuation = true
         } else {
           this.observed = true
+          // Live work outranks an earlier clear: only this snapshot is evidence of it.
+          this.released = false
           this.tasks.set(id, {
             taskId: id, toolUseId: id, tool: 'Agent', description: run.label as string,
             observedAt: this.tasks.get(id)?.observedAt ?? now
@@ -68,14 +79,28 @@ export class PiBackgroundWork {
 
   end(now = Date.now()): BackgroundWork | undefined {
     if (!this.observed) return undefined
-    return { ...this.snapshot(now), phase: 'inactive', tasks: [...this.tasks.values()].map(task => ({ ...task, status: 'unconfirmed' })) }
+    return { ...this.snapshot(now), phase: 'inactive', tasks: this.unconfirmed() }
+  }
+
+  private release(now: number): BackgroundWork | undefined {
+    if (!this.observed || (!this.tasks.size && !this.awaitingContinuation)) return undefined
+    this.released = true
+    this.awaitingContinuation = false
+    return this.snapshot(now)
+  }
+
+  private unconfirmed(): BackgroundTask[] {
+    return [...this.tasks.values()].map(task => ({ ...task, status: 'unconfirmed' as const }))
   }
 
   private snapshot(now: number): BackgroundWork {
+    const pending = this.pending
     return {
-      providerId: 'pi', phase: this.pending ? this.parentIdle ? 'waiting' : 'working' : 'inactive',
+      providerId: 'pi', phase: pending ? this.parentIdle ? 'waiting' : 'working' : 'inactive',
       quiet: false, lastEventAt: now, revision: ++this.revision,
-      tasks: [...this.tasks.values()], coverage: 'partial', taskStop: 'unavailable'
+      // A launch without a terminal state is an unknown outcome, never a completion.
+      tasks: pending ? [...this.tasks.values()] : this.unconfirmed(),
+      coverage: 'partial', taskStop: 'unavailable'
     }
   }
 }

@@ -55,17 +55,33 @@ describe('Pi detached subagent evidence', () => {
     expect(work.pending).toBe(false)
   })
 
-  it('does not infer completion from absent rows, widget clearing, malformed or older evidence', () => {
+  it('does not infer completion from absent rows, malformed or older evidence', () => {
     const work = new PiBackgroundWork()
     work.observe(widget('running', 2))
     work.observe(widget('complete', 1))
-    work.observe({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })
     work.observe({ ...widget('complete', 3), widgetLines: ['PI_SUBAGENT_ASYNC_JSON:{bad'] })
     work.observe({ ...widget('complete', 3), widgetLines: ['PI_SUBAGENT_ASYNC_JSON:' + JSON.stringify({
       kind: 'pi-subagents.async-status-snapshot', version: 1, generatedAt: 3, runs: []
     })] })
     expect(work.pending).toBe(true)
     expect(work.end()?.tasks).toMatchObject([{ taskId: 'child', status: 'unconfirmed' }])
+  })
+
+  it('ends observation when the extension clears the widget instead of waiting forever', () => {
+    const work = new PiBackgroundWork()
+    work.observe(widget('running', 1))
+    work.observe({ type: 'agent_end' })
+    expect(work.pending).toBe(true)
+    // The extension clears this widget once it has no async jobs left. That is the
+    // end of observation, not proof the child succeeded and not a reason to keep
+    // the run owned: a real turn stayed open for hours waiting for a terminal row.
+    expect(work.observe({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })?.tasks)
+      .toMatchObject([{ taskId: 'child', status: 'unconfirmed' }])
+    expect(work.pending).toBe(false)
+    expect(work.observe({ type: 'agent_settled' })?.phase).toBe('inactive')
+    // Live work in a later snapshot outranks the earlier clear.
+    work.observe(widget('running', 5, 'child-2'))
+    expect(work.pending).toBe(true)
   })
 
   it('does not resurrect from stale snapshots or await historical terminal tasks', () => {
