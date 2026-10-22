@@ -1,3 +1,4 @@
+import { createHash, type Hash } from 'node:crypto'
 import { lstat, open, readdir, readFile, realpath, type FileHandle } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { LoadedSessionTurn } from './session-history'
@@ -196,10 +197,59 @@ export async function readPiNativeSession(args: Parameters<typeof locatePiNative
   return readFile(source.canonical, { encoding: 'utf8', signal: args.signal })
 }
 
+interface NativeEntryMetadata extends Pick<NativeEntry, 'id' | 'parentId' | 'type' | 'timestamp'> {
+  role?: string
+  userText?: string
+  blocks?: Array<{ type: string; id?: string; name?: string }>
+  toolCallId?: string
+  toolName?: string
+  isError?: boolean
+}
+
 interface NativeEntryLocation extends Pick<NativeEntry, 'id' | 'parentId'> {
   offset: number
   length: number
+  metadata: NativeEntryMetadata
 }
+
+interface NativeFileStamp {
+  dev: number
+  ino: number
+  size: number
+  mtimeMs: number
+  ctimeMs: number
+}
+
+interface NativeHistoryCache {
+  canonical: string
+  identity: string
+  stamp: NativeFileStamp
+  contentHash: string
+  endsWithNewline: boolean
+  entries: Map<string, NativeEntryLocation>
+  leaf?: NativeEntryLocation
+}
+
+export class PiNativeHistoryStaleError extends Error {
+  constructor() {
+    super('Pi 原生会话在读取期间发生变化，请重新打开会话')
+    this.name = 'PiNativeHistoryStaleError'
+  }
+}
+
+export function isPiNativeHistoryStaleError(error: unknown): boolean {
+  return error instanceof PiNativeHistoryStaleError
+}
+
+export interface PiNativeHistorySnapshot {
+  /** Metadata-only turns. Their items contain identity markers, not provider payload. */
+  turns: LoadedSessionTurn[]
+  sourceRevision: string
+  hydrate(runIds: readonly string[], signal?: AbortSignal): Promise<LoadedSessionTurn[]>
+}
+
+const nativeHistoryCaches = new Map<string, NativeHistoryCache>()
+const maxNativeHistoryCaches = 4
 
 // Keep only entry locations during the scan, not abandoned branches or image
 // payloads. These bounds cap a single record and the tree index, not file size.
@@ -208,23 +258,30 @@ interface NativeEntryLocation extends Pick<NativeEntry, 'id' | 'parentId'> {
 const maxNativeEntryBytes = 64 * 1024 * 1024
 const maxNativeEntries = 1_000_000
 
-async function* nativeLines(file: FileHandle, size: number, signal?: AbortSignal): AsyncGenerator<{ line: Buffer; offset: number }> {
+async function* nativeLines(
+  file: FileHandle,
+  size: number,
+  signal?: AbortSignal,
+  start = 0,
+  fullHash?: Hash
+): AsyncGenerator<{ line: Buffer; offset: number }> {
   let parts: Buffer[] = []
   let length = 0
-  let offset = 0
-  let position = 0
+  let offset = start
+  let position = start
   while (position < size) {
     signal?.throwIfAborted()
     const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size - position))
     const { bytesRead } = await file.read(chunk, 0, chunk.length, position)
-    if (bytesRead === 0) throw new Error('Pi 原生会话在读取期间发生变化，请重新打开会话')
+    if (bytesRead === 0) throw new PiNativeHistoryStaleError()
     position += bytesRead
     const buffer = chunk.subarray(0, bytesRead)
-    let start = 0
-    while (start < buffer.length) {
-      const newline = buffer.indexOf(10, start)
+    fullHash?.update(buffer)
+    let lineStart = 0
+    while (lineStart < buffer.length) {
+      const newline = buffer.indexOf(10, lineStart)
       const end = newline === -1 ? buffer.length : newline + 1
-      const part = buffer.subarray(start, end)
+      const part = buffer.subarray(lineStart, end)
       length += part.length
       if (length > maxNativeEntryBytes) throw new Error('Pi 原生会话单条记录超过 64 MiB')
       parts.push(part)
@@ -234,58 +291,233 @@ async function* nativeLines(file: FileHandle, size: number, signal?: AbortSignal
         parts = []
         length = 0
       }
-      start = end
+      lineStart = end
     }
   }
   if (length) yield { line: Buffer.concat(parts, length), offset }
 }
 
-export async function readPiNativeHistory(args: Parameters<typeof readPiNativeSession>[0]): Promise<LoadedSessionTurn[] | null> {
+function metadataForEntry(entry: NativeEntry): NativeEntryMetadata {
+  const message = entry.message
+  const blocks = message?.content && typeof message.content !== 'string'
+    ? message.content
+        .filter((block) => block.type === 'toolCall')
+        .map((block) => ({ type: block.type, id: block.id, name: block.name }))
+    : undefined
+  const userText = message?.role === 'user'
+    ? (typeof message.content === 'string'
+        ? message.content
+        : (message.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('\n'))
+    : undefined
+  return {
+    type: entry.type,
+    id: entry.id,
+    parentId: entry.parentId,
+    timestamp: entry.timestamp,
+    role: message?.role,
+    userText,
+    blocks,
+    toolCallId: message?.toolCallId,
+    toolName: message?.toolName,
+    isError: message?.isError
+  }
+}
+
+function appendNativeMetadata(turns: LoadedSessionTurn[], current: NativeEntryMetadata): void {
+  if (current.type !== 'message' || !current.role) return
+  if (current.role === 'user') {
+    turns.push({ runId: `pi-native-${current.id}`, userText: current.userText ?? '', items: [], errorHint: recoveryNotice })
+    return
+  }
+  const turn = turns.at(-1)
+  if (!turn) return
+  const emit = (stage: TraceEvent['stage'], toolUseId?: string): void => {
+    turn.items.push({ id: `pi-native-${current.id}`, runId: turn.runId!, ts: current.timestamp ?? '', kind: stage === 'tool_result' ? 'tool' : 'tool', stage,
+      toolUseId, runtimeMetadata: { source: 'pi_native_transcript' } })
+  }
+  if (current.role === 'assistant') {
+    for (const block of current.blocks ?? []) if (block.type === 'toolCall' && block.id) emit('tool_call', block.id)
+  } else if (current.role === 'toolResult' && current.toolCallId) emit('tool_result', current.toolCallId)
+}
+
+function metadataTurns(entries: Map<string, NativeEntryLocation>, leaf: NativeEntryLocation | undefined): LoadedSessionTurn[] {
+  const turns: LoadedSessionTurn[] = []
+  for (const location of nativeBranch(entries, leaf)) appendNativeMetadata(turns, location.metadata)
+  return turns
+}
+
+function nativeStamp(stat: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): NativeFileStamp {
+  return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs }
+}
+
+function sameNativeStamp(left: NativeFileStamp, right: NativeFileStamp): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
+}
+
+async function assertNativeSourceStable(file: FileHandle, canonical: string, expected: NativeFileStamp): Promise<NativeFileStamp> {
+  const [handleStat, pathStat] = await Promise.all([file.stat(), lstat(canonical)])
+  const actual = nativeStamp(handleStat)
+  if (!handleStat.isFile() || handleStat.isSymbolicLink() || !pathStat.isFile() || pathStat.isSymbolicLink() ||
+      !sameNativeStamp(actual, expected) || !sameNativeStamp(nativeStamp(pathStat), expected)) throw new PiNativeHistoryStaleError()
+  return actual
+}
+
+async function hashNativeFile(file: FileHandle, size: number, prefixSize: number, signal?: AbortSignal): Promise<{ contentHash: string; prefixHash: string }> {
+  const content = createHash('sha256')
+  const prefix = createHash('sha256')
+  let position = 0
+  while (position < size) {
+    signal?.throwIfAborted()
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size - position))
+    const { bytesRead } = await file.read(chunk, 0, chunk.length, position)
+    if (!bytesRead) throw new PiNativeHistoryStaleError()
+    const bytes = chunk.subarray(0, bytesRead)
+    content.update(bytes)
+    if (position < prefixSize) prefix.update(bytes.subarray(0, Math.min(bytes.length, prefixSize - position)))
+    position += bytesRead
+  }
+  return { contentHash: content.digest('hex'), prefixHash: prefix.digest('hex') }
+}
+
+function cacheNativeHistory(cache: NativeHistoryCache): void {
+  nativeHistoryCaches.delete(cache.canonical)
+  nativeHistoryCaches.set(cache.canonical, cache)
+  while (nativeHistoryCaches.size > maxNativeHistoryCaches) nativeHistoryCaches.delete(nativeHistoryCaches.keys().next().value!)
+}
+
+async function readNativeSnapshot(args: Parameters<typeof readPiNativeSession>[0]): Promise<PiNativeHistorySnapshot | null> {
   args.signal?.throwIfAborted()
   const source = await locatePiNativeSession(args)
   if (!source) return null
   const file = await open(source.canonical, 'r')
   try {
-    const before = await file.stat()
-    const byId = new Map<string, NativeEntryLocation>()
+    const before = nativeStamp(await file.stat())
+    const pathBefore = nativeStamp(await lstat(source.canonical))
+    if (!sameNativeStamp(before, pathBefore) || before.size !== source.size) throw new PiNativeHistoryStaleError()
+    const identity = `${args.sessionId}\\0${args.cwd}`
+    const cached = nativeHistoryCaches.get(source.canonical)
+    let entries: Map<string, NativeEntryLocation> = new Map()
     let leaf: NativeEntryLocation | undefined
-    let hasHeader = false
-    for await (const { line, offset } of nativeLines(file, before.size, args.signal)) {
-      args.signal?.throwIfAborted()
-      const text = line.toString('utf8')
-      if (!text.trim()) continue
-      const entry = JSON.parse(text) as NativeEntry
-      if (!hasHeader) {
-        validateHeader(entry, args)
-        hasHeader = true
-        continue
+    let contentHash = ''
+    let endsWithNewline = false
+    const unchanged = cached && cached.identity === identity && sameNativeStamp(cached.stamp, before)
+    if (unchanged) {
+      entries = new Map(cached.entries)
+      leaf = cached.leaf
+      contentHash = cached.contentHash
+      endsWithNewline = cached.endsWithNewline
+    } else if (cached && cached.identity === identity && cached.stamp.dev === before.dev && cached.stamp.ino === before.ino &&
+      before.size > cached.stamp.size && cached.endsWithNewline) {
+      // Size/inode alone do not prove append. Hash the complete current file and
+      // compare the old prefix before parsing only the newly appended records.
+      const hashes = await hashNativeFile(file, before.size, cached.stamp.size, args.signal)
+      if (hashes.prefixHash === cached.contentHash) {
+        entries = new Map(cached.entries)
+        leaf = cached.leaf
+        for await (const { line, offset } of nativeLines(file, before.size, args.signal, cached.stamp.size)) {
+          const text = line.toString('utf8')
+          if (!text.trim()) continue
+          const entry = JSON.parse(text) as NativeEntry
+          if (typeof entry.id !== 'string' || entries.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
+          if (entries.size >= maxNativeEntries) throw new Error('Pi 原生会话记录数超过 1000000 条')
+          const location = { id: entry.id, parentId: entry.parentId, offset, length: line.length, metadata: metadataForEntry(entry) }
+          entries.set(entry.id, location)
+          leaf = location
+        }
+        contentHash = hashes.contentHash
+        endsWithNewline = before.size > 0 && (await readNativeByte(file, before.size - 1)) === 10
       }
-      if (typeof entry.id !== 'string' || byId.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
-      if (byId.size >= maxNativeEntries) throw new Error('Pi 原生会话记录数超过 1000000 条')
-      leaf = { id: entry.id, parentId: entry.parentId, offset, length: line.length }
-      byId.set(entry.id, leaf)
     }
-    if (!hasHeader) validateHeader(undefined, args)
-    const turns: LoadedSessionTurn[] = []
-    for (const entry of nativeBranch(byId, leaf)) {
-      // Positional reads hydrate only the selected ancestry, in branch order.
-      const buffer = Buffer.allocUnsafe(entry.length)
-      let read = 0
-      while (read < buffer.length) {
+    if (!contentHash) {
+      let hasHeader = false
+      const hash = createHash('sha256')
+      for await (const { line, offset } of nativeLines(file, before.size, args.signal, 0, hash)) {
         args.signal?.throwIfAborted()
-        const { bytesRead } = await file.read(buffer, read, buffer.length - read, entry.offset + read)
-        if (bytesRead === 0) throw new Error('Pi 原生会话在读取期间发生变化，请重新打开会话')
-        read += bytesRead
+        const text = line.toString('utf8')
+        if (!text.trim()) continue
+        const entry = JSON.parse(text) as NativeEntry
+        if (!hasHeader) {
+          validateHeader(entry, args)
+          hasHeader = true
+          continue
+        }
+        if (typeof entry.id !== 'string' || entries.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
+        if (entries.size >= maxNativeEntries) throw new Error('Pi 原生会话记录数超过 1000000 条')
+        const location = { id: entry.id, parentId: entry.parentId, offset, length: line.length, metadata: metadataForEntry(entry) }
+        entries.set(entry.id, location)
+        leaf = location
       }
-      appendNativeEntry(turns, JSON.parse(buffer.toString('utf8')) as NativeEntry)
+      if (!hasHeader) validateHeader(undefined, args)
+      contentHash = hash.digest('hex')
+      endsWithNewline = before.size > 0 && (await readNativeByte(file, before.size - 1)) === 10
     }
-    args.signal?.throwIfAborted()
-    const after = await file.stat()
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) {
-      throw new Error('Pi 原生会话在读取期间发生变化，请重新打开会话')
+    const after = await assertNativeSourceStable(file, source.canonical, before)
+    if (!sameNativeStamp(after, before)) throw new PiNativeHistoryStaleError()
+    const next: NativeHistoryCache = { canonical: source.canonical, identity, stamp: before, contentHash, endsWithNewline, entries, leaf }
+    cacheNativeHistory(next)
+    const branch = nativeBranch(entries, leaf)
+    const turns = metadataTurns(entries, leaf)
+    const locationsByRunId = new Map<string, NativeEntryLocation[]>()
+    let turnIndex = -1
+    for (const entry of branch) {
+      if (entry.metadata.role === 'user') turnIndex += 1
+      if (turnIndex < 0) continue
+      const turn = turns[turnIndex]
+      const locations = locationsByRunId.get(turn.runId!)
+      if (locations) locations.push(entry)
+      else locationsByRunId.set(turn.runId!, [entry])
     }
-    return turns
+    const sourceRevision = `${source.canonical}:${before.size}:${contentHash}`
+    const hydrate = async (runIds: readonly string[], signal?: AbortSignal): Promise<LoadedSessionTurn[]> => {
+      signal?.throwIfAborted()
+      const current = await open(source.canonical, 'r')
+      try {
+        await assertNativeSourceStable(current, source.canonical, before)
+        const hydrated: LoadedSessionTurn[] = []
+        for (const runId of runIds) {
+          const locations = locationsByRunId.get(runId)
+          if (!locations) continue
+          const turn: LoadedSessionTurn[] = []
+          for (const location of locations) {
+            signal?.throwIfAborted()
+            if (location.offset < 0 || location.length <= 0 || location.offset + location.length > before.size) throw new PiNativeHistoryStaleError()
+            const buffer = Buffer.allocUnsafe(location.length)
+            let read = 0
+            while (read < buffer.length) {
+              const result = await current.read(buffer, read, buffer.length - read, location.offset + read)
+              if (!result.bytesRead) throw new PiNativeHistoryStaleError()
+              read += result.bytesRead
+            }
+            const entry = JSON.parse(buffer.toString('utf8')) as NativeEntry
+            if (entry.id !== location.id || Buffer.byteLength(buffer.toString('utf8')) !== location.length) throw new PiNativeHistoryStaleError()
+            appendNativeEntry(turn, entry)
+          }
+          if (turn[0]) hydrated.push(turn[0])
+        }
+        await assertNativeSourceStable(current, source.canonical, before)
+        return hydrated
+      } finally { await current.close() }
+    }
+    return { turns, sourceRevision, hydrate }
   } finally {
     await file.close()
   }
+}
+
+async function readNativeByte(file: FileHandle, position: number): Promise<number> {
+  const buffer = Buffer.alloc(1)
+  const result = await file.read(buffer, 0, 1, position)
+  if (result.bytesRead !== 1) throw new PiNativeHistoryStaleError()
+  return buffer[0]
+}
+
+export async function readPiNativeHistorySnapshot(args: Parameters<typeof readPiNativeSession>[0]): Promise<PiNativeHistorySnapshot | null> {
+  return readNativeSnapshot(args)
+}
+
+export async function readPiNativeHistory(args: Parameters<typeof readPiNativeSession>[0]): Promise<LoadedSessionTurn[] | null> {
+  const snapshot = await readNativeSnapshot(args)
+  if (!snapshot) return null
+  return snapshot.hydrate(snapshot.turns.map((turn) => turn.runId!), args.signal)
 }

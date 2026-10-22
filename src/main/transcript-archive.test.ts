@@ -12,7 +12,9 @@ import {
   mirrorTranscript,
   readTraceArchive,
   readTraceArchiveAsync,
+  readTraceArchiveMetadataAsync,
   readTraceArchivePageAsync,
+  readTraceArchiveTurnsAsync,
   resolveTranscriptPath,
   scanTraceArchiveCatalogIndexAsync,
   DEFAULT_TRACE_DISCOVERY_BUDGET,
@@ -20,7 +22,8 @@ import {
   traceArchivePath,
   traceArchiveTurnPath,
   transcriptPath,
-  upsertTraceArchiveTurn
+  upsertTraceArchiveTurn,
+  upsertTraceArchiveTurnAsync
 } from './transcript-archive'
 
 const roots: string[] = []
@@ -326,6 +329,15 @@ describe('transcript archive mirror', () => {
     expect(resolveTranscriptPath({ cwd: collidingCwd, sessionId, userDataDir, home })).toBe(primary)
   })
 
+  it('async turn writer updates one canonical body and one metadata sidecar without rebuilding the page index', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/async-writer', sessionId: 'async-session', providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const, userDataDir }
+    await expect(upsertTraceArchiveTurnAsync({ ...args, turn: { runId: 'async-run', userText: 'hello', items: [], done: true, ts: 1 } })).resolves.toBe(true)
+    expect(existsSync(`${dirname(traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'async-run' }))}.index-v1.json`)).toBe(false)
+    await expect(readTraceArchiveAsync(args)).resolves.toMatchObject({ turns: [{ runId: 'async-run' }] })
+  })
+
   it('完整 TraceEvent archive 按 session 持久化并按 runId 覆盖同一轮', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -478,6 +490,19 @@ describe('transcript archive mirror', () => {
       archive: { turns: [{ runId: 'run-3' }, { runId: 'run-4' }] }
     })
     expect(existsSync(indexPath)).toBe(true)
+    const legacyIndex = JSON.parse(readFileSync(indexPath, 'utf8'))
+    writeFileSync(indexPath, JSON.stringify({ ...legacyIndex, version: 1, entries: legacyIndex.entries.map(({ file, runId, ts }: { file: string; runId: string; ts: number }) => ({ file, runId, ts })) }))
+    const metadata = await readTraceArchiveMetadataAsync({ cwd, sessionId, providerId: 'codex', userDataDir })
+    expect(JSON.parse(readFileSync(indexPath, 'utf8')).version).toBe(2)
+    expect(metadata?.turns.map(({ runId, userText, items }) => ({ runId, userText, items }))).toEqual([
+      { runId: 'run-0', userText: 'turn 0', items: [] },
+      { runId: 'run-1', userText: 'turn 1', items: [] },
+      { runId: 'run-2', userText: 'turn 2', items: [] },
+      { runId: 'run-3', userText: 'turn 3', items: [] },
+      { runId: 'run-4', userText: 'turn 4', items: [] }
+    ])
+    await expect(readTraceArchiveTurnsAsync({ cwd, sessionId, providerId: 'codex', userDataDir }, ['run-1']))
+      .resolves.toEqual([expect.objectContaining({ runId: 'run-1', userText: 'turn 1' })])
     await expect(readTraceArchivePageAsync(
       { cwd, sessionId, providerId: 'codex', userDataDir },
       { before: 3, limit: 2 }

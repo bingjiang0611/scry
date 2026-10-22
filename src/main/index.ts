@@ -28,14 +28,16 @@ import {
   discoverTraceArchiveSessionsAsync,
   mirrorTranscript,
   readTraceArchiveAsync,
+  readTraceArchiveMetadataAsync,
   readTraceArchivePageAsync,
+  readTraceArchiveTurnsAsync,
   resolveTranscriptPath,
   traceArchiveRunIds,
-  upsertTraceArchiveTurn,
+  upsertTraceArchiveTurnAsync,
   type TraceArchive,
   type TraceArchiveTurn
 } from './transcript-archive'
-import { readPiNativeHistory, reconcilePiNativeHistory } from './pi-native-history'
+import { isPiNativeHistoryStaleError, readPiNativeHistorySnapshot, reconcilePiNativeHistory, type PiNativeHistorySnapshot } from './pi-native-history'
 import {
   readCompleteArchiveForNativeReconciliation,
   hydrateSessionHistoryPage,
@@ -70,6 +72,7 @@ import { RunSteering, steerObservedRun } from './run-steering'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import { isRendererPerformanceSample } from '../shared/performance'
 import { isDiffPreviewStage, type ActiveRun, type TraceEvent, type TurnDiffBaselineOrigin, type TurnDiffReason, type TurnDiffSnapshot, type UsageAnalyticsRangeDays } from '../shared/trace'
+import { historyCopy } from '../shared/constants/copy'
 import {
   normalizeAgentForkSessionRequest,
   normalizeAgentStartRequest,
@@ -342,6 +345,9 @@ let sessionHistoryCache: {
   context: { userDataDir: string }
   archiveSource?: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId }
   archiveSnapshotTotalTurns?: number
+  archiveSourceComplete?: boolean
+  archiveSourceIssue?: string
+  nativeHydrator?: (runIds: readonly string[]) => Promise<LoadedSessionTurn[]>
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 } | null = null
 
@@ -947,13 +953,13 @@ interface ArchiveTraceTurnArgs {
   beforePersist?: () => Promise<void>
 }
 
-function cloneForkArchiveTurns(args: {
+async function cloneForkArchiveTurns(args: {
   turns: TraceArchiveTurn[]
   targetSessionId: string
   providerId: ProviderId
   runtimeProvider: RuntimeProvider
   cwd: string
-}): void {
+}): Promise<void> {
   const userDataDir = app.getPath('userData')
   const clonedRunIds: string[] = []
   try {
@@ -969,7 +975,7 @@ function cloneForkArchiveTurns(args: {
         cwd: args.cwd,
         sessionId: args.targetSessionId
       })
-      const ok = upsertTraceArchiveTurn({
+      const ok = await upsertTraceArchiveTurnAsync({
         cwd: args.cwd,
         sessionId: args.targetSessionId,
         providerId: args.providerId,
@@ -1143,7 +1149,7 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
       return
     }
   }
-  const ok = upsertTraceArchiveTurn({
+  const ok = await upsertTraceArchiveTurnAsync({
     cwd: archiveCwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
@@ -1709,7 +1715,7 @@ handleTrusted('agent:forkSession', async (_event, payload: unknown): Promise<Age
         mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
       })
       if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
-      cloneForkArchiveTurns({
+      await cloneForkArchiveTurns({
         turns: prefix,
         targetSessionId: forked.externalSessionId,
         providerId,
@@ -2103,6 +2109,17 @@ function pageWithHookCommands(
   }
 }
 
+function markIncompleteArchivePage(page: SessionHistoryPage, issue: string | undefined): SessionHistoryPage {
+  if (page.turns.length === 0) return { ...page, completeness: 'partial' }
+  const turns = [...page.turns]
+  const last = turns[turns.length - 1]
+  turns[turns.length - 1] = {
+    ...last,
+    errorHint: [last.errorHint, historyCopy.incompleteArchive(issue ?? '部分 canonical segment 不可用')].filter(Boolean).join('\\n')
+  }
+  return { ...page, turns, completeness: 'partial' }
+}
+
 handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?: SessionHistoryPageRequest) => {
   if (!payload.externalSessionId) return null
   const perf = new PerformanceTrace('session_history.load', { provider: payload.providerId })
@@ -2202,30 +2219,46 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     // the Provider returned. Pi's native session is independent durable evidence;
     // read it offline rather than treating a missing Scry archive as no messages.
     let nativeTurns: LoadedSessionTurn[] | null = null
+    let nativeSnapshot: PiNativeHistorySnapshot | null = null
     let nativeReadNotice: string | undefined
     // An in-flight native tail has no Scry run ID; the live RunRegistry owns that
     // display. Do not add an unmatchable second copy while the Provider is running.
     if (payload.providerId === 'pi' && matchingRuns.length === 0) {
       let native: LoadedSessionTurn[] | null = null
       try {
-        native = await readPiNativeHistory({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
+        nativeSnapshot = await readPiNativeHistorySnapshot({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'),
           cwd, sessionId: payload.externalSessionId, signal })
+        native = nativeSnapshot?.turns ?? null
       } catch (error) {
         signal.throwIfAborted()
         if (!archived) throw error
         // A truncated/unsupported native file must not hide an intact Scry archive.
-        nativeReadNotice = `已显示 Scry 归档；Pi 原生历史未能核对：${error instanceof Error ? error.message : String(error)}`
+        nativeReadNotice = historyCopy.nativeArchiveFallback(error instanceof Error ? error.message : String(error))
       }
       if (native && !archived) nativeTurns = native
       else if (native) {
         // A successful continuation must not hide the previously recovered prefix.
         // Reconcile only Provider-native turn IDs, never prompts or output text.
-        const completeArchive = await readCompleteArchiveForNativeReconciliation(
-          archivePage,
-          () => readTraceArchiveAsync(archiveArgs, signal)
-        )
+        const completeArchive = await readTraceArchiveMetadataAsync(archiveArgs, signal) ??
+          await readCompleteArchiveForNativeReconciliation(
+            archivePage,
+            () => readTraceArchiveAsync(archiveArgs, signal)
+          )
         nativeTurns = reconcilePiNativeHistory(native, mergeSessionTurns([], completeArchive,
           { userDataDir }, { hydrateAttachments: false }))
+      }
+      if (nativeSnapshot && nativeTurns === null) nativeTurns = nativeSnapshot.turns
+      if (nativeSnapshot && nativeTurns) {
+        const nativeByRunId = new Map(nativeSnapshot.turns.map((turn) => [turn.runId!, turn]))
+        const reconciledByRunId = new Map(nativeTurns.map((turn) => [turn.runId!, turn]))
+        const hydrateNative = nativeSnapshot.hydrate
+        nativeSnapshot = {
+          ...nativeSnapshot,
+          hydrate: async (runIds, hydrateSignal) => {
+            const nativeIds = runIds.filter((runId) => nativeByRunId.has(runId) && reconciledByRunId.get(runId) === nativeByRunId.get(runId))
+            return nativeIds.length ? hydrateNative(nativeIds, hydrateSignal) : []
+          }
+        }
       }
     }
     signal.throwIfAborted()
@@ -2264,6 +2297,11 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
       mergedHistory
     )
+    if (archivePage && !archivePage.sourceComplete && merged.length) {
+      const last = merged[merged.length - 1]
+      last.errorHint = [last.errorHint, historyCopy.incompleteArchive(archivePage.sourceIssue ?? '部分 canonical segment 不可用')]
+        .filter(Boolean).join('\n')
+    }
     if (nativeReadNotice && merged.length) {
       const last = merged[merged.length - 1]
       last.errorHint = [last.errorHint, nativeReadNotice].filter(Boolean).join('\n')
@@ -2283,10 +2321,13 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
       transcriptTurns: turns,
       archive: archived,
       context: historyContext,
-      ...(archivePaged && !nativeTurns ? {
+      ...(!nativeSnapshot && archivePaged ? {
         archiveSource: archiveArgs,
-        archiveSnapshotTotalTurns: archivePage?.totalTurns ?? 0
+        archiveSnapshotTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0,
+        archiveSourceComplete: archivePage?.sourceComplete ?? true,
+        archiveSourceIssue: archivePage?.sourceIssue
       } : {}),
+      ...(nativeSnapshot ? { nativeHydrator: (runIds) => nativeSnapshot!.hydrate(runIds) } : {}),
       hookConfig
     }
     const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
@@ -2294,14 +2335,75 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
           turns: merged,
           offset: archivePage.offset,
           totalTurns: archivePage.totalTurns,
-          hasOlder: archivePage.hasOlder,
-          completeness: archivePage.hasOlder ? 'partial' : 'complete'
+          hasOlder: archivePage.hasOlder || !archivePage.sourceComplete,
+          completeness: archivePage.hasOlder || !archivePage.sourceComplete ? 'partial' : 'complete'
         }
       : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
+    let selectedPage = unhydratedPage
+    let selectedArchive: TraceArchive | null = archived
+    if (nativeSnapshot) {
+      const selectedRunIds = unhydratedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
+      const selectedArchiveTurns = await readTraceArchiveTurnsAsync(archiveArgs, selectedRunIds, signal)
+      const selectedArchiveLoaded = mergeSessionTurns([], selectedArchiveTurns.length > 0 ? {
+        version: 3,
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        turns: selectedArchiveTurns
+      } : null, historyContext, { hydrateAttachments: false })
+      const hydratedArchiveByRunId = new Map(selectedArchiveLoaded.map((turn) => [turn.runId!, turn]))
+      let hydratedNative: LoadedSessionTurn[] = []
+      let nativeHydrationFailed = false
+      try {
+        hydratedNative = await nativeSnapshot.hydrate(selectedRunIds, signal)
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!archived) throw error
+        nativeHydrationFailed = true
+        nativeReadNotice = [nativeReadNotice, historyCopy.nativeBodyFallback(error instanceof Error ? error.message : String(error))]
+          .filter(Boolean).join('\n')
+      }
+      const hydratedByRunId = new Map(hydratedNative.map((turn) => [turn.runId!, turn]))
+      selectedPage = nativeHydrationFailed
+        ? {
+            turns: selectedArchiveLoaded,
+            offset: archivePage?.offset ?? 0,
+            totalTurns: archivePage?.totalTurns ?? selectedArchiveLoaded.length,
+            hasOlder: Boolean(archivePage?.hasOlder || (archivePage && !archivePage.sourceComplete)),
+            completeness: archivePage?.hasOlder || (archivePage && !archivePage.sourceComplete) ? 'partial' : 'complete'
+          }
+        : {
+            ...unhydratedPage,
+            turns: unhydratedPage.turns.map((turn) =>
+              hydratedArchiveByRunId.get(turn.runId!) ?? hydratedByRunId.get(turn.runId!) ?? turn)
+          }
+      selectedArchive = selectedArchiveTurns.length > 0 ? {
+        version: 3,
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        turns: selectedArchiveTurns
+      } : archived
+      if (archivePage && !archivePage.sourceComplete) {
+        selectedPage = markIncompleteArchivePage(selectedPage, archivePage.sourceIssue)
+      }
+      if (nativeHydrationFailed && selectedPage.turns.length && nativeReadNotice) {
+        const last = selectedPage.turns[selectedPage.turns.length - 1]
+        selectedPage.turns[selectedPage.turns.length - 1] = {
+          ...last,
+          errorHint: [last.errorHint, nativeReadNotice].filter(Boolean).join('\\n')
+        }
+      }
+      const enriched = await providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        selectedPage.turns as ParsedTurn[]
+      )
+      selectedPage = { ...selectedPage, turns: enriched as LoadedSessionTurn[] }
+    }
     const page = hydrateSessionHistoryPage(
-      unhydratedPage,
+      selectedPage,
       turns,
-      archived,
+      selectedArchive,
       historyContext
     )
     perf.mark('page_hydration', { returnedTurns: page.turns.length })
@@ -2339,28 +2441,134 @@ handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, req
         }
         if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
       }
-      const turns = await providerRegistry.enrichSession(
-        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-        mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
-      )
+      const archiveLoaded = mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
+      if (!cache.nativeHydrator) {
+        const turns = await providerRegistry.enrichSession(
+          { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+          archiveLoaded
+        )
+        if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
+        const page = markIncompleteArchivePage(hydrateSessionHistoryPage({
+          turns: turns as LoadedSessionTurn[],
+          offset: sourcePage.offset,
+          totalTurns: sourcePage.totalTurns,
+          hasOlder: sourcePage.hasOlder || !sourcePage.sourceComplete,
+          completeness: sourcePage.hasOlder || !sourcePage.sourceComplete ? 'partial' : 'complete'
+        }, [], sourcePage.archive, cache.context), sourcePage.sourceComplete ? undefined : sourcePage.sourceIssue)
+        perf.mark('indexed_archive', {
+          returnedTurns: page.turns.length,
+          archiveTurnFilesRead: sourcePage.turnFilesRead,
+          sourceComplete: sourcePage.sourceComplete ? 1 : 0
+        })
+        const result = pageWithHookCommands(page, cache.hookConfig)
+        perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+        return result
+      }
+      let cachedPage = sessionHistoryPage(cache.turns, request)
+      const archiveByRunId = new Map(archiveLoaded.map((turn) => [turn.runId!, turn]))
+      let hydratedNative: LoadedSessionTurn[] = []
+      if (cache.nativeHydrator) {
+        try {
+          hydratedNative = await cache.nativeHydrator(
+            cachedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
+          )
+        } catch (error) {
+          if (isPiNativeHistoryStaleError(error)) return null
+          if (!sourcePage.archive) throw error
+          cachedPage = {
+            ...cachedPage,
+            turns: cachedPage.turns.map((turn) => ({
+              ...turn,
+              errorHint: [turn.errorHint, historyCopy.nativeBodyFallback(error instanceof Error ? error.message : String(error))]
+                .filter(Boolean).join('\n')
+            }))
+          }
+        }
+      }
+      const hydratedByRunId = new Map(hydratedNative.map((turn) => [turn.runId!, turn]))
+      cachedPage = {
+        ...cachedPage,
+        turns: cachedPage.turns.map((turn) =>
+          archiveByRunId.get(turn.runId!) ?? hydratedByRunId.get(turn.runId!) ?? turn
+        )
+      }
       if (cache !== sessionHistoryCache || cache.revision !== loadSessionRevision) return null
-      const page = hydrateSessionHistoryPage({
-        turns,
+      const page = markIncompleteArchivePage(hydrateSessionHistoryPage({
+        turns: cachedPage.turns,
         offset: sourcePage.offset,
-        totalTurns: sourcePage.totalTurns,
-        hasOlder: sourcePage.hasOlder,
-        completeness: sourcePage.hasOlder ? 'partial' : 'complete'
-      }, [], sourcePage.archive, cache.context)
+        totalTurns: cachedPage.totalTurns,
+        hasOlder: cachedPage.hasOlder || !sourcePage.sourceComplete,
+        completeness: cachedPage.hasOlder || !sourcePage.sourceComplete ? 'partial' : 'complete'
+      }, cache.transcriptTurns, sourcePage.archive, cache.context), sourcePage.sourceComplete ? undefined : sourcePage.sourceIssue)
       perf.mark('indexed_archive', {
         returnedTurns: page.turns.length,
-        archiveTurnFilesRead: sourcePage.turnFilesRead
+        archiveTurnFilesRead: sourcePage.turnFilesRead,
+        sourceComplete: sourcePage.sourceComplete ? 1 : 0
       })
       const result = pageWithHookCommands(page, cache.hookConfig)
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
       return result
     }
+    let cachedPage = sessionHistoryPage(cache.turns, request)
+    if (cache.nativeHydrator) {
+      const runIds = cachedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
+      const archiveArgs = {
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        userDataDir: cache.context.userDataDir
+      }
+      const selectedArchiveTurns = await readTraceArchiveTurnsAsync(archiveArgs, runIds)
+      const selectedArchive = selectedArchiveTurns.length > 0 ? {
+        version: 3 as const,
+        cwd,
+        sessionId: payload.externalSessionId,
+        providerId: payload.providerId,
+        turns: selectedArchiveTurns
+      } : null
+      const selectedArchiveLoaded = mergeSessionTurns([], selectedArchive, cache.context, { hydrateAttachments: false })
+      const archiveByRunId = new Map(selectedArchiveLoaded.map((turn) => [turn.runId!, turn]))
+      let hydratedNative: LoadedSessionTurn[] = []
+      let nativeHydrationFailed = false
+      try {
+        hydratedNative = await cache.nativeHydrator(runIds)
+      } catch (error) {
+        if (isPiNativeHistoryStaleError(error)) return null
+        nativeHydrationFailed = true
+      }
+      if (nativeHydrationFailed) {
+        const archiveMetadata = await readTraceArchiveMetadataAsync(archiveArgs)
+        const totalTurns = archiveMetadata?.turns.length ?? selectedArchiveLoaded.length
+        const limit = Math.min(200, Math.max(1, Math.floor(request.limit ?? 40)))
+        const end = Math.max(0, Math.min(Math.floor(request.before!), totalTurns))
+        const offset = Math.max(0, end - limit)
+        const fallbackTurns = cachedPage.turns.map((turn) => archiveByRunId.get(turn.runId!)).filter((turn): turn is LoadedSessionTurn => !!turn)
+        const fallbackPage = markIncompleteArchivePage({
+          turns: fallbackTurns,
+          offset,
+          totalTurns,
+          hasOlder: offset > 0 || !archiveMetadata,
+          completeness: offset > 0 && archiveMetadata ? 'partial' : 'partial'
+        }, archiveMetadata ? undefined : 'canonical archive metadata unavailable')
+        const page = hydrateSessionHistoryPage(fallbackPage, [], selectedArchive, cache.context)
+        perf.mark('canonical_archive_fallback', { returnedTurns: page.turns.length, sourceComplete: archiveMetadata ? 1 : 0 })
+        const result = pageWithHookCommands(page, cache.hookConfig)
+        perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+        return result
+      }
+      const hydratedByRunId = new Map(hydratedNative.map((turn) => [turn.runId!, turn]))
+      cachedPage = {
+        ...cachedPage,
+        turns: cachedPage.turns.map((turn) => archiveByRunId.get(turn.runId!) ?? hydratedByRunId.get(turn.runId!) ?? turn)
+      }
+      const enriched = await providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        cachedPage.turns as ParsedTurn[]
+      )
+      cachedPage = { ...cachedPage, turns: enriched as LoadedSessionTurn[] }
+    }
     const page = hydrateSessionHistoryPage(
-      sessionHistoryPage(cache.turns, request),
+      cachedPage,
       cache.transcriptTurns,
       cache.archive,
       cache.context
@@ -3164,7 +3372,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         mcpExecution: authorizedMcpExecution(mcpExecutionSnapshot)
       })
       if (!forked.externalSessionId) throw new Error('Provider 未返回分支会话 ID')
-      cloneForkArchiveTurns({
+      await cloneForkArchiveTurns({
         turns: archive.turns.slice(0, -1),
         targetSessionId: forked.externalSessionId,
         providerId,

@@ -29,6 +29,12 @@ function detail(result: WorkspaceDiffState): string {
 
 const count = (value: number): string => `${value} 个工作区文件的 Git 净改动`
 
+export const historyCopy = {
+  nativeArchiveFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生历史未能核对：${detail}`,
+  nativeBodyFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生正文未能核对：${detail}`,
+  incompleteArchive: (detail: string): string => `Scry 归档不完整：${detail}`
+}
+
 export const workspaceDiffCopy = {
   invalidDirectory: '无效的工作目录',
   heading: 'Changes',
