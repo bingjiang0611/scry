@@ -180,6 +180,20 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
       version: 1, gateway: { hostId: identity.hostId, label: 'Mac1' },
       targets: [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' }]
     } })
+    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, {
+      op: 'executionTargets', keepAlive: true, deviceLabel: 'iPhone discovery'
+    })).resolves.toEqual({ keepAlive: true, executionTargets: {
+      version: 1, gateway: { hostId: identity.hostId, label: 'Mac1' },
+      targets: [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' }]
+    } })
+    expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone discovery')
+    for (const invalid of [
+      [{ op: 'executionTargets', arbitraryAuthority: true }, 'invalid_request'],
+      [{ op: 'executionTargets', keepAlive: 'true' }, 'invalid_request'],
+      [{ op: 'executionTargets', deviceLabel: 42 }, 'invalid_device_label']
+    ] as const) {
+      await expect(call(addr, caPEM, device.certPEM, device.keyPEM, invalid[0])).resolves.toEqual({ error: invalid[1] })
+    }
     await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'target', target, request: { op: 'projects' } })).resolves.toEqual({ projects: [], executionTarget: target })
     expect(client.mobileRequest).toHaveBeenCalledWith(target, { op: 'projects' }, expect.any(Function))
     await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'target', target, request: { op: 'desktopDirectory', query: {} } })).resolves.toEqual({ error: 'invalid_target_request' })

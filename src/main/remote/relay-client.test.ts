@@ -114,6 +114,42 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     expect(legs).toHaveLength(9) // shutdown cannot replenish
   })
 
+  it('reports disjoint opening, waiting and active legs within the finite limit', async () => {
+    const legs: PassThrough[] = []
+    const transport = new ReverseTunnelTransport({ connect: () => {
+      const leg = new PassThrough(); legs.push(leg); return leg
+    }, poolSize: 4 })
+    await transport.start(() => {})
+    try {
+      expect(transport.diagnostics()).toEqual({ waiting: 0, active: 0, opening: 4, limit: 16 })
+      legs[0].emit('connect')
+      expect(transport.diagnostics()).toEqual({ waiting: 1, active: 0, opening: 3, limit: 16 })
+      legs[0].emit('relaySession')
+      expect(transport.diagnostics()).toEqual({ waiting: 0, active: 1, opening: 4, limit: 16 })
+      const state = transport.diagnostics()
+      expect(state.waiting + state.active + state.opening).toBeLessThanOrEqual(state.limit)
+    } finally {
+      await transport.close()
+    }
+  })
+
+  it('counts WSS outer-ready reserve without starting inner TLS before device bytes', async () => {
+    const legs: PassThrough[] = []
+    const started = vi.fn()
+    const transport = new ReverseTunnelTransport({ readyEvent: 'relaySession', poolSize: 4, connect: () => {
+      const leg = new PassThrough(); legs.push(leg); return leg
+    } })
+    await transport.start(started)
+    try {
+      for (const leg of [...legs]) leg.emit('connect')
+      expect(transport.diagnostics()).toEqual({ waiting: 4, active: 0, opening: 0, limit: 16 })
+      expect(started).not.toHaveBeenCalled()
+      legs[0].emit('relaySession')
+      expect(started).toHaveBeenCalledExactlyOnceWith(legs[0])
+      expect(transport.diagnostics()).toEqual({ waiting: 3, active: 1, opening: 1, limit: 16 })
+    } finally { await transport.close() }
+  })
+
   it('recycles a waiting leg that stays idle but never a leg carrying a device session', async () => {
     vi.useFakeTimers()
     const legs: PassThrough[] = []

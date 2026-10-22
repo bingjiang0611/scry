@@ -119,6 +119,13 @@ enum ConnectionCopy {
   static func moreWithStatus(_ status: String) -> String { "\(more)，\(status)" }
   static let refreshSuccess = "刷新成功"
   static let refreshFailure = "会话列表刷新失败"
+  static func hostRefreshFailure(_ host: String, discovery: Bool, summary: String) -> String {
+    discovery ? "\(host) · 主机发现失败" : "\(host) · \(summary)"
+  }
+  static func refreshDiagnostic(host: String, discovery: Bool, cache: Bool, verifiedAt: Date?, detail: String) -> String {
+    let stage = cache ? "手机缓存 · 本地存储" : (discovery ? "主机发现 · control" : "会话列表 · bulk")
+    return "主机：\(host)\n阶段：\(stage)\n\(lastFullRefresh(verifiedAt))\n\(detail)"
+  }
   static let partialRefreshFailure = "列表未完整更新"
   static let cacheWriteRejected = "列表已更新，未保存到手机"
   static let cacheReadFailure = "手机缓存无法读取，正在核对主机"

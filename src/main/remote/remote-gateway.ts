@@ -298,6 +298,8 @@ const MAX_COMMANDS = 256
 const MAX_SESSIONS = 300
 const MAX_CATALOG_PAGE = 100
 const MAX_CATALOG_ITEMS = 100_000
+const SESSION_SNAPSHOT_TTL_MS = 30_000
+const MAX_SESSION_SNAPSHOTS = 32
 const MAX_HISTORY_TURNS = 400
 const MAX_HISTORY_ITEMS_PER_TURN = 500
 const MAX_HISTORY_TEXT = 20_000
@@ -346,7 +348,10 @@ export class RemoteGateway {
   // A catalog page is a frozen view. Keep the materialized source only for the
   // short lifetime of a page walk; authorization is still checked on every
   // request, so revocation never relies on this cache.
-  #sessionCatalogs = new Map<string, { sessions: RemoteSessionRef[]; snapshot: string; revision: string; expiresAt: number }>()
+  // Keep each immutable page walk by its authenticated peer, filter and
+  // snapshot. A newer first page must not overwrite a still-active walk from
+  // the same peer, while the finite cap prevents unbounded retention.
+  #sessionCatalogs = new Map<string, { sessions: readonly RemoteSessionRef[]; snapshot: string; revision: string; expiresAt: number }>()
 
   constructor(deps: RemoteGatewayDependencies) {
     this.#authority = deps.authority
@@ -647,21 +652,45 @@ export class RemoteGateway {
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
     if (input.includeArchived !== undefined && typeof input.includeArchived !== 'boolean') throw new RemoteGatewayError('invalid_session_query')
-    const key = `${peerCertSHA256}:${input.includeArchived === true}`
+    const filter = input.includeArchived === true
+    const baseKey = `${peerCertSHA256}:${filter}`
     const now = Date.now()
-    if (!this.#sessions?.revision) this.#sessionCatalogs.delete(key)
-    const revision = this.#sessions?.revision?.() ?? ''
-    const fresh = cursor === 0 && input.snapshot === undefined
-    let cached = this.#sessionCatalogs.get(key)
-    if (fresh || !cached || cached.expiresAt <= now || cached.revision !== revision) {
-      const sessions = this.sessionRefs((this.#sessions?.list() ?? []).filter(session => input.includeArchived || !session.archivedAt), MAX_CATALOG_ITEMS + 1)
-      if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
-      const snapshot = createHash('sha256').update(JSON.stringify(sessions)).digest('hex')
-      cached = { sessions, snapshot, revision, expiresAt: now + 30_000 }
-      this.#sessionCatalogs.set(key, cached)
+    for (const [key, cached] of this.#sessionCatalogs) {
+      if (cached.expiresAt <= now) this.#sessionCatalogs.delete(key)
     }
-    if (input.snapshot !== undefined && input.snapshot !== cached.snapshot) throw new RemoteGatewayError('session_snapshot_changed')
-    if (input.snapshot !== undefined) cached.expiresAt = now + 30_000
+    const revision = this.#sessions?.revision?.() ?? ''
+    let cached: { sessions: readonly RemoteSessionRef[]; snapshot: string; revision: string; expiresAt: number } | undefined
+
+    if (input.snapshot !== undefined) {
+      const key = `${baseKey}:${revision}:${input.snapshot}`
+      cached = this.#sessionCatalogs.get(key)
+      // An expired/evicted token, or one issued under an older source
+      // revision, cannot be rebuilt from current content: doing so could make
+      // a stale cursor appear valid after a concurrent refresh.
+      if (!cached || cached.revision !== revision) throw new RemoteGatewayError('session_snapshot_changed')
+      // Without a source revision there is no second invalidation signal. The
+      // retained object is the honest frozen page walk until TTL/cap eviction;
+      // authorization is still checked above on every request.
+      // Refresh recency without changing the immutable catalog itself.
+      cached.expiresAt = now + SESSION_SNAPSHOT_TTL_MS
+      this.#sessionCatalogs.delete(key)
+      this.#sessionCatalogs.set(key, cached)
+    } else {
+      const sessions = this.sessionRefs((this.#sessions?.list() ?? []).filter(session => filter || !session.archivedAt), MAX_CATALOG_ITEMS + 1)
+      if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
+      const immutable = Object.freeze(sessions.map((session) => Object.freeze(session)))
+      const snapshot = createHash('sha256').update(JSON.stringify(immutable)).digest('hex')
+      cached = { sessions: immutable, snapshot, revision, expiresAt: now + SESSION_SNAPSHOT_TTL_MS }
+      const key = `${baseKey}:${revision}:${snapshot}`
+      this.#sessionCatalogs.delete(key)
+      this.#sessionCatalogs.set(key, cached)
+      while (this.#sessionCatalogs.size > MAX_SESSION_SNAPSHOTS) {
+        const oldest = this.#sessionCatalogs.keys().next().value
+        if (oldest === undefined) break
+        this.#sessionCatalogs.delete(oldest)
+      }
+    }
+
     if (cursor > cached.sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
     const end = Math.min(cached.sessions.length, cursor + limit)
     return {
