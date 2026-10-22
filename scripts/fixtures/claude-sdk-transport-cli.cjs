@@ -8,7 +8,7 @@ const { spawn } = require('node:child_process')
 const { createHash, randomUUID } = require('node:crypto')
 const root = process.env.SCRY_WIRE_CASE
 const mode = process.env.SCRY_WIRE_MODE
-const managed = ['recorder-complete', 'recorder-interrupt', 'recorder-failed'].includes(mode)
+const managed = ['recorder-complete', 'recorder-interrupt', 'recorder-failed', 'recorder-crash', 'recorder-app-archive'].includes(mode)
 const sessionId = '00000000-0000-4000-8000-000000000001'
 const promptId = '00000000-0000-4000-8000-000000000002'
 const toolId = 'fixture-tool-call'
@@ -79,7 +79,7 @@ const emitContent = async () => {
   send(frame({ type: 'tool_progress', tool_use_id: toolId, tool_name: 'FixtureTool', parent_tool_use_id: null, elapsed_time_seconds: 0 }))
   send(frame({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: 'synthetic reply' }] } }))
   if (mode === 'recorder-failed') await finish('synthetic Provider failure')
-  else if (mode === 'complete' || mode === 'runner-complete' || mode === 'runner-plain' || mode === 'recorder-complete') await finish()
+  else if (mode === 'complete' || mode === 'runner-complete' || mode === 'runner-plain' || mode === 'recorder-complete' || mode === 'recorder-crash' || mode === 'recorder-app-archive') await finish()
 }
 const handle = async packet => {
   log('received', { packet })

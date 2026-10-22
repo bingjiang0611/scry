@@ -201,6 +201,18 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 
 目前只证明同一独立harness内的core恢复拒绝，不是App冷启动、archive_committed崩溃窗口或native进程丢失后的恢复。下一步由维护Agent核验该崩溃窗口的独立恢复/幂等，再评估完整App接缝；真实账号仍需另行授权。未跑延后的全仓门禁、未安装/推送或升版本。
 
+## archive_committed / main文件协调器新进程恢复
+
+独立离线录制/恢复接缝完成，未把M1–M6整体标为完成。接受现场 `scry-claude-wire-GQR7ki`，只读归档 `~/.local/state/rotom/verification-evidence/scry-managed-crash-yrbngh7d/`（1565文件 + FILES.json）。十一场景全部通过，仍真实SDK0.3.251 / 私有CLI0.2.49 / 系统禁网，原harness与恢复worker共享8秒deadline。
+
+Core与生产 `commitManagedTraceTurn` 各验证一个真实窗口：仅在本次空records目录制造EACCES，实际生产调用写出archive_committed才失败；main另实际写生产trace archive与main journal。恢复原目录权限，重验PID/birth/UID/Node命令/脚本hash并fsync停止意图后，仅终止已登记夹具harness；SDK/fake/私有Hook此前均已正常结束。原生SIGKILL close与后续新PID exit0分开记录。真实新进程调用生产Core/main恢复，均只落盘sequence1一条，完整draft不变，main archive evidence与canonical相符；重复恢复/提交不增，pending与journal/handoff收敛。不手写canonical或阶段、不重新调用Provider。
+
+独立审查匹配55个SDK/main输入、24个SDK-free文件恢复输入（并集56）及43私有CLI文件；5个临时workspace各1条，5次独立CLI verify均exit0/records1/pending0。34登记/Hook与5 verify PID均退出；本次七轮188个登记/Hook PID另核验均退出，不承诺未登记后代或全机器闭包。134 focused（managed44+aggregate30+Claude23+main协调器37）、Node/web types、App build、语法/diff通过。
+
+两次8秒超时及严格清理拒绝、records目录懒创建导致的ENOENT均保留；负载93–102及Swift编译仅为观察，因果未知。仅修正有证据的夹具路径/退出竞态与恢复依赖边界，没有加时、sleep、自动重试或更改生产合同；SDK-free恢复不加载Provider SDK。完整过程见[验收说明](../../docs/research/claude-sdk-transport-fixture.md)。
+
+该结果是“真实写入失败后受控进程终止”的指定窗口与main文件归档/record收敛，不是断电、任意崩溃点、完整Electron/startAppRun/WorkflowProgram/可信IPC/SQLite或真实账号验收。安装、推送、版本与延后的全仓门禁均未动。完整App和真实native transcript需要另行独立验收；真实账号仍受既有账号/模型/费用授权边界约束。
+
 ## 尚未完成与下一段
 
 - 普通 App 退出已新增本页记录的 durable preparation gate；内部其他错误清理/stopAll 仍是原 best-effort 路径，不能把退出保证外推给它们。历史不可用分支仍 fail-closed，缺少是否允许明确确认退出的产品决定。

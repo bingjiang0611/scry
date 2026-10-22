@@ -26,8 +26,10 @@ npm run test:claude-sdk-transport
 | recorder-complete | 真实 adapter / 私有 CLI Start+Stop / 聚合器 / prepare+commit，Stop 不写 canonical、commit 写一条且重复不增；独立 CLI verify 与零 pending |
 | recorder-interrupt | 观察到真实 native tool_activity 后发 interrupt；peer 发 ACK 时 promise 未完成、Stop 未执行且 records0/open；释放 gate 后实际 interrupted、Stop/EOF/exit0，随后落盘 interrupted |
 | recorder-failed | 私有 Stop 后 SDK 错误终态；进程正常退出0不等于业务成功，实际 failed、canonical failed；原生/归一化诊断保留 |
+| recorder-crash | 真实 Core commit 写 archive_committed 后记录写入 EACCES；重验身份并终止夹具，新进程恢复一条、重复不增 |
+| recorder-app-archive | 生产 main 协调器实际写 trace archive / journal / Core handoff，再写入失败与受控夹具终止；新进程恢复并核对 archive/canonical 一致 |
 
-每个新场景期限仍为 8 秒，不重试、不加时。临时目录和失败日志保留；只有登记进程的 PID/出生时间/用户/命令及源 hash 都重验后才允许失败清理，不做 pkill。正常成功必须是 EOF + exit 0，SIGTERM 不算成功。macOS 禁止沙箱内 `ps`，OS 出生身份由外层 owner 获取；假 CLI 在外层登记完成前用文件事件 gate 保持存活，再进行握手，避免快速退出与身份采集竞态。runner 的身份采集返回未知时仍只测试 cooperative interrupt，不使用 forceKill 或放宽 profile。
+每个新场景期限仍为 8 秒，不重试、不加时。临时目录和失败日志保留；只有登记进程的 PID/出生时间/用户/命令及源 hash 都重验后才允许失败清理，不做 pkill。普通传输成功必须是 EOF + exit 0，SIGTERM 不算成功。两个专用崩溃场景仅在 SDK/fake/Hook 已正常结束、真实持久化阶段与写入失败已证实后，重验身份并终止夹具 harness；该 SIGKILL 必须有原生 close，恢复 worker 仍须 exit0，不能拿信号接受代替恢复成功。macOS 禁止沙箱内 `ps`，OS 出生身份由外层 owner 获取；假 CLI 在外层登记完成前用文件事件 gate 保持存活，再进行握手，避免快速退出与身份采集竞态。runner 的身份采集返回未知时仍只测试 cooperative interrupt，不使用 forceKill 或放宽 profile。
 
 ## 首轮直接 SDK 证据（2026-10-21）
 
@@ -105,10 +107,29 @@ npm run test:claude-sdk-transport
 
 独立 integrity 核对51个 bundle输入和43个私有CLI文件；focused managed44+Claude23、aggregate30，共97单测通过，Node/web types、App build、两脚本语法和diff check通过。未跑延后的全仓门禁、未安装/推送或真实账号操作。
 
+## archive_committed 与生产 main 协调器冷恢复（十一场景）
+
+本次独立离线接缝验收完成，接受现场 `scry-claude-wire-GQR7ki`。持久只读归档 `~/.local/state/rotom/verification-evidence/scry-managed-crash-yrbngh7d/`：1565文件 + FILES.json，包含全部失败/中间现场、审查日志、实际 bundle 输入、SDK入口和43文件私有CLI快照；仅供审查，不是迁移后的执行store或可重放工作区。
+
+保持 Node24.18.0 / SDK0.3.251 / 私有CLI0.2.49，未改生产代码、选项、版本、依赖或权限模式。十一场景全部通过。新增两个场景均先正常结束真实 SDK/fake/私有Start+Stop，再在仅本次空 records目录上制造权限写入故障：生产 commit 真正写入 archive_committed，随后返回实际 EACCES，目录原权限立即恢复。不手写 canonical/handoff阶段。Parent 核对 PID、出生时间、UID、Node命令、脚本hash，fsync停止意图后仅SIGKILL本次harness；等待原生close后启动不同PID的注册恢复worker。原进程与恢复进程共享原8秒deadline，没有为第二阶段重置预算。
+
+| 接缝 | 实际持久化与恢复结果 |
+| --- | --- |
+| Core | archive_committed真实handoff + records0 → 新进程recover1/pending0、sequence1记录；完整draft与原handoff相同；重复recover0、commit duplicate、pending清零 |
+| Main文件协调器 | 真实commitManagedTraceTurn先写生产trace archive、main journal及Core handoff，再因记录写入失败；新进程recoverManagedTraceTurns恢复1，archive字节视图不变、archive evidence与canonical一致，重复提交/恢复不增，journal/handoff收敛 |
+| 完整性/资源 | 55实际SDK/main bundle输入 + 24 SDK-free恢复输入（合并56）及43私有CLI文件hash匹配；5个隔离workspace各1条，独立私有CLI verify均exit0/records1/pending0；34登记/Hook PID及5个verify PID均退出（39） |
+| 验证 | 134 focused（managed44、aggregate30、Claude23、main coordinator37）、Node/web types、App build、两脚本语法、diff check通过；延后的全仓门禁未重跑 |
+
+恢复 bundle 只依赖实际文件恢复/归档实现与Node原生模块，不加载SDK/Electron/SQLite；包含main文件协调器，不能误称只有Recorder Core。这不是减少真实模型工作或把它移出计时：冷恢复本来不应重新调用Provider，deadline仍覆盖两进程。
+
+首败均保留：3wQswx的直接complete已有terminal/EOF/exit0但外层8秒失败，清理ps又与退出竞态；KxyRFI前9场景通过，崩溃场景在Stop完成前超时，严格清理终止已核验fake，Stop被信号中断、SDK随后143，旧pending不清除/重放。现场观察负载93–102及大量Swift编译，因果未证明。仅在清理中新增二次确认ESRCH可跳过，活着/复用/未知身份仍拒绝信号。AL52kj因错误假设records目录已存在而ENOENT，改为显式创建本次空故障目录；生产初始化器与合同不变。随后3pJDUR十场景、AWEBoG main成功路径、AR1uML两类冷恢复通过；GQR7ki额外留存真实main journal快照及PID配对后为接受版本。七轮共188个登记/Hook PID另核验均退出；不升级为全机器/未登记后代闭包。
+
+这仅证明两个指定的“写入失败后进程终止”窗口，不是断电、任意指令点崩溃、完整Electron启动/renderer/可信IPC/startAppRun/WorkflowProgram或SQLite跨存储原子性。M1–M6整体仍不得据此标为完成。没有真实账号、模型、工具执行、自定义集成提交回调、安装或推送。
+
 ## 明确不能证明
 
-这不是实际 Claude CLI/模型、账号、工具授权/执行、完整 App workflow 或 App archive/SQLite/canonical 跨存储原子收敛验收。当前证明独立 completed/interrupted/failed 路径各真实落盘一条 core canonical record及恢复拒绝；尚未覆盖 managed native进程异常丢失、archive_committed崩溃窗口或App冷启动恢复。SDK `hook_callback` 成功本身不表示私有 recorder CLI 已执行，本轮额外 CLI PID/退出/落盘证据才证明它执行。synthetic usage 零不表示真实费用为零。
+这不是实际 Claude CLI/模型、账号、工具授权/执行、完整 App workflow 或 App archive/SQLite/canonical 跨存储原子收敛验收。当前证明独立 completed/interrupted/failed、恢复拒绝，以及指定 archive_committed 窗口的Core/main文件协调器新进程恢复；未覆盖实际Provider异常丢失、完整App冷启动或SQLite收敛。SDK `hook_callback` 成功本身不表示私有 recorder CLI 已执行，本轮额外 CLI PID/退出/落盘证据才证明它执行。synthetic usage 零不表示真实费用为零。
 
 本检查目前是独立手动命令，未声称 CI 已执行。扩大到 Linux/Windows 前，先提供等价系统禁网和进程身份保证，不静默降低本检查。
 
-下一步由维护 Agent 核验 archive_committed 崩溃窗口的独立恢复与幂等边界，再评估完整 App 接缝与真实 native transcript。当前 prompt ID 来自原生 Hook；transcript_path 仍是元数据，没有声称覆盖 transcript fallback。实际账号探针仍须用户先指定账号、模型并授权费用。
+上述独立离线录制/恢复接缝已完成；完整App与真实native transcript仍须单独验收，不能以本检查代替。当前 prompt ID 来自原生 Hook；transcript_path 仍是元数据，没有声称覆盖 transcript fallback。实际账号探针仍须用户先指定账号、模型并授权费用。
