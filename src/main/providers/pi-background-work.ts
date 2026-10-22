@@ -23,22 +23,21 @@ export class PiBackgroundWork {
   private parentIdle = false
   private awaitingContinuation = false
   private observed = false
-  /** Set when the extension cleared the widget: no child can wake this run back up. */
-  private released = false
-
   get pending(): boolean {
-    return !this.released && (this.tasks.size > 0 || this.awaitingContinuation)
+    if (this.awaitingContinuation) return true
+    for (const task of this.tasks.values()) {
+      if (task.status !== 'unconfirmed') return true
+    }
+    return false
   }
 
   observe(event: WireEvent, now = Date.now()): BackgroundWork | undefined {
     if (event.type === 'agent_start') {
       this.parentIdle = false
       this.awaitingContinuation = false
-      // A wakeup starts a new cycle; live children in it are tracked again.
-      this.released = false
     } else if (event.type === 'agent_end' || event.type === 'agent_settled') {
       this.parentIdle = true
-      if (this.tasks.size > 0) this.awaitingContinuation = true
+      if (this.pending) this.awaitingContinuation = true
     } else if (event.type === 'message_end' && record(event.message).customType === 'subagent-notify') {
       // A fast child may finish before the original parent cycle ends. The native
       // completion message then reaches that cycle without another agent_start.
@@ -62,11 +61,12 @@ export class PiBackgroundWork {
       for (const run of runs) {
         const id = run.id as string
         if (terminalStates.has(run.state as string)) {
-          if (this.tasks.delete(id)) this.awaitingContinuation = true
+          const task = this.tasks.get(id)
+          if (task && task.status !== 'unconfirmed') this.awaitingContinuation = true
+          this.tasks.delete(id)
         } else {
           this.observed = true
-          // Live work outranks an earlier clear: only this snapshot is evidence of it.
-          this.released = false
+          // Only fresh live evidence for this task can restore its ownership.
           this.tasks.set(id, {
             taskId: id, toolUseId: id, tool: 'Agent', description: run.label as string,
             observedAt: this.tasks.get(id)?.observedAt ?? now
@@ -83,8 +83,10 @@ export class PiBackgroundWork {
   }
 
   private release(now: number): BackgroundWork | undefined {
-    if (!this.observed || (!this.tasks.size && !this.awaitingContinuation)) return undefined
-    this.released = true
+    if (!this.observed || !this.pending) return undefined
+    // Keep the evidence gap on each task, not a run-wide flag that a parent wakeup
+    // or a different child could reset and resurrect stale waiting cards.
+    for (const task of this.unconfirmed()) this.tasks.set(task.taskId, task)
     this.awaitingContinuation = false
     return this.snapshot(now)
   }
