@@ -3,15 +3,30 @@ import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, w
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RECORDER_VERSION, listRecords, stableHash } from '../core/turn-recorder/store'
+import { RECORDER_VERSION, listRecords, stableHash, verifyStore } from '../core/turn-recorder/store'
+import { summarizeTurnRecords } from '../core/turn-recorder/turns-summary'
 import { readRecorderContent } from '../core/turn-recorder/content-store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { parseArgs, runScryCli } from './scry'
 import { initWorkspace, integrationsRepair } from './workspace-init'
 
+const recordReads = vi.hoisted(() => new Map<string, number>())
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    readFile: (...args: Parameters<typeof actual.readFile>) => {
+      const path = args[0]
+      if (typeof path === 'string' && recordReads.has(path)) recordReads.set(path, recordReads.get(path)! + 1)
+      return actual.readFile(...args)
+    }
+  }
+})
+
 const roots: string[] = []
 
 afterEach(async () => {
+  recordReads.clear()
   vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
@@ -608,6 +623,58 @@ describe('scry records archive and maintenance', () => {
     }
     return root
   }
+
+  it('verify reads each canonical record once and keeps identity/open-turn evidence advisory', async () => {
+    const root = await withTurns(2)
+    const dataRoot = join(root, '.scry')
+    const expected = summarizeTurnRecords(await listRecords(dataRoot), undefined, { scope: 'workspace' }).identity
+    await writeFile(join(dataRoot, 'health.json'), JSON.stringify({ schemaVersion: 1, pendingCount: 2 }))
+    for (const name of await readdir(join(dataRoot, 'records'))) recordReads.set(join(dataRoot, 'records', name), 0)
+    const stdout = captureStdout()
+    await expect(runScryCli(['turns', 'verify', '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(stdout.text())).toMatchObject({ ok: true, records: 2, errors: [], identity: expected, openTurnsPending: 2,
+      advisories: expect.arrayContaining(['open turns pending recovery: 2']) })
+    expect([...recordReads.values()]).toEqual([1, 1])
+  })
+
+  it.each(['malformed JSON', 'invalid schema'])('verify retains exit 4 and unknown identity for %s without rereading', async (failure) => {
+    const root = await withTurns(2)
+    const recordsRoot = join(root, '.scry', 'records')
+    const names = (await readdir(recordsRoot)).sort()
+    const path = join(recordsRoot, names[1]!)
+    const original = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+    await writeFile(path, failure === 'malformed JSON' ? '{broken' : JSON.stringify({ ...original, schemaVersion: 99 }))
+    for (const name of names) recordReads.set(join(recordsRoot, name), 0)
+    const stdout = captureStdout()
+    await expect(runScryCli(['turns', 'verify', '--workspace', root])).resolves.toBe(4)
+    expect(JSON.parse(stdout.text())).toMatchObject({ ok: false, records: 2, identity: null, errors: [expect.any(String)], advisories: [] })
+    expect([...recordReads.values()]).toEqual([1, 1])
+  })
+
+  it('verify retains identity for readable records even when sequence integrity fails', async () => {
+    const root = await withTurns(2)
+    const recordsRoot = join(root, '.scry', 'records')
+    const names = (await readdir(recordsRoot)).sort()
+    await rm(join(recordsRoot, names[0]!))
+    const stdout = captureStdout()
+    await expect(runScryCli(['turns', 'verify', '--workspace', root])).resolves.toBe(4)
+    expect(JSON.parse(stdout.text())).toMatchObject({ ok: false, records: 1,
+      errors: [expect.stringContaining('sequence gap')], identity: { model: { coverage: { totalTurns: 1 } } } })
+  })
+
+  it('verify preserves an empty store as valid with no identity observations', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['turns', 'verify', '--workspace', root])).resolves.toBe(0)
+    expect(JSON.parse(stdout.text())).toEqual({ ok: true, records: 0, errors: [], archivedThrough: 0,
+      identity: null, openTurnsPending: 0, advisories: [] })
+  })
+
+  it('verify does not turn an observer exception into a corrupt-record report', async () => {
+    const root = await withTurns(1)
+    await expect(verifyStore(join(root, '.scry'), () => { throw new Error('observer failed') })).rejects.toThrow('observer failed')
+    await expect(verifyStore(join(root, '.scry'))).resolves.toMatchObject({ ok: true, records: 1, errors: [] })
+  })
 
   it('maintenance 默认只输出计划，不执行删除', async () => {
     const root = await withTurns(1)

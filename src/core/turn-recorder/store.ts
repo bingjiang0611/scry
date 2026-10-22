@@ -1016,7 +1016,10 @@ export async function lastRecordVersion(dataRoot: string): Promise<string | null
   }
 }
 
-export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
+export async function verifyStore(
+  dataRoot: string,
+  onRecord?: (record: AgentTurnRecord) => void
+): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
   // Integrity verification always bypasses disposable projections and scans canonical filenames.
   const files = await recordFiles(dataRoot, { bypassIndex: true })
   const errors: string[] = []
@@ -1041,11 +1044,16 @@ export async function verifyStore(dataRoot: string): Promise<{ ok: boolean; reco
     previous = file.sequence
     if (ids.has(file.recordId)) errors.push(`duplicate recordId: ${file.recordId}`)
     ids.add(file.recordId)
+    let record: AgentTurnRecord
     try {
-      await readRecordFile(join(dataRoot, 'records', file.name))
+      record = await readRecordFile(join(dataRoot, 'records', file.name))
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error))
+      continue
     }
+    // Synchronous consumers can reuse validated records without retaining their bodies.
+    // Consumer errors must propagate, not be misreported as corrupt canonical records.
+    onRecord?.(record)
   }
   return { ok: errors.length === 0, records: files.length, errors, archivedThrough }
 }
