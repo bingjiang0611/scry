@@ -288,7 +288,8 @@ function qoderOptions(
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
   mcpExecution?: AuthorizedMcpExecution,
-  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
+  managedIdentity?: ProviderRunRequest['managedRecorderIdentity'],
+  overrides?: { persistSession?: boolean }
 ): Record<string, unknown> {
   const detectedExecutable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!detectedExecutable) throw new Error('Qoder CLI 未找到')
@@ -337,6 +338,7 @@ function qoderOptions(
     strictMcpConfig: true,
     mcpServers: authorizedMcpServers(mcpExecution),
     controlRequestTimeoutMs: 30_000,
+    ...(overrides?.persistSession === undefined ? {} : { persistSession: overrides.persistSession }),
     ...(onPid
       ? {
           spawnQoderCLIProcess: (options: { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal: AbortSignal }) => {
@@ -825,7 +827,12 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
     const existing = controls.get(key)
     if (existing) return [key, existing]
     const prompt = heldPrompt()
-    const q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd) as never })
+    const q = query({
+      prompt: prompt.stream,
+      options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, undefined, undefined, {
+        persistSession: false
+      }) as never
+    })
     const session: QoderControlSession = {
       query: q,
       releasePrompt: prompt.release,
@@ -1676,12 +1683,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const generation = contextGenerations.get(key) ?? 0
           let value = modelCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            const models = await withControl(context, (q, initialized) => {
-              const cached = Array.isArray(initialized.models) ? initialized.models : []
-              return cached.length > 0
-                ? Promise.resolve(cached)
-                : q.getAvailableModels({ fetchStrategy: 'live' })
-            })
+            const models = await withControl(context, (q) =>
+              q.getAvailableModels({ fetchStrategy: 'live' })
+            )
             value = {
               observedAt: Date.now(),
               data: {
