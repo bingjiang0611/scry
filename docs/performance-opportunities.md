@@ -2,6 +2,13 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## 静态交接批次 A（2026-10-22/23，仅 perf/handoff，待核验）
+
+- A1：启动身份采集从同步全表 ps 改为有超时的异步单 PID；受控 6 个启动样本由每次 720–725 行降为 1 行，ps 次数不变。身份未知仍 fail closed，Claude/Qoder stop/abort 有生产路径回归。
+- A2：recent/project 元数据键缓存及单例；一轮受控流程 read 6→2，同时间戳 exact no-op 的 write/fsync 14/28→8/16，不同时间戳仍为 14/28。不改变持久性，不以计数冒充耗时。
+- A3：隐藏 60 秒的 list/catalog/status/intents 为 20/20/30/40→0/0/0/0；显示时先撤回旧在线/活动确认，旧请求结束后刷新，错误与历史保留。
+- 三项均只有 L1 证据，不宣称 L2/L3。未安装或合入 main。实验与完整验证见 [批次报告](handoff/perf-2026-10-22/reports/A.md)；批次 B 等 A 核验后再执行。
+
 ## A+B 当前交付（2026-10-22，已合入 main、开发签名版已安装）
 
 - A 按需层与 Provider-specific 安全复用收口；不是全 Provider 统一常驻。OpenCode 五对低负载受控读取确认启动 3→1、三读合计中位 1939→932ms；首次冷读没有提速证据。Qoder 保留 live/初始化寿命与关闭所有权，Pi 继续 fresh，不能虚构原生 reset 合同。

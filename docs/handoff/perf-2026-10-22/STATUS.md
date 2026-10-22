@@ -7,9 +7,9 @@
 
 | # | 问题 | 批次 | 分支 | 状态 | 报告 | 核验备注 |
 |---|---|---|---|---|---|---|
-| 1 | 发送时同步全系统 `ps` | A1 | `perf/handoff` | 未开始 | | |
-| 2 | store 同步读写/重复写 | A2 | `perf/handoff` | 未开始 | | |
-| 6a | 后台不暂停的轮询 | A3 | `perf/handoff` | 未开始 | | |
+| 1 | 发送时同步全系统 `ps` | A1 | `perf/handoff` | 待核验 | [A](reports/A.md) | 单 PID 异步采集；未知身份拒绝 stop/abort 信号；L1 已测 |
+| 2 | store 同步读写/重复写 | A2 | `perf/handoff` | 待核验 | [A](reports/A.md) | 单例/读缓存及 exact no-op；保留 fsync、backup 和活动时间语义 |
+| 6a | 后台不暂停的轮询 | A3 | `perf/handoff` | 待核验 | [A](reports/A.md) | 隐藏 60s IPC 为 0；恢复新鲜度/收敛已测；完整 UI 的既有失败见报告 |
 | 4 | 提交时同步重复读归档 | B1 | `perf/handoff` | 未开始（等 A） | | |
 | 3 | 启动全量归档扫描 | B2 | `perf/handoff` | 未开始（等 A） | | |
 | 5 | 工作区 diff 只读路径 | C | `perf/c-git-readonly` | 未开始 | | |

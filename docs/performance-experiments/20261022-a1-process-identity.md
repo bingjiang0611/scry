@@ -2,7 +2,7 @@
 
 - Path: provider launch/stop identity capture.
 - Baseline source: `bf92d04` (the original pre-optimization tree).
-- Candidate source: `fabced4` plus the corrected collector in this follow-up.
+- Candidate source: `443924a` plus Claude abort gate `bcf2952` and final event-driven collector `5bdc225` on `perf/handoff`.
 - Scope: local child-process fixtures only. No Claude/Qoder provider, network, account, or paid work was used.
 
 ## Reproducible L1 collector
