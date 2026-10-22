@@ -55,7 +55,9 @@ async function waitForGone(owned, timeoutMs) {
 function signalOwned(owned, signal) {
   // Revalidate registered identities immediately before each sweep. Never signal by name/cwd.
   for (const row of remaining(owned)) {
-    if (row.command !== owned.get(row.pid).command) throw new Error(`owned process identity changed; refusing signal: ${JSON.stringify({ pid: row.pid, expected: owned.get(row.pid).command, observed: row.command, status: row.status })}`)
+    // ps can lose argv while a process exits. Never signal a changed identity;
+    // the existing bounded wait must confirm its exit or fail cleanup below.
+    if (row.command !== owned.get(row.pid).command) continue
     try { process.kill(row.pid, signal) } catch (error) { if (error.code !== 'ESRCH') throw error }
   }
 }
