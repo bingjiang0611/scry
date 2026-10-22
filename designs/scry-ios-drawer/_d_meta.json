@@ -1,0 +1,22 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "updatedAt": "2026-10-21T00:00:00.000Z",
+  "assets": {
+    "Scry iOS 会话抽屉 · Codex 式入口": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-21T00:00:00.000Z",
+          "status": "needs-review",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          }
+        }
+      ]
+    }
+  }
+}
