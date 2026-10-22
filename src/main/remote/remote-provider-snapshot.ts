@@ -17,13 +17,15 @@ function contextLabel(provider: string, profile: string): string {
 export function remoteProviderMetadata(input: {
   descriptor: { id: string; label: string; available?: boolean }
   profile?: { id: string; label: string }
+  forkSession?: boolean
 }): RemoteProviderRef {
   const label = input.profile ? contextLabel(input.descriptor.label, input.profile.label) : input.descriptor.label
   return {
     id: input.descriptor.id,
     label,
     available: input.descriptor.available !== false,
-    ...(input.profile ? { agentProfileId: input.profile.id } : {})
+    ...(input.profile ? { agentProfileId: input.profile.id } : {}),
+    ...(input.forkSession ? { forkSession: true as const } : {})
   }
 }
 
