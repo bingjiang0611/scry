@@ -288,8 +288,7 @@ function qoderOptions(
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
   mcpExecution?: AuthorizedMcpExecution,
-  managedIdentity?: ProviderRunRequest['managedRecorderIdentity'],
-  overrides?: { persistSession?: boolean }
+  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
 ): Record<string, unknown> {
   const detectedExecutable = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   if (!detectedExecutable) throw new Error('Qoder CLI 未找到')
@@ -338,7 +337,6 @@ function qoderOptions(
     strictMcpConfig: true,
     mcpServers: authorizedMcpServers(mcpExecution),
     controlRequestTimeoutMs: 30_000,
-    ...(overrides?.persistSession === undefined ? {} : { persistSession: overrides.persistSession }),
     ...(onPid
       ? {
           spawnQoderCLIProcess: (options: { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal: AbortSignal }) => {
@@ -829,9 +827,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
     const prompt = heldPrompt()
     const q = query({
       prompt: prompt.stream,
-      options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, undefined, undefined, {
-        persistSession: false
-      }) as never
+      options: { ...qoderOptions(context.cwd), persistSession: false } as never
     })
     const session: QoderControlSession = {
       query: q,
