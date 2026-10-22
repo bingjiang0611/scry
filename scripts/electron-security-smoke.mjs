@@ -12,6 +12,7 @@ import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseUnifiedConversation, verifyUnifiedConversationRestart } from './unified-conversation-smoke.mjs'
 import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
 import { exerciseMissingWorkflowHistory } from './workflow-recovery-ipc-checks.mjs'
+import { exerciseWorkflowTemplatePublication } from './workflow-template-ipc-checks.mjs'
 
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
@@ -282,8 +283,9 @@ async function main() {
     return response.result?.value
   }
   if (unifiedConversationOnly) {
-    const fixture = { workspace: canonicalWorkspace, userData: userDataDir, inputsFile: conversationInputs, callsFile: conversationCalls }
+    const fixture = { workspace: canonicalWorkspace, templateWorkspace: realpathSync(secondWorkspace), userData: userDataDir, inputsFile: conversationInputs, callsFile: conversationCalls }
     const workflowRecovery = await exerciseMissingWorkflowHistory(evaluate, fixture)
+    const workflowTemplates = await exerciseWorkflowTemplatePublication(evaluate, fixture)
     const result = await exerciseUnifiedConversation(cdp, evaluate, fixture)
     for (const changedIdentity of [false, true]) {
       cdp.close()
@@ -300,9 +302,9 @@ async function main() {
       ...readdirSync(resolve('out/renderer/assets')).filter(name => /\.(js|css)$/.test(name)).map(name => `out/renderer/assets/${name}`)]
     const artifactHashes = Object.fromEntries(artifactPaths.map((path) =>
       [path, createHash('sha256').update(readFileSync(resolve(path))).digest('hex')]))
-    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, workflowRecovery, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
+    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, workflowRecovery, workflowTemplates, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
     console.log(JSON.stringify({ test: result.test, conversationId: result.id, turns: result.runIds.length,
-      providerInvocations: result.receipts.length, workflowRecovery, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
+      providerInvocations: result.receipts.length, workflowRecovery, workflowTemplates, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
     return
   }
   if (ownershipFixture) {

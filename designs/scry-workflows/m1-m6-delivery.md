@@ -46,6 +46,17 @@
 - 本阶段只读证据位置：`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。性能命令对映射的providers.catalog报告无collector，不是性能通过，也不是Runner性能证明。
 - map/collect后续进展见M3；规范中的classifier call target、剩余表达式/集合操作、loop高级恢复、路由/模板/发布及M3完整动态执行/恢复仍未完成。候选筛选与裁决属于M4质量策略，不因旧台账写过choose而新增规范未要求的独立执行指令。M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
 
+### M2/M3 模板数据发布基础（不是模板全生命周期或 M1–M6 完成）
+
+- 新增有限 `WorkflowTemplateDefinition`、个人/项目来源、主进程生成 ID、真实 UTF-8 字节 SHA-256、草稿 CAS 和候选指纹。参数 schema/default、角色偏好及 body 复用既有 schema/作用域/依赖编译器；角色偏好不包含 profile、权限或 runtimeIdentity，也不授予执行能力。无效源码只留在 App-owned 草稿。
+- 当前定义仍是固定目录 JSON；不可变内容及实际观察的来源快照、发布 intent/收据在 App-owned 数据域。保存验证准确基线和已审阅候选，先持久 intent 再原子发布；中断后只核对文件，不重写。另存生成新 ID；外部修改冲突保留候选；显式刷新重读，不以 mtime 或成功文本充当证据。保留 BOM 原字节，不静默改变修订。
+- 项目目标锁在同一宿主用户的共享私有临时目录，不在项目内，也不因 userData 不同而分裂。两个数据域中，第一个发布器暂停时另一个不能覆盖。工作流根、控制帧及模板锁均要求证明旧 owner 不存活；活 PID、未知身份或损坏 owner 不能因时钟过期被接管。Recorder 的既有默认锁策略未改。
+- 新模板 IPC 使用生产 trusted wrapper；scope 仍以已有项目 authority 为准。目录与三份 authority 索引使用异步 I/O，沿用现有主索引/备份/拒绝合同，不建立第二套授权表。拒绝符号链接、越权根、超限定义及私有运行字段，列表每页至多100个 ID。
+- 当前 Node24.18.0/macOS：25文件290项串行 focused、Node/web types、593项 CLI release/独立包 smoke、当前生产 preload/main conversation gate、既有工作流交互 smoke 及本地 pack:artifact/security smoke 通过。两个独立 Node 进程分别在 intent 后与目标发布后实际退出，冷控制器不重发，后者还核对 inode/mtime 未变。生产模板 API 验证个人/项目、另存 ID、准确源码、重复收据与外部冲突；模板步骤的 fixture Provider 账本零新增。原 conversation 场景仍有21次测试 Provider 调用，不是真实账号。
+- 六个故意破坏对照分别产生3/2/1/1/4/1个失败：活/未知 owner 接管、略过基线、恢复重写、按 userData 分裂项目锁、同步 authority 读取、剥掉 BOM。源码均按原字节恢复。首轮测试数据的非 canonical 临时路径、缺少已有 session 规范化字段，以及初版测试类型错误已修正；不改业务断言或 deadline。证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-publication.zSIN60/`。
+- 尚缺：模板实例化并冻结定义/参数/实际角色/程序快照、输入输出与验证合同的完整提取、builtin、历史/恢复/删除接口、Agent authoring transport、source/diff/保存 UI 和真实交互。这里只证明数据发布基础，不是 M2.7、M3.8 或 M5.4 整项验收。真实断电、不同宿主/临时目录命名空间、不合作进程的检查后抢写不在本次证明内；不是跨文件 exactly-once。
+- 接下来由本任务接通现有 Service/compiler 的模板实例化，再完成编辑入口与其余 M1–M6。无 Provider/Jev 发送、patch apply、安装、push 或版本升级。七项延期全量失败、历史并行恢复超时和无性能 collector 仍开放；当前 collector 查询对 providers.catalog/startup.recovery/新模板 trace 均为空，没有宣称性能测量通过。
+
 ## M3：持久解释器与恢复
 
 | ID | 完成要求 |
@@ -134,7 +145,7 @@
 
 ## 初始审计与正在执行
 
-- 已核对上述六份规范及仓库执行/验证指导；当前类型 `src/shared/workflow.ts` 仍只有 sequence/parallel/call/return，编译器对其余指令拒绝，不能把 M2–M4 当作已有实现。
+- 初始审计基线：当时 `src/shared/workflow.ts` 只有 sequence/parallel/call/return，编译器拒绝其他指令。该句不是当前实现状态；后续 bind/branch/map/collect/loop 与模板数据发布进展见上文，准确语法见 [program-ir.md](program-ir.md)。M2–M4 整项仍未完成。
 - 当前 M1 基础原生离线证据：`~/.local/state/rotom/verification-evidence/scry-managed-crash-yrbngh7d/`，但不覆盖完整App/SQLite/WorkflowProgram，更不是M6。
 - 首个实际缺陷：`WorkflowRunner.runBlock` 的 sequence fail-fast 漏掉 blocked，根虽最终显示 blocked，后继仍可能执行。已先新增回归并观察旧实现失败；改为仅 completed 且 settled 的子块可继续。10文件109项focused、Node/web types、App build通过；负对照与green日志在 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-m1-m6-gates.dcg8Lz/`。上述日志另有只读持久副本 `~/.local/state/rotom/verification-evidence/workflow-m1-sequence-m6jzgze1/`。当前App重放/性能覆盖仍待核对，不算M1完成。`performance-paths.json`把workflow IPC归到providers/catalog，但没有workflow-runner专用counter，不拿目录基准冒充调度门测量。
 - 生产owner/observer审计：`index.ts` 的workflow executor仍调用唯一startAppRun；原生终态在最终录制处理后经onTerminal交回，startup与每次dispatch前核对冻结runtimeIdentity。`WorkflowService`恢复历史unknown只保留容量不重发。现有UI smoke是API fixture，不将它当完整生产App证明；该验收继续保留到完整功能交付。

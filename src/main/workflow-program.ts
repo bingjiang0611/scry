@@ -226,9 +226,9 @@ function referencedRoles(body: WorkflowBlock, roles = new Set<WorkflowRole>()): 
 
 const loopStateTypes = new WeakMap<WorkflowBlock, Map<string, Record<string, WorkflowValueSchema>>>()
 
-function validateReferenceDominance(body: WorkflowBlock): Map<string, Record<string, WorkflowValueSchema>> {
+function validateReferenceDominance(body: WorkflowBlock, inputs: ReadonlyMap<string, WorkflowValueSchema> = new Map()): Map<string, Record<string, WorkflowValueSchema>> {
   if (body.kind !== 'sequence' || body.blocks.at(-1)?.kind !== 'return') throw new Error('根 sequence 必须以 return 结束')
-  const available = new Map<string, WorkflowValueSchema>()
+  const available = new Map(inputs)
   const resolvedLoops = new Map<string, Record<string, WorkflowValueSchema>>()
   let returnCount = 0
   const referenceType = (ref: WorkflowOutputRef, scope: ReadonlyMap<string, WorkflowValueSchema>, label = '输入'): WorkflowValueSchema => {
@@ -329,6 +329,16 @@ export function workflowLoopStateTypes(body: WorkflowBlock, nodeId: string): Rec
   return types
 }
 
+export { ROLES as WORKFLOW_ROLES }
+
+/** Definition validation shares the runtime compiler, without inventing Provider bindings or input values. */
+export function validateWorkflowBody(input: unknown, roles: ReadonlySet<WorkflowRole>, inputs: ReadonlyMap<string, WorkflowValueSchema> = new Map()): WorkflowBlock {
+  const body = validateBlock(input, new Set(inputs.keys()), 0, { value: 0, textBytes: 0 })
+  validateReferenceDominance(body, inputs)
+  for (const role of referencedRoles(body)) if (!roles.has(role)) throw new Error(workflowExpressionCopy.role(role))
+  return body
+}
+
 export function validateWorkflowProgram(input: unknown): WorkflowProgram {
   if (!input || typeof input !== 'object') throw new Error('工作流程序无效')
   const value = input as Record<string, unknown>
@@ -341,11 +351,7 @@ export function validateWorkflowProgram(input: unknown): WorkflowProgram {
   if (!Array.isArray(value.roles) || value.roles.length === 0 || value.roles.length > ROLES.length) throw new Error('工作流角色配置无效')
   const roles = value.roles.map((role, index) => validateWorkflowRoleBinding(role, index, true))
   if (new Set(roles.map((role) => role.role)).size !== roles.length) throw new Error('工作流角色不能重复')
-  const seen = new Set<string>()
-  const body = validateBlock(value.body, seen, 0, { value: 0, textBytes: 0 })
-  validateReferenceDominance(body)
-  const configuredRoles = new Set(roles.map((role) => role.role))
-  for (const role of referencedRoles(body)) if (!configuredRoles.has(role)) throw new Error(`程序引用了未配置角色：${role}`)
+  const body = validateWorkflowBody(value.body, new Set(roles.map(role => role.role)))
   return { schemaVersion: WORKFLOW_SCHEMA_VERSION, workflowId: value.workflowId, programRevision: value.programRevision,
     userGoal: value.userGoal.trim(), workspace: value.workspace, roles, body }
 }

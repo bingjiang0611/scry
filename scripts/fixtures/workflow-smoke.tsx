@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import type { WorkflowApi } from '../../src/shared/workflow-api'
 import type { WorkflowPlanPreview, WorkflowProgress } from '../../src/shared/workflow'
 import type { DetectedAgent } from '../../src/renderer/env'
@@ -21,6 +22,7 @@ const agents = [{ id: 'codex', name: 'Codex fixture' }, { id: 'pi:fixture', name
 const request: WorkflowLaunchRequest = { id: 'ui-fixture-command', command: '/scry-workflow run Inspect fixture', cwd: '/fixture',
   orchestrator: { role: 'orchestrator', providerId: 'codex', permissionMode: 'default' } }
 const api: WorkflowApi = {
+  templates: emptyWorkflowBridge.templates,
   plan: async input => {
     counters.plans++
     document.body.dataset.workflowRequest = JSON.stringify(input)

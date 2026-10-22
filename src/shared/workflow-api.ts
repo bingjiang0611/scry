@@ -1,3 +1,4 @@
+import type { WorkflowTemplateApi } from './workflow-template'
 import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowProgressPage, WorkflowRoleBinding } from './workflow.js'
 
 export type WorkflowResumeResult =
@@ -5,6 +6,7 @@ export type WorkflowResumeResult =
   | { state: 'nothing_to_resume'; progress: WorkflowProgress | null }
 
 export interface WorkflowApi {
+  templates: WorkflowTemplateApi
   plan(request: { command: string; cwd: string; commandId?: string; orchestrator: WorkflowRoleBinding; roles: WorkflowRoleBinding[] }): Promise<WorkflowPlanPreview>
   preview(workflowId: string): Promise<WorkflowPlanPreview>
   approve(approval: WorkflowApproval): Promise<true>

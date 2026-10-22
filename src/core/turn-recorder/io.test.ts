@@ -24,6 +24,31 @@ describe('durable archive copy', () => {
 })
 
 describe('withDirectoryLock', () => {
+  it.each(['live', 'corrupt', 'unidentified'] as const)('does not take over an aged %s owner in strict CAS mode', async kind => {
+    const root = tempDir(), lock = join(root, 'strict.lock'), owner = join(lock, 'owner.json')
+    try {
+      await mkdir(lock)
+      const source = kind === 'corrupt' ? '{' : JSON.stringify({ token: 'original-owner', createdAt: 0, ...(kind === 'live' ? { pid: process.pid } : {}) })
+      await writeFile(owner, source)
+      const past = new Date(Date.now() - 6 * 60_000)
+      await utimes(owner, past, past)
+      let entered = false
+      await expect(withDirectoryLock(lock, async () => { entered = true }, { requireDeadOwner: true, waitMs: 0, ttlMs: 10 })).rejects.toMatchObject({ code: 'ELOCKTIMEOUT' })
+      expect(entered).toBe(false)
+      expect(await readFile(owner, 'utf8')).toBe(source)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+  it('recovers an owner proved absent in strict CAS mode', async () => {
+    const root = tempDir(), lock = join(root, 'dead.lock')
+    try {
+      await mkdir(lock)
+      await writeFile(join(lock, 'owner.json'), JSON.stringify({ token: 'dead-owner', createdAt: Date.now(), pid: 2147483647 }))
+      let entered = false
+      await withDirectoryLock(lock, async () => { entered = true }, { requireDeadOwner: true })
+      expect(entered).toBe(true)
+      await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
   it('serializes two contenders recovering the same dead legacy owner', async () => {
     const root = tempDir()
     const lock = join(root, 'locks', 'commit.lock')

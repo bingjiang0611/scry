@@ -66,6 +66,7 @@ import type {
 } from '../shared/workspace'
 import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
 import type { WorkflowApi } from '../shared/workflow-api'
+import type { WorkflowTemplateApi } from '../shared/workflow-template'
 import type { DesktopRemoteAPI, DesktopHostAccess } from '../shared/desktop-remote'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ScanReport } from '../cli/mcpguard-core'
@@ -356,6 +357,13 @@ const api = {
   // This is a refresh hint only (no active-run semantics), so the Mac session
   // list shows the phone's conversation live without corrupting local run state.
   workflow: {
+    templates: {
+      read: (...args: Parameters<WorkflowTemplateApi['read']>): ReturnType<WorkflowTemplateApi['read']> => ipcRenderer.invoke('workflow:templates:read', ...args),
+      list: (...args: Parameters<WorkflowTemplateApi['list']>): ReturnType<WorkflowTemplateApi['list']> => ipcRenderer.invoke('workflow:templates:list', ...args),
+      saveDraft: (request: Parameters<WorkflowTemplateApi['saveDraft']>[0]): ReturnType<WorkflowTemplateApi['saveDraft']> => ipcRenderer.invoke('workflow:templates:saveDraft', request),
+      draft: (id: string): ReturnType<WorkflowTemplateApi['draft']> => ipcRenderer.invoke('workflow:templates:draft', id),
+      publish: (request: Parameters<WorkflowTemplateApi['publish']>[0]): ReturnType<WorkflowTemplateApi['publish']> => ipcRenderer.invoke('workflow:templates:publish', request)
+    },
     plan: (request: Parameters<WorkflowApi['plan']>[0]): ReturnType<WorkflowApi['plan']> => ipcRenderer.invoke('workflow:plan', request),
     preview: (workflowId: string): ReturnType<WorkflowApi['preview']> => ipcRenderer.invoke('workflow:preview', workflowId),
     approve: (approval: Parameters<WorkflowApi['approve']>[0]): ReturnType<WorkflowApi['approve']> => ipcRenderer.invoke('workflow:approve', approval),

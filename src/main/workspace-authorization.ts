@@ -1,10 +1,12 @@
 import { statSync, realpathSync } from 'node:fs'
+import { realpath, stat } from 'node:fs/promises'
+import { workspaceAuthorizationCopy as copy } from '../shared/constants/copy'
 import { isAbsolute, relative, sep } from 'node:path'
 
 export function canonicalExistingDirectory(cwd: string): string {
-  if (!isAbsolute(cwd) || cwd.length > 4_096) throw new Error('无效的工作目录')
+  if (!isAbsolute(cwd) || cwd.length > 4_096) throw new Error(copy.invalid)
   const canonical = realpathSync(cwd)
-  if (!statSync(canonical).isDirectory()) throw new Error('工作目录不存在或不是文件夹')
+  if (!statSync(canonical).isDirectory()) throw new Error(copy.directory)
   return canonical
 }
 
@@ -13,8 +15,23 @@ export function knownProjectDirectory(cwd: string, candidates: Iterable<string>)
   const known = [...candidates].some((candidate) => {
     try { return canonicalExistingDirectory(candidate) === canonical } catch { return false }
   })
-  if (!known) throw new Error('工作目录尚未通过 Scry 目录选择器授权')
+  if (!known) throw new Error(copy.unselected)
   return canonical
+}
+
+async function canonicalExistingDirectoryAsync(cwd: string): Promise<string> {
+  if (!isAbsolute(cwd) || cwd.length > 4_096) throw new Error(copy.invalid)
+  const canonical = await realpath(cwd)
+  if (!(await stat(canonical)).isDirectory()) throw new Error(copy.directory)
+  return canonical
+}
+export async function knownProjectDirectoryAsync(cwd: string, candidates: Iterable<string>): Promise<string> {
+  const canonical = await canonicalExistingDirectoryAsync(cwd)
+  for (const candidate of candidates) {
+    if (candidate === canonical) return canonical
+    try { if (await canonicalExistingDirectoryAsync(candidate) === canonical) return canonical } catch { /* Invalid registered paths cannot grant access. */ }
+  }
+  throw new Error(copy.unselected)
 }
 
 // Remote folder browsing may narrow an already authorized project to any real

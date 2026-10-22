@@ -137,6 +137,8 @@ import { WorkflowService } from './workflow-service'
 import { workflowShutdownCopy } from '../shared/constants/copy'
 import { workflowPlanningPrompt } from './workflow-program'
 import { registerWorkflowIpc } from './workflow-ipc'
+import { registerWorkflowTemplateIpc } from './workflow-template-ipc'
+import { WorkflowTemplateStore } from './workflow-template-store'
 import { workflowPermissionResponse } from './workflow-question'
 import { workflowBindingControls } from './workflow-capability'
 import { WorkflowSlots, WorkflowScopeError, WorkflowDispatch } from './workflow-runner'
@@ -197,7 +199,8 @@ import { flattenTraceItems, previewTraceItems } from './remote/trace-output'
 import {
   authorizedWorkspaceRequest,
   canonicalExistingDirectory,
-  knownProjectDirectory
+  knownProjectDirectory,
+  knownProjectDirectoryAsync
 } from './workspace-authorization'
 import { windowBackgroundColor, windowTitleBarOptions } from './window-chrome'
 import { assertTrustedIpcEvent as assertTrustedIpcEventForWindow, registerTrustedIpcHandler } from './ipc-trust'
@@ -448,6 +451,10 @@ const knownProjectDirectories = (): Set<string> => new Set([
   ...appSessionStore().load().map((session) => session.cwd).filter(Boolean)
 ])
 const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, knownProjectDirectories())
+const resolveTemplateProjectDirectory = async (cwd: string): Promise<string> => {
+  const [recent, projects, sessions] = await Promise.all([recentStore().loadAsync(), projectStore().loadAsync(), appSessionStore().loadAsync()])
+  return knownProjectDirectoryAsync(cwd, new Set([...recent, ...projects.filter(project => !project.removedAt).map(project => project.cwd), ...sessions.map(session => session.cwd).filter(Boolean)]))
+}
 const remoteProjectRoots = (): string[] => canonicalRemoteProjectRoots(knownProjectDirectories())
 const resolveRemoteProjectDirectory = (cwd: string): string => resolveRemoteDescendant(cwd, knownProjectDirectories())
 let traceCatalogRecovery: Promise<void> | null = null
@@ -4697,6 +4704,10 @@ registerWorkflowIpc({
     if (currentCwd && workspace !== canonicalExistingDirectory(currentCwd)) throw new Error('工作流工作区与当前授权目录不一致')
   }
 })
+registerWorkflowTemplateIpc(
+  (channel, listener) => handleTrusted(channel, (_event, ...args: unknown[]) => listener(...args)),
+  new WorkflowTemplateStore(app.getPath('userData'), resolveTemplateProjectDirectory)
+)
 /** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
 const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
 handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {

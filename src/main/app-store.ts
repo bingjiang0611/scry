@@ -12,12 +12,14 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CatalogHealth, ProviderId, SessionProviderId } from '../shared/provider'
 import type { RuntimeProvider } from '../shared/runtime'
 import type { AgentTurnRecord } from '../shared/turn-record'
 import { normalizeSessionTitle } from '../shared/session-title'
+import { appStorePersistenceCopy as copy } from '../shared/constants/copy'
 
 export interface AppSession {
   sessionId: string
@@ -118,7 +120,7 @@ function parsedJson<T>(file: string, isValid: JsonValidator<T>): { status: 'miss
     const value: unknown = JSON.parse(readFileSync(file, 'utf8'))
     return isValid(value)
       ? { status: 'valid', value }
-      : { status: 'invalid', error: 'JSON schema mismatch' }
+      : { status: 'invalid', error: copy.schema }
   } catch (error) {
     return { status: 'invalid', error: error instanceof Error ? error.message : String(error) }
   }
@@ -127,21 +129,38 @@ function parsedJson<T>(file: string, isValid: JsonValidator<T>): { status: 'miss
 function readJsonRecoverable<T>(file: string, fallback: T, isValid: JsonValidator<T>): { value: T; health: CatalogHealth } {
   const primary = parsedJson<T>(file, isValid)
   if (primary.status === 'valid') return { value: primary.value as T, health: { status: 'ready', source: 'primary' } }
-  const backup = parsedJson<T>(`${file}.bak`, isValid)
+  return recoverJsonBackup(primary, parsedJson<T>(`${file}.bak`, isValid), fallback)
+}
+
+async function parsedJsonAsync<T>(file: string, isValid: JsonValidator<T>): Promise<ReturnType<typeof parsedJson<T>>> {
+  try {
+    const value: unknown = JSON.parse(await readFile(file, 'utf8'))
+    return isValid(value) ? { status: 'valid', value } : { status: 'invalid', error: copy.schema }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' }
+    return { status: 'invalid', error: error instanceof Error ? error.message : String(error) }
+  }
+}
+async function readJsonRecoverableAsync<T>(file: string, fallback: T, isValid: JsonValidator<T>): Promise<{ value: T; health: CatalogHealth }> {
+  const primary = await parsedJsonAsync(file, isValid)
+  if (primary.status === 'valid') return { value: primary.value as T, health: { status: 'ready', source: 'primary' } }
+  return recoverJsonBackup(primary, await parsedJsonAsync(`${file}.bak`, isValid), fallback)
+}
+function recoverJsonBackup<T>(primary: ReturnType<typeof parsedJson<T>>, backup: ReturnType<typeof parsedJson<T>>, fallback: T): { value: T; health: CatalogHealth } {
   if (backup.status === 'valid') {
     return {
       value: backup.value as T,
       health: {
         status: 'degraded',
         source: 'backup',
-        reason: primary.status === 'missing' ? '主索引缺失，已使用备份' : `主索引损坏，已使用备份：${primary.error}`
+        reason: primary.status === 'missing' ? copy.primaryMissing : copy.primaryInvalid(primary.error)
       }
     }
   }
   if (primary.status === 'missing' && backup.status === 'missing') {
     return { value: fallback, health: { status: 'ready', source: 'empty' } }
   }
-  const reason = `主索引与备份均不可用：${primary.error ?? primary.status}；${backup.error ?? backup.status}`
+  const reason = copy.unavailable(primary.error ?? primary.status, backup.error ?? backup.status)
   throw Object.assign(new Error(reason), { catalogHealth: { status: 'unavailable', source: 'empty', reason } satisfies CatalogHealth })
 }
 
@@ -240,7 +259,8 @@ export function createRecentFoldersStore(userDataDir: string) {
     writeJsonRecoverable(file, next, isStringArray)
     return next
   }
-  return { load, push, remove }
+  const loadAsync = async (): Promise<string[]> => (await readJsonRecoverableAsync<string[]>(file, [], isStringArray)).value
+  return { load, loadAsync, push, remove }
 }
 
 function isProjectRecordArray(value: unknown): value is ProjectRecord[] {
@@ -307,7 +327,8 @@ export function createProjectStore(userDataDir: string) {
     } else projects.push({ cwd, lastOpenedAt: now, removedAt: now })
     save(projects)
   }
-  return { load, seed, remember, setPinned, rename, remove }
+  const loadAsync = async (): Promise<ProjectRecord[]> => (await readJsonRecoverableAsync<ProjectRecord[]>(file, [], isProjectRecordArray)).value
+  return { load, loadAsync, seed, remember, setPinned, rename, remove }
 }
 
 export function mergeProjectMetas(records: ProjectRecord[], sessionProjects: ProjectMeta[]): ProjectMeta[] {
@@ -573,8 +594,12 @@ export function createAppSessionStore(userDataDir: string) {
     lastHealth = { status: 'ready', source: 'primary' }
   }
 
+  // Read-only async callers do not overwrite the synchronous cache after an
+  // intervening save. Both paths share the same schema and backup authority.
+  const loadAsync = async (): Promise<AppSession[]> => normalize((await readJsonRecoverableAsync<AppSession[]>(file, [], isAppSessionArray)).value)
   return {
     load,
+    loadAsync,
     save,
     health,
     recordPending,

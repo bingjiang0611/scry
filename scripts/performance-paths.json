@@ -42,10 +42,19 @@
         "ipc.workflow:stop",
         "ipc.workflow:snapshot",
         "ipc.workflow:list",
-        "ipc.workflow:cancelPlanning"
+        "ipc.workflow:cancelPlanning",
+        "ipc.workflow:templates:read",
+        "ipc.workflow:templates:list",
+        "ipc.workflow:templates:saveDraft",
+        "ipc.workflow:templates:draft",
+        "ipc.workflow:templates:publish",
+        "workflow.template.publish"
       ],
       "sources": [
         "src/main/index.ts",
+        "src/main/workflow-template-store.ts",
+        "src/main/workflow-template-definition.ts",
+        "src/main/workflow-template-ipc.ts",
         "src/main/context-admission.bench.ts"
       ],
       "benchmarks": [

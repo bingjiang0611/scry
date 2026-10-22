@@ -197,7 +197,7 @@ export class FileWorkflowStore implements WorkflowStore {
       const next = nextWorkflowFrame(await this.loadFrame(input.workflowId, input.frameId), input, expectedRevision)
       await this.atomic(name, next)
       return next
-    })
+    }, { requireDeadOwner: true })
   }
 
   async readConcurrency(): Promise<number | undefined> {
@@ -216,7 +216,7 @@ export class FileWorkflowStore implements WorkflowStore {
       if (workflowRecordFingerprint(current) !== expectedFingerprint) throw new Error(workflowRecoveryCopy.stale)
       validateWorkflowClaim(current, record)
       await this.writeRecord(record)
-    })
+    }, { requireDeadOwner: true })
   }
   async save(record: WorkflowStoreRecord): Promise<void> {
     const id = fileSafe(record.preview.workflowId)
@@ -224,7 +224,7 @@ export class FileWorkflowStore implements WorkflowStore {
       workflowEpochMatches(await this.load(id), record)
       validateWorkflowOwnership(record)
       await this.writeRecord(record)
-    })
+    }, { requireDeadOwner: true })
   }
   async loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined> {
     if (outcome.outputRef === undefined) return undefined

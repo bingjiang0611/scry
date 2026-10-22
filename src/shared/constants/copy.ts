@@ -58,12 +58,40 @@ export const workflowExpressionCopy = {
   valueLimit: '工作流数据超过大小、深度或集合上限，未继续执行',
   field: (field: string) => `工作流表达式字段不受支持：${field}`,
   reference: (name: string) => `工作流绑定不可用：${name}`,
+  role: (role: string) => `程序引用了未配置角色：${role}`,
   missing: (path: string) => `工作流值缺少字段：${path}`,
   type: (kind: string) => `工作流表达式类型不匹配：${kind}`,
   key: '工作流集合键必须是有限标量',
   binding: (name: string) => `工作流绑定已存在：${name}`,
   trueReason: 'condition_true',
   falseReason: 'condition_false'
+}
+
+export const workspaceAuthorizationCopy = {
+  invalid: '无效的工作目录',
+  directory: '工作目录不存在或不是文件夹',
+  unselected: '工作目录尚未通过 Scry 目录选择器授权'
+} as const
+
+export const appStorePersistenceCopy = {
+  schema: 'JSON schema mismatch',
+  primaryMissing: '主索引缺失，已使用备份',
+  primaryInvalid: (error: string | undefined) => `主索引损坏，已使用备份：${error}`,
+  unavailable: (primary: string, backup: string) => `主索引与备份均不可用：${primary}；${backup}`
+} as const
+
+export const workflowTemplateCopy = {
+  invalid: '工作流模板定义或请求无效',
+  version: '工作流模板版本不受支持',
+  limit: '单个模板或草稿内容不能超过 4 MiB',
+  path: '模板目录或文件不是获授权范围内的普通目标，拒绝链接写入或读取',
+  missing: '工作流模板或草稿不存在',
+  staleDraft: '草稿已变化，请重新读取并核对差异',
+  invalidDraft: '草稿尚未通过定义校验，不能发布',
+  command: '模板 commandId 已用于另一操作',
+  ledger: '模板快照或发布收据校验失败',
+  pending: '发布收据未完成，当前内容不能证明结果；未自动重写',
+  parameter: '模板参数缺失、类型不符或包含未声明参数'
 }
 
 export const workflowRecoveryCopy = {

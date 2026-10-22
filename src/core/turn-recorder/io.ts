@@ -136,13 +136,14 @@ function recoveryToken(lockDir: string, owner: LockOwner): string {
   return createHash('sha256').update(`${lockDir}\0${JSON.stringify(owner)}`).digest('hex')
 }
 
-async function staleOwner(lockDir: string, ttlMs: number): Promise<LockOwner | 'ownerless' | 'missing' | null> {
+async function staleOwner(lockDir: string, ttlMs: number, requireDeadOwner: boolean): Promise<LockOwner | 'ownerless' | 'missing' | null> {
   const ownerPath = join(lockDir, 'owner.json')
   let owner: LockOwner
   try {
     owner = JSON.parse(await readFile(ownerPath, 'utf8')) as LockOwner
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if (requireDeadOwner) return null
       try {
         const info = await stat(ownerPath)
         if (Date.now() - info.mtimeMs >= ttlMs) {
@@ -164,8 +165,12 @@ async function staleOwner(lockDir: string, ttlMs: number): Promise<LockOwner | '
       return (statError as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : null
     }
   }
+  if (requireDeadOwner && (!owner || !Number.isInteger(owner.pid) || (owner.pid ?? 0) <= 0)) return null
   if (Number.isInteger(owner.pid) && (owner.pid ?? 0) > 0) {
     if (!pidAlive(owner.pid as number)) return owner
+    // CAS authorities must not admit a second writer merely because a live or
+    // reused PID stopped heartbeating (for example while the App is suspended).
+    if (requireDeadOwner) return null
     // PID reuse cannot be distinguished portably from the original owner. No recorder
     // critical section is expected to live for minutes, so cap a live-PID lock instead
     // of allowing an unrelated reused PID to block the workspace forever.
@@ -228,7 +233,7 @@ async function delay(ms: number): Promise<void> {
 export async function withDirectoryLock<T>(
   lockDir: string,
   action: () => Promise<T>,
-  options: { waitMs?: number; ttlMs?: number } = {}
+  options: { waitMs?: number; ttlMs?: number; requireDeadOwner?: boolean } = {}
 ): Promise<T> {
   const waitMs = options.waitMs ?? 2_000
   const ttlMs = options.ttlMs ?? 30_000
@@ -259,7 +264,7 @@ export async function withDirectoryLock<T>(
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code !== 'EEXIST') throw error
-      const stale = await staleOwner(lockDir, ttlMs)
+      const stale = await staleOwner(lockDir, ttlMs, options.requireDeadOwner === true)
       if (stale === 'missing') continue
       if (stale === 'ownerless') {
         const claim = await claimOwnerlessLock(lockDir)
