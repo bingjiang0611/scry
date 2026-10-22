@@ -163,21 +163,58 @@ function shouldWindowTranscript(turns: readonly Turn[]): boolean {
 
 export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, focusedTurnRunId, ...props }: TranscriptProps) {
   const windowed = shouldWindowTranscript(turns)
+  const intersection = useRef<IntersectionObserver | null>(null)
+  const visibilityCallbacks = useRef(new Map<Element, (intersecting: boolean) => void>())
+  const selectionChecks = useRef(new Set<() => void>())
+  const observeVisibility = useCallback((element: HTMLElement, callback: (intersecting: boolean) => void) => {
+    if (!intersection.current) {
+      intersection.current = new IntersectionObserver(entries => {
+        // Keep only the last state per shell when rapid scrolling queues enter + leave.
+        const latest = new Map(entries.map(entry => [entry.target, entry.isIntersecting]))
+        for (const [target, intersecting] of latest) visibilityCallbacks.current.get(target)?.(intersecting)
+      }, { root: element.closest('.chat-transcript'), rootMargin: '1200px 0px' })
+    }
+    visibilityCallbacks.current.set(element, callback)
+    intersection.current.observe(element)
+    return () => {
+      visibilityCallbacks.current.delete(element)
+      intersection.current?.unobserve(element)
+      if (visibilityCallbacks.current.size === 0) {
+        intersection.current?.disconnect()
+        intersection.current = null
+      }
+    }
+  }, [])
+  const observeSelection = useCallback((recheck: () => void) => {
+    selectionChecks.current.add(recheck)
+    return () => { selectionChecks.current.delete(recheck) }
+  }, [])
+  useEffect(() => {
+    if (!windowed) return
+    // Only materialized rows can hold a selection or expanded disclosure. Empty
+    // shells still receive visibility/focus events, but never global selection work.
+    const recheck = () => { for (const check of selectionChecks.current) check() }
+    document.addEventListener('selectionchange', recheck)
+    return () => document.removeEventListener('selectionchange', recheck)
+  }, [windowed])
   return <>{turns.map((turn, index) => <TranscriptTurn
     key={turn.runId} {...props} turn={turn} index={index} total={turns.length}
     windowed={windowed} initiallyVisible={!windowed || index >= turns.length - TRANSCRIPT_INITIAL_VISIBLE_TURNS}
-    focused={focusedTurnRunId === turn.runId}
+    focused={focusedTurnRunId === turn.runId} observeVisibility={observeVisibility} observeSelection={observeSelection}
   />)}</>
 })
 
 const TranscriptTurn = memo(function TranscriptTurn({
-  turn, index, total, windowed, initiallyVisible, focused,
+  turn, index, total, windowed, initiallyVisible, focused, observeVisibility, observeSelection,
   selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
+  observeVisibility: (element: HTMLElement, callback: (intersecting: boolean) => void) => () => void
+  observeSelection: (recheck: () => void) => () => void
 }) {
   const selected = useMemo(() => selectedId != null && turn.items.some(event => event.id === selectedId), [turn.items, selectedId])
   const shell = useRef<HTMLDivElement | null>(null)
+  const releaseOffscreen = useRef<() => void>()
   const height = useRef(240)
   const [visible, setVisible] = useState(initiallyVisible)
   const pinned = focused || selected || !turn.done || pendingQuestions.some(question => question.runId === turn.runId)
@@ -241,26 +278,33 @@ const TranscriptTurn = memo(function TranscriptTurn({
       const target = event.relatedTarget instanceof Node ? event.relatedTarget : null
       if (!element.contains(target)) release(target)
     }
-    const observer = new IntersectionObserver((entries) => {
-      // Rapid focus/scroll can queue both enter and leave before delivery.
-      intersecting = entries[entries.length - 1].isIntersecting
+    releaseOffscreen.current = recheck
+    const stopObserving = observeVisibility(element, value => {
+      intersecting = value
       if (intersecting) setVisible(true)
       else recheck()
-    }, { root: element.closest('.chat-transcript'), rootMargin: '1200px 0px' })
-    observer.observe(element)
-    // Portaled dialogs can blur before React clears the trigger's expanded state.
-    // Recheck after the disclosure commit, even when the row stays offscreen.
-    const disclosureObserver = new MutationObserver(recheck)
-    disclosureObserver.observe(element, { attributes: true, subtree: true, attributeFilter: ['aria-expanded', 'open'] })
+    })
     element.addEventListener('focusout', blur)
-    document.addEventListener('selectionchange', recheck)
     return () => {
-      observer.disconnect()
-      disclosureObserver.disconnect()
+      stopObserving()
       element.removeEventListener('focusout', blur)
-      document.removeEventListener('selectionchange', recheck)
     }
-  }, [windowed])
+  }, [windowed, observeVisibility])
+
+  useEffect(() => {
+    if (!windowed || !mounted) return
+    // The visibility effect above owns this callback for the shell's lifetime.
+    const recheck = releaseOffscreen.current!
+    const stopObserving = observeSelection(recheck)
+    // Portaled dialogs can blur before React clears the trigger's expanded state.
+    // Keep checking retained offscreen content until its disclosure/selection closes.
+    const disclosureObserver = new MutationObserver(recheck)
+    disclosureObserver.observe(shell.current!, { attributes: true, subtree: true, attributeFilter: ['aria-expanded', 'open'] })
+    return () => {
+      stopObserving()
+      disclosureObserver.disconnect()
+    }
+  }, [windowed, mounted, observeSelection])
 
   return <div
     className={`turn transcript-turn ${selected ? 'is-selected' : ''} ${focused ? 'turn-jump-target' : ''}`}
