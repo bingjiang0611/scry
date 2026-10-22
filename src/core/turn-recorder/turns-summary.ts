@@ -743,7 +743,9 @@ function summarizeInterventions(selected: AgentTurnRecord[]) {
  * explicitly unbound turn as a task turn. `legacy_unset` counts records written before the
  * status field existed — absence is legacy, never an observed fact.
  */
-function summarizeIdentity(selected: AgentTurnRecord[]) {
+export function summarizeIdentity(
+  selected: Array<Pick<AgentTurnRecord, 'provider' | 'turnRoleStatus' | 'turnRole' | 'taskLinkStatus'>>
+) {
   const modelStatus: Record<string, number> = {}
   const modelSource: Record<string, number> = {}
   const roleStatus: Record<string, number> = {}
