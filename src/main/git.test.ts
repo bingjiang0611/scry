@@ -911,7 +911,7 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
       expect(invocations[0]).not.toBe(invocations[1])
       const firstOutput = invocations[0].slice('--output='.length)
       const secondOutput = invocations[1].slice('--output='.length)
-      await expect(access(firstOutput)).resolves.toBeUndefined()
+      await expect(access(firstOutput)).rejects.toMatchObject({ code: 'ENOENT' })
       await expect(access(secondOutput)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       if (baseline) await cancelGitTurnDiff(baseline)
@@ -985,6 +985,39 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
       await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('bounds encoded argv bytes without skipping long-path suffixes or retaining preview artifacts', async () => {
+    const root = await initRepo()
+    const originalPath = process.env.PATH
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      const directory = join(root, 'p'.repeat(160), 'q'.repeat(160))
+      await mkdir(directory, { recursive: true })
+      const paths = Array.from({ length: 100 }, (_, index) => join(directory, `${'f'.repeat(200)}-${index}.txt`))
+      await Promise.all(paths.map(path => writeFile(path, 'before\n')))
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const log = await installPatchShim(root)
+      capture = await beginGitTurnDiff(root)
+      await Promise.all(paths.map(path => writeFile(path, 'after\n')))
+      const result = await finishGitTurnDiff(capture, 10_000)
+      expect(result.files).toHaveLength(paths.length)
+      expect(result.files.every(file => file.patchStatus === 'captured' && file.patch?.includes('+after'))).toBe(true)
+      const calls = (await readFile(log, 'utf8')).split('\0\0').map(row => row.split('\0'))
+        .filter(args => args.includes('--raw') && args.some(arg => arg.startsWith('--output=')))
+      expect(calls.length).toBeGreaterThan(1)
+      for (const args of calls) {
+        const pathspecs = args.slice(args.indexOf('--') + 1)
+        expect(pathspecs.reduce((bytes, arg) => bytes + Buffer.byteLength(arg) + 1, 0)).toBeLessThanOrEqual(64 * 1024)
+        const output = args.find(arg => arg.startsWith('--output='))!.slice('--output='.length)
+        await expect(access(output)).rejects.toMatchObject({ code: 'ENOENT' })
+      }
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+      vi.stubEnv('PATH', originalPath ?? '')
+    }
+  }, 20_000)
 
   it('patch framing pins blank context indicators despite repository config', async () => {
     const root = await initRepo()

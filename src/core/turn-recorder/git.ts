@@ -897,10 +897,9 @@ function parsePatchBody(bytes: Buffer, start: number, allowEof: boolean): Parsed
 function exactGlobPathspec(relPath: string): string {
   let pattern = ''
   for (const character of relPath) {
-    if (character === '\\') pattern += '\\\\'
-    else if (character === '*' || character === '?') pattern += `\\${character}`
-    else if (character === '[') pattern += '[[]'
-    else pattern += character
+    // Escaping even ordinary characters forces Git's full glob match rather than its
+    // directory-prefix shortcut. Thus deleted `a` cannot select new `a/private.env`.
+    pattern += character === '/' ? character : `\\${character}`
   }
   return `:(top,glob)${pattern}`
 }
@@ -966,22 +965,7 @@ async function captureTurnPatches(
     }
 
     const patchPath = join(capture.tempDir, `patch-operation-${operationId}-batch-${start}.diff`)
-    const currentPathKeys = new Set(currentBatch.map((item) => item.pathBytes.toString('hex')))
-    const currentRelativePaths = currentBatch.map((item) => item.pathBytes.toString())
-    // Git pathspecs use directory-prefix semantics for file-to-directory transitions. Exclude
-    // changed descendants outside this batch, so a positive `a` cannot pull in `a/private.env`
-    // (or a later batch) and turn it into unowned evidence. Do not exclude ancestors: an ancestor
-    // file record must not hide a selected descendant in a later batch.
-    const excludedPathspecs = files.flatMap((file) => {
-      const relPath = relative(capture.repoRoot!, file.path).split(sep).join('/')
-      const pathBytes = Buffer.from(relPath)
-      const isSelected = currentPathKeys.has(pathBytes.toString('hex'))
-      const isSelectedDescendant = currentRelativePaths.some(path => relPath.startsWith(`${path}/`))
-      return isSelected || !isSelectedDescendant
-        ? []
-        : [`:(top,exclude,glob)${exactGlobPathspec(relPath).slice(':(top,glob)'.length)}`]
-    })
-    const rawPathspecs = [...currentBatch.map((item) => item.pathspec), ...excludedPathspecs]
+    const rawPathspecs = currentBatch.map((item) => item.pathspec)
     let commandError: TurnDiffReason | undefined
     try {
       await gitCommand(
@@ -1016,6 +1000,8 @@ async function captureTurnPatches(
 
     let bytes: Buffer | undefined
     try { bytes = await readFile(patchPath) } catch {}
+    // Preview baselines can outlive many operations; do not retain every unique batch file.
+    await rm(patchPath, { force: true })
     const parsed = bytes ? splitRawPatchOutput(bytes) : undefined
     let bodyCursor = parsed?.patchStart ?? 0
     const records = parsed?.records ?? []
