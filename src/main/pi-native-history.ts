@@ -3,6 +3,7 @@ import { lstat, open, readdir, readFile, realpath, type FileHandle } from 'node:
 import { join, relative, resolve, sep } from 'node:path'
 import type { LoadedSessionTurn } from './session-history'
 import { classifyTool, type TraceEvent } from '../shared/trace'
+import { historyCopy } from '../shared/constants/copy'
 
 interface NativeEntry {
   type: string
@@ -29,7 +30,7 @@ export function parsePiNativeHistory(content: string, identity: { sessionId: str
   validateHeader(entries.shift(), identity)
   const byId = new Map<string, NativeEntry>()
   for (const entry of entries) {
-    if (typeof entry.id !== 'string' || byId.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
+    if (typeof entry.id !== 'string' || byId.has(entry.id)) throw new Error(historyCopy.nativeEntryInvalid)
     byId.set(entry.id, entry)
   }
   const turns: LoadedSessionTurn[] = []
@@ -232,7 +233,7 @@ interface NativeHistoryCache {
 
 export class PiNativeHistoryStaleError extends Error {
   constructor() {
-    super('Pi 原生会话在读取期间发生变化，请重新打开会话')
+    super(historyCopy.nativeSnapshotChanged)
     this.name = 'PiNativeHistoryStaleError'
   }
 }
@@ -419,8 +420,8 @@ async function readNativeSnapshot(args: Parameters<typeof readPiNativeSession>[0
           const text = line.toString('utf8')
           if (!text.trim()) continue
           const entry = JSON.parse(text) as NativeEntry
-          if (typeof entry.id !== 'string' || entries.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
-          if (entries.size >= maxNativeEntries) throw new Error('Pi 原生会话记录数超过 1000000 条')
+          if (typeof entry.id !== 'string' || entries.has(entry.id)) throw new Error(historyCopy.nativeEntryInvalid)
+          if (entries.size >= maxNativeEntries) throw new Error(historyCopy.nativeRecordLimit)
           const location = { id: entry.id, parentId: entry.parentId, offset, length: line.length, metadata: metadataForEntry(entry) }
           entries.set(entry.id, location)
           leaf = location
@@ -442,8 +443,8 @@ async function readNativeSnapshot(args: Parameters<typeof readPiNativeSession>[0
           hasHeader = true
           continue
         }
-        if (typeof entry.id !== 'string' || entries.has(entry.id)) throw new Error('Pi 原生会话 entry id 无效')
-        if (entries.size >= maxNativeEntries) throw new Error('Pi 原生会话记录数超过 1000000 条')
+        if (typeof entry.id !== 'string' || entries.has(entry.id)) throw new Error(historyCopy.nativeEntryInvalid)
+        if (entries.size >= maxNativeEntries) throw new Error(historyCopy.nativeRecordLimit)
         const location = { id: entry.id, parentId: entry.parentId, offset, length: line.length, metadata: metadataForEntry(entry) }
         entries.set(entry.id, location)
         leaf = location
