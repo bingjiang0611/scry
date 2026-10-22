@@ -1174,10 +1174,16 @@ async function readSegmentedMetadataIndexAsync(args: {
       }, args) || !sameArchiveSegmentStamp(value, segmentStat)) return null
       entries.push(value)
     }
-    return { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory,
+    const after = archiveDirectoryStamp(await lstat(dir))
+    if (!sameArchiveDirectoryStamp(directory, after)) return null
+    const index: TraceArchiveIndex = { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory,
       sourceComplete: metadataCoverageComplete,
       sourceIssue: metadataCoverageComplete ? undefined : 'canonical archive segment coverage changed',
       entries: entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file)) }
+    // A live session can have only per-turn deltas before its first history read. Publish
+    // the validated base once so later pages do not reopen every metadata sidecar.
+    if (metadataCoverageComplete) await writeTraceArchiveIndex(args, index)
+    return index
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     if (signal?.aborted) throw signal.reason
@@ -1506,10 +1512,8 @@ export async function readTraceArchiveMetadataAsync(args: {
   // A segmented index cannot describe monolithic coverage. Force the caller's
   // complete-reader fallback instead of exposing synthetic metadata markers.
   if (monolith.status === 'valid') return null
-  const [validIndex, storedVersion] = await Promise.all([
-    readValidTraceArchiveIndex(args, signal),
-    traceArchiveIndexVersionAsync(args)
-  ])
+  const validIndex = await readValidTraceArchiveIndex(args, signal)
+  const storedVersion = validIndex?.version ?? await traceArchiveIndexVersionAsync(args)
   const indexed = validIndex ?? await readSegmentedMetadataIndexAsync(args, signal)
   const index = await upgradeTraceArchiveIndexAsync(args, indexed, signal)
   if (index?.version === 2 && storedVersion === 1 && (!validIndex || validIndex.version === 1)) await writeTraceArchiveIndex(args, index)
@@ -1726,9 +1730,11 @@ export async function readTraceArchivePageAsync(
 
   const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   let index = await readValidTraceArchiveIndex(args, signal)
-  const indexFileExists = trustedOwnedFile(args.userDataDir, traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId))
-  const storedIndexVersion = await traceArchiveIndexVersionAsync(args)
-  if (!index && indexFileExists && storedIndexVersion === 2) index = await readSegmentedMetadataIndexAsync(args, signal)
+  if (!index) {
+    const indexFileExists = trustedOwnedFile(args.userDataDir, traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId))
+    const storedIndexVersion = await traceArchiveIndexVersionAsync(args)
+    if (!indexFileExists || storedIndexVersion === 2) index = await readSegmentedMetadataIndexAsync(args, signal)
+  }
   if (!index || index.version !== 2) {
     let before: TraceArchiveDirectoryStamp | null = null
     try { before = archiveDirectoryStamp(await lstat(dir)) } catch { /* inspection below owns absence/corruption semantics */ }
