@@ -24,7 +24,7 @@ import type { AgentInputAttachment } from '../shared/runtime'
 import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
 import type { ProviderId } from '../shared/provider'
 import type { AgentTurnRecord, TurnEvidence } from '../shared/turn-record'
-import { storeAttachmentReference, type StoredAttachment } from './attachment-store'
+import { storeAttachmentReferenceAsync, storeAttachmentReference, type StoredAttachment } from './attachment-store'
 
 // Claude Code transcript 目录编码：路径里的 / . _ 都换成 -
 export function encodeCwd(cwd: string): string {
@@ -1863,13 +1863,13 @@ export async function upsertTraceArchiveTurnAsync(args: {
 }): Promise<boolean> {
   if (!args.sessionId) return false
   const providerId = args.providerId ?? 'claude'
+  const attachments = args.turn.attachments
+    ? await Promise.all(args.turn.attachments.map((attachment) =>
+        'storage' in attachment ? attachment : storeAttachmentReferenceAsync(args.userDataDir, args.turn.runId, attachment as AgentInputAttachment)))
+    : undefined
   let turn: TraceArchiveTurn = {
     ...args.turn,
-    attachments: args.turn.attachments?.map((attachment) =>
-      'storage' in attachment
-        ? attachment
-        : storeAttachmentReference(args.userDataDir, args.turn.runId, attachment as AgentInputAttachment)
-    ),
+    attachments,
     items: args.turn.items,
     ts: args.turn.ts ?? Date.now()
   }
