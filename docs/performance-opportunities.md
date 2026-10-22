@@ -2,6 +2,12 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## OpenCode：有界原生实例跨能力刷新周期复用（2026-10-22）
+
+- 用户限制只修改 Scry，本轮不改 Pi/Rotom。OpenCode 空闲保留60秒与桌面60秒能力读取相撞，生产提交 `06591d9` 改为可续租90秒；请求/测试期限、30秒模型目录缓存、原有指纹重验和活跃操作保护不变，空闲实例仍按原策略淘汰。
+- 相同三读、每读间隔60秒：生产 manager 回归与独立受控 Node HTTP 子进程都观察到启动3→1；后两次不再重复启动，指纹重验和真实SDK调用保留。不是所有 Provider 的常驻完成。
+- mac2 `74520c8` 完整 unit **3493 pass / 4既有opt-in skipped**、类型/build、完整43项计数与ratchet通过。锁内五对耗时样本遇到8核load17.99→22.55、highLoad=true，L2不可信，不报告提速。性能owner后续在空闲窗口复验同一harness；Pi保留新进程，Qoder未扩大寿命。见[实验与边界](performance-experiments/20261022-opencode-control-lease.md)。未合入、push或安装。
+
 ## 方案 A：按需 Provider 发现（按需层收口；mac2 Node/UI/计数通过，Swift 测试待完整 Xcode）
 
 - 在隔离分支实现 metadata/selected 协议及能力协商；定时元数据不再初始化全部 Provider，仅选中 Provider/Profile/canonical cwd 才读取能力。同上下文只合并在途查询，沿用 Provider 已有实例机制；未新增 Pi settled cache 或统一常驻池。
