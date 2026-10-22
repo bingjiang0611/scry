@@ -48,10 +48,16 @@ interface Cached<T> {
 }
 
 interface QoderControlSession {
+  key: string
   query: Query
   releasePrompt: () => void
   ready: ReturnType<Query['initializationResult']>
+  initializedAt?: number
   active: number
+  retired: boolean
+  quiesced: Promise<void>
+  resolveQuiesced: () => void
+  closePromise?: Promise<void>
   idleTimer?: NodeJS.Timeout
 }
 
@@ -805,68 +811,159 @@ function qoderTrace(event: TraceEvent, contextEvidence?: QoderContextEvidence): 
 
 export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
   const controls = new Map<string, QoderControlSession>()
+  const closingControls = new Map<string, Promise<void>>()
+  const refreshingControls = new Map<string, Promise<void>>()
+  const ownedControls = new Set<QoderControlSession>()
   const skillCache = new Map<string, Cached<{ data: SkillMeta[]; total: number; included: number }>>()
   const commandCache = new Map<string, Cached<{ commands: SlashCommand[]; skillNames?: Set<string>; reason?: string }>>()
   const modelCache = new Map<string, Cached<AgentRunControlCatalog>>()
   const contextGenerations = new Map<string, number>()
+  let disposed = false
+  let disposePromise: Promise<void> | undefined
   let lastHookFallbackError: string | undefined
   let hookFallbackObserved = false
 
-  const closeControl = (key: string, session: QoderControlSession): void => {
-    if (controls.get(key) !== session) return
-    controls.delete(key)
+  const closeControl = (key: string, session: QoderControlSession): Promise<void> => {
+    if (session.closePromise) return session.closePromise
+    session.retired = true
+    if (controls.get(key) === session) controls.delete(key)
     if (session.idleTimer) clearTimeout(session.idleTimer)
-    session.releasePrompt()
-    void Promise.resolve(session.query.close()).catch(() => {})
+    if (session.active === 0) session.resolveQuiesced()
+    session.closePromise = (async () => {
+      await session.quiesced
+      try {
+        await Promise.resolve(session.query.close())
+      } finally {
+        session.releasePrompt()
+        ownedControls.delete(session)
+      }
+    })()
+    closingControls.set(key, session.closePromise)
+    session.closePromise.then(
+      () => { if (closingControls.get(key) === session.closePromise) closingControls.delete(key) },
+      () => { if (closingControls.get(key) === session.closePromise) closingControls.delete(key) }
+    )
+    return session.closePromise
+  }
+
+  const waitForControlClose = async (key: string): Promise<void> => {
+    const closing = closingControls.get(key)
+    if (closing) await closing
   }
 
   const controlFor = (context: ProviderContext): [string, QoderControlSession] => {
     const key = context.cwd ?? ''
     const existing = controls.get(key)
-    if (existing) return [key, existing]
+    if (existing && !existing.retired) return [key, existing]
+    if (disposed) throw new Error('Qoder adapter 已释放')
     const prompt = heldPrompt()
     const q = query({
       prompt: prompt.stream,
       options: { ...qoderOptions(context.cwd), persistSession: false } as never
     })
-    const session: QoderControlSession = {
-      query: q,
-      releasePrompt: prompt.release,
-      ready: q.initializationResult(),
-      active: 0
-    }
+    let resolveQuiesced!: () => void
+    const quiesced = new Promise<void>((resolve) => { resolveQuiesced = resolve })
+    const session = {} as QoderControlSession
+    session.key = key
+    session.query = q
+    session.releasePrompt = prompt.release
+    session.active = 0
+    session.retired = false
+    session.quiesced = quiesced
+    session.resolveQuiesced = resolveQuiesced
+    session.ready = Promise.resolve(q.initializationResult()).then((initialized) => {
+      session.initializedAt = Date.now()
+      return initialized
+    }) as QoderControlSession['ready']
     controls.set(key, session)
+    ownedControls.add(session)
     return [key, session]
   }
 
+  const refreshControl = (context: ProviderContext, session: QoderControlSession): Promise<void> => {
+    const key = context.cwd ?? ''
+    const existing = refreshingControls.get(key)
+    if (existing) return existing
+    const refresh = (async () => {
+      if (controls.get(key) === session) await closeControl(key, session)
+      await waitForControlClose(key)
+      if (!disposed && !controls.has(key)) controlFor(context)
+    })()
+    refreshingControls.set(key, refresh)
+    refresh.then(
+      () => { if (refreshingControls.get(key) === refresh) refreshingControls.delete(key) },
+      () => { if (refreshingControls.get(key) === refresh) refreshingControls.delete(key) }
+    )
+    return refresh
+  }
+
+  const currentControl = async (context: ProviderContext): Promise<[string, QoderControlSession]> => {
+    const key = context.cwd ?? ''
+    while (true) {
+      const refresh = refreshingControls.get(key)
+      if (refresh) {
+        await refresh
+        continue
+      }
+      await waitForControlClose(key)
+      const current = controls.get(key)
+      if (current && !current.retired) return [key, current]
+      return controlFor(context)
+    }
+  }
+
+  const awaitReady = async (session: QoderControlSession): Promise<Awaited<ReturnType<Query['initializationResult']>>> =>
+    Promise.race([
+      session.ready,
+      new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(CONTROL_READY_TIMEOUT_REASON)), CONTROL_READY_TIMEOUT_MS)
+        void session.ready.catch(() => {}).finally(() => clearTimeout(timer))
+      })
+    ])
+
   const withControl = async <T>(
     context: ProviderContext,
-    read: (q: Query, initialized: Awaited<ReturnType<Query['initializationResult']>>) => Promise<T>
+    read: (
+      q: Query,
+      initialized: Awaited<ReturnType<Query['initializationResult']>>,
+      session: QoderControlSession
+    ) => Promise<T>,
+    options: { requireFreshInitialization?: boolean } = {}
   ): Promise<T> => {
-    const [key, session] = controlFor(context)
-    if (session.idleTimer) clearTimeout(session.idleTimer)
-    session.active++
-    try {
-      const initialized = await Promise.race([
-        session.ready,
-        new Promise<never>((_resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error(CONTROL_READY_TIMEOUT_REASON)), CONTROL_READY_TIMEOUT_MS)
-          void session.ready.catch(() => {}).finally(() => clearTimeout(timer))
-        })
-      ])
-      return await read(session.query, initialized)
-    } catch (error) {
-      const message = String((error as Error).message)
-      // 初始化没完成的会话不会自愈：留在 controls 里会让后续读取一直 await 同一个死 promise。
-      if (message === CONTROL_READY_TIMEOUT_REASON || /transport|closed|process|broken pipe/i.test(message)) {
-        closeControl(key, session)
+    const requireFreshInitialization = options.requireFreshInitialization !== false
+    while (true) {
+      const [key, session] = await currentControl(context)
+      if (session.idleTimer) clearTimeout(session.idleTimer)
+      session.active++
+      let refresh = false
+      let result: T | undefined
+      try {
+        const initialized = await awaitReady(session)
+        refresh = requireFreshInitialization &&
+          (session.retired || controls.get(key) !== session || session.initializedAt == null ||
+            Date.now() - session.initializedAt >= PROBE_TTL_MS)
+        if (!refresh) result = await read(session.query, initialized, session)
+      } catch (error) {
+        const message = String((error as Error).message)
+        // 初始化没完成的会话不会自愈：留在 controls 里会让后续读取一直 await 同一个死 promise。
+        if (message === CONTROL_READY_TIMEOUT_REASON || /transport|closed|process|broken pipe/i.test(message)) {
+          void closeControl(key, session).catch(() => {})
+        }
+        throw error
+      } finally {
+        session.active--
+        if (session.active === 0) {
+          if (session.retired) session.resolveQuiesced()
+          else if (controls.get(key) === session) {
+            session.idleTimer = setTimeout(() => { void closeControl(key, session).catch(() => {}) }, 5_000)
+          }
+        }
       }
-      throw error
-    } finally {
-      session.active--
-      if (controls.get(key) === session && session.active === 0) {
-        session.idleTimer = setTimeout(() => closeControl(key, session), 5_000)
+      if (refresh) {
+        await refreshControl(context, session)
+        continue
       }
+      return result as T
     }
   }
 
@@ -1564,14 +1661,20 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         }
       }
     },
-    invalidateContext(context) {
+    async invalidateContext(context) {
       const key = context.cwd ?? ''
       contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1)
       skillCache.delete(key)
       commandCache.delete(key)
       modelCache.delete(key)
+      const refresh = refreshingControls.get(key)
+      if (refresh) {
+        await refresh
+        return
+      }
       const control = controls.get(key)
-      if (control) closeControl(key, control)
+      if (control) await closeControl(key, control)
+      else await waitForControlClose(key)
     },
     skills: {
       list: async (context) => {
@@ -1580,7 +1683,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const generation = contextGenerations.get(key) ?? 0
           let value = skillCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            const catalog = await withControl(context, async (q, initialized) => {
+            let sourceSession: QoderControlSession | undefined
+            const catalog = await withControl(context, async (q, initialized, session) => {
+              sourceSession = session
               const [usage, commands] = await Promise.all([q.getContextUsage(), q.supportedCommands()])
               const catalog = qoderSkillCatalog(initialized, usage, commands)
               return {
@@ -1595,8 +1700,13 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 included: catalog.included
               }
             })
-            value = { data: catalog, observedAt: Date.now() }
-            if ((contextGenerations.get(key) ?? 0) === generation) {
+            value = { data: catalog, observedAt: sourceSession?.initializedAt ?? Date.now() }
+            if (
+              sourceSession &&
+              (contextGenerations.get(key) ?? 0) === generation &&
+              controls.get(key) === sourceSession &&
+              !sourceSession.retired
+            ) {
               skillCache.delete(key)
               skillCache.set(key, value)
               while (skillCache.size > 16) {
@@ -1622,30 +1732,35 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const generation = contextGenerations.get(key) ?? 0
           let value = commandCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            value = {
-              data: await withControl(context, async (q, initialized) => {
-                const commands = await q.supportedCommands()
-                try {
-                  const catalog = qoderSkillCatalog(initialized, await q.getContextUsage(), commands)
-                  return {
-                    commands,
-                    skillNames: new Set(catalog.skills.map((skill) => skill.name)),
-                    ...(catalog.included < catalog.total
-                      ? { reason: `Qoder 仅返回 ${catalog.included}/${catalog.total} 个已加载 Skill，其他命令来源保持未知` }
-                      : {})
-                  }
-                } catch (error) {
-                  const initializedCatalog = qoderSkillCatalog(initialized, undefined, commands)
-                  return {
-                    commands,
-                    skillNames: new Set(initializedCatalog.skills.map((skill) => skill.name)),
-                    reason: `Qoder Skill catalog 读取失败，命令来源按初始化证据分类：${String((error as Error).message)}`
-                  }
+            let sourceSession: QoderControlSession | undefined
+            const data = await withControl(context, async (q, initialized, session) => {
+              sourceSession = session
+              const commands = await q.supportedCommands()
+              try {
+                const catalog = qoderSkillCatalog(initialized, await q.getContextUsage(), commands)
+                return {
+                  commands,
+                  skillNames: new Set(catalog.skills.map((skill) => skill.name)),
+                  ...(catalog.included < catalog.total
+                    ? { reason: `Qoder 仅返回 ${catalog.included}/${catalog.total} 个已加载 Skill，其他命令来源保持未知` }
+                    : {})
                 }
-              }),
-              observedAt: Date.now()
-            }
-            if ((contextGenerations.get(key) ?? 0) === generation) {
+              } catch (error) {
+                const initializedCatalog = qoderSkillCatalog(initialized, undefined, commands)
+                return {
+                  commands,
+                  skillNames: new Set(initializedCatalog.skills.map((skill) => skill.name)),
+                  reason: `Qoder Skill catalog 读取失败，命令来源按初始化证据分类：${String((error as Error).message)}`
+                }
+              }
+            })
+            value = { data, observedAt: sourceSession?.initializedAt ?? Date.now() }
+            if (
+              sourceSession &&
+              (contextGenerations.get(key) ?? 0) === generation &&
+              controls.get(key) === sourceSession &&
+              !sourceSession.retired
+            ) {
               commandCache.delete(key)
               commandCache.set(key, value)
               while (commandCache.size > 16) {
@@ -1679,9 +1794,11 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           const generation = contextGenerations.get(key) ?? 0
           let value = modelCache.get(key)
           if (!value || Date.now() - value.observedAt >= PROBE_TTL_MS) {
-            const models = await withControl(context, (q) =>
-              q.getAvailableModels({ fetchStrategy: 'live' })
-            )
+            let sourceSession: QoderControlSession | undefined
+            const models = await withControl(context, (q, _initialized, session) => {
+              sourceSession = session
+              return q.getAvailableModels({ fetchStrategy: 'live' })
+            }, { requireFreshInitialization: false })
             value = {
               observedAt: Date.now(),
               data: {
@@ -1699,7 +1816,12 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
                 permissions: permissionOptions({ autoAcceptEdits: true, autoReview: true })
               }
             }
-            if ((contextGenerations.get(key) ?? 0) === generation) {
+            if (
+              sourceSession &&
+              (contextGenerations.get(key) ?? 0) === generation &&
+              controls.get(key) === sourceSession &&
+              !sourceSession.retired
+            ) {
               modelCache.delete(key)
               modelCache.set(key, value)
               while (modelCache.size > 16) {
@@ -1720,11 +1842,20 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       }
     },
     dispose: () => {
-      for (const [key, session] of controls) closeControl(key, session)
-      skillCache.clear()
-      commandCache.clear()
-      modelCache.clear()
-      contextGenerations.clear()
+      if (disposePromise) return disposePromise
+      disposed = true
+      disposePromise = (async () => {
+        const sessions = [...ownedControls]
+        const closes = sessions.map((session) => closeControl(session.key, session))
+        const results = await Promise.allSettled(closes)
+        skillCache.clear()
+        commandCache.clear()
+        modelCache.clear()
+        contextGenerations.clear()
+        const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+        if (failure) throw failure.reason
+      })()
+      return disposePromise
     }
   }
 }
