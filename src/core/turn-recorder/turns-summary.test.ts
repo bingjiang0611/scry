@@ -479,6 +479,60 @@ describe('turn CLI model timing summaries', () => {
   })
 })
 
+describe('turn CLI file grouping', () => {
+  const exact = <T>(value: T): Evidence<T> => ({ status: 'available', quality: 'exact', source: ['fixture'], value })
+
+  it('keeps call-backed files and legacy fallback separate by record object, not record ID', () => {
+    const first = record(1, undefined, {
+      tools: exact([
+        { name: 'Read', category: 'tool', status: 'success', order: 0, completedOrder: 1, file: { path: '/repo/a.ts', operation: 'read' } },
+        { name: 'Edit', category: 'tool', status: 'success', order: 2, completedOrder: 3, file: { path: '/repo/a.ts', operation: 'edit' } }
+      ]),
+      files: exact([{ path: '/repo/not-counted.ts', operation: 'edit' }])
+    })
+    const legacy = record(2, undefined, {
+      recordId: first.recordId,
+      files: { status: 'partial', quality: 'inferred', source: ['fixture'], value: [
+        { path: '/repo/b.ts', operation: 'read' }, { path: '/repo/b.ts', operation: 'edit' }
+      ] }
+    })
+    const excluded = record(3, undefined, {
+      sessionId: 'different-session', files: exact([{ path: '/repo/excluded.ts', operation: 'write' }])
+    })
+    const summary = summarizeTurnRecords([legacy, excluded, first], 'session-1')
+    expect(summary.files.rows).toEqual([
+      { path: '/repo/a.ts', read: 1, inferredRead: 0, write: 0, edit: 1 },
+      { path: '/repo/b.ts', read: 1, inferredRead: 0, write: 0, edit: 1 }
+    ])
+    expect(summary.files.writeCoverage).toEqual({ written: 2, readBefore: 2, inferredReadBefore: 0, blind: [] })
+    expect(summary.files.coverage).toEqual({ knownTurns: 2, totalTurns: 2, complete: false, quality: 'inferred' })
+    // Reusing the input object must not reuse a cached projection from the previous call.
+    legacy.files = exact([{ path: '/repo/c.ts', operation: 'write' }])
+    expect(summarizeTurnRecords([first, legacy], 'session-1').files.rows.map(row => row.path)).toEqual(['/repo/a.ts', '/repo/c.ts'])
+  })
+
+  it('retains shell inference, non-tool file calls and failed-call completion semantics', () => {
+    const summary = summarizeTurnRecords([
+      record(1, undefined, {
+        tools: exact([{ name: 'Bash', category: 'tool', status: 'success', order: 0, completedOrder: 1, input: { command: 'cat /repo/later.ts', cwd: '/repo' } }]),
+        files: exact([{ path: '/repo/later.ts', operation: 'edit' }])
+      }),
+      record(2, undefined, {
+        skills: exact([{ name: 'inspect', status: 'success', order: 0, completedOrder: 1, file: { path: '/repo/skill.ts', operation: 'read' } }]),
+        mcps: exact([{ name: 'mcp_edit', status: 'success', order: 2, completedOrder: 3, file: { path: '/repo/mcp.ts', operation: 'edit' } }]),
+        tools: exact([{ name: 'Write', category: 'tool', status: 'failed', order: 4, completedOrder: 5, file: { path: '/repo/failed.ts', operation: 'write' } }])
+      })
+    ], 'session-1')
+    expect(summary.files.rows).toEqual([
+      { path: '/repo/failed.ts', read: 0, inferredRead: 0, write: 1, edit: 0 },
+      { path: '/repo/later.ts', read: 1, inferredRead: 1, write: 0, edit: 1 },
+      { path: '/repo/mcp.ts', read: 0, inferredRead: 0, write: 0, edit: 1 },
+      { path: '/repo/skill.ts', read: 1, inferredRead: 0, write: 0, edit: 0 }
+    ])
+    expect(summary.files.writeCoverage).toEqual({ written: 2, readBefore: 1, inferredReadBefore: 1, blind: ['/repo/mcp.ts'] })
+  })
+})
+
 describe('turn CLI identity coverage', () => {
   it('reports explicit model, role and task-link status without folding unobserved into observed', () => {
     const summary = summarizeTurnRecords([
