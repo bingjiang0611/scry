@@ -150,11 +150,11 @@
 
 button.overview-metric-action {
   cursor: pointer;
-  transition: background-color 140ms ease, transform 120ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear;
 }
 
 button.overview-metric-action:hover { background: var(--surface-hover); }
-button.overview-metric-action:active { transform: scale(0.985); }
+
 button.overview-metric-action.warn > strong { color: var(--warn); }
 button.overview-metric-action.bad > strong { color: var(--bad); }
 
@@ -245,7 +245,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   white-space: nowrap;
   cursor: pointer;
   opacity: 0.55;
-  transition: opacity 140ms ease, box-shadow 140ms ease;
+  transition: opacity var(--dur-micro) linear;
 }
 
 .segment-ribbon button.b-base { background: var(--dim3); color: var(--fg); }
@@ -318,7 +318,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   color: var(--fg);
   text-align: left;
   cursor: pointer;
-  transition: background-color 140ms ease;
+  transition: background-color var(--dur-micro) linear;
 }
 .segment-ledger > button:hover { background: var(--surface-hover); }
 .segment-ledger > button.is-selected { background: var(--selected-soft); box-shadow: inset 2px 0 0 var(--selected); }
@@ -459,7 +459,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   border: 1px solid var(--border);
   border-radius: 0;
   background: var(--panel);
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 .graph-call-cluster > button.gline:hover,
 .graph-child-run > button.gline:hover { border-color: var(--border2); background: var(--surface-hover); }
@@ -494,12 +494,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   .segments-workspace { margin-inline: 18px; }
   .segment-ribbon button { font-size: 0; }
   .segment-ribbon button::after { content: '·'; font-size: 10px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  button.overview-metric-action,
-  .segment-ribbon button,
-  .segment-ledger > button { transition-duration: 0ms; }
 }
 
 /* --------------------------------------------------------------------------
@@ -699,7 +693,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   margin: 7px 0 0;
   padding: 6px 8px;
   border: 1px solid var(--border3);
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .chat-body .tool-card::before { display: none; }
@@ -1707,15 +1701,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .chat-body .tool-card,
-  .overview-dossier .panel-tabs button,
-  .overview-dossier .turn-call-group,
-  .evidence-graph button.gline,
-  .evidence-segments .segment-ribbon button,
-  .evidence-segments .segment-row { transition-duration: 0ms; }
-}
-
 /* 分页历史窗口提示：明确说明当前只挂载了最近一段轮次，更早轮次仍在本机归档里可取回，
    不是被丢弃也不是不存在。 */
 .history-window-note {
@@ -1856,7 +1841,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   font: 400 10.5px/1.4 var(--font-mono);
   letter-spacing: 0.08em;
   cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--dur-micro) linear;
 }
 .question-raw > summary::-webkit-details-marker {
   display: none;
@@ -1871,7 +1856,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .question-raw > summary .ico {
   width: 10px;
   height: 10px;
-  transition: transform 0.14s var(--ease-out);
+  transition: transform var(--dur-base) var(--ease-struct);
 }
 .question-raw[open] > summary .ico {
   transform: rotate(90deg);

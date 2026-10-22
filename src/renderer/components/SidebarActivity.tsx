@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { activityGroups, type ActivityEntry } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as copy } from '../constants/copy'
+import { MOTION, prefersReducedMotion, subscribeReducedMotion } from '../motion'
 import { Icon } from './primitives/Icon'
 import './sidebar-activity.css'
 
@@ -51,7 +52,7 @@ export function SidebarActivity({ entries, renderEntry }: {
 
   useLayoutEffect(() => {
     const nodes = Array.from(root.current!.querySelectorAll<HTMLElement>('[data-motion-key]'))
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const reduceMotion = prefersReducedMotion()
     // Read the entire bounded list before any animation writes. offsetTop ignores the
     // previous transform; its current translation preserves continuity on interruption.
     const measurements = nodes.map((node) => {
@@ -71,21 +72,19 @@ export function SidebarActivity({ entries, renderEntry }: {
       const animation = node.animate([
         { transform: `translateY(${delta}px)`, opacity: entering ? 0 : 1 },
         { transform: 'translateY(0)', opacity: 1 }
-      ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
+      ], { duration: MOTION.durSlow, easing: MOTION.easeStruct })
       animations.current.set(key, animation)
       animation.onfinish = () => animations.current.delete(key)
     }
   }, [displayed])
 
   useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
     const cancel = (): void => {
       for (const animation of animations.current.values()) animation.cancel()
       animations.current.clear()
     }
-    const onChange = (): void => { if (media.matches) cancel() }
-    media.addEventListener('change', onChange)
-    return () => { media.removeEventListener('change', onChange); cancel() }
+    const unsubscribe = subscribeReducedMotion((reduced) => { if (reduced) cancel() })
+    return () => { unsubscribe(); cancel() }
   }, [])
 
   const children: ReactNode[] = []

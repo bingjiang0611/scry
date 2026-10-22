@@ -73,7 +73,6 @@
   --statusbar-h: 26px;
   --shadow-pop: 0 20px 64px rgba(0, 0, 0, 0.64);
   --shadow-card: none;
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 :root[data-theme='light'] {
@@ -525,7 +524,7 @@ body.pane-resizing * {
   font-size: 12.5px;
   color: var(--fg);
   cursor: pointer;
-  transition: border-color 140ms ease-out, background-color 140ms ease-out;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 .btn:hover {
   border-color: var(--accent);
@@ -649,7 +648,7 @@ body.pane-resizing * {
   left: 3px;
   top: 10.5px;
   border-radius: 999px;
-  transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 .switch .slider::before {
   content: '';
@@ -660,7 +659,7 @@ body.pane-resizing * {
   top: 2px;
   background: var(--fg);
   border-radius: 50%;
-  transition: transform 180ms var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-struct);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 .switch input:checked + .slider::before {
@@ -1087,7 +1086,7 @@ body.pane-resizing * {
   margin: 0 auto 26px;
   border-radius: var(--r-lg);
   scroll-margin-top: 16px;
-  transition: background-color .18s ease-out, box-shadow .18s ease-out;
+  transition: background-color var(--dur-micro) linear;
 }
 
 /* 用户气泡里的 markdown：在蓝底上调整可读性（code/链接/引用/标题边框） */
@@ -1294,7 +1293,7 @@ body.pane-resizing * {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 48%, transparent);
   text-underline-offset: 0.14em;
-  transition: border-color 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 .md-file-ref:hover code {
   border-color: var(--accent);
@@ -1942,7 +1941,7 @@ body.pane-resizing * {
   height: 13px;
   margin-left: auto;
   color: var(--dim3);
-  transition: transform 120ms ease-out;
+  transition: transform var(--dur-base) var(--ease-struct);
 }
 .thinking[open] .think-chevron {
   transform: rotate(180deg);
@@ -1998,7 +1997,7 @@ body.pane-resizing * {
   background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  transition: color .12s, border-color .12s;
+  transition: color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 .tool-group-row .tg-pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
 .tool-group-row:hover .tg-pill { color: var(--fg); border-color: var(--border2); }
@@ -2010,7 +2009,7 @@ body.pane-resizing * {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color .12s;
+  transition: color var(--dur-micro) linear;
 }
 .tool-group-row:hover .tg-label { color: var(--dim); }
 .tool-group-row .tg-rule { flex: 1 1 24px; min-width: 16px; height: 1px; background: var(--border3); }
@@ -2021,7 +2020,7 @@ body.pane-resizing * {
   color: var(--dim3);
   font-variant-numeric: tabular-nums;
   opacity: 0;
-  transition: opacity .12s;
+  transition: opacity var(--dur-micro) linear;
 }
 .tool-group-row:hover .tg-dur,
 .tool-group.open .tg-dur { opacity: 1; }
@@ -2551,9 +2550,7 @@ body.pane-resizing * {
   width: 13px;
   height: 13px;
 }
-.queue-remove:active {
-  transform: scale(0.96);
-}
+
 .queue-remove:disabled {
   color: var(--dim3);
   cursor: not-allowed;
@@ -2937,7 +2934,7 @@ body.pane-resizing * {
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: background-color 130ms var(--ease-out), color 130ms var(--ease-out), opacity 130ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear, opacity var(--dur-micro) linear;
 }
 .agent-option-row:hover .agent-option-remove,
 .agent-option-row:focus-within .agent-option-remove {
@@ -3065,15 +3062,7 @@ button.mitem:disabled {
   width: 14px;
   height: 14px;
 }
-.btn:not(:disabled):active,
-.mcp-test:not(:disabled):active,
-.sb-new:not(:disabled):active,
-.send:not(:disabled):active,
-.stop:not(:disabled):active,
-.modal-x:not(:disabled):active,
-.modal-refresh:not(:disabled):active {
-  transform: scale(0.96);
-}
+
 /* （.psec/.ptitle 已被蓝本 .panel-section/h4 取代——OverviewPanel 是唯一消费者，迁移后移除） */
 .pstats {
   display: flex;
@@ -3193,10 +3182,6 @@ button.mitem:disabled {
   border-color: var(--border2);
   background: var(--panel3);
   color: var(--fg);
-}
-
-.overview-data-tabs button:active {
-  transform: scale(0.96);
 }
 
 /* 行内状态点（蓝本）——补上现有代码已引用、但 CSS 一直缺失的 .sdot */
@@ -3378,7 +3363,6 @@ button.turn-call-group {
   appearance: none;
   cursor: pointer;
   color: inherit;
-  transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 button.turn-call-toggle {
   flex: 0 0 auto;
@@ -3388,9 +3372,7 @@ button.turn-call-toggle {
 button.turn-call-group:not(:disabled):hover {
   background: var(--panel3);
 }
-button.turn-call-group:not(:disabled):active {
-  transform: scale(0.96);
-}
+
 button.turn-call-group:disabled {
   cursor: default;
   opacity: 0.42;
@@ -3630,7 +3612,7 @@ button.turn-call-group:focus-visible {
   height: 12px;
   margin-top: 1px;
   color: var(--dim3);
-  transition: transform 120ms ease;
+  transition: transform var(--dur-base) var(--ease-struct);
 }
 .turn-tool-error[open] .turn-tool-error-chevron {
   transform: rotate(180deg);
@@ -4031,7 +4013,7 @@ button.turn-call-group:focus-visible {
   content: "›";
   color: var(--accent);
   transform: rotate(0deg);
-  transition: transform 120ms ease;
+  transition: transform var(--dur-base) var(--ease-struct);
 }
 .billing-details[open] > summary::before {
   transform: rotate(90deg);
@@ -4747,9 +4729,7 @@ button.turn-call-group:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.user-attachment:active {
-  transform: scale(0.96);
-}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -4822,9 +4802,7 @@ button.turn-call-group:focus-visible {
   background: var(--panel3);
   color: var(--fg);
 }
-.image-lightbox-close:not(:disabled):active {
-  transform: scale(0.96);
-}
+
 .image-lightbox-stage {
   width: 100%;
   height: 100%;
@@ -6174,7 +6152,7 @@ button.toptool {
   border: 1px solid var(--border3);
   border-radius: var(--r-md);
   cursor: pointer;
-  transition: border-color .12s, background .12s;
+  transition: border-color var(--dur-micro) linear, background var(--dur-micro) linear;
 }
 .tool-card::before {
   content: '';
@@ -6516,7 +6494,7 @@ textarea:focus-visible,
   padding: 9px 11px;
   background: var(--panel2);
   border-color: transparent;
-  transition: background-color 140ms ease-out, border-color 140ms ease-out, transform 160ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 .sb-new:hover {
@@ -6561,7 +6539,7 @@ textarea:focus-visible,
   min-height: 40px;
   padding: 8px 11px;
   border-radius: var(--r-md);
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .sb-navitem:hover {
@@ -6746,7 +6724,7 @@ textarea:focus-visible,
      就成了盲区，点上去既不进会话也不触发操作。只有真正的按钮才接指针事件。 */
   pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--panel2) 42%);
-  transition: opacity 120ms ease-out;
+  transition: opacity var(--dur-micro) linear;
 }
 
 .sb-sess-row:hover .sb-sess-acts,
@@ -6770,7 +6748,7 @@ textarea:focus-visible,
   background: transparent;
   color: var(--dim2);
   cursor: pointer;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .sb-act:hover {
@@ -6834,12 +6812,12 @@ textarea:focus-visible,
 .modal-refresh,
 .send,
 .stop {
-  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 160ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .tb-action {
   min-height: 40px;
-  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .btn:hover,
@@ -6882,7 +6860,7 @@ textarea:focus-visible,
   padding: 0 1px;
   border-radius: 0;
   border-bottom: 2px solid transparent;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .vtab.active {
@@ -6996,7 +6974,7 @@ textarea:focus-visible,
 
 .sg-card {
   border-color: var(--border3);
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .sg-card:hover {
@@ -7298,7 +7276,7 @@ textarea:focus-visible,
 }
 
 .gline {
-  transition: background-color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .gline:hover {
@@ -7417,17 +7395,13 @@ textarea:focus-visible,
   color: var(--dim);
   text-align: left;
   cursor: pointer;
-  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 160ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .theme-option.active {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--fg);
-}
-
-.theme-option:active {
-  transform: scale(0.96);
 }
 
 .theme-preview {
@@ -7571,7 +7545,7 @@ textarea:focus-visible,
   font: 12.5px/1 var(--font-ui);
   text-align: left;
   cursor: pointer;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .settings-tab:hover {
@@ -7637,7 +7611,7 @@ textarea:focus-visible,
   color: var(--bad);
   font: 12px/1 var(--font-ui);
   cursor: pointer;
-  transition: border-color 120ms ease-out;
+  transition: border-color var(--dur-micro) linear;
 }
 
 .arch-danger:hover:not(:disabled) {
@@ -7809,7 +7783,7 @@ textarea:focus-visible,
   background: transparent;
   color: var(--dim2);
   cursor: pointer;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .arch-del:hover {
@@ -7828,7 +7802,7 @@ textarea:focus-visible,
   font: 12px/1 var(--font-ui);
   white-space: nowrap;
   cursor: pointer;
-  transition: border-color 120ms ease-out;
+  transition: border-color var(--dur-micro) linear;
 }
 
 .arch-unarch:hover {
@@ -7935,7 +7909,7 @@ textarea:focus-visible,
   left: auto;
   width: 38px;
   height: 22px;
-  transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 .skill-switch .slider::before {
@@ -7943,15 +7917,11 @@ textarea:focus-visible,
   height: 16px;
   top: 2px;
   left: 2px;
-  transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-struct), background-color var(--dur-micro) linear;
 }
 
 .skill-switch input:checked + .slider::before {
   transform: translateX(16px);
-}
-
-.skill-switch input:active + .slider {
-  transform: scale(0.96);
 }
 
 .skill-switch-state {
@@ -8074,15 +8044,33 @@ textarea:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sb-running { animation: none; }
-
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
+    animation-duration: 120ms !important;
+    animation-timing-function: linear !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
-    transition: none !important;
+    /* Spatial changes commit immediately; only visual feedback can interpolate. */
+    transition-property: opacity, color, background-color, border-color !important;
+    transition-duration: 120ms !important;
+    transition-timing-function: linear !important;
+    transition-delay: 0ms !important;
+  }
+
+  .sb-running,
+  .spinner,
+  .sk-line::after {
+    animation: none !important;
+  }
+
+  /* Selection text must update in the same frame, including reduced motion. */
+  .sb-view-tabs [role='tab'],
+  .sb-view-tabs [role='tab'] *,
+  .surface-tab,
+  .surface-tab * {
+    transition-property: opacity, background-color, border-color !important;
   }
 }
 
@@ -9220,7 +9208,7 @@ textarea:focus-visible,
   background: transparent;
   color: var(--dim2);
   cursor: pointer;
-  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 160ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .diff-review-close svg {
@@ -9231,10 +9219,6 @@ textarea:focus-visible,
 .diff-review-close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-
-.diff-review-close:active {
-  transform: scale(0.96);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -9798,7 +9782,7 @@ select:focus-visible,
   color: var(--dim2);
   font: 11.5px/1 var(--font-ui);
   cursor: pointer;
-  transition: background-color 130ms var(--ease-out), color 130ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .welcome-rescan:hover:not(:disabled) {
@@ -9838,12 +9822,10 @@ select:focus-visible,
   color: var(--dim);
   text-align: left;
   cursor: pointer;
-  transition: border-color 140ms var(--ease-out), background-color 140ms var(--ease-out),
-    transform 140ms var(--ease-out);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .welcome-provider:disabled { cursor: default; }
-.welcome-provider:active:not(:disabled) { transform: scale(0.995); }
 
 .welcome-provider.is-selected {
   border-color: var(--selected-line);
@@ -9963,12 +9945,12 @@ select:focus-visible,
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color 130ms var(--ease-out), transform 130ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear;
 }
 
 .welcome-profile-row:has(.welcome-profile-remove) .welcome-profile-pick { padding-right: 38px; }
 .welcome-profile-pick:disabled { cursor: default; }
-.welcome-profile-pick:active:not(:disabled) { transform: scale(0.995); }
+
 .welcome-profile-pick.is-selected { background: var(--selected-soft); }
 
 .welcome-profile-title {
@@ -9997,7 +9979,7 @@ select:focus-visible,
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: background-color 130ms var(--ease-out), color 130ms var(--ease-out), opacity 130ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear, opacity var(--dur-micro) linear;
 }
 
 .welcome-profile-row:hover .welcome-profile-remove,
@@ -11031,7 +11013,7 @@ button.turn-id.turn-call-open:focus-visible {
   background: color-mix(in srgb, var(--panel2) 97%, transparent);
   box-shadow: var(--shadow-pop);
   transform-origin: top right;
-  animation: surface-menu-in 150ms var(--ease-out);
+  animation: surface-menu-in var(--dur-fast) var(--ease-out);
 }
 
 @keyframes surface-menu-in {
@@ -11142,7 +11124,7 @@ button.turn-id.turn-call-open:focus-visible {
   background: var(--panel2);
   color: var(--fg);
   text-align: left;
-  transition: border-color 140ms ease, background-color 140ms ease, transform 120ms var(--ease-out);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .surface-card .card-icon {
@@ -11618,17 +11600,6 @@ button.turn-id.turn-call-open:focus-visible {
   }
 }
 
-.surface-tab-activate:active,
-.surface-tab-close:active,
-.right-surface-panel .icon-button:active,
-.surface-menu .menu-item:active,
-.surface-card:active,
-.terminal-tab button:active,
-.terminal-action:active:not(:disabled),
-.terminal-restart:active {
-  transform: scale(0.97);
-}
-
 @media (max-width: 1180px) {
   .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) {
     grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
@@ -11666,10 +11637,10 @@ button.turn-id.turn-call-open:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .surface-menu,
-  .surface-card {
-    animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
+  /* Keep the existing menu entrance as a fade, without its spatial keyframes. */
+  @keyframes surface-menu-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 }
 

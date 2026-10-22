@@ -1187,7 +1187,6 @@ select:focus-visible,
 .runtime-composer .send:hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--fg) 86%, var(--dim2));
-  transform: translateY(-1px);
 }
 
 .runtime-composer .send:disabled {
@@ -1858,14 +1857,6 @@ button.pinned-summary-detail-row:hover {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .runtime-composer .send,
-  .surface-card,
-  .theme-option {
-    transition: none;
-  }
-}
-
 /* ===== Provider 品牌字形 =====
    会话、欢迎、Agent 选择与分析共用一套 mask；颜色仍由各表面的现有语义 token 决定。 */
 .provider-glyph {
@@ -1980,12 +1971,13 @@ button.pinned-summary-detail-row:hover {
 .tb-action,
 .surface-tab,
 .icon-button {
-  transition:
-    color 150ms ease,
-    background-color 150ms ease,
-    border-color 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+/* Tab selection is immediate; a shared moving indicator requires step 04's DOM work. */
+.surface-tab,
+.surface-tab-activate {
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 /* 会话行保持静止：横向位移会扩大滚动区域，并在列表底部反复触发/取消 hover。 */
@@ -2081,18 +2073,13 @@ button.pinned-summary-detail-row:hover {
   border-radius: var(--r-md);
   background: var(--surface-subtle);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .welcome-provider:hover {
   border-color: var(--border2);
   background: var(--surface-hover);
   box-shadow: var(--shadow-card);
-  transform: translateY(-2px);
 }
 
 .welcome-provider.is-selected,
@@ -2117,17 +2104,13 @@ button.pinned-summary-detail-row:hover {
   border: 1px solid transparent;
   border-radius: 12px;
   background: var(--surface-subtle);
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    transform 150ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .runtime-composer .composer-context .wdbtn:hover,
 .runtime-composer .composer-context .wdbtn.on {
   border-color: var(--border3);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 /* Conversation: turn cards, tool blocks and measured telemetry. */
@@ -2153,7 +2136,7 @@ button.pinned-summary-detail-row:hover {
   border-radius: 20px;
   background: var(--surface-faint);
   box-shadow: none;
-  transition: background-color 150ms ease;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .chat-body .transcript-turn:hover .turn-assistant,
@@ -2196,18 +2179,13 @@ button.pinned-summary-detail-row:hover {
   border-radius: 12px;
   background: var(--surface-subtle);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .chat-body .tool-card:hover {
   border-color: var(--border2);
   background: var(--surface-hover);
   box-shadow: var(--shadow-card);
-  transform: translateY(-1px);
 }
 
 .chat-body .tool-row .name {
@@ -2238,9 +2216,7 @@ button.pinned-summary-detail-row:hover {
   color: var(--dim);
   letter-spacing: 0.02em;
   text-transform: none;
-  transition:
-    color 150ms ease,
-    background-color 150ms ease;
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .chat-body .turn-hooks-summary > summary:hover,
@@ -2307,10 +2283,7 @@ button.pinned-summary-detail-row:hover {
   box-shadow:
     0 1px 0 rgb(255 255 255 / 4%),
     0 20px 52px rgb(0 0 0 / 24%);
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+  transition: border-color var(--dur-micro) linear;
 }
 
 :root[data-theme='light'] .runtime-composer .composer-shell {
@@ -2325,7 +2298,6 @@ button.pinned-summary-detail-row:hover {
     0 0 0 1px var(--accent-line),
     0 0 0 5px var(--accent-soft),
     0 24px 56px rgb(0 0 0 / 28%);
-  transform: translateY(-1px);
 }
 
 :root[data-theme='light'] .runtime-composer .composer-shell:focus-within {
@@ -2349,35 +2321,26 @@ button.pinned-summary-detail-row:hover {
   border: 1px solid transparent;
   border-radius: 999px;
   background: var(--surface-subtle);
-  transition:
-    color 150ms ease,
-    background-color 150ms ease,
-    border-color 150ms ease,
-    transform 150ms ease;
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 .runtime-composer .permission-mode-trigger:hover,
 .runtime-composer .model-effort-trigger:hover {
   border-color: var(--border3);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 .runtime-composer .send {
   box-shadow:
     0 8px 20px rgb(0 0 0 / 18%),
     inset 0 1px 0 rgb(255 255 255 / 22%);
-  transition:
-    background-color 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .runtime-composer .send:not(:disabled):hover {
   box-shadow:
     0 12px 26px rgb(0 0 0 / 24%),
     inset 0 1px 0 rgb(255 255 255 / 22%);
-  transform: translateY(-2px);
 }
 
 /* Overview: editorial session verdict, independent KPI tiles and evidence rows. */
@@ -2449,16 +2412,12 @@ button.pinned-summary-detail-row:hover {
   border: 1px solid var(--border3);
   border-radius: 13px;
   background: var(--surface-subtle);
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    transform 150ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .overview-metric:hover {
   border-color: var(--border2);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 .overview-metric > strong {
@@ -2485,10 +2444,7 @@ button.pinned-summary-detail-row:hover {
 .overview-data-tabs button {
   min-height: 32px;
   border-radius: 8px;
-  transition:
-    color 150ms ease,
-    background-color 150ms ease,
-    box-shadow 150ms ease;
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .overview-data-tabs button.active {
@@ -2521,11 +2477,7 @@ button.pinned-summary-detail-row:hover {
   border: 1px solid var(--border3);
   border-radius: 14px;
   background: var(--surface-faint);
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .overview-dossier .turn-call-row:hover,
@@ -2533,7 +2485,6 @@ button.pinned-summary-detail-row:hover {
   border-color: var(--border2);
   background: var(--surface-subtle);
   box-shadow: var(--shadow-card);
-  transform: translateY(-1px);
 }
 
 .overview-dossier .turn-call-heading strong {
@@ -2576,65 +2527,16 @@ button.pinned-summary-detail-row:hover {
   padding-inline: 10px;
   border: 1px solid transparent;
   border-radius: 12px;
-  transition:
-    background-color 150ms ease,
-    border-color 150ms ease,
-    transform 150ms ease;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 button.pinned-summary-row:hover,
 button.pinned-summary-row:focus-visible {
   border-color: var(--border3);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 .pinned-summary-divider {
   margin: 10px 8px;
   background: var(--border3);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sb-new,
-  .sb-navitem,
-  .sb-proj-head,
-  .sb-sess,
-  .sb-settings,
-  .tb-action,
-  .surface-tab,
-  .icon-button,
-  .welcome-provider,
-  .runtime-composer .composer-context .wdbtn,
-  .chat-body .turn-assistant,
-  .chat-body .tool-card,
-  .runtime-composer .composer-shell,
-  .runtime-composer .run-control-select,
-  .runtime-composer .model-effort-trigger,
-  .runtime-composer .send,
-  .overview-metric,
-  .overview-data-tabs button,
-  .overview-dossier .turn-call-row,
-  .pinned-summary-row {
-    transition: none;
-  }
-
-  .sb-sess:hover,
-  .sb-sess-row:focus-within .sb-sess,
-  .welcome-provider:hover,
-  .runtime-composer .composer-context .wdbtn:hover,
-  .runtime-composer .composer-context .wdbtn.on,
-  .chat-body .transcript-turn:hover .turn-assistant,
-  .chat-body .transcript-turn:focus-within .turn-assistant,
-  .chat-body .tool-card:hover,
-  .runtime-composer .composer-shell:focus-within,
-  .runtime-composer .run-control-select:hover,
-  .runtime-composer .model-effort-trigger:hover,
-  .runtime-composer .send:not(:disabled):hover,
-  .overview-metric:hover,
-  .overview-dossier .turn-call-row:hover,
-  .overview-dossier .turn-call-row:focus-within,
-  button.pinned-summary-row:hover,
-  button.pinned-summary-row:focus-visible {
-    transform: none;
-  }
 }
