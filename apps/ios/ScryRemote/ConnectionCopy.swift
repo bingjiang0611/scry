@@ -292,6 +292,11 @@ enum ConnectionCopy {
   static let providersUnreadable = "无法读取 Provider"
   static let hostReadAt = "读取"
   static func provenance(_ host: String, _ time: String) -> String { "来自 \(host) · \(time) \(hostReadAt)" }
+  // A panel that has not completed its first read has no timestamp to claim.
+  static func panelProvenance(_ host: String, readAt: String?) -> String {
+    guard let readAt else { return "来自 \(host) · \(archivedFetchedNone)" }
+    return "来自 \(host) · \(readAt) \(hostReadAt)"
+  }
   static let unavailable = "不可用"
   static let unavailableDetail = "这次读取没有返回这项数据。"
   static let moreRows = "再加载"
