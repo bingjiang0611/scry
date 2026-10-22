@@ -2,6 +2,12 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## Qoder：初始化证据不再被重复读取续期（2026-10-22）
+
+- Skill/命令来源时间固定为初始化完成，过期新读取正常排空旧实例、确认关闭后再初始化；模型仍live。未增加5秒空闲保留、30秒目录TTL或20秒初始化期限。
+- 修正关闭失败失去所有权、获取/退休竞态、释放等待应取消请求、刷新期间失效漏关替换实例。冻结受检树`2c9e602`；父任务101项Qoder focused通过，移除最终屏障时微任务offset4确定失败。
+- mac2完整unit **3510 pass / 4既有opt-in skipped**、类型/build、完整43项计数门禁通过。完整UI首轮workspace dirty标记失败，基线单跑和同候选完整复核通过；原失败保留、未分类，不改UI断言或期限。必要初始化成本不宣称为提速。见[本轮合同与原始失败](performance-experiments/20261022-qoder-initialization-lifetime.md)。未合入、push或安装；完整A/Pi刷新合同及可信L2仍未完成。
+
 ## Qoder：先修正模型来源，不盲目扩大实例寿命（2026-10-22）
 
 - SDK1.0.17 的 initializationResult/supportedCommands 永久复用初始化快照；reloadPlugins 不构成模型/认证/启动配置的完整刷新合同。保持原5秒空闲回收和30秒catalog缓存，不宣称Qoder长期常驻完成。
