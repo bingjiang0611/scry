@@ -14,6 +14,7 @@ import { createHostController } from './host-controller-factory'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
+import { providerDiscoveryFixture } from './provider-discovery.fixture'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 
@@ -51,7 +52,8 @@ async function harness(
     sessions(): { sessionId: string; providerId: string; cwd: string; label: string; ts: number }[]
   },
   readHistoryPreview?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<RemoteHistoryPreview>,
-  targetClient?: ConstructorParameters<typeof ExecutionTargetRouter>[0]['client']
+  targetClient?: ConstructorParameters<typeof ExecutionTargetRouter>[0]['client'],
+  providerDiscovery?: Pick<Parameters<typeof createHostController>[0], 'listProviders' | 'listProviderControls' | 'listProvidersFull'>
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
@@ -65,6 +67,7 @@ async function harness(
     ...(listCommands ? { listCommands } : {}),
     ...(readHistory ? { readHistory } : {}),
     ...(readHistoryPreview ? { readHistoryPreview } : {}),
+    ...(providerDiscovery ? { ...providerDiscovery, readDesktop: async () => ({ kind: 'info' as const, protocol: 1 as const, hostId: identity.hostId, execution: 'canonical' as const }) } : {}),
     ...(lists ? { listDirectories: lists.directories, listSessions: lists.sessions } : {})
   })
   cleanups.push(() => binding.close())
@@ -142,6 +145,32 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('negotiates metadata and exact selected controls with the marker consumed by Swift', async () => {
+    const fixture = providerDiscoveryFixture({
+      authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('workspace_not_authorized'); return cwd },
+      defaultWorkspace: () => AUTHORIZED
+    })
+    await fixture.discovery.refreshMetadata()
+    const h = await harness(async () => {}, undefined, undefined, undefined, undefined, undefined, {
+      listProviders: fixture.discovery.metadata,
+      listProviderControls: fixture.discovery.selected,
+      listProvidersFull: fixture.discovery.legacy
+    })
+    const device = await pairDevice(h.identity, h.controller)
+    const request = (value: unknown) => call(h.addr, h.caPEM, device.certPEM, device.keyPEM, value)
+    expect(await request({ op: 'desktop', query: { kind: 'info' } })).toMatchObject({ desktop: { providerDiscovery: 2 } })
+    expect(await request({ op: 'providers', detail: 'metadata' })).toMatchObject({ providerDiscovery: 2, providers: [{ id: 'pi' }, { id: 'qoder' }, { id: 'opencode' }] })
+    expect(fixture.calls).toHaveLength(0)
+    const selected = { op: 'providers', detail: 'selected', providerId: 'pi', agentProfileId: 'pi:fixture', cwd: AUTHORIZED }
+    expect(await request(selected)).toMatchObject({ providerDiscovery: 2, providers: [{ id: 'pi', agentProfileId: 'pi:fixture', available: true }] })
+    expect(fixture.calls).toEqual([{ providerId: 'pi', agentProfileId: 'pi:fixture', cwd: AUTHORIZED }])
+    expect(await request({ ...selected, cwd: '/outside' })).toHaveProperty('error')
+    expect(await request({ ...selected, agentProfileId: 'pi:missing' })).toHaveProperty('error')
+    expect(await request({ op: 'providers', detail: 'unknown' })).toEqual({ error: 'invalid_request' })
+    expect(fixture.calls).toHaveLength(1)
+    expect(await request({ op: 'providers' })).toHaveProperty('providers')
+    expect(fixture.calls).toHaveLength(4)
+  })
   it('refreshes only the verified peer device label without changing its pairing or authority', async () => {
     const start = vi.fn(async () => {})
     const { identity, controller, caPEM, addr } = await harness(start)

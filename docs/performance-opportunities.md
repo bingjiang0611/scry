@@ -2,6 +2,40 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## A+B 当前收口（2026-10-22，L1/L2 已验证，未部署）
+
+- A 按需层与 Provider-specific 安全复用收口；不是全 Provider 统一常驻。OpenCode 五对低负载受控读取确认启动 3→1、三读合计中位 1939→932ms；首次冷读没有提速证据。Qoder 保留 live/初始化寿命与关闭所有权，Pi 继续 fresh，不能虚构原生 reset 合同。
+- B 交付批量 Git patch、Pi 按身份先选页后读正文、归档基表＋单轮 delta、journal 大载荷只写一次。初版读路径退化及 metadata 误改远程源版本已修复，原失败/高负载记录保留。
+- 冻结 `4d561dd`：mac2 **3528 pass / 4 opt-in skipped**；类型、App/CLI build、全套 renderer UI、shell、CLI tarball 冒烟和 43 项计数/ratchet 通过。3 个 CPU instruction candidate 仍 missing；4 个必要新工作的 worse 不抬基线，4 项收紧 proposal 仅生成、不应用。
+- 生产 Electron IPC，4000 canonical＋4001 native 轮次、最新/旧页各40：同正文 SHA，暖两页合计中位 **958.1→154.6ms**；单独旧页 **0.8→39.0ms**，因为不再预读全部正文且重新核验来源。独立锁内负载均低于8核；这不是屏幕绘制/真实 Provider/L3结论。
+- 仅本地隔离分支提交；未合入、push、安装或重启日常 App。详见[本轮实现、每项 worse、产物映射与失败](performance-experiments/20261022-evidence-engine.md)。下列旧条目保留各阶段当时的状态，不覆盖为新的部署事实。
+
+## Qoder：初始化证据不再被重复读取续期（2026-10-22）
+
+- Skill/命令来源时间固定为初始化完成，过期新读取正常排空旧实例、确认关闭后再初始化；模型仍live。未增加5秒空闲保留、30秒目录TTL或20秒初始化期限。
+- 修正关闭失败失去所有权、获取/退休竞态、释放等待应取消请求、刷新期间失效漏关替换实例。冻结受检树`2c9e602`；父任务101项Qoder focused通过，移除最终屏障时微任务offset4确定失败。
+- mac2完整unit **3510 pass / 4既有opt-in skipped**、类型/build、完整43项计数门禁通过。完整UI首轮workspace dirty标记失败，基线单跑和同候选完整复核通过；原失败保留、未分类，不改UI断言或期限。必要初始化成本不宣称为提速。见[本轮合同与原始失败](performance-experiments/20261022-qoder-initialization-lifetime.md)。未合入、push或安装；完整A/Pi刷新合同及可信L2仍未完成。
+
+## Qoder：先修正模型来源，不盲目扩大实例寿命（2026-10-22）
+
+- SDK1.0.17 的 initializationResult/supportedCommands 永久复用初始化快照；reloadPlugins 不构成模型/认证/启动配置的完整刷新合同。保持原5秒空闲回收和30秒catalog缓存，不宣称Qoder长期常驻完成。
+- 修正已有模型刷新链路：cache MISS 始终获取原生 live 模型，保留effort/default，空列表不回退旧初始化值，失败不复用旧成功值；仅发现控制查询设置persistSession:false。源码 `5d11ab5`/调用点简化 `dddc43e`，回归 `36ee5f1`。
+- 新测试对旧代码6项失败；本机87项Qoder focused与完整类型检查通过；mac2冻结`dddc43e`完整unit **3496 pass / 4既有opt-in skipped**、类型/build、完整43项计数ratchet通过。新增live请求是获得当前证据的必要工作，不宣称提速。见[合同、证据与剩余边界](performance-experiments/20261022-qoder-live-controls.md)。后续由性能owner先约束初始化证据寿命/失效，再评估更长保留；Pi维持新进程，未合入、push或安装。
+
+## OpenCode：有界原生实例跨能力刷新周期复用（2026-10-22）
+
+- 用户限制只修改 Scry，本轮不改 Pi/Rotom。OpenCode 空闲保留60秒与桌面60秒能力读取相撞，生产提交 `06591d9` 改为可续租90秒；请求/测试期限、30秒模型目录缓存、原有指纹重验和活跃操作保护不变，空闲实例仍按原策略淘汰。
+- 相同三读、每读间隔60秒：生产 manager 回归与独立受控 Node HTTP 子进程都观察到启动3→1；后两次不再重复启动，指纹重验和真实SDK调用保留。不是所有 Provider 的常驻完成。
+- mac2 `74520c8` 完整 unit **3493 pass / 4既有opt-in skipped**、类型/build、完整43项计数与ratchet通过。锁内五对耗时样本遇到8核load17.99→22.55、highLoad=true，L2不可信，不报告提速。性能owner后续在空闲窗口复验同一harness；Pi保留新进程，Qoder未扩大寿命。见[实验与边界](performance-experiments/20261022-opencode-control-lease.md)。未合入、push或安装。
+
+## 方案 A：按需 Provider 发现（按需层收口；mac2 Node/UI/计数通过，Swift 测试待完整 Xcode）
+
+- 在隔离分支实现 metadata/selected 协议及能力协商；定时元数据不再初始化全部 Provider，仅选中 Provider/Profile/canonical cwd 才读取能力。同上下文只合并在途查询，沿用 Provider 已有实例机制；未新增 Pi settled cache 或统一常驻池。
+- 固定三个上下文的 **adapter 入口计数**：metadata 0、两个重叠 selected 请求 1、显式 legacy 全量 3，五轮一致。注入 metadata 全量探测后回归确定性失败。这不是 CLI 进程数或 L2/L3 提速结论。
+- 第二轮源码 `a742d62`、测试/诊断 `1588832`：补齐主机观察时间、独立发布版本、已知配置失效栅栏；旧在途数据不发布/不回填缓存，可见、focus 与成功手动重读保留用户选择，失败不复用旧成功值。底层 SDK 缓存/重载仍逐 Provider 决定，不承诺外部配置即时全部生效，不视为完整常驻 A。
+- 本机类型/build、iPhoneOS unsigned SDK 编译、完整 renderer UI、25 项失效 focused 已通过；本机完整 unit 的 Rename 超时和 Swift TLS leaked promise 首次记录保留。用户授权 mac2 复验冻结 `54e9dd1`：完整 unit **3491 pass / 4 既有 opt-in skipped**、完整 renderer UI、类型/build、Swift build、完整43项计数及 ratchet/propose/guard 均通过。未修改测试期限，未应用1字节的无关 candidate baseline 提议。mac2 Swift test 因无 XCTest/完整 Xcode 未进入执行，不把它当作 TLS 问题已解决。
+- 测试 owner 下一步在完整 Xcode 环境运行原 Swift 全套并复核 TLS；性能 owner 补独立冷/热 L2。mac2 计数时 load3.09→3.45/8核、highLoad=false，但这不是毫秒收益证明。三个 CPU 指令 candidate 缺失仍为 missing，不记0。未合入、push、安装或真机重放。范围、各轮原始失败及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
+
 ## 独立 CLI 多仓库采集（2026-10-21，受控实验；未改生产）
 
 - 独立 CLI 日常样本提示每轮通常采集 18–19 个仓库；不能用 App journal 替代其热点证据。当前优先多仓库采集与通知重复工作，暂缓用户级服务和内容存储重建。

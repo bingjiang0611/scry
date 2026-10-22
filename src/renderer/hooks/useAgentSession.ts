@@ -343,6 +343,7 @@ export interface SessionHistoryWindow {
   offset: number
   totalTurns: number
   hasOlder: boolean
+  sourceComplete?: boolean
   completeness: 'complete' | 'partial'
 }
 
@@ -351,6 +352,7 @@ export interface OlderSessionPage {
   offset: number
   totalTurns: number
   hasOlder: boolean
+  sourceComplete?: boolean
   completeness: 'complete' | 'partial'
 }
 
@@ -365,6 +367,7 @@ export const sessionHistoryWindowOf = (
         offset: page.offset,
         totalTurns: page.totalTurns,
         hasOlder: page.hasOlder,
+        sourceComplete: page.sourceComplete,
         completeness: page.completeness
       }
     : { sessionId, offset: 0, totalTurns: loadedTurns, hasOlder: false, completeness: 'complete' }
@@ -392,7 +395,8 @@ export function prependOlderSessionTurns(
       offset: page.offset,
       totalTurns: page.totalTurns,
       hasOlder: page.hasOlder,
-      completeness: page.hasOlder ? 'partial' : 'complete'
+      sourceComplete: page.sourceComplete,
+      completeness: page.hasOlder || page.sourceComplete === false ? 'partial' : 'complete'
     }
   }
 }

@@ -207,6 +207,67 @@ describe('每轮 Git 工作树快照', () => {
     return root
   }
 
+  async function installPatchShim(root: string): Promise<string> {
+    const binDir = join(root, 'test-bin')
+    const realGit = (await pexecFile('which', ['git'])).stdout.trim()
+    const argsLog = join(root, '.git', 'git-argv.log')
+    await mkdir(binDir)
+    await writeFile(join(binDir, 'git'), `#!/bin/sh
+output=''
+raw=0
+for arg in "$@"; do
+  printf '%s\\000' "$arg" >> "$SCRY_TEST_GIT_ARG_LOG"
+  case "$arg" in
+    --output=*) output="\${arg#--output=}" ;;
+    --raw) raw=1 ;;
+  esac
+done
+printf '\\000' >> "$SCRY_TEST_GIT_ARG_LOG"
+if [ "$raw" = 1 ] && [ -n "$output" ]; then
+  if [ "$SCRY_TEST_PATCH_MODE" = fail-before-open ]; then exit 73; fi
+  if [ "$SCRY_TEST_PATCH_MODE" = partial-complete ] || [ "$SCRY_TEST_PATCH_MODE" = partial-zero ] || [ "$SCRY_TEST_PATCH_MODE" = partial-midline ]; then
+    {
+      printf '%s\\000%s\\000' ':100644 100644 1111111 2222222 M' 'first.txt'
+      printf '%s\\000%s\\000' ':100644 100644 3333333 4444444 M' 'second.txt'
+      printf '\\000'
+      cat <<'PATCH'
+diff --git a/first.txt b/first.txt
+index 1111111..2222222 100644
+--- a/first.txt
++++ b/first.txt
+@@ -1 +1 @@
+-old
++first-new
+diff --git a/second.txt b/second.txt
+index 3333333..4444444 100644
+--- a/second.txt
++++ b/second.txt
+@@ -1 +1 @@
+PATCH
+      if [ "$SCRY_TEST_PATCH_MODE" = partial-complete ]; then printf '%b' '-old\\n+second-new'; fi
+      if [ "$SCRY_TEST_PATCH_MODE" = partial-midline ]; then printf '%s' '-unfinished'; fi
+    } > "$output"
+    exit 73
+  fi
+fi
+exec "$SCRY_TEST_REAL_GIT" "$@"
+`)
+    await chmod(join(binDir, 'git'), 0o700)
+    vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`)
+    vi.stubEnv('SCRY_TEST_REAL_GIT', realGit)
+    vi.stubEnv('SCRY_TEST_GIT_ARG_LOG', argsLog)
+    return argsLog
+  }
+
+  async function preparePatchShimFixture(): Promise<string> {
+    const root = await initRepo()
+    await writeFile(join(root, 'first.txt'), 'old\n')
+    await writeFile(join(root, 'second.txt'), 'old\n')
+    await pexecFile('git', ['add', '.'], { cwd: root })
+    await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+    return root
+  }
+
   it('只统计本轮净变化，纳入 untracked、排除 ignored，且不改变真实 index', async () => {
     const root = await initRepo()
     try {
@@ -854,26 +915,212 @@ describe('每轮 Git 工作树快照', () => {
     }
   }, 15_000)
 
-  it('大文件 patch 不再按单文件预算截断，且 numstat 保持完整', async () => {
+  it('失败 patch 只保留 next-header 正确界定的前缀', async () => {
+    const originalPath = process.env.PATH
+    try {
+      for (const mode of ['partial-complete', 'partial-zero', 'partial-midline']) {
+        const root = await preparePatchShimFixture()
+        let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+        try {
+          const argsLog = await installPatchShim(root)
+          vi.stubEnv('SCRY_TEST_PATCH_MODE', mode)
+          capture = await beginGitTurnDiff(root)
+          await writeFile(join(root, 'first.txt'), 'first-new\n')
+          await writeFile(join(root, 'second.txt'), 'second-new\n')
+
+          const result = await finishGitTurnDiff(capture, 10_000)
+          const byName = new Map(result.files.map(file => [file.path.split('/').pop(), file]))
+          expect(result.status).toBe('captured')
+          expect(result.files).toHaveLength(2)
+          expect(byName.get('first.txt')).toMatchObject({ patchStatus: 'captured' })
+          expect(byName.get('second.txt')).toMatchObject({ patchStatus: 'unavailable', patchReason: 'git_error' })
+          expect(byName.get('second.txt')?.patch).toBeUndefined()
+          expect((await readFile(argsLog)).toString()).toContain('--output=')
+        } finally {
+          if (capture) await cancelGitTurnDiff(capture)
+          await rm(root, { recursive: true, force: true })
+        }
+      }
+    } finally {
+      vi.stubEnv('PATH', originalPath ?? '')
+      vi.stubEnv('SCRY_TEST_PATCH_MODE', '')
+    }
+  }, 30_000)
+
+  it('失败 preview 不会复用上一次 operation 的 output artifact', async () => {
+    const originalPath = process.env.PATH
+    const root = await preparePatchShimFixture()
+    let baseline: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      const argsLog = await installPatchShim(root)
+      baseline = await beginGitTurnDiff(root)
+      await writeFile(join(root, 'first.txt'), 'first-v1\n')
+      await writeFile(join(root, 'second.txt'), 'second-v1\n')
+      vi.stubEnv('SCRY_TEST_PATCH_MODE', 'partial-midline')
+      const first = await snapshotSessionNetDiff(baseline, 10_000)
+      expect(first.files.find(file => file.path.endsWith('first.txt'))).toMatchObject({ patchStatus: 'captured' })
+
+      await writeFile(join(root, 'first.txt'), 'first-v2\n')
+      await writeFile(join(root, 'second.txt'), 'second-v2\n')
+      vi.stubEnv('SCRY_TEST_PATCH_MODE', 'fail-before-open')
+      const second = await snapshotSessionNetDiff(baseline, 10_000)
+      expect(second.files.every(file => file.patchStatus === 'unavailable')).toBe(true)
+      expect(second.files.every(file => file.patch === undefined)).toBe(true)
+
+      const invocations = (await readFile(argsLog)).toString().split('\0\0')
+        .map(record => record.split('\0').find(arg => arg.startsWith('--output=')))
+        .filter((output): output is string => output != null)
+      expect(invocations).toHaveLength(2)
+      expect(invocations[0]).not.toBe(invocations[1])
+      const firstOutput = invocations[0].slice('--output='.length)
+      const secondOutput = invocations[1].slice('--output='.length)
+      await expect(access(firstOutput)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(access(secondOutput)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      if (baseline) await cancelGitTurnDiff(baseline)
+      await rm(root, { recursive: true, force: true })
+      vi.stubEnv('PATH', originalPath ?? '')
+      vi.stubEnv('SCRY_TEST_PATCH_MODE', '')
+    }
+  }, 30_000)
+
+  it('大文件 patch 保留与 native Git 一致的完整字节，且 numstat 保持完整', async () => {
     const root = await initRepo()
     try {
       await writeFile(join(root, 'base.txt'), 'base\n')
+      await writeFile(join(root, 'large.txt'), 'before\n')
       await pexecFile('git', ['add', '.'], { cwd: root })
       await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
 
       const capture = await beginGitTurnDiff(root)
-      await writeFile(join(root, 'large.txt'), `${'你'.repeat(Math.ceil((1024 * 1024 + 8192) / 3))}\n`)
+      await writeFile(join(root, 'large.txt'), `${'你'.repeat(Math.ceil((17 * 1024 * 1024) / 3))}\n`)
       const result = await finishGitTurnDiff(capture, 10_000)
+      const oracle = await pexecFile('git', [
+        '-c', 'core.fsmonitor=false', '-c', 'diff.suppressBlankEmpty=false',
+        'diff', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=3',
+        '--src-prefix=a/', '--dst-prefix=b/', '--line-prefix=',
+        '--output-indicator-new=+', '--output-indicator-old=-', '--output-indicator-context= ',
+        'HEAD', '--', 'large.txt'
+      ], { cwd: root, maxBuffer: 32 * 1024 * 1024 })
 
       expect(result.status).toBe('captured')
-      expect(result.files[0]).toMatchObject({
-        added: 1,
-        deleted: 0,
-        patchStatus: 'captured'
-      })
-      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeGreaterThan(32 * 1024)
+      expect(result.files[0]).toMatchObject({ added: 1, deleted: 1, patchStatus: 'captured' })
+      expect(result.files[0].patch).toBe(oracle.stdout)
+      expect(Buffer.byteLength(result.files[0].patch ?? '', 'utf8')).toBeGreaterThan(16 * 1024 * 1024)
       expect(result.files[0].patch).not.toContain('�')
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('批量 patch 以 raw 路径映射奇异文件名，并忽略 hunk 内的伪 header', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      const newline = String.fromCharCode(10)
+      const backslash = String.fromCharCode(92)
+      const names = [
+        'space name.txt',
+        `quote\"single'${backslash}日本.txt`,
+        'glob*?[x].txt',
+        `line${newline}name.txt`,
+        ...Array.from({ length: 132 }, (_, index) => `batch-${String(index).padStart(3, '0')}.txt`)
+      ]
+      for (const name of names) await writeFile(join(root, name), `old${newline}`)
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      capture = await beginGitTurnDiff(root)
+      for (const name of names) {
+        const content = name === 'batch-000.txt'
+          ? `old${newline}-diff --git fake/a fake/b${newline}+diff --git fake/a fake/b${newline}`
+          : `new${newline}`
+        await writeFile(join(root, name), content)
+      }
+      const result = await finishGitTurnDiff(capture, 20_000)
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(names.length)
+      expect(result.files.every(file => file.patchStatus === 'captured')).toBe(true)
+      expect(result.files.find(file => file.path.endsWith('batch-000.txt'))?.patch).toContain('+diff --git fake/a fake/b')
+      expect(result.files.find(file => file.path.endsWith(`line${newline}name.txt`))?.patch).toContain('+new')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('bounds encoded argv bytes without skipping long-path suffixes or retaining preview artifacts', async () => {
+    const root = await initRepo()
+    const originalPath = process.env.PATH
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      const directory = join(root, 'p'.repeat(160), 'q'.repeat(160))
+      await mkdir(directory, { recursive: true })
+      const paths = Array.from({ length: 100 }, (_, index) => join(directory, `${'f'.repeat(200)}-${index}.txt`))
+      await Promise.all(paths.map(path => writeFile(path, 'before\n')))
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const log = await installPatchShim(root)
+      capture = await beginGitTurnDiff(root)
+      await Promise.all(paths.map(path => writeFile(path, 'after\n')))
+      const result = await finishGitTurnDiff(capture, 10_000)
+      expect(result.files).toHaveLength(paths.length)
+      expect(result.files.every(file => file.patchStatus === 'captured' && file.patch?.includes('+after'))).toBe(true)
+      const calls = (await readFile(log, 'utf8')).split('\0\0').map(row => row.split('\0'))
+        .filter(args => args.includes('--raw') && args.some(arg => arg.startsWith('--output=')))
+      expect(calls.length).toBeGreaterThan(1)
+      for (const args of calls) {
+        const pathspecs = args.slice(args.indexOf('--') + 1)
+        expect(pathspecs.reduce((bytes, arg) => bytes + Buffer.byteLength(arg) + 1, 0)).toBeLessThanOrEqual(64 * 1024)
+        const output = args.find(arg => arg.startsWith('--output='))!.slice('--output='.length)
+        await expect(access(output)).rejects.toMatchObject({ code: 'ENOENT' })
+      }
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+      vi.stubEnv('PATH', originalPath ?? '')
+    }
+  }, 20_000)
+
+  it('patch framing pins blank context indicators despite repository config', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'blank.txt'), 'first\n\nold\nlast\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      await pexecFile('git', ['config', 'diff.suppressBlankEmpty', 'true'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      await writeFile(join(root, 'blank.txt'), 'first\n\nnew\nlast\n')
+
+      const result = await finishGitTurnDiff(capture, 10_000)
+      expect(result.files[0]).toMatchObject({ patchStatus: 'captured' })
+      expect(result.files[0].patch).toContain(' \n')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('空文件删除与 mode-only patch 都保留完整边界', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'empty.txt'), '')
+      await writeFile(join(root, 'mode.txt'), 'content\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      await rm(join(root, 'empty.txt'))
+      await chmod(join(root, 'mode.txt'), 0o755)
+      const result = await finishGitTurnDiff(capture, 10_000)
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(2)
+      expect(result.files.every(file => file.patchStatus === 'captured')).toBe(true)
+      expect(result.files.find(file => file.path.endsWith('empty.txt'))?.patch).toContain('deleted file mode')
+      expect(result.files.find(file => file.path.endsWith('mode.txt'))?.patch).toContain('old mode')
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)
@@ -897,6 +1144,39 @@ describe('每轮 Git 工作树快照', () => {
       })
       expect(result.files[0].patch).toBeUndefined()
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('文件到目录转换时 exact pathspec 不捕获策略排除的后代文件', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'a'), 'old\n')
+      await writeFile(join(root, 'z'), 'old\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+
+      capture = await beginGitTurnDiff(root)
+      await rm(join(root, 'a'))
+      await mkdir(join(root, 'a'))
+      await writeFile(join(root, 'a', 'private.env'), 'secret\n')
+      await writeFile(join(root, 'z'), 'new\n')
+      const result = await finishGitTurnDiff(capture, 10_000, { patchExcludeBasenames: ['private.env'] })
+      const canonicalRoot = await realpath(root)
+      const byPath = new Map(result.files.map(file => [file.path, file]))
+
+      expect(result.status).toBe('captured')
+      expect(result.files).toHaveLength(3)
+      expect(byPath.get(join(canonicalRoot, 'a'))).toMatchObject({ patchStatus: 'captured' })
+      expect(byPath.get(join(canonicalRoot, 'a', 'private.env'))).toMatchObject({
+        patchStatus: 'unavailable', patchReason: 'policy'
+      })
+      expect(byPath.get(join(canonicalRoot, 'z'))).toMatchObject({ patchStatus: 'captured' })
+      expect(byPath.get(join(canonicalRoot, 'z'))?.patch).toContain('+new')
+      expect(result.files.filter(file => file.patchStatus === 'captured')).toHaveLength(2)
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)

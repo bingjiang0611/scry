@@ -389,6 +389,7 @@ const api = {
     disconnect: (id) => ipcRenderer.invoke('desktopRemote:disconnect', id),
     forget: (id) => ipcRenderer.invoke('desktopRemote:forget', id),
     catalog: (id) => ipcRenderer.invoke('desktopRemote:catalog', id),
+    providerControls: (id, context) => ipcRenderer.invoke('desktopRemote:providerControls', id, context),
     commands: (id, context) => ipcRenderer.invoke('desktopRemote:commands', id, context),
     sessionAction: (id, context, action) => ipcRenderer.invoke('desktopRemote:sessionAction', id, context, action),
     forkSession: (id, request) => ipcRenderer.invoke('desktopRemote:forkSession', id, request),

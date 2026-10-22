@@ -210,6 +210,7 @@ enum ConnectionCopy {
   static let clearPairingMessage = "将删除本机凭据、草稿和历史缓存。再次连接需要在 Mac 上重新授权；不会停止 Mac 上正在运行的任务。"
 
   static let chooseWorkspaceFirst = "先选择工作目录，再选择 Provider"
+  static let chooseTaskContext = "发送前请在“新任务”中选择项目与 Provider"
   static let chooseProviderToSend = "选择 Provider 后即可发送"
   static let selectedModelUnavailable = "所选模型当前不可用，请重新选择模型或自动模型。"
   static let selectedEffortUnavailable = "所选推理强度当前不可用，请重新选择。"
@@ -218,6 +219,21 @@ enum ConnectionCopy {
   static let reasoningEffort = "推理强度"
   static let defaultEffort = "默认"
   static func modelAndEffort(_ model: String, _ effort: String) -> String { "模型 \(model)，推理强度 \(effort)" }
+  static let providerControlsUnavailable = "所选 Provider 设置不可用"
+  static let refreshProviderControls = "重新读取设置"
+  static func providerControlsObserved(_ observedAt: Double?) -> String {
+    guard let observedAt else { return "主机快照；读取时间未知" }
+    let date = Date(timeIntervalSince1970: observedAt / 1000)
+    return "主机读取于 \(date.formatted(date: .abbreviated, time: .shortened))"
+  }
+  static let providerControlsLoading = "正在读取所选 Provider 设置…"
+  static let legacyProviderControls = "旧版主机能力快照；发送时由主机重验"
+  static let restoredModelUnavailable = "恢复的 Model 当前不可用，已阻止静默替换"
+  static let restoredEffortUnavailable = "恢复的推理强度当前不可用，已阻止静默替换"
+  static let restoredPermissionUnavailable = "恢复的权限模式当前不可用，已阻止静默替换"
+  static let modelUnavailable = "所选模型不属于当前 Provider"
+  static let effortUnavailable = "所选推理强度不属于当前模型"
+  static let permissionUnavailable = "所选权限不属于当前 Provider"
   static let authorizedProjects = "已授权项目"
   static let chooseThisFolder = "选择此文件夹"
   static let subfolders = "子文件夹"

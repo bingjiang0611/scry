@@ -41,7 +41,17 @@ export interface RemoteProviderRef {
   efforts?: RemoteControlOption[]
   permissions?: RemoteControlOption[]
   forkSession?: true
+  /** Host observation time, not the Provider's underlying catalog update time. */
+  observedAt?: number
+  /** Publication sequence for metadata; independent of wall-clock adjustments. */
+  metadataRevision?: number
 }
+export function isRemoteProviderObservationTime(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && Number.isFinite(new Date(value).getTime())
+}
+export type RemoteProviderQuery =
+  | { detail: 'metadata' }
+  | { detail: 'selected'; providerId: string; cwd: string; agentProfileId?: string }
 export interface RemoteCommandRef {
   name: string
   description: string
@@ -118,7 +128,10 @@ export interface DesktopRemoteCatalog {
   sessions: RemoteSessionRef[]
   attachments?: DesktopRemoteAttachmentCapability
   // A cached Provider picker is not a current authentication/capability proof.
-  providerEvidence: 'host_snapshot'
+  providerEvidence: 'host_snapshot' | 'legacy_host'
+  // Selected controls are exact for the requested Provider/profile/cwd only when
+  // this negotiated capability is present. Older hosts expose legacy snapshots.
+  providerDiscovery?: 2
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
@@ -149,7 +162,7 @@ export type DesktopHostRead =
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
   | { kind: 'trace'; run: ActiveRun | null; imageCount?: number }
@@ -238,6 +251,7 @@ export interface DesktopRemoteAPI {
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
   catalog(connectionId: string): Promise<DesktopRemoteCatalog>
+  providerControls(connectionId: string, context: DesktopRemoteContext): Promise<RemoteProviderRef>
   commands(connectionId: string, context: DesktopRemoteContext): Promise<RemoteCommandCatalog>
   sessionAction(connectionId: string, context: DesktopRemoteContext, action: DesktopRemoteSessionAction): Promise<boolean>
   forkSession(connectionId: string, request: DesktopRemoteForkSessionRequest): Promise<{ externalSessionId: string }>

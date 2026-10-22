@@ -1,6 +1,48 @@
 {
   "schema": 1,
   "metrics": {
+    "providers.discovery/metadata.controlReads": {
+      "scenario": "providers.discovery",
+      "metric": "metadata.controlReads",
+      "layer": "main",
+      "unit": "count",
+      "workload": "3available-contexts;open-picker-and-select-pi;2overlapping-selected-reads",
+      "source": "production ProviderDiscovery orchestration; adapter-entry callbacks, not CLI processes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "providers.discovery/selected.controlReads": {
+      "scenario": "providers.discovery",
+      "metric": "selected.controlReads",
+      "layer": "main",
+      "unit": "count",
+      "workload": "3available-contexts;open-picker-and-select-pi;2overlapping-selected-reads",
+      "source": "production ProviderDiscovery orchestration; adapter-entry callbacks, not CLI processes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "providers.discovery/legacy.controlReads": {
+      "scenario": "providers.discovery",
+      "metric": "legacy.controlReads",
+      "layer": "main",
+      "unit": "count",
+      "workload": "3available-contexts;open-picker-and-select-pi;2overlapping-selected-reads",
+      "source": "production ProviderDiscovery orchestration; adapter-entry callbacks, not CLI processes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 3
+      }
+    },
     "source-control.service.diff-validated/subprocess.git": {
       "scenario": "source-control.service.diff-validated",
       "metric": "subprocess.git",

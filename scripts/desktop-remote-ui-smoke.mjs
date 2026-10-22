@@ -20,6 +20,7 @@ const negativePromptControl = process.argv.includes('--negative-prompt-control')
 const negativeSettingsControl = process.argv.includes('--negative-settings-control')
 const negativeSlashControl = process.argv.includes('--negative-slash-control')
 const negativeHistorySlashControl = process.argv.includes('--negative-history-slash-control')
+const negativeProviderRevisionControl = process.argv.includes('--negative-provider-revision-control')
 const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
@@ -49,7 +50,8 @@ const secondScryRun = 'remote-run-fixture-2'
 const state = {
   historyPrompts: ['older remote prompt', 'latest remote prompt'],
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
-  catalogCalls: 0, holdHistory: false,
+  catalogCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
+  providerControlsFailure: null, legacyProviderHost: false,
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
@@ -60,7 +62,8 @@ const state = {
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
   phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
   clipboardImageCalls: 0, forks: [], deletions: [], deleteFailure: false,
-  commandFailure: false, holdCommands: false
+  commandFailure: false, holdCommands: false,
+  providerMetadataObservedAt: 1700000000000, providerControlsObservedAt: 1700000000000, providerMetadataRevision: 1
 }
 const connection = {
   id: 'fixture-connection', label: 'Fixture desktop', hostId: 'fixture-host', anchorSHA256: 'fixture-fingerprint',
@@ -124,8 +127,19 @@ const api = {
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
       sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs } : session),
-      providers: state.hideProvider ? [beta] : catalog.providers, directorySelection: state.oldDirectoryHost ? undefined : true
+      providers: (state.hideProvider ? [beta] : catalog.providers).map(provider => state.legacyProviderHost ? provider
+        : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
+      providerDiscovery: state.legacyProviderHost ? undefined : 2,
+      providerEvidence: state.legacyProviderHost ? 'legacy_host' : 'host_snapshot',
+      directorySelection: state.oldDirectoryHost ? undefined : true
     })
+  },
+  async providerControls(id, context) {
+    state.providerControlsCalls.push({ id, context: contextFor({ context }) })
+    if (state.holdProviderControls) await new Promise(resolve => state.providerControlWaiters.push(resolve))
+    const match = catalog.providers.find(provider => provider.id === context.providerId && (provider.agentProfileId ?? '') === (context.agentProfileId ?? ''))
+    if (!match || state.providerControlsFailure === 'throw') throw new Error('fixture provider controls unavailable')
+    return structuredClone(state.providerControlsFailure === 'unavailable' ? { id: match.id, label: match.label, available: false } : { ...match, observedAt: state.providerControlsObservedAt })
   },
   async commands(id, context) {
     state.commandCalls.push({ id, context })
@@ -366,6 +380,76 @@ async function exercise(contents, pointer, capture, options) {
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
   if (options.openingOnly || options.measureOpening) {
+  // Selected controls are demand-loaded. A delayed response for a previous
+  // session Provider must not publish after the user switches context.
+  await read('window.desktopRemoteFixture.holdProviderControls = true')
+  await click('[data-remote-session="other-native"]')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.some(call => call.context.providerId === "qoder")', 'selected Beta controls request')
+  await click('[data-remote-session="old-native"]')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.some(call => call.context.providerId === "claude")', 'selected Alpha controls request after switch')
+  await read('window.desktopRemoteFixture.providerControlWaiters.shift()()')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.at(-1)?.context.providerId === "claude"', 'selected Alpha context after switch')
+  check(!await read('document.querySelector(".chat")?.textContent.includes("Beta Default")'), 'Stale Provider controls were published')
+  await read('window.desktopRemoteFixture.holdProviderControls = false; window.desktopRemoteFixture.providerControlWaiters.splice(0).forEach(resolve => resolve())')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Alpha Default"', 'selected controls settle after stale switch')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "unavailable"')
+  await click('[data-remote-session="other-native"]')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'unavailable controls are visible')
+  await click('textarea[aria-label="描述任务"]'); await insert('control-load-check')
+  check(await read(sendDisabled), 'Unavailable controls enabled send')
+  await read('window.desktopRemoteFixture.providerControlsFailure = null')
+  await click('.composer-notice button')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'explicit controls retry restores send')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const beforeLegacy = (await fixture()).providerControlsCalls.length
+  await read('window.desktopRemoteFixture.legacyProviderHost = true')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("旧版主机能力快照")', 'negotiated legacy snapshot is labelled')
+  await click('textarea[aria-label="描述任务"]'); await insert('legacy-control-check')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'legacy host preserves its existing send contract')
+  check((await fixture()).providerControlsCalls.length === beforeLegacy, 'Legacy host received a selected-controls query')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  await read('window.desktopRemoteFixture.legacyProviderHost = false')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new-host controls restored')
+  if (options.openingOnly) {
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("主机读取于")', 'selected host observation time')
+  const readLabel = await read('document.querySelector(".composer-notice span").textContent')
+  const beforeMetadataRefresh = (await fixture()).providerControlsCalls.length
+  await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeMetadataRefresh, 'same-context metadata invalidates selected controls')
+  await wait('document.querySelector(".composer-notice span")?.textContent !== ' + JSON.stringify(readLabel) + ' && !document.querySelector(".composer-notice button").disabled', 'selected observation time advances')
+  check(await read('document.querySelector(".model-effort-model")?.textContent === "Beta Default"'), 'Refresh silently changed selected model')
+  const beforeManualRefresh = (await fixture()).providerControlsCalls.length
+  await click('.composer-notice button')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeManualRefresh, 'successful controls remain explicitly refreshable')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("主机读取于") && !document.querySelector(".composer-notice button").disabled', 'manual refresh settles')
+  await click('textarea[aria-label="描述任务"]'); await insert('same-context-observation')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'known selected snapshot can send')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "throw"')
+  await click('.composer-notice button')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'failed reread discards old successful catalog')
+  check(await read(sendDisabled), 'Failed reread silently reused old controls')
+  await read('window.desktopRemoteFixture.providerControlsFailure = null')
+  await click('.composer-notice button')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'same-context retry restores valid choices')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const beforeFocus = (await fixture()).providerControlsCalls.length
+  check(await read('document.visibilityState === "visible"'), 'Focus control requires unchanged visible state')
+  await read('window.dispatchEvent(new Event("focus"))')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeFocus, 'visible window focus rereads selected controls')
+  await wait('!document.querySelector(".composer-notice button").disabled', 'focused controls settle')
+  const beforeHidden = (await fixture()).providerControlsCalls.length
+  const catalogBeforeHidden = (await fixture()).catalogCalls
+  await read('Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('window.desktopRemoteFixture.catalogCalls > ' + catalogBeforeHidden, 'hidden metadata observation')
+  check((await fixture()).providerControlsCalls.length === beforeHidden, 'Hidden composer initialized a Provider')
+  await read('delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange"))')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeHidden, 'visible composer reobserves its selected controls')
+  }
+  await click('.sb-new')
+  await wait('document.querySelector(".location-button") != null', 'new remote draft after stale switch')
+  }
+  if (options.openingOnly || options.measureOpening) {
     const bottom = '(() => { const el = document.querySelector(".chat"); return el && el.scrollHeight - el.scrollTop - el.clientHeight <= 2 })()'
     const samples = []
     const wheelUp = async () => {
@@ -510,7 +594,7 @@ async function exercise(contents, pointer, capture, options) {
       await read(`window.desktopRemoteFixture.historyPrompts = ${JSON.stringify(prompts)}; window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()`)
       await wait('document.querySelector(".composer-notice")?.textContent.includes("未连接")', 'history refresh disconnect')
       await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
-      await wait(`window.desktopRemoteFixture.historyCalls.length > ${reads} && !document.querySelector(".composer-notice")`, 'history refresh reconnect')
+      await wait(`window.desktopRemoteFixture.historyCalls.length > ${reads} && !document.querySelector(".composer-notice:not(.is-info)")`, 'history refresh reconnect')
       await wait(`document.querySelector(".chat-transcript")?.textContent.includes(${JSON.stringify(prompts.at(-1))})`, 'updated remote history')
     }
     await refreshHistory(['older remote prompt', 'latest remote prompt', 'arrived while browsing'])
@@ -994,12 +1078,12 @@ async function exercise(contents, pointer, capture, options) {
 
   await capture('remote-workspace')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.hideProvider = true')
-  await wait('document.querySelector(".composer-notice button") != null', 'offline before Provider removal')
+  await wait('document.querySelector(".composer-notice:not(.is-info) button") != null', 'offline before Provider removal')
   await click('.composer-notice button')
   await wait('document.querySelector(".clibtn")?.textContent.includes("原 Provider")', 'missing Provider is not replaced')
   check(await read(sendDisabled), 'Missing Provider allowed submission')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.hideProvider = false')
-  await wait('document.querySelector(".composer-notice button") != null', 'offline before Provider restore')
+  await wait('document.querySelector(".composer-notice:not(.is-info) button") != null', 'offline before Provider restore')
   await click('.composer-notice button')
   await wait(`!${sendDisabled}`, 'original Provider restored')
 
@@ -1088,7 +1172,7 @@ async function exercise(contents, pointer, capture, options) {
   await wait('document.querySelector(".clibtn")?.disabled === true', 'bound session context')
   check(!(await read('document.querySelector(".location-button")')), 'Bound session exposed the location picker')
   await read('window.desktopRemoteFixture.connected = false; window.desktopRemoteFixture.catalogRevision = 1')
-  await wait('document.querySelector(".composer-notice button") != null', 'bound session disconnect')
+  await wait('document.querySelector(".composer-notice:not(.is-info) button") != null', 'bound session disconnect')
   await click('.composer-notice button')
   await wait('document.querySelector(".sb-remote-proj .pname")?.textContent === "Project A v2"', 'reconnect refreshes catalog alongside bound-session history')
 
@@ -1137,7 +1221,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     // Mutation control stays in this fixture's bundle; production files are untouched.
-    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeSlashControl || negativeHistorySlashControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeSlashControl || negativeHistorySlashControl || negativeProviderRevisionControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeProviderRevisionControl && id.endsWith('/RemoteChat.tsx')) {
+        const dependency = ', provider?.metadataRevision'
+        if (!source.includes(dependency)) throw new Error('Provider metadata revision dependency not found')
+        return source.replace(dependency, '')
+      }
       if (negativeHistorySlashControl && id.endsWith('/ChatView.tsx')) {
         const guard = 'const slashOpen = slashRequested && !historyNavigation'
         if (!source.includes(guard)) throw new Error('history slash guard not found')
@@ -1211,7 +1300,7 @@ try {
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()
         win.destroy()
-        process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
+        process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => { console.log('SCRY_DESKTOP_REMOTE_UI_EXIT_REQUEST'); app.exit(0) })
       } catch (error) { console.error(error); app.exit(1) }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
@@ -1220,19 +1309,27 @@ try {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home'), SCRY_TEST_APP: '1' }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
+    const startedAt = performance.now()
+    const lifecycle = { resultAtMs: null, exitRequestAtMs: null, exitAtMs: null, closeAtMs: null }
     let cleanupTimer
     const timer = setTimeout(() => {
       failed = true
-      const failure = new Error(`DesktopRemote UI timed out (pid=${child.pid}, fixture=${temp}):\\n${output.slice(-8000)}`)
+      const failure = new Error(`DesktopRemote UI timed out (pid=${child.pid}, fixture=${temp}, lifecycle=${JSON.stringify(lifecycle)}):\\n${output.slice(-8000)}`)
       console.error(failure.message)
       cleanupTimer = stopOwnedApp(child).then(() => reject(failure), (error) => { cleanupUnknown = true; reject(new Error(`DesktopRemote cleanup unknown; fixture preserved: ${temp}`, { cause: error })) })
     // Includes three 3s background catalog transitions plus recorded/unknown/
     // dispatched run polls. Per-condition deadlines stay unchanged at 7s.
     }, 55_000)
-    child.stdout.on('data', (chunk) => { output += chunk.toString() })
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString()
+      if (lifecycle.resultAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_RESULT=')) lifecycle.resultAtMs = Math.round(performance.now() - startedAt)
+      if (lifecycle.exitRequestAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_EXIT_REQUEST')) lifecycle.exitRequestAtMs = Math.round(performance.now() - startedAt)
+    })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
+    child.once('exit', () => { lifecycle.exitAtMs = Math.round(performance.now() - startedAt) })
     child.once('error', (error) => { clearTimeout(timer); failed = true; reject(error) })
     child.once('close', (code, signal) => {
+      lifecycle.closeAtMs = Math.round(performance.now() - startedAt)
       clearTimeout(timer)
       if (cleanupTimer) return
       const result = output.match(/^SCRY_DESKTOP_REMOTE_UI_RESULT=(.+)$/m)?.[1]

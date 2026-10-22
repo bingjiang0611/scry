@@ -61,6 +61,89 @@ import {
 } from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
+  it('measures the fixed three-read idle-retention workload', async () => {
+    vi.useFakeTimers()
+    const repo = await mkdtemp(join(tmpdir(), 'scry-opencode-retention-'))
+    const client = {
+      v2: { model: { list: vi.fn(async () => ({ data: [] })) } }
+    } as unknown as OpencodeClient
+    const state = {
+      cwd: repo,
+      mcpFingerprint: 'none',
+      projectFingerprint: 'project',
+      projectContentFingerprint: 'content',
+      projectPluginFingerprint: 'none',
+      url: 'http://127.0.0.1:12345',
+      client,
+      // The frozen workload mocks only the ready native state; no CLI is launched.
+      process: { exitCode: null, signalCode: null }
+    } as OpenCodeServerState & { process: { exitCode: null; signalCode: null } }
+    const start = vi.spyOn(
+      OpenCodeServerManager.prototype as unknown as {
+        start: (projection: OpenCodeProjectProjection, generation: number) => Promise<OpenCodeServerState>
+      },
+      'start'
+    ).mockImplementation(async function (this: OpenCodeServerManager, projection) {
+      const ready = {
+        ...state,
+        cwd: projection.cwd,
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: projection.contentFingerprint
+      }
+      const internals = this as unknown as { active: typeof ready }
+      internals.active = ready
+      return ready
+    })
+    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockResolvedValue()
+    const adapter = createOpenCodeAdapter()
+    try {
+      const read = () => adapter.runControls!.read({ providerId: 'opencode', cwd: repo })
+      await read()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await read()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await read()
+      // Counter is actual production manager starts; the client/CLI boundary is mocked.
+      expect(start).toHaveBeenCalledTimes(1)
+      expect(close).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(89_999)
+      expect(close).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(close).toHaveBeenCalledOnce()
+    } finally {
+      await adapter.dispose?.()
+      start.mockRestore()
+      close.mockRestore()
+      await rm(repo, { recursive: true, force: true })
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the model catalog cache at 30 seconds as a negative control', async () => {
+    vi.useFakeTimers()
+    const modelList = vi.fn(async () => ({ data: [] }))
+    const state = {
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345',
+      client: { v2: { model: { list: modelList } } } as unknown as OpencodeClient
+    } satisfies OpenCodeServerState
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue(state)
+    const adapter = createOpenCodeAdapter()
+    try {
+      const read = () => adapter.runControls!.read({ providerId: 'opencode', cwd: '/repo' })
+      await read()
+      await vi.advanceTimersByTimeAsync(29_999)
+      await read()
+      expect(modelList).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(2)
+      await read()
+      expect(modelList).toHaveBeenCalledTimes(2)
+    } finally {
+      await adapter.dispose?.()
+      ensure.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('forwards only local api/oauth credentials and drops wellknown remote configuration auth', () => {
     expect(sanitizeOpenCodeAuth({
       anthropic: { type: 'api', key: 'api-key' },

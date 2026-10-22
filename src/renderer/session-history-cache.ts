@@ -58,7 +58,8 @@ export class SessionHistorySnapshotCache {
     const offset = page.offset + page.turns.length - turns.length
     let snapshot: SessionHistoryPage = {
       ...page, turns, offset, hasOlder: offset > 0,
-      completeness: offset === 0 ? 'complete' : 'partial'
+      sourceComplete: page.sourceComplete,
+      completeness: offset === 0 && page.sourceComplete !== false ? 'complete' : 'partial'
     }
     const representation = JSON.stringify(snapshot)
     const bytes = representation.length * 2

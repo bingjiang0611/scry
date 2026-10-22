@@ -57,6 +57,29 @@ describe('Provider 探测缓存', () => {
     expect(loader).toHaveBeenCalledTimes(4)
   })
 
+  it.each([false, true])('does not publish a superseded pending result (old read fails=%s)', async (fails) => {
+    let resolveOld!: (value: string) => void
+    let rejectOld!: (error: Error) => void
+    const old = new Promise<string>((resolve, reject) => { resolveOld = resolve; rejectOld = reject })
+    const loader = vi.fn<() => Promise<string>>().mockReturnValueOnce(old).mockResolvedValue('fresh')
+    const cached = createCachedAsyncLoader(loader, { ttlMs: 60_000 })
+    const first = cached.load()
+    await Promise.resolve()
+    cached.invalidate()
+    const current = cached.load()
+    expect(loader).toHaveBeenCalledTimes(1)
+    if (fails) {
+      rejectOld(new Error('superseded failure'))
+      await expect(first).rejects.toThrow('superseded failure')
+    } else {
+      resolveOld('old')
+      await expect(first).resolves.toBe('old')
+    }
+    await expect(current).resolves.toBe('fresh')
+    await expect(cached.load()).resolves.toBe('fresh')
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
+
   it('零 TTL 只合并在途请求，不阻止下一次定时刷新', async () => {
     const loader = vi.fn().mockResolvedValue('snapshot')
     const refresh = createCachedAsyncLoader(loader, { ttlMs: 0 })

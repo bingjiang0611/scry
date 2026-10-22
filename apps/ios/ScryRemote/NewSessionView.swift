@@ -5,6 +5,8 @@ import RemoteTransport
 // Provider are full-width controls backed only by host-authorized data. The +
 // control stages real, bounded image/text attachments for the encrypted request.
 struct NewSessionView: View {
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var controlsVisible = false
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
   @EnvironmentObject var targets: ExecutionTargetCoordinator
@@ -53,6 +55,15 @@ struct NewSessionView: View {
           .font(.system(size: 13)).foregroundStyle(Palette.muted).padding(.horizontal, 20)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
+      if run.chosenProvider != nil, let notice = run.providerControlsNotice {
+        HStack {
+          Text(notice).font(.system(size: 13)).foregroundStyle(Palette.muted)
+          if !run.providerControlsLoading {
+            Button(run.controlsReady ? ConnectionCopy.refreshProviderControls : ConnectionCopy.retry) { run.retryProviderControls() }
+          }
+        }
+        .padding(.horizontal, 20).frame(maxWidth: .infinity, alignment: .leading)
+      }
       MessageComposer(text: composer.text, attachments: composer.attachments,
                       placeholder: paired ? "描述任务，或粘贴错误信息…" : "连接后可输入",
                       disabled: !paired, sendDisabled: !canSend,
@@ -87,6 +98,11 @@ struct NewSessionView: View {
     .background(Palette.surface)
     // A discovered target can become ready without changing its identity.
     .task(id: paired ? targets.newTaskScope.id : nil) { if paired { run.loadProjects(); run.loadProviders() } }
+    .onAppear { controlsVisible = true }
+    .onDisappear { controlsVisible = false }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active, controlsVisible, paired, !run.isBusy, !run.providerControlsLoading { run.retryProviderControls() }
+    }
     .sheet(isPresented: $showProjects) {
       ProjectPickerSheet { run.chooseProject($0); showProjects = false }
     }

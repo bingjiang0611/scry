@@ -198,8 +198,18 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var chosenModelId: String?
   @Published private(set) var chosenEffort: String?
   @Published private(set) var permissionMode: String = "default"
+  @Published private(set) var providerControlsLoading = false
+  @Published private(set) var providerControlsError: String? = nil
+  @Published private(set) var providerDiscoverySupported: Bool? = nil
 
   var modelOptions: [G0Transport.RunModelOption] { chosenProvider?.models ?? [] }
+  var providerControlsNotice: String? {
+    if providerControlsLoading { return ConnectionCopy.providerControlsLoading }
+    if let providerControlsError { return providerControlsError }
+    if let restoredControlsError { return restoredControlsError }
+    if providerDiscoverySupported == false { return ConnectionCopy.legacyProviderControls }
+    return controlsReady ? ConnectionCopy.providerControlsObserved(chosenProvider?.observedAt) : nil
+  }
   var effortOptions: [G0Transport.RunControlOption] {
     if let chosenModelId, let model = modelOptions.first(where: { $0.selectionId == chosenModelId }) {
       return model.efforts ?? []
@@ -221,7 +231,9 @@ final class RemoteRunStore: ObservableObject {
     return nil
   }
   var controlsReady: Bool {
-    guard restoredControlsError == nil, let provider = chosenProvider else { return false }
+    guard restoredControlsError == nil, providerControlsError == nil, !providerControlsLoading,
+          providerControlsLoaded, let provider = chosenProvider, provider.available,
+          let cwd = chosen?.path, providerControlsCwd == cwd else { return false }
     if let permissions = provider.permissions {
       guard permissions.contains(where: { $0.id == permissionMode }) else { return false }
     } else if permissionMode != "default" {
@@ -462,6 +474,11 @@ final class RemoteRunStore: ObservableObject {
   private var catalogRequestID = 0
   private var historyTask: Task<Void, Never>?
   private var providersTask: Task<Void, Never>?
+  private var providerControlsTask: Task<Void, Never>?
+  private var providerControlsRequestID = 0
+  private var providerControlsLoaded = false
+  private var providerControlsCwd: String?
+  private var providerControlsNeedDefaults = true
   private var commandsTask: Task<Void, Never>?
   private var projectsTask: Task<Void, Never>?
   private var directoriesTask: Task<Void, Never>?
@@ -876,28 +893,131 @@ final class RemoteRunStore: ObservableObject {
     permissionMode = "default"; latestProviderPreference = (nil, nil)
     restoredControlErrors = [:]; contextNeedsRestore = false
     commandsRequestGeneration += 1
+    providerControlsRequestID += 1
+    providerControlsTask?.cancel(); providerControlsTask = nil; providerControlsLoaded = false
     commandsTask?.cancel(); commandsTask = nil; commands = .idle
   }
 
   func chooseProject(_ ref: G0Transport.RunProjectRef) {
     chosen = ref
     if let provider = chosenProvider {
+      loadProviderControls(providerId: provider.id, cwd: ref.path, agentProfileId: provider.agentProfileId)
       loadCommands(providerId: provider.id, cwd: ref.path, agentProfileId: provider.agentProfileId)
     }
   }
   func chooseProvider(_ ref: G0Transport.RunProviderRef) {
     restoredControlErrors = [:]
+    providerControlsError = nil
+    providerControlsLoaded = false
+    providerControlsCwd = nil
+    providerControlsNeedDefaults = true
+    providerControlsLoading = false
+    providerControlsRequestID += 1
+    providerControlsTask?.cancel(); providerControlsTask = nil
     chosenProvider = ref
     chosenModelId = nil
     chosenEffort = nil
     permissionMode = ref.permissions?.first(where: { $0.id == "default" })?.id ?? ref.permissions?.first?.id ?? "default"
     restoreModelSelection()
-    if let cwd = chosen?.path { loadCommands(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId) }
+    if let cwd = chosen?.path {
+      loadProviderControls(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId)
+      loadCommands(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId)
+    }
+  }
+
+  func controlsMatch(providerId: String, agentProfileId: String?, cwd: String) -> Bool {
+    controlsReady && chosenProvider?.id == providerId && chosenProvider?.agentProfileId == agentProfileId && providerControlsCwd == cwd
+  }
+
+  func retryProviderControls() {
+    guard let provider = chosenProvider, let cwd = chosen?.path else { return }
+    if providerDiscoverySupported == false {
+      loadProviders(preferredId: provider.id, preferredAgentProfileId: provider.agentProfileId, force: true)
+    } else {
+      loadProviderControls(providerId: provider.id, cwd: cwd, agentProfileId: provider.agentProfileId)
+    }
+  }
+
+  func loadSessionProviderControls(providerId: String, agentProfileId: String?, cwd: String, force: Bool = false) {
+    // Session identity is presentation context, never a workspace grant. The
+    // selected lookup and subsequent submit both revalidate it on the host.
+    chosen = .init(path: cwd, label: URL(fileURLWithPath: cwd).lastPathComponent)
+    loadProviders(preferredId: providerId, preferredAgentProfileId: agentProfileId, force: force)
+    if let provider = chosenProvider, provider.id == providerId, provider.agentProfileId == agentProfileId,
+       !force, !providerControlsLoading, !controlsMatch(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd) {
+      loadProviderControls(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+    }
+  }
+
+  private func applyProviderControls(_ controls: G0Transport.RunProviderRef, cwd: String) {
+    providerControlsLoading = false
+    providerControlsError = controls.available ? nil : ConnectionCopy.providerControlsUnavailable
+    providerControlsLoaded = controls.available
+    providerControlsCwd = controls.available ? cwd : nil
+    chosenProvider = controls
+    guard controls.available else { return }
+    if contextNeedsRestore { _ = restoreActiveContext(); return }
+    if providerControlsNeedDefaults {
+      permissionMode = controls.permissions?.first(where: { $0.isDefault == true })?.id ?? controls.permissions?.first(where: { $0.id == "default" })?.id ?? controls.permissions?.first?.id ?? "default"
+      providerControlsNeedDefaults = false
+    }
+    restoredControlErrors[.model] = chosenModelId.map { id in
+      modelOptions.contains(where: { $0.selectionId == id }) ? nil : ConnectionCopy.modelUnavailable
+    } ?? nil
+    restoredControlErrors[.effort] = chosenEffort.map { id in
+      effortOptions.contains(where: { $0.id == id }) ? nil : ConnectionCopy.effortUnavailable
+    } ?? nil
+    restoredControlErrors[.permission] = controls.permissions.map { permissions in
+      permissions.contains(where: { $0.id == permissionMode }) ? nil : ConnectionCopy.permissionUnavailable
+    } ?? (permissionMode == "default" ? nil : ConnectionCopy.permissionUnavailable)
+  }
+
+  private func loadProviderControls(providerId: String, cwd: String, agentProfileId: String?) {
+    providerControlsRequestID += 1
+    let requestID = providerControlsRequestID
+    providerControlsTask?.cancel(); providerControlsTask = nil
+    providerControlsLoaded = false
+    providerControlsCwd = nil
+    providerControlsError = nil
+    providerControlsLoading = true
+    #if DEBUG
+    if mockMode, let provider = chosenProvider { applyProviderControls(provider, cwd: cwd); return }
+    #endif
+    if providerDiscoverySupported == false, let provider = chosenProvider {
+      // Preserve the negotiated legacy snapshot contract; it is not advertised
+      // as a fresh cwd-scoped catalog. Submission remains host-authorized.
+      applyProviderControls(provider, cwd: cwd)
+      return
+    }
+    guard let client = makeClient() else {
+      providerControlsLoading = false
+      providerControlsError = ConnectionCopy.providerControlsUnavailable
+      return
+    }
+    providerControlsTask = Task { [weak self] in
+      do {
+        let controls = try await client.providerControls(providerId: providerId, cwd: cwd, agentProfileId: agentProfileId)
+        await MainActor.run {
+          guard let self, self.providerControlsRequestID == requestID,
+                self.chosen?.path == cwd, self.chosenProvider.map({ Self.sameProviderContext($0, controls) }) == true else { return }
+          self.providerControlsTask = nil
+          self.applyProviderControls(controls, cwd: cwd)
+        }
+      } catch {
+        await MainActor.run {
+          guard let self, self.providerControlsRequestID == requestID else { return }
+          self.providerControlsTask = nil
+          self.providerControlsLoading = false
+          self.providerControlsError = ConnectionCopy.providerControlsUnavailable
+        }
+      }
+    }
   }
   func chooseModel(_ id: String?) {
     guard id == nil || modelOptions.contains(where: { $0.selectionId == id }) else { return }
     restoredControlErrors[.model] = nil
     restoredControlErrors[.effort] = nil
+    contextNeedsRestore = false
     chosenModelId = id
     chosenEffort = nil
     rememberModelSelection()
@@ -905,6 +1025,7 @@ final class RemoteRunStore: ObservableObject {
   func chooseEffort(_ id: String?) {
     guard id == nil || effortOptions.contains(where: { $0.id == id }) else { return }
     restoredControlErrors[.effort] = nil
+    contextNeedsRestore = false
     chosenEffort = id
     rememberModelSelection()
   }
@@ -956,6 +1077,8 @@ final class RemoteRunStore: ObservableObject {
   func choosePermission(_ id: String) {
     guard chosenProvider?.permissions?.contains(where: { $0.id == id }) == true else { return }
     restoredControlErrors[.permission] = nil
+    contextNeedsRestore = false
+    providerControlsNeedDefaults = false
     permissionMode = id
   }
 
@@ -1852,13 +1975,39 @@ final class RemoteRunStore: ObservableObject {
     let requestConnectionRevision = connectionSuccessRevision
     providersTask = Task { [weak self] in
       do {
-        let list = try await client.providers()
+        let discovery = try await client.providersWithCapability()
+        let list = discovery.providers
         await MainActor.run {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.providersTask = nil
           self.recordSuccess()
+          self.providerDiscoverySupported = discovery.capability == 2
           self.providersLoadedAt = Date()
           self.applyProviderCatalog(list)
+          let usable = list.filter { $0.available }
+          if let chosen = self.chosenProvider {
+            if let refreshed = usable.first(where: { Self.sameProviderContext($0, chosen) }) {
+              // Metadata has no controls. Keep the observed catalog and user
+              // choices until a selected-context reply can validate them.
+              if discovery.capability != 2 { self.chosenProvider = refreshed }
+            } else {
+              self.providerControlsRequestID += 1
+              self.providerControlsTask?.cancel(); self.providerControlsTask = nil
+              self.providerControlsLoaded = false
+              self.providerControlsCwd = nil
+              self.providerControlsLoading = false
+              self.chosenProvider = nil
+              self.chosenModelId = nil
+              self.chosenEffort = nil
+              self.permissionMode = "default"
+            }
+          }
+          self.applyPreferredProvider(self.latestProviderPreference.id,
+                                      agentProfileId: self.latestProviderPreference.agentProfileId)
+          self.restoreActiveContext()
+          if let provider = self.chosenProvider, let cwd = self.chosen?.path {
+            self.loadProviderControls(providerId: provider.id, cwd: cwd, agentProfileId: provider.agentProfileId)
+          }
         }
       } catch {
         await MainActor.run {
@@ -1928,10 +2077,14 @@ final class RemoteRunStore: ObservableObject {
         ? .init(path: routing.cwd, label: URL(fileURLWithPath: routing.cwd).lastPathComponent) : nil
     } else if case .empty = projects { chosen = nil }
     if case let .loaded(providers) = providers {
-      chosenProvider = providers.first(where: {
+      let metadata = providers.first(where: {
         $0.id == routing.providerId && $0.agentProfileId == routing.agentProfileId
       })
-      restoredControlErrors = [:]
+      if metadata == nil || chosenProvider?.id != routing.providerId || chosenProvider?.agentProfileId != routing.agentProfileId {
+        chosenProvider = metadata
+        providerControlsLoaded = false
+        providerControlsCwd = nil
+      }
       guard let provider = chosenProvider else {
         chosenModelId = nil
         chosenEffort = nil
@@ -1939,14 +2092,21 @@ final class RemoteRunStore: ObservableObject {
         return false
       }
       let remembered = modelSelectionKey().flatMap { key in storedModelSelections().first { $0.key == key } }
+      guard providerControlsLoaded, providerControlsCwd == routing.cwd else {
+        if chosen?.path == routing.cwd, !providerControlsLoading {
+          loadProviderControls(providerId: routing.providerId, cwd: routing.cwd, agentProfileId: routing.agentProfileId)
+        }
+        return !contextNeedsRestore && restoredControlsError == nil && chosen?.path == routing.cwd
+      }
+      restoredControlErrors = [:]
+      providerControlsNeedDefaults = false
       if let remembered {
         chosenModelId = remembered.modelId
-      } else if let modelId = routing.modelId {
-        if let model = (provider.models ?? []).first(where: { $0.id == modelId && $0.providerId == routing.modelProviderId }) {
+      } else if let modelId = routing.modelId {        if let model = (provider.models ?? []).first(where: { $0.id == modelId && $0.providerId == routing.modelProviderId }) {
           chosenModelId = model.selectionId
         } else {
           chosenModelId = nil
-          restoredControlErrors[.model] = ConnectionCopy.selectedModelUnavailable
+          restoredControlErrors[.model] = ConnectionCopy.restoredModelUnavailable
         }
       } else {
         chosenModelId = nil
@@ -1958,7 +2118,7 @@ final class RemoteRunStore: ObservableObject {
           chosenEffort = effort
         } else {
           chosenEffort = nil
-          restoredControlErrors[.effort] = ConnectionCopy.selectedEffortUnavailable
+          restoredControlErrors[.effort] = ConnectionCopy.restoredEffortUnavailable
         }
       } else {
         chosenEffort = nil
@@ -1968,7 +2128,7 @@ final class RemoteRunStore: ObservableObject {
           permissionMode = permission
         } else {
           permissionMode = permission
-          restoredControlErrors[.permission] = "恢复的权限模式当前不可用，已阻止静默替换"
+          restoredControlErrors[.permission] = ConnectionCopy.restoredPermissionUnavailable
         }
       } else {
         permissionMode = "default"
@@ -2081,6 +2241,9 @@ final class RemoteRunStore: ObservableObject {
           self.projectsLoadedAt = Date()
           self.projects = list.isEmpty ? .empty : .loaded(list)
           _ = self.restoreActiveContext()
+          if let provider = self.chosenProvider, let cwd = self.chosen?.path {
+            self.loadProviderControls(providerId: provider.id, cwd: cwd, agentProfileId: provider.agentProfileId)
+          }
         }
       } catch {
         await MainActor.run {
@@ -2864,6 +3027,8 @@ final class RemoteRunStore: ObservableObject {
     prefetchTask?.cancel(); prefetchTask = nil; warmedScreens.removeAll()
     historyTask?.cancel(); historyTask = nil
     providersTask?.cancel(); providersTask = nil
+    providerControlsRequestID += 1
+    providerControlsTask?.cancel(); providerControlsTask = nil; providerControlsLoaded = false
     commandsTask?.cancel(); commandsTask = nil
     projectsTask?.cancel(); projectsTask = nil
     directoriesTask?.cancel(); directoriesTask = nil
@@ -2925,7 +3090,7 @@ final class RemoteRunStore: ObservableObject {
                                          agentProfileId: agentProfileId)
     let resumeId = activeSessionIdentity == identity ? liveExternalSessionId ?? resume : resume
     let matchingProvider = chosenProvider?.id == providerId && chosenProvider?.agentProfileId == agentProfileId ? chosenProvider : nil
-    guard let matchingProvider, controlsReady else {
+    guard let matchingProvider, controlsMatch(providerId: providerId, agentProfileId: agentProfileId, cwd: cwd) else {
       submitError = agentProfileId == nil ? "当前 Provider 控件不可用" : "原 Agent Profile 当前不可用，已阻止切换身份继续会话"
       return false
     }
@@ -4264,6 +4429,8 @@ final class RemoteRunStore: ObservableObject {
     ]
     providers = .loaded(availableProviders)
     chooseProvider(availableProviders[0])
+    providerControlsLoaded = true
+    providerControlsCwd = chosen?.path
     commands = .loaded([
       .init(name: "review", description: "审查当前改动", argumentHint: "[范围]", source: "builtin"),
       .init(name: "compact", description: "压缩当前会话上下文", source: "builtin"),

@@ -24,7 +24,7 @@ const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; unknownIntent?: boolean; encrypt?: typeof encrypt } = {}) {
+async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -51,7 +51,8 @@ async function setup(setupOptions: { submitResponse?: () => unknown; intentStatu
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
-    if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical' } }
+    if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) } }
+    if ((request as { op?: string }).op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
     if ((request as { op?: string }).op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
@@ -138,6 +139,52 @@ describe('DesktopRemoteClient', () => {
       await expect(reloaded.mobileSubmit({ ...input, target: reloadedTarget, payloadHash: 'c'.repeat(64) })).rejects.toThrow('intent_payload_conflict')
       expect(fixture.tlsRequest.mock.calls.filter((call) => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
     } finally { await reloaded?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it.each([false, true])('negotiates before listing providers (selected support: %s)', async (supported) => {
+    const fixture = await setup({ providerDiscovery: supported })
+    try {
+      const pending = await fixture.client.pair({ label: 'Catalog', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      fixture.tlsRequest.mockClear()
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', ...(supported ? { providerDiscovery: 2 } : {}) } })
+        .mockResolvedValueOnce({ projects: [] })
+        .mockResolvedValueOnce({ providers: [{ id: 'claude', label: 'Claude', available: true }] })
+        .mockResolvedValueOnce({ sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture' } })
+      expect(await fixture.client.catalog(id)).toMatchObject({ providerEvidence: supported ? 'host_snapshot' : 'legacy_host' })
+      expect(fixture.tlsRequest.mock.calls.map(([value]) => value.request)).toEqual([
+        { op: 'desktop', query: { kind: 'info' } }, { op: 'projects' },
+        { op: 'providers', ...(supported ? { detail: 'metadata' } : {}) },
+        { op: 'sessionsPage', includeArchived: true, cursor: 0, limit: 100 }
+      ])
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+  it('rejects selected controls from a legacy host without negotiated capability', async () => {
+    const fixture = await setup({ providerDiscovery: false })
+    try {
+      const pending = await fixture.client.pair({ label: 'Legacy controls', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      await expect(fixture.client.providerControls(id, { cwd: '/workspace', providerId: 'claude' })).rejects.toThrow('provider_controls_unavailable')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('requests selected Provider controls with the exact context', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Controls', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const context = { cwd: '/workspace', providerId: 'claude' as const }
+      await expect(fixture.client.providerControls(id, context)).resolves.toMatchObject({ id: 'claude', permissions: [{ id: 'default' }] })
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: {
+        op: 'providers', detail: 'selected', providerId: 'claude', cwd: '/workspace'
+      } }))
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
   it('reassembles bounded history chunks and rejects malformed or non-progressing pages', async () => {
