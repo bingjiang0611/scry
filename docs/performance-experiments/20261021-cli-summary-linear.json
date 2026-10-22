@@ -1,0 +1,164 @@
+{
+  "schema": 1,
+  "measurementCommit": "ed5c47f57dcffe1ea2d75da53983e7c7216aa5d1",
+  "candidateSourceCommit": "7e8d4811bfd8b9f9f5d7a5851f6b89886f0da31c",
+  "candidateSourceSha256": "ad305f57f66f0d39682949f2ae767a38268f572c3c82b138c11106a5d4a5d860",
+  "harnessSha256": "ffb801f040ef12fad7525a34e73454dd8bbe477c8cb9da194fe0e2b234c46725",
+  "baseline": {
+    "schema": 1,
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "sourceCommit": "b3bf6f25759471f215367abb3436c68bfc8259e6",
+    "bundleSha256": "89802445f5214073f648f8a90f5c793c532ab4c2e2a86842522ce68da27fee4f",
+    "workload": {
+      "records": [
+        1,
+        186
+      ],
+      "callsPerRecord": 18,
+      "distinctPathsPerRecord": 9,
+      "warmups": 3,
+      "samples": 9
+    },
+    "scope": "production full session summary on schema-valid synthetic records; excludes CLI startup, file reading/parsing, Provider and upload; timings have no instrumentation",
+    "counter": "OrderedCall.record property reads across all summary phases; not total CPU work or Map operations",
+    "results": [
+      {
+        "records": 1,
+        "calls": 18,
+        "inputSha256": "1960210eb516c44b5a9bde7c337b66fb6d56fe9ac19d99b2e0c85abee52971d6",
+        "summarySha256": "9ba566e2606341f8f94cfa7bca08b91a9be0bb0acb5417497a265bcd39a29df1",
+        "samplesMs": [
+          0.09337500000000176,
+          0.08879199999999798,
+          0.09545899999999818,
+          0.08450000000000557,
+          0.07470899999999858,
+          0.08683300000000571,
+          0.05620900000000262,
+          0.04433300000000173,
+          0.04866699999999469
+        ],
+        "p50Ms": 0.08450000000000557,
+        "p95Ms": 0.09545899999999818,
+        "recordReads": 156,
+        "observedEntries": 18,
+        "sensitivity": {
+          "duplicateRecordReads": 312,
+          "passed": true
+        }
+      },
+      {
+        "records": 186,
+        "calls": 3348,
+        "inputSha256": "8a2c0cea33db4fde35ae4ec98b24897536bd911ca391b7d4ef43d50c2aafcec2",
+        "summarySha256": "eac72b9d264a38e9f2d9ecbb38e55c7271b2e2d537d69775879e5ae7e09cb2b8",
+        "samplesMs": [
+          14.207834000000005,
+          14.850957999999991,
+          15.397500000000008,
+          15.99600000000001,
+          14.176416999999987,
+          14.30533299999999,
+          13.897208000000006,
+          14.073833000000008,
+          13.768958999999995
+        ],
+        "p50Ms": 14.207834000000005,
+        "p95Ms": 15.99600000000001,
+        "recordReads": 1889376,
+        "observedEntries": 3348,
+        "sensitivity": {
+          "duplicateRecordReads": 3778752,
+          "passed": true
+        }
+      }
+    ]
+  },
+  "candidate": {
+    "schema": 1,
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "sourceCommit": "ed5c47f57dcffe1ea2d75da53983e7c7216aa5d1",
+    "bundleSha256": "f507a832b527bf8de4740649a4b361125e347f9d5efa98cdd4f6e6ddd4962d3d",
+    "workload": {
+      "records": [
+        1,
+        186
+      ],
+      "callsPerRecord": 18,
+      "distinctPathsPerRecord": 9,
+      "warmups": 3,
+      "samples": 9
+    },
+    "scope": "production full session summary on schema-valid synthetic records; excludes CLI startup, file reading/parsing, Provider and upload; timings have no instrumentation",
+    "counter": "OrderedCall.record property reads across all summary phases; not total CPU work or Map operations",
+    "results": [
+      {
+        "records": 1,
+        "calls": 18,
+        "inputSha256": "1960210eb516c44b5a9bde7c337b66fb6d56fe9ac19d99b2e0c85abee52971d6",
+        "summarySha256": "9ba566e2606341f8f94cfa7bca08b91a9be0bb0acb5417497a265bcd39a29df1",
+        "samplesMs": [
+          0.08679199999999554,
+          0.154791000000003,
+          0.10995799999999889,
+          0.09120899999999921,
+          0.09299999999999642,
+          0.07466699999999804,
+          0.10833300000000179,
+          0.06745800000000202,
+          0.05141700000000071
+        ],
+        "p50Ms": 0.09120899999999921,
+        "p95Ms": 0.154791000000003,
+        "recordReads": 120,
+        "observedEntries": 18,
+        "sensitivity": {
+          "duplicateRecordReads": 240,
+          "passed": true
+        }
+      },
+      {
+        "records": 186,
+        "calls": 3348,
+        "inputSha256": "8a2c0cea33db4fde35ae4ec98b24897536bd911ca391b7d4ef43d50c2aafcec2",
+        "summarySha256": "eac72b9d264a38e9f2d9ecbb38e55c7271b2e2d537d69775879e5ae7e09cb2b8",
+        "samplesMs": [
+          2.593834000000001,
+          2.8065409999999957,
+          3.249040999999991,
+          2.6184999999999974,
+          2.164750000000012,
+          3.0270830000000046,
+          2.304249999999996,
+          2.601792000000003,
+          3.047249999999991
+        ],
+        "p50Ms": 2.6184999999999974,
+        "p95Ms": 3.249040999999991,
+        "recordReads": 24540,
+        "observedEntries": 3348,
+        "sensitivity": {
+          "duplicateRecordReads": 49080,
+          "passed": true
+        }
+      }
+    ]
+  },
+  "timing": {
+    "baseline": {
+      "cores": 10,
+      "loadBefore": 22.25,
+      "loadAfter": 22.25,
+      "highLoad": true
+    },
+    "candidate": {
+      "cores": 10,
+      "loadBefore": 26.54,
+      "loadAfter": 26.54,
+      "highLoad": true
+    },
+    "conclusion": "L2 unavailable; raw timings are not speed claims"
+  }
+}
