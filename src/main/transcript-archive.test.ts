@@ -393,6 +393,35 @@ describe('transcript archive mirror', () => {
     })
   })
 
+  it('repairs a corrupt cold source without turning missing canonical evidence green', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/cold-repair', sessionId: 'cold-repair', providerId: 'codex' as const, userDataDir }
+    expect(upsertTraceArchiveTurn({ ...args, turn: { runId: 'run-one', userText: 'one', items: [], done: true, ts: 1 } })).toBe(true)
+    expect(upsertTraceArchiveTurn({ ...args, turn: { runId: 'run-two', userText: 'two', items: [], done: true, ts: 2 } })).toBe(true)
+    rmSync(join(userDataDir, 'trace-archive-metadata-v1'), { recursive: true, force: true })
+    const damagedPath = traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'run-two' })
+    writeFileSync(damagedPath, '{broken')
+    await expect(readTraceArchivePageAsync(args, { limit: 2 })).resolves.toMatchObject({
+      sourceComplete: false, totalTurns: 1, archive: { turns: [{ runId: 'run-one' }] }
+    })
+
+    writeFileSync(damagedPath, JSON.stringify({
+      version: 3, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId,
+      turns: [{ runId: 'run-two', userText: 'repaired', items: [], done: true, ts: 2 }]
+    }))
+    const repaired = await readTraceArchivePageAsync(args, { limit: 2 })
+    expect(repaired).toMatchObject({ sourceComplete: true, totalTurns: 2 })
+    const indexPath = `${dirname(damagedPath)}.index-v1.json`
+    const degradedIndex = JSON.parse(readFileSync(indexPath, 'utf8'))
+    degradedIndex.sourceComplete = false
+    writeFileSync(indexPath, JSON.stringify(degradedIndex))
+    await expect(readTraceArchivePageAsync(args, { limit: 2 })).resolves.toMatchObject({ sourceComplete: true, totalTurns: 2 })
+    await expect(readTraceArchiveMetadataAsync(args)).resolves.toMatchObject({
+      turns: expect.arrayContaining([expect.objectContaining({ runId: 'run-two', userText: 'repaired' })])
+    })
+  })
+
   it('valid JSON base index with an omitted entry recovers the canonical entry', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')

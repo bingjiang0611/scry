@@ -1067,21 +1067,21 @@ function sameArchiveSegmentStamp(entry: TraceArchiveIndexEntry, stat: { size: nu
   return entry.size === stat.size && entry.mtimeMs === stat.mtimeMs && entry.ctimeMs === stat.ctimeMs && entry.ino === stat.ino
 }
 
-function archiveIndexFromArchives(
+async function archiveIndexFromArchives(
   args: { userDataDir: string; cwd: string; sessionId: string; providerId: ProviderId },
   directory: TraceArchiveDirectoryStamp,
-  archives: TraceArchive[]
-): TraceArchiveIndex {
-  return {
-    version: 2,
-    cwd: args.cwd,
-    sessionId: args.sessionId,
-    providerId: args.providerId,
-    directory,
-    entries: archives.flatMap((archive) => archive.turns.map((turn) => {
+  archives: TraceArchive[],
+  signal?: AbortSignal
+): Promise<TraceArchiveIndex> {
+  const turns = archives.flatMap((archive) => archive.turns).sort((left, right) => left.ts - right.ts || traceArchiveTurnKey(left).localeCompare(traceArchiveTurnKey(right)))
+  const entries: TraceArchiveIndexEntry[] = []
+  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  for (let offset = 0; offset < turns.length; offset += 32) {
+    signal?.throwIfAborted()
+    const batch = await Promise.all(turns.slice(offset, offset + 32).map(async (turn) => {
       const file = `${traceArchiveTurnKey(turn)}.json`
-      const path = join(traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId), file)
-      const stat = lstatSync(path)
+      const stat = await lstat(join(dir, file))
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('trace archive segment is not a trusted regular file')
       return {
         file,
         runId: turn.runId,
@@ -1092,20 +1092,22 @@ function archiveIndexFromArchives(
         ino: stat.ino,
         metadata: archiveTurnMetadata(turn)
       }
-    })).sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
+    }))
+    entries.push(...batch)
   }
+  return { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory, entries }
 }
 
-function writeTraceArchiveIndex(args: {
+async function writeTraceArchiveIndex(args: {
   userDataDir: string
   cwd: string
   sessionId: string
   providerId: ProviderId
-}, index: TraceArchiveIndex): void {
+}, index: TraceArchiveIndex): Promise<void> {
   if (index.entries.length > TRACE_ARCHIVE_PAGE_INDEX_MAX_ENTRIES) throw new Error('trace archive page index capacity exceeded')
   const content = `${JSON.stringify(index)}\n`
   if (Buffer.byteLength(content) > TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES) throw new Error('trace archive page index capacity exceeded')
-  writeOwnedFileAtomically(
+  await writeOwnedFileAtomicallyAsync(
     args.userDataDir,
     traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
     content
@@ -1232,6 +1234,9 @@ async function readValidTraceArchiveIndex(args: {
     if (value.version !== 2) {
       return sameArchiveDirectoryStamp(value.directory, archiveDirectoryStamp(directoryStat)) ? value : null
     }
+    // A degraded base index is not evidence that missing canonical turns are absent. Force the
+    // authoritative rebuild path so repaired source can restore complete coverage.
+    if (value.sourceComplete === false) return null
 
     const directory = archiveDirectoryStamp(directoryStat)
     const canonicalNames = (await readdir(dir)).filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
@@ -1289,7 +1294,7 @@ async function readValidTraceArchiveIndex(args: {
       sessionId: args.sessionId,
       providerId: args.providerId,
       directory,
-      sourceComplete: value.sourceComplete !== false && invalidCount === 0,
+      sourceComplete: invalidCount === 0,
       sourceIssue: invalidCount ? `${invalidCount} canonical archive segment(s) unavailable` : value.sourceIssue,
       entries: entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
     }
@@ -1475,10 +1480,11 @@ async function upgradeTraceArchiveIndexAsync(args: {
   if (inspected.invalid.length > 0) return null
   try {
     const directory = archiveDirectoryStamp(await lstat(traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)))
-    const upgraded = archiveIndexFromArchives(args, directory, inspected.valid)
-    writeTraceArchiveIndex(args, upgraded)
+    const upgraded = await archiveIndexFromArchives(args, directory, inspected.valid, signal)
+    await writeTraceArchiveIndex(args, upgraded)
     return upgraded
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason
     return null
   }
 }
@@ -1506,7 +1512,7 @@ export async function readTraceArchiveMetadataAsync(args: {
   ])
   const indexed = validIndex ?? await readSegmentedMetadataIndexAsync(args, signal)
   const index = await upgradeTraceArchiveIndexAsync(args, indexed, signal)
-  if (index?.version === 2 && storedVersion === 1 && (!validIndex || validIndex.version === 1)) writeTraceArchiveIndex(args, index)
+  if (index?.version === 2 && storedVersion === 1 && (!validIndex || validIndex.version === 1)) await writeTraceArchiveIndex(args, index)
   if (!index || index.version !== 2) return null
   signal?.throwIfAborted()
   return {
@@ -1730,11 +1736,12 @@ export async function readTraceArchivePageAsync(
     signal?.throwIfAborted()
     try {
       const after = archiveDirectoryStamp(await lstat(dir))
-      const rebuilt = archiveIndexFromArchives(args, after, inspected.valid)
+      const rebuilt = await archiveIndexFromArchives(args, after, inspected.valid, signal)
       if (before && sameArchiveDirectoryStamp(before, after) && inspected.invalid.length === 0) {
-        writeTraceArchiveIndex(args, rebuilt)
+        await writeTraceArchiveIndex(args, rebuilt)
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason
       // A segment changed during the rebuild. The already-inspected canonical snapshot remains safe
       // for this response; a later request retries the rebuild from current files.
     }
