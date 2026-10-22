@@ -738,19 +738,19 @@ describe('Qoder provider adapter', () => {
     await adapter.dispose?.()
   })
 
-  it('reads model efforts from the native Qoder catalog', async () => {
-    const getAvailableModels = vi.fn().mockResolvedValue([])
+  it('reads model efforts from the live native Qoder catalog', async () => {
+    const getAvailableModels = vi.fn().mockResolvedValue([{
+      value: 'performance-live',
+      displayName: 'Performance Live',
+      description: 'fresh',
+      isDefault: true,
+      isEnabled: true,
+      efforts: ['low', 'high'],
+      defaultEffort: 'high'
+    }])
     sdk.query.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({
-        models: [{
-          value: 'performance',
-          displayName: 'Performance',
-          description: 'fast',
-          isDefault: true,
-          isEnabled: true,
-          efforts: ['low', 'high'],
-          defaultEffort: 'high'
-        }]
+        models: [{ value: 'performance-stale', displayName: 'Performance Stale', isEnabled: true }]
       }),
       getAvailableModels,
       close: sdk.close
@@ -760,26 +760,125 @@ describe('Qoder provider adapter', () => {
       state: 'ready',
       data: {
         models: [{
-          model: { id: 'performance' },
+          model: { id: 'performance-live' },
+          label: 'Performance Live',
+          description: 'fresh',
+          isDefault: true,
           efforts: [{ id: 'low' }, { id: 'high', isDefault: true }]
         }]
       }
     })
-    expect(getAvailableModels).not.toHaveBeenCalled()
+    expect(getAvailableModels).toHaveBeenCalledOnce()
+    expect(getAvailableModels).toHaveBeenCalledWith({ fetchStrategy: 'live' })
     await adapter.dispose?.()
   })
 
-  it('falls back to the live CLI catalog when initialization has no models', async () => {
+  it('keeps a valid empty live catalog instead of falling back to initialization', async () => {
     const getAvailableModels = vi.fn().mockResolvedValue([])
     sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({ models: [] }),
+      initializationResult: vi.fn().mockResolvedValue({
+        models: [{ value: 'performance-stale', displayName: 'Performance Stale', isEnabled: true }]
+      }),
+      getAvailableModels,
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    await expect(adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })).resolves.toMatchObject({
+      state: 'ready',
+      data: { models: [] }
+    })
+    expect(getAvailableModels).toHaveBeenCalledWith({ fetchStrategy: 'live' })
+    await adapter.dispose?.()
+  })
+
+  it('uses an ephemeral no-input discovery query and closes it on disposal', async () => {
+    const getAvailableModels = vi.fn().mockResolvedValue([])
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({ models: [{ value: 'stale' }] }),
       getAvailableModels,
       close: sdk.close
     })
     const adapter = createQoderAdapter()
     await adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })
-    expect(getAvailableModels).toHaveBeenCalledWith({ fetchStrategy: 'live' })
+
+    expect(sdk.query.mock.calls[0][0].options).toMatchObject({ persistSession: false })
+    const prompt = sdk.query.mock.calls[0][0].prompt as AsyncIterable<unknown>
+    const nextMessage = prompt[Symbol.asyncIterator]().next()
     await adapter.dispose?.()
+    await expect(nextMessage).resolves.toEqual({ value: undefined, done: true })
+    expect(sdk.close).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes live models after the TTL while another facet keeps the control alive', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolveUsage: (usage: unknown) => void = () => {}
+      const usage = new Promise((resolve) => { resolveUsage = resolve })
+      const getAvailableModels = vi.fn()
+        .mockResolvedValueOnce([{ value: 'live-before', displayName: 'Before', efforts: [] }])
+        .mockResolvedValueOnce([{ value: 'live-after', displayName: 'After', efforts: [] }])
+      sdk.query.mockReturnValue({
+        initializationResult: vi.fn().mockResolvedValue({
+          models: [{ value: 'initialized-stale', displayName: 'Initialized Stale', efforts: [] }]
+        }),
+        getAvailableModels,
+        getContextUsage: vi.fn().mockReturnValue(usage),
+        supportedCommands: vi.fn().mockResolvedValue([]),
+        close: sdk.close
+      })
+      const adapter = createQoderAdapter()
+      const context = { providerId: 'qoder' as const, cwd: '/repo' }
+
+      await expect(adapter.runControls!.read(context)).resolves.toMatchObject({
+        data: { models: [{ model: { id: 'live-before' } }] }
+      })
+      const skillsRead = adapter.skills!.list(context)
+      await vi.waitFor(() => expect(sdk.query.mock.calls).toHaveLength(1))
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      await expect(adapter.runControls!.read(context)).resolves.toMatchObject({
+        data: { models: [{ model: { id: 'live-after' } }] }
+      })
+      expect(getAvailableModels).toHaveBeenCalledTimes(2)
+      resolveUsage({ skills: { count: 0, items: [] } })
+      await skillsRead
+      await adapter.dispose?.()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not recache a successful catalog after a failed live refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const getAvailableModels = vi.fn()
+        .mockResolvedValueOnce([{ value: 'live-before', displayName: 'Before', efforts: [] }])
+        .mockRejectedValueOnce(new Error('transport closed'))
+        .mockResolvedValueOnce([{ value: 'live-after', displayName: 'After', efforts: [] }])
+      sdk.query.mockReturnValue({
+        initializationResult: vi.fn().mockResolvedValue({ models: [{ value: 'initialized-stale' }] }),
+        getAvailableModels,
+        close: sdk.close
+      })
+      const adapter = createQoderAdapter()
+      const context = { providerId: 'qoder' as const, cwd: '/repo' }
+
+      await adapter.runControls!.read(context)
+      await vi.advanceTimersByTimeAsync(30_000)
+      await expect(adapter.runControls!.read(context)).resolves.toMatchObject({
+        state: 'degraded',
+        data: { models: [] },
+        reason: 'transport closed'
+      })
+      await expect(adapter.runControls!.read(context)).resolves.toMatchObject({
+        state: 'ready',
+        data: { models: [{ model: { id: 'live-after' } }] }
+      })
+      expect(getAvailableModels).toHaveBeenCalledTimes(3)
+      await adapter.dispose?.()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('bounds a control session that never initializes and retries with a fresh session', async () => {
@@ -802,8 +901,11 @@ describe('Qoder provider adapter', () => {
 
       sdk.query.mockReturnValueOnce({
         initializationResult: vi.fn().mockResolvedValue({
-          models: [{ value: 'ultimate', displayName: 'Ultimate', isEnabled: true, efforts: [] }]
+          models: [{ value: 'initialized-stale', displayName: 'Initialized Stale', isEnabled: true, efforts: [] }]
         }),
+        getAvailableModels: vi.fn().mockResolvedValue([
+          { value: 'ultimate', displayName: 'Ultimate', isEnabled: true, efforts: [] }
+        ]),
         close: sdk.close
       })
       const retry = adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })
