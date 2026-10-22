@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MemoryWorkflowStore } from './workflow-store'
-import { WorkflowRunner, WorkflowSlots } from './workflow-runner'
+import { WorkflowRunner, WorkflowSlots, type WorkflowProviderExecutionRequest } from './workflow-runner'
 import type { WorkflowPlanPreview } from '../shared/workflow'
 
 const preview: WorkflowPlanPreview = {
@@ -66,6 +66,37 @@ describe('WorkflowRunner M0 scheduler', () => {
     expect(starts).toEqual(['codex', 'qoder'])
     expect(result.attempts).toHaveLength(2)
     expect((await store.load(preview.workflowId))?.intents).toHaveLength(2)
+  })
+
+  it('does not advance a sequence or publish a final report after a blocked call', async () => {
+    const store = new MemoryWorkflowStore()
+    const plan = structuredClone(preview)
+    plan.program.body = { kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'call', blockId: 'blocked-worker', role: 'worker', prompt: 'worker' },
+      { kind: 'call', blockId: 'must-not-dispatch', role: 'reviewer', prompt: 'reviewer' },
+      { kind: 'return', blockId: 'final', ref: { nodeId: 'must-not-dispatch' } }
+    ] }
+    const execute = vi.fn((request: WorkflowProviderExecutionRequest) => ({
+      result: Promise.resolve({ runId: request.attemptId,
+        status: request.taskId.endsWith(':blocked-worker') ? 'blocked' as const : 'completed' as const,
+        output: 'must not become a final report after the blocked predecessor', settled: true }),
+      stop: () => true
+    }))
+    const slots = new WorkflowSlots(1)
+    const runner = new WorkflowRunner({ store, slots, execute })
+    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    runner.approve(plan, approval)
+    const result = await runner.start(plan, approval)
+    expect(result.state).toBe('blocked')
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(result.dispatchAttempts).toBe(1)
+    expect(result.finalReportStatus).toBe('unavailable')
+    expect(result.finalReport).toBeUndefined()
+    const saved = await store.load(plan.workflowId)
+    expect(saved?.intents).toHaveLength(1)
+    expect(saved?.outcomes).toHaveLength(1)
+    expect(saved?.outcomes[0]).toMatchObject({ nodeId: 'blocked-worker', state: 'blocked', settled: true })
+    expect(slots.active).toBe(0)
   })
 
   it('publishes bounded live evidence through the canonical attempt observer without persisting it', async () => {

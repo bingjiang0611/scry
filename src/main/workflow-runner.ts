@@ -418,7 +418,7 @@ export class WorkflowRunner {
       for (const child of block.blocks) {
         const childOutcomes = await this.runBlock(preview, child, record, controller, activeStops)
         outcomes.push(...childOutcomes)
-        if (controller.stopped || childOutcomes.some((outcome) => outcome.state === 'failed' || outcome.state === 'unknown' || outcome.state === 'stopped' || !outcome.settled)) break
+        if (controller.stopped || childOutcomes.some((outcome) => outcome.state !== 'completed' || !outcome.settled)) break
       }
       return outcomes
     }
