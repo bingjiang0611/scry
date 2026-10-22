@@ -17,6 +17,9 @@ it.each(['recent', 'project'] as const)('caches %s reads, returns copies, and in
     const first = kind === 'recent' ? ['/repo-a'] : [{ cwd: '/repo-a', lastOpenedAt: 1 }]
     const second = kind === 'recent' ? ['/repo-b'] : [{ cwd: '/repo-b', lastOpenedAt: 2 }]
     const store = kind === 'recent' ? createRecentFoldersStore(dir) : createProjectStore(dir)
+    const empty = store.load()
+    empty.length = 1
+    expect(store.load()).toEqual([])
     fs.writeFileSync(file, JSON.stringify(first))
     expect(store.load()).toEqual(first)
     vi.mocked(fs.readFileSync).mockClear()

@@ -235,12 +235,12 @@ function cachedCatalogReader<T>(file: string, fallback: T, isValid: JsonValidato
     try { key = catalogFileKey(file) } catch {
       // Cache metadata cannot override the catalog's existing recovery policy.
       cached = undefined
-      return readJsonRecoverable(file, fallback, isValid)
+      return readJsonRecoverable(file, structuredClone(fallback), isValid)
     }
     if (cached?.key === key) {
       return { value: structuredClone(cached.value), health: { status: 'ready', source: 'primary' } }
     }
-    const read = readJsonRecoverable(file, fallback, isValid)
+    const read = readJsonRecoverable(file, structuredClone(fallback), isValid)
     // Backup recovery must keep observing external repairs to either file.
     cached = read.health.source === 'primary' ? { key, value: structuredClone(read.value) } : undefined
     return read
