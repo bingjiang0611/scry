@@ -479,6 +479,7 @@ struct SessionTranscriptView: View {
                       sendDisabled: runBusy || !controlsMatch || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       contextLabel: run.chosenProvider?.label ?? session?.providerId.uppercased(), contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
+                      modelSelectionIssue: run.modelSelectionIssue,
                       onModel: { run.chooseModel($0) },
                       effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },

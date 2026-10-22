@@ -42,6 +42,7 @@ struct CatalogRefreshChecks {
       let checks = try await RemoteRunStore.selfTestCatalogRefreshFlow(directory: directory)
         + RemoteRunStore.selfTestExecutionTargets(directory: directory.appendingPathComponent("targets"))
         + RemoteRunStore.selfTestInteractionState()
+        + RemoteRunStore.selfTestModelSelection()
         + snapshotChecks + tlsChecks
       for (name, passed) in checks {
         print("\(passed ? "PASS" : "FAIL") catalog.\(name)")

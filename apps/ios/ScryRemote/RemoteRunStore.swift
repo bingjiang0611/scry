@@ -210,6 +210,16 @@ final class RemoteRunStore: ObservableObject {
     guard let chosenModelId else { return nil }
     return modelOptions.first(where: { $0.selectionId == chosenModelId })
   }
+  var modelSelectionIssue: String? {
+    if let error = restoredControlErrors[.model] ?? restoredControlErrors[.effort] { return error }
+    if let chosenModelId, !modelOptions.contains(where: { $0.selectionId == chosenModelId }) {
+      return ConnectionCopy.selectedModelUnavailable
+    }
+    if let chosenEffort, !effortOptions.contains(where: { $0.id == chosenEffort }) {
+      return ConnectionCopy.selectedEffortUnavailable
+    }
+    return nil
+  }
   var controlsReady: Bool {
     guard restoredControlsError == nil, let provider = chosenProvider else { return false }
     if let permissions = provider.permissions {
@@ -455,6 +465,16 @@ final class RemoteRunStore: ObservableObject {
   private var historyPreviewKey: String?
   private var pendingSubmission: PendingSubmission?
   private var activeRouting: RemoteRunClient.Routing?
+  // Composer selection belongs to a conversation, not to the focused run.
+  // Starting a new task can leave that run alive with its frozen routing.
+  private var modelSelectionSession: SessionIdentity?
+  private struct ModelSelection: Codable {
+    let key: String
+    let modelId: String?
+    let effort: String?
+  }
+  private var modelSelections: [ModelSelection] = []
+  private static let modelSelectionsKey = "com.scry.remote.model-selections.v1"
   private var seenOutputSequences = Set<Int>()
   private var archivedActiveTurn = false
   @Published private(set) var terminalDrainCompleted = false
@@ -747,6 +767,7 @@ final class RemoteRunStore: ObservableObject {
         return
       }
       activeSessionIdentity = checkpoint.identity
+      modelSelectionSession = checkpoint.identity
       activeRouting = checkpoint.routing
       contextNeedsRestore = true
       prompt = checkpoint.routing?.prompt
@@ -824,6 +845,7 @@ final class RemoteRunStore: ObservableObject {
   func resetNewTaskContext() {
     // Only composer choices change. Existing runs/outbox already carry frozen
     // routing and must keep observing their original target and Provider.
+    modelSelectionSession = nil
     chosen = nil; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil
     permissionMode = "default"; latestProviderPreference = (nil, nil)
     restoredControlErrors = [:]; contextNeedsRestore = false
@@ -843,6 +865,7 @@ final class RemoteRunStore: ObservableObject {
     chosenModelId = nil
     chosenEffort = nil
     permissionMode = ref.permissions?.first(where: { $0.id == "default" })?.id ?? ref.permissions?.first?.id ?? "default"
+    restoreModelSelection()
     if let cwd = chosen?.path { loadCommands(providerId: ref.id, cwd: cwd, agentProfileId: ref.agentProfileId) }
   }
   func chooseModel(_ id: String?) {
@@ -851,12 +874,59 @@ final class RemoteRunStore: ObservableObject {
     restoredControlErrors[.effort] = nil
     chosenModelId = id
     chosenEffort = nil
+    rememberModelSelection()
   }
   func chooseEffort(_ id: String?) {
     guard id == nil || effortOptions.contains(where: { $0.id == id }) else { return }
     restoredControlErrors[.effort] = nil
     chosenEffort = id
+    rememberModelSelection()
   }
+
+  private func modelSelectionKey() -> String? {
+    guard let provider = chosenProvider else { return nil }
+    if let session = modelSelectionSession,
+       session.providerId != provider.id || session.agentProfileId != provider.agentProfileId { return nil }
+    let gateway = loadConnection().map { RemoteHistoryCache.catalogKey(connection: $0, target: targetScope) } ?? "preview"
+    let fields = [gateway, provider.id, provider.agentProfileId ?? "",
+                  modelSelectionSession == nil ? "new" : "session",
+                  modelSelectionSession?.cwd ?? "", modelSelectionSession?.externalSessionId ?? "",
+                  modelSelectionSession?.localId ?? ""]
+    return SHA256.hash(data: try! JSONEncoder().encode(fields)).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private func storedModelSelections() -> [ModelSelection] {
+    // Preview/offline fixtures must never read or alter a real pairing's preferences.
+    guard loadConnection() != nil, !historyOnly,
+          let data = connections.defaults.data(forKey: Self.modelSelectionsKey) else { return modelSelections }
+    return (try? JSONDecoder().decode([ModelSelection].self, from: data)) ?? []
+  }
+
+  private func rememberModelSelection() {
+    guard let key = modelSelectionKey(), !historyOnly else { return }
+    var entries = storedModelSelections().filter { $0.key != key }
+    entries.append(ModelSelection(key: key, modelId: chosenModelId, effort: chosenEffort))
+    // Preferences, not an audit log: retain the most recent 128 contexts.
+    modelSelections = Array(entries.suffix(128))
+    if loadConnection() != nil {
+      connections.defaults.set(try! JSONEncoder().encode(modelSelections), forKey: Self.modelSelectionsKey)
+    }
+  }
+
+  private func restoreModelSelection() {
+    let selection = modelSelectionKey().flatMap { key in storedModelSelections().first { $0.key == key } }
+    chosenModelId = selection?.modelId
+    chosenEffort = selection?.effort
+    restoredControlErrors[.model] = nil
+    restoredControlErrors[.effort] = nil
+  }
+
+  private func activateModelSelection(for identity: SessionIdentity) {
+    guard modelSelectionSession != identity else { return }
+    modelSelectionSession = identity
+    restoreModelSelection()
+  }
+
   func choosePermission(_ id: String) {
     guard chosenProvider?.permissions?.contains(where: { $0.id == id }) == true else { return }
     restoredControlErrors[.permission] = nil
@@ -1144,7 +1214,9 @@ final class RemoteRunStore: ObservableObject {
       commandsRequestGeneration += 1
       commandsTask?.cancel(); commandsTask = nil; commands = .idle
       history = .idle
-    } else if historyTask != nil { return }
+    }
+    activateModelSelection(for: identity)
+    if historyTask != nil { return }
     guard let connection = loadConnection() else { history = .failed("尚未配对"); return }
     let key = RemoteHistoryCache.key(connection: connection, target: targetScope, providerId: providerId, cwd: cwd, sessionId: externalSessionId, agentProfileId: agentProfileId)
     let client = RemoteRunClient(connection: connection, executionTarget: targetScope?.targetBinding)
@@ -1645,30 +1717,7 @@ final class RemoteRunStore: ObservableObject {
           self.providersTask = nil
           self.recordSuccess()
           self.providersLoadedAt = Date()
-          let usable = list.filter { $0.available }
-          self.providers = usable.isEmpty ? .empty : .loaded(usable)
-          if let chosen = self.chosenProvider {
-            if let refreshed = usable.first(where: { Self.sameProviderContext($0, chosen) }) {
-              self.chosenProvider = refreshed
-              if let modelId = self.chosenModelId, !(refreshed.models ?? []).contains(where: { $0.selectionId == modelId }) {
-                self.chosenModelId = nil
-                self.chosenEffort = nil
-              } else if let effort = self.chosenEffort, !self.effortOptions.contains(where: { $0.id == effort }) {
-                self.chosenEffort = nil
-              }
-              if !(refreshed.permissions ?? []).contains(where: { $0.id == self.permissionMode }) {
-                self.permissionMode = refreshed.permissions?.first(where: { $0.id == "default" })?.id ?? refreshed.permissions?.first?.id ?? "default"
-              }
-            } else {
-              self.chosenProvider = nil
-              self.chosenModelId = nil
-              self.chosenEffort = nil
-              self.permissionMode = "default"
-            }
-          }
-          self.applyPreferredProvider(self.latestProviderPreference.id,
-                                      agentProfileId: self.latestProviderPreference.agentProfileId)
-          self.restoreActiveContext()
+          self.applyProviderCatalog(list)
         }
       } catch {
         await MainActor.run {
@@ -1679,6 +1728,28 @@ final class RemoteRunStore: ObservableObject {
         }
       }
     }
+  }
+
+  private func applyProviderCatalog(_ list: [G0Transport.RunProviderRef]) {
+    let usable = list.filter { $0.available }
+    providers = usable.isEmpty ? .empty : .loaded(usable)
+    if let selected = chosenProvider {
+      if let refreshed = usable.first(where: { Self.sameProviderContext($0, selected) }) {
+        chosenProvider = refreshed
+        // Keep unavailable model/effort choices visible and block sending,
+        // rather than silently replacing a conversation's selection with auto.
+        if !(refreshed.permissions ?? []).contains(where: { $0.id == permissionMode }) {
+          permissionMode = refreshed.permissions?.first(where: { $0.id == "default" })?.id ?? refreshed.permissions?.first?.id ?? "default"
+        }
+      } else {
+        chosenProvider = nil
+        chosenModelId = nil
+        chosenEffort = nil
+        permissionMode = "default"
+      }
+    }
+    applyPreferredProvider(latestProviderPreference.id, agentProfileId: latestProviderPreference.agentProfileId)
+    restoreActiveContext()
   }
 
   private static func sameProviderContext(_ lhs: G0Transport.RunProviderRef, _ rhs: G0Transport.RunProviderRef) -> Bool {
@@ -1726,22 +1797,27 @@ final class RemoteRunStore: ObservableObject {
         permissionMode = "default"
         return false
       }
-      if let modelId = routing.modelId {
+      let remembered = modelSelectionKey().flatMap { key in storedModelSelections().first { $0.key == key } }
+      if let remembered {
+        chosenModelId = remembered.modelId
+      } else if let modelId = routing.modelId {
         if let model = (provider.models ?? []).first(where: { $0.id == modelId && $0.providerId == routing.modelProviderId }) {
           chosenModelId = model.selectionId
         } else {
           chosenModelId = nil
-          restoredControlErrors[.model] = "恢复的 Model 当前不可用，已阻止静默替换"
+          restoredControlErrors[.model] = ConnectionCopy.selectedModelUnavailable
         }
       } else {
         chosenModelId = nil
       }
-      if let effort = routing.effort {
+      if let remembered {
+        chosenEffort = remembered.effort
+      } else if let effort = routing.effort {
         if (provider.models?.first(where: { $0.selectionId == chosenModelId })?.efforts ?? provider.efforts ?? []).contains(where: { $0.id == effort }) {
           chosenEffort = effort
         } else {
           chosenEffort = nil
-          restoredControlErrors[.effort] = "恢复的推理强度当前不可用，已阻止静默替换"
+          restoredControlErrors[.effort] = ConnectionCopy.selectedEffortUnavailable
         }
       } else {
         chosenEffort = nil
@@ -1760,7 +1836,9 @@ final class RemoteRunStore: ObservableObject {
         loadCommands(providerId: routing.providerId, cwd: routing.cwd,
                      agentProfileId: routing.agentProfileId)
       }
-      if chosen != nil && restoredControlsError == nil {
+      if chosen != nil && controlsReady {
+        modelSelectionSession = activeSessionIdentity
+        rememberModelSelection()
         contextNeedsRestore = false
         return true
       }
@@ -1951,6 +2029,8 @@ final class RemoteRunStore: ObservableObject {
     guard persistOutbox(outbox + [pending]) else { return false }
     outbox.append(pending)
     activeSessionIdentity = pending.identity
+    modelSelectionSession = pending.identity
+    rememberModelSelection()
     prompt = pending.routing.prompt
     sentAttachments = attachments.map(SentAttachment.init)
     activeRouting = pending.routing
@@ -2486,7 +2566,14 @@ final class RemoteRunStore: ObservableObject {
         }
         // The Provider's own session id for THIS run. Captured so a chained
         // follow-up resumes the latest session (continuous memory), not a stale id.
-        if marker["event"] == "session", let ext = marker["externalSessionId"], !ext.isEmpty { liveExternalSessionId = ext }
+        if marker["event"] == "session", let ext = marker["externalSessionId"], !ext.isEmpty {
+          liveExternalSessionId = ext
+          if modelSelectionSession == identity {
+            modelSelectionSession = .opened(providerId: identity.providerId, agentProfileId: identity.agentProfileId,
+              cwd: identity.cwd, externalSessionId: ext, scope: targetScope)
+            rememberModelSelection()
+          }
+        }
         if marker["event"] == "bound", marker["ledgerRunId"] == runId, let id = marker["scryRunId"], !id.isEmpty { liveHostRunId = id }
       }
     case "run_settled": if lifecycle != .cancelled { lifecycle = .settled }
@@ -2642,6 +2729,7 @@ final class RemoteRunStore: ObservableObject {
     pendingSubmission = nil
     activeRouting = nil
     projects = .idle; directories = .idle; chosen = nil
+    modelSelectionSession = nil; modelSelections = []
     providers = .idle; commands = .idle; chosenProvider = nil; chosenModelId = nil; chosenEffort = nil; permissionMode = "default"
     catalog = .idle; catalogRefreshFailure = nil; catalogEvidence = .none; catalogVerifiedAt = nil; catalogRefreshInFlight = false; history = .idle; historyPreview = .idle; historyPreviewKey = nil; historyWindow = nil; historyWindowKey = nil; historyCapacityLimit = false; reachable = nil; connectionObservation = .unverified
     catalogLoadedAt = nil; providersLoadedAt = nil; projectsLoadedAt = nil; commandCache = [:]; cachedHistory = nil; historyFollowingLatest = true
@@ -3102,6 +3190,110 @@ final class RemoteRunStore: ObservableObject {
     checks.append(("preview.noDetachedTransportOrStop", store.detachedTask == nil && store.liveActionRunId == nil))
     store.mockMode = false
     checks.append(("preview.pairingPreserved", connections.load() == connection && store.makeClient()?.connection == connection))
+    return checks
+  }
+
+  static func selfTestModelSelection() -> [(String, Bool)] {
+    let suite = "scry-model-selection-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let connections = RemoteConnectionStore(defaults: defaults)
+    let store = RemoteRunStore(connections: connections, stateDirectory: nil)
+    let efforts = [G0Transport.RunControlOption(id: "high", label: "High")]
+    let models = ["a", "b"].map {
+      G0Transport.RunModelOption(id: $0, providerId: "openai", label: $0, efforts: efforts)
+    }
+    let provider = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true,
+      agentProfileId: "profile-a", models: models, efforts: efforts)
+    store.providers = .loaded([provider])
+    store.chooseProvider(provider)
+    store.chooseModel(models[0].selectionId)
+    store.chooseEffort("high")
+    let a = SessionIdentity.opened(providerId: "pi", agentProfileId: "profile-a", cwd: "/repo", externalSessionId: "a")
+    let b = SessionIdentity.opened(providerId: "pi", agentProfileId: "profile-a", cwd: "/repo", externalSessionId: "b")
+    // Drive actual navigation before pairing; no transport or real app state.
+    func open(_ identity: SessionIdentity) {
+      store.loadHistory(providerId: identity.providerId, cwd: identity.cwd,
+        externalSessionId: identity.externalSessionId!, agentProfileId: identity.agentProfileId)
+      store.applyPreferredProvider(identity.providerId, agentProfileId: identity.agentProfileId)
+    }
+    open(a)
+    var checks = [("model.newSessionDoesNotInheritDraft", store.chosenModelId == nil && store.chosenEffort == nil)]
+    store.chooseModel(models[0].selectionId); store.chooseEffort("high")
+    let routing = RemoteRunClient.Routing(cwd: "/repo", providerId: "pi", agentProfileId: "profile-a",
+      prompt: "running", modelId: "a", modelProviderId: "openai", effort: "high")
+    store.outbox = [.init(intentId: "running-a", routing: routing, identity: a)]
+    open(b)
+    checks.append(("model.otherSessionStartsIndependently", store.chosenModelId == nil && store.chosenEffort == nil))
+    store.chooseModel(models[1].selectionId)
+    checks.append(("model.runningRoutingIsFrozen", store.outbox.first?.routing == routing))
+    open(a)
+    checks.append(("model.sessionRestoresModelAndEffort", store.chosenModelId == models[0].selectionId && store.chosenEffort == "high"))
+    store.loadProviders(preferredId: "pi", preferredAgentProfileId: "profile-a")
+    checks.append(("model.reloadKeepsSelection", store.chosenModelId == models[0].selectionId && store.chosenEffort == "high"))
+    open(b)
+    checks.append(("model.secondSessionUnaffected", store.chosenModelId == models[1].selectionId && store.chosenEffort == nil))
+    store.chooseModel(nil)
+    open(a); open(b)
+    checks.append(("model.explicitAutoIsRemembered", store.chosenModelId == nil && store.controlsReady))
+    store.resetNewTaskContext(); store.chooseProvider(provider)
+    checks.append(("model.newTaskPreferenceIsSeparate", store.chosenModelId == models[0].selectionId && store.chosenEffort == "high"))
+    open(b)
+    checks.append(("model.returnFromNewTaskRestoresSameSession", store.chosenModelId == nil && store.chosenEffort == nil))
+    open(a)
+    let missing = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true,
+      agentProfileId: "profile-a", models: [], efforts: [])
+    store.applyProviderCatalog([missing])
+    checks.append(("model.catalogLossCannotSelectAuto", store.chosenModelId == models[0].selectionId && !store.controlsReady && store.modelSelectionIssue != nil))
+    store.applyProviderCatalog([provider])
+    checks.append(("model.catalogRecoveryRestoresReadiness", store.controlsReady && store.chosenEffort == "high"))
+    let noEffort = G0Transport.RunProviderRef(id: "pi", label: "Pi", available: true,
+      agentProfileId: "profile-a", models: models.map { .init(id: $0.id, providerId: $0.providerId, label: $0.label, efforts: []) })
+    store.applyProviderCatalog([noEffort])
+    checks.append(("model.effortLossCannotSelectDefault", store.chosenEffort == "high" && !store.controlsReady && store.modelSelectionIssue == ConnectionCopy.selectedEffortUnavailable))
+    store.applyProviderCatalog([provider])
+    store.chooseModel(models[1].selectionId)
+    checks.append(("model.modelChangeResetsEffort", store.chosenEffort == nil))
+    let otherProfile = G0Transport.RunProviderRef(id: "pi", label: "Pi B", available: true,
+      agentProfileId: "profile-b", models: models)
+    let profileB = SessionIdentity.opened(providerId: "pi", agentProfileId: "profile-b", cwd: "/repo", externalSessionId: "a")
+    store.providers = .loaded([provider, otherProfile])
+    open(profileB)
+    checks.append(("model.profileIsolation", store.chosenModelId == nil))
+    open(a)
+    checks.append(("model.originalProfileRetained", store.chosenModelId == models[1].selectionId))
+    store.activeRouting = routing; store.contextNeedsRestore = true
+    store.modelSelectionSession = a
+    store.chooseModel(nil)
+    store.restoreActiveContext()
+    checks.append(("model.recoveryCannotOverwriteExplicitAuto", store.chosenModelId == nil))
+    store.contextNeedsRestore = false
+    let local = SessionIdentity.new(providerId: "pi", agentProfileId: "profile-a", cwd: "/repo")
+    store.activeSessionIdentity = local; store.modelSelectionSession = local
+    store.chooseModel(models[1].selectionId)
+    let marker = "{\"event\":\"session\",\"externalSessionId\":\"provider-assigned\"}"
+    let eventData = try! JSONSerialization.data(withJSONObject: ["seq": 1, "at": 1, "runId": "running-a", "kind": "run_progress", "detail": marker])
+    let event = try! JSONDecoder().decode(G0Transport.RunLedgerEvent.self, from: eventData)
+    store.apply(event: event, generation: store.generation, identity: local)
+    let external = SessionIdentity.opened(providerId: "pi", agentProfileId: "profile-a", cwd: "/repo", externalSessionId: "provider-assigned")
+    open(b); open(external)
+    checks.append(("model.providerSessionIDKeepsSelection", store.chosenModelId == models[1].selectionId))
+    open(a)
+    // Persist with an isolated public pairing descriptor, then recreate the store.
+    // No client method is called after installing the descriptor.
+    let connection = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "host-a", anchorPEM: "fixture", deviceId: "device-a")
+    connections.save(connection)
+    store.chooseModel(models[0].selectionId); store.chooseEffort("high")
+    let reopened = RemoteRunStore(connections: connections, stateDirectory: nil)
+    reopened.modelSelectionSession = a; reopened.chooseProvider(provider)
+    checks.append(("model.relaunchKeepsSelection", reopened.chosenModelId == models[0].selectionId && reopened.chosenEffort == "high"))
+    connections.save(RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+      hostId: "host-b", anchorPEM: "fixture-b", deviceId: "device-b"))
+    reopened.restoreModelSelection()
+    checks.append(("model.hostIsolation", reopened.chosenModelId == nil))
+    connections.save(connection); reopened.restoreModelSelection()
+    checks.append(("model.originalHostRetained", reopened.chosenModelId == models[0].selectionId))
     return checks
   }
 

@@ -203,6 +203,13 @@ enum ConnectionCopy {
 
   static let chooseWorkspaceFirst = "先选择工作目录，再选择 Provider"
   static let chooseProviderToSend = "选择 Provider 后即可发送"
+  static let selectedModelUnavailable = "所选模型当前不可用，请重新选择模型或自动模型。"
+  static let selectedEffortUnavailable = "所选推理强度当前不可用，请重新选择。"
+  static let model = "模型"
+  static let automaticModel = "自动模型"
+  static let reasoningEffort = "推理强度"
+  static let defaultEffort = "默认"
+  static func modelAndEffort(_ model: String, _ effort: String) -> String { "模型 \(model)，推理强度 \(effort)" }
   static let authorizedProjects = "已授权项目"
   static let chooseThisFolder = "选择此文件夹"
   static let subfolders = "子文件夹"

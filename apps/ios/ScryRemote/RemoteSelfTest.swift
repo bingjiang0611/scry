@@ -138,7 +138,7 @@ enum RemoteSelfTest {
     check("run.submittingIsNotRecorded", RemoteRunStore.Lifecycle.submitting != .recorded)
     check("run.stateGates", RemoteRunStore.selfTestStateGates())
     for (name, passed) in RemoteRunStore.selfTestCatalogRefreshProjection() { check("catalog.\(name)", passed) }
-    for (name, passed) in RemoteRunStore.selfTestInteractionState() { check("run.\(name)", passed) }
+    for (name, passed) in RemoteRunStore.selfTestInteractionState() + RemoteRunStore.selfTestModelSelection() { check("run.\(name)", passed) }
     for (name, passed) in RemoteRunStore.selfTestConnectionReplacement() { check("run.\(name)", passed) }
     for (name, passed) in RemoteRunStore.selfTestPreviewConnectionIsolation() { check("run.\(name)", passed) }
     let model = AppModel()
@@ -209,6 +209,7 @@ enum RemoteSelfTest {
         let checks = try await RemoteRunStore.selfTestCatalogRefreshFlow(directory: directory)
           + RemoteRunStore.selfTestExecutionTargets(directory: directory.appendingPathComponent("targets"))
           + RemoteRunStore.selfTestInteractionState()
+          + RemoteRunStore.selfTestModelSelection()
         for (name, passed) in checks { print("TARGETTEST \(name) \(passed ? "PASS" : "FAIL")") }
         let failures = checks.filter { !$0.1 }.count
         try FileManager.default.removeItem(at: directory)
