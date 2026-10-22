@@ -26,6 +26,7 @@ struct HomeDrawer: View {
   let onOpen: (ExecutionTargetCoordinator.HomeSession) -> Void
   let onNewTask: (ExecutionTargetScope, String?) -> Void
   let onRowAction: (ExecutionTargetCoordinator.HomeSession, SessionRowAction) -> Void
+  let onOpenTool: (ToolKind) -> Void
 
   @State private var showAllRecent = false
 
@@ -226,7 +227,7 @@ struct HomeDrawer: View {
       // P3 wires the three read-only panels. Until the host op exists, the rows
       // say so instead of opening an empty screen or a Mac-only action.
       ForEach(ToolKind.allCases) { kind in
-        ToolRowView(kind: kind, available: false, onOpen: {})
+        ToolRowView(kind: kind) { onOpenTool(kind) }
       }
       Text(ConnectionCopy.toolsNote).font(.system(size: 11)).foregroundStyle(Palette.faint)
         .padding(.top, 10)
@@ -295,18 +296,7 @@ struct HomeDrawer: View {
   }
 }
 
-// One row per read-only panel. `available` is the client's own knowledge; a
-// panel that the phone cannot read says so instead of opening an empty screen.
-enum ToolKind: String, CaseIterable, Identifiable {
-  case analytics, llmPerformance, mcpTrust
-  var id: String { rawValue }
-  var title: String {
-    switch self {
-    case .analytics: return ConnectionCopy.analyticsTitle
-    case .llmPerformance: return ConnectionCopy.llmTitle
-    case .mcpTrust: return ConnectionCopy.mcpTitle
-    }
-  }
+extension ToolKind {
   var symbol: String {
     switch self {
     case .analytics: return Symbol.chart

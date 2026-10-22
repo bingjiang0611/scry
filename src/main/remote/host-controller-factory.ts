@@ -73,6 +73,7 @@ export interface HostControllerFactoryDependencies {
   sessionAction?: HostControllerDependencies['sessionAction']
   sessionFork?: HostControllerDependencies['sessionFork']
   sessionDelete?: HostControllerDependencies['sessionDelete']
+  toolPanels?: HostControllerDependencies['toolPanels']
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerDependencies['readSessionStatus']

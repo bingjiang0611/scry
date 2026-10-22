@@ -56,6 +56,7 @@ export interface RemoteHostServiceDependencies {
   sessionAction?: (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => Promise<boolean> | boolean
   sessionFork?: HostControllerFactoryDependencies['sessionFork']
   sessionDelete?: HostControllerFactoryDependencies['sessionDelete']
+  toolPanels?: HostControllerFactoryDependencies['toolPanels']
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
@@ -146,6 +147,7 @@ export class RemoteHostService {
       ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
       ...(deps.sessionFork ? { sessionFork: deps.sessionFork } : {}),
       ...(deps.sessionDelete ? { sessionDelete: deps.sessionDelete } : {}),
+      ...(deps.toolPanels ? { toolPanels: deps.toolPanels } : {}),
       ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
       ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
       ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),

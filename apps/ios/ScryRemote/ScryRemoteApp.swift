@@ -54,6 +54,7 @@ struct RootView: View {
             SessionTranscriptView().id(identity)
           }
         case .settings: SettingsView()
+        case let .toolPanel(kind): ToolPanelView(kind: kind)
         }
       }
     }
