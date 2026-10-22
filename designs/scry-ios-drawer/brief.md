@@ -307,3 +307,25 @@ P0 只做读取和打开，不加任何写接口；P1 起才有写动作，且�
 
 - 视觉参数（272pt 宽、26pt 圆角、行高 52–56、15/11.5pt 字号）是从现有 `Theme.swift` 与 `Components.swift` 推的具体值，不是新设计系统。实现后应把稳定项补进 `DESIGN.md` 的 iOS 小节。
 - 原型里的会话、项目、时间为合成数据；原型不连接主机、不发送、不写任何缓存。
+
+---
+
+## 12 实现状态（2026-10-21）
+
+| 切分 | 状态 | 位置 |
+|---|---|---|
+| P0 首屏输入框 + 抽屉 | 已实现 | `apps/ios/ScryRemote/HomeView.swift`、`HomeComposer.swift`、`HomeDrawer.swift`；搜索框从底部 dock 移入抽屉，抽屉宽 `min(320, 屏宽 84%)` |
+| P1 行操作 | 已实现 | `SessionRow.swift`、`SessionActions.swift`、`RemoteRunStore.applySessionAction`、`RemoteTransport.relaySessionAction`；运行中存档先确认再停 |
+| P2 已存档会话 | 已实现 | `ArchivedSessionsView.swift` + 设置新增一节；transport 加 `includeArchived` / `sessionDelete` |
+| P3 工具面板 | 部分实现 | `ToolPanels.swift` + 新主机 op `toolPanel`（analytics / llmPerformance / mcpTrust），`src/shared/tool-panel.ts` |
+| P4 技能 / Meta Prompts | 未开始 | 工具页只列三类面板 |
+
+### P3 与设计稿的差异（需维护者确认）
+
+- **MCP 风险发现缺席**：`toolPanel(mcpTrust)` 只返回已缓存的 snapshot（live 状态 + 策略清单），风险发现需要 `mcpGuardScan`，那会在主机侧读配置并生成报告。为避免手机新增扫描权限，本实现不提供发现项，屏上写明"手机端不触发 MCP 扫描"。若要覆盖，需要单独决定"手机可否请求只读扫描"。
+- **图表降级**：分析每日图用条形而非面积图，LLM 历史用行表而非折线；数据口径（`≈`、下界、覆盖度、截断说明）与 Mac 一致，缺的只是 SVG 级图形。
+- **技能 / Meta Prompts**：工具页显示"手机端暂未提供"，不是"Mac 未提供"，避免把客户端缺口说成主机缺口。
+
+### 未验证
+
+- 抽屉、行操作、已存档、三个面板尚未在运行中的 App 里逐屏重放：本机 `xcodebuild test` 的 UI runner 在建立连接前挂起（`runner hung before establishing connection`，0 个用例执行），属环境问题。首屏已用模拟器 `-uiPreview -connected -uiMockData -route home` 截图确认。

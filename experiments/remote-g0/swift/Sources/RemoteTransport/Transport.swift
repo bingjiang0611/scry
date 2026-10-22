@@ -658,6 +658,12 @@ public enum G0Transport {
   struct RunSessionActionRequest: Encodable {
     let op = "sessionAction"; let context: SessionActionContext; let action: SessionActionWire
   }
+  struct RunToolPanelRequest: Encodable {
+    let op = "toolPanel"
+    let kind: String
+    let rangeDays: Int?
+    let providerId: String?
+  }
   struct RunSessionDeleteRequest: Encodable {
     let op = "sessionDelete"
     let request: Body
@@ -713,6 +719,7 @@ public enum G0Transport {
     let stop: RunStopBody?
     let sessionAction: Bool?
     let sessionDelete: DeleteSessionOutcome?
+    let toolPanel: ToolPanelPayload?
     let liveRuns: LiveRunsOutcome?
     let intent: RunIntentBody?
     let executionTarget: ExecutionTargetBinding?
@@ -1082,6 +1089,86 @@ public enum G0Transport {
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
     guard let stop = response.stop else { throw ProbeError.unexpectedReply }
     return stop.status
+  }
+
+  public enum ToolPanelKind: String, Sendable, Equatable {
+    case analytics, llmPerformance, mcpTrust
+  }
+
+  // Mirrors of the host's bounded projection. Every number that the host could
+  // not measure arrives as nil and must stay "unavailable" in the UI.
+  public struct ToolPanelPayload: Decodable, Sendable, Equatable {
+    public let kind: String
+    public let readAt: Double
+    public let unavailable: String?
+    public let analytics: Analytics?
+    public let llm: Llm?
+    public let mcp: Mcp?
+
+    public struct Totals: Decodable, Sendable, Equatable {
+      public let costUsd: Double?; public let inputTokens: Double?; public let outputTokens: Double?
+      public let cacheReadTokens: Double?; public let cacheWriteTokens: Double?; public let reasoningTokens: Double?
+      public let turns: Int; public let tokenKnownRows: Int; public let costKnownRows: Int
+      public let exactCostRows: Int; public let estimatedCostRows: Int; public let inferredCostRows: Int
+    }
+    public struct DayRow: Decodable, Sendable, Equatable {
+      public let day: String; public let costUsd: Double?; public let inputTokens: Double?; public let outputTokens: Double?
+    }
+    public struct ProviderRow: Decodable, Sendable, Equatable {
+      public let provider: String; public let costUsd: Double?; public let inputTokens: Double?
+      public let outputTokens: Double?; public let turns: Int
+    }
+    public struct ModelRow: Decodable, Sendable, Equatable {
+      public let provider: String; public let model: String?; public let costUsd: Double?
+      public let turns: Int; public let tokenKnownRows: Int
+    }
+    public struct Analytics: Decodable, Sendable, Equatable {
+      public let rangeDays: Int; public let status: String; public let observedAt: Double
+      public let fromDay: String; public let toDay: String
+      public let totals: Totals; public let byDay: [DayRow]; public let byProvider: [ProviderRow]
+      public let byModel: [ModelRow]; public let byModelTruncated: Bool; public let byProviderTruncated: Bool
+    }
+    public struct RunningModel: Decodable, Sendable, Equatable {
+      public let key: String; public let model: String?; public let sessions: Int
+      public let tokensPerSecond: Double?; public let firstTokenMs: Double?; public let states: [String]
+    }
+    public struct HistoryRow: Decodable, Sendable, Equatable {
+      public let ts: String; public let model: String; public let providerId: String
+      public let speed: Double?; public let firstTokenMs: Double?; public let failed: Bool
+    }
+    public struct Llm: Decodable, Sendable, Equatable {
+      public let running: Running; public let history: History
+      public struct Running: Decodable, Sendable, Equatable {
+        public let observedAt: String; public let models: [RunningModel]
+      }
+      public struct History: Decodable, Sendable, Equatable {
+        public let rows: [HistoryRow]; public let truncated: Bool
+        public let invalidLines: Int; public let cappedAt: Int
+      }
+    }
+    public struct McpTarget: Decodable, Sendable, Equatable {
+      public let name: String; public let scope: String; public let transport: String
+      public let enabled: Bool; public let targetId: String?
+    }
+    public struct McpRuntime: Decodable, Sendable, Equatable {
+      public let name: String; public let status: String; public let tools: Int?
+    }
+    public struct Mcp: Decodable, Sendable, Equatable {
+      public let providerId: String; public let configured: [McpTarget]
+      public let runtime: [McpRuntime]?; public let configuredTruncated: Bool
+      public let runtimeTruncated: Bool; public let findingsUnavailable: String
+    }
+  }
+
+  // One bounded read of an already-computed panel. The host never scans on this
+  // call, so a device cannot widen its own authority through it.
+  public static func relayToolPanel(endpoint: RelayEndpoint, identity: G0ProbeIdentity, kind: ToolPanelKind,
+                                    rangeDays: Int? = nil, providerId: String? = nil) async throws -> ToolPanelPayload {
+    let request = try JSONEncoder().encode(RunToolPanelRequest(kind: kind.rawValue, rangeDays: rangeDays, providerId: providerId))
+    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity,
+                                                    request: request, lane: .bulk), expectedTarget: endpoint.executionTarget)
+    guard let panel = response.toolPanel else { throw ProbeError.unexpectedReply }
+    return panel
   }
 
   public enum SessionCleanup: Sendable, Equatable {

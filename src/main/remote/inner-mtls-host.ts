@@ -261,6 +261,9 @@ export class InnerMtlsHost {
           ...(typeof request.agentProfileId === 'string' ? { agentProfileId: request.agentProfileId } : {})
         }) }
       }
+      if (request.op === 'toolPanel') {
+        return { toolPanel: await controller.readToolPanel(fingerprint, request) }
+      }
       if (request.op === 'sessionAction') {
         return { sessionAction: await controller.sessionAction(fingerprint, { context: request.context, action: request.action }) }
       }

@@ -275,6 +275,14 @@ struct RemoteRunClient {
     try await G0Transport.relaySessionAction(endpoint: endpoint(), identity: try identity(), context: context, action: action)
   }
 
+  // One bounded read of an already-computed host panel (analytics, LLM
+  // performance, MCP snapshot). The host never scans on this call.
+  func toolPanel(kind: G0Transport.ToolPanelKind, rangeDays: Int? = nil,
+                 providerId: String? = nil) async throws -> G0Transport.ToolPanelPayload {
+    try await G0Transport.relayToolPanel(endpoint: endpoint(), identity: try identity(), kind: kind,
+                                         rangeDays: rangeDays, providerId: providerId)
+  }
+
   // Permanent delete of an archived session; the host re-authorizes and reports
   // what it actually removed.
   func deleteSession(providerId: String, cwd: String, externalSessionId: String,

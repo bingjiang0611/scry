@@ -224,7 +224,8 @@ struct HomeView: View {
                  if let cwd { targets.newTaskStore.chooseProject(.init(path: cwd, label: projectName(cwd))) }
                  model.composerDraft(for: .newTask(scope)).wrappedValue = .init()
                },
-               onRowAction: { row, action in handle(row, action) })
+               onRowAction: { row, action in handle(row, action) },
+               onOpenTool: { kind in closeDrawer(); model.route = .toolPanel(kind) })
       .frame(width: drawerWidth)
       .frame(maxHeight: .infinity)
       .transition(.move(edge: .leading))
