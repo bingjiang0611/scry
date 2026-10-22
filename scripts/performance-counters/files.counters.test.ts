@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
 
 const io = vi.hoisted(() => ({
@@ -158,74 +158,81 @@ describe('fixed production file work counters', () => {
   // Production module transforms were never part of the metered I/O workload.
   beforeAll(async () => { production = await imports() })
 
-  it('counts fixed file workloads with complete functional results', async () => {
-    const runs = await repeatCounters(defaultRepeats, async (index) => {
-      const fixture = await tempRoot()
-      const { mkdir, writeFile, rm } = await import('node:fs/promises')
-      const { existsSync } = await import('node:fs')
-      const { join } = await import('node:path')
-      const stale = [
-        join(fixture.userData, 'app-sessions.json.tmp'),
-        join(fixture.userData, 'recent-folders.json.tmp'),
-        join(fixture.userData, 'usage.jsonl.tmp'),
-        join(fixture.userData, 'app-sessions.json.1.00000000-0000-4000-8000-000000000000.tmp')
-      ]
-      const { writeFileSync } = await import('node:fs')
-      const sessions = Array.from({ length: 500 }, (_, item) => ({ sessionId: `session-${item}`, runId: `catalog-${item}`, providerId: 'codex', runtimeProvider: 'codex_cli', cwd: fixture.workspace, preview: `prompt ${item}`, ts: item }))
-      writeFileSync(join(fixture.userData, 'app-sessions.json'), JSON.stringify(sessions))
-      const usageRows = Array.from({ length: 240 }, (_, item) => JSON.stringify({ providerId: 'codex', runtimeProvider: 'codex_cli', cwd: fixture.workspace, runId: `usage-${item}`, cost: 0.01, tin: 100, tout: 40, ts: timestamp })).join('\n') + '\n'
-      writeFileSync(join(fixture.userData, 'usage.jsonl'), usageRows)
-      const archive = { cwd: fixture.workspace, sessionId: 'fixed-session', providerId: 'codex' as const, userDataDir: fixture.userData }
-      for (let item = 0; item < 120; item++) production.upsertTraceArchiveTurn({ ...archive, turn: { runId: `archive-${item}`, userText: `request ${item}`, done: true, ts: item, items: [] } })
-      await writeFile(join(fixture.workspace, 'large-fixed.txt'), 'x'.repeat(1024 * 1024))
-      await mkdir(join(fixture.workspace, 'directory'), { recursive: true })
-      await writeFile(join(fixture.workspace, 'directory', 'entry.txt'), 'entry')
-      const store = production.createAppSessionStore(fixture.userData)
-      const draftStorage = { value: '', getItem: () => draftStorage.value, setItem: (_key: string, value: string) => { draftStorage.value = value }, removeItem: () => { draftStorage.value = '' } }
-      await Promise.all(stale.map((path) => writeFile(path, 'stale')))
-      let result: unknown
-      const counts = await measure(async () => {
-        production.cleanupAppStoreAtomicTemps(fixture.userData)
-        production.cleanupUsageAtomicTemps(fixture.userData)
-        production.cleanupTraceTurnProgressTemps(fixture.userData)
-        await production.cleanupTraceArchiveTemps(fixture.userData)
-        expect(stale.every((path) => !existsSync(path))).toBe(true)
-        const stats = production.readUsageStats(fixture.userData)
-        expect(stats).toMatchObject({ status: 'ready', turns: 240 })
+  const samples: Array<Record<string, number>> = []
 
-        const skills = production.listSkills(fixture.workspace, fixture.home)
-        const mcp = production.listMcp(fixture.workspace, fixture.home)
-        expect(skills).toHaveLength(2)
-        expect(mcp.some((item) => item.name === 'fixed')).toBe(true)
+  // Each fixed sample keeps Vitest's default deadline. A timed-out five-sample
+  // batch could otherwise keep running into the next test's global I/O meter.
+  it.each(Array.from({ length: defaultRepeats }, (_, index) => index))('counts fixed file workloads with complete functional results (sample %i)', async (index) => {
+    const fixture = await tempRoot()
+    const { mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const stale = [
+      join(fixture.userData, 'app-sessions.json.tmp'),
+      join(fixture.userData, 'recent-folders.json.tmp'),
+      join(fixture.userData, 'usage.jsonl.tmp'),
+      join(fixture.userData, 'app-sessions.json.1.00000000-0000-4000-8000-000000000000.tmp')
+    ]
+    const { writeFileSync } = await import('node:fs')
+    const sessions = Array.from({ length: 500 }, (_, item) => ({ sessionId: `session-${item}`, runId: `catalog-${item}`, providerId: 'codex', runtimeProvider: 'codex_cli', cwd: fixture.workspace, preview: `prompt ${item}`, ts: item }))
+    writeFileSync(join(fixture.userData, 'app-sessions.json'), JSON.stringify(sessions))
+    const usageRows = Array.from({ length: 240 }, (_, item) => JSON.stringify({ providerId: 'codex', runtimeProvider: 'codex_cli', cwd: fixture.workspace, runId: `usage-${item}`, cost: 0.01, tin: 100, tout: 40, ts: timestamp })).join('\n') + '\n'
+    writeFileSync(join(fixture.userData, 'usage.jsonl'), usageRows)
+    const archive = { cwd: fixture.workspace, sessionId: 'fixed-session', providerId: 'codex' as const, userDataDir: fixture.userData }
+    for (let item = 0; item < 120; item++) production.upsertTraceArchiveTurn({ ...archive, turn: { runId: `archive-${item}`, userText: `request ${item}`, done: true, ts: item, items: [] } })
+    await writeFile(join(fixture.workspace, 'large-fixed.txt'), 'x'.repeat(1024 * 1024))
+    await mkdir(join(fixture.workspace, 'directory'), { recursive: true })
+    await writeFile(join(fixture.workspace, 'directory', 'entry.txt'), 'entry')
+    const store = production.createAppSessionStore(fixture.userData)
+    const draftStorage = { value: '', getItem: () => draftStorage.value, setItem: (_key: string, value: string) => { draftStorage.value = value }, removeItem: () => { draftStorage.value = '' } }
+    await Promise.all(stale.map((path) => writeFile(path, 'stale')))
+    let result: unknown
+    const counts = await measure(async () => {
+      production.cleanupAppStoreAtomicTemps(fixture.userData)
+      production.cleanupUsageAtomicTemps(fixture.userData)
+      production.cleanupTraceTurnProgressTemps(fixture.userData)
+      await production.cleanupTraceArchiveTemps(fixture.userData)
+      expect(stale.every((path) => !existsSync(path))).toBe(true)
+      const stats = production.readUsageStats(fixture.userData)
+      expect(stats).toMatchObject({ status: 'ready', turns: 240 })
 
-        expect(store.load()).toHaveLength(500)
-        const initialPage = await production.readTraceArchivePageAsync(archive, { limit: 40 })
-        expect(initialPage.archive?.turns).toHaveLength(40)
-        const written = production.upsertTraceArchiveTurn({ ...archive, turn: { runId: 'archive-write', userText: 'written', done: true, ts: 121, items: [] } })
-        expect(written).toBe(true)
-        const page = await production.readTraceArchivePageAsync(archive, { limit: 40 })
-        expect(page.archive?.turns.length).toBeGreaterThan(0)
+      const skills = production.listSkills(fixture.workspace, fixture.home)
+      const mcp = production.listMcp(fixture.workspace, fixture.home)
+      expect(skills).toHaveLength(2)
+      expect(mcp.some((item) => item.name === 'fixed')).toBe(true)
 
-        production.appendUsage(fixture.userData, { providerId: 'codex', runtimeProvider: 'codex_cli', cwd: fixture.workspace, runId: `appended-${index}` }, { costUsd: 0.02, tokensIn: 101, tokensOut: 41, ts: timestamp })
-        expect(production.readUsageStats(fixture.userData).turns).toBe(241)
+      expect(store.load()).toHaveLength(500)
+      const initialPage = await production.readTraceArchivePageAsync(archive, { limit: 40 })
+      expect(initialPage.archive?.turns).toHaveLength(40)
+      const written = production.upsertTraceArchiveTurn({ ...archive, turn: { runId: 'archive-write', userText: 'written', done: true, ts: 121, items: [] } })
+      expect(written).toBe(true)
+      const page = await production.readTraceArchivePageAsync(archive, { limit: 40 })
+      expect(page.archive?.turns.length).toBeGreaterThan(0)
 
-        const listed = await production.listWorkspace({ cwd: fixture.workspace, path: '', limit: 200 })
-        const file = await production.readWorkspaceFile({ cwd: fixture.workspace, path: 'large-fixed.txt' })
-        const filePage = await production.readWorkspaceFilePage({ cwd: fixture.workspace, path: 'large-fixed.txt', limit: 64 * 1024 })
-        expect(listed.entries.some((entry) => entry.path === 'large-fixed.txt')).toBe(true)
-        expect(file.content).toHaveLength(1024 * 1024)
-        expect(filePage.content).toHaveLength(64 * 1024 + 3)
+      production.appendUsage(fixture.userData, { providerId: 'codex', runtimeProvider: 'codex_cli', cwd: fixture.workspace, runId: `appended-${index}` }, { costUsd: 0.02, tokensIn: 101, tokensOut: 41, ts: timestamp })
+      expect(production.readUsageStats(fixture.userData).turns).toBe(241)
 
-        let drafts = production.readComposerDrafts(draftStorage)
-        for (let draft = 0; draft < 32; draft++) drafts = production.updateComposerDraft(drafts, `codex\\0fixed\\0session-${draft}`, () => ({ input: 'x'.repeat(4096), attachments: [] })).drafts
-        expect(production.writeComposerDrafts(draftStorage, drafts)).toBe(true)
-        expect(production.readComposerDrafts(draftStorage)).toHaveProperty('size', 32)
-        result = stats
-      })
-      expect(result).toBeDefined()
-      await rm(fixture.root, { recursive: true, force: true })
-      return metrics(counts)
+      const listed = await production.listWorkspace({ cwd: fixture.workspace, path: '', limit: 200 })
+      const file = await production.readWorkspaceFile({ cwd: fixture.workspace, path: 'large-fixed.txt' })
+      const filePage = await production.readWorkspaceFilePage({ cwd: fixture.workspace, path: 'large-fixed.txt', limit: 64 * 1024 })
+      expect(listed.entries.some((entry) => entry.path === 'large-fixed.txt')).toBe(true)
+      expect(file.content).toHaveLength(1024 * 1024)
+      expect(filePage.content).toHaveLength(64 * 1024 + 3)
+
+      let drafts = production.readComposerDrafts(draftStorage)
+      for (let draft = 0; draft < 32; draft++) drafts = production.updateComposerDraft(drafts, `codex\\0fixed\\0session-${draft}`, () => ({ input: 'x'.repeat(4096), attachments: [] })).drafts
+      expect(production.writeComposerDrafts(draftStorage, drafts)).toBe(true)
+      expect(production.readComposerDrafts(draftStorage)).toHaveProperty('size', 32)
+      result = stats
     })
+    expect(result).toBeDefined()
+    await rm(fixture.root, { recursive: true, force: true })
+    samples.push(metrics(counts))
+  })
+
+  afterAll(async () => {
+    expect(samples).toHaveLength(defaultRepeats)
+    const runs = await repeatCounters(defaultRepeats, async (index) => samples[index])
     const meta = { scenario: 'files.fixed-operations', layer: 'io' as const, workload, source: 'pass-through node:fs and node:fs/promises wrappers around production functions' }
     writeCollector('files', Object.entries(runs).map(([metric, values]) => measured({ ...meta, metric, unit: metric === 'io.read.bytes' ? 'bytes' as const : 'count' as const }, values)))
   })
