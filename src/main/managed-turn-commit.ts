@@ -110,7 +110,9 @@ function normalizeJournal(
   journal: ManagedTurnJournal | null,
   state: ManagedTurnJournalState | null
 ): ManagedTurnJournal | null {
-  if (!validJournal(journal)) return null
+  // Preserve malformed intents so scoped recovery can attribute and report them, and a
+  // new commit cannot mistake an existing corrupt artifact for an absent journal.
+  if (!validJournal(journal)) return journal
   // The v1 journal remains the immutable intent and is a complete recovery fallback. A
   // malformed, stale, or missing sidecar is disposable and must never authorize a new phase.
   if (!validJournalState(state, journal)) return journal
