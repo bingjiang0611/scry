@@ -3,7 +3,7 @@ import childProcess from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
-import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import moduleApi from 'node:module'
@@ -283,19 +283,18 @@ async function runArchive(archive: ArchiveSource, count: number): Promise<Record
     ? await archive.upsertTraceArchiveTurnAsync(upsertArgs)
     : archive.upsertTraceArchiveTurn(upsertArgs)
   archiveScope = false
+  const insertMs = elapsed(insertStarted)
+  const insertedWrites = counters.archiveWrites
   expect(insertResult).toBe(true); expect(retryResult).toBe(true)
-  return { operation: 'archive.index', existingTurns: count, cold: { ms: coldMs, readMode: cold.readMode, turnFilesRead: cold.turnFilesRead, totalTurns: coldTotal, writes: coldWrites.map(({ directory, bytes }) => ({ directory, bytes })), writeCount: coldWrites.length, writeBytes: coldWrites.reduce((total, write) => total + write.bytes, 0) }, warmedInsert: { ms: elapsed(insertStarted), api: archive.upsertTraceArchiveTurnAsync ? 'upsertTraceArchiveTurnAsync' : 'upsertTraceArchiveTurn', retry: 'same-ts-same-payload', inserted: insertResult, retryResult, writes: counters.archiveWrites.map(({ directory, bytes }) => ({ directory, bytes })), writeCount: counters.archiveWrites.length, writeBytes: counters.archiveWrites.reduce((total, write) => total + write.bytes, 0) } }
+  resetCounters(); archiveScope = true; const postReadStarted = process.hrtime.bigint()
+  const postRead = await archive.readTraceArchivePageAsync(session.args, { limit: 40 })
+  const postReadMs = elapsed(postReadStarted)
+  archiveScope = false
+  expect(postRead.totalTurns).toBe(count + 1)
+  const postWrites = counters.archiveWrites
+  return { operation: 'archive.index', readAfterInsert: { ms: postReadMs, totalTurns: postRead.totalTurns, readMode: postRead.readMode, turnFilesRead: postRead.turnFilesRead, writeCount: postWrites.length, writeBytes: postWrites.reduce((total, write) => total + write.bytes, 0) }, existingTurns: count, cold: { ms: coldMs, readMode: cold.readMode, turnFilesRead: cold.turnFilesRead, totalTurns: coldTotal, writes: coldWrites.map(({ directory, bytes }) => ({ directory, bytes })), writeCount: coldWrites.length, writeBytes: coldWrites.reduce((total, write) => total + write.bytes, 0) }, warmedInsert: { ms: insertMs, api: archive.upsertTraceArchiveTurnAsync ? 'upsertTraceArchiveTurnAsync' : 'upsertTraceArchiveTurn', retry: 'same-ts-same-payload', inserted: insertResult, retryResult, writes: insertedWrites.map(({ directory, bytes }) => ({ directory, bytes })), writeCount: insertedWrites.length, writeBytes: insertedWrites.reduce((total, write) => total + write.bytes, 0) } }
 }
 
-async function findPayload(root: string, payload: string): Promise<boolean> {
-  if (!existsSync(root)) return false
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    const path = join(root, entry.name)
-    if (entry.isDirectory() && await findPayload(path, payload)) return true
-    if (entry.isFile() && (await readFile(path, 'utf8')).includes(payload)) return true
-  }
-  return false
-}
 async function runCommit(modules: { commit: CommitSource; aggregate: AggregateSource; hook: HookSource; store: StoreSource }): Promise<Record<string, unknown>> {
   const userText = `evidence-large-${'U'.repeat(256 * 1024 - 20)}-done`
   const workspace = await mkdtemp(join(tmpdir(), 'scry-evidence-managed-workspace-')); const userDataDir = await mkdtemp(join(tmpdir(), 'scry-evidence-managed-user-')); roots.push(workspace, userDataDir)
