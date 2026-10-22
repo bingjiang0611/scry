@@ -14,7 +14,14 @@
 - `9391016` 在完整 Git 发现成功且无候选时复用同一不可变基线和 discovery index，不再重建并比较相同快照。没有跨轮缓存，没有缩小采集范围，没有改生产并发。
 - 沿用原 19 仓库 × 512 文件负载及 19/4/1 路调度：无变化轮 Git 190→114（−40%）；单仓改动轮 192→120，所有证据及完整 patch 断言通过。峰值仍为 38/8/2。
 - 270 项 focused、typecheck、CLI build、3480 项 full unit（4 个既有 opt-in skipped）通过；现有 source-control.diff 计数仍为 8，ratchet 通过。先前全量测试不稳定不据本次通过宣称根治。
-- 两次 timing-run 均 highLoad，L2 unavailable、L3 未验证；未安装、合入、推送或发布。性能 owner 在低负载时对同一完整负载补两侧 L2，发布 owner 再确认分发；详见[实验记录](performance-experiments/20261021-cli-empty-candidates.md)。历史读取/汇总优化仍待下一批。
+- 两次 timing-run 均 highLoad，L2 unavailable、L3 未验证；未安装、合入、推送或发布。性能 owner 在低负载时对同一完整负载补两侧 L2，发布 owner 再确认分发；详见[实验记录](performance-experiments/20261021-cli-empty-candidates.md)。汇总优化见下节；历史读取优化仍待下一批。
+
+## CLI 汇总按记录分组（2026-10-21，L1 已验证，未部署）
+
+- 测量 `ed5c47f` 与优化 `7e8d481` 分开提交。文件调用只按 record 对象身份分组一次，不再每条记录三次扫描整个时间线；保留 legacy 回退、推断和证据质量。
+- 固定 186 轮 / 3348 调用，OrderedCall.record 读取 1,889,376→24,540（−98.70%），完整输出 hash 不变；单轮 156→120。计数不含所有 Map 工作，不等于总 CPU 或耗时比例。只读快照 2181 条记录、全部 531 个 session 的新旧完整汇总 JSON 相等。
+- 56 项相关测试、typecheck、CLI build 通过。全量 3481 通过、1 个未改动 Git 查询 timeout、4 个既有 opt-in skipped；两侧定向通过不抹掉首次失败，也没有扩大 timeout。现有 source-control.diff 计数仍为 8，ratchet 通过。
+- 两侧计时均 highLoad，单轮原始耗时上升尚不能归因；性能 owner 需在低负载下同时复测 1 / 186 轮，不能以长会话收益抵消小输入风险。未合入、安装、推送或发布，见[实验记录](performance-experiments/20261021-cli-summary-linear.md)。下一步代码假设是消除 verify 的重复读取和无关汇总，不预先建设持久索引。
 
 ## 通知身份隔离（2026-10-21，已部署独立 CLI 0.2.50）
 
