@@ -140,6 +140,9 @@ export async function exerciseConversationManagement({ cdp, evaluate, fixture, i
   assert.equal(inputs(fixture).length, invocations.length + 1)
   assert.equal(inputs(fixture).at(-1).resume, null)
   assert.deepEqual(ledger(fixture, adoptedId).turns[1].importedItems, next.missingItems.map(item => item.ref))
+  // Accepted delivery can precede runtime settlement. Observe the read-only
+  // ownership boundary before testing a single rejected migration write.
+  await wait(() => evaluate(`window.scry.conversations.previewAdoption(${json({ ...source, externalSessionId: newNativeId })}).then(preview=>!!preview.adoptedConversation,error=>/已归属统一对话/.test(String(error)))`), 'native adoption source ownership after runtime settlement')
   assert.match(await evaluate(`window.scry.conversations.adopt(${json({ ...source, externalSessionId: newNativeId })},${json(sourcePreview.fingerprint)}).then(()=>'',error=>String(error))`), /已归属统一对话/, 'a migration fingerprint cannot be replayed against a different native binding')
   return { id: adoptedId, source, fingerprint: sourcePreview.fingerprint, runId: started.runId, nextRunId: continued.turns[1].runId, originalTitle: 'Managed logical conversation' }
 }
