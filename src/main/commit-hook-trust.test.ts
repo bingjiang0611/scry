@@ -11,7 +11,7 @@ import {
 } from './commit-hook-trust'
 import { redeliverGrantedCommitHooksAtStartup } from './commit-hook-startup'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
-import { drainCommitNotifications } from '../core/turn-recorder/store'
+import { drainCommitNotifications, stableHash } from '../core/turn-recorder/store'
 
 const roots: string[] = []
 const fixture = async () => {
@@ -233,7 +233,7 @@ describe('commit hook bundle trust', () => {
     await store.grant(value.workspace, inspection.fingerprint)
     const capability = await store.materialize(inspection)
     await drainCommitNotifications(join(value.workspace, '.scry'), { ...process.env, ...capability.env })
-    const statePath = join(value.workspace, '.scry', 'notifications', 'commit-hook-state.json')
+    const statePath = join(value.workspace, '.scry', 'notifications', 'commit-hooks', `${stableHash(inspection.fingerprint)}.json`)
     const before = await readFile(statePath, 'utf8')
     await writeFile(capture, '')
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest'
-import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNameStatus, parseNumstat, parsePorcelainPaths, snapshotSessionNetDiff } from './git'
+import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnAndSessionDiff, finishGitTurnDiff, gitNumstat, limitTurnDiffPatchBytes, parseNameStatus, parseNumstat, parsePorcelainPaths, previewGitTurnDiff, snapshotSessionNetDiff } from './git'
 
 const pexecFile = promisify(execFile)
 
@@ -324,6 +324,69 @@ describe('每轮 Git 工作树快照', () => {
       await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('零候选预览后重新发现真实改动，不把空工具路径当作无变化', async () => {
+    const root = await initRepo()
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'base.txt'), 'before\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      const indexBefore = await readFile(join(root, '.git/index'))
+      capture = await beginGitTurnDiff(root)
+      expect(await previewGitTurnDiff(capture, undefined, { structuredPaths: [] })).toMatchObject({
+        status: 'captured', files: [],
+        collection: { strategy: 'targeted', evidence: 'git_status', candidatePathCount: 0 }
+      })
+
+      await writeFile(join(root, 'base.txt'), 'after\n')
+      await writeFile(join(root, 'new.txt'), 'new\n')
+      const result = await finishGitTurnDiff(capture, undefined, { structuredPaths: [] })
+      expect(result.status).toBe('captured')
+      expect(result.collection).toMatchObject({ strategy: 'targeted', candidatePathCount: 2 })
+      const canonicalRoot = await realpath(root)
+      expect(result.files.map(file => file.path).sort()).toEqual([
+        join(canonicalRoot, 'base.txt'), join(canonicalRoot, 'new.txt')
+      ])
+      expect(result.files.find(file => file.path.endsWith('/base.txt'))?.patch).toContain('+after')
+      expect(result.files.find(file => file.path.endsWith('/new.txt'))?.patch).toContain('+new')
+      expect(await readFile(join(root, '.git/index'))).toEqual(indexBefore)
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it('零候选轮次仍共享终点给较早会话基线，保留已提交的会话累计改动', async () => {
+    const root = await initRepo()
+    let baseline: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    let capture: Awaited<ReturnType<typeof beginGitTurnDiff>> | undefined
+    try {
+      await writeFile(join(root, 'base.txt'), 'before\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
+      baseline = await beginGitTurnDiff(root)
+      await writeFile(join(root, 'base.txt'), 'earlier turn\n')
+      await pexecFile('git', ['add', '.'], { cwd: root })
+      await pexecFile('git', ['commit', '-m', 'earlier turn'], { cwd: root })
+      capture = await beginGitTurnDiff(root)
+      const captureDir = capture.tempDir!
+      const pair = finishGitTurnAndSessionDiff(capture, baseline)
+      const [turn, session] = await Promise.all([pair.turn, pair.session])
+      expect(turn).toMatchObject({
+        status: 'captured', files: [], collection: { strategy: 'targeted', candidatePathCount: 0 }
+      })
+      expect(session).toMatchObject({ status: 'captured', afterAt: turn.afterAt, collection: { sharedAfter: 'turn' } })
+      expect(session.files).toHaveLength(1)
+      expect(session.files[0].patch).toContain('-before')
+      expect(session.files[0].patch).toContain('+earlier turn')
+      await expect(access(captureDir)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      if (capture) await cancelGitTurnDiff(capture)
+      if (baseline) await cancelGitTurnDiff(baseline)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
 
   it('结构化路径作为交叉证据，但 Git status 仍补齐 Bash 写入', async () => {
     const root = await initRepo()

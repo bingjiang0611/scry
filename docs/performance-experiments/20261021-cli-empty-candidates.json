@@ -1,0 +1,1182 @@
+{
+  "schema": 1,
+  "baselineSourceCommit": "3cdf6d78d0f98d650eac31de1f1d1965b5766df3",
+  "candidateSourceCommit": "9391016476f24a41f1e16498f7a0c132a238d799",
+  "candidateSourceSha256": "e4345faafc326349ad9799ac1bb311baf07e3d990cf93876d91c384d2dcd3ce8",
+  "harnessSha256": "26f75a54444ba912eea7563141c03251641fff09784ae059ae17b02e07c5d0b6",
+  "provenanceNote": "Candidate raw sourceCommit is the checkout parent; its dirty git.ts implementation was subsequently committed as candidateSourceCommit. bundleSha256 identifies the measured module. Harness and workload were unchanged.",
+  "baseline": {
+    "schema": 1,
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "sourceCommit": "3cdf6d78d0f98d650eac31de1f1d1965b5766df3",
+    "bundleSha256": "5cf99846159a6db7442fc5ada45ec0b654f66871773bacb2ae8139f1852e1b0b",
+    "workload": {
+      "repositories": 19,
+      "trackedFilesPerRepo": 512,
+      "turnsPerLimit": 4,
+      "changedRepoTurns": [
+        4
+      ],
+      "changedFiles": 1,
+      "limits": [
+        19,
+        4,
+        1
+      ],
+      "warmupTurnsPerLimit": 1
+    },
+    "scope": "production begin/finish functions with experimental caller scheduling; excludes discovery, transcript, recorder locks and notifications; no Provider",
+    "results": [
+      {
+        "limit": 4,
+        "turn": 1,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 709.7997079999914,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 4522.992915999988,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 8,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 1,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 1612.2149579999968,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 13361.22170899999,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 2,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 1,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 389.85491699998965,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1830.2587920000078,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 26,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 2,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 1528.6504580000037,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 18407.620375,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 2,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 2,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 399.6007499999978,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 2887.1794590000063,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 32,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 4,
+        "turn": 2,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 603.3195419999975,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 4807.956833000004,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 8,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 3,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 452.4104170000064,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 2242.1754999999976,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 36,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 4,
+        "turn": 3,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 675.6626669999969,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 8002.921249999999,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 7,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 3,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 3578.915374999997,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 20823.930250000005,
+          "processes": 152,
+          "gitProcesses": 152,
+          "peakProcesses": 2,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "diff": 38
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 4,
+        "turn": 4,
+        "changed": true,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 993.5128329999861,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 4821.840458999999,
+          "processes": 154,
+          "gitProcesses": 154,
+          "peakProcesses": 7,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "add": 1,
+            "write-tree": 19,
+            "diff": 39
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 4,
+        "changed": true,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 1801.3892499999783,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 23606.074166999984,
+          "processes": 154,
+          "gitProcesses": 154,
+          "peakProcesses": 2,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "add": 1,
+            "write-tree": 19,
+            "diff": 39
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 4,
+        "changed": true,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 488.9783330000064,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 2379.9324590000033,
+          "processes": 154,
+          "gitProcesses": 154,
+          "peakProcesses": 28,
+          "commands": {
+            "config": 19,
+            "read-tree": 38,
+            "update-index": 19,
+            "status": 19,
+            "write-tree": 19,
+            "add": 1,
+            "diff": 39
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      }
+    ],
+    "sensitivity": {
+      "injectedGitProcesses": 1,
+      "passed": true
+    },
+    "summary": [
+      {
+        "limit": 19,
+        "samples": 4,
+        "evidenceCorrect": true,
+        "beginMs": {
+          "p50": 399.6007499999978,
+          "p95": 488.9783330000064
+        },
+        "finishMs": {
+          "p50": 2242.1754999999976,
+          "p95": 2887.1794590000063
+        },
+        "totalCaptureMs": {
+          "p50": 2694.585917000004,
+          "p95": 3286.780209000004
+        },
+        "gitProcesses": [
+          190,
+          190,
+          190,
+          192
+        ],
+        "peakProcesses": 38
+      },
+      {
+        "limit": 4,
+        "samples": 4,
+        "evidenceCorrect": true,
+        "beginMs": {
+          "p50": 675.6626669999969,
+          "p95": 993.5128329999861
+        },
+        "finishMs": {
+          "p50": 4807.956833000004,
+          "p95": 8002.921249999999
+        },
+        "totalCaptureMs": {
+          "p50": 5411.276375000001,
+          "p95": 8678.583916999996
+        },
+        "gitProcesses": [
+          190,
+          190,
+          190,
+          192
+        ],
+        "peakProcesses": 8
+      },
+      {
+        "limit": 1,
+        "samples": 4,
+        "evidenceCorrect": true,
+        "beginMs": {
+          "p50": 1612.2149579999968,
+          "p95": 3578.915374999997
+        },
+        "finishMs": {
+          "p50": 18407.620375,
+          "p95": 23606.074166999984
+        },
+        "totalCaptureMs": {
+          "p50": 19936.270833000002,
+          "p95": 25407.463416999963
+        },
+        "gitProcesses": [
+          190,
+          190,
+          190,
+          192
+        ],
+        "peakProcesses": 2
+      }
+    ]
+  },
+  "candidate": {
+    "schema": 1,
+    "node": "v24.18.0",
+    "platform": "darwin",
+    "sourceCommit": "3cdf6d78d0f98d650eac31de1f1d1965b5766df3",
+    "bundleSha256": "3ee2e35a578f5c7880cf3deee44c7acbb9966a79f4ade6bce6489b5ead7270b9",
+    "workload": {
+      "repositories": 19,
+      "trackedFilesPerRepo": 512,
+      "turnsPerLimit": 4,
+      "changedRepoTurns": [
+        4
+      ],
+      "changedFiles": 1,
+      "limits": [
+        19,
+        4,
+        1
+      ],
+      "warmupTurnsPerLimit": 1
+    },
+    "scope": "production begin/finish functions with experimental caller scheduling; excludes discovery, transcript, recorder locks and notifications; no Provider",
+    "results": [
+      {
+        "limit": 4,
+        "turn": 1,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 572.4149580000085,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 2029.694749999995,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 4,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 1,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 2809.5143339999922,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 8928.255959000002,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 1,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 1,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 677.057249999998,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1121.5827080000017,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 19,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 2,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 1546.7061669999966,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 5434.688500000004,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 1,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 2,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 651.3947919999919,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1192.7671659999905,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 19,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 4,
+        "turn": 2,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 602.1160830000008,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1341.7154169999994,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 4,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 3,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 290.55395800000406,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1035.3851659999928,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 19,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 4,
+        "turn": 3,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 493.5025000000023,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1992.7984580000048,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 4,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 3,
+        "changed": false,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 1331.199667000008,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 6051.565583000003,
+          "processes": 76,
+          "gitProcesses": 76,
+          "peakProcesses": 1,
+          "commands": {
+            "config": 19,
+            "read-tree": 19,
+            "update-index": 19,
+            "status": 19
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 4,
+        "turn": 4,
+        "changed": true,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 1172.658083000002,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 8,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 2836.746250000011,
+          "processes": 82,
+          "gitProcesses": 82,
+          "peakProcesses": 5,
+          "commands": {
+            "config": 19,
+            "read-tree": 20,
+            "update-index": 19,
+            "status": 19,
+            "add": 1,
+            "write-tree": 1,
+            "diff": 3
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 1,
+        "turn": 4,
+        "changed": true,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 3300.7353749999893,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 2,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 12481.206292000003,
+          "processes": 82,
+          "gitProcesses": 82,
+          "peakProcesses": 2,
+          "commands": {
+            "config": 19,
+            "read-tree": 20,
+            "update-index": 19,
+            "status": 19,
+            "add": 1,
+            "write-tree": 1,
+            "diff": 3
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      },
+      {
+        "limit": 19,
+        "turn": 4,
+        "changed": true,
+        "evidenceCorrect": true,
+        "begin": {
+          "elapsedMs": 369.82583400000294,
+          "processes": 38,
+          "gitProcesses": 38,
+          "peakProcesses": 38,
+          "commands": {
+            "rev-parse": 19,
+            "status": 19
+          },
+          "statuses": {
+            "ready": 19
+          }
+        },
+        "finish": {
+          "elapsedMs": 1767.302416000006,
+          "processes": 82,
+          "gitProcesses": 82,
+          "peakProcesses": 19,
+          "commands": {
+            "config": 19,
+            "read-tree": 20,
+            "update-index": 19,
+            "status": 19,
+            "add": 1,
+            "write-tree": 1,
+            "diff": 3
+          },
+          "statuses": {
+            "captured": 19
+          },
+          "strategies": {
+            "targeted": 19
+          },
+          "fallbacks": {}
+        }
+      }
+    ],
+    "sensitivity": {
+      "injectedGitProcesses": 1,
+      "passed": true
+    },
+    "summary": [
+      {
+        "limit": 19,
+        "samples": 4,
+        "evidenceCorrect": true,
+        "beginMs": {
+          "p50": 369.82583400000294,
+          "p95": 677.057249999998
+        },
+        "finishMs": {
+          "p50": 1121.5827080000017,
+          "p95": 1767.302416000006
+        },
+        "totalCaptureMs": {
+          "p50": 1798.6399579999998,
+          "p95": 2137.128250000009
+        },
+        "gitProcesses": [
+          114,
+          114,
+          114,
+          120
+        ],
+        "peakProcesses": 38
+      },
+      {
+        "limit": 4,
+        "samples": 4,
+        "evidenceCorrect": true,
+        "beginMs": {
+          "p50": 572.4149580000085,
+          "p95": 1172.658083000002
+        },
+        "finishMs": {
+          "p50": 1992.7984580000048,
+          "p95": 2836.746250000011
+        },
+        "totalCaptureMs": {
+          "p50": 2486.300958000007,
+          "p95": 4009.404333000013
+        },
+        "gitProcesses": [
+          114,
+          114,
+          114,
+          120
+        ],
+        "peakProcesses": 8
+      },
+      {
+        "limit": 1,
+        "samples": 4,
+        "evidenceCorrect": true,
+        "beginMs": {
+          "p50": 1546.7061669999966,
+          "p95": 3300.7353749999893
+        },
+        "finishMs": {
+          "p50": 6051.565583000003,
+          "p95": 12481.206292000003
+        },
+        "totalCaptureMs": {
+          "p50": 7382.765250000011,
+          "p95": 15781.941666999992
+        },
+        "gitProcesses": [
+          114,
+          114,
+          114,
+          120
+        ],
+        "peakProcesses": 2
+      }
+    ]
+  },
+  "timing": {
+    "baseline": {
+      "label": "cli-empty-candidates-baseline",
+      "exit": 0,
+      "wallMs": 193921,
+      "cores": 10,
+      "loadBefore": 166.67,
+      "loadAfter": 162.68,
+      "highLoad": true
+    },
+    "candidate": {
+      "label": "cli-empty-candidates-candidate",
+      "exit": 0,
+      "wallMs": 139219,
+      "cores": 10,
+      "loadBefore": 60.04,
+      "loadAfter": 57.89,
+      "highLoad": true
+    }
+  }
+}

@@ -392,7 +392,7 @@ function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent, number
   return [...collapseHookRuns(runs), ...aggregateHookDeliveries(events, eventOrder)]
 }
 
-type CaptureField = 'assistant_response' | 'tool_input' | 'tool_response' | 'model_segments'
+type CaptureField = 'assistant_response' | 'tool_input' | 'tool_response' | 'model_segments' | 'error'
 
 function captureOmissionReasons(events: TraceEvent[], fields: CaptureField[]): string[] {
   const reasons = new Set<string>()
@@ -561,12 +561,13 @@ export function aggregateTurnEvidence(args: {
     event.danger ? [{ ...event.danger, tool: event.tool, toolUseId: event.toolUseId }] : []
   )
   const errors = args.events.flatMap((event) =>
-    isOverviewToolErrorEvent(event)
+    (isOverviewToolErrorEvent(event) || (event.kind === 'harness' && event.stage === 'task_error' && event.isError === true))
       ? [{ message: outputSummary(event.output ?? event.text) ?? `${event.tool ?? event.stage} failed`, source: event.stage, toolUseId: event.toolUseId }]
       : []
   )
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
+  const errorCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['error']))
   const assistantCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['assistant_response']))
   const callCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['tool_input', 'tool_response']))
   const modelSegmentCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['assistant_response', 'model_segments']))
@@ -719,7 +720,9 @@ export function aggregateTurnEvidence(args: {
       : dangerCoverage === 'unsupported'
         ? unavailable('danger classification is unsupported for this Provider', [source])
         : available(dangers, [source]),
-    errors: observable.errors ? available(errors, [source]) : unavailable('provider error events were not observable', [source]),
+    errors: !observable.errors
+      ? unavailable('provider error events were not observable', [source])
+      : errorCaptureReason ? partial(errors, [source], errorCaptureReason, 'exact') : available(errors, [source]),
     interventions: observable.interventions
       ? available(interventions, [source])
       : unavailable('provider user-input events were not observable', [source])

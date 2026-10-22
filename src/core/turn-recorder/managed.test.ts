@@ -1481,7 +1481,7 @@ describe('提交通知投递位置', () => {
   async function ackedThrough(root: string): Promise<number | null> {
     try {
       const state = JSON.parse(
-        await readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8')
+        await readFile(join(root, '.scry', 'notifications', 'commit-hooks', `${stableHash('explicit-environment-v1')}.json`), 'utf8')
       ) as { ackedThrough?: number }
       return state.ackedThrough ?? null
     } catch {

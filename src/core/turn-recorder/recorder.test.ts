@@ -6,8 +6,8 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { drainRecorderDelivery, handleRecorderHook, mergeTurnTraceEvents, readTranscriptWindow, recoverRecorder, resetTranscriptSnapshotCache, transcriptSnapshotCacheStats } from './recorder'
-import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, recordStoreIndexStats, redeliverLatestCommitNotification, resetRecordStoreIndex, safeKey, verifyStore } from './store'
-import { inspectCommitHookBundle, readCommitHookGrant, writeCommitHookGrant } from './commit-hook-grant'
+import { archiveRecords, commitNotificationStatus, commitRecord, readArchiveState, drainCommitNotifications, exportRecords, listRecords, readHealth, recordStoreIndexStats, redeliverLatestCommitNotification, resetRecordStoreIndex, safeKey, stableHash, verifyStore } from './store'
+import { commitHookEnv, inspectCommitHookBundle, readCommitHookGrant, resolveCommitHookActivation, writeCommitHookGrant } from './commit-hook-grant'
 import { resolveRecorderLocation } from './config'
 import { syncDirectory } from './io'
 import { HOOK_LOCK_WAIT_MS, recorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state'
@@ -15,6 +15,10 @@ import { readRecorderContent } from './content-store'
 
 const roots: string[] = []
 const pexecFile = promisify(execFile)
+
+function commitAckPath(root: string, fingerprint = 'explicit-environment-v1'): string {
+  return join(root, '.scry', 'notifications', 'commit-hooks', `${stableHash(fingerprint)}.json`)
+}
 
 interface EarlyStopDiagnostic {
   root?: string
@@ -3154,7 +3158,7 @@ describe('record store cursor and recovery semantics', () => {
       sequence: 1
     })
     expect(JSON.stringify(notification)).not.toContain('do not leak this prompt')
-    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+    await expect(readFile(commitAckPath(root), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
   })
 
@@ -3166,14 +3170,239 @@ describe('record store cursor and recovery semantics', () => {
 
     await expect(drainCommitNotifications(join(root, '.scry'), base))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
-    await expect(access(join(root, '.scry', 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
+    await expect(access(commitAckPath(root))).rejects.toThrow()
     const hook = await commitHook(root)
     await expect(drainCommitNotifications(join(root, '.scry'), {
       ...base,
       SCRY_RECORDER_COMMIT_HOOK: hook.path
     })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
-    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+    await expect(readFile(commitAckPath(root), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
+  })
+
+  it.each([
+    {
+      name: 'nonzero exit',
+      source: '#!/bin/sh\ncat >/dev/null\nprintf do-not-log-secret >&2\nexit 7\n',
+      expected: { reason: 'exit', exitCode: 7, signal: null }
+    },
+    {
+      name: 'signal',
+      source: '#!/bin/sh\ncat >/dev/null\nkill -TERM "$$"\n',
+      expected: { reason: 'signal', exitCode: null, signal: 'SIGTERM' }
+    },
+    {
+      name: 'spawn error',
+      source: '#!/scry-missing-interpreter\n',
+      expected: { reason: 'spawn_error', errorCode: 'ENOENT' }
+    }
+  ])('callback diagnostics preserve pending work: $name', async ({ source, expected }) => {
+    const root = await workspace()
+    await completeTurn(root, 'diagnostic')
+    const hook = await commitHook(root)
+    await writeFile(hook.path, source)
+    const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path }
+    const dataRoot = join(root, '.scry')
+
+    await expect(drainCommitNotifications(dataRoot, env))
+      .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    await expect(redeliverLatestCommitNotification(dataRoot, env))
+      .resolves.toMatchObject({ delivered: false, reason: 'commit hook did not ACK' })
+    await expect(commitNotificationStatus(dataRoot, env))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 1 })
+    const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
+    const diagnostics = log.trim().split('\n').map(line => JSON.parse(line.split('; diagnostic=')[1]))
+    expect(diagnostics).toHaveLength(2)
+    for (const diagnostic of diagnostics) {
+      expect(diagnostic).toMatchObject({ acknowledged: false, recorderPid: process.pid, ...expected })
+    }
+    expect(log).not.toContain('do-not-log-secret')
+    expect(log).not.toContain(root)
+  })
+
+  it('callback diagnostics distinguish the real deadline from an ordinary signal', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'diagnostic-timeout')
+    const hook = await commitHook(root)
+    // Deliberately block this owned callback to exercise the unchanged 10-second production deadline.
+    await writeFile(hook.path, '#!/bin/sh\ncat >/dev/null\nexec sleep 60\n')
+    const dataRoot = join(root, '.scry')
+    await expect(drainCommitNotifications(dataRoot, {
+      PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path
+    })).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
+    expect(JSON.parse(log.trim().split('; diagnostic=')[1]))
+      .toMatchObject({ acknowledged: false, reason: 'timeout', signal: 'SIGTERM', recorderPid: process.pid })
+    await expect(access(commitAckPath(root))).rejects.toThrow()
+  }, 20_000)
+
+  it('通知身份不一致只使 ACK 不适用，不能解释同一身份下 callback 不 ACK', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'identity-1')
+    await completeTurn(root, 'identity-2')
+    const hook = await commitHook(root)
+    const failure = join(root, 'fail-callback')
+    const hookSource = `#!/bin/sh\ncat >> ${JSON.stringify(hook.capture)}\n[ ! -f ${JSON.stringify(failure)} ] || exit 7\nexit 0\n`
+    await writeFile(hook.path, hookSource)
+    const configPath = join(root, 'scry.config.json')
+    await writeFile(configPath, JSON.stringify({
+      ...JSON.parse(await readFile(configPath, 'utf8')),
+      commitHook: { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
+    }))
+    const location = await resolveRecorderLocation(root)
+    if (!location.valid) throw new Error('invalid fixture config')
+    const env = { PATH: '/usr/bin:/bin', SCRY_GRANT_DIR: join(root, 'grants') }
+    const activate = () => resolveCommitHookActivation(root, location.config, env)
+    const configured = commitHookEnv(await activate(), env)
+    const dataRoot = join(root, '.scry')
+    const statePath = commitAckPath(root, configured.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
+
+    await expect(drainCommitNotifications(dataRoot, configured, { maxRecords: 1 }))
+      .resolves.toEqual({ delivered: 1, pending: 1, truncated: true })
+    const saved = await readFile(statePath, 'utf8')
+    const hosted = { ...env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
+    await expect(resolveCommitHookActivation(root, location.config, hosted))
+      .resolves.toEqual({ status: 'host-provided' })
+    await expect(commitNotificationStatus(dataRoot, hosted))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 2 })
+    expect(await readFile(statePath, 'utf8')).toBe(saved)
+
+    const restored = commitHookEnv(await activate(), env)
+    await expect(commitNotificationStatus(dataRoot, restored))
+      .resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
+    await writeFile(failure, '')
+    expect(commitHookEnv(await activate(), env)).toEqual(restored)
+    await expect(drainCommitNotifications(dataRoot, restored))
+      .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    expect(await readFile(statePath, 'utf8')).toBe(saved)
+
+    await appendFile(hook.path, '# changed bundle identity\n')
+    const changed = commitHookEnv(await activate(), env)
+    expect(changed.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
+      .not.toBe(restored.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
+    await expect(commitNotificationStatus(dataRoot, changed))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 2 })
+    expect(await readFile(statePath, 'utf8')).toBe(saved)
+  })
+
+  it('independent hook identities retain their own ACK across successful alternating deliveries', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'identity-a')
+    await completeTurn(root, 'identity-b')
+    const hook = await commitHook(root)
+    const dataRoot = join(root, '.scry')
+    const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'cli-bundle' }
+    const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'sha256:app-bundle' }
+    await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 2, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, b, { maxRecords: 1 })).resolves.toMatchObject({ delivered: 1, pending: 1 })
+    await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    await expect(commitNotificationStatus(dataRoot, b)).resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
+    await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 0, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, b)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(4)
+  })
+
+  it('legacy ACK migration survives old App writes without rewriting its shared file', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'migration-a')
+    await completeTurn(root, 'migration-b')
+    const hook = await commitHook(root)
+    const dataRoot = join(root, '.scry')
+    const directory = join(dataRoot, 'notifications')
+    const legacyPath = join(directory, 'commit-hook-state.json')
+    const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'cli-bundle' }
+    const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'sha256:old-app' }
+    await mkdir(directory, { recursive: true })
+    const original = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'cli-bundle', ackedThrough: 2 })
+    await writeFile(legacyPath, original)
+    await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    expect(await readdir(directory)).toEqual(['commit-hook-state.json'])
+    await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 0, pending: 0 })
+    expect(await readFile(legacyPath, 'utf8')).toBe(original)
+
+    // An old App remains free to own the v1 file; it must not erase the CLI checkpoint.
+    const appState = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'sha256:old-app', ackedThrough: 1 })
+    await writeFile(legacyPath, appState)
+    await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 0, pending: 0 })
+    expect(await readFile(legacyPath, 'utf8')).toBe(appState)
+    await expect(drainCommitNotifications(dataRoot, b)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    expect(await readFile(legacyPath, 'utf8')).toBe(appState)
+    await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
+  })
+
+  it('same-identity legacy progress is merged monotonically, never borrowed by another bundle', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'monotonic-a')
+    await completeTurn(root, 'monotonic-b')
+    const hook = await commitHook(root)
+    const dataRoot = join(root, '.scry')
+    const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: '../opaque/bundle' }
+    await drainCommitNotifications(dataRoot, env, { maxRecords: 1 })
+    const legacyPath = join(dataRoot, 'notifications', 'commit-hook-state.json')
+    const legacy = (ackedThrough: number) => JSON.stringify({ schemaVersion: 1, hookFingerprint: env.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT, ackedThrough })
+    await writeFile(legacyPath, legacy(2))
+    await expect(drainCommitNotifications(dataRoot, env)).resolves.toMatchObject({ delivered: 0, pending: 0 })
+    await writeFile(legacyPath, legacy(1))
+    await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    await expect(commitNotificationStatus(dataRoot, { ...env, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'new-bundle' }))
+      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 2 })
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
+  })
+
+  it('concurrent same and different identities do not duplicate or erase acknowledged deliveries', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'concurrent-a')
+    await completeTurn(root, 'concurrent-b')
+    const hook = await commitHook(root)
+    const dataRoot = join(root, '.scry')
+    const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'a' }
+    const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'b' }
+    const results = await Promise.all([a, b, a].map(env => drainCommitNotifications(dataRoot, env)))
+    expect(results.map(result => result.delivered).sort()).toEqual([0, 2, 2])
+    expect(results.every(result => result.pending === 0)).toBe(true)
+    for (const env of [a, b]) {
+      await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    }
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(4)
+    await expect(access(join(dataRoot, 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
+  })
+
+  it('migration preserves known ACK but a failing callback cannot advance either file', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'migration-fail-a')
+    await completeTurn(root, 'migration-fail-b')
+    const hook = await commitHook(root, 7)
+    const dataRoot = join(root, '.scry')
+    const directory = join(dataRoot, 'notifications')
+    await mkdir(directory, { recursive: true })
+    const original = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'migration', ackedThrough: 1 })
+    const legacyPath = join(directory, 'commit-hook-state.json')
+    await writeFile(legacyPath, original)
+    const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'migration' }
+    await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    expect(JSON.parse(await readFile(commitAckPath(root, 'migration'), 'utf8')).ackedThrough).toBe(1)
+    expect(await readFile(legacyPath, 'utf8')).toBe(original)
+    await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
+  })
+
+  it.each([
+    { schemaVersion: 2, ackedThrough: 1 },
+    { schemaVersion: 1, ackedThrough: -1 },
+    { schemaVersion: 1, ackedThrough: 1.5 }
+  ])('invalid legacy checkpoints never skip notifications: %j', async invalid => {
+    const root = await workspace()
+    await completeTurn(root, 'invalid-checkpoint')
+    const hook = await commitHook(root)
+    const dataRoot = join(root, '.scry')
+    await mkdir(join(dataRoot, 'notifications'), { recursive: true })
+    await writeFile(join(dataRoot, 'notifications', 'commit-hook-state.json'), JSON.stringify({
+      ...invalid, hookFingerprint: 'explicit-environment-v1'
+    }))
+    const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path }
+    await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: null, notifyBacklog: 1 })
+    await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
   })
 
   it('duplicate commit 只重试既有未 ACK 通知，不创建第二条 sequence', async () => {
@@ -3202,7 +3431,7 @@ describe('record store cursor and recovery semantics', () => {
       SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'redelivery-test-v1'
     }
     await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 2, pending: 0, truncated: false })
-    const statePath = join(root, '.scry', 'notifications', 'commit-hook-state.json')
+    const statePath = commitAckPath(root, 'redelivery-test-v1')
     const before = await readFile(statePath, 'utf8')
     await writeFile(hook.capture, '')
 
@@ -3534,7 +3763,7 @@ describe('CLI-side commit hook activation gate', () => {
     const notification = JSON.parse((await readFile(hook.capture, 'utf8')).trim()) as Record<string, unknown>
     expect(notification).toMatchObject({ event: 'record-committed', sessionId: 'gate-auto', sequence: 1 })
     expect((await readCommitHookGrant(root, env))?.source).toBe('auto')
-    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+    await expect(readFile(commitAckPath(root, (await readCommitHookGrant(root, env))?.fingerprint), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
   })
 
@@ -3548,7 +3777,7 @@ describe('CLI-side commit hook activation gate', () => {
 
     const notification = JSON.parse((await readFile(hook.capture, 'utf8')).trim()) as Record<string, unknown>
     expect(notification).toMatchObject({ event: 'record-committed', sessionId: 'gate-trusted', sequence: 1 })
-    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+    await expect(readFile(commitAckPath(root, (await readCommitHookGrant(root, env))?.fingerprint), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
   })
 
@@ -3582,7 +3811,7 @@ describe('commit notification drain budget', () => {
 
     await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2 }))
       .resolves.toEqual({ delivered: 2, pending: 1, truncated: true })
-    await expect(readFile(join(root, '.scry', 'notifications', 'commit-hook-state.json'), 'utf8'))
+    await expect(readFile(commitAckPath(root), 'utf8'))
       .resolves.toContain('"ackedThrough":2')
     await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2 }))
       .resolves.toEqual({ delivered: 1, pending: 0, truncated: false })

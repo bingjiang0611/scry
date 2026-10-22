@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g @ali/scry-turn-recorder@0.2.49 \
+npm install -g @ali/scry-turn-recorder@0.2.51 \
   --registry=https://registry.anpm.alibaba-inc.com
 
 cd /path/to/project      # 必须是 Git 仓库根目录
@@ -118,6 +118,21 @@ Agent、skill 与提示词不应主动调用这些命令。
 - 外围上传端必须透传这两个新字段，看板需要展示正文及完整性状态；ACK 只证明接收成功。Scry CLI 不实现远端看板，也不负责外围多 active workspace 的 session 唯一绑定。
 
 深工作目录（包括显式过长的 `SCRY_RECORDER_SOCKET`）自动映射为工作区/endpoint 哈希短路径；临时目录本身过长时回退 `/tmp`。路径按字节限制为不超过 100 字节，保留原有 daemon 所有权校验。
+
+## 0.2.51 CLI 重复工作消除与 Pi 终态修复
+
+- 完整 Git discovery 确认零候选时复用既有快照；相同 tree 不再重复 diff，不减少仓库检查范围。
+- 会话汇总按 record 对象一次分组，避免重复关联工具调用；`turns verify` 复用同一批已校验记录计算身份覆盖，仍完整扫描 canonical 文件。
+- Pi 模型失败和取消分别保留为 failed/cancelled；成功重试不会继承旧失败。错误信息有界保存，截断明确标 partial，不修改历史记录。
+- 保留 0.2.50 的独立 ACK 游标与原有 trust、at-least-once 合同。未提供会话选择性读取或历史缺号修复。
+
+## 0.2.50 按通知身份隔离 ACK
+
+- 每个 hook fingerprint 的 ACK 单独保存在 `.scry/notifications/commit-hooks/<sha256>.json`，不同 App / CLI 身份不会互相覆盖。
+- 旧 `commit-hook-state.json` 只读保留，旧 App 可以继续使用它。同一指纹的有效旧 ACK 与新文件取较大值，并在下次投递时持久迁移；只读查询不迁移，不同指纹绝不借用 ACK。
+- 每个曾确认投递的身份保留一个小文件，不自动删除历史游标；读取只定位当前身份，不扫描历史身份目录。bundle 变化仍需新身份独立 ACK。
+- 失败日志区分启动失败、退出码、信号、stdin 与超时，不保存原始 stderr。ACK 表示回调成功接收，不等于外部上传成功。
+- 降级到旧 CLI 不会理解这些独立游标，可能再次重放；消费者仍须遵守既有 at-least-once 去重合同。
 
 ## 0.2.49 锁超时排队修正
 
@@ -308,7 +323,7 @@ scry commit-hook revoke --workspace "$PWD"
 
 **daemon 在响应 Provider 之后才投递**,所以回调耗时不占 hook 预算。没有 daemon 时(`SCRY_RECORDER_TRANSPORT=direct` 或冷启动)只能同步投递,此时每个事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending。实测回调 350ms/条、积压 6 条时:同步 1688ms/事件,移出后 500ms/事件。
 
-`notifyBacklog` 如实显示积压。需要一次清空:
+`notifyBacklog` 显示当前已激活 hook 身份的积压，不是所有身份的合计，也不是上传 outbox 的待发数。归档检查仍针对当前命令解析出的 hook 身份，不代表其他 host 身份已经接收；并存使用时，应分别确认各接收方已处理需要保留的记录后再归档。需要清空当前身份的通知积压:
 
 ```bash
 scry recorder notify-drain --workspace "$PWD"
