@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import { protectToolContent, workspaceToolContentPolicy } from '../core/turn-recorder/content-policy.js'
 import type { ToolContentPolicy } from '../core/turn-recorder/tool-content.js'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { isDiffSnapshotStage, normalizeTurnDiffSnapshot, type TraceEvent } from '../shared/trace'
 import type { AgentInputAttachment } from '../shared/runtime'
 import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
@@ -421,6 +421,15 @@ function rebuildTraceArchiveCatalogIndex(userDataDir: string): TraceArchiveCatal
   return scanned.entries
 }
 
+async function markTraceArchiveCatalogIndexDirtyAsync(userDataDir: string): Promise<void> {
+  traceArchiveCatalogWriteGeneration++
+  const marker = traceArchiveCatalogIndexDirtyPath(userDataDir)
+  if (trustedOwnedFile(userDataDir, marker)) return
+  try { await writeOwnedFileAtomicallyAsync(userDataDir, marker, 'dirty\n') } catch {
+    try { await unlink(traceArchiveCatalogIndexPath(userDataDir)) } catch { /* discovery will scan */ }
+  }
+}
+
 function markTraceArchiveCatalogIndexDirty(userDataDir: string): void {
   traceArchiveCatalogWriteGeneration++
   const marker = traceArchiveCatalogIndexDirtyPath(userDataDir)
@@ -470,15 +479,33 @@ function traceArchiveTurnDir(userDataDir: string, cwd: string, sessionId: string
 }
 
 const TRACE_ARCHIVE_INDEX_SUFFIX = '.index-v1.json'
+const TRACE_ARCHIVE_METADATA_SUFFIX = '.meta-v1.json'
 const TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES = 32 * 1024 * 1024
 const TRACE_ARCHIVE_PAGE_INDEX_MAX_ENTRIES = 100_000
 const TRACE_ARCHIVE_TURN_FILE = /^turn-[a-f0-9]{64}\.json$/
 const TRACE_ARCHIVE_TEMP_FILE = /^turn-[a-f0-9]{64}\.json\.tmp$/
+const TRACE_ARCHIVE_METADATA_TEMP_FILE = /^turn-[a-f0-9]{64}\.meta-v1\.json\.tmp$/
 
 interface TraceArchiveIndexEntry {
   file: string
   runId: string
   ts: number
+  size?: number
+  mtimeMs?: number
+  ctimeMs?: number
+  ino?: number
+  metadata?: {
+    providerTurnId?: string
+    forkTurnId?: string
+    userText: string
+    done: boolean
+    status?: AgentTurnRecord['status']
+    error?: string
+    errorHint?: string
+    hasSuccessfulResult: boolean
+    toolIds: Array<{ stage: TraceEvent['stage']; toolUseId: string }>
+    acceptedSteers: Array<{ messageId: string; prompt: string }>
+  }
 }
 
 interface TraceArchiveDirectoryStamp {
@@ -488,7 +515,7 @@ interface TraceArchiveDirectoryStamp {
 }
 
 interface TraceArchiveIndex {
-  version: 1
+  version: 1 | 2
   cwd: string
   sessionId: string
   providerId: ProviderId
@@ -498,6 +525,10 @@ interface TraceArchiveIndex {
 
 function traceArchiveIndexPath(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId): string {
   return `${traceArchiveTurnDir(userDataDir, cwd, sessionId, providerId)}${TRACE_ARCHIVE_INDEX_SUFFIX}`
+}
+
+function traceArchiveMetadataPath(dir: string, file: string): string {
+  return join(dir, file.replace(/\.json$/, TRACE_ARCHIVE_METADATA_SUFFIX))
 }
 
 function trustedSegmentTempPaths(args: {
@@ -511,7 +542,7 @@ function trustedSegmentTempPaths(args: {
     trustedOwnedParent(args.userDataDir, join(dir, '.identity'), false)
     const paths: string[] = []
     for (const name of readdirSync(dir)) {
-      if (!TRACE_ARCHIVE_TEMP_FILE.test(name)) continue
+      if (!TRACE_ARCHIVE_TEMP_FILE.test(name) && !TRACE_ARCHIVE_METADATA_TEMP_FILE.test(name)) continue
       const path = join(dir, name)
       const stat = lstatSync(path)
       if (stat.isFile() && !stat.isSymbolicLink()) paths.push(path)
@@ -535,7 +566,7 @@ export async function cleanupTraceArchiveTemps(userDataDir: string): Promise<voi
         const path = join(dir, entry.name)
         if (depth < 3 && entry.isDirectory()) await walk(path, depth + 1)
         else if (entry.isFile() && (
-          (depth === 3 && TRACE_ARCHIVE_TEMP_FILE.test(entry.name)) ||
+          (depth === 3 && (TRACE_ARCHIVE_TEMP_FILE.test(entry.name) || TRACE_ARCHIVE_METADATA_TEMP_FILE.test(entry.name))) ||
           (depth === 2 && entry.name.endsWith(`${TRACE_ARCHIVE_INDEX_SUFFIX}.tmp`))
         )) {
           try { await unlink(path) } catch { /* startup cleanup is best-effort */ }
@@ -596,6 +627,26 @@ function trustedOwnedFile(userDataDir: string, filePath: string): boolean {
     return stat.isFile() && !stat.isSymbolicLink()
   } catch {
     return false
+  }
+}
+
+async function writeOwnedFileAtomicallyAsync(userDataDir: string, filePath: string, content: string): Promise<void> {
+  trustedOwnedParent(userDataDir, filePath, true)
+  const tmp = `${filePath}.tmp`
+  let fd: Awaited<ReturnType<typeof openFile>> | undefined
+  try {
+    try { await unlink(tmp) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    fd = await openFile(tmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
+    await fd.writeFile(content)
+    await fd.close()
+    fd = undefined
+    await rename(tmp, filePath)
+  } catch (error) {
+    if (fd) await fd.close()
+    try { await unlink(tmp) } catch { /* ignore */ }
+    throw error
   }
 }
 
@@ -883,7 +934,7 @@ function isTraceArchiveIndex(value: unknown, args: {
 }): value is TraceArchiveIndex {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const index = value as Partial<TraceArchiveIndex>
-  if (index.version !== 1 || index.cwd !== args.cwd || index.sessionId !== args.sessionId || index.providerId !== args.providerId ||
+  if ((index.version !== 1 && index.version !== 2) || index.cwd !== args.cwd || index.sessionId !== args.sessionId || index.providerId !== args.providerId ||
       !index.directory || typeof index.directory.mtimeMs !== 'number' || !Number.isFinite(index.directory.mtimeMs) ||
       typeof index.directory.ctimeMs !== 'number' || !Number.isFinite(index.directory.ctimeMs) ||
       typeof index.directory.ino !== 'number' || !Number.isFinite(index.directory.ino) || !Array.isArray(index.entries) ||
@@ -894,8 +945,80 @@ function isTraceArchiveIndex(value: unknown, args: {
         typeof entry.runId !== 'string' || !entry.runId || typeof entry.ts !== 'number' || !Number.isFinite(entry.ts) ||
         files.has(entry.file)) return false
     files.add(entry.file)
+    if (index.version === 2) {
+      const metadata = entry.metadata
+      if (typeof entry.size !== 'number' || !Number.isSafeInteger(entry.size) || entry.size <= 0 ||
+          typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs) ||
+          typeof entry.ctimeMs !== 'number' || !Number.isFinite(entry.ctimeMs) ||
+          typeof entry.ino !== 'number' || !Number.isSafeInteger(entry.ino) || entry.ino <= 0 ||
+          !metadata || typeof metadata.userText !== 'string' || typeof metadata.done !== 'boolean' ||
+          typeof metadata.hasSuccessfulResult !== 'boolean' || !Array.isArray(metadata.toolIds) || !Array.isArray(metadata.acceptedSteers) ||
+          !metadata.toolIds.every((item) => item && typeof item.stage === 'string' && typeof item.toolUseId === 'string') ||
+          !metadata.acceptedSteers.every((item) => item && typeof item.messageId === 'string' && typeof item.prompt === 'string')) return false
+    }
     return true
   })
+}
+
+function archiveTurnMetadata(turn: TraceArchiveTurn): TraceArchiveIndexEntry['metadata'] {
+  return {
+    providerTurnId: turn.providerTurnId,
+    forkTurnId: turn.forkTurnId,
+    userText: turn.userText,
+    done: turn.done,
+    status: turn.status,
+    error: turn.error,
+    errorHint: turn.errorHint,
+    hasSuccessfulResult: turn.items.some((event) => event.stage === 'result' && event.isError === false),
+    toolIds: turn.items.filter((event): event is TraceEvent & { toolUseId: string } => !!event.toolUseId)
+      .map((event) => ({ stage: event.stage, toolUseId: event.toolUseId })),
+    acceptedSteers: turn.items
+      .filter((event) => event.stage === 'steer' && event.steer?.status === 'accepted' && !!event.steer.messageId)
+      .map((event) => ({ messageId: event.steer!.messageId, prompt: event.steer!.prompt }))
+  }
+}
+
+function archiveMetadataTurn(entry: TraceArchiveIndexEntry): TraceArchiveTurn | null {
+  const metadata = entry.metadata
+  if (!metadata) return null
+  return {
+    runId: entry.runId,
+    providerTurnId: metadata.providerTurnId,
+    forkTurnId: metadata.forkTurnId,
+    userText: metadata.userText,
+    done: metadata.done,
+    status: metadata.status,
+    error: metadata.error,
+    errorHint: metadata.errorHint,
+    items: [
+      ...(metadata.hasSuccessfulResult ? [{
+        id: `archive-index-result-${entry.runId}`,
+        runId: entry.runId,
+        ts: String(entry.ts),
+        kind: 'harness' as const,
+        stage: 'result' as const,
+        isError: false
+      }] : []),
+      ...metadata.toolIds.map((item, index): TraceEvent => ({
+        id: `archive-index-${entry.runId}-${index}`,
+        runId: entry.runId,
+        ts: String(entry.ts),
+        kind: 'tool',
+        stage: item.stage,
+        toolUseId: item.toolUseId,
+        runtimeMetadata: { source: 'scry_archive_index' }
+      })),
+      ...metadata.acceptedSteers.map((steer, index): TraceEvent => ({
+        id: `archive-index-steer-${entry.runId}-${index}`,
+        runId: entry.runId,
+        ts: String(entry.ts),
+        kind: 'human',
+        stage: 'steer',
+        steer: { messageId: steer.messageId, prompt: steer.prompt, attachments: [], status: 'accepted' }
+      }))
+    ],
+    ts: entry.ts
+  }
 }
 
 function archiveDirectoryStamp(info: { mtimeMs: number; ctimeMs: number; ino: number }): TraceArchiveDirectoryStamp {
@@ -906,22 +1029,38 @@ function sameArchiveDirectoryStamp(left: TraceArchiveDirectoryStamp, right: Trac
   return left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs && left.ino === right.ino
 }
 
+function sameArchiveSegmentStamp(entry: TraceArchiveIndexEntry, stat: { size: number; mtimeMs: number; ctimeMs: number; ino: number }): boolean {
+  return entry.size === stat.size && entry.mtimeMs === stat.mtimeMs && entry.ctimeMs === stat.ctimeMs && entry.ino === stat.ino
+}
+
 function archiveIndexFromArchives(
-  args: { cwd: string; sessionId: string; providerId: ProviderId },
+  args: { userDataDir: string; cwd: string; sessionId: string; providerId: ProviderId },
   directory: TraceArchiveDirectoryStamp,
   archives: TraceArchive[]
 ): TraceArchiveIndex {
   return {
-    version: 1,
+    version: 2,
     cwd: args.cwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
     directory,
-    entries: archives.flatMap((archive) => archive.turns.map((turn) => ({
-      file: `${traceArchiveTurnKey(turn)}.json`,
-      runId: turn.runId,
-      ts: turn.ts
-    }))).sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
+    entries: archives.flatMap((archive) => archive.turns.map((turn) => {
+      const file = `${traceArchiveTurnKey(turn)}.json`
+      const path = join(traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId), file)
+      const stat = lstatSync(path)
+      const entry = {
+        file,
+        runId: turn.runId,
+        ts: turn.ts,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ctimeMs: stat.ctimeMs,
+        ino: stat.ino,
+        metadata: archiveTurnMetadata(turn)
+      }
+      writeTraceArchiveMetadataSidecar(args, entry)
+      return entry
+    })).sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
   }
 }
 
@@ -941,6 +1080,69 @@ function writeTraceArchiveIndex(args: {
   )
 }
 
+function writeTraceArchiveMetadataSidecar(args: {
+  userDataDir: string
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+}, entry: TraceArchiveIndexEntry): void {
+  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  writeOwnedFileAtomically(args.userDataDir, traceArchiveMetadataPath(dir, entry.file), `${JSON.stringify(entry)}\n`)
+}
+
+async function writeTraceArchiveMetadataSidecarAsync(args: {
+  userDataDir: string
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+}, entry: TraceArchiveIndexEntry): Promise<void> {
+  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  await writeOwnedFileAtomicallyAsync(args.userDataDir, traceArchiveMetadataPath(dir, entry.file), `${JSON.stringify(entry)}\n`)
+}
+
+async function readSegmentedMetadataIndexAsync(args: {
+  userDataDir: string
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+}, signal?: AbortSignal): Promise<TraceArchiveIndex | null> {
+  signal?.throwIfAborted()
+  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  try {
+    trustedOwnedParent(args.userDataDir, join(dir, '.identity'), false)
+    const directoryStat = await lstat(dir)
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return null
+    const directory = archiveDirectoryStamp(directoryStat)
+    const names = (await readdir(dir)).filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
+    // metadata sidecars are disposable; canonical files remain authoritative
+    const entries: TraceArchiveIndexEntry[] = []
+    for (const file of names) {
+      signal?.throwIfAborted()
+      const segmentPath = join(dir, file)
+      const metadataPath = traceArchiveMetadataPath(dir, file)
+      const [segmentStat, metadataStat] = await Promise.all([lstat(segmentPath), lstat(metadataPath)])
+      if (!segmentStat.isFile() || segmentStat.isSymbolicLink() || !metadataStat.isFile() || metadataStat.isSymbolicLink() ||
+          metadataStat.size <= 0 || metadataStat.size > TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES) return null
+      const value = JSON.parse(await readFile(metadataPath, { encoding: 'utf8', signal })) as TraceArchiveIndexEntry
+      if (!value || value.file !== file || !isTraceArchiveIndex({
+        version: 2,
+        cwd: args.cwd,
+        sessionId: args.sessionId,
+        providerId: args.providerId,
+        directory,
+        entries: [value]
+      }, args) || !sameArchiveSegmentStamp(value, segmentStat)) return null
+      entries.push(value)
+    }
+    return { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory,
+      entries: entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file)) }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    if (signal?.aborted) throw signal.reason
+    return null
+  }
+}
+
 async function readValidTraceArchiveIndex(args: {
   userDataDir: string
   cwd: string
@@ -957,73 +1159,17 @@ async function readValidTraceArchiveIndex(args: {
         indexStat.size > TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES || !directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return null
     const value: unknown = JSON.parse(await readFile(path, { encoding: 'utf8', signal }))
     if (!isTraceArchiveIndex(value, args)) return null
-    return sameArchiveDirectoryStamp(value.directory, archiveDirectoryStamp(directoryStat)) ? value : null
+    if (!sameArchiveDirectoryStamp(value.directory, archiveDirectoryStamp(directoryStat))) return null
+    if (value.version === 2) {
+      for (const entry of value.entries) {
+        const stat = await lstat(join(dir, entry.file))
+        if (!stat.isFile() || stat.isSymbolicLink() || !sameArchiveSegmentStamp(entry, stat)) return null
+      }
+    }
+    return value
   } catch (error) {
     if (signal?.aborted) throw signal.reason
     return null
-  }
-}
-
-function readValidTraceArchiveIndexSync(args: {
-  userDataDir: string
-  cwd: string
-  sessionId: string
-  providerId: ProviderId
-}): TraceArchiveIndex | null {
-  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
-  try {
-    trustedOwnedParent(args.userDataDir, join(dir, '.identity'), false)
-    const path = traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
-    const indexStat = lstatSync(path)
-    const directoryStat = lstatSync(dir)
-    if (!indexStat.isFile() || indexStat.isSymbolicLink() || indexStat.size <= 0 ||
-        indexStat.size > TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES || !directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return null
-    const value: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    if (!isTraceArchiveIndex(value, args)) return null
-    return sameArchiveDirectoryStamp(value.directory, archiveDirectoryStamp(directoryStat)) ? value : null
-  } catch {
-    return null
-  }
-}
-
-function updateTraceArchivePageIndexAfterWrite(args: {
-  userDataDir: string
-  cwd: string
-  sessionId: string
-  providerId: ProviderId
-}, previous: TraceArchiveIndex | null, turn: TraceArchiveTurn): void {
-  if (!previous) {
-    invalidateTraceArchiveIndex(args)
-    return
-  }
-  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
-  const directoryStat = lstatSync(dir)
-  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error('trace archive directory is invalid')
-  const file = `${traceArchiveTurnKey(turn)}.json`
-  const entries = previous.entries.filter((entry) => entry.file !== file)
-  entries.push({ file, runId: turn.runId, ts: turn.ts })
-  entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file))
-  writeTraceArchiveIndex(args, {
-    ...previous,
-    directory: archiveDirectoryStamp(directoryStat),
-    entries
-  })
-}
-
-function invalidateTraceArchiveIndex(args: {
-  userDataDir: string
-  cwd: string
-  sessionId: string
-  providerId: ProviderId
-}): void {
-  const path = traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
-  for (const candidate of [path, `${path}.tmp`]) {
-    try {
-      trustedOwnedParent(args.userDataDir, candidate, false)
-      unlinkSync(candidate)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
   }
 }
 
@@ -1176,6 +1322,114 @@ export function readTraceArchive(args: {
   return mergeArchives(archiveCandidates(args))
 }
 
+async function traceArchiveIndexVersionAsync(args: {
+  userDataDir: string
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+}): Promise<1 | 2 | null> {
+  try {
+    const path = traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+    const stat = await lstat(path)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES) return null
+    const value = JSON.parse(await readFile(path, 'utf8')) as { version?: unknown; entries?: unknown }
+    if (!Array.isArray(value.entries) || value.entries.length > TRACE_ARCHIVE_PAGE_INDEX_MAX_ENTRIES) return null
+    return value.version === 1 || value.version === 2 ? value.version : null
+  } catch { return null }
+}
+
+async function upgradeTraceArchiveIndexAsync(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+}, index: TraceArchiveIndex | null, signal?: AbortSignal): Promise<TraceArchiveIndex | null> {
+  if (!index || index.version !== 1) return index
+  const inspected = await inspectSegmentedArchivesAsync(args, signal)
+  if (inspected.invalid.length > 0) return null
+  try {
+    const directory = archiveDirectoryStamp(await lstat(traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)))
+    const upgraded = archiveIndexFromArchives(args, directory, inspected.valid)
+    writeTraceArchiveIndex(args, upgraded)
+    return upgraded
+  } catch {
+    return null
+  }
+}
+
+export async function readTraceArchiveMetadataAsync(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+}, signal?: AbortSignal): Promise<TraceArchive | null> {
+  const monolith = await inspectArchiveFileAsync(
+    args.userDataDir,
+    traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
+    args.cwd,
+    args.sessionId,
+    args.providerId,
+    signal
+  )
+  // A segmented index cannot describe monolithic coverage. Force the caller's
+  // complete-reader fallback instead of exposing synthetic metadata markers.
+  if (monolith.status === 'valid') return null
+  const [validIndex, storedVersion] = await Promise.all([
+    readValidTraceArchiveIndex(args, signal),
+    traceArchiveIndexVersionAsync(args)
+  ])
+  const indexed = validIndex ?? await readSegmentedMetadataIndexAsync(args, signal)
+  const index = await upgradeTraceArchiveIndexAsync(args, indexed, signal)
+  if (index?.version === 2 && storedVersion === 1 && (!validIndex || validIndex.version === 1)) writeTraceArchiveIndex(args, index)
+  if (!index || index.version !== 2) return null
+  signal?.throwIfAborted()
+  return {
+    version: 3,
+    cwd: args.cwd,
+    sessionId: args.sessionId,
+    externalSessionId: args.sessionId,
+    providerId: args.providerId,
+    turns: index.entries.map((entry) => archiveMetadataTurn(entry)).filter((turn): turn is TraceArchiveTurn => turn != null)
+  }
+}
+
+export async function readTraceArchiveTurnsAsync(args: {
+  cwd: string
+  sessionId: string
+  userDataDir: string
+  providerId: ProviderId
+}, runIds: readonly string[], signal?: AbortSignal): Promise<TraceArchiveTurn[]> {
+  signal?.throwIfAborted()
+  if (runIds.length === 0) return []
+  const monolith = await inspectArchiveFileAsync(
+    args.userDataDir,
+    traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
+    args.cwd,
+    args.sessionId,
+    args.providerId,
+    signal
+  )
+  if (monolith.status === 'valid') return monolith.archive.turns.filter((turn) => runIds.includes(turn.runId))
+  const indexed = await readValidTraceArchiveIndex(args, signal) ?? await readSegmentedMetadataIndexAsync(args, signal)
+  const index = await upgradeTraceArchiveIndexAsync(args, indexed, signal)
+  if (!index || index.version !== 2) {
+    const archive = await readTraceArchiveAsync(args, signal)
+    return (archive?.turns ?? []).filter((turn) => runIds.includes(turn.runId))
+  }
+  const wanted = new Set(runIds)
+  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  const turns: TraceArchiveTurn[] = []
+  for (const entry of index.entries) {
+    if (!wanted.has(entry.runId)) continue
+    const inspected = await inspectArchiveFileAsync(args.userDataDir, join(dir, entry.file), args.cwd, args.sessionId, args.providerId, signal)
+    if (inspected.status !== 'valid' || inspected.archive.turns.length !== 1 || inspected.archive.turns[0].runId !== entry.runId) {
+      throw new Error('trace archive index entry changed or is corrupt')
+    }
+    turns.push(inspected.archive.turns[0])
+  }
+  return turns
+}
+
 export async function readTraceArchiveAsync(args: {
   cwd: string
   sessionId: string
@@ -1268,6 +1522,9 @@ export async function readTraceArchiveVersionAsync(
 
 export interface TraceArchivePage {
   archive: TraceArchive | null
+  /** False means the page is a degraded projection of surviving canonical segments. */
+  sourceComplete: boolean
+  sourceIssue?: string
   offset: number
   totalTurns: number
   hasOlder: boolean
@@ -1325,13 +1582,17 @@ export async function readTraceArchivePageAsync(
       totalTurns,
       hasOlder: offset > 0,
       turnFilesRead: totalTurns,
-      readMode: 'monolithic'
+      readMode: 'monolithic',
+      sourceComplete: true
     }
   }
 
   const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   let index = await readValidTraceArchiveIndex(args, signal)
-  if (!index) {
+  const indexFileExists = trustedOwnedFile(args.userDataDir, traceArchiveIndexPath(args.userDataDir, args.cwd, args.sessionId, args.providerId))
+  const storedIndexVersion = await traceArchiveIndexVersionAsync(args)
+  if (!index && indexFileExists && storedIndexVersion === 2) index = await readSegmentedMetadataIndexAsync(args, signal)
+  if (!index || index.version !== 2) {
     let before: TraceArchiveDirectoryStamp | null = null
     try { before = archiveDirectoryStamp(await lstat(dir)) } catch { /* inspection below owns absence/corruption semantics */ }
     const inspected = await inspectSegmentedArchivesAsync(args, signal)
@@ -1339,7 +1600,7 @@ export async function readTraceArchivePageAsync(
     try {
       const after = archiveDirectoryStamp(await lstat(dir))
       const rebuilt = archiveIndexFromArchives(args, after, inspected.valid)
-      if (before && sameArchiveDirectoryStamp(before, after) && inspected.invalid.length === 0 && rebuilt.entries.length > 0) {
+      if (before && sameArchiveDirectoryStamp(before, after) && inspected.invalid.length === 0) {
         writeTraceArchiveIndex(args, rebuilt)
       }
     } catch {
@@ -1356,15 +1617,22 @@ export async function readTraceArchivePageAsync(
       totalTurns,
       hasOlder: offset > 0,
       turnFilesRead: inspected.valid.length,
-      readMode: 'index_rebuild'
+      readMode: 'index_rebuild',
+      sourceComplete: inspected.invalid.length === 0,
+      sourceIssue: inspected.invalid.length ? `${inspected.invalid.length} canonical archive segment(s) unavailable` : undefined
     }
   }
 
   const { offset, end, totalTurns } = traceArchivePageBounds(index.entries.length, request)
   const selected = index.entries.slice(offset, end)
   const archives = await Promise.all(selected.map(async (entry) => {
+    const segmentPath = join(dir, entry.file)
+    let segmentStat
+    try { segmentStat = await lstat(segmentPath) } catch { return null }
+    if (entry.size == null || entry.mtimeMs == null || entry.ctimeMs == null || entry.ino == null ||
+        segmentStat.size !== entry.size || segmentStat.mtimeMs !== entry.mtimeMs || segmentStat.ctimeMs !== entry.ctimeMs || segmentStat.ino !== entry.ino) return null
     const inspected = await inspectArchiveFileAsync(
-      args.userDataDir, join(dir, entry.file), args.cwd, args.sessionId, args.providerId, signal
+      args.userDataDir, segmentPath, args.cwd, args.sessionId, args.providerId, signal
     )
     if (inspected.status !== 'valid' || inspected.archive.turns.length !== 1) return null
     const turn = inspected.archive.turns[0]
@@ -1383,7 +1651,9 @@ export async function readTraceArchivePageAsync(
       totalTurns: rebuiltTotal,
       hasOlder: rebuiltOffset > 0,
       turnFilesRead: rebuilt.valid.length,
-      readMode: 'index_rebuild'
+      readMode: 'index_rebuild',
+      sourceComplete: rebuilt.invalid.length === 0,
+      sourceIssue: rebuilt.invalid.length ? `${rebuilt.invalid.length} canonical archive segment(s) unavailable` : undefined
     }
   }
   return {
@@ -1392,7 +1662,8 @@ export async function readTraceArchivePageAsync(
     totalTurns,
     hasOlder: offset > 0,
     turnFilesRead: selected.length,
-    readMode: 'indexed'
+    readMode: 'indexed',
+    sourceComplete: true
   }
 }
 
@@ -1526,6 +1797,10 @@ export function upsertTraceArchiveTurn(args: {
     const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
     turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
   } catch { return false }
+  // Managed commit retries can present the same immutable turn more than once. Avoid touching
+  // the canonical segment and its growing page index when the durable body is unchanged.
+  if (existing.status === 'valid' && existing.archive.turns.length === 1 &&
+      JSON.stringify(existing.archive.turns[0]) === JSON.stringify(turn)) return true
   const archive: TraceArchive = {
     version: 3,
     cwd: args.cwd,
@@ -1541,20 +1816,77 @@ export function upsertTraceArchiveTurn(args: {
     sessionId: args.sessionId,
     providerId
   }
-  const previousPageIndex = readValidTraceArchiveIndexSync(indexArgs)
   try {
     markTraceArchiveCatalogIndexDirty(args.userDataDir)
     writeOwnedFileAtomically(args.userDataDir, fp, `${JSON.stringify(archive)}\n`)
-    try {
-      updateTraceArchivePageIndexAfterWrite(indexArgs, previousPageIndex, turn)
-    } catch {
-      // The per-session page index is only a performance hint; page reads rebuild it from canonical turn files.
-      try { invalidateTraceArchiveIndex(indexArgs) } catch { /* canonical turn is already durable */ }
-    }
+    const stat = lstatSync(fp)
+    writeTraceArchiveMetadataSidecar(indexArgs, {
+      file: `${traceArchiveTurnKey(turn)}.json`,
+      runId: turn.runId,
+      ts: turn.ts,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ctimeMs: stat.ctimeMs,
+      ino: stat.ino,
+      metadata: archiveTurnMetadata(turn)
+    })
     return true
   } catch {
     return false
   }
+}
+
+export async function upsertTraceArchiveTurnAsync(args: {
+  cwd: string
+  sessionId: string
+  providerId?: ProviderId
+  runtimeProvider?: RuntimeProvider
+  userDataDir: string
+  turn: Omit<TraceArchiveTurn, 'ts'> & { ts?: number }
+}): Promise<boolean> {
+  if (!args.sessionId) return false
+  const providerId = args.providerId ?? 'claude'
+  let turn: TraceArchiveTurn = {
+    ...args.turn,
+    attachments: args.turn.attachments?.map((attachment) =>
+      'storage' in attachment
+        ? attachment
+        : storeAttachmentReference(args.userDataDir, args.turn.runId, attachment as AgentInputAttachment)
+    ),
+    items: args.turn.items,
+    ts: args.turn.ts ?? Date.now()
+  }
+  const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
+  const existing = await inspectArchiveFileAsync(args.userDataDir, fp, args.cwd, args.sessionId, providerId)
+  if (existing.status === 'invalid') return false
+  if (existing.status === 'valid' && (existing.archive.turns.length !== 1 ||
+      traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, existing.archive.turns[0]) !== fp)) return false
+  try {
+    const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
+    turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
+  } catch { return false }
+  if (existing.status === 'valid' && JSON.stringify(existing.archive.turns[0]) === JSON.stringify(turn)) return true
+  const archive: TraceArchive = {
+    version: 3,
+    cwd: args.cwd,
+    sessionId: args.sessionId,
+    externalSessionId: args.sessionId,
+    providerId,
+    runtimeProvider: args.runtimeProvider ?? (existing.status === 'valid' ? existing.archive.runtimeProvider : undefined),
+    turns: [turn]
+  }
+  const indexArgs = { userDataDir: args.userDataDir, cwd: args.cwd, sessionId: args.sessionId, providerId }
+  try {
+    await markTraceArchiveCatalogIndexDirtyAsync(args.userDataDir)
+    await writeOwnedFileAtomicallyAsync(args.userDataDir, fp, `${JSON.stringify(archive)}\n`)
+    const stat = await lstat(fp)
+    await writeTraceArchiveMetadataSidecarAsync(indexArgs, {
+      file: `${traceArchiveTurnKey(turn)}.json`, runId: turn.runId, ts: turn.ts,
+      size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino,
+      metadata: archiveTurnMetadata(turn)
+    })
+    return true
+  } catch { return false }
 }
 
 export function resolveTranscriptPath(args: {
@@ -1742,12 +2074,12 @@ export function deleteTranscriptCopies(args: {
   if (segmentTemps.error) failed.push(segmentTemps.error)
   for (const invalid of segmented.invalid) {
     failed.push(invalid)
-    if (/\/turn-[a-f0-9]{64}\.json$/.test(invalid.path)) exactTargets.push(invalid.path, `${invalid.path}.tmp`)
+    if (/\/turn-[a-f0-9]{64}\.json$/.test(invalid.path)) exactTargets.push(invalid.path, `${invalid.path}.tmp`, traceArchiveMetadataPath(dirname(invalid.path), basename(invalid.path)), `${traceArchiveMetadataPath(dirname(invalid.path), basename(invalid.path))}.tmp`)
   }
   for (const archive of segmented.valid) {
     const turn = archive.turns[0]
     const path = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
-    exactTargets.push(path, `${path}.tmp`)
+    exactTargets.push(path, `${path}.tmp`, traceArchiveMetadataPath(dirname(path), basename(path)), `${traceArchiveMetadataPath(dirname(path), basename(path))}.tmp`)
   }
   markTraceArchiveCatalogIndexDirty(args.userDataDir)
   for (const fp of [...new Set(exactTargets)]) {
