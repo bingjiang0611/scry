@@ -16,6 +16,7 @@ export function createProviderDiscovery(options: {
   controls: (context: ProviderContext) => Promise<CapabilityEnvelope<AgentRunControlCatalog>>
   defaultWorkspace: () => string | undefined
   permissionOverride: () => AgentPermissionMode | undefined
+  supportsForkSession?: (providerId: ProviderId) => boolean
   onError: (error: unknown) => void
   now?: () => number
 }) {
@@ -25,6 +26,7 @@ export function createProviderDiscovery(options: {
   let metadataInvalidation = 0
   const contextRevisions = new Map<ProviderId, number>()
   const pending = new Map<string, { revision: number; request: Promise<RemoteProviderRef> }>()
+  const forkSession = (providerId: ProviderId): boolean => options.supportsForkSession?.(providerId) === true
 
   const contexts = async () => {
     const descriptors = await options.descriptors()
@@ -42,7 +44,7 @@ export function createProviderDiscovery(options: {
       if (startedInvalidation !== metadataInvalidation) return
       const observedAt = now()
       metadataRevision += 1
-      metadata = entries.map((context) => ({ ...remoteProviderMetadata(context), observedAt, metadataRevision }))
+      metadata = entries.map((context) => ({ ...remoteProviderMetadata({ ...context, forkSession: forkSession(context.descriptor.id) }), observedAt, metadataRevision }))
     } catch (error) {
       // Metadata is an observational snapshot, not execution authority. Retain its
       // last value while a selected request still performs fresh validation.
@@ -73,12 +75,12 @@ export function createProviderDiscovery(options: {
       try {
         const controls = await options.controls({ providerId: descriptor.id, cwd, ...(profile ? { agentProfileId: profile.id } : {}) })
         if ((contextRevisions.get(descriptor.id) ?? 0) !== revision) {
-          return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false, observedAt: now() }
+          return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}), forkSession: forkSession(descriptor.id) }), available: false, observedAt: now() }
         }
-        return { ...remoteProviderEntry({ descriptor, ...(profile ? { profile } : {}), controls, previous: [], permissionOverride }), observedAt: now() }
+        return { ...remoteProviderEntry({ descriptor, ...(profile ? { profile } : {}), controls, previous: [], permissionOverride, forkSession: forkSession(descriptor.id) }), observedAt: now() }
       } catch (error) {
         options.onError(error)
-        return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) }), available: false, observedAt: now() }
+        return { ...remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}), forkSession: forkSession(descriptor.id) }), available: false, observedAt: now() }
       }
     }).finally(() => { if (pending.get(key)?.request === request) pending.delete(key) })
     pending.set(key, { revision, request })
@@ -91,7 +93,7 @@ export function createProviderDiscovery(options: {
     const cwd = options.defaultWorkspace()
     const entries = await contexts()
     return Promise.all(entries.map(async ({ descriptor, profile }) => {
-      if (!descriptor.available || !cwd) return remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}) })
+      if (!descriptor.available || !cwd) return remoteProviderMetadata({ descriptor, ...(profile ? { profile } : {}), forkSession: forkSession(descriptor.id) })
       return selected({ detail: 'selected', providerId: descriptor.id, cwd, ...(profile ? { agentProfileId: profile.id } : {}) })
     }))
   }, { ttlMs: 60_000, now: options.now })

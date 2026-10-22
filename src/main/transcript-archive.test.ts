@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   archivedTranscriptPath,
   cleanupTraceArchiveTemps,
@@ -352,6 +352,53 @@ describe('transcript archive mirror', () => {
     const removed = traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'one' })
     unlinkSync(removed)
     await expect(readTraceArchivePageAsync(args, { limit: 2 })).resolves.toMatchObject({ sourceComplete: false, totalTurns: 1, archive: { turns: [{ runId: 'two' }] } })
+  })
+
+  it('rejects strict indexed reads when a canonical segment outside the page is corrupt', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/strict-corrupt', sessionId: 'strict-corrupt', providerId: 'pi' as const, userDataDir }
+    for (const [runId, ts] of [['old', 1], ['new', 2]] as const) {
+      expect(upsertTraceArchiveTurn({ ...args, turn: { runId, userText: runId, agentProfileId: 'profile', items: [], done: true, ts } })).toBe(true)
+    }
+    await readTraceArchivePageAsync(args, { limit: 1 })
+    writeFileSync(traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'old' }), '{corrupt')
+    await expect(readTraceArchivePageAsync(args, { agentProfileId: 'profile', limit: 1 })).rejects.toMatchObject({ code: 'history_profile_unavailable' })
+    await expect(readTraceArchivePageAsync(args, { requireComplete: true, limit: 1 })).rejects.toMatchObject({ code: 'history_profile_unavailable' })
+  })
+
+  it('rebuilds unmarked v2 profile metadata from canonical turns before strict filtering', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/legacy-profile-index', sessionId: 'legacy-profile-index', providerId: 'codex' as const, userDataDir }
+    for (const [runId, agentProfileId, ts] of [['named', 'profile-a', 1], ['default', null, 2]] as const) {
+      expect(upsertTraceArchiveTurn({ ...args, turn: { runId, userText: runId, ...(agentProfileId === null ? { agentProfileId: null } : { agentProfileId }), items: [], done: true, ts } })).toBe(true)
+    }
+    await readTraceArchivePageAsync(args, { limit: 2 })
+    const segmentDir = dirname(traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'named' }))
+    const indexPath = `${segmentDir}.index-v1.json`
+    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as { profileMetadataVersion?: number; entries: Array<{ profileMetadataVersion?: number }> }
+    delete index.profileMetadataVersion
+    for (const entry of index.entries) delete entry.profileMetadataVersion
+    writeFileSync(indexPath, JSON.stringify(index))
+    const metadataDir = join(userDataDir, 'trace-archive-metadata-v1', 'codex', basename(dirname(segmentDir)), basename(segmentDir))
+    for (const name of readdirSync(metadataDir)) {
+      const path = join(metadataDir, name)
+      const entry = JSON.parse(readFileSync(path, 'utf8')) as { profileMetadataVersion?: number }
+      delete entry.profileMetadataVersion
+      writeFileSync(path, JSON.stringify(entry))
+    }
+    await expect(readTraceArchivePageAsync(args, { agentProfileId: 'profile-a', limit: 2 })).resolves.toMatchObject({ totalTurns: 1, archive: { turns: [{ runId: 'named' }] } })
+    await expect(readTraceArchivePageAsync(args, { agentProfileId: null, limit: 2 })).resolves.toMatchObject({ totalTurns: 1, archive: { turns: [{ runId: 'default' }] } })
+  })
+
+  it('does not make genuinely unknown canonical profile provenance selectable', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/unknown-profile', sessionId: 'unknown-profile', providerId: 'codex' as const, userDataDir }
+    expect(upsertTraceArchiveTurn({ ...args, turn: { runId: 'unknown', userText: 'unknown', items: [], done: true, ts: 1 } })).toBe(true)
+    await readTraceArchivePageAsync(args, { limit: 1 })
+    await expect(readTraceArchivePageAsync(args, { agentProfileId: 'profile-a', limit: 1 })).rejects.toMatchObject({ code: 'history_profile_unavailable' })
   })
 
   it('async turn writer updates one canonical body and one metadata sidecar without rebuilding the page index', async () => {

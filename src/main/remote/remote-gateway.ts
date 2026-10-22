@@ -577,6 +577,7 @@ export class RemoteGateway {
         label: entry.label.slice(0, 128),
         available: entry.available === true,
         ...(agentProfileId ? { agentProfileId } : {}),
+        ...(entry.forkSession === true ? { forkSession: true as const } : {}),
         ...(isRemoteProviderObservationTime(entry.observedAt) ? { observedAt: entry.observedAt } : {}),
         ...(typeof entry.metadataRevision === 'number' && Number.isSafeInteger(entry.metadataRevision) && entry.metadataRevision >= 0 ? { metadataRevision: entry.metadataRevision } : {})
       })
@@ -631,6 +632,7 @@ export class RemoteGateway {
       label: entry.label.slice(0, 128),
       available: entry.available === true,
       ...(agentProfileId ? { agentProfileId } : {}),
+      ...(entry.forkSession === true ? { forkSession: true as const } : {}),
       ...(typeof entry.modelId === 'string' && entry.modelId.length > 0 && entry.modelId.length <= 128 ? { modelId: entry.modelId } : {}),
       ...(models.length > 0 ? { models } : {}),
       ...(efforts.length > 0 ? { efforts } : {}),

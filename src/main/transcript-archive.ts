@@ -493,8 +493,11 @@ const TRACE_ARCHIVE_PAGE_INDEX_MAX_ENTRIES = 100_000
 const TRACE_ARCHIVE_TURN_FILE = /^turn-[a-f0-9]{64}\.json$/
 const TRACE_ARCHIVE_TEMP_FILE = /^turn-[a-f0-9]{64}\.json\.tmp$/
 const TRACE_ARCHIVE_METADATA_TEMP_FILE = /^turn-[a-f0-9]{64}\.meta-v1\.json\.tmp$/
+const TRACE_ARCHIVE_PROFILE_METADATA_VERSION = 1 as const
 
 interface TraceArchiveIndexEntry {
+  /** Distinguishes profile-aware metadata from pre-profile v2 sidecars. */
+  profileMetadataVersion?: 1
   agentProfileId?: string | null
   file: string
   runId: string
@@ -525,6 +528,8 @@ interface TraceArchiveDirectoryStamp {
 
 interface TraceArchiveIndex {
   version: 1 | 2
+  /** Present on every new v2 base/delta index; absent means legacy profile provenance. */
+  profileMetadataVersion?: 1
   sourceComplete?: boolean
   sourceIssue?: string
   cwd: string
@@ -972,6 +977,7 @@ function isTraceArchiveIndex(value: unknown, args: {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const index = value as Partial<TraceArchiveIndex>
   if ((index.version !== 1 && index.version !== 2) || index.cwd !== args.cwd || index.sessionId !== args.sessionId || index.providerId !== args.providerId ||
+      (index.version === 2 && index.profileMetadataVersion !== TRACE_ARCHIVE_PROFILE_METADATA_VERSION) ||
       !index.directory || typeof index.directory.mtimeMs !== 'number' || !Number.isFinite(index.directory.mtimeMs) ||
       typeof index.directory.ctimeMs !== 'number' || !Number.isFinite(index.directory.ctimeMs) ||
       typeof index.directory.ino !== 'number' || !Number.isFinite(index.directory.ino) || !Array.isArray(index.entries) ||
@@ -980,6 +986,7 @@ function isTraceArchiveIndex(value: unknown, args: {
   return index.entries.every((entry) => {
     if (!entry || typeof entry !== 'object' || !TRACE_ARCHIVE_TURN_FILE.test(entry.file) ||
         typeof entry.runId !== 'string' || !entry.runId || typeof entry.ts !== 'number' || !Number.isFinite(entry.ts) ||
+        (index.version === 2 && entry.profileMetadataVersion !== TRACE_ARCHIVE_PROFILE_METADATA_VERSION) ||
         files.has(entry.file) || (entry.agentProfileId !== undefined && entry.agentProfileId !== null &&
           (typeof entry.agentProfileId !== 'string' || !entry.agentProfileId))) return false
     files.add(entry.file)
@@ -1089,6 +1096,7 @@ async function archiveIndexFromArchives(
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('trace archive segment is not a trusted regular file')
       return {
         file,
+        profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION,
         ...(turn.agentProfileId !== undefined ? { agentProfileId: turn.agentProfileId } : {}),
         runId: turn.runId,
         ts: turn.ts,
@@ -1101,7 +1109,15 @@ async function archiveIndexFromArchives(
     }))
     entries.push(...batch)
   }
-  return { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory, entries }
+  return {
+    version: 2,
+    profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION,
+    cwd: args.cwd,
+    sessionId: args.sessionId,
+    providerId: args.providerId,
+    directory,
+    entries
+  }
 }
 
 async function writeTraceArchiveIndex(args: {
@@ -1182,7 +1198,7 @@ async function readSegmentedMetadataIndexAsync(args: {
     }
     const after = archiveDirectoryStamp(await lstat(dir))
     if (!sameArchiveDirectoryStamp(directory, after)) return null
-    const index: TraceArchiveIndex = { version: 2, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory,
+    const index: TraceArchiveIndex = { version: 2, profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, directory,
       sourceComplete: metadataCoverageComplete,
       sourceIssue: metadataCoverageComplete ? undefined : 'canonical archive segment coverage changed',
       entries: entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file)) }
@@ -1298,10 +1314,11 @@ async function readValidTraceArchiveIndex(args: {
         invalidCount++
         continue
       }
-      entries.push({ file, ...(turn.agentProfileId !== undefined ? { agentProfileId: turn.agentProfileId } : {}), runId: turn.runId, ts: turn.ts, size: finalStat.size, mtimeMs: finalStat.mtimeMs, ctimeMs: finalStat.ctimeMs, ino: finalStat.ino, metadata: archiveTurnMetadata(turn) })
+      entries.push({ file, profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION, ...(turn.agentProfileId !== undefined ? { agentProfileId: turn.agentProfileId } : {}), runId: turn.runId, ts: turn.ts, size: finalStat.size, mtimeMs: finalStat.mtimeMs, ctimeMs: finalStat.ctimeMs, ino: finalStat.ino, metadata: archiveTurnMetadata(turn) })
     }
     return {
       version: 2,
+      profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION,
       cwd: args.cwd,
       sessionId: args.sessionId,
       providerId: args.providerId,
@@ -1771,6 +1788,15 @@ export async function readTraceArchivePageAsync(
     const storedIndexVersion = await traceArchiveIndexVersionAsync(args)
     if (!indexFileExists || storedIndexVersion === 2) index = await readSegmentedMetadataIndexAsync(args, signal)
   }
+  if (strictStorage && index?.version === 2 && index.sourceComplete === false) {
+    throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+  }
+  if (strictStorage && index?.version === 2) {
+    const inspected = await inspectSegmentedArchivesAsync(args, signal)
+    if (inspected.invalid.length) {
+      throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
+    }
+  }
   if (!index || index.version !== 2) {
     let before: TraceArchiveDirectoryStamp | null = null
     try { before = archiveDirectoryStamp(await lstat(dir)) } catch { /* inspection below owns absence/corruption semantics */ }
@@ -2023,6 +2049,7 @@ export function upsertTraceArchiveTurn(args: {
     const stat = lstatSync(fp)
     writeTraceArchiveMetadataSidecar(indexArgs, {
       file: `${traceArchiveTurnKey(turn)}.json`,
+      profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION,
       runId: turn.runId,
       ts: turn.ts,
       size: stat.size,
@@ -2069,7 +2096,7 @@ export async function upsertTraceArchiveTurnAsync(args: {
     await writeOwnedFileAtomicallyAsync(args.userDataDir, fp, `${JSON.stringify(archive)}\n`)
     const stat = await lstat(fp)
     await writeTraceArchiveMetadataSidecarAsync(indexArgs, {
-      file: `${traceArchiveTurnKey(turn)}.json`, runId: turn.runId, ts: turn.ts,
+      file: `${traceArchiveTurnKey(turn)}.json`, profileMetadataVersion: TRACE_ARCHIVE_PROFILE_METADATA_VERSION, runId: turn.runId, ts: turn.ts,
       size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino,
       ...(turn.agentProfileId !== undefined ? { agentProfileId: turn.agentProfileId } : {}),
       metadata: archiveTurnMetadata(turn)

@@ -4970,6 +4970,7 @@ const remoteProviderDiscovery = createProviderDiscovery({
   controls: (context) => withProviderOperation(context.providerId, () => providerRegistry.runControls(context), context.agentProfileId),
   defaultWorkspace: () => remoteProjectRoots()[0],
   permissionOverride: configuredRemotePermissionMode,
+  supportsForkSession: (providerId) => providerRegistry.get(providerId).forkSession !== undefined,
   onError: (error) => console.warn('[scry] remote Provider discovery failed:', error)
 })
 

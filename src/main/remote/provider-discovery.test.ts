@@ -36,6 +36,16 @@ describe('selected Provider discovery production path', () => {
     expect(calls).toEqual([{ providerId: 'pi', agentProfileId: 'pi:fixture', cwd: '/workspace' }])
   })
 
+  it('preserves native fork support in metadata, selected, and legacy snapshots without probing metadata', async () => {
+    const { discovery, calls } = providerDiscoveryFixture({ supportsForkSession: (providerId) => providerId === 'pi' })
+    await discovery.refreshMetadata()
+    expect(discovery.metadata().find((row) => row.id === 'pi')).toMatchObject({ forkSession: true, observedAt: expect.any(Number), metadataRevision: 1 })
+    expect(discovery.metadata().find((row) => row.id === 'qoder')).not.toHaveProperty('forkSession')
+    expect(calls).toEqual([])
+    expect(await discovery.selected(pi)).toMatchObject({ forkSession: true })
+    expect((await discovery.legacy()).find((row) => row.id === 'pi')).toMatchObject({ forkSession: true })
+  })
+
   it('validates optional observation time without inventing a current timestamp', () => {
     expect(isRemoteProviderObservationTime(0)).toBe(true)
     expect(isRemoteProviderObservationTime(1700000000000)).toBe(true)

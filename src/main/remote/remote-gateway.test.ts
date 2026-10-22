@@ -306,6 +306,20 @@ describe('RemoteGateway', () => {
     expect(providers.some((p) => p.id === '')).toBe(false)
   })
 
+  it('preserves only the exact native fork capability through metadata and selected snapshots', async () => {
+    const { authority } = await grantedAuthority()
+    const selected = vi.fn(async () => ({ id: 'claude', label: 'Claude', available: true, forkSession: true as const }))
+    const gw = new RemoteGateway({ authority, ledger: new SessionLedger({ store: new MemoryLedgerStore() }), providers: {
+      list: () => [{ id: 'claude', label: 'Claude', available: true, forkSession: true as const },
+        { id: 'qoder', label: 'Qoder', available: true, forkSession: 'true' as unknown as true }],
+      selected,
+      listFull: async () => [{ id: 'claude', label: 'Claude', available: true, forkSession: true as const }]
+    }})
+    expect(gw.listProviders(CERT)).toEqual([{ id: 'claude', label: 'Claude', available: true, forkSession: true }, { id: 'qoder', label: 'Qoder', available: true }])
+    await expect(gw.listProviderControls(CERT, { detail: 'selected', providerId: 'claude', cwd: '/authorized' })).resolves.toMatchObject({ forkSession: true })
+    await expect(gw.listProvidersFull(CERT)).resolves.toEqual([{ id: 'claude', label: 'Claude', available: true, forkSession: true }])
+  })
+
   it('resolves controls only for the selected authorized context', async () => {
     const { authority } = await grantedAuthority()
     const selected = vi.fn(async (query: { detail: 'selected'; providerId: string; cwd: string; agentProfileId?: string }) => ({
