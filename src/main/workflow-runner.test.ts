@@ -99,6 +99,71 @@ describe('WorkflowRunner M0 scheduler', () => {
     expect(slots.active).toBe(0)
   })
 
+  it.each([
+    { output: '{"accepted":false}', state: 'completed', calls: 2 },
+    { output: '{}', state: 'failed', calls: 1 },
+    { output: '{"accepted":"false"}', state: 'failed', calls: 1 },
+    { output: '{"accepted":false,"extra":true}', state: 'failed', calls: 1 },
+    { output: '```json\n{"accepted":false}\n```', state: 'failed', calls: 1 },
+    { output: undefined, state: 'failed', calls: 1 }
+  ])('requires the frozen output schema before admitting a successor ($output)', async ({ output, state, calls }) => {
+    const store = new MemoryWorkflowStore()
+    const plan = structuredClone(preview)
+    plan.program.body = { kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'call', blockId: 'structured', role: 'worker', prompt: 'review',
+        outputSchema: { type: 'object', properties: { accepted: { type: 'boolean' } }, required: ['accepted'] } },
+      { kind: 'call', blockId: 'summary', role: 'reviewer', prompt: 'summarize', inputRefs: [{ nodeId: 'structured' }] },
+      { kind: 'return', blockId: 'final', ref: { nodeId: 'summary' } }
+    ] }
+    const execute = vi.fn((request: WorkflowProviderExecutionRequest) => ({
+      result: Promise.resolve({ runId: request.attemptId, status: 'completed' as const,
+        output: request.taskId.endsWith(':structured') ? output : 'verified summary', settled: true }),
+      stop: () => true
+    }))
+    const slots = new WorkflowSlots(1)
+    const runner = new WorkflowRunner({ store, slots, execute })
+    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    runner.approve(plan, approval)
+    const result = await runner.start(plan, approval)
+    expect(result.state).toBe(state)
+    expect(execute).toHaveBeenCalledTimes(calls)
+    expect(result.dispatchAttempts).toBe(calls)
+    expect(slots.active).toBe(0)
+    expect(execute.mock.calls[0][0].prompt).toContain('"required":["accepted"]')
+    const saved = await store.load(plan.workflowId)
+    if (state === 'completed') {
+      expect(execute.mock.calls[1][0].prompt).toContain('{"accepted":false}')
+      expect(result.finalReport).toBe('verified summary')
+    } else {
+      expect(result.finalReportStatus).toBe('unavailable')
+      expect(saved?.outcomes[0]).toMatchObject({ state: 'failed', settled: true })
+      expect(saved?.outcomes[0].error).toBeTruthy()
+      expect(saved?.outcomes[0].output).toBe(output)
+      expect(saved?.intents).toHaveLength(1)
+    }
+  })
+
+  it('does not turn an output-contract failure into proof of physical settlement', async () => {
+    const store = new MemoryWorkflowStore()
+    const plan = structuredClone(preview)
+    plan.program.body = { kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'call', blockId: 'structured', role: 'worker', prompt: 'review', outputSchema: { type: 'boolean' } },
+      { kind: 'return', blockId: 'final', ref: { nodeId: 'structured' } }
+    ] }
+    const slots = new WorkflowSlots(1)
+    const runner = new WorkflowRunner({ store, slots, execute: () => ({
+      result: Promise.resolve({ runId: 'unsettled', status: 'completed', output: 'not JSON', settled: false }),
+      stop: () => true
+    }) })
+    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    runner.approve(plan, approval)
+    const result = await runner.start(plan, approval)
+    expect(result.state).toBe('unknown')
+    expect(result.attempts[0]).toMatchObject({ state: 'failed', settled: false })
+    expect(slots.active).toBe(1)
+    expect(result.finalReportStatus).toBe('unavailable')
+  })
+
   it('publishes bounded live evidence through the canonical attempt observer without persisting it', async () => {
     const store = new MemoryWorkflowStore()
     const plan = structuredClone(preview)

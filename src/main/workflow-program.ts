@@ -12,6 +12,7 @@ import type {
   WorkflowOutputRef
 } from '../shared/workflow'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState } from '../shared/workflow'
+import { validateWorkflowValueSchema } from './workflow-values'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/
@@ -47,7 +48,8 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
     "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
     'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, and exactly one final return. Every node must include kind and a unique blockId.',
     'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
-    'A call is {kind:"call",blockId,role,prompt,inputRefs?}; role must be one of the configured roles. inputRefs may reference only an earlier committed call output by {nodeId}; never reference a parallel sibling or future node.',
+    'A call is {kind:"call",blockId,role,prompt,inputRefs?,outputSchema?}; role must be one of the configured roles. inputRefs may reference only an earlier committed call output by {nodeId}; never reference a parallel sibling or future node.',
+    'Optional outputSchema freezes a finite JSON data contract: {type:"string"|"number"|"boolean"|"null"}, {type:"enum",values:[scalar,...]}, {type:"array",items:schema,maxItems:0..4096}, or {type:"object",properties:{field:schema,...},required:[field,...]}. No extra schema keywords or executable validators. Omitted required means all declared fields. Invalid Provider output fails the call, never becomes a successful dependency. Schema depth is at most 16 and total schema nodes at most 256.',
     'The final root return is {kind:"return",blockId,ref:{nodeId:"..."}} and must reference one completed call output. No JavaScript, eval, imports, shell, command, path, loops, conditionals, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs.',
     `Never exceed ${WORKFLOW_MAX_ATTEMPTS} Agent calls. The following example illustrates grammar only; do not copy its tasks or role choices instead of planning the user's goal.`,
     `Grammar example: ${JSON.stringify({ schemaVersion: WORKFLOW_SCHEMA_VERSION, body: example })}`,
@@ -140,13 +142,15 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
   count.value += 1
   if (count.value > MAX_BLOCKS) throw new Error(`程序块数量不能超过 ${MAX_BLOCKS}`)
   if (input.kind === 'call') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'role', 'prompt', 'inputRefs'])
+    rejectUnknownFields(input, ['kind', 'blockId', 'role', 'prompt', 'inputRefs', 'outputSchema'])
     validateRole(input.role)
     assertText(input.prompt, 'Agent 调用提示', MAX_PROMPT_LENGTH)
-    count.textBytes += Buffer.byteLength(input.prompt)
+    const outputSchema = input.outputSchema === undefined ? undefined : validateWorkflowValueSchema(input.outputSchema)
+    count.textBytes += Buffer.byteLength(input.prompt) + (outputSchema ? Buffer.byteLength(JSON.stringify(outputSchema)) : 0)
     if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error('工作流程序文本超过 4 MiB 上限')
     const inputRefs = input.inputRefs === undefined ? undefined : validateRefs(input.inputRefs, '输入')
-    return { kind: 'call', blockId: input.blockId, role: input.role, prompt: input.prompt, ...(inputRefs ? { inputRefs } : {}) }
+    return { kind: 'call', blockId: input.blockId, role: input.role, prompt: input.prompt,
+      ...(inputRefs ? { inputRefs } : {}), ...(outputSchema ? { outputSchema } : {}) }
   }
   if (input.kind === 'return') {
     rejectUnknownFields(input, ['kind', 'blockId', 'value', 'ref'])

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { capabilityForRole, makePlanPreview, validateWorkflowProgram, workflowPlanningPrompt } from './workflow-program'
+import { capabilityForRole, makePlanPreview, validateWorkflowProgram, workflowPlanningPrompt, workflowRevision } from './workflow-program'
 import { WORKFLOW_SCHEMA_VERSION, parseWorkflowRunCommand } from '../shared/workflow'
 
 const role = { role: 'worker' as const, providerId: 'codex' as const, requestedModel: { id: 'fixture-model' } }
@@ -36,6 +36,32 @@ describe('WorkflowProgram M0 contract', () => {
     expect(parseWorkflowRunCommand('/scry-workflow run inspect the repo')).toEqual({ goal: 'inspect the repo' })
     expect(parseWorkflowRunCommand('/scry-workflow run')).toBeNull()
     expect(parseWorkflowRunCommand('/workflow run inspect')).toBeNull()
+  })
+
+  it('normalizes and freezes a declared structured output schema in the canonical program', () => {
+    const candidate = { ...program, body: { ...program.body, blocks: [
+      { ...program.body.blocks[0], outputSchema: { type: 'object', properties: { accepted: { type: 'boolean' } } } },
+      program.body.blocks[1]
+    ] } }
+    const validated = validateWorkflowProgram(candidate)
+    expect(validated.body).toMatchObject({ blocks: [{ outputSchema: { type: 'object', properties: { accepted: { type: 'boolean' } }, required: ['accepted'] } }, {}] })
+    const changed = validateWorkflowProgram({ ...candidate, body: { ...candidate.body, blocks: [
+      { ...candidate.body.blocks[0], outputSchema: { type: 'string' } }, candidate.body.blocks[1]
+    ] } })
+    const { programRevision: _before, ...before } = validated
+    const { programRevision: _after, ...after } = changed
+    expect(workflowRevision(before)).not.toBe(workflowRevision(after))
+    expect(JSON.stringify(candidate)).not.toContain('required')
+    expect(workflowPlanningPrompt([role], 'structured inspection')).toContain('outputSchema')
+  })
+
+  it('rejects schema execution hooks while allowing data fields named command or path', () => {
+    const schema = { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } } }
+    const withSchema = (outputSchema: unknown) => ({ ...program, body: { ...program.body, blocks: [
+      { ...program.body.blocks[0], outputSchema }, program.body.blocks[1]
+    ] } })
+    expect(() => validateWorkflowProgram(withSchema(schema))).not.toThrow()
+    expect(() => validateWorkflowProgram(withSchema({ ...schema, eval: 'process.exit(0)' }))).toThrow('eval')
   })
 
   it('rejects unsupported control blocks and duplicate ids', () => {

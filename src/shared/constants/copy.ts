@@ -36,6 +36,21 @@ export const workflowControlCopy = {
   invalidPlanningStopReceipt: '工作流规划停止收据合同无效'
 }
 
+export const workflowValueCopy = {
+  invalidSchema: '工作流结构化输出合同无效',
+  schemaLimit: '工作流数据合同超过深度或节点上限',
+  unsupportedField: (field: string) => `工作流数据合同字段不受支持：${field}`,
+  invalidRequired: '工作流必需字段必须存在于属性声明中且不能重复',
+  invalidArrayLimit: '工作流数组上限必须为 0–4096 的整数',
+  invalidEnum: '工作流枚举必须包含有限、不重复的标量值',
+  invalidOutput: 'Agent 未返回合同要求的完整 JSON 输出',
+  outputLimit: 'Agent 输出超过工作流 16384 字符上限',
+  valueMismatch: (path: string, expected: string) => `工作流输出 ${path} 不符合 ${expected} 合同`,
+  unexpectedProperty: (path: string) => `工作流输出包含未声明字段：${path}`,
+  missingProperty: (path: string) => `工作流输出缺少必需字段：${path}`,
+  structuredInstruction: 'Return only one complete JSON value matching this frozen data contract. Do not wrap it in Markdown or add commentary. Missing evidence must not be invented or replaced by zero/false. Contract:'
+}
+
 export const workflowShutdownCopy = {
   title: 'Scry',
   unconfirmed: '工作流尚未全部收敛，已阻止安全退出；请检查工作流状态并再次停止。',

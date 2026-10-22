@@ -5,6 +5,9 @@ export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
 export const WORKFLOW_MAX_ATTEMPTS = 1000
 export const WORKFLOW_MAX_STOP_REQUESTS = 256
+export const WORKFLOW_MAX_OUTPUT_LENGTH = 16 * 1024
+export const WORKFLOW_MAX_SCHEMA_DEPTH = 16
+export const WORKFLOW_MAX_SCHEMA_NODES = 256
 export const WORKFLOW_DEFAULT_SLOTS = 16
 export const WORKFLOW_MIN_SLOTS = 1
 export const WORKFLOW_MAX_SLOTS = 256
@@ -43,12 +46,23 @@ export interface WorkflowOutputRef {
   nodeId: string
 }
 
+export type WorkflowScalar = string | number | boolean | null
+export type WorkflowValue = WorkflowScalar | WorkflowValue[] | { [key: string]: WorkflowValue }
+
+/** Finite data contracts, never executable TypeScript/JSON-Schema extensions. */
+export type WorkflowValueSchema =
+  | { type: 'string' | 'number' | 'boolean' | 'null' }
+  | { type: 'enum'; values: WorkflowScalar[] }
+  | { type: 'array'; items: WorkflowValueSchema; maxItems: number }
+  | { type: 'object'; properties: Record<string, WorkflowValueSchema>; required: string[] }
+
 export interface WorkflowCallBlock {
   kind: 'call'
   blockId: string
   role: WorkflowRole
   prompt: string
   inputRefs?: WorkflowOutputRef[]
+  outputSchema?: WorkflowValueSchema
 }
 
 export interface WorkflowSequenceBlock {

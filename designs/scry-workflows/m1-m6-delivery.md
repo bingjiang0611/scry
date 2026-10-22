@@ -34,6 +34,14 @@
 | M2.7 | 个人/项目模板保存、草稿、修订、来源快照；手动编辑与 Agent 候选修改不直接覆盖 |
 | M2.8 | Agent 参数化不得携带私有运行状态，写入权限不会由生成程序自授 |
 
+### M2 当前已实施的数据合同基础（不是M2完成）
+
+- 首个M1缺陷已本地提交 `4abbd9d`；没有把读码或109测试升级为完整App验收。
+- 唯一WorkflowProgram增加可选call.outputSchema；编译器规范化并纳入修订/4MiB预算，Runner追加冻结格式要求，并在Native result后真实校验完整JSON。数据合同无效时记录failed且不推进后继；未settled作用域仍unknown并占容量，不退款。
+- 只支持有限类型/枚举/数组/对象，深度16/节点256、数组≤4096、复用原16,384字符输出上限；不执行schema扩展、截取JSON片段、类型强转或补零。null/false/0/显式unknown保持原样。具体已落地语法见 [program-ir.md](program-ir.md)。这是宿主类型校验，不是Provider原生强制JSON、工具禁用或内容真实性证明。
+- 新增22项回归，11文件131项Workflow测试、Node/web types、build通过；故意关闭运行时数据门后6项失败，恢复后35项相关测试通过。只读源码/命令证据 `~/.local/state/rotom/verification-evidence/workflow-m2-values-8k8viz79/`，不代表真实Provider/App验收。
+- M2剩余全部控制指令、typed表达式与作用域、路由/模板/发布仍未完成；下一步直接实现map/branch/loop及数据表达式，连同M3持久控制帧实现执行/恢复。M1生产App证明与其余目标继续保留，不用数据合同小交付替代。
+
 ## M3：持久解释器与恢复
 
 | ID | 完成要求 |

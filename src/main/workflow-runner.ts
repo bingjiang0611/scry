@@ -11,7 +11,8 @@ import type {
   WorkflowProgress,
   WorkflowRoleBinding
 } from '../shared/workflow'
-import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_STOP_REQUESTS, workflowSlotLimit, workflowProgressSnapshot } from '../shared/workflow'
+import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_OUTPUT_LENGTH, workflowSlotLimit, workflowProgressSnapshot } from '../shared/workflow'
+import { decodeWorkflowOutput, workflowStructuredOutputPrompt } from './workflow-values'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
@@ -533,9 +534,15 @@ export class WorkflowRunner {
         } finally {
           if (result?.settled) { activeStops.delete(stop); releaseLive() }
         }
-        const outcome = this.outcome(preview, block, result.status, {
+        let outputError: string | undefined
+        if (result.status === 'completed' && block.outputSchema) {
+          try { decodeWorkflowOutput(result.output, block.outputSchema) } catch (error) {
+            outputError = error instanceof Error ? error.message : String(error)
+          }
+        }
+        const outcome = this.outcome(preview, block, outputError ? 'failed' : result.status, {
           attemptId, taskId, runId: result.runId, output: result.output, actualModel: result.actualModel,
-          archiveRef: result.archiveRef, settled: result.settled, error: result.error, providerId: role.providerId
+          archiveRef: result.archiveRef, settled: result.settled, error: outputError ?? result.error, providerId: role.providerId
         })
         await this.commitOutcome(record, outcome)
         if (result.settled) return { outcome }
@@ -564,14 +571,14 @@ export class WorkflowRunner {
   }
 
   private promptFor(block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord): string | undefined {
-    if (!block.inputRefs?.length) return block.prompt
     const inputs: string[] = []
-    for (const ref of block.inputRefs) {
+    for (const ref of block.inputRefs ?? []) {
       const outcome = [...record.outcomes].reverse().find((candidate) => candidate.nodeId === ref.nodeId)
       if (!outcome || outcome.state !== 'completed' || !outcome.settled || !outcome.output) return undefined
       inputs.push(`[committed output ${ref.nodeId}]\n${outcome.output}`)
     }
-    return `${block.prompt}\n\n${inputs.join('\n\n')}`
+    const prompt = inputs.length ? `${block.prompt}\n\n${inputs.join('\n\n')}` : block.prompt
+    return block.outputSchema ? workflowStructuredOutputPrompt(prompt, block.outputSchema) : prompt
   }
 
   private async reserveDispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, role: WorkflowRoleBinding,
@@ -593,7 +600,7 @@ export class WorkflowRunner {
 
   private outcome(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, state: WorkflowAttemptOutcome['state'], patch: Partial<WorkflowAttemptOutcome>): WorkflowAttemptOutcome {
     const role = preview.program.roles.find((candidate) => candidate.role === block.role)!
-    const output = typeof patch.output === 'string' && patch.output.length <= 16 * 1024 ? patch.output : undefined
+    const output = typeof patch.output === 'string' && patch.output.length <= WORKFLOW_MAX_OUTPUT_LENGTH ? patch.output : undefined
     return { attemptId: patch.attemptId ?? randomUUID(), taskId: patch.taskId ?? `${preview.workflowId}:${block.blockId}`, nodeId: block.blockId,
       role: block.role, providerId: patch.providerId ?? role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel } : {}),
       actualModelStatus: patch.actualModel ? 'observed' : 'unknown', state, settled: patch.settled ?? false,
