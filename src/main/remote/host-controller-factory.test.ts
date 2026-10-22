@@ -10,6 +10,7 @@ import { createHostController, type HostControllerBinding } from './host-control
 import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import type { IssuedPairingCertificate } from './pairing'
+import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
 import type { RemoteIntentRouting } from './host-controller'
 
 const HOST = randomUUID() // a stable host identity across restarts (see factory doc)
@@ -58,6 +59,39 @@ async function grant(binding: HostControllerBinding) {
 }
 
 describe('createHostController (production persistence binding)', () => {
+  // The op can be declared and still be dropped between the service deps and the
+  // controller; that regression only shows up as tool_panel_unavailable on a
+  // paired device, so assert the seam itself.
+  it('forwards tool panel sources through the production binding', async () => {
+    const toolPanels = {
+      analytics: vi.fn(),
+      llmPerformance: vi.fn(async (): Promise<[LlmPerformanceHistory, LlmPerformanceSummary]> =>
+        [{ rows: [], invalidLines: 0, truncated: false }, { observedAt: 'now', sessions: [] }]),
+      mcpTrust: vi.fn()
+    }
+    const binding = await createHostController({
+      stateDirectory: mkdtempSync(join(tmpdir(), 'scry-toolpanels-')),
+      hostId: HOST,
+      anchorSHA256: ANCHOR,
+      verifyCSR: vi.fn(async (csrPEM: string) => ({ csrPEM, csrSHA256: CSR, publicKeySHA256: KEY })),
+      issue: vi.fn(async ({ deviceId }: { deviceId: string }) => ({
+        deviceId, certificatePEM: 'synthetic', certificateSHA256: CERT, publicKeySHA256: KEY, expiresAt: Date.now() + 3_600_000
+      })),
+      authorizeWorkspace: (cwd) => cwd,
+      startRun: vi.fn(async () => {}),
+      gate: new ProviderOperationGate(),
+      createOutputStore: (directory) => new RunOutputFileStore(directory),
+      toolPanels
+    })
+    bindings.push(binding)
+    await grant(binding)
+    // A valid kind proves the dependency reached the controller: without the
+    // factory spread this rejects with tool_panel_unavailable instead.
+    const panel = await binding.controller.readToolPanel(CERT, { kind: 'llmPerformance' })
+    expect(panel.kind).toBe('llmPerformance')
+    expect(toolPanels.llmPerformance).toHaveBeenCalledTimes(1)
+  })
+
   it('persists pairing + ledger on real disk and runs a routed intent through startRun', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-host-'))
     dirs.push(dir)

@@ -179,6 +179,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
     ...(deps.sessionFork ? { sessionFork: deps.sessionFork } : {}),
     ...(deps.sessionDelete ? { sessionDelete: deps.sessionDelete } : {}),
+    ...(deps.toolPanels ? { toolPanels: deps.toolPanels } : {}),
     ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
     ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
     ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
