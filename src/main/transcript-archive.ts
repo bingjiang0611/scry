@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import { protectToolContent, workspaceToolContentPolicy } from '../core/turn-recorder/content-policy.js'
 import type { ToolContentPolicy } from '../core/turn-recorder/tool-content.js'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { isDiffSnapshotStage, normalizeTurnDiffSnapshot, type TraceEvent } from '../shared/trace'
 import type { AgentInputAttachment } from '../shared/runtime'
 import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
@@ -476,6 +476,11 @@ export function traceArchivePath(userDataDir: string, cwd: string, sessionId: st
 
 function traceArchiveTurnDir(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId): string {
   return join(userDataDir, 'trace-archive-turns-v1', providerId, ownedCwdKey(cwd), ownedSessionFileStem(sessionId))
+}
+
+function traceArchiveMetadataDir(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId): string {
+  // Rebuildable metadata must not mutate canonical-directory stamps used by remote cursors.
+  return join(userDataDir, 'trace-archive-metadata-v1', providerId, ownedCwdKey(cwd), ownedSessionFileStem(sessionId))
 }
 
 const TRACE_ARCHIVE_INDEX_SUFFIX = '.index-v1.json'
@@ -1089,7 +1094,7 @@ function writeTraceArchiveMetadataSidecar(args: {
   sessionId: string
   providerId: ProviderId
 }, entry: TraceArchiveIndexEntry): void {
-  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  const dir = traceArchiveMetadataDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   writeOwnedFileAtomically(args.userDataDir, traceArchiveMetadataPath(dir, entry.file), `${JSON.stringify(entry)}\n`)
 }
 
@@ -1099,7 +1104,7 @@ async function writeTraceArchiveMetadataSidecarAsync(args: {
   sessionId: string
   providerId: ProviderId
 }, entry: TraceArchiveIndexEntry): Promise<void> {
-  const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+  const dir = traceArchiveMetadataDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   await writeOwnedFileAtomicallyAsync(args.userDataDir, traceArchiveMetadataPath(dir, entry.file), `${JSON.stringify(entry)}\n`)
 }
 
@@ -1118,7 +1123,9 @@ async function readSegmentedMetadataIndexAsync(args: {
     const directory = archiveDirectoryStamp(directoryStat)
     const allNames = await readdir(dir)
     const names = allNames.filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
-    const metadataNames = allNames.filter((name) => TRACE_ARCHIVE_METADATA_FILE.test(name)).sort()
+    const metadataDir = traceArchiveMetadataDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
+    trustedOwnedParent(args.userDataDir, join(metadataDir, '.identity'), false)
+    const metadataNames = (await readdir(metadataDir)).filter((name) => TRACE_ARCHIVE_METADATA_FILE.test(name)).sort()
     const metadataFiles = new Set(metadataNames)
     const metadataCoverageComplete = metadataFiles.size === names.length && names.every((name) => metadataFiles.has(name.replace(/\.json$/, TRACE_ARCHIVE_METADATA_SUFFIX)))
     // metadata sidecars are disposable; canonical files remain authoritative
@@ -1126,7 +1133,7 @@ async function readSegmentedMetadataIndexAsync(args: {
     for (const file of names) {
       signal?.throwIfAborted()
       const segmentPath = join(dir, file)
-      const metadataPath = traceArchiveMetadataPath(dir, file)
+      const metadataPath = traceArchiveMetadataPath(metadataDir, file)
       const [segmentStat, metadataStat] = await Promise.all([lstat(segmentPath), lstat(metadataPath)])
       if (!segmentStat.isFile() || segmentStat.isSymbolicLink() || !metadataStat.isFile() || metadataStat.isSymbolicLink() ||
           metadataStat.size <= 0 || metadataStat.size > TRACE_ARCHIVE_PAGE_INDEX_MAX_BYTES) return null
@@ -2090,14 +2097,27 @@ export function deleteTranscriptCopies(args: {
   })
   exactTargets.push(...segmentTemps.paths)
   if (segmentTemps.error) failed.push(segmentTemps.error)
+  const metadataDir = traceArchiveMetadataDir(args.userDataDir, args.cwd, args.sessionId, providerId)
+  try {
+    trustedOwnedParent(args.userDataDir, join(metadataDir, '.identity'), false)
+    for (const name of readdirSync(metadataDir)) {
+      if (TRACE_ARCHIVE_METADATA_FILE.test(name) || TRACE_ARCHIVE_METADATA_TEMP_FILE.test(name)) {
+        exactTargets.push(join(metadataDir, name))
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      failed.push({ path: metadataDir, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   for (const invalid of segmented.invalid) {
     failed.push(invalid)
-    if (/\/turn-[a-f0-9]{64}\.json$/.test(invalid.path)) exactTargets.push(invalid.path, `${invalid.path}.tmp`, traceArchiveMetadataPath(dirname(invalid.path), basename(invalid.path)), `${traceArchiveMetadataPath(dirname(invalid.path), basename(invalid.path))}.tmp`)
+    if (/\/turn-[a-f0-9]{64}\.json$/.test(invalid.path)) exactTargets.push(invalid.path, `${invalid.path}.tmp`)
   }
   for (const archive of segmented.valid) {
     const turn = archive.turns[0]
     const path = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
-    exactTargets.push(path, `${path}.tmp`, traceArchiveMetadataPath(dirname(path), basename(path)), `${traceArchiveMetadataPath(dirname(path), basename(path))}.tmp`)
+    exactTargets.push(path, `${path}.tmp`)
   }
   markTraceArchiveCatalogIndexDirty(args.userDataDir)
   for (const fp of [...new Set(exactTargets)]) {
