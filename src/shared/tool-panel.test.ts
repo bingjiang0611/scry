@@ -29,7 +29,9 @@ describe('tool panel shaping', () => {
     expect(panel.readAt).toBe(42)
     expect(panel.analytics?.totals.costUsd).toBe(1.25)
     expect(panel.analytics?.totals.inputTokens).toBeNull()
-    expect(panel.analytics?.byModel[0].costUsd).toBeNull()
+    // A model row without a known cost is not a breakdown row at all; the Mac
+    // table drops it too, so the phone must not invent an "unavailable" line.
+    expect(panel.analytics?.byModel).toEqual([])
     // Coverage counters travel with the projection so the phone can show evidence.
     expect(panel.analytics?.totals.tokenKnownRows).toBe(2)
     expect(panel.analytics?.totals.exactCostRows).toBe(1)
@@ -37,12 +39,35 @@ describe('tool panel shaping', () => {
 
   it('caps model and provider rows and says the list is truncated', () => {
     const rows = Array.from({ length: TOOL_PANEL_MODEL_ROWS + 5 }, (_, index) => ({
-      provider: 'claude', model: `model-${index}`, ...aggregate()
+      provider: 'claude', model: `model-${index}`, ...aggregate({ costUsd: index })
     })) as never[]
     const panel = shapeAnalyticsPanel(analytics({ byModel: rows, byProvider: rows }))
     expect(panel.analytics?.byModel).toHaveLength(TOOL_PANEL_MODEL_ROWS)
     expect(panel.analytics?.byModelTruncated).toBe(true)
     expect(panel.analytics?.byProviderTruncated).toBe(true)
+  })
+
+  it('lists the same model rows the Mac shows: known cost, no qoder model, ranked', () => {
+    const panel = shapeAnalyticsPanel(analytics({
+      byModel: [
+        { provider: 'codex', model: 'gpt-6.1-sol', ...aggregate({ costUsd: 10 }) },
+        { provider: 'claude', model: 'opus', ...aggregate({ costUsd: 30 }) },
+        { provider: 'radius', model: 'recursive/flint', ...aggregate({ costUsd: null }) },
+        { provider: 'qoder', model: 'qoder-model', ...aggregate({ costUsd: 9 }) }
+      ] as never,
+      byProvider: [
+        { provider: 'qoder', ...aggregate({ costUsd: 9, turns: 110 }) },
+        { provider: 'radius', ...aggregate({ costUsd: null }) }
+      ] as never
+    }))
+    expect(panel.analytics?.byModel.map(row => [row.provider, row.model, row.costUsd])).toEqual([
+      ['claude', 'opus', 30],
+      ['codex', 'gpt-6.1-sol', 10],
+      // qoder's credits are attributed to the provider, exactly like the Mac table.
+      ['qoder', null, 9]
+    ])
+    // Only rows the Mac would draw as approximate carry the marker.
+    expect(panel.analytics?.byModel.map(row => row.approximate)).toEqual([false, false, false])
   })
 
   it('reports running sessions grouped by model without inventing a measurement', () => {

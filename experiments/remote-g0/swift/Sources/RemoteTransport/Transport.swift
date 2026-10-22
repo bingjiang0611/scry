@@ -1181,6 +1181,9 @@ public enum G0Transport {
     public struct ModelRow: Decodable, Sendable, Equatable {
       public let provider: String; public let model: String?; public let costUsd: Double?
       public let turns: Int; public let tokenKnownRows: Int
+      // Estimated/inferred cost rows carry the marker; exact rows do not claim one.
+      // Optional so a host that predates the marker still decodes.
+      public let approximate: Bool?
     }
     public struct Analytics: Decodable, Sendable, Equatable {
       public let rangeDays: Int; public let status: String; public let observedAt: Double

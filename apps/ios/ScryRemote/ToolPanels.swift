@@ -190,17 +190,16 @@ struct ToolPanelView: View {
       VStack(alignment: .leading, spacing: 8) {
         Text(ConnectionCopy.analyticsBreakdown).font(.system(size: 11, weight: .bold)).tracking(0.6)
           .foregroundStyle(Palette.muted)
-        ForEach(analytics.byModel.filter { $0.costUsd != nil }, id: \.model) { row in
+        ForEach(Array(analytics.byModel.enumerated()), id: \.offset) { _, row in
           HStack(spacing: 8) {
-            Text(row.model ?? row.provider).font(.system(size: 12)).foregroundStyle(Palette.ink).lineLimit(1)
+            Text(modelLabel(row)).font(.system(size: 12)).foregroundStyle(Palette.ink).lineLimit(1)
               .frame(width: 110, alignment: .leading)
             GeometryReader { geo in
               RoundedRectangle(cornerRadius: 3)
                 .fill(Palette.blue.opacity(0.7))
                 .frame(width: max(2, geo.size.width * ((row.costUsd ?? 0) / maxCost)))
             }.frame(height: 8)
-            Text(row.costUsd ?? 0, format: .currency(code: "USD").precision(.fractionLength(2)))
-              .font(.system(size: 11)).foregroundStyle(Palette.muted).frame(width: 58, alignment: .trailing)
+            costText(row.costUsd)
           }
         }
       }
@@ -214,7 +213,7 @@ struct ToolPanelView: View {
           .foregroundStyle(Palette.muted)
         ForEach(analytics.byProvider, id: \.provider) { row in
           HStack {
-            Text(row.provider.uppercased()).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
+            Text(ConnectionCopy.providerLabel(row.provider)).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
             Spacer()
             Text("\(row.turns) 轮").font(.system(size: 11)).foregroundStyle(Palette.faint)
             Text(row.costUsd.map { String(format: "$%.2f", $0) } ?? ConnectionCopy.unavailable)
@@ -257,14 +256,14 @@ struct ToolPanelView: View {
           .foregroundStyle(Palette.muted)
         ForEach(Array(analytics.byModel.enumerated()), id: \.offset) { _, row in
           HStack(spacing: 6) {
-            Text(row.model ?? ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.ink)
+            Text(modelLabel(row)).font(.system(size: 12)).foregroundStyle(Palette.ink)
               .lineLimit(1)
-            Text(ConnectionCopy.analyticsApprox).font(.system(size: 10)).foregroundStyle(Palette.faint)
+            if row.approximate == true {
+              Text(ConnectionCopy.analyticsApprox).font(.system(size: 10)).foregroundStyle(Palette.faint)
+            }
             Spacer(minLength: 4)
             Text("\(row.turns) 轮").font(.system(size: 10)).foregroundStyle(Palette.faint)
-            Text(row.costUsd.map { String(format: "$%.2f", $0) } ?? ConnectionCopy.unavailable)
-              .font(.system(size: 11)).foregroundStyle(row.costUsd == nil ? Palette.faint : Palette.muted)
-              .frame(width: 58, alignment: .trailing)
+            costText(row.costUsd)
           }
         }
         if analytics.byModelTruncated {
@@ -319,7 +318,7 @@ struct ToolPanelView: View {
             HStack(spacing: 6) {
               VStack(alignment: .leading, spacing: 2) {
                 Text(row.model).font(.system(size: 12.5)).foregroundStyle(Palette.ink).lineLimit(1)
-                Text("\(row.providerId.uppercased()) · \(shortTime(row.ts))")
+                Text("\(ConnectionCopy.providerLabel(row.providerId)) · \(shortTime(row.ts))")
                   .font(.system(size: 10.5)).foregroundStyle(Palette.faint)
               }
               Spacer(minLength: 4)
@@ -344,8 +343,39 @@ struct ToolPanelView: View {
     }
   }
 
+  // Mac rows are `provider ＋ model`; qoder's credits belong to the provider.
+  private func modelLabel(_ row: G0Transport.ToolPanelPayload.ModelRow) -> String {
+    row.provider == "qoder" ? ConnectionCopy.providerLabel("qoder") : (row.model ?? ConnectionCopy.unattributed)
+  }
+
+  private func costText(_ costUsd: Double?) -> some View {
+    Text(costUsd.map { Self.usdFormatter.string(from: NSNumber(value: $0)) ?? "" } ?? ConnectionCopy.unavailable)
+      .font(.system(size: 11))
+      .foregroundStyle(costUsd == nil ? Palette.faint : Palette.muted)
+      .lineLimit(1)
+      .minimumScaleFactor(0.8)
+      .frame(width: 84, alignment: .trailing)
+  }
+
+  private static let usdFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .currency
+    formatter.currencyCode = "USD"
+    formatter.locale = Locale(identifier: "en_US")
+    formatter.minimumFractionDigits = 2
+    formatter.maximumFractionDigits = 2
+    return formatter
+  }()
+
   private func shortTime(_ iso: String) -> String {
+    // Provider timestamps carry fractional seconds; the default options fail on
+    // them and would leak the raw ISO string into the row.
     let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: iso) {
+      return date.formatted(date: .omitted, time: .shortened)
+    }
+    formatter.formatOptions = [.withInternetDateTime]
     guard let date = formatter.date(from: iso) else { return iso }
     return date.formatted(date: .omitted, time: .shortened)
   }
@@ -358,7 +388,7 @@ struct ToolPanelView: View {
         Text(ConnectionCopy.mcpLive).font(.system(size: 11, weight: .bold)).tracking(0.6)
           .foregroundStyle(Palette.muted)
         HStack(spacing: 8) {
-          Text(mcp.providerId.uppercased()).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
+          Text(ConnectionCopy.providerLabel(mcp.providerId)).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
           Spacer()
           if let runtime = mcp.runtime {
             Text("\(runtime.count)").font(.system(size: 11)).foregroundStyle(Palette.faint)

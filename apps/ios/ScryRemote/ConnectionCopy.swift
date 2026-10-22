@@ -314,6 +314,20 @@ enum ConnectionCopy {
     return "来自 \(host) · \(readAt) \(hostReadAt)"
   }
   static let unavailable = "不可用"
+  static let unattributed = "未归因"
+
+  // Mirrors the two provider maps the Mac renders from (AnalyticsView.providerLabels
+  // for billing providers, copy.providers for runtime providers). An id outside
+  // both is shown raw: the phone must not invent a friendlier name than the Mac.
+  private static let providerNames: [String: String] = [
+    "anthropic": "Anthropic", "openai": "OpenAI", "openrouter": "OpenRouter", "gemini": "Gemini",
+    "claude-code": "Claude Code", "claude": "Claude", "codex": "Codex", "qoder": "Qoder",
+    "opencode": "OpenCode", "local": "Local", "pi": "Pi"
+  ]
+
+  static func providerLabel(_ providerId: String) -> String {
+    providerNames[providerId] ?? providerId
+  }
   static let unavailableDetail = "这次读取没有返回这项数据。"
   static let moreRows = "再加载"
   static func rowsLimited(_ shown: Int) -> String { "已显示前 \(shown) 条" }

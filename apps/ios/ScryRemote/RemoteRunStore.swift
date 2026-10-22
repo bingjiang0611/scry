@@ -602,6 +602,10 @@ final class RemoteRunStore: ObservableObject {
     return loadConnection()?.relayHost
   }
 
+  // Provenance next to evidence names the host the user picked ("Mac1"), not the
+  // relay hostname the connection happens to use.
+  var scopeLabel: String { targetScope?.label ?? ConnectionCopy.gatewayHost }
+
   var hasRecoverableRun: Bool {
     pendingSubmission != nil || runId != nil
   }

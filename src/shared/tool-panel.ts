@@ -40,7 +40,16 @@ export interface ToolPanelAnalytics {
   totals: ToolPanelTokenTotals
   byDay: Array<{ day: string; costUsd: number | null; inputTokens: number | null; outputTokens: number | null }>
   byProvider: Array<{ provider: string; costUsd: number | null; inputTokens: number | null; outputTokens: number | null; turns: number }>
-  byModel: Array<{ provider: string; model: string | null; costUsd: number | null; turns: number; tokenKnownRows: number }>
+  byModel: Array<{
+    provider: string
+    model: string | null
+    costUsd: number | null
+    turns: number
+    tokenKnownRows: number
+    // The Mac marks a row whose cost is estimated or inferred; a row reaching
+    // this projection without that flag must not claim to be exact.
+    approximate: boolean
+  }>
   byModelTruncated: boolean
   byProviderTruncated: boolean
 }
@@ -121,8 +130,37 @@ function totals(source: UsageAnalytics['totals']): ToolPanelTokenTotals {
   }
 }
 
+// Mirrors AnalyticsView.modelBreakdownRows so both surfaces list the same rows:
+// a model row needs a model id and a known cost, qoder's credits are attributed
+// to the provider instead of a model, and the list is ranked by cost. Slicing
+// happens after filtering, otherwise unavailable rows would push real ones out.
+function modelBreakdownRows(models: UsageAnalytics['byModel'], providers: UsageAnalytics['byProvider']) {
+  const rows = (models ?? [])
+    .filter(row => String(row.provider) !== 'qoder' && row.model && row.costUsd != null)
+    .map(row => ({
+      provider: String(row.provider),
+      model: row.model,
+      costUsd: row.costUsd,
+      turns: row.turns,
+      tokenKnownRows: row.tokenKnownRows,
+      approximate: row.estimatedCostRows > 0 || row.inferredCostRows > 0
+    }))
+  const qoder = (providers ?? []).find(row => String(row.provider) === 'qoder')
+  if (qoder?.costUsd != null) {
+    rows.push({
+      provider: 'qoder',
+      model: null,
+      costUsd: qoder.costUsd,
+      turns: qoder.turns,
+      tokenKnownRows: qoder.tokenKnownRows,
+      approximate: qoder.estimatedCostRows > 0 || qoder.inferredCostRows > 0
+    })
+  }
+  return rows.sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0))
+}
+
 export function shapeAnalyticsPanel(analytics: UsageAnalytics, now = Date.now()): ToolPanelPayload {
-  const models = analytics.byModel ?? []
+  const models = modelBreakdownRows(analytics.byModel, analytics.byProvider)
   const providers = analytics.byProvider ?? []
   return {
     kind: 'analytics',
@@ -147,13 +185,7 @@ export function shapeAnalyticsPanel(analytics: UsageAnalytics, now = Date.now())
         outputTokens: row.outputTokens,
         turns: row.turns
       })),
-      byModel: models.slice(0, TOOL_PANEL_MODEL_ROWS).map(row => ({
-        provider: String(row.provider),
-        model: row.model,
-        costUsd: row.costUsd,
-        turns: row.turns,
-        tokenKnownRows: row.tokenKnownRows
-      })),
+      byModel: models.slice(0, TOOL_PANEL_MODEL_ROWS),
       byModelTruncated: models.length > TOOL_PANEL_MODEL_ROWS,
       byProviderTruncated: providers.length > TOOL_PANEL_PROVIDER_ROWS
     }

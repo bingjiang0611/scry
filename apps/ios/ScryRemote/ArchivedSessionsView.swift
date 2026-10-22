@@ -96,7 +96,7 @@ struct ArchivedSessionsView: View {
   }
 
   private var provenance: some View {
-    Text(ConnectionCopy.provenance(run.hostLabel ?? ConnectionCopy.unconnected, run.archivedFetchedAt?.formatted(date: .omitted, time: .shortened)
+    Text(ConnectionCopy.provenance(run.scopeLabel, run.archivedFetchedAt?.formatted(date: .omitted, time: .shortened)
                                    ?? ConnectionCopy.archivedFetchedNone))
       .font(.system(size: 11)).foregroundStyle(Palette.faint)
       .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
