@@ -556,6 +556,27 @@ describe('managed trace turn coordinator', () => {
       .resolves.toEqual({ recovered: 0, pending: 0, errors: [] })
   })
 
+  it('keeps malformed attributed journals visible to scoped recovery without overwriting them', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+    const journal = join(userDataDir, 'managed-turn-commits', 'malformed.json')
+    await mkdir(dirname(journal), { recursive: true })
+    const bytes = JSON.stringify({ schemaVersion: 1, request: {
+      cwd: workspace, sessionId: request.sessionId, providerId: request.providerId
+    } })
+    await writeFile(journal, bytes)
+
+    await expect(recoverManagedTraceTurns(userDataDir, {
+      cwd: workspace, providerId: request.providerId
+    })).resolves.toEqual({
+      recovered: 0, pending: 1, errors: ['invalid managed turn journal: malformed.json']
+    })
+    expect(await readFile(journal, 'utf8')).toBe(bytes)
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: '/another-repo' })).resolves.toEqual({
+      recovered: 0, pending: 0, errors: []
+    })
+  })
+
   it('unattributable malformed artifacts warn globally without blocking an unrelated scoped run', async () => {
     const { userDataDir } = await fixture()
     const progress = join(userDataDir, 'managed-turn-progress', 'malformed.json')
