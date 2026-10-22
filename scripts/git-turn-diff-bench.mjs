@@ -29,6 +29,10 @@ if (!existsSync(bundle)) {
   process.stderr.write(`missing CLI bundle: ${bundle}\nrun: npm run build:cli\n`)
   process.exit(2)
 }
+if (process.argv.includes('--workspace-numstat')) {
+  await import('./workspace-numstat-bench.mjs')
+  process.exit(0)
+}
 const { beginGitTurnDiff, cloneGitTurnDiffCapture } = await import(pathToFileURL(bundle).href)
 
 const ROUNDS = Number(process.env.BENCH_ROUNDS ?? 6)
