@@ -1,12 +1,12 @@
 // 这些检查只证明原型的列表规则，不证明真实 iOS 行为或主机能力。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { copy, fixtures } from './copy.mjs'
 import {
   initialState, RECENT_LIMIT, attention, pinned, recents, projectGroups, visibleCount,
   canOpen, togglePin, renameSession, archiveSession, restoreSession, toggleProject, relativeTime, matches,
   renderBoard, toolRows, canOpenTool, analyticsMetrics
 } from './prototype.mjs'
-import { fixtures } from './copy.mjs'
 
 const ids = sessions => sessions.map(session => session.id)
 
@@ -97,10 +97,10 @@ test('最近列表上限与相对时间分档', () => {
 })
 
 test('每块画板都能渲染，且没有 undefined 或缺失的发送按钮', () => {
-  for (const id of ['home', 'recent', 'projects', 'evidence', 'tools', 'analytics', 'mcp']) {
+  for (const id of copy.boards.map(meta => meta.id)) {
     const html = renderBoard(id)
     assert.ok(!html.includes('undefined'), `${id} 渲染出现 undefined`)
-    if (id === 'analytics' || id === 'mcp') continue
+    if (['analytics', 'llm', 'skills', 'mcp', 'meta'].includes(id)) continue
     assert.ok(html.includes('aria-label="发送"'), `${id} 缺少发送按钮`)
     assert.ok(html.includes('class="composer"'), `${id} 缺少输入区`)
   }
@@ -118,11 +118,12 @@ test('工具页固定五个面板，顺序与 Mac 侧栏一致', () => {
   assert.deepEqual(toolRows().map(row => row.id), ['analytics', 'llm', 'skills', 'mcp', 'meta'])
 })
 
-test('能力不成立的工具行不可点，且写明原因而不是留空', () => {
-  const skills = toolRows().find(row => row.id === 'skills')
-  assert.equal(canOpenTool(skills), false)
-  assert.match(skills.statusText, /^不可用 · .+/)
-  assert.equal(canOpenTool(toolRows().find(row => row.id === 'analytics')), true)
+test('能力不成立的工具行不可点，且写明缺失的是哪项能力', () => {
+  for (const row of toolRows()) assert.equal(canOpenTool(row), true, `${row.id} 默认应可用`)
+  const gated = toolRows({ skills: false, mcp: false })
+  assert.equal(canOpenTool(gated.find(row => row.id === 'skills')), false)
+  assert.equal(gated.find(row => row.id === 'skills').statusText, `不可用 · ${copy.toolGated.skills}`)
+  assert.equal(gated.find(row => row.id === 'mcp').statusText, `不可用 · ${copy.toolGated.mcp}`)
 })
 
 test('缺失的指标保持 unavailable，不折成 0', () => {
@@ -134,17 +135,69 @@ test('缺失的指标保持 unavailable，不折成 0', () => {
   assert.ok(metrics.every(metric => metric.value !== '0'))
 })
 
-test('工具页与面板屏渲染出全部条目和只读说明', () => {
+test('工具页渲染五个面板行与只读说明', () => {
   const tools = renderBoard('tools')
-  for (const label of ['分析', 'LLM 性能', '技能', 'MCP', 'Meta Prompts']) {
-    assert.ok(tools.includes(`>${label}<`), `工具页缺少 ${label}`)
+  for (const row of copy.toolRows) assert.ok(tools.includes(`>${row.label}<`), `工具页缺少 ${row.label}`)
+  assert.ok(tools.includes(copy.toolsNote))
+  assert.ok(tools.includes('data-act="tool-analytics"'))
+})
+
+test('五个面板屏都渲染出来源时间与 Mac 面板结构', () => {
+  for (const kind of ['analytics', 'llm', 'skills', 'mcp', 'meta']) {
+    const html = renderBoard(kind)
+    assert.ok(html.includes(copy.panel.provenance(copy.hostOne, '21:32')), `${kind} 缺少来源与读取时间`)
+    assert.ok(html.includes('class="panel-body"'), `${kind} 缺少面板容器`)
+    assert.ok(html.includes('aria-label="返回"'), `${kind} 缺少返回`)
+    assert.ok(!html.includes('undefined'), `${kind} 出现 undefined`)
   }
-  assert.ok(tools.includes('aria-disabled="true"'))
-  const analytics = renderBoard('analytics')
-  assert.equal((analytics.match(/class="metric-label"/g) || []).length, 5)
-  assert.ok(analytics.includes('is-unavailable'), '缺失指标没有标记 unavailable')
-  assert.ok(analytics.includes('21:32 读取'))
-  const mcp = renderBoard('mcp')
-  assert.equal((mcp.match(/class="server"/g) || []).length, 3)
-  assert.ok(mcp.includes('在 Mac 上处理'))
+})
+
+test('分析面板与 Mac 同序：总览、每日、按 Provider、Token、明细', () => {
+  const html = renderBoard('analytics')
+  const order = [copy.analytics.totalLabel, copy.analytics.composition, copy.analytics.dailyCost,
+    copy.analytics.byProvider, copy.analytics.tokens, copy.analytics.details]
+  const positions = order.map(label => html.indexOf(label))
+  positions.forEach((position, index) => {
+    assert.ok(position > 0, `缺少 ${order[index]}`)
+    if (index) assert.ok(position > positions[index - 1], `${order[index]} 顺序与 Mac 不一致`)
+  })
+  assert.ok(html.includes('is-approximate') && html.includes('is-lower-bound'), '近似与下界标记缺失')
+  assert.equal((html.match(/<dt>/g) || []).length >= 5, true)
+})
+
+test('LLM 性能：运行中会话在历史之前，含平均速度、首字与模型对比', () => {
+  const html = renderBoard('llm')
+  assert.ok(html.indexOf(copy.llm.runningRegion) < html.indexOf(copy.llm.history('')))
+  assert.ok(html.includes(copy.llm.average) && html.includes(copy.llm.firstToken))
+  assert.ok(html.includes(copy.llm.comparison))
+  assert.ok(html.includes('tok/s'))
+  assert.equal((html.match(/class="p-run"/g) || []).length, fixtures.panels.llm.running.length)
+})
+
+test('技能：Provider 页计数为 0 时不出现空页，并给出只读脚注', () => {
+  const html = renderBoard('skills')
+  assert.ok(html.includes(copy.skills.scopes.project) && html.includes(copy.skills.scopes.user))
+  assert.ok(!html.includes(copy.skills.scopes.provider), '计数 0 的来源页不应出现')
+  assert.ok(html.includes(copy.skills.footnoteBody))
+  assert.ok(html.includes(copy.panel.shown(fixtures.panels.skills.shown, fixtures.panels.skills.total)))
+})
+
+test('MCP 面板是只读观测：策略/发现/inventory/审计齐全，没有允许或拒绝按钮', () => {
+  const html = renderBoard('mcp')
+  for (const label of [copy.mcp.liveTitle, copy.mcp.policy, copy.mcp.criticalHigh, copy.mcp.policyBlocks,
+    copy.mcp.findings, copy.mcp.inventory, copy.mcp.policyAudit]) {
+    assert.ok(html.includes(label), `缺少 ${label}`)
+  }
+  assert.ok(!html.includes('>允许</button>') && !html.includes('>拒绝</button>'), '面板不该提供允许/拒绝动作')
+  assert.ok(html.includes(copy.mcp.refreshLive) && html.includes(copy.mcp.scan), '缺刷新或扫描')
+  assert.ok(html.includes('不是官方认证'), '缺报告证据说明')
+})
+
+test('Meta Prompts：列表可复制，详情有字数、放入输入框与 Mac 侧编辑说明', () => {
+  const html = renderBoard('meta')
+  assert.ok(html.includes(copy.meta.count(fixtures.panels.meta.prompts.length)))
+  assert.ok(html.includes(copy.meta.insert))
+  assert.match(html, /\d+ 字 · 纯文本/)
+  assert.ok(html.includes(copy.meta.edit) && html.includes(copy.meta.remove))
+  assert.ok(html.includes(copy.panel.macOnly), '编辑与删除要说明在 Mac 上处理')
 })
