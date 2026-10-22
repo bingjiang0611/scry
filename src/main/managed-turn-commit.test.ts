@@ -963,6 +963,39 @@ describe('managed trace turn coordinator', () => {
     expect(records[0].diff).toEqual(rich.turn.turnEvidence?.diff)
   })
 
+  it('keeps the large v1 intent immutable and recovers honestly when the phase sidecar is corrupt', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await startManaged(workspace)
+    const request = input(workspace, userDataDir)
+    request.turn.userText = 'fixed-large-payload-'.repeat(10_000)
+    request.turn.turnEvidence = aggregateTurnEvidence({
+      userText: request.turn.userText,
+      events: request.turn.items,
+      source: 'scry_provider_adapter'
+    })
+
+    await expect(commitManagedTraceTurn(request, {
+      removeArtifact: async () => { throw new Error('simulated post-commit cleanup crash') }
+    })).rejects.toThrow('simulated post-commit cleanup crash')
+
+    const journalName = (await readdir(join(userDataDir, 'managed-turn-commits'))).find((name) => name.endsWith('.json'))!
+    const journalPath = join(userDataDir, 'managed-turn-commits', journalName)
+    const statePath = join(userDataDir, 'managed-turn-journal-state', journalName)
+    const immutableIntent = await readFile(journalPath)
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, unknown>
+    expect(Buffer.byteLength(JSON.stringify(state))).toBeLessThan(immutableIntent.byteLength / 10)
+
+    await writeFile(statePath, JSON.stringify({ ...state, phase: 'archive_committed', archiveFingerprint: 'wrong' }))
+    expect(await readFile(journalPath)).toEqual(immutableIntent)
+    await expect(recoverManagedTraceTurns(userDataDir, { cwd: workspace, waitMs: 100 })).resolves.toEqual({
+      recovered: 1,
+      pending: 0,
+      errors: []
+    })
+    expect(existsSync(journalPath)).toBe(false)
+    expect(existsSync(statePath)).toBe(false)
+  })
+
   it('disabled recovery discards stale progress without overwriting a richer committed archive', async () => {
     const { workspace, userDataDir } = await fixture()
     const base = input(workspace, userDataDir)
