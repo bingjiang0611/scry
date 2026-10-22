@@ -5,6 +5,17 @@ import { WorkspacePanel } from '../../src/renderer/components/WorkspacePanel'
 // In-memory file transport only. No real workspace or preload writes.
 const initialContent = '---\n\n# Preview first\n\nReadable **Markdown**.\n\n## Details\n\n---\n\nKeep the content, remove the decorative rules.'
 let savedContent = initialContent
+let holdWorkspaceWrite = false
+let releaseWorkspaceWrite: (() => void) | null = null
+Object.assign(window, {
+  __holdWorkspaceWrite: () => { holdWorkspaceWrite = true },
+  __workspaceWritePending: () => releaseWorkspaceWrite !== null,
+  __releaseWorkspaceWrite: () => {
+    holdWorkspaceWrite = false
+    releaseWorkspaceWrite?.()
+    releaseWorkspaceWrite = null
+  }
+})
 const snapshot = (path: string, content: string): WorkspaceFileSnapshot => ({
   name: path, path, content, size: content.length, mtimeMs: 0, revision: content, language: 'markdown'
 })
@@ -21,6 +32,7 @@ Object.defineProperty(window, 'scry', { value: {
   }),
   workspaceWrite: async ({ path, content, expectedRevision }) => {
     if (expectedRevision !== savedContent) throw new Error('Revision mismatch')
+    if (holdWorkspaceWrite) await new Promise<void>((resolve) => { releaseWorkspaceWrite = resolve })
     savedContent = content
     return snapshot(path, content)
   }
