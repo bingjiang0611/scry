@@ -96,6 +96,39 @@ describe('HostController (composition root)', () => {
     expect(select).toHaveBeenCalledTimes(1)
   })
 
+  it('serves read-only tool panels but rejects unknown kinds, bad ranges and unpaired devices', async () => {
+    const analytics = vi.fn(() => ({
+      status: 'ready' as const, rangeDays: 7 as const, fromDay: '2026-10-15', toDay: '2026-10-21', observedAt: 1, days: [],
+      totals: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null,
+        costUsd: null, turns: 0, usageRows: 0, inputKnownRows: 0, outputKnownRows: 0, cacheReadKnownRows: 0, cacheWriteKnownRows: 0,
+        reasoningKnownRows: 0, tokenKnownRows: 0, costKnownRows: 0, exactCostRows: 0, providerReportedCostRows: 0, estimatedCostRows: 0, inferredCostRows: 0 },
+      byDay: [], dailyByProvider: [], byProvider: [], byModel: []
+    }))
+    const mcpSnapshot = vi.fn(async () => ({ configured: [], runtime: null }))
+    const { controller } = await grantedController(vi.fn(async () => {}), undefined, {
+      toolPanels: { analytics, llmPerformance: () => [{ rows: [], invalidLines: 0, truncated: false }, { observedAt: 'now', sessions: [] }], mcpSnapshot }
+    })
+    await expect(controller.readToolPanel('0'.repeat(64), { kind: 'analytics', rangeDays: 7 })).rejects.toThrow('device_not_authorized')
+    expect(analytics).not.toHaveBeenCalled()
+    await expect(controller.readToolPanel(CERT, { kind: 'secrets' })).rejects.toThrow('invalid_tool_panel')
+    await expect(controller.readToolPanel(CERT, { kind: 'analytics', rangeDays: 14 })).rejects.toThrow('invalid_tool_panel')
+    await expect(controller.readToolPanel(CERT, { kind: 'mcpTrust', providerId: '' })).rejects.toThrow('invalid_tool_panel')
+    expect(mcpSnapshot).not.toHaveBeenCalled()
+
+    const panel = await controller.readToolPanel(CERT, { kind: 'analytics', rangeDays: 30 })
+    expect(panel.kind).toBe('analytics')
+    expect(panel.analytics?.rangeDays).toBe(7)
+    // The panel is a background read: a device can never ask for a refresh.
+    const mcp = await controller.readToolPanel(CERT, { kind: 'mcpTrust', providerId: 'claude' })
+    expect(mcp.kind).toBe('mcpTrust')
+    expect(mcpSnapshot).toHaveBeenCalledExactlyOnceWith({ providerId: 'claude', refresh: false })
+  })
+
+  it('reports an unavailable panel instead of an empty one when the host has no source', async () => {
+    const { controller } = await grantedController(vi.fn(async () => {}))
+    await expect(controller.readToolPanel(CERT, { kind: 'llmPerformance' })).rejects.toThrow('tool_panel_unavailable')
+  })
+
   it('authorizes session metadata actions, canonicalizes cwd, and never dispatches denied requests', async () => {
     const sessionAction = vi.fn(async () => true)
     const { controller } = await grantedController(vi.fn(async () => {}), undefined, {

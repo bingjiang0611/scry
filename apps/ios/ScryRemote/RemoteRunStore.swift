@@ -311,6 +311,16 @@ final class RemoteRunStore: ObservableObject {
   @Published private(set) var archivedFetchedAt: Date?
   @Published private(set) var archivedLoading = false
   @Published private(set) var archivedFailure: String?
+  // One visible tool panel at a time, so a stale reply can never overwrite a
+  // newer request's evidence.
+  enum ToolPanelState: Equatable {
+    case idle
+    case loading
+    case loaded(G0Transport.ToolPanelPayload)
+    case failed(String)
+  }
+  @Published private(set) var toolPanel: ToolPanelState = .idle
+  private var toolPanelRequest = 0
 
   enum HistoryPreviewState: Equatable {
     case idle
@@ -1079,6 +1089,30 @@ final class RemoteRunStore: ObservableObject {
   }
 
   private var archivedTask: Task<Bool, Never>?
+
+  func loadToolPanel(kind: G0Transport.ToolPanelKind, rangeDays: Int? = nil, providerId: String? = nil) async {
+    guard let client = makeClient() else {
+      toolPanel = .failed(ConnectionCopy.notPaired)
+      return
+    }
+    toolPanelRequest += 1
+    let request = toolPanelRequest
+    toolPanel = .loading
+    do {
+      let payload = try await client.toolPanel(kind: kind, rangeDays: rangeDays, providerId: providerId)
+      guard request == toolPanelRequest else { return }
+      toolPanel = .loaded(payload)
+    } catch {
+      guard request == toolPanelRequest else { return }
+      if case G0Transport.RunError.host(code: "unknown_op") = error {
+        toolPanel = .failed(ConnectionCopy.panelUnsupported)
+      } else if case G0Transport.RunError.host(code: "tool_panel_unavailable") = error {
+        toolPanel = .failed(ConnectionCopy.toolMissingCapability)
+      } else {
+        toolPanel = .failed(Self.describe(error))
+      }
+    }
+  }
 
   // Archive is reversible and delete is not, so both return the host's verdict
   // as a message and re-read the catalog rather than projecting a local guess.

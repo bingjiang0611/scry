@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest } from '../../shared/desktop-remote'
-import type { DeleteSessionResult } from '../../shared/provider'
+import type { DeleteSessionResult, McpSnapshot } from '../../shared/provider'
+import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
+import { shapeAnalyticsPanel, shapeLlmPanel, shapeMcpPanel, type ToolPanelPayload } from '../../shared/tool-panel'
+import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace'
 import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
 import { parseDesktopHostRead } from './desktop-host-reader'
 import { parseDesktopWorkbenchQuery } from './desktop-workbench'
@@ -114,6 +117,12 @@ const LIVE_RUNS_MAX_WAIT_MS = 20_000
 const LIVE_RUNS_TICK_MS = 1_000
 const LIVE_RUN_PROMPT_CHARS = 200
 
+export interface ToolPanelSources {
+  analytics(rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> | UsageAnalytics
+  llmPerformance(): Promise<[LlmPerformanceHistory, LlmPerformanceSummary]> | [LlmPerformanceHistory, LlmPerformanceSummary]
+  mcpSnapshot(query: { providerId: string; refresh: false }): Promise<McpSnapshot | { status: 'unavailable'; reason?: string }>
+}
+
 export interface HostControllerDependencies {
   readDesktop?(query: DesktopHostRead): Promise<DesktopHostReadResult>
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
@@ -160,6 +169,9 @@ export interface HostControllerDependencies {
   sessionAction?(context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void): Promise<boolean> | boolean
   sessionFork?(request: DesktopRemoteForkSessionRequest, authorize: () => void): Promise<{ externalSessionId: string }>
   sessionDelete?(request: DesktopRemoteDeleteSessionRequest, authorize: () => void): Promise<DeleteSessionResult>
+  // Read-only tool panels for the paired device. Production passes the same
+  // aggregations the Mac UI shows; nothing here scans or executes.
+  toolPanels?: ToolPanelSources
   // Snapshot of the host session catalog a device may browse. Absent => empty.
   listSessions?(): RemoteSessionRef[]
   sessionCatalogRevision?(): string
@@ -301,6 +313,7 @@ export class HostController {
   #sessionAction?: HostControllerDependencies['sessionAction']
   #sessionFork?: HostControllerDependencies['sessionFork']
   #sessionDelete?: HostControllerDependencies['sessionDelete']
+  #toolPanels?: HostControllerDependencies['toolPanels']
   #attachmentStore?: DesktopAttachmentStore
   // Wake-up signal for long-poll watchers. Ledger events and output appends bump
   // it; a watcher always re-reads through the normal authorized readers.
@@ -318,6 +331,7 @@ export class HostController {
     this.#sessionAction = deps.sessionAction
     this.#sessionFork = deps.sessionFork
     this.#sessionDelete = deps.sessionDelete
+    this.#toolPanels = deps.toolPanels
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#notifyChange() })
     this.#attachmentStore = deps.attachmentStore ?? (deps.attachmentDirectory
       ? new DesktopAttachmentStore(deps.attachmentDirectory, (peer, id) => this.#ledger.intentRun(scopedIntentId(peer, id))?.lifecycle)
@@ -584,6 +598,41 @@ export class HostController {
   // Device-facing: Provider-native slash commands for this exact workspace.
   listCommands(peerCertSHA256: string, query: RemoteCommandQuery): Promise<RemoteCommandCatalog> {
     return this.#gateway.listCommands(peerCertSHA256, query)
+  }
+
+  // Device-facing read of one bounded tool panel. Unknown kinds and out-of-range
+  // analytics windows are rejected; a missing source reports unavailable with a
+  // reason instead of an empty panel that would read as "nothing happened".
+  async readToolPanel(peerCertSHA256: string, input: unknown): Promise<ToolPanelPayload> {
+    this.authorizeDevice(peerCertSHA256)
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_tool_panel')
+    const value = input as Record<string, unknown>
+    const now = Date.now()
+    if (value.kind === 'analytics') {
+      const rangeDays = value.rangeDays ?? 7
+      if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('invalid_tool_panel')
+      if (!this.#toolPanels?.analytics) throw new Error('tool_panel_unavailable')
+      const analytics = await this.#toolPanels.analytics(rangeDays)
+      return shapeAnalyticsPanel(analytics, now)
+    }
+    if (value.kind === 'llmPerformance') {
+      if (!this.#toolPanels?.llmPerformance) throw new Error('tool_panel_unavailable')
+      const [history, running] = await this.#toolPanels.llmPerformance()
+      return shapeLlmPanel(history, running, now)
+    }
+    if (value.kind === 'mcpTrust') {
+      const providerId = value.providerId
+      if (typeof providerId !== 'string' || providerId.length === 0 || providerId.length > 256) throw new Error('invalid_tool_panel')
+      if (!this.#toolPanels?.mcpSnapshot) throw new Error('tool_panel_unavailable')
+      // Background read of already-loaded state: an explicit refresh is never
+      // triggered from a device, so no new MCP execution authority is created.
+      const snapshot = await this.#toolPanels.mcpSnapshot({ providerId, refresh: false })
+      if (snapshot && typeof snapshot === 'object' && 'status' in snapshot && (snapshot as { status?: unknown }).status === 'unavailable') {
+        return { kind: 'mcpTrust', readAt: now, unavailable: String((snapshot as { reason?: unknown }).reason ?? 'mcp_snapshot_unavailable') }
+      }
+      return shapeMcpPanel(providerId, snapshot as McpSnapshot, now)
+    }
+    throw new Error('invalid_tool_panel')
   }
 
   async sessionAction(peerCertSHA256: string, input: unknown): Promise<boolean> {

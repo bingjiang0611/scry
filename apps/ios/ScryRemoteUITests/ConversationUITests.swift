@@ -30,15 +30,36 @@ final class ConversationUITests: XCTestCase {
   private func launchHome(extra: [String] = []) {
     app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"] + extra
     app.launch()
-    XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 10))
+    // Composer-first home: the drawer is the only session entry point.
+    XCTAssertTrue(app.buttons["打开会话列表"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
   }
 
-  func testGroupedSessionOmitsRepeatedProjectContext() {
+  private func openDrawer() {
+    app.buttons["打开会话列表"].firstMatch.tap()
+    XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 5))
+  }
+
+  func testDrawerRowCarriesProviderAndProjectOncePerRow() {
     launchHome()
+    openDrawer()
     let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "完成 iOS 工作目录选择器和附件发送")).firstMatch
     XCTAssertTrue(row.waitForExistence(timeout: 5))
     XCTAssertTrue(row.label.contains("CODEX"))
-    XCTAssertFalse(row.label.contains("scry"))
+    XCTAssertTrue(row.label.contains("scry"))
+    // Every drawer row names its own Provider/project, so a group header must not
+    // repeat it: the projects tab groups by project without a Provider header.
+    app.buttons["项目"].firstMatch.tap()
+    XCTAssertTrue(app.staticTexts["ios"].waitForExistence(timeout: 5))
+  }
+
+  func testDrawerToolsTabListsReadOnlyPanels() {
+    launchHome()
+    openDrawer()
+    app.buttons["工具"].firstMatch.tap()
+    for title in ["用量分析", "LLM 性能", "MCP 信任"] {
+      XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.exists)
+    }
   }
 
   func testPairingParseFailureIsActionableWithCollapsedTechnicalDetail() {
@@ -114,7 +135,7 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.waitForExistence(timeout: 5))
     capture("home-details-after-background-recovery")
     app.buttons["完成"].tap()
-    XCTAssertTrue(app.buttons["新任务"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["打开会话列表"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.staticTexts["Mac1 · 会话列表刷新失败"].exists)
     XCTAssertFalse(app.staticTexts["刷新成功"].exists)
   }
@@ -139,8 +160,9 @@ final class ConversationUITests: XCTestCase {
   func testOpeningSearchResultWithKeyboardVisibleStaysResponsive() {
     app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
     app.launch()
-    let search = app.textFields.firstMatch
-    XCTAssertTrue(search.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["打开会话列表"].waitForExistence(timeout: 10))
+    openDrawer()
+    let search = app.textFields["搜索会话"]
     search.tap()
     search.typeText("重构")
     XCTAssertTrue(app.keyboards.firstMatch.exists)
