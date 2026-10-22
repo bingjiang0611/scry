@@ -8,6 +8,7 @@ struct ToolPanelView: View {
   let kind: ToolKind
   @EnvironmentObject var model: AppModel
   @EnvironmentObject var run: RemoteRunStore
+  @EnvironmentObject var targets: ExecutionTargetCoordinator
   @State private var rangeDays = 7
   @State private var providerId: String?
 
@@ -83,7 +84,7 @@ struct ToolPanelView: View {
 
   private var provenance: some View {
     HStack(spacing: 8) {
-      Text(ConnectionCopy.provenance(run.hostLabel ?? ConnectionCopy.unconnected, readStamp))
+      Text(ConnectionCopy.panelProvenance(panelHost, readAt: readStamp))
         .font(.system(size: 11)).foregroundStyle(Palette.faint)
       Spacer(minLength: 0)
       if let panel, isStale(panel) {
@@ -92,8 +93,14 @@ struct ToolPanelView: View {
     }
   }
 
-  private var readStamp: String {
-    guard let panel else { return ConnectionCopy.archivedFetchedNone }
+  // The host chip the drawer shows is the label a reader recognises; the relay
+  // hostname is transport detail, not provenance the user can act on.
+  private var panelHost: String {
+    targets.aggregatesHosts ? targets.filterLabel : (targets.targetScopes.first?.label ?? ConnectionCopy.unconnected)
+  }
+
+  private var readStamp: String? {
+    guard let panel else { return nil }
     return Date(timeIntervalSince1970: panel.readAt / 1000).formatted(date: .omitted, time: .shortened)
   }
 
