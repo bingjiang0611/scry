@@ -1103,6 +1103,7 @@ struct MessageComposer: View {
   var contextLocked = false
   var modelOptions: [G0Transport.RunModelOption] = []
   var selectedModelId: String?
+  var modelSelectionIssue: String?
   var onModel: ((String?) -> Void)?
   var effortOptions: [G0Transport.RunControlOption] = []
   var selectedEffort: String?
@@ -1173,14 +1174,17 @@ struct MessageComposer: View {
         .buttonStyle(.plain).disabled(disabled || sendDisabled)
         .accessibilityLabel("发送")
       }
-      if contextLabel != nil || !modelOptions.isEmpty || !effortOptions.isEmpty {
+      if contextLabel != nil || !modelOptions.isEmpty || !effortOptions.isEmpty || selectedModelId != nil || selectedEffort != nil {
         Rectangle().fill(Palette.line).frame(height: 0.5)
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 12) {
             if let contextLabel { contextControl(contextLabel) }
-            if !modelOptions.isEmpty || !effortOptions.isEmpty { modelEffortControl }
+            if !modelOptions.isEmpty || !effortOptions.isEmpty || selectedModelId != nil || selectedEffort != nil { modelEffortControl }
           }
         }
+      }
+      if let modelSelectionIssue {
+        Text(modelSelectionIssue).font(.footnote).foregroundStyle(Palette.negative)
       }
       if let attachmentError {
         Text(attachmentError).font(.system(size: 11)).foregroundStyle(Palette.negative)
@@ -1296,10 +1300,10 @@ struct MessageComposer: View {
 
   private var modelEffortControl: some View {
     Menu {
-      if !modelOptions.isEmpty {
-        Section("模型") {
+      if !modelOptions.isEmpty || selectedModelId != nil {
+        Section(ConnectionCopy.model) {
           Button { onModel?(nil) } label: {
-            Label("自动模型", systemImage: selectedModelId == nil ? Symbol.check : "wand.and.stars")
+            Label(ConnectionCopy.automaticModel, systemImage: selectedModelId == nil ? Symbol.check : "wand.and.stars")
           }
           ForEach(modelOptions, id: \.selectionId) { option in
             Button { onModel?(option.selectionId) } label: {
@@ -1308,10 +1312,10 @@ struct MessageComposer: View {
           }
         }
       }
-      if !effortOptions.isEmpty {
-        Section("推理强度") {
+      if !effortOptions.isEmpty || selectedEffort != nil {
+        Section(ConnectionCopy.reasoningEffort) {
           Button { onEffort?(nil) } label: {
-            Label("默认", systemImage: selectedEffort == nil ? Symbol.check : "brain")
+            Label(ConnectionCopy.defaultEffort, systemImage: selectedEffort == nil ? Symbol.check : "brain")
           }
           ForEach(effortOptions, id: \.id) { option in
             Button { onEffort?(option.id) } label: {
@@ -1323,14 +1327,14 @@ struct MessageComposer: View {
     } label: {
       HStack(spacing: 4) {
         Text(modelLabel).lineLimit(1)
-        if !effortOptions.isEmpty { Text(effortLabel).foregroundStyle(Palette.faint) }
+        if !effortOptions.isEmpty || selectedEffort != nil { Text(effortLabel).foregroundStyle(Palette.faint) }
         Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
       }
       .font(.system(size: 12)).foregroundStyle(Palette.muted)
       .frame(minHeight: 44).contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(disabled)
-    .accessibilityLabel("模型 \(modelLabel)，推理强度 \(effortLabel)")
+    .accessibilityLabel(ConnectionCopy.modelAndEffort(modelLabel, effortLabel))
   }
 
   private func controlCapsule(_ label: String, symbol: String) -> some View {
@@ -1344,12 +1348,13 @@ struct MessageComposer: View {
   }
 
   private var modelLabel: String {
-    guard let selectedModelId else { return "自动模型" }
+    guard let selectedModelId else { return ConnectionCopy.automaticModel }
     return modelOptions.first(where: { $0.selectionId == selectedModelId })?.label ?? selectedModelId
   }
 
   private var effortLabel: String {
-    effortOptions.first(where: { $0.id == selectedEffort })?.label ?? "默认"
+    guard let selectedEffort else { return ConnectionCopy.defaultEffort }
+    return effortOptions.first(where: { $0.id == selectedEffort })?.label ?? selectedEffort
   }
 
   private func attachmentChip(_ item: DraftAttachment) -> some View {

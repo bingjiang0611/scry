@@ -105,6 +105,7 @@ struct ChatView: View {
                       sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       contextLabel: run.chosenProvider?.label, contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
+                      modelSelectionIssue: run.modelSelectionIssue,
                       onModel: { run.chooseModel($0) },
                       effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },

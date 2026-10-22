@@ -58,6 +58,7 @@ struct NewSessionView: View {
                       disabled: !paired, sendDisabled: !canSend,
                       contextLabel: run.chosenProvider?.label, onContext: { showProviders = true },
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
+                      modelSelectionIssue: run.modelSelectionIssue,
                       onModel: { run.chooseModel($0) },
                       effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
                       onEffort: { run.chooseEffort($0) },
