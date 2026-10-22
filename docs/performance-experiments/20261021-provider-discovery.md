@@ -100,3 +100,24 @@
 完整运行的历史失败也保留：`phase2-unit-full-serial.log` 在工具 600 秒截止时中断，已完成 6 文件有 8 项失败；`phase2-unit-full-default.log` 被中断，末尾 ERR_IPC_CHANNEL_CLOSED；按完全执行文件续跑 `phase2-unit-remaining.log` 后覆盖 290 文件的同一源码范围时有 3 项失败（runtime-evidence、MarkdownLayout、Pi lifecycle），不冒充单次完整运行。其源码补丁为较早的 `ba310591...`，不替代上述最终 `5e404400...` 全量。基线对照 `phase2-baseline-timeout-control.log` 的两个对应文件单跑 4 项通过；尚不能把全部超时简单归因于资源或本次代码。
 
 **交付边界**：按需层专项、完整 renderer UI、类型、桌面/iPhoneOS 编译和 scoped L1 已验证；完整 unit/Swift 未全部通过，原生/付费 Provider、真实手机、安装构建和 L2/L3 未验证。本轮机器负载从约 142 降至约 13（10 核），不报告毫秒提升。性能 owner 下一步先在可控空闲环境复核 Rename 完整运行及独立 TLS 失败，保留现有期限；再补独立的冷/热 L2。当前仅保留本地提交，不合入、push 或安装。
+
+## mac2 复验：冻结 `54e9dd1`
+
+用户明确授权在 mac2 测试。使用已有 SSH 目标 `test@30.7.226.226`，主机 `B-31AYQ05P-1948.local`，macOS 26.3.2 / arm64 / 8 核 / Node 24.18.0。裸名称 mac2 的 DNS 曾错误指向其他地址并连接超时，未绕过 SSH 信任校验。独立目录 `/Users/test/scry-provider-control-mac2.IEatqT/source`，完整 bundle SHA-256 为 `2f8f08444ac18dac4e8ca3f4fb956c4ee02bb7ee60b4710fb9b62c5e0f5b07cf`，远端 HEAD 与本地冻结提交逐一核对。
+
+依赖使用同机已有安装的 APFS COW 副本，未写原依赖或工作区。虽然 root package version 不同，非根锁定条目及根 dependencies/devDependencies 的 SHA-256 一致：`a24b610e628c92c79ff4523a6509fe91ee1dc8d9a9945b421409e983829a3f8a`。Electron 42.10.1 / Vitest 3.2.7 / SQLite 12.11.1。SQLite 原生绑定 ABI146，普通 Node ABI137 的初始化降级警告单独保留，不冒充普通 Node 的真实 DB 验收；Electron Node 24.18.1 中内存 select1 正对照，以及完整 SQLite collector 的真实临时 DB 均通过。未为消除警告重编或替换原有绑定。
+
+| 检查 | mac2 结果 |
+| --- | --- |
+| `npm run test:unit` | **3491 pass / 4 既有 opt-in skipped**，290 文件，无失败；Rename、Markdown、Pi lifecycle 均通过。日志 `logs/unit-full.log`。不追认此前本机失败的根因 |
+| `npm run typecheck` / `npm run build` | 均通过；`logs/typecheck.log`、`logs/build.log` |
+| `npm run test:renderer:ui` | 完整通过，包括 Credits、原生指针/键盘、生产 IPC 及真实临时 Git；`logs/renderer-ui-full.log` |
+| `swift build --package-path experiments/remote-g0/swift` | 通过；`logs/swift-build.log` |
+| `swift test --package-path experiments/remote-g0/swift` | **未执行测试**：测试目标编译时缺少 XCTest。只有 Command Line Tools，/Applications 与 Spotlight 均未找到完整 Xcode；未安装工具链、复制框架或改测试。`logs/swift-full.log` 保留首次失败，不能据此判断本机 TLS promise 问题是否仍发生 |
+| 完整 `performance:measure` | 43 observations 生成，ratchet 通过，5 轮 metadata=0、selected=1、legacy=3；SQLite prepare/query 均11，exec0。原 runtime-evidence collector 也通过。`logs/performance-full.log`、`performance/measure.json` |
+| 覆盖边界 | ratchet 46 行中40 unchanged、2 gating pass、1 candidate 少1字节、3 candidate CPU 指令指标 missing。缺失不是0；少1字节不归因为本次优化，也不据此宣称收益 |
+| propose / guard | 均通过，仅生成 `performance/proposed-ratchet.json`，提出上述1字节 candidate baseline 降低；没有应用、提交该无关调整，也未升门禁或放宽上限。`logs/propose.log`、`logs/propose-guard.log` |
+
+完整计数任务经 timing-run 锁串行执行：8核、load 3.09→3.45、`highLoad=false`。这不是 Provider 冷/热 L2 基准，仍不报告毫秒提速；也没有 L3、真实/付费 Provider、真机或安装验收。没有停止/替换 mac2 正在使用的 App，没有更改其原仓库、配对或用户数据。测试结束时独立源码工作区干净，保留该目录及原始证据供复盘。
+
+原始日志及 SHA-256 清单保留远端临时根，并复制到本机 `/tmp/scry-provider-control.UGpNzU/mac2-54e9dd1-logs/`、`mac2-54e9dd1-performance/`、`mac2-54e9dd1-performance-refresh/` 和 `mac2-evidence-sha256.txt`。剩余由测试 owner 在完整 Xcode 环境运行原 Swift 全套并定位 TLS 生命周期问题；性能 owner另行补独立冷/热 L2。合入、push、安装仍未授权或执行。
