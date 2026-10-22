@@ -5,7 +5,7 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, connect } from 'node:net'
 import { once } from 'node:events'
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, mkdtempSync, renameSync, existsSync, realpathSync, watch as watchFile } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, mkdtempSync, renameSync, existsSync, realpathSync, readdirSync, lstatSync, watch as watchFile } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { builtinModules, createRequire } from 'node:module'
@@ -18,6 +18,7 @@ const sandbox = '/usr/bin/sandbox-exec'
 const profile = '(version 1)(allow default)(deny network*)'
 const budgetMs = 8_000
 const cap = 16 * 1024
+const cases = ['complete', 'interrupt', 'negative', 'runner-complete', 'runner-interrupt', 'runner-plain', 'recorder-complete', 'recorder-interrupt', 'recorder-failed']
 const privateRecorderRoot = join(dirname(script), '../packages/turn-recorder-cli')
 const privateRecorderCli = join(privateRecorderRoot, 'dist/cli/scry.js')
 const privateRecorderCliHash = '1457bd9e30b87e8617571019ea59112182a77fae0f45255ec587bdcbaab6c274'
@@ -74,6 +75,31 @@ const session = '00000000-0000-4000-8000-000000000001'
 const promptId = '00000000-0000-4000-8000-000000000002'
 const prompt = 'synthetic prompt with spaces\nand newline'
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex')
+// Read only this fixture's native session, never global history. Bound snapshot
+// size so rejection/recovery checks do not grow with unrelated workspaces.
+function runtimeFiles(root) {
+  const files = {}
+  let bytes = 0, entries = 0
+  const visit = (dir, prefix = '') => {
+    for (const name of readdirSync(dir).sort()) {
+      assert(++entries <= 128, 'Runtime snapshot exceeds fixture entry budget')
+      const file = join(dir, name), relative = prefix + name, stat = lstatSync(file)
+      assert(!stat.isSymbolicLink(), 'Unexpected runtime symlink')
+      // This index is explicitly derived from committed records, not lifecycle
+      // authority; a rejected lookup may legitimately build its empty cache.
+      if (relative === 'provider-turn-index.json') continue
+      if (stat.isDirectory()) visit(file, relative + '/')
+      else {
+        assert(stat.isFile())
+        bytes += stat.size
+        assert(bytes <= 1024 * 1024, 'Runtime snapshot exceeds fixture byte budget')
+        files[relative] = hash(file)
+      }
+    }
+  }
+  visit(root)
+  return files
+}
 function assertRecorderIntegrity() {
   assert.equal(hash(privateRecorderCli), privateRecorderCliHash, 'Pinned recorder CLI entry hash changed')
   const packageJson = JSON.parse(readFileSync(privateRecorderPackage, 'utf8'))
@@ -279,7 +305,7 @@ async function runHarness(root, mode, port) {
       })])
     } finally { clearTimeout(timer); lifetime.abort(new Error('Runner fixture decision finished')) }
   }
-  if (mode === 'recorder-complete') {
+  if (mode.startsWith('recorder-')) {
     const bundle = process.env.SCRY_RUNNER_BUNDLE
     assert(bundle, 'Production adapter bundle is required')
     assert.equal(process.env.SCRY_CLAUDE_PATH, fake)
@@ -297,10 +323,13 @@ async function runHarness(root, mode, port) {
     assert.equal(enabled.enabled, true)
     const toolContentPolicy = { ...enabled.config.capture }
     const lifetime = new AbortController()
-    const runId = 'fixture-recorder-complete'
+    const runId = `fixture-${mode}`
+    const expectedStatus = mode === 'recorder-interrupt' ? 'interrupted' : mode === 'recorder-failed' ? 'failed' : 'completed'
     const native = []
     const trace = []
     const startedAt = new Date().toISOString()
+    let activitySeen
+    const activity = new Promise(resolve => { activitySeen = resolve })
     const adapter = production.createClaudeAdapter(join(root, 'home'))
     const handle = adapter.run({
       runId,
@@ -312,17 +341,39 @@ async function runHarness(root, mode, port) {
       managedRecorderIdentity: { runId, promptHash: createHash('sha256').update(prompt).digest('hex') },
       emit: event => trace.push(structuredClone(event)),
       recordNative: (type, payload) => native.push({ type, payload: structuredClone(payload) }),
-      onExternalSessionId: sessionId => log(root, 'adapter-session', { sessionId })
+      onExternalSessionId: sessionId => log(root, 'adapter-session', { sessionId }),
+      onWorkflowObservation: observation => { if (observation.kind === 'tool_activity') activitySeen() }
     })
-    let timer
+    let timer, settled = false
+    const settlement = handle.promise.then(() => { settled = true }, () => { settled = true })
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('Managed recorder adapter exceeded 8000ms')
+        lifetime.abort(error)
+        reject(error)
+      }, budgetMs)
+    })
     try {
-      const result = await Promise.race([handle.promise, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Managed recorder adapter exceeded 8000ms')), budgetMs)
-      })])
+      if (mode === 'recorder-interrupt') {
+        await Promise.race([activity, handle.promise.then(() => assert.fail('Adapter ended before native activity')), deadline])
+        handle.interrupt()
+        await Promise.race([waitForWireEvent(root, event => event.event === 'interrupt-ack', lifetime.signal), deadline])
+        assert.equal(settled, false, 'Interrupt ACK is not adapter completion')
+        const held = completeWire(root)
+        assert(!held.some(event => event.event === 'terminal' || (event.event === 'recorder-hook' && event.hookEvent === 'Stop')))
+        assert.deepEqual(await production.listRecords(join(cwd, '.scry')), [])
+        assert.equal(await production.recorderHasOpenTurn(join(cwd, '.scry')), true)
+        log(root, 'interrupt-ack-pending', { adapterSettled: settled, canonicalRecords: 0 })
+        writeFileSync(join(root, 'release.tmp'), 'release-after-ack\n')
+        renameSync(join(root, 'release.tmp'), join(root, 'release'))
+      }
+      const result = await Promise.race([handle.promise, deadline])
+      await settlement
       assert.equal(result.externalSessionId, session)
       assert.equal(result.providerTurnId, promptId)
-      assert.equal(result.status, 'completed')
-      assert.equal(result.stopped, false)
+      assert.equal(result.status, expectedStatus)
+      assert.equal(result.stopped, mode === 'recorder-interrupt')
+      assert.equal(native.findLast(event => event.type === 'result').payload.is_error, expectedStatus !== 'completed')
       await waitForWireEvent(root, event => event.event === 'cli-exit', lifetime.signal)
       const wire = completeWire(root)
       assert(wire.some(event => event.event === 'cli-network' && event.code === 'EPERM'))
@@ -349,6 +400,13 @@ async function runHarness(root, mode, port) {
       const recordsBefore = await production.listRecords(join(cwd, '.scry'))
       assert.deepEqual(recordsBefore, [], 'Stop hook must not create a canonical record')
       assert.equal(await production.recorderHasOpenTurn(join(cwd, '.scry')), true, 'Managed Stop must leave pending lifecycle')
+      const sessionRoot = production.recorderSessionRoot(join(cwd, '.scry'), 'claude', session)
+      const beforeRecovery = runtimeFiles(sessionRoot)
+      const recoveryBeforePrepare = await production.recoverManagedRecorderTurns(cwd, process.env, { provider: 'claude', sessionId: session })
+      assert.deepEqual(recoveryBeforePrepare, { recovered: 0, pending: 1 })
+      assert.deepEqual(runtimeFiles(sessionRoot), beforeRecovery, 'Recovery altered an unprepared native lifecycle')
+      assert.equal((await production.readHealth(join(cwd, '.scry'))).pendingCount, 1)
+      assert.deepEqual(await production.listRecords(join(cwd, '.scry')), [])
       const completedAt = new Date().toISOString()
       const timing = { startedAt, completedAt, durationMs: Date.parse(completedAt) - Date.parse(startedAt) }
       assert(timing.durationMs >= 0)
@@ -356,25 +414,38 @@ async function runHarness(root, mode, port) {
       // Bind a real standalone evidence artifact, not a claimed App archive commit.
       assert.equal(aggregate.hooks.quality, 'exact')
       assert.deepEqual(aggregate.hooks.value.map(hook => hook.event), ['UserPromptSubmit', 'Stop'])
-      const archive = { scope: 'standalone-fake-cli', runId, evidence: aggregate, timing, toolContentPolicy, sessionId: result.externalSessionId, providerTurnId: result.providerTurnId }
+      const archive = { scope: 'standalone-fake-cli', runId, status: result.status, evidence: aggregate, timing, toolContentPolicy, sessionId: result.externalSessionId, providerTurnId: result.providerTurnId }
       writeFileSync(join(root, 'archive.tmp'), JSON.stringify(archive))
       renameSync(join(root, 'archive.tmp'), join(root, 'archive.json'))
       const archived = JSON.parse(readFileSync(join(root, 'archive.json'), 'utf8'))
       const evidence = archived.evidence
       const archiveFingerprint = production.stableHash(archived)
-      const prepared = await production.prepareManagedRecorderTurn({
+      const turnInput = {
         workspace: cwd, provider: 'claude', sessionId: result.externalSessionId, runId,
         providerTurnId: result.providerTurnId, userText: prompt, evidence, timing, toolContentPolicy,
-        status: 'completed', archiveFingerprint
-      })
+        status: result.status, archiveFingerprint
+      }
+      await assert.rejects(production.prepareManagedRecorderTurn({ ...turnInput, providerTurnId: '00000000-0000-4000-8000-000000000003' }), /Provider turn id differs from the open lifecycle identity/)
+      assert.deepEqual(runtimeFiles(sessionRoot), beforeRecovery, 'Rejected identity changed native lifecycle')
+      assert.deepEqual(JSON.parse(readFileSync(join(sessionRoot, 'provider-turn-index.json'), 'utf8')), {
+        schemaVersion: 1, stamp: { count: 0, maxSequence: 0 }, providerTurnRecordIds: {}
+      }, 'Rejected identity must not index a nonexistent canonical record')
+      assert.deepEqual(await production.listRecords(join(cwd, '.scry')), [])
+      const prepared = await production.prepareManagedRecorderTurn(turnInput)
       assert.equal(prepared.status, 'prepared')
       assert.deepEqual(await production.listRecords(join(cwd, '.scry')), [], 'Prepare must not commit a record')
       assert.equal(await production.recorderHasOpenTurn(join(cwd, '.scry')), true, 'Prepare must retain pending lifecycle')
-      const committed = await production.commitManagedRecorderTurn({
-        workspace: cwd, provider: 'claude', sessionId: result.externalSessionId, runId,
-        recordId: prepared.recordId, providerTurnId: result.providerTurnId, userText: prompt,
-        evidence, timing, toolContentPolicy, status: 'completed', archiveFingerprint
-      })
+      const preparedFiles = runtimeFiles(sessionRoot)
+      const recoveryPrepared = await production.recoverManagedRecorderTurns(cwd, process.env, { provider: 'claude', sessionId: session })
+      assert.deepEqual(recoveryPrepared, { recovered: 0, pending: 1 })
+      assert.deepEqual(runtimeFiles(sessionRoot), preparedFiles, 'Recovery promoted a prepared handoff without archive commit')
+      assert.equal((await production.readHealth(join(cwd, '.scry'))).pendingCount, 1)
+      assert.deepEqual(await production.listRecords(join(cwd, '.scry')), [])
+      const commitInput = { ...turnInput, recordId: prepared.recordId }
+      await assert.rejects(production.commitManagedRecorderTurn({ ...commitInput, archiveFingerprint: production.stableHash({ unrelated: true }) }), /commit identity differs from prepared handoff/)
+      assert.deepEqual(runtimeFiles(sessionRoot), preparedFiles, 'Rejected archive identity changed the handoff')
+      assert.deepEqual(await production.listRecords(join(cwd, '.scry')), [])
+      const committed = await production.commitManagedRecorderTurn(commitInput)
       assert.equal(committed.status, 'committed')
       const records = await production.listRecords(join(cwd, '.scry'))
       assert.equal(records.length, 1)
@@ -388,17 +459,13 @@ async function runHarness(root, mode, port) {
       for (const key of ['user', 'assistant', 'tools', 'skills', 'mcps', 'hooks', 'usage', 'files', 'diff', 'dangerousOperations', 'errors']) {
         assert.deepEqual(record[key], evidence[key], `Canonical ${key} evidence differs from aggregate`)
       }
-      const repeated = await production.commitManagedRecorderTurn({
-        workspace: cwd, provider: 'claude', sessionId: result.externalSessionId, runId,
-        recordId: prepared.recordId, providerTurnId: result.providerTurnId, userText: prompt,
-        evidence, timing, toolContentPolicy, status: 'completed', archiveFingerprint
-      })
+      const repeated = await production.commitManagedRecorderTurn(commitInput)
       assert.equal(repeated.status, 'duplicate')
       assert.deepEqual(await production.listRecords(join(cwd, '.scry')), records, 'Idempotent commit altered canonical records')
       assert.equal(await production.recorderHasOpenTurn(join(cwd, '.scry')), false)
       assert.equal((await production.verifyStore(join(cwd, '.scry'))).ok, true)
       assert.equal((await production.readHealth(join(cwd, '.scry'))).pendingCount, 0)
-      writeFileSync(join(root, 'recorder.json'), JSON.stringify({ result, timing, evidence, native, trace, committed, repeated }, null, 2))
+      writeFileSync(join(root, 'recorder.json'), JSON.stringify({ result, timing, evidence, native, trace, committed, repeated, recoveryBeforePrepare, recoveryPrepared, identityRejected: true, archiveRejected: true }, null, 2))
       log(root, 'case-passed', { mode, status: result.status, records: 1, hookCount: hooks.length })
       return { mode, status: result.status, sessionId: result.externalSessionId, providerTurnId: result.providerTurnId, native: native.length, trace: trace.length, records: 1, sdkNetwork: denied, cliNetwork: 'EPERM' }
     } finally { clearTimeout(timer); lifetime.abort(new Error('Managed recorder fixture decision finished')) }
@@ -511,10 +578,10 @@ async function runParent() {
     `export { createClaudeAdapter } from ${JSON.stringify(join(dirname(script), '../src/main/providers/claude.ts'))}`,
     `export { WorkflowLiveObservationTracker } from ${JSON.stringify(join(dirname(script), '../src/main/workflow-live-observation.ts'))}`,
     `export { aggregateTurnEvidence } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/aggregate.ts'))}`,
-    `export { commitManagedRecorderTurn, prepareManagedRecorderTurn } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/managed.ts'))}`,
+    `export { commitManagedRecorderTurn, prepareManagedRecorderTurn, recoverManagedRecorderTurns } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/managed.ts'))}`,
     `export { initWorkspace } from ${JSON.stringify(join(dirname(script), '../src/cli/workspace-init.ts'))}`,
     `export { resolveRecorderEnablement } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/config.ts'))}`,
-    `export { recorderHasOpenTurn } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/runtime-state.ts'))}`,
+    `export { recorderHasOpenTurn, recorderSessionRoot } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/runtime-state.ts'))}`,
     `export { listRecords, stableHash, verifyStore, readHealth } from ${JSON.stringify(join(dirname(script), '../src/core/turn-recorder/store.ts'))}`
   ].join('\n') + '\n')
   let bundleResult
@@ -542,7 +609,7 @@ async function runParent() {
   writeFileSync(join(root, 'scope.json'), JSON.stringify({ node, nodeVersion: process.version, profile, scriptHash: hash(script),
     cliSourceHash: hash(join(dirname(script), 'fixtures/claude-sdk-transport-cli.cjs')),
     sdkEntry, sdkHash: hash(sdkEntry), sdkVersion: JSON.parse(readFileSync(join(dirname(sdkEntry), 'package.json'), 'utf8')).version,
-    bundle: bundleEvidence, recorder: recorderEvidence, sdk: 'real query, no mocks', cases: ['complete', 'interrupt', 'negative', 'runner-complete', 'runner-interrupt', 'runner-plain', 'recorder-complete'], synthetic: true }))
+    bundle: bundleEvidence, recorder: recorderEvidence, sdk: 'real query, no mocks', cases, synthetic: true }))
   console.log('Fixture evidence: ' + root)
   const server = createServer(socket => socket.end())
   server.listen(0, '127.0.0.1')
@@ -551,7 +618,7 @@ async function runParent() {
   try {
     assert.equal(await networkProbe(port), 'CONNECTED', 'Loopback positive control failed')
     const reports = []
-    for (const mode of ['complete', 'interrupt', 'negative', 'runner-complete', 'runner-interrupt', 'runner-plain', 'recorder-complete']) {
+    for (const mode of cases) {
       const dir = join(root, mode)
       mkdirSync(dir, { mode: 0o700 })
       for (const name of ['home', 'tmp', 'workspace with spaces']) mkdirSync(join(dir, name), { mode: 0o700 })
@@ -562,12 +629,12 @@ async function runParent() {
         SCRY_CLAUDE_PATH: join(dir, 'fake claude'), SCRY_CLI_PATH: privateRecorderCli,
         SCRY_WIRE_RECORDER_ENTRY_HASH: privateRecorderCliHash,
         SCRY_WIRE_CASE: dir, SCRY_WIRE_MODE: mode, SCRY_WIRE_PORT: String(port),
-        ...(mode.startsWith('runner-') || mode === 'recorder-complete' ? { SCRY_RUNNER_BUNDLE: runnerBundle } : {}) }
+        ...(mode.startsWith('runner-') || mode.startsWith('recorder-') ? { SCRY_RUNNER_BUNDLE: runnerBundle } : {}) }
       let rejectRegistration
       const registrationFailure = new Promise((_, reject) => { rejectRegistration = reject })
       let stdout = '', stderr = '', timer, buffer = '', wireWatch
       try {
-        wireWatch = mode.startsWith('runner-') || mode === 'recorder-complete' ? watchWire(dir, event => {
+        wireWatch = mode.startsWith('runner-') || mode.startsWith('recorder-') ? watchWire(dir, event => {
           if (event.event !== 'cli-start' || existsSync(join(dir, 'fake-registered'))) return
           assert.equal(typeof event.pid, 'number')
           assert(Array.isArray(event.argv))

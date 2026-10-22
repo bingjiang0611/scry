@@ -189,6 +189,18 @@ PID 53307、56908 均在确认 scope 终态后按 executable/userData/出生时�
 
 先前 `/tmp` legacy manifest/临时工作区已不在，删除原因未知，旧16源 hash 本轮无法重验。历史 unknown/pending 不据此结算、退款或重发，也不重建旧证据；新受控证据另做私有只读快照。当前只验证独立成功路径，未验证 managed 中断/失败/恢复、真实 transcript fallback、完整 startAppRun / App archive / SQLite 原子提交或真实 Claude 账号。下一步由维护 Agent 补 recorder 的失败/中断边界，再评估完整 App 接缝。Scry 未升版本、未安装、未推送。
 
+## 独立 managed 中断、失败与恢复拒绝
+
+新增两个实际SDK场景（私有CLI仍0.2.49冻结），当前九场景全部通过。接受现场 `scry-claude-wire-576UgZ`，持久只读审查 `~/.local/state/rotom/verification-evidence/scry-managed-control-j_a614s7/`。只改两份夹具及说明，没有改变生产合同。
+
+- 中断：观测native工具活动后，peer发ACK时adapter.promise仍未完成、Stop尚未执行、records0/open；gate释放后实际terminal、私有Stop、EOF/exit0，canonical为interrupted。
+- 失败：原生SDK错误终态与归一化诊断保留；CLI物理exit0仍得到failed record，不把进程正常退出当业务成功。普通errors容器按既有合同只计失败tool_result，本例工具成功，所以空数组不代表运行成功。
+- 三个managed场景各一条completed/interrupted/failed，重复commit不增。各自core recover在未prepare及仅prepared时均recovered0/pending1，health.pending1，记录0、生命周期/handoff字节不变；错误provider ID与archive fingerprint也拒绝，共12项负输入/停留核验。只允许可重建空派生索引，并单独验证其真实性。
+- 三次独立私有CLI verify均原生exit0、结构完整/records1/pending0，不是failed转成功。24登记/Hook PID确认退出（本次四轮共88登记PID均退出）；三个verify PID未留存，仅保留已同步观察的native exit0，不伪造PID闭包。
+- 97 focused（managed44+Claude23+aggregate30）、Node/web types、App build、语法/diff通过。首轮索引快照断言及独立verifier对errors容器的错误假设均保留，按明确生产合同修正检查，不改生产实现、不重放旧pending或已完成CLI命令。
+
+目前只证明同一独立harness内的core恢复拒绝，不是App冷启动、archive_committed崩溃窗口或native进程丢失后的恢复。下一步由维护Agent核验该崩溃窗口的独立恢复/幂等，再评估完整App接缝；真实账号仍需另行授权。未跑延后的全仓门禁、未安装/推送或升版本。
+
 ## 尚未完成与下一段
 
 - 普通 App 退出已新增本页记录的 durable preparation gate；内部其他错误清理/stopAll 仍是原 best-effort 路径，不能把退出保证外推给它们。历史不可用分支仍 fail-closed，缺少是否允许明确确认退出的产品决定。

@@ -24,6 +24,8 @@ npm run test:claude-sdk-transport
 | runner-interrupt | 等生产 runner 实际观测到 tool_activity 后才 interrupt；假 CLI ACK 后 handle.promise 仍 pending，无 terminal，释放 gate 后才 interrupted、EOF/exit0；不调用 forceKill |
 | runner-plain | 同样的生产路径但关闭观测；trace/native 内容与 runner-complete 一致，只剔除 trace id/ts/runId、native 帧 uuid 和 init cwd，保留工具/消息 ID、输入输出、用量及结果 |
 | recorder-complete | 真实 adapter / 私有 CLI Start+Stop / 聚合器 / prepare+commit，Stop 不写 canonical、commit 写一条且重复不增；独立 CLI verify 与零 pending |
+| recorder-interrupt | 观察到真实 native tool_activity 后发 interrupt；peer 发 ACK 时 promise 未完成、Stop 未执行且 records0/open；释放 gate 后实际 interrupted、Stop/EOF/exit0，随后落盘 interrupted |
+| recorder-failed | 私有 Stop 后 SDK 错误终态；进程正常退出0不等于业务成功，实际 failed、canonical failed；原生/归一化诊断保留 |
 
 每个新场景期限仍为 8 秒，不重试、不加时。临时目录和失败日志保留；只有登记进程的 PID/出生时间/用户/命令及源 hash 都重验后才允许失败清理，不做 pkill。正常成功必须是 EOF + exit 0，SIGTERM 不算成功。macOS 禁止沙箱内 `ps`，OS 出生身份由外层 owner 获取；假 CLI 在外层登记完成前用文件事件 gate 保持存活，再进行握手，避免快速退出与身份采集竞态。runner 的身份采集返回未知时仍只测试 cooperative interrupt，不使用 forceKill 或放宽 profile。
 
@@ -84,10 +86,29 @@ npm run test:claude-sdk-transport
 
 较早 `/tmp/scry-workflow-pending-audit.../source-manifest.json` 与 legacy 临时工作区在本轮复核时已不存在，原因未知；无法重验旧16源 hash，不能把历史核对升级为本轮核对。未重建、清除或重发旧 unknown/pending。新受控现场已另外只读归档，避免只依赖易清理的临时路径。
 
+## Managed 中断、失败与恢复拒绝（九场景）
+
+接受现场 `scry-claude-wire-576UgZ`；只读归档 `~/.local/state/rotom/verification-evidence/scry-managed-control-j_a614s7/`，735文件 + FILES.json。仅两份测试脚本及说明变动，不改生产 adapter、recorder、选项、依赖或版本。Node24.18.0 / SDK0.3.251 / 冻结私有 CLI0.2.49；原七场景加两个新场景全部通过，每场景仍8秒。
+
+三个 managed 场景各真实落盘一条，分别 completed / interrupted / failed，重复 commit 都为 duplicate 且记录不变。分别独立调用固定私有 CLI turns verify，均 exit0 / signal-null、结构完整、records1 / pending0；这不表示 failed 运行变为成功。24登记 harness/fake/Hook PID均确认不存在；本次四轮中88个登记/Hook PID也逐一确认退出，未声称所有未登记后代或全机器闭包。CLI验证三个 PID未留存，不编造 PID核验；首个 verifier 已同步观察各自 native exit0，修正审查断言后直接消费保留结果，没有重发命令。
+
+每个 managed 场景额外核验四个负输入/停留状态，共12项：
+
+- Stop后尚未 prepare，调用真实 core recover：recovered0 / pending1，records0、health.pendingCount1，原始生命周期字节不变。
+- prepare后但未确认 archive commit，recover仍为0 / 1，不自动完成或写 canonical；handoff与生命周期字节不变。
+- 错误 providerTurnId 的 prepare 必须拒绝；错误 archive fingerprint 的 commit 必须拒绝；不推进状态、不写 canonical。
+- 字节快照仅检查本次 session，最多128条目录项、1MiB内容；明确区分可重建的 provider-turn-index 派生缓存。被拒绝的 lookup 允许建立空缓存，但必须验证其 count0/maxSequence0/空映射，不得虚构已提交事实。
+
+中断 ACK 检查观测的是 fake peer 已发送 ACK，adapter没有单独暴露 SDK ACK消费回执；不升级为完成证据。随后必须真实收到 terminal、Stop CLI返回pending、stdin EOF / exit0，才进入 prepare/commit。恢复检查是同一独立 harness 在 SDK结束后调用 core文件恢复 API，不是 App冷启动或 archive_committed 崩溃窗口恢复。
+
+自审保留两类首败：first-run / Sd2X4F 的 blanket目录快照把合法派生索引当作不可变事实，按 managed.ts明确缓存合同修正并加空索引真实性断言，原 pending现场不清除；首个独立 verifier 错把 Provider失败等同于普通errors容器非空。aggregate.test.ts的既有合同只计失败tool_result，故本场景工具成功、普通errors=[]正确；Provider诊断保留在native SDK errors / harness result，canonical.status仍failed。保留first-verifier.mjs和三份独立CLI结果，不改生产逻辑迁就错误断言。
+
+独立 integrity 核对51个 bundle输入和43个私有CLI文件；focused managed44+Claude23、aggregate30，共97单测通过，Node/web types、App build、两脚本语法和diff check通过。未跑延后的全仓门禁、未安装/推送或真实账号操作。
+
 ## 明确不能证明
 
-这不是实际 Claude CLI/模型、账号、工具授权/执行、完整 App workflow 或 App archive/SQLite/canonical 跨存储原子收敛验收。本轮仅证明独立完成路径真实落盘一条 core canonical record；managed interrupt/failure/recovery 尚未覆盖。SDK `hook_callback` 成功本身不表示私有 recorder CLI 已执行，本轮额外 CLI PID/退出/落盘证据才证明它执行。synthetic usage 零不表示真实费用为零。
+这不是实际 Claude CLI/模型、账号、工具授权/执行、完整 App workflow 或 App archive/SQLite/canonical 跨存储原子收敛验收。当前证明独立 completed/interrupted/failed 路径各真实落盘一条 core canonical record及恢复拒绝；尚未覆盖 managed native进程异常丢失、archive_committed崩溃窗口或App冷启动恢复。SDK `hook_callback` 成功本身不表示私有 recorder CLI 已执行，本轮额外 CLI PID/退出/落盘证据才证明它执行。synthetic usage 零不表示真实费用为零。
 
 本检查目前是独立手动命令，未声称 CI 已执行。扩大到 Linux/Windows 前，先提供等价系统禁网和进程身份保证，不静默降低本检查。
 
-下一步由维护 Agent 扩展独立 recorder 的中断/失败/恢复拒绝场景，再评估完整 App 接缝与真实 native transcript。当前 prompt ID 来自原生 Hook；transcript_path 仍是元数据，没有声称覆盖 transcript fallback。实际账号探针仍须用户先指定账号、模型并授权费用。
+下一步由维护 Agent 核验 archive_committed 崩溃窗口的独立恢复与幂等边界，再评估完整 App 接缝与真实 native transcript。当前 prompt ID 来自原生 Hook；transcript_path 仍是元数据，没有声称覆盖 transcript fallback。实际账号探针仍须用户先指定账号、模型并授权费用。

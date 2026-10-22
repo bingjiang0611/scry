@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process')
 const { createHash, randomUUID } = require('node:crypto')
 const root = process.env.SCRY_WIRE_CASE
 const mode = process.env.SCRY_WIRE_MODE
+const managed = ['recorder-complete', 'recorder-interrupt', 'recorder-failed'].includes(mode)
 const sessionId = '00000000-0000-4000-8000-000000000001'
 const promptId = '00000000-0000-4000-8000-000000000002'
 const toolId = 'fixture-tool-call'
@@ -17,7 +18,7 @@ const cap = 16 * 1024
 const log = (event, data = {}) => fs.appendFileSync(path.join(root, 'wire.jsonl'), JSON.stringify({ event, ...data }) + '\n')
 let activeRecorderChild
 const runRecorderHook = (hookEvent, payload) => new Promise((resolve, reject) => {
-  assert.equal(mode, 'recorder-complete')
+  assert(managed, 'Recorder hooks require an explicit managed fixture case')
   assert.equal(typeof recorderCli, 'string', 'Managed recorder CLI path missing')
   assert.equal(recorderCliHash, process.env.SCRY_WIRE_RECORDER_ENTRY_HASH)
   assert.equal(createHash('sha256').update(fs.readFileSync(recorderCli)).digest('hex'), recorderCliHash)
@@ -54,7 +55,7 @@ const finish = async error => {
   assert(!finishing && !ended, 'duplicate terminal result')
   finishing = true
   watcher?.close()
-  if (mode === 'recorder-complete') {
+  if (managed) {
     const result = await runRecorderHook('Stop', {
       hook_event_name: 'Stop', session_id: sessionId, prompt_id: promptId,
       transcript_path: path.join(root, 'synthetic-transcript.jsonl'), stop_hook_active: false,
@@ -77,7 +78,8 @@ const emitContent = async () => {
     usage: { input_tokens: 0, output_tokens: 0 } } }))
   send(frame({ type: 'tool_progress', tool_use_id: toolId, tool_name: 'FixtureTool', parent_tool_use_id: null, elapsed_time_seconds: 0 }))
   send(frame({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: 'synthetic reply' }] } }))
-  if (mode === 'complete' || mode === 'runner-complete' || mode === 'runner-plain' || mode === 'recorder-complete') await finish()
+  if (mode === 'recorder-failed') await finish('synthetic Provider failure')
+  else if (mode === 'complete' || mode === 'runner-complete' || mode === 'runner-plain' || mode === 'recorder-complete') await finish()
 }
 const handle = async packet => {
   log('received', { packet })
@@ -89,7 +91,7 @@ const handle = async packet => {
       send(frame({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: [], mcp_servers: [], model: 'offline-fixture',
         permissionMode: 'default', capabilities: {}, apiKeySource: 'none', claude_code_version: 'synthetic-transport', slash_commands: [], output_style: 'default' }))
     } else if (packet.request.subtype === 'interrupt') {
-      assert(mode === 'interrupt' || mode === 'runner-interrupt')
+      assert(mode === 'interrupt' || mode === 'runner-interrupt' || mode === 'recorder-interrupt')
       // Register the filesystem gate BEFORE ACK, avoiding a lost release event.
       watcher = fs.watch(root, (_event, name) => {
         if (name !== 'release') return
@@ -101,7 +103,7 @@ const handle = async packet => {
     } else throw new Error('Unexpected control request: ' + packet.request.subtype)
   } else if (packet.type === 'user') {
     assert.deepEqual(packet.message.content, [{ type: 'text', text: 'synthetic prompt with spaces\nand newline' }])
-    if (mode === 'recorder-complete') {
+    if (managed) {
       const result = await runRecorderHook('UserPromptSubmit', {
         hook_event_name: 'UserPromptSubmit', session_id: sessionId, cwd: process.cwd(),
         transcript_path: path.join(root, 'synthetic-transcript.jsonl'), prompt: packet.message.content[0].text, prompt_id: promptId
