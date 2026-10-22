@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>侧栏「动态」设计稿 · bolder</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="page-header">
+    <div>
+      <h1>把「此刻正在发生」变成整块列表的峰值</h1>
+      <p class="subtitle">同尺寸对照：现状与三条加强方向。尺寸与颜色取自 <code>src/renderer/styles.css</code>，标题取自截图里的真实数据。</p>
+    </div>
+    <div class="controls">
+      <label><input type="checkbox" id="light"> 浅色主题</label>
+      <label><input type="checkbox" id="attention"> 加入「需要回复」组</label>
+      <label><input type="checkbox" id="zoom"> 放大到 1.4×</label>
+      <label><input type="checkbox" id="motion"> 播放标题扫光</label>
+      <label><input type="checkbox" id="plain"> A 用实色标题（不做扫光）</label>
+    </div>
+  </header>
+
+  <main class="board" id="board">
+    <!-- 现状 -->
+    <section class="comp" data-variant="before">
+      <div class="comp-head"><span class="tag">现状</span><span class="rank">基线</span></div>
+      <div class="sidebar">
+        <div class="sb-brand"><span class="name">Scry</span><span class="ver">0.2.216</span></div>
+        <button class="sb-new"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建会话</span><span class="kbd">⌘N</span></button>
+        <div class="sb-search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索会话 / 项目…" tabindex="-1"></div>
+        <div class="sb-view-tabs"><span role="tab">项目</span><span role="tab" aria-selected="true">动态</span></div>
+        <div class="sb-list"><div class="sb-activity" data-list></div></div>
+      </div>
+    </section>
+
+    <!-- A 幕线 -->
+    <section class="comp" data-variant="a">
+      <div class="comp-head"><span class="tag">A · 幕线</span><span class="rank">已实现</span></div>
+      <div class="sidebar">
+        <div class="sb-brand"><span class="name">Scry</span><span class="ver">0.2.216</span></div>
+        <button class="sb-new"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建会话</span><span class="kbd">⌘N</span></button>
+        <div class="sb-search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索会话 / 项目…" tabindex="-1"></div>
+        <div class="sb-view-tabs"><span role="tab">项目</span><span role="tab" aria-selected="true">动态</span></div>
+        <div class="sb-list"><div class="sb-activity" data-list></div></div>
+      </div>
+    </section>
+
+    <!-- B 竖轨 -->
+    <section class="comp" data-variant="b">
+      <div class="comp-head"><span class="tag">B · 竖轨</span><span class="rank">替代</span></div>
+      <div class="sidebar">
+        <div class="sb-brand"><span class="name">Scry</span><span class="ver">0.2.216</span></div>
+        <button class="sb-new"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建会话</span><span class="kbd">⌘N</span></button>
+        <div class="sb-search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索会话 / 项目…" tabindex="-1"></div>
+        <div class="sb-view-tabs"><span role="tab">项目</span><span role="tab" aria-selected="true">动态</span></div>
+        <div class="sb-list"><div class="sb-activity" data-list></div></div>
+      </div>
+    </section>
+
+    <!-- C 字阶 -->
+    <section class="comp" data-variant="c">
+      <div class="comp-head"><span class="tag">C · 字阶</span><span class="rank">替代</span></div>
+      <div class="sidebar">
+        <div class="sb-brand"><span class="name">Scry</span><span class="ver">0.2.216</span></div>
+        <button class="sb-new"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建会话</span><span class="kbd">⌘N</span></button>
+        <div class="sb-search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索会话 / 项目…" tabindex="-1"></div>
+        <div class="sb-view-tabs"><span role="tab">项目</span><span role="tab" aria-selected="true">动态</span></div>
+        <div class="sb-list"><div class="sb-activity" data-list></div></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="captions">
+    <p class="caption">六条标题同样灰、同样高，运行状态只剩标题里一段几乎看不见的亮带。整屏没有分段，也没有可扫的右列。</p>
+    <p class="caption"><b>分组变成「幕」</b>：标题带一条通栏细线，进行中的标签与线更亮。<b>右侧状态列</b>：旋转环回到和「需要回复 / 已完成」图标同一列。<b>强调反转</b>：运行中标题满强度，扫光带改为向中间调调制。已完成压到 28px。</p>
+    <p class="caption"><b>不画横线，画一条左侧竖轨</b>：轨道只覆盖「进行中」这一段，像观测记录里的边注；已完成组完全平铺。文字 x 与 A 相同，右列保留。分区靠轨道长度，不靠线条数量。</p>
+    <p class="caption"><b>一条线都不画，只用字号和密度分层</b>：运行中 14px / 600、行高 40；已完成 12.5px / 400、行高 26；分组标题退到 11px 字距标签。峰值来自排版对比，代价是动态标题不再与项目列表同字号。</p>
+  </div>
+
+  <p class="page-footer">四列都是 230px 侧栏宽度、截到首屏；底部淡出表示列表可继续滚动。B、C 只是设计稿，尚未实现。</p>
+
+  <section class="notes">
+    <div class="note">
+      <h2>我推荐 A</h2>
+      <p>它保留你已批准的平铺词汇（无卡片、无计数、无副标题），只做三件事：分段、把运行状态放回右列、把最强的文字留给正在跑的会话。B 的竖轨信息量更少但和项目视图的左缩进语言不一致；C 最抢眼，却牺牲「动态标题与项目列表同字号」这条既有约定。</p>
+    </div>
+    <div class="note">
+      <h2>共同约束</h2>
+      <p>不使用新颜色、新字体、新圆角；只动 <code>--fg / --dim / --dim2 / --dim3 / --border2 / --border3</code> 的用法。三版都保留每组 40 行上限、悬停让位给操作按钮、<code>prefers-reduced-motion</code> 与强制颜色回退。</p>
+    </div>
+    <div class="note">
+      <h2>怎么验</h2>
+      <p>A 已在隔离 Electron 夹具通过 23 项检查（含状态列同列、完成段更矮、运行中标题更亮三项新断言），深浅主题逐张目视。B、C 只是设计稿，没有实现；确认方向后再落到 <code>sidebar-activity.css</code>。</p>
+    </div>
+  </section>
+
+  <script>
+    const COMPLETED = ['性能爬坡', 'impeccable']
+    const RUNNING = [
+      '/skill:impeccable bolder 设计下这个侧栏动态',
+      '起一个test实例 随意点击查看各个视图',
+      'workflow',
+      '看下近几天rotom本地版本的会话与任务状态',
+      '现在有个需求 不需要走rate-workflow'
+    ]
+    const ATTENTION = '看下这个报错'
+
+    const laptop = '<svg class="ico" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>'
+    const alert = '<svg class="ico" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>'
+
+    const row = (group, title) => {
+      const mark = group === 'attention' ? alert : group === 'completed' ? laptop : ''
+      const status = mark ? `<span class="sb-activity-status">${mark}</span>` : ''
+      const ring = group === 'working' ? '<span class="sb-running" aria-hidden="true"></span>' : ''
+      return `<div class="sb-activity-item" data-group="${group}">
+        <div class="sb-sess"><span class="sb-sesstext">${title}</span>${ring}${status}</div>
+      </div>`
+    }
+    const heading = (group, label) => `<h3 class="sb-activity-heading" data-group="${group}">${label}</h3>`
+
+    const render = () => {
+      const withAttention = document.getElementById('attention').checked
+      const running = withAttention ? RUNNING : [ATTENTION, ...RUNNING]
+      const groups = []
+      if (withAttention) groups.push(heading('attention', '需要回复') + row('attention', ATTENTION))
+      groups.push(heading('working', '进行中') + running.map((title) => row('working', title)).join(''))
+      groups.push(heading('completed', '已完成') + COMPLETED.map((title) => row('completed', title)).join(''))
+      for (const list of document.querySelectorAll('[data-list]')) list.innerHTML = groups.join('')
+      for (const comp of document.querySelectorAll(".comp[data-variant='b']")) {
+        const list = comp.querySelector('[data-list]')
+        const head = list.querySelector("[data-group='working']")
+        const items = list.querySelectorAll(".sb-activity-item[data-group='working']")
+        const last = items[items.length - 1]
+        if (!head || !last) continue
+        const spine = document.createElement('span')
+        spine.className = 'spine'
+        spine.style.top = head.offsetTop + 'px'
+        spine.style.height = last.offsetTop + last.offsetHeight - head.offsetTop + 'px'
+        list.appendChild(spine)
+      }
+    }
+
+    const light = document.getElementById('light')
+    const zoom = document.getElementById('zoom')
+    const motion = document.getElementById('motion')
+    const plain = document.getElementById('plain')
+    const apply = () => {
+      document.documentElement.classList.toggle('light', light.checked)
+      document.getElementById('board').classList.toggle('zoomed', zoom.checked)
+      document.getElementById('board').classList.toggle('motion', motion.checked)
+      document.getElementById('board').classList.toggle('plain', plain.checked)
+      render()
+    }
+    for (const input of document.querySelectorAll('input')) input.addEventListener('change', apply)
+    const params = new URLSearchParams(location.search)
+    for (const key of ['light', 'attention', 'zoom', 'motion', 'plain']) {
+      if (!params.has(key)) continue
+      const box = document.getElementById(key)
+      if (box) box.checked = params.get(key) !== '0'
+    }
+    apply()
+  </script>
+</body>
+</html>
