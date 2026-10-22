@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { installPiIntegration, piIntegrationStatus } from './pi-integration'
+import { handleRecorderHook } from '../core/turn-recorder/recorder'
+import { listRecords } from '../core/turn-recorder/store'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -46,6 +48,82 @@ describe('Pi recorder integration installer', () => {
 })
 
 describe('Pi recorder extension lifecycle', () => {
+  it.each<{
+    name: string
+    reasons: string[]
+    status: string
+    error?: string
+    aborted?: boolean
+    shutdown?: boolean
+    toolError?: boolean
+  }>([
+    { name: 'API error', reasons: ['error'], status: 'failed', error: 'model rejected by account' },
+    { name: 'error without diagnostic', reasons: ['error'], status: 'failed' },
+    { name: 'aborted response', reasons: ['aborted'], status: 'cancelled' },
+    { name: 'aborted settlement', reasons: ['stop'], status: 'cancelled', aborted: true },
+    { name: 'successful retry', reasons: ['error', 'stop'], status: 'completed', error: 'temporary error' },
+    { name: 'tool failure recovered', reasons: ['stop'], status: 'completed', toolError: true },
+    { name: 'shutdown after API error', reasons: ['error'], status: 'failed', error: 'model rejected', shutdown: true },
+    { name: 'shutdown before settlement', reasons: ['stop'], status: 'interrupted', shutdown: true },
+    { name: 'bounded diagnostic', reasons: ['error'], status: 'failed', error: '你'.repeat(30_000) }
+  ])('保留 Pi 真实终态和错误证据：$name', async ({ reasons, status, error, aborted, shutdown, toolError }) => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-terminal space-'))
+    roots.push(root)
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'pi-terminal', workspaceLabel: 'Pi terminal' }))
+    const capture = join(root, 'capture.jsonl')
+    const argvPath = join(root, 'argv.bin')
+    const cli = join(root, 'capture.sh')
+    await writeFile(cli, `#!/bin/sh\nprintf '%s\\0' "$@" >> ${JSON.stringify(argvPath)}\npayload=$(cat)\nprintf '%s\\n' "$payload" >> ${JSON.stringify(capture)}\n`)
+    await chmod(cli, 0o700)
+    process.env.SCRY_CLI_PATH = cli
+    process.env.SCRY_RECORDER_TRANSPORT = 'direct'
+    const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-terminal', getLeafId: () => 'pi-turn' } }
+    const handlers = new Map<string, (event: Record<string, unknown>, context: typeof ctx) => unknown>()
+    // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
+    const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
+    extension.default({ on(name: string, handler: (event: Record<string, unknown>, context: typeof ctx) => unknown) { handlers.set(name, handler) } })
+    const emit = async (name: string, event: Record<string, unknown> = {}) => {
+      expect(handlers.has(name)).toBe(true)
+      await handlers.get(name)!(event, ctx)
+    }
+    await emit('before_agent_start', { prompt: 'terminal evidence' })
+    if (toolError) await emit('tool_execution_end', { toolName: 'read', toolCallId: 'read-1', isError: true, result: 'missing file' })
+    for (const stopReason of reasons) {
+      await emit('message_end', { message: { role: 'assistant', stopReason, errorMessage: stopReason === 'error' ? error : undefined, content: error && Buffer.byteLength(error) > 64 * 1024 ? [{ type: 'text', text: '文'.repeat(100_000) }] : [] } })
+    }
+    await emit(shutdown ? 'session_shutdown' : 'agent_settled', { aborted: aborted ?? false })
+    await emit('session_shutdown')
+    const argv = (await readFile(argvPath, 'utf8')).split('\0').slice(0, -1)
+    const rows = (await readFile(capture, 'utf8')).trim().split('\n').map((line, index) => ({
+      argv: argv.slice(index * 10, (index + 1) * 10), payload: JSON.parse(line) as Record<string, unknown>
+    }))
+    expect(argv).toHaveLength(rows.length * 10)
+    const stops = rows.filter(({ argv }) => argv[argv.indexOf('--event') + 1] === 'Stop')
+    expect(stops).toHaveLength(1)
+    expect(stops[0].payload.status).toBe(status)
+    const expectedError = reasons.at(-1) === 'error' ? error : undefined
+    if (!expectedError) expect(stops[0].payload).not.toHaveProperty('error')
+    for (const { argv, payload } of rows) {
+      const event = argv[argv.indexOf('--event') + 1]
+      expect(argv).toEqual(['recorder', 'hook', '--provider', 'pi', '--event', event, '--workspace', root, '--stdin', '--quiet'])
+      await handleRecorderHook({ workspace: root, provider: 'pi', event, payload })
+    }
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].status).toBe(status)
+    if (expectedError) {
+      const bounded = Buffer.byteLength(expectedError) > 64 * 1024
+      expect(records[0].errors.status).toBe(bounded ? 'partial' : 'available')
+      if (bounded) expect(records[0].assistant.status).toBe('partial')
+      expect(records[0].errors.value).toHaveLength(1)
+      expect(records[0].errors.value?.[0].message).toContain(bounded ? '你' : expectedError)
+      expect(String(stops[0].payload.error)).not.toContain('\uFFFD')
+      expect(Buffer.byteLength(String(stops[0].payload.error))).toBeLessThanOrEqual(64 * 1024)
+    } else if (!toolError) {
+      expect(records[0].errors.status).toBe('unavailable')
+    }
+  })
+
   it('daemon 未 ACK 时回退幂等 direct CLI，避免静默丢事件', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-timeout-'))
     roots.push(root)

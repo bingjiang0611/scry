@@ -432,7 +432,7 @@ function hookDeliveryEvent(args: {
 }
 
 interface CaptureLimitation {
-  field: 'assistant_response' | 'tool_input' | 'tool_response' | 'model_segments'
+  field: 'assistant_response' | 'tool_input' | 'tool_response' | 'model_segments' | 'error'
   status: 'partial' | 'unavailable'
   reason: 'byte_limit' | 'item_limit' | 'serialization_error'
 }
@@ -443,7 +443,7 @@ function captureLimitations(payload: Record<string, unknown>): CaptureLimitation
   const raw = capture as Record<string, unknown>
   if (raw.schemaVersion !== 1 || !raw.fields || typeof raw.fields !== 'object' || Array.isArray(raw.fields)) return []
   return Object.entries(raw.fields as Record<string, unknown>).flatMap(([field, value]) => {
-    if (!['assistant_response', 'tool_input', 'tool_response', 'model_segments'].includes(field) || !value || typeof value !== 'object' || Array.isArray(value)) return []
+    if (!['assistant_response', 'tool_input', 'tool_response', 'model_segments', 'error'].includes(field) || !value || typeof value !== 'object' || Array.isArray(value)) return []
     const limitation = value as Record<string, unknown>
     if (!['partial', 'unavailable'].includes(String(limitation.status)) || !['byte_limit', 'item_limit', 'serialization_error'].includes(String(limitation.reason))) return []
     return [{ field, status: limitation.status, reason: limitation.reason } as CaptureLimitation]
@@ -600,6 +600,17 @@ export function lifecycleTraceEvents(args: {
       } : { invalid: true }
     })
   }
+  const providerError = args.provider === 'pi' && args.event === 'Stop' ? stringAt(args.payload, 'error') : undefined
+  if (providerError) out.push({
+    id: `pi-error-${stableHash([args.runId, providerError]).slice(0, 16)}`,
+    ts: at,
+    runId: args.runId,
+    kind: 'harness',
+    stage: 'task_error',
+    text: providerError,
+    isError: true,
+    runtimeMetadata: limitationMetadata(limitations.filter((item) => item.field === 'error'))
+  })
   const assistant = stringAt(args.payload, 'assistant_response', 'assistantResponse', 'result_text')
   if (assistant) out.push({
     id: `assistant-${stableHash(assistant).slice(0, 16)}`,
@@ -2529,7 +2540,9 @@ async function finalizeOpenTurn(
       hooks: enablement.config.capture.hooks && (hasHookEvidence || transcript.observable.hooks),
       usage: hasUsage || transcript.observable.usage,
       files: events.some((event) => !!event.filePath && !!event.fileOp) || transcript.observable.files,
-      errors: hasToolEvidence || transcript.observable.errors,
+      errors: hasToolEvidence || transcript.observable.errors || events.some((event) =>
+        event.kind === 'harness' && event.stage === 'task_error' && event.isError === true
+      ),
       diff: enablement.config.capture.diff
     }
   })

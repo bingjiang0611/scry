@@ -28,10 +28,12 @@ function utf8Prefix(text, limit) {
   return source.subarray(0, end).toString('utf8')
 }
 
-function limitation(field, result) {
-  return result.capture
-    ? { scry_capture: { schemaVersion: 1, fields: { [field]: result.capture } } }
-    : {}
+function limitation(fields) {
+  const captures = Object.fromEntries(Object.entries(fields)
+    .filter(([, result]) => result?.capture)
+    .map(([field, result]) => [field, result.capture]))
+  return Object.keys(captures).length
+    ? { scry_capture: { schemaVersion: 1, fields: captures } } : {}
 }
 
 function boundedJson(value) {
@@ -238,6 +240,12 @@ export default function scryPiRecorder(pi) {
   pi.on('message_end', (event) => {
     const message = event.message
     if (!active || !message || message.role !== 'assistant') return
+    // A settled run can still have failed. A successful retry replaces the prior
+    // failure, so only the last assistant response determines the terminal status.
+    active.terminalStatus = message.stopReason === 'error' ? 'failed'
+      : message.stopReason === 'aborted' ? 'cancelled' : undefined
+    active.error = message.stopReason === 'error' && message.errorMessage
+      ? boundedText(message.errorMessage, MAX_JSON_BYTES) : undefined
     const text = assistantText(message)
     if (text) active.assistant.push(text)
     active.usageObserved = addUsage(active.usage, message) || active.usageObserved
@@ -261,7 +269,7 @@ export default function scryPiRecorder(pi) {
       tool_name: event.toolName,
       tool_use_id: event.toolCallId,
       tool_input: input.value,
-      ...limitation('tool_input', input),
+      ...limitation({ tool_input: input }),
       timestamp: new Date().toISOString(),
     })
   })
@@ -275,13 +283,13 @@ export default function scryPiRecorder(pi) {
       tool_name: event.toolName,
       tool_use_id: event.toolCallId,
       tool_response: output.value,
-      ...limitation('tool_response', output),
+      ...limitation({ tool_response: output }),
       ...(event.isError ? { error: true } : {}),
       timestamp: new Date().toISOString(),
     })
   })
 
-  pi.on('agent_settled', async () => {
+  pi.on('agent_settled', async (event) => {
     const turn = active
     if (!turn || turn.settled) return
     turn.settled = true
@@ -290,10 +298,11 @@ export default function scryPiRecorder(pi) {
       session_id: turn.sessionId,
       promptId: turn.providerTurnId,
       assistant_response: assistant.value,
-      ...limitation('assistant_response', assistant),
+      ...limitation({ assistant_response: assistant, error: turn.error }),
       ...(turn.usageObserved ? { usage: turn.usage } : {}),
       model_segments: turn.modelSegments,
-      status: 'completed',
+      ...(turn.error ? { error: turn.error.value } : {}),
+      status: event.aborted ? 'cancelled' : turn.terminalStatus ?? 'completed',
       timestamp: new Date().toISOString(),
     })
     if (active === turn) active = undefined
@@ -308,10 +317,11 @@ export default function scryPiRecorder(pi) {
         session_id: turn.sessionId,
         promptId: turn.providerTurnId,
         assistant_response: assistant.value,
-        ...limitation('assistant_response', assistant),
+        ...limitation({ assistant_response: assistant, error: turn.error }),
         ...(turn.usageObserved ? { usage: turn.usage } : {}),
         model_segments: turn.modelSegments,
-        status: 'interrupted',
+        ...(turn.error ? { error: turn.error.value } : {}),
+        status: turn.terminalStatus ?? 'interrupted',
         timestamp: new Date().toISOString(),
       })
     }
