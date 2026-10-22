@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import type { WorkflowControlFrame, WorkflowValueReference } from '../shared/workflow'
-import { workflowFrameCopy as copy } from '../shared/constants/copy'
+import type { WorkflowControlFrame, WorkflowLoopCheckpoint, WorkflowValueReference } from '../shared/workflow'
+import { workflowFrameCopy as copy, workflowLoopCopy } from '../shared/constants/copy'
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -16,6 +16,21 @@ export function validateWorkflowValueReference(value: unknown, workflowId: strin
   if (!object(value) || value.workflowId !== workflowId || !id(value.key) || typeof value.hash !== 'string' || !/^[a-f0-9]{64}$/.test(value.hash) || Object.keys(value).some(key => !['workflowId', 'key', 'hash'].includes(key))) throw new Error(copy.reference)
 }
 
+export function validateWorkflowLoopCheckpoint(value: unknown, workflowId: string): asserts value is WorkflowLoopCheckpoint {
+  if (!object(value) || !Number.isSafeInteger(value.iteration) || (value.iteration as number) < 0 || (value.iteration as number) > 1000 || (typeof value.stage !== 'string' || !['ready', 'committed'].includes(value.stage)) || !Number.isSafeInteger(value.noProgress) || (value.noProgress as number) < 0 || (value.noProgress as number) > 1000) throw new Error(workflowLoopCopy.checkpoint)
+  for (const field of ['stateRefs', 'initialStateRefs', 'invariantRefs'] as const) {
+    const bindings = value[field]
+    if (!object(bindings) || !Object.keys(bindings).length || Object.keys(bindings).length > 4096) throw new Error(workflowLoopCopy.checkpoint)
+    for (const [key, reference] of Object.entries(bindings)) { if (!id(key)) throw new Error(workflowLoopCopy.checkpoint); validateWorkflowValueReference(reference, workflowId) }
+  }
+  if (!Array.isArray(value.history) || value.history.length > 1001 || value.history.some(entry => !object(entry) || !Number.isSafeInteger(entry.iteration) || (entry.iteration as number) < 0 || (entry.iteration as number) > (value.iteration as number) || typeof entry.key !== 'string' || !/^[a-f0-9]{64}$/.test(entry.key))) throw new Error(workflowLoopCopy.checkpoint)
+  if (!Array.isArray(value.iterations) || value.iterations.length > 1000) throw new Error(workflowLoopCopy.checkpoint)
+  for (const reference of value.iterations) validateWorkflowValueReference(reference, workflowId)
+  if (!Array.isArray(value.reasons) || value.reasons.length > 8 || new Set(value.reasons).size !== value.reasons.length || value.reasons.some(reason => typeof reason !== 'string' || !['success', 'no_progress', 'oscillation', 'exhausted', 'failed', 'blocked', 'unknown', 'stopped'].includes(reason))) throw new Error(workflowLoopCopy.checkpoint)
+  if (value.bestRef !== undefined) validateWorkflowValueReference(value.bestRef, workflowId)
+  if (value.outcomeRef !== undefined) validateWorkflowValueReference(value.outcomeRef, workflowId)
+}
+
 export function validateWorkflowFrame(value: unknown, workflowId: string, frameId: string): asserts value is WorkflowControlFrame {
   if (!object(value) || value.schemaVersion !== 1 || value.workflowId !== workflowId || value.frameId !== frameId || !id(value.nodeId) || !id(value.programRevision) || typeof value.inputKey !== 'string' || !/^[a-f0-9]{64}$/.test(value.inputKey) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 1 || typeof value.phase !== 'string' || !phases.includes(value.phase)) throw new Error(copy.invalid)
   if (!Array.isArray(value.scopePath) || value.scopePath.length > 64 || !value.scopePath.every(item => typeof item === 'string' && item.length <= 256) || workflowFrameId(value.nodeId, value.scopePath) !== frameId) throw new Error(copy.invalid)
@@ -25,6 +40,8 @@ export function validateWorkflowFrame(value: unknown, workflowId: string, frameI
   if (value.decisionRef !== undefined) validateWorkflowValueReference(value.decisionRef, workflowId)
   if (value.resultRef !== undefined) validateWorkflowValueReference(value.resultRef, workflowId)
   if (value.sourceRef !== undefined) validateWorkflowValueReference(value.sourceRef, workflowId)
+  if (value.loop !== undefined) validateWorkflowLoopCheckpoint(value.loop, workflowId)
+  if (value.continuation !== undefined && (value.continuation !== 'report_partial' || value.phase !== 'blocked')) throw new Error(copy.invalid)
   if (value.cursor !== undefined && (!Number.isSafeInteger(value.cursor) || (value.cursor as number) < 0 || (value.cursor as number) > 4096)) throw new Error(copy.invalid)
   if (value.children !== undefined) {
     if (!Array.isArray(value.children) || value.children.length > 4096 || value.cursor !== value.children.length) throw new Error(copy.invalid)
@@ -48,6 +65,22 @@ export function nextWorkflowFrame(current: WorkflowControlFrame | undefined, inp
   if (current) {
     if (current.nodeId !== next.nodeId || current.programRevision !== next.programRevision || current.inputKey !== next.inputKey || JSON.stringify(current.scopePath) !== JSON.stringify(next.scopePath)) throw new Error(copy.identity)
     if (terminal.has(current.phase)) throw new Error(copy.terminal)
+    if (current.loop) {
+      const previous = current.loop, loop = next.loop
+      if (!loop ||
+        JSON.stringify(previous.invariantRefs) !== JSON.stringify(loop.invariantRefs) ||
+        JSON.stringify(previous.initialStateRefs) !== JSON.stringify(loop.initialStateRefs) ||
+        JSON.stringify(Object.keys(previous.stateRefs).sort()) !== JSON.stringify(Object.keys(loop.stateRefs).sort()) ||
+        loop.iteration < previous.iteration || loop.iteration > previous.iteration + 1) throw new Error(workflowLoopCopy.checkpoint)
+      const stateChanged = JSON.stringify(loop.stateRefs) !== JSON.stringify(previous.stateRefs)
+      const progressChanged = loop.noProgress !== previous.noProgress ||
+        JSON.stringify(loop.history) !== JSON.stringify(previous.history) ||
+        JSON.stringify(loop.iterations) !== JSON.stringify(previous.iterations)
+      if (loop.iteration === previous.iteration && previous.stage === 'committed' &&
+        (loop.stage !== 'committed' || stateChanged || progressChanged)) throw new Error(workflowLoopCopy.checkpoint)
+      if (loop.iteration > previous.iteration &&
+        (loop.stage !== 'ready' || previous.reasons.length > 0 || (previous.stage !== 'committed' && previous.iteration !== 0) || stateChanged || progressChanged)) throw new Error(workflowLoopCopy.checkpoint)
+    }
     if (current.arm !== undefined && (next.phase === 'entered' || current.arm !== next.arm || !sameRef(current.decisionRef, next.decisionRef))) throw new Error(copy.decision)
   }
   return next

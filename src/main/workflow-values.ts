@@ -90,6 +90,19 @@ export function matchesWorkflowValue(value: unknown, schema: WorkflowValueSchema
   }
 }
 
+/** Structural assignment for frozen loop state, including host-only collection
+ * schemas. Runtime values still pass the actual data contract before commit. */
+export function workflowSchemaAssignable(actual: WorkflowValueSchema, expected: WorkflowValueSchema): boolean {
+  if (actual.type === 'union') return actual.variants.every(variant => workflowSchemaAssignable(variant, expected))
+  if (expected.type === 'union') return expected.variants.some(variant => workflowSchemaAssignable(actual, variant))
+  if (actual.type === 'enum') return actual.values.every(value => matchesWorkflowValue(value, expected))
+  if (actual.type !== expected.type) return false
+  if (actual.type === 'collection' && expected.type === 'collection') return workflowSchemaAssignable(actual.items, expected.items)
+  if (actual.type === 'array' && expected.type === 'array') return actual.maxItems <= expected.maxItems && workflowSchemaAssignable(actual.items, expected.items)
+  if (actual.type === 'object' && expected.type === 'object') return expected.required.every(key => actual.required.includes(key)) && Object.entries(actual.properties).every(([key, schema]) => Object.hasOwn(expected.properties, key) && workflowSchemaAssignable(schema, expected.properties[key]))
+  return true
+}
+
 /** Parse the whole Provider output. Never recover a JSON fragment from prose,
  * coerce strings into booleans/numbers, fill missing fields, or invent defaults. */
 export function decodeWorkflowOutput(text: string | undefined, schema: WorkflowValueSchema): WorkflowValue {

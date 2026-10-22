@@ -40,11 +40,11 @@
 - 唯一WorkflowProgram增加可选call.outputSchema；编译器规范化并纳入修订/4MiB预算，Runner追加冻结格式要求，并在Native result后真实校验完整JSON。数据合同无效时记录failed且不推进后继；未settled作用域仍unknown并占容量，不退款。
 - 支持有限类型/枚举/数组/对象及新增union，深度16/节点256、数组≤4096、复用原16,384字符输出上限；不执行schema扩展、截取JSON片段、类型强转或补零。null/false/0/显式unknown保持原样。具体已落地语法见 [program-ir.md](program-ir.md)。这是宿主类型校验，不是Provider原生强制JSON、工具禁用或内容真实性证明。
 - 新增22项回归，11文件131项Workflow测试、Node/web types、build通过；故意关闭运行时数据门后6项失败，恢复后35项相关测试通过。只读源码/命令证据 `~/.local/state/rotom/verification-evidence/workflow-m2-values-8k8viz79/`，不代表真实Provider/App验收。
-- 新增bind/branch及有限表达式：字段投影、比较、保守unknown布尔组合、count/concat、保留成员的group/unique、保留matched/rejected/unknown的filter/partition。编译检查类型、前置依赖、兄弟隔离及分支私有绑定；分支结果带arm标签，未选arm记skipped且不派发。规划提示同步真实已支持语法，不宣称支持map/loop。
-- 同一Runner新增CAS控制帧与内容寻址值存储，真实文件锁串行跨store竞争；选择落盘后才执行子任务，结果先落盘再推进。unknown及其他终态不可被重置覆盖。没有把这些帧当作已实现完整恢复执行；显式栈的后续进展见M3，map/loop、carry/最佳候选与sibling复用仍缺。
+- 新增bind/branch及有限表达式：字段投影、比较、保守unknown布尔组合、count/concat、保留成员的group/unique、保留matched/rejected/unknown的filter/partition。编译检查类型、前置依赖、兄弟隔离及分支私有绑定；分支结果带arm标签，未选arm记skipped且不派发。该阶段规划提示仅声明当时语法；后续map/loop实现见M3。
+- 同一Runner新增CAS控制帧与内容寻址值存储，真实文件锁串行跨store竞争；选择落盘后才执行子任务，结果先落盘再推进。unknown及其他终态不可被重置覆盖。没有把这些帧当作已实现完整恢复执行；显式栈的后续进展见M3，后续map/loop、carry/最佳候选进展见M3，恢复与sibling复用仍缺。
 - 本阶段Node24.18.0/macOS：13文件160项Workflow测试、Node/web types及build通过（focused-delivery.log/typecheck-delivery.log/build-delivery.log）。最终源码unknown→else负对照为2失败/13通过（错误completed和额外派发）；按SHA256恢复原字节后相关42项通过（restored-delivery.log）。首轮长ID临时文件超限及测试数据类型失败均保留，分别修复writer临时名和准确JSON类型，没有删断言或加超时。
 - 本阶段只读证据位置：`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。性能命令对映射的providers.catalog报告无collector，不是性能通过，也不是Runner性能证明。
-- map/collect后续进展见M3；M2剩余loop/choose/classify等指令、路由/模板/发布，及M3完整动态执行/恢复仍未完成。继续直接实现这些目标；M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
+- map/collect后续进展见M3；M2剩余choose/classify等指令及loop高级恢复、路由/模板/发布，及M3完整动态执行/恢复仍未完成。继续直接实现这些目标；M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
 
 ## M3：持久解释器与恢复
 
@@ -64,14 +64,22 @@
 - 已用唯一WorkflowInterpreter显式activation stack替换Runner递归控制求值；Native调用、预算、slots和outcome仍走原Runner，不引入第二套程序或生成JS。
 - framed sequence增加cursor与带版本的已提交child/result引用；子结果先持久化、父cursor提交成功后才进入后继。注入父提交失败，已完成首个子任务可查，第二个不发送。
 - Node24.18.0/macOS：13文件161项Workflow回归、Node/web types、build通过；省略父checkpoint负对照3失败/13通过，按SHA256恢复后16项相关测试通过。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`。
-- map后续进展见下节；仍缺普通M0程序控制帧统一、跨进程恢复、loop/carry/最佳候选和依赖/sibling恢复。历史unknown仍不可重发/退款。本阶段没有真实App/Provider验收，既有性能collector缺口与七项延期门禁保持未验证，不因本阶段focused通过消失。
+- map后续进展见下节；仍缺普通M0程序控制帧统一、跨进程恢复、loop/carry/最佳候选的恢复和依赖/sibling恢复。历史unknown仍不可重发/退款。本阶段没有真实App/Provider验收，既有性能collector缺口与七项延期门禁保持未验证，不因本阶段focused通过消失。
 
 ### M3 动态map与受控集合进展（仍非M2/M3完成）
 
 - 同一IR/解释器新增动态map与显式collect，完整输入/稳定key/批次上限先验，受共享slots和根预算控制；已证明item内流水与跨窗口补位，不设整页barrier。
 - 宿主mint typed集合引用，manifest保存每项状态/物理settled及不可变结果引用；失败/unknown/pending不删。cold读取核对hash/workflow/count/结构。collect保留失败摘要与0值，不把unknown当空或恢复成功。
 - Node24.18.0/macOS：14文件172项focused、Node/web types、build通过；关闭重复key预检后1失败/10通过（发生本应禁止的Native test-double调用），SHA256恢复后11通过。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。
-- 仍缺嵌套collection字段的typed metadata投影、超4MiB集合的streaming group/filter、普通M0统一持久化、loop/carry/最佳候选与跨进程/依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
+- 仍缺嵌套collection字段的typed metadata投影、超4MiB集合的streaming group/filter、普通M0统一持久化、loop/carry/最佳候选的跨进程/依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
+
+### M3 有界loop与逻辑退出进展（仍非M2/M3完成）
+
+- 新增具名initial/invariants/stateSchema/carry及显式policy，1–1000轮边界；唯一解释器调用body，主进程循环控制器提交状态，不创建模型调度回合或新AST。
+- typed carry与原始/当前/best引用、ready/committed轮次、不可变轮次记录和完整退出原因已落盘。未知不进入下一轮；失败提交不新派发；连续两轮无进展与非相邻振荡区分，比较内容而非artifact nonce。
+- known逻辑退出可经批准步骤生成partial报告，但根不green；这一状态穿过所有已有容器。停止与后到success均记录，停止/错误/unknown不被覆盖。generic best引用和模型布尔不是独立质量证明。
+- Node24.18.0/macOS：15文件187项focused、Node/web types、build通过；关闭no_progress门后1失败/14通过（多发2轮），SHA恢复后15通过。首轮纯控制blocked丢失缺陷已在共同父状态折叠修复，裸loop拒绝测试改为明确边界合同，并保留拒绝。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。
+- 仍缺真实main check/可靠比较器、定时事件截止、普通M0控制帧统一、实际跨进程/依赖/sibling恢复、剩余指令和生产App/UI验收。本阶段没有真实Provider调用；M1、M4–M6、性能collector缺口及七项延期门禁仍未结案。
 
 ## M4：质量模式、检查与写入
 

@@ -1,0 +1,122 @@
+import { createHash } from 'node:crypto'
+import type { WorkflowAttemptOutcome, WorkflowControlFrame, WorkflowEvaluation, WorkflowLoopBlock, WorkflowLoopCheckpoint, WorkflowLoopExitReason, WorkflowValueSchema } from '../shared/workflow'
+import { workflowLoopCopy as copy } from '../shared/constants/copy'
+import { evaluateWorkflowExpression, workflowValueKey } from './workflow-expressions'
+import { matchesWorkflowValue } from './workflow-values'
+import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
+import type { WorkflowExecutionResult, WorkflowInterpreterState } from './workflow-interpreter'
+
+type Completion = { frame: WorkflowControlFrame; value: WorkflowEvaluation; phase: WorkflowControlFrame['phase']; outcomes: WorkflowAttemptOutcome[]; reportPartial: boolean }
+const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+
+/** Owns only a loop's durable state transition. Its body callback is the same
+ * Interpreter's explicit-stack evaluator; no generated code or model scheduler. */
+export class WorkflowLoopExecution {
+  private readonly schemas: Record<string, WorkflowValueSchema>
+  private readonly outcomes: WorkflowAttemptOutcome[] = []
+  constructor(private readonly block: WorkflowLoopBlock, private readonly parent: WorkflowControlScope,
+    private frame: WorkflowControlFrame, private readonly control: WorkflowControl, private readonly execution: WorkflowInterpreterState,
+    private readonly body: (scope: WorkflowControlScope) => Promise<WorkflowExecutionResult>) {
+    this.schemas = control.loopSchemas(block.blockId)
+  }
+  private evaluate(values: WorkflowLoopBlock['initial'], scope: WorkflowControlScope): Record<string, WorkflowEvaluation> {
+    return Object.fromEntries(Object.entries(values).map(([name, expression]) => [name, evaluateWorkflowExpression(expression, scope.bindings)]))
+  }
+  private scope(values: Record<string, WorkflowEvaluation>, invariants: Record<string, WorkflowEvaluation>, iteration: number, label: string): WorkflowControlScope {
+    const scope = this.control.child(this.parent, label)
+    for (const [name, value] of [...Object.entries(invariants), ...Object.entries(values)]) this.control.bind(scope, name, value)
+    if (this.block.iteration) this.control.bind(scope, this.block.iteration, { state: 'known', value: iteration, derivedFrom: [] })
+    return scope
+  }
+  private valid(values: Record<string, WorkflowEvaluation>): boolean {
+    return Object.entries(values).every(([name, value]) => value.state === 'known' && (this.schemas[name].type === 'collection' ? value.collection !== undefined : matchesWorkflowValue(value.value, this.schemas[name])))
+  }
+  private async checkpoint(value: WorkflowLoopCheckpoint): Promise<void> { this.frame = await this.control.checkpointLoop(this.frame, value) }
+  private async finish(checkpoint: WorkflowLoopCheckpoint, values: Record<string, WorkflowEvaluation>, invariants: Record<string, WorkflowEvaluation>, reasons: WorkflowLoopExitReason[], body?: WorkflowExecutionResult): Promise<Completion> {
+    const final = evaluateWorkflowExpression(this.block.result, this.scope(values, invariants, checkpoint.iteration, this.block.blockId + ':result').bindings)
+    if (final.state === 'unknown') reasons.push('unknown')
+    if (this.execution.stopped) reasons.push('stopped')
+    reasons = [...new Set(reasons)]
+    const status: WorkflowLoopExitReason = reasons.includes('unknown') ? 'unknown' : reasons.includes('stopped') ? 'stopped' : reasons.includes('failed') ? 'failed' : reasons.includes('blocked') ? 'blocked' : reasons.includes('success') ? 'success' : reasons.includes('oscillation') ? 'oscillation' : reasons.includes('no_progress') ? 'no_progress' : 'exhausted'
+    const outcome = { status, reasons, iteration: checkpoint.iteration, noProgress: checkpoint.noProgress }
+    const [outcomeRef] = Object.values(await this.control.saveBindings({ outcome: { state: 'known', value: outcome, derivedFrom: [] } }))
+    await this.checkpoint({ ...checkpoint, reasons, outcomeRef })
+    this.control.bind(this.parent, this.block.outcome, { state: 'known', value: outcome, derivedFrom: [`value:${outcomeRef.key}:${outcomeRef.hash}`] })
+    const unsettled = body?.phase === 'unknown' || this.outcomes.some(value => !value.settled || value.state === 'unknown')
+    const phase = unsettled ? 'unknown' : this.execution.stopped ? 'stopped' : reasons.includes('failed') ? 'failed' : reasons.includes('unknown') || reasons.includes('blocked') ? 'blocked' : status === 'success' ? 'completed' : 'blocked'
+    const reportPartial = phase === 'blocked' && !reasons.some(reason => ['unknown', 'failed', 'blocked', 'stopped'].includes(reason))
+    return { frame: this.frame, value: final, phase, outcomes: this.outcomes, reportPartial }
+  }
+
+  async run(): Promise<Completion> {
+    const invariants = this.evaluate(this.block.invariants, this.parent)
+    const initialScope = this.control.child(this.parent, this.block.blockId + ':initial')
+    for (const [name, value] of Object.entries(invariants)) this.control.bind(initialScope, name, value)
+    let values = this.evaluate(this.block.initial, initialScope)
+    const initialStateRefs = await this.control.saveBindings(values)
+    let checkpoint: WorkflowLoopCheckpoint = { iteration: 0, stage: 'ready', stateRefs: initialStateRefs, initialStateRefs, invariantRefs: await this.control.saveBindings(invariants), noProgress: 0, history: [], iterations: [], reasons: [] }
+    if (this.block.best) checkpoint.bestRef = checkpoint.stateRefs[this.block.best]
+    await this.checkpoint(checkpoint)
+    if (Object.values(invariants).some(value => value.state === 'unknown') || Object.values(values).some(value => value.state === 'unknown')) return this.finish(checkpoint, values, invariants, ['unknown'])
+    if (!this.valid(values)) return this.finish(checkpoint, values, invariants, ['failed'])
+    if (this.block.progress !== 'bounded_only') {
+      const baseline = evaluateWorkflowExpression(this.block.progress.baseline, this.scope(values, invariants, 0, this.block.blockId + ':baseline').bindings)
+      if (baseline.state === 'unknown' || baseline.collection) return this.finish(checkpoint, values, invariants, ['unknown'])
+      checkpoint = { ...checkpoint, history: [{ iteration: 0, key: fingerprint(workflowValueKey(baseline.value)) }] }
+      await this.checkpoint(checkpoint)
+    }
+    for (let iteration = 1; iteration <= this.block.maxIterations; iteration++) {
+      if (this.execution.stopped) return this.finish(checkpoint, values, invariants, ['stopped'])
+      checkpoint = { ...checkpoint, iteration, stage: 'ready', reasons: [] }
+      await this.checkpoint(checkpoint)
+      const inputKey = fingerprint({ state: checkpoint.stateRefs, invariants: checkpoint.invariantRefs })
+      const scope = this.scope(values, invariants, iteration, this.block.blockId + ':' + iteration + ':' + inputKey)
+      const body = await this.body(scope)
+      this.outcomes.push(...body.outcomes)
+      const reasons: WorkflowLoopExitReason[] = []
+      const success = evaluateWorkflowExpression(this.block.until, scope.bindings)
+      if (success.state === 'known' && success.value === true) reasons.push('success')
+      if (this.execution.stopped || body.phase === 'stopped') reasons.push('stopped')
+      if (body.phase === 'unknown') reasons.push('unknown')
+      if (body.phase === 'failed') reasons.push('failed')
+      if (body.phase === 'blocked') reasons.push('blocked')
+      if (success.state === 'unknown' || typeof success.value !== 'boolean') reasons.push('unknown')
+      let carry: Record<string, WorkflowEvaluation> | undefined
+      let key: string | undefined
+      let improved = false
+      if (!reasons.some(reason => reason !== 'success')) {
+        carry = this.evaluate(this.block.carry, scope)
+        if (Object.values(carry).some(value => value.state === 'unknown')) reasons.push('unknown')
+        else if (!this.valid(carry)) reasons.push('failed')
+        if (this.block.progress !== 'bounded_only') {
+          const progress = evaluateWorkflowExpression(this.block.progress.key, scope.bindings)
+          const improvement = evaluateWorkflowExpression(this.block.progress.improved, scope.bindings)
+          if (progress.state === 'unknown' || progress.collection || improvement.state === 'unknown' || typeof improvement.value !== 'boolean') reasons.push('unknown')
+          else { key = fingerprint(workflowValueKey(progress.value)); improved = improvement.value }
+        }
+      }
+      // Only the controller commits a whole next state, after the body and all
+      // conditions are known. Partial carry artifacts never authorize a round.
+      if (carry && !reasons.some(reason => reason !== 'success')) {
+        values = carry
+        checkpoint = { ...checkpoint, stateRefs: await this.control.saveBindings(values) }
+        if (this.block.best) checkpoint.bestRef = checkpoint.stateRefs[this.block.best]
+        if (key !== undefined) {
+          const previous = checkpoint.history.at(-1)!
+          const noProgress = key === previous.key || !improved ? checkpoint.noProgress + 1 : 0
+          const oscillation = key !== previous.key && checkpoint.history.some(value => value.key === key && value.iteration < iteration - 1)
+          checkpoint = { ...checkpoint, noProgress, history: [...checkpoint.history, { iteration, key }] }
+          if (noProgress >= 2) reasons.push('no_progress')
+          if (oscillation) reasons.push('oscillation')
+        }
+      }
+      if (iteration === this.block.maxIterations) reasons.push('exhausted')
+      const record = await this.control.saveLoopRecord({ iteration, stateRefs: checkpoint.stateRefs, invariantRefs: checkpoint.invariantRefs,
+        noProgress: checkpoint.noProgress, reasons: [...new Set(reasons)], ...(body.reference ? { body: body.reference } : {}), ...(checkpoint.bestRef ? { bestRef: checkpoint.bestRef } : {}) })
+      checkpoint = { ...checkpoint, stage: 'committed', iterations: [...checkpoint.iterations, record], reasons: [...new Set(reasons)] }
+      await this.checkpoint(checkpoint)
+      if (reasons.length) return this.finish(checkpoint, values, invariants, reasons, body)
+    }
+    throw new Error(copy.contract)
+  }
+}

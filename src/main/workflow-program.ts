@@ -13,10 +13,11 @@ import type {
   WorkflowValueSchema
 } from '../shared/workflow'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
-import { validateWorkflowValueSchema } from './workflow-values'
+import { validateWorkflowValueSchema, workflowSchemaAssignable } from './workflow-values'
+import { validateWorkflowLoop, workflowLoopOutcomeSchema } from './workflow-loops'
 import { collectionItemSchema } from './workflow-collections'
 import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema, workflowItemsSchema, workflowScalarSchema } from './workflow-expressions'
-import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
+import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowLoopCopy, workflowValueCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/
@@ -50,14 +51,15 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
   ] }
   return [
     "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
-    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, map, collect, and exactly one final return. Every node must include kind and a unique blockId.',
+    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, map, collect, loop, and exactly one final return. Every node must include kind and a unique blockId.',
     'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
     'A call is {kind:"call",blockId,role,prompt,inputRefs?,outputSchema?}; role must be one of the configured roles. inputRefs reference an earlier committed binding by {nodeId,path?:[field,...]}; path means JSON fields, not a filesystem path. Never reference a parallel sibling or future node.',
     'A bind is {kind:"bind",blockId,value:expression}; it binds its immutable result under blockId. A branch is {kind:"branch",blockId,when:expression,then:block,else:block,unknown:block|"blocked"}. when must be boolean; missing evidence is unknown, never false. Exactly one arm runs; private arm bindings do not escape. The branch binds {arm:"then"|"else"|"unknown",value:chosenOutput}.',
     'A map is {kind:"map",blockId,items:expression,item:localName,key:[field,...],maxItems:0..4096,body:block}. It evaluates a real collection dynamically; do not unroll it. Validate the complete input bound and unique scalar keys before dispatch. maxItems is a visible whole-batch refusal boundary, never truncation. Worst-case calls are maxItems times body calls. Source collection references must retain key:["key"]. A collect is {kind:"collect",blockId,items:expression}; it reads a sealed host collection into bounded outcome rows with key/index/state/settled/value?/error?, retaining failed slots. Explicit collect is required to consume a known settled failed map summary; unknown never advances.',
+    'A loop is {kind:"loop",blockId,initial:{name:expression,...},stateSchema:{name:schema|"inferred",...},invariants:{name:expression,...},iteration?:localName,best?:stateName,outcome:outputName,maxIterations:1..1000,body:block,until:booleanExpression,carry:{name:expression,...},result:expression,progress:"bounded_only"|{baseline:expression,key:expression,improved:booleanExpression},policy:{error:"fail_closed",unknown:"block",stop:"cancel",logicalExit:"report_partial"}}. initial and carry must have identical state keys. Nonempty invariants bind once; state is immutable inside each round. result reads only committed state/invariants, not private body bindings. Native/contract errors or unknown do not create another iteration. Logical exhaustion/no-progress/oscillation permit the approved partial report but never make the root successful. best names a preserved state reference, not independent quality proof. Compare actual diagnosis/rubric content, never per-round artifact IDs. Loop calls are maxIterations times body calls; budgets never reset.',
     'Finite expressions: {kind:"literal",value:JSON}, {kind:"ref",name:blockId}, {kind:"field",source:expression,path:[field,...]}, {kind:"compare",operator:"eq"|"ne"|"gt"|"gte"|"lt"|"lte",left:expression,right:expression}, {kind:"and"|"or"|"concat",values:[expression,...]}, {kind:"not"|"count",value:expression}, {kind:"group"|"unique",items:expression,key:[field,...]}, {kind:"filter"|"partition",items:expression,item:localName,when:expression}. No callbacks or user code. group/unique retain all members and original indexes; filter/partition return matched/rejected/unknown entries with indexes, values and reasons, not a flattened list.',
     'Optional outputSchema freezes a finite JSON data contract: {type:"string"|"number"|"boolean"|"null"}, {type:"enum",values:[scalar,...]}, {type:"array",items:schema,maxItems:0..4096}, {type:"object",properties:{field:schema,...},required:[field,...]}, or {type:"union",variants:[schema,...]}. No extra schema keywords or executable validators. Omitted required means all declared fields. Invalid Provider output fails the call, never becomes a successful dependency. Schema depth is at most 16 and total schema nodes at most 256.',
-    'The final root return is {kind:"return",blockId,ref:{nodeId:"...",path?:[field,...]}} and must reference one committed binding. No JavaScript, eval, imports, shell execution, loops, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Bound data are at most 4 MiB UTF-8 JSON, depth 64 and 4096 collection members; expressions are at most depth 16 and 256 nodes.',
+    'The final root return is {kind:"return",blockId,ref:{nodeId:"...",path?:[field,...]}} and must reference one committed binding. No JavaScript, eval, imports, shell execution, unbounded loops, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Bound data are at most 4 MiB UTF-8 JSON, depth 64 and 4096 collection members; expressions are at most depth 16 and 256 nodes.',
     `Never exceed ${WORKFLOW_MAX_ATTEMPTS} Agent calls. The following example illustrates grammar only; do not copy its tasks or role choices instead of planning the user's goal.`,
     `Grammar example: ${JSON.stringify({ schemaVersion: WORKFLOW_SCHEMA_VERSION, body: example })}`,
     `Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}`,
@@ -178,6 +180,13 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
       else: validateBlock(input.else, seen, depth + 1, count),
       unknown: input.unknown === 'blocked' ? 'blocked' : validateBlock(input.unknown, seen, depth + 1, count) }
   }
+  if (input.kind === 'loop') {
+    rejectUnknownFields(input, ['kind', 'blockId', 'initial', 'stateSchema', 'invariants', 'iteration', 'best', 'outcome', 'maxIterations', 'body', 'until', 'carry', 'result', 'progress', 'policy'])
+    const loop = validateWorkflowLoop(input)
+    count.textBytes += Buffer.byteLength(JSON.stringify(loop))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    return { ...loop, body: validateBlock(input.body, seen, depth + 1, count) }
+  }
   if (input.kind === 'map' || input.kind === 'collect') {
     rejectUnknownFields(input, input.kind === 'map' ? ['kind', 'blockId', 'items', 'item', 'key', 'maxItems', 'body'] : ['kind', 'blockId', 'items'])
     const items = validateWorkflowExpression(input.items)
@@ -215,9 +224,12 @@ function referencedRoles(body: WorkflowBlock, roles = new Set<WorkflowRole>()): 
   return roles
 }
 
-function validateReferenceDominance(body: WorkflowBlock): void {
+const loopStateTypes = new WeakMap<WorkflowBlock, Map<string, Record<string, WorkflowValueSchema>>>()
+
+function validateReferenceDominance(body: WorkflowBlock): Map<string, Record<string, WorkflowValueSchema>> {
   if (body.kind !== 'sequence' || body.blocks.at(-1)?.kind !== 'return') throw new Error('根 sequence 必须以 return 结束')
   const available = new Map<string, WorkflowValueSchema>()
+  const resolvedLoops = new Map<string, Record<string, WorkflowValueSchema>>()
   let returnCount = 0
   const referenceType = (ref: WorkflowOutputRef, scope: ReadonlyMap<string, WorkflowValueSchema>, label = '输入'): WorkflowValueSchema => {
     if (!scope.has(ref.nodeId)) throw new Error(`${label}引用不是已提交的前置输出：${ref.nodeId}`)
@@ -234,6 +246,30 @@ function validateReferenceDominance(body: WorkflowBlock): void {
       return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
     }
     if (block.kind === 'bind') return bind(scope, block.blockId, inferWorkflowExpression(block.value, scope))
+    if (block.kind === 'loop') {
+      const invariantScope = new Map(scope)
+      for (const [name, expression] of Object.entries(block.invariants)) bind(invariantScope, name, inferWorkflowExpression(expression, scope))
+      const stateScope = new Map(invariantScope)
+      for (const [name, expression] of Object.entries(block.initial)) {
+        const actual = inferWorkflowExpression(expression, invariantScope)
+        const expected = block.stateSchema[name] === 'inferred' ? actual : block.stateSchema[name] as WorkflowValueSchema
+        if (!workflowSchemaAssignable(actual, expected)) throw new Error(workflowLoopCopy.schema)
+        bind(stateScope, name, expected)
+      }
+      resolvedLoops.set(block.blockId, Object.fromEntries(Object.keys(block.initial).map(name => [name, stateScope.get(name)!])))
+      if (block.iteration) bind(stateScope, block.iteration, { type: 'number' })
+      const bodyScope = new Map(stateScope)
+      visit(block.body, bodyScope)
+      if (!workflowBooleanSchema(inferWorkflowExpression(block.until, bodyScope))) throw new Error(workflowLoopCopy.condition)
+      for (const [name, expression] of Object.entries(block.carry)) if (!workflowSchemaAssignable(inferWorkflowExpression(expression, bodyScope), stateScope.get(name)!)) throw new Error(workflowLoopCopy.schema)
+      if (block.progress !== 'bounded_only') {
+        if (inferWorkflowExpression(block.progress.baseline, stateScope).type === 'collection' || inferWorkflowExpression(block.progress.key, bodyScope).type === 'collection') throw new Error(workflowLoopCopy.progress)
+        if (!workflowBooleanSchema(inferWorkflowExpression(block.progress.improved, bodyScope))) throw new Error(workflowLoopCopy.condition)
+      }
+      const result = inferWorkflowExpression(block.result, stateScope)
+      bind(scope, block.outcome, workflowLoopOutcomeSchema)
+      return bind(scope, block.blockId, result)
+    }
     if (block.kind === 'map' || block.kind === 'collect') {
       const source = inferWorkflowExpression(block.items, scope)
       if (block.kind === 'collect') {
@@ -283,6 +319,14 @@ function validateReferenceDominance(body: WorkflowBlock): void {
   }
   visit(body, available)
   if (returnCount !== 1) throw new Error('工作流程序必须包含且只能包含一个根 return')
+  loopStateTypes.set(body, resolvedLoops)
+  return resolvedLoops
+}
+
+export function workflowLoopStateTypes(body: WorkflowBlock, nodeId: string): Record<string, WorkflowValueSchema> {
+  const types = (loopStateTypes.get(body) ?? validateReferenceDominance(body)).get(nodeId)
+  if (!types) throw new Error(workflowLoopCopy.schema)
+  return types
 }
 
 export function validateWorkflowProgram(input: unknown): WorkflowProgram {
@@ -341,6 +385,7 @@ export function makePlanPreview(programInput: unknown, capabilities: WorkflowRol
 export function workflowCallBudget(block: WorkflowBlock): number {
   let budget: number
   if (block.kind === 'call') budget = 1
+  else if (block.kind === 'loop') budget = block.maxIterations * workflowCallBudget(block.body)
   else if (block.kind === 'map') budget = block.maxItems === 0 ? 0 : block.maxItems * workflowCallBudget(block.body)
   else if (block.kind === 'branch') budget = Math.max(...workflowChildBlocks(block).map(workflowCallBudget))
   else budget = workflowChildBlocks(block).reduce((sum, child) => sum + workflowCallBudget(child), 0)

@@ -66,6 +66,18 @@ export const workflowExpressionCopy = {
   falseReason: 'condition_false'
 }
 
+export const workflowLoopCopy = {
+  bounds: '循环轮数必须是已确认的 1–1000 整数',
+  contract: '循环必须声明固定合同、状态、carry、进展与退出策略',
+  bindings: '循环绑定名称或状态字段集合无效',
+  schema: '循环状态不符合冻结类型合同',
+  policy: '循环必须明确以下策略：错误 fail_closed、unknown block、停止 cancel、逻辑退出 report_partial',
+  condition: '循环成功和进展条件必须为布尔类型',
+  progress: '循环进展键必须是已提交的诊断或评价内容，不能直接比较集合引用',
+  unknown: '循环关键证据未知，未提交下一轮状态',
+  checkpoint: '循环控制帧不允许回退轮次或改写固定合同'
+}
+
 export const workflowCollectionCopy = {
   invalid: '工作流集合引用或清单无效',
   unsealed: '工作流集合来源尚未封口，未继续执行',
@@ -79,7 +91,7 @@ export const workflowCollectionCopy = {
 }
 
 export const workflowFrameCopy = {
-  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、map、collect、return；其他控制块暂不可用',
+  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、map、collect、loop、return；其他控制块暂不可用',
   invalid: '工作流控制帧合同无效',
   revision: '工作流控制帧修订已变化，不能覆盖',
   identity: '工作流控制帧输入或身份已变化，不能复用旧状态',

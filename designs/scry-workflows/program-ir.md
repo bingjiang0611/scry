@@ -58,7 +58,7 @@
 - 表达式仅支持literal/ref/field、比较、and/or/not、count/concat、group/unique、filter/partition，不执行JS、回调或任意宿主命令。布尔组合保守传播unknown，不用已知布尔掩盖缺失证据。
 - group/unique保留全部members和原始derivedFrom索引，不因键相同丢掉矛盾成员。filter/partition均保留matched/rejected/unknown三组，含index/value/reason及外部判定来源，不返回一个被静默删减的列表。
 - 只有own JSON字段可读；数据含constructor等名称不成为原型访问。有限数值、false、0、null保持原值。已封口的空集合有效；缺失来源不是空集合。
-- 单表达式深度≤16、指令节点≤256；值≤4MiB UTF-8 JSON、深度≤64、数组≤4096。超过限制整项拒绝，不截尾。动态map及集合引用见下节；streaming group/filter、loop等剩余能力仍待实现，不能只提高数据上限绕过。
+- 单表达式深度≤16、指令节点≤256；值≤4MiB UTF-8 JSON、深度≤64、数组≤4096。超过限制整项拒绝，不截尾。动态map及集合引用见下节；streaming group/filter等剩余能力仍待实现；有界loop见下节，不能只提高数据上限绕过。
 
 ## 动态 map 与显式 collect
 
@@ -79,6 +79,28 @@ map也可读取受控集合：必须沿用`key:["key"]`；只为活跃fiber读�
 
 本阶段14文件172项focused、Node/web types及build通过；关闭重复key预检后1项失败（已发出1次本应禁止的调用），按SHA256恢复后11项通过。首次fixture表参数、误删同内容hash的另一个artifact、回调/联合类型推断失败均保留于证据说明；未删除断言或放宽超时。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。这些是生产Runner/临时文件存储加Provider test double，不是完整App或真实账号验收。
 
+## 有界 loop、显式 carry 与退出报告
+
+loop仍属于同一WorkflowProgram。`WorkflowLoopExecution`只负责提交循环状态；body回调仍调用唯一Interpreter，Native效果仍走原Runner，不额外向规划模型询问下一步。
+
+冻结字段：
+
+- `initial`与`carry`：同名的`{binding:expression}`字典；`stateSchema`逐项声明有限schema或`inferred`。body内只读本轮状态，只有控制器可在完整验证后提交下一轮。
+- `invariants`：非空具名表达式字典，初始化求值一次并持久保存，不能在后续帧改写。外部同名绑定禁止shadow；可显式使用新的合同名称。
+- `iteration`可指定只读轮次变量；`best`可标出一个状态引用供观测，**这不是质量证明**。最佳结果是否真的满足约束仍须M4独立评价规则；不能把作者自评分当检查通过。
+- `outcome`指定外部可见的宿主退出事实绑定。`result`只读取最后已提交状态/固定合同，向后继提供实际选定结果；不回注body私有上下文。
+- `maxIterations`当前必须显式为1–1000。`progress`必须是`bounded_only`，或`{baseline,key,improved}`；后者比较已提交诊断/评价内容的canonical JSON，不比较每轮必变的artifact ID。首次未变化只累加1；连续两轮无进展退出；A→B→A和相邻A→A分开。
+- `until`与`improved`必须为布尔类型。缺证据不会变false，不提交未知carry，不把API/格式/权限失败或unknown当作下一逻辑轮的重试。
+- `policy`显式声明`{error:"fail_closed",unknown:"block",stop:"cancel",logicalExit:"report_partial"}`。已批准的exhausted/no_progress/oscillation可继续形成partial root报告，但根仍blocked而非completed；这个标记穿过sequence/branch/parallel/map。错误、unknown、停止不因后到success变成功。
+
+控制帧保存initial/current stateRefs、invariantRefs、轮次ready/committed、不可变轮次记录、bestRef、无进展计数、内容历史及全部退出原因。每轮先保存ready状态，body结果与typed carry落盘后再提交committed帧，随后才准入下一轮。提交失败时已完成子调用仍可查，不发新一轮。`iteration`与Native attempt ID独立，预算不重置。主进程重新加载这些引用仍需完整恢复准入，**本阶段没有恢复执行API**。
+
+15文件187项focused、Node/web types及build通过。关闭连续两轮无进展检查后，1项负对照失败（4次而非2次调用），按SHA256恢复后15项通过。首轮测试真实发现父容器丢失纯控制blocked状态；已在共同执行栈保留非成功状态，不能仅按Native outcome重新算completed。原bare loop测试仍拒绝，只将“未知指令”预期更新为已支持loop缺少明确轮数边界的拒绝。
+
+只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。全部Provider调用仍为test double，不能替代App、真实账号、独立质量检查或M6验收。
+
+当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、实际跨进程恢复/依赖重启、nested collection字段的通用typed投影和全指令。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
+
 ## 控制状态持久化的当前范围
 
 带上述控制/字段投影的程序在原有Runner中写入内容寻址的值artifact与CAS控制帧。帧记录程序修订、作用域、输入来源、分支选择与decision/result引用。值先落盘，再提交引用它的帧；选择帧成功后才派发被选子任务。校验失败、缺artifact、修订/输入不符或已终态帧均拒绝覆盖。unknown帧不可重置为entered/completed。
@@ -89,7 +111,7 @@ map也可读取受控集合：必须沿用`key:["key"]`；只为活跃fiber读�
 
 测试注入父cursor提交失败后，首个子调用的outcome/终态帧/值仍可由独立store读取，第二个调用不执行。引用读取同时校验frame revision、resultRef和内容hash，不把未完成帧当已提交结果。省略父checkpoint的负对照使3项测试失败。
 
-**这不是M3恢复执行完成**：普通M0程序仍沿用既有任务身份/无控制帧路径；其求值也用显式栈，但本阶段持久cursor只覆盖已有framed程序。跨进程冷恢复、全部指令统一持久化、loop carry/最佳候选、恢复调度和sibling复用仍未实现；根的已有观察式历史恢复仍不自动派发。本阶段161项Workflow回归、types/build及负对照日志保存在`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`，不冒充完整App或真实Provider验收。
+**这不是M3恢复执行完成**：普通M0程序仍沿用既有任务身份/无控制帧路径；其求值也用显式栈，但本阶段持久cursor只覆盖已有framed程序。跨进程冷恢复、全部指令统一持久化、loop carry/最佳候选的恢复调度和sibling复用仍未实现；根的已有观察式历史恢复仍不自动派发。本阶段161项Workflow回归、types/build及负对照日志保存在`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`，不冒充完整App或真实Provider验收。
 
 ## 证据
 

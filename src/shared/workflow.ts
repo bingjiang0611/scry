@@ -104,6 +104,21 @@ export type WorkflowCollectionEntry = {
   error?: string
 }
 
+export type WorkflowLoopExitReason = 'success' | 'no_progress' | 'oscillation' | 'exhausted' | 'failed' | 'blocked' | 'unknown' | 'stopped'
+export type WorkflowLoopCheckpoint = {
+  iteration: number
+  stage: 'ready' | 'committed'
+  stateRefs: Record<string, WorkflowValueReference>
+  initialStateRefs: Record<string, WorkflowValueReference>
+  invariantRefs: Record<string, WorkflowValueReference>
+  noProgress: number
+  history: Array<{ iteration: number; key: string }>
+  iterations: WorkflowValueReference[]
+  bestRef?: WorkflowValueReference
+  outcomeRef?: WorkflowValueReference
+  reasons: WorkflowLoopExitReason[]
+}
+
 export interface WorkflowControlFrame {
   schemaVersion: 1
   workflowId: string
@@ -121,6 +136,8 @@ export interface WorkflowControlFrame {
   cursor?: number
   children?: WorkflowFrameReference[]
   sourceRef?: WorkflowValueReference
+  loop?: WorkflowLoopCheckpoint
+  continuation?: 'report_partial'
 }
 
 export interface WorkflowBindBlock {
@@ -154,6 +171,24 @@ export interface WorkflowCollectBlock {
   items: WorkflowExpression
 }
 
+export interface WorkflowLoopBlock {
+  kind: 'loop'
+  blockId: string
+  initial: Record<string, WorkflowExpression>
+  stateSchema: Record<string, WorkflowValueSchema | 'inferred'>
+  invariants: Record<string, WorkflowExpression>
+  iteration?: string
+  best?: string
+  outcome: string
+  maxIterations: number
+  body: WorkflowBlock
+  until: WorkflowExpression
+  carry: Record<string, WorkflowExpression>
+  result: WorkflowExpression
+  progress: 'bounded_only' | { baseline: WorkflowExpression; key: WorkflowExpression; improved: WorkflowExpression }
+  policy: { error: 'fail_closed'; unknown: 'block'; stop: 'cancel'; logicalExit: 'report_partial' }
+}
+
 export interface WorkflowCallBlock {
   kind: 'call'
   blockId: string
@@ -181,12 +216,12 @@ export interface WorkflowReturnBlock {
   ref: WorkflowOutputRef
 }
 
-export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock
+export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock
 
 export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   switch (block.kind) {
     case 'call': case 'return': case 'bind': case 'collect': return []
-    case 'map': return [block.body]
+    case 'map': case 'loop': return [block.body]
     case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
     case 'sequence': case 'parallel': return block.blocks
   }

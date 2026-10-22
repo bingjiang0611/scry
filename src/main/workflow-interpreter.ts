@@ -4,6 +4,7 @@ import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, Workf
 import { workflowCollectionCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
 import { evaluateWorkflowExpression, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
+import { WorkflowLoopExecution } from './workflow-loop-execution'
 
 export type WorkflowInterpreterState = {
   stopped: boolean
@@ -11,12 +12,15 @@ export type WorkflowInterpreterState = {
   returnPath?: string[]
   returnValue?: WorkflowEvaluation
 }
-type Result = { outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation; phase: WorkflowControlFrame['phase']; reference?: WorkflowFrameReference }
+type Result = { outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation; phase: WorkflowControlFrame['phase']; reference?: WorkflowFrameReference; reportPartial?: boolean }
+export type { Result as WorkflowExecutionResult }
 type Base = { scope: WorkflowControlScope; frame?: WorkflowControlFrame }
 type Activation =
   | { stage: 'enter'; block: WorkflowBlock; scope: WorkflowControlScope }
-  | (Base & { stage: 'sequence'; block: Extract<WorkflowBlock, { kind: 'sequence' }>; cursor: number; outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation })
+  | (Base & { stage: 'sequence'; block: Extract<WorkflowBlock, { kind: 'sequence' }>; cursor: number; outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation; partial: boolean; terminal?: WorkflowControlFrame['phase']; critical: boolean })
   | (Base & { stage: 'branch'; block: Extract<WorkflowBlock, { kind: 'branch' }>; arm: 'then' | 'else' | 'unknown'; decision: WorkflowEvaluation; childScope: WorkflowControlScope })
+const retainPhase = (previous: WorkflowControlFrame['phase'], next: WorkflowControlFrame['phase']): WorkflowControlFrame['phase'] =>
+  (['unknown', 'stopped', 'failed', 'blocked', 'completed'] as const).find(phase => phase === previous || phase === next) ?? 'unknown'
 const unavailable = (reason = copy.failedValue): WorkflowEvaluation => ({ state: 'unknown', reason, derivedFrom: [] })
 
 /** The sole WorkflowProgram evaluator. Each fork owns an explicit activation
@@ -33,10 +37,17 @@ export class WorkflowInterpreter {
           : outcomes.some(outcome => outcome.state !== 'completed') ? 'failed' : 'completed'
   }
   private async finish(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined,
-    value: WorkflowEvaluation, phase: WorkflowControlFrame['phase'], outcomes: WorkflowAttemptOutcome[] = []): Promise<Result> {
-    const committed = await this.control.complete(block, scope, frame, value, phase)
+    value: WorkflowEvaluation, phase: WorkflowControlFrame['phase'], outcomes: WorkflowAttemptOutcome[] = [], reportPartial = false): Promise<Result> {
+    const committed = await this.control.complete(block, scope, frame, value, phase, reportPartial)
     const reference = committed?.resultRef ? { frameId: committed.frameId, revision: committed.revision, resultRef: committed.resultRef } : undefined
-    return { outcomes, phase, value: scope.bindings.get(block.blockId)!, ...(reference ? { reference } : {}) }
+    return { outcomes, phase, value: scope.bindings.get(block.blockId)!, ...(reference ? { reference } : {}), ...(reportPartial ? { reportPartial: true } : {}) }
+  }
+
+  private finishSequence(top: Extract<Activation, { stage: 'sequence' }>): Promise<Result> {
+    const base = this.phase(top.outcomes, top.scope)
+    const phase = base === 'completed' ? top.terminal ?? base : base
+    const partial = top.partial && !top.critical && phase === 'blocked'
+    return this.finish(top.block, top.scope, top.frame, top.value, phase, top.outcomes, partial)
   }
 
   async run(block: WorkflowBlock, scope: WorkflowControlScope): Promise<Result> {
@@ -52,17 +63,23 @@ export class WorkflowInterpreter {
           top.cursor++
           const next = top.block.blocks[top.cursor]
           const explicitCollect = (returned.phase === 'failed' || returned.phase === 'blocked') && returned.outcomes.every(outcome => outcome.settled) && next?.kind === 'collect' && workflowExpressionReferences(next.items).includes(top.block.blocks[top.cursor - 1].blockId)
-          const halted = returned.phase !== 'completed' && !explicitCollect
+          const partial = returned.reportPartial === true && returned.phase === 'blocked'
+          if (returned.phase !== 'completed') {
+            top.terminal = retainPhase(top.terminal ?? 'completed', returned.phase)
+            top.critical ||= !partial
+          }
+          top.partial ||= partial
+          const halted = returned.phase !== 'completed' && !explicitCollect && !partial
           returned = undefined
           if (halted || this.state.stopped) {
             stack.pop()
-            returned = await this.finish(top.block, top.scope, top.frame, top.value, this.phase(top.outcomes, top.scope), top.outcomes)
+            returned = await this.finishSequence(top)
             continue
           }
         }
         if (top.cursor === top.block.blocks.length || this.state.stopped) {
           stack.pop()
-          returned = await this.finish(top.block, top.scope, top.frame, top.value, this.phase(top.outcomes, top.scope), top.outcomes)
+          returned = await this.finishSequence(top)
         } else stack.push({ stage: 'enter', block: top.block.blocks[top.cursor], scope: top.scope })
         continue
       }
@@ -74,7 +91,10 @@ export class WorkflowInterpreter {
           derivedFrom: [...new Set([...top.decision.derivedFrom, ...returned.value.derivedFrom])]
         } : returned.value
         stack.pop()
-        returned = await this.finish(top.block, top.scope, top.frame, value, this.phase(returned.outcomes, top.scope), returned.outcomes)
+        const base = this.phase(returned.outcomes, top.scope)
+        const phase = base === 'completed' ? returned.phase : base
+        const partial = phase === 'blocked' && returned.reportPartial === true
+        returned = await this.finish(top.block, top.scope, top.frame, value, phase, returned.outcomes, partial)
         continue
       }
       if (this.state.stopped) {
@@ -109,7 +129,7 @@ export class WorkflowInterpreter {
           break
         }
         case 'sequence':
-          stack[stack.length - 1] = { stage: 'sequence', block: current, scope: top.scope, frame, cursor: 0, outcomes: [], value: unavailable() }
+          stack[stack.length - 1] = { stage: 'sequence', block: current, scope: top.scope, frame, cursor: 0, outcomes: [], value: unavailable(), partial: false, critical: false }
           break
         case 'branch': {
           const decision = evaluateWorkflowExpression(current.when, top.scope.bindings)
@@ -130,6 +150,12 @@ export class WorkflowInterpreter {
             stack[stack.length - 1] = { stage: 'branch', block: current, scope: top.scope, frame: selectedFrame, arm, decision, childScope }
             stack.push({ stage: 'enter', block: selected, scope: childScope })
           }
+          break
+        }
+        case 'loop': {
+          const loop = await new WorkflowLoopExecution(current, top.scope, frame!, this.control, this.state, child => this.run(current.body, child)).run()
+          returned = await this.finish(current, top.scope, loop.frame, loop.value, loop.phase, loop.outcomes, loop.reportPartial)
+          stack.pop()
           break
         }
         case 'map': {
@@ -199,12 +225,15 @@ export class WorkflowInterpreter {
     frame = await this.control.freezeSource(frame, source)
     const entries: WorkflowCollectionEntry[] = keys.map((key, index) => ({ key, index, state: 'pending', settled: false }))
     const outcomes: WorkflowAttemptOutcome[] = []
+    let partial = false, critical = false
     const run = async (index: number): Promise<Result> => {
       const child = this.control.child(scope, labels[index])
       const input = collection ? await this.control.entryValue(collection[index]) : { state: 'known' as const, value: (source.value as WorkflowValue[])[index], derivedFrom: source.derivedFrom }
       this.control.bind(child, block.item, input)
       const result = await this.run(block.body, child)
       const phase = result.phase
+      partial ||= result.reportPartial === true
+      critical ||= phase !== 'completed' && !result.reportPartial
       if (!['completed', 'failed', 'blocked', 'unknown', 'stopped'].includes(phase)) throw new Error(copy.invalid)
       entries[index] = { key: keys[index], index, state: phase as WorkflowCollectionEntry['state'], settled: result.outcomes.every(outcome => outcome.settled),
         ...(result.reference ? { reference: result.reference } : { error: workflowCollectionCopy.pending }) }
@@ -212,7 +241,7 @@ export class WorkflowInterpreter {
       return result
     }
     const finish = async (phase: WorkflowControlFrame['phase']) => this.finish(block, scope, frame,
-      await this.control.collection(frame, structuredClone(entries), entries.every(entry => entry.state !== 'pending' && entry.state !== 'unknown' && entry.settled)), phase, outcomes)
+      await this.control.collection(frame, structuredClone(entries), entries.every(entry => entry.state !== 'pending' && entry.state !== 'unknown' && entry.settled)), phase, outcomes, phase === 'blocked' && partial && !critical && !this.state.stopped)
     let cursor = 0
     const active = new Set<Promise<{ index: number; result?: Result; error?: unknown }>>()
     const admit = () => {
@@ -240,11 +269,16 @@ export class WorkflowInterpreter {
       .then(value => ({ value } as const)).catch((error: unknown) => ({ error } as const)))
     const unresolved = new Set(pending)
     const outcomes: WorkflowAttemptOutcome[] = []
+    let partial = false, critical = false
+    let terminal: WorkflowControlFrame['phase'] = 'completed'
     while (unresolved.size) {
       const next = await Promise.race([...unresolved].map(promise => promise.then(result => ({ result, source: promise }))))
       unresolved.delete(next.source)
       if ('error' in next.result) { await Promise.allSettled([...unresolved]); throw next.result.error }
       outcomes.push(...next.result.value.outcomes)
+      if (next.result.value.phase !== 'completed') terminal = retainPhase(terminal, next.result.value.phase)
+      partial ||= next.result.value.reportPartial === true
+      critical ||= next.result.value.phase !== 'completed' && !next.result.value.reportPartial
       if (next.result.value.phase === 'unknown') return this.finish(block, scope, frame, unavailable(), 'unknown', outcomes)
     }
     this.control.join(scope, scopes)
@@ -253,6 +287,9 @@ export class WorkflowInterpreter {
       state: 'known', value: Object.fromEntries(block.blocks.map((child, index) => [child.blockId, (values[index] as Extract<WorkflowEvaluation, { state: 'known' }>).value])),
       derivedFrom: [...new Set(values.flatMap(item => item.derivedFrom))]
     } : unavailable()
-    return this.finish(block, scope, frame, value, this.phase(outcomes, scope), outcomes)
+    const base = this.phase(outcomes, scope)
+    const phase = base === 'completed' ? terminal : base
+    const reportPartial = partial && !critical && phase === 'blocked'
+    return this.finish(block, scope, frame, value, phase, outcomes, reportPartial)
   }
 }

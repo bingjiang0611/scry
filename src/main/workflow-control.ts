@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import type { WorkflowBlock, WorkflowCollectionEntry, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowPlanPreview } from '../shared/workflow'
+import type { WorkflowBlock, WorkflowCollectionEntry, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowLoopCheckpoint, WorkflowPlanPreview, WorkflowValue, WorkflowValueReference, WorkflowValueSchema } from '../shared/workflow'
 import { workflowChildBlocks } from '../shared/workflow'
 import { workflowExpressionCopy, workflowFrameCopy } from '../shared/constants/copy'
 import { workflowExpressionReferences } from './workflow-expressions'
 import { collectionDescriptor } from './workflow-collections'
+import { workflowLoopStateTypes } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
 import type { WorkflowStore } from './workflow-store'
 
@@ -24,7 +25,7 @@ export class WorkflowControl {
     let framed = false
     while (pending.length) {
       const block = pending.pop()!
-      if (block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
+      if (block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
     this.framed = framed
@@ -51,7 +52,7 @@ export class WorkflowControl {
   }
   async enter(block: WorkflowBlock, scope: WorkflowControlScope): Promise<WorkflowControlFrame | undefined> {
     if (!this.framed) return undefined
-    const names = block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
+    const names = block.kind === 'loop' ? [...new Set([...Object.values(block.initial), ...Object.values(block.invariants)].flatMap(workflowExpressionReferences))] : block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
       : block.kind === 'call' ? (block.inputRefs ?? []).map(ref => ref.nodeId) : block.kind === 'return' ? [block.ref.nodeId] : []
     return this.store.saveFrame({ schemaVersion: 1, workflowId: this.preview.workflowId, programRevision: this.preview.programRevision,
       frameId: workflowFrameId(block.blockId, scope.path), nodeId: block.blockId, scopePath: scope.path,
@@ -64,19 +65,32 @@ export class WorkflowControl {
     const { revision, ...input } = frame
     return this.store.saveFrame({ ...input, phase: 'selected', arm, decisionRef }, revision)
   }
-  async complete(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined, value: WorkflowEvaluation, phase: WorkflowControlFrame['phase']): Promise<WorkflowControlFrame | undefined> {
+  async complete(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined, value: WorkflowEvaluation, phase: WorkflowControlFrame['phase'], reportPartial = false): Promise<WorkflowControlFrame | undefined> {
     let completed
     let reference
     if (frame) {
       reference = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'result']), value)
       const { revision, ...input } = frame
-      completed = await this.store.saveFrame({ ...input, phase, resultRef: reference, ...(value.state === 'unknown' ? { reason: value.reason.slice(0, 4096) } : {}) }, revision)
+      completed = await this.store.saveFrame({ ...input, phase, resultRef: reference, ...(reportPartial ? { continuation: 'report_partial' as const } : {}), ...(value.state === 'unknown' ? { reason: value.reason.slice(0, 4096) } : {}) }, revision)
     }
     // The artifact owns its direct input references. Descendants reference it,
     // rather than copying the whole transitive history into every checkpoint.
     const result = reference ? { ...value, derivedFrom: [`value:${reference.key}:${reference.hash}`] } : value
     this.bind(scope, block.blockId, result)
     return completed
+  }
+  loopSchemas(nodeId: string): Record<string, WorkflowValueSchema> { return workflowLoopStateTypes(this.preview.program.body, nodeId) }
+  async saveBindings(values: Record<string, WorkflowEvaluation>): Promise<Record<string, WorkflowValueReference>> {
+    const entries: Array<[string, WorkflowValueReference]> = []
+    for (const [name, value] of Object.entries(values)) entries.push([name, await this.store.saveValue(this.preview.workflowId, 'loop_binding', value)])
+    return Object.fromEntries(entries)
+  }
+  async saveLoopRecord(value: WorkflowValue): Promise<WorkflowValueReference> {
+    return this.store.saveValue(this.preview.workflowId, 'loop_record', { state: 'known', value, derivedFrom: [] })
+  }
+  async checkpointLoop(frame: WorkflowControlFrame, loop: WorkflowLoopCheckpoint): Promise<WorkflowControlFrame> {
+    const { revision, ...input } = frame
+    return this.store.saveFrame({ ...input, loop }, revision)
   }
   async freezeSource(frame: WorkflowControlFrame, value: WorkflowEvaluation): Promise<WorkflowControlFrame> {
     const sourceRef = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'source']), value)

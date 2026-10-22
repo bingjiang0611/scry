@@ -67,8 +67,8 @@ describe('WorkflowProgram M0 contract', () => {
     expect(() => validateWorkflowProgram(withSchema({ ...schema, eval: 'process.exit(0)' }))).toThrow('eval')
   })
 
-  it('rejects unsupported control blocks and duplicate ids', () => {
-    expect(() => validateWorkflowProgram({ ...program, body: { kind: 'loop', blockId: 'loop' } })).toThrow('仅支持')
+  it('rejects bare unbounded loops and duplicate ids', () => {
+    expect(() => validateWorkflowProgram({ ...program, body: { kind: 'loop', blockId: 'loop' } })).toThrow('循环轮数')
     expect(() => validateWorkflowProgram({ ...program, body: { ...program.body, blocks: [program.body.blocks[0], { ...program.body.blocks[0] }] } })).toThrow('重复')
   })
 
