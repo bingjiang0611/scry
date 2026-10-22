@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
 import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
+import { exerciseMotionTokens } from './motion-tokens-ui-checks.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const cacheOnly = process.argv.includes('--cache-only')
+const motionTokensOnly = process.argv.includes('--motion-tokens-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
@@ -26,8 +28,8 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
-  : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
+const fixtures = motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+  : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
@@ -1567,7 +1569,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${fixture === 'sidebar-activity' ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -1586,6 +1588,12 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
+        if (${fixtures.includes('motion-tokens')}) {
+          win.setSize(1400, 1000)
+          await win.loadFile(${JSON.stringify(join(temp, 'motion-tokens.html'))})
+          result.motionTokens = await (${exerciseMotionTokens.toString()})(win.webContents)
+          if (${motionTokensOnly}) { finish(result); return }
+        }
         if (${fixtures.includes('sidebar-activity')}) {
           win.setSize(1100, 760)
           await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})

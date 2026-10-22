@@ -4,6 +4,7 @@ import type { ActiveRun } from '../../src/shared/trace'
 import type { ProviderContext } from '../../src/shared/provider'
 import type { ProjectMeta } from '../../src/preload'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Full production App with an isolated bridge: no Provider, filesystem or user data access.

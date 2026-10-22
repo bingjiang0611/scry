@@ -41,6 +41,7 @@ import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
 import { refreshRemoteCatalog } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
 import { refreshDesktopConnections } from ${JSON.stringify(join(root, 'src/renderer/hooks/useDesktopConnections.ts'))}
 import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
+import ${JSON.stringify(join(root, 'src/renderer/motion.css'))}
 import ${JSON.stringify(join(root, 'src/renderer/codex-alignment.css'))}
 
 const firstLedger = '11111111-1111-4111-8111-111111111111'

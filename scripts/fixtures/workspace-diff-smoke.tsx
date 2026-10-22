@@ -6,6 +6,7 @@ import { OverviewPanel } from '../../src/renderer/components/OverviewPanel'
 import { useIntegrations } from '../../src/renderer/hooks/useIntegrations'
 import { buildSessionReport } from '../../src/renderer/format'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 
 let mode = 'clean'
 let release: ((value: WorkspaceDiffResult) => void) | undefined
