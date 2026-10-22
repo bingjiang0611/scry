@@ -1036,7 +1036,9 @@ export function createOpenCodeAdapter(
   const managerActivity = new Map<OpenCodeServerManager, number>()
   const managerLastUsed = new Map<OpenCodeServerManager, number>()
   const managerIdleTimers = new Map<OpenCodeServerManager, ReturnType<typeof setTimeout>>()
-  const SERVER_IDLE_MS = 60_000
+  // A bounded renewable lease spans the existing 60s metadata refresh cadence without making
+  // an idle server resident indefinitely. Active operations still protect the shared writer.
+  const SERVER_IDLE_MS = 90_000
   const evictIdleManagers = (protectedManager?: OpenCodeServerManager): void => {
     if (managers.size <= 3) return
     const idle = [...managers.entries()]
