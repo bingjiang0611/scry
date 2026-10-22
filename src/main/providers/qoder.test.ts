@@ -813,6 +813,7 @@ describe('Qoder provider adapter', () => {
   it('anchors Skill and command evidence to initialization completion, not late catalog completion', async () => {
     vi.useFakeTimers()
     try {
+      vi.setSystemTime(0)
       let resolveUsage: (usage: unknown) => void = () => {}
       const usage = new Promise((resolve) => { resolveUsage = resolve })
       let initializedAt = 0
@@ -909,6 +910,107 @@ describe('Qoder provider adapter', () => {
     expect(close).not.toHaveBeenCalled()
     await expect(adapter.dispose?.()).rejects.toThrow('close failed')
     expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('retains a rejected close and blocks replacement queries and disposal', async () => {
+    const close = vi.fn().mockRejectedValue(new Error('close failed'))
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getAvailableModels: vi.fn().mockResolvedValue([]),
+      close
+    })
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+    await adapter.runControls!.read(context)
+    await expect(adapter.invalidateContext?.(context)).rejects.toThrow('close failed')
+    expect(sdk.query).toHaveBeenCalledOnce()
+    await expect(adapter.runControls!.read(context)).resolves.toMatchObject({
+      state: 'degraded',
+      reason: 'close failed'
+    })
+    expect(sdk.query).toHaveBeenCalledOnce()
+    await expect(adapter.dispose?.()).rejects.toThrow('close failed')
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('starts SDK close immediately when disposal races a pending model read', async () => {
+    let resolveModels: (models: unknown[]) => void = () => {}
+    const models = new Promise<unknown[]>((resolve) => { resolveModels = resolve })
+    const close = vi.fn().mockResolvedValue(undefined)
+    const getAvailableModels = vi.fn().mockReturnValue(models)
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockResolvedValue({}),
+      getAvailableModels,
+      close
+    })
+    const adapter = createQoderAdapter()
+    const pending = adapter.runControls!.read({ providerId: 'qoder', cwd: '/repo' })
+    await vi.waitFor(() => expect(sdk.query).toHaveBeenCalledOnce())
+    const disposing = adapter.dispose?.()
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce())
+    resolveModels([])
+    await disposing
+    await expect(pending).resolves.toMatchObject({ data: { models: [] } })
+    expect(getAvailableModels).toHaveBeenCalledOnce()
+  })
+
+  it('does not dispatch a model read on a session retired during initialization', async () => {
+    let resolveInitialization: (value: unknown) => void = () => {}
+    const initialization = new Promise((resolve) => { resolveInitialization = resolve })
+    const getAvailableModels = vi.fn().mockResolvedValue([])
+    sdk.query.mockReturnValue({
+      initializationResult: vi.fn().mockReturnValue(initialization),
+      getAvailableModels,
+      close: sdk.close
+    })
+    const adapter = createQoderAdapter()
+    const context = { providerId: 'qoder' as const, cwd: '/repo' }
+    const pending = adapter.runControls!.read(context)
+    await vi.waitFor(() => expect(sdk.query).toHaveBeenCalledOnce())
+    await expect(adapter.invalidateContext?.(context)).resolves.toBeUndefined()
+    resolveInitialization({})
+    await expect(pending).resolves.toMatchObject({ state: 'degraded' })
+    expect(getAvailableModels).not.toHaveBeenCalled()
+  })
+
+  it('does not create an uninvalidated replacement when refresh races invalidation', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolveUsage: (usage: unknown) => void = () => {}
+      const usage = new Promise((resolve) => { resolveUsage = resolve })
+      let resolveClose: () => void = () => {}
+      const closeResult = new Promise<void>((resolve) => { resolveClose = resolve })
+      const close = vi.fn().mockReturnValue(closeResult)
+      const oldControl = {
+        initializationResult: vi.fn().mockResolvedValue({}),
+        getContextUsage: vi.fn()
+          .mockResolvedValueOnce({ skills: { count: 1, items: [{ name: 'old', source: 'project' }] } })
+          .mockReturnValue(usage),
+        supportedCommands: vi.fn().mockResolvedValue([{ name: 'old', description: 'Old', argumentHint: '' }]),
+        close
+      }
+      sdk.query.mockReturnValue(oldControl)
+      const adapter = createQoderAdapter()
+      const context = { providerId: 'qoder' as const, cwd: '/repo' }
+      await adapter.commands!.list(context)
+      await vi.advanceTimersByTimeAsync(1_000)
+      const activeSkills = adapter.skills!.list(context)
+      await Promise.resolve()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(29_000)
+      const refreshing = adapter.commands!.list(context)
+      const invalidation = adapter.invalidateContext?.(context)
+      await Promise.resolve()
+      expect(sdk.query).toHaveBeenCalledOnce()
+      resolveUsage({ skills: { count: 1, items: [{ name: 'old', source: 'project' }] } })
+      await activeSkills
+      resolveClose()
+      await invalidation
+      await expect(refreshing).resolves.toMatchObject({ state: 'unknown' })
+      expect(sdk.query).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('refreshes live models after the TTL while another facet keeps the control alive', async () => {
