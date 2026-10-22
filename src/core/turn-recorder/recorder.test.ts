@@ -3360,13 +3360,51 @@ describe('record store cursor and recovery semantics', () => {
     const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'a' }
     const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'b' }
     const results = await Promise.all([a, b, a].map(env => drainCommitNotifications(dataRoot, env)))
-    expect(results.map(result => result.delivered).sort()).toEqual([0, 2, 2])
-    expect(results.every(result => result.pending === 0)).toBe(true)
+    // The bounded lock may legitimately time out while another identity delivers.
+    // Only that diagnosed contention may defer work to an explicit recovery drain.
+    if (results.some(result => result.pending > 0)) {
+      expect(await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('lock timeout:')
+    } else {
+      expect(results.map(result => result.delivered).sort()).toEqual([0, 2, 2])
+    }
+    const recovered = []
+    for (const env of [a, b]) recovered.push(await drainCommitNotifications(dataRoot, env))
+    expect(recovered.every(result => result.pending === 0)).toBe(true)
+    expect([...results, ...recovered].every(result => result.truncated === false)).toBe(true)
+    expect([...results, ...recovered].map(result => result.delivered).sort()).toEqual([0, 0, 0, 2, 2])
     for (const env of [a, b]) {
       await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
     }
     expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(4)
     await expect(access(join(dataRoot, 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
+  })
+
+  it('retains pending notifications on a live lock deadline and delivers them once on explicit recovery', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'lock-contention')
+    const hook = await commitHook(root)
+    const dataRoot = join(root, '.scry')
+    const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path }
+    const lockDir = join(dataRoot, 'locks', 'commit-notification.lock')
+    await mkdir(lockDir, { recursive: true })
+    await writeFile(join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: 'live-test-owner' }))
+    // Advance the lock deadline, not callback timers; no sleep or real 2s wait.
+    let now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now += 2_001)
+    try {
+      await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+      expect(await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('lock timeout:')
+      await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: null, notifyBacklog: 1 })
+      await expect(access(hook.capture)).rejects.toThrow()
+      expect(JSON.parse(await readFile(join(lockDir, 'owner.json'), 'utf8')).token).toBe('live-test-owner')
+    } finally {
+      clock.mockRestore()
+      await rm(lockDir, { recursive: true })
+    }
+    await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
+    await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({ delivered: 0, pending: 0, truncated: false })
+    await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 1, notifyBacklog: 0 })
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
   })
 
   it('migration preserves known ACK but a failing callback cannot advance either file', async () => {
