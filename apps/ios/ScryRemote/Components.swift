@@ -30,6 +30,13 @@ enum Symbol {
   static let check = "checkmark"
   static let gear = "gearshape"
   static let link = "link"
+  static let pin = "pin"
+  static let archive = "archivebox"
+  static let tray = "tray.full"
+  static let chart = "chart.bar"
+  static let gaugeSpeed = "speedometer"
+  static let plug = "powerplug"
+  static let hand = "hand.raised"
 }
 
 // MARK: - Core controls
