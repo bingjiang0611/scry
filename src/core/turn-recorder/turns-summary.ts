@@ -373,18 +373,27 @@ function callCommand(call: TurnCall): { command: string; cwd?: string } | null {
   }
 }
 
-function structuredFileCalls(record: AgentTurnRecord, calls: OrderedCall[]): Array<{ call?: TurnCall; file: TurnFile }> {
-  const fromCalls = calls
-    .filter((entry) => entry.record === record && entry.call.file)
-    .map((entry) => ({ call: entry.call, file: entry.call.file as TurnFile }))
-  if (fromCalls.length > 0) return fromCalls
-  return availableArray(record.files) ? record.files.value.map((file) => ({ file })) : []
-}
-
 function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof orderedCalls>) {
+  const filesByRecord = new Map<AgentTurnRecord, Array<{ call?: TurnCall; file: TurnFile }>>()
+  for (const { record, call } of timeline.calls) {
+    if (!call.file) continue
+    let files = filesByRecord.get(record)
+    if (!files) {
+      files = []
+      filesByRecord.set(record, files)
+    }
+    files.push({ call, file: call.file })
+  }
+  // Preserve object identity and initialize every selected record. Call-backed files
+  // take precedence; Providers without them retain their legacy file evidence.
+  for (const record of selected) {
+    if (!filesByRecord.has(record)) {
+      filesByRecord.set(record, availableArray(record.files) ? record.files.value.map((file) => ({ file })) : [])
+    }
+  }
   const rows = new Map<string, FileRow>()
   const candidatePaths = [...new Set(selected.flatMap((record) => {
-    const fromCalls = structuredFileCalls(record, timeline.calls).map((entry) => entry.file.path)
+    const fromCalls = filesByRecord.get(record)!.map((entry) => entry.file.path)
     const fromEvidence = availableArray(record.files) ? record.files.value.map((file) => file.path) : []
     return [...fromCalls, ...fromEvidence]
   }))]
@@ -403,7 +412,7 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
   }
 
   for (const record of selected) {
-    for (const entry of structuredFileCalls(record, timeline.calls)) {
+    for (const entry of filesByRecord.get(record)!) {
       rowOf(entry.file.path)[entry.file.operation]++
     }
   }
@@ -443,7 +452,7 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
 
   // Some Providers expose file evidence without a matching call. Preserve it as completed evidence.
   for (const record of selected) {
-    if (structuredFileCalls(record, timeline.calls).some((entry) => entry.call)) continue
+    if (filesByRecord.get(record)!.some((entry) => entry.call)) continue
     if (!availableArray(record.files)) continue
     for (const file of record.files.value) {
       if (file.operation === 'read') exactRead.add(file.path)
