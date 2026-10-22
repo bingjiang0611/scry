@@ -2,13 +2,13 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
-## 方案 A：按需 Provider 发现（2026-10-21，按需层本地收口，全量验收未通过）
+## 方案 A：按需 Provider 发现（按需层收口；mac2 Node/UI/计数通过，Swift 测试待完整 Xcode）
 
 - 在隔离分支实现 metadata/selected 协议及能力协商；定时元数据不再初始化全部 Provider，仅选中 Provider/Profile/canonical cwd 才读取能力。同上下文只合并在途查询，沿用 Provider 已有实例机制；未新增 Pi settled cache 或统一常驻池。
 - 固定三个上下文的 **adapter 入口计数**：metadata 0、两个重叠 selected 请求 1、显式 legacy 全量 3，五轮一致。注入 metadata 全量探测后回归确定性失败。这不是 CLI 进程数或 L2/L3 提速结论。
 - 第二轮源码 `a742d62`、测试/诊断 `1588832`：补齐主机观察时间、独立发布版本、已知配置失效栅栏；旧在途数据不发布/不回填缓存，可见、focus 与成功手动重读保留用户选择，失败不复用旧成功值。底层 SDK 缓存/重载仍逐 Provider 决定，不承诺外部配置即时全部生效，不视为完整常驻 A。
-- 当前类型/build、iPhoneOS unsigned SDK 编译、完整 renderer UI、25 项缓存/失效 focused 和三指标 scoped ratchet 通过。最终全量 unit：3490 pass / 1 fail / 4 既有 opt-in skipped，Rename Electron fixture 30 秒超时；候选/基线单跑均通过，不能抹掉完整运行失败。Swift 新协议组 5 项通过，完整 package 再次命中基线已复现的 TLS leaked promise。未扩大期限，未完成完整 gate/propose/L2；不合入、安装或 push。
-- 性能 owner 下一步先在可控空闲环境复核 Rename 完整运行与独立 TLS 失败，再做相同负载锁内冷/热 L2；真机交互及安装仍未授权。范围、各轮原始失败及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
+- 本机类型/build、iPhoneOS unsigned SDK 编译、完整 renderer UI、25 项失效 focused 已通过；本机完整 unit 的 Rename 超时和 Swift TLS leaked promise 首次记录保留。用户授权 mac2 复验冻结 `54e9dd1`：完整 unit **3491 pass / 4 既有 opt-in skipped**、完整 renderer UI、类型/build、Swift build、完整43项计数及 ratchet/propose/guard 均通过。未修改测试期限，未应用1字节的无关 candidate baseline 提议。mac2 Swift test 因无 XCTest/完整 Xcode 未进入执行，不把它当作 TLS 问题已解决。
+- 测试 owner 下一步在完整 Xcode 环境运行原 Swift 全套并复核 TLS；性能 owner 补独立冷/热 L2。mac2 计数时 load3.09→3.45/8核、highLoad=false，但这不是毫秒收益证明。三个 CPU 指令 candidate 缺失仍为 missing，不记0。未合入、push、安装或真机重放。范围、各轮原始失败及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
 
 ## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
 
