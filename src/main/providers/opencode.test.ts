@@ -90,7 +90,8 @@ describe('OpenCode provider adapter', () => {
         projectFingerprint: projection.fingerprint,
         projectContentFingerprint: projection.contentFingerprint
       }
-      ;(this as unknown as { active: typeof ready }).active = ready
+      const internals = this as unknown as { active: typeof ready }
+      internals.active = ready
       return ready
     })
     const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockResolvedValue()
@@ -103,13 +104,40 @@ describe('OpenCode provider adapter', () => {
       await vi.advanceTimersByTimeAsync(60_000)
       await read()
       // Counter is actual production manager starts; the client/CLI boundary is mocked.
-      expect(start).toHaveBeenCalledTimes(3)
-      expect(close).toHaveBeenCalledTimes(2)
+      expect(start).toHaveBeenCalledTimes(1)
+      expect(close).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(close).toHaveBeenCalledOnce()
     } finally {
       await adapter.dispose?.()
       start.mockRestore()
       close.mockRestore()
       await rm(repo, { recursive: true, force: true })
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the model catalog cache at 30 seconds as a negative control', async () => {
+    vi.useFakeTimers()
+    const modelList = vi.fn(async () => ({ data: [] }))
+    const state = {
+      cwd: '/repo', mcpFingerprint: 'none', url: 'http://127.0.0.1:12345',
+      client: { v2: { model: { list: modelList } } } as unknown as OpencodeClient
+    } satisfies OpenCodeServerState
+    const ensure = vi.spyOn(OpenCodeServerManager.prototype, 'ensure').mockResolvedValue(state)
+    const adapter = createOpenCodeAdapter()
+    try {
+      const read = () => adapter.runControls!.read({ providerId: 'opencode', cwd: '/repo' })
+      await read()
+      await vi.advanceTimersByTimeAsync(29_999)
+      await read()
+      expect(modelList).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(2)
+      await read()
+      expect(modelList).toHaveBeenCalledTimes(2)
+    } finally {
+      await adapter.dispose?.()
+      ensure.mockRestore()
       vi.useRealTimers()
     }
   })
