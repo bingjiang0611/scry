@@ -8,6 +8,7 @@ export const emptyWorkflowBridge: WorkflowApi = {
   preview: unavailable,
   approve: unavailable,
   start: unavailable,
+  resume: unavailable,
   stop: async () => false,
   cancelPlanning: async () => false,
   snapshot: async () => null,

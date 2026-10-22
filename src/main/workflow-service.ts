@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { workflowShutdownCopy } from '../shared/constants/copy'
+import { workflowShutdownCopy, workflowRecoveryCopy } from '../shared/constants/copy'
+import type { WorkflowResumeResult } from '../shared/workflow-api'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
 import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowLiveObservation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage } from '../shared/workflow'
 import { parseWorkflowRunCommand, workflowProgressSnapshot } from '../shared/workflow'
@@ -57,6 +58,7 @@ export class WorkflowService {
   private initializationError: unknown
   private readonly plans = new Map<string, Receipt<WorkflowPlanPreview>>()
   private readonly starts = new Map<string, Receipt<WorkflowProgress>>()
+  private readonly resumes = new Map<string, Receipt<WorkflowResumeResult>>()
   private readonly stops = new Map<string, Receipt<boolean>>()
   private readonly planning = new Map<string, { commandId?: string; intent: WorkflowPlanningIntent; halt: () => void; stop: () => void }>()
   private readonly planningOutcomes = new Map<string, boolean>()
@@ -534,6 +536,24 @@ export class WorkflowService {
       return this.progressSnapshot(await this.runner.start(preview, approval))
     }
     return commandId ? this.receipt(this.starts, commandId, fingerprint, start) : start()
+  }
+  async resume(id: string, approval: WorkflowApproval, commandId: string): Promise<WorkflowResumeResult> {
+    const generation = this.admissionGeneration
+    await this.ensureReady()
+    this.assertAdmissionGeneration(generation)
+    const fingerprint = JSON.stringify({ workflowId: id, programRevision: approval.programRevision })
+    return this.receipt(this.resumes, commandId, fingerprint, async () => {
+      const preview = await this.loadPreview(id)
+      if (approval.workflowId !== id || approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
+      const record = (await this.options.store.load(id))!
+      if (record.progress.state !== 'completed' && !record.execution?.segments.some(segment => segment.commandId === commandId)) {
+        this.runner.assertRecovery(record)
+        await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
+      }
+      this.assertAdmissionGeneration(generation)
+      const result = await this.runner.resume(preview, approval, commandId)
+      return { ...result, progress: this.progressSnapshot(result.progress) }
+    })
   }
   async preview(id: string): Promise<WorkflowPlanPreview> { await this.ensureReady(); return this.loadPreview(id) }
   async stop(id: string, commandId: string): Promise<boolean> {

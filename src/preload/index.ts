@@ -360,6 +360,7 @@ const api = {
     preview: (workflowId: string): ReturnType<WorkflowApi['preview']> => ipcRenderer.invoke('workflow:preview', workflowId),
     approve: (approval: Parameters<WorkflowApi['approve']>[0]): ReturnType<WorkflowApi['approve']> => ipcRenderer.invoke('workflow:approve', approval),
     start: (workflowId: string, approval: Parameters<WorkflowApi['start']>[1], commandId?: string): ReturnType<WorkflowApi['start']> => ipcRenderer.invoke('workflow:start', workflowId, { ...approval, ...(commandId ? { commandId } : {}) }),
+    resume: (workflowId: string, approval: Parameters<WorkflowApi['resume']>[1], commandId: string): ReturnType<WorkflowApi['resume']> => ipcRenderer.invoke('workflow:resume', workflowId, { ...approval, commandId }),
     stop: (workflowId: string, commandId: string): ReturnType<WorkflowApi['stop']> => ipcRenderer.invoke('workflow:stop', workflowId, commandId),
     cancelPlanning: (commandId: string): ReturnType<WorkflowApi['cancelPlanning']> => ipcRenderer.invoke('workflow:cancelPlanning', commandId),
     list: (cwd: string, cursor?: string): ReturnType<WorkflowApi['list']> => ipcRenderer.invoke('workflow:list', cwd, cursor),

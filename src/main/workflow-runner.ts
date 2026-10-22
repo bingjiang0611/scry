@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { workflowControlCopy, workflowFrameCopy } from '../shared/constants/copy'
+import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { availableParallelism } from 'node:os'
 import type { AgentPermissionMode } from '../shared/runtime'
 import type {
@@ -19,6 +19,8 @@ import { workflowField } from './workflow-expressions'
 import { workflowFrameId } from './workflow-frames'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowInterpreter, type WorkflowInterpreterState } from './workflow-interpreter'
+import { assertWorkflowRecovery, workflowRecordFingerprint } from './workflow-recovery'
+import type { WorkflowResumeResult } from '../shared/workflow-api'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
@@ -235,6 +237,7 @@ export class WorkflowRunner {
   private readonly beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
   private readonly approvals = new Map<string, WorkflowApproval>()
   private readonly structuredOutputs = new Map<string, WorkflowValue>()
+  private readonly instanceId = randomUUID()
   private readonly active = new Map<string, {
     record: WorkflowStoreRecord
     progress: WorkflowProgress
@@ -272,6 +275,23 @@ export class WorkflowRunner {
   invalidate(workflowId: string): void { this.approvals.delete(workflowId) }
 
   async start(preview: WorkflowPlanPreview, approval: WorkflowApproval): Promise<WorkflowProgress> {
+    return this.run(preview, approval)
+  }
+  async resume(preview: WorkflowPlanPreview, approval: WorkflowApproval, commandId: string): Promise<WorkflowResumeResult> {
+    if (this.active.has(preview.workflowId)) throw new Error(workflowRecoveryCopy.owner)
+    const record = await this.store.load(preview.workflowId)
+    if (!record) throw new Error(workflowRecoveryCopy.legacy)
+    if (record.execution?.segments.some(segment => segment.commandId === commandId)) return { state: 'continued', progress: workflowProgressSnapshot(record.progress) }
+    if (record.progress.state === 'completed') return { state: 'nothing_to_resume', progress: workflowProgressSnapshot(record.progress) }
+    this.assertRecovery(record)
+    if (record.execution!.segments.length >= 256) throw new Error(workflowRecoveryCopy.limit)
+    return { state: 'continued', progress: await this.run(preview, approval, { record, commandId }) }
+  }
+  assertRecovery(record: WorkflowStoreRecord): void {
+    if (this.active.has(record.preview.workflowId)) throw new Error(workflowRecoveryCopy.owner)
+    assertWorkflowRecovery(record, this.instanceId)
+  }
+  private async run(preview: WorkflowPlanPreview, approval: WorkflowApproval, continuation?: { record: WorkflowStoreRecord; commandId: string }): Promise<WorkflowProgress> {
     const current = this.approvals.get(preview.workflowId)
     if (!current || current.programRevision !== approval.programRevision || current.programRevision !== preview.programRevision) {
       throw new Error('计划未确认或配置已变化，不能执行')
@@ -280,10 +300,16 @@ export class WorkflowRunner {
     if (this.active.has(preview.workflowId)) throw new Error('工作流已经在运行')
     const progress: WorkflowProgress = {
       workflowId: preview.workflowId, programRevision: preview.programRevision, workspace: preview.workspace,
-      goal: preview.userGoal, state: 'queued', attempts: [], dispatchAttempts: 0,
+      goal: preview.userGoal, state: 'queued', attempts: continuation ? [...continuation.record.outcomes] : [], dispatchAttempts: continuation?.record.progress.dispatchAttempts ?? 0,
       slots: { limit: this.slots.limit, inUse: this.slots.active, queued: this.slots.queued }, updatedAt: this.now()
     }
-    const record: WorkflowStoreRecord = { preview, progress, intents: [], outcomes: [], executionStarted: this.now() }
+    const epoch = randomUUID()
+    const previous = continuation?.record.execution?.segments ?? []
+    const generationId = continuation ? epoch : undefined
+    const record: WorkflowStoreRecord = { ...(continuation?.record ?? {}), preview, progress,
+      intents: continuation ? [...continuation.record.intents] : [], outcomes: continuation ? [...continuation.record.outcomes] : [], executionStarted: continuation?.record.executionStarted ?? this.now(),
+      execution: { version: 2, epoch, owner: { pid: process.pid, instanceId: this.instanceId, state: 'active' },
+        segments: [...previous, { id: epoch, ...(generationId ? { generationId } : {}), ...(continuation ? { commandId: continuation.commandId } : {}), createdAt: this.now(), mode: continuation ? 'continue' : 'start' }] } }
     const controller: WorkflowInterpreterState = { stopped: false }
     const activeStops = new Set<() => boolean>()
     let initialized!: (accepted: boolean) => void
@@ -299,11 +325,12 @@ export class WorkflowRunner {
     this.approvals.delete(preview.workflowId)
     try {
       const existing = await this.store.load(preview.workflowId)
-      if (existing && (existing.executionStarted !== undefined || existing.intents.length > 0 || existing.outcomes.length > 0 || ['completed', 'failed', 'blocked', 'stopped', 'unknown'].includes(existing.progress.state))) {
+      if (!continuation && existing && (existing.executionStarted !== undefined || existing.intents.length > 0 || existing.outcomes.length > 0 || ['completed', 'failed', 'blocked', 'stopped', 'unknown'].includes(existing.progress.state))) {
         throw new Error('工作流已有持久化执行记录，不能重新派发')
       }
       if (existing?.receipt) record.receipt = existing.receipt
-      await this.store.save(record)
+      progress.revision = (existing?.progress.revision ?? 0) + 1
+      await this.store.claim(record, workflowRecordFingerprint(continuation?.record ?? existing))
       initialized(true)
     } catch (error) {
       initialized(false)
@@ -315,13 +342,15 @@ export class WorkflowRunner {
     this.publish(progress)
     let finalCommitted = false
     try {
-      const control = new WorkflowControl(this.store, preview)
-      const interpreter = new WorkflowInterpreter(control, controller, async (block, scope) => {
-        const outcome = await this.dispatch(preview, block, record, controller, activeStops, scope)
+      const control = new WorkflowControl(this.store, preview, { record, previous, generationId })
+      const interpreter = new WorkflowInterpreter(control, controller, async (block, scope, frame) => {
+        const recovered = control.recoveredOutcome(block, scope, frame)
+        const outcome = recovered ?? await this.dispatch(preview, block, record, controller, activeStops, scope)
+        const output = recovered ? await this.store.loadOutput(preview.workflowId, outcome) : outcome.output
         let value: WorkflowEvaluation = { state: 'unknown', reason: outcome.error ?? workflowFrameCopy.failedValue, derivedFrom: ['attempt:' + outcome.attemptId] }
-        if (outcome.state === 'completed' && outcome.settled && outcome.output !== undefined) {
+        if (outcome.state === 'completed' && outcome.settled && output !== undefined) {
           const key = preview.workflowId + ':' + preview.programRevision + ':' + outcome.attemptId
-          const data = block.outputSchema ? this.structuredOutputs.get(key) ?? decodeWorkflowOutput(outcome.output, block.outputSchema) : outcome.output
+          const data = block.outputSchema ? this.structuredOutputs.get(key) ?? decodeWorkflowOutput(output, block.outputSchema) : output
           value = { state: 'known', value: data, derivedFrom: ['attempt:' + outcome.attemptId] }
         }
         return { outcome, value }
@@ -338,6 +367,7 @@ export class WorkflowRunner {
       }
       const final = report ?? ''
       if (final && final.length <= 64 * 1024) { progress.finalReport = final; progress.finalReportStatus = 'available' } else progress.finalReportStatus = 'unavailable'
+      this.closeOwnership(record)
       await this.persist(record, progress)
       finalCommitted = true
       return structuredClone(progress)
@@ -350,6 +380,7 @@ export class WorkflowRunner {
       progress.finalReportStatus = 'unavailable'
       delete progress.finalReport
       progress.error = error instanceof Error ? error.message : String(error)
+      this.closeOwnership(record)
       await this.persist(record, progress)
       finalCommitted = true
       throw error
@@ -358,6 +389,10 @@ export class WorkflowRunner {
       this.finishSettledRoot(preview.workflowId)
       this.publish(progress)
     }
+  }
+
+  private closeOwnership(record: WorkflowStoreRecord): void {
+    if (record.execution && !this.hasUnsettledIntents(record) && record.outcomes.every(value => value.settled && value.state !== 'unknown')) record.execution.owner.state = 'closed'
   }
 
   /** Business outcome can remain unknown after every native scope and required

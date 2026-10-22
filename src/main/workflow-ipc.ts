@@ -1,8 +1,9 @@
 import type { WorkflowApproval } from '../shared/workflow'
 import type { WorkflowService } from './workflow-service'
 import { validateWorkflowRoleBinding } from './workflow-program'
+import { workflowRecoveryCopy } from '../shared/constants/copy'
 
-type Service = Pick<WorkflowService, 'planCommand' | 'preview' | 'approve' | 'start' | 'stop' | 'snapshot' | 'list' | 'cancelPlanning'>
+type Service = Pick<WorkflowService, 'planCommand' | 'preview' | 'approve' | 'start' | 'resume' | 'stop' | 'snapshot' | 'list' | 'cancelPlanning'>
 const identity = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value)) throw new Error('工作流身份无效')
   return value
@@ -45,6 +46,16 @@ export function registerWorkflowIpc({ register, service, resolveWorkspace, asser
     if (identity(workflowId) !== accepted.workflowId) throw new Error('工作流确认不匹配')
     const commandId = (payload as Record<string, unknown>).commandId
     return service.start(accepted.workflowId, accepted, commandId === undefined ? undefined : identity(commandId))
+  })
+  register('workflow:resume', (workflowId, payload) => {
+    const accepted = approval(payload)
+    if (identity(workflowId) !== accepted.workflowId) throw new Error(workflowRecoveryCopy.fingerprint)
+    const commandId = identity((payload as Record<string, unknown>).commandId)
+    return (async () => {
+      const preview = await service.preview(accepted.workflowId)
+      resolveWorkspace(preview.workspace)
+      return service.resume(accepted.workflowId, accepted, commandId)
+    })()
   })
   register('workflow:stop', (workflowId, commandId) => service.stop(identity(workflowId), identity(commandId)))
   register('workflow:snapshot', async workflowId => {

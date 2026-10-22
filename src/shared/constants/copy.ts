@@ -66,6 +66,18 @@ export const workflowExpressionCopy = {
   falseReason: 'condition_false'
 }
 
+export const workflowRecoveryCopy = {
+  legacy: '此运行没有完整的恢复合同，只能查看历史，不会重新派发',
+  unknown: '原调用结果或作用域仍未知，不能恢复派发',
+  owner: '原控制器仍在运行或身份无法证明已关闭，未接管执行',
+  stale: '执行控制段已变化，旧控制器不能覆盖或继续派发',
+  ledger: '工作流恢复账本、预算或身份不一致',
+  fingerprint: '冻结程序已变化，不能按原运行恢复',
+  limit: '工作流恢复控制段已达 256 次上限',
+  frame: '恢复所需的输入或控制帧证据缺失或不一致',
+  output: '恢复所需的不可变输出缺失或校验失败'
+}
+
 export const workflowLoopCopy = {
   bounds: '循环轮数必须是已确认的 1–1000 整数',
   contract: '循环必须声明固定合同、状态、carry、进展与退出策略',

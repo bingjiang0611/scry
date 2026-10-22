@@ -81,6 +81,15 @@
 - Node24.18.0/macOS：15文件187项focused、Node/web types、build通过；关闭no_progress门后1失败/14通过（多发2轮），SHA恢复后15通过。首轮纯控制blocked丢失缺陷已在共同父状态折叠修复，裸loop拒绝测试改为明确边界合同，并保留拒绝。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。
 - 仍缺真实main check/可靠比较器、定时事件截止、普通M0控制帧统一、实际跨进程/依赖/sibling恢复、剩余指令和生产App/UI验收。本阶段没有真实Provider调用；M1、M4–M6、性能collector缺口及七项延期门禁仍未结案。
 
+### M3 显式继续与跨进程恢复进展（仍非M1–M6验收）
+
+- 新Runner根（含普通M0控制块）统一持久化，根所有权version2、epoch和有界控制段进入原File/Memory store。typed preload/可信IPC新增resume；Service重验冻结runtime能力，Runner仍复用唯一原App executor。根CAS先接管再执行，保留旧帧和原预算；旧epoch写入被拒绝。
+- 根据已提交意图/outcome、原输出hash、输入/分支帧复用已完成调用及封口map；已知派发前失败也不重试。无outcome意图、业务unknown（包括物理已settled）、无证明退出的活owner及旧无所有权记录拒绝。loop恢复initial/current/best、carry、invariants、轮次记录、内容历史和无进展计数，不改写旧终态。
+- 独立Node控制进程+真实本地CLI效果账本共5场景（含二次恢复只落entered后再次退出的依赖链复用）：子完成/父cursor前硬退出、活owner拒绝并在关闭后继续、无outcome意图拒绝、第二轮ready后恢复并准确两轮无进展退出。真实子进程不是真实Provider账号/SDK；deny-network、临时HOME/workspace也不是文件系统沙箱。
+- 当前Node24.18.0/macOS：18文件217项focused串行通过，最终fixture聚焦零新增效果后12项恢复回归通过；Node/web types、build、生产conversation IPC、CLI release 589项及pack:artifact安全smoke通过。关闭缓存效果复用后，独立进程测试失败且账本有两次first；恢复SHA后通过；只取最近空帧的另一个负对照使依赖链恢复失败。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-recovery.46r4VG/`。
+- 失败保留：两轮默认并行focused各1项5秒超时（活owner、loop），三进程用例的一轮专用串行检查也超时1项；初始化故障fixture先只覆盖save而未覆盖新claim，已补claim故障且保留save/停止断言；进程fixture缺required的首轮类型错误已修复。活owner删除一次不增加验收信息的冷启动后，扩大并行仍有loop超时；三进程fixture最终聚焦两个已提交依赖调用并断言零新增效果，不再附加另有场景证明的新调用。高机器负载只作环境证据，因果未证明；串行通过不等于并行门禁通过，也未提高deadline。原7项延期门禁、性能collector缺口仍开放。
+- 后续本任务继续完成：完整依赖/sibling与每个提交边界恢复、停滞重启、缺失记录的标准nothing_to_resume返回、remaining IR/路由/模板、M4/M5及真实完整App/Provider M6。安装、推送、真实账号/Jev发送与apply均未执行；未获具体授权前不做这些外部动作。最新包仅在worktree的dist，不替换用户App，不升版本。
+
 ## M4：质量模式、检查与写入
 
 | ID | 完成要求 |

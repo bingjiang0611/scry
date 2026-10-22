@@ -49,6 +49,7 @@ const api: WorkflowApi = {
     notify()
     return progress
   },
+  resume: async () => { throw new Error('Continuation is disabled in this fixture') },
   stop: async (_id, commandId) => {
     if (!/^[A-Za-z0-9_-]{1,96}$/.test(commandId)) throw new Error('Missing stop command identity')
     stopCommands.push(commandId)

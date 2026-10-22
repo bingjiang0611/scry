@@ -1,10 +1,11 @@
 import { mkdir, open, opendir, rename, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { workflowControlCopy, workflowFrameCopy } from '../shared/constants/copy'
+import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { withDirectoryLock } from '../core/turn-recorder/io'
 import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
 import { assertWorkflowValue } from './workflow-expressions'
+import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
 import { collectionDescriptor, collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
 import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
@@ -19,9 +20,17 @@ export interface WorkflowIntent {
   requestedModel?: string
   createdAt: number
 }
+export type WorkflowExecutionOwnership = {
+  version: 2
+  epoch: string
+  owner: { pid: number; instanceId: string; state: 'active' | 'closed' }
+  segments: Array<{ id: string; generationId?: string; commandId?: string; createdAt: number; mode: 'start' | 'continue' }>
+}
+
 export interface WorkflowStoreRecord {
   preview: WorkflowPlanPreview
   executionStarted?: number
+  execution?: WorkflowExecutionOwnership
   /** Durable user intents only. Presence never proves a native signal or settlement. */
   stopRequests?: Array<{ commandId: string; requestedAt: number }>
   receipt?: { commandId: string; fingerprint: string; status: 'accepted' | 'completed' | 'failed' | 'unknown' }
@@ -53,6 +62,8 @@ export interface WorkflowPlanningIntent {
 export interface WorkflowStorePage { records: WorkflowStoreRecord[]; nextCursor?: string }
 export interface WorkflowStore {
   save(record: WorkflowStoreRecord): Promise<void>
+  claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void>
+  loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined>
   saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame>
   loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined>
   saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference>
@@ -198,7 +209,32 @@ export class FileWorkflowStore implements WorkflowStore {
     return concurrency
   }
 
+  async claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void> {
+    const id = fileSafe(record.preview.workflowId)
+    await withDirectoryLock(join(this.directory, 'roots', id + '.lock'), async () => {
+      const current = await this.load(id)
+      if (workflowRecordFingerprint(current) !== expectedFingerprint) throw new Error(workflowRecoveryCopy.stale)
+      validateWorkflowClaim(current, record)
+      await this.writeRecord(record)
+    })
+  }
   async save(record: WorkflowStoreRecord): Promise<void> {
+    const id = fileSafe(record.preview.workflowId)
+    await withDirectoryLock(join(this.directory, 'roots', id + '.lock'), async () => {
+      workflowEpochMatches(await this.load(id), record)
+      validateWorkflowOwnership(record)
+      await this.writeRecord(record)
+    })
+  }
+  async loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined> {
+    if (outcome.outputRef === undefined) return undefined
+    const match = new RegExp(`^${fileSafe(workflowId)}\\.${fileSafe(outcome.attemptId)}\\.([a-f0-9]{64})\\.output\\.json$`).exec(outcome.outputRef)
+    if (!match) throw new Error(workflowRecoveryCopy.output)
+    const data = await this.readJson(outcome.outputRef)
+    if (!data || typeof data !== 'object' || !('output' in data) || typeof data.output !== 'string' || createHash('sha256').update(data.output).digest('hex') !== match[1]) throw new Error(workflowRecoveryCopy.output)
+    return data.output
+  }
+  private async writeRecord(record: WorkflowStoreRecord): Promise<void> {
     const id = fileSafe(record.preview.workflowId)
     const snapshot = structuredClone(record)
     for (const outcome of snapshot.outcomes) {
@@ -260,6 +296,7 @@ export class FileWorkflowStore implements WorkflowStore {
     if (value === undefined) return undefined
     if (!value || typeof value !== 'object') throw new Error('工作流记录已损坏')
     const record = value as WorkflowStoreRecord
+    validateWorkflowOwnership(record)
     if (record.preview?.workflowId !== id || record.progress?.workflowId !== id || !Array.isArray(record.intents) || !Array.isArray(record.outcomes)) throw new Error('工作流记录合同无效')
     if (record.stopRequests !== undefined && (!Array.isArray(record.stopRequests) || record.stopRequests.length > WORKFLOW_MAX_STOP_REQUESTS || record.stopRequests.some(request =>
       !request || typeof request.commandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.commandId) || !Number.isFinite(request.requestedAt) || request.requestedAt < 0) ||
@@ -337,7 +374,22 @@ export class MemoryWorkflowStore implements WorkflowStore {
     this.frames.set(key, next)
     return structuredClone(next)
   }
+  async claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void> {
+    const id = record.preview.workflowId
+    const current = this.records.get(id)
+    if (workflowRecordFingerprint(current) !== expectedFingerprint) throw new Error(workflowRecoveryCopy.stale)
+    validateWorkflowClaim(current, record)
+    const snapshot = structuredClone(record)
+    delete snapshot.progress.live
+    this.records.set(id, snapshot)
+  }
+  async loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined> {
+    const stored = this.records.get(workflowId)?.outcomes.find(value => value.attemptId === outcome.attemptId && value.taskId === outcome.taskId)
+    return stored?.output
+  }
   async save(record: WorkflowStoreRecord): Promise<void> {
+    workflowEpochMatches(this.records.get(record.preview.workflowId), record)
+    validateWorkflowOwnership(record)
     const snapshot = structuredClone(record)
     delete snapshot.progress.live
     this.records.set(record.preview.workflowId, snapshot)

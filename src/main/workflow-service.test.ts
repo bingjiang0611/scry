@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate as nextTurn } from 'node:timers/promises'
 import { FileWorkflowStore, MemoryWorkflowStore, type WorkflowPlanningIntent, type WorkflowStoreRecord } from './workflow-store'
-import { WORKFLOW_MAX_STOP_REQUESTS } from '../shared/workflow'
+import { WORKFLOW_MAX_STOP_REQUESTS, type WorkflowControlFrame } from '../shared/workflow'
 import { WorkflowService, type WorkflowServiceOptions } from './workflow-service'
 import { WorkflowDispatch, WorkflowSlots, type WorkflowProviderExecutionResult } from './workflow-runner'
 
@@ -29,7 +29,48 @@ function fixture(store = new MemoryWorkflowStore(), changes: Partial<WorkflowSer
   return { service, plan, execute, slots, store }
 }
 
+class ParentCheckpointStore extends MemoryWorkflowStore {
+  fail = true
+  override async saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, revision: number) {
+    if (this.fail && frame.nodeId === 'root' && frame.cursor === 1) throw new Error('fixture parent checkpoint failure')
+    return super.saveFrame(frame, revision)
+  }
+}
+
 describe('workflow service receipts, capabilities and recovery', () => {
+  it('continues through the same Service/Runner chain and deduplicates concurrent and cold resume receipts', async () => {
+    const store = new ParentCheckpointStore(), first = fixture(store)
+    const preview = await first.service.planCommand(request), approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await first.service.approve(approval)
+    await expect(first.service.start(preview.workflowId, approval)).rejects.toThrow('checkpoint failure')
+    expect(first.execute).toHaveBeenCalledTimes(1)
+    store.fail = false
+    const second = fixture(store)
+    await second.service.approve(approval)
+    const results = await Promise.all([second.service.resume(preview.workflowId, approval, 'resume-command'), second.service.resume(preview.workflowId, approval, 'resume-command')])
+    expect(results.map(result => result.progress.state)).toEqual(['completed', 'completed'])
+    expect(second.execute).not.toHaveBeenCalled()
+    expect((await store.load(preview.workflowId))?.execution?.segments).toHaveLength(2)
+    const third = fixture(store)
+    expect((await third.service.resume(preview.workflowId, approval, 'resume-command')).progress.state).toBe('completed')
+    expect(third.execute).not.toHaveBeenCalled()
+    expect((await store.load(preview.workflowId))?.execution?.segments).toHaveLength(2)
+  })
+
+  it('rechecks the frozen runtime after approval and before claiming a continuation', async () => {
+    const store = new ParentCheckpointStore(), first = fixture(store)
+    const preview = await first.service.planCommand(request), approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await first.service.approve(approval)
+    await expect(first.service.start(preview.workflowId, approval)).rejects.toThrow('checkpoint failure')
+    store.fail = false
+    let identity = 'fixture-runtime'
+    const second = fixture(store, { runControls: async role => ({ descriptor: descriptor(role.providerId), model: true, stop: true, identity, independentRun: true, terminalOutput: true }) })
+    await second.service.approve(approval)
+    identity = 'changed-runtime'
+    await expect(second.service.resume(preview.workflowId, approval, 'resume-stale-runtime')).rejects.toThrow()
+    expect(second.execute).not.toHaveBeenCalled()
+    expect((await store.load(preview.workflowId))?.execution?.segments).toHaveLength(1)
+  })
   it('observes stop write failures while asynchronous journal enumeration is still pending', async () => {
     let finish!: (result: WorkflowProviderExecutionResult) => void
     let entered!: () => void

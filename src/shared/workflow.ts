@@ -127,6 +127,9 @@ export interface WorkflowControlFrame {
   nodeId: string
   scopePath: string[]
   inputKey: string
+  executionEpoch?: string
+  generationId?: string
+  origin?: { frameId: string; revision: number }
   revision: number
   phase: 'entered' | 'selected' | 'completed' | 'failed' | 'blocked' | 'unknown' | 'stopped' | 'skipped_by_condition'
   arm?: 'then' | 'else' | 'unknown'

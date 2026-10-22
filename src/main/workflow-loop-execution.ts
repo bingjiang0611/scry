@@ -29,7 +29,10 @@ export class WorkflowLoopExecution {
     return scope
   }
   private valid(values: Record<string, WorkflowEvaluation>): boolean {
-    return Object.entries(values).every(([name, value]) => value.state === 'known' && (this.schemas[name].type === 'collection' ? value.collection !== undefined : matchesWorkflowValue(value.value, this.schemas[name])))
+    return Object.keys(values).length === Object.keys(this.schemas).length && Object.entries(this.schemas).every(([name, schema]) => {
+      const value = values[name]
+      return value?.state === 'known' && (schema.type === 'collection' ? value.collection !== undefined : matchesWorkflowValue(value.value, schema))
+    })
   }
   private async checkpoint(value: WorkflowLoopCheckpoint): Promise<void> { this.frame = await this.control.checkpointLoop(this.frame, value) }
   private async finish(checkpoint: WorkflowLoopCheckpoint, values: Record<string, WorkflowEvaluation>, invariants: Record<string, WorkflowEvaluation>, reasons: WorkflowLoopExitReason[], body?: WorkflowExecutionResult): Promise<Completion> {
@@ -43,29 +46,34 @@ export class WorkflowLoopExecution {
     await this.checkpoint({ ...checkpoint, reasons, outcomeRef })
     this.control.bind(this.parent, this.block.outcome, { state: 'known', value: outcome, derivedFrom: [`value:${outcomeRef.key}:${outcomeRef.hash}`] })
     const unsettled = body?.phase === 'unknown' || this.outcomes.some(value => !value.settled || value.state === 'unknown')
-    const phase = unsettled ? 'unknown' : this.execution.stopped ? 'stopped' : reasons.includes('failed') ? 'failed' : reasons.includes('unknown') || reasons.includes('blocked') ? 'blocked' : status === 'success' ? 'completed' : 'blocked'
+    const phase = unsettled ? 'unknown' : this.execution.stopped || reasons.includes('stopped') ? 'stopped' : reasons.includes('failed') ? 'failed' : reasons.includes('unknown') || reasons.includes('blocked') ? 'blocked' : status === 'success' ? 'completed' : 'blocked'
     const reportPartial = phase === 'blocked' && !reasons.some(reason => ['unknown', 'failed', 'blocked', 'stopped'].includes(reason))
     return { frame: this.frame, value: final, phase, outcomes: this.outcomes, reportPartial }
   }
 
   async run(): Promise<Completion> {
-    const invariants = this.evaluate(this.block.invariants, this.parent)
+    const restored = await this.control.restoreLoop(this.frame)
+    if (restored && (Object.keys(restored.invariants).sort().join() !== Object.keys(this.block.invariants).sort().join() || Object.keys(restored.checkpoint.initialStateRefs).sort().join() !== Object.keys(this.schemas).sort().join())) throw new Error(copy.checkpoint)
+    const invariants = restored?.invariants ?? this.evaluate(this.block.invariants, this.parent)
     const initialScope = this.control.child(this.parent, this.block.blockId + ':initial')
     for (const [name, value] of Object.entries(invariants)) this.control.bind(initialScope, name, value)
-    let values = this.evaluate(this.block.initial, initialScope)
-    const initialStateRefs = await this.control.saveBindings(values)
-    let checkpoint: WorkflowLoopCheckpoint = { iteration: 0, stage: 'ready', stateRefs: initialStateRefs, initialStateRefs, invariantRefs: await this.control.saveBindings(invariants), noProgress: 0, history: [], iterations: [], reasons: [] }
+    let values = restored?.values ?? this.evaluate(this.block.initial, initialScope)
+    const initialStateRefs = restored?.checkpoint.initialStateRefs ?? await this.control.saveBindings(values)
+    let checkpoint: WorkflowLoopCheckpoint = restored?.checkpoint ?? { iteration: 0, stage: 'ready', stateRefs: initialStateRefs, initialStateRefs, invariantRefs: await this.control.saveBindings(invariants), noProgress: 0, history: [], iterations: [], reasons: [] }
     if (this.block.best) checkpoint.bestRef = checkpoint.stateRefs[this.block.best]
     await this.checkpoint(checkpoint)
     if (Object.values(invariants).some(value => value.state === 'unknown') || Object.values(values).some(value => value.state === 'unknown')) return this.finish(checkpoint, values, invariants, ['unknown'])
     if (!this.valid(values)) return this.finish(checkpoint, values, invariants, ['failed'])
-    if (this.block.progress !== 'bounded_only') {
+    if (checkpoint.reasons.length) return this.finish(checkpoint, values, invariants, checkpoint.reasons)
+    if (this.block.progress !== 'bounded_only' && !checkpoint.history.length) {
+      if (checkpoint.iteration !== 0) throw new Error(copy.checkpoint)
       const baseline = evaluateWorkflowExpression(this.block.progress.baseline, this.scope(values, invariants, 0, this.block.blockId + ':baseline').bindings)
       if (baseline.state === 'unknown' || baseline.collection) return this.finish(checkpoint, values, invariants, ['unknown'])
       checkpoint = { ...checkpoint, history: [{ iteration: 0, key: fingerprint(workflowValueKey(baseline.value)) }] }
       await this.checkpoint(checkpoint)
     }
-    for (let iteration = 1; iteration <= this.block.maxIterations; iteration++) {
+    const first = restored ? checkpoint.stage === 'committed' ? checkpoint.iteration + 1 : Math.max(1, checkpoint.iteration) : 1
+    for (let iteration = first; iteration <= this.block.maxIterations; iteration++) {
       if (this.execution.stopped) return this.finish(checkpoint, values, invariants, ['stopped'])
       checkpoint = { ...checkpoint, iteration, stage: 'ready', reasons: [] }
       await this.checkpoint(checkpoint)

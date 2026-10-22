@@ -10,7 +10,7 @@ function fixture() {
   const sender = { mainFrame: frame }
   const win = { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
   const event = { sender, senderFrame: frame } as unknown as IpcMainInvokeEvent
-  const service = { planCommand: vi.fn(async () => null), approve: vi.fn(async () => true), start: vi.fn(async () => null), stop: vi.fn(async () => true),
+  const service = { preview: vi.fn(async () => ({ workspace: '/authorized' })), resume: vi.fn(async () => null), planCommand: vi.fn(async () => null), approve: vi.fn(async () => true), start: vi.fn(async () => null), stop: vi.fn(async () => true),
     snapshot: vi.fn(async () => undefined), list: vi.fn(async () => ({ records: [] })), cancelPlanning: vi.fn(() => true) }
   const resolveWorkspace = vi.fn((cwd: string) => { if (cwd !== '/authorized') throw new Error('unauthorized'); return cwd })
   registerWorkflowIpc({
@@ -27,6 +27,7 @@ const plan = { command: '/scry-workflow run inspect', commandId: 'command-test',
 const approval = { workflowId: 'workflow-test', programRevision: 'revision', approvedAt: 1 }
 const commands: Array<[string, unknown[]]> = [
   ['plan', [plan]], ['approve', [approval]], ['start', ['workflow-test', approval]], ['stop', ['workflow-test', 'stop-command']],
+  ['resume', ['workflow-test', { ...approval, commandId: 'resume-command' }]],
   ['snapshot', ['workflow-test']], ['list', ['/authorized']], ['cancelPlanning', ['command-test']]
 ]
 
@@ -51,6 +52,18 @@ describe('workflow production IPC registrations', () => {
     await expect(invoke({ sender, senderFrame: frame } as unknown as IpcMainInvokeEvent)).rejects.toThrow('非可信 renderer')
     for (const listener of Object.values(service)) expect(listener).not.toHaveBeenCalled()
     expect(resolveWorkspace).not.toHaveBeenCalled()
+  })
+  it('validates resume approval, command identity and workspace before continuing', async () => {
+    const { handlers, event, service } = fixture()
+    const invoke = async (id: string, payload: unknown) => handlers.get('workflow:resume')!(event, id, payload)
+    await expect(invoke('workflow-test', approval)).rejects.toThrow('身份无效')
+    await expect(invoke('other', { ...approval, commandId: 'resume-command' })).rejects.toThrow()
+    expect(service.preview).not.toHaveBeenCalled()
+    service.preview.mockResolvedValueOnce({ workspace: '/unauthorized' })
+    await expect(invoke('workflow-test', { ...approval, commandId: 'resume-command' })).rejects.toThrow('unauthorized')
+    expect(service.resume).not.toHaveBeenCalled()
+    await invoke('workflow-test', { ...approval, commandId: 'resume-command' })
+    expect(service.resume).toHaveBeenCalledWith('workflow-test', approval, 'resume-command')
   })
   it('admits a valid cross-provider plan with a Pi profile/model, using canonical workspace authority', async () => {
     const { handlers, event, service } = fixture()

@@ -38,6 +38,7 @@
         "ipc.workflow:approve",
         "ipc.workflow:preview",
         "ipc.workflow:start",
+        "ipc.workflow:resume",
         "ipc.workflow:stop",
         "ipc.workflow:snapshot",
         "ipc.workflow:list",

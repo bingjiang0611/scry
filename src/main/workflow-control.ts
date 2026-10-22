@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
-import type { WorkflowBlock, WorkflowCollectionEntry, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowLoopCheckpoint, WorkflowPlanPreview, WorkflowValue, WorkflowValueReference, WorkflowValueSchema } from '../shared/workflow'
+import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowCollectionEntry, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowLoopCheckpoint, WorkflowPlanPreview, WorkflowValue, WorkflowValueReference, WorkflowValueSchema } from '../shared/workflow'
 import { workflowChildBlocks } from '../shared/workflow'
-import { workflowExpressionCopy, workflowFrameCopy } from '../shared/constants/copy'
+import { workflowExpressionCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { workflowExpressionReferences } from './workflow-expressions'
 import { collectionDescriptor } from './workflow-collections'
 import { workflowLoopStateTypes } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
-import type { WorkflowStore } from './workflow-store'
+import type { WorkflowExecutionOwnership, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 
 export type WorkflowControlScope = {
   path: string[]
@@ -20,7 +20,9 @@ const digest = (value: unknown): string => createHash('sha256').update(JSON.stri
 export class WorkflowControl {
   readonly framed: boolean
   readonly root: WorkflowControlScope
-  constructor(private readonly store: WorkflowStore, private readonly preview: WorkflowPlanPreview) {
+  private readonly origins = new Map<string, WorkflowControlFrame[]>()
+  constructor(private readonly store: WorkflowStore, private readonly preview: WorkflowPlanPreview,
+    private readonly execution?: { record: WorkflowStoreRecord; previous: WorkflowExecutionOwnership['segments']; generationId?: string }) {
     const pending = [preview.program.body]
     let framed = false
     while (pending.length) {
@@ -28,8 +30,8 @@ export class WorkflowControl {
       if (block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
-    this.framed = framed
-    this.root = { path: framed ? ['revision:' + preview.programRevision] : [], bindings: new Map() }
+    this.framed = framed || execution !== undefined
+    this.root = { path: this.framed ? ['revision:' + preview.programRevision] : [], bindings: new Map() }
   }
   child(parent: WorkflowControlScope, label: string): WorkflowControlScope {
     return { path: this.framed ? [...parent.path, label] : parent.path, bindings: new Map(parent.bindings) }
@@ -54,13 +56,30 @@ export class WorkflowControl {
     if (!this.framed) return undefined
     const names = block.kind === 'loop' ? [...new Set([...Object.values(block.initial), ...Object.values(block.invariants)].flatMap(workflowExpressionReferences))] : block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
       : block.kind === 'call' ? (block.inputRefs ?? []).map(ref => ref.nodeId) : block.kind === 'return' ? [block.ref.nodeId] : []
+    const inputKey = digest({ revision: this.preview.programRevision, nodeId: block.blockId, scope: scope.path,
+      sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) })
+    const frameId = workflowFrameId(block.blockId, scope.path, this.execution?.generationId)
+    const origins: WorkflowControlFrame[] = []
+    for (const segment of [...(this.execution?.previous ?? [])].reverse()) {
+      const prior = await this.store.loadFrame(this.preview.workflowId, workflowFrameId(block.blockId, scope.path, segment.generationId))
+      if (!prior) continue
+      if (prior.executionEpoch !== segment.id || prior.inputKey !== inputKey || prior.programRevision !== this.preview.programRevision) throw new Error(workflowRecoveryCopy.frame)
+      origins.push(prior)
+    }
+    if (origins.length) this.origins.set(frameId, origins)
+    const origin = origins[0]
     return this.store.saveFrame({ schemaVersion: 1, workflowId: this.preview.workflowId, programRevision: this.preview.programRevision,
-      frameId: workflowFrameId(block.blockId, scope.path), nodeId: block.blockId, scopePath: scope.path,
-      inputKey: digest({ revision: this.preview.programRevision, nodeId: block.blockId, scope: scope.path,
-        sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) }), phase: 'entered' }, 0)
+      frameId, nodeId: block.blockId, scopePath: scope.path, inputKey, phase: 'entered',
+      ...(this.execution ? { executionEpoch: this.execution.record.execution!.epoch } : {}), ...(this.execution?.generationId ? { generationId: this.execution.generationId } : {}),
+      ...(origin ? { origin: { frameId: origin.frameId, revision: origin.revision } } : {}) }, 0)
   }
   async select(frame: WorkflowControlFrame | undefined, arm: 'then' | 'else' | 'unknown', decision: WorkflowEvaluation): Promise<WorkflowControlFrame> {
     if (!frame) throw new Error(workflowFrameCopy.invalid)
+    const origin = this.origins.get(frame.frameId)?.find(prior => prior.arm !== undefined)
+    if (origin?.arm !== undefined) {
+      if (origin.arm !== arm || origin.decisionRef!.hash !== digest(decision)) throw new Error(workflowRecoveryCopy.frame)
+      await this.store.loadValue(this.preview.workflowId, origin.decisionRef!)
+    }
     const decisionRef = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'decision']), decision)
     const { revision, ...input } = frame
     return this.store.saveFrame({ ...input, phase: 'selected', arm, decisionRef }, revision)
@@ -69,7 +88,14 @@ export class WorkflowControl {
     let completed
     let reference
     if (frame) {
-      reference = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'result']), value)
+      const origin = this.origins.get(frame.frameId)?.find(prior => prior.resultRef !== undefined)
+      if (origin?.resultRef && origin.resultRef.hash === digest(value)) {
+        await this.store.loadValue(this.preview.workflowId, origin.resultRef)
+        reference = origin.resultRef
+      } else {
+        if (origin?.resultRef && block.kind === 'call') throw new Error(workflowRecoveryCopy.frame)
+        reference = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'result']), value)
+      }
       const { revision, ...input } = frame
       completed = await this.store.saveFrame({ ...input, phase, resultRef: reference, ...(reportPartial ? { continuation: 'report_partial' as const } : {}), ...(value.state === 'unknown' ? { reason: value.reason.slice(0, 4096) } : {}) }, revision)
     }
@@ -78,6 +104,28 @@ export class WorkflowControl {
     const result = reference ? { ...value, derivedFrom: [`value:${reference.key}:${reference.hash}`] } : value
     this.bind(scope, block.blockId, result)
     return completed
+  }
+  recoveredOutcome(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined): WorkflowAttemptOutcome | undefined {
+    if (!this.execution?.previous.length) return undefined
+    const taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
+    const intent = this.execution.record.intents.find(value => value.taskId === taskId)
+    const outcome = this.execution.record.outcomes.find(value => value.taskId === taskId)
+    if (!intent && !outcome) return undefined
+    if (!frame || !this.origins.has(frame.frameId)) throw new Error(workflowRecoveryCopy.frame)
+    if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(workflowRecoveryCopy.unknown)
+    return outcome
+  }
+  async restoreLoop(frame: WorkflowControlFrame): Promise<{ checkpoint: WorkflowLoopCheckpoint; values: Record<string, WorkflowEvaluation>; invariants: Record<string, WorkflowEvaluation> } | undefined> {
+    const checkpoint = this.origins.get(frame.frameId)?.find(prior => prior.loop !== undefined)?.loop
+    if (!checkpoint) return undefined
+    const load = async (values: Record<string, WorkflowValueReference>) => {
+      const entries: Array<[string, WorkflowEvaluation]> = []
+      for (const [name, reference] of Object.entries(values)) entries.push([name, await this.store.loadValue(this.preview.workflowId, reference)])
+      return Object.fromEntries(entries)
+    }
+    await load(checkpoint.initialStateRefs)
+    for (const reference of [...checkpoint.iterations, ...(checkpoint.bestRef ? [checkpoint.bestRef] : []), ...(checkpoint.outcomeRef ? [checkpoint.outcomeRef] : [])]) await this.store.loadValue(this.preview.workflowId, reference)
+    return { checkpoint: structuredClone(checkpoint), values: await load(checkpoint.stateRefs), invariants: await load(checkpoint.invariantRefs) }
   }
   loopSchemas(nodeId: string): Record<string, WorkflowValueSchema> { return workflowLoopStateTypes(this.preview.program.body, nodeId) }
   async saveBindings(values: Record<string, WorkflowEvaluation>): Promise<Record<string, WorkflowValueReference>> {
@@ -91,6 +139,18 @@ export class WorkflowControl {
   async checkpointLoop(frame: WorkflowControlFrame, loop: WorkflowLoopCheckpoint): Promise<WorkflowControlFrame> {
     const { revision, ...input } = frame
     return this.store.saveFrame({ ...input, loop }, revision)
+  }
+  async restoredCollection(frame: WorkflowControlFrame): Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase']; reportPartial: boolean } | undefined> {
+    const origin = this.origins.get(frame.frameId)?.find(prior => prior.resultRef !== undefined)
+    if (!origin?.resultRef || !['completed', 'failed', 'blocked', 'stopped'].includes(origin.phase)) return undefined
+    const value = await this.store.loadValue(this.preview.workflowId, origin.resultRef)
+    if (value.state !== 'known' || !value.collection?.sealed) return undefined
+    const entries = await this.entries(value)
+    for (const entry of entries) {
+      if (!entry.settled || !entry.reference || entry.state === 'pending' || entry.state === 'unknown') throw new Error(workflowRecoveryCopy.frame)
+      await this.readCommitted(entry.reference)
+    }
+    return { value, phase: origin.phase, reportPartial: origin.continuation === 'report_partial' }
   }
   async freezeSource(frame: WorkflowControlFrame, value: WorkflowEvaluation): Promise<WorkflowControlFrame> {
     const sourceRef = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'source']), value)

@@ -7,9 +7,10 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 const phases = ['entered', 'selected', 'completed', 'failed', 'blocked', 'unknown', 'stopped', 'skipped_by_condition']
 const terminal = new Set(['completed', 'failed', 'blocked', 'unknown', 'stopped', 'skipped_by_condition'])
 
-export function workflowFrameId(nodeId: string, scopePath: readonly string[]): string {
+export function workflowFrameId(nodeId: string, scopePath: readonly string[], generationId?: string): string {
   if (!id(nodeId)) throw new Error(copy.invalid)
-  return scopePath.length ? createHash('sha256').update(JSON.stringify({ nodeId, scopePath })).digest('hex') : nodeId
+  if (generationId !== undefined && !id(generationId)) throw new Error(copy.invalid)
+  return scopePath.length || generationId ? createHash('sha256').update(JSON.stringify({ nodeId, scopePath, ...(generationId ? { generationId } : {}) })).digest('hex') : nodeId
 }
 
 export function validateWorkflowValueReference(value: unknown, workflowId: string): asserts value is WorkflowValueReference {
@@ -33,7 +34,9 @@ export function validateWorkflowLoopCheckpoint(value: unknown, workflowId: strin
 
 export function validateWorkflowFrame(value: unknown, workflowId: string, frameId: string): asserts value is WorkflowControlFrame {
   if (!object(value) || value.schemaVersion !== 1 || value.workflowId !== workflowId || value.frameId !== frameId || !id(value.nodeId) || !id(value.programRevision) || typeof value.inputKey !== 'string' || !/^[a-f0-9]{64}$/.test(value.inputKey) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 1 || typeof value.phase !== 'string' || !phases.includes(value.phase)) throw new Error(copy.invalid)
-  if (!Array.isArray(value.scopePath) || value.scopePath.length > 64 || !value.scopePath.every(item => typeof item === 'string' && item.length <= 256) || workflowFrameId(value.nodeId, value.scopePath) !== frameId) throw new Error(copy.invalid)
+  if (!Array.isArray(value.scopePath) || value.scopePath.length > 64 || !value.scopePath.every(item => typeof item === 'string' && item.length <= 256) || workflowFrameId(value.nodeId, value.scopePath, value.generationId as string | undefined) !== frameId) throw new Error(copy.invalid)
+  if (value.executionEpoch !== undefined && !id(value.executionEpoch)) throw new Error(copy.invalid)
+  if (value.origin !== undefined && (!object(value.origin) || !id(value.origin.frameId) || !Number.isSafeInteger(value.origin.revision) || (value.origin.revision as number) < 1)) throw new Error(copy.invalid)
   if (value.arm !== undefined && (typeof value.arm !== 'string' || !['then', 'else', 'unknown'].includes(value.arm))) throw new Error(copy.invalid)
   if ((value.arm === undefined) !== (value.decisionRef === undefined) || (value.phase === 'selected' && value.arm === undefined) || (terminal.has(value.phase) && value.phase !== 'skipped_by_condition' && value.resultRef === undefined)) throw new Error(copy.invalid)
   if (value.reason !== undefined && (typeof value.reason !== 'string' || value.reason.length > 4096)) throw new Error(copy.invalid)
@@ -63,7 +66,7 @@ export function nextWorkflowFrame(current: WorkflowControlFrame | undefined, inp
   const next = structuredClone({ ...input, revision: expectedRevision + 1 })
   validateWorkflowFrame(next, input.workflowId, input.frameId)
   if (current) {
-    if (current.nodeId !== next.nodeId || current.programRevision !== next.programRevision || current.inputKey !== next.inputKey || JSON.stringify(current.scopePath) !== JSON.stringify(next.scopePath)) throw new Error(copy.identity)
+    if (current.nodeId !== next.nodeId || current.executionEpoch !== next.executionEpoch || current.generationId !== next.generationId || JSON.stringify(current.origin) !== JSON.stringify(next.origin) || current.programRevision !== next.programRevision || current.inputKey !== next.inputKey || JSON.stringify(current.scopePath) !== JSON.stringify(next.scopePath)) throw new Error(copy.identity)
     if (terminal.has(current.phase)) throw new Error(copy.terminal)
     if (current.loop) {
       const previous = current.loop, loop = next.loop

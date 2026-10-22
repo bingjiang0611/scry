@@ -28,7 +28,7 @@ const unavailable = (reason = copy.failedValue): WorkflowEvaluation => ({ state:
  * effects remain in the canonical Runner callback, with its slots and ledger. */
 export class WorkflowInterpreter {
   constructor(private readonly control: WorkflowControl, private readonly state: WorkflowInterpreterState,
-    private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number) {}
+    private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number) {}
 
   private phase(outcomes: WorkflowAttemptOutcome[], scope: WorkflowControlScope): WorkflowControlFrame['phase'] {
     return outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown') ? 'unknown'
@@ -123,7 +123,7 @@ export class WorkflowInterpreter {
           break
         }
         case 'call': {
-          const { outcome, value } = await this.call(current, top.scope)
+          const { outcome, value } = await this.call(current, top.scope, frame)
           stack.pop()
           returned = await this.finish(current, top.scope, frame, value, this.phase([outcome], top.scope), [outcome])
           break
@@ -200,6 +200,8 @@ export class WorkflowInterpreter {
   }
 
   private async map(block: Extract<WorkflowBlock, { kind: 'map' }>, scope: WorkflowControlScope, frame: WorkflowControlFrame): Promise<Result> {
+    const restored = await this.control.restoredCollection(frame)
+    if (restored) return this.finish(block, scope, frame, restored.value, restored.phase, [], restored.reportPartial)
     const source = evaluateWorkflowExpression(block.items, scope.bindings)
     if (source.state === 'unknown') {
       scope.blockedReason = source.reason

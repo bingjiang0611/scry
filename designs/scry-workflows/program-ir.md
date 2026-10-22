@@ -93,25 +93,38 @@ loop仍属于同一WorkflowProgram。`WorkflowLoopExecution`只负责提交循�
 - `until`与`improved`必须为布尔类型。缺证据不会变false，不提交未知carry，不把API/格式/权限失败或unknown当作下一逻辑轮的重试。
 - `policy`显式声明`{error:"fail_closed",unknown:"block",stop:"cancel",logicalExit:"report_partial"}`。已批准的exhausted/no_progress/oscillation可继续形成partial root报告，但根仍blocked而非completed；这个标记穿过sequence/branch/parallel/map。错误、unknown、停止不因后到success变成功。
 
-控制帧保存initial/current stateRefs、invariantRefs、轮次ready/committed、不可变轮次记录、bestRef、无进展计数、内容历史及全部退出原因。每轮先保存ready状态，body结果与typed carry落盘后再提交committed帧，随后才准入下一轮。提交失败时已完成子调用仍可查，不发新一轮。`iteration`与Native attempt ID独立，预算不重置。主进程重新加载这些引用仍需完整恢复准入，**本阶段没有恢复执行API**。
+控制帧保存initial/current stateRefs、invariantRefs、轮次ready/committed、不可变轮次记录、bestRef、无进展计数、内容历史及全部退出原因。每轮先保存ready状态，body结果与typed carry落盘后再提交committed帧，随后才准入下一轮。提交失败时已完成子调用仍可查，不发新一轮。`iteration`与Native attempt ID独立，预算不重置。主进程重新加载这些引用仍需恢复准入；最初loop阶段未开放恢复API，现有显式继续路径见下节。
 
 15文件187项focused、Node/web types及build通过。关闭连续两轮无进展检查后，1项负对照失败（4次而非2次调用），按SHA256恢复后15项通过。首轮测试真实发现父容器丢失纯控制blocked状态；已在共同执行栈保留非成功状态，不能仅按Native outcome重新算completed。原bare loop测试仍拒绝，只将“未知指令”预期更新为已支持loop缺少明确轮数边界的拒绝。
 
 只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。全部Provider调用仍为test double，不能替代App、真实账号、独立质量检查或M6验收。
 
-当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、实际跨进程恢复/依赖重启、nested collection字段的通用typed投影和全指令。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
+当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、完整依赖重启、nested collection字段的通用typed投影和全指令。受限的跨进程继续已有下述证据，不能外推为每个崩溃边界均已验收。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
 
 ## 控制状态持久化的当前范围
 
-带上述控制/字段投影的程序在原有Runner中写入内容寻址的值artifact与CAS控制帧。帧记录程序修订、作用域、输入来源、分支选择与decision/result引用。值先落盘，再提交引用它的帧；选择帧成功后才派发被选子任务。校验失败、缺artifact、修订/输入不符或已终态帧均拒绝覆盖。unknown帧不可重置为entered/completed。
+新Runner根执行（包括普通sequence/parallel/call/return）统一写入内容寻址的值artifact与CAS控制帧。帧记录程序修订、作用域、输入来源、分支选择与decision/result引用。值先落盘，再提交引用它的帧；选择帧成功后才派发被选子任务。校验失败、缺artifact、修订/输入不符或已终态帧均拒绝覆盖。unknown帧不可重置为entered/completed。
 
-作用域身份含程序修订及分支选择来源；普通M0程序保留已有任务身份。现有Agent预算/intent与outcome仍由同一Runner提交，不因控制帧退款或重发。
+新运行的作用域身份含程序修订及分支选择来源；无version2执行所有权的旧记录只保留观察路径，不自动升级为可执行运行。现有Agent预算/intent与outcome仍由同一Runner提交，不因控制帧退款或重发。
 
 控制求值现已从Runner递归方法迁入唯一`WorkflowInterpreter`：sequence/branch通过显式activation stack求值，parallel各fiber有独立栈，Native调用仍委托原Runner/slots/intent/outcome链。带控制帧的sequence在子结果提交后持久更新cursor和带revision/resultRef的children引用，然后才进入后继；cursor表示已登记子结果数量，不单独授权派发，未知/失败结果仍停止依赖。
 
 测试注入父cursor提交失败后，首个子调用的outcome/终态帧/值仍可由独立store读取，第二个调用不执行。引用读取同时校验frame revision、resultRef和内容hash，不把未完成帧当已提交结果。省略父checkpoint的负对照使3项测试失败。
 
-**这不是M3恢复执行完成**：普通M0程序仍沿用既有任务身份/无控制帧路径；其求值也用显式栈，但本阶段持久cursor只覆盖已有framed程序。跨进程冷恢复、全部指令统一持久化、loop carry/最佳候选的恢复调度和sibling复用仍未实现；根的已有观察式历史恢复仍不自动派发。本阶段161项Workflow回归、types/build及负对照日志保存在`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`，不冒充完整App或真实Provider验收。
+最初显式栈阶段的161项回归与限制保留于`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`；后续普通程序统一持久化与显式继续见下节。**这仍不是M3整体恢复完成**，观察式历史恢复本身始终不派发。
+
+## 显式继续与跨进程恢复的当前范围
+
+`window.scry.workflow.resume(workflowId, approval, commandId)`复用Service、唯一Interpreter/Runner及原App executor链。新根记录带`execution.version:2`、owner与最多256个控制段；命令回执有界且持久，重复命令不重发。完成运行返回`nothing_to_resume`。缺失运行仍拒绝，不创建空根；缺失记录的标准`nothing_to_resume`响应、完整依赖恢复及已知失败attempt的明确重试仍待实现。
+
+- 先核对冻结程序、角色/profile/模型/权限、当前runtime能力、原意图/outcome与单调根预算。未知业务结果即使物理settled也拒绝；PID仍存活或无法证明原owner退出则不接管。旧无所有权记录只读。PID复用按仍存活拒绝，不声称识别并接管复用后的进程。
+- 接管以根元数据CAS提交新epoch/控制段；旧epoch不能覆盖根、增加预算或再派发。旧终态帧不改写；新帧通过generation与origin关联旧证据。恢复核对分支选择及输入来源，复用有hash校验的原输出和已封口集合引用，不重新调用已完成或已知失败的任务。
+- 每个逻辑节点的历史帧读取成本随控制段线性增长，最多256段；若实际量测显示这成为主因，再增加受canonical帧校验的索引，不以索引取代权威记录。loop从持久ready/committed恢复carry、initial/current/best、invariants、迭代记录、内容历史及无进展计数；不把逻辑迭代当transport重试。两个进程间在第二轮ready处退出的场景验证了第二轮消费candidate-1、两轮无进展退出、原seed/best保留及根预算3而非重置。
+- 5项独立控制进程场景使用真实本地Node子进程和effect ledger；覆盖子结果完成后硬退出、活owner拒绝、无outcome意图拒绝、loop恢复，以及第二个控制器只写entered帧后再次退出。最近控制帧不覆盖更早已提交结果/loop/decision的证据；三进程回归要求两个已提交依赖调用都复用，零新增效果。macOS用deny-network策略、隔离HOME/工作区；不是文件系统沙箱，也不是账号/模型、真实Provider SDK或完整App的Workflow验收。
+- 18文件217项focused在`--maxWorkers=1`通过；其后仅将三进程fixture专注到两个已提交依赖调用（不再附加本已另测的新调用），最终12项恢复回归及types通过。当前App代码的build、conversation IPC、589项CLI release合同及打包安全smoke通过。故意绕过旧效果复用后，用例失败且effect ledger确有两次first；故意只取最近空帧后，已提交依赖链恢复失败。两处均按原SHA恢复；产品源码与通过217项时相同，最终fixture日志另存。初始化存储故障注入随新CAS入口移至claim，同时保留save故障及全部断言。
+- 两轮默认并行focused各有1项5秒超时（活owner、loop）；新增三进程用例后，一轮专用串行进程检查也超时1项，日志和失败现场均保留。最终活owner用调用测试的独立进程做拒绝检查，三进程用例要求零新增效果；删除的是重复冷启动/非本场景必需的新调用，不删除owner、依赖链、预算或旧引用断言。10核机器曾记录load38/109/98，后一次约24/20/25，不能据此断言根因。最终12项通过不抹掉这些失败，不提高deadline，不声称默认并行门禁已绿；后续由本任务继续定位争用/收敛。既有7项延期全套失败、Runner性能collector缺口也未关闭。
+
+源码与日志：`~/.local/state/rotom/verification-evidence/workflow-m3-recovery.46r4VG/`。产物为未安装的本地Scry0.2.210；打包/通用IPC smoke不代表新的恢复API已在生产Workflow UI、SQLite归档链和每个提交边界端到端验收。
 
 ## 证据
 

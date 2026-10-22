@@ -25,6 +25,10 @@ describe('WorkflowRunner M0 scheduler', () => {
     const barrier = new Promise<void>(resolve => { release = resolve })
     class InitializingStore extends MemoryWorkflowStore {
       override async load(id: string) { await barrier; return super.load(id) }
+      override async claim(record: import('./workflow-store').WorkflowStoreRecord, fingerprint: string | undefined) {
+        if (failInitialization) throw new Error('initial storage unavailable')
+        await super.claim(record, fingerprint)
+      }
       override async save(record: import('./workflow-store').WorkflowStoreRecord) {
         if (failInitialization) throw new Error('initial storage unavailable')
         await super.save(record)
