@@ -1119,7 +1119,8 @@ async function readSegmentedMetadataIndexAsync(args: {
     const allNames = await readdir(dir)
     const names = allNames.filter((name) => TRACE_ARCHIVE_TURN_FILE.test(name)).sort()
     const metadataNames = allNames.filter((name) => TRACE_ARCHIVE_METADATA_FILE.test(name)).sort()
-    const metadataCoverageComplete = metadataNames.length === names.length && names.every((name) => metadataNames.includes(name.replace(/\.json$/, TRACE_ARCHIVE_METADATA_SUFFIX)))
+    const metadataFiles = new Set(metadataNames)
+    const metadataCoverageComplete = metadataFiles.size === names.length && names.every((name) => metadataFiles.has(name.replace(/\.json$/, TRACE_ARCHIVE_METADATA_SUFFIX)))
     // metadata sidecars are disposable; canonical files remain authoritative
     const entries: TraceArchiveIndexEntry[] = []
     for (const file of names) {
@@ -1780,6 +1781,40 @@ export function findTraceArchiveTurnMatches(args: {
   }
 }
 
+type TraceArchiveUpsertInput = Parameters<typeof upsertTraceArchiveTurn>[0]
+
+function prepareArchiveUpdate(
+  args: TraceArchiveUpsertInput,
+  providerId: ProviderId,
+  turn: TraceArchiveTurn,
+  existing: ReturnType<typeof inspectArchiveFile>,
+  fp: string
+): TraceArchive | boolean {
+  if (existing.status === 'invalid') return false
+  if (
+    existing.status === 'valid' &&
+    (existing.archive.turns.length !== 1 ||
+      traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, existing.archive.turns[0]) !== fp)
+  ) return false
+  try {
+    const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
+    turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
+  } catch { return false }
+  // Managed commit retries can present the same immutable turn more than once. Avoid touching
+  // the canonical segment and its growing page index when the durable body is unchanged.
+  if (existing.status === 'valid' && existing.archive.turns.length === 1 &&
+      JSON.stringify(existing.archive.turns[0]) === JSON.stringify(turn)) return true
+  return {
+    version: 3,
+    cwd: args.cwd,
+    sessionId: args.sessionId,
+    externalSessionId: args.sessionId,
+    providerId,
+    runtimeProvider: args.runtimeProvider ?? (existing.status === 'valid' ? existing.archive.runtimeProvider : undefined),
+    turns: [turn]
+  }
+}
+
 export function upsertTraceArchiveTurn(args: {
   cwd: string
   sessionId: string
@@ -1804,29 +1839,9 @@ export function upsertTraceArchiveTurn(args: {
   }
   const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
   const existing = inspectArchiveFile(args.userDataDir, fp, args.cwd, args.sessionId, providerId)
-  if (existing.status === 'invalid') return false
-  if (
-    existing.status === 'valid' &&
-    (existing.archive.turns.length !== 1 ||
-      traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, existing.archive.turns[0]) !== fp)
-  ) return false
-  try {
-    const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
-    turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
-  } catch { return false }
-  // Managed commit retries can present the same immutable turn more than once. Avoid touching
-  // the canonical segment and its growing page index when the durable body is unchanged.
-  if (existing.status === 'valid' && existing.archive.turns.length === 1 &&
-      JSON.stringify(existing.archive.turns[0]) === JSON.stringify(turn)) return true
-  const archive: TraceArchive = {
-    version: 3,
-    cwd: args.cwd,
-    sessionId: args.sessionId,
-    externalSessionId: args.sessionId,
-    providerId,
-    runtimeProvider: args.runtimeProvider ?? (existing.status === 'valid' ? existing.archive.runtimeProvider : undefined),
-    turns: [turn]
-  }
+  const archive = prepareArchiveUpdate(args, providerId, turn, existing, fp)
+  if (typeof archive === 'boolean') return archive
+  turn = archive.turns[0]
   const indexArgs = {
     userDataDir: args.userDataDir,
     cwd: args.cwd,
@@ -1875,23 +1890,9 @@ export async function upsertTraceArchiveTurnAsync(args: {
   }
   const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
   const existing = await inspectArchiveFileAsync(args.userDataDir, fp, args.cwd, args.sessionId, providerId)
-  if (existing.status === 'invalid') return false
-  if (existing.status === 'valid' && (existing.archive.turns.length !== 1 ||
-      traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, existing.archive.turns[0]) !== fp)) return false
-  try {
-    const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
-    turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
-  } catch { return false }
-  if (existing.status === 'valid' && JSON.stringify(existing.archive.turns[0]) === JSON.stringify(turn)) return true
-  const archive: TraceArchive = {
-    version: 3,
-    cwd: args.cwd,
-    sessionId: args.sessionId,
-    externalSessionId: args.sessionId,
-    providerId,
-    runtimeProvider: args.runtimeProvider ?? (existing.status === 'valid' ? existing.archive.runtimeProvider : undefined),
-    turns: [turn]
-  }
+  const archive = prepareArchiveUpdate(args, providerId, turn, existing, fp)
+  if (typeof archive === 'boolean') return archive
+  turn = archive.turns[0]
   const indexArgs = { userDataDir: args.userDataDir, cwd: args.cwd, sessionId: args.sessionId, providerId }
   try {
     await markTraceArchiveCatalogIndexDirtyAsync(args.userDataDir)

@@ -32,7 +32,8 @@ const count = (value: number): string => `${value} 个工作区文件的 Git 净
 export const historyCopy = {
   nativeArchiveFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生历史未能核对：${detail}`,
   nativeBodyFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生正文未能核对：${detail}`,
-  incompleteArchive: (detail: string): string => `Scry 归档不完整：${detail}`
+  nativePageReload: 'Pi 原生历史在翻页期间发生变化，请重新打开会话',
+  incompleteArchive: '部分历史归档无法读取；当前内容可能不完整。'
 }
 
 export const workspaceDiffCopy = {
