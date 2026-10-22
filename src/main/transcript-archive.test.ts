@@ -329,6 +329,31 @@ describe('transcript archive mirror', () => {
     expect(resolveTranscriptPath({ cwd: collidingCwd, sessionId, userDataDir, home })).toBe(primary)
   })
 
+  it('readTraceArchiveTurnsAsync merges monolith and newer segmented canonical bodies', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/merge', sessionId: 'merge-session', providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const, userDataDir }
+    const monolith = { version: 3 as const, cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId,
+      runtimeProvider: args.runtimeProvider, turns: [{ runId: 'old', userText: 'old', items: [], done: true, ts: 1 }] }
+    mkdirSync(dirname(traceArchivePath(userDataDir, args.cwd, args.sessionId, args.providerId)), { recursive: true })
+    writeFileSync(traceArchivePath(userDataDir, args.cwd, args.sessionId, args.providerId), JSON.stringify(monolith))
+    expect(upsertTraceArchiveTurn({ ...args, turn: { runId: 'new', userText: 'new', items: [], done: true, ts: 2 } })).toBe(true)
+    await expect(readTraceArchiveTurnsAsync(args, ['old', 'new'])).resolves.toEqual([
+      expect.objectContaining({ runId: 'old' }), expect.objectContaining({ runId: 'new' })
+    ])
+  })
+
+  it('rebuilds after a valid index loses a canonical segment instead of claiming complete coverage', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/missing-segment', sessionId: 'missing-segment', providerId: 'pi' as const, userDataDir }
+    for (const runId of ['one', 'two']) expect(upsertTraceArchiveTurn({ ...args, turn: { runId, userText: runId, items: [], done: true, ts: runId === 'one' ? 1 : 2 } })).toBe(true)
+    await readTraceArchivePageAsync(args, { limit: 2 })
+    const removed = traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'one' })
+    unlinkSync(removed)
+    await expect(readTraceArchivePageAsync(args, { limit: 2 })).resolves.toMatchObject({ sourceComplete: false, totalTurns: 1, archive: { turns: [{ runId: 'two' }] } })
+  })
+
   it('async turn writer updates one canonical body and one metadata sidecar without rebuilding the page index', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
