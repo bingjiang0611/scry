@@ -4934,6 +4934,25 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       },
       sessionFork: async (request: DesktopRemoteForkSessionRequest, authorize: () => void) =>
         forkSessionWithAuthority(request, authorize),
+      // Read-only panels for the paired device. This reuses the same aggregations
+      // the Mac UI reads and never scans or executes anything: MCP is the cached
+      // snapshot with refresh disabled.
+      toolPanels: {
+        analytics: (rangeDays: UsageAnalyticsRangeDays) => usageAnalyticsWithCreditsQuery(rangeDays),
+        llmPerformance: async () => [await readLlmPerformanceHistory(app.getPath('userData')),
+          summarizeRunningLlmSessions(runs.activeStates())] as const,
+        mcpSnapshot: async ({ providerId }: { providerId: string }) => {
+          const context = { providerId: providerId as ProviderId, cwd: currentCwd ?? '' }
+          if (providerRegistry.isDisabled(context.providerId)) {
+            return { status: 'unavailable' as const, reason: '该 Provider 已通过 SCRY_DISABLED_PROVIDERS 禁用' }
+          }
+          const envelope = await providerRegistry.mcpSnapshot(context, false)
+          if (!envelope.data) {
+            return { status: 'unavailable' as const, reason: envelope.reason ?? 'Provider 未提供 MCP 快照' }
+          }
+          return envelope.data
+        }
+      },
       sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
         const ref = sessionRefFromRequest(request)
         if (!ref) throw new Error('无效的远程会话删除请求')

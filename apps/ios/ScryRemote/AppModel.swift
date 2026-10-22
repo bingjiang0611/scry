@@ -24,7 +24,28 @@ enum HostLink: Equatable {
   var isConnected: Bool { if case .connected = self { return true }; return false }
 }
 
-enum Route: Hashable { case home, newSession, chat, pair, transcript, settings }
+// Which read-only host panel a route shows. Kept with the route so the model
+// layer does not depend on a view file.
+enum ToolKind: String, CaseIterable, Identifiable {
+  case analytics, llmPerformance, mcpTrust
+  var id: String { rawValue }
+  var title: String {
+    switch self {
+    case .analytics: return ConnectionCopy.analyticsTitle
+    case .llmPerformance: return ConnectionCopy.llmTitle
+    case .mcpTrust: return ConnectionCopy.mcpTitle
+    }
+  }
+  var panelKind: G0Transport.ToolPanelKind {
+    switch self {
+    case .analytics: return .analytics
+    case .llmPerformance: return .llmPerformance
+    case .mcpTrust: return .mcpTrust
+    }
+  }
+}
+
+enum Route: Hashable { case home, newSession, chat, pair, transcript, settings, toolPanel(ToolKind) }
 
 // The session the owner opened to READ its past conversation (read-only replay).
 // Plain identity fields (no transport coupling); externalSessionId is required -

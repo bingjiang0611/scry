@@ -295,7 +295,7 @@ enum ConnectionCopy {
   static let unavailable = "不可用"
   static let unavailableDetail = "这次读取没有返回这项数据。"
   static let moreRows = "再加载"
-  static let rowsLimited = "已显示前 %d 条"
+  static func rowsLimited(_ shown: Int) -> String { "已显示前 \(shown) 条" }
 
   // 工具面板（P3）：只读投影，动作仍在 Mac 上。
   static let toolsNote = "只读投影：数值来自 Mac 最近一次读取，操作在 Mac 上完成。"
@@ -342,6 +342,7 @@ enum ConnectionCopy {
   static let panelStale = "这次读取较旧，可能已变化"
   static let panelMacOnly = "这项操作只能在 Mac 上完成"
   static let panelLoadFailed = "这次读取失败"
+  static let panelUnsupported = "这台 Mac 的 Scry 版本还不支持这个面板，请更新 Mac 端。"
 
   #if DEBUG
   static let fixtureTransportFailure = "fixture transport failure"
