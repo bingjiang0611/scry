@@ -9,24 +9,24 @@ import RemoteTransport
 private final class DependencyProbe {
   var invalidations = 0
   let read: () -> Void
-  #if LEGACY_OBSERVATION
   private var subscription: AnyCancellable?
+  private var armed = false
   init<Object: ObservableObject>(_ object: Object, read: @escaping () -> Void) {
     self.read = read
     subscription = object.objectWillChange.sink { [weak self] _ in self?.invalidations += 1 }
   }
-  #else
   init<Object>(_ object: Object, read: @escaping () -> Void) { self.read = read }
-  #endif
 
   func arm() {
-    #if LEGACY_OBSERVATION
-    read()
-    #else
+    if subscription != nil { read(); return }
+    guard !armed else { return }
+    armed = true
     withObservationTracking { read() } onChange: { [weak self] in
-      MainActor.assumeIsolated { self?.invalidations += 1 }
+      MainActor.assumeIsolated {
+        self?.armed = false
+        self?.invalidations += 1
+      }
     }
-    #endif
   }
 }
 
@@ -100,7 +100,36 @@ extension RemoteRunStore {
     await Task { @MainActor in }.value
     let rearmed = firstCatalog && model.targetCoordinator.homeSessions.first?.session.sessionId == "two"
     print("\(rearmed ? "PASS" : "FAIL") observation.catalogRearms")
-    return intact && isolated && controlsVisible && rearmed
+
+    let pending = DependencyProbe(model.targetCoordinator) { _ = model.targetCoordinator.hasPendingWork }
+    pending.arm()
+    store.runId = "fixture"
+    let nestedPending = pending.invalidations > 0 && model.targetCoordinator.hasPendingWork
+    print("\(nestedPending ? "PASS" : "FAIL") observation.nestedPendingWork")
+    store.lifecycle = .running
+    let stop = DependencyProbe(store) { _ = store.canStop }
+    stop.arm()
+    store.lifecycle = .cancelled
+    let stopUpdates = stop.invalidations > 0 && !store.canStop
+    print("\(stopUpdates ? "PASS" : "FAIL") observation.stopProjection")
+
+    let history = probes.first { $0.0 == "history" }!.1
+    let historyBefore = history.invalidations
+    history.arm()
+    store.history = .loaded([.init(userText: "fixture", items: [.init(kind: "output", text: "reply")])])
+    let historyUpdates = history.invalidations > historyBefore
+    print("\(historyUpdates ? "PASS" : "FAIL") observation.historyUpdates")
+
+    store.chosen = .init(path: "/fixture", label: "fixture")
+    store.chosenProvider = .init(id: "pi", label: "Pi", available: true)
+    store.providerControlsCwd = "/fixture"
+    store.providerControlsLoaded = false
+    let readiness = DependencyProbe(store) { _ = store.controlsReady }
+    readiness.arm()
+    store.providerControlsLoaded = true
+    let readinessUpdates = readiness.invalidations > 0 && store.controlsReady
+    print("\(readinessUpdates ? "PASS" : "FAIL") observation.privateReadinessDependency")
+    return intact && isolated && controlsVisible && rearmed && nestedPending && stopUpdates && historyUpdates && readinessUpdates
   }
 }
 
