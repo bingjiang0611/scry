@@ -33,13 +33,27 @@ mac2 `54e9dd1` 对 `74520c8` 交替顺序五对：每个基线实际启动 **3 �
 | mac2 完整 unit | `74520c8`：**3493 pass / 4 既有 opt-in skipped**，290 文件；`lease-unit-full.log` |
 | mac2 类型 / build | 均通过；`lease-typecheck.log`、`lease-build.log` |
 | mac2 完整性能计数 | 原固定负载、43 observations、ratchet 通过；`lease-performance.log`；未改台账或升门禁 |
-| L2 | 未验证可信收益：锁内真实受控子进程五对虽执行完，但 8 核 load17.99→22.55、`highLoad=true`。原始 `lease-pair.log` 和 `samples.json` 保留，不因耗时下降宣称提速，也不重复找绿 |
+| L2 首组 | 8 核 load17.99→22.55、`highLoad=true`，不采信毫秒收益。原始 `lease-pair.log` 和 `samples.json` 保留；后续低负载复核单列于下，不抹掉首组 |
 | 生效 / 设备 | 未安装或打包部署；不影响现有 App。无真实/付费 Provider、手机、L3 或 Swift 新验证；本次未改 Swift/UI |
 
 原始本机归档 `/tmp/scry-provider-control.UGpNzU/lease-lab-mac2/` 包含对子结果及日志。mac2 独立源码根保留，测试后工作区干净。
 
-## 未完成部分与下一步
+## 后续低负载复核与 A/B 集成
+
+在原本冻结的 mac2 candidate/control 树、相同三读和 60 秒虚拟间隔上完成五对交替受控测量。`A-final-lease-pair.log` 的锁记录：8 核 load3.61→4.29、`highLoad=false`。
+
+| 指标（中位，ms） | 基线 | 候选 |
+| --- | ---: | ---: |
+| 三次主动读取合计 | 1939.06 | 931.91 |
+| 后两读，合计10个样本（偶数取中间两项均值） | 470.69 | 2.18 |
+| 首次冷读，5个样本 | 866.53 | 926.44 |
+
+每对实际子进程启动仍为 3→1。只有后续读取不再重复启动的收益得到支持；冷读没有提速证据，不用暖读抵消它。仍是本地受控 HTTP 子进程和真实 SDK 传输，不是真实 OpenCode 服务、账号或屏幕绘制。
+
+当次原始样本和 harness 文本保存在 `/tmp/scry-provider-control.UGpNzU/A-final-lease-samples.json`；对应锁日志为同目录 `A-final-lease-pair.log`。后续 B 没有修改 OpenCode 生产文件；最终组合验证、当前实现与未部署边界见[收口记录](20261022-evidence-engine.md)。
+
+## Provider 边界与下一步
 
 Pi 仍使用新的 offline/no-session 探测。已检查的 Pi SDK `1.3.0-rotom.2` 虽能通过 `new_session` 重建模型/auth 服务，但还保留进程级扩展模块和项目 trust 决策缓存；不能把新 session ID 当作完整冷启动等价，也不通过 `prompt` 冒充重载控制。用户拒绝跨仓库修改后，本轮不新增无权威刷新合同的 Pi 常驻复用。Qoder 原有生命周期也未扩大；不能从本轮 OpenCode 结果推断其可安全长留。
 
-性能 owner 下一步在空闲机器对同一 harness 补可信 L2；后续 Qoder 必须先证明 live catalog、初始化证据和认证/配置失效合同，才扩大其实例寿命。Pi 完整常驻仍需原生刷新合同或其他已证明等价的方案；当前限制下不宣称完整 A 完成。
+本次已补受控 L2；日常收益仍需另获合入/安装授权后采样。Qoder 的 live 模型、初始化证据寿命/失效及关闭所有权已另行验证，但不据此扩大原空闲寿命，见[对应记录](20261022-qoder-initialization-lifetime.md)。Pi 完整常驻仍需原生刷新合同或其他已证明等价的方案；本次 A 按 Provider 合同收口，不宣称全 Provider 统一常驻。

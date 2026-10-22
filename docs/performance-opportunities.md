@@ -2,6 +2,14 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## A+B 当前收口（2026-10-22，L1/L2 已验证，未部署）
+
+- A 按需层与 Provider-specific 安全复用收口；不是全 Provider 统一常驻。OpenCode 五对低负载受控读取确认启动 3→1、三读合计中位 1939→932ms；首次冷读没有提速证据。Qoder 保留 live/初始化寿命与关闭所有权，Pi 继续 fresh，不能虚构原生 reset 合同。
+- B 交付批量 Git patch、Pi 按身份先选页后读正文、归档基表＋单轮 delta、journal 大载荷只写一次。初版读路径退化及 metadata 误改远程源版本已修复，原失败/高负载记录保留。
+- 冻结 `4d561dd`：mac2 **3528 pass / 4 opt-in skipped**；类型、App/CLI build、全套 renderer UI、shell、CLI tarball 冒烟和 43 项计数/ratchet 通过。3 个 CPU instruction candidate 仍 missing；4 个必要新工作的 worse 不抬基线，4 项收紧 proposal 仅生成、不应用。
+- 生产 Electron IPC，4000 canonical＋4001 native 轮次、最新/旧页各40：同正文 SHA，暖两页合计中位 **958.1→154.6ms**；单独旧页 **0.8→39.0ms**，因为不再预读全部正文且重新核验来源。独立锁内负载均低于8核；这不是屏幕绘制/真实 Provider/L3结论。
+- 仅本地隔离分支提交；未合入、push、安装或重启日常 App。详见[本轮实现、每项 worse、产物映射与失败](performance-experiments/20261022-evidence-engine.md)。下列旧条目保留各阶段当时的状态，不覆盖为新的部署事实。
+
 ## Qoder：初始化证据不再被重复读取续期（2026-10-22）
 
 - Skill/命令来源时间固定为初始化完成，过期新读取正常排空旧实例、确认关闭后再初始化；模型仍live。未增加5秒空闲保留、30秒目录TTL或20秒初始化期限。
