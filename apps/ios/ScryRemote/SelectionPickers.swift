@@ -75,7 +75,7 @@ struct SelectionRow: View {
 }
 
 struct ProjectPickerSheet: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   @Environment(\.dismiss) private var dismiss
   let onChoose: (G0Transport.RunProjectRef) -> Void
 
@@ -143,7 +143,7 @@ struct ProjectPickerSheet: View {
 }
 
 struct ProviderPickerSheet: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   @Environment(\.dismiss) private var dismiss
   let onChoose: (G0Transport.RunProviderRef) -> Void
 

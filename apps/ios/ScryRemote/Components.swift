@@ -828,7 +828,7 @@ struct CompletedTurnView: View {
 // The run this store is driving. While it runs, the transcript shows only real
 // content; its state is in the status strip.
 struct FocusedTurnView: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   var body: some View {
     Group {
       if let prompt = run.prompt {

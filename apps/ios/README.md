@@ -32,8 +32,13 @@ Focused offline checks (no phone, credentials or Provider execution):
 ```sh
 python3 apps/ios/Checks/new-task-readiness.py
 python3 apps/ios/Checks/catalog-refresh.py
+python3 apps/ios/Checks/catalog-refresh.py --check observation --require-isolation
 swift test --package-path experiments/remote-g0/swift -j 4
 ```
+
+`RemoteRunStore` and `ExecutionTargetCoordinator` use iOS 17 property observation. Views read them through typed `@Environment`; the read-only history owner uses `@State`. Only the materialized home-session catalog needs an explicit, one-shot/rearmed observer. Do not forward whole-store changes through the coordinator. `AppModel` and session actions retain their existing Combine ownership; neither forwards streamed output. Pairing, persisted connection authority and draft behavior are unchanged.
+
+The observation checker drives 200 real store output appends in an isolated native fixture. It counts dependency invalidations, not SwiftUI body evaluations, frames or elapsed time. It also checks nested pending-work/stop projections, questions, history, private readiness dependencies and repeated catalog refreshes. Physical-device interaction and hitch checks remain separate requirements.
 
 The native checker explicitly seals and verifies its temporary executable with an ad-hoc test signature. If local execution policy requires a CMS development signature, set `SCRY_IOS_CHECK_SIGN_IDENTITY` to an available local development identity. Signing or verification failure stops the check; no system security policy is changed.
 

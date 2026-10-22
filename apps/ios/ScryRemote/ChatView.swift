@@ -12,7 +12,7 @@ struct ChatView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var controlsVisible = false
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   @State private var showFiles = false
   @State private var latestReadRequest = 0
   @State private var confirmStop = false

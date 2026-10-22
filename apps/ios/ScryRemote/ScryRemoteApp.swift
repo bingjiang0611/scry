@@ -20,7 +20,7 @@ struct ScryRemoteApp: App {
   }
   var body: some Scene {
     WindowGroup {
-      RootView().environmentObject(model).environmentObject(model.targetCoordinator)
+      RootView().environmentObject(model).environment(model.targetCoordinator)
     }
   }
 }
@@ -29,7 +29,7 @@ struct ScryRemoteApp: App {
 // connected unless a real paired transport exchange has proved reachability.
 struct RootView: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(ExecutionTargetCoordinator.self) var targets
 
   private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
@@ -40,7 +40,7 @@ struct RootView: View {
         PairView()
       } else {
         switch model.route {
-        case .home: HomeView().environmentObject(targets.localStore)
+        case .home: HomeView().environment(targets.localStore)
         case .newSession: NewSessionView()
         case .chat: ChatView()
         case .pair: PairView()
@@ -58,7 +58,7 @@ struct RootView: View {
         }
       }
     }
-    .environmentObject(run)
+    .environment(run)
     .foregroundStyle(Palette.ink)
     .background(Palette.surface.ignoresSafeArea())
     .tint(Palette.blue)

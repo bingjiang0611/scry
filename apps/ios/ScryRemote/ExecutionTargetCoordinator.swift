@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Combine
 import RemoteTransport
 
@@ -36,7 +37,8 @@ struct ExecutionTargetScope: Codable, Hashable, Sendable, Identifiable {
 }
 
 @MainActor
-final class ExecutionTargetCoordinator: ObservableObject {
+@Observable
+final class ExecutionTargetCoordinator {
   struct HomeSession: Identifiable, Equatable {
     let session: G0Transport.RunSessionRef
     let scope: ExecutionTargetScope
@@ -64,17 +66,17 @@ final class ExecutionTargetCoordinator: ObservableObject {
     }
   }
 
-  @Published private(set) var discoveredTargets: [ExecutionTargetScope] = []
-  @Published private(set) var homeSessions: [HomeSession] = []
-  @Published private(set) var homeLoading = false
-  @Published private(set) var homeFailure: RemoteRunStore.CatalogRefreshFailure?
-  @Published private(set) var discoveryIssue: RemoteRunStore.CatalogRefreshFailure?
-  @Published private(set) var catalogFetchedAt: Date?
-  @Published private(set) var forwardingSupported = false
-  @Published private(set) var recoveryUnavailable = false
-  @Published private(set) var selectedScope: ExecutionTargetScope
-  @Published private(set) var newTaskScope: ExecutionTargetScope
-  @Published private(set) var homeFilter: HomeFilter = .all
+  private(set) var discoveredTargets: [ExecutionTargetScope] = []
+  private(set) var homeSessions: [HomeSession] = []
+  private(set) var homeLoading = false
+  private(set) var homeFailure: RemoteRunStore.CatalogRefreshFailure?
+  private(set) var discoveryIssue: RemoteRunStore.CatalogRefreshFailure?
+  private(set) var catalogFetchedAt: Date?
+  private(set) var forwardingSupported = false
+  private(set) var recoveryUnavailable = false
+  private(set) var selectedScope: ExecutionTargetScope
+  private(set) var newTaskScope: ExecutionTargetScope
+  private(set) var homeFilter: HomeFilter = .all
 
   let localStore: RemoteRunStore
   private let connections: RemoteConnectionStore
@@ -84,7 +86,6 @@ final class ExecutionTargetCoordinator: ObservableObject {
   private var gatewayIdentity: String?
   private var gatewayLabel = ConnectionCopy.gatewayHost
   private var stores: [ExecutionTargetScope: RemoteRunStore] = [:]
-  private var observers: [ExecutionTargetScope: [AnyCancellable]] = [:]
   private var rebuilding = false
   private var foregroundEligible = false
   private var discoveryTask: Task<Void, Never>?
@@ -197,16 +198,21 @@ final class ExecutionTargetCoordinator: ObservableObject {
   func selectFilter(_ filter: HomeFilter) { homeFilter = filter; catalogFetchedAt = nil; homeFailure = nil; rebuildHomeSessions() }
 
   private func observe(_ store: RemoteRunStore, scope: ExecutionTargetScope) {
-    observers[scope] = [
-      store.objectWillChange.sink { [weak self] _ in
-        guard let self, scope == self.selectedScope || scope == self.newTaskScope else { return }
-        self.objectWillChange.send()
-      },
-      store.$catalog.dropFirst().sink { [weak self] _ in self?.scheduleRebuild() },
-      store.$pendingQuestions.dropFirst().sink { [weak self] _ in self?.objectWillChange.send() },
-      store.$outbox.dropFirst().sink { [weak self] _ in self?.objectWillChange.send() },
-      store.$lifecycle.dropFirst().sink { [weak self] _ in self?.objectWillChange.send() }
-    ]
+    let revision = authorityRevision
+    // Only the materialized home-session projection needs an explicit observer.
+    // SwiftUI tracks nested questions/outbox/lifecycle reads directly. Forwarding
+    // object-wide changes here would reintroduce stream-wide invalidations.
+    withObservationTracking { _ = store.catalog } onChange: { [weak self, weak store] in
+      // Observation fires before the write and is one-shot. Read/rearm on the
+      // next main-actor turn, then rebuild from the latest catalog. An old grant
+      // or pruned store must not rearm after connectionChanged().
+      Task { @MainActor [weak self, weak store] in
+        guard let self, let store, self.authorityRevision == revision,
+              self.stores[scope] === store else { return }
+        self.observe(store, scope: scope)
+        self.scheduleRebuild()
+      }
+    }
   }
   private func scheduleRebuild() {
     guard !rebuilding else { return }
@@ -376,7 +382,7 @@ final class ExecutionTargetCoordinator: ObservableObject {
     refreshTask?.cancel(); refreshTask = nil
     backgrounded()
     recoveryAttempt = 0
-    stores = [:]; observers = [:]
+    stores = [:]
     gatewayIdentity = identity; gatewayLabel = ConnectionCopy.gatewayHost
     discoveredTargets = []; homeSessions = []; homeFailure = nil; discoveryIssue = nil
     catalogFetchedAt = nil; forwardingSupported = false; homeLoading = false; recoveryUnavailable = false
@@ -457,7 +463,6 @@ final class ExecutionTargetCoordinator: ObservableObject {
     let kept = Set(targetScopes + [selectedScope, newTaskScope])
     for (scope, store) in stores where !scope.isLocal && !kept.contains(scope) && !store.hasUnsentMessages && !store.hasUnresolvedRun {
       store.stopLiveRuns()
-      observers.removeValue(forKey: scope)
       stores.removeValue(forKey: scope)
     }
   }

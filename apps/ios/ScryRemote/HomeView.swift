@@ -15,8 +15,8 @@ struct CatalogRefreshDetailsSnapshot: Identifiable {
 // immutable scope, including when two hosts expose identical session ids.
 struct HomeView: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(RemoteRunStore.self) var run
+  @Environment(ExecutionTargetCoordinator.self) var targets
   @StateObject private var actions = SessionActionCenter()
   @State private var drawerOpen = false
   @State private var drawerTab: DrawerTab = .recent
@@ -406,7 +406,7 @@ private struct CatalogRefreshDetails: View {
   let paired: Bool
   var issues: [ExecutionTargetCoordinator.RefreshIssue] = []
   #if DEBUG
-  @EnvironmentObject private var targets: ExecutionTargetCoordinator
+  @Environment(ExecutionTargetCoordinator.self) private var targets
   #endif
   @Environment(\.dismiss) private var dismiss
   @State private var technicalExpanded = false
@@ -452,8 +452,8 @@ struct LiveRunBadge: View {
 
 struct SettingsView: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(RemoteRunStore.self) var run
+  @Environment(ExecutionTargetCoordinator.self) var targets
   @State private var confirmUnpair = false
   @State private var cacheNotice: String?
   @State private var showArchived = false
@@ -548,7 +548,7 @@ struct SettingsView: View {
       .tint(Palette.blue)
     }
     .background(Palette.surface)
-    .sheet(isPresented: $showArchived) { ArchivedSessionsView().environmentObject(run) }
+    .sheet(isPresented: $showArchived) { ArchivedSessionsView().environment(run) }
     .confirmationDialog(ConnectionCopy.clearPairingTitle, isPresented: $confirmUnpair, titleVisibility: .visible) {
       Button(ConnectionCopy.clearPairingAction, role: .destructive) { Task { await model.destructiveUnpair(runStore: run) } }
       Button(ConnectionCopy.cancel, role: .cancel) {}

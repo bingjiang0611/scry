@@ -5,7 +5,7 @@ import SwiftUI
 // Mac issues a real grant.
 struct PairView: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   @State private var technicalExpanded = false
 
   var body: some View {

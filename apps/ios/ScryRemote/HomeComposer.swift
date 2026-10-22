@@ -6,8 +6,8 @@ import RemoteTransport
 // the host; sending submits the same durable run intent as the new-task screen.
 struct HomeComposer: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(RemoteRunStore.self) var run
+  @Environment(ExecutionTargetCoordinator.self) var targets
   @State private var showProjects = false
   @State private var showProviders = false
 

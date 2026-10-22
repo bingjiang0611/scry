@@ -8,8 +8,8 @@ struct NewSessionView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var controlsVisible = false
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(RemoteRunStore.self) var run
+  @Environment(ExecutionTargetCoordinator.self) var targets
   private var composer: Binding<AppModel.ComposerDraft> { model.composerDraft(for: .newTask(targets.newTaskScope)) }
   private var draft: String { composer.wrappedValue.text }
   private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }

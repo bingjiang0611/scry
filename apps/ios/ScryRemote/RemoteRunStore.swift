@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Observation
 import CryptoKit
 import RemoteTransport
 #if canImport(UIKit)
@@ -20,7 +20,8 @@ import UIKit
 //     Provider-canonical evidence); they are never re-derived from output text.
 //   - A transport failure surfaces verbatim; we never pretend "offline" success.
 @MainActor
-final class RemoteRunStore: ObservableObject {
+@Observable
+final class RemoteRunStore {
   enum ConnectionObservation: Equatable {
     case unverified
     case reachable
@@ -189,18 +190,18 @@ final class RemoteRunStore: ObservableObject {
     let runId: String?
   }
 
-  @Published private(set) var projects: ProjectsState = .idle
-  @Published private(set) var directories: DirectoriesState = .idle
-  @Published private(set) var chosen: G0Transport.RunProjectRef?
-  @Published private(set) var providers: ProvidersState = .idle
-  @Published private(set) var commands: CommandsState = .idle
-  @Published private(set) var chosenProvider: G0Transport.RunProviderRef?
-  @Published private(set) var chosenModelId: String?
-  @Published private(set) var chosenEffort: String?
-  @Published private(set) var permissionMode: String = "default"
-  @Published private(set) var providerControlsLoading = false
-  @Published private(set) var providerControlsError: String? = nil
-  @Published private(set) var providerDiscoverySupported: Bool? = nil
+  private(set) var projects: ProjectsState = .idle
+  private(set) var directories: DirectoriesState = .idle
+  private(set) var chosen: G0Transport.RunProjectRef?
+  private(set) var providers: ProvidersState = .idle
+  private(set) var commands: CommandsState = .idle
+  private(set) var chosenProvider: G0Transport.RunProviderRef?
+  private(set) var chosenModelId: String?
+  private(set) var chosenEffort: String?
+  private(set) var permissionMode: String = "default"
+  private(set) var providerControlsLoading = false
+  private(set) var providerControlsError: String? = nil
+  private(set) var providerDiscoverySupported: Bool? = nil
 
   var modelOptions: [G0Transport.RunModelOption] { chosenProvider?.models ?? [] }
   var providerControlsNotice: String? {
@@ -260,7 +261,7 @@ final class RemoteRunStore: ObservableObject {
       return false
     }
   }
-  @Published private(set) var catalog: CatalogState = .idle
+  private(set) var catalog: CatalogState = .idle
   enum CatalogEvidence: Equatable {
     case none
     case unverifiedCache(Date?)
@@ -310,19 +311,19 @@ final class RemoteRunStore: ObservableObject {
       }
     }
   }
-  @Published private(set) var catalogRefreshFailure: CatalogRefreshFailure?
-  @Published private(set) var catalogEvidence: CatalogEvidence = .none
-  @Published private(set) var catalogVerifiedAt: Date?
-  @Published private(set) var catalogRefreshInFlight = false
-  @Published private(set) var catalogRefreshRevision = 0
+  private(set) var catalogRefreshFailure: CatalogRefreshFailure?
+  private(set) var catalogEvidence: CatalogEvidence = .none
+  private(set) var catalogVerifiedAt: Date?
+  private(set) var catalogRefreshInFlight = false
+  private(set) var catalogRefreshRevision = 0
 
   // The archived catalog is a separate, explicitly requested read. It is not
   // written to the disk cache, so an archived row can never appear as current
   // state after an offline start.
-  @Published private(set) var archivedCatalog: CatalogState = .idle
-  @Published private(set) var archivedFetchedAt: Date?
-  @Published private(set) var archivedLoading = false
-  @Published private(set) var archivedFailure: String?
+  private(set) var archivedCatalog: CatalogState = .idle
+  private(set) var archivedFetchedAt: Date?
+  private(set) var archivedLoading = false
+  private(set) var archivedFailure: String?
   // One visible tool panel at a time, so a stale reply can never overwrite a
   // newer request's evidence.
   enum ToolPanelState: Equatable {
@@ -331,7 +332,7 @@ final class RemoteRunStore: ObservableObject {
     case loaded(G0Transport.ToolPanelPayload)
     case failed(String)
   }
-  @Published private(set) var toolPanel: ToolPanelState = .idle
+  private(set) var toolPanel: ToolPanelState = .idle
   private var toolPanelRequest = 0
 
   enum HistoryPreviewState: Equatable {
@@ -351,16 +352,16 @@ final class RemoteRunStore: ObservableObject {
     case baseUnavailable
     case failed(String)
   }
-  @Published private(set) var history: HistoryState = .idle
-  @Published private(set) var historyPreview: HistoryPreviewState = .idle
-  @Published private(set) var historyRevision = 0
-  @Published private(set) var historySyncing = false
-  @Published private(set) var historyFromCache = false
-  @Published private(set) var historyFetchedAt: Date?
-  @Published private(set) var historyProgress: String?
-  @Published private(set) var historyRefreshError: String?
-  @Published private(set) var historyStorageNotice: String?
-  @Published private(set) var historyCapacityLimit = false
+  private(set) var history: HistoryState = .idle
+  private(set) var historyPreview: HistoryPreviewState = .idle
+  private(set) var historyRevision = 0
+  private(set) var historySyncing = false
+  private(set) var historyFromCache = false
+  private(set) var historyFetchedAt: Date?
+  private(set) var historyProgress: String?
+  private(set) var historyRefreshError: String?
+  private(set) var historyStorageNotice: String?
+  private(set) var historyCapacityLimit = false
   // A failed history read is remembered for a short window so leaving and
   // re-entering a session does not re-pay a whole doomed round trip (14s on a
   // stale host, 30s on a dead network). A host-contract failure is remembered
@@ -368,63 +369,63 @@ final class RemoteRunStore: ObservableObject {
   // the Mac runs current code.
   private struct HistoryReadBackoff { let message: String; let until: Date; let attempts: Int }
   private var historyReadBackoff: [String: HistoryReadBackoff] = [:]
-  @Published private(set) var historyCacheClearing = false
+  private(set) var historyCacheClearing = false
   // Whether the host was actually reached on the LAST attempt. Paired != reachable:
   // a persisted grant only means we MAY reach the host; only a real successful
   // exchange proves it. nil = not tried yet. This is the honest source of the
   // connection status (fixes "shows offline while sending works").
-  @Published private(set) var reachable: Bool?
+  private(set) var reachable: Bool?
   // Remote targets require a fresh catalog capability/state before new writes;
   // the legacy local lane remains usable when reachability has not been proven.
-  @Published private(set) var executionTargetAvailable = true
+  private(set) var executionTargetAvailable = true
   // `reachable` is retained for the existing link indicator; this richer value
   // prevents an authenticated business/protocol reply from being rendered as
   // transport-offline (or as a successful connected state).
-  @Published private(set) var connectionObservation: ConnectionObservation = .unverified
-  @Published private(set) var lifecycle: Lifecycle = .unknown
-  @Published private(set) var output: [OutputLine] = []
+  private(set) var connectionObservation: ConnectionObservation = .unverified
+  private(set) var lifecycle: Lifecycle = .unknown
+  private(set) var output: [OutputLine] = []
   // The user's own submitted message, echoed immediately as a chat bubble
   // (ChatGPT/Codex style) so the person sees exactly what they sent. This is the
   // literal local input, not host-derived, and is labeled as the user turn.
-  @Published private(set) var prompt: String?
-  @Published private(set) var sentAttachments: [SentAttachment] = []
-  @Published private(set) var runId: String?
-  @Published private(set) var submitError: String?
-  @Published private(set) var truncated = false
+  private(set) var prompt: String?
+  private(set) var sentAttachments: [SentAttachment] = []
+  private(set) var runId: String?
+  private(set) var submitError: String?
+  private(set) var truncated = false
   // Provider-canonical result evidence, surfaced verbatim from the ledger
   // `result` marker only. nil until the host reports it; never a fabricated 0.
-  @Published private(set) var resultSummary: String?
+  private(set) var resultSummary: String?
   // The Provider session id the live run reported (from the ledger `session`
   // marker). Lets a follow-up into an opened session resume the LATEST id.
-  @Published private(set) var liveExternalSessionId: String?
+  private(set) var liveExternalSessionId: String?
   // The host Scry run id of the live run (ledger `bound` marker). Archived
   // history turns carry the same id, so the device can recognize its own run.
-  @Published private(set) var liveHostRunId: String?
-  @Published private(set) var activeSessionIdentity: SessionIdentity?
-  @Published private(set) var observationInterrupted = false
+  private(set) var liveHostRunId: String?
+  private(set) var activeSessionIdentity: SessionIdentity?
+  private(set) var observationInterrupted = false
   // Transport dropped mid-observation and is being re-established
   // automatically. Not a lifecycle: the run may still be progressing on the Mac.
-  @Published private(set) var observationReconnecting = false
-  @Published private(set) var stopRequesting = false
-  @Published private(set) var stopRequested = false
-  @Published private(set) var stopError: String?
+  private(set) var observationReconnecting = false
+  private(set) var stopRequesting = false
+  private(set) var stopRequested = false
+  private(set) var stopError: String?
   // Every unacknowledged submission, including the focused one. Persisted in
   // outbox.json so a killed app keeps sending after relaunch.
-  @Published private(set) var outbox: [PendingSubmission] = []
-  @Published private(set) var completedLiveTurns: [SessionIdentity: [CompletedLiveTurn]] = [:]
-  @Published private(set) var pendingQuestions: [G0Transport.RunQuestionRequest] = []
-  @Published private(set) var questionAnswering = false
-  @Published private(set) var questionError: String?
+  private(set) var outbox: [PendingSubmission] = []
+  private(set) var completedLiveTurns: [SessionIdentity: [CompletedLiveTurn]] = [:]
+  private(set) var pendingQuestions: [G0Transport.RunQuestionRequest] = []
+  private(set) var questionAnswering = false
+  private(set) var questionError: String?
 
   // Multi-task: every run the host proves live right now (any paired device's
   // runs plus Mac UI runs in authorized projects). Absence is "not observed".
   enum LiveRunsStatus: Equatable { case unknown, observed, unsupported, failed(String) }
-  @Published private(set) var liveRuns: [G0Transport.LiveRun] = []
-  @Published private(set) var liveRunsStatus: LiveRunsStatus = .unknown
-  @Published private(set) var liveActionRunId: String?
-  @Published private(set) var liveActionError: String?
+  private(set) var liveRuns: [G0Transport.LiveRun] = []
+  private(set) var liveRunsStatus: LiveRunsStatus = .unknown
+  private(set) var liveActionRunId: String?
+  private(set) var liveActionError: String?
   // Questions the host acknowledged as answered; hidden until the list catches up.
-  @Published private(set) var liveAnsweredQuestions: Set<String> = []
+  private(set) var liveAnsweredQuestions: Set<String> = []
   private var liveRunsTask: Task<Void, Never>?
   private var liveRunsForegroundEligible = false
   private var liveRunsRevision: String?
@@ -434,9 +435,9 @@ final class RemoteRunStore: ObservableObject {
   // A brand-new phone session has no archive until the run ends, and remote
   // runs are not in the Mac's active-run memory, so this host output store is
   // the only live evidence. Mac runs need none: their history includes it.
-  @Published private(set) var detachedRunId: String?
-  @Published private(set) var detachedHostRunId: String?
-  @Published private(set) var detachedOutput: [OutputLine] = []
+  private(set) var detachedRunId: String?
+  private(set) var detachedHostRunId: String?
+  private(set) var detachedOutput: [OutputLine] = []
   private var detachedTask: Task<Void, Never>?
 
   // A run remains unresolved until its durable intent is acknowledged and a
@@ -520,7 +521,7 @@ final class RemoteRunStore: ObservableObject {
   private static let modelSelectionsKey = "com.scry.remote.model-selections.v1"
   private var seenOutputSequences = Set<Int>()
   private var archivedActiveTurn = false
-  @Published private(set) var terminalDrainCompleted = false
+  private(set) var terminalDrainCompleted = false
   private var contextNeedsRestore = false
   private var directoriesRequestGeneration = 0
   private var commandsRequestGeneration = 0

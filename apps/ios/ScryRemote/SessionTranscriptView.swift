@@ -56,15 +56,15 @@ private struct HistoryTurnView: View {
 // the history implementation and protected cache, but never restore its run.
 struct ReadOnlySessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
-  @StateObject private var history: RemoteRunStore
+  @State private var history: RemoteRunStore
 
   init(owner: RemoteRunStore) {
-    _history = StateObject(wrappedValue: RemoteRunStore(historyFor: owner))
+    _history = State(initialValue: RemoteRunStore(historyFor: owner))
   }
 
   var body: some View {
     SessionTranscriptView(readOnly: true)
-      .environmentObject(history)
+      .environment(history)
       .onChange(of: history.reachable) { if let ok = history.reachable { model.markReachable(ok) } }
       .onChange(of: history.connectionObservation) { _, observation in model.markObservation(observation) }
   }
@@ -75,7 +75,7 @@ struct SessionTranscriptView: View {
   @State private var controlsVisible = false
   var readOnly = false
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   @State private var showFiles = false
   @State private var showHistoryDetails = false
   @State private var olderReadRequest = 0

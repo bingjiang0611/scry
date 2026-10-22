@@ -12,7 +12,7 @@ struct SessionRowView: View {
   let onAction: (SessionRowAction) -> Void
   var indent: CGFloat = 0
 
-  @EnvironmentObject private var targets: ExecutionTargetCoordinator
+  @Environment(ExecutionTargetCoordinator.self) private var targets
 
   private var session: G0Transport.RunSessionRef { row.session }
   private var store: RemoteRunStore { targets.store(for: row.scope) }

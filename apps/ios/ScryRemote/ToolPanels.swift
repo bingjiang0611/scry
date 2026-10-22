@@ -7,8 +7,8 @@ import RemoteTransport
 struct ToolPanelView: View {
   let kind: ToolKind
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(RemoteRunStore.self) var run
+  @Environment(ExecutionTargetCoordinator.self) var targets
   @State private var rangeDays = 7
   @State private var providerId: String?
 

@@ -18,8 +18,8 @@ enum DrawerTab: String, CaseIterable, Identifiable {
 // list. Everything it shows comes from the host catalog already in memory.
 struct HomeDrawer: View {
   @EnvironmentObject var model: AppModel
-  @EnvironmentObject var run: RemoteRunStore
-  @EnvironmentObject var targets: ExecutionTargetCoordinator
+  @Environment(RemoteRunStore.self) var run
+  @Environment(ExecutionTargetCoordinator.self) var targets
   @Binding var tab: DrawerTab
   @Binding var expandedProjects: Set<String>
   let onClose: () -> Void

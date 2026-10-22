@@ -30,7 +30,7 @@ struct WorkspaceBrowserView: View {
 }
 
 private struct WorkspaceDirectoryView: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   let cwd: String
   let path: String
   @State private var page: G0Transport.WorkspaceListing?
@@ -81,7 +81,7 @@ private struct WorkspaceDirectoryView: View {
 }
 
 private struct WorkspaceContentView: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   let cwd: String
   let path: String? // nil = current workspace vs HEAD, not this session's edits
   @State private var file: G0Transport.WorkspaceFile?
@@ -154,7 +154,7 @@ private struct WorkspaceContentView: View {
 }
 
 struct SessionRunStatusView: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   let session: OpenedSession
   @Environment(\.scenePhase) private var scenePhase
   @State private var status: G0Transport.SessionStatus?
@@ -206,7 +206,7 @@ struct WorkspaceFileView: View {
 }
 
 private struct RemoteFilePreview: View {
-  @EnvironmentObject var run: RemoteRunStore
+  @Environment(RemoteRunStore.self) var run
   let cwd: String
   let target: String
   @State private var url: URL?
