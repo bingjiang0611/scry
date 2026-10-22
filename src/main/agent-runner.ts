@@ -234,7 +234,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   let frozenTranscriptBaseline: TranscriptBaseline | undefined
   let stderrDiagnostic = ''
   let spawnedChild: ChildProcessWithoutNullStreams | undefined
-  let spawnedIdentity: ProcessIdentity | undefined
+  let spawnedIdentityPromise: Promise<ProcessIdentity | undefined> | undefined
   const captureSessionId = (next: string | undefined): void => {
     if (!next || sessionId === next) return
     sessionId = next
@@ -310,8 +310,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       stdio: ['pipe', 'pipe', 'pipe']
     })
     spawnedChild = child
-    // 进程还活着时采集身份，强杀前用它核对，避免 PID/PGID 复用时误杀其他进程组。
-    spawnedIdentity = captureProcessIdentity(child.pid)
+    // 立刻异步采集身份；强杀前等待它完成，避免 PID/PGID 复用时误杀其他进程组。
+    spawnedIdentityPromise = captureProcessIdentity(child.pid)
     return child
   }
   options.strictMcpConfig = true
@@ -418,17 +418,23 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   const forceKill = (): void => {
     stopped = true
     const child = spawnedChild
-    if (!child || child.exitCode !== null || child.signalCode !== null) return
-    if (process.platform === 'win32' || !spawnedIdentity?.startedAt) {
-      // 没有进程组语义，或者身份没采集到：只能动 Node 自己持有的子进程句柄。
-      try { child.kill('SIGKILL') } catch { /* already gone */ }
-      return
-    }
-    const outcome = signalProcessTreeWithIdentity({ identity: spawnedIdentity, signal: 'SIGKILL' })
-    // 身份核对不过时不对进程组动手，但本进程持有的子进程句柄仍然是安全的（未被回收，PID 不会被复用）。
-    if (outcome.status !== 'signalled') {
-      try { child.kill('SIGKILL') } catch { /* already gone */ }
-    }
+    const identityPromise = spawnedIdentityPromise
+    if (!child || child.exitCode !== null || child.signalCode !== null || !identityPromise) return
+    void (async () => {
+      let identity: ProcessIdentity | undefined
+      try {
+        identity = await identityPromise
+      } catch {
+        return
+      }
+      // 身份未知、超时或采集失败时 fail closed：不发任何信号，也不绕过校验直接操作 child 句柄。
+      if (!identity?.startedAt || process.platform === 'win32') return
+      try {
+        signalProcessTreeWithIdentity({ identity, signal: 'SIGKILL' })
+      } catch {
+        // 复核失败或 ps 不可用时保持 fail closed，不发送直接 fallback 信号。
+      }
+    })()
   }
 
   const promise = (async () => {

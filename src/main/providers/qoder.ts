@@ -288,15 +288,25 @@ function livePrompt(text: string): { stream: AsyncIterable<SDKUserMessage>; rele
  *
  * 这里只有一个裸 PID（SDK 回调给出，不是活的 child 句柄），进程可能已经退出并被
  * 别人复用。所以 spawn 时采集 `(pid, 启动时间, 命令行)`，发信号前重新核对；
- * 核对不上就不发，win32 上没有进程组语义时自动退化为单进程信号。
+ * 核对不上就不发；身份不可用时不发送任何信号。
  */
-function signalProcessTree(identity: ProcessIdentity | undefined, signal: NodeJS.Signals): void {
-  if (!identity) return
-  if (process.platform === 'win32') {
-    try { process.kill(identity.pid, signal) } catch { /* already gone */ }
-    return
-  }
-  signalProcessTreeWithIdentity({ identity, signal })
+function signalProcessTree(identityPromise: Promise<ProcessIdentity | undefined> | undefined, signal: NodeJS.Signals): void {
+  if (!identityPromise) return
+  void (async () => {
+    let identity: ProcessIdentity | undefined
+    try {
+      identity = await identityPromise
+    } catch {
+      return
+    }
+    // 身份未知、超时或采集失败时 fail closed；不走 win32 或句柄直发 fallback。
+    if (!identity?.startedAt || process.platform === 'win32') return
+    try {
+      signalProcessTreeWithIdentity({ identity, signal })
+    } catch {
+      // 复核失败或 ps 不可用时拒绝发信号。
+    }
+  })()
 }
 
 export function resolveQoderSdkExecutable(executable: string): string {
@@ -310,7 +320,7 @@ export function resolveQoderSdkExecutable(executable: string): string {
 function qoderOptions(
   cwd: string | undefined,
   resume?: string,
-  onPid?: (pid: number, identity: ProcessIdentity | undefined) => void,
+  onPid?: (pid: number, identity: Promise<ProcessIdentity | undefined>) => void,
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
@@ -373,11 +383,11 @@ function qoderOptions(
               detached: process.platform !== 'win32',
               stdio: ['pipe', 'pipe', 'pipe']
             })
-            // 立刻采集身份：进程还活着时采到的启动时间才能作为后续核对基准。
-            const identity = captureProcessIdentity(child.pid)
-            if (child.pid) onPid(child.pid, identity)
+            // 立刻发起身份采集；进程还活着时采到的启动时间才能作为后续核对基准。
+            const identityPromise = captureProcessIdentity(child.pid)
+            if (child.pid) onPid(child.pid, identityPromise)
             child.once('exit', (code, signal) => onExit?.(code, signal))
-            options.signal.addEventListener('abort', () => signalProcessTree(identity, 'SIGTERM'), { once: true })
+            options.signal.addEventListener('abort', () => signalProcessTree(identityPromise, 'SIGTERM'), { once: true })
             return child
           }
         }
@@ -1107,7 +1117,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         let stopped = false
         let externalSessionId = request.resume
         let q: Query | undefined
-        let qoderIdentity: ProcessIdentity | undefined
+        let qoderIdentityPromise: Promise<ProcessIdentity | undefined> | undefined
         const ctx: NormalizeCtx = {
           runId: request.runId,
           cwd: request.cwd,
@@ -1122,7 +1132,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
               ...qoderOptions(
                 request.cwd,
                 request.resume,
-                (_pid, identity) => { qoderIdentity = identity },
+                (_pid, identityPromise) => { qoderIdentityPromise = identityPromise },
                 undefined,
                 request.permissionMode,
                 request.managedRecorder === true,
@@ -1183,7 +1193,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             controller.abort()
             void q?.interrupt().catch(() => {})
           },
-          forceKill: () => signalProcessTree(qoderIdentity, 'SIGKILL'),
+          forceKill: () => signalProcessTree(qoderIdentityPromise, 'SIGKILL'),
           // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
           forceKillScope: 'run_scoped',
           getExternalSessionId: () => externalSessionId,
@@ -1205,7 +1215,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       const currentProviderTurnId = (): string | undefined => providerTurnIdAmbiguous ? undefined : providerTurnId
       let q: Query | undefined
       let qoderPid: number | undefined
-      let qoderIdentity: ProcessIdentity | undefined
+      let qoderIdentityPromise: Promise<ProcessIdentity | undefined> | undefined
       let streamSettled = false
       let exitTimer: ReturnType<typeof setTimeout> | undefined
       let rejectUnexpectedExit: (error: Error) => void = () => {}
@@ -1305,7 +1315,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
             ...qoderOptions(
               request.cwd,
               request.resume,
-              (pid, identity) => { qoderPid = pid; qoderIdentity = identity },
+              (pid, identityPromise) => { qoderPid = pid; qoderIdentityPromise = identityPromise },
               (code, signal) => {
                 if (stopped || streamSettled) return
                 exitTimer = setTimeout(() => {
@@ -1580,7 +1590,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
           return result
         },
         interrupt,
-        forceKill: () => signalProcessTree(qoderIdentity, 'SIGKILL'),
+        forceKill: () => signalProcessTree(qoderIdentityPromise, 'SIGKILL'),
         // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
         forceKillScope: 'run_scoped',
         getExternalSessionId: () => externalSessionId,

@@ -49,6 +49,21 @@ describe('进程身份与快照解析', () => {
     const snapshot = readProcessSnapshot()
     expect(snapshot.get(process.pid)?.pid).toBe(process.pid)
   })
+
+  it('异步身份采集只向 lister 请求目标 PID', async () => {
+    const calls: number[] = []
+    const identity = await captureProcessIdentity(501, (pid) => {
+      calls.push(pid)
+      return '  501   1 S    Wed Oct 15 10:00:00 2026 claude'
+    })
+    expect(calls).toEqual([501])
+    expect(identity).toEqual({ pid: 501, startedAt: 'Wed Oct 15 10:00:00 2026', command: 'claude' })
+  })
+
+  it('身份采集超时返回未知身份', async () => {
+    const identity = await captureProcessIdentity(501, () => new Promise<string>(() => {}), 1)
+    expect(identity).toEqual({ pid: 501 })
+  })
 })
 
 describe('类别白名单', () => {
@@ -209,7 +224,7 @@ describe('真实进程树（端到端）', () => {
       expect(tree[0]).toMatchObject({ pid: child.pid, depth: 0, category: 'provider-root' })
       expect(tree.slice(1).every((node) => node.depth === 1 && node.category === 'provider-child')).toBe(true)
 
-      const identity = captureProcessIdentity(child.pid)
+      const identity = await captureProcessIdentity(child.pid)
       expect(identity?.startedAt).toBeTruthy()
 
       // 伪造一个启动时间不符的身份：必须拒绝，真实进程树还活着

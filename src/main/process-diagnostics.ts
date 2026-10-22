@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 
 /**
  * 进程身份化与后代树诊断。
@@ -49,6 +49,7 @@ export function parseProcessSnapshot(output: string): ProcessSnapshot {
 }
 
 export type ProcessLister = () => string
+export type ProcessIdentityLister = (pid: number) => Promise<string> | string
 
 /**
  * lstart 的字段顺序随 locale 变化，身份采集与复核必须用同一种固定格式，
@@ -59,6 +60,24 @@ export const defaultProcessLister: ProcessLister = () => execFileSync(
   ['-axo', 'pid=,ppid=,stat=,lstart=,command='],
   { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }
 )
+
+const PROCESS_IDENTITY_TIMEOUT_MS = 1_000
+
+/**
+ * 身份采集只读取目标 PID，避免启动路径同步扫描整机进程表。
+ * 输出仍使用与全表诊断和发信号前复核相同的 LC_ALL=C/lstart 格式。
+ */
+export const defaultProcessIdentityLister: ProcessIdentityLister = (pid) => new Promise<string>((resolve, reject) => {
+  execFile(
+    '/bin/ps',
+    ['-o', 'pid=,ppid=,stat=,lstart=,command=', '-p', String(pid)],
+    { encoding: 'utf8', maxBuffer: 64 * 1024, timeout: PROCESS_IDENTITY_TIMEOUT_MS, env: { ...process.env, LC_ALL: 'C' } },
+    (error, stdout) => {
+      if (error) reject(error)
+      else resolve(stdout)
+    }
+  )
+})
 
 export function readProcessSnapshot(lister: ProcessLister = defaultProcessLister): ProcessSnapshot {
   return parseProcessSnapshot(lister())
@@ -242,15 +261,27 @@ export function signalProcessTreeWithIdentity(args: {
   }
 }
 
-/** 为一个刚启动的 PID 采集身份。采集不到时返回不带启动时间的身份，发信号会被拒绝。 */
-export function captureProcessIdentity(pid: number | undefined, lister: ProcessLister = defaultProcessLister): ProcessIdentity | undefined {
-  if (!pid) return undefined
-  let row: ProcessRow | undefined
+/** 为一个刚启动的 PID 异步采集身份。采集不到、超时或失败时返回未知身份，发信号会被拒绝。 */
+export async function captureProcessIdentity(
+  pid: number | undefined,
+  lister: ProcessIdentityLister = defaultProcessIdentityLister,
+  timeoutMs = PROCESS_IDENTITY_TIMEOUT_MS
+): Promise<ProcessIdentity | undefined> {
+  if (!pid || !Number.isInteger(pid) || pid <= 0) return undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    row = readProcessSnapshot(lister).get(pid)
+    const output = await Promise.race([
+      Promise.resolve().then(() => lister(pid)),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`采集 PID ${pid} 身份超时`)), timeoutMs)
+      })
+    ])
+    const row = parseProcessSnapshot(output).get(pid)
+    return row ? { pid, startedAt: row.startedAt, command: row.command } : { pid }
   } catch {
     // ps 不可用时身份未知；调用方据此拒绝发信号，而不是无校验地杀。
     return { pid }
+  } finally {
+    if (timer) clearTimeout(timer)
   }
-  return row ? { pid, startedAt: row.startedAt, command: row.command } : { pid }
 }
