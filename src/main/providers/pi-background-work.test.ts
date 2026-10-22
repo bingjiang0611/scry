@@ -84,6 +84,47 @@ describe('Pi detached subagent evidence', () => {
     expect(work.pending).toBe(true)
   })
 
+  it('does not revive cleared tasks when the parent wakes again', () => {
+    const work = new PiBackgroundWork()
+    work.observe(widget('running'))
+    work.observe({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })
+    expect(work.observe({ type: 'agent_start' })?.phase).toBe('inactive')
+    expect(work.pending).toBe(false)
+    expect(work.observe({ type: 'agent_settled' })?.phase).toBe('inactive')
+    expect(work.end()?.tasks).toMatchObject([{ taskId: 'child', status: 'unconfirmed' }])
+  })
+
+  it('keeps cleared tasks unconfirmed when a different child starts', () => {
+    const work = new PiBackgroundWork()
+    work.observe(widget('running'))
+    work.observe({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })
+    expect(work.observe(widget('running', 2, 'new-child'))?.tasks).toMatchObject([
+      { taskId: 'child', status: 'unconfirmed' }, { taskId: 'new-child' }
+    ])
+    work.observe(widget('complete', 3, 'new-child'))
+    work.observe(notify)
+    expect(work.pending).toBe(false)
+    expect(work.observe({ type: 'agent_settled' })?.phase).toBe('inactive')
+  })
+
+  it('only revives a cleared task on fresh live evidence for that task', () => {
+    const work = new PiBackgroundWork()
+    work.observe(widget('running', 2))
+    work.observe({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })
+    expect(work.observe(widget('running', 1))).toBeUndefined()
+    expect(work.pending).toBe(false)
+    expect(work.observe(widget('running', 3))?.tasks[0].status).toBeUndefined()
+    expect(work.pending).toBe(true)
+  })
+
+  it('does not await continuation for a late terminal row from a cleared task', () => {
+    const work = new PiBackgroundWork()
+    work.observe(widget('running'))
+    work.observe({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })
+    work.observe(widget('complete', 2))
+    expect(work.pending).toBe(false)
+  })
+
   it('does not resurrect from stale snapshots or await historical terminal tasks', () => {
     const work = new PiBackgroundWork()
     expect(work.observe(widget('complete'))).toBeUndefined()
