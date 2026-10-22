@@ -28,6 +28,7 @@ const anchors = {
 // Runs before React; observe actual listener/observer lifetimes, not source-code counts.
 function bootstrap() {
   window.profileCounts = {}
+  window.profileAppBodyMs = []
   window.profileResources = {}
   for (const name of ['IntersectionObserver', 'MutationObserver', 'ResizeObserver']) {
     const Native = window[name]
@@ -82,10 +83,11 @@ async function exercise(contents, controls, fullApp) {
   const snapshot = () => read(`({counts: {...profileCounts}, resources: {...profileResources},
     shells: document.querySelectorAll('.transcript-turn').length,
     mounted: document.querySelectorAll('.transcript-turn:not([data-virtualized])').length,
-    domNodes: document.querySelectorAll('*').length, selectionDispatchMs: [...profileSelectionMs],
+    domNodes: document.querySelectorAll('*').length, selectionDispatchMs: [...profileSelectionMs], appBodyBeforeJsxMs: [...profileAppBodyMs],
     longTasks: profileLongTasksSupported ? [...profileLongTasks] : {availability: 'unavailable', reason: 'Chromium longtask observer unsupported'}})`)
   const delta = (before, after) => Object.fromEntries(Object.keys(after.counts).map(key => [key, after.counts[key] - (before.counts[key] ?? 0)]))
   const stats = values => {
+    if (values.length === 0) return {availability: 'unavailable', reason: 'No samples in this phase'}
     const sorted = [...values].sort((a, b) => a - b)
     return { samples: sorted.length, p50: sorted[Math.ceil(sorted.length * .5) - 1], p95: sorted[Math.ceil(sorted.length * .95) - 1] }
   }
@@ -143,8 +145,8 @@ async function exercise(contents, controls, fullApp) {
   await frame()
   const unmounted = await snapshot()
   if (unmounted.resources.IntersectionObserver !== 0 || unmounted.resources.MutationObserver !== 0 || unmounted.resources.ResizeObserver !== 0 || unmounted.resources.selectionListeners !== 1) throw new Error(`Unmount leaked resources: ${JSON.stringify(unmounted.resources)}`)
-  return { viewport, initial, unmounted, typing: { commits: typingCommits, roundTripTwoFrameMs: stats(typingMs), selectionDispatchMs: stats(afterTyping.selectionDispatchMs.slice(beforeTyping.selectionDispatchMs.length)) },
-    streaming: { commits: streamCommits, roundTripTwoFrameMs: stats(streamMs) },
+  return { viewport, initial, unmounted, typing: { commits: typingCommits, appBodyBeforeJsxMs: stats(afterTyping.appBodyBeforeJsxMs.slice(beforeTyping.appBodyBeforeJsxMs.length)), longTasks: afterTyping.longTasks, roundTripTwoFrameMs: stats(typingMs), selectionDispatchMs: stats(afterTyping.selectionDispatchMs.slice(beforeTyping.selectionDispatchMs.length)) },
+    streaming: { commits: streamCommits, appBodyBeforeJsxMs: stats(afterStream.appBodyBeforeJsxMs.slice(afterTyping.appBodyBeforeJsxMs.length)), longTasks: afterStream.longTasks, roundTripTwoFrameMs: stats(streamMs) },
     selection: { releaseChecks: afterSelection.counts.releaseChecks - beforeSelection.counts.releaseChecks, resources: afterSelection.resources, dispatchMs: stats(afterSelection.selectionDispatchMs.slice(beforeSelection.selectionDispatchMs.length)) },
     final: afterSelection,
     scope: fullApp ? 'production App + offline renderer bridge' : 'production SessionChatView component' }
@@ -162,6 +164,13 @@ try {
         if (code.split(anchor).length !== 2) throw new Error(`Profile anchor changed: ${key}`)
         const increment = `window.profileCounts.${key} = (window.profileCounts.${key} ?? 0) + 1;`
         code = code.replace(anchor, commit ? `  profileCommit(() => { ${increment} })\n${anchor}` : `${anchor}\n      ${increment}`)
+      }
+      if (id === join(root, 'src/renderer/App.tsx')) {
+        const start = 'export function App() {'
+        const end = '  return (\n    <div\n      className={`app app-shell'
+        if (code.split(start).length !== 2 || code.split(end).length !== 2) throw new Error('App body timing anchor changed')
+        code = code.replace(start, `${start}\n  const profileAppStarted = performance.now()`)
+          .replace(end, `  window.profileAppBodyMs.push(performance.now() - profileAppStarted)\n${end}`)
       }
       return code
     } }],
