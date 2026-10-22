@@ -55,6 +55,7 @@
 | `src/renderer/codex-alignment.css` | `.prompt-queue` 从浮层组拆出，改内嵌面、去掉 `--shadow-pop` |
 | `src/renderer/remote-prompt-queue.ts` + `RemoteChat.tsx` | 远端队列同构支持：`claimed` 记录在飞条目、`claim(key, skipMessageId)` 跳过编辑中的行、`enqueueEdited` 移到队尾；写未知提示从「队首」改成「上一条」 |
 | `scripts/steer-ui-smoke.mjs` + `fixtures/steer.tsx` | 原生坐标点铅笔 → 行变编辑中、文本进输入框、高亮跳到下一条、点 `取消编辑` 复原 |
+| `scripts/remote-prompt-queue-ui-smoke.mjs` + `fixtures/remote-queue.tsx` | 远端等价 fixture：真实 `SessionChatView` + 真实 `RemotePromptQueueStore`，原生坐标验证铅笔可用、编辑载入文本、出队跳过编辑中的行、取消复原、编辑后移到队尾 |
 | `steer.test.ts` / `render.test.tsx` | 队列项换 id 移到队尾、附件随行、旧 Steer 状态不跟随、跳过语义、编辑态渲染与「有内容时禁用」 |
 
 ## 验证记录
@@ -66,6 +67,8 @@
 | `node scripts/steer-ui-smoke.mjs` | 通过，含新增 `queueEditing`：pending 行铅笔禁用、点第 1 条铅笔后 `is-editing`、正文进真实 textarea、`is-next` 落到第 2 条、提示条写明「会先跳过这条」、取消后复原 |
 | `SCRY_STEER_UI_SCREENSHOT` 导出 | 深/浅两版用生产 `styles.css` + `codex-alignment.css` 渲染的队列实图，竖轨、发丝线、抬高行、铅笔、能力说明都正常 |
 | `npm run install:mac:dev` | 打包、`check-packaged-app`、`smoke:electron`（含 steer/session-capability/remote 等）通过，已装到 `/Applications/Scry.app`，备份在 `/Applications/.Scry.app.backup` |
+| `node scripts/remote-prompt-queue-ui-smoke.mjs` | 通过；`test:renderer:ui` 已接入 `npm run test:remote-queue-ui` |
+| 控制实验（远端） | 把 `claim` 的跳行改回 `queue.prompts[0]` 后，smoke 报 `Drain did not skip the row being edited`；还原后重新通过 |
 
 控制实验：编辑按钮的「输入框有内容时禁用」断言第一次是**失败**的——`editDisabled` 漏了 `editDraftBlocked`，单测立刻抓到，补上后才通过。说明这条断言能区分真假实现。
 
@@ -75,5 +78,5 @@
 - `App.tsx` 的编辑分支（`send()` 里的 `editedPromptToTail` 调用、暂停标记清理）只有 helper 级单测覆盖，没有集成测试。
 - 键盘 Tab 顺序、`aria-live` 朗读、`Esc` 后的焦点归位没有在 fixture 里断言。
 - 队列超过约 5 条时 `max-height: 214px` 的滚动、竖轨在滚动容器内的连续性没有截图确认。
-- 远端会话（`RemoteChat.tsx` + `RemotePromptQueueStore`）已同步支持编辑：同一套 ChatView UI，store 增加 `claim(key, skipMessageId)` 跳行提交、`submitted` 按 `claimed` 删条目、`enqueueEdited` 换新 id 排到队尾。只有 store 级单测，没有远端 fixture 走原生点击。
+- 远端 fixture 只内联了 RemoteChat 的三处粘合（装载文本、`enqueueEdited`、`claim` 跳行），并没有挂载真正的 `RemoteChat` 组件（它需要完整 host bridge）。所以「RemoteChat 少传一个回调」这类接线错误仍只能靠人工检查，fixture 抓不到。
 - 编辑期间新加附件只做了合并逻辑，没有真实图片落盘验证。
