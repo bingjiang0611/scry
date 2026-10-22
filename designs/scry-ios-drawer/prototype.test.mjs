@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   initialState, RECENT_LIMIT, attention, pinned, recents, projectGroups, visibleCount,
   canOpen, togglePin, renameSession, archiveSession, restoreSession, toggleProject, relativeTime, matches,
-  renderBoard
+  renderBoard, toolRows, canOpenTool, analyticsMetrics
 } from './prototype.mjs'
 import { fixtures } from './copy.mjs'
 
@@ -97,9 +97,10 @@ test('最近列表上限与相对时间分档', () => {
 })
 
 test('每块画板都能渲染，且没有 undefined 或缺失的发送按钮', () => {
-  for (const id of ['home', 'recent', 'projects', 'evidence']) {
+  for (const id of ['home', 'recent', 'projects', 'evidence', 'tools', 'analytics', 'mcp']) {
     const html = renderBoard(id)
     assert.ok(!html.includes('undefined'), `${id} 渲染出现 undefined`)
+    if (id === 'analytics' || id === 'mcp') continue
     assert.ok(html.includes('aria-label="发送"'), `${id} 缺少发送按钮`)
     assert.ok(html.includes('class="composer"'), `${id} 缺少输入区`)
   }
@@ -111,4 +112,39 @@ test('切换画板到项目视图后仍能渲染完整分组', () => {
   const projects = renderBoard('projects')
   assert.ok(projects.includes('class="group-name">scry<'))
   assert.ok(projects.includes('data-act="new-in-project"'))
+})
+
+test('工具页固定五个面板，顺序与 Mac 侧栏一致', () => {
+  assert.deepEqual(toolRows().map(row => row.id), ['analytics', 'llm', 'skills', 'mcp', 'meta'])
+})
+
+test('能力不成立的工具行不可点，且写明原因而不是留空', () => {
+  const skills = toolRows().find(row => row.id === 'skills')
+  assert.equal(canOpenTool(skills), false)
+  assert.match(skills.statusText, /^不可用 · .+/)
+  assert.equal(canOpenTool(toolRows().find(row => row.id === 'analytics')), true)
+})
+
+test('缺失的指标保持 unavailable，不折成 0', () => {
+  const metrics = analyticsMetrics()
+  assert.equal(metrics.length, 5)
+  const missing = metrics.filter(metric => metric.unavailable)
+  assert.deepEqual(missing.map(metric => metric.label), ['缓存写入'])
+  assert.equal(missing[0].value, '不可用')
+  assert.ok(metrics.every(metric => metric.value !== '0'))
+})
+
+test('工具页与面板屏渲染出全部条目和只读说明', () => {
+  const tools = renderBoard('tools')
+  for (const label of ['分析', 'LLM 性能', '技能', 'MCP', 'Meta Prompts']) {
+    assert.ok(tools.includes(`>${label}<`), `工具页缺少 ${label}`)
+  }
+  assert.ok(tools.includes('aria-disabled="true"'))
+  const analytics = renderBoard('analytics')
+  assert.equal((analytics.match(/class="metric-label"/g) || []).length, 5)
+  assert.ok(analytics.includes('is-unavailable'), '缺失指标没有标记 unavailable')
+  assert.ok(analytics.includes('21:32 读取'))
+  const mcp = renderBoard('mcp')
+  assert.equal((mcp.match(/class="server"/g) || []).length, 3)
+  assert.ok(mcp.includes('在 Mac 上处理'))
 })

@@ -4,7 +4,7 @@
 export const copy = {
   title: 'Scry / iOS 会话抽屉',
   heading: '先给输入框，左上角再给列表。',
-  intro: '首屏不再是一页会话索引。左上角打开的抽屉接住 Mac 侧栏的会话能力：需要你、置顶、项目分组、搜索、重命名、存档。深色与语义色沿用 iOS 现值，只借 Codex 的结构，不借它的浅色皮肤。',
+  intro: '首屏不再是一页会话索引。左上角打开的抽屉接住 Mac 侧栏：需要你、置顶、项目分组、搜索、重命名、存档，外加「工具」里的五个只读面板。深色与语义色沿用 iOS 现值，只借 Codex 的结构，不借它的浅色皮肤。',
   prototype: '设计原型 · 合成数据 · 不连接 Mac，不发送任何内容',
   brief: '技术方案与功能对照 ↗',
   hint: '点左上角开抽屉；点会话行看原型反馈；右键或长按行 = 置顶 / 重命名 / 存档。',
@@ -14,7 +14,10 @@ export const copy = {
     { id: 'home', label: '首屏 · 先输入，再导航', note: '顶栏只有三件事：左上开抽屉、中间当前主机、右上刷新会话。最近会话贴着输入框，键盘弹起后收起，只留输入框。' },
     { id: 'recent', label: '抽屉 · 最近', note: '抽屉宽 272pt，从左侧推入。搜索点开才出现，先让列表占满高度。等待决定的会话提到最上面，不在下面重复出现。' },
     { id: 'projects', label: '抽屉 · 项目与行操作', note: '项目视图保留 Mac 的折叠与项目内新建。长按行打开置顶 / 重命名 / 存档；存档可撤销，运行中的会话要先停止。' },
-    { id: 'evidence', label: '首屏 · 运行、失败与队列仍是证据', note: '刷新失败、等待决定、未确认的后台发送都不藏进抽屉：首屏继续承担“发生了什么”的责任。' }
+    { id: 'evidence', label: '首屏 · 运行、失败与队列仍是证据', note: '刷新失败、等待决定、未确认的后台发送都不藏进抽屉：首屏继续承担“发生了什么”的责任。' },
+    { id: 'tools', label: '抽屉 · 工具', note: 'Mac 侧栏的五个面板收进「工具」标签页：每行带真实状态摘要，能力不成立时整行不可用并写原因，不做假入口。' },
+    { id: 'analytics', label: '面板 · 分析', note: '读 Mac 的聚合结果。每个指标都带覆盖度；主机没给的字段是 unavailable，不是 0。明细有上限，可再加载。' },
+    { id: 'mcp', label: '面板 · MCP 信任', note: '手机只读：能看指纹、findings 与 live 状态。允许、拒绝、改配置要重验指纹，仍在 Mac 上执行。' }
   ],
 
   drawerTitle: 'Scry',
@@ -25,6 +28,52 @@ export const copy = {
   cancel: '取消',
   tabRecent: '最近',
   tabProjects: '项目',
+  tabTools: '工具',
+
+  toolsLabel: '工具',
+  toolsNote: '只读镜像 · 写操作在 Mac 上完成',
+  toolUnavailable: reason => `不可用 · ${reason}`,
+  toolRows: [
+    { id: 'analytics', label: '分析', icon: 'chart', status: '近 30 天 · 128 轮 · US$4.12', available: true },
+    { id: 'llm', label: 'LLM 性能', icon: 'gauge', status: '2 个模型有样本 · 1 个会话运行中', available: true },
+    { id: 'skills', label: '技能', icon: 'spark', status: '当前 Provider 未声明技能能力', available: false },
+    { id: 'mcp', label: 'MCP', icon: 'plug', status: '3 个 server · 1 项待核对', available: true, tone: 'warn' },
+    { id: 'meta', label: 'Meta Prompts', icon: 'doc', status: '8 条模板 · 可填入输入框', available: true }
+  ],
+
+  panel: {
+    back: '返回',
+    refresh: '重新读取',
+    provenance: (host, time) => `来自 ${host} · ${time} 读取`,
+    stale: '未标为最新 · 仍在显示上次读取的数据',
+    unavailable: '不可用',
+    more: '再加载 20 行',
+    limit: (shown, total) => `显示前 ${shown} / ${total} 项`,
+    macOnly: '在 Mac 上处理',
+    readOnly: '只读'
+  },
+
+  analytics: {
+    title: '分析',
+    rangeLabel: '统计范围',
+    ranges: [7, 30, 90],
+    rangeLabelOf: days => `${days} 天`,
+    cost: '成本合计',
+    costEvidence: 'exact · 128 轮',
+    breakdown: '按模型',
+    breakdownNote: '仅前 3 个模型有成本数据'
+  },
+
+  mcpTrust: {
+    title: 'MCP 信任',
+    summaryLabel: '信任状态',
+    severityLabel: { warn: '警告', info: '提示' },
+    summary: '允许',
+    summaryNote: '2 个 server 已核对 · 1 项发现待处理',
+    mode: '权限模式 strict',
+    findingsTitle: '发现',
+    actionNote: '允许、拒绝与改写配置会重验 canonical cwd 与内容指纹，只在 Mac 上执行。手机可以重新核对，但不改信任。'
+  },
 
   hostOne: 'MacBook Pro',
   allHosts: '全部主机',
@@ -115,6 +164,43 @@ export const copy = {
 }
 
 export const fixtures = {
+  panels: {
+    analytics: {
+      cost: 'US$4.12',
+      metrics: [
+        { label: '已处理 token', value: '1.82M', evidence: '128 / 128 轮有数据', known: true },
+        { label: '缓存读取', value: '1.20M', evidence: '96 / 128 轮有数据', known: true },
+        { label: '输入', value: '410K', evidence: '96 / 128 轮有数据', known: true },
+        { label: '输出', value: '62.4K', evidence: '124 / 128 轮有数据', known: true },
+        { label: '缓存写入', value: null, evidence: '主机未提供该字段', known: false }
+      ],
+      rows: [
+        { name: 'gpt-5-codex', share: 0.72, value: 'US$2.96' },
+        { name: 'claude-sonnet-4.5', share: 0.22, value: 'US$0.91' },
+        { name: 'other', share: 0.06, value: 'US$0.25' }
+      ]
+    },
+    mcpTrust: {
+      servers: [
+        {
+          id: 'srv1', name: 'filesystem', transport: 'stdio', digest: '8f3c…21ab',
+          state: '已核对', tone: 'ok',
+          findings: [
+            { id: 'f1', severity: 'warn', text: '配置引用了用户目录外的可执行文件' },
+            { id: 'f2', severity: 'info', text: '上次核对：2026-10-21 20:04' }
+          ]
+        },
+        {
+          id: 'srv2', name: 'github', transport: 'http', digest: '31d9…7c04',
+          state: '已核对', tone: 'ok', findings: []
+        },
+        {
+          id: 'srv3', name: 'local-index', transport: 'stdio', digest: '待核对',
+          state: '指纹变化', tone: 'warn', findings: []
+        }
+      ]
+    }
+  },
   host: { id: 'mac1', name: 'MacBook Pro' },
   // minutes 是“多少分钟前”，用于排序与相对时间。
   sessions: [

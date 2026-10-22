@@ -15,6 +15,8 @@ export function initialState(overrides = {}) {
     toast: null,
     collapsed: [],
     hostMenu: false,
+    range: 30,
+    expanded: 'srv1',
     sessions: fixtures.sessions.map(session => ({ ...session })),
     archived: [],
     ...overrides
@@ -149,13 +151,68 @@ const icons = {
   check: '<path d="m5 12.5 4.5 4.5L19 6.5"/>',
   chevron: '<path d="m9 5 7 7-7 7"/>',
   hand: '<path d="M9 12V6.5a1.5 1.5 0 0 1 3 0V11"/><path d="M12 11V5.5a1.5 1.5 0 0 1 3 0V11"/><path d="M15 11V7.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.2a5 5 0 0 1-4.2-2.3L4 14.5a1.6 1.6 0 0 1 2.6-1.8L9 15"/>',
-  tray: '<path d="M4.5 14 7 5.5h10L19.5 14"/><path d="M4.5 14h4l1.2 2.2h4.6L15.5 14h4v3.6a1.4 1.4 0 0 1-1.4 1.4H5.9a1.4 1.4 0 0 1-1.4-1.4z"/>'
+  tray: '<path d="M4.5 14 7 5.5h10L19.5 14"/><path d="M4.5 14h4l1.2 2.2h4.6L15.5 14h4v3.6a1.4 1.4 0 0 1-1.4 1.4H5.9a1.4 1.4 0 0 1-1.4-1.4z"/>',
+  chart: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+  gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5.5"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3 9 9M15 15l2.7 2.7M17.7 6.3 15 9M9 15l-2.7 2.7"/>',
+  plug: '<path d="M9 3v5M15 3v5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v4"/>',
+  doc: '<path d="M6 3.5h7l5 5V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20z"/><path d="M13 3.5V9h5"/><path d="M9 13h6M9 16.5h4"/>',
+  lock: '<rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/>',
+  'chevron-left': '<path d="m15 5-7 7 7 7"/>'
 }
 
 const icon = (name, size = 20) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${icons[name]}</svg>`
 
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+
+// 工具行的可用性由主机能力决定；不可用时给原因，不给假入口。
+export function toolRows() {
+  return copy.toolRows.map(row => ({
+    ...row,
+    statusText: row.available ? row.status : copy.toolUnavailable(row.status),
+    openable: row.available
+  }))
+}
+
+export function canOpenTool(row) {
+  return row.available === true
+}
+
+// 缺失的指标保持 unavailable，绝不折成 0。
+export function analyticsMetrics() {
+  return fixtures.panels.analytics.metrics.map(metric => ({
+    label: metric.label,
+    value: metric.known ? metric.value : copy.panel.unavailable,
+    evidence: metric.evidence,
+    unavailable: !metric.known
+  }))
+}
+
+function toolRowHtml(row) {
+  return `<li class="tool-row-wrap">
+    <button type="button" class="tool-row${row.openable ? '' : ' disabled'}" data-act="tool-${row.id}"
+      ${row.openable ? '' : 'disabled aria-disabled="true"'}>
+      <span class="tool-icon">${icon(row.icon, 19)}</span>
+      <span class="tool-text">
+        <span class="tool-name">${escape(row.label)}</span>
+        <span class="tool-status${row.tone === 'warn' ? ' warn' : ''}">${escape(row.statusText)}</span>
+      </span>
+      ${row.openable ? icon('chevron', 13) : ''}
+    </button>
+  </li>`
+}
+
+function toolsHtml(board) {
+  return `<div class="scroll">
+    <section class="section">
+      <p class="section-label">${escape(copy.toolsLabel)}</p>
+      <ul class="tools">${toolRows().map(toolRowHtml).join('')}</ul>
+      <p class="section-note">${escape(copy.toolsNote)}</p>
+    </section>
+    <div class="scroll-tail"></div>
+  </div>`
+}
 
 function rowHtml(board, session, { indent = false, showProject = true } = {}) {
   const meta = [session.provider, showProject ? session.project : null].filter(Boolean).join(' · ')
@@ -199,6 +256,7 @@ function groupHtml(board, group) {
 
 function listHtml(board) {
   const state = board.state
+  if (state.tab === 'tools') return toolsHtml(board)
   const needs = attention(state)
   const pins = pinned(state)
   const recent = recents(state)
@@ -262,8 +320,8 @@ function tabsHtml(board) {
   const state = board.state
   const tab = (id, label) => `<button type="button" role="tab" id="tab-${id}" aria-selected="${state.tab === id}"
     aria-controls="drawer-list" class="tab${state.tab === id ? ' active' : ''}" data-act="tab-${id}">${escape(label)}</button>`
-  return `<div class="tabs" role="tablist" aria-label="${escape(copy.tabRecent)} / ${escape(copy.tabProjects)}">
-    ${tab('recent', copy.tabRecent)}${tab('projects', copy.tabProjects)}
+  return `<div class="tabs" role="tablist" aria-label="${escape(copy.tabRecent)} / ${escape(copy.tabProjects)} / ${escape(copy.tabTools)}">
+    ${tab('recent', copy.tabRecent)}${tab('projects', copy.tabProjects)}${tab('tools', copy.tabTools)}
   </div>`
 }
 
@@ -364,6 +422,102 @@ function composerHtml() {
   </div>`
 }
 
+function panelHeadHtml(board, title) {
+  return `<header class="panel-head">
+    <button type="button" class="hit" data-act="panel-back" aria-label="${escape(copy.panel.back)}">${icon('chevron-left', 21)}</button>
+    <div class="panel-title-group">
+      <h2 class="panel-title">${escape(title)}</h2>
+      <p class="panel-sub">${escape(copy.panel.provenance(copy.hostOne, '21:32'))}</p>
+    </div>
+    <button type="button" class="hit" data-act="panel-refresh" aria-label="${escape(copy.panel.refresh)}">${icon('refresh', 19)}</button>
+  </header>`
+}
+
+function analyticsPanelHtml(board) {
+  const data = fixtures.panels.analytics
+  return `<div class="range-row" role="group" aria-label="${escape(copy.analytics.rangeLabel)}">
+    <div class="segmented">
+      ${copy.analytics.ranges.map(days => `<button type="button" data-act="range" data-days="${days}"
+        aria-pressed="${board.state.range === days}">${escape(copy.analytics.rangeLabelOf(days))}</button>`).join('')}
+    </div>
+  </div>
+  <section class="panel-block">
+    <p class="stat-label">${escape(copy.analytics.cost)}</p>
+    <p class="stat-value">${escape(data.cost)}</p>
+    <p class="stat-evidence">${escape(copy.analytics.costEvidence)}</p>
+  </section>
+  <ul class="metric-grid">
+    ${analyticsMetrics().map(metric => `<li class="metric${metric.unavailable ? ' is-unavailable' : ''}">
+      <p class="metric-label">${escape(metric.label)}</p>
+      <p class="metric-value">${escape(metric.value)}</p>
+      <p class="metric-evidence">${escape(metric.evidence)}</p>
+    </li>`).join('')}
+  </ul>
+  <section class="panel-block">
+    <p class="section-label">${escape(copy.analytics.breakdown)}</p>
+    <ul class="bar-rows">
+      ${data.rows.map(row => `<li class="bar-row">
+        <span class="bar-name">${escape(row.name)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${Math.round(row.share * 100)}%"></span></span>
+        <span class="bar-value">${escape(row.value)}</span>
+      </li>`).join('')}
+    </ul>
+    <p class="limit-note">${escape(copy.analytics.breakdownNote)}</p>
+    <button type="button" class="see-all" data-act="panel-refresh">${escape(copy.panel.more)}</button>
+  </section>`
+}
+
+function mcpPanelHtml(board) {
+  const data = fixtures.panels.mcpTrust
+  return `<section class="panel-block">
+    <p class="stat-label">${escape(copy.mcpTrust.summaryLabel)}</p>
+    <p class="stat-value ok">${escape(copy.mcpTrust.summary)}</p>
+    <p class="stat-evidence">${escape(copy.mcpTrust.summaryNote)}</p>
+    <p class="stat-evidence">${escape(copy.mcpTrust.mode)}</p>
+  </section>
+  <ul class="servers">
+    ${data.servers.map(server => {
+      const open = board.state.expanded === server.id
+      const count = server.findings.length
+      return `<li class="server">
+      <button type="button" class="server-head" data-act="mcp-toggle" data-id="${server.id}" aria-expanded="${open}">
+        <span class="dot ${server.tone}"></span>
+        <span class="server-text">
+          <span class="server-name">${escape(server.name)}</span>
+          <span class="server-meta">${escape(server.transport)} · ${escape(server.digest)}</span>
+        </span>
+        <span class="badge ${server.tone === 'warn' ? 'waiting' : 'draft'}">${escape(server.state)}</span>
+        ${count ? icon('down', 14) : ''}
+      </button>
+      ${open && count ? `<ul class="findings">
+        ${server.findings.map(finding => `<li class="finding">
+          <span class="badge ${finding.severity === 'warn' ? 'waiting' : 'draft'}">${escape(copy.mcpTrust.severityLabel[finding.severity] ?? finding.severity)}</span>
+          <span>${escape(finding.text)}</span>
+        </li>`).join('')}
+      </ul>` : ''}
+    </li>`}).join('')}
+  </ul>
+  <div class="card">
+    <div class="card-line">
+      ${icon('lock', 18)}
+      <div class="card-text">
+        <p class="card-title">${escape(copy.panel.macOnly)}</p>
+        <p class="card-body">${escape(copy.mcpTrust.actionNote)}</p>
+      </div>
+    </div>
+  </div>`
+}
+
+function panelHtml(board) {
+  const title = board.kind === 'analytics' ? copy.analytics.title : copy.mcpTrust.title
+  return `<div class="panel-home">
+    <div class="safe-top"></div>
+    ${panelHeadHtml(board, title)}
+    <div class="panel-body">${board.kind === 'analytics' ? analyticsPanelHtml(board) : mcpPanelHtml(board)}</div>
+    <div class="safe-bottom"></div>
+  </div>`
+}
+
 function topbarHtml(board) {
   return `<header class="topbar">
     <button type="button" class="hit" data-act="drawer" aria-label="${escape(copy.openList)}" aria-expanded="${board.state.drawer}">${icon('menu', 21)}</button>
@@ -445,6 +599,9 @@ function overlaysHtml(board) {
 }
 
 function boardHtml(board) {
+  if (board.kind === 'analytics' || board.kind === 'mcp') {
+    return `<div class="phone" data-board="${board.id}">${panelHtml(board)}</div>`
+  }
   const body = homeBodyHtml(board)
   const drawerOpen = board.state.drawer
   return `<div class="phone" data-board="${board.id}">
@@ -484,8 +641,8 @@ function board(id) {
       id,
       kind,
       state: initialState({
-        drawer: kind === 'recent' || kind === 'projects',
-        tab: kind === 'projects' ? 'projects' : 'recent'
+        drawer: kind === 'recent' || kind === 'projects' || kind === 'tools',
+        tab: kind === 'projects' ? 'projects' : kind === 'tools' ? 'tools' : 'recent'
       })
     })
   }
@@ -551,6 +708,15 @@ function handleAction(boardId, action, target, event) {
     case 'search-cancel': state.search = false; state.query = ''; return rerender(boardId)
     case 'tab-recent': state.tab = 'recent'; return rerender(boardId)
     case 'tab-projects': state.tab = 'projects'; return rerender(boardId)
+    case 'tab-tools': state.tab = 'tools'; return rerender(boardId)
+    case 'range': state.range = Number(target.dataset.days); return rerender(boardId)
+    case 'mcp-toggle': {
+      state.expanded = state.expanded === target.dataset.id ? null : target.dataset.id
+      return rerender(boardId)
+    }
+    case 'panel-back':
+    case 'panel-refresh':
+      return flash(boardId, copy.panel.readOnly)
     case 'see-all': state.tab = 'projects'; return rerender(boardId)
     case 'collapse': {
       state.collapsed = toggleProject(state, target.dataset.cwd).collapsed
