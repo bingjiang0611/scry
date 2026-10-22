@@ -10,6 +10,7 @@ target_fingerprint: "sha256:e4f2ed26f2918e7fc2c6486f7ade82209e824fdca7f51bd17a61
 target_path: /Users/baobingjiang/IdeaProjects/vibecoding/scry/apps/ios/ScryRemote/HomeView.swift
 timestamp: 2026-10-21T08-07-22Z
 slug: apps-ios-scryremote-homeview-swift
+closed: true
 ---
 Method: design review only (detector not applicable, native platform)
 
