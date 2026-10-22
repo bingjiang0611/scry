@@ -393,6 +393,28 @@ describe('transcript archive mirror', () => {
     })
   })
 
+  it('checkpoints a sidecar-only session once before serving bounded subsequent pages', async () => {
+    const userDataDir = join(tempRoot(), 'userData')
+    const args = { cwd: '/repo/sidecar-checkpoint', sessionId: 'sidecar-checkpoint', providerId: 'codex' as const, userDataDir }
+    for (let index = 0; index < 80; index++) {
+      expect(upsertTraceArchiveTurn({ ...args, turn: { runId: `run-${index}`, userText: `turn ${index}`, items: [], done: true, ts: index + 1 } })).toBe(true)
+    }
+    const indexPath = `${dirname(traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'run-0' }))}.index-v1.json`
+    expect(existsSync(indexPath)).toBe(false)
+    await expect(readTraceArchivePageAsync(args, { limit: 40 })).resolves.toMatchObject({ totalTurns: 80, turnFilesRead: 40 })
+    expect(existsSync(indexPath)).toBe(true)
+    const stamp = statSync(indexPath)
+    const parse = vi.spyOn(JSON, 'parse')
+    try {
+      await expect(readTraceArchivePageAsync(args, { before: 40, limit: 40 })).resolves.toMatchObject({
+        totalTurns: 80, offset: 0, hasOlder: false, sourceComplete: true,
+        archive: { turns: expect.arrayContaining([expect.objectContaining({ runId: 'run-0', userText: 'turn 0' })]) }
+      })
+      expect(parse.mock.calls.length).toBeLessThanOrEqual(41)
+      expect(statSync(indexPath).mtimeMs).toBe(stamp.mtimeMs)
+    } finally { parse.mockRestore() }
+  })
+
   it('repairs a corrupt cold source without turning missing canonical evidence green', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -581,6 +603,8 @@ describe('transcript archive mirror', () => {
     const updatedPath = traceArchiveTurnPath(userDataDir, cwd, sessionId, 'codex', { runId: 'run-0' })
     const indexPath = `${dirname(updatedPath)}.index-v1.json`
     expect(existsSync(indexPath)).toBe(false)
+    // Exercise canonical cold rebuilding, not the separately tested sidecar-only checkpoint.
+    rmSync(join(userDataDir, 'trace-archive-metadata-v1'), { recursive: true, force: true })
 
     await expect(readTraceArchivePageAsync(
       { cwd, sessionId, providerId: 'codex', userDataDir },
