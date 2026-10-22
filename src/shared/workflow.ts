@@ -61,6 +61,7 @@ export type WorkflowValueSchema =
   | { type: 'union'; variants: WorkflowValueSchema[] }
   | { type: 'array'; items: WorkflowValueSchema; maxItems: number }
   | { type: 'object'; properties: Record<string, WorkflowValueSchema>; required: string[] }
+  | { type: 'collection'; items: WorkflowValueSchema }
 
 export type WorkflowExpression =
   | { kind: 'literal'; value: WorkflowValue }
@@ -78,19 +79,29 @@ export type WorkflowExpression =
   | { kind: 'partition'; items: WorkflowExpression; item: string; when: WorkflowExpression }
 
 export type WorkflowEvaluation =
-  | { state: 'known'; value: WorkflowValue; derivedFrom: string[] }
+  | { state: 'known'; value: WorkflowValue; derivedFrom: string[]; collection?: WorkflowCollectionReference }
   | { state: 'unknown'; reason: string; derivedFrom: string[] }
 
-export interface WorkflowValueReference {
+export type WorkflowValueReference = {
   workflowId: string
   key: string
   hash: string
 }
 
-export interface WorkflowFrameReference {
+export type WorkflowFrameReference = {
   frameId: string
   revision: number
   resultRef: WorkflowValueReference
+}
+
+export type WorkflowCollectionReference = { reference: WorkflowValueReference; count: number; sealed: boolean }
+export type WorkflowCollectionEntry = {
+  key: WorkflowScalar
+  index: number
+  state: 'pending' | 'completed' | 'failed' | 'blocked' | 'unknown' | 'stopped'
+  settled: boolean
+  reference?: WorkflowFrameReference
+  error?: string
 }
 
 export interface WorkflowControlFrame {
@@ -109,6 +120,7 @@ export interface WorkflowControlFrame {
   reason?: string
   cursor?: number
   children?: WorkflowFrameReference[]
+  sourceRef?: WorkflowValueReference
 }
 
 export interface WorkflowBindBlock {
@@ -124,6 +136,22 @@ export interface WorkflowBranchBlock {
   then: WorkflowBlock
   else: WorkflowBlock
   unknown: WorkflowBlock | 'blocked'
+}
+
+export interface WorkflowMapBlock {
+  kind: 'map'
+  blockId: string
+  items: WorkflowExpression
+  item: string
+  key: string[]
+  maxItems: number
+  body: WorkflowBlock
+}
+
+export interface WorkflowCollectBlock {
+  kind: 'collect'
+  blockId: string
+  items: WorkflowExpression
 }
 
 export interface WorkflowCallBlock {
@@ -153,11 +181,12 @@ export interface WorkflowReturnBlock {
   ref: WorkflowOutputRef
 }
 
-export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock
+export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock
 
 export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   switch (block.kind) {
-    case 'call': case 'return': case 'bind': return []
+    case 'call': case 'return': case 'bind': case 'collect': return []
+    case 'map': return [block.body]
     case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
     case 'sequence': case 'parallel': return block.blocks
   }

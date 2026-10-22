@@ -14,8 +14,9 @@ import type {
 } from '../shared/workflow'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
 import { validateWorkflowValueSchema } from './workflow-values'
-import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema } from './workflow-expressions'
-import { workflowExpressionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
+import { collectionItemSchema } from './workflow-collections'
+import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema, workflowItemsSchema, workflowScalarSchema } from './workflow-expressions'
+import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/
@@ -49,13 +50,14 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
   ] }
   return [
     "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
-    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, and exactly one final return. Every node must include kind and a unique blockId.',
+    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, map, collect, and exactly one final return. Every node must include kind and a unique blockId.',
     'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
     'A call is {kind:"call",blockId,role,prompt,inputRefs?,outputSchema?}; role must be one of the configured roles. inputRefs reference an earlier committed binding by {nodeId,path?:[field,...]}; path means JSON fields, not a filesystem path. Never reference a parallel sibling or future node.',
     'A bind is {kind:"bind",blockId,value:expression}; it binds its immutable result under blockId. A branch is {kind:"branch",blockId,when:expression,then:block,else:block,unknown:block|"blocked"}. when must be boolean; missing evidence is unknown, never false. Exactly one arm runs; private arm bindings do not escape. The branch binds {arm:"then"|"else"|"unknown",value:chosenOutput}.',
+    'A map is {kind:"map",blockId,items:expression,item:localName,key:[field,...],maxItems:0..4096,body:block}. It evaluates a real collection dynamically; do not unroll it. Validate the complete input bound and unique scalar keys before dispatch. maxItems is a visible whole-batch refusal boundary, never truncation. Worst-case calls are maxItems times body calls. Source collection references must retain key:["key"]. A collect is {kind:"collect",blockId,items:expression}; it reads a sealed host collection into bounded outcome rows with key/index/state/settled/value?/error?, retaining failed slots. Explicit collect is required to consume a known settled failed map summary; unknown never advances.',
     'Finite expressions: {kind:"literal",value:JSON}, {kind:"ref",name:blockId}, {kind:"field",source:expression,path:[field,...]}, {kind:"compare",operator:"eq"|"ne"|"gt"|"gte"|"lt"|"lte",left:expression,right:expression}, {kind:"and"|"or"|"concat",values:[expression,...]}, {kind:"not"|"count",value:expression}, {kind:"group"|"unique",items:expression,key:[field,...]}, {kind:"filter"|"partition",items:expression,item:localName,when:expression}. No callbacks or user code. group/unique retain all members and original indexes; filter/partition return matched/rejected/unknown entries with indexes, values and reasons, not a flattened list.',
     'Optional outputSchema freezes a finite JSON data contract: {type:"string"|"number"|"boolean"|"null"}, {type:"enum",values:[scalar,...]}, {type:"array",items:schema,maxItems:0..4096}, {type:"object",properties:{field:schema,...},required:[field,...]}, or {type:"union",variants:[schema,...]}. No extra schema keywords or executable validators. Omitted required means all declared fields. Invalid Provider output fails the call, never becomes a successful dependency. Schema depth is at most 16 and total schema nodes at most 256.',
-    'The final root return is {kind:"return",blockId,ref:{nodeId:"...",path?:[field,...]}} and must reference one committed binding. No JavaScript, eval, imports, shell execution, map, loops, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Bound data are at most 4 MiB UTF-8 JSON, depth 64 and 4096 collection members; expressions are at most depth 16 and 256 nodes.',
+    'The final root return is {kind:"return",blockId,ref:{nodeId:"...",path?:[field,...]}} and must reference one committed binding. No JavaScript, eval, imports, shell execution, loops, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Bound data are at most 4 MiB UTF-8 JSON, depth 64 and 4096 collection members; expressions are at most depth 16 and 256 nodes.',
     `Never exceed ${WORKFLOW_MAX_ATTEMPTS} Agent calls. The following example illustrates grammar only; do not copy its tasks or role choices instead of planning the user's goal.`,
     `Grammar example: ${JSON.stringify({ schemaVersion: WORKFLOW_SCHEMA_VERSION, body: example })}`,
     `Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}`,
@@ -176,6 +178,18 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
       else: validateBlock(input.else, seen, depth + 1, count),
       unknown: input.unknown === 'blocked' ? 'blocked' : validateBlock(input.unknown, seen, depth + 1, count) }
   }
+  if (input.kind === 'map' || input.kind === 'collect') {
+    rejectUnknownFields(input, input.kind === 'map' ? ['kind', 'blockId', 'items', 'item', 'key', 'maxItems', 'body'] : ['kind', 'blockId', 'items'])
+    const items = validateWorkflowExpression(input.items)
+    count.textBytes += Buffer.byteLength(JSON.stringify(items))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    if (input.kind === 'collect') return { kind: 'collect', blockId: input.blockId, items }
+    assertId(input.item, 'map item')
+    if (!Array.isArray(input.key) || input.key.length > 16 || !input.key.every(part => typeof part === 'string' && part.length <= 256)) throw new Error(workflowCollectionCopy.key)
+    const maxItems = input.maxItems ?? WORKFLOW_MAX_BATCH
+    if (typeof maxItems !== 'number' || !Number.isInteger(maxItems) || maxItems < 0 || maxItems > WORKFLOW_MAX_BATCH) throw new Error(workflowCollectionCopy.limit)
+    return { kind: 'map', blockId: input.blockId, items, item: input.item, key: [...input.key] as string[], maxItems, body: validateBlock(input.body, seen, depth + 1, count) }
+  }
   if (input.kind === 'return') {
     rejectUnknownFields(input, ['kind', 'blockId', 'value', 'ref'])
     const ref = input.ref === undefined ? undefined : validateRefs([input.ref], '返回')[0]
@@ -220,6 +234,20 @@ function validateReferenceDominance(body: WorkflowBlock): void {
       return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
     }
     if (block.kind === 'bind') return bind(scope, block.blockId, inferWorkflowExpression(block.value, scope))
+    if (block.kind === 'map' || block.kind === 'collect') {
+      const source = inferWorkflowExpression(block.items, scope)
+      if (block.kind === 'collect') {
+        if (source.type !== 'collection') throw new Error(workflowCollectionCopy.source)
+        return bind(scope, block.blockId, { type: 'array', items: source.items, maxItems: WORKFLOW_MAX_BATCH })
+      }
+      if (scope.has(block.item)) throw new Error(workflowExpressionCopy.binding(block.item))
+      const itemSchema = workflowItemsSchema(source)
+      if (source.type === 'collection' && (block.key.length !== 1 || block.key[0] !== 'key')) throw new Error(workflowCollectionCopy.collectionKey)
+      const local = new Map(scope).set(block.item, itemSchema)
+      const keySchema = inferWorkflowExpression({ kind: 'field', source: { kind: 'ref', name: block.item }, path: block.key }, local)
+      if (!workflowScalarSchema(keySchema)) throw new Error(workflowCollectionCopy.key)
+      return bind(scope, block.blockId, { type: 'collection', items: collectionItemSchema(visit(block.body, local)) })
+    }
     if (block.kind === 'branch') {
       if (!workflowBooleanSchema(inferWorkflowExpression(block.when, scope))) throw new Error(workflowFrameCopy.expectedBoolean)
       const arms: Array<['then' | 'else' | 'unknown', WorkflowBlock]> = [['then', block.then], ['else', block.else]]
@@ -311,9 +339,13 @@ export function makePlanPreview(programInput: unknown, capabilities: WorkflowRol
 }
 
 export function workflowCallBudget(block: WorkflowBlock): number {
-  if (block.kind === 'call') return 1
-  if (block.kind === 'branch') return Math.max(...workflowChildBlocks(block).map(workflowCallBudget))
-  return workflowChildBlocks(block).reduce((sum, child) => sum + workflowCallBudget(child), 0)
+  let budget: number
+  if (block.kind === 'call') budget = 1
+  else if (block.kind === 'map') budget = block.maxItems === 0 ? 0 : block.maxItems * workflowCallBudget(block.body)
+  else if (block.kind === 'branch') budget = Math.max(...workflowChildBlocks(block).map(workflowCallBudget))
+  else budget = workflowChildBlocks(block).reduce((sum, child) => sum + workflowCallBudget(child), 0)
+  if (!Number.isSafeInteger(budget)) throw new Error(workflowCollectionCopy.budget)
+  return budget
 }
 
 export function callBlocks(block: WorkflowBlock): WorkflowCallBlock[] {

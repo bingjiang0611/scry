@@ -3,7 +3,7 @@ import {
   WORKFLOW_MAX_VALUE_BYTES, WORKFLOW_MAX_VALUE_DEPTH, type WorkflowEvaluation, type WorkflowExpression,
   type WorkflowScalar, type WorkflowValue, type WorkflowValueSchema
 } from '../shared/workflow'
-import { workflowExpressionCopy as copy } from '../shared/constants/copy'
+import { workflowCollectionCopy, workflowExpressionCopy as copy } from '../shared/constants/copy'
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const scalar = (value: unknown): value is WorkflowScalar => value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))
@@ -114,7 +114,7 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
       }
       case 'field': {
         const value = evaluate(item.source, scope)
-        return value.state === 'unknown' ? value : workflowField(value.value, item.path, value.derivedFrom)
+        return value.state === 'unknown' || !item.path.length ? value : workflowField(value.value, item.path, value.derivedFrom)
       }
       case 'compare': {
         const left = evaluate(item.left, scope), right = evaluate(item.right, scope), sources = refs(left, right)
@@ -147,6 +147,7 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         const value = evaluate(item.value, scope)
         if (value.state === 'unknown') return value
         if (item.kind === 'not' && typeof value.value === 'boolean') return known(!value.value, value.derivedFrom)
+        if (item.kind === 'count' && value.collection) return value.collection.sealed ? known(value.collection.count, value.derivedFrom) : unknown(workflowCollectionCopy.unsealed, value.derivedFrom)
         if (item.kind === 'count' && Array.isArray(value.value)) return known(value.value.length, value.derivedFrom)
         return unknown(copy.type(item.kind), value.derivedFrom)
       }
@@ -256,9 +257,11 @@ export function inferWorkflowExpression(expression: WorkflowExpression, scope: R
       if (!schemas.every(boolean)) throw new Error(copy.type(expression.kind))
       return { type: 'boolean' }
     }
-    case 'count':
-      arraySchema(infer(expression.value), expression.kind)
+    case 'count': {
+      const schema = infer(expression.value)
+      if (schema.type !== 'collection') arraySchema(schema, expression.kind)
       return { type: 'number' }
+    }
     case 'concat': {
       const schemas = expression.values.map(infer)
       if (schemas.every(schema => scalarTypes(schema)?.every(type => type === 'string'))) return { type: 'string' }
@@ -304,3 +307,5 @@ export function workflowExpressionReferences(expression: WorkflowExpression): st
 }
 
 export const workflowBooleanSchema = boolean
+export const workflowScalarSchema = (schema: WorkflowValueSchema): boolean => scalarTypes(schema) !== undefined
+export const workflowItemsSchema = (schema: WorkflowValueSchema): WorkflowValueSchema => schema.type === 'collection' ? schema.items : arraySchema(schema, 'map').items

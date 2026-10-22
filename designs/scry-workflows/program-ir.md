@@ -58,7 +58,26 @@
 - 表达式仅支持literal/ref/field、比较、and/or/not、count/concat、group/unique、filter/partition，不执行JS、回调或任意宿主命令。布尔组合保守传播unknown，不用已知布尔掩盖缺失证据。
 - group/unique保留全部members和原始derivedFrom索引，不因键相同丢掉矛盾成员。filter/partition均保留matched/rejected/unknown三组，含index/value/reason及外部判定来源，不返回一个被静默删减的列表。
 - 只有own JSON字段可读；数据含constructor等名称不成为原型访问。有限数值、false、0、null保持原值。已封口的空集合有效；缺失来源不是空集合。
-- 单表达式深度≤16、指令节点≤256；值≤4MiB UTF-8 JSON、深度≤64、数组≤4096。超过限制整项拒绝，不截尾。集合引用/分页和map/loop等完整控制指令仍待实现，不能只提高上限绕过。
+- 单表达式深度≤16、指令节点≤256；值≤4MiB UTF-8 JSON、深度≤64、数组≤4096。超过限制整项拒绝，不截尾。动态map及集合引用见下节；streaming group/filter、loop等剩余能力仍待实现，不能只提高数据上限绕过。
+
+## 动态 map 与显式 collect
+
+`map`使用`{kind,blockId,items:expression,item:localName,key:[field,...],maxItems,body}`。maxItems省略时为4096；这是冻结、可见的整批拒绝边界，不是截断条数。Native调用的最坏预算为maxItems×body预算；若过于保守，须在确认前声明真实允许的上限，而非运行时少做部分任务。
+
+- 派发前校验完整逻辑集合、唯一有限标量key以及≤4096/已确认maxItems。重复key、超限或未知来源不派发子项；封口的空输入才产生合法空结果。
+- 每项执行真实子程序，拥有独立scope和输入指纹；body私有绑定不会逃逸。共享slots/根1000 Agent预算仍由原Runner控制，未创建另一个executor。
+- 同时活跃的map fiber有界，任何一项完成即可补位。已测试慢a未完成时，b的verify完成并准入c，不等待整页结束；不是先扫完全部再统一复核。
+- 父结果为宿主mint的集合描述符及typed metadata，manifest保留全部key/index/state/settled/result reference。业务unknown和物理settled分开；unknown时停止新项准入，未执行项仍pending，不伪装成功或丢掉。
+- manifest为独立、内容寻址的`.collection.json`，受现有8MiB记录限制，不复制每项原始输出；普通数据值仍限4MiB。已验证4096项、超过4MiB的纯引用/状态清单可独立保存并冷读。
+- Native JSON schema和literal不能mint集合权限；形似描述符的普通对象不是受控引用。cold load校验manifest存在、hash、workflow、count、slot结构及封口状态。
+
+`collect`使用`{kind:"collect",blockId,items:expression}`，显式读取已封口集合，产生保留全部outcome的有界数组；失败项没有伪造value/0/null，仍有状态和错误。它可紧随其直接依赖的已知、已settled失败map读取摘要；unknown不会因collect推进。执行失败与partial报告可用性分开，不把失败结果改成completed。
+
+map也可读取受控集合：必须沿用`key:["key"]`；只为活跃fiber读取该项payload。需要重分组时先显式collect；collect展开超过4MiB则失败并保留原引用，不声称完整展开。更大的分组/投影需要后续流式引用操作，不能调大普通value上限绕过。
+
+当前限制仍明确保留：嵌套collection存入普通object字段后的typed metadata投影、streaming group/filter、完整依赖恢复尚未完成；不据此宣称全部map/循环/恢复合同通过。嵌套控制树可执行，不代表上述引用投影已经支持。
+
+本阶段14文件172项focused、Node/web types及build通过；关闭重复key预检后1项失败（已发出1次本应禁止的调用），按SHA256恢复后11项通过。首次fixture表参数、误删同内容hash的另一个artifact、回调/联合类型推断失败均保留于证据说明；未删除断言或放宽超时。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。这些是生产Runner/临时文件存储加Provider test double，不是完整App或真实账号验收。
 
 ## 控制状态持久化的当前范围
 
@@ -70,7 +89,7 @@
 
 测试注入父cursor提交失败后，首个子调用的outcome/终态帧/值仍可由独立store读取，第二个调用不执行。引用读取同时校验frame revision、resultRef和内容hash，不把未完成帧当已提交结果。省略父checkpoint的负对照使3项测试失败。
 
-**这不是M3恢复执行完成**：普通M0程序仍沿用既有任务身份/无控制帧路径；其求值也用显式栈，但本阶段持久cursor只覆盖已有framed程序。跨进程冷恢复、全部指令统一持久化、map迭代、loop carry/最佳候选、恢复调度和sibling复用仍未实现；根的已有观察式历史恢复仍不自动派发。本阶段161项Workflow回归、types/build及负对照日志保存在`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`，不冒充完整App或真实Provider验收。
+**这不是M3恢复执行完成**：普通M0程序仍沿用既有任务身份/无控制帧路径；其求值也用显式栈，但本阶段持久cursor只覆盖已有framed程序。跨进程冷恢复、全部指令统一持久化、loop carry/最佳候选、恢复调度和sibling复用仍未实现；根的已有观察式历史恢复仍不自动派发。本阶段161项Workflow回归、types/build及负对照日志保存在`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`，不冒充完整App或真实Provider验收。
 
 ## 证据
 

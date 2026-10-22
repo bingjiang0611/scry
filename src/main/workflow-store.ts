@@ -5,7 +5,8 @@ import { workflowControlCopy, workflowFrameCopy } from '../shared/constants/copy
 import { withDirectoryLock } from '../core/turn-recorder/io'
 import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
 import { assertWorkflowValue } from './workflow-expressions'
-import type { WorkflowAttemptOutcome, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
+import { collectionDescriptor, collectionEntries, validateCollectionReference } from './workflow-collections'
+import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
 import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
 
 export interface WorkflowIntent {
@@ -56,6 +57,8 @@ export interface WorkflowStore {
   loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined>
   saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference>
   loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation>
+  saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference>
+  loadCollection(workflowId: string, reference: WorkflowCollectionReference): Promise<WorkflowCollectionEntry[]>
   savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void>
   loadPlanningIntent(workflowId: string): Promise<WorkflowPlanningIntent | undefined>
   planningIntents(): AsyncIterable<WorkflowPlanningIntent>
@@ -71,13 +74,20 @@ const absent = (error: unknown) => typeof error === 'object' && error !== null &
 const MAX_RECORD_BYTES = 8 * 1024 * 1024
 const frameName = (id: string, frameId: string): string => `${fileSafe(id)}.${fileSafe(frameId)}.frame.json`
 const valueName = (reference: WorkflowValueReference): string => `${fileSafe(reference.workflowId)}.${createHash('sha256').update(fileSafe(reference.key)).digest('hex')}.${reference.hash}.value.json`
-function validateEvaluation(value: unknown): asserts value is WorkflowEvaluation {
+const collectionName = (reference: WorkflowValueReference): string => valueName(reference).replace(/\.value\.json$/, '.collection.json')
+function validateEvaluation(value: unknown, workflowId: string): asserts value is WorkflowEvaluation {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(workflowFrameCopy.invalid)
   const input = value as Record<string, unknown>
   if (!Array.isArray(input.derivedFrom) || !input.derivedFrom.every(item => typeof item === 'string' && item.length <= 512)) throw new Error(workflowFrameCopy.invalid)
-  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom'] : ['state', 'reason', 'derivedFrom']
+  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom', 'collection'] : ['state', 'reason', 'derivedFrom']
   if (Object.keys(input).some(key => !allowed.includes(key)) || (input.state === 'known' ? !Object.hasOwn(input, 'value') : input.state !== 'unknown' || typeof input.reason !== 'string' || !input.reason || input.reason.length > 4096)) throw new Error(workflowFrameCopy.invalid)
-  if (input.state === 'known') assertWorkflowValue(input.value)
+  if (input.state === 'known') {
+    assertWorkflowValue(input.value)
+    if (input.collection !== undefined) {
+      validateCollectionReference(input.collection, workflowId)
+      if (JSON.stringify(input.value) !== JSON.stringify(collectionDescriptor(input.collection))) throw new Error(workflowFrameCopy.invalid)
+    }
+  }
 }
 
 export class FileWorkflowStore implements WorkflowStore {
@@ -123,7 +133,7 @@ export class FileWorkflowStore implements WorkflowStore {
   }
 
   async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
-    validateEvaluation(evaluation)
+    validateEvaluation(evaluation, workflowId)
     const text = JSON.stringify(evaluation)
     const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
     const name = valueName(reference)
@@ -134,15 +144,36 @@ export class FileWorkflowStore implements WorkflowStore {
     }
     return reference
   }
-  async loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
+  private async readEvaluation(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
     validateWorkflowValueReference(reference, workflowId)
     const text = await this.readText(valueName(reference))
     if (text === undefined) throw new Error(workflowFrameCopy.missing)
     if (createHash('sha256').update(text).digest('hex') !== reference.hash) throw new Error(workflowFrameCopy.digest)
     const value: unknown = JSON.parse(text)
-    validateEvaluation(value)
+    validateEvaluation(value, workflowId)
     return value
   }
+  async loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
+    const value = await this.readEvaluation(workflowId, reference)
+    if (value.state === 'known' && value.collection) await this.loadCollection(workflowId, value.collection)
+    return value
+  }
+  async saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference> {
+    const data = { schemaVersion: 1, sealed, entries }
+    collectionEntries(data, workflowId, entries.length, sealed)
+    const text = JSON.stringify(data)
+    const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
+    await this.atomicText(collectionName(reference), text)
+    return { reference, count: entries.length, sealed }
+  }
+  async loadCollection(workflowId: string, reference: WorkflowCollectionReference): Promise<WorkflowCollectionEntry[]> {
+    validateCollectionReference(reference, workflowId)
+    const text = await this.readText(collectionName(reference.reference))
+    if (text === undefined) throw new Error(workflowFrameCopy.missing)
+    if (createHash('sha256').update(text).digest('hex') !== reference.reference.hash) throw new Error(workflowFrameCopy.digest)
+    return collectionEntries(JSON.parse(text) as unknown, workflowId, reference.count, reference.sealed)
+  }
+
   async loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined> {
     const frame = await this.readJson(frameName(workflowId, frameId))
     if (frame === undefined) return undefined
@@ -266,8 +297,9 @@ export class MemoryWorkflowStore implements WorkflowStore {
   private readonly planning = new Map<string, WorkflowPlanningIntent>()
   private readonly frames = new Map<string, WorkflowControlFrame>()
   private readonly values = new Map<string, WorkflowEvaluation>()
+  private readonly collections = new Map<string, string>()
   async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
-    validateEvaluation(evaluation)
+    validateEvaluation(evaluation, workflowId)
     const text = JSON.stringify(evaluation)
     const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
     this.values.set(valueName(reference), JSON.parse(text) as WorkflowEvaluation)
@@ -277,7 +309,23 @@ export class MemoryWorkflowStore implements WorkflowStore {
     validateWorkflowValueReference(reference, workflowId)
     const value = this.values.get(valueName(reference))
     if (!value) throw new Error(workflowFrameCopy.missing)
+    if (value.state === 'known' && value.collection) await this.loadCollection(workflowId, value.collection)
     return structuredClone(value)
+  }
+  async saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference> {
+    const data = { schemaVersion: 1, sealed, entries }
+    collectionEntries(data, workflowId, entries.length, sealed)
+    const text = JSON.stringify(data)
+    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
+    const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
+    this.collections.set(collectionName(reference), text)
+    return { reference, count: entries.length, sealed }
+  }
+  async loadCollection(workflowId: string, reference: WorkflowCollectionReference): Promise<WorkflowCollectionEntry[]> {
+    validateCollectionReference(reference, workflowId)
+    const text = this.collections.get(collectionName(reference.reference))
+    if (text === undefined) throw new Error(workflowFrameCopy.missing)
+    return collectionEntries(JSON.parse(text) as unknown, workflowId, reference.count, reference.sealed)
   }
   async loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined> {
     const value = this.frames.get(frameName(workflowId, frameId))

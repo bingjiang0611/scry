@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
+import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionEntry, type WorkflowScalar, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference } from '../shared/workflow'
-import { workflowFrameCopy as copy } from '../shared/constants/copy'
-import { evaluateWorkflowExpression, workflowField } from './workflow-expressions'
+import { workflowCollectionCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
+import { evaluateWorkflowExpression, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 
 export type WorkflowInterpreterState = {
@@ -22,7 +24,7 @@ const unavailable = (reason = copy.failedValue): WorkflowEvaluation => ({ state:
  * effects remain in the canonical Runner callback, with its slots and ledger. */
 export class WorkflowInterpreter {
   constructor(private readonly control: WorkflowControl, private readonly state: WorkflowInterpreterState,
-    private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>) {}
+    private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number) {}
 
   private phase(outcomes: WorkflowAttemptOutcome[], scope: WorkflowControlScope): WorkflowControlFrame['phase'] {
     return outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown') ? 'unknown'
@@ -48,9 +50,11 @@ export class WorkflowInterpreter {
           top.value = returned.value
           if (returned.reference) top.frame = await this.control.advanceSequence(top.frame, top.cursor + 1, returned.reference)
           top.cursor++
-          const halted = returned.phase !== 'completed'
+          const next = top.block.blocks[top.cursor]
+          const explicitCollect = (returned.phase === 'failed' || returned.phase === 'blocked') && returned.outcomes.every(outcome => outcome.settled) && next?.kind === 'collect' && workflowExpressionReferences(next.items).includes(top.block.blocks[top.cursor - 1].blockId)
+          const halted = returned.phase !== 'completed' && !explicitCollect
           returned = undefined
-          if (halted || this.state.stopped || top.scope.blockedReason) {
+          if (halted || this.state.stopped) {
             stack.pop()
             returned = await this.finish(top.block, top.scope, top.frame, top.value, this.phase(top.outcomes, top.scope), top.outcomes)
             continue
@@ -85,7 +89,7 @@ export class WorkflowInterpreter {
           this.state.returnNode = current.ref.nodeId
           this.state.returnPath = current.ref.path
           const source = top.scope.bindings.get(current.ref.nodeId) ?? unavailable()
-          this.state.returnValue = source.state === 'known' && current.ref.path ? workflowField(source.value, current.ref.path, source.derivedFrom) : source
+          this.state.returnValue = source.state === 'known' && current.ref.path?.length ? workflowField(source.value, current.ref.path, source.derivedFrom) : source
           if (this.control.framed && this.state.returnValue.state === 'unknown') top.scope.blockedReason = this.state.returnValue.reason
           stack.pop()
           returned = await this.finish(current, top.scope, frame, this.state.returnValue, top.scope.blockedReason ? 'blocked' : 'completed')
@@ -128,6 +132,32 @@ export class WorkflowInterpreter {
           }
           break
         }
+        case 'map': {
+          returned = await this.map(current, top.scope, frame!)
+          stack.pop()
+          break
+        }
+        case 'collect': {
+          const source = evaluateWorkflowExpression(current.items, top.scope.bindings)
+          if (source.state === 'unknown') {
+            top.scope.blockedReason = source.reason
+            returned = await this.finish(current, top.scope, frame, source, 'blocked')
+          } else {
+            const entries = await this.control.entries(source)
+            const values: WorkflowValue[] = []
+            let bytes = 2
+            for (const entry of entries) {
+              const value = await this.control.entryValue(entry)
+              if (value.state !== 'known') throw new Error(workflowCollectionCopy.invalid)
+              bytes += Buffer.byteLength(JSON.stringify(value.value)) + (values.length ? 1 : 0)
+              if (bytes > WORKFLOW_MAX_VALUE_BYTES) throw new Error(workflowCollectionCopy.payloadLimit)
+              values.push(value.value)
+            }
+            returned = await this.finish(current, top.scope, frame, { state: 'known', value: values, derivedFrom: source.derivedFrom }, 'completed')
+          }
+          stack.pop()
+          break
+        }
         case 'parallel': {
           returned = await this.fork(current, top.scope, frame)
           stack.pop()
@@ -141,6 +171,67 @@ export class WorkflowInterpreter {
     }
     if (!returned) throw new Error(copy.invalid)
     return returned
+  }
+
+  private async map(block: Extract<WorkflowBlock, { kind: 'map' }>, scope: WorkflowControlScope, frame: WorkflowControlFrame): Promise<Result> {
+    const source = evaluateWorkflowExpression(block.items, scope.bindings)
+    if (source.state === 'unknown') {
+      scope.blockedReason = source.reason
+      return this.finish(block, scope, frame, source, 'blocked')
+    }
+    const collection = source.collection ? await this.control.entries(source) : undefined
+    if (!collection && !Array.isArray(source.value)) throw new Error(workflowCollectionCopy.source)
+    if (collection && (block.key.length !== 1 || block.key[0] !== 'key')) throw new Error(workflowCollectionCopy.collectionKey)
+    const length = collection?.length ?? (source.value as WorkflowValue[]).length
+    if (length > WORKFLOW_MAX_BATCH || length > block.maxItems) throw new Error(workflowCollectionCopy.limit)
+    const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+    const keys: WorkflowScalar[] = [], labels: string[] = [], seen = new Set<string>()
+    // Validate the complete logical batch before starting any item. Collection
+    // maps retain existing logical keys; payloads are loaded only by live fibers.
+    for (let index = 0; index < length; index++) {
+      const key = collection ? { state: 'known' as const, value: collection[index].key, derivedFrom: [] } : workflowField((source.value as WorkflowValue[])[index], block.key)
+      if (key.state !== 'known' || !(key.value === null || typeof key.value === 'string' || typeof key.value === 'boolean' || (typeof key.value === 'number' && Number.isFinite(key.value)))) throw new Error(workflowCollectionCopy.key)
+      const encoded = workflowValueKey(key.value)
+      if (seen.has(encoded)) throw new Error(workflowCollectionCopy.key)
+      seen.add(encoded); keys.push(key.value)
+      labels.push(block.blockId + ':' + hash(encoded) + ':' + hash({ value: collection ? collection[index] : (source.value as WorkflowValue[])[index], sources: source.derivedFrom }))
+    }
+    frame = await this.control.freezeSource(frame, source)
+    const entries: WorkflowCollectionEntry[] = keys.map((key, index) => ({ key, index, state: 'pending', settled: false }))
+    const outcomes: WorkflowAttemptOutcome[] = []
+    const run = async (index: number): Promise<Result> => {
+      const child = this.control.child(scope, labels[index])
+      const input = collection ? await this.control.entryValue(collection[index]) : { state: 'known' as const, value: (source.value as WorkflowValue[])[index], derivedFrom: source.derivedFrom }
+      this.control.bind(child, block.item, input)
+      const result = await this.run(block.body, child)
+      const phase = result.phase
+      if (!['completed', 'failed', 'blocked', 'unknown', 'stopped'].includes(phase)) throw new Error(copy.invalid)
+      entries[index] = { key: keys[index], index, state: phase as WorkflowCollectionEntry['state'], settled: result.outcomes.every(outcome => outcome.settled),
+        ...(result.reference ? { reference: result.reference } : { error: workflowCollectionCopy.pending }) }
+      if (child.blockedReason) scope.blockedReason ??= child.blockedReason
+      return result
+    }
+    const finish = async (phase: WorkflowControlFrame['phase']) => this.finish(block, scope, frame,
+      await this.control.collection(frame, structuredClone(entries), entries.every(entry => entry.state !== 'pending' && entry.state !== 'unknown' && entry.settled)), phase, outcomes)
+    let cursor = 0
+    const active = new Set<Promise<{ index: number; result?: Result; error?: unknown }>>()
+    const admit = () => {
+      while (!this.state.stopped && cursor < length && active.size < this.parallelism()) {
+        const index = cursor++
+        active.add(run(index).then(result => ({ index, result }), (error: unknown) => ({ index, error })))
+      }
+    }
+    admit()
+    while (active.size) {
+      const next = await Promise.race([...active].map(promise => promise.then(value => ({ promise, value }))))
+      active.delete(next.promise)
+      if ('error' in next.value) { await Promise.allSettled([...active]); throw next.value.error }
+      outcomes.push(...next.value.result!.outcomes)
+      if (next.value.result!.phase === 'unknown') return finish('unknown')
+      admit()
+    }
+    const phase = this.state.stopped ? 'stopped' : entries.some(entry => entry.state === 'blocked') ? 'blocked' : entries.some(entry => entry.state !== 'completed') ? 'failed' : 'completed'
+    return finish(phase)
   }
 
   private async fork(block: Extract<WorkflowBlock, { kind: 'parallel' }>, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined): Promise<Result> {

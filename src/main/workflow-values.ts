@@ -56,6 +56,7 @@ class WorkflowValueMismatch extends Error {}
 
 function assertValue(value: unknown, schema: WorkflowValueSchema, path: string): asserts value is WorkflowValue {
   switch (schema.type) {
+    case 'collection': throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
     case 'null':
       if (value !== null) throw new WorkflowValueMismatch(copy.valueMismatch(path, schema.type))
       return

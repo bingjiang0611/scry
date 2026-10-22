@@ -325,9 +325,9 @@ export class WorkflowRunner {
           value = { state: 'known', value: data, derivedFrom: ['attempt:' + outcome.attemptId] }
         }
         return { outcome, value }
-      })
-      const { outcomes } = await interpreter.run(preview.program.body, control.root)
-      progress.state = outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : (control.root.blockedReason || outcomes.some(outcome => outcome.state === 'blocked')) ? 'blocked' : controller.stopped ? 'stopped' : outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
+      }, () => this.slots.limit)
+      const { outcomes, phase: controlPhase } = await interpreter.run(preview.program.body, control.root)
+      progress.state = controlPhase === 'unknown' || outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : (controlPhase === 'blocked' || control.root.blockedReason || outcomes.some(outcome => outcome.state === 'blocked')) ? 'blocked' : controller.stopped || controlPhase === 'stopped' ? 'stopped' : controlPhase === 'failed' || outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
       const legacyReport = controller.returnPath === undefined && controller.returnNode !== undefined ? outcomes.find(outcome =>
         outcome.nodeId === controller.returnNode && outcome.state === 'completed' && outcome.settled)?.output : undefined
       const report = legacyReport ?? (controller.returnValue?.state === 'known' ? (typeof controller.returnValue.value === 'string' ? controller.returnValue.value : JSON.stringify(controller.returnValue.value)) : undefined)

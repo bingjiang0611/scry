@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
-import type { WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowPlanPreview } from '../shared/workflow'
+import type { WorkflowBlock, WorkflowCollectionEntry, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowPlanPreview } from '../shared/workflow'
 import { workflowChildBlocks } from '../shared/workflow'
 import { workflowExpressionCopy, workflowFrameCopy } from '../shared/constants/copy'
 import { workflowExpressionReferences } from './workflow-expressions'
+import { collectionDescriptor } from './workflow-collections'
 import { workflowFrameId } from './workflow-frames'
 import type { WorkflowStore } from './workflow-store'
 
@@ -23,7 +24,7 @@ export class WorkflowControl {
     let framed = false
     while (pending.length) {
       const block = pending.pop()!
-      if (block.kind === 'bind' || block.kind === 'branch' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
+      if (block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
     this.framed = framed
@@ -50,7 +51,7 @@ export class WorkflowControl {
   }
   async enter(block: WorkflowBlock, scope: WorkflowControlScope): Promise<WorkflowControlFrame | undefined> {
     if (!this.framed) return undefined
-    const names = block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
+    const names = block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
       : block.kind === 'call' ? (block.inputRefs ?? []).map(ref => ref.nodeId) : block.kind === 'return' ? [block.ref.nodeId] : []
     return this.store.saveFrame({ schemaVersion: 1, workflowId: this.preview.workflowId, programRevision: this.preview.programRevision,
       frameId: workflowFrameId(block.blockId, scope.path), nodeId: block.blockId, scopePath: scope.path,
@@ -76,6 +77,26 @@ export class WorkflowControl {
     const result = reference ? { ...value, derivedFrom: [`value:${reference.key}:${reference.hash}`] } : value
     this.bind(scope, block.blockId, result)
     return completed
+  }
+  async freezeSource(frame: WorkflowControlFrame, value: WorkflowEvaluation): Promise<WorkflowControlFrame> {
+    const sourceRef = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'source']), value)
+    const { revision, ...input } = frame
+    return this.store.saveFrame({ ...input, sourceRef }, revision)
+  }
+  async collection(frame: WorkflowControlFrame, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowEvaluation> {
+    const collection = await this.store.saveCollection(this.preview.workflowId, digest([frame.frameId, 'entries']), entries, sealed)
+    return { state: 'known', value: collectionDescriptor(collection), collection, derivedFrom: [`collection:${collection.reference.key}:${collection.reference.hash}`] }
+  }
+  async entries(value: Extract<WorkflowEvaluation, { state: 'known' }>): Promise<WorkflowCollectionEntry[]> {
+    if (!value.collection || !value.collection.sealed) throw new Error(workflowFrameCopy.missing)
+    return this.store.loadCollection(this.preview.workflowId, value.collection)
+  }
+  async entryValue(entry: WorkflowCollectionEntry): Promise<WorkflowEvaluation> {
+    const value = entry.reference ? await this.readCommitted(entry.reference) : undefined
+    const error = entry.error ?? (value?.state === 'unknown' ? value.reason : undefined)
+    return { state: 'known', value: { key: entry.key, index: entry.index, state: entry.state, settled: entry.settled,
+      ...(value?.state === 'known' ? { value: value.value } : {}), ...(error ? { error } : {})
+    }, derivedFrom: entry.reference ? [`value:${entry.reference.resultRef.key}:${entry.reference.resultRef.hash}`] : [] }
   }
   async advanceSequence(frame: WorkflowControlFrame | undefined, cursor: number, child: WorkflowFrameReference | undefined): Promise<WorkflowControlFrame | undefined> {
     if (!frame) return undefined

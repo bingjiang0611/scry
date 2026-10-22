@@ -66,8 +66,20 @@ export const workflowExpressionCopy = {
   falseReason: 'condition_false'
 }
 
+export const workflowCollectionCopy = {
+  invalid: '工作流集合引用或清单无效',
+  unsealed: '工作流集合来源尚未封口，未继续执行',
+  key: '工作流集合 key 必须是唯一的有限标量',
+  limit: '工作流集合超过已确认的批次上限，未派发任何子项',
+  payloadLimit: '集合展开结果超过 4 MiB 上限；原始子结果引用已保留',
+  budget: '工作流最坏调用预算超出整数范围，请降低已确认批次上限',
+  source: '工作流 map 来源必须是已提交数组或受控集合引用',
+  collectionKey: '受控集合 map 必须沿用 key 字段；重分组前需显式 collect',
+  pending: '子项尚未执行或没有完整结果'
+}
+
 export const workflowFrameCopy = {
-  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、return；其他控制块暂不可用',
+  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、map、collect、return；其他控制块暂不可用',
   invalid: '工作流控制帧合同无效',
   revision: '工作流控制帧修订已变化，不能覆盖',
   identity: '工作流控制帧输入或身份已变化，不能复用旧状态',

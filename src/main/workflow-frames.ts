@@ -24,6 +24,7 @@ export function validateWorkflowFrame(value: unknown, workflowId: string, frameI
   if (value.reason !== undefined && (typeof value.reason !== 'string' || value.reason.length > 4096)) throw new Error(copy.invalid)
   if (value.decisionRef !== undefined) validateWorkflowValueReference(value.decisionRef, workflowId)
   if (value.resultRef !== undefined) validateWorkflowValueReference(value.resultRef, workflowId)
+  if (value.sourceRef !== undefined) validateWorkflowValueReference(value.sourceRef, workflowId)
   if (value.cursor !== undefined && (!Number.isSafeInteger(value.cursor) || (value.cursor as number) < 0 || (value.cursor as number) > 4096)) throw new Error(copy.invalid)
   if (value.children !== undefined) {
     if (!Array.isArray(value.children) || value.children.length > 4096 || value.cursor !== value.children.length) throw new Error(copy.invalid)

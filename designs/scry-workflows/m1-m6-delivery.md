@@ -44,7 +44,7 @@
 - 同一Runner新增CAS控制帧与内容寻址值存储，真实文件锁串行跨store竞争；选择落盘后才执行子任务，结果先落盘再推进。unknown及其他终态不可被重置覆盖。没有把这些帧当作已实现完整恢复执行；显式栈的后续进展见M3，map/loop、carry/最佳候选与sibling复用仍缺。
 - 本阶段Node24.18.0/macOS：13文件160项Workflow测试、Node/web types及build通过（focused-delivery.log/typecheck-delivery.log/build-delivery.log）。最终源码unknown→else负对照为2失败/13通过（错误completed和额外派发）；按SHA256恢复原字节后相关42项通过（restored-delivery.log）。首轮长ID临时文件超限及测试数据类型失败均保留，分别修复writer临时名和准确JSON类型，没有删断言或加超时。
 - 本阶段只读证据位置：`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。性能命令对映射的providers.catalog报告无collector，不是性能通过，也不是Runner性能证明。
-- M2剩余map/loop/collect/choose/classify等全部指令、路由/模板/发布，及M3动态执行/恢复仍未完成。继续直接实现这些目标；M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
+- map/collect后续进展见M3；M2剩余loop/choose/classify等指令、路由/模板/发布，及M3完整动态执行/恢复仍未完成。继续直接实现这些目标；M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
 
 ## M3：持久解释器与恢复
 
@@ -64,7 +64,14 @@
 - 已用唯一WorkflowInterpreter显式activation stack替换Runner递归控制求值；Native调用、预算、slots和outcome仍走原Runner，不引入第二套程序或生成JS。
 - framed sequence增加cursor与带版本的已提交child/result引用；子结果先持久化、父cursor提交成功后才进入后继。注入父提交失败，已完成首个子任务可查，第二个不发送。
 - Node24.18.0/macOS：13文件161项Workflow回归、Node/web types、build通过；省略父checkpoint负对照3失败/13通过，按SHA256恢复后16项相关测试通过。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`。
-- 仍缺普通M0程序控制帧统一、跨进程恢复、map/loop/carry/最佳候选和依赖/sibling恢复。历史unknown仍不可重发/退款。本阶段没有真实App/Provider验收，既有性能collector缺口与七项延期门禁保持未验证，不因本阶段focused通过消失。
+- map后续进展见下节；仍缺普通M0程序控制帧统一、跨进程恢复、loop/carry/最佳候选和依赖/sibling恢复。历史unknown仍不可重发/退款。本阶段没有真实App/Provider验收，既有性能collector缺口与七项延期门禁保持未验证，不因本阶段focused通过消失。
+
+### M3 动态map与受控集合进展（仍非M2/M3完成）
+
+- 同一IR/解释器新增动态map与显式collect，完整输入/稳定key/批次上限先验，受共享slots和根预算控制；已证明item内流水与跨窗口补位，不设整页barrier。
+- 宿主mint typed集合引用，manifest保存每项状态/物理settled及不可变结果引用；失败/unknown/pending不删。cold读取核对hash/workflow/count/结构。collect保留失败摘要与0值，不把unknown当空或恢复成功。
+- Node24.18.0/macOS：14文件172项focused、Node/web types、build通过；关闭重复key预检后1失败/10通过（发生本应禁止的Native test-double调用），SHA256恢复后11通过。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。
+- 仍缺嵌套collection字段的typed metadata投影、超4MiB集合的streaming group/filter、普通M0统一持久化、loop/carry/最佳候选与跨进程/依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
 
 ## M4：质量模式、检查与写入
 
