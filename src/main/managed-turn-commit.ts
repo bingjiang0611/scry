@@ -23,7 +23,7 @@ import {
 import { listFiles, readJson, withDirectoryLock, writeJsonAtomic } from '../core/turn-recorder/io.js'
 import { safeKey, stableHash } from '../core/turn-recorder/store.js'
 import {
-  upsertTraceArchiveTurn,
+  upsertTraceArchiveTurnAsync,
   findTraceArchiveTurnMatches,
   type TraceArchiveTurn
 } from './transcript-archive.js'
@@ -487,7 +487,7 @@ async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<
   return { ...input, turn: protectToolContent(turn, input.cwd) }
 }
 
-function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void {
+async function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): Promise<void> {
   const request = journal.request
   const existing = findTraceArchiveTurnMatches({
     cwd: request.cwd,
@@ -507,7 +507,7 @@ function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): void 
   if (existing.byRunId && stableHash(existing.byRunId) !== stableHash(request.turn)) {
     throw new Error(`managed recorder archive collision for ${request.turn.runId}`)
   }
-  const ok = upsertTraceArchiveTurn({
+  const ok = await upsertTraceArchiveTurnAsync({
     cwd: request.cwd,
     sessionId: request.sessionId,
     providerId: request.providerId,
@@ -598,7 +598,7 @@ async function replayJournal(
   // lifecycle that an older recovery pass discarded before preparing the canonical handoff.
   const prepared = await prepareJournalRecord(journal, waitMs, true)
   await writeJournalState(userDataDir, prepared)
-  archiveJournal(prepared, userDataDir)
+  await archiveJournal(prepared, userDataDir)
   const archiveCommitted: ManagedTurnJournal = { ...prepared, phase: 'archive_committed' }
   await writeJournalState(userDataDir, archiveCommitted)
   if (!archiveCommitted.recordId) throw new Error('managed recorder journal has no prepared record id')
@@ -696,7 +696,7 @@ export async function commitManagedTraceTurn(
         return { recorder: 'disabled' }
       }
     }
-    const ok = upsertTraceArchiveTurn({
+    const ok = await upsertTraceArchiveTurnAsync({
       cwd: input.cwd,
       sessionId: input.sessionId,
       providerId: input.providerId,
@@ -737,7 +737,7 @@ export async function commitManagedTraceTurn(
     if (!existing) await writeJsonAtomic(path, journal)
     const prepared = await prepareJournalRecord(journal, options.waitMs ?? 5_000)
     await writeJournalState(input.userDataDir, prepared)
-    archiveJournal(prepared, input.userDataDir)
+    await archiveJournal(prepared, input.userDataDir)
     const archiveCommitted: ManagedTurnJournal = { ...prepared, phase: 'archive_committed' }
     await writeJournalState(input.userDataDir, archiveCommitted)
     if (!archiveCommitted.recordId) throw new Error('managed recorder journal has no prepared record id')
