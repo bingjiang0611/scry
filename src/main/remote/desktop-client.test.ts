@@ -9,6 +9,7 @@ import { generateDesktopDeviceIdentity, desktopTlsRequest, type DesktopSshTunnel
 import { DesktopRemoteClient } from './desktop-client'
 import { createHostController } from './host-controller-factory'
 import { InnerMtlsHost } from './inner-mtls-host'
+import type { MacRunView } from './host-controller'
 import { PairingTransport } from './pairing-transport'
 import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
@@ -242,6 +243,29 @@ describe('DesktopRemoteClient', () => {
       await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-adopted' } }])
       expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
     } finally { await reloaded?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('resolves a device-started live run on the opened session to its bound trace identity', async () => {
+    const ledgerRunId = randomUUID()
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Live', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const scope = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'session-a' }
+      const live = (externalSessionId: string) => ({ origin: 'remote', runId: ledgerRunId, providerId: 'pi', cwd: '/workspace', externalSessionId, prompt: 'p', state: 'running', questions: [] })
+      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r1', runs: [live('session-a')] } })
+      fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
+      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId: ledgerRunId, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'run-phone-1' }) }] } })
+      await expect(fixture.client.liveRun(id, scope)).resolves.toEqual({ runId: ledgerRunId, origin: 'remote', state: 'running', scryRunId: 'run-phone-1' })
+      expect(fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op).slice(-3)).toEqual(['liveRuns', 'runState', 'poll'])
+      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r2', runs: [live('session-b')] } })
+      await expect(fixture.client.liveRun(id, scope)).resolves.toBeNull()
+      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r3', runs: [{ ...live('session-a'), state: 'done' }] } })
+      await expect(fixture.client.liveRun(id, scope)).rejects.toThrow('invalid_live_runs_response')
+      await expect(fixture.client.liveRun(id, { cwd: '/workspace', providerId: 'pi' })).rejects.toThrow('session_required')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
   it('lists a fresh profile without touching secure storage, and fails pairing before networking when encryption fails', async () => {
@@ -738,6 +762,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(imageBytes)
     let receivedImage: string | undefined
     let liveRun: ActiveRun | null = null
+    let hostUiRuns: MacRunView[] = []
     let outputReads: MockInstance | undefined
     const binding = await createHostController({
       stateDirectory: directory,
@@ -772,6 +797,8 @@ describe('DesktopRemoteClient over real host TLS', () => {
       listProviders: () => [{ id: 'claude', label: 'Claude', available: true }],
       listSessions: () => [{ sessionId: 'session-real', externalSessionId: 'session-real', providerId: 'claude', cwd: '/workspace', label: 'real', ts: Date.now() }],
       sessionCatalogRevision: () => 'revision-real',
+      // A run typed on the host's own UI: the desktop client has no receipt for it.
+      macRuns: { list: () => hostUiRuns, stop: () => false, answer: () => false },
       readDesktop: createDesktopHostReader({
         userDataDir: directory, hostId: () => identity.hostId, authorizeWorkspace: cwd => cwd,
         authorizeSession: (context) => {
@@ -826,6 +853,15 @@ describe('DesktopRemoteClient over real host TLS', () => {
       await expect(client.catalog(pending.connection.id)).resolves.toMatchObject({ projects: catalog.projects })
       expect(wire.filter((request) => (request as { operation?: string }).operation?.startsWith('pair.'))).toHaveLength(pairingRequests)
       await expect(client.history(pending.connection.id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' })).resolves.toMatchObject({ turns: [] })
+      const sessionContext = { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' }
+      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toBeNull()
+      hostUiRuns = [
+        { runId: 'run-other-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-other', prompt: 'other', questions: [], stopping: false },
+        { runId: 'run-hostui-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-real', prompt: '继续', questions: [], stopping: false }
+      ]
+      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
+      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' })).resolves.toBeNull()
+      hostUiRuns = []
       if (!captureFailure) {
         const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
         const text = '中文🙂\"\n'.repeat(400_000)

@@ -55,7 +55,7 @@ const state = {
   intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
-  catalogFailure: false, sessionActive: false, sessionTs: 1700000000000,
+  catalogFailure: false, sessionActive: false, sessionTs: 1700000000000, hostRunArchived: false, liveRunCalls: 0,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
   phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
@@ -177,6 +177,8 @@ const api = {
     if (${openingOnly || measureOpening}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
       { id: 'opening-answer', runId: 'opening-history', ts: '2026-10-19T12:00:00.000Z', kind: 'model', stage: 'text', text: Array.from({ length: 80 }, (_, i) => 'Remote history paragraph ' + i).join('\\n\\n') }
     ] }], hasOlder: false, source: 'trace_archive', status: 'available' }
+    // A run typed on the host's own UI becomes history once it leaves the live set.
+    if (state.hostRunArchived && context.externalSessionId === 'old-native') return { turns: [{ ...activeRun('run-hostui-1', 'old-native', 'host ui continue'), done: true }], hasOlder: false, source: 'trace_archive', status: 'available' }
     const turns = ${composerHistoryOnly} && context.externalSessionId === 'old-native'
       ? state.historyPrompts.map((userText, index) => ({ runId: 'history-' + index, userText, items: [], done: true }))
       : state.firstIntentCleared && context.externalSessionId === 'native-session'
@@ -191,6 +193,7 @@ const api = {
     if (runId === firstScryRun && state.firstIntentCleared) throw new Error('terminal trace unavailable')
     if (runId === firstScryRun) return activeRun(firstScryRun, 'native-session', 'first remote run', question)
     if (runId === secondScryRun) return activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
+    if (runId === 'run-hostui-1') return activeRun('run-hostui-1', 'old-native', 'host ui continue')
     return null
   },
   async intents() {
@@ -225,6 +228,11 @@ const api = {
     }
     if (runId === firstLedger) return { state: 'dispatched', scryRunId: firstScryRun, externalSessionId: 'native-session', detail: 'fixture dispatched' }
     return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', detail: 'fixture background work' }
+  },
+  // Host-UI run on old-native: present only while the catalog marks it active.
+  async liveRun(_id, context) {
+    state.liveRunCalls++
+    return state.sessionActive && context.externalSessionId === 'old-native' ? { runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' } : null
   },
   async stop(_id, runId) { state.stopCalls.push(runId) },
   async answer(_id, runId, response) { state.answerCalls.push({ runId, response }); state.answerFailure = true; throw new Error('remote answer rejected') },
@@ -460,6 +468,9 @@ async function exercise(contents, pointer, capture, options) {
     await click('.sb-activity [data-remote-session="old-native"]')
     await wait(remoteShown, 'activity selection opens the owning remote session')
     check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'Activity selection executed a turn')
+    // The run was started on the host UI: no receipt here, yet the open session follows it.
+    await wait('document.querySelector(".chat-transcript")?.textContent.includes("host ui continue")', 'host-started run streams into the opened remote session')
+    check((await fixture()).intentsCalls > 0 && (await fixture()).liveRunCalls > 0, 'Foreign run was not discovered through the host live set')
     await capture('remote-activity-tab')
     await read('window.desktopRemoteFixture.catalogFailure = true')
     await wait('!document.querySelector(".sb-activity [data-remote-session=old-native]")', 'failed catalog removes cached live activity')
@@ -467,8 +478,10 @@ async function exercise(contents, pointer, capture, options) {
     await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "unknown"', 'failed catalog read invalidates live activity')
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Stale catalog still claimed a running remote session')
     check(await read('document.querySelector(".sb-remote-proj [data-remote-session=old-native]") != null'), 'Catalog failure discarded remote history')
-    await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false')
+    const historyReads = (await fixture()).historyCalls.length
+    await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false; window.desktopRemoteFixture.hostRunArchived = true')
     await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog polling recovers')
+    await wait(`window.desktopRemoteFixture.historyCalls.length > ${historyReads} && document.querySelector(".chat-transcript")?.textContent.includes("host ui continue")`, 'ended host run is re-read as history')
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
     await click('.sb-view-tabs [role=tab]', '动态')
     check(!await read('document.querySelector(".sb-activity [data-remote-session]")'), 'Idle remote history was guessed to be completed')

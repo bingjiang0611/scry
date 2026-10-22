@@ -131,7 +131,7 @@ const desktopChannels = {
   catalog: 'desktopRemote:catalog', commands: 'desktopRemote:commands', sessionAction: 'desktopRemote:sessionAction', directories: 'desktopRemote:directories', selectDirectory: 'desktopRemote:selectDirectory', history: 'desktopRemote:history', trace: 'desktopRemote:trace',
   forkSession: 'desktopRemote:forkSession', deleteSession: 'desktopRemote:deleteSession',
   intents: 'desktopRemote:intents', submit: 'desktopRemote:submit', intentStatus: 'desktopRemote:intentStatus',
-  runStatus: 'desktopRemote:runStatus', stop: 'desktopRemote:stop', answer: 'desktopRemote:answer',
+  runStatus: 'desktopRemote:runStatus', liveRun: 'desktopRemote:liveRun', stop: 'desktopRemote:stop', answer: 'desktopRemote:answer',
   files: 'desktopRemote:files', file: 'desktopRemote:file', workbench: 'desktopRemote:workbench'
 } as const satisfies Record<keyof ScryApi['desktopRemote'], string>
 
