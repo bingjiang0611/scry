@@ -14,6 +14,7 @@ export const TOOL_PANEL_PROVIDER_ROWS = 12
 export const TOOL_PANEL_HISTORY_ROWS = 200
 export const TOOL_PANEL_RUNNING_ROWS = 20
 export const TOOL_PANEL_MCP_TARGETS = 40
+export const TOOL_PANEL_FINDING_ROWS = 20
 
 export interface ToolPanelTokenTotals {
   costUsd: number | null
@@ -65,14 +66,33 @@ export interface ToolPanelLlm {
   }
 }
 
+export interface ToolPanelMcpFinding {
+  id: string
+  title: string
+  severity: string
+  confidence: string
+  decision: string
+  ruleId: string
+  targets: string[]
+  recommendation: string
+}
+
+export interface ToolPanelMcpScan {
+  status: 'pass' | 'warn' | 'block' | null
+  summary: { critical: number; high: number; medium: number; low: number; info: number } | null
+  findings: ToolPanelMcpFinding[]
+  findingsTruncated: boolean
+}
+
 export interface ToolPanelMcp {
   providerId: string
   configured: Array<{ name: string; scope: string; transport: string; enabled: boolean; targetId?: string }>
   runtime: Array<{ name: string; status: string; tools?: number }> | null
   configuredTruncated: boolean
   runtimeTruncated: boolean
-  /** The phone never triggers an MCP scan, so findings are absent by construction. */
-  findingsUnavailable: string
+  /** A read-only static scan. Absent with a reason when the host cannot scan. */
+  scan?: ToolPanelMcpScan
+  scanUnavailable?: string
 }
 
 export interface ToolPanelPayload {
@@ -175,7 +195,57 @@ export function shapeLlmPanel(history: LlmPerformanceHistory, running: LlmPerfor
   }
 }
 
-export function shapeMcpPanel(providerId: string, snapshot: McpSnapshot, now = Date.now()): ToolPanelPayload {
+const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+// The scan report carries evidence paths, key names and hashes. The phone gets
+// only what a reader needs to judge the finding, never that evidence.
+export function shapeMcpScan(raw: unknown): ToolPanelMcpScan | undefined {
+  const report = record(raw)
+  const summary = record(report?.summary)
+  if (!report || !Array.isArray(report.findings) || !summary) return undefined
+  const counts = {
+    critical: Number(summary.critical ?? 0), high: Number(summary.high ?? 0), medium: Number(summary.medium ?? 0),
+    low: Number(summary.low ?? 0), info: Number(summary.info ?? 0)
+  }
+  const status = ['pass', 'warn', 'block'].includes(String(summary.status)) ? String(summary.status) as 'pass' | 'warn' | 'block' : null
+  const findings = report.findings.flatMap((entry): ToolPanelMcpFinding[] => {
+    const finding = record(entry)
+    const rule = record(finding?.rule)
+    const policy = record(finding?.policy)
+    if (!finding || !rule || !policy) return []
+    const severity = String(finding.severity)
+    if (!SEVERITIES.includes(severity as (typeof SEVERITIES)[number])) return []
+    const targets = Array.isArray(finding.affectedTargets)
+      ? finding.affectedTargets.flatMap((target) => {
+        const value = record(target)
+        return typeof value?.targetId === 'string' ? [value.targetId] : []
+      })
+      : []
+    return [{
+      id: typeof finding.findingInstanceId === 'string' ? finding.findingInstanceId : String(rule.id ?? 'finding'),
+      title: typeof finding.title === 'string' ? finding.title.slice(0, 200) : String(rule.id ?? 'finding'),
+      severity,
+      confidence: typeof finding.confidence === 'string' ? finding.confidence : 'possible',
+      decision: String(policy.decision ?? 'pass'),
+      ruleId: String(rule.id ?? ''),
+      targets: targets.slice(0, 8),
+      recommendation: typeof finding.recommendation === 'string' ? finding.recommendation.slice(0, 400) : ''
+    }]
+  })
+  return {
+    status,
+    summary: counts,
+    findings: findings.slice(0, TOOL_PANEL_FINDING_ROWS),
+    findingsTruncated: findings.length > TOOL_PANEL_FINDING_ROWS
+  }
+}
+
+export function shapeMcpPanel(providerId: string, snapshot: McpSnapshot, now = Date.now(),
+                              scan?: ToolPanelMcpScan, scanUnavailable?: string): ToolPanelPayload {
   const configured = snapshot.configured ?? []
   const runtime = snapshot.runtime
   return {
@@ -197,7 +267,8 @@ export function shapeMcpPanel(providerId: string, snapshot: McpSnapshot, now = D
       })),
       configuredTruncated: configured.length > TOOL_PANEL_MCP_TARGETS,
       runtimeTruncated: runtime != null && runtime.length > TOOL_PANEL_MCP_TARGETS,
-      findingsUnavailable: '手机端不触发 MCP 扫描；风险发现在 Mac 上读取'
+      ...(scan ? { scan } : {}),
+      ...(scanUnavailable ? { scanUnavailable } : {})
     }
   }
 }

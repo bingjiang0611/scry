@@ -390,17 +390,86 @@ struct ToolPanelView: View {
           }
         }
       }
-      VStack(alignment: .leading, spacing: 6) {
-        Text(ConnectionCopy.mcpFindings).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
-        Text(mcp.findingsUnavailable).font(.system(size: 12)).foregroundStyle(Palette.faint)
-        Text(ConnectionCopy.mcpReadOnly).font(.system(size: 11)).foregroundStyle(Palette.faint)
-      }
+      findings(mcp)
+      Text(ConnectionCopy.mcpScanNote).font(.system(size: 11)).foregroundStyle(Palette.faint)
+      Text(ConnectionCopy.mcpReadOnly).font(.system(size: 11)).foregroundStyle(Palette.faint)
       if mcp.configuredTruncated || mcp.runtimeTruncated {
         Text(ConnectionCopy.rowsLimited(mcp.configured.count)).font(.system(size: 10)).foregroundStyle(Palette.faint)
       }
     } else {
       Notice(text: ConnectionCopy.unavailable, warning: true)
+    }
+  }
+
+  @ViewBuilder private func findings(_ mcp: G0Transport.ToolPanelPayload.Mcp) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(ConnectionCopy.mcpFindings).font(.system(size: 11, weight: .bold)).tracking(0.6)
+        .foregroundStyle(Palette.muted)
+      if let scan = mcp.scan {
+        if let summary = scan.summary {
+          HStack(spacing: 6) {
+            severityChip("critical", count: summary.critical)
+            severityChip("high", count: summary.high)
+            severityChip("medium", count: summary.medium)
+            severityChip("low", count: summary.low)
+            severityChip("info", count: summary.info)
+          }
+        }
+        if scan.findings.isEmpty {
+          Text(ConnectionCopy.mcpNoFindings).font(.system(size: 12)).foregroundStyle(Palette.faint)
+        } else {
+          ForEach(scan.findings, id: \.id) { finding in
+            VStack(alignment: .leading, spacing: 3) {
+              HStack(spacing: 6) {
+                Text(ConnectionCopy.mcpSeverity(finding.severity))
+                  .font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.surface)
+                  .padding(.horizontal, 6).frame(minHeight: 18)
+                  .background(severityColor(finding.severity), in: Capsule())
+                Text(finding.title).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Palette.ink)
+                  .lineLimit(2)
+                Spacer(minLength: 0)
+              }
+              Text("\(finding.ruleId) · \(ConnectionCopy.mcpDecision(finding.decision))")
+                .font(.system(size: 10.5)).foregroundStyle(Palette.muted)
+              if !finding.targets.isEmpty {
+                Text(finding.targets.joined(separator: " · ")).font(.system(size: 10.5))
+                  .foregroundStyle(Palette.faint).lineLimit(1)
+              }
+              if !finding.recommendation.isEmpty {
+                Text(finding.recommendation).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(3)
+              }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+          }
+          if scan.findingsTruncated {
+            Text(ConnectionCopy.rowsLimited(scan.findings.count)).font(.system(size: 10)).foregroundStyle(Palette.faint)
+          }
+        }
+      } else {
+        Text(mcp.scanUnavailable ?? ConnectionCopy.mcpScanUnavailable)
+          .font(.system(size: 12)).foregroundStyle(Palette.faint)
+      }
+    }
+  }
+
+  private func severityChip(_ severity: String, count: Int) -> some View {
+    HStack(spacing: 3) {
+      Text(ConnectionCopy.mcpSeverity(severity)).font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(count > 0 ? Palette.ink : Palette.faint)
+      Text("\(count)").font(.system(size: 10, weight: .bold))
+        .foregroundStyle(count > 0 ? severityColor(severity) : Palette.faint)
+    }
+    .padding(.horizontal, 6).frame(minHeight: 20)
+    .background(Palette.message, in: Capsule())
+  }
+
+  private func severityColor(_ severity: String) -> Color {
+    switch severity {
+    case "critical": return Palette.negative
+    case "high": return Palette.amber
+    case "medium": return Palette.warnInk
+    default: return Palette.muted
     }
   }
 }

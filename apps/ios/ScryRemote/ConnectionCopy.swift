@@ -339,6 +339,29 @@ enum ConnectionCopy {
   static let mcpScan = "扫描当前 MCP"
   static let mcpNoFindings = "这次扫描没有发现风险项"
   static let mcpReadOnly = "手机只读：信任与策略在 Mac 上修改。"
+  static let mcpScanNote = "只有刷新会重新做一次静态只读扫描；不连接服务器，也不授权任何配置。"
+  static let mcpScanUnavailable = "这次没有可读的扫描报告"
+  static let mcpSeverityCritical = "严重"
+  static let mcpSeverityHigh = "高"
+  static let mcpSeverityMedium = "中"
+  static let mcpSeverityLow = "低"
+  static let mcpSeverityInfo = "提示"
+  static func mcpSeverity(_ value: String) -> String {
+    switch value {
+    case "critical": return mcpSeverityCritical
+    case "high": return mcpSeverityHigh
+    case "medium": return mcpSeverityMedium
+    case "low": return mcpSeverityLow
+    default: return mcpSeverityInfo
+    }
+  }
+  static func mcpDecision(_ value: String) -> String {
+    switch value {
+    case "block": return "策略拦截"
+    case "warn": return "策略警告"
+    default: return "策略放行"
+    }
+  }
   static let panelStale = "这次读取较旧，可能已变化"
   static let panelMacOnly = "这项操作只能在 Mac 上完成"
   static let panelLoadFailed = "这次读取失败"

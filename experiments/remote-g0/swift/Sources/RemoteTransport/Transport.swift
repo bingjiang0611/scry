@@ -1153,10 +1153,26 @@ public enum G0Transport {
     public struct McpRuntime: Decodable, Sendable, Equatable {
       public let name: String; public let status: String; public let tools: Int?
     }
+    public struct McpFinding: Decodable, Sendable, Equatable {
+      public let id: String; public let title: String; public let severity: String
+      public let confidence: String; public let decision: String; public let ruleId: String
+      public let targets: [String]; public let recommendation: String
+    }
+    public struct McpScan: Decodable, Sendable, Equatable {
+      public let status: String?; public let summary: Summary?
+      public let findings: [McpFinding]; public let findingsTruncated: Bool
+      public struct Summary: Decodable, Sendable, Equatable {
+        public let critical: Int; public let high: Int; public let medium: Int
+        public let low: Int; public let info: Int
+      }
+    }
     public struct Mcp: Decodable, Sendable, Equatable {
       public let providerId: String; public let configured: [McpTarget]
       public let runtime: [McpRuntime]?; public let configuredTruncated: Bool
-      public let runtimeTruncated: Bool; public let findingsUnavailable: String
+      public let runtimeTruncated: Bool
+      // A read-only static scan. Absent (with a reason) when the Mac could not run one.
+      public let scan: McpScan?
+      public let scanUnavailable: String?
     }
   }
 

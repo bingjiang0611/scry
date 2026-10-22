@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  shapeAnalyticsPanel, shapeLlmPanel, shapeMcpPanel, TOOL_PANEL_HISTORY_ROWS, TOOL_PANEL_MODEL_ROWS
+  shapeAnalyticsPanel, shapeLlmPanel, shapeMcpPanel, shapeMcpScan,
+  TOOL_PANEL_FINDING_ROWS, TOOL_PANEL_HISTORY_ROWS, TOOL_PANEL_MODEL_ROWS
 } from './tool-panel'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from './llm-performance'
 import type { McpSnapshot } from './provider'
@@ -78,7 +79,37 @@ describe('tool panel shaping', () => {
     expect(missing.llm?.history.rows[0].firstTokenMs).toBeNull()
   })
 
-  it('passes MCP configured/runtime through and states that findings need a Mac scan', () => {
+  it('shapes MCP findings without leaking evidence paths or key names', () => {
+    const scan = shapeMcpScan({
+      summary: { critical: 1, high: 2, medium: 0, low: 0, info: 0, status: 'block' },
+      findings: [
+        { findingInstanceId: 'f1', title: '未固定版本', severity: 'critical', confidence: 'high',
+          rule: { id: 'mcpguard/unpinned-package' }, policy: { decision: 'block' },
+          affectedTargets: [{ targetId: 't1', role: 'subject' }], recommendation: '固定版本',
+          evidence: [{ path: '/Users/me/.claude.json', keyName: 'GITHUB_TOKEN', snippetHash: 'abc' }] },
+        { findingInstanceId: 'f2', title: '未知严重度', severity: 'unknown', confidence: 'low',
+          rule: { id: 'r' }, policy: { decision: 'warn' }, affectedTargets: [] }
+      ]
+    })
+    expect(scan?.status).toBe('block')
+    expect(scan?.summary).toEqual({ critical: 1, high: 2, medium: 0, low: 0, info: 0 })
+    expect(scan?.findings).toHaveLength(1)
+    expect(JSON.stringify(scan)).not.toContain('/Users/me/.claude.json')
+    expect(JSON.stringify(scan)).not.toContain('GITHUB_TOKEN')
+    expect(shapeMcpScan({ summary: { status: 'pass' } })).toBeUndefined()
+  })
+
+  it('caps MCP findings and marks the truncation', () => {
+    const findings = Array.from({ length: TOOL_PANEL_FINDING_ROWS + 3 }, (_, index) => ({
+      findingInstanceId: `f${index}`, title: `finding-${index}`, severity: 'high', confidence: 'high',
+      rule: { id: 'r' }, policy: { decision: 'warn' }, affectedTargets: []
+    }))
+    const scan = shapeMcpScan({ summary: { critical: 0, high: 23, medium: 0, low: 0, info: 0, status: 'warn' }, findings })
+    expect(scan?.findings).toHaveLength(TOOL_PANEL_FINDING_ROWS)
+    expect(scan?.findingsTruncated).toBe(true)
+  })
+
+  it('passes MCP configured/runtime through and keeps an absent scan explicit', () => {
     const snapshot: McpSnapshot = {
       configured: [{ name: 'fs', scope: 'user', transport: 'stdio', detail: 'npx', enabled: true, targetId: 't1' }],
       runtime: [{ name: 'fs', status: 'connected', tools: 4 }]
@@ -87,7 +118,10 @@ describe('tool panel shaping', () => {
     expect(panel.mcp?.providerId).toBe('claude')
     expect(panel.mcp?.configured[0]).toMatchObject({ name: 'fs', enabled: true, targetId: 't1' })
     expect(panel.mcp?.runtime?.[0]).toEqual({ name: 'fs', status: 'connected', tools: 4 })
-    expect(panel.mcp?.findingsUnavailable).toContain('Mac')
+    // No scan evidence stays absent with a reason, never "no findings".
+    expect(panel.mcp?.scan).toBeUndefined()
+    expect(shapeMcpPanel('claude', snapshot, 1, undefined, '这次没有生成可读的扫描报告').mcp?.scanUnavailable)
+      .toBe('这次没有生成可读的扫描报告')
     // No live status is not "disconnected": the panel keeps null.
     expect(shapeMcpPanel('claude', { configured: [], runtime: null }).mcp?.runtime).toBeNull()
   })
