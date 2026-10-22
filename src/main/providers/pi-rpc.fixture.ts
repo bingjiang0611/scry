@@ -72,13 +72,25 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
       send({ type: 'extension_ui_request', id: 'persisted', method: 'setStatus', statusKey: 'persisted', text: 'Persisted' })
       return
     }
-    if (command.message === 'background-child' || command.message === 'background-cleared') {
-      const snapshot = (state) => send({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async',
+    if (command.message === 'background-child' || command.message.startsWith('background-cleared')) {
+      const snapshot = (state, id = 'child-1') => send({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async',
         widgetLines: ['PI_SUBAGENT_ASYNC_JSON:' + JSON.stringify({ kind: 'pi-subagents.async-status-snapshot', version: 1,
           generatedAt: Date.now(), omitted: { runs: 0, children: 0, byteLimitExceeded: false },
-          runs: [{ id: 'child-1', kind: 'subagent', label: 'worker', state }] })] })
+          runs: [{ id, kind: 'subagent', label: 'worker', state }] })] })
       snapshot('running')
-      if (command.message === 'background-cleared') {
+      if (command.message === 'background-cleared-resume' || command.message === 'background-cleared-new-child') {
+        // Clear while the parent is active, then wake it without resurrecting the
+        // old child. A later child's widget must not restore that old ownership.
+        send({ type: 'extension_ui_request', method: 'setWidget', widgetKey: 'subagent-async' })
+        send({ type: 'agent_start' })
+        if (command.message === 'background-cleared-new-child') {
+          snapshot('running', 'child-2')
+          snapshot('complete', 'child-2')
+          send({ type: 'message_end', message: { role: 'custom', customType: 'subagent-notify', content: 'New child finished' } })
+        }
+        send({ type: 'agent_end', messages: [] })
+        send({ type: 'agent_settled' })
+      } else if (command.message === 'background-cleared') {
         send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'Work wrapped up' }], stopReason: 'stop' } })
         send({ type: 'agent_end', messages: [] })
         send({ type: 'agent_settled' })

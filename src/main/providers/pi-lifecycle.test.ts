@@ -67,12 +67,12 @@ describe('Pi startup and probe lifecycle', () => {
     })
   })
 
-  it('settles a run when the extension clears async evidence after native idle', async () => {
+  it.each(['background-cleared', 'background-cleared-resume', 'background-cleared-new-child'])('settles after cleared async evidence without reviving stale cards: %s', async (prompt) => {
     await withProbeFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const events: TraceEvent[] = []
       const handle = adapter.run({
-        runId: 'background-cleared', prompt: 'background-cleared', cwd, agentProfileId: profile.id,
+        runId: 'background-cleared', prompt, cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit(event) { events.push(event) }
       })
       onTestFailed(() => {
@@ -83,11 +83,18 @@ describe('Pi startup and probe lifecycle', () => {
         }))
       })
       try {
-        // Native idle alone keeps the run owned; the extension's clear ends observation.
+        // Check the production RPC/event path, not just the state machine: clear,
+        // parent wakeup and a different child's updates must all reach the UI honestly.
         await expect(handle.promise).resolves.toMatchObject({ status: 'completed' })
-        expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+        const work = events.flatMap(event => event.backgroundWork ? [event.backgroundWork] : [])
+        expect(work.at(-1)).toMatchObject({
           phase: 'inactive', tasks: [{ taskId: 'child-1', status: 'unconfirmed' }]
         })
+        const cleared = work.findIndex(snapshot => snapshot.phase === 'inactive')
+        expect(cleared).toBeGreaterThanOrEqual(0)
+        for (const snapshot of work.slice(cleared)) {
+          expect(snapshot.tasks.find(task => task.taskId === 'child-1')?.status).toBe('unconfirmed')
+        }
         expect(events.some(event => event.stage === 'result')).toBe(true)
       } finally {
         handle.forceKill?.()
