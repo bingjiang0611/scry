@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -363,6 +363,56 @@ describe('transcript archive mirror', () => {
     await expect(readTraceArchiveAsync(args)).resolves.toMatchObject({ turns: [{ runId: 'async-run' }] })
   })
 
+  it('cold archive indexing writes one base index, then reads unchanged and changed metadata without opening every sidecar', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/base-index', sessionId: 'base-index', providerId: 'codex' as const, userDataDir }
+    for (let index = 0; index < 400; index++) {
+      expect(upsertTraceArchiveTurn({ ...args, turn: { runId: `run-${index}`, userText: `turn ${index}`, items: [], done: true, ts: index + 1 } })).toBe(true)
+    }
+    rmSync(join(userDataDir, 'trace-archive-metadata-v1'), { recursive: true, force: true })
+    const indexPath = `${dirname(traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'run-0' }))}.index-v1.json`
+    await expect(readTraceArchivePageAsync(args, { limit: 40 })).resolves.toMatchObject({
+      readMode: 'index_rebuild', totalTurns: 400, turnFilesRead: 400
+    })
+    expect(existsSync(indexPath)).toBe(true)
+    expect(existsSync(join(userDataDir, 'trace-archive-metadata-v1'))).toBe(false)
+    const indexStamp = statSync(indexPath)
+    await expect(readTraceArchivePageAsync(args, { limit: 40 })).resolves.toMatchObject({
+      readMode: 'indexed', totalTurns: 400, turnFilesRead: 40
+    })
+    expect(statSync(indexPath).mtimeMs).toBe(indexStamp.mtimeMs)
+
+    expect(upsertTraceArchiveTurn({ ...args, turn: { runId: 'run-399', userText: 'changed', items: [], done: true, ts: 400 } })).toBe(true)
+    await expect(readTraceArchivePageAsync(args, { limit: 40 })).resolves.toMatchObject({
+      readMode: 'indexed', totalTurns: 400, turnFilesRead: 40,
+      archive: { turns: expect.arrayContaining([expect.objectContaining({ runId: 'run-399', userText: 'changed' })]) }
+    })
+    await expect(readTraceArchiveMetadataAsync(args)).resolves.toMatchObject({
+      turns: expect.arrayContaining([expect.objectContaining({ runId: 'run-399', userText: 'changed' })])
+    })
+  })
+
+  it('valid JSON base index with an omitted entry recovers the canonical entry', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/omitted-index-entry', sessionId: 'omitted-index-entry', providerId: 'codex' as const, userDataDir }
+    for (let index = 0; index < 3; index++) {
+      expect(upsertTraceArchiveTurn({ ...args, turn: { runId: `run-${index}`, userText: `turn ${index}`, items: [], done: true, ts: index + 1 } })).toBe(true)
+    }
+    const segmentPath = traceArchiveTurnPath(userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'run-0' })
+    const indexPath = `${dirname(segmentPath)}.index-v1.json`
+    await readTraceArchivePageAsync(args, { limit: 3 })
+    const index = JSON.parse(readFileSync(indexPath, 'utf8'))
+    index.entries = index.entries.filter((entry: { runId: string }) => entry.runId !== 'run-1')
+    writeFileSync(indexPath, JSON.stringify(index))
+    await expect(readTraceArchivePageAsync(args, { limit: 3 })).resolves.toMatchObject({
+      totalTurns: 3, archive: { turns: [
+        { runId: 'run-0' }, { runId: 'run-1' }, { runId: 'run-2' }
+      ] }
+    })
+  })
+
   it('完整 TraceEvent archive 按 session 持久化并按 runId 覆盖同一轮', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
@@ -572,7 +622,7 @@ describe('transcript archive mirror', () => {
     await expect(readTraceArchivePageAsync(
       { cwd, sessionId, providerId: 'codex', userDataDir },
       { limit: 1 }
-    )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 6, archive: { turns: [{ runId: 'run-0', ts: 99 }] } })
+    )).resolves.toMatchObject({ totalTurns: 6, turnFilesRead: 1, archive: { turns: [{ runId: 'run-0', ts: 99 }] } })
 
     writeFileSync(indexPath, '{broken')
     await expect(readTraceArchivePageAsync(
