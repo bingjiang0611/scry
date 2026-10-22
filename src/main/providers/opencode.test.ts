@@ -61,6 +61,59 @@ import {
 } from './opencode-server'
 
 describe('OpenCode provider adapter', () => {
+  it('measures the fixed three-read idle-retention workload', async () => {
+    vi.useFakeTimers()
+    const repo = await mkdtemp(join(tmpdir(), 'scry-opencode-retention-'))
+    const client = {
+      v2: { skill: { list: vi.fn(async () => ({ data: [] })) } }
+    } as unknown as OpencodeClient
+    const state = {
+      cwd: repo,
+      mcpFingerprint: 'none',
+      projectFingerprint: 'project',
+      projectContentFingerprint: 'content',
+      projectPluginFingerprint: 'none',
+      url: 'http://127.0.0.1:12345',
+      client,
+      // The frozen workload mocks only the ready native state; no CLI is launched.
+      process: { exitCode: null, signalCode: null }
+    } as OpenCodeServerState & { process: { exitCode: null; signalCode: null } }
+    const start = vi.spyOn(
+      OpenCodeServerManager.prototype as unknown as {
+        start: (projection: OpenCodeProjectProjection, generation: number) => Promise<OpenCodeServerState>
+      },
+      'start'
+    ).mockImplementation(async function (this: OpenCodeServerManager, projection) {
+      const ready = {
+        ...state,
+        cwd: projection.cwd,
+        projectFingerprint: projection.fingerprint,
+        projectContentFingerprint: projection.contentFingerprint
+      }
+      ;(this as unknown as { active: typeof ready }).active = ready
+      return ready
+    })
+    const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockResolvedValue()
+    const adapter = createOpenCodeAdapter()
+    try {
+      const read = () => adapter.skills!.list({ providerId: 'opencode', cwd: repo })
+      await read()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await read()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await read()
+      // Counter is actual production manager starts; the client/CLI boundary is mocked.
+      expect(start).toHaveBeenCalledTimes(3)
+      expect(close).toHaveBeenCalledTimes(2)
+    } finally {
+      await adapter.dispose?.()
+      start.mockRestore()
+      close.mockRestore()
+      await rm(repo, { recursive: true, force: true })
+      vi.useRealTimers()
+    }
+  })
+
   it('forwards only local api/oauth credentials and drops wellknown remote configuration auth', () => {
     expect(sanitizeOpenCodeAuth({
       anthropic: { type: 'api', key: 'api-key' },
