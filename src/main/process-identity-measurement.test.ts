@@ -49,7 +49,7 @@ interface Measurement {
 async function collect(provider: Measurement['provider']): Promise<Measurement> {
   const providerStart = calls.process.length
   for (let sample = 0; sample < 3; sample += 1) {
-    const child = spawn('/bin/sh', ['-c', 'sleep 2'], { detached: true, stdio: 'ignore' })
+    const child = spawn(process.execPath, ['-e', 'process.stdin.resume()'], { detached: true, stdio: ['pipe', 'ignore', 'ignore'] })
     try {
       const identity = await Promise.resolve(captureProcessIdentity(child.pid))
       expect(identity?.pid).toBe(child.pid)

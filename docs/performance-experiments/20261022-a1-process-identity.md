@@ -7,7 +7,7 @@
 
 ## Reproducible L1 collector
 
-`src/main/process-identity-measurement.test.ts` starts `/bin/sh -c 'sleep 2'` as a detached child for three Claude-labelled and three Qoder-labelled spawn-equivalent samples. It calls the production `captureProcessIdentity(child.pid)` with its default lister. A pass-through `node:child_process` mock records the real executable, argv, whether the call is full-table or target-PID, and returned row count. The child group is killed and its exit is awaited before the fixture is cleaned up.
+`src/main/process-identity-measurement.test.ts` starts `node -e 'process.stdin.resume()'` with an open stdin pipe as a detached child for three Claude-labelled and three Qoder-labelled spawn-equivalent samples. It calls the production `captureProcessIdentity(child.pid)` with its default lister. A pass-through `node:child_process` mock records the real executable, argv, whether the call is full-table or target-PID, and returned row count. The child group is killed and its exit is awaited before the fixture is cleaned up.
 
 Run:
 
@@ -19,12 +19,14 @@ The same test file was copied into an isolated worktree at `bf92d04` for the bas
 
 ```text
 baseline bf92d04: 6 execFileSync /bin/ps calls; 6 full-table calls using
-  [-axo, pid=,ppid=,stat=,lstart=,command=]; returned 714–717 rows each;
+  [-axo, pid=,ppid=,stat=,lstart=,command=]; returned 720–725 rows each in the final event-driven fixture run;
   Claude 3 calls, Qoder 3 calls.
 candidate: 6 execFile /bin/ps calls; 6 target calls using
   [-o, pid=,ppid=,stat=,lstart=,command=, -p, <child pid>]; returned 1 row each;
   Claude 3 calls, Qoder 3 calls.
 ```
+
+The final fixture uses stdin readiness to keep its child alive, not a sleep or an enlarged timeout. Against original `bf92d04`, the new Claude stop tests fail 6 of 9 cases, including an unchecked child-handle SIGKILL for unknown identity. This negative control ran only against mocked child signalling; the real measurement child was stopped and its exit awaited.
 
 The collector therefore measures the actual default implementation on both sides. It does not inject the baseline full-table lister into the candidate, and it does not include elapsed-time samples.
 
