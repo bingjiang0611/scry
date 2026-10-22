@@ -42,6 +42,7 @@ import { RemotePromptQueueStore, remoteQueueKey } from '../remote-prompt-queue'
 import type { SlashCmd } from '@shared/trace'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
+import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
 import { ChatView } from './ChatView'
 import { bridge, defaultOption, desktopProviderKey, historyTurns, RemoteFiles, shouldQueryUnknownIntent } from './DesktopRemote'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
@@ -228,6 +229,7 @@ export function RemoteChat({
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
   const pollInFlight = useRef(false)
+  const pollRef = useRef<(() => Promise<void>) | undefined>(undefined)
   const adoptingSession = useRef(false)
   const adoptedIntent = useRef<DesktopRemoteIntent | undefined>()
   const draftKey = remoteDraftKey(connectionId, cwd, sessionId)
@@ -472,9 +474,15 @@ export function RemoteChat({
       } catch (reason) { if (!cancelled && sequence === pollSequence.current) setPollError(errorText(reason)) }
       finally { pollInFlight.current = false }
     }
-    void poll(); const timer = window.setInterval(() => { void poll() }, 1500)
-    return () => { cancelled = true; pollSequence.current += 1; window.clearInterval(timer) }
+    pollRef.current = poll
+    if (!document.hidden) void poll()
+    return () => {
+      cancelled = true
+      pollSequence.current += 1
+      if (pollRef.current === poll) pollRef.current = undefined
+    }
   }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive])
+  useVisibilityPolling(`remote-chat:${connectionId}:${cwd}`, () => pollRef.current?.(), 1500)
 
   const runControlCatalog = useMemo(() => remoteRunControlCatalog(controlProvider, host), [host, controlProvider])
   const chosenModel = controlProvider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))

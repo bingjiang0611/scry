@@ -8,6 +8,7 @@ import { RemoteConnectionsSettings } from './HostsView'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { ModalFrame } from './Modals'
+import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
 
 // Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
 // data: URL, no innerHTML). The QR encodes only what the code already contains.
@@ -54,11 +55,7 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
     } finally { reading.current = false }
   }, [])
 
-  useEffect(() => {
-    void refresh()
-    const timer = setInterval(() => { void refresh() }, 2000)
-    return () => clearInterval(timer)
-  }, [refresh])
+  useVisibilityPolling('remote-pairing', refresh, 2000)
 
   const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true); setError(null)

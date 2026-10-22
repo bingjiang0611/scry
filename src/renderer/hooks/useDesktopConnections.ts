@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from 'react'
 import type { DesktopRemoteConnection } from '@shared/desktop-remote'
+import { useVisibilityPolling } from './useVisibilityPolling'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 
 type Snapshot = { connections: DesktopRemoteConnection[]; loaded: boolean; error: string | null }
 let snapshot: Snapshot = { connections: [], loaded: false, error: null }
 const listeners = new Set<() => void>()
-let timer: ReturnType<typeof setInterval> | undefined
 let revision = 0
 
 // Main owns persisted identities and SSH state. This is only a shared projection:
@@ -25,18 +25,16 @@ export async function refreshDesktopConnections(): Promise<void> {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
-  if (listeners.size === 1) {
-    void refreshDesktopConnections()
-    timer = setInterval(() => { void refreshDesktopConnections() }, 3000)
-  }
   return () => {
     listeners.delete(listener)
-    if (listeners.size === 0) { clearInterval(timer); revision += 1 }
+    if (listeners.size === 0) revision += 1
   }
 }
 const getSnapshot = (): Snapshot => snapshot
 export function useDesktopConnections(): Snapshot {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const result = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  useVisibilityPolling('desktop-connections', refreshDesktopConnections, 3000)
+  return result
 }
 
 export function desktopConnectionLabel(connection: DesktopRemoteConnection, error: string | null): string {

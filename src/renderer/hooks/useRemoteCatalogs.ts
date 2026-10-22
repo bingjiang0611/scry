@@ -1,5 +1,6 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
 import type { DesktopRemoteCatalog, DesktopRemoteConnection } from '@shared/desktop-remote'
+import { useVisibilityPolling } from './useVisibilityPolling'
 
 // One host catalog per saved connection, shared by the sidebar, location picker,
 // hosts page and remote conversation. The catalog is a host snapshot: it is kept
@@ -64,15 +65,8 @@ export function useRemoteCatalogs(): Snapshot {
 // A failed read retains history, but its error invalidates live activity badges.
 export function useConnectedCatalogLoader(connections: readonly DesktopRemoteConnection[], readError: string | null): void {
   const connectedIds = readError ? '' : connections.filter(connection => connection.state === 'connected').map(connection => connection.id).join('\u0000')
-  useEffect(() => {
+  useVisibilityPolling('remote-catalogs', () => {
     const connected = new Set(connectedIds ? connectedIds.split('\u0000') : [])
-    const refresh = (): void => {
-      for (const id of connected) {
-        if (!snapshot.get(id)?.loading) void refreshRemoteCatalog(id)
-      }
-    }
-    refresh()
-    const timer = window.setInterval(refresh, 3000)
-    return () => { window.clearInterval(timer) }
-  }, [connectedIds])
+    return Promise.all(Array.from(connected, id => snapshot.get(id)?.loading ? undefined : refreshRemoteCatalog(id))).then(() => {})
+  }, 3000)
 }
