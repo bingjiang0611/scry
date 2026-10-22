@@ -2155,7 +2155,12 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
     const userDataDir = app.getPath('userData')
     const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
-    const archiveProfile = typeof payload.agentProfileId === 'string' ? { agentProfileId: payload.agentProfileId } : {}
+    // Pi/Rotom resume the whole native session via --session, even when older
+    // turns came from another launcher or predate Profile provenance. Keep each
+    // turn's evidence unchanged; only non-Pi providers use a Profile-scoped read.
+    const archiveProfile = payload.providerId !== 'pi' && typeof payload.agentProfileId === 'string'
+      ? { agentProfileId: payload.agentProfileId }
+      : {}
     const fp =
       payload.providerId === 'claude' && cwd
         ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })

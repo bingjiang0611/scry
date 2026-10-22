@@ -154,7 +154,7 @@ async function main() {
     assert.ok(statSync(nativePath).size > 64 * 1024 * 1024)
     writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
       sessionId: nativeSessionId, externalSessionId: nativeSessionId, runId: 'remote-run-fixture-1',
-      providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace,
+      providerId: 'pi', agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace,
       preview: '手机会话恢复测试', ts: Date.now()
     }]))
   }
@@ -443,7 +443,7 @@ async function main() {
         message: { role: 'assistant', content: [{ type: 'text', text: nativeHistoryPerformanceOnly ? `${'reply'.repeat(410)}-${i}` : `continued reply ${i}` }] } })
     }
     appendFileSync(nativePath, '\n' + entries.map(entry => JSON.stringify(entry)).join('\n'))
-    const context = { providerId: 'pi', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
+    const context = { providerId: 'pi', agentProfileId: 'pi:rotom', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
     if (nativeHistoryPerformanceOnly) {
       const hash = value => createHash('sha256').update(value).digest('hex')
       const dir = join(userDataDir, 'trace-archive-turns-v1', 'pi', `cwd-${hash(canonicalWorkspace)}`, `sid-${hash(nativeSessionId)}`)
@@ -565,8 +565,39 @@ async function main() {
     assert.equal(fallbackOlder.turns[0].runId, 'archive-only-early')
     assert.equal(fallbackOlder.turns[0].attachments[0].dataBase64, png)
     assert.equal(fallbackOlder.sourceComplete, false)
+    // Pi and Rotom share native --session history. A launch Profile is not a
+    // filter on the session's older turns, including legacy unknown provenance.
+    rmSync(nativePath)
+    rmSync(archivePath)
+    rmSync(segmentDir, { recursive: true })
+    mkdirSync(segmentDir, { recursive: true })
+    for (let i = 0; i < 55; i++) {
+      const runId = `shared-session-${i}`
+      const agentProfileId = i < 9 ? undefined : i % 2 ? 'pi:default' : 'pi:rotom'
+      writeFileSync(join(segmentDir, `turn-${hash(`run\0${runId}`)}.json`), JSON.stringify({
+        version: 3, cwd: canonicalWorkspace, sessionId: nativeSessionId, providerId: 'pi', runtimeProvider: 'pi_rpc',
+        turns: [{ runId, agentProfileId, ts: 100 + i, userText: `shared prompt ${i}`, done: true, items: [] }]
+      }))
+    }
+    // Reopen too: the second read exercises the persisted index rather than only its rebuild.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const latest = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 40 })`)
+      assert.equal(latest.totalTurns, 55)
+      assert.equal(latest.turns.length, 40)
+      assert.equal(latest.turns[0].runId, 'shared-session-15')
+      assert.equal(latest.turns.at(-1).runId, 'shared-session-54')
+      assert.equal(latest.sourceComplete, true)
+      const older = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 15, limit: 40 })`)
+      assert.equal(older.totalTurns, 55)
+      assert.deepEqual(older.turns.map(turn => turn.runId), Array.from({ length: 15 }, (_, i) => `shared-session-${i}`))
+      assert.equal(older.hasOlder, false)
+    }
+    const savedTurns = readdirSync(segmentDir).map(file => JSON.parse(readFileSync(join(segmentDir, file), 'utf8')).turns[0])
+    assert.equal(savedTurns.filter(turn => !Object.hasOwn(turn, 'agentProfileId')).length, 9, 'history loading must not invent legacy Profile provenance')
+    assert.equal(savedTurns.filter(turn => turn.agentProfileId === 'pi:default').length, 23)
+    assert.equal(savedTurns.filter(turn => turn.agentProfileId === 'pi:rotom').length, 23)
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
-    console.log('Pi native history: real IPC verifies 43-turn interleaving, older canonical tools/usage/attachments and native-only prefix without Provider execution')
+    console.log('Pi native history: real UI/IPC verifies named-Profile native restore, mixed/unknown Profile history, archive-only 55-turn pagination/reopen and unchanged provenance without Provider execution')
     cdp.close()
     return
   }

@@ -31,6 +31,7 @@ import {
 
 const fixtureSource = `#!/usr/bin/env node
 require('node:fs').appendFileSync(process.cwd() + '/fixture-starts', String(process.pid) + '\\n')
+require('node:fs').writeFileSync(process.cwd() + '/fixture-argv.json', JSON.stringify(process.argv.slice(2)))
 if (process.argv.includes('--approve') || process.argv.includes('--no-approve')) {
   process.stderr.write('Scry must not override Pi project trust')
   process.exit(64)
@@ -1478,6 +1479,26 @@ describe('Pi RPC Provider', () => {
       ]))
     })
   }, 15_000)
+
+  it.each(['fixture-pi', 'rotom'])('cold-resumes an existing native session through --session with %s', async (executableName) => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      try {
+        await expect(adapter.run({
+          runId: 'cold-resume', prompt: 'continue existing history', cwd, resume: 'pi-session-1',
+          agentProfileId: profile.id, attachments: [], permissionMode: 'full_access', emit: vi.fn()
+        }).promise).resolves.toMatchObject({ externalSessionId: 'pi-session-1', status: 'completed' })
+        const argv: string[] = JSON.parse(readFileSync(join(cwd, 'fixture-argv.json'), 'utf8'))
+        const sessionFlag = argv.indexOf('--session')
+        expect(sessionFlag).toBeGreaterThanOrEqual(0)
+        expect(argv[sessionFlag + 1]).toBe('pi-session-1')
+        expect(argv.filter(arg => arg === '--session')).toHaveLength(1)
+        expect(argv).not.toContain('--no-session')
+      } finally {
+        await adapter.dispose?.()
+      }
+    }, executableName)
+  })
 
   it('reuses a settled Rotom RPC across turns and invalidates it with the session context', async () => {
     await withRotomFixture(async (profile, cwd) => {
