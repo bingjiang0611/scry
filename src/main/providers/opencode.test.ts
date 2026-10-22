@@ -65,7 +65,7 @@ describe('OpenCode provider adapter', () => {
     vi.useFakeTimers()
     const repo = await mkdtemp(join(tmpdir(), 'scry-opencode-retention-'))
     const client = {
-      v2: { skill: { list: vi.fn(async () => ({ data: [] })) } }
+      v2: { model: { list: vi.fn(async () => ({ data: [] })) } }
     } as unknown as OpencodeClient
     const state = {
       cwd: repo,
@@ -97,7 +97,7 @@ describe('OpenCode provider adapter', () => {
     const close = vi.spyOn(OpenCodeServerManager.prototype, 'close').mockResolvedValue()
     const adapter = createOpenCodeAdapter()
     try {
-      const read = () => adapter.skills!.list({ providerId: 'opencode', cwd: repo })
+      const read = () => adapter.runControls!.read({ providerId: 'opencode', cwd: repo })
       await read()
       await vi.advanceTimersByTimeAsync(60_000)
       await read()
@@ -106,7 +106,9 @@ describe('OpenCode provider adapter', () => {
       // Counter is actual production manager starts; the client/CLI boundary is mocked.
       expect(start).toHaveBeenCalledTimes(1)
       expect(close).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(90_000)
+      await vi.advanceTimersByTimeAsync(89_999)
+      expect(close).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
       expect(close).toHaveBeenCalledOnce()
     } finally {
       await adapter.dispose?.()
