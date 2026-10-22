@@ -30,6 +30,10 @@ The collector therefore measures the actual default implementation on both sides
 
 The earlier committed `samplesMs` values and any timings collected without the `timing-run.mjs` host lock are unlocked historical timings. They are not valid L2 evidence and must not be used as a user-timing claim. This follow-up reports only the reproducible L1 work/count change. No timing run was needed.
 
+## Additional abort gate
+
+Parent review found that Claude's native `spawn({ signal })` would let Node send SIGTERM before identity capture completed. The spawn callback now registers an abort listener through the same verified-identity gate as force-kill, removes it on child exit, and rechecks child exit state after awaiting capture. Pending/rejected/unknown capture, already-exited children, and resolved abort/force-kill paths have focused production-runner coverage. Qoder uses its explicit abort hook, now awaited through the identity Promise.
+
 ## Guardrails
 
 - `readProcessSnapshot` full-table diagnostics remain out of scope.

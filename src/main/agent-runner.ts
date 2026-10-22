@@ -295,6 +295,16 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   // 显式传完整登录环境，修 launchd 启动的打包 app spawn claude 时 "Not logged in"。
   if (opts.env) options.env = opts.env
   if (opts.settingSources?.length) options.settingSources = opts.settingSources
+  const signalSpawnedChild = (child: ChildProcessWithoutNullStreams, identityPromise: Promise<ProcessIdentity | undefined>, signal: NodeJS.Signals): void => {
+    void (async () => {
+      let identity: ProcessIdentity | undefined
+      try { identity = await identityPromise } catch { return }
+      if (!identity?.startedAt || process.platform === 'win32' || child.exitCode !== null || child.signalCode !== null) return
+      try { signalProcessTreeWithIdentity({ identity, signal }) } catch {
+        // Failed verification must not fall back to an unchecked child/PID signal.
+      }
+    })()
+  }
   options.spawnClaudeCodeProcess = (spawnOptions: {
     command: string
     args: string[]
@@ -306,12 +316,18 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       cwd: spawnOptions.cwd,
       env: spawnOptions.env,
       detached: process.platform !== 'win32',
-      signal: spawnOptions.signal,
       stdio: ['pipe', 'pipe', 'pipe']
     })
     spawnedChild = child
     // 立刻异步采集身份；强杀前等待它完成，避免 PID/PGID 复用时误杀其他进程组。
-    spawnedIdentityPromise = captureProcessIdentity(child.pid)
+    const identityPromise = captureProcessIdentity(child.pid)
+    spawnedIdentityPromise = identityPromise
+    // Node's native spawn(signal) kills the child without identity verification.
+    // Use the same fail-closed gate for SDK abort as for the force-kill control.
+    const abort = (): void => signalSpawnedChild(child, identityPromise, 'SIGTERM')
+    spawnOptions.signal.addEventListener('abort', abort, { once: true })
+    child.once('exit', () => spawnOptions.signal.removeEventListener('abort', abort))
+    if (spawnOptions.signal.aborted) abort()
     return child
   }
   options.strictMcpConfig = true
@@ -420,21 +436,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     const child = spawnedChild
     const identityPromise = spawnedIdentityPromise
     if (!child || child.exitCode !== null || child.signalCode !== null || !identityPromise) return
-    void (async () => {
-      let identity: ProcessIdentity | undefined
-      try {
-        identity = await identityPromise
-      } catch {
-        return
-      }
-      // 身份未知、超时或采集失败时 fail closed：不发任何信号，也不绕过校验直接操作 child 句柄。
-      if (!identity?.startedAt || process.platform === 'win32') return
-      try {
-        signalProcessTreeWithIdentity({ identity, signal: 'SIGKILL' })
-      } catch {
-        // 复核失败或 ps 不可用时保持 fail closed，不发送直接 fallback 信号。
-      }
-    })()
+    signalSpawnedChild(child, identityPromise, 'SIGKILL')
   }
 
   const promise = (async () => {
