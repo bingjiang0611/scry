@@ -22,7 +22,12 @@ function detail(result: WorkspaceDiffState): string {
     deadline: 'Git 采集超时',
     git_error: 'Git 采集失败',
     no_baseline: '缺少 Git 比较基线',
-    request_failed: '无法读取工作区改动'
+    request_failed: '无法读取工作区改动',
+    workspace_limit: '工作区改动超出只读统计上限',
+    workspace_attributes: 'Git 属性或换行转换不支持只读统计，无法准确统计',
+    workspace_file_type: '未跟踪路径包含不支持的文件类型，无法准确统计',
+    workspace_index: '工作区使用 assume-unchanged 或 skip-worktree，无法准确统计',
+    workspace_submodule: '子模块改动不支持只读统计，无法准确统计'
   }
   return reasons[result.reason]
 }
@@ -43,6 +48,10 @@ export const workspaceDiffCopy = {
   invalidDirectory: '无效的工作目录',
   heading: 'Changes',
   overviewHeading: '工作区未提交改动（vs HEAD）',
+  freshness: (result: WorkspaceDiffState, refreshing: boolean): string => {
+    const source = result?.collectedAt ? `来源 ${new Date(result.collectedAt).toLocaleTimeString()}` : ''
+    return refreshing ? (source ? `刷新中 · ${source}` : '刷新中') : source
+  },
   binary: 'binary',
   scope: '当前工作树对比 HEAD（含未跟踪新文件，不含 ignored）· 含本会话之外的改动 · check=结构化文件工具足迹内 · alert=未被结构化文件工具记录',
   label,

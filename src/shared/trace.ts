@@ -113,9 +113,10 @@ export interface DiffFile {
 export type TurnDiffStatus = 'captured' | 'unavailable' | 'timeout' | 'failed'
 export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error' | 'no_baseline'
 
-export type WorkspaceDiffResult =
+export type WorkspaceDiffResult = (
   | { status: 'captured'; files: DiffFile[] }
-  | { status: Exclude<TurnDiffStatus, 'captured'>; reason: TurnDiffReason | 'request_failed'; files: [] }
+  | { status: Exclude<TurnDiffStatus, 'captured'>; reason: TurnDiffReason | 'request_failed' | 'workspace_limit' | 'workspace_attributes' | 'workspace_file_type' | 'workspace_index' | 'workspace_submodule'; files: [] }
+) & { collectedAt?: string }
 
 // Diff 快照的四个 harness stage。`*_preview` 是运行中的临时快照（同一 Git capture 的非消费式重算），
 // 终态 `turn_diff` / `session_diff` 一到达就在展示上取代它，且不写入会话 archive。

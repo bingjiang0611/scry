@@ -1099,7 +1099,9 @@ async function main() {
     }
     return { result, rejected }
   })()`)
-  assert.deepEqual(gitBoundary, {
+  assert.match(gitBoundary.result.collectedAt, /^\d{4}-\d{2}-\d{2}T/)
+  const { collectedAt: _collectedAt, ...gitBoundaryResult } = gitBoundary.result
+  assert.deepEqual({ ...gitBoundary, result: gitBoundaryResult }, {
     result: { status: 'unavailable', reason: 'not_git', files: [] },
     rejected: [true, true, true, true]
   })

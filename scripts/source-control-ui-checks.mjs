@@ -84,6 +84,17 @@ export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remot
   await click(visible('button.sb-sess'))
   await open()
 
+  // Batch C: the real preload/main read-only API must include untracked content
+  // without changing the user's index, not just return a visually plausible list.
+  const indexBeforeNumstat = readFileSync(join(workspace, '.git/index'))
+  const workspaceNumstat = await evaluate(`window.scry.gitDiff(${JSON.stringify(workspace)})`)
+  assert.equal(workspaceNumstat.status, 'captured')
+  assert.match(workspaceNumstat.collectedAt, /^\d{4}-\d{2}-\d{2}T/)
+  assert.deepEqual(workspaceNumstat.files.find(file => file.path.endsWith('/selected.txt')), {
+    path: join(workspace, 'selected.txt'), added: 1, deleted: 0
+  })
+  assert.deepEqual(readFileSync(join(workspace, '.git/index')), indexBeforeNumstat)
+
   // Reproduce the original dead end: no index entries and an unrelated pre-push hook.
   assert.equal(git('diff', '--cached', '--name-only'), '')
   await click(button('提交改动…'))

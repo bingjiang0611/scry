@@ -716,6 +716,7 @@ export interface OverviewPanelProps {
   stats: DbStats | null
   runtimeProvider?: RuntimeProvider
   gitDiff?: WorkspaceDiffResult | null
+  gitDiffRefreshing?: boolean
   busy?: boolean
   onSelect: (ev: TraceEvent) => void
   onOpenTurn?: (runId: string, ev?: TraceEvent | null, target?: 'turn' | 'event') => void
@@ -734,6 +735,7 @@ function OverviewPanelBody({
   selected,
   runtimeProvider,
   gitDiff,
+  gitDiffRefreshing = false,
   busy = false,
   onSelect,
   onOpenTurn,
@@ -1790,12 +1792,13 @@ function OverviewPanelBody({
             <div className="panel-section">
               <h4>
                 {workspaceDiffCopy.overviewHeading}
-                <span className="more" role="status" data-evidence={gitDiff?.status ?? 'pending'} title={workspaceDiffCopy.detail(gitDiff)}>
+                <span className="more" role="status" data-evidence={gitDiffRefreshing ? 'refreshing' : gitDiff?.status ?? 'pending'} title={workspaceDiffCopy.detail(gitDiff)}>
                   {gitDiff?.status === 'captured' && diffFiles.length
                     ? workspaceDiffCopy.totals(diffFiles.length, diffAdd, diffDel)
                     : workspaceDiffCopy.label(gitDiff)}
                 </span>
               </h4>
+              <div className="psrc" role="status">{workspaceDiffCopy.freshness(gitDiff, gitDiffRefreshing)}</div>
               {diffFiles.map((d) => (
                 <div className="gdrow" key={d.path} title={d.path}>
                   <span className={`gd-mark ${touched.has(d.path) ? 'gd-add' : 'gd-del'}`}>

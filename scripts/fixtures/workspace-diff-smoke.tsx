@@ -16,7 +16,7 @@ window.scry = {
   gitDiff: async () => {
     if (mode === 'reject') throw new Error('fixture: IPC rejected')
     if (mode === 'pending') return new Promise<WorkspaceDiffResult>((resolve) => { release = resolve })
-    if (mode === 'dirty') return { status: 'captured', files: [{ path: '/fixture/a.ts', added: 5, deleted: 2 }] }
+    if (mode === 'dirty') return { status: 'captured', collectedAt: '2026-10-22T12:00:00Z', files: [{ path: '/fixture/a.ts', added: 5, deleted: 2 }] }
     if (mode === 'unavailable') return { status: 'unavailable', reason: 'not_git', files: [] }
     if (mode === 'timeout') return { status: 'timeout', reason: 'deadline', files: [] }
     return { status: 'captured', files: [] }
@@ -43,12 +43,12 @@ function Fixture() {
   return <>
     <nav>{controls.map((control) => <button key={control} id={`diff-${control}`} onClick={() => change(control)}>{control}</button>)}</nav>
     <section id="diff-summary">
-      <PinnedSummary cwd={cwd} gitDiff={integrations.gitDiff} turns={[]} busy={false} temporary={false}
+      <PinnedSummary cwd={cwd} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} turns={[]} busy={false} temporary={false}
         expandedSections={new Set()} onDismiss={() => undefined} onToggleSection={() => undefined}
         onOpenCall={() => undefined} onOpenAgents={() => undefined} onOpenChanges={() => undefined} />
     </section>
     <section id="diff-overview">
-      <OverviewPanel turns={[{ runId: 'fixture', userText: '', done: true, items: [] }]} selected={null} usage={null} stats={null} gitDiff={integrations.gitDiff} onSelect={() => undefined} />
+      <OverviewPanel turns={[{ runId: 'fixture', userText: '', done: true, items: [] }]} selected={null} usage={null} stats={null} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} onSelect={() => undefined} />
     </section>
     <pre id="diff-report">{buildSessionReport([], integrations.gitDiff)}</pre>
   </>

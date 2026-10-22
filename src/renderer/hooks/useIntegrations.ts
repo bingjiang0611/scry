@@ -560,8 +560,10 @@ export function useIntegrations(
   const [billingFixtureLoading, setBillingFixtureLoading] = useState(false)
   const [mcpGuardReportsByCwd, setMcpGuardReportsByCwd] = useState<Record<string, McpGuardReport>>({})
   const [mcpGuardScanning, setMcpGuardScanning] = useState(false)
-  // undefined: no workspace; null: a fresh capture is in flight.
+  // Keep same-workspace evidence visible during refresh; never reuse it across cwd.
   const [gitDiff, setGitDiff] = useState<WorkspaceDiffResult | null>()
+  const [gitDiffRefreshing, setGitDiffRefreshing] = useState(false)
+  const gitDiffCwdRef = useRef<string | null>(null)
   const cwdRef = useRef(cwd)
   const gitDiffRequestSeq = useRef(0)
   const usageRequestSeq = useRef(0)
@@ -769,19 +771,29 @@ export function useIntegrations(
 
   const loadGitDiff = useCallback((dir = cwdRef.current): void => {
     const seq = ++gitDiffRequestSeq.current
+    const sameWorkspace = gitDiffCwdRef.current === dir
+    gitDiffCwdRef.current = dir
     if (dir && typeof window.scry.gitDiff === 'function') {
-      setGitDiff(null)
+      if (!sameWorkspace) setGitDiff(null)
+      setGitDiffRefreshing(true)
       window.scry
         .gitDiff(dir)
         .then((diff) => {
-          if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) setGitDiff(diff)
+          if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) {
+            setGitDiff(diff)
+            setGitDiffRefreshing(false)
+          }
         })
         .catch(() => {
           if (seq === gitDiffRequestSeq.current && cwdRef.current === dir) {
             setGitDiff({ status: 'failed', reason: 'request_failed', files: [] })
+            setGitDiffRefreshing(false)
           }
         })
-    } else setGitDiff(dir ? { status: 'unavailable', reason: 'request_failed', files: [] } : undefined)
+    } else {
+      setGitDiff(dir ? { status: 'unavailable', reason: 'request_failed', files: [] } : undefined)
+      setGitDiffRefreshing(false)
+    }
   }, [])
 
   const refreshSkills = useCallback(async (): Promise<void> => {
@@ -1275,7 +1287,8 @@ export function useIntegrations(
     billingFixtureLoading,
     mcpGuardReport,
     mcpGuardScanning,
-    gitDiff,
+    gitDiff: gitDiffCwdRef.current === cwd ? gitDiff : undefined,
+    gitDiffRefreshing: gitDiffCwdRef.current === cwd && gitDiffRefreshing,
     rescan,
     agentsScanError,
     detectionRetrying: agentsScanning || runControlsRefreshing,

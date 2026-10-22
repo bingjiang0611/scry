@@ -24,6 +24,7 @@ export type PinnedSummarySection = 'inventory' | 'web' | 'agents'
 export interface PinnedSummaryProps {
   cwd: string | null
   gitDiff: WorkspaceDiffResult | null | undefined
+  gitDiffRefreshing?: boolean
   turns: Turn[]
   busy: boolean
   temporary: boolean
@@ -126,6 +127,7 @@ export function PinnedSummary(props: PinnedSummaryProps) {
 function PinnedSummaryBody({
   cwd,
   gitDiff,
+  gitDiffRefreshing = false,
   turns,
   busy,
   temporary,
@@ -188,7 +190,8 @@ function PinnedSummaryBody({
           >
             <span className="pinned-summary-row-icon"><Icon name="diff" /></span>
             <span className="pinned-summary-row-main">{workspaceDiffCopy.heading}</span>
-            <span className="pinned-summary-row-value" role="status" data-evidence={gitDiff?.status ?? 'pending'}>
+            <span className="pinned-summary-row-value" role="status" data-evidence={gitDiffRefreshing ? 'refreshing' : gitDiff?.status ?? 'pending'}>
+              <span className="dim">{workspaceDiffCopy.freshness(gitDiff, gitDiffRefreshing)}</span>
               {gitDiff?.status === 'captured' && files.length ? <>
                 <span className="additions">+{additions.toLocaleString()}</span><span className="deletions">−{deletions.toLocaleString()}</span>
               </> : workspaceDiffCopy.label(gitDiff)}

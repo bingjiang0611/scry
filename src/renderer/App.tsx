@@ -2706,6 +2706,7 @@ export function App() {
           visible={(view === 'chat' || view === 'conversation') && summaryVisible}
           cwd={cwd}
           gitDiff={integrations.gitDiff}
+          gitDiffRefreshing={integrations.gitDiffRefreshing}
           turns={displayedTurns}
           busy={displayedBusy}
           temporary={!summaryPersistent}
@@ -2785,6 +2786,7 @@ export function App() {
                   stats={integrations.stats}
                   runtimeProvider={panelRuntimeProvider}
                   gitDiff={integrations.gitDiff}
+                  gitDiffRefreshing={integrations.gitDiffRefreshing}
                   busy={session.busy}
                   onSelect={session.setSelected}
                   onOpenTurn={openTurnInChat}

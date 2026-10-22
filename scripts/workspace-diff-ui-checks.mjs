@@ -31,8 +31,7 @@ export async function exerciseWorkspaceDiff(contents) {
     ['dirty', 'captured', '+5'],
     ['unavailable', 'unavailable', '不可用'],
     ['timeout', 'timeout', '采集超时'],
-    ['reject', 'failed', '采集失败'],
-    ['pending', 'pending', '采集中']
+    ['reject', 'failed', '采集失败']
   ]) {
     await click(`#diff-${mode}`)
     await wait(state(status, text))
@@ -40,6 +39,22 @@ export async function exerciseWorkspaceDiff(contents) {
       throw new Error('Missing Git evidence was exported as a clean workspace')
     }
   }
+  await click('#diff-dirty')
+  await wait(state('captured', '+5'))
+  await click('#diff-pending')
+  await wait(state('refreshing', '+5'))
+  await wait(`['#diff-summary', '#diff-overview'].every(selector => {
+    const text = document.querySelector(selector).textContent;
+    return text.includes('刷新中') && text.includes('来源');
+  }) && document.querySelector('#diff-overview .gd-path')?.textContent === 'a.ts'`)
+  // A later same-cwd reply wins even if the earlier request finishes last.
+  await click('#diff-clean')
+  await wait(state('captured', '无改动'))
+  await click('#diff-release')
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  if (!(await read(state('captured', '无改动')))) throw new Error('Out-of-order same-workspace reply replaced the latest result')
+  await click('#diff-pending')
+  await wait(state('refreshing', '无改动'))
   await click('#diff-switch')
   await wait(state('captured', '无改动'))
   await click('#diff-release')
@@ -48,5 +63,5 @@ export async function exerciseWorkspaceDiff(contents) {
   if (!(await read(state('captured', '无改动')))) throw new Error('Stale Git reply replaced the current workspace')
   await click('#diff-unbind')
   await wait(`!document.querySelector('#diff-summary [role="status"]') && !document.querySelector('#diff-overview [data-evidence]')`)
-  return { clean: true, dirty: true, unavailable: true, timeout: true, ipcRejection: true, pending: true, staleReplyRejected: true, unbound: true, nativeInput: true }
+  return { clean: true, dirty: true, unavailable: true, timeout: true, ipcRejection: true, refreshRetainsEvidence: true, sourceTime: true, sameWorkspaceReplyOrdered: true, staleReplyRejected: true, unbound: true, nativeInput: true }
 }

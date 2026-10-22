@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { gitNumstat, registerGitDiffIpc } from './git'
+import { readWorkspaceNumstat, registerGitDiffIpc } from './git'
 import { registerTrustedIpcHandler } from './ipc-trust'
 import { knownProjectDirectory } from './workspace-authorization'
 
-vi.mock('../core/turn-recorder/git.js', () => ({ gitNumstat: vi.fn() }))
+vi.mock('../core/turn-recorder/git.js', () => ({ readWorkspaceNumstat: vi.fn() }))
 
 const roots: string[] = []
 afterEach(async () => {
@@ -16,6 +16,34 @@ afterEach(async () => {
 })
 
 describe('registered workspace Git diff boundary', () => {
+  it('coalesces canonical aliases only while in flight and reauthorizes every caller', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-git-ipc-flight-'))
+    roots.push(root)
+    const alias = join(root, 'alias')
+    const approved = join(root, 'approved')
+    await mkdir(approved)
+    await symlink(approved, alias)
+    const canonical = await realpath(approved)
+    const authorize = vi.fn((cwd: string) => knownProjectDirectory(cwd, [approved]))
+    let handler!: (event: IpcMainInvokeEvent, cwd: unknown) => unknown
+    registerGitDiffIpc((_channel, listener) => { handler = listener }, authorize)
+    let finish!: (value: { status: 'captured'; files: [] }) => void
+    const capture = vi.mocked(readWorkspaceNumstat)
+    capture.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const event = {} as IpcMainInvokeEvent
+    const first = handler(event, approved)
+    const second = handler(event, alias)
+    await vi.waitFor(() => expect(capture).toHaveBeenCalledExactlyOnceWith(canonical))
+    finish({ status: 'captured', files: [] })
+    expect(await first).toEqual(await second)
+    expect(authorize).toHaveBeenCalledTimes(2)
+    capture.mockResolvedValueOnce({ status: 'failed', reason: 'git_error', files: [] })
+    expect(await handler(event, approved)).toMatchObject({ status: 'failed' })
+    capture.mockResolvedValueOnce({ status: 'captured', files: [] })
+    expect(await handler(event, approved)).toMatchObject({ status: 'captured' })
+    expect(capture).toHaveBeenCalledTimes(3)
+  })
+
   it('checks sender, payload and canonical project authority before Git capture', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-git-ipc-'))
     roots.push(root)
@@ -36,7 +64,7 @@ describe('registered workspace Git diff boundary', () => {
     }, (cwd) => knownProjectDirectory(cwd, [approved]))
     const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent
     const invoke = async (cwd: unknown, sender = event): Promise<unknown> => handler(sender, cwd)
-    const capture = vi.mocked(gitNumstat)
+    const capture = vi.mocked(readWorkspaceNumstat)
     capture.mockResolvedValue({ status: 'captured', files: [] })
 
     for (const sender of [
