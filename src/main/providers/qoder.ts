@@ -956,6 +956,9 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         return [key, created]
       }
       await waitForControlClose(key)
+      // Expiry can establish a barrier while this acquisition yields, even when
+      // its context generation is unchanged. Recheck before reserving a lease.
+      if (refreshingControls.has(key) || closingControls.has(key)) continue
       if ((contextGenerations.get(key) ?? 0) !== expectedGeneration) throw new Error(CONTROL_CONTEXT_INVALIDATED_REASON)
       const current = controls.get(key)
       if (current && !current.retired && !disposed) {
