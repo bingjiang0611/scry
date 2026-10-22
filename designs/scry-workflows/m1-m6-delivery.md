@@ -41,7 +41,7 @@
 - 支持有限类型/枚举/数组/对象及新增union，深度16/节点256、数组≤4096、复用原16,384字符输出上限；不执行schema扩展、截取JSON片段、类型强转或补零。null/false/0/显式unknown保持原样。具体已落地语法见 [program-ir.md](program-ir.md)。这是宿主类型校验，不是Provider原生强制JSON、工具禁用或内容真实性证明。
 - 新增22项回归，11文件131项Workflow测试、Node/web types、build通过；故意关闭运行时数据门后6项失败，恢复后35项相关测试通过。只读源码/命令证据 `~/.local/state/rotom/verification-evidence/workflow-m2-values-8k8viz79/`，不代表真实Provider/App验收。
 - 新增bind/branch及有限表达式：字段投影、比较、保守unknown布尔组合、count/concat、保留成员的group/unique、保留matched/rejected/unknown的filter/partition。编译检查类型、前置依赖、兄弟隔离及分支私有绑定；分支结果带arm标签，未选arm记skipped且不派发。规划提示同步真实已支持语法，不宣称支持map/loop。
-- 同一Runner新增CAS控制帧与内容寻址值存储，真实文件锁串行跨store竞争；选择落盘后才执行子任务，结果先落盘再推进。unknown及其他终态不可被重置覆盖。没有把这些帧当作已实现完整恢复执行；仍缺控制栈、map/loop、carry/最佳候选与sibling复用。
+- 同一Runner新增CAS控制帧与内容寻址值存储，真实文件锁串行跨store竞争；选择落盘后才执行子任务，结果先落盘再推进。unknown及其他终态不可被重置覆盖。没有把这些帧当作已实现完整恢复执行；显式栈的后续进展见M3，map/loop、carry/最佳候选与sibling复用仍缺。
 - 本阶段Node24.18.0/macOS：13文件160项Workflow测试、Node/web types及build通过（focused-delivery.log/typecheck-delivery.log/build-delivery.log）。最终源码unknown→else负对照为2失败/13通过（错误completed和额外派发）；按SHA256恢复原字节后相关42项通过（restored-delivery.log）。首轮长ID临时文件超限及测试数据类型失败均保留，分别修复writer临时名和准确JSON类型，没有删断言或加超时。
 - 本阶段只读证据位置：`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。性能命令对映射的providers.catalog报告无collector，不是性能通过，也不是Runner性能证明。
 - M2剩余map/loop/collect/choose/classify等全部指令、路由/模板/发布，及M3动态执行/恢复仍未完成。继续直接实现这些目标；M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
@@ -58,6 +58,13 @@
 | M3.6 | 先证明原 scope 收敛再最多五次停滞重启，等待排除来源充分；能力缺失时拒绝而非猜测 |
 | M3.7 | nothing_to_resume 不重开；运行中业务输入拒绝，恢复观察与恢复执行明确区分 |
 | M3.8 | 模板发布收据/冲突检查与实例快照；改修订不重置根预算或更换运行中快照 |
+
+### M3 当前执行栈进展（不是M3完成）
+
+- 已用唯一WorkflowInterpreter显式activation stack替换Runner递归控制求值；Native调用、预算、slots和outcome仍走原Runner，不引入第二套程序或生成JS。
+- framed sequence增加cursor与带版本的已提交child/result引用；子结果先持久化、父cursor提交成功后才进入后继。注入父提交失败，已完成首个子任务可查，第二个不发送。
+- Node24.18.0/macOS：13文件161项Workflow回归、Node/web types、build通过；省略父checkpoint负对照3失败/13通过，按SHA256恢复后16项相关测试通过。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`。
+- 仍缺普通M0程序控制帧统一、跨进程恢复、map/loop/carry/最佳候选和依赖/sibling恢复。历史unknown仍不可重发/退款。本阶段没有真实App/Provider验收，既有性能collector缺口与七项延期门禁保持未验证，不因本阶段focused通过消失。
 
 ## M4：质量模式、检查与写入
 

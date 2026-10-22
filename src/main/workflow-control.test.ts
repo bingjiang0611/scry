@@ -8,6 +8,7 @@ import { FileWorkflowStore } from './workflow-store'
 import { WorkflowRunner, WorkflowSlots, type WorkflowProviderExecutionRequest } from './workflow-runner'
 import { makePlanPreview, validateWorkflowProgram, workflowRevision } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
+import { WorkflowControl } from './workflow-control'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -99,6 +100,10 @@ describe('typed branch and binding execution through production Runner/store', (
     const execute = vi.fn((request: WorkflowProviderExecutionRequest) => ({ result: Promise.resolve({ runId: request.attemptId, status: 'completed' as const, output: 'chosen result', settled: true }), stop: () => true }))
     const runner = new WorkflowRunner({ store, slots: new WorkflowSlots(1), execute, beforeDispatch: async () => {
       const independent = new FileWorkflowStore(root)
+      const checkpoint = await independent.loadFrame(preview.workflowId, workflowFrameId('root', path))
+      expect(checkpoint).toMatchObject({ phase: 'entered', cursor: 1 })
+      expect(checkpoint?.children).toHaveLength(1)
+      expect(await new WorkflowControl(independent, preview).readCommitted(checkpoint!.children![0])).toMatchObject({ state: 'known', value: flag })
       const frozen = await independent.loadFrame(preview.workflowId, branchId)
       expect(frozen).toMatchObject({ phase: 'selected', arm: flag ? 'then' : 'else' })
       expect(await independent.loadValue(preview.workflowId, frozen!.decisionRef!)).toMatchObject({ state: 'known', value: flag })
@@ -205,6 +210,38 @@ describe('typed branch and binding execution through production Runner/store', (
     expect(saved?.progress.dispatchAttempts).toBe(0)
     expect(saved?.progress.state).toBe('failed')
     expect(await new FileWorkflowStore(root).loadFrame(preview.workflowId, workflowFrameId('choice', ['revision:' + preview.programRevision]))).toMatchObject({ phase: 'entered', revision: 1 })
+  })
+
+  it('keeps the completed child receipt when advancing its parent fails, and never dispatches the next child', async () => {
+    class CutAdvanceStore extends FileWorkflowStore {
+      override async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, revision: number) {
+        if (input.nodeId === 'root' && input.cursor === 1 && input.phase === 'entered') throw new Error('fixture cursor checkpoint failure')
+        return super.saveFrame(input, revision)
+      }
+    }
+    const root = await temporary(), store = new CutAdvanceStore(root)
+    const preview = plan({ kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'call', blockId: 'first', role: 'worker', prompt: 'first effect', outputSchema: { type: 'boolean' } },
+      { kind: 'call', blockId: 'second', role: 'worker', prompt: 'must not run' }, result('second', [])
+    ] })
+    const execute = vi.fn(() => ({ result: Promise.resolve({ runId: 'first-result', status: 'completed' as const, output: 'false', settled: true }), stop: () => true }))
+    const runner = new WorkflowRunner({ store, execute })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    runner.approve(preview, approval)
+    await expect(runner.start(preview, approval)).rejects.toThrow('cursor checkpoint failure')
+    expect(execute).toHaveBeenCalledTimes(1)
+    const independent = new FileWorkflowStore(root)
+    const saved = await independent.load(preview.workflowId)
+    expect(saved?.intents).toHaveLength(1)
+    expect(saved?.outcomes).toHaveLength(1)
+    expect(saved?.outcomes[0]).toMatchObject({ state: 'completed', settled: true })
+    const child = await independent.loadFrame(preview.workflowId, workflowFrameId('first', ['revision:' + preview.programRevision]))
+    expect(child).toMatchObject({ phase: 'completed' })
+    const reference = { frameId: child!.frameId, revision: child!.revision, resultRef: child!.resultRef! }
+    const control = new WorkflowControl(independent, preview)
+    expect(await control.readCommitted(reference)).toMatchObject({ state: 'known', value: false })
+    await expect(control.readCommitted({ ...reference, revision: reference.revision + 1 })).rejects.toThrow('身份')
+    expect(await independent.loadFrame(preview.workflowId, workflowFrameId('root', ['revision:' + preview.programRevision]))).toMatchObject({ phase: 'entered', revision: 1 })
   })
 
   it('accepts a sealed literal empty collection without turning a missing source into empty', () => {

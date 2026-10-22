@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview } from '../shared/workflow'
+import type { WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowPlanPreview } from '../shared/workflow'
 import { workflowChildBlocks } from '../shared/workflow'
 import { workflowExpressionCopy, workflowFrameCopy } from '../shared/constants/copy'
 import { workflowExpressionReferences } from './workflow-expressions'
@@ -63,17 +63,30 @@ export class WorkflowControl {
     const { revision, ...input } = frame
     return this.store.saveFrame({ ...input, phase: 'selected', arm, decisionRef }, revision)
   }
-  async complete(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined, value: WorkflowEvaluation, phase: WorkflowControlFrame['phase']): Promise<void> {
+  async complete(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined, value: WorkflowEvaluation, phase: WorkflowControlFrame['phase']): Promise<WorkflowControlFrame | undefined> {
+    let completed
     let reference
     if (frame) {
       reference = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'result']), value)
       const { revision, ...input } = frame
-      await this.store.saveFrame({ ...input, phase, resultRef: reference, ...(value.state === 'unknown' ? { reason: value.reason.slice(0, 4096) } : {}) }, revision)
+      completed = await this.store.saveFrame({ ...input, phase, resultRef: reference, ...(value.state === 'unknown' ? { reason: value.reason.slice(0, 4096) } : {}) }, revision)
     }
     // The artifact owns its direct input references. Descendants reference it,
     // rather than copying the whole transitive history into every checkpoint.
     const result = reference ? { ...value, derivedFrom: [`value:${reference.key}:${reference.hash}`] } : value
     this.bind(scope, block.blockId, result)
+    return completed
+  }
+  async advanceSequence(frame: WorkflowControlFrame | undefined, cursor: number, child: WorkflowFrameReference | undefined): Promise<WorkflowControlFrame | undefined> {
+    if (!frame) return undefined
+    if (!child || cursor !== (frame.cursor ?? 0) + 1) throw new Error(workflowFrameCopy.invalid)
+    const { revision, ...input } = frame
+    return this.store.saveFrame({ ...input, cursor, children: [...(frame.children ?? []), child] }, revision)
+  }
+  async readCommitted(reference: WorkflowFrameReference): Promise<WorkflowEvaluation> {
+    const frame = await this.store.loadFrame(this.preview.workflowId, reference.frameId)
+    if (!frame || frame.phase === 'entered' || frame.phase === 'selected' || frame.revision !== reference.revision || !frame.resultRef || frame.resultRef.key !== reference.resultRef.key || frame.resultRef.hash !== reference.resultRef.hash) throw new Error(workflowFrameCopy.identity)
+    return this.store.loadValue(this.preview.workflowId, reference.resultRef)
   }
   async skip(block: WorkflowBlock, scope: WorkflowControlScope): Promise<void> {
     const frame = await this.enter(block, scope)

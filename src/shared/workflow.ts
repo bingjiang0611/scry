@@ -87,6 +87,12 @@ export interface WorkflowValueReference {
   hash: string
 }
 
+export interface WorkflowFrameReference {
+  frameId: string
+  revision: number
+  resultRef: WorkflowValueReference
+}
+
 export interface WorkflowControlFrame {
   schemaVersion: 1
   workflowId: string
@@ -101,6 +107,8 @@ export interface WorkflowControlFrame {
   decisionRef?: WorkflowValueReference
   resultRef?: WorkflowValueReference
   reason?: string
+  cursor?: number
+  children?: WorkflowFrameReference[]
 }
 
 export interface WorkflowBindBlock {

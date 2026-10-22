@@ -66,7 +66,11 @@
 
 作用域身份含程序修订及分支选择来源；普通M0程序保留已有任务身份。现有Agent预算/intent与outcome仍由同一Runner提交，不因控制帧退款或重发。
 
-**这不是M3恢复执行完成**：当前只证明独立FileWorkflowStore对象可以读取并校验已写的帧/值。仍没有完整持久控制栈、map迭代、loop carry/最佳候选、恢复调度或sibling复用；根的已有观察式历史恢复仍不自动派发。
+控制求值现已从Runner递归方法迁入唯一`WorkflowInterpreter`：sequence/branch通过显式activation stack求值，parallel各fiber有独立栈，Native调用仍委托原Runner/slots/intent/outcome链。带控制帧的sequence在子结果提交后持久更新cursor和带revision/resultRef的children引用，然后才进入后继；cursor表示已登记子结果数量，不单独授权派发，未知/失败结果仍停止依赖。
+
+测试注入父cursor提交失败后，首个子调用的outcome/终态帧/值仍可由独立store读取，第二个调用不执行。引用读取同时校验frame revision、resultRef和内容hash，不把未完成帧当已提交结果。省略父checkpoint的负对照使3项测试失败。
+
+**这不是M3恢复执行完成**：普通M0程序仍沿用既有任务身份/无控制帧路径；其求值也用显式栈，但本阶段持久cursor只覆盖已有framed程序。跨进程冷恢复、全部指令统一持久化、map迭代、loop carry/最佳候选、恢复调度和sibling复用仍未实现；根的已有观察式历史恢复仍不自动派发。本阶段161项Workflow回归、types/build及负对照日志保存在`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`，不冒充完整App或真实Provider验收。
 
 ## 证据
 
