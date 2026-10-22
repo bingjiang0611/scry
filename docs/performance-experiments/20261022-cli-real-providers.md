@@ -1,5 +1,7 @@
 # 独立 CLI 真实 Provider 验收：2026-10-22
 
+后续：用户授权的 [Pi 终态修复与修复后验证](20261022-pi-terminal-fix.md)已完成。下文保留首次验收结果，不把历史失败改写成通过。
+
 ## 结论与范围
 
 用户授权新建 rate-native worktree，调用真实 Pi、Codex、Qoder，执行独立 CLI 三轮验证。不是完整 rate-workflow，不包含 Aone、业务上传、Scry App 或发布验收。
