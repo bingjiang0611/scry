@@ -35,6 +35,12 @@ async function setup(blocks?: WorkflowBlock[]) {
 const completed = (request: WorkflowProviderExecutionRequest) => ({ result: Promise.resolve({ runId: request.attemptId, status: 'completed' as const, settled: true, output: request.prompt.startsWith('first') ? 'first-result' : 'second-result' }), stop: () => true })
 
 describe('explicit continuation and epoch fencing', () => {
+  it('returns nothing_to_resume for missing history without creating a replacement execution', async () => {
+    const f = await setup(), store = new FileWorkflowStore(f.root), execute = vi.fn(completed), runner = new WorkflowRunner({ store, execute })
+    expect(await runner.resume(f.preview, f.approval, 'missing-history')).toEqual({ state: 'nothing_to_resume', progress: null })
+    expect(execute).not.toHaveBeenCalled()
+    expect(await store.load(f.preview.workflowId)).toBeUndefined()
+  })
   it('reuses a durable completed child and dispatches only the unstarted successor, without resetting budget or old frames', async () => {
     const f = await setup(), firstStore = new CutParentStore(f.root), firstEffects = vi.fn(completed)
     const original = new WorkflowRunner({ store: firstStore, execute: firstEffects })
@@ -47,9 +53,9 @@ describe('explicit continuation and epoch fencing', () => {
     const store = new FileWorkflowStore(f.root), effects = vi.fn(completed), runner = new WorkflowRunner({ store, execute: effects })
     runner.approve(f.preview, f.approval)
     const resumed = await runner.resume(f.preview, f.approval, 'resume-1')
-    expect(resumed.progress.state).toBe('completed')
-    expect(resumed.progress.finalReport).toBe('second-result')
-    expect(resumed.progress.dispatchAttempts).toBe(2)
+    expect(resumed.progress?.state).toBe('completed')
+    expect(resumed.progress?.finalReport).toBe('second-result')
+    expect(resumed.progress?.dispatchAttempts).toBe(2)
     expect(effects).toHaveBeenCalledTimes(1)
     expect(effects.mock.calls[0][0].prompt).toContain('first-result')
     expect(await store.loadFrame(f.preview.workflowId, rootId)).toEqual(oldFrame)
@@ -76,7 +82,7 @@ describe('explicit continuation and epoch fencing', () => {
     const mapId = workflowFrameId('batch', ['revision:' + f.preview.programRevision]), before = (await store.loadFrame(f.preview.workflowId, mapId))!
     const effects = vi.fn(completed), next = new FileWorkflowStore(f.root), runner = new WorkflowRunner({ store: next, execute: effects })
     runner.approve(f.preview, f.approval)
-    expect((await runner.resume(f.preview, f.approval, 'map-resume')).progress.state).toBe('completed')
+    expect((await runner.resume(f.preview, f.approval, 'map-resume')).progress?.state).toBe('completed')
     expect(effects).toHaveBeenCalledTimes(1)
     expect(effects.mock.calls[0][0].prompt).toContain('second-result')
     const record = (await next.load(f.preview.workflowId))!, segment = record.execution!.segments.at(-1)!
@@ -91,7 +97,7 @@ describe('explicit continuation and epoch fencing', () => {
     expect((await store.load(f.preview.workflowId))?.intents).toHaveLength(0)
     const effects = vi.fn(completed), runner = new WorkflowRunner({ store: new FileWorkflowStore(f.root), execute: effects })
     runner.approve(f.preview, f.approval)
-    expect((await runner.resume(f.preview, f.approval, 'resume-no-retry')).progress.state).toBe('failed')
+    expect((await runner.resume(f.preview, f.approval, 'resume-no-retry')).progress?.state).toBe('failed')
     expect(effects).not.toHaveBeenCalled()
     expect((await store.load(f.preview.workflowId))?.progress.dispatchAttempts).toBe(0)
   })

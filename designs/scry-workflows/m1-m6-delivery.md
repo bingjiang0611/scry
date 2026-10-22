@@ -44,7 +44,7 @@
 - 同一Runner新增CAS控制帧与内容寻址值存储，真实文件锁串行跨store竞争；选择落盘后才执行子任务，结果先落盘再推进。unknown及其他终态不可被重置覆盖。没有把这些帧当作已实现完整恢复执行；显式栈的后续进展见M3，后续map/loop、carry/最佳候选进展见M3，恢复与sibling复用仍缺。
 - 本阶段Node24.18.0/macOS：13文件160项Workflow测试、Node/web types及build通过（focused-delivery.log/typecheck-delivery.log/build-delivery.log）。最终源码unknown→else负对照为2失败/13通过（错误completed和额外派发）；按SHA256恢复原字节后相关42项通过（restored-delivery.log）。首轮长ID临时文件超限及测试数据类型失败均保留，分别修复writer临时名和准确JSON类型，没有删断言或加超时。
 - 本阶段只读证据位置：`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。性能命令对映射的providers.catalog报告无collector，不是性能通过，也不是Runner性能证明。
-- map/collect后续进展见M3；M2剩余choose/classify等指令及loop高级恢复、路由/模板/发布，及M3完整动态执行/恢复仍未完成。继续直接实现这些目标；M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
+- map/collect后续进展见M3；规范中的classifier call target、剩余表达式/集合操作、loop高级恢复、路由/模板/发布及M3完整动态执行/恢复仍未完成。候选筛选与裁决属于M4质量策略，不因旧台账写过choose而新增规范未要求的独立执行指令。M1生产App证明及M4–M6继续保留，不用本阶段单测/存储合同代替完整交付。
 
 ## M3：持久解释器与恢复
 
@@ -88,7 +88,13 @@
 - 独立Node控制进程+真实本地CLI效果账本共5场景（含二次恢复只落entered后再次退出的依赖链复用）：子完成/父cursor前硬退出、活owner拒绝并在关闭后继续、无outcome意图拒绝、第二轮ready后恢复并准确两轮无进展退出。真实子进程不是真实Provider账号/SDK；deny-network、临时HOME/workspace也不是文件系统沙箱。
 - 当前Node24.18.0/macOS：18文件217项focused串行通过，最终fixture聚焦零新增效果后12项恢复回归通过；Node/web types、build、生产conversation IPC、CLI release 589项及pack:artifact安全smoke通过。关闭缓存效果复用后，独立进程测试失败且账本有两次first；恢复SHA后通过；只取最近空帧的另一个负对照使依赖链恢复失败。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-recovery.46r4VG/`。
 - 失败保留：两轮默认并行focused各1项5秒超时（活owner、loop），三进程用例的一轮专用串行检查也超时1项；初始化故障fixture先只覆盖save而未覆盖新claim，已补claim故障且保留save/停止断言；进程fixture缺required的首轮类型错误已修复。活owner删除一次不增加验收信息的冷启动后，扩大并行仍有loop超时；三进程fixture最终聚焦两个已提交依赖调用并断言零新增效果，不再附加另有场景证明的新调用。高机器负载只作环境证据，因果未证明；串行通过不等于并行门禁通过，也未提高deadline。原7项延期门禁、性能collector缺口仍开放。
-- 后续本任务继续完成：完整依赖/sibling与每个提交边界恢复、停滞重启、缺失记录的标准nothing_to_resume返回、remaining IR/路由/模板、M4/M5及真实完整App/Provider M6。安装、推送、真实账号/Jev发送与apply均未执行；未获具体授权前不做这些外部动作。最新包仅在worktree的dist，不替换用户App，不升版本。
+- 后续本任务继续完成：完整依赖/sibling与每个提交边界恢复、停滞重启、remaining IR/路由/模板、M4/M5及真实完整App/Provider M6。安装、推送、真实账号/Jev发送与apply均未执行；未获具体授权前不做这些外部动作。最新包仅在worktree的dist，不替换用户App，不升版本。
+
+### M3 缺失历史 no-op 合同（局部验收）
+
+- 缺失记录的Service/Runner和可信resume入口统一返回`nothing_to_resume + null`；不创建替代根、不调用规划/能力探测/Provider、不清除其他未收敛运行的容量。缓存回执也不能绕过approval身份检查。已有记录仍按冻结程序workspace授权，不使用进度摘要作为authority。
+- 18文件223项focused串行及Node/web types通过；隔离Electron以当前build的生产preload/main执行3次缺失历史请求（含重复commandId），目录和测试Provider入口账本不变。conversation gate连同构建通过。旧legacy抛错的负对照有2项失败，进度摘要冒充workspace授权的负对照有1项失败，产品源码按SHA恢复后61项直接回归通过。源码/日志：`~/.local/state/rotom/verification-evidence/workflow-m3-missing-history.ZhQY4H/`。
+- 这不补齐完整已有运行恢复、模板生命周期、质量系统步骤/副本/应用、管理UI、真实Provider/SQLite验收或性能collector；历史并行超时和七项延期门禁仍未结案。未安装、未推送、未调用真实账号/Jev或应用patch。
 
 ## M4：质量模式、检查与写入
 

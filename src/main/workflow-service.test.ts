@@ -38,6 +38,35 @@ class ParentCheckpointStore extends MemoryWorkflowStore {
 }
 
 describe('workflow service receipts, capabilities and recovery', () => {
+  it('returns nothing_to_resume without planning, probing capabilities or creating an empty root', async () => {
+    const runControls = vi.fn<WorkflowServiceOptions['runControls']>(), f = fixture(new MemoryWorkflowStore(), { runControls })
+    const approval = { workflowId: 'missing-history', programRevision: 'missing-revision', approvedAt: 1 }
+    expect(await f.service.resume(approval.workflowId, approval, 'resume-missing')).toEqual({ state: 'nothing_to_resume', progress: null })
+    expect(f.plan).not.toHaveBeenCalled()
+    expect(f.execute).not.toHaveBeenCalled()
+    expect(runControls).not.toHaveBeenCalled()
+    expect(await f.store.load(approval.workflowId)).toBeUndefined()
+    expect(await f.service.findPreview(approval.workflowId)).toBeUndefined()
+  })
+  it('does not let a cached missing-history receipt bypass approval identity validation', async () => {
+    const f = fixture(), approval = { workflowId: 'missing-history', programRevision: 'missing-revision', approvedAt: 1 }
+    await f.service.resume(approval.workflowId, approval, 'resume-missing')
+    await expect(f.service.resume(approval.workflowId, { ...approval, workflowId: 'other-history' }, 'resume-missing')).rejects.toThrow('冻结程序已变化')
+    expect(f.execute).not.toHaveBeenCalled()
+  })
+  it('does not clear another unknown run or its reserved capacity when missing history is resumed', async () => {
+    const f = fixture(new MemoryWorkflowStore(), { execute: () => ({ result: Promise.resolve({ runId: 'unknown-native', status: 'unknown', settled: false }), stop: () => true }) })
+    const preview = await f.service.planCommand(request)
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await f.service.approve(approval)
+    expect((await f.service.start(preview.workflowId, approval)).state).toBe('unknown')
+    const original = await f.store.load(preview.workflowId)
+    expect(f.slots.active).toBe(1)
+    expect(await f.service.resume('missing-history', { workflowId: 'missing-history', programRevision: 'missing-revision', approvedAt: 1 }, 'resume-missing')).toEqual({ state: 'nothing_to_resume', progress: null })
+    expect(await f.store.load(preview.workflowId)).toEqual(original)
+    expect(f.slots.active).toBe(1)
+    expect(await f.store.load('missing-history')).toBeUndefined()
+  })
   it('continues through the same Service/Runner chain and deduplicates concurrent and cold resume receipts', async () => {
     const store = new ParentCheckpointStore(), first = fixture(store)
     const preview = await first.service.planCommand(request), approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
@@ -48,11 +77,11 @@ describe('workflow service receipts, capabilities and recovery', () => {
     const second = fixture(store)
     await second.service.approve(approval)
     const results = await Promise.all([second.service.resume(preview.workflowId, approval, 'resume-command'), second.service.resume(preview.workflowId, approval, 'resume-command')])
-    expect(results.map(result => result.progress.state)).toEqual(['completed', 'completed'])
+    expect(results.map(result => result.progress?.state)).toEqual(['completed', 'completed'])
     expect(second.execute).not.toHaveBeenCalled()
     expect((await store.load(preview.workflowId))?.execution?.segments).toHaveLength(2)
     const third = fixture(store)
-    expect((await third.service.resume(preview.workflowId, approval, 'resume-command')).progress.state).toBe('completed')
+    expect((await third.service.resume(preview.workflowId, approval, 'resume-command')).progress?.state).toBe('completed')
     expect(third.execute).not.toHaveBeenCalled()
     expect((await store.load(preview.workflowId))?.execution?.segments).toHaveLength(2)
   })

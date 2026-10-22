@@ -3,7 +3,7 @@ import type { WorkflowService } from './workflow-service'
 import { validateWorkflowRoleBinding } from './workflow-program'
 import { workflowRecoveryCopy } from '../shared/constants/copy'
 
-type Service = Pick<WorkflowService, 'planCommand' | 'preview' | 'approve' | 'start' | 'resume' | 'stop' | 'snapshot' | 'list' | 'cancelPlanning'>
+type Service = Pick<WorkflowService, 'planCommand' | 'preview' | 'findPreview' | 'approve' | 'start' | 'resume' | 'stop' | 'snapshot' | 'list' | 'cancelPlanning'>
 const identity = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value)) throw new Error('工作流身份无效')
   return value
@@ -52,8 +52,9 @@ export function registerWorkflowIpc({ register, service, resolveWorkspace, asser
     if (identity(workflowId) !== accepted.workflowId) throw new Error(workflowRecoveryCopy.fingerprint)
     const commandId = identity((payload as Record<string, unknown>).commandId)
     return (async () => {
-      const preview = await service.preview(accepted.workflowId)
-      resolveWorkspace(preview.workspace)
+      // Workspace authority comes from the frozen program, never a progress summary.
+      const preview = await service.findPreview(accepted.workflowId)
+      if (preview) resolveWorkspace(preview.workspace)
       return service.resume(accepted.workflowId, accepted, commandId)
     })()
   })

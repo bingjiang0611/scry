@@ -191,8 +191,14 @@ export class WorkflowService {
     if (programRevision !== workflowRevision(program) || preview.programRevision !== programRevision || preview.workspace !== program.workspace || preview.workflowId !== program.workflowId || preview.userGoal !== program.userGoal) throw new Error('程序指纹已变化，必须重新规划')
   }
   private async loadPreview(id: string): Promise<WorkflowPlanPreview> {
+    const preview = await this.findPreview(id)
+    if (!preview) throw new Error('计划记录缺失，不会自动重跑')
+    return preview
+  }
+  async findPreview(id: string): Promise<WorkflowPlanPreview | undefined> {
+    await this.ensureReady()
     const record = await this.options.store.load(id)
-    if (!record) throw new Error('计划记录缺失，不会自动重跑')
+    if (!record) return undefined
     this.assertFrozen(record.preview)
     return record.preview
   }
@@ -541,18 +547,21 @@ export class WorkflowService {
     const generation = this.admissionGeneration
     await this.ensureReady()
     this.assertAdmissionGeneration(generation)
+    if (approval.workflowId !== id) throw new Error(workflowRecoveryCopy.fingerprint)
     const fingerprint = JSON.stringify({ workflowId: id, programRevision: approval.programRevision })
     return this.receipt(this.resumes, commandId, fingerprint, async () => {
-      const preview = await this.loadPreview(id)
-      if (approval.workflowId !== id || approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
-      const record = (await this.options.store.load(id))!
+      const record = await this.options.store.load(id)
+      if (!record) return { state: 'nothing_to_resume', progress: null }
+      const preview = record.preview
+      this.assertFrozen(preview)
+      if (approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
       if (record.progress.state !== 'completed' && !record.execution?.segments.some(segment => segment.commandId === commandId)) {
         this.runner.assertRecovery(record)
         await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
       }
       this.assertAdmissionGeneration(generation)
       const result = await this.runner.resume(preview, approval, commandId)
-      return { ...result, progress: this.progressSnapshot(result.progress) }
+      return result.progress ? { ...result, progress: this.progressSnapshot(result.progress) } : result
     })
   }
   async preview(id: string): Promise<WorkflowPlanPreview> { await this.ensureReady(); return this.loadPreview(id) }

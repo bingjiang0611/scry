@@ -1,6 +1,8 @@
 import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowProgressPage, WorkflowRoleBinding } from './workflow.js'
 
-export type WorkflowResumeResult = { state: 'continued' | 'nothing_to_resume'; progress: WorkflowProgress }
+export type WorkflowResumeResult =
+  | { state: 'continued'; progress: WorkflowProgress }
+  | { state: 'nothing_to_resume'; progress: WorkflowProgress | null }
 
 export interface WorkflowApi {
   plan(request: { command: string; cwd: string; commandId?: string; orchestrator: WorkflowRoleBinding; roles: WorkflowRoleBinding[] }): Promise<WorkflowPlanPreview>

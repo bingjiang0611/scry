@@ -280,7 +280,7 @@ export class WorkflowRunner {
   async resume(preview: WorkflowPlanPreview, approval: WorkflowApproval, commandId: string): Promise<WorkflowResumeResult> {
     if (this.active.has(preview.workflowId)) throw new Error(workflowRecoveryCopy.owner)
     const record = await this.store.load(preview.workflowId)
-    if (!record) throw new Error(workflowRecoveryCopy.legacy)
+    if (!record) return { state: 'nothing_to_resume', progress: null }
     if (record.execution?.segments.some(segment => segment.commandId === commandId)) return { state: 'continued', progress: workflowProgressSnapshot(record.progress) }
     if (record.progress.state === 'completed') return { state: 'nothing_to_resume', progress: workflowProgressSnapshot(record.progress) }
     this.assertRecovery(record)
