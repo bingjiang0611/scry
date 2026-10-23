@@ -137,3 +137,14 @@ Ratchet：
 - iOS `build-for-testing`：需要在装有 Xcode 的机器上运行本报告中的命令。
 - `catalog-refresh.py` 的逐项结果：需要一台允许运行本地 ad-hoc 签名 Swift 可执行文件的机器，或者一个可用的本地开发签名 identity。然后与 142/146 的基线逐项比较。
 - 真机、L2/L3 毫秒、A1/B2 重放：本次没有在移植版本上重做。A1 和 B2 只在旧 integration 上通过；在移植版本上仍未验证。
+
+## 核验意见（审查方，2026-10-23）
+
+**桌面端已核验；iOS 编译仍待完成。**
+
+- `815c0e8` 只把 `desktop-client-ipc.test.ts` 的方法数断言从 28 改为 29：main 加了 `resolveIntent`，E 加了 `traceDelta`，移植时 `METHODS` 取了并集，29 是正确的数。同一测试里对 `traceDelta`、`resolveIntent` 和外来 sender 拒绝的断言都保留，依据写得清楚，修复正确。
+- 7 个桌面 gate 通过；手工合并的远程会话路径由真实 Electron 冒烟覆盖，包括 `--unknown-receipt-only` 及其负对照。`sendBlockedReason` 的优先级和 `unknownIntent` 的写法与移植记录一致。
+- 性能计数与旧整合结果逐行一致，`io.read.bytes` +17 在同版本重跑的波动范围内。
+- 身份：`origin/main..HEAD` 的 74 个提交，作者和提交者全部是 noreply 地址。
+
+**合入 main 前还差一步**：在有 Xcode 的机器上运行 `xcodebuild build-for-testing`，并跑完 `catalog-refresh.py`。main 的 iOS 改动与 F/F2 在 `ToolPanels.swift`、`HomeDrawer.swift`、`ArchivedSessionsView.swift`、`RemoteRunStore.swift` 上是自动合并的，其中 SwiftUI 视图文件目前没有任何编译证据。A1/B2 的重放没在移植版本上重做：相关源码除 `index.ts` 外都没和 main 冲突，`index.ts` 是自动合并且桌面 gate 通过，所以不强制要求。

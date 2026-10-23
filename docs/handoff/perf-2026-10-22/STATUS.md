@@ -2,7 +2,7 @@
 
 状态值：`未开始` → `进行中` → `待核验` → `已核验` / `需修改`；测量后判定不值得做：`放弃（附证据）`。
 
-- **本文件以 `perf/handoff` 上的版本为准。** 并行分支上的 STATUS 改动在整合时丢弃，取本分支版本。
+- **2026-10-23 起本文件以 `perf/port-2026-10-23` 上的版本为准**（main 重写历史后，旧 `perf/*`、`fix/*` 分支已停用，见文末「移植到重写后的 main」）。
 - `perf/handoff` 上的批次（A、B）由执行方直接更新本表；并行分支（C、D、E、F）只写 `reports/<批次>.md`，由审查方在此更新。
 - 核验方式见各报告末尾「核验意见」。审查方本轮**未能独立重跑测试**（会话网络策略拒绝访问 npm registry），核验依据是逐行读 diff、核对红线与执行方的命令记录；独立复跑留到整合时。
 
@@ -60,3 +60,8 @@ main 已在 10-23 重写历史（清除内部邮箱、内部引用和 designs/�
 - 核对：未与 main 同时改动的 105 个文件与源分支逐字节一致；其余差异都在预期内（F2 覆盖 F、STATUS 取 handoff、上述脱敏，以及 `qoder.ts` 保留 main 重写时的脱敏注释）。node 侧差分类型检查没有新增生产代码错误，61 个改动的 TS 文件语法检查通过。**完整 gate 尚未在移植结果上运行。**
 - 各报告中出现的提交哈希指向旧分支，旧分支删除后这些哈希将无法在远端访问，仅作历史记录。
 - 旧的 9 个远端分支（`perf/handoff`、`perf/c-git-readonly`、`perf/d-renderer-transcript`、`perf/e-remote-delta`、`perf/f-ios-observable`、`perf/f2-ios-stream-layout`、`perf/integration-2026-10-23`、`fix/chat-preview-workspace-dirty`）含重写前历史。按维护者决定，移植分支 gate 通过并核验后再删除；在此之前，任何会话都不要再向这些旧分支推送。
+
+### 移植分支 gate（2026-10-23）
+
+- 桌面端 **已核验**：7 个 gate 通过；首次唯一失败是合并后 IPC 方法数断言过期（28→29），已在 `815c0e8` 单独修复。详见 [reports/port.md](reports/port.md)。
+- iOS **待完成**：C 会话所在机器没有 Xcode，`xcodebuild build-for-testing` 未运行；`catalog-refresh.py` 被本机执行策略 SIGKILL，无法与 142/146 基线比较。需在有 Xcode 的机器上补跑后再合入 main。
