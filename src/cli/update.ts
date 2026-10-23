@@ -7,7 +7,6 @@ import { readJson, withDirectoryLock, writeJsonAtomic } from '../core/turn-recor
 
 const execFileAsync = promisify(execFile)
 const PACKAGE_NAME = 'scry-turn-recorder'
-const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
 const SUCCESS_INTERVAL_MS = 24 * 60 * 60 * 1_000
 const FAILURE_INTERVAL_MS = 6 * 60 * 60 * 1_000
 
@@ -56,11 +55,17 @@ function statePath(env: NodeJS.ProcessEnv = process.env): string {
   return env.SCRY_CLI_UPDATE_STATE_PATH ?? join(homedir(), '.scry', 'cli-update.json')
 }
 
-function registryOf(env: NodeJS.ProcessEnv): string {
-  const value = (env.SCRY_CLI_REGISTRY ?? DEFAULT_REGISTRY).replace(/\/+$/, '')
+/**
+ * Registry is deployment configuration, not a code default: an unset `SCRY_CLI_REGISTRY` leaves
+ * resolution to the machine's npm configuration, and only an explicitly configured registry is
+ * pinned on our npm calls.
+ */
+function registryArgs(env: NodeJS.ProcessEnv): string[] {
+  const value = env.SCRY_CLI_REGISTRY?.trim()
+  if (!value) return []
   const url = new URL(value)
   if (url.protocol !== 'https:') throw new Error('Scry CLI registry must use HTTPS')
-  return url.href.replace(/\/+$/, '')
+  return ['--registry', url.href.replace(/\/+$/, '')]
 }
 
 function npmExecutable(env: NodeJS.ProcessEnv): string {
@@ -216,7 +221,7 @@ function updateSpec(currentVersion: string, allowBreaking: boolean, checkOnly: b
 async function availableVersion(env: NodeJS.ProcessEnv, spec: string): Promise<string> {
   const output = await runNpm([
     'view', `${PACKAGE_NAME}@${spec}`, 'version', '--json',
-    '--registry', registryOf(env)
+    ...registryArgs(env)
   ], env, 8_000)
   const value = JSON.parse(output) as unknown
   const versions = (Array.isArray(value) ? value : [value])
@@ -268,7 +273,7 @@ export async function upgradeCli(options: UpgradeOptions): Promise<UpgradeResult
       if (!entryPath || !prefix) throw new Error('当前 scry 不是 npm 全局安装；请使用对应安装方式升级')
       await runNpm([
         'install', '--global', '--prefix', prefix,
-        '--registry', registryOf(env), '--no-audit', '--no-fund', '--ignore-scripts',
+        ...registryArgs(env), '--no-audit', '--no-fund', '--ignore-scripts',
         `${PACKAGE_NAME}@${latest}`
       ], env, 120_000)
       const { stdout } = await execFileAsync(process.execPath, [entryPath, '--version'], {
@@ -309,7 +314,7 @@ export async function runBackgroundUpdate(currentVersion: string, entryPath?: st
       currentVersion,
       entryPath,
       allowBreaking: false,
-      env: { ...process.env, SCRY_CLI_REGISTRY: DEFAULT_REGISTRY }
+      env: process.env
     })
   }, { waitMs: 100, ttlMs: 3 * 60 * 1_000 }).catch(() => null)
 }

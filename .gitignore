@@ -11,9 +11,13 @@ packages/turn-recorder-cli/dist/
 .claude/*
 !.claude/skills/
 .claude/skills/*
-!.claude/skills/validate-scry-rate-workflow/
 !.claude/skills/scry-performance-climb/
 .local/
 .pi/
 .vite/
 docs/ui-audit/screenshots/
+# 内部上下文：内网 registry、需求单、本地内部资料索引。CLAUDE.md 会读取它，文件本身不提交。
+.claude/company-context.local.md
+# 内部团队推广方案与内部验收 skill：只保留在本地工作区。
+docs/cli-team-rollout.md
+.agents/skills/validate-scry-rate-workflow

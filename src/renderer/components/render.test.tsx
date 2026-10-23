@@ -2806,7 +2806,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
   })
 
   it('用户气泡保留长链接的完整 href', () => {
-    const url = 'https://docs.example.com/i/nodes/93NwLYZXWvxXroNzCNEKwjB58kyEqBQm?cid=7886930%3A4041342848&utm_source=im&utm_scene=team_space&iframeQuery=utm_medium%3D'
+    const url = 'https://docs.example.com/i/nodes/example-node-id?cid=7886930%3A4041342848&utm_source=im&utm_scene=team_space&iframeQuery=utm_medium%3D'
     const userHtml = renderToStaticMarkup(<UserMessage text={`技术方案：\n${url}`} />)
     expect(userHtml).toContain('class="md user-md"')
     expect(userHtml).toContain(`href="${url.replaceAll('&', '&amp;')}"`)

@@ -120,6 +120,6 @@ npm run install:mac
 npm run publish:cli
 ```
 
-package lifecycle 会强制执行 `check:cli-release`，registry 固定为内网地址；不要从陈旧 `dist` 手工 `npm publish`。
+package lifecycle 会强制执行 `check:cli-release`；发布目标是执行者本机 npm 配置（或用 `--registry` 显式指定）的 registry，仓库不再固定任何部署方地址。不要从陈旧 `dist` 手工 `npm publish`。
 
 提交前检查 `git diff`，只提交本任务改动；除非用户明确要求，不推送。

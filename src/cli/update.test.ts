@@ -123,6 +123,47 @@ else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.s
     expect(saved.notifiedAt).toBe(saved.updatedAt)
   }, 15_000)
 
+  it('只在显式配置 registry 时才固定它，仓库不内置任何部署方地址', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
+    tempDirs.push(root)
+    const npm = join(root, 'mock-npm.mjs')
+    const npmLog = join(root, 'npm.log')
+    await writeFile(npm, `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs'
+appendFileSync(process.env.MOCK_NPM_LOG, JSON.stringify(process.argv.slice(2)) + '\\n')
+if (process.argv[2] === 'view') process.stdout.write(JSON.stringify('0.2.12'))
+`)
+    await chmod(npm, 0o755)
+
+    const base = {
+      PATH: process.env.PATH ?? '',
+      SCRY_NPM_PATH: npm,
+      SCRY_CLI_UPDATE_STATE_PATH: join(root, 'state.json'),
+      MOCK_NPM_LOG: npmLog
+    }
+    // 未设置时交由本机 npm 配置决定 registry，不再带上任何硬编码地址。
+    await expect(upgradeCli({ currentVersion: '0.2.12', checkOnly: true, env: { ...base } })).resolves.toMatchObject({
+      status: 'current'
+    })
+    await expect(upgradeCli({
+      currentVersion: '0.2.12',
+      checkOnly: true,
+      env: { ...base, SCRY_CLI_REGISTRY: 'https://registry.example.com' }
+    })).resolves.toMatchObject({ status: 'current' })
+    // 非 HTTPS 的 registry 直接拒绝，不发 npm 请求。
+    await expect(upgradeCli({
+      currentVersion: '0.2.12',
+      checkOnly: true,
+      env: { ...base, SCRY_CLI_REGISTRY: 'http://registry.example.com' }
+    })).resolves.toMatchObject({ status: 'error', message: 'Scry CLI registry must use HTTPS' })
+
+    const calls = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[])
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).not.toContain('--registry')
+    expect(calls[1]).toContain('--registry')
+    expect(calls[1]).toContain('https://registry.example.com')
+  }, 15_000)
+
   it('后台任务安装同 major 的更新，包括跨 minor，并把结果留给一次性提示', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-update-'))
     tempDirs.push(root)

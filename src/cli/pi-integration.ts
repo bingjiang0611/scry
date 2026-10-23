@@ -5,6 +5,16 @@ import { fileURLToPath } from 'node:url'
 
 const MARKER = '// managed-by: scry-turn-recorder pi integration'
 
+/**
+ * Older releases wrote the npm scope into the marker, and published CLI packages carry different
+ * scopes. Recognize the shape instead of one literal, so an upgrade still treats the previously
+ * installed extension as managed instead of refusing to replace it.
+ */
+function isManagedContent(content: string): boolean {
+  const [firstLine = ''] = content.split('\n', 1)
+  return /^\/\/ managed-by: (?:\S+\/)?scry-turn-recorder pi integration$/.test(firstLine.trimEnd())
+}
+
 function piSettingsPath(home = homedir()): string {
   return join(home, '.pi', 'agent', 'settings.json')
 }
@@ -45,7 +55,7 @@ export async function piIntegrationStatus(options: { home?: string; source?: str
     const targetStat = await lstat(target)
     if (!targetStat.isFile() || targetStat.isSymbolicLink()) return { installed: false, target, source, reason: 'target is not a regular file' }
     const content = await readFile(target, 'utf8')
-    if (!content.startsWith(MARKER) || !content.includes(source)) {
+    if (!isManagedContent(content) || !content.includes(source)) {
       return { installed: false, target, source, reason: 'target is not managed by the installed Scry package' }
     }
     await stat(source)
@@ -68,7 +78,7 @@ export async function installPiIntegration(options: { home?: string; source?: st
     const existing = await lstat(target)
     if (!existing.isFile() || existing.isSymbolicLink()) throw new Error(`refusing to replace non-regular Pi extension: ${target}`)
     const content = await readFile(target, 'utf8')
-    if (!content.startsWith(MARKER)) throw new Error(`refusing to replace unmanaged Pi extension: ${target}`)
+    if (!isManagedContent(content)) throw new Error(`refusing to replace unmanaged Pi extension: ${target}`)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }

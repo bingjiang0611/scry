@@ -45,7 +45,7 @@ try {
     '--no-package-lock'
   ], { cwd: installRoot })
 
-  const installedRoot = join(installRoot, 'node_modules', '@ali', 'scry-turn-recorder')
+  const installedRoot = join(installRoot, 'node_modules', packageJson.name)
   const bin = join(installRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'scry.cmd' : 'scry')
   accessSync(bin, process.platform === 'win32' ? constants.F_OK : constants.X_OK)
   assert.ok(existsSync(join(installedRoot, 'dist', 'cli', 'scry.js')), 'tarball is missing the built CLI')

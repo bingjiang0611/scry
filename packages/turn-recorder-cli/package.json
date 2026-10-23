@@ -21,9 +21,6 @@
   "scripts": {
     "prepublishOnly": "npm --prefix ../.. run check:cli-release"
   },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org"
-  },
   "license": "MIT",
   "author": "bingjiang0611",
   "repository": {

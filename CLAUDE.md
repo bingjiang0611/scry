@@ -76,6 +76,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 | 修改对应领域/边界 | [检查清单](docs/agent/change-checklists.md)，只展开受影响领域 |
 | 普通代码、UI、跨边界或发布验证 | [验证与交付](docs/agent/verification.md)，按下述范围选择小节 |
 | 性能分析、优化、指标/门禁维护 | [持续性能闭环](docs/performance-loop.md)、`scry-performance-climb` skill |
+| 内网 registry、内网需求单、本地内部资料 | `.claude/company-context.local.md`（已 gitignore，缺失时按公开默认配置工作） |
 
 ## 性能是默认要求
 
