@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import { RIGHT_SURFACE_DEFINITIONS, type RightSurfaceKind } from '../right-surface'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
+import { useTabIndicator } from '../hooks/useTabIndicator'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
 
@@ -63,11 +64,14 @@ export function RightSurfacePanel({
     }
   })
   const tabRefs = useRef<Partial<Record<RightSurfaceKind, HTMLButtonElement | null>>>({})
+  const tabItemRefs = useRef(new Map<string, HTMLElement | null>())
+  const surfaceTabsRef = useRef<HTMLDivElement>(null)
   const pendingCloseFocusRef = useRef<{
     closingKind: RightSurfaceKind
     targetKind: RightSurfaceKind | null
   } | null>(null)
   const activeKind = activeId && openIds.includes(activeId) ? activeId : openIds[0] ?? null
+  const { indicatorRef: surfaceIndicatorRef } = useTabIndicator(surfaceTabsRef, activeKind, tabItemRefs.current)
   const mountedKinds: readonly RightSurfaceKind[] = retainTerminal && !openIds.includes('terminal')
     ? [...openIds, 'terminal'] : openIds
 
@@ -176,14 +180,14 @@ export function RightSurfacePanel({
     >
       <div className="surface-topbar">
         {workbenchPicker}
-        <div className="surface-tabs" role="tablist" aria-label="已打开的 Surface">
+        <div className="surface-tabs" ref={surfaceTabsRef} role="tablist" aria-label="已打开的 Surface">
           {openIds.map((kind) => {
             const definition = RIGHT_SURFACE_DEFINITIONS.find((item) => item.kind === kind)!
             const selected = activeKind === kind
             const tabId = `${rootId}-${kind}-tab`
             const panelId = `${rootId}-${kind}-panel`
             return (
-              <div className={`surface-tab${selected ? ' active' : ''}`} role="presentation" key={kind}>
+              <div ref={(node) => { tabItemRefs.current.set(kind, node) }} className={`surface-tab${selected ? ' active' : ''}`} role="presentation" key={kind}>
                 <button
                   ref={(node) => { tabRefs.current[kind] = node }}
                   id={tabId}
@@ -211,6 +215,7 @@ export function RightSurfacePanel({
               </div>
             )
           })}
+          <span ref={surfaceIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
         </div>
 
         <div className="surface-actions">

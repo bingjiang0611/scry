@@ -1,6 +1,6 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
@@ -15,6 +15,9 @@ import { MODAL_COPY } from '../constants/copy'
 import { ModalFrame, requestModalClose } from './Modals'
 import { createPortal } from 'react-dom'
 import { usePresence } from '../hooks/usePresence'
+import { Disclosure } from './Disclosure'
+import { useFlipList } from '../hooks/useFlipList'
+import { useTabIndicator } from '../hooks/useTabIndicator'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
@@ -29,6 +32,12 @@ import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocatio
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
+
+function SessionMotionList({ revision, children, className = 'sb-sess-list' }: { revision: unknown; children: ReactNode; className?: string }) {
+  const root = useRef<HTMLDivElement>(null)
+  useFlipList(root, revision)
+  return <div className={className} ref={root}>{children}</div>
+}
 
 // 会话行的 Provider 身份用真实品牌字形呈现（见 codex-alignment.css 的 .sb-provider mask）；
 // 这里保留可访问名，legacy_unknown 无品牌，仍用「历史?」文字。
@@ -138,6 +147,9 @@ export const Sidebar = memo(function Sidebar({
   }, [])
   const [q, setQ] = useState('')
   const [view, setView] = useState<'projects' | 'activity'>('projects')
+  const viewTabRefs = useRef(new Map<string, HTMLElement | null>())
+  const viewTabsRef = useRef<HTMLDivElement>(null)
+  const { indicatorRef: viewIndicatorRef } = useTabIndicator(viewTabsRef, view, viewTabRefs.current)
   const remoteGroups = useRemoteProjectGroups(q)
   const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const activity = useMemo(() => view === 'activity'
@@ -204,7 +216,7 @@ export const Sidebar = memo(function Sidebar({
       top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 292))
     })
   }
-  const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" key={conversation.id}>
+  const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" data-motion-key={view === 'projects' ? `conversation:${conversation.id}` : undefined} key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
       <span className="sb-session-main">
         <Icon name={conversation.pinnedAt ? 'pin' : 'message'} />
@@ -275,18 +287,19 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <div className="sb-view-tabs" role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
+      <div className="sb-view-tabs" ref={viewTabsRef} role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
         const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
         setView(next)
         document.getElementById(`${tabId}-${next}`)?.focus()
       }}>
-        {(['projects', 'activity'] as const).map((tab) => <button key={tab} type="button" role="tab"
+        {(['projects', 'activity'] as const).map((tab) => <button key={tab} ref={(node) => { viewTabRefs.current.set(tab, node) }} type="button" role="tab"
           id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
           tabIndex={view === tab ? 0 : -1} title={tab === 'activity' ? activityCopy.scope : undefined} onClick={() => setView(tab)}>
           {activityCopy[tab]}
         </button>)}
+        <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
       </div>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealth && catalogHealth.status !== 'ready' && (
@@ -319,7 +332,7 @@ export const Sidebar = memo(function Sidebar({
         {pinned.length > 0 && (
           <>
             <div className="sb-section">置顶</div>
-            <div className="sb-pinned">
+            <SessionMotionList className="sb-pinned" revision={pinned}>
               {pinned.map(row => {
                 if (row.kind === 'conversation') return renderConversation(row.conversation)
                 const { session, cwd, name } = row
@@ -331,6 +344,7 @@ export const Sidebar = memo(function Sidebar({
                   cwd={cwd}
                   projectName={name}
                   showProjectName
+                  motionKey={sessionKey(cwd, session)}
                   active={isActive(cwd, session)}
                   running={Boolean(session.runId && runningRunIds.has(session.runId))}
                   waitingForAnswer={Boolean(session.runId && waitingQuestionRunIds.has(session.runId))}
@@ -347,7 +361,7 @@ export const Sidebar = memo(function Sidebar({
                   onMenu={onRenameSession ? openSessionMenu : undefined}
                 />
               })}
-            </div>
+            </SessionMotionList>
             <div className="sb-divider" />
           </>
         )}
@@ -386,6 +400,7 @@ export const Sidebar = memo(function Sidebar({
                   data-project-path={p.cwd}
                   onClick={() => toggle(p.cwd)}
                 >
+                  <Icon name="chevronRight" className={`sb-project-chevron motion-chevron ${open ? 'is-open' : ''}`} />
                   <Icon name="folder" className="sb-project-folder" />
                   <span className="pname">{p.name}</span>
                   {p.pinnedAt && <Icon name="pin" className="sb-project-pin" />}
@@ -413,12 +428,13 @@ export const Sidebar = memo(function Sidebar({
                   </span>
                 )}
               </div>
-              {open && (
-                <div className="sb-sess-list">
+              <Disclosure open={open}>{() => (
+                <SessionMotionList revision={`${p.cwd}:${p.conversations.map(conversation => conversation.id).join(',')}:${p.sessions.map(session => sessionKey(p.cwd, session)).join(',')}`}>
                   {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
                   {p.sessions.map((s) => (
                     <SessionRow
                       key={sessionKey(p.cwd, s)}
+                      motionKey={sessionKey(p.cwd, s)}
                       session={s}
                       relativeTime={relTime(s.mtime)}
                       draftStore={draftStore}
@@ -443,8 +459,8 @@ export const Sidebar = memo(function Sidebar({
                   {p.sessions.length === 0 && p.conversations.length === 0 && (
                     <div className="sb-project-empty">{emptyLabel}</div>
                   )}
-                </div>
-              )}
+                </SessionMotionList>
+              )}</Disclosure>
             </div>
           )
         })}
@@ -622,6 +638,7 @@ const SessionRow = memo(function SessionRow({
   cwd,
   projectName,
   showProjectName = false,
+  motionKey,
   active,
   running,
   waitingForAnswer,
@@ -639,6 +656,7 @@ const SessionRow = memo(function SessionRow({
   cwd: string
   projectName?: string
   showProjectName?: boolean
+  motionKey?: string
   active: boolean
   running: boolean
   waitingForAnswer: boolean
@@ -654,7 +672,7 @@ const SessionRow = memo(function SessionRow({
   const status = running ? backgroundWorkStatus(backgroundWork) : undefined
   const hover = useSessionHoverCard(session, cwd, projectName, running, status?.label)
   return (
-    <div className="sb-sess-row">
+    <div className="sb-sess-row" data-motion-key={motionKey}>
       <button
         type="button"
         className={['sb-sess', active && 'active', running && 'running', waitingForAnswer && 'waiting-answer', unread && 'unread'].filter(Boolean).join(' ')}

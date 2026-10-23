@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { flushPresenceExits, usePresence, type PresenceCloseReason } from '../hooks/usePresence'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta, ProjectMeta, SessionMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
@@ -656,6 +657,7 @@ export function SkillsModal({
   const [query, setQuery] = useState('')
   const scopeSkills = filterSkillsForScope(skills, scope)
   const filtered = filterSkillsForScope(skills, scope, query)
+  const listMotion = useFirstReadyList(filtered.length > 0)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
   const providerCount = skills.length - projectCount - userCount
@@ -799,9 +801,9 @@ export function SkillsModal({
         )}
 
         {filtered.length > 0 && (
-          <div className="skill-ledger">
-            {filtered.map((skill) => (
-              <article className="skill-ledger__row" key={skill.scope + ':' + skill.name}>
+          <div className={`skill-ledger ${listMotion.className}`}>
+            {filtered.map((skill, index) => (
+              <article className="skill-ledger__row motion-stagger-item" style={listMotion.itemStyle(index)} key={skill.scope + ':' + skill.name}>
                 <div className="skill-ledger__main">
                   <div className="skill-ledger__name-line">
                     <strong>{skill.name}</strong>
@@ -930,6 +932,7 @@ export function McpModal({
   const loading = loadingConfig || refreshing
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const mcpMotion = useFirstReadyList(mcps.length > 0)
   const liveByName = new Map(live.map((item) => [item.name, item]))
   const connectedCount = live.filter((item) => item.status === 'connected').length
   const testEvidenceCount = Object.values(status).filter((item) => item.ok != null || item.testing).length
@@ -990,7 +993,7 @@ export function McpModal({
           </div>
         ) : (
           <div className="mcp-fleet-wrap">
-            <table className="mcp-fleet">
+            <table className={`mcp-fleet ${mcpMotion.className}`}>
               <caption className="inventory-sr-only">MCP Fleet：Provider 运行态与认证独立展示</caption>
               <thead>
                 <tr>
@@ -1058,7 +1061,7 @@ export function McpModal({
 
                 return (
                   <tbody key={mcp.scope + ':' + targetId}>
-                    <tr className={'mcp-fleet__row mcp-fleet__row--' + runtimeValue.state}>
+                    <tr className={'mcp-fleet__row mcp-fleet__row--' + runtimeValue.state + ' motion-stagger-item'} style={mcpMotion.itemStyle(index)}>
                       <th scope="row">
                         <div className="mcp-server-cell">
                           <div className="mcp-server-cell__name">
@@ -1229,6 +1232,7 @@ export function CapabilitiesModal({
   const visibleMcps = source === 'all'
     ? mcps
     : mcps.filter((mcp) => (mcp.scope === 'user' ? 'user' : 'project') === source)
+  const capabilityMotion = useFirstReadyList((view === 'skills' ? visibleSkills : visibleMcps).length > 0)
 
   const chooseView = (nextView: CapabilityView): void => {
     setSource('all')
@@ -1283,9 +1287,9 @@ export function CapabilitiesModal({
       )}
 
       {view === 'skills' ? (
-        <div className="capabilities-body capabilities-skills" role="tabpanel">
-          {visibleSkills.length > 0 ? visibleSkills.map((skill) => (
-            <article className="capability-skill" key={skill.scope + ':' + skill.name}>
+        <div className={`capabilities-body capabilities-skills ${capabilityMotion.className}`} role="tabpanel">
+          {visibleSkills.length > 0 ? visibleSkills.map((skill, index) => (
+            <article className="capability-skill motion-stagger-item" style={capabilityMotion.itemStyle(index)} key={skill.scope + ':' + skill.name}>
               <strong>{skill.name}</strong>
               <p title={skill.description}>{skill.description}</p>
             </article>
@@ -1296,8 +1300,8 @@ export function CapabilitiesModal({
           )}
         </div>
       ) : (
-        <div className="capabilities-body capability-mcp-list" role="tabpanel">
-          {visibleMcps.length > 0 ? visibleMcps.map((mcp) => {
+        <div className={`capabilities-body capability-mcp-list ${capabilityMotion.className}`} role="tabpanel">
+          {visibleMcps.length > 0 ? visibleMcps.map((mcp, index) => {
             const targetId = mcp.targetId ?? mcp.name
             const runtime = liveByName.get(mcp.name)
             const currentStatus = status[targetId]
@@ -1325,7 +1329,7 @@ export function CapabilitiesModal({
             }
 
             return (
-              <article className={`capability-mcp-row capability-mcp-row--${runtimeValue.state}`} key={mcp.scope + ':' + targetId}>
+              <article className={`capability-mcp-row capability-mcp-row--${runtimeValue.state} motion-stagger-item`} style={capabilityMotion.itemStyle(index)} key={mcp.scope + ':' + targetId}>
                 <div className="capability-mcp-row__summary">
                   <div className="capability-mcp-server">
                     <div className="capability-mcp-server__name">

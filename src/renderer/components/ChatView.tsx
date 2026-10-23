@@ -25,6 +25,7 @@ import { backgroundWorkStatus } from '../background-work-status'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../hooks/useAgentSession'
 import type { ComposerDraftStore } from '../composer-drafts'
 import { steerStateForMessage } from '../steer'
+import { useFlipList } from '../hooks/useFlipList'
 import { QUEUE_COPY, SLASH_COMMAND_COPY } from '../constants/copy'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
@@ -138,7 +139,12 @@ export function SessionChatView({ draftStore, draftKey, ...props }: Omit<ChatVie
 }
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
+  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & {
+  remote?: boolean
+  liveRunId?: string | null
+  completedLiveRunId?: string | null
+  liveArrivalResetKey?: unknown
+}
 
 // Keep small/light histories intact, but window text-heavy pages even below
 // the turn-count threshold. Source length is a work budget, not a latency estimate.
@@ -172,7 +178,8 @@ export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, fo
 
 const TranscriptTurn = memo(function TranscriptTurn({
   turn, index, total, windowed, initiallyVisible, focused,
-  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false
+  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false,
+  liveRunId = null, completedLiveRunId = null, liveArrivalResetKey
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
 }) {
@@ -273,7 +280,9 @@ const TranscriptTurn = memo(function TranscriptTurn({
     {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
       <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
-        onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote} />
+        onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+        liveArrivalEligible={turn.runId === liveRunId}
+        footerArrivalEligible={turn.runId === liveRunId || turn.runId === completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
     </>}
   </div>
 })
@@ -504,6 +513,8 @@ export function ChatView({
   )
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
+  const queueListRef = useRef<HTMLDivElement>(null)
+  useFlipList(queueListRef, queuedPrompts)
   const compositionActiveRef = useRef(false)
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
@@ -587,6 +598,15 @@ export function ChatView({
     inFlightTurn != null && providerHasEnded(inFlightTurn.items)
   )
   const busyTurn = busy ? inFlightTurn : undefined
+  const ownerReady = !sessionLoading && !sessionCacheVisible
+  const liveRunId = ownerReady ? busyTurn?.runId ?? null : null
+  const lastLive = useRef<{ scope: string | undefined; runId: string | null }>({ scope: composerScopeKey, runId: null })
+  const completedLiveRunId = ownerReady && lastLive.current.scope === composerScopeKey ? lastLive.current.runId : null
+  const liveArrivalResetKey = useMemo(() => ({ scope: composerScopeKey, ready: ownerReady }), [composerScopeKey, ownerReady])
+  useLayoutEffect(() => {
+    if (!ownerReady || lastLive.current.scope !== composerScopeKey) lastLive.current = { scope: composerScopeKey, runId: liveRunId }
+    else if (liveRunId) lastLive.current.runId = liveRunId
+  }, [ownerReady, composerScopeKey, liveRunId])
   const backgroundStatus = stopStatus.tone === 'running' && busyTurn && pendingQuestions.length === 0
     ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined
   const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
@@ -676,6 +696,7 @@ export function ChatView({
             forkableRunIds={forkableRunIds}
             onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
             pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+            liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey}
           />}
           </div>
         </div>
@@ -727,7 +748,7 @@ export function ChatView({
               </span>
               <span className="queue-hint">{QUEUE_COPY.hint}</span>
             </div>
-            <div className="queue-list" role="list">
+            <div className="queue-list" role="list" ref={queueListRef}>
               {queuedPrompts.map((prompt, index) => {
                 const evidence = steerEvidenceByMessageId.get(prompt.messageId)
                 const steerState = steerStateForMessage(prompt.steer, evidence)
@@ -771,6 +792,7 @@ export function ChatView({
                 return (
                   <div
                     className={`queue-item${next ? ' is-next' : ''}${editing ? ' is-editing' : ''}${pending ? ' is-steer-pending' : ''}${unknown ? ' is-steer-unknown' : ''}${rejected ? ' is-steer-rejected' : ''}`}
+                    data-motion-key={prompt.messageId}
                     role="listitem"
                     key={prompt.messageId}
                   >

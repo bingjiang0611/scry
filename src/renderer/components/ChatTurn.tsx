@@ -1,10 +1,12 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
 import { providerHasEnded } from '../run-stop-status'
 import { BackgroundWorkPanel } from './BackgroundWorkPanel'
+import { Disclosure, disclosureIsLong, useDisclosurePresence } from './Disclosure'
+import { useLiveArrivalKeys } from '../hooks/useLiveArrivalKeys'
 import Markdown, { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import type { HookConfiguredCommand, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -45,6 +47,8 @@ import {
 import type { FileRow, HookGroup, HookScriptRow, HookSummary, Turn } from '../format'
 import { displayDiffPath, editActionLineCounts, turnDiffViewOf } from '../turn-diff'
 import { TurnStreamProjectionCache, isStreamTextFragment } from '../turn-stream-projection'
+
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
@@ -176,24 +180,23 @@ function UserMessageImpl({
   const [expanded, setExpanded] = useState(false)
   const [preview, setPreview] = useState<AgentInputAttachment | null>(null)
   const skillDetailId = useId()
-  if (!text && attachments.length === 0) return null
   const { command, body, injectedSkill } = parseUserMessage(text)
 
   // skill 注入：不是用户发的，渲染成中性折叠注记（默认收起，点开看 SKILL.md）
+  if (!text && attachments.length === 0) return null
   if (injectedSkill) {
     const lineCount = body.split('\n').length
+    const long = lineCount > 40
     return (
       <div className="skillinject">
         <button type="button" className="si-head" aria-expanded={expanded} aria-controls={skillDetailId} onClick={() => setExpanded((v) => !v)}>
           <Icon name="box" /> 注入 skill 内容 · <b>{injectedSkill}</b> · {lineCount} 行{' '}
           <span className="dim">（claude code 自动注入，非用户输入）</span>
-          <Icon name={expanded ? 'chevronDown' : 'chevronRight'} className="chev" />
+          <Icon name="chevronRight" className={`chev motion-chevron ${expanded ? 'is-open' : ''}`} />
         </button>
-        {expanded && (
-          <div id={skillDetailId} className="md si-body">
-            <Markdown>{body}</Markdown>
-          </div>
-        )}
+        <Disclosure open={expanded} long={long}>{() => (
+          <div id={skillDetailId} className="md si-body"><Markdown>{body}</Markdown></div>
+        )}</Disclosure>
       </div>
     )
   }
@@ -278,15 +281,25 @@ export function coalesceAdjacentThinking(items: readonly TraceEvent[]): TraceEve
 
 function ThinkingBlock({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(true)
+  const presence = useDisclosurePresence(open)
+  const content = useRef<HTMLDivElement | null>(null)
+  const [long, setLong] = useState(() => text.split('\n').length > 40)
+  const measure = (): void => { if (content.current) setLong(disclosureIsLong(content.current)) }
+  useBrowserLayoutEffect(measure, [open, presence.present])
   if (!text.trim()) return null
   return (
-    <details className="thinking" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary className="think-head" aria-expanded={open}>
+    <details className="thinking" open={open} data-long={long || undefined}
+      onToggle={event => setOpen(event.currentTarget.open)}
+      onTransitionEnd={event => { if (!open && event.nativeEvent.pseudoElement === '::details-content') presence.finishNow() }}>
+      <summary className="think-head" aria-expanded={open} onClick={measure}>
         <Icon name="bulb" className="think-bulb" />
         <span>思考过程</span>
-        <Icon name="chevronDown" className="think-chevron" />
+        <Icon name="chevronRight" className="think-chevron motion-chevron" />
       </summary>
-      {open && <div className="think-text md"><Markdown streaming={streaming}>{text}</Markdown></div>}
+      {presence.present && <div className="think-text md" aria-hidden={!open || undefined}
+        ref={node => { content.current = node; presence.ref(node); if (node) node.inert = !open }}>
+        <Markdown streaming={streaming}>{text}</Markdown>
+      </div>}
     </details>
   )
 }
@@ -409,7 +422,8 @@ function ToolItem({
   onAnswerQuestion,
   onOpenFileDiff,
   turnDone = false,
-  remote = false
+  remote = false,
+  liveArrival = false
 }: {
   ev: TraceEvent
   selected: boolean
@@ -422,6 +436,7 @@ function ToolItem({
   onOpenFileDiff?: () => void
   turnDone?: boolean
   remote?: boolean
+  liveArrival?: boolean
 }) {
   const isAskUserQuestion = ev.tool === 'AskUserQuestion' || !!intervention
   const detailId = useId()
@@ -450,13 +465,15 @@ function ToolItem({
   const lockedOpen = waitingForAnswer || waitingForQuestionState
   const hasDetail = ev.input != null || !!ev.output || !!questionRequest || !!ev.inputContent?.contentRef || !!ev.outputContent?.contentRef
   const shownOpen = lockedOpen || open
+  const inputText = useMemo(() => ev.input != null ? JSON.stringify(ev.input, null, 2) : null, [ev.input])
+  const detailLong = useMemo(() => (ev.output?.split('\n', 41).length ?? 0) > 40 || (inputText?.split('\n', 41).length ?? 0) > 40, [ev.output, inputText])
   const kind = ev.isError ? 'err' : ev.isMcp ? 'mcp' : ev.kind
   const displayName = toolDisplayName(ev)
   const rowDisplayName = waitingForAnswer ? '需要你的选择' : displayName
   const durPct = ev.durationMs != null ? Math.max(3, Math.round((ev.durationMs / maxDur) * 100)) : 0
   return (
     <div
-      className={`tool-card k-${kind} ${selected ? 'selected' : ''} ${ev.agentId || ev.parentToolUseId ? 'sub' : ''}`}
+      className={`tool-card k-${kind} ${selected ? 'selected' : ''} ${ev.agentId || ev.parentToolUseId ? 'sub' : ''}${liveArrival ? ' stream-arrival' : ''}`}
       data-trace-event-id={ev.id}
     >
       <button
@@ -507,9 +524,9 @@ function ToolItem({
             </span>
           )}
         </span>
-        {hasDetail && !lockedOpen && <Icon name={shownOpen ? 'chevronUp' : 'chevronDown'} className="chev" />}
+        {hasDetail && !lockedOpen && <Icon name="chevronRight" className={`chev motion-chevron ${shownOpen ? 'is-open' : ''}`} />}
       </button>
-      {shownOpen && hasDetail && (
+      {hasDetail && <Disclosure open={shownOpen} long={detailLong} immediate={lockedOpen}>{() => (
         <div id={detailId} className="tool-detail-region">
         {waitingForAnswer && questionRequest && onAnswerQuestion ? (
           <AskUserQuestionInline
@@ -548,7 +565,7 @@ function ToolItem({
             ) : ev.input != null ? (
               <>
                 <div className="lbl">input</div>
-                <pre>{JSON.stringify(ev.input, null, 2)}</pre>
+                <pre>{inputText}</pre>
               </>
             ) : null}
             {ev.inputContent?.contentRef && <RecorderContentPager label="input" contentRef={ev.inputContent.contentRef} source={ev.inputContent.source} remote={remote} />}
@@ -562,7 +579,7 @@ function ToolItem({
           </div>
         )}
         </div>
-      )}
+      )}</Disclosure>}
     </div>
   )
 }
@@ -622,9 +639,9 @@ function ToolGroup({
         <span className="tg-rule" />
         {failed > 0 && <span className="tg-fail">{failed} 失败</span>}
         {dur != null && <span className="tg-dur" title="工具调用耗时合计">{fmtDur(dur)}</span>}
-        <Icon name={shownOpen ? 'chevronUp' : 'chevronDown'} className="chev" />
+        <Icon name="chevronRight" className={`chev motion-chevron ${shownOpen ? 'is-open' : ''}`} />
       </button>
-      {shownOpen ? <div id={bodyId} className="tool-group-body">{children}</div> : null}
+      <Disclosure open={shownOpen}>{() => <div id={bodyId} className="tool-group-body">{children}</div>}</Disclosure>
     </div>
   )
 }
@@ -642,7 +659,8 @@ function SubagentBlock({
   liveText = '',
   liveThinking = '',
   liveKey: liveTailKey = '',
-  remote = false
+  remote = false,
+  liveArrivalKeys = new Set<string>()
 }: {
   items: TraceEvent[]
   selectedId: string | null
@@ -655,6 +673,7 @@ function SubagentBlock({
   liveThinking?: string
   liveKey?: string
   remote?: boolean
+  liveArrivalKeys?: ReadonlySet<string>
 }) {
   const visibleItems = useMemo(
     () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
@@ -674,9 +693,9 @@ function SubagentBlock({
     <div className="subagent">
       <button type="button" className="subhead" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((current) => (hasPendingQuestion ? true : !current))}>
         <Icon name="cube" /> 子 agent 内部 · {toolN} 工具 / {items.length} 步{' '}
-        <Icon name={open ? 'chevronDown' : 'chevronRight'} className="chev" />
+        <Icon name="chevronRight" className={`chev motion-chevron ${open ? 'is-open' : ''}`} />
       </button>
-      {open && (
+      <Disclosure open={open} immediate={hasPendingQuestion}>{() => (
         <div id={bodyId} className="subbody">
           {(() => {
             const out: ReactNode[] = []
@@ -725,6 +744,7 @@ function SubagentBlock({
                   selected={selectedId === ev.id}
                   onSelect={() => onSelect(ev)}
                   maxDur={maxDur}
+                  liveArrival={liveArrivalKeys.has(ev.id)}
                   pendingQuestion={pendingQuestion}
                   intervention={interventions.find((item) => item.request.questionId === ev.toolUseId)}
                   queuedQuestionCount={pendingQuestions.length}
@@ -753,7 +773,7 @@ function SubagentBlock({
             return out
           })()}
         </div>
-      )}
+      )}</Disclosure>
     </div>
   )
 }
@@ -1083,13 +1103,17 @@ function hookPhaseTiming(phase: TurnHookPhase): HookPhaseTiming | undefined {
 export function HooksSummary({
   summary,
   title = '本轮 Hook',
-  defaultExpanded = false
+  defaultExpanded = false,
+  liveArrivalKeys = new Set<string>(),
+  phases: providedPhases
 }: {
   summary: HookSummary
   title?: string
   defaultExpanded?: boolean
+  liveArrivalKeys?: ReadonlySet<string>
+  phases?: readonly TurnHookPhase[]
 }) {
-  const phases = aggregateTurnHookPhases(summary)
+  const phases = useMemo(() => providedPhases ?? aggregateTurnHookPhases(summary), [providedPhases, summary])
   const detailValue = (value: unknown): string | undefined =>
     typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
   const scopeLabel = (source: HookConfiguredCommand['source']): string =>
@@ -1110,7 +1134,7 @@ export function HooksSummary({
             ? `周期占用墙钟约 ${formatHookPhaseDuration(timing.durationMs)}；按 ${timing.timedInstances}/${timing.totalInstances} 个处理器实例的运行区间合并去重，并行实例不重复计时。`
             : '未获得可配对的 Hook 开始与结束时间，无法可靠计算周期耗时。'
           return (
-            <details className="turn-hook-phase" key={phase.event} open={defaultExpanded}>
+            <details className={`turn-hook-phase${liveArrivalKeys.has(`hook:${phase.event}`) ? ' stream-arrival' : ''}`} key={phase.event} open={defaultExpanded}>
               <summary className="turn-hook-phase-row">
                 <span className="hook-phase-order">{String(phaseIndex + 1).padStart(2, '0')}</span>
                 <span className={`sdot ${phaseTone}`} />
@@ -1188,7 +1212,7 @@ export function HooksSummary({
               .filter(Boolean)
               .join(' · ')
             return (
-              <details className="turn-hook-item" key={script.key} open={defaultExpanded}>
+              <details className={`turn-hook-item${liveArrivalKeys.has(`hook:${phase.event}:${script.key}`) ? ' stream-arrival' : ''}`} key={script.key} open={defaultExpanded}>
                 <summary className="turn-hook-row" title={`${phase.event} · ${triggerSubjects.join('、')}`}>
                   <span className={`sdot ${tone}`} />
                   <span className="hook-script-name">{script.label}</span>
@@ -1378,7 +1402,10 @@ function AssistantTurnImpl({
   onForkTurn,
   pendingQuestions = [],
   onAnswerQuestion,
-  remote = false
+  remote = false,
+  liveArrivalEligible = false,
+  footerArrivalEligible = false,
+  liveArrivalResetKey
 }: {
   turn: Turn
   selectedId: string | null
@@ -1388,6 +1415,9 @@ function AssistantTurnImpl({
   pendingQuestions?: AgentQuestionRequest[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   remote?: boolean
+  liveArrivalEligible?: boolean
+  footerArrivalEligible?: boolean
+  liveArrivalResetKey?: unknown
 }) {
   const [forking, setForking] = useState(false)
   const [forkError, setForkError] = useState<string | null>(null)
@@ -1418,12 +1448,28 @@ function AssistantTurnImpl({
     () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
     [items]
   )
+  const hookSummary = useMemo(() => aggregateHooks(items), [items])
+  const hookPhases = useMemo(() => aggregateTurnHookPhases(hookSummary), [hookSummary])
+  const liveStructuralKeys = useMemo(() => {
+    const toolKeys = visibleItems
+      .filter(event => event.kind === 'tool' || event.kind === 'skill' || event.kind === 'agent')
+      .map(event => event.id)
+    const hookKeys = hookPhases.flatMap(phase => [
+      `hook:${phase.event}`,
+      ...phase.scripts.map(script => `hook:${phase.event}:${script.key}`)
+    ])
+    return [...toolKeys, ...hookKeys]
+  }, [hookPhases, visibleItems])
+  const liveArrivalKeys = useLiveArrivalKeys(liveStructuralKeys, liveArrivalEligible, liveArrivalResetKey)
   const latestSteerEvents = useMemo(() => {
     const latest = new Map<string, TraceEvent>()
     for (const event of visibleItems) if (event.steer) latest.set(event.steer.messageId, event)
     return latest
   }, [visibleItems])
   const result = resultOf({ items })
+  const footerKnown = turn.done && result != null && [result.tokensIn, result.tokensOut, result.durationMs, result.durationApiMs].some(value => value != null)
+  const footerKeys = useMemo(() => footerKnown ? ['footer'] : [], [footerKnown])
+  const footerArrival = useLiveArrivalKeys(footerKeys, footerArrivalEligible, liveArrivalResetKey).has('footer')
   // Failed provider turns can still have an authoritative native boundary. Exposing that
   // boundary lets Pi/Rotom recover exactly as its terminal tree navigation does, instead
   // of trapping the user on a repeatedly failing session leaf.
@@ -1466,7 +1512,6 @@ function AssistantTurnImpl({
   // or the currently selected project. Main still canonicalizes every opened target.
   const linkWorkspaces = useMemo(() => turn.cwd ? [turn.cwd] : [], [turn.cwd])
   const linkFilePaths = useMemo(() => [...new Set([...structured.map((file) => file.path), ...diffPaths])], [structured, diffPaths])
-  const hookSummary = useMemo(() => aggregateHooks(items), [items])
   const hasFiles =
     structured.length > 0 ||
     (turnDiff?.status === 'captured' && turnDiff.files.length > 0) ||
@@ -1665,10 +1710,12 @@ function AssistantTurnImpl({
                 onOpenFileDiff={openFileDiffFor(ev)}
                 turnDone={turn.done}
                 remote={remote}
+                liveArrival={liveArrivalKeys.has(ev.id)}
               />
               {kids?.length || childLiveText || childLiveThinking ? (
                 <SubagentBlock
                   items={kids ?? []}
+                  liveArrivalKeys={liveArrivalKeys}
                   selectedId={selectedId}
                   onSelect={onSelect}
                   pendingQuestions={pendingQuestions}
@@ -1816,7 +1863,7 @@ function AssistantTurnImpl({
           <div className="sk-line" style={{ width: '48%' }} />
         </div>
       )}
-      {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} />}
+      {hookSummary.groups.length > 0 && <HooksSummary summary={hookSummary} phases={hookPhases} liveArrivalKeys={liveArrivalKeys} />}
       {hasFiles && (
         <FilesSummary
           structured={structured}
@@ -1826,7 +1873,7 @@ function AssistantTurnImpl({
         />
       )}
       {(turn.done || canFork) && (
-        <div className="turn-tail">
+        <div className={`turn-tail${footerArrival ? ' stream-arrival' : ''}`}>
           {turn.done && <TurnFooter items={turn.items} files={structured} />}
           {canFork && (
             <div className="turn-branch-row">

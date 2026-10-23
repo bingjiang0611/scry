@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import type {
   UsageAnalytics,
   UsageAnalyticsAggregate,
@@ -359,6 +360,7 @@ export interface AnalyticsViewProps {
 export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeChange, onRefresh, onBack }: AnalyticsViewProps) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('cost')
   const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
+  const breakdownMotion = useFirstReadyList(Boolean(analytics?.status === 'ready'))
 
   if (!analytics && loading) {
     return <main className="usage-page"><div className="usage-state">{copy.loading}</div></main>
@@ -507,10 +509,10 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
             <table>
               <colgroup><col className="usage-model-column" /><col className="usage-cost-column" /><col /><col /></colgroup>
               <thead><tr><th scope="col">{breakdownMode === 'model' ? copy.model : copy.day}</th><th scope="col">{copy.costUsd}</th><th scope="col">{copy.share}</th><th scope="col">{copy.token}</th></tr></thead>
-              <tbody>
+              <tbody className={breakdownMotion.className}>
                 {rows.length === 0 ? (
                   <tr><td colSpan={4}>{copy.noDetails}</td></tr>
-                ) : rows.map((row) => {
+                ) : rows.map((row, index) => {
                   const modelRow = row as UsageAnalyticsBreakdownRow
                   const key = breakdownMode === 'model' ? `${modelRow.provider}:${modelRow.model ?? ''}` : (row as typeof analytics.byDay[number]).day
                   const label = breakdownMode === 'model'
@@ -518,7 +520,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                     : (row as typeof analytics.byDay[number]).day
                   const rowProvider = breakdownMode === 'model' ? modelRow.provider : qoderOnly ? 'qoder' : undefined
                   return (
-                    <tr key={key}>
+                    <tr key={key} className="motion-stagger-item" style={breakdownMotion.itemStyle(index)}>
                       <th scope="row">
                         <span className="usage-model-cell">
                           {breakdownMode === 'model' ? <ProviderMark provider={modelRow.provider} /> : <Icon name="clock" />}

@@ -9,6 +9,7 @@ import {
 import { ModalFrame, requestModalClose } from './Modals'
 import type { PresenceCloseReason } from '../hooks/usePresence'
 import { Icon } from './primitives/Icon'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 import './meta-prompts.css'
@@ -38,6 +39,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
   const [notice, setNotice] = useState<Notice | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const deleteTitleId = useId()
+  const listMotion = useFirstReadyList(library.status === 'ready')
   useEffect(() => { searchRef.current?.focus() }, [])
   useEffect(() => {
     if (!notice || notice.error) return
@@ -107,9 +109,9 @@ export function MetaPromptsView({ onBack, onInsert }: {
           <aside className="mp-list" aria-label="提示词列表">
             <label className="mp-search"><Icon name="search" /><input ref={searchRef} type="search" aria-label="搜索提示词" placeholder="搜索标题或正文…" value={query} onChange={event => setQuery(event.target.value)} /></label>
             <div className="mp-list-count">{query.trim() ? `${visible.length} 条匹配` : `${prompts.length} 条提示词`}</div>
-            <div className="mp-rows">
-              {visible.map(prompt => (
-                <div key={prompt.id} className={`mp-row${selected?.id === prompt.id ? ' selected' : ''}`}>
+            <div className={`mp-rows ${listMotion.className}`}>
+              {visible.map((prompt, index) => (
+                <div key={prompt.id} className={`mp-row motion-stagger-item${selected?.id === prompt.id ? ' selected' : ''}`} style={listMotion.itemStyle(index)}>
                   <button type="button" className="mp-row-select" aria-pressed={selected?.id === prompt.id} onClick={() => setSelectedId(prompt.id)}>
                     <strong>{prompt.title}</strong><span>{prompt.body.split('\n')[0]}</span>
                   </button>

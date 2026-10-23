@@ -4,6 +4,7 @@ import { groupRunningLlmSessions, llmMetricSamples, quantile, smoothLlmMetric } 
 import { ModalFrame, requestModalClose } from './Modals'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { LLM_RUNNING_MODELS_COPY as runningCopy, LLM_PERFORMANCE_COPY as copy } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import './llm-performance.css'
@@ -157,6 +158,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
   const oldestKept = history?.truncated && history.rows.length ? Date.parse(history.rows.at(-1)!.ts) : undefined
   const sessions = summary?.sessions ?? []
   const runningModels = useMemo(() => groupRunningLlmSessions(summary?.sessions ?? []), [summary])
+  const runningMotion = useFirstReadyList(open && runningModels.length > 0)
 
   if (!open) return null
   return (
@@ -174,15 +176,15 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
       <div className="llm-perf-body">
         {summaryError && <p className="llm-perf-alert" role="alert">{copy.summaryError(summaryError)}</p>}
         {sessions.length > 0 && (
-          <section className="llm-perf-running" aria-label={runningCopy.region}>
+          <section className={`llm-perf-running ${runningMotion.className}`} aria-label={runningCopy.region}>
             <h3 className="llm-perf-live on"><i aria-hidden="true" />{runningCopy.heading(sessions.length)}</h3>
-            {runningModels.map(group => {
+            {runningModels.map((group, index) => {
               const state = modelState(group.sessions)
               const first = group.sessions[0]
               const speedCount = group.sessions.filter(session => session.tokensPerSecond != null).length
               const waitCount = group.sessions.filter(session => session.firstTokenMs != null).length
               return (
-                <details key={group.key} className="llm-perf-run">
+                <details key={group.key} className="llm-perf-run motion-stagger-item" style={runningMotion.itemStyle(index)}>
                   <summary className="llm-perf-run-summary" tabIndex={0}>
                     <i aria-hidden="true" style={group.model ? { background: colorOf(group.model) } : undefined} />
                     <div className="llm-perf-run-model">
@@ -372,16 +374,17 @@ function ModelComparison({ samples, firstToken, selected, colorOf, onSelect }: {
       }
     }).sort((a, b) => b.p50 - a.p50)
   }, [samples, firstToken])
+  const listMotion = useFirstReadyList(groups.length > 0)
   const max = Math.max(10, Math.ceil(Math.max(...groups.map(group => group.p75)) / 10) * 10)
   const percent = (value: number): string => `${Math.min(value, max) / max * 100}%`
   return (
-    <div className="llm-perf-models">
+    <div className={`llm-perf-models ${listMotion.className}`}>
       <div className="llm-perf-mhead"><span>{copy.columns.model}</span>
         <MetricHelp label={copy.columns.distribution} text={copy.distributionHelp} />
         <span>{copy.columns.speed}</span><span>{copy.columns.firstToken}</span>
         <MetricHelp label={copy.columns.rounds} text={copy.roundsHelp} /></div>
-      {groups.map(group => (
-        <button key={group.model} type="button" className="llm-perf-mrow" aria-pressed={selected === group.model} onClick={() => onSelect(group.model)}>
+      {groups.map((group, index) => (
+        <button key={group.model} type="button" className="llm-perf-mrow motion-stagger-item" style={listMotion.itemStyle(index)} aria-pressed={selected === group.model} onClick={() => onSelect(group.model)}>
           <span className="llm-perf-mname"><i style={{ background: colorOf(group.model) }} /><b>{group.model}</b></span>
           <span className="llm-perf-bar" aria-hidden="true"><span className="track" />
             <span className="iqr" style={{ left: percent(group.p25), width: `calc(${percent(group.p75)} - ${percent(group.p25)})`, background: colorOf(group.model) }} />

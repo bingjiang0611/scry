@@ -2025,10 +2025,9 @@ body.pane-resizing * {
   height: 13px;
   margin-left: auto;
   color: var(--dim3);
-  transition: transform var(--dur-base) var(--ease-struct);
 }
 .thinking[open] .think-chevron {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 .thinking .think-text {
   padding: 0 14px 14px;
