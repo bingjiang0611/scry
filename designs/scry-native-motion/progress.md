@@ -7,7 +7,7 @@
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
 | 01 基础 | 通过 | `22b0358`（修正实现）、`3abbfeb`（修正验收）；已落实 01 核验要求 |
-| 02 结构过渡 | 待核验 | `e00dedc3`（实现）、`4440dcd2`（验收 / 测量）；采用已批准的实时 DOM 例外，安装门禁受阻，见本轮记录 |
+| 02 结构过渡 | 需修改 | `e00dedc3`（实现）、`4440dcd2`（验收 / 测量）；核验见「02 · 核验」，修正以 `motion(02-fix)` 提交 |
 | 03 弹窗与浮层 | 未开始 | — |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
@@ -150,6 +150,34 @@
 - 调查而非盲重跑：同 8 文件改用 `--maxWorkers=1`，**196 通过 / 3 失败（199）**；10 核负载 43.67→89.90。剩余是文件计数 5s 超时、CLI wrapper 探测未 ready、本地 TLS 5s 超时。日志 `/tmp/scry-motion-02-failed-files-serial.log`。未改 test timeout / skip / 预期。
 - 独立 `git archive 35bd6a8d` 源码对照 `/private/tmp/scry-motion-02-head-control.hUTsuW`，使用同一依赖与单 worker，三个文件 **73 通过 / 2 失败（75）**：同一个文件计数与 TLS 用例仍超时；CLI 用例通过。日志 `/tmp/scry-motion-02-head-control.log`。这支持既有环境 / 时限问题，**不声称全部 20 项已被完全归因或修复**；本轮未修改这些 main / counter 实现与测试。
 - 未验证：安装产物、本轮完整 unit 通过、真实双机远程网络、真实付费 Provider、物理 120Hz。安装通过前，用户当前 App 不会加载本轮改动。执行方待机器低负载重跑原安装流程；设计方核验 02，本轮不继续 03。
+
+
+#### 核验（设计方，2026-10-23）
+
+- 结论：**需修改**（两处，范围小）。修正并按下文验收后直接进入 03，不需要再等一轮核验，除非修正中发现新问题。
+- 01-fix 一并确认通过：全局规则只剩 `transition-property / timing / delay` 覆盖；新断言改为检查「改色后无动画」；负对照真实失败后撤销。
+- 核验方式与边界：读 `bfa0616..2005599` 的全部 diff。这次核验的云端环境仍连不上 npm 源，**没有重跑**单测、类型检查、构建与 UI fixture；这些以执行方记录为准。
+- 方案调整已登记：用户批准放弃原生 View Transitions，改为实时 DOM 入场、主题即时切换、面板采用 F。原因是两条平台事实（更新回调异步执行；转场期间被捕获区域吞掉首次点击），执行方在真实 Electron 里做了可重复的探针，并在发现后按协议停下，处理得当。设计方已把 brief 的场景 1–5 与 `steps/02-structure.md` 更新为现行方案。
+- 通过的部分：
+  - `structural-motion.ts`：先 `flushSync(commit)` 再在实时 DOM 上播入场，提交与异常都同步；可打断；减弱动效只做 120ms 透明度；系统中途切到减弱动效会取消。
+  - `pane-motion.ts`：布局只提交一次，只动面板自身的 `transform / opacity`；退场面板固定在原位置、`inert` 且不接收指针，结束后恢复；面板与结构入场互相取消。V/F 实验用可见的 300 轮转录、每方案 10 次，选择依据清楚，并如实标注高负载下不作毫秒结论。
+  - 接入：`changeView` 的未保存确认仍在提交之前；侧栏选中与会话 authority 保持同步；流式路径没有加动画；`ConversationView` 与 `RemoteChat` 只在首次呈现历史时入场。
+  - 新增 `.main-content` 包裹层：`.main-area` 原本就是 `overflow: hidden`，不会新增裁切；固定摘要相关选择器已同步改成 `:is(.main-area, .main-content)`。
+  - 首轮 UI 失败（坐标取点早于面板动画结束、确认框未等预检）的修法合理，没有 sleep、扩大超时或删断言。
+- **需修改 1：同一个会话被重复替换时，整个主内容区会再淡入一次。**
+  - 位置：`App.tsx` 的 `replacePresentedSession`。它对每次 `parsed.length > 0` 的替换都调用 `runStructuralTransition('session', …)`，没有区分「换了会话」还是「同一会话的内容刷新」。
+  - 会触发的路径：切到一个有缓存的会话时，先用缓存页替换一次（淡入）；历史读完后如果缓存已过期（`cacheConfirmed` 为 false，正好是会话有新活动的常见情况），会对同一个会话再替换一次，主内容区（包括 composer）从透明度 0 再淡入一次，用户正在看的内容闪一下。`onFocusedRun` 聚焦到当前已打开会话的运行时也是同样情况。
+  - 要求：只有当呈现的会话 ID 与当前屏幕上的会话不同才播入场；同一会话的刷新、缓存确认、聚焦都即时替换。参照 `RemoteChat` 已有的 `presentedHistoryContext` 写法，用一个 ref 记录当前呈现的会话 ID；`newConversation` 与 `clearTurns` 时重置它。
+  - 验收：`--structure-only` 增加一条：用有缓存且已过期的会话（缓存页与读到的历史不同），切换后主内容区只出现一个 `scry-structure` 动画；在已打开会话上触发一次聚焦或刷新，没有 `scry-structure` 动画。负对照：去掉守卫后该断言须失败一次。
+- **需修改 2：退路分支丢掉了 `flushSync`，而且生产代码按测试模式分支。**
+  - 位置：`structural-motion.ts` 与 `pane-motion.ts` 开头的 `document.hidden || import.meta.env.MODE === 'test'` 分支直接调用 `commit()`。
+  - 问题：`newConversation()` 原本刻意用 `flushSync` 同步清空界面再 `await`；现在窗口隐藏时（例如最小化后经菜单、快捷键或远程触发）就不再同步提交，行为取决于窗口是否可见。另外，单测走的是 `MODE === 'test'` 分支，从未覆盖生产里真正执行的 `flushSync` 路径。
+  - 要求：所有分支都用 `flushSync(commit)` 提交，只把「是否播动画」做成条件；用特性检测（例如 `typeof Element.prototype.animate !== 'function'`）代替 `import.meta.env.MODE === 'test'`。`env.d.ts` 里为此新增的 `vite/client` 引用如不再需要就删掉。
+  - 验收：`structural-motion.test.ts` 与面板对应单测断言隐藏文档与无 `animate` 环境下 commit 也在 `flushSync` 内执行（可以 mock `react-dom` 的 `flushSync` 记录调用）；其余已有断言不变。
+- 不阻塞，但要知道：
+  - 安装仍未完成，所以 01、02 的改动都还没进到 `/Applications/Scry.app`。这次失败发生在完整单测阶段，执行时机器负载达到 91（10 核），旧提交的同一批用例在同环境也超时，更像是负载问题。请在机器空闲时重跑 `npm run install:mac:dev`；不要为了通过而改超时或跳过用例。03 可以照常推进。
+  - `navigation` 没有计数采集器，记为 unavailable 是对的；本任务不要求新增采集器。
+  - 页面入场期间 `.main-content` 带 `transform`，会成为其中 `position: fixed` 后代的定位参照，持续 240ms。已在 `steps/03-overlays.md` 加了一条验收：切页后立刻打开主内容区里的菜单或弹窗，位置要正确。
 
 <!--
 ### NN · <步骤名>

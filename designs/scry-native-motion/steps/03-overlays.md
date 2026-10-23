@@ -28,7 +28,7 @@
 
 - [ ] `usePresence` 单测：单次关闭、重复关闭只回调一次、`animationend` 不触发时兜底计时器生效、卸载时无残留计时器。
 - [ ] 现有 Modals 相关单测、`render.test.tsx` 全部通过；`npm run typecheck:web`、`npm run build` 通过。
-- [ ] 隔离 Electron fixture 新增 `--overlays-only`：① 打开设置弹窗，`.modal` 有 260ms 动画；② 分别用关闭按钮、Esc、点击遮罩关闭，弹窗在 ≤ 250ms 内从 DOM 移除，焦点回到触发按钮；③ 出场期间点击侧栏会话行，点击生效；④ 减弱动效下入场、出场都只有透明度动画；⑤ surface 菜单入场与出场时长分别为 160ms / 100ms。
+- [ ] 隔离 Electron fixture 新增 `--overlays-only`：① 打开设置弹窗，`.modal` 有 260ms 动画；② 分别用关闭按钮、Esc、点击遮罩关闭，弹窗在 ≤ 250ms 内从 DOM 移除，焦点回到触发按钮；③ 出场期间点击侧栏会话行，点击生效；④ 减弱动效下入场、出场都只有透明度动画；⑤ surface 菜单入场与出场时长分别为 160ms / 100ms；⑥ 切页后 100ms 内（02 的页面入场仍在播放、`.main-content` 带 `transform`）打开主内容区里的一个菜单和一个弹窗，二者位置与静止时一致。
 - [ ] `npm run test:renderer:ui` 通过。
 - [ ] test 实例深浅主题各检查：设置、技能、MCP、LLM 性能弹窗；右侧「+」菜单；会话悬停卡。
 - [ ] 本步不涉及数据路径，`performance:measure` 可不跑；若改动触及 `performance-paths.json` 的 `sources`，照常测量。

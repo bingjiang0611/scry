@@ -14,7 +14,7 @@
 - **H2 状态先于动画。** 点击后的状态（选中会话、`setView`、开关面板、切标签）在同一帧提交；动画只是装饰，代码里不得 `await` 动画后再改状态，也不得因动画拦截下一次点击。唯一例外是「出场」：弹窗、浮层、折叠收起可以先播完出场（≤160ms）再卸载 DOM，但期间新的交互照常生效。
 - **H3 证据不演戏。** 数字不做滚动计数；刻度条、占用条不从 0 长出来；`unknown`、`unavailable`、`—` 不加任何动画；不让缺失看起来像「正在加载」。
 - **H4 性能。** 只对 `transform` 和 `opacity` 做动画；高度动画只用于不超过 40 行的局部容器，长转录内不做高度动画、不做逐帧重排。遵守 `CLAUDE.md`「性能是默认要求」与「遵守性能闭环」。
-- **H5 不引入依赖。** 不加 framer-motion、react-spring 等动画库；使用 CSS、Web Animations API、View Transitions API（Electron 42 的 Chromium 均支持）与现有代码。
+- **H5 不引入依赖。** 不加 framer-motion、react-spring 等动画库；使用 CSS、Web Animations API 与现有代码。不使用原生 View Transitions：其更新回调异步执行，且转场期间被捕获的区域会吞掉首次点击（02 实测，见 `progress.md`）。
 - **H6 安全边界不动。** 不为动画放宽 CSP、sandbox、contextIsolation，不新增 IPC。
 
 ## 现状（2026-10-22，基于 `531e88c`）
@@ -65,11 +65,11 @@ JS 侧（WAAPI、View Transitions）读同一套值：新增 `src/renderer/motio
 
 | # | 场景 | 新版 | 实现 | 步骤 |
 | --- | --- | --- | --- | --- |
-| 1 | 页面切换（会话 / 对话 / 分析 / Meta Prompts / 远程） | 侧栏、顶栏不动；内容区旧页 110ms 淡出（exit），新页 240ms 淡入并上移 6px（out） | View Transitions：仅内容区 `view-transition-name: page`，`:root` 的 old/new 设 `animation: none` | 02 |
-| 2 | 切换会话 | 选中行立刻高亮；读取 ≤150ms：旧转录留到新转录就绪，180ms 交叉淡入（不上移），全程不出现加载 UI。读取 >150ms：旧转录 120ms 淡出（不能让上一个会话的内容长时间顶着新会话的标题），顶部 2px 加载条与原加载说明淡入 | 转录替换那一次提交包进 View Transition（02）；`useDelayedFlag(sessionLoading, 150)`（05） | 02、05 |
-| 3 | 右侧面板开关 / 最大化 | 面板宽度 300ms（struct）；面板内容不挤压，只被裁切并淡入；正文同步让位 | 首选 View Transitions 快照变形（old 隐藏、new `object-fit: none; object-position: left top`）；先做性能实验，不达标改退路：面板 `transform` 滑入、正文一次改宽 | 02 |
+| 1 | 页面切换（会话 / 对话 / 分析 / Meta Prompts / 远程） | 侧栏、顶栏不动；新页 240ms 淡入并上移 6px（out）；旧页即时移除 | 实时 DOM：`structural-motion.ts` 先 `flushSync` 提交，再对 `.main-content` 播 WAAPI 入场（2026-10-23 用户批准，取代 View Transitions） | 02 |
+| 2 | 切换会话 | 选中行立刻高亮；读取 ≤150ms：旧转录留到新转录就绪，180ms 交叉淡入（不上移），全程不出现加载 UI。读取 >150ms：旧转录 120ms 淡出（不能让上一个会话的内容长时间顶着新会话的标题），顶部 2px 加载条与原加载说明淡入 | 换会话时的那次转录替换播 180ms 透明度入场（实时 DOM；同一会话的刷新不播）（02）；`useDelayedFlag(sessionLoading, 150)`（05） | 02、05 |
+| 3 | 右侧面板开关 / 最大化 | 面板 300ms（struct）滑入 / 滑出并淡入淡出；正文一次改宽，不逐帧重排 | 方案 F：`pane-motion.ts`，布局只提交一次，只动面板 `transform / opacity`（V 方案实测掉帧，未采用） | 02 |
 | 4 | 侧栏折叠 | 同面板；`sidebar-collapsed` 下交通灯旁顶栏留白同步过渡 | 同上 | 02 |
-| 5 | 主题切换 | 整窗 260ms 交叉淡化 | `startViewTransition` 包住 `theme.ts` 的 `setAttribute('data-theme')` | 02 |
+| 5 | 主题切换 | 即时切换（2026-10-23 用户批准，取消整窗交叉淡化） | — | 02 |
 | 6 | 弹窗 | 遮罩 180ms 淡入；面板 `scale(0.97) translateY(6px)` → 原位 260ms（struct）；关闭 150ms 淡出到 0.98（exit）后再卸载 | `ModalShell` 加 presence：关闭先播出场再调用 `onClose`；焦点陷阱、焦点归还不变 | 03 |
 | 7 | 菜单、浮层、悬停卡 | 160ms 从触发点方向展开（`transform-origin` 对准锚点）；出场 100ms 淡出 | CSS + 共用 `usePresence` | 03 |
 | 8 | 折叠展开（项目分组、工具详情、思考块、技能详情） | 展开 240ms（struct）、收起 180ms（exit）；箭头同步旋转；展开后新行错开淡入 | `grid-template-rows: 0fr → 1fr`（`inventory-evidence.css` 约 1321 行已有先例） | 04 |

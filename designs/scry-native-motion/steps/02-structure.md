@@ -1,5 +1,7 @@
 # 02 · 结构过渡：View Transitions
 
+> **2026-10-23 更新：本步已按用户批准改为实时 DOM 方案。** 原生 View Transitions 在 Electron 42 中更新回调异步执行、转场期间被捕获区域吞掉首次点击（见 `../progress.md`「02」记录），因此生产实现为 `structural-motion.ts`（先 `flushSync` 提交，再对 `.main-content` 播 WAAPI 入场）与 `pane-motion.ts`（方案 F）；旧页淡出与主题整窗交叉淡化取消。下文 A–C 中关于 View Transitions 的内容仅作历史记录，以 `../brief.md` 场景 1–5 与 `../progress.md`「02 · 核验」为准。
+
 让页面、会话、主题、面板与侧栏的切换有过渡。核心是一个小封装：状态仍然同步提交，浏览器负责截取前后快照并合成过渡，不让 React 逐帧重排。
 
 ## 要做
