@@ -7,7 +7,7 @@
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
 | 01 基础 | 通过 | `22b0358`（修正实现）、`3abbfeb`（修正验收）；已落实 01 核验要求 |
-| 02 结构过渡 | 需修改 | `e00dedc3`（实现）、`4440dcd2`（验收 / 测量）；核验见「02 · 核验」，修正以 `motion(02-fix)` 提交 |
+| 02 结构过渡 | 通过 | `e00dedc3`（实现）、`4440dcd2`（验收 / 测量）；核验见「02 · 核验」，修正以 `motion(02-fix)` 提交 |
 | 03 弹窗与浮层 | 未开始 | — |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
@@ -178,6 +178,18 @@
   - 安装仍未完成，所以 01、02 的改动都还没进到 `/Applications/Scry.app`。这次失败发生在完整单测阶段，执行时机器负载达到 91（10 核），旧提交的同一批用例在同环境也超时，更像是负载问题。请在机器空闲时重跑 `npm run install:mac:dev`；不要为了通过而改超时或跳过用例。03 可以照常推进。
   - `navigation` 没有计数采集器，记为 unavailable 是对的；本任务不要求新增采集器。
   - 页面入场期间 `.main-content` 带 `transform`，会成为其中 `position: fixed` 后代的定位参照，持续 240ms。已在 `steps/03-overlays.md` 加了一条验收：切页后立刻打开主内容区里的菜单或弹窗，位置要正确。
+
+### 02-fix · 同会话刷新与退路提交修正（2026-10-23）
+
+- 按「02 · 核验」修正后直接进入 03 的授权执行。实现 `42f3f9dc`；断言与负对照 `3145cd79`，与生产分开提交。
+- `App.tsx` 以 ref 记录实际呈现的会话 ID：同一会话的缓存更新、刷新、聚焦不重复入场；清空 / 新建时重置。所有本地 clearTurns 调用经过同一重置函数；不改 authority、selection sequence 或流式路径。
+- 两个动效 helper 在所有退路中也使用 `flushSync`；是否播放仅由 document 可用性 / hidden / Element.animate 决定。删除测试 MODE 分支及不再需要的 vite/client 引用。
+- 验收：`npm run test:unit -- src/renderer/structural-motion.test.ts src/renderer/pane-motion.test.ts src/renderer/hooks/useAgentSession.test.ts src/renderer/session-history-cache.test.ts src/renderer/session-selection.test.ts src/renderer/components/render.test.tsx`：6 文件 **304 项通过**；完整 typecheck、build、`--structure-only` 均通过。日志 `/tmp/scry-motion-02-fix-{focused,type,build,structure-final}.log`。
+- 新 UI 断言覆盖过期缓存 v1→v2 只播一次、当前会话刷新和聚焦零动画、新建后重新选择仍入场；原有首击输入、首帧高亮、迟到历史、reduce 断言保留。单测用 flushSync mock 的执行区间断言提交确实在内部，不只看 callback 被调用。
+- 负对照 1：临时去掉会话 ID 守卫，真实 Electron 在 `Stale cache refresh replayed the session entrance` 处失败（exit 1），日志 `/tmp/scry-motion-02-fix-negative-cache.log`。
+- 负对照 2：临时恢复两处退路直接 commit，**6 个断言失败 / 5 通过**；日志 `/tmp/scry-motion-02-fix-negative-flush-final.log`。首次负对照暴露 Element mock 不是可调用构造器，导致 Vitest 错误序列化失败，不能作为验收证据；改成真实 class 后才取得上述有效负对照。两个故意破坏均已撤回，正向重新通过。
+- `performance:measure -- --scenario history.page --compare HEAD` 相对 `5befaff4`：10020 bytes、1 message、1 stringify 均不变，无 worse，ratchet 通过；日志 `/tmp/scry-motion-02-fix-perf.log`。导航 collector 缺失沿用核验允许的 unavailable，不新增 collector。
+- 开始时 10 核负载 19.70 / 16.37 / 16.81，不能视为空闲；暂不重跑安装，03 完成后再检查。未触碰用户运行实例，未提前标注已安装。
 
 <!--
 ### NN · <步骤名>
