@@ -7,6 +7,7 @@ import { build } from 'vite'
 import electron from 'electron'
 import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
 import { exerciseMotionTokens } from './motion-tokens-ui-checks.mjs'
+import { exerciseStructure } from './structure-ui-checks.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
@@ -14,6 +15,8 @@ import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const cacheOnly = process.argv.includes('--cache-only')
 const motionTokensOnly = process.argv.includes('--motion-tokens-only')
+const paneBenchOnly = process.argv.includes('--structure-pane-bench')
+const structureOnly = process.argv.includes('--structure-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
@@ -28,7 +31,7 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+const fixtures = structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
   : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
@@ -730,6 +733,9 @@ async function exerciseSessionTerminals(contents, scenario) {
   }
   const click = async (selector) => {
     await wait(`[...document.querySelectorAll(${JSON.stringify(selector)})].some(node => node.getBoundingClientRect().width > 0)`)
+    // This ownership test needs a stationary native target. Animation-time input is
+    // checked separately by --structure-only, without waiting for its entrance.
+    await read(`Promise.allSettled(document.getAnimations().filter(animation => animation.id === 'scry-pane').map(animation => animation.finished)).then(() => true)`)
     const point = await read(`(() => {
       const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node => node.getBoundingClientRect().width > 0);
       if (!node) throw new Error('Missing terminal control ' + ${JSON.stringify(selector)});
@@ -1569,7 +1575,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -1588,6 +1594,17 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
+        if (${paneBenchOnly}) {
+          win.setContentSize(1280, 800)
+          await win.loadFile(${JSON.stringify(join(temp, 'structure-pane-bench.html'))})
+          result.paneBenchmark = await win.webContents.executeJavaScript(` + "`" + `(async () => {
+            const deadline = Date.now() + 5000
+            while (!window.paneExperiment && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 16))
+            if (!window.paneExperiment) throw new Error('Pane benchmark did not mount')
+            return [await window.paneExperiment('V'), await window.paneExperiment('F')]
+          })()` + "`" + `)
+          finish(result); return
+        }
         if (${fixtures.includes('motion-tokens')}) {
           win.setSize(1400, 1000)
           await win.loadFile(${JSON.stringify(join(temp, 'motion-tokens.html'))})
@@ -1603,6 +1620,10 @@ try {
         if (${fixtures.includes('session-cache')}) {
           win.setSize(1200, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'session-cache.html'))})
+          if (${structureOnly}) {
+            result.structure = await (${exerciseStructure.toString()})(win.webContents)
+            finish(result); return
+          }
           result.sessionCache = await (${exerciseSessionCache.toString()})(win.webContents)
           if (${cacheOnly}) { finish(result); return }
         }

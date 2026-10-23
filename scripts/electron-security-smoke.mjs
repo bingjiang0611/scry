@@ -9,11 +9,13 @@ import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
 import { exerciseMotionApp } from './motion-tokens-ui-checks.mjs'
+import { exerciseStructureApp } from './structure-app-checks.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseUnifiedConversation, verifyUnifiedConversationRestart } from './unified-conversation-smoke.mjs'
 import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
 
 const motionOnly = process.argv[2] === '--dev-motion-only'
+const structureOnly = process.argv[2] === '--dev-structure-only'
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
@@ -33,7 +35,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = motionOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = structureOnly || motionOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -290,6 +292,12 @@ async function main() {
       throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
     }
     return response.result?.value
+  }
+  if (structureOnly) {
+    const result = await exerciseStructureApp(cdp, evaluate)
+    cdp.close()
+    console.log(JSON.stringify(result))
+    return
   }
   if (motionOnly) {
     const result = await exerciseMotionApp(cdp, evaluate)

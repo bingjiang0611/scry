@@ -38,6 +38,8 @@ export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remot
     }
   })()`)
   const click = async expression => {
+    // Source-control contracts use settled coordinates; animation-time input has its own smoke.
+    await evaluate(`Promise.allSettled(document.getAnimations().filter(animation => animation.id === 'scry-pane').map(animation => animation.finished)).then(() => true)`)
     const point = await evaluate(`(() => {
       const element = ${expression};
       if (!element || element.disabled) throw new Error('Missing/disabled click target: ' + ${JSON.stringify(expression)});
@@ -132,6 +134,7 @@ export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remot
 
   // Explicit unstage is still available and preserves the file.
   await click(visible('[aria-label="取消暂存 reversible.txt"]'))
+  await wait(`Boolean(${button('确认执行', '.modal')})`)
   await click(button('确认执行', '.modal'))
   await wait(`${settled} && !document.querySelector('[aria-label="取消暂存 reversible.txt"]')`)
   assert.equal(readFileSync(join(workspace, 'reversible.txt'), 'utf8'), 'keep working file\n')

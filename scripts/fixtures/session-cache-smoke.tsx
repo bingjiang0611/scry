@@ -5,6 +5,7 @@ import type { ActiveRun, TraceEvent } from '../../src/shared/trace'
 import type { ProviderContext } from '../../src/shared/provider'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/motion.css'
+import '../../src/renderer/session-evidence.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Full production renderer with explicit asynchronous bridge boundaries. No

@@ -26,6 +26,7 @@ const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
 const lifecycleOnly = process.argv.includes('--session-lifecycle-only')
 const openingOnly = process.argv.includes('--session-opening-only')
+const structureOnly = process.argv.includes('--structure-only')
 const measureOpening = process.argv.includes('--measure-session-opening')
 const keepArtifacts = process.argv.includes('--keep')
 let cleanupUnknown = false
@@ -53,7 +54,7 @@ const state = {
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
   catalogCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
   providerControlsFailure: null, legacyProviderHost: false,
-  fileLists: [], fileReads: [], localWorkspaceCalls: [],
+  fileLists: [], fileReads: [], localWorkspaceCalls: [], workbenchCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
@@ -92,6 +93,7 @@ const catalog = {
     { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
   ],
   providerEvidence: 'host_snapshot', directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
+  workbench: ${structureOnly ? '1' : 'undefined'},
   attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 }
 }
 const contextFor = (input) => ({ ...input.context })
@@ -134,6 +136,13 @@ const api = {
       providerEvidence: state.legacyProviderHost ? 'legacy_host' : 'host_snapshot',
       directorySelection: state.oldDirectoryHost ? undefined : true
     })
+  },
+  async workbench(id, request) {
+    state.workbenchCalls.push({ id, request })
+    if (id !== 'fixture-connection' || request.cwd !== '/fixture/project-a' || request.surface !== 'workspace') throw new Error('Wrong remote workspace authority')
+    if (request.method === 'workspaceList') return { entries: [{ name: 'notes.txt', path: 'notes.txt', kind: 'file', mtimeMs: 1 }], truncated: false }
+    if (request.method === 'workspaceRead') return { name: 'notes.txt', path: 'notes.txt', content: 'original remote file', size: 20, mtimeMs: 1, revision: 'structure-rev', language: 'plaintext' }
+    throw new Error('Unexpected remote workspace operation: ' + request.method)
   },
   async providerControls(id, context) {
     state.providerControlsCalls.push({ id, context: contextFor({ context }) })
@@ -189,7 +198,7 @@ const api = {
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
     if (state.holdHistory) await new Promise(resolve => { window.releaseHistory = resolve })
-    if (${openingOnly || measureOpening}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
+    if (${openingOnly || measureOpening || structureOnly}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
       { id: 'opening-answer', runId: 'opening-history', ts: '2026-10-19T12:00:00.000Z', kind: 'model', stage: 'text', text: Array.from({ length: 80 }, (_, i) => 'Remote history paragraph ' + i).join('\\n\\n') }
     ] }], hasOlder: false, source: 'trace_archive', status: 'available' }
     // A run typed on the host's own UI becomes history once it leaves the live set.
@@ -380,6 +389,52 @@ async function exercise(contents, pointer, capture, options) {
   check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation remains')
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  if (options.structureOnly) {
+    const remotePanel = '#remote-right-surface-pane'
+    let accept = false
+    const dialogs = []
+    const dialogHandler = (_event, method, params) => {
+      if (method !== 'Page.javascriptDialogOpening') return
+      dialogs.push(params)
+      void send('Page.handleJavaScriptDialog', { accept })
+    }
+    await send('Page.enable')
+    contents.debugger.on('message', dialogHandler)
+    try {
+      await read('window.structureEntries = []; window.structureNativeCalls = 0; const animate = Element.prototype.animate; Element.prototype.animate = function(frames, options) { if (this.matches(".main-content")) window.structureEntries.push(options.duration); return animate.call(this, frames, options) }; document.startViewTransition = () => { window.structureNativeCalls++; throw new Error("Native capture forbidden") }; undefined')
+      for (const theme of ['light', 'dark']) {
+        await read('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
+        await click('[data-remote-session="old-native"]')
+        await wait(remoteShown, 'remote context selected')
+        await wait('document.querySelector(".chat")?.textContent.includes("Remote history paragraph 79")', 'remote history loaded')
+        if (await read('document.querySelector(".panel-pill:not(.summary-pill)").getAttribute("aria-pressed") !== "true"')) await click('.panel-pill:not(.summary-pill)')
+        await wait('document.querySelector("#remote-right-surface-pane").getBoundingClientRect().width > 0', 'remote pane visible')
+        await click(remotePanel + ' button[aria-label="添加 Surface"]')
+        await click(remotePanel + ' [role=menuitem]', '文件')
+        await wait(`document.querySelector('${remotePanel} [data-workspace-path="notes.txt"]') != null`, 'editable host file tree')
+        await click(remotePanel + ' [data-workspace-path="notes.txt"]')
+        await wait('document.querySelector("#remote-right-surface-pane textarea")?.value === "original remote file"', 'host file content')
+        await click(remotePanel + ' textarea'); await insert(' unsaved remote edit')
+        await wait('document.querySelector("#remote-right-surface-pane .workspace-editorbar .primary")?.disabled === false', 'dirty remote file')
+        await read('Promise.allSettled(document.getAnimations().filter(a => a.id === "scry-structure" || a.id === "scry-pane").map(a => a.finished)).then(() => true)')
+        const before = await read('window.structureEntries.length')
+        const count = dialogs.length
+        accept = false
+        await click('.sb-nav .sb-navitem:first-child')
+        check(dialogs.length === count + 1 && dialogs.at(-1).message.includes('远程文件'), 'Native confirmation did not precede remote navigation')
+        check(await read('window.structureEntries.length') === before, 'Cancelled remote navigation started an entrance')
+        check(await read(remoteShown + ' && document.querySelector("#remote-right-surface-pane textarea").value.includes("unsaved remote edit")'), 'Cancel discarded remote selection or edit')
+        await capture('structure-remote-' + theme + '-cancelled')
+        accept = true
+        await click('.sb-nav .sb-navitem:first-child')
+        await wait('document.querySelector(".usage-page") != null', 'confirmed remote navigation')
+        check(await read('window.structureEntries.length') > before, 'Confirmation positive control has no page entrance')
+        await capture('structure-remote-' + theme)
+      }
+      check(await read('window.structureNativeCalls === 0 && window.desktopRemoteFixture.localWorkspaceCalls.length === 0 && window.desktopRemoteFixture.workbenchCalls.every(call => call.request.method !== "workspaceWrite")'), 'Remote structure used native capture, local fallback or a write')
+      return { remoteStructure: { themes: ['light', 'dark'], realDialogConfirmBeforeEntry: true, cancelNoTransition: true, cancelKeepsEdit: true, acceptNavigates: true, hostScopedFileTransport: true, noWriteOrLocalFallback: true } }
+    } finally { contents.debugger.removeListener('message', dialogHandler) }
+  }
   if (options.openingOnly || options.measureOpening) {
   // Selected controls are demand-loaded. A delayed response for a previous
   // session Provider must not publish after the user switches context.
@@ -1296,7 +1351,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
+        }, { structureOnly: ${structureOnly}, parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
         // Native input and capture have finished. Release their debugger/window
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()
