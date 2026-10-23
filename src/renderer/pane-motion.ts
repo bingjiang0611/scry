@@ -13,13 +13,11 @@ export function cancelPaneMotion(): void {
 export function animatePaneChange(commit: () => void): void {
   cancelPaneMotion()
   cancelStructuralMotion()
-  if (typeof document === 'undefined' || document.hidden || import.meta.env.MODE === 'test') {
-    commit()
-    return
-  }
-  const panes = Array.from(document.querySelectorAll<HTMLElement>(paneSelector))
+  const canAnimate = typeof document !== 'undefined' && !document.hidden && typeof Element.prototype.animate === 'function'
+  const panes = canAnimate ? Array.from(document.querySelectorAll<HTMLElement>(paneSelector)) : []
   const before = panes.map(node => node.getBoundingClientRect())
   flushSync(commit)
+  if (!canAnimate) return
   const after = panes.map(node => node.getBoundingClientRect())
   const reduced = prefersReducedMotion()
   panes.forEach((node, index) => {

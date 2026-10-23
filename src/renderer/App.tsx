@@ -924,11 +924,20 @@ export function App() {
       loadProjects()
     }
   })
+  const presentedSessionId = useRef<string | null>(null)
+  const clearPresentedSession = useCallback((...args: Parameters<typeof session.clearTurns>): void => {
+    presentedSessionId.current = null
+    session.clearTurns(...args)
+  }, [session.clearTurns])
   const replacePresentedSession = useCallback((...args: Parameters<typeof session.replaceWithParsedSession>): void => {
-    const [, parsed, options] = args
-    if (parsed.length > 0 || options?.activeRun?.items.length) {
-      runStructuralTransition('session', () => session.replaceWithParsedSession(...args))
-    } else session.replaceWithParsedSession(...args)
+    const [sessionId, parsed, options] = args
+    const hasContent = parsed.length > 0 || Boolean(options?.activeRun?.items.length)
+    const commit = (): void => {
+      session.replaceWithParsedSession(...args)
+      if (hasContent) presentedSessionId.current = sessionId
+    }
+    if (hasContent && presentedSessionId.current !== sessionId) runStructuralTransition('session', commit)
+    else commit()
   }, [session.replaceWithParsedSession])
   const steerEvidenceByMessageId = useMemo(
     () => latestSteerEvidenceForTurns(session.turns),
@@ -1690,7 +1699,7 @@ export function App() {
     await window.scry.setCwd(dir)
     if (!isCurrent()) return
     setCwd(dir)
-    session.clearTurns()
+    clearPresentedSession()
     resetPromptQueueControl()
     shouldStickToBottomRef.current = true
     selectSessionId(null)
@@ -1707,7 +1716,7 @@ export function App() {
     await window.scry.setCwd(null)
     if (!isCurrent()) return
     setCwd(null)
-    session.clearTurns()
+    clearPresentedSession()
     resetPromptQueueControl()
     shouldStickToBottomRef.current = true
     selectSessionId(null)
@@ -1733,14 +1742,14 @@ export function App() {
         next.delete(pendingDraftKey)
         return next
       })
-      session.clearTurns()
+      clearPresentedSession()
       setView('chat')
     })
     try {
       await window.scry.focusRun(null)
       if (!isCurrent()) return
       await applyNewConversationEffects({
-        clearTurns: session.clearTurns,
+        clearTurns: clearPresentedSession,
         newSession: () => window.scry.newSession(integrations.providerContext),
         refreshProviderCatalogs,
         setActiveSessionId: selectSessionId,
@@ -1818,7 +1827,7 @@ export function App() {
     setSessionCacheVisible(Boolean(cachedPage?.turns.length))
     if (switchingSession) {
       if (cachedPage) replacePresentedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
-      else session.clearTurns()
+      else clearPresentedSession()
     }
     resetPromptQueueControl()
     requestChatBottom(true)
@@ -1894,7 +1903,7 @@ export function App() {
         })
         sessionSnapshots.delete(historyContext)
         setSessionCacheVisible(false)
-        if (cachedPage) session.clearTurns()
+        if (cachedPage) clearPresentedSession()
         setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
       }
     } finally {
@@ -2100,7 +2109,7 @@ export function App() {
         if (viewRef.current === 'chat' && sequence === sessionSelectionSeqRef.current && activeSessionIdRef.current === sourceSessionId && cwdRef.current === sourceCwd) {
           sessionSelectionSeqRef.current += 1
           selectSessionId(null)
-          session.clearTurns()
+          clearPresentedSession()
           setConversationAgent(agentId)
           setConversationError(undefined)
           setLogicalConversation(adopted)

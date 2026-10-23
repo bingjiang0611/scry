@@ -11,11 +11,8 @@ export function cancelStructuralMotion(): void {
 /** Live DOM only: commits and errors remain synchronous; captured-page hit testing is never used. */
 export function runStructuralTransition(kind: StructuralKind, commit: () => void): void {
   cancelStructuralMotion()
-  if (typeof document === 'undefined' || document.hidden || import.meta.env.MODE === 'test') {
-    commit()
-    return
-  }
   flushSync(commit)
+  if (typeof document === 'undefined' || document.hidden || typeof Element.prototype.animate !== 'function') return
   // User-approved exception: theme changes immediately, without a whole-window snapshot.
   if (kind === 'theme') return
   const page = Array.from(document.querySelectorAll<HTMLElement>('.main-content')).find(node => node.getClientRects().length > 0)
