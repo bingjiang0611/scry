@@ -49,3 +49,14 @@
 - `perf/integration-2026-10-23` **已核验**：5 个分支 `--no-ff` 合入，无源码冲突；7 个 gate 第一次运行全部通过，`test:renderer:ui` 整条全绿；A1 停止/强制停止与 B2 后台恢复刷新已在独立 test 实例中重放通过。详见该分支 `reports/integration.md`。
 - `perf/f2-ios-stream-layout` 已核验，尚未合入整合分支；试算无冲突。
 - 下一步需维护者决定：把 F2 合入整合分支，再把整合分支合入 main，然后按仓库规定 `install:mac:dev` 安装，积累 L3 日常数据。
+
+## 移植到重写后的 main（审查方，2026-10-23）
+
+main 已在 10-23 重写历史（清除内部邮箱、内部引用和 designs/、.claude/skills 历史），与本轮各 `perf/*`、`fix/*` 分支不再有共同祖先。本轮工作因此逐提交移植到新分支 **`perf/port-2026-10-23`**（起点 `origin/main@b358dcb`）：
+
+- 70 个非合并提交按 handoff → fix → C → D → E → F → F2 → 整合报告的顺序 cherry-pick；作者和提交者统一为 `bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>`，作者时间保留。
+- 冲突处理：`STATUS.md` 取 handoff 版本；`performance-opportunities.md` 两边条目都保留；与新 main 的源码冲突 4 处（`scripts/desktop-remote-ui-smoke.mjs` 参数取并集、`RemoteChat.tsx` 两处、`desktop-client-ipc.ts` 方法列表取并集）均为两边都保留。`RemoteChat.tsx` 中 main 新增的“提交回执未知时阻止发送”放在优先级最前，`unknownIntent` 采用 main 去掉上下文过滤的新写法。
+- 整合报告中的旧包名 `@ali/scry-turn-recorder` 已改为 `scry-turn-recorder`。
+- 核对：未与 main 同时改动的 105 个文件与源分支逐字节一致；其余差异都在预期内（F2 覆盖 F、STATUS 取 handoff、上述脱敏，以及 `qoder.ts` 保留 main 重写时的脱敏注释）。node 侧差分类型检查没有新增生产代码错误，61 个改动的 TS 文件语法检查通过。**完整 gate 尚未在移植结果上运行。**
+- 各报告中出现的提交哈希指向旧分支，旧分支删除后这些哈希将无法在远端访问，仅作历史记录。
+- 旧的 9 个远端分支（`perf/handoff`、`perf/c-git-readonly`、`perf/d-renderer-transcript`、`perf/e-remote-delta`、`perf/f-ios-observable`、`perf/f2-ios-stream-layout`、`perf/integration-2026-10-23`、`fix/chat-preview-workspace-dirty`）含重写前历史。按维护者决定，移植分支 gate 通过并核验后再删除；在此之前，任何会话都不要再向这些旧分支推送。
