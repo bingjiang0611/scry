@@ -141,3 +141,107 @@ This device has reached the maximum number of installed apps using a free develo
 阻碍是免费开发者签名的安装槽位已满。腾出槽位需要删除设备上的 App，这一步由设备所有者决定。
 
 4 项 `catalog-refresh` 失败在基线上同样存在，已记入 `perf/handoff` 的 STATUS「既有问题」，不归入 F。
+
+## 真机补充核验（执行方，本轮 2026-10-22/23）
+
+**结论：审查意见要求的安装、`-selfTest`、XCTest UI target、iCTRL 回放及 600 行 L2 采集均已执行；不是测试全绿，也没有证据支持“真实流式输出已明显更快”。** 本轮未发现这两个测试套件相对 `bf92d04` 新增的失败，未改生产实现。以下更新前文“设备尚不可用”的现场状态；不覆盖审查方原意见，**本轮没有修改 `STATUS.md`**。
+
+### 身份、授权与数据边界
+
+- 首先 `git pull --ff-only` 到 `de8501ab5989114949f04a99decee8484d48d4c4`，读完上述审查意见。候选运行源码仍是已审查的 `82c5b33`；对照源码是 `bf92d049539a375aeafbc4044beedd61fef4244c`。测量工具及归一化数据独立提交 `e26941f2`，没有把测量代码塞入生产 target。
+- 始终使用 **iPhone 13 / iOS 26.5.2**，UDID `00008110-000808180E8B801E`，iCTRL 1.97.0；未使用模拟器，也未换成另一台手机。宿主 arm64 macOS 27.2、Xcode 26.6 (17F113)、Swift 6.3.3 / Swift 5 mode、Debug、`-jobs 4`。设备 UI 日志是 23 日，宿主日志是 22 日；统计使用 trace 内的单调时间，不混用两边的墙钟。
+- 隔离包仍被免费签名三 App 配额拒绝。之后用户明确授权 **“覆盖日常 scry”**，本轮才改用 `com.scry.remote.local` 原地安装；没有卸载 Scry、清空它的数据或重置配对。用户登录 Xcode 后 runner 可以签名，但安装仍超额；用户随后明确批准卸载 `com.baobingjiang.etch.mobile`，才得以执行 UI target。**Etch 已卸载，未自动重装，可能丢失其本地数据。**
+- `device-observation.py` 从不可变 Git revision 生成临时副本；给两边注入同一份 `device-observation.swift`。仅在生成副本隔离 defaults/history/state 目录、注入 body 计数与 trace、增加固定负载按钮和 Documents 结果文件。UI fixture 强制 preview；`-selfTest` 不强制 preview，保留原 admission 语义。没有改 transport、协议、恢复、outbox 或生产 Keychain 实现。
+- 构建时 Xcode 自动选择的 **8 个依赖 pin 在基线/候选完全相同**，已对比两份完整 pins 和两份 build log。该实验图保存为 [`20261022-ios-observation-device-f-packages.json`](../../../performance-experiments/20261022-ios-observation-device-f-packages.json)：ASN1 1.7.3、Collections 1.7.4、Atomics 1.3.1、Certificates 1.20.0、Crypto 4.5.2、NIO 2.90.1、NIOSSL 2.36.1、System 1.8.1。因此这是**同一实验依赖图下的源码对照**，不是声称复现原发布二进制。未提交 App 依赖升级；最终日常包另用仓库原锁文件构建，见末节。
+
+### 真机功能结果
+
+| 项目 | 结果 | 证据与范围 |
+| --- | --- | --- |
+| 真机 `-selfTest` | 基线、候选均 **114 PASS / 3 FAIL**，全部 117 条 SELFTEST 结果相同 | `/tmp/scry-f-device-selftest-{baseline,candidate}-v3.log`；使用隔离 defaults 与测试专用 Keychain service，不写生产 service |
+| XCTest UI target | 基线、候选均 **26/31 PASS，5 FAIL，0 skip**；失败名及错误文本完全相同 | `/tmp/scry-f-followup-ui-{v3,baseline}.xcresult`；两边 UI 测试源码无 diff；没有删断言、跳过测试或扩大其超时 |
+| iCTRL 首页、切换会话 | 可从首页打开“完成 iOS 工作目录选择器和附件发送”，返回后打开“修复手机续聊在 Mac 端不可见的问题” | `/tmp/scry-f-replay-*.json`；预置 DEBUG 会话，未冒充真实 Provider 请求或刷新成功 |
+| iCTRL 后台→前台 | 经 Settings 切后台，再回到 Scry，第二条会话标题仍在 | 同上；没有重新配对、清缓存或手动恢复会话 |
+| iCTRL 持续输出及流中切后台 | 固定流实际完成 600 行，1 个输出 row，前后台回放后的完整输出 hash 与基线相同 | `/tmp/scry-f-replay-stream-{start,progress,background,foreground,resumed,final}.json`；AX 样本上限 50 条，不将该样本说成 600 行全量 UI 遍历 |
+| 数据保留 | 日常 `Library/Preferences/com.scry.remote.local.plist` 安装前、测试后、最终安装后**字节完全一致**；其中连接描述符仍在 | `/tmp/scry-f-daily-preferences-{before,after-tests,final-locked}.plist`；未导出私钥，没有调用生产 Keychain 写入/删除路径。不将此等同于真实宿主已重新联通 |
+
+`-selfTest` 的三个基线同样失败项：
+
+- `run.recovery.explicitModelChoice`
+- `run.model.explicitAutoIsRemembered`
+- `run.model.catalogRecoveryRestoresReadiness`
+
+XCTest 的五个基线同样失败项（两边实际都执行了完整 31 个测试）：
+
+- `ConversationUITests.testFailedTurnKeepsItsOutcomeInTheTurn`
+- `ConversationUITests.testHomeRefreshFailureKeepsCacheActionableAndTechnicalDetailsCollapsed`
+- `ConversationUITests.testOpeningAndSendingFromOlderMessagesGoToLatest`
+- `ConversationUITests.testSessionStatusAndReadOnlyWorkspaceBrowser`
+- `ConversationUITests.testTurnDetailsDoNotInventMissingUsage`
+
+这些结果证明的是**相对此基线没有新增套件失败**，不是上述行为已通过验收，也未进一步把五项 UI 失败归因为产品 bug 或 fixture bug。本轮不扩大到修复非 F 回归。
+
+### 串行 L2：真实 body、Hitches 与 FPS estimate
+
+固定输入为 `stream600-paragraphs-30hz-tail500-v2`：600 段相同长度文本，按 33 ms 调度，走真实 `RemoteRunStore.append` / 合并与 SwiftUI 渲染，末尾留 500 ms。33 ms 是调度目标，**不是实现达成的吞吐率**。没有真实 Provider、付费请求、自动发送或网络流量造数。所有六轮均输出 600 行 / 1 row，完整 UTF-8 SHA-256：
+
+`2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4`
+
+每轮通过 `timing-run.mjs` 独占锁串行执行；顺序 A1→B1→B2→A2→A3→B3。以数字 PID attach，Activity Monitor + Hitches + Core Animation FPS + os_signpost，等固定负载完成后停止并保存 trace，而不是录固定秒数截断输出。只统计 `com.scry.batch-f / Stream600` interval；Hitches 再按目标 App PID 筛选，并裁剪到该 interval。已独立核对六份完整 Hitches 表：swap ID 均唯一、时间区间不重叠，没有重复相加。
+
+| 样本 | Stream interval ms | App hitches | Hitch ms/s | Display FPS estimate | 手机 thermal | 宿主 load before→after / 10 cores |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| A1 `baseline-v2-1` | 51981.6 | 326 | 365.9 | 26.62 | nominal→nominal | 90.22→63.58 |
+| B1 `candidate-v2-1` | 53446.6 | 304 | 313.7 | 26.57 | nominal→nominal | 41.46→39.02 |
+| B2 `candidate-v2-2` | 52851.1 | 307 | 356.4 | 26.58 | nominal→nominal | 36.59→26.03 |
+| A2 `baseline-v2-2` | 56434.3 | 324 | 339.7 | 26.03 | nominal→fair | 22.05→15.32 |
+| A3 `baseline-v2-3` | 52936.0 | 303 | 357.0 | 26.08 | nominal→nominal | 6.04→7.23 |
+| B3 `candidate-v2-3` | 54540.7 | 302 | 319.0 | 25.70 | nominal→nominal | 11.23→7.28 |
+
+FPS 按每个采样桶与 interval 的交集加权，覆盖率另存 JSON；它是 Instruments 的 **display FPS estimate**，不是 App 每帧呈现证明。`hitches-frame-lifetimes` 的 A3/B3 导出也已解析（1487/1474 行），其 schema 没有权威 dropped-frame-count 字段。CADisplayLink 的 missed callbacks 仅是主线程漏回调：基线 2710/2965/2764，候选 2786/2751/2855；**不能说成实际 GPU 呈现丢帧数**，本轮精确呈现丢帧计数为 unavailable。
+
+纯流式区间的真实 `body` 入口计数，六轮一致：
+
+| View | 基线 / 每轮 | 候选 / 每轮 | 解释 |
+| --- | ---: | ---: | --- |
+| `RootView` | 601 | 0 | 原来读 coordinator 的父层失效被切断；缺失的 dictionary counter 表示未进入该已注入的 body，基线是正对照 |
+| `ChatView` | 601 | 601 | 它自身依赖流式状态，仍正常更新 |
+| `FocusedTurnView` | 601 | 601 | 输出未被隐藏、节流或减少 |
+
+**可证实：本固定场景消除了无关父层 body 重算，且输出完整。不可证实：App 已整体更快或卡顿已解决。** 样本中位数 interval 为 52936.0→53446.6 ms（候选约 +0.96%）；hitches 324→304，hitch ms/s 357.0→319.0，FPS estimate 26.08→26.57。这只是描述，不是显著性结论。5/6 轮被现有 timing guard 标为 `highLoad:true`，A2 结束时 thermal 为 fair；保留全部样本，未挑掉慢值。不能将该小幅耗时增加归因为 F，也不能据此承诺无性能回归。若要作稳定 L2 提速/门禁结论，必须再做双方低宿主负载且 thermal nominal 的成对测量；本轮没有放宽 ratchet、替换 workload 或把 L1 当 L2/L3。当前持续输出依然有明显卡顿；未做 CPU call tree 归因，不擅自把它归咎于 Markdown 或扩大重构。
+
+归一化完整数据及 XML SHA-256：[`20261022-ios-observation-device-f.json`](../../../performance-experiments/20261022-ios-observation-device-f.json)。原始六份 trace、三张导出表、process metadata、iCTRL replies、结果和 timing log 均在 `/tmp/scry-f-l2-20261022/<样本名>/`。未上传 trace、xcresult、偏好文件或设备诊断。
+
+### 工具、负对照与首轮失败
+
+- 新增 `apps/ios/Checks/device-observation.{py,swift}`：只生成隔离副本，不自动安装、签名或运行。新增 `device-observation-record.py`：必须由现有 timing lock 包装，对明确授权的 bundle/device 录一轮，拒绝覆盖已有输出目录；最后两轮已实际用提交版入口执行。新增 `device-observation-report.py`：完整解析三张 XML 表及 ref，校验 phase PID、600 行、1 row 和独立计算的完整输出 hash；六轮重新归一化后与提交数据逐字节相同。
+- Python 编译检查通过。报告器负对照：把独立副本改成 599 行、把 process PID 改成错误值，**两者均退出 1**；没有把缺失证据显示成 0 或成功。没有新增依赖或 App target 源文件。
+- 初次 self-test harness 错误地强制 preview，造成额外 readiness 失败；只修正临时入口选择后才采纳 v3 的 117 项完整对照。初次 XCTest 是缺 runner profile / Xcode No Accounts；登录后仍被槽位拒绝；经用户批准卸载 Etch 后才真正运行，没有把安装失败算作 skip 或 PASS。
+- 初次 Instruments 按进程名 attach 失败；改数字 PID。另一次 Animation Hitches 模板固定约 28 s，早于约 56 s 的实际 workload 结束，保存被中断，trace 无法导出。这些首次失败仍保留在本地，**不纳入可比较的 v2 数据**；之后使用更轻模板并按 completion 停止，没有缩小 600 行负载。完整 v2 的慢值和高负载值全部保留。
+
+同机复现示例（需要设备所有者事先授权相应安装/覆盖；不要清 Keychain 或重新配对）：
+
+```sh
+# 对 bf92d04 / de8501a 各生成一份新目录；实际设备构建、签名、安装另行执行。
+python3 apps/ios/Checks/device-observation.py --revision bf92d04 --output /tmp/f-device-A
+# 两边构建前使用同一份已归档实验依赖图，防止重新解析到未来的版本。
+cp docs/performance-experiments/20261022-ios-observation-device-f-packages.json \
+  /tmp/f-device-A/apps/ios/ScryRemote.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+# xcodebuild 使用 -onlyUsePackageVersionsFromResolvedFile；不要自动升级依赖。
+# 安装并确认对应 fixture 后，一次只录一轮，output 必须是新目录。
+node .agents/skills/scry-performance-climb/scripts/timing-run.mjs F-ios-A \
+  -- python3 apps/ios/Checks/device-observation-record.py \
+  --device 00008110-000808180E8B801E --bundle com.scry.remote.local --output /tmp/f-l2-A \
+  > /tmp/f-l2-A.log 2>&1
+cp /tmp/f-l2-A.log /tmp/f-l2-A/timing.log
+python3 apps/ios/Checks/device-observation-report.py /tmp/f-l2-A
+```
+
+### 收尾与未验证项
+
+- 已卸载**本轮新装的** `com.scry.remote.local.xctrunner`，释放 runner 槽位。iCTRL runner 仍在；没有停止原本已运行的 USB tunnel（PID 82924）。本轮 xctrace / xcodebuild 已结束；未留下运行中的 Provider 或测试驱动。
+- 已从当前仓库正常 target **重新构建并原地安装无注入的 Scry `0.1.15 (24)`**。命令是相同 physical-device Debug build 加 `-onlyUsePackageVersionsFromResolvedFile`；codesign strict/deep 校验、构建、安装均成功。Xcode 曾自动改动 App `Package.resolved`，已仅撤回该次生成的更新；最终锁文件与 Git 完全一致（ASN1 1.7.2 / Collections 1.6.0），未顺带提交依赖升级。
+- 最终正常包 `ScryRemote.debug.dylib` SHA-256：`361dd6d75f4492c73596edb8838ceef5044c52825a947a0d3c26434604b1b012`。symbol 检查不存在 `BatchFDevice`；不会再默认进入 fixture。最终版本没有完整嵌入 Git build ID，以上 revision / version / hash 用于限定证据。日志 `/tmp/scry-f-followup-final-locked-build.log`，安装结果 `/tmp/scry-f-followup-final-locked-install.json`。
+- 最终正常包**未自动启动或发送**。功能/帧率验收针对上述隔离状态、相同实验依赖图的 DEBUG fixture；不冒充最终正常包的真实已配对宿主/Provider 联通验收。没有执行 L3 日常样本或精确 GPU 呈现丢帧验收。默认 preferences 再次逐字节比较未变，真实 Keychain 不导出、不重置。
+- 本地保留上述 `/tmp/scry-f-*` 证据、临时 fixture、构建产物及失败现场。App Documents 中保留本轮 `batch-f-preview.json`、`batch-f-stream.json`、`batch-f-selftest.log` 三个测试文件；无注入正常包不读取它们。Etch 未自动恢复；如需使用，由设备所有者按其原安装流程恢复。
+- **审查方 / 原 iOS 契约维护者下一步**：处理或明确接受上列 3 项 self-test 与 5 项 UI 基线同样失败，再决定整体验收口径；不要把本轮“已运行且未新增失败”改写成“全绿”。如要宣称 L2 更快，由 F 执行方另做低负载、nominal 的成对复测。本轮只补证据，不更改 `STATUS.md`，不合并 main。

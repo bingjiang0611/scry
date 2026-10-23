@@ -41,10 +41,11 @@ for directory in args.runs:
     processes = json.loads((directory / 'process.json').read_text())['result']['runningProcesses']
     assert len(processes) == 1
     process = processes[0]['processIdentifier']
-    rows, _ = table(directory / 'os-signpost-interval.xml')
+    rows, resolve = table(directory / 'os-signpost-interval.xml')
     phases = [row for row in rows if row['name'].text == 'Stream600' and row['subsystem'].text == 'com.scry.batch-f']
     assert len(phases) == 1
     phase = phases[0]
+    assert int(resolve(phase['process'].find('pid')).text) == process, 'Stream phase belongs to a different process'
     start = int(phase['start'].text)
     duration = int(phase['duration'].text)
     assert duration > 0
