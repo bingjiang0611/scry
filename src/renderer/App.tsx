@@ -1825,6 +1825,7 @@ export function App() {
     const cachedPage = switchingSession ? sessionSnapshots.get(historyContext) : undefined
     setSessionLoading(switchingSession || session.turns.length === 0)
     setSessionCacheVisible(Boolean(cachedPage?.turns.length))
+    setView('chat')
     if (switchingSession) {
       if (cachedPage) replacePresentedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
       else clearPresentedSession()
@@ -1832,7 +1833,6 @@ export function App() {
     resetPromptQueueControl()
     requestChatBottom(true)
     selectSessionId(sessionId)
-    setView('chat')
     setCwd(projectCwd || null)
     integrations.setSelectedId(agentProfileId ?? providerId)
     try {
