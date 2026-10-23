@@ -16,6 +16,9 @@ packages/turn-recorder-cli/dist/
 .pi/
 .vite/
 docs/ui-audit/screenshots/
+# 设计稿与截图属本地工作素材（含内部会话/项目名）：保留在工作区，不随仓库分发。
+designs/
+artifacts/
 # 内部上下文：内网 registry、需求单、本地内部资料索引。CLAUDE.md 会读取它，文件本身不提交。
 .claude/company-context.local.md
 # 内部团队推广方案与内部验收 skill：只保留在本地工作区。

@@ -114,6 +114,8 @@ components:
 
 这是现有实现的记录，不是重设计。用户已确认上述比喻、气质、语义色名，以及“分层为主，阴影辅助”“柔和边界，明确操作”。仅记录稳定的共享样式与代表组件；不把当前未提交功能升级为全局规范。
 
+设计稿、原型和截图放在本地 `designs/`、`artifacts/` 目录，不随仓库分发；文档里指向这两个目录的链接只在维护者本机可打开。
+
 桌面入口 `src/renderer/main.tsx` 依次导入 styles、analytics-evidence、inventory-evidence、session-evidence、codex-alignment 的 CSS。最后一层覆盖基础变量，但仍须遵守选择器优先级和组件局部样式。iOS 依据 `apps/ios/ScryRemote/Theme.swift`、`Components.swift` 和 `HomeView.swift`。原始代码路径与内容指纹见配套 `.impeccable/design.json`。
 
 2026-10-21 补充了真实运行界面的视觉抽查，替代此前截图超时的证据缺口。桌面记录已更新为安装 0.2.214、用户手动重启后的观察：
