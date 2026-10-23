@@ -95,3 +95,11 @@
 
 1. 未跟踪的普通文件先 `lstat` 再 `open(absolute, 'r')`，两步之间可被换成符号链接。影响只是行数统计读到工作区外的文件，不泄露内容；可改用 `O_RDONLY | O_NOFOLLOW` 打开。
 2. renderer 在 render 中读取 `gitDiffCwdRef.current`；目前每次 setState 都会触发重渲染，所以结果正确，但这依赖调用顺序，日后改动时留意。
+
+## 建议 1 的后续加固（2026-10-23）
+
+按用户要求，仅处理建议 1，不改建议 2 或 STATUS。未跟踪普通文件使用 `O_RDONLY | O_NOFOLLOW` 打开，拒绝 lstat/open 之间替换成的符号链接；原本就是 symlink 的路径仍走 readlink，不改变原有语义。
+
+新增确定性竞态回归：在真实 lstat 返回后，将未跟踪文件换成指向工作区外的 symlink。外部文件与原文件等长但行数不同，避免测试被尺寸上限误挡。旧实现确定失败（返回 captured、统计外部 3 行）；加固后返回 failed/git_error，无成功文件列表。
+
+验证：focused 74 pass；完整 unit 3712 pass / 4 既有 opt-in skipped；typecheck、App build、CLI build 通过。`performance:measure --scenario source-control.diff` 为 gate 8 pass / total 8 unchanged，无 worse；不宣称新增性能收益。原始日志 `/tmp/scry-c-nofollow-*.log`。未安装 App，未合入 main。

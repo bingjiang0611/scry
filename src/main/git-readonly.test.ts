@@ -6,6 +6,20 @@ import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { beginGitTurnDiff, cancelGitTurnDiff, gitNumstat, parseNumstat, readWorkspaceNumstat } from './git'
 
+const symlinkRace = vi.hoisted(() => ({ path: '', target: '', swapped: false }))
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, lstat: async (...args: Parameters<typeof actual.lstat>) => {
+    const metadata = await actual.lstat(...args)
+    if (String(args[0]) === symlinkRace.path) {
+      await actual.rm(symlinkRace.path)
+      await actual.symlink(symlinkRace.target, symlinkRace.path)
+      symlinkRace.swapped = true
+    }
+    return metadata
+  } }
+})
+
 const exec = promisify(execFile)
 const git = (cwd: string, args: string[]) => exec('git', args, { cwd })
 beforeAll(() => {
@@ -45,6 +59,25 @@ async function equivalent(root: string): Promise<void> {
 }
 
 describe('workspace numstat read-only equivalence', () => {
+  it('rejects an untracked regular file replaced by an outside symlink between lstat and open', async () => fixture(async root => {
+    const outside = await mkdtemp(join(tmpdir(), 'scry-readonly-outside-'))
+    try {
+      const path = join(root, 'untracked.txt')
+      const target = join(outside, 'private.txt')
+      // Equal byte lengths: following the symlink must not fail merely on the size guard.
+      await writeFile(path, 'inside\n')
+      await writeFile(target, 'x\nx\nxx\n')
+      Object.assign(symlinkRace, { path, target, swapped: false })
+      const result = await readWorkspaceNumstat(root)
+      expect(symlinkRace.swapped).toBe(true)
+      expect(await realpath(path)).toBe(await realpath(target))
+      expect(result).toMatchObject({ status: 'failed', reason: 'git_error', files: [] })
+    } finally {
+      Object.assign(symlinkRace, { path: '', target: '', swapped: false })
+      await rm(outside, { recursive: true, force: true })
+    }
+  }))
+
   it('matches modified / deleted / staged / untracked / binary / empty / odd paths without index or object writes', async () => fixture(async root => {
     await writeFile(join(root, 'changed.txt'), 'after\nsecond\n')
     await rm(join(root, 'deleted.txt'))

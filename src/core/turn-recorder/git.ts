@@ -1,6 +1,7 @@
 // P2 Files & Diff（RFC §8.4）：拿 cwd 在单轮开始/结束之间的净 diff，与工具足迹对照。
 // 用 execFile（非 exec，无 shell 注入）。采集失败保留状态与原因，不冒充成功空结果。
 import { execFile } from 'node:child_process'
+import { constants } from 'node:fs'
 import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readlink, realpath, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -1444,7 +1445,7 @@ export async function readWorkspaceNumstat(
           content = Buffer.from(await readlink(absolute))
         } else if (metadata.isFile()) {
           if (metadata.size > remaining) throw new WorkspaceReadUnavailable('workspace_limit')
-          const handle = await open(absolute, 'r')
+          const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW)
           try {
             // One extra byte detects growth beyond the total budget without readFile's unbounded allocation.
             const buffer = Buffer.alloc(metadata.size + 1)
