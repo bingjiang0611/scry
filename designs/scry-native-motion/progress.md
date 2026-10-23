@@ -6,8 +6,8 @@
 
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
-| 01 基础 | 需修改 | `cf5642b`（实现）；核验见「01 · 核验」，修正以 `motion(01-fix)` 提交 |
-| 02 结构过渡 | 未开始 | — |
+| 01 基础 | 通过 | `22b0358`（修正实现）、`3abbfeb`（修正验收）；已落实 01 核验要求 |
+| 02 结构过渡 | 进行中 | 仅完成合同预检；发现平台合同冲突，见「问题」，未接入运行代码 |
 | 03 弹窗与浮层 | 未开始 | — |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
@@ -20,6 +20,15 @@
 （执行方发现规格有误、做不到或需要用户决定的事项写在这里，并停下等待回复。）
 
 - 01 安装受阻：`npm run install:mac:dev` 已执行。完整测试、shell、构建及打包完成后，`check:packaged-app` 执行产物的 `Contents/Resources/bin/scry --version` 收到 `SIGKILL`；单独读版本再次复现（退出 137）。`codesign --verify --deep --strict --verbose=2 dist/mac-arm64/Scry.app` 通过，但不能据此认定产物可运行。未绕过校验，未安装到 `/Applications/Scry.app`，未停止用户实例。签名/系统终止的根因未确定；由维护者决定是否另开打包排查，恢复后需重新走完整安装流程。本步实现与下列验收已提交待设计方核验；不进入 02。
+
+### 2026-10-22 · main 打包对照与 02 合同问题
+
+- main 对照：按「01 · 核验」指定的 `main` 基线 `531e88c`，在独立 detached worktree `/private/tmp/scry-motion-main-repro.tS07ww/source` 执行完整 `npm run pack`；沿用 Node 22.22.1、Electron 42.10.1、同一签名身份和单 worker 环境变量。**未复现**：typecheck、3699 个 unit（4 个原有跳过）、shell、build、packaged check、全部 packaged smoke 均通过；私有 CLI 返回 `0.2.51`。日志 `/tmp/scry-motion-main-repro-pack.log`。没有切换或写入用户现有 main worktree，没有安装 main 产物、没有向 main 提交或推送。
+- 对照后的排查：同一时点重新运行设计分支原来失败路径的 `dist/mac-arm64/Scry.app/Contents/Resources/bin/scry --version`，现在也返回 `0.2.51`（exit 0），未改动该 bundle 来使其通过。因此当前无法稳定复现历史 SIGKILL，不能将其标成已复现的 main 既有缺陷，也不能断言根因是动效代码或签名缓存。原始失败记录保留；没有绕过 `check:packaged-app`。新修正版本的安装尚未执行，不能将 main 打包通过当成修正版本已安装。
+- **02 暂停：`steps/02-structure.md` A 与 H2 的同步合同无法同时由原生 View Transitions API 满足。** A 要求 `runViewTransition(kind, commit): void` 在 API 的回调中 `flushSync(commit)`，同时要求 commit 的异常同步冒泡到调用方；H2 要求调用后的状态同帧提交。Electron 42 的 `startViewTransition` 会先返回，再异步调用 update callback。`flushSync` 只能保证回调执行时同步刷新 React，不能让尚未调用的回调回到调用者栈里执行。原生 API 将回调异常放入 `updateCallbackDone` / `finished` 的 rejected Promise，不会同步 throw 给外层调用方。
+- 平台实测：独立 sandbox/contextIsolation 的隐藏 Electron 测试窗口、独立临时 userData，未显示或抢焦点。Electron `42.10.1` / Chromium `148.0.7778.280`，`document.visibilityState === 'visible'`，非隐藏文档退路。正常调用事件顺序为 `["returned", "commit"]`，函数返回时 state 仍是 `old`，finished 后才是 `new`；回调抛出 `probe-sentinel` 时外层同步 catch 未触发，错误通过两个 Promise 拒绝。原始可运行探针 `/tmp/scry-native-vt-contract-probe.cjs`，日志 `/tmp/scry-native-vt-contract-probe.log`，临时 userData 已清理。
+- 最小复现：`let state = 'old'; const vt = document.startViewTransition(() => { state = 'new' }); console.log(state); await vt.finished; console.log(state)` 在真实 Electron 输出 `old`、`new`。把赋值改为 `throw new Error('sentinel')`，错误进入 `vt.updateCallbackDone`，不进入围绕 `startViewTransition(...)` 的同步 catch。不能用同步执行回调的单测 mock 证明相反合同。
+- 需设计方决定：保留真实 View Transitions，则需明确允许快照更新回调的异步调度，并将错误通过 Promise 交付（侧栏选中仍单独同步提交）；或坚持同步 commit / 同步异常，则需批准改为 WAAPI 等同步提交后的新内容入场，并放弃旧页快照交叉淡化。执行方未自行改 brief、步骤说明或降低验收。按执行协议在此暂停 02；尚未做面板 V/F 实验、接入或宣称第 02 步完成。
 
 ## 记录
 
@@ -82,6 +91,17 @@
 - 规格补充（设计方已在本次提交中写入步骤文件，执行方按新版执行）：
   - `steps/04-lists.md`：加入 01 留下的「标签指示条」。
   - `steps/03-overlays.md`、`steps/04-lists.md`、`steps/05-loading.md`：01 的全局规则只把关键帧动画的时长压到 120ms，不会去掉关键帧里的 `transform`。所以新增的、带位移或缩放的 `@keyframes` 必须像 `surface-menu-in` 一样，在减弱动效下提供只含透明度的版本；05 的不定进度条在减弱动效下改为静态细条加文案，不能被压成一次 120ms 后就消失。
+
+### 01-fix · 减弱动效核验修正（2026-10-22）
+
+- 提交：`3abbfeb` motion(01-fix): 验证减弱动效不会新增颜色过渡（fixture / smoke）；`22b0358` motion(01-fix): 保留元素原有过渡时长与即时状态（实现）。
+- 改动：删除全局 `transition-duration: 120ms !important`；无过渡及 transition:none 元素保持 0s，已有过渡只限颜色 / 透明度并沿用自己的时长。删掉侧栏 tab 的多余例外；surface tab 已声明 100ms 背景过渡，仍需排除 color，避免全局 property 覆盖给其选中文字新增淡化。没有改全局关键帧动画时长或循环动画规则。
+- 验收：`--motion-tokens-only` 真实 CSS 下修改无过渡元素、显式 none 元素、真实会话行 `.sb-sess-row` 与 `.sb-sesstext` 的底色，`getAnimations()` 均为空；有生产 `.btn` micro 过渡的元素只有一个 ≤100ms 的 linear background-color 动画。正常 FLIP 300ms 正对照、reduce 下无空间动画均继续通过。sidebar 检查已改为实际改色后的动画计数，不再依赖 transitionProperty 字符串。
+- 负对照：临时加回被核验否决的 120ms 行，新断言真实失败：`#motion-instant` 产生一个 120ms background-color 动画；日志 `/tmp/scry-motion-01-fix-negative.log`。随后删除该行，motion 与 sidebar focused smoke 均通过，负对照未留源码。
+- `npm run test:unit -- src/renderer/motion.test.ts src/renderer/sidebar-activity.test.ts`：11 通过；`npm run typecheck`（含 web）、`npm run build`：通过；`npm run test:renderer:ui`：完整通过，含 Credits / 新断言 / 既有安全与归属检查，日志 `/tmp/scry-motion-01-fix-ui.log`。`git diff --check`：通过。
+- 首轮失败：本轮唯一故意失败为上面的负对照；没有删断言、扩大超时或改动保护以变绿。
+- main 打包已按要求对照并登记到「问题」；main 未复现，设计分支旧产物当前也不复现，历史 SIGKILL 的根因仍未知。未安装 main，也未将旧产物恢复运行当成新修正已安装。
+- 01 修正通过后按授权开始 02 的合同预检；发现真实平台行为与规格冲突，依协议暂停并请求决定。未改步骤文件；未进入 03。
 
 <!--
 ### NN · <步骤名>
