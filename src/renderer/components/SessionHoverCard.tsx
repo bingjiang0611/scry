@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { SessionMeta } from '../env'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
+import { usePresence } from '../hooks/usePresence'
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -38,29 +39,31 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   const owner = useContext(HoverOwner)
   const id = useId()
   const anchor = useRef<HTMLButtonElement>(null)
-  const card = useRef<HTMLDivElement>(null)
+  const card = useRef<HTMLDivElement | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const frame = useRef<number>()
   const [visible, setOpen] = useState(false)
+  const presence = usePresence({ onClose: () => setOpen(false), exitMs: 100 })
   const open = visible && owner !== null
-  const [position, setPosition] = useState({ left: 0, top: 0 })
+  const [position, setPosition] = useState({ left: 0, top: 0, transformOrigin: 'top left' })
   const clear = (): void => {
     clearTimeout(timer.current)
     if (frame.current !== undefined) cancelAnimationFrame(frame.current)
   }
-  const dismiss = (): void => { clear(); setOpen(false) }
-  const show = (): void => { clear(); setOpen(true) }
+  const dismiss = (): void => { clear(); if (open) presence.requestClose('pointer') }
+  const dismissImmediately = (): void => { clear(); presence.finishNow(); setOpen(false) }
+  const show = (): void => { clear(); presence.reset(); setOpen(true) }
   const enter = (): void => {
     clear()
     setOpen(false)
-    owner?.claim({ id, dismiss })
+    owner?.claim({ id, dismiss: dismissImmediately })
     timer.current = setTimeout(show, 350)
   }
-  const leave = (): void => { clear(); timer.current = setTimeout(() => setOpen(false), 120) }
+  const leave = (): void => { clear(); timer.current = setTimeout(dismiss, 120) }
   const focus = (): void => {
     clear()
     setOpen(false)
-    owner?.claim({ id, dismiss })
+    owner?.claim({ id, dismiss: dismissImmediately })
     // Let the browser scroll a keyboard-focused row into view before opening.
     frame.current = requestAnimationFrame(show)
   }
@@ -72,17 +75,19 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   useBrowserLayoutEffect(() => {
     if (!open || !anchor.current || !card.current) return
     const row = anchor.current.getBoundingClientRect()
-    const box = card.current.getBoundingClientRect()
+    const box = { width: card.current.offsetWidth, height: card.current.offsetHeight }
     const right = row.right + 8
-    const left = right + box.width <= window.innerWidth - 8 ? right : row.left - box.width - 8
+    const showOnRight = right + box.width <= window.innerWidth - 8
+    const left = showOnRight ? right : row.left - box.width - 8
     setPosition({
       left: Math.max(8, Math.min(left, window.innerWidth - box.width - 8)),
-      top: Math.max(8, Math.min(row.top, window.innerHeight - box.height - 8))
+      top: Math.max(8, Math.min(row.top, window.innerHeight - box.height - 8)),
+      transformOrigin: showOnRight ? 'top left' : 'top right'
     })
   }, [open, session.preview, projectName, cwd])
   useEffect(() => {
     if (!open) return
-    const hide = (): void => { clearTimeout(timer.current); setOpen(false) }
+    const hide = (): void => { clearTimeout(timer.current); dismiss() }
     const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') hide() }
     const scroll = (event: Event): void => {
       if (!(event.target instanceof Node) || !card.current?.contains(event.target)) hide()
@@ -106,14 +111,14 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
     dismiss,
     triggerProps: {
       ref: anchor,
-      'aria-describedby': open ? id : undefined,
+      'aria-describedby': open && presence.state === 'enter' ? id : undefined,
       onMouseEnter: enter,
       onMouseLeave: leave,
       onFocus: focus,
       onBlur: dismiss
     },
     tooltip: open ? createPortal(
-      <div id={id} ref={card} role="tooltip" className="session-hover-card" style={position}
+      <div id={id} ref={(node) => { card.current = node; presence.ref(node) }} role="tooltip" className="session-hover-card" data-state={presence.state} style={position}
         onMouseEnter={clear} onMouseLeave={dismiss}>
         <div className="session-hover-heading">
           <strong>{session.preview || '(无标题)'}</strong>

@@ -12,7 +12,9 @@ import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
+import { createPortal } from 'react-dom'
+import { usePresence } from '../hooks/usePresence'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
@@ -145,28 +147,12 @@ export const Sidebar = memo(function Sidebar({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
   const [projectDialog, setProjectDialog] = useState<{ mode: 'rename' | 'remove'; project: ProjectMeta } | null>(null)
-  const projectMenuRef = useRef<HTMLDivElement>(null)
   const toggle = (key: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
-  useEffect(() => {
-    if (!projectMenu) return
-    const dismissPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !projectMenuRef.current?.contains(event.target)) setProjectMenu(null)
-    }
-    const dismissEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setProjectMenu(null)
-    }
-    document.addEventListener('pointerdown', dismissPointer, true)
-    document.addEventListener('keydown', dismissEscape)
-    return () => {
-      document.removeEventListener('pointerdown', dismissPointer, true)
-      document.removeEventListener('keydown', dismissEscape)
-    }
-  }, [projectMenu])
   const ql = q.trim().toLowerCase()
   const { pinned, filtered } = useMemo(() => {
     const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
@@ -470,53 +456,19 @@ export const Sidebar = memo(function Sidebar({
           onPickConversation(conversation)
           setSessionMenu(null)
           window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`[data-conversation-id="${conversation.id}"] textarea`)?.focus())
-        } : undefined} onClose={() => {
-          const trigger = sessionMenu.trigger
-          setSessionMenu(null)
-          window.requestAnimationFrame(() => { if (trigger.isConnected) trigger.focus() })
-        }} />
+        } : undefined} onClose={() => setSessionMenu(null)} />
       )}
 
       {projectMenu && (
-        <div
-          ref={projectMenuRef}
-          className="menu sb-project-menu"
-          role="menu"
-          aria-label={`管理项目 ${projectMenu.project.name}`}
-          style={{ left: projectMenu.left, top: projectMenu.top }}
-        >
-          <div className="sb-project-menu-head">
-            <b>{projectMenu.project.name}</b>
-            <code>{projectMenu.project.cwd}</code>
-          </div>
-          {onNewProjectChat && (
-            <button type="button" className="mitem on" onClick={() => { setProjectMenu(null); onNewProjectChat(projectMenu.project.cwd) }}>
-              <Icon name="plus" /> 在此项目新建会话
-            </button>
-          )}
-          <div className="mdiv" />
-          {onToggleProjectPin && (
-            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onToggleProjectPin(projectMenu.project) }}>
-              <Icon name="pin" /> {projectMenu.project.pinnedAt ? '取消置顶项目' : '置顶项目'}
-            </button>
-          )}
-          {onRevealProject && (
-            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onRevealProject(projectMenu.project) }}>
-              <Icon name="folder" /> 在 Finder 中显示
-            </button>
-          )}
-          {onRenameProject && (
-            <button type="button" className="mitem" onClick={() => { setProjectDialog({ mode: 'rename', project: projectMenu.project }); setProjectMenu(null) }}>
-              <Icon name="settings" /> 编辑项目名称
-            </button>
-          )}
-          <div className="mdiv" />
-          {onRemoveProject && (
-            <button type="button" className="mitem sb-project-remove" onClick={() => { setProjectDialog({ mode: 'remove', project: projectMenu.project }); setProjectMenu(null) }}>
-              <Icon name="x" /> 从 Scry 移除项目
-            </button>
-          )}
-        </div>
+        <ProjectMenu
+          menu={projectMenu}
+          onClose={() => setProjectMenu(null)}
+          onNewProjectChat={onNewProjectChat}
+          onToggleProjectPin={onToggleProjectPin}
+          onRevealProject={onRevealProject}
+          onRenameProject={(project) => { setProjectDialog({ mode: 'rename', project }); setProjectMenu(null) }}
+          onRemoveProject={(project) => { setProjectDialog({ mode: 'remove', project }); setProjectMenu(null) }}
+        />
       )}
 
       {projectDialog && (
@@ -556,6 +508,56 @@ export const Sidebar = memo(function Sidebar({
   )
 })
 
+function ProjectMenu({
+  menu,
+  onClose,
+  onNewProjectChat,
+  onToggleProjectPin,
+  onRevealProject,
+  onRenameProject,
+  onRemoveProject
+}: {
+  menu: { project: ProjectMeta; left: number; top: number }
+  onClose: () => void
+  onNewProjectChat?: (cwd: string) => void
+  onToggleProjectPin?: (project: ProjectMeta) => void
+  onRevealProject?: (project: ProjectMeta) => void
+  onRenameProject?: (project: ProjectMeta) => void
+  onRemoveProject?: (project: ProjectMeta) => void
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const presence = usePresence({ onClose, exitMs: 100 })
+  useEffect(() => {
+    if (presence.state === 'exit') return
+    const dismissPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) presence.requestClose('pointer')
+    }
+    const dismissEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') { event.preventDefault(); presence.requestClose('escape') }
+    }
+    document.addEventListener('pointerdown', dismissPointer, true)
+    document.addEventListener('keydown', dismissEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissPointer, true)
+      document.removeEventListener('keydown', dismissEscape)
+    }
+  }, [presence.state, presence.requestClose])
+  const content = (
+    <div ref={(node) => { menuRef.current = node; presence.ref(node) }} className="menu sb-project-menu" data-state={presence.state}
+      role="menu" aria-label={`管理项目 ${menu.project.name}`} style={{ left: menu.left, top: menu.top, transformOrigin: 'top left' }}>
+      <div className="sb-project-menu-head"><b>{menu.project.name}</b><code>{menu.project.cwd}</code></div>
+      {onNewProjectChat && <button type="button" className="mitem on" onClick={() => { onNewProjectChat(menu.project.cwd); presence.requestClose('button') }}><Icon name="plus" /> 在此项目新建会话</button>}
+      <div className="mdiv" />
+      {onToggleProjectPin && <button type="button" className="mitem" onClick={() => { onToggleProjectPin(menu.project); presence.requestClose('button') }}><Icon name="pin" /> {menu.project.pinnedAt ? '取消置顶项目' : '置顶项目'}</button>}
+      {onRevealProject && <button type="button" className="mitem" onClick={() => { onRevealProject(menu.project); presence.requestClose('button') }}><Icon name="folder" /> 在 Finder 中显示</button>}
+      {onRenameProject && <button type="button" className="mitem" onClick={() => onRenameProject(menu.project)}><Icon name="settings" /> 编辑项目名称</button>}
+      <div className="mdiv" />
+      {onRemoveProject && <button type="button" className="mitem sb-project-remove" onClick={() => onRemoveProject(menu.project)}><Icon name="x" /> 从 Scry 移除项目</button>}
+    </div>
+  )
+  return typeof document === 'undefined' ? content : createPortal(content, document.body)
+}
+
 function ProjectDialog({
   mode,
   project,
@@ -576,7 +578,7 @@ function ProjectDialog({
     <ModalFrame labelledBy={titleId} initialFocusRef={mode === 'rename' ? inputRef : undefined} className="project-dialog" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>{mode === 'rename' ? '编辑项目名称' : `移除“${project.name}”？`}</b>
-        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={onClose}>×</ModalCloseButton>
+        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={() => requestModalClose()}>×</ModalCloseButton>
       </div>
       {mode === 'rename' ? (
         <form
@@ -594,7 +596,7 @@ function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="button" className="btn" onClick={() => requestModalClose()}>取消</button>
             <button type="submit" className="btn primary" disabled={!name.trim()}>保存</button>
           </div>
         </form>
@@ -605,7 +607,7 @@ function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="button" className="btn" onClick={() => requestModalClose()}>取消</button>
             <button type="button" className="btn project-remove-confirm" onClick={() => void onRemove()}>移除项目</button>
           </div>
         </>

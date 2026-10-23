@@ -6,7 +6,8 @@ import {
   writeMetaPrompts,
   type MetaPrompt
 } from '../meta-prompts'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
+import type { PresenceCloseReason } from '../hooks/usePresence'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
@@ -137,10 +138,10 @@ export function MetaPromptsView({ onBack, onInsert }: {
       )}
       {notice && !editor && !deleting && <p className={`mp-notice${notice.error ? ' error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
       {editor && <PromptEditor prompt={editor.prompt} error={notice?.error ? notice.text : null} onSave={save} onClose={() => { setEditor(null); setNotice(null) }} />}
-      {deleting && <ModalFrame labelledBy={deleteTitleId} className="mp-delete-modal" onClose={() => { setDeleting(null); setNotice(null) }}>
-        <div className="modal-head"><b id={deleteTitleId}>删除这条提示词？</b><ModalCloseButton aria-label={MODAL_COPY.cancelDelete} onClick={() => setDeleting(null)} /></div>
+      {deleting && <ModalFrame labelledBy={deleteTitleId} className="mp-delete-modal" onClose={reason => { setDeleting(null); if (reason !== 'button') setNotice(null) }}>
+        <div className="modal-head"><b id={deleteTitleId}>删除这条提示词？</b><ModalCloseButton aria-label={MODAL_COPY.cancelDelete} onClick={() => requestModalClose()} /></div>
         <div className="mp-delete-content"><p>「{deleting.title}」将从本机提示词库移除，无法撤销。</p>{notice?.error && <p className="mp-form-error" role="alert">{notice.text}</p>}</div>
-        <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => setDeleting(null)}>取消</button><button type="button" className="mp-button mp-danger" onClick={remove}>删除</button></footer>
+        <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>取消</button><button type="button" className="mp-button mp-danger" onClick={remove}>删除</button></footer>
       </ModalFrame>}
     </section>
   )
@@ -158,23 +159,26 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
   const [body, setBody] = useState(prompt?.body ?? '')
   const [discarding, setDiscarding] = useState(false)
   const changed = title !== (prompt?.title ?? '') || body !== (prompt?.body ?? '')
-  const close = (): void => { if (changed) setDiscarding(true); else onClose() }
+  const canClose = (reason: PresenceCloseReason): boolean => {
+    if (changed && reason !== 'confirm') { setDiscarding(true); return false }
+    return true
+  }
   const submit = (event: FormEvent): void => {
     event.preventDefault()
     onSave(title.trim(), body)
   }
   return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={inputRef} className="mp-editor-modal" onClose={close}>
+    <ModalFrame labelledBy={titleId} initialFocusRef={inputRef} className="mp-editor-modal" canClose={canClose} onClose={onClose}>
       <form onSubmit={submit}>
-        <div className="modal-head"><b id={titleId}>{prompt ? '编辑提示词' : '新建提示词'}</b><ModalCloseButton aria-label={MODAL_COPY.closePromptEditor} onClick={close} /></div>
+        <div className="modal-head"><b id={titleId}>{prompt ? '编辑提示词' : '新建提示词'}</b><ModalCloseButton aria-label={MODAL_COPY.closePromptEditor} onClick={() => requestModalClose()} /></div>
         <div className="mp-editor-fields">
           <label>标题<input ref={inputRef} required maxLength={META_PROMPT_TITLE_LIMIT} value={title} placeholder="例如：先写方案，再开始实现" onChange={event => setTitle(event.target.value)} /></label>
           <label>提示词正文<textarea required value={body} placeholder="写下你希望重复使用的指令…" onChange={event => setBody(event.target.value)} /></label>
           <div className="mp-editor-meta"><span>{Array.from(body).length} 字</span></div>
           {error && <p className="mp-form-error" role="alert">{error}</p>}
-          {discarding && <div className="mp-discard" role="alert"><strong>放弃未保存的修改？</strong><p>放弃后，本次修改不会保存。</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>继续编辑</button><button type="button" className="mp-button mp-danger" onClick={onClose}>放弃修改</button></div></div>}
+          {discarding && <div className="mp-discard" role="alert"><strong>放弃未保存的修改？</strong><p>放弃后，本次修改不会保存。</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>继续编辑</button><button type="button" className="mp-button mp-danger" onClick={() => requestModalClose('confirm')}>放弃修改</button></div></div>}
         </div>
-        {!discarding && <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={close}>取消</button><button type="submit" className="mp-button mp-primary" disabled={!title.trim() || !body.trim()}>保存提示词</button></footer>}
+        {!discarding && <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>取消</button><button type="submit" className="mp-button mp-primary" disabled={!title.trim() || !body.trim()}>保存提示词</button></footer>}
       </form>
     </ModalFrame>
   )

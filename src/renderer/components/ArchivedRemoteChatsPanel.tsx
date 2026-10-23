@@ -4,7 +4,7 @@ import { providerIdForAgentId } from '@shared/runtime'
 import { REMOTE_SESSION_COPY as copy } from '../constants/copy'
 import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import type { RemoteProjectGroup } from './SidebarRemoteProjects'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { bridge } from './DesktopRemote'
 import { Icon } from './primitives/Icon'
 
@@ -90,11 +90,11 @@ export function ArchivedRemoteChatsPanel({ groups }: { groups: RemoteProjectGrou
       </div>
     </>}
     {error && <div className="arch-failures" role="alert">{error}</div>}
-    {deleting && <ModalFrame labelledBy={deleteTitleId} onClose={() => { if (!pending) setDeleting(null) }}>
+    {deleting && <ModalFrame labelledBy={deleteTitleId} closeDisabled={pending} onClose={() => { if (!pending) setDeleting(null) }}>
       <div className="modal-head"><b id={deleteTitleId}>{copy.deleteTitle(deleting.group.connection.label)}</b></div>
       <div className="modal-body"><p>{copy.deleteWarning(deleting.session.label)}</p></div>
       <div className="modal-foot">
-        <button type="button" className="btn" disabled={pending} onClick={() => setDeleting(null)}>{copy.cancel}</button>
+        <button type="button" className="btn" disabled={pending} onClick={() => requestModalClose()}>{copy.cancel}</button>
         <button type="button" className="btn danger" disabled={pending || !groups.some(group => group.key === deleting.group.key && group.canDelete)} onClick={() => { void change(deleting, true) }}>{pending ? copy.deleting : copy.delete}</button>
       </div>
     </ModalFrame>}

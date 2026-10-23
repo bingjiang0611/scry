@@ -24,7 +24,7 @@ import {
 } from '@shared/runtime'
 import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionDialog'
 import { IMAGE_PREVIEW_COPY } from '../constants/copy'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import {
   aggregateCalls,
   aggregateHooks,
@@ -132,7 +132,7 @@ function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachme
         {natural && (
           <span className="image-lightbox-dims">{IMAGE_PREVIEW_COPY.dimensions(natural.width, natural.height)}</span>
         )}
-        <button ref={closeRef} type="button" className="image-lightbox-close" onClick={onClose} aria-label={IMAGE_PREVIEW_COPY.close}>
+        <button ref={closeRef} type="button" className="image-lightbox-close" onClick={() => requestModalClose()} aria-label={IMAGE_PREVIEW_COPY.close}>
           <Icon name="x" />
         </button>
       </div>

@@ -9,6 +9,8 @@ import {
   type ReactNode,
   type RefObject
 } from 'react'
+import { createPortal } from 'react-dom'
+import { flushPresenceExits, usePresence, type PresenceCloseReason } from '../hooks/usePresence'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta, ProjectMeta, SessionMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
@@ -23,57 +25,111 @@ import { RemotePairing } from './RemotePairing'
 import { ARCHIVED_SESSIONS_COPY as archivedCopy, REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
 import type { AppTheme } from '../theme'
 
+type ModalEntry = { element: HTMLElement; active: boolean; requestClose: (reason: PresenceCloseReason) => void }
+const activeModals: ModalEntry[] = []
+function topModal(): ModalEntry | undefined {
+  for (let index = activeModals.length - 1; index >= 0; index--) {
+    if (activeModals[index].active) return activeModals[index]
+  }
+  return undefined
+}
+
+/** Explicit close-button routing; the primitive keeps its ordinary click contract. */
+export function requestModalClose(reason: PresenceCloseReason = 'button'): void {
+  topModal()?.requestClose(reason)
+}
+
 export function ModalFrame({
   labelledBy,
   initialFocusRef,
   className,
   onClose,
+  closeDisabled = false,
+  canClose,
   children
 }: {
   labelledBy: string
   initialFocusRef?: RefObject<HTMLElement>
   className?: string
-  onClose: () => void
+  onClose: (reason: PresenceCloseReason) => void
+  closeDisabled?: boolean
+  canClose?: (reason: PresenceCloseReason) => boolean
   children: ReactNode
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
+  const restoreRef = useRef<(() => void) | null>(null)
+  const entryRef = useRef<ModalEntry | null>(null)
+  const frameRef = useRef<number>()
+  const disabledRef = useRef(closeDisabled)
+  const canCloseRef = useRef(canClose)
+  disabledRef.current = closeDisabled
+  canCloseRef.current = canClose
+  const presence = usePresence({
+    onClose,
+    exitMs: 160,
+    onExitStart: () => {
+      if (entryRef.current) entryRef.current.active = false
+      if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
+      restoreRef.current?.()
+    }
+  })
+  const requestClose = useCallback((reason: PresenceCloseReason): void => {
+    if (!disabledRef.current && canCloseRef.current?.(reason) !== false) presence.requestClose(reason)
+  }, [presence.requestClose])
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    flushPresenceExits()
+    const entry: ModalEntry = { element: dialog, active: true, requestClose }
+    entryRef.current = entry
+    activeModals.push(entry)
+    return () => {
+      const index = activeModals.indexOf(entry)
+      if (index >= 0) activeModals.splice(index, 1)
+      entryRef.current = null
+    }
+  }, [requestClose])
+
   useEffect(() => {
     const restore = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    let restored = false
     const focusable = (): HTMLElement[] => [...(dialogRef.current?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     ) ?? [])]
     let initialTarget: HTMLElement | null = null
+    const isTop = (): boolean => topModal() === entryRef.current
     const focusInitial = (): void => {
+      if (!isTop()) return
       const requested = initialFocusRef?.current
       const target = requested && !requested.matches(':disabled') ? requested : focusable()[0] ?? dialogRef.current
       if (!initialTarget) initialTarget = target ?? null
       target?.focus({ preventScroll: true })
     }
-    // effect 执行时 DOM 已提交，先同步聚焦；rAF 只用于覆盖随后完成的布局/控件挂载。
-    // If the user selected another control inside the modal before that frame, keep that
-    // selection. External focus is still redirected by the focus trap below.
+    const restoreFocus = (): void => {
+      if (restored) return
+      restored = true
+      if (restore?.isConnected) restore.focus({ preventScroll: true })
+    }
+    restoreRef.current = restoreFocus
     focusInitial()
-    const frame = window.requestAnimationFrame(() => {
+    frameRef.current = window.requestAnimationFrame(() => {
       const active = document.activeElement
       if (dialogRef.current?.contains(active) && active !== initialTarget) return
       focusInitial()
     })
     const onFocusIn = (): void => {
+      if (!isTop()) return
       if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) focusInitial()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      // Only the innermost dialog owns Escape and Tab. Removing the last
-      // archive row can leave focus on body; the remaining dialog still owns keys.
-      const focusedDialog = document.activeElement instanceof Element ? document.activeElement.closest('[role="dialog"][aria-modal="true"]') : null
-      if ((focusedDialog && focusedDialog !== dialogRef.current) || dialogRef.current?.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (!isTop() || !dialogRef.current) return
       if (event.key === 'Escape') {
         event.preventDefault()
-        onCloseRef.current()
+        requestClose('escape')
         return
       }
-      if (event.key !== 'Tab' || !dialogRef.current) return
+      if (event.key !== 'Tab') return
       const controls = focusable()
       if (controls.length === 0) {
         event.preventDefault()
@@ -96,17 +152,25 @@ export function ModalFrame({
     document.addEventListener('focusin', onFocusIn)
     document.addEventListener('keydown', onKeyDown)
     return () => {
-      window.cancelAnimationFrame(frame)
+      if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
       document.removeEventListener('focusin', onFocusIn)
       document.removeEventListener('keydown', onKeyDown)
-      if (restore?.isConnected) restore.focus()
+      restoreRef.current = null
+      if (!restored && restore?.isConnected) restore.focus({ preventScroll: true })
     }
-  }, [initialFocusRef])
-  return (
+  }, [initialFocusRef, requestClose])
+
+  const content = (
     <div
+      ref={presence.ref}
       className="modal-overlay"
+      data-state={presence.state}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget) {
+          // The backdrop's native mousedown must not clear the focus restored below.
+          event.preventDefault()
+          requestClose('backdrop')
+        }
       }}
     >
       <div ref={dialogRef} className={`modal${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}>
@@ -114,6 +178,7 @@ export function ModalFrame({
       </div>
     </div>
   )
+  return typeof document === 'undefined' ? content : createPortal(content, document.body)
 }
 
 export type SettingsTab = 'appearance' | 'archived' | 'remote'
@@ -155,7 +220,7 @@ export function SettingsModal({
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>设置</b>
-        <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeSettings} />
+        <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSettings} />
       </div>
       <div className="settings-shell">
         <nav className="settings-rail" aria-label="设置分区">
@@ -642,7 +707,7 @@ export function SkillsModal({
           <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
             <Icon name="refresh" />
           </button>
-          <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeSkills} />
+          <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSkills} />
         </div>
       </div>
 
@@ -895,7 +960,7 @@ export function McpModal({
             {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
             {readsRuntime && <span>{refreshing ? (readsPiSnapshot ? '刷新中…' : '检测中…') : refreshLabel}</span>}
           </button>
-          <ModalCloseButton ref={closeRef} onClick={onClose} aria-label={MODAL_COPY.closeMcp} />
+          <ModalCloseButton ref={closeRef} onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeMcp} />
         </div>
       </div>
 
@@ -1197,7 +1262,7 @@ export function CapabilitiesModal({
             <span>{mcpRefreshing ? '检测中…' : '刷新'}</span>
           </button>
         )}
-        <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={onClose} aria-label={MODAL_COPY.closeCapabilities} />
+        <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeCapabilities} />
       </div>
 
       <div className="capabilities-source-bar">

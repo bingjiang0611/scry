@@ -580,6 +580,58 @@ body.pane-resizing * {
   place-items: center;
   z-index: 100;
 }
+.modal-overlay[data-state='enter'] {
+  animation: modal-backdrop-in 180ms linear both;
+}
+.modal-overlay[data-state='exit'] {
+  pointer-events: none;
+  animation: modal-backdrop-out 160ms var(--ease-exit) both;
+}
+.modal-overlay[data-state='enter'] > .modal {
+  animation: modal-dialog-in 260ms var(--ease-struct) both;
+}
+.modal-overlay[data-state='exit'] > .modal {
+  pointer-events: none;
+  animation: modal-dialog-out 150ms var(--ease-exit) both;
+}
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes modal-dialog-in {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes modal-dialog-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.98); }
+}
+.ctx-overlay[data-state='exit'] {
+  pointer-events: none;
+}
+.menu[data-state='enter'],
+.ctxmenu[data-state='enter'],
+.session-hover-card[data-state='enter'] {
+  animation: overlay-menu-in 160ms var(--ease-out) both;
+}
+.menu[data-state='exit'],
+.ctxmenu[data-state='exit'],
+.session-hover-card[data-state='exit'] {
+  pointer-events: none;
+  animation: overlay-menu-out 100ms linear both;
+}
+@keyframes overlay-menu-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes overlay-menu-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 .modal {
   max-width: 92vw;
   border: 1px solid var(--border2);
@@ -11044,10 +11096,14 @@ button.turn-id.turn-call-open:focus-visible {
   transform-origin: top right;
   animation: surface-menu-in var(--dur-fast) var(--ease-out);
 }
+.surface-menu[data-state='exit'] {
+  pointer-events: none;
+  animation: overlay-menu-out 100ms linear both;
+}
 
 @keyframes surface-menu-in {
-  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .surface-menu .menu-item {
@@ -11666,7 +11722,19 @@ button.turn-id.turn-call-open:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* Keep the existing menu entrance as a fade, without its spatial keyframes. */
+  /* Keep overlay feedback, but remove all spatial motion. */
+  @keyframes modal-dialog-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes modal-dialog-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+  @keyframes overlay-menu-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   @keyframes surface-menu-in {
     from { opacity: 0; }
     to { opacity: 1; }
