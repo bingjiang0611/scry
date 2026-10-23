@@ -140,7 +140,16 @@
 - 组合回归首败保留：12文件/156项有4个原跨进程场景5000ms超时；修复generation后12文件/157项有156通过、原loop跨进程场景1项5000ms超时。原5项独立运行通过、冻结旧实现5项也通过，不能以单独通过关闭组合门禁或证明首败与改动无关。未提高deadline、未删断言/skip。当前/旧实现的串行phase诊断约2.1s，无原首败phase数据，原因仍未决定。
 - 必需性能测量exit1/unavailable：providers.catalog无collector，机器负载约30/10 cores。没有L1/L2/L3提速结论。
 - 证据：`~/.local/state/rotom/verification-evidence/workflow-m3-streaming-collections.x0Ge4c/`；原始日志`/tmp/scry-workflow-template-editor.ZnkC6L/streaming-*.log`。同时保留初始fixture根sequence错误、错误英文错误文案预期及schema双包outcome的首败，不作为目标负控。
-- 当前完整conversation gate通过，不擦除旧cutoff。完整pack/CLI、七项延期失败和组合process deadline仍开放；未push、未安装、未升版本。M3失败/修订恢复、停滞重启与M4质量执行仍待实施。
+- 当前完整conversation gate通过，不擦除旧cutoff。完整pack/CLI、七项延期失败与历史超时根因仍开放；该串行组合门禁的最新结果见下一节。未push、未安装、未升版本。M3失败/修订恢复、停滞重启与M4质量执行仍待实施。
+
+### M3 测试收敛与超时现场（不改变生产执行语义）
+
+- 独立进程诊断提交`366d58d4`保留有界阶段、独立时钟和清理前现场。负控使用原5000ms超时：清理前exitCode仍为null，owned IPC清理后才close(75)，不能把晚到关闭当作按时通过。证据`~/.local/state/rotom/verification-evidence/workflow-m3-recovery-diagnostics.nbl974qr/`。
+- 该版本的下一次组合命令中，独立进程6项通过，但纯loop有4项原5000ms超时、其中3项清理ENOTEMPTY；工具在180s截止，整条命令未完成。源码证明loop fixture未持有Runner原Promise，超时后直接删除目录，可能与仍在进行的持久化竞争。这解释清理缺陷，不解释最初五秒耗在哪里。残留目录已被部分删除，只能作为事后片段，不能倒推超时点。
+- `src/main/workflow-loop.test.ts`现持有原测试body及Runner原run Promise；清理先停止获登记的fixture，释放已登记的纯测试pending gate，等待原body（包括直接store调用）与原run Promise，再用已有activeWorkflowIds确认控制段已退役。stop ACK、Root返回和所有作用域/后续写入收敛不混同；未收敛则保留目录并使清理失败。一个刻意pending的纯测试fake只在teardown显式释放，不改变迟到成功断言或真实Provider合同。
+- 失败保留原目录、相邻清理前diagnostic JSON与独立cleanup JSON，清理后不会覆盖原现场；持久化begin/end/rejected、开放操作与128条ring记录均不含输入/输出内容。标准库event-loop histogram有界记录样本及最大delay，无样本标unavailable。这不是性能collector或提速证据。沿用原5000ms测试、2000ms目录锁与原hook界限，不加sleep/retry。
+- 新增两项回归：阻塞写入未结束时禁止删除；stop已ACK但scope未收敛时保留目录。临时副本恢复“先删目录”后，新回归因remove被提前调用立即失败；另一个受控副本在原5000ms超时后才释放直接store写入，现场保留并证明该写入于cleanup closed前完成，原超时仍失败。两个副本均已移出仓库。Node/web类型检查、loop单文件17项及同组12文件160项串行组合均通过（Node24.18.0/macOS arm64，测量机器负载仍高于10核）。当前这组门禁已绿，不能以此关闭历史超时根因、并行/完整发布门禁或providers.catalog collector缺口。
+- 证据`~/.local/state/rotom/verification-evidence/workflow-m3-loop-cleanup.vb1ns0a_/`，原始`loop-cleanup-*.log`在`/tmp/scry-workflow-template-editor.ZnkC6L/`。本次只改测试与台账，不重新构建/安装App，不push，不调用真实Provider/Jev，不升版本。一般失败节点重试、成功sibling复用/消费者失效与修订恢复仍未实现；下一步先落实append-only attempt链和明确replay eligibility，不能把已settled直接当作允许重发。
 
 ### M3 有界loop与逻辑退出进展（仍非M2/M3完成）
 
