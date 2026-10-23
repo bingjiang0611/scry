@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 01 基础 | 通过 | `22b0358`（实现修正）、`3abbfeb`（验收修正）、`7fbbf106`（经用户批准隔离验收前置主题过渡） |
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
-| 03 弹窗与浮层 | 待核验 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认 |
+| 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
 | 06 侧栏材质（可选） | 需用户确认 | — |
@@ -239,6 +239,29 @@
 - 限制与规格偏差：按本轮用户确认的点名范围交付；独立工作区确认框、Picker 弹出层未迁移。隐藏真实 App 的 8 次关闭走允许的计时兜底，241.7–243.4ms；不能把它当成前台 animationend 或日常手感证据，真实 CSS 事件由 offscreen 专项另证。未做前台 OS 焦点、120Hz、真实账号 Provider 或真实远程宿主验收；未声称 L2/L3 更快。性能映射所列 `navigation.catalog / compose.drafts / send.codex-fixture / evidence.projection` 没有 counter collector，明确为 unavailable，未加假计数或修改 ratchet。
 - 安装：**本轮未重跑，不是已安装或安装成功**。用户要求仅空闲时顺带安装；收尾 10 核机器两次采样：06:38 load 18.15 / 11.58 / 9.34、内存 31G 使用 / 11G compressor；06:53 load 11.66 / 16.14 / 15.92，仍不满足空闲条件，未再启动完整 pack。未升版本、未更换 `/Applications/Scry.app`，未停止或要求重启用户实例；历史安装阻碍仍保留。
 - 已自审 source / test diff：补齐 footer 取消关闭接线、保留原有 busy 拒绝与错误提示、删除重复 portal 和未使用的第二套关闭入口；最终 `git diff --check` 通过。独立 test 实例已退出，临时日志 / 截图 / 诊断归档留作本机核验。03 标「待核验」，不进入 04。
+
+
+#### 核验（设计方，2026-10-23 · 02-fix 与 03）
+
+- 结论：**02-fix 通过，03 通过。** 有一项小修正请在 04 开头以 `motion(03-fix)` 单独提交，不需要为它再等一轮核验。
+- 核验方式与边界：读 `5befaff..7138e85` 的全部 diff。这次核验的云端环境仍连不上 npm 源，**没有重跑**单测、类型检查、构建与 UI fixture；这些以执行方记录为准。
+- 02-fix：
+  - `presentedSessionId` 守卫只在呈现的会话 ID 变化时入场，所有 `clearTurns` 入口都经 `clearPresentedSession` 重置；过期缓存 v1→v2 只播一次，有负对照证明。
+  - 两个动效 helper 的所有分支都在 `flushSync` 内提交，测试模式分支和 `vite/client` 引用已删除。
+  - 相邻路径修正（`setView('chat')` 前移，让缓存替换的入场落在新的 `.main-content` 上）合理，且只改变同一次批量提交内的顺序，不影响选择序号与 authority。
+- 03 通过的部分：
+  - `usePresence`：一次关闭、只认自身 `animationend`、计时兜底、卸载清理、下一次原生输入先同步结束旧出场，覆盖完整；出场一开始就 `inert` 并归还焦点，符合 H2。
+  - `ModalFrame` 渲染到 `document.body`，避开页面入场期间 `transform` 造成的定位偏移，有负对照（放回 `.main-content` 后遮罩从全窗变成主内容区大小）。已检查没有依赖 `.app`、`.main-area` 等祖先的弹窗选择器（`.settings-modal` 是弹窗自身的类名），不受影响。
+  - `Escape` 与焦点陷阱改由弹窗栈的顶层持有；仓库里另外两个自定义对话框在右侧工作区内，不会与 `ModalFrame` 嵌套。
+  - 4 类菜单与悬停卡：抽成独立组件后菜单项行为不变；会话菜单的焦点归还从 `onClose` 的 rAF 移到出场开始，没有丢；点遮罩关闭右键菜单时，遮罩在出场期间仍在 DOM 中，点击落到 `body`，不会穿透触发下方按钮。
+  - 减弱动效下的同名关键帧只含透明度，按 01 核验后的要求补齐。
+  - 范围取舍（工作区确认框、Picker 弹出层不迁移）经用户确认，已如实记录。
+- **请在 04 开头修：入场动画用 `both` 填充，结束后会一直留着 `transform`。**
+  - 位置：`styles.css` 中 `.modal-overlay[data-state='enter'] > .modal`、`.menu / .ctxmenu / .session-hover-card[data-state='enter']` 的 `animation: … both`。
+  - 问题：入场结束后 `transform: scale(1) translateY(0)` 仍然生效（执行方记录里也提到 finished 动画仍留在 `getAnimations()` 中）。只要 `transform` 不是 `none`，元素就会成为其中 `position: fixed` 后代的定位参照并单独占一个合成层。目前弹窗里没有固定定位的后代，所以还没出问题，但以后在弹窗里加下拉菜单或提示就会错位，原因也很难查。
+  - 要求：入场改用 `backwards` 填充（动画结束后不留样式），出场保留 `both` 或 `forwards`（需要停在透明状态直到卸载）。
+  - 验收：`--overlays-only` 增加一条：入场结束后，`.modal` 与一个菜单的 `getComputedStyle(…).transform` 为 `none`，且 `getAnimations()` 中没有已完成的入场动画。负对照：改回 `both` 后该断言须失败一次。
+- 安装：01–03 的改动**都还没进到 `/Applications/Scry.app`**。执行方用「机器空闲」作为重跑安装的前提，但记录里机器一直处于中等负载（load 11–19）；最初失败时的负载是 38–91。是否在当前负载下直接重跑安装，由用户决定。
 
 <!--
 ### NN · <步骤名>

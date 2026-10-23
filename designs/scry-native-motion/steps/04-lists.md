@@ -2,6 +2,10 @@
 
 ## 要做
 
+### 0. 先修 03 的入场填充（单独提交 `motion(03-fix)`）
+
+见 `../progress.md`「03 · 核验」：入场动画改用 `backwards` 填充，出场保留 `both`；按其中的验收与负对照执行。
+
 ### A. `src/renderer/hooks/useFlipList.ts`
 
 从 `components/SidebarActivity.tsx`（约 52–80 行的 `useLayoutEffect`）抽出位置过渡逻辑，保持原有语义：
