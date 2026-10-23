@@ -45,7 +45,7 @@ private struct HistoryTurnView: View {
     // tall turns independently and can leave the tail viewport empty.
     Group {
       if !turn.userText.isEmpty { TurnUserBubble(text: turn.userText, runId: turn.runId) }
-      ForEach(ConversationEntry.group(turn.items, id: { index, _ in index }, kind: \.kind, text: \.text)) { entry in
+      ForEach(ConversationEntry.group(turn.items, kind: \.kind, text: \.text)) { entry in
         HistoryChunkView(kind: entry.kind, text: entry.text, result: entry.result)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)

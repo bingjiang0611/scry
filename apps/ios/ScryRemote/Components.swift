@@ -279,8 +279,8 @@ private struct ConversationBottom: PreferenceKey {
 
 // MARK: - Conversation content
 
-struct ConversationMarkdownTable: Equatable, Sendable {
-  enum Alignment: Equatable, Sendable {
+struct ConversationMarkdownTable: Sendable {
+  enum Alignment: Sendable {
     case left, center, right
   }
 
@@ -289,8 +289,8 @@ struct ConversationMarkdownTable: Equatable, Sendable {
   let rows: [[String]]
 }
 
-struct ConversationMarkdownBlock: Identifiable, Equatable, Sendable {
-  enum Kind: Equatable, Sendable {
+struct ConversationMarkdownBlock: Identifiable, Sendable {
+  enum Kind: Sendable {
     case paragraph
     case heading(Int)
     case unordered
@@ -560,20 +560,13 @@ struct ConversationMarkdownText: View {
     // tail viewport empty even after the outer scroll reaches its bottom.
     VStack(alignment: .leading, spacing: muted ? 8 : 11) {
       ForEach(blocks) { block in
-        ConversationMarkdownBlockView(block: block, muted: muted).equatable()
+        blockView(block)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
-}
 
-// A growing source must not rebuild unchanged block subtrees on every append.
-// Compare the whole parsed value so an open tail or changed Markdown kind redraws.
-private struct ConversationMarkdownBlockView: View, Equatable {
-  let block: ConversationMarkdownBlock
-  let muted: Bool
-
-  @ViewBuilder var body: some View {
+  @ViewBuilder private func blockView(_ block: ConversationMarkdownBlock) -> some View {
     switch block.kind {
     case .paragraph:
       ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
@@ -645,7 +638,9 @@ struct ConversationEntry: Identifiable, Equatable {
   let text: String
   var result: String?
 
-  static func group<T>(_ items: [T], id: (Int, T) -> Int, kind: (T) -> String, text: (T) -> String) -> [ConversationEntry] {
+  // A live row's seq advances when deltas coalesce. Use its position within
+  // the append-only turn, like archive rendering, so SwiftUI keeps its subtree.
+  static func group<T>(_ items: [T], kind: (T) -> String, text: (T) -> String) -> [ConversationEntry] {
     var entries: [ConversationEntry] = []
     for (index, item) in items.enumerated() {
       let itemKind = kind(item)
@@ -653,7 +648,7 @@ struct ConversationEntry: Identifiable, Equatable {
         entries[entries.count - 1].result = text(item)
         continue
       }
-      entries.append(ConversationEntry(id: id(index, item), kind: itemKind, text: text(item)))
+      entries.append(ConversationEntry(id: index, kind: itemKind, text: text(item)))
     }
     return entries
   }
@@ -783,7 +778,7 @@ struct TurnUserBubble: View {
 struct TurnOutputList: View {
   let lines: [RemoteRunStore.OutputLine]
   var body: some View {
-    ForEach(ConversationEntry.group(lines, id: { $1.id }, kind: \.kind, text: \.text)) { entry in
+    ForEach(ConversationEntry.group(lines, kind: \.kind, text: \.text)) { entry in
       ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
     }
   }

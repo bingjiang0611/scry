@@ -1,61 +1,60 @@
+struct FixtureLine {
+  let id: Int
+  let kind: String
+  let text: String
+}
+
 @main enum MarkdownBlockChecks {
   static func main() {
     var checks = 0
     func expect(_ condition: Bool, _ label: String) {
-      precondition(condition, label)
+      if !condition { print("FAIL \(label)"); exit(1) }
       checks += 1
       print("PASS \(label)")
     }
-    typealias Block = ConversationMarkdownBlock
-    typealias Table = ConversationMarkdownTable
-    let paragraph = Block(id: 0, kind: .paragraph, text: "Hello")
-    expect(paragraph == Block(id: 0, kind: .paragraph, text: "Hello"), "unchanged block is equal")
-    expect(paragraph != Block(id: 1, kind: .paragraph, text: "Hello"), "identity changes invalidate")
-    expect(paragraph != Block(id: 0, kind: .paragraph, text: "Hello world"), "tail text invalidates")
-    expect(paragraph != Block(id: 0, kind: .heading(1), text: "Hello"), "Markdown kind invalidates")
-
-    let pairs: [(Block.Kind, Block.Kind)] = [
-      (.heading(1), .heading(2)),
-      (.ordered("1."), .ordered("2.")),
-      (.code(nil), .code("swift")),
-      (.code("swift"), .code("json")),
-      (.quote, .unordered),
-      (.divider, .paragraph),
-      (.table(Table(headers: ["A"], alignments: [.left], rows: [["1"]])),
-       .table(Table(headers: ["B"], alignments: [.left], rows: [["1"]]))),
-      (.table(Table(headers: ["A"], alignments: [.left], rows: [["1"]])),
-       .table(Table(headers: ["A"], alignments: [.right], rows: [["1"]]))),
-      (.table(Table(headers: ["A"], alignments: [.left], rows: [["1"]])),
-       .table(Table(headers: ["A"], alignments: [.left], rows: [["2"]])))
-    ]
-    for (index, pair) in pairs.enumerated() {
-      // Keep text identical: equality must compare every associated payload,
-      // not merely source text or id (table.text normally changes as well).
-      expect(Block(id: 0, kind: pair.0, text: "same") != Block(id: 0, kind: pair.1, text: "same"),
-             "kind payload \(index) invalidates")
-    }
-
-    let first = ConversationMarkdownParser.parse("done\n\ntail")
-    let next = ConversationMarkdownParser.parse("done\n\ntail grows 🌿")
-    expect(first[0] == next[0], "completed prefix remains equal")
-    expect(first[1] != next[1], "open tail remains live")
-    let openCode = ConversationMarkdownParser.parse("```swift\nlet x = 1")
-    let closedCode = ConversationMarkdownParser.parse("```swift\nlet x = 1\n```")
-    expect(openCode == closedCode, "closing a fence preserves identical rendered content")
-    let moreCode = ConversationMarkdownParser.parse("```swift\nlet x = 1\nprint(x)")
-    expect(openCode != moreCode, "open fenced block still updates")
-    let table = ConversationMarkdownParser.parse("A | B\n--- | ---\n1 | 2")
-    let moreTable = ConversationMarkdownParser.parse("A | B\n--- | ---\n1 | 2\n3 | 4")
-    expect(table != moreTable, "growing table still updates")
+    let before = [FixtureLine(id: 10001, kind: "output", text: "first")]
+    let after = [FixtureLine(id: 10002, kind: "output", text: "first second")]
+    expect(grouped(before)[0].id == grouped(after)[0].id, "coalescing preserves live display identity")
+    expect(grouped(after)[0].text == "first second", "stable identity does not freeze text")
+    expect(before[0].id == 10001 && after[0].id == 10002, "canonical sequence stays unchanged")
+    let tool = [FixtureLine(id: 9, kind: "tool", text: "call")]
+    let result = tool + [FixtureLine(id: 10, kind: "tool_result", text: "complete result")]
+    expect(grouped(tool)[0].id == grouped(result)[0].id, "tool result preserves call identity")
+    expect(grouped(result).count == 1 && grouped(result)[0].result == "complete result", "tool result is retained")
+    let mixed = result + [FixtureLine(id: 11, kind: "output", text: "answer")]
+    expect(grouped(mixed).map(\.id) == [0, 2], "ordinals remain unique after grouping")
+    expect(grouped(mixed).map(\.text) == ["call", "answer"], "grouping preserves content and order")
+    let orphan = grouped([FixtureLine(id: 4, kind: "tool_result", text: "orphan")])
+    expect(orphan[0].kind == "tool_result" && orphan[0].text == "orphan", "orphan result is not dropped")
+    let reasoning = [FixtureLine(id: 1, kind: "reasoning", text: "a")]
+    let grownReasoning = [FixtureLine(id: 2, kind: "reasoning", text: "ab")]
+    expect(grouped(reasoning)[0].id == grouped(grownReasoning)[0].id, "reasoning coalesces without rekeying")
 
     let paragraphs = (1...600).map { String(format: "Line %04d: fixed streamed paragraph for batch F observation.", $0) }
-    let source = paragraphs.joined(separator: "\n\n") + "\n\n"
+    var source = ""
+    for (index, paragraph) in paragraphs.enumerated() {
+      source += paragraph + "\n\n"
+      let entries = grouped([FixtureLine(id: 10001 + index, kind: "output", text: source)])
+      guard entries.count == 1, entries[0].id == 0, entries[0].text == source else {
+        print("FAIL complete stream projection at \(index + 1)"); exit(1)
+      }
+    }
+    expect(true, "all 600 canonical revisions keep identity and full source")
     let blocks = ConversationMarkdownParser.parse(source)
     expect(blocks.count == 600, "all 600 paragraphs remain present")
     expect(blocks.map(\.text) == paragraphs, "every paragraph is intact and ordered")
-    expect(blocks.map(\.id) == Array(0..<600), "stable complete block identities")
+    expect(blocks.map(\.id) == Array(0..<600), "complete Markdown block identities")
+    let open = ConversationMarkdownParser.parse("done\n\ntail")
+    let grown = ConversationMarkdownParser.parse("done\n\ntail grows 🌿")
+    expect(open[0].text == grown[0].text && grown[1].text == "tail grows 🌿", "tail text continues to update")
+    let code = ConversationMarkdownParser.parse("```swift\nlet x = 1\nprint(x)")
+    expect(code[0].text == "let x = 1\nprint(x)", "open fenced block remains complete")
+    let table = ConversationMarkdownParser.parse("A | B\n--- | ---\n1 | 2\n3 | 4")
+    if case let .table(value) = table[0].kind {
+      expect(value.rows == [["1", "2"], ["3", "4"]], "growing Markdown table retains every row")
+    } else { print("FAIL table kind"); exit(1) }
     let unicode = ConversationMarkdownParser.parse("中文 👩🏽‍💻\r\n\r\n尾部 e\u{301}")
     expect(unicode.map(\.text) == ["中文 👩🏽‍💻", "尾部 e\u{301}"], "Unicode and CRLF content survive")
-    print("\(checks) Markdown block checks passed")
+    print("\(checks) conversation identity/Markdown checks passed")
   }
 }
