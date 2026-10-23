@@ -81,27 +81,36 @@ function fixture(): string {
   return userDataDir
 }
 
+async function collect(scenario: string, providers?: ProviderId[]) {
+  const userDataDir = fixture()
+  const parse = vi.spyOn(JSON, 'parse')
+  probe.turnReads = 0
+  probe.turnBytes = 0
+  probe.indexWrites = { sync: 0, async: 0 }
+  probe.active = true
+  const summaries = await archive.discoverTraceArchiveSessionsAsync(userDataDir, providers)
+  probe.active = false
+  const result = {
+    scenario,
+    files: PROVIDERS.length * SESSIONS_PER_PROVIDER * TURNS_PER_SESSION,
+    qoderFiles: SESSIONS_PER_PROVIDER * TURNS_PER_SESSION,
+    turnFileReads: probe.turnReads,
+    turnBytesRead: probe.turnBytes,
+    jsonParseCalls: parse.mock.calls.length,
+    indexPublishes: probe.indexWrites,
+    summaries: summaries.length,
+    qoderSummaries: summaries.filter((summary) => summary.providerId === 'qoder').length
+  }
+  console.log('B2 discovery', JSON.stringify(result))
+  return result
+}
+
 describe('B2 catalog discovery work with a dirty index (L1 collector)', () => {
-  it('counts the discovery that startup recovery runs', async () => {
-    const userDataDir = fixture()
-    const parse = vi.spyOn(JSON, 'parse')
-    probe.turnReads = 0
-    probe.turnBytes = 0
-    probe.indexWrites = { sync: 0, async: 0 }
-    probe.active = true
-    const summaries = await archive.discoverTraceArchiveSessionsAsync(userDataDir)
-    probe.active = false
-    const result = {
-      files: PROVIDERS.length * SESSIONS_PER_PROVIDER * TURNS_PER_SESSION,
-      qoderFiles: SESSIONS_PER_PROVIDER * TURNS_PER_SESSION,
-      turnFileReads: probe.turnReads,
-      turnBytesRead: probe.turnBytes,
-      jsonParseCalls: parse.mock.calls.length,
-      indexPublishes: probe.indexWrites,
-      summaries: summaries.length,
-      qoderSummaries: summaries.filter((summary) => summary.providerId === 'qoder').length
-    }
-    console.log('B2 discovery', JSON.stringify(result))
-    expect(result.qoderSummaries).toBe(SESSIONS_PER_PROVIDER)
+  it('counts an all-Provider discovery (the baseline startup call)', async () => {
+    expect((await collect('all-providers')).qoderSummaries).toBe(SESSIONS_PER_PROVIDER)
+  })
+
+  it('counts the Qoder-scoped discovery used by background startup recovery', async () => {
+    expect((await collect('qoder-scoped', ['qoder'])).qoderSummaries).toBe(SESSIONS_PER_PROVIDER)
   })
 })
