@@ -61,3 +61,9 @@ focused: textarea
 本次原问题发生在隔离 fixture，因此原始操作在其自己的隐藏 Electron BrowserWindow 重放，使用生产 React/CSS 组件、原生鼠标/键盘/insertText；sandbox/contextIsolation 保持开启，临时 HOME/userData/sessionData，不操作用户日常 App。workspace transport 是内存 fixture，不把这次重放声称为真实文件持久化验收。完整组合入口另覆盖现有生产 App/main/preload 的相邻 source-control 和 conversation 测试。
 
 最终受检脚本 SHA256：`79ccac904173b8c3b6db5d86d8b23f81556397ec2a64af34e7d3a2eb82a03040`。本报告与修复同一提交交付，推送目标仅 `fix/chat-preview-workspace-dirty`。不改 STATUS，不安装、不合入、不升版本。日志保留于上述 `/tmp/scry-chat-dirty-*.log`；独立 worktree 保留供审查，测试进程已退出。
+
+## 核验意见（审查方，2026-10-23）
+
+**已核验。** 只改 `scripts/chat-preview-ui-smoke.mjs`。第二次编辑原来在 `sendInputEvent` 后立刻 `selectAll()`/`insertText()`，第一次编辑等待的焦点与选区条件它都没等；诊断显示失败时预览仍是第一份已保存内容，说明是输入没落进 textarea，而不是产品漏标 dirty。修复把两次编辑统一到同一个 helper，原断言和 5 s/30 s 上限都没动，并新增“草稿与预览都更新为第二份内容”的断言，防止将来再把没生效的输入当成成功。完整 `npm run test:renderer:ui` 一次通过。
+
+这个分支基于 `main@531e88c`、与性能分支互不依赖，可以先于性能分支单独合入 main。合入后各性能分支的 UI gate 就能整条跑通。
