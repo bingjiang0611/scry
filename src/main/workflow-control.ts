@@ -7,6 +7,7 @@ import { evaluateWorkflowCollection } from './workflow-collection-expressions'
 import { collectionDescriptor } from './workflow-collections'
 import { workflowLoopStateTypes } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
+import { workflowPendingRetry, workflowRetryBoundary } from './workflow-retry'
 import type { WorkflowExecutionOwnership, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 
 export type WorkflowControlScope = {
@@ -61,7 +62,9 @@ export class WorkflowControl {
       sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) })
     const frameId = workflowFrameId(block.blockId, scope.path, this.execution?.generationId)
     const origins: WorkflowControlFrame[] = []
-    for (const segment of [...(this.execution?.previous ?? [])].reverse()) {
+    const taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
+    const boundary = block.kind === 'call' && this.execution ? workflowRetryBoundary(this.execution.record, taskId) : 0
+    for (const segment of [...(this.execution?.previous.slice(boundary) ?? [])].reverse()) {
       const prior = await this.store.loadFrame(this.preview.workflowId, workflowFrameId(block.blockId, scope.path, segment.generationId))
       if (!prior) continue
       if (prior.executionEpoch !== segment.id || prior.inputKey !== inputKey || prior.programRevision !== this.preview.programRevision) throw new Error(workflowRecoveryCopy.frame)
@@ -109,8 +112,9 @@ export class WorkflowControl {
   recoveredOutcome(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined): WorkflowAttemptOutcome | undefined {
     if (!this.execution?.previous.length) return undefined
     const taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
-    const intent = this.execution.record.intents.find(value => value.taskId === taskId)
-    const outcome = this.execution.record.outcomes.find(value => value.taskId === taskId)
+    if (workflowPendingRetry(this.execution.record, taskId)) return undefined
+    const intent = [...this.execution.record.intents].reverse().find(value => value.taskId === taskId)
+    const outcome = [...this.execution.record.outcomes].reverse().find(value => value.taskId === taskId)
     if (!intent && !outcome) return undefined
     if (!frame || !this.origins.has(frame.frameId)) throw new Error(workflowRecoveryCopy.frame)
     if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(workflowRecoveryCopy.unknown)

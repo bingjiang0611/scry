@@ -39,6 +39,7 @@
         "ipc.workflow:preview",
         "ipc.workflow:start",
         "ipc.workflow:resume",
+        "ipc.workflow:retry",
         "ipc.workflow:stop",
         "ipc.workflow:snapshot",
         "ipc.workflow:list",
@@ -71,6 +72,12 @@
         "src/main/workflow-template-instance.ts",
         "src/main/workflow-template-identity.ts",
         "src/main/workflow-template-ipc.ts",
+        "src/main/workflow-retry.ts",
+        "src/main/workflow-recovery.ts",
+        "src/main/workflow-runner.ts",
+        "src/main/workflow-control.ts",
+        "src/main/workflow-service.ts",
+        "src/main/workflow-ipc.ts",
         "src/main/context-admission.bench.ts"
       ],
       "benchmarks": [

@@ -9,12 +9,15 @@ import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches,
 import { collectionDescriptor, collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_VALUE_DEPTH, workflowProgressSnapshot } from '../shared/workflow'
+import type { WorkflowRetryTarget } from '../shared/workflow-api'
 
 export interface WorkflowIntent {
   workflowId: string
   programRevision: string
   taskId: string
   attemptId: string
+  previousAttemptId?: string
+  retryCommandId?: string
   role: string
   providerId: string
   requestedModel?: string
@@ -24,7 +27,7 @@ export type WorkflowExecutionOwnership = {
   version: 2
   epoch: string
   owner: { pid: number; instanceId: string; state: 'active' | 'closed' }
-  segments: Array<{ id: string; generationId?: string; commandId?: string; createdAt: number; mode: 'start' | 'continue' }>
+  segments: Array<{ id: string; generationId?: string; commandId?: string; createdAt: number; mode: 'start' | 'continue' | 'retry'; retry?: WorkflowRetryTarget }>
 }
 
 export interface WorkflowStoreRecord {

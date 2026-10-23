@@ -377,6 +377,7 @@ const api = {
     approve: (approval: Parameters<WorkflowApi['approve']>[0]): ReturnType<WorkflowApi['approve']> => ipcRenderer.invoke('workflow:approve', approval),
     start: (workflowId: string, approval: Parameters<WorkflowApi['start']>[1], commandId?: string): ReturnType<WorkflowApi['start']> => ipcRenderer.invoke('workflow:start', workflowId, { ...approval, ...(commandId ? { commandId } : {}) }),
     resume: (workflowId: string, approval: Parameters<WorkflowApi['resume']>[1], commandId: string): ReturnType<WorkflowApi['resume']> => ipcRenderer.invoke('workflow:resume', workflowId, { ...approval, commandId }),
+    retry: (workflowId: string, approval: Parameters<WorkflowApi['retry']>[1], target: Parameters<WorkflowApi['retry']>[2], commandId: string): ReturnType<WorkflowApi['retry']> => ipcRenderer.invoke('workflow:retry', workflowId, { ...approval, target, commandId }),
     stop: (workflowId: string, commandId: string): ReturnType<WorkflowApi['stop']> => ipcRenderer.invoke('workflow:stop', workflowId, commandId),
     cancelPlanning: (commandId: string): ReturnType<WorkflowApi['cancelPlanning']> => ipcRenderer.invoke('workflow:cancelPlanning', commandId),
     list: (cwd: string, cursor?: string): ReturnType<WorkflowApi['list']> => ipcRenderer.invoke('workflow:list', cwd, cursor),

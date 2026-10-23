@@ -19,6 +19,7 @@ function fixture(actualService?: Parameters<typeof registerWorkflowIpc>[0]['serv
     preview: vi.fn(async () => ({ workspace: '/authorized' })),
     findPreview: vi.fn(async (): Promise<{ workspace: string } | undefined> => ({ workspace: '/authorized' })),
     resume: vi.fn(async () => ({ state: 'nothing_to_resume', progress: null })),
+    retry: vi.fn(async () => null),
     planCommand: vi.fn(async () => null),
     approve: vi.fn(async () => true),
     start: vi.fn(async () => null),
@@ -43,6 +44,7 @@ const approval = { workflowId: 'workflow-test', programRevision: 'revision', app
 const commands: Array<[string, unknown[]]> = [
   ['plan', [plan]], ['approve', [approval]], ['start', ['workflow-test', approval]], ['stop', ['workflow-test', 'stop-command']],
   ['resume', ['workflow-test', { ...approval, commandId: 'resume-command' }]],
+  ['retry', ['workflow-test', { ...approval, commandId: 'retry-command', target: { taskId: 'workflow-test:' + 'a'.repeat(64) + ':node', attemptId: 'failed-attempt', expectedRevision: 1 } }]],
   ['snapshot', ['workflow-test']], ['list', ['/authorized']], ['cancelPlanning', ['command-test']]
 ]
 
@@ -67,6 +69,20 @@ describe('workflow production IPC registrations', () => {
     await expect(invoke({ sender, senderFrame: frame } as unknown as IpcMainInvokeEvent)).rejects.toThrow('非可信 renderer')
     for (const listener of Object.values(service)) expect(listener).not.toHaveBeenCalled()
     expect(resolveWorkspace).not.toHaveBeenCalled()
+  })
+  it('validates retry target, command and frozen workspace before the privileged retry listener', async () => {
+    const { handlers, event, service } = fixture()
+    const target = { taskId: 'workflow-test:' + 'a'.repeat(64) + ':node', attemptId: 'failed-attempt', expectedRevision: 1 }
+    const invoke = async (payload: unknown) => handlers.get('workflow:retry')!(event, 'workflow-test', payload)
+    await expect(invoke({ ...approval, commandId: 'retry-command', target: { ...target, expectedRevision: 0 } })).rejects.toThrow()
+    await expect(invoke({ ...approval, commandId: 'retry-command', target: { ...target, executable: 'bad' } })).rejects.toThrow()
+    await expect(invoke({ ...approval, target })).rejects.toThrow()
+    expect(service.preview).not.toHaveBeenCalled()
+    service.preview.mockResolvedValueOnce({ workspace: '/unauthorized' })
+    await expect(invoke({ ...approval, commandId: 'retry-command', target })).rejects.toThrow('unauthorized')
+    expect(service.retry).not.toHaveBeenCalled()
+    await invoke({ ...approval, commandId: 'retry-command', target })
+    expect(service.retry).toHaveBeenCalledWith('workflow-test', approval, target, 'retry-command')
   })
   it('validates resume approval, command identity and workspace before continuing', async () => {
     const { handlers, event, service } = fixture()

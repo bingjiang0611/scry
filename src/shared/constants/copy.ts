@@ -113,6 +113,17 @@ export const workflowTemplateCopy = {
   parameter: '模板参数缺失、类型不符或包含未声明参数'
 }
 
+export const workflowRetryCopy = {
+  target: '重试目标身份或状态版本无效',
+  stale: '运行或所选 attempt 已变化，请刷新后重新选择',
+  state: '只允许显式重试已停止推进的失败运行',
+  unsafe: '缺少原调用未进入 Provider 的可信证据，不能安全重发',
+  dynamic: '当前重试仅支持 sequence、parallel、call、bind、return；动态作用域尚不可重试',
+  limit: '同一逻辑调用已达到 6 次 attempt 上限',
+  pending: '已有尚未准入的重试，请继续原控制段，不要创建另一重试',
+  command: '命令身份已用于其他操作或重试目标'
+}
+
 export const workflowRecoveryCopy = {
   legacy: '此运行没有完整的恢复合同，只能查看历史，不会重新派发',
   unknown: '原调用结果或作用域仍未知，不能恢复派发',

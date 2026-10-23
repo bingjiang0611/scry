@@ -5,6 +5,9 @@ export type WorkflowResumeResult =
   | { state: 'continued'; progress: WorkflowProgress }
   | { state: 'nothing_to_resume'; progress: WorkflowProgress | null }
 
+/** Exact observed failure and durable state version; never an effect receipt. */
+export type WorkflowRetryTarget = { taskId: string; attemptId: string; expectedRevision: number }
+
 export interface WorkflowApi {
   templates: WorkflowTemplateApi
   extractTemplate(request: WorkflowTemplateExtraction): Promise<WorkflowTemplateDraft>
@@ -15,6 +18,8 @@ export interface WorkflowApi {
   start(workflowId: string, approval: WorkflowApproval, commandId?: string): Promise<WorkflowProgress>
   /** Explicitly continue unstarted work; never replay unknown or failed effects. */
   resume(workflowId: string, approval: WorkflowApproval, commandId: string): Promise<WorkflowResumeResult>
+  /** Explicit same-revision retry, currently only proven pre-Provider failures in static programs. */
+  retry(workflowId: string, approval: WorkflowApproval, target: WorkflowRetryTarget, commandId: string): Promise<WorkflowProgress>
   /** true acknowledges a durable stop intent, not a native signal or scope settlement.
    * Re-delivery must reuse commandId; an explicit stop-again uses a new identity. */
   stop(workflowId: string, commandId: string): Promise<boolean>

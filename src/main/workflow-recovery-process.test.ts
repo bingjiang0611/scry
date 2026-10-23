@@ -118,6 +118,31 @@ async function effects(root: string): Promise<Array<{ node: string; taskId: stri
 }
 
 describe('production Runner across distinct controller processes (local CLI, no account)', () => {
+  it('retains the admitted retry attempt and exact result after a controller exit, without redispatch on continuation', async () => {
+    const f = await setup()
+    await run(f.root, 'retry-refusal', 0)
+    const before = (await f.store.load(f.preview.workflowId))!
+    expect(before.progress).toMatchObject({ state: 'failed', dispatchAttempts: 2 })
+    expect(before.outcomes.find(outcome => outcome.nodeId === 'second')).toMatchObject({ state: 'failed', settled: true, providerDispatch: 'not_attempted' })
+    expect((await effects(f.root)).map(row => row.node)).toEqual(['first'])
+    await run(f.root, 'retry-crash', 73)
+    const admitted = (await f.store.load(f.preview.workflowId))!, segment = admitted.execution!.segments.at(-1)!
+    const second = await f.store.loadFrame(f.preview.workflowId, workflowFrameId('second', ['revision:' + f.preview.programRevision], segment.generationId))
+    expect(second?.phase).toBe('completed')
+    expect(second?.resultRef).toBeDefined()
+    expect(admitted.progress.dispatchAttempts).toBe(3)
+    expect(admitted.intents.at(-1)).toMatchObject({ previousAttemptId: before.outcomes.find(outcome => outcome.nodeId === 'second')!.attemptId, retryCommandId: 'process-retry' })
+    expect(admitted.outcomes.slice(0, 2)).toEqual(before.outcomes)
+    await run(f.root, 'resume', 0)
+    const after = (await f.store.load(f.preview.workflowId))!, continued = after.execution!.segments.at(-1)!
+    expect(after.progress).toMatchObject({ state: 'completed', dispatchAttempts: 3, finalReport: 'second-result' })
+    expect((await effects(f.root)).map(row => row.node)).toEqual(['first', 'second'])
+    const recovered = await f.store.loadFrame(f.preview.workflowId, workflowFrameId('second', ['revision:' + f.preview.programRevision], continued.generationId))
+    expect(recovered?.phase).toBe('completed')
+    expect(recovered?.resultRef).toEqual(second?.resultRef)
+    expect(after.intents).toHaveLength(3)
+    expect(after.execution!.segments).toHaveLength(3)
+  })
   it('continues after a hard controller exit without repeating a completed native child', async () => {
     const f = await setup()
     await run(f.root, 'crash', 73)

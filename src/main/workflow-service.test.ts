@@ -38,6 +38,41 @@ class ParentCheckpointStore extends MemoryWorkflowStore {
 }
 
 describe('workflow service receipts, capabilities and recovery', () => {
+  it('retries one proven refusal through the canonical chain and deduplicates concurrent and cold commands', async () => {
+    let refused = true
+    const execute = vi.fn<WorkflowServiceOptions['execute']>(() => ({ result: refused
+      ? Promise.reject(new WorkflowDispatch().rejected(new Error('fixture preflight')))
+      : Promise.resolve({ runId: 'retried', status: 'completed', settled: true, output: 'retried output' }), stop: () => true }))
+    const f = fixture(undefined, { execute })
+    const preview = await f.service.planCommand(request), approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await f.service.approve(approval)
+    expect((await f.service.start(preview.workflowId, approval)).state).toBe('failed')
+    const before = (await f.store.load(preview.workflowId))!, failed = before.outcomes[0]
+    const target = { taskId: failed.taskId, attemptId: failed.attemptId, expectedRevision: before.progress.revision! }
+    refused = false
+    await f.service.approve(approval)
+    const results = await Promise.all([f.service.retry(preview.workflowId, approval, target, 'retry-command'), f.service.retry(preview.workflowId, approval, target, 'retry-command')])
+    expect(results.map(result => result.state)).toEqual(['completed', 'completed'])
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect((await f.store.load(preview.workflowId))?.intents).toHaveLength(2)
+    const cold = fixture(f.store)
+    expect((await cold.service.retry(preview.workflowId, approval, target, 'retry-command')).dispatchAttempts).toBe(2)
+    expect(cold.execute).not.toHaveBeenCalled()
+    await expect(cold.service.retry(preview.workflowId, approval, { ...target, attemptId: 'other' }, 'retry-command')).rejects.toThrow()
+  })
+
+  it('revalidates the frozen runtime before claiming a retry segment', async () => {
+    const f = fixture(undefined, { execute: () => ({ result: Promise.reject(new WorkflowDispatch().rejected(new Error('fixture preflight'))), stop: () => true }) })
+    const preview = await f.service.planCommand(request), approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await f.service.approve(approval)
+    await f.service.start(preview.workflowId, approval)
+    const before = (await f.store.load(preview.workflowId))!, outcome = before.outcomes[0]
+    const changed = fixture(f.store, { runControls: async role => ({ descriptor: descriptor(role.providerId), model: true, stop: true, identity: 'changed-runtime', independentRun: true, terminalOutput: true }) })
+    await changed.service.approve(approval)
+    await expect(changed.service.retry(preview.workflowId, approval, { taskId: outcome.taskId, attemptId: outcome.attemptId, expectedRevision: before.progress.revision! }, 'retry-changed')).rejects.toThrow()
+    expect(await f.store.load(preview.workflowId)).toEqual(before)
+    expect(changed.execute).not.toHaveBeenCalled()
+  })
   it('returns nothing_to_resume without planning, probing capabilities or creating an empty root', async () => {
     const runControls = vi.fn<WorkflowServiceOptions['runControls']>(), f = fixture(new MemoryWorkflowStore(), { runControls })
     const approval = { workflowId: 'missing-history', programRevision: 'missing-revision', approvedAt: 1 }

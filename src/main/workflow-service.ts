@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { workflowShutdownCopy, workflowRecoveryCopy, workflowTemplateCopy } from '../shared/constants/copy'
-import type { WorkflowResumeResult } from '../shared/workflow-api'
+import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
+import { assertWorkflowRetryTarget, validateWorkflowRetryTarget } from './workflow-retry'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
 import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowLiveObservation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage } from '../shared/workflow'
 import { parseWorkflowRunCommand, workflowProgressSnapshot } from '../shared/workflow'
@@ -64,6 +65,7 @@ export class WorkflowService {
   private readonly plans = new Map<string, Receipt<WorkflowPlanPreview>>()
   private readonly starts = new Map<string, Receipt<WorkflowProgress>>()
   private readonly resumes = new Map<string, Receipt<WorkflowResumeResult>>()
+  private readonly retries = new Map<string, Receipt<WorkflowProgress>>()
   private readonly stops = new Map<string, Receipt<boolean>>()
   private readonly planning = new Map<string, { commandId?: string; intent: WorkflowPlanningIntent; halt: () => void; stop: () => void }>()
   private readonly planningOutcomes = new Map<string, boolean>()
@@ -646,6 +648,27 @@ export class WorkflowService {
       this.assertAdmissionGeneration(generation)
       const result = await this.runner.resume(preview, approval, commandId)
       return result.progress ? { ...result, progress: this.progressSnapshot(result.progress) } : result
+    })
+  }
+  async retry(id: string, approval: WorkflowApproval, target: WorkflowRetryTarget, commandId: string): Promise<WorkflowProgress> {
+    const generation = this.admissionGeneration
+    await this.ensureReady()
+    this.assertAdmissionGeneration(generation)
+    if (approval.workflowId !== id) throw new Error(workflowRecoveryCopy.fingerprint)
+    target = validateWorkflowRetryTarget(target)
+    const fingerprint = JSON.stringify({ workflowId: id, programRevision: approval.programRevision, target })
+    return this.receipt(this.retries, commandId, fingerprint, async () => {
+      const record = await this.options.store.load(id)
+      if (!record) throw new Error(workflowRecoveryCopy.legacy)
+      await this.assertFrozen(record.preview)
+      if (approval.programRevision !== record.preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
+      if (!record.execution?.segments.some(segment => segment.commandId === commandId)) {
+        this.runner.assertRecovery(record)
+        assertWorkflowRetryTarget(record, target)
+        await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true)))
+      }
+      this.assertAdmissionGeneration(generation)
+      return this.progressSnapshot(await this.runner.retry(record.preview, approval, target, commandId))
     })
   }
   async preview(id: string): Promise<WorkflowPlanPreview> { await this.ensureReady(); return this.loadPreview(id) }

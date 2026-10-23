@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
+import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy, workflowRetryCopy } from '../shared/constants/copy'
 import { availableParallelism } from 'node:os'
 import type { AgentPermissionMode } from '../shared/runtime'
 import type {
@@ -20,7 +20,8 @@ import { workflowFrameId } from './workflow-frames'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowInterpreter, type WorkflowInterpreterState } from './workflow-interpreter'
 import { assertWorkflowRecovery, workflowRecordFingerprint } from './workflow-recovery'
-import type { WorkflowResumeResult } from '../shared/workflow-api'
+import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
+import { assertWorkflowRetryTarget, validateWorkflowRetryTarget, workflowRetryAdmission } from './workflow-retry'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
@@ -281,17 +282,37 @@ export class WorkflowRunner {
     if (this.active.has(preview.workflowId)) throw new Error(workflowRecoveryCopy.owner)
     const record = await this.store.load(preview.workflowId)
     if (!record) return { state: 'nothing_to_resume', progress: null }
-    if (record.execution?.segments.some(segment => segment.commandId === commandId)) return { state: 'continued', progress: workflowProgressSnapshot(record.progress) }
+    const accepted = record.execution?.segments.find(segment => segment.commandId === commandId)
+    if (accepted) {
+      if (accepted.mode !== 'continue') throw new Error(workflowRetryCopy.command)
+      return { state: 'continued', progress: workflowProgressSnapshot(record.progress) }
+    }
     if (record.progress.state === 'completed') return { state: 'nothing_to_resume', progress: workflowProgressSnapshot(record.progress) }
     this.assertRecovery(record)
     if (record.execution!.segments.length >= 256) throw new Error(workflowRecoveryCopy.limit)
     return { state: 'continued', progress: await this.run(preview, approval, { record, commandId }) }
   }
+  async retry(preview: WorkflowPlanPreview, approval: WorkflowApproval, target: WorkflowRetryTarget, commandId: string): Promise<WorkflowProgress> {
+    target = validateWorkflowRetryTarget(target)
+    if (approval.workflowId !== preview.workflowId || approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
+    const record = await this.store.load(preview.workflowId)
+    if (!record?.execution) throw new Error(workflowRecoveryCopy.legacy)
+    if (JSON.stringify(record.preview.program) !== JSON.stringify(preview.program)) throw new Error(workflowRecoveryCopy.fingerprint)
+    const accepted = record.execution.segments.find(segment => segment.commandId === commandId)
+    if (accepted) {
+      if (accepted.mode !== 'retry' || JSON.stringify(validateWorkflowRetryTarget(accepted.retry)) !== JSON.stringify(target)) throw new Error(workflowRetryCopy.command)
+      return workflowProgressSnapshot(record.progress)
+    }
+    this.assertRecovery(record)
+    assertWorkflowRetryTarget(record, target)
+    if (record.execution.segments.length >= 256) throw new Error(workflowRecoveryCopy.limit)
+    return this.run(preview, approval, { record, commandId, retry: target })
+  }
   assertRecovery(record: WorkflowStoreRecord): void {
     if (this.active.has(record.preview.workflowId)) throw new Error(workflowRecoveryCopy.owner)
     assertWorkflowRecovery(record, this.instanceId)
   }
-  private async run(preview: WorkflowPlanPreview, approval: WorkflowApproval, continuation?: { record: WorkflowStoreRecord; commandId: string }): Promise<WorkflowProgress> {
+  private async run(preview: WorkflowPlanPreview, approval: WorkflowApproval, continuation?: { record: WorkflowStoreRecord; commandId: string; retry?: WorkflowRetryTarget }): Promise<WorkflowProgress> {
     const current = this.approvals.get(preview.workflowId)
     if (!current || current.programRevision !== approval.programRevision || current.programRevision !== preview.programRevision) {
       throw new Error('计划未确认或配置已变化，不能执行')
@@ -309,7 +330,7 @@ export class WorkflowRunner {
     const record: WorkflowStoreRecord = { ...(continuation?.record ?? {}), preview, progress,
       intents: continuation ? [...continuation.record.intents] : [], outcomes: continuation ? [...continuation.record.outcomes] : [], executionStarted: continuation?.record.executionStarted ?? this.now(),
       execution: { version: 2, epoch, owner: { pid: process.pid, instanceId: this.instanceId, state: 'active' },
-        segments: [...previous, { id: epoch, ...(generationId ? { generationId } : {}), ...(continuation ? { commandId: continuation.commandId } : {}), createdAt: this.now(), mode: continuation ? 'continue' : 'start' }] } }
+        segments: [...previous, { id: epoch, ...(generationId ? { generationId } : {}), ...(continuation ? { commandId: continuation.commandId } : {}), createdAt: this.now(), mode: continuation?.retry ? 'retry' : continuation ? 'continue' : 'start', ...(continuation?.retry ? { retry: continuation.retry } : {}) }] } }
     const controller: WorkflowInterpreterState = { stopped: false }
     const activeStops = new Set<() => boolean>()
     let initialized!: (accepted: boolean) => void
@@ -627,8 +648,9 @@ export class WorkflowRunner {
     try {
       if (controller.stopped) return
       if (record.progress.dispatchAttempts >= WORKFLOW_MAX_ATTEMPTS) throw new Error(`已达到根执行 ${WORKFLOW_MAX_ATTEMPTS} 次 Agent 派发上限`)
+      const retry = workflowRetryAdmission(record, taskId)
       record.progress.dispatchAttempts += 1
-      record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId,
+      record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId, ...retry,
         role: role.role, providerId: role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel.id } : {}), createdAt: this.now() })
       record.progress.attempts.push(this.outcome(preview, block, 'intent_persisted', { taskId, attemptId, settled: false }))
       await this.persist(record, record.progress)

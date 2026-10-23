@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { WorkflowControlFrame } from '../../src/shared/workflow'
-import { WorkflowRunner, type WorkflowProviderExecutionRequest } from '../../src/main/workflow-runner'
+import { WorkflowDispatch, WorkflowRunner, type WorkflowProviderExecutionRequest } from '../../src/main/workflow-runner'
 import { FileWorkflowStore, type WorkflowStoreRecord } from '../../src/main/workflow-store'
 
 const [root, mode] = process.argv.slice(2)
@@ -34,7 +34,7 @@ class Store extends FileWorkflowStore {
   }
   override async saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, revision: number) {
     trace('frame_persistence_begin', { node: frame.nodeId, phase: frame.phase, cursor: frame.cursor })
-    if (frame.nodeId === 'root' && ((mode === 'crash' && frame.cursor === 1) || (mode === 'crash-two' && frame.cursor === 2) || (mode === 'crash-control' && frame.cursor === 4))) process.exit(73)
+    if (frame.nodeId === 'root' && ((mode === 'crash' && frame.cursor === 1) || (mode === 'crash-two' && frame.cursor === 2) || (mode === 'crash-control' && frame.cursor === 4) || (mode === 'retry-crash' && frame.cursor === 2))) process.exit(73)
     if (mode === 'live' && frame.nodeId === 'root' && frame.cursor === 1) {
       process.send!({ type: 'checkpoint', pid: process.pid })
       await new Promise<void>(resolve => process.once('message', message => { if (message === 'continue') resolve() }))
@@ -56,6 +56,9 @@ const round = previous.filter(row => row.node === node).length + 1;
 fs.appendFileSync(path, JSON.stringify({...request, node, pid:process.pid})+'\\n');
 process.stdout.write(node === 'revise' ? JSON.stringify({candidate:'candidate-'+round, done:false, feedback:'repeat', improved:false}) : node+'-result');`
 function execute(request: WorkflowProviderExecutionRequest) {
+  if (mode === 'retry-refusal' && request.taskId.endsWith(':second')) return {
+    result: Promise.reject(new WorkflowDispatch().rejected(new Error('fixture pre-Provider refusal'))), stop: () => true
+  }
   trace('native_child_spawn_request')
   const child = spawn(process.execPath, ['-e', cli, join(root, 'effects.jsonl'), JSON.stringify({ taskId: request.taskId, attemptId: request.attemptId, prompt: request.prompt })], { env: { HOME: root, PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'pipe', 'pipe'] })
   child.once('spawn', () => trace('native_child_spawn', { pid: child.pid! }))
@@ -76,9 +79,16 @@ function execute(request: WorkflowProviderExecutionRequest) {
 try {
   const preview = JSON.parse(await readFile(join(root, 'preview.json'), 'utf8'))
   const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
-  const runner = new WorkflowRunner({ store: new Store(root), execute })
+  const store = new Store(root), runner = new WorkflowRunner({ store, execute })
   runner.approve(preview, approval)
-  const result = mode === 'resume' || mode === 'reenter' ? await runner.resume(preview, approval, 'process-' + mode) : await runner.start(preview, approval)
+  const retry = async () => runner.retry(preview, approval, JSON.parse(await readFile(join(root, 'retry-target.json'), 'utf8')), 'process-retry')
+  const result = mode === 'retry-crash' ? await retry()
+    : mode === 'resume' || mode === 'reenter' ? await runner.resume(preview, approval, 'process-' + mode) : await runner.start(preview, approval)
+  if (mode === 'retry-refusal') {
+    const record = (await store.load(preview.workflowId))!, outcome = record.outcomes.find(value => value.nodeId === 'second')!
+    await writeFile(join(root, 'retry-target.json'), JSON.stringify({ taskId: outcome.taskId, attemptId: outcome.attemptId, expectedRevision: record.progress.revision! }))
+  }
+  if (mode === 'resume' && (await store.load(preview.workflowId))!.execution!.segments.some(segment => segment.commandId === 'process-retry')) await retry()
   await writeFile(join(root, 'result.json'), JSON.stringify({ pid: process.pid, result }))
   trace('top_level_completion', { outcome: 'returned' })
 } catch (error) {

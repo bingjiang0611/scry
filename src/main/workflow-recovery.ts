@@ -3,6 +3,7 @@ import type { WorkflowStoreRecord } from './workflow-store'
 import { WORKFLOW_MAX_ATTEMPTS, workflowChildBlocks, type WorkflowBlock } from '../shared/workflow'
 import { workflowRecoveryCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
+import { assertWorkflowRetryTarget, validateWorkflowAttemptChains, validateWorkflowRetryTarget } from './workflow-retry'
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
 export const workflowRecordFingerprint = (value: WorkflowStoreRecord | undefined): string | undefined => value === undefined ? undefined : createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -12,7 +13,9 @@ export function validateWorkflowOwnership(record: WorkflowStoreRecord): void {
   if (!execution) return
   if (execution.version !== 2 || !id(execution.epoch) || !execution.owner || !Number.isSafeInteger(execution.owner.pid) || execution.owner.pid < 1 || !id(execution.owner.instanceId) || !['active', 'closed'].includes(execution.owner.state) || !Array.isArray(execution.segments) || !execution.segments.length || execution.segments.length > 256) throw new Error(copy.ledger)
   for (const [index, segment] of execution.segments.entries()) {
-    if (!segment || !id(segment.id) || !Number.isFinite(segment.createdAt) || (index === 0 ? segment.mode !== 'start' || segment.generationId !== undefined || segment.commandId !== undefined : segment.mode !== 'continue' || segment.generationId !== segment.id || !id(segment.commandId))) throw new Error(copy.ledger)
+    if (!segment || !id(segment.id) || !Number.isFinite(segment.createdAt) || (index === 0 ? segment.mode !== 'start' || segment.generationId !== undefined || segment.commandId !== undefined : !['continue', 'retry'].includes(segment.mode) || segment.generationId !== segment.id || !id(segment.commandId))) throw new Error(copy.ledger)
+    if (segment.mode === 'retry') validateWorkflowRetryTarget(segment.retry)
+    else if (segment.retry !== undefined) throw new Error(copy.ledger)
   }
   const commands = execution.segments.slice(1).map(segment => segment.commandId)
   if (new Set(commands).size !== commands.length) throw new Error(copy.ledger)
@@ -27,8 +30,9 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
   const { programRevision, ...program } = validateWorkflowProgram(record.preview.program)
   if (programRevision !== workflowRevision(program) || programRevision !== record.preview.programRevision || record.preview.workflowId !== program.workflowId || record.preview.workspace !== program.workspace) throw new Error(copy.fingerprint)
   if (!Number.isSafeInteger(record.progress.dispatchAttempts) || record.progress.dispatchAttempts !== record.intents.length || record.progress.dispatchAttempts > WORKFLOW_MAX_ATTEMPTS ||
-    new Set(record.intents.map(intent => intent.attemptId)).size !== record.intents.length || new Set(record.intents.map(intent => intent.taskId)).size !== record.intents.length ||
-    new Set(record.outcomes.map(outcome => outcome.attemptId)).size !== record.outcomes.length || new Set(record.outcomes.map(outcome => outcome.taskId)).size !== record.outcomes.length) throw new Error(copy.ledger)
+    new Set(record.intents.map(intent => intent.attemptId)).size !== record.intents.length ||
+    new Set(record.outcomes.map(outcome => outcome.attemptId)).size !== record.outcomes.length) throw new Error(copy.ledger)
+  validateWorkflowAttemptChains(record)
   const calls = new Map<string, Extract<WorkflowBlock, { kind: 'call' }>>()
   const pending = [program.body]
   while (pending.length) {
@@ -67,6 +71,7 @@ export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, 
   }
   assertWorkflowRecovery(current, next.execution.owner.instanceId)
   const segments = next.execution.segments
+  if (segments.at(-1)?.mode === 'retry') assertWorkflowRetryTarget(current, segments.at(-1)!.retry!)
   if (next.execution.epoch === current.execution.epoch || segments.length !== current.execution.segments.length + 1 ||
     JSON.stringify(segments.slice(0, -1)) !== JSON.stringify(current.execution.segments) ||
     JSON.stringify(next.preview.program) !== JSON.stringify(current.preview.program) ||

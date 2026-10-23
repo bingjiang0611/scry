@@ -1,5 +1,16 @@
 # M1–M6 实施与真实验收台账
 
+## 显式失败重试增量（M3，严格子集；整体仍未完成）
+
+- 新增 `WorkflowApi.retry(workflowId, approval, { taskId, attemptId, expectedRevision }, commandId)`，经现有可信 IPC → Service → Runner → Interpreter 执行。先校验冻结程序/运行时、原根全部效果收敛和观察版本，再持久化 retry 控制段；只在原预算内追加 intent，不修改旧 attempt/outcome，不退款。每个同修订逻辑调用最多 6 次 admitted attempts，根仍最多 1000 次、控制段最多 256 个。
+- 本轮只允许 `sequence/parallel/call/bind/return`，且选中的最新失败 outcome 必须 `settled + providerDispatch:not_attempted`。该证据来自原 canonical dispatch guard；普通 Provider 失败、unknown、停止 ACK、物理退出或 owner 死亡均不提供安全重发资格。动态 map/loop/branch/collect 等程序明确拒绝。成功 sibling 复用原不可变结果，选中失败 call 的旧控制帧不再当作已接受结果；依赖它的尚未开始消费者随后执行。这里没有实现一般动态依赖失效。
+- 追加式 `previousAttemptId/retryCommandId` 链在 ownership/CAS 准入和恢复时校验，拒绝伪造前驱、丢失重发证据、同命令不同目标、陈旧版本和竞争准入。相同命令的当前/冷启动重交只读回状态。若已接受 retry 但尚无新 intent，显式 resume 可以继续这个已批准的 attempt，不会另建 retry；普通 resume 仍不把原失败变成重试。
+- 验证：Node/web 类型检查通过；19 文件串行组合 **264/264**；新 retry focused **14/14**，覆盖成功复用、追加链、六次上限、unknown/未收敛/无证据拒绝、晚到物理收敛不变成重发许可、竞争/重复命令及待准入 retry 继续。跨进程场景通过：初次 pre-Provider 拒绝 → 新 attempt 完成后控制器 exit73 → 新进程继续，实际本地 CLI ledger 只有 first/second 各一次，预算为 3，复用准确新结果引用。所有原 deadlines 保持不变。
+- 有效负控：临时禁用 pending-retry 选择后，同一关键用例立即失败（缺失正确控制帧），而不是复用旧失败后假绿。补晚到收敛测试时出现的首次 TS2322 是测试 spy 被推断成仅允许 completed；已改为生产 `WorkflowProviderExecutor` 类型，原失败日志保留，没有削弱断言。
+- 构建及完整 `test:conversation:ipc` 通过；实际隔离 Electron main/preload 确认新 retry 方法存在，缺失历史得到准确拒绝、不造记录、不进入 Provider。现有完整场景 21 次调用均为离线 fixture；新 retry 正向证据来自真实 Service/Runner 与跨进程本地 CLI，不冒充真实 Provider 或完整 App 正向重试验收。`test:workflow:ui` 通过，但未新增重试管理按钮。
+- 性能路径已登记；`performance:measure -- --scenario providers.catalog` 仍 exit1：`No counter collector matches providers.catalog`。最终组合与生产计时均标 `highLoad:false`，但没有可比较的性能结论；不声称性能通过或提速。历史超时、完整发布/CLI 门禁仍按下文保留，本轮没有关闭它们。
+- 下一步由主实施会话继续：设计同根修订 lineage/storage 和动态目标依赖失效，随后实现可信 check/classifier、质量流程与管理/恢复 UI；真实 Provider/Jev、费用或业务写入仍到授权边界再询问。这个增量不是 M3 或 M1–M6 完成。
+
 ## 模板工作台增量（M2/M5，整体仍未完成）
 
 - 已实现只读 builtin 分发源、16 项模板摘要与私有草稿分页、冻结定义提取、显式参数/默认值选择、独立草稿、源码/结构同源视图、完整源码及连续变化范围核对、发布/准确修订删除/历史恢复、绑定后进入显式审批的准备入口。全部仍使用原 compiler → Service → Runner → Interpreter，不执行另一套模板运行时。

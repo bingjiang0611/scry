@@ -5,6 +5,7 @@ import type { WorkflowTemplateInstance } from './workflow-template.js'
 export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
 export const WORKFLOW_MAX_ATTEMPTS = 1000
+export const WORKFLOW_MAX_TASK_ATTEMPTS = 6
 export const WORKFLOW_MAX_STOP_REQUESTS = 256
 export const WORKFLOW_MAX_OUTPUT_LENGTH = 16 * 1024
 export const WORKFLOW_MAX_SCHEMA_DEPTH = 16
