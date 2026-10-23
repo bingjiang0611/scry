@@ -145,7 +145,7 @@ node scripts/electron-security-smoke.mjs --dev-pi-history-only
 
 ## A1 修正（执行方，2026-10-23）
 
-按上节「核验意见」第 1–5 点修改，单独提交（hash 见分支日志中 `fix: restore Claude child-handle stop fallback`，B 报告同步引用）。
+按上节「核验意见」第 1–5 点修改，单独提交 `e5b9236`（`fix: restore Claude child-handle stop fallback`）。
 
 - **代码**：`src/main/agent-runner.ts` 的 `signalSpawnedChild` 先等待身份。身份可用且非 win32 时先调用 `signalProcessTreeWithIdentity`。结果不是 `signalled`、复核抛错、身份未知/采集失败或 win32 时，只要 `child.exitCode === null && child.signalCode === null`，就回退 `child.kill(signal)`。强制停止用 SIGKILL；SDK abort 用 SIGTERM，等价于原 Node `spawn({ signal })` 的句柄信号，但先尝试经复核的树信号。身份 pending 期间仍不提前发信号。Qoder 不变（只有裸 PID，原代码也没有句柄回退）。
 - **断言修改依据**：本报告「核验意见 › A1 需修改」。Node 在 `exit` 之前不会回收子进程，PID 不会被复用；只有进程组/树信号需要身份复核。原交接红线写错，已由审查方更正。
