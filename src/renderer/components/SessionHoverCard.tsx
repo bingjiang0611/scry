@@ -108,7 +108,9 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   }, [open])
   const validTime = Number.isFinite(session.mtime) && session.mtime > 0
   return {
-    dismiss,
+    // A menu or selection takes ownership immediately; pointer leave / blur
+    // still use the decorative exit above.
+    dismiss: dismissImmediately,
     triggerProps: {
       ref: anchor,
       'aria-describedby': open && presence.state === 'enter' ? id : undefined,
