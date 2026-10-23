@@ -245,3 +245,16 @@ python3 apps/ios/Checks/device-observation-report.py /tmp/f-l2-A
 - 最终正常包**未自动启动或发送**。功能/帧率验收针对上述隔离状态、相同实验依赖图的 DEBUG fixture；不冒充最终正常包的真实已配对宿主/Provider 联通验收。没有执行 L3 日常样本或精确 GPU 呈现丢帧验收。默认 preferences 再次逐字节比较未变，真实 Keychain 不导出、不重置。
 - 本地保留上述 `/tmp/scry-f-*` 证据、临时 fixture、构建产物及失败现场。App Documents 中保留本轮 `batch-f-preview.json`、`batch-f-stream.json`、`batch-f-selftest.log` 三个测试文件；无注入正常包不读取它们。Etch 未自动恢复；如需使用，由设备所有者按其原安装流程恢复。
 - **审查方 / 原 iOS 契约维护者下一步**：处理或明确接受上列 3 项 self-test 与 5 项 UI 基线同样失败，再决定整体验收口径；不要把本轮“已运行且未新增失败”改写成“全绿”。如要宣称 L2 更快，由 F 执行方另做低负载、nominal 的成对复测。本轮只补证据，不更改 `STATUS.md`，不合并 main。
+
+## 核验意见 · 真机补充（审查方，2026-10-22）
+
+结论：**F 已核验**。目标是消除与流式输出无关的父层失效，这一点已在真机上证实；L2 提速没有证实，也不再要求。
+
+- `82c5b33..1a7f152` 只新增 `apps/ios/Checks/` 的测量工具与文档，生产源码与上次核验一致。
+- 真机 L1：`RootView` body 每轮 601→0；`ChatView`/`FocusedTurnView` 仍为 601，输出完整（600 行、hash 一致）。说明只删掉了无关重算，没有节流或丢输出。
+- 功能：`-selfTest` 114/117、XCTest UI 26/31，基线与候选的失败项和错误文本完全相同，没有新增失败。8 项原有失败已记入 `perf/handoff` 的 STATUS「既有问题」，不归 F。
+- L2：中位数 hitch 324→304、hitch ms/s 357→319，区间 +0.96%。只能算描述，不足以下结论。报告没有夸大。不再为 F 补低负载复测，理由见下一条：真正的瓶颈不在 F 的范围内。
+
+**新发现，单独立项（F2，不在本分支做）。** 固定负载按 33 ms 调度 600 段，理论约 19.8 s，实测每轮 52–56 s；FPS 约 26，约 35% 的时间在 hitch。两边都一样，说明主线程处理每段追加约需 88 ms，跟不上输入。`ChatView` 和 `FocusedTurnView` 每段都重算 body，而输出合并成一个不断变长的 row，推测每次追加都要对全文重新排版，整体是 O(n²)。这是推测，需要 Time Profiler 的调用树来确认。
+
+设备侧记录：经用户授权覆盖安装日常 `com.scry.remote.local`，并卸载了 Etch（可能丢失其本地数据）。最终已装回无注入的正常包，偏好文件逐字节不变。
