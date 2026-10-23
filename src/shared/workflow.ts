@@ -1,5 +1,6 @@
 import type { ProviderId, ProviderDescriptor } from './provider.js'
 import type { AgentModelRef, AgentPermissionMode, RuntimeProvider } from './runtime.js'
+import type { WorkflowTemplateInstance } from './workflow-template.js'
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
@@ -147,6 +148,7 @@ export interface WorkflowBindBlock {
   kind: 'bind'
   blockId: string
   value: WorkflowExpression
+  schema?: WorkflowValueSchema
 }
 
 export interface WorkflowBranchBlock {
@@ -238,6 +240,7 @@ export interface WorkflowProgram {
   workspace: string
   roles: WorkflowRoleBinding[]
   body: WorkflowBlock
+  template?: WorkflowTemplateInstance
 }
 
 export interface WorkflowPlanPreview {

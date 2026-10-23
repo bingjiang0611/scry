@@ -23,6 +23,7 @@ const request: WorkflowLaunchRequest = { id: 'ui-fixture-command', command: '/sc
   orchestrator: { role: 'orchestrator', providerId: 'codex', permissionMode: 'default' } }
 const api: WorkflowApi = {
   templates: emptyWorkflowBridge.templates,
+  instantiateTemplate: emptyWorkflowBridge.instantiateTemplate,
   plan: async input => {
     counters.plans++
     document.body.dataset.workflowRequest = JSON.stringify(input)

@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os'
 import { syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
 import { WORKFLOW_TEMPLATE_MAX_BYTES, type WorkflowTemplateApi, type WorkflowTemplateDraft, type WorkflowTemplatePublication, type WorkflowTemplateRef, type WorkflowTemplateScope, type WorkflowTemplateSnapshot } from '../shared/workflow-template'
-import { assertTemplateSource, templateHashPattern, templateIdPattern, templateObject, validateWorkflowTemplate } from './workflow-template-definition'
+import { assertTemplateSource, validateWorkflowTemplate } from './workflow-template-definition'
+import { templateHashPattern, templateIdPattern, templateObject, templateReference, templateScope, templateSource } from './workflow-template-identity'
+import type { WorkflowTemplateDefinition, WorkflowTemplateSource } from '../shared/workflow-template'
 import { PerformanceTrace } from './performance-timing'
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -19,12 +21,6 @@ function digest(value: unknown): asserts value is string {
 }
 function command(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value)) throw new Error(copy.invalid)
-}
-function scopeValue(value: unknown): WorkflowTemplateScope {
-  const scope = templateObject(value, ['kind', 'workspace'])
-  if (scope.kind === 'personal' && scope.workspace === undefined) return { kind: 'personal' }
-  if (scope.kind === 'project' && typeof scope.workspace === 'string' && scope.workspace.length > 0 && scope.workspace.length <= 4096) return { kind: 'project', workspace: scope.workspace }
-  throw new Error(copy.invalid)
 }
 
 /** Bounded reads also cover external editors growing a file after stat. */
@@ -95,7 +91,7 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
   ) {}
 
   private async normalize(scope: WorkflowTemplateScope): Promise<{ scope: WorkflowTemplateScope; base: string; domainId: string }> {
-    const accepted = scopeValue(scope)
+    const accepted = templateScope(scope)
     const base = accepted.kind === 'personal' ? await realpath(this.userData) : await this.authorizeProject(accepted.workspace)
     const normalized: WorkflowTemplateScope = accepted.kind === 'personal' ? accepted : { kind: 'project', workspace: base }
     return { scope: normalized, base, domainId: hash(JSON.stringify(normalized.kind === 'personal' ? ['personal', base] : ['project', base])) }
@@ -150,7 +146,7 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     if (prior === undefined) await writeJsonAtomic(path, { ref, sourceHash })
     else {
       const observed = templateObject(JSON.parse(prior), ['ref', 'sourceHash'])
-      if (observed.sourceHash !== sourceHash || JSON.stringify(this.reference(observed.ref)) !== JSON.stringify(ref)) throw new Error(copy.ledger)
+      if (observed.sourceHash !== sourceHash || JSON.stringify(templateReference(observed.ref)) !== JSON.stringify(ref)) throw new Error(copy.ledger)
     }
   }
   async read(scope: WorkflowTemplateScope, templateId: string): Promise<WorkflowTemplateSnapshot | null> {
@@ -184,18 +180,40 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     const value = templateObject(JSON.parse(text), ['draftId', 'draftRevision', 'domainId', 'templateId', 'scope', 'base', 'sourceHash'])
     if (value.draftId !== draftId || !Number.isSafeInteger(value.draftRevision) || Number(value.draftRevision) < 1) throw new Error(copy.ledger)
     id(value.templateId); digest(value.sourceHash); digest(value.domainId)
-    const location = await this.normalize(scopeValue(value.scope))
+    const location = await this.normalize(templateScope(value.scope))
     if (location.domainId !== value.domainId) throw new Error(copy.ledger)
     if (value.base !== null) {
-      const base = this.reference(value.base)
+      const base = templateReference(value.base)
       if (base.domainId !== value.domainId || base.templateId !== value.templateId || JSON.stringify(base.scope) !== JSON.stringify(location.scope)) throw new Error(copy.ledger)
     }
     return value as DraftRecord
   }
-  private reference(input: unknown): WorkflowTemplateRef {
-    const ref = templateObject(input, ['scope', 'domainId', 'templateId', 'revisionHash'])
-    id(ref.templateId); digest(ref.domainId); digest(ref.revisionHash)
-    return { scope: scopeValue(ref.scope), domainId: ref.domainId, templateId: ref.templateId, revisionHash: ref.revisionHash }
+  /** Capture only the reviewed revision. No publication or Provider execution. */
+  async freeze(input: WorkflowTemplateSource): Promise<{ ref: WorkflowTemplateRef; origin: WorkflowTemplateSource; definition: WorkflowTemplateDefinition }> {
+    const origin = templateSource(input)
+    if (origin.kind === 'saved') {
+      const snapshot = await this.read(origin.ref.scope, origin.ref.templateId)
+      if (!snapshot || JSON.stringify(snapshot.ref) !== JSON.stringify(origin.ref)) throw new Error(copy.sourceChanged)
+      if (snapshot.state !== 'valid') throw new Error(snapshot.error)
+      return { ref: snapshot.ref, origin, definition: snapshot.definition }
+    }
+    const draft = await this.draft(origin.draftId)
+    if (draft.draftRevision !== origin.draftRevision || draft.candidateHash !== origin.candidateHash) throw new Error(copy.staleDraft)
+    const definition = validateWorkflowTemplate(draft.source, draft.templateId)
+    const ref = { scope: draft.scope, domainId: draft.domainId, templateId: draft.templateId, revisionHash: hash(draft.source) }
+    await this.observe(ref, draft.source)
+    return { ref, origin, definition }
+  }
+  /** App-owned frozen history, not the mutable source or the current draft.
+   * The run's workspace and Provider authority are checked independently. */
+  async frozen(input: WorkflowTemplateRef): Promise<WorkflowTemplateDefinition> {
+    const ref = templateReference(input)
+    const path = join(await this.own(['history', ref.domainId, ref.templateId]), `${ref.revisionHash}.json`)
+    const text = await readText(path)
+    if (text === undefined) throw new Error(copy.frozen)
+    const record = templateObject(JSON.parse(text), ['ref', 'sourceHash'])
+    if (record.sourceHash !== ref.revisionHash || JSON.stringify(templateReference(record.ref)) !== JSON.stringify(ref)) throw new Error(copy.ledger)
+    return validateWorkflowTemplate(await this.source(ref.revisionHash), ref.templateId)
   }
   private async expand(record: DraftRecord): Promise<WorkflowTemplateDraft> {
     const source = await this.source(record.sourceHash)
@@ -217,7 +235,7 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
       const prior = request.draftId ? await this.record(draftId) : undefined
       if (prior && request.expectedDraftRevision !== prior.draftRevision) throw new Error(copy.staleDraft)
       if (!prior && request.expectedDraftRevision !== undefined) throw new Error(copy.staleDraft)
-      const base = request.base === undefined ? null : this.reference(request.base)
+      const base = request.base === undefined ? null : templateReference(request.base)
       if (base && (base.domainId !== location.domainId || JSON.stringify(base.scope) !== JSON.stringify(location.scope))) throw new Error(copy.invalid)
       if (prior && (JSON.stringify(prior.scope) !== JSON.stringify(location.scope) || JSON.stringify(prior.base) !== JSON.stringify(base))) throw new Error(copy.staleDraft)
       const templateId = prior?.templateId ?? base?.templateId ?? randomUUID()
@@ -330,7 +348,7 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
         const result = prior.result
         if (!result) throw new Error(copy.ledger)
         if (result.state === 'published') {
-          const ref = this.reference(result.ref)
+          const ref = templateReference(result.ref)
           if (JSON.stringify(ref) !== JSON.stringify({ ...target.ref, revisionHash: prior.desiredHash }) || !['write', 'reconciled_content'].includes(result.verification)) throw new Error(copy.ledger)
         } else if (result.state === 'conflict') {
           if (result.currentRevisionHash !== null) digest(result.currentRevisionHash)

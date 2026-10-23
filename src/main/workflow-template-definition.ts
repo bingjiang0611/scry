@@ -4,12 +4,7 @@ import { workflowTemplateCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowBody, validateWorkflowRoleBinding, WORKFLOW_ROLES } from './workflow-program'
 import { matchesWorkflowValue, validateWorkflowValueSchema } from './workflow-values'
 
-export const templateHashPattern = /^[a-f0-9]{64}$/
-export const templateIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
-export function templateObject(value: unknown, fields: readonly string[]): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw new Error(copy.invalid)
-  return value as Record<string, unknown>
-}
+import { templateIdPattern, templateObject } from './workflow-template-identity'
 export function assertTemplateSource(source: unknown): asserts source is string {
   if (typeof source !== 'string') throw new Error(copy.invalid)
   const bytes = Buffer.from(source, 'utf8')

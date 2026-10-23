@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { workflowShutdownCopy, workflowRecoveryCopy } from '../shared/constants/copy'
+import { workflowShutdownCopy, workflowRecoveryCopy, workflowTemplateCopy } from '../shared/constants/copy'
 import type { WorkflowResumeResult } from '../shared/workflow-api'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
 import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowLiveObservation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage } from '../shared/workflow'
 import { parseWorkflowRunCommand, workflowProgressSnapshot } from '../shared/workflow'
-import { capabilityForRole, makePlanPreview, validateWorkflowProgram, workflowRevision } from './workflow-program'
+import { capabilityForRole, makePlanPreview, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision } from './workflow-program'
 import { WorkflowRunner, WorkflowSlots, WorkflowScopeError, type WorkflowProviderExecution, type WorkflowProviderExecutionResult } from './workflow-runner'
 import { SHUTDOWN_DEADLINE_MS } from './shutdown'
 import type { WorkflowPlanningIntent, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowTemplateStore } from './workflow-template-store'
+import { PerformanceTrace } from './performance-timing'
+import { frozenTemplateParameters, templateBody, templateRoles, validateTemplateInstantiation } from './workflow-template-instance'
 
 export interface WorkflowPlanRequest {
   command: string
@@ -22,6 +25,7 @@ export interface WorkflowPlanProvider {
 }
 export interface WorkflowServiceOptions {
   store: WorkflowStore
+  templates?: WorkflowTemplateStore
   providerRegistered: (providerId: ProviderId) => boolean
   runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
   plan: WorkflowPlanProvider
@@ -186,9 +190,19 @@ export class WorkflowService {
       await this.options.store.save(record)
     }
   }
-  private assertFrozen(preview: WorkflowPlanPreview): void {
+  private async assertFrozen(preview: WorkflowPlanPreview): Promise<void> {
     const { programRevision, ...program } = validateWorkflowProgram(preview.program)
     if (programRevision !== workflowRevision(program) || preview.programRevision !== programRevision || preview.workspace !== program.workspace || preview.workflowId !== program.workflowId || preview.userGoal !== program.userGoal) throw new Error('程序指纹已变化，必须重新规划')
+    if (program.template) {
+      if (!this.options.templates || program.body.kind !== 'sequence') throw new Error(workflowTemplateCopy.frozen)
+      const definition = await this.options.templates.frozen(program.template.ref)
+      const names = Object.keys(definition.parameters).sort()
+      if (JSON.stringify(names) !== JSON.stringify(program.template.parameterNames) || program.workflowId !== planningId('template:' + program.template.commandId)) throw new Error(workflowTemplateCopy.frozen)
+      const parameters = frozenTemplateParameters(program.body, names)
+      if (JSON.stringify(templateBody(definition, parameters)) !== JSON.stringify(program.body)) throw new Error(workflowTemplateCopy.frozen)
+      templateRoles(definition, program.roles)
+      if (JSON.stringify(validateWorkflowRoleBinding(preview.orchestrator, 0, true)) !== JSON.stringify(program.roles.find(role => role.role === 'orchestrator'))) throw new Error(workflowTemplateCopy.frozen)
+    }
   }
   private async loadPreview(id: string): Promise<WorkflowPlanPreview> {
     const preview = await this.findPreview(id)
@@ -199,7 +213,8 @@ export class WorkflowService {
     await this.ensureReady()
     const record = await this.options.store.load(id)
     if (!record) return undefined
-    this.assertFrozen(record.preview)
+    if (record.preview.workflowId !== id) throw new Error(workflowRecoveryCopy.ledger)
+    await this.assertFrozen(record.preview)
     return record.preview
   }
   private receipt<T>(cache: Map<string, Receipt<T>>, commandId: string, fingerprint: string, action: () => Promise<T>): Promise<T> {
@@ -216,6 +231,55 @@ export class WorkflowService {
     cache.set(commandId, entry)
     void entry.promise.then(() => { entry.settled = true }, () => { entry.settled = true })
     return entry.promise
+  }
+
+  async instantiateTemplate(input: unknown): Promise<WorkflowPlanPreview> {
+    const request = validateTemplateInstantiation(input), generation = this.admissionGeneration
+    await this.ensureReady()
+    this.assertAdmissionGeneration(generation)
+    const templates = this.options.templates
+    if (!templates) throw new Error(workflowTemplateCopy.instantiationUnavailable)
+    const fingerprint = createHash('sha256').update(JSON.stringify(request)).digest('hex')
+    const id = planningId('template:' + request.commandId)
+    const prior = async (): Promise<WorkflowPlanPreview | undefined> => {
+      const preview = await this.findPreview(id)
+      if (!preview) return undefined
+      if (preview.program.template?.commandId !== request.commandId || preview.program.template.requestHash !== fingerprint) throw new Error(workflowTemplateCopy.instanceCommand)
+      return preview
+    }
+    const result = await this.receipt(this.plans, 'template:' + request.commandId, fingerprint, async () => {
+      const trace = new PerformanceTrace('workflow.template.instantiate')
+      try {
+        const previous = await prior()
+        this.assertAdmissionGeneration(generation)
+        if (previous) { trace.finish(undefined, previous.state === 'ready' ? 'completed' : 'unavailable'); return previous }
+        const frozen = await templates.freeze(request.source)
+        this.assertAdmissionGeneration(generation)
+        const bindings = [request.orchestrator, ...request.roles]
+        templateRoles(frozen.definition, bindings)
+        const body = templateBody(frozen.definition, request.parameters)
+        trace.mark('source_frozen')
+        const capabilities = await Promise.all(bindings.map(role => this.capability(role, request.cwd)))
+        this.assertAdmissionGeneration(generation)
+        trace.mark('bindings_resolved')
+        const roles = bindings.map((role, index) => ({ ...role, ...(capabilities[index].runtimeIdentity ? { runtimeIdentity: capabilities[index].runtimeIdentity } : {}) }))
+        const program = validateWorkflowProgram({ schemaVersion: 1, workflowId: id, programRevision: 'pending', userGoal: request.userGoal, workspace: request.cwd,
+          roles, body, template: { ref: frozen.ref, origin: frozen.origin, parameterNames: Object.keys(frozen.definition.parameters).sort(), commandId: request.commandId, requestHash: fingerprint } })
+        const { programRevision: _revision, ...snapshot } = program
+        program.programRevision = workflowRevision(snapshot)
+        const preview = makePlanPreview(program, capabilities, roles[0])
+        const created = await this.options.store.create({ preview, progress: { workflowId: id, programRevision: program.programRevision, workspace: request.cwd, goal: request.userGoal,
+          state: 'awaiting_approval', attempts: [], dispatchAttempts: 0, revision: 0, slots: { limit: this.options.slots.limit, inUse: this.options.slots.active, queued: this.options.slots.queued }, updatedAt: Date.now() }, intents: [], outcomes: [] })
+        this.assertAdmissionGeneration(generation)
+        trace.mark('instance_persisted')
+        const winner = created ? preview : await prior()
+        if (!winner) throw new Error(workflowTemplateCopy.frozen)
+        trace.finish(undefined, winner.state === 'ready' ? 'completed' : 'unavailable')
+        return winner
+      } catch (error) { trace.finish(undefined, 'error'); throw error }
+    })
+    this.assertAdmissionGeneration(generation)
+    return structuredClone(result)
   }
 
   async planCommand(request: WorkflowPlanRequest): Promise<WorkflowPlanPreview> {
@@ -553,7 +617,7 @@ export class WorkflowService {
       const record = await this.options.store.load(id)
       if (!record) return { state: 'nothing_to_resume', progress: null }
       const preview = record.preview
-      this.assertFrozen(preview)
+      await this.assertFrozen(preview)
       if (approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
       if (record.progress.state !== 'completed' && !record.execution?.segments.some(segment => segment.commandId === commandId)) {
         this.runner.assertRecovery(record)

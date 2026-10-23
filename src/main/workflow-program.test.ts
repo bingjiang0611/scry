@@ -58,6 +58,15 @@ describe('WorkflowProgram M0 contract', () => {
     expect(workflowPlanningPrompt([role], 'structured inspection')).toContain('outputSchema')
   })
 
+  it('checks bind schema annotations instead of treating them as unchecked casts', () => {
+    const body = (value: unknown) => ({ kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'bind', blockId: 'parameter', value: { kind: 'literal', value }, schema: { type: 'string' } },
+      { kind: 'return', blockId: 'finish', ref: { nodeId: 'parameter' } }
+    ] })
+    expect(() => validateWorkflowProgram({ ...program, body: body('seed') })).not.toThrow()
+    expect(() => validateWorkflowProgram({ ...program, body: body(0) })).toThrow('绑定值')
+  })
+
   it('rejects schema execution hooks while allowing data fields named command or path', () => {
     const schema = { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } } }
     const withSchema = (outputSchema: unknown) => ({ ...program, body: { ...program.body, blocks: [

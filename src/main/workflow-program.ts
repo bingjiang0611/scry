@@ -10,12 +10,14 @@ import type {
   WorkflowRoleBinding,
   WorkflowRoleCapability,
   WorkflowOutputRef,
-  WorkflowValueSchema
+  WorkflowValueSchema,
+  WorkflowSequenceBlock
 } from '../shared/workflow'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
 import { validateWorkflowValueSchema, workflowSchemaAssignable } from './workflow-values'
 import { validateWorkflowLoop, workflowLoopOutcomeSchema } from './workflow-loops'
 import { collectionItemSchema } from './workflow-collections'
+import { templateInstance } from './workflow-template-identity'
 import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema, workflowItemsSchema, workflowScalarSchema } from './workflow-expressions'
 import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowLoopCopy, workflowValueCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
@@ -163,11 +165,12 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
       ...(inputRefs ? { inputRefs } : {}), ...(outputSchema ? { outputSchema } : {}) }
   }
   if (input.kind === 'bind') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'value'])
+    rejectUnknownFields(input, ['kind', 'blockId', 'value', 'schema'])
     const expression = validateWorkflowExpression(input.value)
-    count.textBytes += Buffer.byteLength(JSON.stringify(expression))
+    const schema = input.schema === undefined ? undefined : validateWorkflowValueSchema(input.schema)
+    count.textBytes += Buffer.byteLength(JSON.stringify(expression)) + (schema ? Buffer.byteLength(JSON.stringify(schema)) : 0)
     if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    return { kind: 'bind', blockId: input.blockId, value: expression }
+    return { kind: 'bind', blockId: input.blockId, value: expression, ...(schema ? { schema } : {}) }
   }
   if (input.kind === 'branch') {
     rejectUnknownFields(input, ['kind', 'blockId', 'when', 'then', 'else', 'unknown'])
@@ -245,7 +248,11 @@ function validateReferenceDominance(body: WorkflowBlock, inputs: ReadonlyMap<str
       for (const ref of block.inputRefs ?? []) referenceType(ref, scope)
       return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
     }
-    if (block.kind === 'bind') return bind(scope, block.blockId, inferWorkflowExpression(block.value, scope))
+    if (block.kind === 'bind') {
+      const actual = inferWorkflowExpression(block.value, scope)
+      if (block.schema && !workflowSchemaAssignable(actual, block.schema)) throw new Error(workflowValueCopy.bindingContract)
+      return bind(scope, block.blockId, block.schema ?? actual)
+    }
     if (block.kind === 'loop') {
       const invariantScope = new Map(scope)
       for (const [name, expression] of Object.entries(block.invariants)) bind(invariantScope, name, inferWorkflowExpression(expression, scope))
@@ -332,17 +339,18 @@ export function workflowLoopStateTypes(body: WorkflowBlock, nodeId: string): Rec
 export { ROLES as WORKFLOW_ROLES }
 
 /** Definition validation shares the runtime compiler, without inventing Provider bindings or input values. */
-export function validateWorkflowBody(input: unknown, roles: ReadonlySet<WorkflowRole>, inputs: ReadonlyMap<string, WorkflowValueSchema> = new Map()): WorkflowBlock {
+export function validateWorkflowBody(input: unknown, roles: ReadonlySet<WorkflowRole>, inputs: ReadonlyMap<string, WorkflowValueSchema> = new Map()): WorkflowSequenceBlock {
   const body = validateBlock(input, new Set(inputs.keys()), 0, { value: 0, textBytes: 0 })
   validateReferenceDominance(body, inputs)
   for (const role of referencedRoles(body)) if (!roles.has(role)) throw new Error(workflowExpressionCopy.role(role))
-  return body
+  // validateReferenceDominance establishes the root sequence/return contract.
+  return body as WorkflowSequenceBlock
 }
 
 export function validateWorkflowProgram(input: unknown): WorkflowProgram {
   if (!input || typeof input !== 'object') throw new Error('工作流程序无效')
   const value = input as Record<string, unknown>
-  rejectUnknownFields(value, ['schemaVersion', 'workflowId', 'programRevision', 'userGoal', 'workspace', 'roles', 'body'])
+  rejectUnknownFields(value, ['schemaVersion', 'workflowId', 'programRevision', 'userGoal', 'workspace', 'roles', 'body', 'template'])
   if (value.schemaVersion !== WORKFLOW_SCHEMA_VERSION) throw new Error('工作流程序版本不受支持')
   assertId(value.workflowId, 'workflowId')
   assertId(value.programRevision, 'programRevision')
@@ -353,7 +361,8 @@ export function validateWorkflowProgram(input: unknown): WorkflowProgram {
   if (new Set(roles.map((role) => role.role)).size !== roles.length) throw new Error('工作流角色不能重复')
   const body = validateWorkflowBody(value.body, new Set(roles.map(role => role.role)))
   return { schemaVersion: WORKFLOW_SCHEMA_VERSION, workflowId: value.workflowId, programRevision: value.programRevision,
-    userGoal: value.userGoal.trim(), workspace: value.workspace, roles, body }
+    userGoal: value.userGoal.trim(), workspace: value.workspace, roles, body,
+    ...(value.template === undefined ? {} : { template: templateInstance(value.template) }) }
 }
 
 export function capabilityForRole(binding: WorkflowRoleBinding, input: WorkflowCapabilityInput): WorkflowRoleCapability {

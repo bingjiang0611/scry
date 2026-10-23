@@ -9,7 +9,8 @@ const ledger = async path => {
   }
 }
 
-/** Current production main/preload, fresh fixture directories, no model requests. */
+/** Current production main/preload and canonical Interpreter/Runner, fresh
+ * fixture directories. These data-only templates never call a Provider. */
 export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   const invoke = (method, ...args) => evaluate(`window.scry.workflow.templates.${method}(...${JSON.stringify(args)})`)
   const ledgers = [fixture.inputsFile, fixture.callsFile]
@@ -33,12 +34,39 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   assert.equal((await invoke('publish', request(sharedDraft))).state, 'published')
   assert.equal((await invoke('read', project, sharedDraft.templateId)).source, sharedDraft.source)
   assert.ok((await invoke('list', project)).templateIds.includes(sharedDraft.templateId))
+  const workflow = (method, ...args) => evaluate(`window.scry.workflow.${method}(...${JSON.stringify(args)})`)
+  const instanceRequest = { source: { kind: 'saved', ref: snapshot.ref }, commandId: 'template-instance-production', cwd: fixture.templateWorkspace,
+    userGoal: 'Frozen instance IPC fixture', parameters: { message: 'frozen input' }, orchestrator: { role: 'orchestrator', providerId: 'codex' }, roles: [] }
+  const instance = await workflow('instantiateTemplate', instanceRequest)
+  assert.equal(instance.state, 'ready', JSON.stringify(instance.unavailableReasons))
+  assert.equal(instance.program.template.origin.kind, 'saved')
+  assert.equal(instance.program.roles[0].runtimeIdentity, instance.roles[0].runtimeIdentity)
+  assert.ok(instance.program.roles[0].runtimeIdentity)
+  const initial = JSON.parse(await readFile(join(fixture.userData, 'workflows', instance.workflowId + '.json'), 'utf8'))
+  assert.equal(initial.progress.state, 'awaiting_approval')
+  assert.equal(initial.progress.dispatchAttempts, 0)
+  assert.equal(initial.execution, undefined)
   const edited = await invoke('saveDraft', { scope: personal, base: snapshot.ref, source: JSON.stringify({ ...JSON.parse(snapshot.source), name: 'reviewed candidate' }) })
   const external = JSON.stringify({ ...JSON.parse(snapshot.source), name: 'external editor' })
   await writeFile(join(fixture.userData, 'workflows', 'templates', personalDraft.templateId + '.json'), external)
   assert.equal((await invoke('publish', request(edited))).state, 'conflict')
   assert.equal((await invoke('read', personal, personalDraft.templateId)).source, external)
   assert.equal((await invoke('draft', edited.draftId)).source, edited.source)
+  assert.deepEqual(await workflow('preview', instance.workflowId), instance)
+  const approval = { workflowId: instance.workflowId, programRevision: instance.programRevision, approvedAt: 1 }
+  assert.equal(await workflow('approve', approval), true)
+  const completed = await workflow('start', instance.workflowId, approval, 'template-instance-start')
+  assert.equal(completed.state, 'completed')
+  assert.equal(completed.finalReport, 'frozen input')
+  assert.equal(completed.dispatchAttempts, 0)
+  assert.deepEqual(await workflow('instantiateTemplate', instanceRequest), instance)
+  const onlyRun = await workflow('instantiateTemplate', { ...instanceRequest, commandId: 'template-only-run-production',
+    source: { kind: 'draft', draftId: edited.draftId, draftRevision: edited.draftRevision, candidateHash: edited.candidateHash }, parameters: { message: 'only this run' } })
+  assert.equal(onlyRun.program.template.origin.kind, 'draft')
+  const onlyApproval = { workflowId: onlyRun.workflowId, programRevision: onlyRun.programRevision, approvedAt: 1 }
+  await workflow('approve', onlyApproval)
+  assert.equal((await workflow('start', onlyRun.workflowId, onlyApproval, 'template-only-run-start')).finalReport, 'only this run')
+  assert.equal(await readFile(join(fixture.userData, 'workflows', 'templates', personalDraft.templateId + '.json'), 'utf8'), external)
   assert.deepEqual(await Promise.all(ledgers.map(ledger)), before, 'template publication must not invoke any Provider')
-  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, providerInvocations: 0 }
+  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, providerInvocations: 0 }
 }

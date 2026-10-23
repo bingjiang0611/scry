@@ -61,6 +61,7 @@ export interface WorkflowPlanningIntent {
 }
 export interface WorkflowStorePage { records: WorkflowStoreRecord[]; nextCursor?: string }
 export interface WorkflowStore {
+  create(record: WorkflowStoreRecord): Promise<boolean>
   save(record: WorkflowStoreRecord): Promise<void>
   claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void>
   loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined>
@@ -209,6 +210,15 @@ export class FileWorkflowStore implements WorkflowStore {
     return concurrency
   }
 
+  async create(record: WorkflowStoreRecord): Promise<boolean> {
+    const id = fileSafe(record.preview.workflowId)
+    return withDirectoryLock(join(this.directory, 'roots', id + '.lock'), async () => {
+      if (await this.load(id)) return false
+      validateWorkflowOwnership(record)
+      await this.writeRecord(record)
+      return true
+    }, { requireDeadOwner: true })
+  }
   async claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void> {
     const id = fileSafe(record.preview.workflowId)
     await withDirectoryLock(join(this.directory, 'roots', id + '.lock'), async () => {
@@ -386,6 +396,14 @@ export class MemoryWorkflowStore implements WorkflowStore {
   async loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined> {
     const stored = this.records.get(workflowId)?.outcomes.find(value => value.attemptId === outcome.attemptId && value.taskId === outcome.taskId)
     return stored?.output
+  }
+  async create(record: WorkflowStoreRecord): Promise<boolean> {
+    if (this.records.has(record.preview.workflowId)) return false
+    validateWorkflowOwnership(record)
+    const snapshot = structuredClone(record)
+    delete snapshot.progress.live
+    this.records.set(record.preview.workflowId, snapshot)
+    return true
   }
   async save(record: WorkflowStoreRecord): Promise<void> {
     workflowEpochMatches(this.records.get(record.preview.workflowId), record)

@@ -134,10 +134,10 @@ import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { FileWorkflowStore } from './workflow-store'
 import { WorkflowService } from './workflow-service'
-import { workflowShutdownCopy } from '../shared/constants/copy'
+import { workflowShutdownCopy, workflowTemplateCopy } from '../shared/constants/copy'
 import { workflowPlanningPrompt } from './workflow-program'
 import { registerWorkflowIpc } from './workflow-ipc'
-import { registerWorkflowTemplateIpc } from './workflow-template-ipc'
+import { registerWorkflowTemplateIpc, registerWorkflowTemplateInstantiationIpc } from './workflow-template-ipc'
 import { WorkflowTemplateStore } from './workflow-template-store'
 import { workflowPermissionResponse } from './workflow-question'
 import { workflowBindingControls } from './workflow-capability'
@@ -199,6 +199,7 @@ import { flattenTraceItems, previewTraceItems } from './remote/trace-output'
 import {
   authorizedWorkspaceRequest,
   canonicalExistingDirectory,
+  canonicalExistingDirectoryAsync,
   knownProjectDirectory,
   knownProjectDirectoryAsync
 } from './workspace-authorization'
@@ -4621,9 +4622,11 @@ async function workflowRunControls(role: WorkflowRoleBinding, workspace: string)
 }
 
 const workflowStore = new FileWorkflowStore(app.getPath('userData'))
+const workflowTemplates = new WorkflowTemplateStore(app.getPath('userData'), resolveTemplateProjectDirectory)
 const workflowSlots = new WorkflowSlots()
 const workflowService = new WorkflowService({
   store: workflowStore,
+  templates: workflowTemplates,
   slots: workflowSlots,
   loadConcurrency: () => workflowStore.readConcurrency(),
   providerRegistered: (providerId) => providerRegistry.isRegistered(providerId) && !providerRegistry.isDisabled(providerId),
@@ -4701,12 +4704,21 @@ registerWorkflowIpc({
   service: workflowService,
   resolveWorkspace: resolveKnownProjectDirectory,
   assertCurrentWorkspace: workspace => {
-    if (currentCwd && workspace !== canonicalExistingDirectory(currentCwd)) throw new Error('工作流工作区与当前授权目录不一致')
+    if (currentCwd && workspace !== canonicalExistingDirectory(currentCwd)) throw new Error(workflowTemplateCopy.workspace)
   }
 })
 registerWorkflowTemplateIpc(
   (channel, listener) => handleTrusted(channel, (_event, ...args: unknown[]) => listener(...args)),
-  new WorkflowTemplateStore(app.getPath('userData'), resolveTemplateProjectDirectory)
+  workflowTemplates
+)
+registerWorkflowTemplateInstantiationIpc(
+  (channel, listener) => handleTrusted(channel, (_event, ...args: unknown[]) => listener(...args)),
+  workflowService,
+  async cwd => {
+    const workspace = await resolveTemplateProjectDirectory(cwd)
+    if (currentCwd && workspace !== await canonicalExistingDirectoryAsync(currentCwd)) throw new Error(workflowTemplateCopy.workspace)
+    return workspace
+  }
 )
 /** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
 const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()

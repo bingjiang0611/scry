@@ -1,4 +1,4 @@
-import type { WorkflowBlock, WorkflowRoleBinding, WorkflowValue, WorkflowValueSchema } from './workflow'
+import type { WorkflowSequenceBlock, WorkflowRoleBinding, WorkflowValue, WorkflowValueSchema } from './workflow'
 
 export const WORKFLOW_TEMPLATE_MAX_BYTES = 4 * 1024 * 1024
 
@@ -17,7 +17,28 @@ export interface WorkflowTemplateDefinition {
   parameters: Record<string, { schema: WorkflowValueSchema; default?: WorkflowValue }>
   /** Suggestions only. No profile, runtime identity, permission or execution grant. */
   roles: Array<Pick<WorkflowRoleBinding, 'role'> & Partial<Pick<WorkflowRoleBinding, 'providerId' | 'requestedModel'>>>
-  body: WorkflowBlock
+  body: WorkflowSequenceBlock
+}
+export type WorkflowTemplateSource =
+  | { kind: 'saved'; ref: WorkflowTemplateRef }
+  | { kind: 'draft'; draftId: string; draftRevision: number; candidateHash: string }
+/** Source bytes live in the App-owned immutable snapshot. Parameter values live
+ * once, in the program's leading typed bind nodes, not in a second executable form. */
+export interface WorkflowTemplateInstance {
+  ref: WorkflowTemplateRef
+  origin: WorkflowTemplateSource
+  parameterNames: string[]
+  commandId: string
+  requestHash: string
+}
+export interface WorkflowTemplateInstantiation {
+  source: WorkflowTemplateSource
+  commandId: string
+  cwd: string
+  userGoal: string
+  parameters: Record<string, WorkflowValue>
+  orchestrator: WorkflowRoleBinding
+  roles: WorkflowRoleBinding[]
 }
 export type WorkflowTemplateSnapshot = {
   ref: WorkflowTemplateRef

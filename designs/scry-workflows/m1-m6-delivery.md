@@ -54,8 +54,17 @@
 - 新模板 IPC 使用生产 trusted wrapper；scope 仍以已有项目 authority 为准。目录与三份 authority 索引使用异步 I/O，沿用现有主索引/备份/拒绝合同，不建立第二套授权表。拒绝符号链接、越权根、超限定义及私有运行字段，列表每页至多100个 ID。
 - 当前 Node24.18.0/macOS：25文件290项串行 focused、Node/web types、593项 CLI release/独立包 smoke、当前生产 preload/main conversation gate、既有工作流交互 smoke 及本地 pack:artifact/security smoke 通过。两个独立 Node 进程分别在 intent 后与目标发布后实际退出，冷控制器不重发，后者还核对 inode/mtime 未变。生产模板 API 验证个人/项目、另存 ID、准确源码、重复收据与外部冲突；模板步骤的 fixture Provider 账本零新增。原 conversation 场景仍有21次测试 Provider 调用，不是真实账号。
 - 六个故意破坏对照分别产生3/2/1/1/4/1个失败：活/未知 owner 接管、略过基线、恢复重写、按 userData 分裂项目锁、同步 authority 读取、剥掉 BOM。源码均按原字节恢复。首轮测试数据的非 canonical 临时路径、缺少已有 session 规范化字段，以及初版测试类型错误已修正；不改业务断言或 deadline。证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-publication.zSIN60/`。
-- 尚缺：模板实例化并冻结定义/参数/实际角色/程序快照、输入输出与验证合同的完整提取、builtin、历史/恢复/删除接口、Agent authoring transport、source/diff/保存 UI 和真实交互。这里只证明数据发布基础，不是 M2.7、M3.8 或 M5.4 整项验收。真实断电、不同宿主/临时目录命名空间、不合作进程的检查后抢写不在本次证明内；不是跨文件 exactly-once。
+- 当时尚缺（实例化后续进展见下节）：模板实例化并冻结定义/参数/实际角色/程序快照、输入输出与验证合同的完整提取、builtin、历史/恢复/删除接口、Agent authoring transport、source/diff/保存 UI 和真实交互。这里只证明数据发布基础，不是 M2.7、M3.8 或 M5.4 整项验收。真实断电、不同宿主/临时目录命名空间、不合作进程的检查后抢写不在本次证明内；不是跨文件 exactly-once。
 - 接下来由本任务接通现有 Service/compiler 的模板实例化，再完成编辑入口与其余 M1–M6。无 Provider/Jev 发送、patch apply、安装、push 或版本升级。七项延期全量失败、历史并行恢复超时和无性能 collector 仍开放；当前 collector 查询对 providers.catalog/startup.recovery/新模板 trace 均为空，没有宣称性能测量通过。
+
+### M2/M3 模板冻结实例（仍不是模板全生命周期或 M1–M6 完成）
+
+- 新增生产 trusted `workflow:instantiateTemplate` 与 typed preload API，异步重验已有工作区 authority/current cwd。saved ref 或准确 draft revision/candidate 才可冻结；私有不可变源码、来源/修订、实际参数与角色/runtimeIdentity、编译程序均纳入既有实例与修订合同。参数降低为带 schema 的普通 bind，不做文本替换、不调用规划模型、不新增执行链。
+- 显式实际角色不同于便携偏好；拒绝 renderer runtimeIdentity、缺失/多余/类型错误的参数和不完整绑定。能力不可用保留 unavailable，不改用其他 Provider。必须显式审批，开始/继续时重验实际 runtime。Only This Run 不发布；重复/冷恢复/双控制器竞争不能覆盖已执行根。
+- 27文件309项 focused 按三个不重叠串行分组通过；Node/web types、当前生产 IPC（模板步骤零新增 Provider 调用、普通 bind 经真实 Service/Runner 执行）、既有 workflow UI fixture、本地 pack:artifact/打包安全 smoke 通过；本地包不是发布或 CLI gate 全绿。槽位真实排队、active 调用、父 checkpoint 失败后续接均验证源更新/删除不串实例；后者不重发已提交调用。
+- 三项故意破坏各触发1个预期失败：覆盖已存在根、去掉参数 schema 导致默认字面量错误收窄、用当前源码替代不可变历史。均按完整源码字节恢复。首轮 fixture 的未改变草稿/空 invariants、测试类型及错误文案匹配已修正，没有修改业务保护或 deadline。生产 smoke 的原 catalog 没有模型与 workflow capability，因此首次如实显示 unavailable；新增显式 opt-in 的合成 catalog/作用域 fixture，没有放宽生产 gate。
+- 限制保留：首次26文件合并运行在180s工具期限后中止，只记录到首文件15项通过；拆分通过不证明合并/默认并行稳定。默认 CLI release 本次592通过、1个未修改的 Recorder 超长 prompt 用例在5000ms超时；同用例受控单进程诊断通过，不把它当整项 gate 通过。历史七项延期失败、恢复并行超时及无性能 collector 也未结案。原失败日志保留。
+- 证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-instance.zaLvJf/`。没有安装、push、版本升级、真实 Provider/Jev 发送或 patch apply。下一步由本任务继续输入/输出/验证提取、builtin、历史/恢复/删除与编辑入口，再推进其余 M1–M6；真实账号/费用/写入另需明确授权。
 
 ## M3：持久解释器与恢复
 

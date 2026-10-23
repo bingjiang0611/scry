@@ -7,11 +7,13 @@ import type { ProviderAdapter } from './types'
 import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
 import { HistoricalInput } from './historical-input'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
+import { workflowTemplateCopy } from '../../shared/constants/copy'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
 export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi' = 'codex'): ProviderAdapter {
   // Test-only entry receipts prove that a rejected production IPC never reached the
   // privileged adapter. This adapter itself requires the existing explicit smoke gate.
+  const workflowFixture = process.env.SCRY_ELECTRON_SMOKE_WORKFLOW === '1'
   const callsFile = process.env.SCRY_ELECTRON_SMOKE_CALLS
   const recordCall = (operation: string, identity: string): void => {
     if (callsFile) appendFileSync(callsFile, `${JSON.stringify({ operation, identity })}\n`)
@@ -25,6 +27,8 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
   } : undefined
   return {
     forkSession,
+    // Explicit synthetic workflow fixture only; never a real Provider capability.
+    ...(workflowFixture ? { workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true } as const } : {}),
     id: providerId,
     runtimeProvider: runtimeProviderForProviderId(providerId),
     historicalContext: true,
@@ -225,7 +229,8 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
         ...context,
         mode: 'read',
         state: 'ready',
-        data: { models: [], permissions: providerId === 'pi'
+        data: { models: workflowFixture
+          ? [{ model: { id: 'workflow-fixture' }, label: workflowTemplateCopy.fixtureModel, efforts: [], isDefault: true }] : [], permissions: providerId === 'pi'
           ? [{ id: 'full_access', label: '本机完全访问', description: 'synthetic Pi fixture; no sandbox' }]
           : [{ id: 'default', label: '默认审批', description: 'smoke fixture' }] },
         observedAt: Date.now()

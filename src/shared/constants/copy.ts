@@ -39,6 +39,7 @@ export const workflowControlCopy = {
 export const workflowValueCopy = {
   programLimit: '工作流程序文本超过 4 MiB 上限',
   invalidSchema: '工作流结构化输出合同无效',
+  bindingContract: '工作流绑定值不符合声明的数据合同',
   schemaLimit: '工作流数据合同超过深度或节点上限',
   unsupportedField: (field: string) => `工作流数据合同字段不受支持：${field}`,
   invalidRequired: '工作流必需字段必须存在于属性声明中且不能重复',
@@ -81,6 +82,14 @@ export const appStorePersistenceCopy = {
 } as const
 
 export const workflowTemplateCopy = {
+  sourceChanged: '模板来源或修订已变化，请刷新并重新确认',
+  instanceCommand: '模板实例化 commandId 已用于另一请求',
+  fixtureModel: '隔离工作流测试模型',
+  workspace: '工作流工作区与当前授权目录不一致',
+  frozen: '模板冻结快照缺失或与程序不一致，不能执行',
+  instantiationUnavailable: '当前工作流服务未提供模板实例化',
+  parameterValue: (name: string) => `模板参数缺失或不符合数据合同：${name}`,
+  roleBindings: '实际角色绑定必须与模板声明一致；不会自动使用其他 Provider 或配置档',
   invalid: '工作流模板定义或请求无效',
   version: '工作流模板版本不受支持',
   limit: '单个模板或草稿内容不能超过 4 MiB',

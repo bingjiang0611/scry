@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionEntry, type WorkflowScalar, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference } from '../shared/workflow'
-import { workflowCollectionCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
+import { workflowCollectionCopy, workflowValueCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
 import { evaluateWorkflowExpression, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowLoopExecution } from './workflow-loop-execution'
+import { matchesWorkflowValue } from './workflow-values'
 
 export type WorkflowInterpreterState = {
   stopped: boolean
@@ -116,7 +117,8 @@ export class WorkflowInterpreter {
           break
         }
         case 'bind': {
-          const value = evaluateWorkflowExpression(current.value, top.scope.bindings)
+          let value = evaluateWorkflowExpression(current.value, top.scope.bindings)
+          if (value.state === 'known' && current.schema && !matchesWorkflowValue(value.value, current.schema)) value = { state: 'unknown', reason: workflowValueCopy.bindingContract, derivedFrom: value.derivedFrom }
           if (value.state === 'unknown') top.scope.blockedReason = value.reason
           stack.pop()
           returned = await this.finish(current, top.scope, frame, value, value.state === 'unknown' ? 'blocked' : 'completed')

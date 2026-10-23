@@ -19,7 +19,7 @@ export function knownProjectDirectory(cwd: string, candidates: Iterable<string>)
   return canonical
 }
 
-async function canonicalExistingDirectoryAsync(cwd: string): Promise<string> {
+export async function canonicalExistingDirectoryAsync(cwd: string): Promise<string> {
   if (!isAbsolute(cwd) || cwd.length > 4_096) throw new Error(copy.invalid)
   const canonical = await realpath(cwd)
   if (!(await stat(canonical)).isDirectory()) throw new Error(copy.directory)

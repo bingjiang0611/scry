@@ -2,6 +2,15 @@
 
 本文件记录已落地语法，不替代 [M1–M6目标](m1-m6-delivery.md) 或 [完整执行语义](execution-semantics.md)。仍复用唯一 WorkflowProgram/schemaVersion1、修订指纹、审批、Runner 与 outcome/artifact 存储；不另建解释器或把表达式当 JavaScript 执行。
 
+## 模板实例与声明式参数
+
+- `workflow.instantiateTemplate` 接受准确 saved ref 或 draftId/revision/candidateHash、commandId、已授权 cwd、目标、参数及明确的实际角色绑定。它不调用规划模型，不占 Agent 槽位，不扣尝试预算，也不自动审批或执行。
+- 主进程冻结源码引用/字节修订与来源；准确源码在 App-owned 不可变历史中。程序的可选 `template` 字段记录 ref、origin、parameterNames、commandId 和请求指纹，并参与既有 programRevision。模板本身仍不能保存 profile、权限或 runtimeIdentity；实例中的实际角色由当前 catalog 解析并冻结，执行前再核对。
+- 参数按名字排序，降低为根 sequence 最前面的普通 `bind`：`{kind:"bind",blockId:name,value:{kind:"literal",value},schema:declaredSchema}`。实际值仅存在这个可执行表示；没有字符串替换、模板全局变量或第二个解释器。未知参数、缺失且无 default、类型不匹配、名称冲突或降低后超过程序原有上限均拒绝。显式 `null/false/0` 不会被 default 覆盖。
+- `bind.schema?` 是可选有限数据合同。编译器检查表达式类型可赋值，再以声明 schema 推断后继类型；不能用它做不受检查的强制类型转换。解释器对 known 值重验，失败按 unknown 阻断。省略时保留原来的推断语义。
+- 实例创建使用既有根锁的 create-if-absent。重复或竞争 command 返回已冻结的赢家，不覆盖已审批/已执行根；同 command 的不同请求拒绝。Only This Run 使用准确草稿快照而不发布源码。实例在排队、执行及原程序恢复时不重新读取当前模板或草稿；修改、删除和 Git 切换不替换实例。
+- 继续原程序仍使用同一 Service/compiler/Interpreter/Runner、原审批、预算及不可变结果；改程序恢复仍未实现。builtin、历史管理、完整提取合同、Agent 编辑及模板编辑 UI 不因本节而成为已完成。
+
 ## Agent 调用的结构化输出
 
 `call.outputSchema` 可选。缺省保留原有文本调用；声明后由 main 在接受 Provider result 时验证，不仅靠提示词。合同也参与冻结程序和修订指纹。角色、Provider/profile/模型/权限语义不因数据合同改变。

@@ -48,12 +48,16 @@
         "ipc.workflow:templates:saveDraft",
         "ipc.workflow:templates:draft",
         "ipc.workflow:templates:publish",
-        "workflow.template.publish"
+        "ipc.workflow:instantiateTemplate",
+        "workflow.template.publish",
+        "workflow.template.instantiate"
       ],
       "sources": [
         "src/main/index.ts",
         "src/main/workflow-template-store.ts",
         "src/main/workflow-template-definition.ts",
+        "src/main/workflow-template-instance.ts",
+        "src/main/workflow-template-identity.ts",
         "src/main/workflow-template-ipc.ts",
         "src/main/context-admission.bench.ts"
       ],

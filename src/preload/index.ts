@@ -357,6 +357,7 @@ const api = {
   // This is a refresh hint only (no active-run semantics), so the Mac session
   // list shows the phone's conversation live without corrupting local run state.
   workflow: {
+    instantiateTemplate: (request: Parameters<WorkflowApi['instantiateTemplate']>[0]): ReturnType<WorkflowApi['instantiateTemplate']> => ipcRenderer.invoke('workflow:instantiateTemplate', request),
     templates: {
       read: (...args: Parameters<WorkflowTemplateApi['read']>): ReturnType<WorkflowTemplateApi['read']> => ipcRenderer.invoke('workflow:templates:read', ...args),
       list: (...args: Parameters<WorkflowTemplateApi['list']>): ReturnType<WorkflowTemplateApi['list']> => ipcRenderer.invoke('workflow:templates:list', ...args),
