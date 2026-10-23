@@ -101,3 +101,44 @@ node scripts/electron-security-smoke.mjs --dev-pi-history-only
 - 不打包安装到 `/Applications/Scry.app`，不要求用户重启日常实例。
 - 日常 App 未被停止或替换；测试使用独立实例。交付时清理本次自建 worktree；日志、raw performance JSON 与 Electron native 暂存模块保留在上列 `/tmp/scry-*` 路径。测试后台命令均已结束。
 - 本报告与 STATUS 的提交 / push 身份见分支 HEAD 与末次交付消息；A1/A2/A3 均为「待核验」。负责人：审查方，按 README 检查本报告与反例后标已核验或需修改；B 留待 A 通过后开始。
+
+## 核验意见（审查方，2026-10-22）
+
+结论：**A2、A3 已核验；A1 需修改**。B 可在 A1 修正提交后开始，A1 修正与 B 一起核验。
+
+审查方未能在本会话重跑测试（网络策略拒绝 npm registry）。以下依据逐行 diff 与本报告的命令记录。
+
+### A1 需修改：恢复 Claude 子进程句柄的回退
+
+**问题。** 原 `agent-runner.ts` 的 `forceKill` 在身份未知或树复核未成功时会回退到 `child.kill('SIGKILL')`，SDK abort 则由 Node `spawn({ signal })` 直接对句柄发 SIGTERM。现在两条路径都改成“身份未知就什么都不发”（`agent-runner.ts` 新增的 `signalSpawnedChild`），测试 `does not kill the child handle when identity is unknown` 也把这当成了期望行为。
+
+**后果。** `ps` 超时、不可用，或进程身份在 1 s 内没采到时，用户点“停止/强制停止”不会结束 Claude 进程，Provider 会继续运行并计费，而 UI 认为已停止。这是停止可靠性的回归。
+
+**为什么旧回退是安全的。** Node 持有的 `ChildProcess` 在 `exit` 事件之前尚未被 waitpid 回收，PID 不可能被复用；JS 单线程下“检查 `exitCode/signalCode` 为 null 后 `child.kill()`”与回收不会交错。原代码注释已写明这一点。需要身份校验的只有**进程组/树**信号（`signalProcessTreeWithIdentity`），因为组内其他 PID 不受 Node 句柄保护。
+
+**根因在交接文档。** A.md 的红线写成“身份未知、超时、采集失败 → 拒绝发信号（现有语义，fail closed）”，对 agent-runner 来说这不是现有语义，是审查方写错了。执行方按字面执行没有过错。
+
+**请这样改（单独提交）：**
+
+1. `signalSpawnedChild`：身份可用且平台非 win32 时先走 `signalProcessTreeWithIdentity`；返回 `status !== 'signalled'`、抛错、身份未知/超时/失败、或 win32 时，若 `child.exitCode === null && child.signalCode === null`，回退 `child.kill(signal)`。这与原 `forceKill` 的语义一致，只是改为异步等待身份。
+2. SDK abort 路径同样适用（相当于恢复原 Node `spawn(signal)` 的句柄 SIGTERM，但先尝试经复核的树信号）。
+3. Qoder 保持本次实现：其 `forceKill` 只有 SDK 回调给出的裸 PID，原代码也没有句柄回退。
+4. 测试：把 `does not kill the child handle when identity is unknown` 改为期望 `child.kill('SIGKILL')`；补“树复核返回 refused → 回退句柄”“子进程已退出 → 不调用 `child.kill`”；保留“身份 pending 时不提前发信号”和“已复核身份 → 只发树信号、不调用 `child.kill`”。按 CLAUDE.md，在报告里写明修改断言的依据（即本节）。
+5. 对 `bf92d04` 的负对照里，“未知身份时直接 child-handle SIGKILL”应改为预期行为，而不是失败项。
+
+### A2 已核验
+
+- `cachedCatalogReader` 以 `dev:ino:size:mtimeMs` 为键，仅缓存 primary 来源；backup 来源不缓存，外部修复能被观察到。返回值均为 `structuredClone` 副本。
+- `save` 只在 normalize 后内容完全相同且健康来源为 primary 时跳过；写入仍走原 `writeAtomic`（file + 目录 fsync）与 `.bak`。degraded 状态下不把备份派生值写进 `.bak`，比原实现更稳。
+- 不合并不同活动时间的写入是正确取舍；是否按逻辑轮次归并由维护者决定（见报告“未验证项”）。
+
+### A3 已核验
+
+- `createVisibilityPollingController`：隐藏时清定时器；可见时先 `invalidate()` 再立即刷新；in-flight 期间最多排队一次。
+- 恢复可见后，`refreshing`/`stale`/`pollFresh` 阻止旧数据被当成“已连接/可发送”，发送按钮与运行中徽标都等新读取。队列只在确认断开时暂停，不会因刷新中而误暂停。
+- RemoteChat 的轮询 key 包含 `context`（含 providerId/profile/cwd/session），Provider 切换会重新启动轮询。
+- 配对状态轮询经确认只是读快照，暂停不影响配对过期。
+
+### 非阻塞建议
+
+- `captureProcessIdentity` 的超时 1 s 是固定值；高负载机器上可能偶尔超时。A1 恢复句柄回退后，超时只影响树信号，不再影响能否停止，可以保留。

@@ -2,17 +2,25 @@
 
 状态值：`未开始` → `进行中` → `待核验` → `已核验` / `需修改`；测量后判定不值得做：`放弃（附证据）`。
 
-- `perf/handoff` 上的批次（A、B）由执行方直接更新本表。
-- 并行分支（C、D、E、F）**不改本文件**，只写 `reports/<批次>.md`；审查方核验后在 `perf/handoff` 上更新。
+- **本文件以 `perf/handoff` 上的版本为准。** 并行分支上的 STATUS 改动在整合时丢弃，取本分支版本。
+- `perf/handoff` 上的批次（A、B）由执行方直接更新本表；并行分支（C、D、E、F）只写 `reports/<批次>.md`，由审查方在此更新。
+- 核验方式见各报告末尾「核验意见」。审查方本轮**未能独立重跑测试**（会话网络策略拒绝访问 npm registry），核验依据是逐行读 diff、核对红线与执行方的命令记录；独立复跑留到整合时。
 
 | # | 问题 | 批次 | 分支 | 状态 | 报告 | 核验备注 |
 |---|---|---|---|---|---|---|
-| 1 | 发送时同步全系统 `ps` | A1 | `perf/handoff` | 待核验 | [A](reports/A.md) | 单 PID 异步采集；未知身份拒绝 stop/abort 信号；L1 已测 |
-| 2 | store 同步读写/重复写 | A2 | `perf/handoff` | 待核验 | [A](reports/A.md) | 单例/读缓存及 exact no-op；保留 fsync、backup 和活动时间语义 |
-| 6a | 后台不暂停的轮询 | A3 | `perf/handoff` | 待核验 | [A](reports/A.md) | 隐藏 60s IPC 为 0；恢复新鲜度/收敛已测；完整 UI 的既有失败见报告 |
-| 4 | 提交时同步重复读归档 | B1 | `perf/handoff` | 未开始（等 A） | | |
-| 3 | 启动全量归档扫描 | B2 | `perf/handoff` | 未开始（等 A） | | |
-| 5 | 工作区 diff 只读路径 | C | `perf/c-git-readonly` | 未开始 | | |
-| 8 | transcript 观察者 / App 重渲染 | D | `perf/d-renderer-transcript` | 未开始 | | |
-| 6b | 远程 trace 增量协议 | E | `perf/e-remote-delta`（A 核验后创建） | 未开始（等 A） | | |
-| 7 | iOS store 观察粒度 | F | `perf/f-ios-observable` | 未开始 | | |
+| 1 | 发送时同步全系统 `ps` | A1 | `perf/handoff` | **需修改** | [A](reports/A.md) | 性能部分正确；但删掉了 Claude 子进程句柄的安全回退，身份采集失败时 stop/强杀不再生效。根因是交接红线写错，见 A 报告核验意见 |
+| 2 | store 同步读写/重复写 | A2 | `perf/handoff` | 已核验 | [A](reports/A.md) | 读次数 6→2，写/fsync 仅 exact no-op 时减少；fsync 与 `.bak` 保留 |
+| 6a | 后台不暂停的轮询 | A3 | `perf/handoff` | 已核验 | [A](reports/A.md) | 隐藏 60 s 四类轮询 0 次；恢复可见先撤回旧确认再刷新 |
+| 4 | 提交时同步重复读归档 | B1 | `perf/handoff` | 可开始（先修 A1） | | |
+| 3 | 启动全量归档扫描 | B2 | `perf/handoff` | 可开始（先修 A1） | | |
+| 5 | 工作区 diff 只读路径 | C | `perf/c-git-readonly` | 已核验 | [C](https://github.com/bingjiang0611/scry/blob/perf/c-git-readonly/docs/handoff/perf-2026-10-22/reports/C.md) | 对象写入 4→0，受控 p50 约 −20%；spawn 8→8 未减；无法等价的场景显式 unavailable |
+| 8 | transcript 观察者 / App 重渲染 | D | `perf/d-renderer-transcript` | 已核验（D1）/ 放弃（D2，附证据） | [D](https://github.com/bingjiang0611/scry/blob/perf/d-renderer-transcript/docs/handoff/perf-2026-10-22/reports/D.md) | 1000 轮时 IO 1000→1、输入 30 字的检查 30000→120；App 拆分数据不支持 |
+| 6b | 远程 trace 增量协议 | E | `perf/e-remote-delta` | 可开始 | | 已从本分支 A3 之后切出 |
+| 7 | iOS store 观察粒度 | F | `perf/f-ios-observable` | 代码已核验，真机验收未完成 | [F](https://github.com/bingjiang0611/scry/blob/perf/f-ios-observable/docs/handoff/perf-2026-10-22/reports/F.md) | 无关失效 200→0（7 类）；真机因免费签名槽位已满未安装 |
+
+## 本轮发现的既有问题（不属于任何批次，需另行处理）
+
+| 问题 | 证据 | 影响 |
+|---|---|---|
+| `npm run test:renderer:ui` 在 `chat-preview-ui-smoke` 的 workspace dirty 断言失败 | A、C、D 三个执行方分别在 `bf92d04` 基线上独立复现（编辑预览后 dirty=false） | macOS UI gate 在 main 上已是红的，复合入口后续 11 组被截断，只能逐组跑 |
+| iOS `catalog-refresh.py` 146 项中 4 项失败 | F 执行方在基线与候选上得到完全相同的 PASS/FAIL 列表 | `followUp.routingDoesNotResumeAnotherProfile`、`recovery.explicitModelChoice`、`model.explicitAutoIsRemembered`、`model.catalogRecoveryRestoresReadiness` 的合同目前未满足 |
