@@ -80,3 +80,18 @@
 用户本次明确要求更新 STATUS，覆盖 README/C.md 的并行分支一般约定：仅更新 C 为待核验，不代替审查方标记已核验。
 
 后续由审查方在 `perf/handoff` 核验本报告并决定合入；合入、安装、日常 L3 均不在本次分支交付中。L3 需部署后同场景 ≥30 样本、≥2 会话。无付费 Provider 探针、无远端服务写入；仅 push 到授权的 `perf/c-git-readonly`。
+
+## 核验意见（审查方，2026-10-22）
+
+结论：**已核验**。审查方未能在本会话重跑测试（网络策略拒绝 npm registry），依据是逐行读 `0dcd7fe` 的 diff 与本报告的命令记录。
+
+- **recorder 隔离**：`beginGitTurnDiff` 及 finish/preview/session 路径未改；`loadSnapshotOverrides` 只多了可选的预读配置参数，默认调用行为不变。
+- **不执行仓库代码**：所有读取工作树的命令都经 `snapshotGitArgs` 和 filter 覆盖；`diff` 保留 `--no-ext-diff --no-textconv`；读真实 index 的 `ls-files -v` 和 `diff --cached` 不触碰工作树，也不会触发 clean filter。`GIT_NO_LAZY_FETCH=1` 是交接文档没要求的额外防护，做得好。
+- **默认排除**：IPC 路径不传 `excludedPaths`，与旧 `gitNumstat → beginGitTurnDiff(cwd)` 的默认值一致。
+- **证据诚实**：无法等价的情况（skip-worktree、暂存的 `.gitattributes`、需转换的未跟踪文件、子模块、超限）显式返回 `unavailable` + reason，不返回成功空列表。不做已完成结果的缓存也是正确判断。
+- **收益口径如实**：spawn 8→8 没有减少，只消除了对象写入（4→0）；受控 p50 下降约 20%，机器负载接近阈值，已标注。
+
+非阻塞建议（可在后续顺手做）：
+
+1. 未跟踪的普通文件先 `lstat` 再 `open(absolute, 'r')`，两步之间可被换成符号链接。影响只是行数统计读到工作区外的文件，不泄露内容；可改用 `O_RDONLY | O_NOFOLLOW` 打开。
+2. renderer 在 render 中读取 `gitDiffCwdRef.current`；目前每次 setState 都会触发重渲染，所以结果正确，但这依赖调用顺序，日后改动时留意。
