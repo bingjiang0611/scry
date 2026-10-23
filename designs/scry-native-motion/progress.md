@@ -7,7 +7,7 @@
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
 | 01 基础 | 通过 | `22b0358`（修正实现）、`3abbfeb`（修正验收）；已落实 01 核验要求 |
-| 02 结构过渡 | 进行中 | 本地接入 WIP 未提交；原生快照阻断主内容点击，见「问题」，等待规格决定 |
+| 02 结构过渡 | 待核验 | `e00dedc3`（实现）、`4440dcd2`（验收 / 测量）；采用已批准的实时 DOM 例外，安装门禁受阻，见本轮记录 |
 | 03 弹窗与浮层 | 未开始 | — |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
@@ -39,6 +39,12 @@
 - 独立可重复对照 `/tmp/scry-native-vt-input-probe.cjs` / `.log`：Electron 42.10.1 / Chromium 148.0.7778.280，sandbox/contextIsolation、独立 userData、隐藏窗口但文档 `visible`。让真实原生转场到 ready 后暂停动画，仅固定观测阶段，不 mock API 或业务输入。原生命中与输入结果：捕获区 input 的命中落到 BODY，鼠标首击及文本 `X` 未进入 input；未捕获的外侧 input 可原生点击并收到 `Y`。这区分了“整个窗口/输入服务失效”和“原生快照排除捕获区命中”。
 - 两个控制均未解决首击：① document 捕获阶段的 `pointerdown` 调用原生 `skipTransition()`，转场虽结束，但本次已定位到父节点的点击不会自动重新命中 input，文本仍为空；② ready 后清除元素的 `view-transition-name`，活动捕获区仍不能命中。没有重放点击、合成按钮事件、手动代替用户执行动作，也没有放宽 renderer/IPC 边界。探针完成后私有窗口、进程和临时 userData 已清理。
 - 按协议在此暂停。需要用户/设计方明确选择：改用实时 DOM 的新内容入场（不再保留旧快照 110ms 淡出；主题即时切换，不做全窗截图交叉淡化），以保持首击/输入；或明确放宽 H2，接受原生截图动画窗口内捕获区可能丢首击；或由设计方修改规格后再继续。**当前未完成真实 App 的深浅色、全部形状变化与远程取消路径验收，未跑本 WIP 的完整 UI/performance gate，未对本 WIP 执行完整打包与安装。** 上面的局部通过不替代这些要求，状态不改为待核验。
+
+### 2026-10-23 · 实时 DOM 例外已获批准；本轮安装门禁受阻
+
+- 用户选择「改用实时 DOM 动效（推荐）」：页面 / 会话只让新内容入场；主题即时切换；放弃旧快照退场与整窗主题交叉淡化。此前原生快照输入冲突不再通过延迟输入或伪造点击规避，生产已移除原生 capture。
+- 本轮 `npm run install:mac:dev` 在完整 unit 阶段失败，未进入打包、产物校验和安装。未绕过门禁；历史 SIGKILL 没有得到新的复现或修复证据。
+- 同环境未改动 HEAD `35bd6a8d` 的隔离源码对照也复现文件计数与真实本地 TLS 测试的 5s 超时，详见 02 记录。这是保留的门禁阻碍，不宣称整套验证通过。执行方待机器低负载时重新执行完整安装；本轮停止在 02，等待设计方核验，不进入 03。
 
 ## 记录
 
@@ -112,6 +118,38 @@
 - 首轮失败：本轮唯一故意失败为上面的负对照；没有删断言、扩大超时或改动保护以变绿。
 - main 打包已按要求对照并登记到「问题」；main 未复现，设计分支旧产物当前也不复现，历史 SIGKILL 的根因仍未知。未安装 main，也未将旧产物恢复运行当成新修正已安装。
 - 01 修正通过后按授权开始 02 的合同预检；发现真实平台行为与规格冲突，依协议暂停并请求决定。未改步骤文件；未进入 03。
+
+### 02 · 结构过渡：实时 DOM 入场（2026-10-23）
+
+- 状态：待核验。实现 `e00dedc3`；测量与验收 `4440dcd2`，与生产实现分开提交。没有改 brief、步骤规格、依赖、权限或 IPC 边界，没有进入 03。
+- 已批准偏差：采用 `structural-motion.ts`，不再实现生产 `view-transition.ts` / 原生快照伪元素。页面 240ms、6px 上升与透明度；会话 180ms 透明度；reduce 120ms linear 透明度；主题即时提交。旧内容 110ms 退场与主题 260ms 整窗交叉淡化取消，以上是用户明确选择，不是未告知的降级。
+- 接入：顶栏以下的 `.main-content` 包含转录、分析、Meta Prompts、远程内容与 composer；页面确认仍在提交之前。会话 authority 和高亮保持同步；历史实际到达时才入场，流式 trace 路径不加动画。撤回原生方案的异步会话展示 seam，`useAgentSession.ts` 保持原合同。
+- 中断：下一次结构入场取消前一次；面板操作取消结构入场；页面 / 主题切换先结束面板动效。系统切为 reduce 时取消正在播放的空间动画。面板保留 F：布局只提交一次，面板自身 300ms transform / opacity；退场面板 fixed、inert、pointer-events:none，结束后清理。
+
+#### 面板 V / F 实验
+
+- 有效实验为可见 300 轮 Markdown 转录、1280×800、各 10 次开关。转录视口高度 778px、scrollHeight 75705px；前两次未证实可见布局的采样不作为结论。
+- 每次 >25ms 的帧数：V `[3,7,2,5,2,4,2,5,2,5]`；F `[1,1,1,1,1,1,1,1,1,1]`。按 ≤1 / 次的本次观测选择 F；V 仅留在隔离测量 fixture，不进入生产。
+- 实验在实时 DOM 取舍之前完成；F 的逐帧逻辑未变，最终接入另经当前 App 验收。经 timing-run 串行，10 核、负载 11.60→11.48，highLoad:true。只报告本次帧计数与方案取舍，不宣称可信 L2 毫秒提升。日志 `/tmp/scry-motion-02-pane-visible.log`。
+
+#### 验收与首轮失败
+
+- [x] `structural-motion.test.ts` 5 项：同步提交 / 异常、隐藏或测试环境、连续取消、reduce 映射与运行中开启 reduce。与会话 hook、历史缓存、选择、组件渲染合计 5 文件 **298 项通过**，日志 `/tmp/scry-motion-02-focused-final.log`。
+- [x] `npm run typecheck`（含 node / web）与 `npm run build` 通过；build 日志 `/tmp/scry-motion-02-live-build.log`。本轮安装命令内的完整 typecheck 也通过。
+- [x] `npm run test:renderer:ui` 最终完整通过，含 Credits、安全 / authority、远程及会话 `--structure-only`，日志 `/tmp/scry-motion-02-live-ui-verified.log`。真实原生输入在入场仍活动时首击聚焦并输入成功；高亮首帧同步、迟到历史拒绝、快速切换与 reduce 均检查，原生 capture 调用数为零。此前原生实现的失败是输入回归负对照，不以等待动画结束掩盖。
+- [x] 当前构建的独立 App、临时 userData / workspace，light / dark 分别检查分析、Meta Prompts、会话、新建、即时主题、面板 F、最大化 / 恢复、侧栏键盘折叠 / 展开、草稿与原生发送。转录宽度在面板动画中不逐帧变化；选取深浅截图复核，截图未入库。命令 `node scripts/electron-security-smoke.mjs --dev-structure-only`；日志 `/tmp/scry-motion-02-live-app-final.log`。
+- [x] 远程使用完整 App 的隔离 Electron fixture 与 host-scoped 内存文件 transport，深浅主题均以真实原生确认框验证：取消后保留未保存编辑且无入场，确认后才导航；不写文件、不回退本地。它不代表双机真实网络 / Provider 验收。
+- 首轮 UI 失败保留：旧 terminal ownership / source-control 坐标 helper 在面板运动时立即取点，且 source-control 确认按钮未等异步预检显示。改为等待该功能验收所需的 `scry-pane.finished`，并等待确认框存在；没有 sleep、扩大超时或删断言。terminal 两种情形与 source-control focused 均通过；动画中输入另有不等待入场结束的独立检查。日志 `/tmp/scry-motion-02-live-ui-final2.log`、`/tmp/scry-motion-02-live-ui-complete.log`、`/tmp/scry-motion-02-terminals.log`、`/tmp/scry-motion-02-sourcecontrol.log`。
+
+#### 性能与安装限制
+
+- [x] `npm run performance:measure -- --scenario history.page --compare HEAD --out /tmp/scry-motion-02-perf-history`：相对 `35bd6a8d`，IPC bytes **10020→10020**、messages **1→1**、stringify **1→1**，ratchet 通过，无 worse。日志 `/tmp/scry-motion-02-perf-history.log`。
+- [ ] navigation L1 为 **unavailable**：`navigation` 与实际路径 ID `navigation.catalog` 均已尝试，但仓库没有对应 counter collector，命令明确失败，不能记成 0 / 通过。日志 `/tmp/scry-motion-02-perf-navigation.log` 与 `/tmp/scry-motion-02-perf-navigation.catalog.log`。没有为本步新增 collector 或放宽 ratchet。
+- 已经 timing-run 执行现有 `performance:bench`，2 项通过、覆盖各用户路径；输出 `/tmp/scry-motion-02-l2.json`、日志 `/tmp/scry-motion-02-l2.log`。10 核，负载 **91.06→75.64**，highLoad:true；不据此声称 L2 改善或把不可比较的毫秒数字当成回归结论。
+- [ ] `npm run install:mac:dev`：typecheck 通过后，完整 unit **3686 通过 / 20 失败 / 4 原有跳过（3710）**，8 文件失败，耗时 1004.67s。失败集中于 Git、CLI 探测、Pi lifecycle、文件计数、本地 TLS 与 performance fixture 的超时 / 后续状态断言；没有安装、没有新产物验证，也没有停止用户实例。日志 `/tmp/scry-motion-02-install.log`。
+- 调查而非盲重跑：同 8 文件改用 `--maxWorkers=1`，**196 通过 / 3 失败（199）**；10 核负载 43.67→89.90。剩余是文件计数 5s 超时、CLI wrapper 探测未 ready、本地 TLS 5s 超时。日志 `/tmp/scry-motion-02-failed-files-serial.log`。未改 test timeout / skip / 预期。
+- 独立 `git archive 35bd6a8d` 源码对照 `/private/tmp/scry-motion-02-head-control.hUTsuW`，使用同一依赖与单 worker，三个文件 **73 通过 / 2 失败（75）**：同一个文件计数与 TLS 用例仍超时；CLI 用例通过。日志 `/tmp/scry-motion-02-head-control.log`。这支持既有环境 / 时限问题，**不声称全部 20 项已被完全归因或修复**；本轮未修改这些 main / counter 实现与测试。
+- 未验证：安装产物、本轮完整 unit 通过、真实双机远程网络、真实付费 Provider、物理 120Hz。安装通过前，用户当前 App 不会加载本轮改动。执行方待机器低负载重跑原安装流程；设计方核验 02，本轮不继续 03。
 
 <!--
 ### NN · <步骤名>
