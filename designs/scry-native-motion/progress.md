@@ -7,7 +7,7 @@
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
 | 01 基础 | 通过 | `22b0358`（修正实现）、`3abbfeb`（修正验收）；已落实 01 核验要求 |
-| 02 结构过渡 | 进行中 | 仅完成合同预检；发现平台合同冲突，见「问题」，未接入运行代码 |
+| 02 结构过渡 | 进行中 | 本地接入 WIP 未提交；原生快照阻断主内容点击，见「问题」，等待规格决定 |
 | 03 弹窗与浮层 | 未开始 | — |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
@@ -29,6 +29,16 @@
 - 平台实测：独立 sandbox/contextIsolation 的隐藏 Electron 测试窗口、独立临时 userData，未显示或抢焦点。Electron `42.10.1` / Chromium `148.0.7778.280`，`document.visibilityState === 'visible'`，非隐藏文档退路。正常调用事件顺序为 `["returned", "commit"]`，函数返回时 state 仍是 `old`，finished 后才是 `new`；回调抛出 `probe-sentinel` 时外层同步 catch 未触发，错误通过两个 Promise 拒绝。原始可运行探针 `/tmp/scry-native-vt-contract-probe.cjs`，日志 `/tmp/scry-native-vt-contract-probe.log`，临时 userData 已清理。
 - 最小复现：`let state = 'old'; const vt = document.startViewTransition(() => { state = 'new' }); console.log(state); await vt.finished; console.log(state)` 在真实 Electron 输出 `old`、`new`。把赋值改为 `throw new Error('sentinel')`，错误进入 `vt.updateCallbackDone`，不进入围绕 `startViewTransition(...)` 的同步 catch。不能用同步执行回调的单测 mock 证明相反合同。
 - 需设计方决定：保留真实 View Transitions，则需明确允许快照更新回调的异步调度，并将错误通过 Promise 交付（侧栏选中仍单独同步提交）；或坚持同步 commit / 同步异常，则需批准改为 WAAPI 等同步提交后的新内容入场，并放弃旧页快照交叉淡化。执行方未自行改 brief、步骤说明或降低验收。按执行协议在此暂停 02；尚未做面板 V/F 实验、接入或宣称第 02 步完成。
+
+### 2026-10-22 · 02 继续执行与原生转场的输入阻碍
+
+- 用户已明确批准上一项前置取舍：保留真实 View Transitions，采用异步更新回调与 Promise 错误合同；侧栏选中及 authority 不得延后。历史打包 SIGKILL 按未确定原因继续跟踪，不据此绕过任何后续打包检查。原始记录保留，brief 与步骤文件未改。
+- 本地 WIP 已接入 page/session/theme，分离会话 authority 与异步展示提交，增加过期回调检查；补充真实 App 和隔离 renderer 检查。实现与测试均未提交，也未宣称 02 完成。局部验证：`npm run typecheck:web`、297 个 focused unit（5 文件）、`npm run build` 通过。`node scripts/session-capability-ui-smoke.mjs --structure-only` 通过 page 240ms、session 180ms、主内容在 chrome 下且包含 composer、侧栏首帧选中、跳过后的旧回调不能覆盖新会话、减弱动效仅 120ms opacity 且不捕获 root。这里的点击检查仅证明**侧栏**在主内容动画期间可用，不证明被捕获主内容可点击。日志 `/tmp/scry-motion-02-focused.log`、`/tmp/scry-motion-02-structure-final.log`。
+- 面板实验选择 F：300 轮真实 Markdown 转录，1280×800，每方案 10 次开合；最后一轮另校验可见转录高度 778px、scrollHeight 75705px，避免空白/不可见 workload。V 每次超过 25ms 的帧数为 `[3,7,2,5,2,4,2,5,2,5]`，不达线；生产 F 为 `[1,1,1,1,1,1,1,1,1,1]`，正文一次改宽，仅面板 transform/opacity。原始逐帧数据 `/tmp/scry-motion-02-pane-visible.log`。10 核机器 load 11.60→11.48，锁报告 `highLoad: true`：**高负载，L2 毫秒结论不可信**，不宣称更快或日常不卡；仅据观察到的帧数保守选 F。前两轮未校验转录可见布局，已排除，不当作最终达标证据；本轮共做三次实验，不通过循环重跑挑绿色结果。
+- **新阻碍：真实 App 在 session 转场活动期间无法点击 composer。** `node scripts/electron-security-smoke.mjs --dev-structure-only` 的真实临时 App 测试失败，未移除命中检查或改成等待动画结束。textarea 的 rect 在视口内、`pointer-events: auto`、`visibility: visible`、无 inert；但 `elementFromPoint` 返回主内容父节点。同期存在 `::view-transition-{group,new,old}(page)`，`data-vt=session`。未暂停的 App 失败日志 `/tmp/scry-motion-02-app-hit-test.log`；诊断截图仅留本机临时目录，不提交用户数据或截图。
+- 独立可重复对照 `/tmp/scry-native-vt-input-probe.cjs` / `.log`：Electron 42.10.1 / Chromium 148.0.7778.280，sandbox/contextIsolation、独立 userData、隐藏窗口但文档 `visible`。让真实原生转场到 ready 后暂停动画，仅固定观测阶段，不 mock API 或业务输入。原生命中与输入结果：捕获区 input 的命中落到 BODY，鼠标首击及文本 `X` 未进入 input；未捕获的外侧 input 可原生点击并收到 `Y`。这区分了“整个窗口/输入服务失效”和“原生快照排除捕获区命中”。
+- 两个控制均未解决首击：① document 捕获阶段的 `pointerdown` 调用原生 `skipTransition()`，转场虽结束，但本次已定位到父节点的点击不会自动重新命中 input，文本仍为空；② ready 后清除元素的 `view-transition-name`，活动捕获区仍不能命中。没有重放点击、合成按钮事件、手动代替用户执行动作，也没有放宽 renderer/IPC 边界。探针完成后私有窗口、进程和临时 userData 已清理。
+- 按协议在此暂停。需要用户/设计方明确选择：改用实时 DOM 的新内容入场（不再保留旧快照 110ms 淡出；主题即时切换，不做全窗截图交叉淡化），以保持首击/输入；或明确放宽 H2，接受原生截图动画窗口内捕获区可能丢首击；或由设计方修改规格后再继续。**当前未完成真实 App 的深浅色、全部形状变化与远程取消路径验收，未跑本 WIP 的完整 UI/performance gate，未对本 WIP 执行完整打包与安装。** 上面的局部通过不替代这些要求，状态不改为待核验。
 
 ## 记录
 
