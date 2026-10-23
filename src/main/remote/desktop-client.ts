@@ -486,25 +486,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 0) || snapshot !== undefined && !text(snapshot, 256)) fail('invalid_history_cursor')
     const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', historyScope: 'session', context: context(value), byteChunks: true, images: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
     let result = await this.#desktop(connectionIdValue, query)
-    if (result.kind === 'history_chunk') {
-      const { id, totalBytes } = result
-      if (!uuid(id) || !Number.isSafeInteger(totalBytes) || Number(totalBytes) <= 0 || Number(totalBytes) > DESKTOP_HISTORY_MAX_BYTES) fail('invalid_history_response')
-      const bytes = Buffer.alloc(totalBytes as number)
-      let offset = 0
-      while (offset < bytes.length) {
-        const length = Math.min(DESKTOP_HISTORY_CHUNK_BYTES, bytes.length - offset)
-        if (result.kind !== 'history_chunk' || result.id !== id || result.totalBytes !== totalBytes || result.offset !== offset || typeof result.data !== 'string' || result.data.length !== 4 * Math.ceil(length / 3)) fail('invalid_history_response')
-        const chunk = Buffer.from(result.data, 'base64')
-        if (chunk.length !== length || chunk.toString('base64') !== result.data) fail('invalid_history_response')
-        chunk.copy(bytes, offset)
-        offset += length
-        if (offset < bytes.length) result = await this.#desktop(connectionIdValue, { ...query, chunk: { id, offset } })
-      }
-      let decoded: unknown
-      try { decoded = JSON.parse(bytes.toString('utf8')) } catch { fail('invalid_history_response') }
-      if (!record(decoded)) fail('invalid_history_response')
-      result = decoded
-    }
+    if (result.kind === 'history_chunk') result = await this.#assembleChunks(connectionIdValue, query, result, 'invalid_history_response')
     const raw = result.history
     if (result.kind !== 'history' || !record(raw) || !Array.isArray(raw.turns) || typeof raw.hasOlder !== 'boolean' || raw.source !== 'trace_archive' || !['available', 'unavailable'].includes(String(raw.status))) fail('invalid_history_response')
     if (raw.historyScope !== 'session') fail('history_scope_unverified')
@@ -527,7 +509,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   async trace(connectionIdValue: string, value: DesktopRemoteContext, runId: string, knownAttachmentCount?: number): Promise<ActiveRun | null> {
     if (!validRunId(runId)) fail('invalid_run_id')
     if (knownAttachmentCount !== undefined && (!Number.isSafeInteger(knownAttachmentCount) || knownAttachmentCount < 0 || knownAttachmentCount > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_request')
-    const result = await this.#desktop(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true })
+    const result = await this.#readTrace(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true, byteChunks: true })
     if (result.kind !== 'trace') fail('invalid_trace_response')
     return this.#traceSnapshot(connectionIdValue, value, runId, result, knownAttachmentCount)
   }
@@ -541,7 +523,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     if (knownAttachmentCount !== undefined && (!Number.isSafeInteger(knownAttachmentCount) || knownAttachmentCount < 0 || knownAttachmentCount > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_request')
     if (after !== undefined && (!record(after) || !text(after.revision, 128) || !Number.isSafeInteger(after.count) || after.count < 0 || after.count > MAX_ITEMS)) fail('invalid_request')
     const delta = this.#active.get(connectionIdValue)?.traceDelta === 1
-    const result = await this.#desktop(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true,
+    const result = await this.#readTrace(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true, byteChunks: true,
       ...(delta ? { delta: after ? { after: { revision: after.revision, count: after.count } } : {} } : {}) })
     if (result.kind === 'trace') {
       const run = await this.#traceSnapshot(connectionIdValue, value, runId, result, knownAttachmentCount)
@@ -577,6 +559,38 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   #traceAttachments(connectionIdValue: string, value: DesktopRemoteContext, runId: string, imageCount: unknown, knownAttachmentCount?: number): Promise<AgentInputAttachment[] | undefined> {
     return imageCount !== undefined && (imageCount !== knownAttachmentCount || imageCount === 0)
       ? this.#readImages(connectionIdValue, value, runId, imageCount) : Promise.resolve(undefined)
+  }
+
+  // Older hosts ignore byteChunks and keep their previous bounded response behavior.
+  async #readTrace(connectionIdValue: string, query: Extract<DesktopHostRead, { kind: 'trace' }>): Promise<Record<string, unknown>> {
+    const result = await this.#desktop(connectionIdValue, query)
+    return result.kind === 'history_chunk' ? this.#assembleChunks(connectionIdValue, query, result, 'invalid_trace_response') : result
+  }
+
+  async #assembleChunks(
+    connectionIdValue: string,
+    query: Extract<DesktopHostRead, { kind: 'history' | 'trace' }>,
+    first: Record<string, unknown>,
+    error: 'invalid_history_response' | 'invalid_trace_response'
+  ): Promise<Record<string, unknown>> {
+    const { id, totalBytes } = first
+    if (!uuid(id) || !Number.isSafeInteger(totalBytes) || Number(totalBytes) <= 0 || Number(totalBytes) > DESKTOP_HISTORY_MAX_BYTES) fail(error)
+    const bytes = Buffer.alloc(totalBytes as number)
+    let result = first
+    let offset = 0
+    while (offset < bytes.length) {
+      const length = Math.min(DESKTOP_HISTORY_CHUNK_BYTES, bytes.length - offset)
+      if (result.kind !== 'history_chunk' || result.id !== id || result.totalBytes !== totalBytes || result.offset !== offset || typeof result.data !== 'string' || result.data.length !== 4 * Math.ceil(length / 3)) fail(error)
+      const chunk = Buffer.from(result.data, 'base64')
+      if (chunk.length !== length || chunk.toString('base64') !== result.data) fail(error)
+      chunk.copy(bytes, offset)
+      offset += length
+      if (offset < bytes.length) result = await this.#desktop(connectionIdValue, { ...query, chunk: { id, offset } })
+    }
+    let decoded: unknown
+    try { decoded = JSON.parse(bytes.toString('utf8')) } catch { fail(error) }
+    if (!record(decoded)) fail(error)
+    return decoded
   }
 
   async #readImages(id: string, value: DesktopRemoteContext, runId: string, count: unknown, providerTurnId?: string, historyScope?: 'session'): Promise<AgentInputAttachment[]> {

@@ -160,7 +160,7 @@ export interface DesktopRemoteHistory {
   status: 'available' | 'unavailable'
   reason?: string
 }
-// Oversized history pages are transferred losslessly in bounded byte chunks.
+// Oversized history pages and live traces are transferred losslessly in bounded byte chunks.
 // The assembled page is capped separately from the 4 MiB wire response limit.
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
 export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
@@ -168,7 +168,7 @@ export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
 export type DesktopHostRead =
   | { kind: 'info' }
   | { kind: 'history'; context: DesktopRemoteContext; historyScope?: 'session'; before?: number; snapshot?: string; byteChunks?: true; images?: true; chunk?: { id: string; offset: number } }
-  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor } }
+  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number } }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
   | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }

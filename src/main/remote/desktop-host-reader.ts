@@ -52,7 +52,7 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
         delta = { after: { revision: text(after.revision, 128), count: after.count as number } }
       }
     }
-    return { kind: 'trace', context, runId: text(query.runId, 128), ...(query.images ? { images: true } : {}), ...(delta ? { delta } : {}) }
+    return { kind: 'trace', context, runId: text(query.runId, 128), ...(query.images ? { images: true } : {}), ...(delta ? { delta } : {}), ...parseByteChunks(query) }
   }
   if (query.kind === 'image') {
     if (!Number.isSafeInteger(query.index) || Number(query.index) < 0 || Number(query.index) >= DESKTOP_ATTACHMENT_MAX_COUNT) throw new Error('invalid_request')
@@ -70,21 +70,21 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   }
   if (!context.externalSessionId) throw new Error('session_required')
   if (query.before !== undefined && (!Number.isSafeInteger(query.before) || Number(query.before) < 0)) throw new Error('invalid_request')
-  if (query.byteChunks !== undefined && query.byteChunks !== true) throw new Error('invalid_request')
-  let chunk: { id: string; offset: number } | undefined
-  if (query.chunk !== undefined) {
-    const input = object(query.chunk)
-    if (query.byteChunks !== true || !Number.isSafeInteger(input.offset) || Number(input.offset) <= 0 || Number(input.offset) >= DESKTOP_HISTORY_MAX_BYTES) throw new Error('invalid_request')
-    chunk = { id: text(input.id, 128), offset: input.offset as number }
-  }
   return {
     kind: 'history', context, ...scope,
     ...(query.before === undefined ? {} : { before: query.before as number }),
     ...(query.snapshot === undefined ? {} : { snapshot: text(query.snapshot, 128) }),
-    ...(query.byteChunks === true ? { byteChunks: true } : {}),
     ...(query.images === true ? { images: true } : {}),
-    ...(chunk ? { chunk } : {})
+    ...parseByteChunks(query)
   }
+}
+
+function parseByteChunks(query: Record<string, unknown>): { byteChunks?: true; chunk?: { id: string; offset: number } } {
+  if (query.byteChunks !== undefined && query.byteChunks !== true) throw new Error('invalid_request')
+  if (query.chunk === undefined) return query.byteChunks === true ? { byteChunks: true } : {}
+  const input = object(query.chunk)
+  if (query.byteChunks !== true || !Number.isSafeInteger(input.offset) || Number(input.offset) <= 0 || Number(input.offset) >= DESKTOP_HISTORY_MAX_BYTES) throw new Error('invalid_request')
+  return { byteChunks: true, chunk: { id: text(input.id, 128), offset: input.offset as number } }
 }
 
 // This reader is injected only by the App composition using canonical run
@@ -159,6 +159,20 @@ export function createDesktopHostReader(deps: {
       return { kind: 'image_chunk', id, offset, totalBytes: page.bytes.length, data: page.bytes.subarray(offset, offset + DESKTOP_HISTORY_CHUNK_BYTES).toString('base64'), ...page.image,
         ...(sessionScope ? { historyScope: 'session' as const } : {}) }
     }
+    // Live traces are captured once and continued from the same immutable bytes;
+    // later polls start a new snapshot instead of mixing two run states. The
+    // delta cursor is part of the key, so a continuation cannot answer another base.
+    const chunkKey = query.kind === 'trace'
+      ? JSON.stringify({ kind: 'trace', context, runId: query.runId, images: query.images === true, delta: query.delta })
+      : JSON.stringify({ context, sessionScope, before: query.before, snapshot: query.snapshot })
+    if (query.chunk) {
+      const page = pages.get(query.chunk.id)
+      if (!page || page.image || page.key !== chunkKey || query.chunk.offset >= page.bytes.length || query.chunk.offset % DESKTOP_HISTORY_CHUNK_BYTES !== 0) throw new Error(`invalid_${query.kind}_chunk`)
+      page.touched = Date.now()
+      pages.delete(query.chunk.id)
+      if (query.chunk.offset + DESKTOP_HISTORY_CHUNK_BYTES < page.bytes.length) pages.set(query.chunk.id, page)
+      return chunkResult(query.chunk.id, page.bytes, query.chunk.offset)
+    }
     if (query.kind === 'trace') {
       const run = deps.getRun(query.runId)
       if (run && (run.cwd !== cwd || run.providerId !== context.providerId ||
@@ -184,15 +198,6 @@ export function createDesktopHostReader(deps: {
         cwd, providerId: context.providerId as ProviderId,
         ...(!sessionScope ? { agentProfileId: context.agentProfileId ?? null } : {}),
         sessionId: context.externalSessionId!, userDataDir: deps.userDataDir
-      }
-      const key = JSON.stringify({ context, sessionScope, before: query.before, snapshot: query.snapshot })
-      if (query.chunk) {
-        const page = pages.get(query.chunk.id)
-        if (!page || page.key !== key || query.chunk.offset >= page.bytes.length || query.chunk.offset % DESKTOP_HISTORY_CHUNK_BYTES !== 0) throw new Error('invalid_history_chunk')
-        page.touched = Date.now()
-        pages.delete(query.chunk.id)
-        if (query.chunk.offset + DESKTOP_HISTORY_CHUNK_BYTES < page.bytes.length) pages.set(query.chunk.id, page)
-        return chunkResult(query.chunk.id, page.bytes, query.chunk.offset)
       }
       const version = await readTraceArchiveVersionAsync(args)
       if (query.snapshot !== undefined && query.snapshot !== version.version) throw new Error('history_snapshot_changed')
@@ -221,9 +226,9 @@ export function createDesktopHostReader(deps: {
     const serialized = JSON.stringify(result)
     const size = Buffer.byteLength(serialized)
     if (size <= MAX_RESPONSE_BYTES) return result
-    if (query.kind !== 'history' || result.kind !== 'history' || !query.byteChunks || size > DESKTOP_HISTORY_MAX_BYTES) throw new Error('desktop_evidence_response_too_large')
+    if (!query.byteChunks || size > DESKTOP_HISTORY_MAX_BYTES) throw new Error('desktop_evidence_response_too_large')
     const bytes = Buffer.from(serialized)
-    const id = cache(JSON.stringify({ context, sessionScope, before: query.before, snapshot: query.snapshot }), bytes)
+    const id = cache(chunkKey, bytes)
     return chunkResult(id, bytes, 0)
   }
 }

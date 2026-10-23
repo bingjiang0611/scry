@@ -231,6 +231,54 @@ describe('desktop authenticated evidence source', () => {
     await expect(f.read({ ...query, chunk: { id: first.id, offset } })).rejects.toThrow('invalid_history_chunk')
   })
 
+  it('losslessly chunks an oversized live trace from one captured run snapshot', async () => {
+    const f = fixture()
+    const text = '中文🙂"\n'.repeat(400_000)
+    const run = (body: string): ActiveRun => ({ runId: 'run-live', cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId,
+      userText: 'task', done: false, items: [{ id: 'event', runId: 'run-live', ts: '2026-10-14T00:00:00Z', kind: 'model', stage: 'text_delta', text: body }] })
+    f.setRun(run(text))
+    const query = { kind: 'trace' as const, context: f.context, runId: 'run-live', images: true as const }
+    // Older clients keep their previous bounded response contract.
+    await expect(f.read(query)).rejects.toThrow('desktop_evidence_response_too_large')
+    const chunked = { ...query, byteChunks: true as const }
+    const first = await f.read(chunked)
+    if (first.kind !== 'history_chunk') throw new Error('expected chunked trace')
+    expect(first.totalBytes).toBeGreaterThan(4 * 1024 * 1024)
+    const continuation = { ...chunked, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } }
+    await expect(f.read({ ...continuation, runId: 'other-run' })).rejects.toThrow('invalid_trace_chunk')
+    await expect(f.read({ ...continuation, context: { ...f.context, agentProfileId: 'other' } })).rejects.toThrow('invalid_trace_chunk')
+    await expect(f.read({ ...continuation, kind: 'history' })).rejects.toThrow('invalid_history_chunk')
+    // A later live update must not be mixed into the captured response.
+    f.setRun(run('changed'))
+    const chunks = [Buffer.from(first.data, 'base64')]
+    for (let offset = DESKTOP_HISTORY_CHUNK_BYTES; offset < first.totalBytes; offset += DESKTOP_HISTORY_CHUNK_BYTES) {
+      const page = await f.read({ ...chunked, chunk: { id: first.id, offset } })
+      if (page.kind !== 'history_chunk') throw new Error('missing continuation')
+      expect(Buffer.byteLength(JSON.stringify({ desktop: page }))).toBeLessThan(4 * 1024 * 1024)
+      chunks.push(Buffer.from(page.data, 'base64'))
+    }
+    const result = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    expect(result).toMatchObject({ kind: 'trace', imageCount: 0, run: { runId: 'run-live', items: [{ text }] } })
+    await expect(f.read({ ...chunked, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('invalid_trace_chunk')
+    f.setRun(run(text))
+    // The delta protocol's first full reset uses the same bounded chunks and keeps its cursor.
+    const reset = { ...chunked, delta: {} }
+    const resetFirst = await f.read(reset)
+    if (resetFirst.kind !== 'history_chunk') throw new Error('expected chunked reset')
+    await expect(f.read({ ...chunked, chunk: { id: resetFirst.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('invalid_trace_chunk')
+    const resetChunks = [Buffer.from(resetFirst.data, 'base64')]
+    for (let offset = DESKTOP_HISTORY_CHUNK_BYTES; offset < resetFirst.totalBytes; offset += DESKTOP_HISTORY_CHUNK_BYTES) {
+      const page = await f.read({ ...reset, chunk: { id: resetFirst.id, offset } })
+      if (page.kind !== 'history_chunk') throw new Error('missing reset continuation')
+      resetChunks.push(Buffer.from(page.data, 'base64'))
+    }
+    expect(JSON.parse(Buffer.concat(resetChunks).toString('utf8'))).toMatchObject({ kind: 'trace', reset: true, revision: expect.any(String), run: { items: [{ text }] } })
+    const next = await f.read(chunked)
+    if (next.kind !== 'history_chunk') throw new Error('expected chunked trace')
+    f.revoke()
+    await expect(f.read({ ...chunked, chunk: { id: next.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('workspace_not_authorized')
+  })
+
   it('caps assembled pages instead of dropping evidence from an oversized turn', async () => {
     const f = fixture()
     expect(f.archive(0, 'x'.repeat(DESKTOP_HISTORY_MAX_BYTES))).toBe(true)
@@ -242,6 +290,11 @@ describe('desktop authenticated evidence source', () => {
     const context = { cwd: '/repo', providerId: 'pi', externalSessionId: 'session' }
     const chunked = { kind: 'history', context, byteChunks: true, chunk: { id: 'page', offset: DESKTOP_HISTORY_CHUNK_BYTES } }
     expect(parseDesktopHostRead(chunked)).toEqual(chunked)
+    const traceChunk = { kind: 'trace', context, runId: 'run-live', images: true, byteChunks: true, chunk: { id: 'page', offset: DESKTOP_HISTORY_CHUNK_BYTES } }
+    expect(parseDesktopHostRead(traceChunk)).toEqual(traceChunk)
+    for (const query of [{ ...traceChunk, byteChunks: undefined }, { ...traceChunk, byteChunks: false }, { ...traceChunk, chunk: { id: 'page', offset: 0 } }]) {
+      expect(() => parseDesktopHostRead(query)).toThrow('invalid_request')
+    }
     const image = { kind: 'image', context, runId: 'run-image', providerTurnId: 'native-turn', index: 0 }
     expect(parseDesktopHostRead(image)).toEqual(image)
     for (const providerTurnId of ['', 'x'.repeat(257), 'native\0turn', 1, null]) {

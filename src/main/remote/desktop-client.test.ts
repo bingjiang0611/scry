@@ -293,6 +293,34 @@ describe('DesktopRemoteClient', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('reassembles bounded live trace chunks with the same context and validation', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Trace', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const context = { cwd: '/workspace', providerId: 'pi', agentProfileId: 'pi:rotom', externalSessionId: 'session' }
+      const text = '中文🙂"\n'.repeat(Math.ceil(DESKTOP_HISTORY_CHUNK_BYTES / 8))
+      const run = { runId: 'remote-run-mvl1omap-a', ...context, userText: 'prompt', done: false, items: [{ id: 'event', ts: '2026-10-14', runId: 'remote-run-mvl1omap-a', kind: 'model', stage: 'text_delta', text }] }
+      const bytes = Buffer.from(JSON.stringify({ kind: 'trace', run, imageCount: 0 }))
+      const first = { kind: 'history_chunk', id: randomUUID(), offset: 0, totalBytes: bytes.length, data: bytes.subarray(0, DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
+      const second = { ...first, offset: DESKTOP_HISTORY_CHUNK_BYTES, data: bytes.subarray(DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: second })
+      const loaded = await fixture.client.trace(id, context, 'remote-run-mvl1omap-a', 0)
+      expect(loaded?.items[0]?.text).toBe(text)
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktop', query: { kind: 'trace', context, runId: 'remote-run-mvl1omap-a', images: true, byteChunks: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
+      for (const invalid of [{ ...second, id: randomUUID() }, { ...second, offset: 1 }, { ...second, data: '' }]) {
+        fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: invalid })
+        await expect(fixture.client.trace(id, context, 'remote-run-mvl1omap-a', 0)).rejects.toThrow('invalid_trace_response')
+      }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: second })
+      const delta = await fixture.client.traceDelta(id, context, 'remote-run-mvl1omap-a', undefined, 0)
+      expect(delta.kind === 'snapshot' ? delta.run?.items[0]?.text : undefined).toBe(text)
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: expect.objectContaining({ query: expect.objectContaining({ kind: 'trace', byteChunks: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } }) }) }))
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('validates bounded directory pages and forwards explicit selection without a run intent', async () => {
     const fixture = await setup()
     try {
