@@ -58,10 +58,13 @@ export async function exerciseStructure(contents) {
 
   const entryCount = `window.structureEntries.filter(animation => animation.id === 'scry-structure').length`
   await control('update-a')
+  await click(`document.querySelector('.sb-nav .sb-navitem')`)
+  await wait(`document.querySelector('.usage-page') && ${entries}.length === 0`)
   await read(`window.structureEntries = []`)
   await click(row('cache-a'))
   await pending('cache-a')
   check(await read(`document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a v1') && ${entryCount} === 1`), 'Stale cached A did not enter exactly once')
+  check(await read(`${entry}?.effect.target === document.querySelector('.main-content')`), 'Cached navigation entrance targets detached old page')
   await control('resolve-a')
   await wait(`document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a v2')`)
   check(await read(`${entryCount} === 1`), 'Stale cache refresh replayed the session entrance')
@@ -105,6 +108,6 @@ export async function exerciseStructure(contents) {
   }
   return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
     selectionFirstFrame: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
-    staleCacheOnlyOneEntrance: true, sameSessionRefreshNoEntrance: true, sameSessionFocusNoEntrance: true,
+    cachedNavigationTargetsLivePage: true, staleCacheOnlyOneEntrance: true, sameSessionRefreshNoEntrance: true, sameSessionFocusNoEntrance: true,
     newConversationResetsIdentity: true, reduced120OpacityOnly: true, nativeCaptureCalls: 0 }
 }
