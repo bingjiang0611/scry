@@ -8,12 +8,14 @@
 - A2：recent/project 元数据键缓存及单例；一轮受控流程 read 6→2，同时间戳 exact no-op 的 write/fsync 14/28→8/16，不同时间戳仍为 14/28。不改变持久性，不以计数冒充耗时。
 - A3：隐藏 60 秒的 list/catalog/status/intents 为 20/20/30/40→0/0/0/0；显示时先撤回旧在线/活动确认，旧请求结束后刷新，错误与历史保留。
 - 三项均只有 L1 证据，不宣称 L2/L3。未安装或合入 main。实验与完整验证见 [批次报告](handoff/perf-2026-10-22/reports/A.md)；批次 B 等 A 核验后再执行。
+
 ## 批次 C：工作区 numstat 只读化（2026-10-22，分支待核验）
 
 - `agent:gitDiff` 不再复用 recorder before-tree；固定9/5001 tracked、5 dirty负载，Git仍8次，新写对象4→0。源码 `0dcd7fe`，测量 `26cca06` / `c2802e1`；进行中请求合并、刷新保留旧证据并标来源，不缓存已完成结果。
 - L2固定API各6样本：p50 **277.29→224.18ms / 289.90→218.83ms**；8核load6.81→6.63、highLoad=false但非空闲机。不是日常L3；完整哈希次数unavailable，不把0对象写入说成0哈希。
 - 最终unit **3711 pass / 4 opt-in skipped**，typecheck/CLI build、真实source-control App/UI、workspace刷新fixture与安全冒烟通过。完整renderer UI仍被基线`bf92d04`同样复现的workspace dirty标记超时阻断，其余11组原命令逐组通过。特殊index、属性/规范化、子模块等不等价范围明确unavailable；不改recorder或台账。
 - 见[实验与全部样本](performance-experiments/20261022-workspace-numstat-readonly.md)、[批次C报告](handoff/perf-2026-10-22/reports/C.md)。未合入、未安装、不要求用户重启；审查方核验后决定合入。
+
 ## 批次 D transcript 观察者（2026-10-23，分支待核验、未安装）
 
 - `perf/d-renderer-transcript` / `3256e68`：1000 轮、30 字原生输入的选择检查 30000→120；IO 1000→1，只有 4 轮正文保留 disclosure 观察。局部选择分发有 L2 证据，不宣称整体输入/流输出更快。
