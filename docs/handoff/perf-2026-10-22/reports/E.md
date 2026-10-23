@@ -123,3 +123,22 @@
 - 分支 `perf/e-remote-delta` 与本报告一起 push。
 - 未安装 App。临时 worktree `/tmp/scry-E-basewt` 已清理。
 - 日志位于 `/tmp/scry-E-*.{json,log}`。
+
+## 核验意见（审查方，2026-10-23）
+
+结论：**已核验**。审查方未在本会话重跑测试（网络策略拒绝 npm registry），依据是逐行读 `13d7cd9` 的 diff 和本报告的命令记录。
+
+**宿主算法（`desktop-trace-delta.ts`）**
+- 逐 item 按 index 比较 hash：追加、原位修改，以及 `result_superseded` 删除后整体前移的 item 都会被列为变化；客户端按新的 count 截断。这比只看追加的方案正确，报告里的负对照也证明了这一点。
+- 客户端游标对应的 revision 已被逐出、epoch 不认识、或 count 对不上时返回 reset；多个 peer 共享同一个 run 的 revision 链，从任一旧 revision 起算的变更并集都完整。
+- 状态只存 hash 和 index，按 run 共享，并且有三重上限（8 个 run、32 个 revision、5 万个变化）；没有接 `releaseDesktopPeer` 的理由成立。
+- 增量处理位于 workspace、session 和 `run_context_mismatch` 授权之后。
+
+**客户端与 renderer**
+- 客户端校验每个 change 的 `0 ≤ index < count`、`changes.length ≤ count`；宿主声明了能力但返回旧形状时，按快照处理且不带游标，不会出错。
+- `mergeRemoteTrace` 会核对 base、runId，并确认 `prior.cursor.count` 等于当前显示的条数，还会检查客户端未持有的每个 index 都被覆盖；任一不满足即判为缺口并全量重取，重取后仍是缺口就报错，不会拼出不完整的轮次。
+- 退避间隔存在 ref 中，不触发重渲染；只有宿主明确报告“无变化”时才退避，旧宿主保持 1.5 s。A3 的可见性暂停保留。
+
+**接受的限制**
+- reset 仍是整包，长 run 中途打开超过 4 MiB 时仍会报错（与基线相同，如实报错）。日常记录中出现 `desktop_evidence_response_too_large` 时，再给 reset 复用 history 的分块。
+- 宿主每次轮询仍要对每个 item 做一次 O(n) 的 hash；1000 items 时读取 124→140 ms。这是识别原位修改必需的工作，可以接受。
