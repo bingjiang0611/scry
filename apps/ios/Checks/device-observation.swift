@@ -57,6 +57,7 @@ final class BatchFDevice: NSObject {
   @objc private func frame(_ link: CADisplayLink) {
     let nominal = link.targetTimestamp - link.timestamp
     guard nominal > 0 else { return }
+    nominalIntervals.append(nominal * 1000)
     if let previousTimestamp {
       let delta = link.timestamp - previousTimestamp
       intervals.append(delta * 1000)
@@ -90,7 +91,10 @@ final class BatchFDevice: NSObject {
       // paragraphs at 30 Hz, through the real append/coalescing path.
       for sequence in 1...600 {
         try await clock.sleep(until: start + .milliseconds(sequence * 33))
+        let appendSignpost = OSSignpostID(log: log)
+        os_signpost(.begin, log: log, name: "Append600", signpostID: appendSignpost, "sequence=%{public}d", sequence)
         try store.appendBatchFLine(sequence)
+        os_signpost(.end, log: log, name: "Append600", signpostID: appendSignpost)
       }
       // Fixed tail window includes the final committed SwiftUI layout.
       try await clock.sleep(for: .milliseconds(500))

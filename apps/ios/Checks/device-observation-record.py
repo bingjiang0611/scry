@@ -22,6 +22,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--device', required=True)
 parser.add_argument('--bundle', required=True)
 parser.add_argument('--output', required=True, type=Path)
+parser.add_argument('--time-profiler', action='store_true', help='Add sampled CPU stacks without changing the fixed workload')
 args = parser.parse_args()
 owner = json.loads(Path('/tmp/scry-performance-timing.lock/owner.json').read_text())
 assert owner['pid'] == os.getppid(), 'Invoke through timing-run.mjs; do not time concurrently'
@@ -67,11 +68,13 @@ processes = json.loads((base / 'process.json').read_text())['result']['runningPr
 assert len(processes) == 1, processes
 pid = processes[0]['processIdentifier']
 notification = 'com.scry.batch-f.trace.' + label
+profiler_options = ['--instrument', 'Time Profiler'] if args.time_profiler else []
 with (base / 'notify.log').open('w') as notify_log, (base / 'xctrace.log').open('w') as trace_log:
     listener = subprocess.Popen(['notifyutil', '-1', notification], stdout=notify_log, stderr=subprocess.STDOUT)
     recorder = subprocess.Popen([
         'xcrun', 'xctrace', 'record', '--template', 'Activity Monitor',
         '--instrument', 'Hitches', '--instrument', 'Core Animation FPS', '--instrument', 'os_signpost',
+        *profiler_options,
         '--device', args.device, '--attach', str(pid), '--output', str(base / 'animation.trace'),
         '--notify-tracing-started', notification,
     ], stdout=trace_log, stderr=subprocess.STDOUT)

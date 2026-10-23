@@ -53,7 +53,7 @@ app.write_text(content)
 for file, names in {
     'ScryRemoteApp.swift': ['RootView'],
     'ChatView.swift': ['ChatView'],
-    'Components.swift': ['FocusedTurnView'],
+    'Components.swift': ['FocusedTurnView', 'ConversationMarkdownText', 'ConversationMarkdownInline'],
     'HomeView.swift': ['HomeView', 'SettingsView'],
     'HomeComposer.swift': ['HomeComposer'],
 }.items():

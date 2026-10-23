@@ -1,0 +1,1658 @@
+{
+  "schema": 1,
+  "base": "aedb1f189470ee974f84f33e84f86ae2e65eaee3",
+  "runs": [
+    {
+      "label": "scry-f2-profiler-before-1",
+      "profile": {
+        "schema": 1,
+        "sourceRevision": "aedb1f189470ee974f84f33e84f86ae2e65eaee3",
+        "phaseMs": 51862.482667,
+        "phaseSamplesAllThreads": 51505,
+        "mainSamples": 49891,
+        "mainSampledCpuMs": 49891.0,
+        "unsymbolicatedLeafFraction": 0.7639253572788679,
+        "unavailableStackCpuMs": 7.0,
+        "appendSync": {
+          "count": 600,
+          "sumMs": 44.09113,
+          "medianMs": 0.07135449999999999,
+          "maxMs": 1.396667
+        },
+        "windows": [
+          {
+            "firstSequence": 1,
+            "lastSequence": 100,
+            "wallMs": 3334.573333,
+            "mainSampledCpuMs": 1873.0,
+            "appendSyncMs": 7.233371
+          },
+          {
+            "firstSequence": 101,
+            "lastSequence": 200,
+            "wallMs": 3816.408459,
+            "mainSampledCpuMs": 3769.0,
+            "appendSyncMs": 5.779799
+          },
+          {
+            "firstSequence": 201,
+            "lastSequence": 300,
+            "wallMs": 6323.123333,
+            "mainSampledCpuMs": 6277.0,
+            "appendSyncMs": 6.781916
+          },
+          {
+            "firstSequence": 301,
+            "lastSequence": 400,
+            "wallMs": 9135.244208,
+            "mainSampledCpuMs": 9116.0,
+            "appendSyncMs": 7.409288
+          },
+          {
+            "firstSequence": 401,
+            "lastSequence": 500,
+            "wallMs": 12500.410167,
+            "mainSampledCpuMs": 12469.0,
+            "appendSyncMs": 8.229377
+          },
+          {
+            "firstSequence": 501,
+            "lastSequence": 600,
+            "wallMs": 16752.723167,
+            "mainSampledCpuMs": 16387.0,
+            "appendSyncMs": 8.657379
+          }
+        ],
+        "focusInclusiveCpuMs": {
+          "scrollTo": 33017.0,
+          "markdownParse": 1518.0,
+          "inlineRendered": 2060.0
+        },
+        "leafBinaries": [
+          {
+            "symbol": "libswiftCore.dylib",
+            "sampledCpuMs": 9722.0,
+            "fractionMainCpu": 0.1948648052755006
+          },
+          {
+            "symbol": "AttributeGraph",
+            "sampledCpuMs": 8475.0,
+            "fractionMainCpu": 0.1698703172916959
+          },
+          {
+            "symbol": "CoreGraphics",
+            "sampledCpuMs": 4657.0,
+            "fractionMainCpu": 0.0933434888055962
+          },
+          {
+            "symbol": "CoreText",
+            "sampledCpuMs": 4036.0,
+            "fractionMainCpu": 0.080896354051833
+          },
+          {
+            "symbol": "SwiftUICore",
+            "sampledCpuMs": 4027.0,
+            "fractionMainCpu": 0.08071596079453208
+          },
+          {
+            "symbol": "libsystem_platform.dylib",
+            "sampledCpuMs": 2977.0,
+            "fractionMainCpu": 0.05967008077609188
+          },
+          {
+            "symbol": "libobjc.A.dylib",
+            "sampledCpuMs": 2737.0,
+            "fractionMainCpu": 0.05485959391473412
+          },
+          {
+            "symbol": "CoreFoundation",
+            "sampledCpuMs": 2555.0,
+            "fractionMainCpu": 0.051211641378204484
+          },
+          {
+            "symbol": "unavailable binary",
+            "sampledCpuMs": 2310.0,
+            "fractionMainCpu": 0.04630093604056844
+          },
+          {
+            "symbol": "libsystem_malloc.dylib",
+            "sampledCpuMs": 2055.0,
+            "fractionMainCpu": 0.04118979375037582
+          },
+          {
+            "symbol": "libsystem_kernel.dylib",
+            "sampledCpuMs": 1572.0,
+            "fractionMainCpu": 0.03150868894189333
+          },
+          {
+            "symbol": "UIFoundation",
+            "sampledCpuMs": 727.0,
+            "fractionMainCpu": 0.014571766450862882
+          },
+          {
+            "symbol": "SwiftUI",
+            "sampledCpuMs": 642.0,
+            "fractionMainCpu": 0.012868052354132008
+          },
+          {
+            "symbol": "QuartzCore",
+            "sampledCpuMs": 627.0,
+            "fractionMainCpu": 0.012567396925297148
+          },
+          {
+            "symbol": "Foundation",
+            "sampledCpuMs": 587.0,
+            "fractionMainCpu": 0.011765649115070855
+          },
+          {
+            "symbol": "libsystem_pthread.dylib",
+            "sampledCpuMs": 398.0,
+            "fractionMainCpu": 0.007977390711751619
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib",
+            "sampledCpuMs": 380.0,
+            "fractionMainCpu": 0.007616604197149787
+          },
+          {
+            "symbol": "libicucore.A.dylib",
+            "sampledCpuMs": 318.0,
+            "fractionMainCpu": 0.006373895091299032
+          },
+          {
+            "symbol": "CollectionsInternal",
+            "sampledCpuMs": 176.0,
+            "fractionMainCpu": 0.0035276903649956908
+          },
+          {
+            "symbol": "UIKitCore",
+            "sampledCpuMs": 152.0,
+            "fractionMainCpu": 0.0030466416788599146
+          }
+        ],
+        "inclusiveTop": [
+          {
+            "symbol": "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "CoreFoundation: 0x1967d354b",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "dyld: start",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "SwiftUI: runApp<A>(_:)",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "GraphicsServices: GSEventRunModal",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "SwiftUI: closure #1 in KitRendererCommon(_:)",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "UIKitCore: -[UIApplication _run]",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "SwiftUI: static App.main()",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "UIKitCore: UIApplicationMain",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+            "sampledCpuMs": 36490.0,
+            "fractionMainCpu": 0.731394439878936
+          },
+          {
+            "symbol": "SwiftUICore: static Update.ensure<A>(_:)",
+            "sampledCpuMs": 36350.0,
+            "fractionMainCpu": 0.7285883225431441
+          },
+          {
+            "symbol": "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+            "sampledCpuMs": 36350.0,
+            "fractionMainCpu": 0.7285883225431441
+          },
+          {
+            "symbol": "SwiftUICore: GraphHost.flushTransactions()",
+            "sampledCpuMs": 36344.0,
+            "fractionMainCpu": 0.7284680603716102
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c9909913",
+            "sampledCpuMs": 34776.0,
+            "fractionMainCpu": 0.6970395462107394
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_main_queue_drain",
+            "sampledCpuMs": 33244.0,
+            "fractionMainCpu": 0.6663326050790723
+          },
+          {
+            "symbol": "CoreFoundation: 0x19684702f",
+            "sampledCpuMs": 33244.0,
+            "fractionMainCpu": 0.6663326050790723
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+            "sampledCpuMs": 33244.0,
+            "fractionMainCpu": 0.6663326050790723
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+            "sampledCpuMs": 33244.0,
+            "fractionMainCpu": 0.6663326050790723
+          },
+          {
+            "symbol": "CoreFoundation: 0x1967d4603",
+            "sampledCpuMs": 33244.0,
+            "fractionMainCpu": 0.6663326050790723
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_client_callout",
+            "sampledCpuMs": 33184.0,
+            "fractionMainCpu": 0.665129983363733
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: <deduplicated_symbol>",
+            "sampledCpuMs": 33178.0,
+            "fractionMainCpu": 0.665009721192199
+          },
+          {
+            "symbol": "SwiftUICore: static Update.dispatchActions()",
+            "sampledCpuMs": 33121.0,
+            "fractionMainCpu": 0.6638672305626265
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_call_block_and_release",
+            "sampledCpuMs": 33068.0,
+            "fractionMainCpu": 0.6628049147140767
+          },
+          {
+            "symbol": "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+            "sampledCpuMs": 33063.0,
+            "fractionMainCpu": 0.6627046962377984
+          },
+          {
+            "symbol": "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+            "sampledCpuMs": 33017.0,
+            "fractionMainCpu": 0.6617826862560382
+          },
+          {
+            "symbol": "SwiftUICore: withTransaction<A>(_:_:)",
+            "sampledCpuMs": 33015.0,
+            "fractionMainCpu": 0.6617425988655269
+          },
+          {
+            "symbol": "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+            "sampledCpuMs": 33014.0,
+            "fractionMainCpu": 0.6617225551702712
+          },
+          {
+            "symbol": "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+            "sampledCpuMs": 33014.0,
+            "fractionMainCpu": 0.6617225551702712
+          },
+          {
+            "symbol": "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+            "sampledCpuMs": 33014.0,
+            "fractionMainCpu": 0.6617225551702712
+          }
+        ],
+        "appInclusiveTop": [
+          {
+            "symbol": "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+            "sampledCpuMs": 49843.0,
+            "fractionMainCpu": 0.9990379026277284
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: <deduplicated_symbol>",
+            "sampledCpuMs": 33178.0,
+            "fractionMainCpu": 0.665009721192199
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: protocol witness for View.body.getter in conformance ConversationMarkdownInline",
+            "sampledCpuMs": 2420.0,
+            "fractionMainCpu": 0.04850574251869075
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownInline.body.getter",
+            "sampledCpuMs": 2411.0,
+            "fractionMainCpu": 0.04832534926138983
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownInline.rendered.getter",
+            "sampledCpuMs": 2060.0,
+            "fractionMainCpu": 0.041290012226654106
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: protocol witness for View.body.getter in conformance ConversationMarkdownText",
+            "sampledCpuMs": 1530.0,
+            "fractionMainCpu": 0.03066685374115572
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownText.body.getter",
+            "sampledCpuMs": 1530.0,
+            "fractionMainCpu": 0.03066685374115572
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: closure #1 in ConversationMarkdownText.body.getter",
+            "sampledCpuMs": 1529.0,
+            "fractionMainCpu": 0.03064681004590006
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownText.blocks.getter",
+            "sampledCpuMs": 1528.0,
+            "fractionMainCpu": 0.030626766350644406
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.parse(_:)",
+            "sampledCpuMs": 1518.0,
+            "fractionMainCpu": 0.030426329398087832
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.isDivider(_:)",
+            "sampledCpuMs": 586.0,
+            "fractionMainCpu": 0.011745605419815197
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.startsBlock(_:)",
+            "sampledCpuMs": 430.0,
+            "fractionMainCpu": 0.008618788959932653
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.tableCells(_:)",
+            "sampledCpuMs": 312.0,
+            "fractionMainCpu": 0.006253632919765088
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: closure #1 in closure #1 in ConversationMarkdownText.body.getter",
+            "sampledCpuMs": 286.0,
+            "fractionMainCpu": 0.005732496843117997
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownText.blockView(_:)",
+            "sampledCpuMs": 220.0,
+            "fractionMainCpu": 0.004409612956244613
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.unorderedItem(_:)",
+            "sampledCpuMs": 131.0,
+            "fractionMainCpu": 0.0026257240784911106
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: MessageComposer.body.getter",
+            "sampledCpuMs": 111.0,
+            "fractionMainCpu": 0.002224850173377964
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: protocol witness for View.body.getter in conformance MessageComposer",
+            "sampledCpuMs": 111.0,
+            "fractionMainCpu": 0.002224850173377964
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ViewBuilder.buildEither<A, B>(first:)",
+            "sampledCpuMs": 94.0,
+            "fractionMainCpu": 0.0018841073540317892
+          }
+        ],
+        "leafTop": [
+          {
+            "symbol": "AttributeGraph: 0x1c9900885",
+            "sampledCpuMs": 1979.0,
+            "fractionMainCpu": 0.03966647291094586
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c9900811",
+            "sampledCpuMs": 1024.0,
+            "fractionMainCpu": 0.02052474394179311
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c990c51d",
+            "sampledCpuMs": 812.0,
+            "fractionMainCpu": 0.016275480547593753
+          },
+          {
+            "symbol": "libsystem_platform.dylib: 0x2b67b6b49",
+            "sampledCpuMs": 811.0,
+            "fractionMainCpu": 0.016255436852338098
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a380d",
+            "sampledCpuMs": 756.0,
+            "fractionMainCpu": 0.015153033613276943
+          },
+          {
+            "symbol": "libsystem_platform.dylib: 0x2b67b6a49",
+            "sampledCpuMs": 756.0,
+            "fractionMainCpu": 0.015153033613276943
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c990c529",
+            "sampledCpuMs": 611.0,
+            "fractionMainCpu": 0.01224669780120663
+          },
+          {
+            "symbol": "SwiftUICore: <deduplicated_symbol>",
+            "sampledCpuMs": 603.0,
+            "fractionMainCpu": 0.012086348239161371
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a38e1",
+            "sampledCpuMs": 533.0,
+            "fractionMainCpu": 0.010683289571265358
+          },
+          {
+            "symbol": "libsystem_kernel.dylib: 0x245581a81",
+            "sampledCpuMs": 454.0,
+            "fractionMainCpu": 0.00909983764606843
+          },
+          {
+            "symbol": "CoreText: OTL::Coverage::SearchFmt2Binary(unsigned short) const",
+            "sampledCpuMs": 448.0,
+            "fractionMainCpu": 0.008979575474534485
+          },
+          {
+            "symbol": "libobjc.A.dylib: 0x19335b401",
+            "sampledCpuMs": 437.0,
+            "fractionMainCpu": 0.008759094826722255
+          },
+          {
+            "symbol": "libsystem_pthread.dylib: ___chkstk_darwin",
+            "sampledCpuMs": 355.0,
+            "fractionMainCpu": 0.007115511815758353
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a37f1",
+            "sampledCpuMs": 353.0,
+            "fractionMainCpu": 0.007075424425247038
+          },
+          {
+            "symbol": "libsystem_kernel.dylib: 0x24558703d",
+            "sampledCpuMs": 352.0,
+            "fractionMainCpu": 0.0070553807299913816
+          },
+          {
+            "symbol": "SwiftUICore: specialized find1<A>(_:key:filter:)",
+            "sampledCpuMs": 300.0,
+            "fractionMainCpu": 0.0060131085766972
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a3825",
+            "sampledCpuMs": 266.0,
+            "fractionMainCpu": 0.00533162293800485
+          },
+          {
+            "symbol": "libswiftCore.dylib: 0x1934a3071",
+            "sampledCpuMs": 262.0,
+            "fractionMainCpu": 0.005251448156982221
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a389d",
+            "sampledCpuMs": 235.0,
+            "fractionMainCpu": 0.004710268385079474
+          },
+          {
+            "symbol": "CoreText: ItemVariationStore::RegionAxisCoordinates::ComputeScalar(short) const",
+            "sampledCpuMs": 222.0,
+            "fractionMainCpu": 0.004449700346755928
+          }
+        ],
+        "representativeStacks": [
+          {
+            "sampledCpuMs": 736.0,
+            "framesLeafFirst": [
+              "libsystem_platform.dylib: 0x2b67b6a49",
+              "AttributeGraph: 0x1c990cf9f",
+              "AttributeGraph: 0x1c9907d0f",
+              "AttributeGraph: 0x1c990b9af",
+              "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+              "SwiftUICore: GraphHost.flushTransactions()",
+              "SwiftUI: closure #1 in static ScrollViewCommitMutation.commit(layoutState:phaseState:containerSize:isPreferred:transaction:)",
+              "SwiftUICore: static Update.dispatchActions()",
+              "SwiftUICore: static Update.end()",
+              "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+              "SwiftUICore: static Update.ensure<A>(_:)",
+              "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+              "SwiftUICore: withTransaction<A>(_:_:)",
+              "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "libdispatch.dylib: _dispatch_call_block_and_release",
+              "libdispatch.dylib: _dispatch_client_callout",
+              "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+              "libdispatch.dylib: _dispatch_main_queue_drain",
+              "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+              "CoreFoundation: 0x19684702f",
+              "CoreFoundation: 0x1967d4603",
+              "CoreFoundation: 0x1967d354b",
+              "GraphicsServices: GSEventRunModal",
+              "UIKitCore: -[UIApplication _run]",
+              "UIKitCore: UIApplicationMain",
+              "SwiftUI: closure #1 in KitRendererCommon(_:)",
+              "SwiftUI: runApp<A>(_:)",
+              "SwiftUI: static App.main()",
+              "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+              "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+              "dyld: start"
+            ]
+          },
+          {
+            "sampledCpuMs": 705.0,
+            "framesLeafFirst": [
+              "AttributeGraph: 0x1c990c51d",
+              "AttributeGraph: 0x1c990d2ab",
+              "AttributeGraph: 0x1c9907d0f",
+              "AttributeGraph: 0x1c990b9af",
+              "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+              "SwiftUICore: GraphHost.flushTransactions()",
+              "SwiftUI: closure #1 in static ScrollViewCommitMutation.commit(layoutState:phaseState:containerSize:isPreferred:transaction:)",
+              "SwiftUICore: static Update.dispatchActions()",
+              "SwiftUICore: static Update.end()",
+              "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+              "SwiftUICore: static Update.ensure<A>(_:)",
+              "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+              "SwiftUICore: withTransaction<A>(_:_:)",
+              "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "libdispatch.dylib: _dispatch_call_block_and_release",
+              "libdispatch.dylib: _dispatch_client_callout",
+              "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+              "libdispatch.dylib: _dispatch_main_queue_drain",
+              "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+              "CoreFoundation: 0x19684702f",
+              "CoreFoundation: 0x1967d4603",
+              "CoreFoundation: 0x1967d354b",
+              "GraphicsServices: GSEventRunModal",
+              "UIKitCore: -[UIApplication _run]",
+              "UIKitCore: UIApplicationMain",
+              "SwiftUI: closure #1 in KitRendererCommon(_:)",
+              "SwiftUI: runApp<A>(_:)",
+              "SwiftUI: static App.main()",
+              "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+              "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+              "dyld: start"
+            ]
+          },
+          {
+            "sampledCpuMs": 578.0,
+            "framesLeafFirst": [
+              "AttributeGraph: 0x1c990c529",
+              "AttributeGraph: 0x1c990d2ab",
+              "AttributeGraph: 0x1c9907d0f",
+              "AttributeGraph: 0x1c990b9af",
+              "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+              "SwiftUICore: GraphHost.flushTransactions()",
+              "SwiftUI: closure #1 in static ScrollViewCommitMutation.commit(layoutState:phaseState:containerSize:isPreferred:transaction:)",
+              "SwiftUICore: static Update.dispatchActions()",
+              "SwiftUICore: static Update.end()",
+              "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+              "SwiftUICore: static Update.ensure<A>(_:)",
+              "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+              "SwiftUICore: withTransaction<A>(_:_:)",
+              "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "libdispatch.dylib: _dispatch_call_block_and_release",
+              "libdispatch.dylib: _dispatch_client_callout",
+              "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+              "libdispatch.dylib: _dispatch_main_queue_drain",
+              "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+              "CoreFoundation: 0x19684702f",
+              "CoreFoundation: 0x1967d4603",
+              "CoreFoundation: 0x1967d354b",
+              "GraphicsServices: GSEventRunModal",
+              "UIKitCore: -[UIApplication _run]",
+              "UIKitCore: UIApplicationMain",
+              "SwiftUI: closure #1 in KitRendererCommon(_:)",
+              "SwiftUI: runApp<A>(_:)",
+              "SwiftUI: static App.main()",
+              "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+              "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+              "dyld: start"
+            ]
+          },
+          {
+            "sampledCpuMs": 450.0,
+            "framesLeafFirst": [
+              "libsystem_kernel.dylib: 0x245581a81",
+              "libdispatch.dylib: _dispatch_root_queue_poke_slow",
+              "libswift_Concurrency.dylib: swift_task_enqueueGlobalImpl",
+              "libswift_Concurrency.dylib: swift_task_enqueueGlobal",
+              "libswift_Concurrency.dylib: swift::AsyncTask::flagAsAndEnqueueOnExecutor(swift::SerialExecutorRef)",
+              "libswift_Concurrency.dylib: swift_task_create_commonImpl(unsigned long, swift::TaskOptionRecord*, swift::TargetMetadata<swift::InProcess> const*, void (swift::AsyncContext* swift_async_context) swiftasynccall*, void*, unsigned long)",
+              "SwiftUICore: specialized static Task<>.detached(name:priority:operation:)",
+              "SwiftUICore: specialized closure #1 in PropertyList.subscript.getter",
+              "SwiftUICore: specialized PropertyList.Tracker.value<A>(_:for:)",
+              "SwiftUICore: AttributedStringTextStorage.resolve<A>(into:in:with:)",
+              "SwiftUICore: specialized Text.resolve<A>(into:in:with:)",
+              "SwiftUICore: Text.resolveAttributedStringAndProperties(in:includeDefaultAttributes:options:idiom:)",
+              "SwiftUICore: ResolvedTextHelper.resolve(_:with:sizeFitting:)",
+              "SwiftUICore: ResolvedTextFilter.updateValue()",
+              "SwiftUICore: specialized implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908e67",
+              "AttributeGraph: 0x1c99032a7",
+              "SwiftUI: UIKitTextSelectionRepresentation.SelectableTextChildQuery.value.getter",
+              "SwiftUI: protocol witness for Rule.value.getter in conformance UIKitTextSelectionRepresentation.SelectableTextChildQuery<A>",
+              "SwiftUI: implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908e67",
+              "AttributeGraph: 0x1c99032a7",
+              "SwiftUICore: DynamicBody.updateValue()",
+              "SwiftUICore: partial apply for implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908e67",
+              "AttributeGraph: 0x1c99032a7",
+              "SwiftUICore: specialized implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908caf",
+              "AttributeGraph: 0x1c990a12b",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.dimensions(in:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.resize(_:proposal:proxy:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.sizeChildrenIdeally(in:minorProposalForChild:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.placeChildren1(in:minorProposalForChild:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.placeChildren(in:)",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: closure #1 in ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)"
+            ]
+          },
+          {
+            "sampledCpuMs": 448.0,
+            "framesLeafFirst": [
+              "CoreText: OTL::Coverage::SearchFmt2Binary(unsigned short) const",
+              "CoreText: OTL::GPOS::ApplyLookupAt(OTL::Lookup const&, unsigned int, TGlyphIterator&, unsigned long) const",
+              "CoreText: TOpenTypePositioningEngine::PositionRuns(SyncState&, KerningStatus&)",
+              "CoreText: TKerningEngine::PositionGlyphs(TRunGlue&, TCharStream const&, signed char)",
+              "CoreText: TTypesetter::FinishLayout(std::__1::tuple<TLine const*, TCharStream const*, void const* (*)(__CTRun const*, __CFString const*, void*), void*, std::__1::shared_ptr<TBidiLevelsProvider>*, unsigned int, unsigned char, bool, long*> const&, TRunGlue&, signed char, SyncState)",
+              "CoreText: TTypesetterAttrString::Initialize(__CFAttributedString const*, bool)",
+              "CoreText: TTypesetterAttrString::TTypesetterAttrString(__CFAttributedString const*, __CFDictionary const*, bool)",
+              "CoreText: CTLineCreateWithAttributedString",
+              "UIFoundation: __NSCoreTypesetterCreateBaseLineFromAttributedString",
+              "UIFoundation: -[NSCoreTypesetter _stringDrawingCoreTextEngineWithOriginalString:rect:padding:graphicsContext:forceClipping:attributes:stringDrawingOptions:drawingContext:stringDrawingInterface:]",
+              "UIKit: -[NSCoreTypesetterAccessibility__UIKit__UIFoundation _stringDrawingCoreTextEngineWithOriginalString:rect:padding:graphicsContext:forceClipping:attributes:stringDrawingOptions:drawingContext:stringDrawingInterface:]",
+              "UIFoundation: __NSStringDrawingEngine",
+              "UIFoundation: -[NSAttributedString(NSExtendedStringDrawing) boundingRectWithSize:options:context:]",
+              "SwiftUICore: NSAttributedString.MetricsCache.metrics(requestedSize:layoutMargins:wantsNumberOfLineFragments:context:)",
+              "SwiftUICore: ResolvedStyledText.StringDrawing.sizeThatFits(_:)",
+              "SwiftUICore: StyledTextLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.dimensions(in:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.resize(_:proposal:proxy:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.sizeChildrenIdeally(in:minorProposalForChild:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.placeChildren1(in:minorProposalForChild:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.placeChildren(in:)",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: closure #1 in ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngine.lengthThatFits(_:in:)",
+              "SwiftUICore: LayoutEngineBox.lengthThatFits(_:in:)",
+              "SwiftUICore: LayoutProxy.lengthThatFits(_:in:)",
+              "SwiftUICore: _LazyLayout_Subview.lengthAndSpacing(size:axis:predecessor:uniformSpacing:)",
+              "SwiftUICore: specialized LazyHVStack<>.lengthAndSpacing(subviews:predecessors:minorGeometry:)",
+              "SwiftUICore: specialized closure #1 in LazyStack<>.measureEstimates(updatingPosition:index:minor:subviews:cache:)",
+              "SwiftUICore: partial apply for specialized closure #1 in LazyStack<>.measureEstimates(updatingPosition:index:minor:subviews:cache:)",
+              "SwiftUICore: closure #1 in applyNode #1 (start:style:node:transform:section:) in _LazyLayout_Subviews.apply(from:style:to:)",
+              "SwiftUICore: partial apply for closure #1 in applyNode #1 (start:style:node:transform:section:) in _LazyLayout_Subviews.apply(from:style:to:)",
+              "SwiftUICore: BaseViewList.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: ModifiedViewList.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: _ViewList_TemporarySublistTransform.withPushedItem<A, B>(_:do:)",
+              "SwiftUICore: DynamicViewList.WrappedList.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: closure #2 in closure #1 in ForEachState.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: _ViewList_TemporarySublistTransform.withPushedItem<A, B>(_:do:)"
+            ]
+          }
+        ],
+        "sourceSHA256": {
+          "time-profile.xml": "7b101453234a354305be6cfcfdc5f1a416c5c5b8c442b94aa3580f472136012d",
+          "os-signpost-interval.xml": "5009cafe9cbb884b320506a6dd7931ce6554eb8cc1761e4eba837f7da709c388",
+          "stream.json": "18c4ce48e1564f1c25362de3d8ed3cfcf47726b1ea1259725930346695c53e75"
+        }
+      },
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601
+        },
+        "callbackGapsOver50Ms": 163,
+        "callbackIntervalMaxMs": 552.4623749952298,
+        "callbackIntervalP50Ms": 16.68020835495554,
+        "callbackIntervalP95Ms": 474.4465000112541,
+        "callbackSamples": 404,
+        "elapsedMs": 51871.62204165361,
+        "missedDisplayLinkCallbacks": 2709,
+        "nominalIntervalMs": 16.68033335590735,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "aedb1f189470ee974f84f33e84f86ae2e65eaee3",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 55.64,
+        "loadAfter": 39.84,
+        "highLoad": true
+      },
+      "sourceFilesSHA256": {
+        "ScryRemoteApp.swift": "96fc19fee1a38a66189815176d76b5ed7ec701c751ac6d90d36134a3b8ef3723",
+        "RemoteRunStore.swift": "47eaf091fb515dd7f9d156870a40891cafb9ccff1d2cfd40e0c34fc24c6e6082",
+        "ChatView.swift": "cd48bc59df4c603f0b9588c28abe2533121d26d0cc691226f5bd6ebd31e117dc",
+        "Components.swift": "ab0c77d4dfcf81bd7f88ed9327bfbdf3d777539401286b8e2b3fcd11a745cebe"
+      },
+      "debugDylibSHA256": "10ccbde6158304f02bbc021038746cb5c6c80950e26b94e605b3359fb7ce15a1"
+    },
+    {
+      "label": "scry-f2-profiler-before-2",
+      "profile": {
+        "schema": 1,
+        "sourceRevision": "aedb1f189470ee974f84f33e84f86ae2e65eaee3",
+        "phaseMs": 52612.500458,
+        "phaseSamplesAllThreads": 52222,
+        "mainSamples": 50701,
+        "mainSampledCpuMs": 50701.0,
+        "unsymbolicatedLeafFraction": 0.5136585077217412,
+        "unavailableStackCpuMs": 0.0,
+        "appendSync": {
+          "count": 600,
+          "sumMs": 44.820788,
+          "medianMs": 0.0722085,
+          "maxMs": 1.406125
+        },
+        "windows": [
+          {
+            "firstSequence": 1,
+            "lastSequence": 100,
+            "wallMs": 3334.558083,
+            "mainSampledCpuMs": 1887.0,
+            "appendSyncMs": 7.486084
+          },
+          {
+            "firstSequence": 101,
+            "lastSequence": 200,
+            "wallMs": 3889.763042,
+            "mainSampledCpuMs": 3848.0,
+            "appendSyncMs": 5.511042
+          },
+          {
+            "firstSequence": 201,
+            "lastSequence": 300,
+            "wallMs": 6294.754292,
+            "mainSampledCpuMs": 6280.0,
+            "appendSyncMs": 6.724416
+          },
+          {
+            "firstSequence": 301,
+            "lastSequence": 400,
+            "wallMs": 9248.86,
+            "mainSampledCpuMs": 9220.0,
+            "appendSyncMs": 7.811963
+          },
+          {
+            "firstSequence": 401,
+            "lastSequence": 500,
+            "wallMs": 12804.0065,
+            "mainSampledCpuMs": 12778.0,
+            "appendSyncMs": 8.369078
+          },
+          {
+            "firstSequence": 501,
+            "lastSequence": 600,
+            "wallMs": 17040.558541,
+            "mainSampledCpuMs": 16688.0,
+            "appendSyncMs": 8.918205
+          }
+        ],
+        "focusInclusiveCpuMs": {
+          "scrollTo": 35151.0,
+          "markdownParse": 1546.0,
+          "inlineRendered": 2109.0
+        },
+        "leafBinaries": [
+          {
+            "symbol": "libswiftCore.dylib",
+            "sampledCpuMs": 9980.0,
+            "fractionMainCpu": 0.19684029900790911
+          },
+          {
+            "symbol": "AttributeGraph",
+            "sampledCpuMs": 8380.0,
+            "fractionMainCpu": 0.16528273604070925
+          },
+          {
+            "symbol": "CoreGraphics",
+            "sampledCpuMs": 4622.0,
+            "fractionMainCpu": 0.0911619100214986
+          },
+          {
+            "symbol": "CoreText",
+            "sampledCpuMs": 4205.0,
+            "fractionMainCpu": 0.08293722017317212
+          },
+          {
+            "symbol": "SwiftUICore",
+            "sampledCpuMs": 4048.0,
+            "fractionMainCpu": 0.07984063430701564
+          },
+          {
+            "symbol": "libsystem_platform.dylib",
+            "sampledCpuMs": 3002.0,
+            "fractionMainCpu": 0.059209877517208735
+          },
+          {
+            "symbol": "libobjc.A.dylib",
+            "sampledCpuMs": 2777.0,
+            "fractionMainCpu": 0.054772095224946256
+          },
+          {
+            "symbol": "CoreFoundation",
+            "sampledCpuMs": 2602.0,
+            "fractionMainCpu": 0.05132048677540877
+          },
+          {
+            "symbol": "unavailable binary",
+            "sampledCpuMs": 2513.0,
+            "fractionMainCpu": 0.04956509733535828
+          },
+          {
+            "symbol": "libsystem_malloc.dylib",
+            "sampledCpuMs": 2092.0,
+            "fractionMainCpu": 0.041261513579613815
+          },
+          {
+            "symbol": "libsystem_kernel.dylib",
+            "sampledCpuMs": 1636.0,
+            "fractionMainCpu": 0.03226760813396185
+          },
+          {
+            "symbol": "UIFoundation",
+            "sampledCpuMs": 738.0,
+            "fractionMainCpu": 0.014555925918620935
+          },
+          {
+            "symbol": "QuartzCore",
+            "sampledCpuMs": 654.0,
+            "fractionMainCpu": 0.012899153862842941
+          },
+          {
+            "symbol": "SwiftUI",
+            "sampledCpuMs": 621.0,
+            "fractionMainCpu": 0.012248279126644446
+          },
+          {
+            "symbol": "Foundation",
+            "sampledCpuMs": 590.0,
+            "fractionMainCpu": 0.011636851344154948
+          },
+          {
+            "symbol": "libsystem_pthread.dylib",
+            "sampledCpuMs": 416.0,
+            "fractionMainCpu": 0.008204966371471964
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib",
+            "sampledCpuMs": 384.0,
+            "fractionMainCpu": 0.007573815112127966
+          },
+          {
+            "symbol": "libicucore.A.dylib",
+            "sampledCpuMs": 357.0,
+            "fractionMainCpu": 0.007041281237056468
+          },
+          {
+            "symbol": "CollectionsInternal",
+            "sampledCpuMs": 176.0,
+            "fractionMainCpu": 0.003471331926391984
+          },
+          {
+            "symbol": "libswiftObjectiveC.dylib",
+            "sampledCpuMs": 176.0,
+            "fractionMainCpu": 0.003471331926391984
+          }
+        ],
+        "inclusiveTop": [
+          {
+            "symbol": "CoreFoundation: __CFRunLoopRun",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "GraphicsServices: GSEventRunModal",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "dyld: start",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "CoreFoundation: _CFRunLoopRunSpecificWithOptions",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "SwiftUI: closure #1 in KitRendererCommon(_:)",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "SwiftUI: static App.main()",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "UIKitCore: UIApplicationMain",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "UIKitCore: -[UIApplication _run]",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "SwiftUI: runApp<A>(_:)",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+            "sampledCpuMs": 37077.0,
+            "fractionMainCpu": 0.7312873513342932
+          },
+          {
+            "symbol": "SwiftUICore: static Update.ensure<A>(_:)",
+            "sampledCpuMs": 36926.0,
+            "fractionMainCpu": 0.7283091063292637
+          },
+          {
+            "symbol": "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+            "sampledCpuMs": 36926.0,
+            "fractionMainCpu": 0.7283091063292637
+          },
+          {
+            "symbol": "SwiftUICore: GraphHost.flushTransactions()",
+            "sampledCpuMs": 36887.0,
+            "fractionMainCpu": 0.7275398907319383
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c9909913",
+            "sampledCpuMs": 35448.0,
+            "fractionMainCpu": 0.6991578075383128
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+            "sampledCpuMs": 35403.0,
+            "fractionMainCpu": 0.6982702510798604
+          },
+          {
+            "symbol": "CoreFoundation: __CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__",
+            "sampledCpuMs": 35403.0,
+            "fractionMainCpu": 0.6982702510798604
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_main_queue_drain",
+            "sampledCpuMs": 35403.0,
+            "fractionMainCpu": 0.6982702510798604
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+            "sampledCpuMs": 35401.0,
+            "fractionMainCpu": 0.6982308041261513
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_client_callout",
+            "sampledCpuMs": 35341.0,
+            "fractionMainCpu": 0.6970473955148814
+          },
+          {
+            "symbol": "SwiftUICore: static Update.dispatchActions()",
+            "sampledCpuMs": 35262.0,
+            "fractionMainCpu": 0.6954892408433758
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: <deduplicated_symbol>",
+            "sampledCpuMs": 35247.0,
+            "fractionMainCpu": 0.6951933886905584
+          },
+          {
+            "symbol": "libdispatch.dylib: _dispatch_call_block_and_release",
+            "sampledCpuMs": 35218.0,
+            "fractionMainCpu": 0.6946214078617778
+          },
+          {
+            "symbol": "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+            "sampledCpuMs": 35186.0,
+            "fractionMainCpu": 0.6939902566024339
+          },
+          {
+            "symbol": "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+            "sampledCpuMs": 35151.0,
+            "fractionMainCpu": 0.6932999349125264
+          },
+          {
+            "symbol": "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+            "sampledCpuMs": 35150.0,
+            "fractionMainCpu": 0.6932802114356719
+          },
+          {
+            "symbol": "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+            "sampledCpuMs": 35150.0,
+            "fractionMainCpu": 0.6932802114356719
+          },
+          {
+            "symbol": "SwiftUICore: withTransaction<A>(_:_:)",
+            "sampledCpuMs": 35150.0,
+            "fractionMainCpu": 0.6932802114356719
+          },
+          {
+            "symbol": "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+            "sampledCpuMs": 35150.0,
+            "fractionMainCpu": 0.6932802114356719
+          }
+        ],
+        "appInclusiveTop": [
+          {
+            "symbol": "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+            "sampledCpuMs": 50661.0,
+            "fractionMainCpu": 0.99921106092582
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: <deduplicated_symbol>",
+            "sampledCpuMs": 35247.0,
+            "fractionMainCpu": 0.6951933886905584
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: protocol witness for View.body.getter in conformance ConversationMarkdownInline",
+            "sampledCpuMs": 2483.0,
+            "fractionMainCpu": 0.048973393029723276
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownInline.body.getter",
+            "sampledCpuMs": 2468.0,
+            "fractionMainCpu": 0.04867754087690578
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownInline.rendered.getter",
+            "sampledCpuMs": 2109.0,
+            "fractionMainCpu": 0.041596812686140315
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownText.body.getter",
+            "sampledCpuMs": 1553.0,
+            "fractionMainCpu": 0.03063055955503836
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: protocol witness for View.body.getter in conformance ConversationMarkdownText",
+            "sampledCpuMs": 1553.0,
+            "fractionMainCpu": 0.03063055955503836
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: closure #1 in ConversationMarkdownText.body.getter",
+            "sampledCpuMs": 1553.0,
+            "fractionMainCpu": 0.03063055955503836
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownText.blocks.getter",
+            "sampledCpuMs": 1551.0,
+            "fractionMainCpu": 0.03059111260132936
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.parse(_:)",
+            "sampledCpuMs": 1546.0,
+            "fractionMainCpu": 0.030492495217056863
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.isDivider(_:)",
+            "sampledCpuMs": 559.0,
+            "fractionMainCpu": 0.01102542356166545
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.tableCells(_:)",
+            "sampledCpuMs": 437.0,
+            "fractionMainCpu": 0.00861915938541646
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.startsBlock(_:)",
+            "sampledCpuMs": 397.0,
+            "fractionMainCpu": 0.007830220311236464
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: closure #1 in closure #1 in ConversationMarkdownText.body.getter",
+            "sampledCpuMs": 355.0,
+            "fractionMainCpu": 0.007001834283347468
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: ConversationMarkdownText.blockView(_:)",
+            "sampledCpuMs": 293.0,
+            "fractionMainCpu": 0.005778978718368474
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ViewBuilder.buildEither<A, B>(first:)",
+            "sampledCpuMs": 145.0,
+            "fractionMainCpu": 0.002859904143902487
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: static ConversationMarkdownParser.unorderedItem(_:)",
+            "sampledCpuMs": 127.0,
+            "fractionMainCpu": 0.0025048815605214886
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: protocol witness for View.body.getter in conformance MessageComposer",
+            "sampledCpuMs": 79.0,
+            "fractionMainCpu": 0.0015581546715054929
+          },
+          {
+            "symbol": "ScryRemote.debug.dylib: MessageComposer.body.getter",
+            "sampledCpuMs": 79.0,
+            "fractionMainCpu": 0.0015581546715054929
+          }
+        ],
+        "leafTop": [
+          {
+            "symbol": "AttributeGraph: 0x1c9900885",
+            "sampledCpuMs": 1921.0,
+            "fractionMainCpu": 0.03788879903749433
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c9900811",
+            "sampledCpuMs": 1041.0,
+            "fractionMainCpu": 0.020532139405534406
+          },
+          {
+            "symbol": "libswiftCore.dylib: swift_release",
+            "sampledCpuMs": 927.0,
+            "fractionMainCpu": 0.018283663044121417
+          },
+          {
+            "symbol": "libsystem_platform.dylib: 0x2b67b6b49",
+            "sampledCpuMs": 844.0,
+            "fractionMainCpu": 0.016646614465197926
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c990c51d",
+            "sampledCpuMs": 837.0,
+            "fractionMainCpu": 0.016508550127216425
+          },
+          {
+            "symbol": "libswiftCore.dylib: swift_retain",
+            "sampledCpuMs": 767.0,
+            "fractionMainCpu": 0.015127906747401432
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a380d",
+            "sampledCpuMs": 758.0,
+            "fractionMainCpu": 0.014950395455710933
+          },
+          {
+            "symbol": "libsystem_platform.dylib: 0x2b67b6a49",
+            "sampledCpuMs": 720.0,
+            "fractionMainCpu": 0.014200903335239936
+          },
+          {
+            "symbol": "SwiftUICore: <deduplicated_symbol>",
+            "sampledCpuMs": 656.0,
+            "fractionMainCpu": 0.012938600816551942
+          },
+          {
+            "symbol": "AttributeGraph: 0x1c990c529",
+            "sampledCpuMs": 634.0,
+            "fractionMainCpu": 0.012504684325752944
+          },
+          {
+            "symbol": "libswiftCore.dylib: swift::TargetContextDescriptor<swift::InProcess>::getGenericContext() const",
+            "sampledCpuMs": 575.0,
+            "fractionMainCpu": 0.011340999191337449
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a38e1",
+            "sampledCpuMs": 564.0,
+            "fractionMainCpu": 0.01112404094593795
+          },
+          {
+            "symbol": "libswiftCore.dylib: swift::MetadataCacheKey::operator==(swift::MetadataCacheKey const&) const",
+            "sampledCpuMs": 523.0,
+            "fractionMainCpu": 0.010315378394903454
+          },
+          {
+            "symbol": "libswiftCore.dylib: getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)",
+            "sampledCpuMs": 498.0,
+            "fractionMainCpu": 0.009822291473540955
+          },
+          {
+            "symbol": "CoreText: OTL::Coverage::SearchFmt2Binary(unsigned short) const",
+            "sampledCpuMs": 485.0,
+            "fractionMainCpu": 0.009565886274432457
+          },
+          {
+            "symbol": "libobjc.A.dylib: 0x19335b401",
+            "sampledCpuMs": 474.0,
+            "fractionMainCpu": 0.009348928029032958
+          },
+          {
+            "symbol": "libsystem_kernel.dylib: 0x245581a81",
+            "sampledCpuMs": 439.0,
+            "fractionMainCpu": 0.008658606339125461
+          },
+          {
+            "symbol": "libsystem_kernel.dylib: 0x24558703d",
+            "sampledCpuMs": 380.0,
+            "fractionMainCpu": 0.007494921204709966
+          },
+          {
+            "symbol": "libsystem_pthread.dylib: ___chkstk_darwin",
+            "sampledCpuMs": 371.0,
+            "fractionMainCpu": 0.007317409913019467
+          },
+          {
+            "symbol": "CoreGraphics: 0x1975a37f1",
+            "sampledCpuMs": 340.0,
+            "fractionMainCpu": 0.00670598213052997
+          }
+        ],
+        "representativeStacks": [
+          {
+            "sampledCpuMs": 750.0,
+            "framesLeafFirst": [
+              "AttributeGraph: 0x1c990c51d",
+              "AttributeGraph: 0x1c990d2ab",
+              "AttributeGraph: 0x1c9907d0f",
+              "AttributeGraph: 0x1c990b9af",
+              "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+              "SwiftUICore: GraphHost.flushTransactions()",
+              "SwiftUI: closure #1 in static ScrollViewCommitMutation.commit(layoutState:phaseState:containerSize:isPreferred:transaction:)",
+              "SwiftUICore: static Update.dispatchActions()",
+              "SwiftUICore: static Update.end()",
+              "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+              "SwiftUICore: static Update.ensure<A>(_:)",
+              "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+              "SwiftUICore: withTransaction<A>(_:_:)",
+              "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "libdispatch.dylib: _dispatch_call_block_and_release",
+              "libdispatch.dylib: _dispatch_client_callout",
+              "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+              "libdispatch.dylib: _dispatch_main_queue_drain",
+              "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+              "CoreFoundation: __CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__",
+              "CoreFoundation: __CFRunLoopRun",
+              "CoreFoundation: _CFRunLoopRunSpecificWithOptions",
+              "GraphicsServices: GSEventRunModal",
+              "UIKitCore: -[UIApplication _run]",
+              "UIKitCore: UIApplicationMain",
+              "SwiftUI: closure #1 in KitRendererCommon(_:)",
+              "SwiftUI: runApp<A>(_:)",
+              "SwiftUI: static App.main()",
+              "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+              "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+              "dyld: start"
+            ]
+          },
+          {
+            "sampledCpuMs": 719.0,
+            "framesLeafFirst": [
+              "libsystem_platform.dylib: 0x2b67b6a49",
+              "AttributeGraph: 0x1c990cf9f",
+              "AttributeGraph: 0x1c9907d0f",
+              "AttributeGraph: 0x1c990b9af",
+              "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+              "SwiftUICore: GraphHost.flushTransactions()",
+              "SwiftUI: closure #1 in static ScrollViewCommitMutation.commit(layoutState:phaseState:containerSize:isPreferred:transaction:)",
+              "SwiftUICore: static Update.dispatchActions()",
+              "SwiftUICore: static Update.end()",
+              "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+              "SwiftUICore: static Update.ensure<A>(_:)",
+              "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+              "SwiftUICore: withTransaction<A>(_:_:)",
+              "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "libdispatch.dylib: _dispatch_call_block_and_release",
+              "libdispatch.dylib: _dispatch_client_callout",
+              "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+              "libdispatch.dylib: _dispatch_main_queue_drain",
+              "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+              "CoreFoundation: __CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__",
+              "CoreFoundation: __CFRunLoopRun",
+              "CoreFoundation: _CFRunLoopRunSpecificWithOptions",
+              "GraphicsServices: GSEventRunModal",
+              "UIKitCore: -[UIApplication _run]",
+              "UIKitCore: UIApplicationMain",
+              "SwiftUI: closure #1 in KitRendererCommon(_:)",
+              "SwiftUI: runApp<A>(_:)",
+              "SwiftUI: static App.main()",
+              "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+              "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+              "dyld: start"
+            ]
+          },
+          {
+            "sampledCpuMs": 603.0,
+            "framesLeafFirst": [
+              "AttributeGraph: 0x1c990c529",
+              "AttributeGraph: 0x1c990d2ab",
+              "AttributeGraph: 0x1c9907d0f",
+              "AttributeGraph: 0x1c990b9af",
+              "SwiftUICore: specialized GraphHost.runTransaction(_:do:id:)",
+              "SwiftUICore: GraphHost.flushTransactions()",
+              "SwiftUI: closure #1 in static ScrollViewCommitMutation.commit(layoutState:phaseState:containerSize:isPreferred:transaction:)",
+              "SwiftUICore: static Update.dispatchActions()",
+              "SwiftUICore: static Update.end()",
+              "SwiftUICore: closure #1 in static Update.ensure<A>(_:)",
+              "SwiftUICore: static Update.ensure<A>(_:)",
+              "SwiftUI: closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUI: partial apply for closure #1 in ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "SwiftUICore: closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: partial apply for closure #1 in withTransaction<A>(_:_:)",
+              "SwiftUICore: withExtendedLifetime<A, B, C>(_:_:)",
+              "SwiftUICore: withTransaction<A>(_:_:)",
+              "SwiftUI: ScrollViewProxy.scrollTo<A>(_:anchor:)",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "ScryRemote.debug.dylib: <deduplicated_symbol>",
+              "libdispatch.dylib: _dispatch_call_block_and_release",
+              "libdispatch.dylib: _dispatch_client_callout",
+              "libdispatch.dylib: _dispatch_main_queue_drain.cold.6",
+              "libdispatch.dylib: _dispatch_main_queue_drain",
+              "libdispatch.dylib: _dispatch_main_queue_callback_4CF",
+              "CoreFoundation: __CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__",
+              "CoreFoundation: __CFRunLoopRun",
+              "CoreFoundation: _CFRunLoopRunSpecificWithOptions",
+              "GraphicsServices: GSEventRunModal",
+              "UIKitCore: -[UIApplication _run]",
+              "UIKitCore: UIApplicationMain",
+              "SwiftUI: closure #1 in KitRendererCommon(_:)",
+              "SwiftUI: runApp<A>(_:)",
+              "SwiftUI: static App.main()",
+              "ScryRemote.debug.dylib: static ScryRemoteApp.$main()",
+              "ScryRemote.debug.dylib: __debug_main_executable_dylib_entry_point",
+              "dyld: start"
+            ]
+          },
+          {
+            "sampledCpuMs": 485.0,
+            "framesLeafFirst": [
+              "CoreText: OTL::Coverage::SearchFmt2Binary(unsigned short) const",
+              "CoreText: OTL::GPOS::ApplyLookupAt(OTL::Lookup const&, unsigned int, TGlyphIterator&, unsigned long) const",
+              "CoreText: TOpenTypePositioningEngine::PositionRuns(SyncState&, KerningStatus&)",
+              "CoreText: TKerningEngine::PositionGlyphs(TRunGlue&, TCharStream const&, signed char)",
+              "CoreText: TTypesetter::FinishLayout(std::__1::tuple<TLine const*, TCharStream const*, void const* (*)(__CTRun const*, __CFString const*, void*), void*, std::__1::shared_ptr<TBidiLevelsProvider>*, unsigned int, unsigned char, bool, long*> const&, TRunGlue&, signed char, SyncState)",
+              "CoreText: TTypesetterAttrString::Initialize(__CFAttributedString const*, bool)",
+              "CoreText: TTypesetterAttrString::TTypesetterAttrString(__CFAttributedString const*, __CFDictionary const*, bool)",
+              "CoreText: CTLineCreateWithAttributedString",
+              "UIFoundation: __NSCoreTypesetterCreateBaseLineFromAttributedString",
+              "UIFoundation: -[NSCoreTypesetter _stringDrawingCoreTextEngineWithOriginalString:rect:padding:graphicsContext:forceClipping:attributes:stringDrawingOptions:drawingContext:stringDrawingInterface:]",
+              "UIKit: -[NSCoreTypesetterAccessibility__UIKit__UIFoundation _stringDrawingCoreTextEngineWithOriginalString:rect:padding:graphicsContext:forceClipping:attributes:stringDrawingOptions:drawingContext:stringDrawingInterface:]",
+              "UIFoundation: __NSStringDrawingEngine",
+              "UIFoundation: -[NSAttributedString(NSExtendedStringDrawing) boundingRectWithSize:options:context:]",
+              "SwiftUICore: NSAttributedString.MetricsCache.metrics(requestedSize:layoutMargins:wantsNumberOfLineFragments:context:)",
+              "SwiftUICore: ResolvedStyledText.StringDrawing.sizeThatFits(_:)",
+              "SwiftUICore: StyledTextLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.dimensions(in:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.resize(_:proposal:proxy:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.sizeChildrenIdeally(in:minorProposalForChild:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.placeChildren1(in:minorProposalForChild:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.placeChildren(in:)",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: closure #1 in ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngine.lengthThatFits(_:in:)",
+              "SwiftUICore: LayoutEngineBox.lengthThatFits(_:in:)",
+              "SwiftUICore: LayoutProxy.lengthThatFits(_:in:)",
+              "SwiftUICore: _LazyLayout_Subview.lengthAndSpacing(size:axis:predecessor:uniformSpacing:)",
+              "SwiftUICore: specialized LazyHVStack<>.lengthAndSpacing(subviews:predecessors:minorGeometry:)",
+              "SwiftUICore: specialized closure #1 in LazyStack<>.measureEstimates(updatingPosition:index:minor:subviews:cache:)",
+              "SwiftUICore: partial apply for specialized closure #1 in LazyStack<>.measureEstimates(updatingPosition:index:minor:subviews:cache:)",
+              "SwiftUICore: closure #1 in applyNode #1 (start:style:node:transform:section:) in _LazyLayout_Subviews.apply(from:style:to:)",
+              "SwiftUICore: partial apply for closure #1 in applyNode #1 (start:style:node:transform:section:) in _LazyLayout_Subviews.apply(from:style:to:)",
+              "SwiftUICore: BaseViewList.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: ModifiedViewList.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: _ViewList_TemporarySublistTransform.withPushedItem<A, B>(_:do:)",
+              "SwiftUICore: DynamicViewList.WrappedList.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: closure #2 in closure #1 in ForEachState.applyNodes(from:style:list:transform:to:)",
+              "SwiftUICore: _ViewList_TemporarySublistTransform.withPushedItem<A, B>(_:do:)"
+            ]
+          },
+          {
+            "sampledCpuMs": 438.0,
+            "framesLeafFirst": [
+              "libsystem_kernel.dylib: 0x245581a81",
+              "libdispatch.dylib: _dispatch_root_queue_poke_slow",
+              "libswift_Concurrency.dylib: swift_task_enqueueGlobalImpl",
+              "libswift_Concurrency.dylib: swift_task_enqueueGlobal",
+              "libswift_Concurrency.dylib: swift::AsyncTask::flagAsAndEnqueueOnExecutor(swift::SerialExecutorRef)",
+              "libswift_Concurrency.dylib: swift_task_create_commonImpl(unsigned long, swift::TaskOptionRecord*, swift::TargetMetadata<swift::InProcess> const*, void (swift::AsyncContext* swift_async_context) swiftasynccall*, void*, unsigned long)",
+              "SwiftUICore: specialized static Task<>.detached(name:priority:operation:)",
+              "SwiftUICore: specialized closure #1 in PropertyList.subscript.getter",
+              "SwiftUICore: specialized PropertyList.Tracker.value<A>(_:for:)",
+              "SwiftUICore: AttributedStringTextStorage.resolve<A>(into:in:with:)",
+              "SwiftUICore: specialized Text.resolve<A>(into:in:with:)",
+              "SwiftUICore: Text.resolveAttributedStringAndProperties(in:includeDefaultAttributes:options:idiom:)",
+              "SwiftUICore: ResolvedTextHelper.resolve(_:with:sizeFitting:)",
+              "SwiftUICore: ResolvedTextFilter.updateValue()",
+              "SwiftUICore: specialized implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908e67",
+              "AttributeGraph: 0x1c99032a7",
+              "SwiftUI: UIKitTextSelectionRepresentation.SelectableTextChildQuery.value.getter",
+              "SwiftUI: protocol witness for Rule.value.getter in conformance UIKitTextSelectionRepresentation.SelectableTextChildQuery<A>",
+              "SwiftUI: implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908e67",
+              "AttributeGraph: 0x1c99032a7",
+              "SwiftUICore: DynamicBody.updateValue()",
+              "SwiftUICore: partial apply for implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908e67",
+              "AttributeGraph: 0x1c99032a7",
+              "SwiftUICore: specialized implicit closure #1 in closure #1 in closure #1 in Attribute.init<A>(_:)",
+              "AttributeGraph: 0x1c9909913",
+              "AttributeGraph: 0x1c990952b",
+              "AttributeGraph: 0x1c9908caf",
+              "AttributeGraph: 0x1c990a12b",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.dimensions(in:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.resize(_:proposal:proxy:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.sizeChildrenIdeally(in:minorProposalForChild:)",
+              "SwiftUICore: specialized StackLayout.UnmanagedImplementation.placeChildren1(in:minorProposalForChild:)",
+              "SwiftUICore: StackLayout.UnmanagedImplementation.placeChildren(in:)",
+              "SwiftUICore: <deduplicated_symbol>",
+              "SwiftUICore: closure #1 in ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: ViewLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)",
+              "SwiftUICore: protocol witness for UnaryLayout.sizeThatFits(in:context:child:) in conformance _FlexFrameLayout",
+              "SwiftUICore: UnaryLayoutEngine.sizeThatFits(_:)",
+              "SwiftUICore: 0x1a0b3dde8",
+              "SwiftUICore: LayoutEngineBox.sizeThatFits(_:)",
+              "SwiftUICore: LayoutProxy.size(in:)",
+              "SwiftUICore: _FlexFrameLayout.sizeThatFits(in:context:child:)"
+            ]
+          }
+        ],
+        "sourceSHA256": {
+          "time-profile.xml": "706fcfaf405c104e3f272306de9e728440183b0ec3b12affcb3dd47c8b4dcb07",
+          "os-signpost-interval.xml": "feb67b0c2ef7d26225a33dfa35a995790416a3a429cedb62a7ecdc2c583e16b0",
+          "stream.json": "3f5310bf097361979c269f25842b816123eb94b5a45fa937a7c7a5a682c4f124"
+        }
+      },
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "ConversationMarkdownInline": 180300,
+          "ConversationMarkdownText": 600,
+          "FocusedTurnView": 601
+        },
+        "callbackGapsOver50Ms": 164,
+        "callbackIntervalMaxMs": 564.2418333445676,
+        "callbackIntervalP50Ms": 16.681750013958663,
+        "callbackIntervalP95Ms": 486.43541664932854,
+        "callbackSamples": 411,
+        "elapsedMs": 52622.19066664693,
+        "missedDisplayLinkCallbacks": 2742,
+        "nominalIntervalMs": 16.678583342581987,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "aedb1f189470ee974f84f33e84f86ae2e65eaee3",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 150.55,
+        "loadAfter": 92.81,
+        "highLoad": true
+      },
+      "sourceFilesSHA256": {
+        "ScryRemoteApp.swift": "96fc19fee1a38a66189815176d76b5ed7ec701c751ac6d90d36134a3b8ef3723",
+        "RemoteRunStore.swift": "47eaf091fb515dd7f9d156870a40891cafb9ccff1d2cfd40e0c34fc24c6e6082",
+        "ChatView.swift": "cd48bc59df4c603f0b9588c28abe2533121d26d0cc691226f5bd6ebd31e117dc",
+        "Components.swift": "5feba7a48af493804ee8a2c4c56ff30490fd06c54c25405810f97730a71baad6"
+      },
+      "debugDylibSHA256": "ce3b45b29b816a15b5ef5f4abef96754a13bd46fb6c36ea4a3e54a33cd7dbd63"
+    }
+  ]
+}
