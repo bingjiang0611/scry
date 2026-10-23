@@ -7,7 +7,6 @@ import {
   archivedTranscriptPath,
   cleanupTraceArchiveTemps,
   deleteTranscriptCopies,
-  discoverTraceArchiveSessions,
   discoverTraceArchiveSessionsAsync,
   mirrorTranscript,
   readTraceArchive,
@@ -187,7 +186,7 @@ describe('transcript archive mirror', () => {
     expect(existsSync(dirtyPath)).toBe(false)
     // The scoped index answers the same scope from the index, but never a wider request.
     expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
-    expect(discoverTraceArchiveSessions(userDataDir).map((entry) => entry.sessionId).sort()).toEqual(['codex-session', 'qoder-session'])
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((entry) => entry.sessionId).sort()).toEqual(['codex-session', 'qoder-session'])
     expect(JSON.parse(readFileSync(indexPath, 'utf8')).providers).toBeUndefined()
     expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
     writeFileSync(indexPath, JSON.stringify({ version: 1, providers: ['qoder'], entries: [] }))
@@ -224,7 +223,7 @@ describe('transcript archive mirror', () => {
     expect(existsSync(join(userDataDir, 'trace-archive-index-v1.dirty'))).toBe(false)
   })
 
-  it('原子增量索引损坏或 segment 身份变化时从 canonical 文件重建', () => {
+  it('原子增量索引损坏或 segment 身份变化时从 canonical 文件重建', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
     const cwd = '/repo'
@@ -236,23 +235,44 @@ describe('transcript archive mirror', () => {
     const dirtyPath = join(userDataDir, 'trace-archive-index-v1.dirty')
     expect(existsSync(indexPath)).toBe(false)
     expect(existsSync(dirtyPath)).toBe(true)
-    expect(discoverTraceArchiveSessions(userDataDir)).toHaveLength(2)
+    expect(await discoverTraceArchiveSessionsAsync(userDataDir)).toHaveLength(2)
     expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(2)
     expect(existsSync(dirtyPath)).toBe(false)
 
     writeFileSync(indexPath, '{broken')
-    expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId).sort())
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((session) => session.sessionId).sort())
       .toEqual(['session-first', 'session-second'])
     expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(2)
 
     const firstPath = traceArchiveTurnPath(userDataDir, cwd, 'session-first', 'qoder', first)
     writeFileSync(firstPath, 'corrupt')
-    expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId)).toEqual(['session-second'])
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((session) => session.sessionId)).toEqual(['session-second'])
     expect(JSON.parse(readFileSync(indexPath, 'utf8')).entries).toHaveLength(1)
 
     writeFileSync(join(userDataDir, 'trace-archive-index-v1.dirty'), 'dirty\n')
-    expect(discoverTraceArchiveSessions(userDataDir).map((session) => session.sessionId)).toEqual(['session-second'])
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((session) => session.sessionId)).toEqual(['session-second'])
     expect(existsSync(join(userDataDir, 'trace-archive-index-v1.dirty'))).toBe(false)
+  })
+
+  it('session deletion leaves the catalog dirty for the next discovery instead of rebuilding it', async () => {
+    const userDataDir = tempRoot()
+    const args = { cwd: '/repo', providerId: 'qoder' as const, runtimeProvider: 'qoder_cli' as const, userDataDir }
+    for (const sessionId of ['kept-session', 'deleted-session']) {
+      expect(upsertTraceArchiveTurn({ ...args, sessionId,
+        turn: { runId: `${sessionId}-run`, userText: sessionId, items: [], done: true } })).toBe(true)
+    }
+    expect(await discoverTraceArchiveSessionsAsync(userDataDir)).toHaveLength(2)
+    const indexPath = join(userDataDir, 'trace-archive-index-v1.json')
+    const dirtyPath = join(userDataDir, 'trace-archive-index-v1.dirty')
+    const indexBefore = readFileSync(indexPath, 'utf8')
+    expect(existsSync(dirtyPath)).toBe(false)
+
+    expect(deleteTranscriptCopies({ cwd: '/repo', sessionId: 'deleted-session', userDataDir, providerId: 'qoder' }).failed).toEqual([])
+    // Deletion does not rescan or rewrite the catalog; the marker makes the old index untrusted.
+    expect(readFileSync(indexPath, 'utf8')).toBe(indexBefore)
+    expect(existsSync(dirtyPath)).toBe(true)
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['kept-session'])
+    expect(existsSync(dirtyPath)).toBe(false)
   })
 
   it('keeps opaque or traversal-like session ids inside every owned directory for read/write/delete', () => {

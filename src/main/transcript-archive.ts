@@ -195,43 +195,6 @@ function indexSummaries(entries: TraceArchiveCatalogIndexEntry[]): TraceArchiveS
   return [...summaries.values()].map(({ firstTs: _firstTs, ...summary }) => summary)
 }
 
-function parseTraceArchiveCatalogIndex(userDataDir: string, allowDirty: boolean): TraceArchiveCatalogIndexEntry[] | null {
-  const indexPath = traceArchiveCatalogIndexPath(userDataDir)
-  try {
-    if (!allowDirty && existsSync(traceArchiveCatalogIndexDirtyPath(userDataDir))) return null
-    trustedOwnedParent(userDataDir, indexPath, false)
-    const indexStat = lstatSync(indexPath)
-    if (!indexStat.isFile() || indexStat.isSymbolicLink() || indexStat.size <= 0 || indexStat.size > TRACE_INDEX_MAX_BYTES) return null
-    const parsed = JSON.parse(readFileSync(indexPath, 'utf8')) as Partial<TraceArchiveCatalogIndex>
-    if (parsed.version !== 1 || !Array.isArray(parsed.entries) || parsed.entries.length > TRACE_DISCOVERY_MAX_FILES) return null
-    // The synchronous caller needs every Provider; a Provider-scoped index cannot answer it.
-    if (parsed.providers !== undefined) return null
-    const seen = new Set<string>()
-    const entries: TraceArchiveCatalogIndexEntry[] = []
-    const archiveRoot = join(userDataDir, 'trace-archive-turns-v1')
-    for (const value of parsed.entries) {
-      if (!value || typeof value !== 'object') return null
-      const entry = value as Partial<TraceArchiveCatalogIndexEntry>
-      if (typeof entry.path !== 'string' || !validIndexRelativePath(entry.path) || seen.has(entry.path) ||
-          typeof entry.size !== 'number' || !Number.isSafeInteger(entry.size) || entry.size <= 0 || entry.size > TRACE_DISCOVERY_MAX_FILE_BYTES ||
-          typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs) ||
-          typeof entry.cwd !== 'string' || typeof entry.sessionId !== 'string' || !entry.sessionId ||
-          !DISCOVERABLE_PROVIDER_IDS.has(entry.providerId as ProviderId) || typeof entry.runtimeProvider !== 'string' ||
-          typeof entry.firstPrompt !== 'string' || typeof entry.firstTs !== 'number' || !Number.isFinite(entry.firstTs) ||
-          typeof entry.latestRunId !== 'string' || !entry.latestRunId || typeof entry.latestTs !== 'number' || !Number.isFinite(entry.latestTs)) return null
-      const path = join(archiveRoot, entry.path)
-      if (!trustedOwnedFile(userDataDir, path)) return null
-      const stat = lstatSync(path)
-      if (stat.size !== entry.size || stat.mtimeMs !== entry.mtimeMs) return null
-      seen.add(entry.path)
-      entries.push(entry as TraceArchiveCatalogIndexEntry)
-    }
-    return entries
-  } catch {
-    return null
-  }
-}
-
 async function parseTraceArchiveCatalogIndexAsync(
   userDataDir: string,
   providers?: readonly ProviderId[]
@@ -275,77 +238,6 @@ async function parseTraceArchiveCatalogIndexAsync(
     return entries
   } catch {
     return null
-  }
-}
-
-function scanTraceArchiveCatalogIndex(
-  userDataDir: string,
-  budget: TraceDiscoveryBudget = DEFAULT_TRACE_DISCOVERY_BUDGET
-): { entries: TraceArchiveCatalogIndexEntry[]; complete: boolean } {
-  const root = join(userDataDir, 'trace-archive-turns-v1')
-  const entries: TraceArchiveCatalogIndexEntry[] = []
-  let inspectedFiles = 0
-  let inspectedBytes = 0
-  try {
-    for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
-      if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink() ||
-          !DISCOVERABLE_PROVIDER_IDS.has(providerEntry.name as ProviderId)) continue
-      const providerId = providerEntry.name as ProviderId
-      const providerDir = join(root, providerEntry.name)
-      for (const cwdEntry of readdirSync(providerDir, { withFileTypes: true })) {
-        if (!cwdEntry.isDirectory() || cwdEntry.isSymbolicLink()) continue
-        const cwdDir = join(providerDir, cwdEntry.name)
-        for (const sessionEntry of readdirSync(cwdDir, { withFileTypes: true })) {
-          if (!sessionEntry.isDirectory() || sessionEntry.isSymbolicLink()) continue
-          const sessionDir = join(cwdDir, sessionEntry.name)
-          for (const fileEntry of readdirSync(sessionDir, { withFileTypes: true })) {
-            if (!fileEntry.isFile() || fileEntry.isSymbolicLink() || !/^turn-[a-f0-9]{64}\.json$/.test(fileEntry.name)) continue
-            if (++inspectedFiles > budget.maxFiles) return { entries, complete: false }
-            const path = join(sessionDir, fileEntry.name)
-            const stat = lstatSync(path)
-            if (stat.size <= 0 || stat.size > budget.maxFileBytes) continue
-            if (inspectedBytes + stat.size > budget.maxTotalBytes) return { entries, complete: false }
-            inspectedBytes += stat.size
-            let archive: TraceArchive
-            try {
-              archive = JSON.parse(readFileSync(path, 'utf8')) as TraceArchive
-            } catch {
-              continue
-            }
-            if (!archive || !Array.isArray(archive.turns) || archive.providerId !== providerId ||
-                typeof archive.cwd !== 'string' || typeof archive.sessionId !== 'string' || !archive.sessionId ||
-                typeof archive.runtimeProvider !== 'string') continue
-            const turns = archive.turns.filter((turn) =>
-              turn && typeof turn.runId === 'string' && !!turn.runId && typeof turn.userText === 'string' &&
-              typeof turn.ts === 'number' && Number.isFinite(turn.ts)
-            )
-            if (turns.length === 0) continue
-            const first = turns.reduce((left, right) => left.ts <= right.ts ? left : right)
-            const latest = turns.reduce((left, right) => left.ts >= right.ts ? left : right)
-            entries.push({
-              path: relative(root, path).split('\\').join('/'),
-              size: stat.size,
-              mtimeMs: stat.mtimeMs,
-              cwd: archive.cwd,
-              sessionId: archive.sessionId,
-              providerId,
-              runtimeProvider: archive.runtimeProvider,
-              firstPrompt: first.userText,
-              firstTs: first.ts,
-              latestRunId: latest.runId,
-              latestTs: latest.ts
-            })
-          }
-        }
-      }
-    }
-    return { entries, complete: true }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.warn('[scry] trace archive catalog recovery failed:', (error as Error).message)
-      return { entries, complete: false }
-    }
-    return { entries: [], complete: true }
   }
 }
 
@@ -419,27 +311,6 @@ export async function scanTraceArchiveCatalogIndexAsync(
   }
 }
 
-function writeTraceArchiveCatalogIndex(userDataDir: string, entries: TraceArchiveCatalogIndexEntry[]): void {
-  const content = JSON.stringify({ version: 1, entries } satisfies TraceArchiveCatalogIndex)
-  if (Buffer.byteLength(content) > TRACE_INDEX_MAX_BYTES) throw new Error('trace archive index capacity exceeded')
-  writeOwnedFileAtomically(userDataDir, traceArchiveCatalogIndexPath(userDataDir), content)
-}
-
-function rebuildTraceArchiveCatalogIndex(userDataDir: string): TraceArchiveCatalogIndexEntry[] {
-  const scanned = scanTraceArchiveCatalogIndex(userDataDir)
-  if (scanned.complete) {
-    try {
-      writeTraceArchiveCatalogIndex(userDataDir, scanned.entries)
-      try { unlinkSync(traceArchiveCatalogIndexDirtyPath(userDataDir)) } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-    } catch (error) {
-      console.warn('[scry] trace archive index rebuild failed:', (error as Error).message)
-    }
-  }
-  return scanned.entries
-}
-
 async function markTraceArchiveCatalogIndexDirtyAsync(userDataDir: string): Promise<void> {
   traceArchiveCatalogWriteGeneration++
   const marker = traceArchiveCatalogIndexDirtyPath(userDataDir)
@@ -463,14 +334,9 @@ function markTraceArchiveCatalogIndexDirty(userDataDir: string): void {
   }
 }
 
-/** Recover Scry-owned session catalog metadata from canonical per-turn archives. */
-export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveSessionSummary[] {
-  return indexSummaries(parseTraceArchiveCatalogIndex(userDataDir, false) ?? rebuildTraceArchiveCatalogIndex(userDataDir))
-}
-
 /**
- * Startup recovery variant: filesystem work yields between files instead of blocking Electron main.
- * `providers` limits the scan and the published index to those Providers.
+ * Recover Scry-owned session catalog metadata from canonical per-turn archives. Filesystem work
+ * yields between files instead of blocking Electron main. `providers` limits the scan and the published index to those Providers.
  */
 export async function discoverTraceArchiveSessionsAsync(
   userDataDir: string,
@@ -2349,6 +2215,7 @@ export function deleteTranscriptCopies(args: {
       }
     }
   }
-  rebuildTraceArchiveCatalogIndex(args.userDataDir)
+  // The dirty marker above keeps the catalog untrusted; the next background discovery rescans
+  // instead of this deletion synchronously rescanning and rewriting the whole catalog.
   return { deleted, failed }
 }

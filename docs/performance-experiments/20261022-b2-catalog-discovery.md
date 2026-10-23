@@ -38,3 +38,7 @@ npx vitest run src/main/trace-catalog-discovery.measurement.test.ts
 - 恢复逻辑移到 `src/main/trace-catalog-recovery.ts`（`recoverQoderCatalogSessions`），只扫 Qoder，仍只记录已知 cwd 的会话，不复活归档的回归证据。
 - `listProjectCatalog` 不再 `await` 恢复，只在后台启动一次。恢复新增会话后发送 `agent:dataUpdated { kind: 'catalog_recovered' }`，renderer 据此重新加载项目列表。恢复失败只记 warn（catalog 只是提示），下次启动按 dirty 索引重试。
 - 删除路径的 `rebuildTraceArchiveCatalogIndex` 仍同步全量扫描并同步写索引。它不在启动路径，本批不改；见报告未验证项。
+
+### 最终自审：移除剩下的同步 catalog 实现
+
+`discoverTraceArchiveSessions` 已无生产调用方；仅 session 删除调用同步 rebuild。删除已先标 dirty，没有必要同步重建提示索引。因此删除不再 rebuild，只保留 dirty，下一次发现走唯一异步实现。同步 parse/scan/write/rebuild 与测试专用 export 一并删除（约 140 行）。原 catalog 损坏/身份变化测试改用生产异步 API，断言不变；删除测试新增断言：索引内容不变、dirty 保留、下一次发现不返回已删会话。此断言在 `fc51e3e` 上失败。
