@@ -18,6 +18,7 @@ export function templateStructure(root: WorkflowBlock) {
   while (stack.length) {
     const { block, depth } = stack.pop()!
     const expressions: WorkflowExpression[] = block.kind === 'bind' ? [block.value] : block.kind === 'branch' ? [block.when]
+      : block.kind === 'check' ? [block.replica] : block.kind === 'replica' ? block.source ? [block.source] : []
       : block.kind === 'map' || block.kind === 'collect' ? [block.items]
       : block.kind === 'loop' ? [...Object.values(block.initial), ...Object.values(block.invariants), block.until, ...Object.values(block.carry), block.result,
         ...(block.progress === 'bounded_only' ? [] : [block.progress.baseline, block.progress.key, block.progress.improved])] : []

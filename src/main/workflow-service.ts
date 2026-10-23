@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { workflowShutdownCopy, workflowRecoveryCopy, workflowTemplateCopy } from '../shared/constants/copy'
+import type { WorkflowSystemHost } from './workflow-system-host'
+import { workflowSystemCopy } from '../shared/constants/copy'
+import { validateWorkflowSystemLedger } from './workflow-system-ledger'
 import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
 import { assertWorkflowRetryTarget, validateWorkflowRetryTarget } from './workflow-retry'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
-import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowLiveObservation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage } from '../shared/workflow'
-import { parseWorkflowRunCommand, workflowProgressSnapshot } from '../shared/workflow'
-import { capabilityForRole, makePlanPreview, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision } from './workflow-program'
+import type { WorkflowApproval, WorkflowAttemptOutcome, WorkflowLiveObservation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgressPage, WorkflowProgram } from '../shared/workflow'
+import { parseWorkflowRunCommand, workflowProgressSnapshot, workflowChildBlocks } from '../shared/workflow'
+import { capabilityForRole, makePlanPreview, workflowSystemSourceBody, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision } from './workflow-program'
 import { WorkflowRunner, WorkflowSlots, WorkflowScopeError, type WorkflowProviderExecution, type WorkflowProviderExecutionResult } from './workflow-runner'
 import { SHUTDOWN_DEADLINE_MS } from './shutdown'
 import type { WorkflowPlanningIntent, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
@@ -28,6 +31,7 @@ export interface WorkflowPlanProvider {
 export interface WorkflowServiceOptions {
   store: WorkflowStore
   templates?: WorkflowTemplateStore
+  systems?: WorkflowSystemHost
   providerRegistered: (providerId: ProviderId) => boolean
   runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
   plan: WorkflowPlanProvider
@@ -81,7 +85,7 @@ export class WorkflowService {
 
   constructor(options: WorkflowServiceOptions) {
     this.options = { ...options, slots: options.slots ?? new WorkflowSlots() }
-    this.runner = new WorkflowRunner({ store: options.store, slots: this.options.slots,
+    this.runner = new WorkflowRunner({ store: options.store, slots: this.options.slots, systems: options.systems,
       execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd, onObservation: request.onObservation }),
       onLifecycle: () => this.notifyLifecycle(),
       beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true) },
@@ -171,6 +175,17 @@ export class WorkflowService {
     }
   }
   private async recover(record: WorkflowStoreRecord): Promise<void> {
+    validateWorkflowSystemLedger(record)
+    const systemKnown = new Set((record.systemOutcomes ?? []).map(outcome => outcome.stepId))
+    for (const intent of record.systemIntents ?? []) if (!systemKnown.has(intent.stepId)) {
+      ;(record.systemOutcomes ??= []).push({ stepId: intent.stepId, taskId: intent.taskId, state: 'unknown', settled: false, startedAt: intent.createdAt, finishedAt: Date.now(), error: workflowSystemCopy.unknown })
+    }
+    const pendingSystems = (record.systemOutcomes ?? []).filter(outcome => !outcome.settled)
+    for (const _ of pendingSystems) this.options.slots.reserveUnknown()
+    if (record.systemIntents?.length) record.progress.systemSteps = record.systemIntents.slice(-64).map(intent => {
+      const outcome = record.systemOutcomes?.find(value => value.stepId === intent.stepId)
+      return { stepId: intent.stepId, nodeId: intent.nodeId, kind: intent.kind, state: outcome?.state ?? 'unknown', settled: outcome?.settled ?? false, startedAt: intent.createdAt, ...(outcome ? { finishedAt: outcome.finishedAt, ...(outcome.check ? { result: outcome.check } : {}), ...(outcome.replica ? { replica: outcome.replica } : {}), ...(outcome.error ? { error: outcome.error } : {}) } : {}) }
+    })
     const known = new Set(record.outcomes.map(outcome => outcome.attemptId))
     for (const intent of record.intents.filter(intent => !known.has(intent.attemptId))) {
       const outcome: WorkflowAttemptOutcome = { attemptId: intent.attemptId, taskId: intent.taskId, nodeId: intent.taskId.split(':').pop() ?? intent.taskId,
@@ -180,7 +195,7 @@ export class WorkflowService {
     }
     const pending = record.outcomes.filter(outcome => !outcome.settled)
     for (const _ of pending) this.options.slots.reserveUnknown()
-    if (pending.length) {
+    if (pending.length || pendingSystems.length) {
       record.progress.state = 'unknown'
       record.progress.revision = (record.progress.revision ?? 0) + 1
       record.progress.finalReportStatus = 'unavailable'
@@ -193,6 +208,14 @@ export class WorkflowService {
       await this.options.store.save(record)
     }
   }
+  private async prepareSystems(program: WorkflowProgram): Promise<WorkflowProgram> {
+    const pending = [program.body]
+    let required = false
+    while (pending.length) { const block = pending.pop()!; required ||= block.kind === 'replica' || block.kind === 'check'; pending.push(...workflowChildBlocks(block)) }
+    if (!required) return program
+    if (!this.options.systems) throw new Error(workflowSystemCopy.unavailable)
+    return validateWorkflowProgram(await this.options.systems.prepare(program))
+  }
   private async assertFrozen(preview: WorkflowPlanPreview): Promise<void> {
     const { programRevision, ...program } = validateWorkflowProgram(preview.program)
     if (programRevision !== workflowRevision(program) || preview.programRevision !== programRevision || preview.workspace !== program.workspace || preview.workflowId !== program.workflowId || preview.userGoal !== program.userGoal) throw new Error('程序指纹已变化，必须重新规划')
@@ -202,7 +225,7 @@ export class WorkflowService {
       const names = Object.keys(definition.parameters).sort()
       if (JSON.stringify(names) !== JSON.stringify(program.template.parameterNames) || program.workflowId !== planningId('template:' + program.template.commandId)) throw new Error(workflowTemplateCopy.frozen)
       const parameters = frozenTemplateParameters(program.body, names)
-      if (JSON.stringify(templateBody(definition, parameters)) !== JSON.stringify(program.body)) throw new Error(workflowTemplateCopy.frozen)
+      if (JSON.stringify(templateBody(definition, parameters)) !== JSON.stringify(workflowSystemSourceBody(program.body))) throw new Error(workflowTemplateCopy.frozen)
       templateRoles(definition, program.roles)
       if (JSON.stringify(validateWorkflowRoleBinding(preview.orchestrator, 0, true)) !== JSON.stringify(program.roles.find(role => role.role === 'orchestrator'))) throw new Error(workflowTemplateCopy.frozen)
     }
@@ -285,8 +308,9 @@ export class WorkflowService {
         this.assertAdmissionGeneration(generation)
         trace.mark('bindings_resolved')
         const roles = bindings.map((role, index) => ({ ...role, ...(capabilities[index].runtimeIdentity ? { runtimeIdentity: capabilities[index].runtimeIdentity } : {}) }))
-        const program = validateWorkflowProgram({ schemaVersion: 1, workflowId: id, programRevision: 'pending', userGoal: request.userGoal, workspace: request.cwd,
+        let program = validateWorkflowProgram({ schemaVersion: 1, workflowId: id, programRevision: 'pending', userGoal: request.userGoal, workspace: request.cwd,
           roles, body, template: { ref: frozen.ref, origin: frozen.origin, parameterNames: Object.keys(frozen.definition.parameters).sort(), commandId: request.commandId, requestHash: fingerprint } })
+        program = await this.prepareSystems(program)
         const { programRevision: _revision, ...snapshot } = program
         program.programRevision = workflowRevision(snapshot)
         const preview = makePlanPreview(program, capabilities, roles[0])
@@ -380,7 +404,8 @@ export class WorkflowService {
       const text = planned.output.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
       const candidate: unknown = JSON.parse(text)
       if (!candidate || typeof candidate !== 'object' || !('body' in candidate)) throw new Error('编排 Provider 未返回有效程序')
-      const program = validateWorkflowProgram({ schemaVersion: 1, workflowId: id, programRevision: 'pending', userGoal: goal, workspace: request.workspace, roles, body: candidate.body })
+      let program = validateWorkflowProgram({ schemaVersion: 1, workflowId: id, programRevision: 'pending', userGoal: goal, workspace: request.workspace, roles, body: candidate.body })
+      program = await this.prepareSystems(program)
       const { programRevision: _revision, ...snapshot } = program
       program.programRevision = workflowRevision(snapshot)
       const preview = makePlanPreview(program, capabilities, request.orchestrator)
@@ -413,7 +438,9 @@ export class WorkflowService {
   private recordSettled(record: WorkflowStoreRecord): boolean {
     const settledAttempts = new Set(record.outcomes.filter(outcome => outcome.settled).map(outcome => outcome.attemptId))
     const outcomeStateSettled = terminalProgressStates.has(record.progress.state) || record.progress.state === 'unknown'
-    return outcomeStateSettled && record.outcomes.every(outcome => outcome.settled) && record.intents.every(intent => settledAttempts.has(intent.attemptId))
+    const settledSystems = new Set((record.systemOutcomes ?? []).filter(outcome => outcome.settled).map(outcome => outcome.stepId))
+    return outcomeStateSettled && record.outcomes.every(outcome => outcome.settled) && record.intents.every(intent => settledAttempts.has(intent.attemptId)) &&
+      (record.systemOutcomes ?? []).every(outcome => outcome.settled) && (record.systemIntents ?? []).every(intent => settledSystems.has(intent.stepId))
   }
 
   private planningSettled(intent: WorkflowPlanningIntent): boolean {

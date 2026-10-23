@@ -133,6 +133,7 @@ import { createDesktopWorkbench } from './remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { FileWorkflowStore } from './workflow-store'
+import { WorkflowSystemHost } from './workflow-system-host'
 import { WorkflowService } from './workflow-service'
 import { workflowShutdownCopy, workflowTemplateCopy } from '../shared/constants/copy'
 import { workflowPlanningPrompt } from './workflow-program'
@@ -4627,6 +4628,7 @@ const workflowSlots = new WorkflowSlots()
 const workflowService = new WorkflowService({
   store: workflowStore,
   templates: workflowTemplates,
+  systems: new WorkflowSystemHost(join(app.getPath('userData'), 'workflow-replicas'), workflowStore),
   slots: workflowSlots,
   loadConcurrency: () => workflowStore.readConcurrency(),
   providerRegistered: (providerId) => providerRegistry.isRegistered(providerId) && !providerRegistry.isDisabled(providerId),

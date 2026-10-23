@@ -1,4 +1,5 @@
-import type { WorkflowRole, WorkflowValue, WorkflowValueSchema } from '../shared/workflow'
+import type { WorkflowBlock, WorkflowRole, WorkflowValue, WorkflowValueSchema } from '../shared/workflow'
+import { workflowChildBlocks } from '../shared/workflow'
 import { WORKFLOW_TEMPLATE_MAX_BYTES, type WorkflowTemplateDefinition } from '../shared/workflow-template'
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowBody, validateWorkflowRolePreference, WORKFLOW_ROLES } from './workflow-program'
@@ -42,5 +43,11 @@ export function validateWorkflowTemplate(source: string, expectedId: string): Wo
   const requiredRoles = new Set(roles.map(role => role.role))
   if (requiredRoles.size !== roles.length) throw new Error(copy.invalid)
   const body = validateWorkflowBody(value.body, requiredRoles, schemas)
+  const pending: WorkflowBlock[] = [body]
+  while (pending.length) {
+    const block = pending.pop()!
+    if (block.kind === 'check' && block.authorization !== undefined) throw new Error(copy.invalid)
+    pending.push(...workflowChildBlocks(block))
+  }
   return { schemaVersion: 1, templateId: expectedId, name: value.name, description: value.description, parameters, roles, body }
 }

@@ -4,6 +4,7 @@ import type { WorkflowTemplateExtraction, WorkflowTemplateDefinition } from '../
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
 import { templateObject, templateScope, templateHashPattern } from './workflow-template-identity'
 import { matchesWorkflowValue, validateWorkflowValueSchema } from './workflow-values'
+import { workflowSystemSourceBody } from './workflow-program'
 
 export const templateExtractionFields = ['workflowId', 'programRevision', 'scope', 'name', 'description', 'parameters'] as const
 export function validateTemplateExtraction(input: unknown): WorkflowTemplateExtraction {
@@ -37,6 +38,6 @@ export function templateExtractionSource(program: WorkflowProgram, request: Work
   }
   return JSON.stringify({ schemaVersion: 1, name: request.name, description: request.description, parameters,
     roles: program.roles.map(({ role, providerId, requestedModel }) => ({ role, providerId, ...(requestedModel ? { requestedModel } : {}) })),
-    body: { ...program.body, blocks: program.body.blocks.filter(block => !Object.hasOwn(parameters, block.blockId)) }
+    body: workflowSystemSourceBody({ ...program.body, blocks: program.body.blocks.filter(block => !Object.hasOwn(parameters, block.blockId)) })
   }, null, 2) + '\n'
 }

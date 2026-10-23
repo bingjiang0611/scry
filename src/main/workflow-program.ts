@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { validateWorkflowCheck, validateWorkflowFrozenCheck } from './workflow-check'
+import { workflowCheckValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
 import type {
   WorkflowBlock,
@@ -21,6 +23,18 @@ import { templateInstance } from './workflow-template-identity'
 import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema, workflowItemsSchema, workflowScalarSchema } from './workflow-expressions'
 import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowLoopCopy, workflowValueCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
+
+/** Portable syntax excludes host-resolved paths/fingerprints. Main freezes
+ * these again for every instance; a template never supplies execution authority. */
+export function workflowSystemSourceBody(body: WorkflowBlock): WorkflowBlock {
+  const result = structuredClone(body), pending = [result]
+  while (pending.length) {
+    const block = pending.pop()!
+    if (block.kind === 'check') delete block.authorization
+    pending.push(...workflowChildBlocks(block))
+  }
+  return result
+}
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/
 const MAX_GOAL_LENGTH = 16_000
@@ -168,6 +182,18 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
     return { kind: 'call', blockId: input.blockId, role: input.role, prompt: input.prompt,
       ...(inputRefs ? { inputRefs } : {}), ...(outputSchema ? { outputSchema } : {}) }
   }
+  if (input.kind === 'replica' || input.kind === 'check') {
+    rejectUnknownFields(input, input.kind === 'replica' ? ['kind', 'blockId', 'source'] : ['kind', 'blockId', 'replica', 'check', 'authorization'])
+    const expression = input.kind === 'replica' ? input.source === undefined ? undefined : validateWorkflowExpression(input.source) : validateWorkflowExpression(input.replica)
+    count.textBytes += Buffer.byteLength(JSON.stringify(expression) ?? '')
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    if (input.kind === 'replica') return { kind: 'replica', blockId: input.blockId, ...(expression ? { source: expression } : {}) }
+    const check = validateWorkflowCheck(input.check), authorization = input.authorization === undefined ? undefined : validateWorkflowFrozenCheck(input.authorization)
+    if (authorization && JSON.stringify(check) !== JSON.stringify(validateWorkflowCheck({ argv: authorization.argv, cwd: authorization.cwd, timeoutMs: authorization.timeoutMs, parser: authorization.parser }))) throw new Error(workflowValueCopy.bindingContract)
+    count.textBytes += Buffer.byteLength(JSON.stringify({ check, authorization }))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    return { kind: 'check', blockId: input.blockId, replica: expression!, check, ...(authorization ? { authorization } : {}) }
+  }
   if (input.kind === 'bind') {
     rejectUnknownFields(input, ['kind', 'blockId', 'value', 'schema'])
     const expression = validateWorkflowExpression(input.value)
@@ -251,6 +277,11 @@ function validateReferenceDominance(body: WorkflowBlock, inputs: ReadonlyMap<str
     if (block.kind === 'call') {
       for (const ref of block.inputRefs ?? []) referenceType(ref, scope)
       return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
+    }
+    if (block.kind === 'replica' || block.kind === 'check') {
+      const expression = block.kind === 'replica' ? block.source : block.replica
+      if (expression && !workflowSchemaAssignable(inferWorkflowExpression(expression, scope), workflowReplicaValueSchema)) throw new Error(workflowValueCopy.bindingContract)
+      return bind(scope, block.blockId, block.kind === 'replica' ? workflowReplicaValueSchema : workflowCheckValueSchema)
     }
     if (block.kind === 'bind') {
       const actual = inferWorkflowExpression(block.value, scope)

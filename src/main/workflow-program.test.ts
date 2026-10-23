@@ -67,6 +67,15 @@ describe('WorkflowProgram M0 contract', () => {
     expect(() => validateWorkflowProgram({ ...program, body: body(0) })).toThrow('绑定值')
   })
 
+  it('charges replica source expressions to the same total program text budget', () => {
+    const source = { kind: 'literal', value: { workflowId: 'workflow-test', replicaId: 'x'.repeat(3 * 1024 * 1024), inputHash: 'a'.repeat(64) } }
+    const body = { kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'replica', blockId: 'first', source }, { kind: 'replica', blockId: 'second', source },
+      { kind: 'return', blockId: 'finish', ref: { nodeId: 'second' } }
+    ] }
+    expect(() => validateWorkflowProgram({ ...program, body })).toThrow('程序文本超过 4 MiB')
+  })
+
   it('rejects schema execution hooks while allowing data fields named command or path', () => {
     const schema = { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } } }
     const withSchema = (outputSchema: unknown) => ({ ...program, body: { ...program.body, blocks: [

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { exerciseWorkflowSystemSteps } from './workflow-system-ipc-checks.mjs'
 
 const ledger = async path => {
   try { return await readFile(path, 'utf8') } catch (error) {
@@ -121,6 +122,7 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   assert.deepEqual([nestedReport.group_count, nestedReport.matched_count, nestedReport.rejected_count, nestedReport.unknown_count], [2, 1, 1, 0])
   assert.equal(nestedReport.filtered[0].value.value.value, false)
   assert.equal(nestedResult.dispatchAttempts, 0)
-  assert.deepEqual(await Promise.all(ledgers.map(ledger)), before, 'template publication must not invoke any Provider')
-  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, nestedCollectionProjection: true, streamingGroupAndPartition: true, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
+  const systemSteps = await exerciseWorkflowSystemSteps(evaluate, fixture)
+  assert.deepEqual(await Promise.all(ledgers.map(ledger)), before, 'template publication and SystemSteps must not invoke any Provider')
+  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, nestedCollectionProjection: true, streamingGroupAndPartition: true, systemSteps, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
 }

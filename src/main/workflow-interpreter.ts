@@ -29,7 +29,8 @@ const unavailable = (reason = copy.failedValue): WorkflowEvaluation => ({ state:
  * effects remain in the canonical Runner callback, with its slots and ledger. */
 export class WorkflowInterpreter {
   constructor(private readonly control: WorkflowControl, private readonly state: WorkflowInterpreterState,
-    private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number) {}
+    private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number,
+    private readonly system: (block: Extract<WorkflowBlock, { kind: 'replica' | 'check' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }>) {}
 
   private phase(outcomes: WorkflowAttemptOutcome[], scope: WorkflowControlScope): WorkflowControlFrame['phase'] {
     return outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown') ? 'unknown'
@@ -128,6 +129,13 @@ export class WorkflowInterpreter {
           const { outcome, value } = await this.call(current, top.scope, frame)
           stack.pop()
           returned = await this.finish(current, top.scope, frame, value, this.phase([outcome], top.scope), [outcome])
+          break
+        }
+        case 'replica': case 'check': {
+          const result = await this.system(current, top.scope, frame)
+          if (result.phase === 'blocked' && result.value.state === 'unknown') top.scope.blockedReason = result.value.reason
+          stack.pop()
+          returned = await this.finish(current, top.scope, frame, result.value, result.phase)
           break
         }
         case 'sequence':

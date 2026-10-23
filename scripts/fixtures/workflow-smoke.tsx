@@ -31,6 +31,8 @@ const api: WorkflowApi = {
       orchestrator: input.orchestrator, plannedCalls: 1, roles: [], state: 'ready', unavailableReasons: [], observedAt: Date.now(),
       program: { schemaVersion: 1, workflowId: 'ui-workflow', programRevision: 'ui-revision', userGoal: 'Inspect fixture', workspace: input.cwd, roles: input.roles,
         body: { kind: 'sequence', blockId: 'root', blocks: [
+          ...Array.from({ length: 17 }, (_, index) => ({ kind: 'replica' as const, blockId: `copy_${index}` })),
+          { kind: 'check', blockId: 'verify', replica: { kind: 'ref', name: 'copy_0' }, check: { argv: ['node', 'verify.cjs', 'a b', 'literal;$(not-a-shell)'], cwd: '.', timeoutMs: 1500, parser: 'exit_code' } },
           { kind: 'call', blockId: 'report', role: 'worker', prompt: 'Inspect fixture' },
           { kind: 'return', blockId: 'return', ref: { nodeId: 'report' } }
         ] } } }
@@ -48,7 +50,10 @@ const api: WorkflowApi = {
     progress = { workflowId: preview.workflowId, programRevision: preview.programRevision, workspace: preview.workspace,
       goal: preview.userGoal, state: 'running', dispatchAttempts: 1, revision: 2, updatedAt: Date.now(), finalReportStatus: 'unavailable',
       attempts: [{ attemptId: 'attempt', taskId: 'task', nodeId: 'report', role: 'worker', providerId: 'codex', actualModelStatus: 'unknown', state: 'running', settled: false }],
-      slots: { limit: 2, inUse: 1, queued: 0 } }
+      slots: { limit: 2, inUse: 1, queued: 0 },
+      systemSteps: [{ stepId: 'fixture-system', nodeId: 'verify', kind: 'check', state: 'completed', settled: true,
+        result: { state: 'failed', exitCode: 17, signal: null, startedAt: 1, finishedAt: 2, settled: true, truncated: false, evidence: 'exact',
+          stdoutRef: { workflowId: 'ui-workflow', key: 'stdout', hash: '0'.repeat(64) }, stderrRef: { workflowId: 'ui-workflow', key: 'stderr', hash: '0'.repeat(64) }, diagnostics: { state: 'unavailable', reason: 'fixture only' } } }] }
     notify()
     return progress
   },

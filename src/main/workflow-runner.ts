@@ -6,6 +6,7 @@ import type {
   WorkflowApproval,
   WorkflowAttemptOutcome,
   WorkflowBlock,
+  WorkflowControlFrame,
   WorkflowEvaluation,
   WorkflowValue,
   WorkflowLiveObservation,
@@ -22,6 +23,9 @@ import { WorkflowInterpreter, type WorkflowInterpreterState } from './workflow-i
 import { assertWorkflowRecovery, workflowRecordFingerprint } from './workflow-recovery'
 import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
 import { assertWorkflowRetryTarget, validateWorkflowRetryTarget, workflowRetryAdmission } from './workflow-retry'
+import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowSystemOutcome, type WorkflowSystemProgress } from '../shared/workflow-system'
+import { workflowSystemCopy } from '../shared/constants/copy'
+import type { WorkflowSystemHost } from './workflow-system-host'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
@@ -144,13 +148,18 @@ export class WorkflowSlots {
     })
   }
 
-  withSlot<T>(task: () => Promise<T>, ownerId = '__planner__'): Promise<T> {
+  withSlot<T>(task: () => Promise<T>, ownerId = '__planner__', scope?: () => Promise<void> | undefined): Promise<T> {
     return new Promise((resolve, reject) => {
       const queue = this.genericWaiting.get(ownerId) ?? []
       queue.push({ sequence: this.sequence++, cancel: () => reject(new Error('工作流规划已取消')), run: async () => {
         try { resolve(await task()) } catch (error) {
           reject(error)
-          if (error instanceof WorkflowScopeError && !error.settled) await new Promise<void>(() => {})
+          if (error instanceof WorkflowScopeError && !error.settled && !scope?.()) await new Promise<void>(() => {})
+        } finally {
+          // A result or a journal failure never frees a started native scope.
+          // Rejected convergence remains reserved; its owner reports the error.
+          const closed = scope?.()
+          if (closed) await closed.catch(() => new Promise<void>(() => {}))
         }
       } })
       this.genericWaiting.set(ownerId, queue)
@@ -222,6 +231,7 @@ export interface WorkflowRunnerOptions {
   store: WorkflowStore
   slots?: WorkflowSlots
   execute: WorkflowProviderExecutor
+  systems?: WorkflowSystemHost
   now?: () => number
   onProgress?: (progress: WorkflowProgress) => void
   onLifecycle?: () => void
@@ -232,6 +242,7 @@ export class WorkflowRunner {
   private readonly store: WorkflowStore
   private readonly slots: WorkflowSlots
   private readonly execute: WorkflowProviderExecutor
+  private readonly systems?: WorkflowSystemHost
   private readonly now: () => number
   private readonly onProgress?: (progress: WorkflowProgress) => void
   private readonly onLifecycle?: () => void
@@ -259,6 +270,7 @@ export class WorkflowRunner {
     this.store = options.store
     this.slots = options.slots ?? new WorkflowSlots()
     this.execute = options.execute
+    this.systems = options.systems
     this.now = options.now ?? (() => Date.now())
     this.onProgress = options.onProgress
     this.onLifecycle = options.onLifecycle
@@ -322,6 +334,7 @@ export class WorkflowRunner {
     const progress: WorkflowProgress = {
       workflowId: preview.workflowId, programRevision: preview.programRevision, workspace: preview.workspace,
       goal: preview.userGoal, state: 'queued', attempts: continuation ? [...continuation.record.outcomes] : [], dispatchAttempts: continuation?.record.progress.dispatchAttempts ?? 0,
+      ...(continuation?.record.progress.systemSteps ? { systemSteps: structuredClone(continuation.record.progress.systemSteps) } : {}),
       slots: { limit: this.slots.limit, inUse: this.slots.active, queued: this.slots.queued }, updatedAt: this.now()
     }
     const epoch = randomUUID()
@@ -346,7 +359,7 @@ export class WorkflowRunner {
     this.approvals.delete(preview.workflowId)
     try {
       const existing = await this.store.load(preview.workflowId)
-      if (!continuation && existing && (existing.executionStarted !== undefined || existing.intents.length > 0 || existing.outcomes.length > 0 || ['completed', 'failed', 'blocked', 'stopped', 'unknown'].includes(existing.progress.state))) {
+      if (!continuation && existing && (existing.executionStarted !== undefined || existing.intents.length > 0 || existing.outcomes.length > 0 || (existing.systemIntents?.length ?? 0) > 0 || ['completed', 'failed', 'blocked', 'stopped', 'unknown'].includes(existing.progress.state))) {
         throw new Error('工作流已有持久化执行记录，不能重新派发')
       }
       if (existing?.receipt) record.receipt = existing.receipt
@@ -375,7 +388,7 @@ export class WorkflowRunner {
           value = { state: 'known', value: data, derivedFrom: ['attempt:' + outcome.attemptId] }
         }
         return { outcome, value }
-      }, () => this.slots.limit)
+      }, () => this.slots.limit, (block, scope, frame) => this.system(preview, block, scope, frame, control, record, controller, activeStops))
       const { outcomes, phase: controlPhase } = await interpreter.run(preview.program.body, control.root)
       progress.state = controlPhase === 'unknown' || outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : (controlPhase === 'blocked' || control.root.blockedReason || outcomes.some(outcome => outcome.state === 'blocked')) ? 'blocked' : controller.stopped || controlPhase === 'stopped' ? 'stopped' : controlPhase === 'failed' || outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
       const legacyReport = !control.framed && controller.returnPath === undefined && controller.returnNode !== undefined ? outcomes.find(outcome =>
@@ -413,7 +426,7 @@ export class WorkflowRunner {
   }
 
   private closeOwnership(record: WorkflowStoreRecord): void {
-    if (record.execution && !this.hasUnsettledIntents(record) && record.outcomes.every(value => value.settled && value.state !== 'unknown')) record.execution.owner.state = 'closed'
+    if (record.execution && !this.hasUnsettledIntents(record) && record.outcomes.every(value => value.settled && value.state !== 'unknown') && (record.systemOutcomes ?? []).every(value => value.settled && value.state !== 'unknown')) record.execution.owner.state = 'closed'
   }
 
   /** Business outcome can remain unknown after every native scope and required
@@ -484,6 +497,85 @@ export class WorkflowRunner {
     return entry ? this.liveSnapshot(entry.progress) : undefined
   }
 
+
+  private async system(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'replica' | 'check' }>, scope: WorkflowControlScope,
+    frame: WorkflowControlFrame | undefined, control: WorkflowControl, record: WorkflowStoreRecord, controller: WorkflowInterpreterState, activeStops: Set<() => boolean>): Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }> {
+    const recovered = control.recoveredSystem(block, scope, frame)
+    if (recovered) {
+      if (recovered.replica) {
+        if (!this.systems) throw new Error(workflowSystemCopy.unavailable)
+        await this.systems.replicas.resolve(recovered.replica)
+      }
+      if (recovered.check) for (const reference of [recovered.check.stdoutRef, recovered.check.stderrRef,
+        ...(recovered.check.diagnostics.state === 'available' ? [recovered.check.diagnostics.reference] : [])]) await this.store.loadValue(preview.workflowId, reference)
+      return { value: await this.store.loadValue(preview.workflowId, recovered.resultRef!), phase: recovered.state }
+    }
+    const unavailable = (reason: string, phase: WorkflowControlFrame['phase'] = 'blocked') => ({ value: { state: 'unknown' as const, reason, derivedFrom: [] }, phase })
+    if (!this.systems) return unavailable(workflowSystemCopy.unavailable)
+    if (controller.stopped) return unavailable(workflowSystemCopy.stopped, 'stopped')
+    const expression = block.kind === 'replica' ? block.source : block.replica
+    const input = expression ? await control.evaluate(expression, scope, block.blockId, () => controller.stopped) : undefined
+    if (input?.state === 'unknown') return unavailable(input.reason)
+    const host = this.systems
+    let held: Promise<void> | undefined
+    try {
+      const result = await this.slots.withSlot(async () => {
+        if (controller.stopped) return unavailable(workflowSystemCopy.stopped, 'stopped')
+        const stepId = randomUUID(), taskId = preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
+        let unlock!: () => void
+        const prior = this.reservationTail
+        this.reservationTail = new Promise<void>(resolve => { unlock = resolve })
+        await prior
+        try {
+          if (controller.stopped) return unavailable(workflowSystemCopy.stopped, 'stopped')
+          const intents = record.systemIntents ??= []
+          if (intents.length >= WORKFLOW_MAX_SYSTEM_STEPS) throw new Error(workflowSystemCopy.limit)
+          if (intents.some(intent => intent.taskId === taskId)) throw new Error(workflowSystemCopy.intent)
+          const kind = block.kind === 'replica' ? 'prepare_replica' : 'check'
+          intents.push({ stepId, taskId, nodeId: block.blockId, kind, programRevision: preview.programRevision, createdAt: this.now(), ...(input?.state === 'known' && input.replica ? { replica: input.replica } : {}) })
+          const visible: WorkflowSystemProgress = { stepId, nodeId: block.blockId, kind, state: 'running', settled: false, startedAt: this.now() }
+          record.progress.systemSteps = [...(record.progress.systemSteps ?? []), visible].slice(-64)
+          await this.persist(record, record.progress)
+        } finally { unlock() }
+        const execution = host.execute(preview, block, stepId, input)
+        activeStops.add(execution.stop)
+        if (controller.stopped) execution.stop()
+        let recorded!: () => void
+        const receiptReady = new Promise<void>(resolve => { recorded = resolve })
+        let outcome: WorkflowSystemOutcome | undefined, committed = false
+        const progress = record.progress.systemSteps!.find(value => value.stepId === stepId)
+        const startedAt = record.systemIntents!.find(intent => intent.stepId === stepId)!.createdAt
+        held = Promise.all([execution.settled, receiptReady]).then(async () => {
+          if (!outcome) {
+            outcome = { stepId, taskId, state: 'unknown', settled: true, startedAt, finishedAt: this.now(), error: workflowSystemCopy.unknown }
+            ;(record.systemOutcomes ??= []).push(outcome)
+          }
+          if (!committed || !outcome.settled) {
+            outcome.settled = true
+            if (progress) Object.assign(progress, { state: outcome.state, settled: true, finishedAt: outcome.finishedAt, ...(outcome.error ? { error: outcome.error } : {}) })
+            await this.persist(record, record.progress)
+          }
+          activeStops.delete(execution.stop)
+          this.finishSettledRoot(preview.workflowId)
+        }).catch(error => { record.progress.error = String(error); this.publish(record.progress); throw error })
+        try {
+          const observed = await execution.result
+          const resultRef = await this.store.saveValue(preview.workflowId, stepId, observed.value)
+          outcome = { stepId, taskId, state: observed.state, settled: observed.settled, resultRef, startedAt, finishedAt: this.now(),
+            ...(observed.replica ? { replica: observed.replica } : {}), ...(observed.check ? { check: observed.check } : {}), ...(observed.error ? { error: observed.error.slice(0, 4096) } : {}) }
+          ;(record.systemOutcomes ??= []).push(outcome)
+          if (progress) Object.assign(progress, { state: outcome.state, settled: outcome.settled, finishedAt: outcome.finishedAt, ...(outcome.replica ? { replica: outcome.replica } : {}), ...(outcome.check ? { result: outcome.check } : {}), ...(outcome.error ? { error: outcome.error } : {}) })
+          await this.persist(record, record.progress)
+          committed = true
+          return { value: observed.value, phase: outcome.state }
+        } finally { recorded() }
+      }, preview.workflowId, () => held)
+      return { value: result.value, phase: result.phase }
+    } catch (error) {
+      if (controller.stopped && !(record.systemIntents ?? []).some(intent => intent.taskId === preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId)) return unavailable(workflowSystemCopy.stopped, 'stopped')
+      throw error
+    }
+  }
 
   private async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope): Promise<WorkflowAttemptOutcome> {
     if (controller.stopped) return this.outcome(preview, block, 'stopped', { settled: true, error: '工作流已停止' })
@@ -611,7 +703,7 @@ export class WorkflowRunner {
 
   private hasUnsettledIntents(record: WorkflowStoreRecord): boolean {
     const settled = new Set(record.outcomes.filter(outcome => outcome.settled).map(outcome => outcome.attemptId))
-    return record.intents.some(intent => !settled.has(intent.attemptId))
+    return record.intents.some(intent => !settled.has(intent.attemptId)) || (record.systemIntents ?? []).some(intent => !(record.systemOutcomes ?? []).some(outcome => outcome.stepId === intent.stepId && outcome.settled))
   }
 
   private async commitOutcome(record: WorkflowStoreRecord, outcome: WorkflowAttemptOutcome): Promise<void> {

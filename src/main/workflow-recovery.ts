@@ -3,6 +3,7 @@ import type { WorkflowStoreRecord } from './workflow-store'
 import { WORKFLOW_MAX_ATTEMPTS, workflowChildBlocks, type WorkflowBlock } from '../shared/workflow'
 import { workflowRecoveryCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
+import { assertWorkflowSystemsSettled } from './workflow-system-ledger'
 import { assertWorkflowRetryTarget, validateWorkflowAttemptChains, validateWorkflowRetryTarget } from './workflow-retry'
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
@@ -33,6 +34,7 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
     new Set(record.intents.map(intent => intent.attemptId)).size !== record.intents.length ||
     new Set(record.outcomes.map(outcome => outcome.attemptId)).size !== record.outcomes.length) throw new Error(copy.ledger)
   validateWorkflowAttemptChains(record)
+  assertWorkflowSystemsSettled(record)
   const calls = new Map<string, Extract<WorkflowBlock, { kind: 'call' }>>()
   const pending = [program.body]
   while (pending.length) {
@@ -76,7 +78,8 @@ export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, 
     JSON.stringify(segments.slice(0, -1)) !== JSON.stringify(current.execution.segments) ||
     JSON.stringify(next.preview.program) !== JSON.stringify(current.preview.program) ||
     next.progress.dispatchAttempts !== current.progress.dispatchAttempts ||
-    JSON.stringify(next.intents) !== JSON.stringify(current.intents) || JSON.stringify(next.outcomes) !== JSON.stringify(current.outcomes)) throw new Error(copy.ledger)
+    JSON.stringify(next.intents) !== JSON.stringify(current.intents) || JSON.stringify(next.outcomes) !== JSON.stringify(current.outcomes) ||
+    JSON.stringify(next.systemIntents) !== JSON.stringify(current.systemIntents) || JSON.stringify(next.systemOutcomes) !== JSON.stringify(current.systemOutcomes)) throw new Error(copy.ledger)
 }
 
 export function workflowEpochMatches(current: WorkflowStoreRecord | undefined, next: WorkflowStoreRecord): void {

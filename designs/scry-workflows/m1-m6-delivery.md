@@ -1,5 +1,16 @@
 # M1–M6 实施与真实验收台账
 
+## main 副本与检查增量（M3/M4 原语；整体仍未完成）
+
+- 新增 replica/check 数据节点，仍走 compiler → Service → canonical Runner → Interpreter → main effect host；没有第二套调度器或任意宿主函数 API。main 冻结命令/解释器/环境/入口文件指纹；同根真实副本使用 opaque authority、输入清单、目录 inode 与租约，不从 Agent JSON 或普通路径推断权限。副本包含当前 dirty/untracked/ignored 内容；边界和上限见 [程序合同](program-ir.md#main-工作副本与检查步骤已接入非完整质量模式)。
+- 系统 intent/结果独立持久，不计 Agent 尝试、不退款；共享原槽位、原根 CAS/epoch/控制段。结果落盘失败也不丢掉原 native scope 的占用；晚到物理收敛只更新范围证据，不赋予重发资格。冷启动缺失 outcome 保留系统容量；退出治理也检查该账本。父 checkpoint 失败复用准确结果；缺失 stdout、错误 artifact 身份或副本收据拒绝，不再执行检查补证据。
+- 计划预览分页显示命令、目标、cwd、超时和解析器，并说明本机权限与副本非沙箱。进度区单列最近 64 个 main 系统结果，区分“已记录结果”和“检查未通过”；最终报告不再把纯程序结果误标成 Agent 输出。模板禁止主机 authorization，提取时删除该字段，实例重新冻结并审批。
+- 当前 Node24.18.0/macOS：新增 **3 文件 36/36** 通过；最后源码相关 **12 文件 154/154** 通过，包含程序文本预算回归；Node/web types、增强的真实 Chromium 输入 workflow UI fixture、build + 完整 production conversation IPC 通过。生产 preload/main 在独立 userData/工作区中实际执行两次本地 Node 检查：exit0→true、exit17→false；各只有一次 native 执行，原工作区未被脚本写入、Agent 尝试为 0、重复 start 不重跑，Provider 增量为 0。完整原有 conversation 场景的 21 次调用仍全部是离线 fixture，不是真实账号/SDK 验收。
+- 负控有效：上一 App bundle 在同一生产新场景以“未实现 replica/check”拒绝，当前 bundle 通过；临时去掉槽位对 native scope 的等待后，“结果 artifact 写失败仍须保留容量”测试在 queued=0（应为1）处失败。模板测试首次使用非 UUID templateId 失败，已修正 fixture 为正式合同要求的 UUID，未修改 validator 或删断言。自审补齐 replica source 的 4 MiB 程序总文本计数，并在 main 冻结字段加入后重验整个程序；临时禁用计数后新增回归明确失败。单次准备中完全相同的 check 共用一次冻结/指纹读取，spy 验证实际一次，没有给出毫秒提速结论。
+- **组合检查未全绿**：26 文件 325 项中 324 通过；既有 1000-attempt 用例在原 5000ms deadline 超时。取父提交 Runner 的临时对照也在相同 deadline 超时；这不证明全部根因或所有共享依赖与本次无关。随后当前源码的单场景 CPU 采样运行通过（1 passed/11 未选择，约3738ms），主要采样落在 MemoryWorkflowStore.save/控制帧复制验证；不据 focused 通过关闭组合首败，也未增加 deadline、缩减工作量或重跑刷绿。后续仍由主实施会话定位并修复可证明的工作量问题。
+- `performance:measure -- --scenario providers.catalog` 仍因 `No counter collector matches providers.catalog` unavailable/exit1；登记来源不是 collector，不能宣称性能通过或提速。UI mechanical detector 返回空 findings；外部 warning-text 参考仅用于权限后果文案，不代表视觉/完整 App 已全部验收。日志保留在 `/tmp/scry-workflow-template-editor.ZnkC6L/system-*`。
+- 主实施会话继续接入：副本 Agent 的 App authority 与 Recorder/归档关系、诊断数据消费与 classifier、质量流程/必需验证、组合/应用/清理；再完成同根修订恢复、chat 路由和其余管理 UI。现有 Manager 原语不是这些流程已完成。真实 Provider/Jev、费用及业务 patch 仍保留明确授权边界；未安装、未 push、未升版本。
+
 ## 显式失败重试增量（M3，严格子集；整体仍未完成）
 
 - 新增 `WorkflowApi.retry(workflowId, approval, { taskId, attemptId, expectedRevision }, commandId)`，经现有可信 IPC → Service → Runner → Interpreter 执行。先校验冻结程序/运行时、原根全部效果收敛和观察版本，再持久化 retry 控制段；只在原预算内追加 intent，不修改旧 attempt/outcome，不退款。每个同修订逻辑调用最多 6 次 admitted attempts，根仍最多 1000 次、控制段最多 256 个。

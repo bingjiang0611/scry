@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+/** Production trusted preload/main -> Service -> canonical Runner/Interpreter.
+ * Only a local Node fixture executes, inside a registered private copy. */
+export async function exerciseWorkflowSystemSteps(evaluate, fixture) {
+  const templates = (method, ...args) => evaluate(`window.scry.workflow.templates.${method}(...${JSON.stringify(args)})`)
+  const workflow = (method, ...args) => evaluate(`window.scry.workflow.${method}(...${JSON.stringify(args)})`)
+  const results = []
+  for (const exitCode of [0, 17]) {
+    const script = 'scry-owned-check-fixture.cjs', marker = 'scry-owned-check-count'
+    await writeFile(join(fixture.templateWorkspace, script), `const fs = require('node:fs'); let count = 0; try { count = Number(fs.readFileSync(${JSON.stringify(marker)}, 'utf8')) } catch(e) { if(e.code !== 'ENOENT') throw e } fs.writeFileSync(${JSON.stringify(marker)}, String(count + 1)); console.log('PRODUCTION-CHECK-OBSERVED'); process.exitCode = ${exitCode}`)
+    const definition = { schemaVersion: 1, name: 'Main check fixture ' + exitCode, description: '', parameters: {}, roles: [], body: { kind: 'sequence', blockId: 'system_root', blocks: [
+      { kind: 'replica', blockId: 'owned_copy' },
+      { kind: 'check', blockId: 'native_check', replica: { kind: 'ref', name: 'owned_copy' }, check: { argv: [process.execPath, script], cwd: '.', timeoutMs: 2000, parser: 'exit_code' } },
+      { kind: 'return', blockId: 'system_report', ref: { nodeId: 'native_check', path: ['passed'] } }
+    ] } }
+    const draft = await templates('saveDraft', { scope: { kind: 'personal' }, source: JSON.stringify(definition) })
+    assert.equal(draft.validation.state, 'valid', JSON.stringify(draft.validation))
+    const preview = await workflow('instantiateTemplate', { source: { kind: 'draft', draftId: draft.draftId, draftRevision: draft.draftRevision, candidateHash: draft.candidateHash }, commandId: 'system-instance-' + exitCode,
+      cwd: fixture.templateWorkspace, userGoal: 'Observe native check ' + exitCode, parameters: {}, orchestrator: { role: 'orchestrator', providerId: 'codex' }, roles: [] })
+    assert.equal(preview.state, 'ready', JSON.stringify(preview.unavailableReasons))
+    assert.equal(preview.plannedCalls, 0)
+    const check = preview.program.body.blocks[1]
+    assert.ok(check.authorization.executableHash)
+    assert.ok(check.authorization.entrypoint.hash)
+    await assert.rejects(readFile(join(fixture.templateWorkspace, marker)), { code: 'ENOENT' })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await workflow('approve', approval)
+    const progress = await workflow('start', preview.workflowId, approval, 'system-start-' + exitCode)
+    assert.equal(progress.state, 'completed', JSON.stringify(progress))
+    assert.equal(progress.finalReport, exitCode === 0 ? 'true' : 'false')
+    assert.equal(progress.dispatchAttempts, 0)
+    assert.equal(progress.attempts.length, 0)
+    const record = JSON.parse(await readFile(join(fixture.userData, 'workflows', preview.workflowId + '.json'), 'utf8'))
+    assert.deepEqual(record.systemIntents.map(intent => intent.kind), ['prepare_replica', 'check'])
+    assert.ok(record.systemOutcomes.every(outcome => outcome.settled))
+    const native = record.systemOutcomes[1].check
+    assert.equal(native.exitCode, exitCode)
+    assert.equal(native.state, exitCode === 0 ? 'passed' : 'failed')
+    assert.equal(native.evidence, 'exact')
+    assert.ok(native.stdoutRef?.hash)
+    const reference = record.systemOutcomes[0].replica
+    const receipt = JSON.parse(await readFile(join(fixture.userData, 'workflow-replicas', preview.workflowId, reference.replicaId + '.replica.json'), 'utf8'))
+    assert.equal(await readFile(join(receipt.directory, marker), 'utf8'), '1')
+    await assert.rejects(readFile(join(fixture.templateWorkspace, marker)), { code: 'ENOENT' })
+    const repeated = await workflow('start', preview.workflowId, approval, 'system-start-' + exitCode)
+    assert.equal(repeated.finalReport, progress.finalReport)
+    assert.equal(await readFile(join(receipt.directory, marker), 'utf8'), '1', 'receipt replay must not spawn the check again')
+    results.push({ exitCode, observed: native.state, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true })
+  }
+  return { test: 'main-owned SystemSteps production preload/main IPC', results }
+}

@@ -113,6 +113,40 @@ export const workflowTemplateCopy = {
   parameter: '模板参数缺失、类型不符或包含未声明参数'
 }
 
+export const workflowSystemCopy = {
+  unavailable: '此宿主没有可用的工作副本或主进程检查执行器',
+  intent: '系统步骤账本或冻结身份不一致，不能执行',
+  unknown: '系统步骤的结果或作用域未知，不会重新执行',
+  authority: '检查目标不是主进程签发的工作副本引用',
+  limit: '工作流系统步骤已达到根上限',
+  stopped: '系统步骤已取消，未开始的工作不会派发'
+}
+
+export const workflowReplicaCopy = {
+  identity: '工作副本身份、输入清单或目录指纹无效',
+  source: '工作副本来源或目标目录无效',
+  special: '输入包含链接、子模块或特殊文件，不能证明完整重建，已拒绝准备副本',
+  limit: '输入超过副本清单或内容上限，不能将部分复制标为完整快照',
+  changed: '源输入在准备期间变化，副本未发布为可执行',
+  incomplete: '副本尚未完成，不能授权执行',
+  stopped: '副本准备已停止；未完成现场保留'
+}
+
+export const workflowCheckCopy = {
+  request: '检查参数无效；只允许冻结 argv、相对目录、超时和内置诊断解析器',
+  directory: '检查目录不属于已登记的工作副本',
+  executable: '检查可执行文件缺失或不可执行',
+  entrypoint: '检查不接受 shell 或内联代码；解释器必须运行工作副本中的入口文件，组合命令请使用仓库脚本',
+  changed: '检查目录、可执行文件或环境指纹已变化，必须重新确认计划',
+  platform: '当前平台不能验证检查进程组收敛',
+  noParser: '此检查只按退出码判断；没有结构化诊断比较证据',
+  truncated: '检查输出已截断，不能据此判通过或完整诊断',
+  scope: '检查进程组尚未证明收敛，保留作用域与容量',
+  stopped: '检查已取消',
+  timedOut: '检查达到计划中冻结的超时',
+  parser: '输出不是完整可识别的 TypeScript 诊断；不能用于无进展比较'
+}
+
 export const workflowRetryCopy = {
   target: '重试目标身份或状态版本无效',
   stale: '运行或所选 attempt 已变化，请刷新后重新选择',
@@ -162,7 +196,7 @@ export const workflowCollectionCopy = {
 }
 
 export const workflowFrameCopy = {
-  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、map、collect、loop、return；其他控制块暂不可用',
+  unsupportedBlock: '仅支持已实现的 sequence、parallel、call、bind、branch、map、collect、loop、replica、check、return；其他控制块暂不可用',
   invalid: '工作流控制帧合同无效',
   revision: '工作流控制帧修订已变化，不能覆盖',
   identity: '工作流控制帧输入或身份已变化，不能复用旧状态',

@@ -10,6 +10,8 @@ import { collectionDescriptor, collectionEntries, validateCollectionReference } 
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_VALUE_DEPTH, workflowProgressSnapshot } from '../shared/workflow'
 import type { WorkflowRetryTarget } from '../shared/workflow-api'
+import type { WorkflowSystemIntent, WorkflowSystemOutcome } from '../shared/workflow-system'
+import { validateWorkflowReplicaReference } from './workflow-replica'
 
 export interface WorkflowIntent {
   workflowId: string
@@ -40,6 +42,8 @@ export interface WorkflowStoreRecord {
   progress: WorkflowProgress
   intents: WorkflowIntent[]
   outcomes: WorkflowAttemptOutcome[]
+  systemIntents?: WorkflowSystemIntent[]
+  systemOutcomes?: WorkflowSystemOutcome[]
 }
 export interface WorkflowPlanningIntent {
   workflowId: string
@@ -94,10 +98,14 @@ function validateEvaluation(value: unknown, workflowId: string): asserts value i
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(workflowFrameCopy.invalid)
   const input = value as Record<string, unknown>
   if (!Array.isArray(input.derivedFrom) || !input.derivedFrom.every(item => typeof item === 'string' && item.length <= 512)) throw new Error(workflowFrameCopy.invalid)
-  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom', 'collection', 'collectionFields'] : ['state', 'reason', 'derivedFrom']
+  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom', 'collection', 'collectionFields', 'replica'] : ['state', 'reason', 'derivedFrom']
   if (Object.keys(input).some(key => !allowed.includes(key)) || (input.state === 'known' ? !Object.hasOwn(input, 'value') : input.state !== 'unknown' || typeof input.reason !== 'string' || !input.reason || input.reason.length > 4096)) throw new Error(workflowFrameCopy.invalid)
   if (input.state === 'known') {
     assertWorkflowValue(input.value)
+    if (input.replica !== undefined) {
+      validateWorkflowReplicaReference(input.replica, workflowId)
+      if (JSON.stringify(input.replica) !== JSON.stringify(input.value)) throw new Error(workflowFrameCopy.invalid)
+    }
     if (input.collection !== undefined) {
       validateCollectionReference(input.collection, workflowId)
       if (JSON.stringify(input.value) !== JSON.stringify(collectionDescriptor(input.collection))) throw new Error(workflowFrameCopy.invalid)

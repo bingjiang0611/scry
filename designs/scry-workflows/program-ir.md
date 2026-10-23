@@ -14,6 +14,17 @@
 - `templates.restoreDraft({ref,base})` 只创建独立草稿，不改源码。base 必须是审阅的当前 ref，或当前不存在时显式 null；仍须审阅 candidateHash/draftRevision 后走既有 publish。删除后可以恢复同一 templateId；无效历史可恢复成无效可编辑草稿，不能直接发布。
 - `templates.delete({ref,commandId})` 只删除匹配准确修订的当前定义，保留历史、草稿和运行。与 publish 共用 canonical 目标锁，先保留准确基线和 intent 再 unlink/fsync。中断后不再次 unlink：有基线快照且观察到不存在时同步目录并以 reconciled_absence 收据确认该后置条件，不归因是谁删除；仍存在或已替换则 unknown。重复完成命令返回历史收据，不能删除后来恢复的定义。真实断电及不合作同用户进程的检查后抢写仍未证明。
 
+## main 工作副本与检查步骤（已接入，非完整质量模式）
+
+- `replica`：`{kind:'replica',blockId,source?:expression}`。省略 source 时复制当前已授权工作区；有 source 时必须是同根 main 铸造的副本值，复制在原副本租约下执行。普通 JSON、路径或 Agent 输出不能铸造该权限。副本值只含 workflowId/replicaId/inputHash；私有目录、inode 与输入清单由 main 登记。
+- `check`：`{kind:'check',blockId,replica:expression,check:{argv,cwd,timeoutMs?,parser?}}`。cwd 为副本内相对目录；默认超时 10 分钟，parser 为 exit_code（默认）或 typescript。main 在准备计划时解析并冻结 executable、解释器、环境及适用入口文件的指纹；执行前在真实副本上重验，拒绝变化，不另找解释器。模板只保留请求，禁止携带 authorization；提取时删除该 main 字段，实例化重新冻结与审批。
+- 明确的 shell/env 命令入口及内联 runtime 代码不属于检查语法；识别到的 runtime CLI 只支持仓库入口文件（不支持 `-e/-c/-m` 等入口选项），组合命令使用仓库可执行脚本或 package scripts。这不是代码沙箱；仓库脚本及其依赖仍以本机用户权限运行，不能完整枚举所有传递代码。
+- argv、目标、相对 cwd、超时与诊断解析器在计划确认界面逐项分页显示；确认整个 programRevision 才授权这些命令。检查使用共享槽位但不计 Agent attempt；每根至多 16,384 个持久系统 intent，不退款、不重放未知效果。stdout/stderr 各至多 1 MiB，超限不能判通过；完整有界文本和诊断保存为 main 不可变 value 引用，不能伪装成 Agent 工具调用。
+- check 的数据值包含 passed/state/exitCode/settled/truncated/diagnosticCount。检查退出非零时，步骤可以成功记录一个 `passed:false` 的真实结果；Workflow 执行完成不等于目标通过，质量程序须据该结果分支。无解析器或无法完整识别时 diagnosticCount 为 null，不是 0。当前尚未提供完整诊断集合的程序内消费、Jev target 或必需验证清单的质量编译合同。
+- 根账本保留独立 systemIntents/systemOutcomes；intent 先于副本/进程 effect，结果与不可变值先于控制帧推进。父 checkpoint 失败可以复用已提交结果，不再次复制或启动检查；缺失 stdout/结果/副本收据拒绝复用，不转为重跑。未知组收敛、停止 ACK 或结果写入失败不能释放已启动范围的槽位；重启保留未知系统容量，退出治理也检查系统账本。settled 的当前证明范围是登记的进程组，不是全部逃逸后代或完整沙箱；finishedAt 是 main 收到结果的时间，不冒充物理范围退出时间。
+- 副本捕获实际已修改、未跟踪及 ignored 内容，排除根 .git/.scry；内部相对符号链接保留，外链、绝对/悬空链接、嵌套 .git/子模块和特殊文件拒绝。上限为 32,768 项、8 MiB 清单、2 GiB 文件内容；超限拒绝，升级需分页清单/流式归档，不截断输入。部分失败现场保留，不覆盖或自动补做。Manager 的登记与租约原语不等于完整清理 UI/流程。
+- **尚未接入**：Agent 使用副本的 canonical App 工作区 authority、质量比较/必需验证、组合/应用/完整清理、检查输出查看 API。同根修订恢复仍未实现。本节不代表 M4 或 M1–M6 已完成。
+
 ## Agent 调用的结构化输出
 
 `call.outputSchema` 可选。缺省保留原有文本调用；声明后由 main 在接受 Provider result 时验证，不仅靠提示词。合同也参与冻结程序和修订指纹。角色、Provider/profile/模型/权限语义不因数据合同改变。

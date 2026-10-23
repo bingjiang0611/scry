@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { WorkflowRolePicker } from './WorkflowRolePicker'
-import type { WorkflowPlanPreview, WorkflowProgress, WorkflowRole, WorkflowRoleBinding } from '@shared/workflow'
-import { parseWorkflowRunCommand } from '@shared/workflow'
+import type { WorkflowBlock, WorkflowPlanPreview, WorkflowProgress, WorkflowRole, WorkflowRoleBinding } from '@shared/workflow'
+import { parseWorkflowRunCommand, workflowChildBlocks } from '@shared/workflow'
 import type { DetectedAgent } from '../env'
 import { WORKFLOW_COPY as copy, WORKFLOW_TEMPLATE_COPY as templateCopy } from '../constants/copy'
 import { WorkflowTemplateWorkbench } from './WorkflowTemplateWorkbench'
@@ -31,6 +31,43 @@ export function mergeWorkflowProgress(current: WorkflowProgress[], incoming: Wor
   return [...combined.values()]
 }
 
+
+function SystemPlan({ preview }: { preview: WorkflowPlanPreview }) {
+  const [page, setPage] = useState(0)
+  const steps = useMemo(() => {
+    const pending = [preview.program.body], result: Extract<WorkflowBlock, { kind: 'replica' | 'check' }>[] = []
+    while (pending.length) {
+      const block = pending.pop()!
+      if (block.kind === 'replica' || block.kind === 'check') result.push(block)
+      pending.push(...workflowChildBlocks(block).reverse())
+    }
+    return result
+  }, [preview])
+  if (!steps.length) return null
+  const pages = Math.ceil(steps.length / 16)
+  return <section className="workflow-system-plan" aria-label={copy.systemPlan}>
+    <h3>{copy.systemPlan}</h3>
+    {steps.some(step => step.kind === 'check') && <p>{copy.checkExecutionNotice}</p>}
+    <p>{copy.systemPlanCount(steps.length)}</p>
+    {steps.slice(page * 16, page * 16 + 16).map(step => <div key={step.blockId} data-workflow-system-node={step.blockId}>
+      <h4>{step.blockId} · {copy.systemKind[step.kind === 'replica' ? 'prepare_replica' : 'check']}</h4>
+      <dl>
+        <dt>{copy.systemTarget}</dt><dd><code>{JSON.stringify(step.kind === 'replica' ? step.source ?? preview.workspace : step.replica)}</code></dd>
+        {step.kind === 'check' && <>
+          <dt>{copy.systemArgv}</dt><dd><code>{JSON.stringify(step.check.argv)}</code></dd>
+          <dt>{copy.systemCwd}</dt><dd><code>{step.check.cwd}</code></dd>
+          <dt>{copy.systemTimeout}</dt><dd>{step.check.timeoutMs}</dd>
+          <dt>{copy.systemParser}</dt><dd><code>{step.check.parser}</code></dd>
+        </>}
+      </dl>
+    </div>)}
+    {pages > 1 && <nav aria-label={copy.systemPlanPages}>
+      <button type="button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>{copy.previousPage}</button>
+      <span>{copy.systemPage(page + 1, pages)}</span>
+      <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(value => value + 1)}>{copy.nextPage}</button>
+    </nav>}
+  </section>
+}
 
 function Launch({ request, agents, onDismiss, onStarted, onError, onEdit }: {
   request: WorkflowLaunchRequest
@@ -112,6 +149,7 @@ function Launch({ request, agents, onDismiss, onStarted, onError, onEdit }: {
       <p>{copy.previewNotice}</p>
       <dl><dt>{copy.revision}</dt><dd>{preview.programRevision}</dd></dl>
       <p>{copy.plannedCalls(preview.plannedCalls)}</p>
+      <SystemPlan key={preview.programRevision} preview={preview} />
       <p>{copy.updatedAt}: {new Date(preview.observedAt).toLocaleString()}</p>
       <table><tbody>{preview.program.roles.map(binding => <tr key={binding.role}>
         <th>{copy.roles[binding.role]}</th><td>{binding.providerId}</td><td>{binding.agentProfileId}</td>
@@ -220,6 +258,14 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
           <td>{copy.modelEvidence(attempt.requestedModel?.id ?? copy.defaultModel, attempt.actualModel)}</td>
           <td><code>{attempt.archiveRef ?? attempt.runId ?? copy.unavailable}</code></td>
         </tr>)}</tbody></table>
+        {Boolean(progress.systemSteps?.length) && <>
+          <h4>{copy.systemResults}</h4>
+          <table><thead><tr>{copy.systemColumns.map(column => <th scope="col" key={column}>{column}</th>)}</tr></thead><tbody>{progress.systemSteps!.map(step => <tr key={step.stepId} data-workflow-system-step={step.nodeId}>
+            <td>{step.nodeId}</td><td>{copy.systemKind[step.kind]}</td><td>{copy.systemState[step.state]}</td>
+            <td>{step.result ? copy.checkState[step.result.state] : copy.unavailable}</td><td>{step.result?.exitCode ?? copy.unavailable}</td>
+            <td>{step.settled ? copy.scopeClosed : copy.scopeUnconfirmed}</td>
+          </tr>)}</tbody></table>
+        </>}
         {progress.error && <p role="alert">{progress.error}</p>}
         {progress.finalReportStatus === 'available' && <><h4>{copy.observedResult}</h4><pre>{progress.finalReport}</pre></>}
         {progress.finalReportStatus === 'unavailable' && <p>{copy.finalReportUnavailable}</p>}

@@ -9,6 +9,10 @@
 .workflow-modal td, .workflow-modal th, .workflow-progress td { text-align: left; padding: 6px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .workflow-modal dd { margin: 4px 0 10px; overflow-wrap: anywhere; font-size: 11px; }
 .workflow-modal pre, .workflow-progress pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.workflow-system-plan { margin-block: 16px; padding-block: 12px; border-block: 1px solid var(--border); font-size: 12px; line-height: 1.6; }
+.workflow-system-plan h3 { margin: 0 0 8px; font-size: 13px; }
+.workflow-system-plan h4 { margin: 12px 0 6px; font-size: 12px; overflow-wrap: anywhere; }
+.workflow-system-plan nav { display: flex; align-items: center; gap: 12px; }
 .workflow-entry { align-self: flex-end; margin: 0 16px 6px; }
 .workflow-goal { display: flex; flex-direction: column; gap: 8px; }
 .workflow-goal textarea { color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; }

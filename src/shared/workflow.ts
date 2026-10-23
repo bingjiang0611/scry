@@ -1,6 +1,9 @@
 import type { ProviderId, ProviderDescriptor } from './provider.js'
 import type { AgentModelRef, AgentPermissionMode, RuntimeProvider } from './runtime.js'
 import type { WorkflowTemplateInstance } from './workflow-template.js'
+import type { WorkflowCheckRequest, WorkflowFrozenCheck } from './workflow-check'
+import type { WorkflowReplicaReference } from './workflow-replica'
+import type { WorkflowSystemProgress } from './workflow-system'
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
@@ -85,7 +88,7 @@ export type WorkflowExpression =
  * their workflow identity and exact descriptor at every declared position. */
 export type WorkflowCollectionField = { path: string[]; collection: WorkflowCollectionReference }
 export type WorkflowEvaluation =
-  | { state: 'known'; value: WorkflowValue; derivedFrom: string[]; collection?: WorkflowCollectionReference; collectionFields?: WorkflowCollectionField[] }
+  | { state: 'known'; value: WorkflowValue; derivedFrom: string[]; collection?: WorkflowCollectionReference; collectionFields?: WorkflowCollectionField[]; replica?: WorkflowReplicaReference }
   | { state: 'unknown'; reason: string; derivedFrom: string[] }
 
 export type WorkflowValueReference = {
@@ -201,6 +204,20 @@ export interface WorkflowLoopBlock {
   policy: { error: 'fail_closed'; unknown: 'block'; stop: 'cancel'; logicalExit: 'report_partial' }
 }
 
+export interface WorkflowReplicaBlock {
+  kind: 'replica'
+  blockId: string
+  source?: WorkflowExpression
+}
+export interface WorkflowCheckBlock {
+  kind: 'check'
+  blockId: string
+  replica: WorkflowExpression
+  check: WorkflowCheckRequest
+  /** Main-frozen at plan preparation, never trusted from a portable template. */
+  authorization?: WorkflowFrozenCheck
+}
+
 export interface WorkflowCallBlock {
   kind: 'call'
   blockId: string
@@ -228,11 +245,11 @@ export interface WorkflowReturnBlock {
   ref: WorkflowOutputRef
 }
 
-export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock
+export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCheckBlock
 
 export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   switch (block.kind) {
-    case 'call': case 'return': case 'bind': case 'collect': return []
+    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'check': return []
     case 'map': case 'loop': return [block.body]
     case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
     case 'sequence': case 'parallel': return block.blocks
@@ -381,6 +398,7 @@ export interface WorkflowProgress {
   attempts: WorkflowAttemptOutcome[]
   outcomeCount?: number
   dispatchAttempts: number
+  systemSteps?: WorkflowSystemProgress[]
   /** A user stop was requested; neither signal acknowledgement nor scope settlement. */
   stopRequestedAt?: number
   slots: { limit: number; inUse: number; queued: number }

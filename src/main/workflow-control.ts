@@ -9,6 +9,8 @@ import { workflowLoopStateTypes } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
 import { workflowPendingRetry, workflowRetryBoundary } from './workflow-retry'
 import type { WorkflowExecutionOwnership, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowSystemOutcome } from '../shared/workflow-system'
+import { workflowSystemCopy } from '../shared/constants/copy'
 
 export type WorkflowControlScope = {
   path: string[]
@@ -29,7 +31,7 @@ export class WorkflowControl {
     let framed = false
     while (pending.length) {
       const block = pending.pop()!
-      if (block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
+      if (block.kind === 'replica' || block.kind === 'check' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && block.inputRefs?.some(ref => ref.path !== undefined))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
     this.framed = framed || execution !== undefined
@@ -57,7 +59,7 @@ export class WorkflowControl {
   async enter(block: WorkflowBlock, scope: WorkflowControlScope): Promise<WorkflowControlFrame | undefined> {
     if (!this.framed) return undefined
     const names = block.kind === 'loop' ? [...new Set([...Object.values(block.initial), ...Object.values(block.invariants)].flatMap(workflowExpressionReferences))] : block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
-      : block.kind === 'call' ? (block.inputRefs ?? []).map(ref => ref.nodeId) : block.kind === 'return' ? [block.ref.nodeId] : []
+      : block.kind === 'check' ? workflowExpressionReferences(block.replica) : block.kind === 'replica' ? block.source ? workflowExpressionReferences(block.source) : [] : block.kind === 'call' ? (block.inputRefs ?? []).map(ref => ref.nodeId) : block.kind === 'return' ? [block.ref.nodeId] : []
     const inputKey = digest({ revision: this.preview.programRevision, nodeId: block.blockId, scope: scope.path,
       sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) })
     const frameId = workflowFrameId(block.blockId, scope.path, this.execution?.generationId)
@@ -97,7 +99,7 @@ export class WorkflowControl {
         await this.store.loadValue(this.preview.workflowId, origin.resultRef)
         reference = origin.resultRef
       } else {
-        if (origin?.resultRef && block.kind === 'call') throw new Error(workflowRecoveryCopy.frame)
+        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica')) throw new Error(workflowRecoveryCopy.frame)
         reference = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'result']), value)
       }
       const { revision, ...input } = frame
@@ -118,6 +120,19 @@ export class WorkflowControl {
     if (!intent && !outcome) return undefined
     if (!frame || !this.origins.has(frame.frameId)) throw new Error(workflowRecoveryCopy.frame)
     if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(workflowRecoveryCopy.unknown)
+    return outcome
+  }
+  recoveredSystem(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined): WorkflowSystemOutcome | undefined {
+    if (!this.execution?.previous.length) return undefined
+    const taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
+    const intent = this.execution.record.systemIntents?.find(value => value.taskId === taskId)
+    const outcome = this.execution.record.systemOutcomes?.find(value => value.taskId === taskId)
+    if (!intent && !outcome) {
+      if (frame && this.origins.get(frame.frameId)?.some(value => value.phase === 'completed')) throw new Error(workflowSystemCopy.intent)
+      return undefined
+    }
+    if (!frame || !this.origins.has(frame.frameId)) throw new Error(workflowRecoveryCopy.frame)
+    if (!intent || !outcome || !outcome.settled || outcome.state === 'unknown' || !outcome.resultRef) throw new Error(workflowSystemCopy.unknown)
     return outcome
   }
   async restoreLoop(frame: WorkflowControlFrame): Promise<{ checkpoint: WorkflowLoopCheckpoint; values: Record<string, WorkflowEvaluation>; invariants: Record<string, WorkflowEvaluation> } | undefined> {
