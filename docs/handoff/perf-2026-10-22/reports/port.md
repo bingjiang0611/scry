@@ -148,3 +148,53 @@ Ratchet：
 - 身份：`origin/main..HEAD` 的 74 个提交，作者和提交者全部是 noreply 地址。
 
 **合入 main 前还差一步**：在有 Xcode 的机器上运行 `xcodebuild build-for-testing`，并跑完 `catalog-refresh.py`。main 的 iOS 改动与 F/F2 在 `ToolPanels.swift`、`HomeDrawer.swift`、`ArchivedSessionsView.swift`、`RemoteRunStore.swift` 上是自动合并的，其中 SwiftUI 视图文件目前没有任何编译证据。A1/B2 的重放没在移植版本上重做：相关源码除 `index.ts` 外都没和 main 冲突，`index.ts` 是自动合并且桌面 gate 通过，所以不强制要求。
+
+## iOS 补充验证（Xcode 机器，2026-10-23）
+
+本节补齐上次核验意见要求的 iOS 编译与逐项运行证据，保留前面不同机器上的首次失败/受阻记录。验证源码为 `perf/port-2026-10-23` 的 `75c5183d1a905f45d1339f7196d98665c941f3ed`；工作区起始干净，`git config user.email` 已确认是 `307659028+bingjiang0611@users.noreply.github.com`。未检出或推送停用的旧分支。
+
+环境：arm64 macOS 27.2（26B5112a）、Xcode 26.6（17F113）、Swift 6.3.3；App 当前按 Swift 5 language mode 编译。按要求串行执行原命令，没有修改 runner、断言、超时或签名策略：
+
+```sh
+xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug -destination 'generic/platform=iOS' build-for-testing CODE_SIGNING_ALLOWED=NO
+python3 apps/ios/Checks/catalog-refresh.py
+python3 apps/ios/Checks/markdown-blocks.py
+```
+
+| 检查 | 本机首次执行结果 | 判断 / 证据 |
+|---|---|---|
+| iOS `build-for-testing` | exit 0，`TEST BUILD SUCCEEDED` | App 与 XCTest UI target 均编译通过；日志 `/tmp/scry-port-ios-build-first.log` |
+| Catalog | exit 1，146 项中 142 PASS、4 FAIL | 与 F 的已知基线逐项完全一致，没有新增失败；日志 `/tmp/scry-port-ios-catalog-first.log` |
+| Markdown | exit 0，17/17 | 原 runner 编译并执行成功，不是解释器替代；日志 `/tmp/scry-port-ios-markdown-first.log` |
+
+### Catalog 逐项比较
+
+读取 `/tmp/scry-f-catalog-control.log`（F 旧实现基线）与 `/tmp/scry-f-catalog.log`（F 候选）保存的原始结果，按**完整行**提取名称与状态，保留 `catalog.catalog.discoveryDiagnostic.1006 fixture-close` 名称中的空格。当前结果与两份记录的全部 **146 项名称、顺序和 PASS/FAIL 都相同，差异为 0**，不是仅比较总数或失败数量。对比记录 `/tmp/scry-port-ios-catalog-comparison.json`。
+
+四项仍失败，未改成通过，也没有删除或跳过断言：
+
+1. `catalog.followUp.routingDoesNotResumeAnotherProfile`
+2. `catalog.recovery.explicitModelChoice`
+3. `catalog.model.explicitAutoIsRemembered`
+4. `catalog.model.catalogRecoveryRestoresReadiness`
+
+146 项有序 `{name,result}` 列表用 `json.dumps(checks, sort_keys=True, separators=(',', ':'))` 序列化后的 SHA-256：`847583bdb96288c4ccc621201b69aaf39ec44257c46ca1e976fdb7fc307196ef`。因此本轮结论是**维持已知基线**，不是 Catalog 全绿。
+
+### 四个自动合并文件复核
+
+核对 main 合并基点 `b358dcb7336c990866a245a8b3a2d3075df61379` 到被测版本的完整文件差异；再机械归一化预期 Observation 迁移，与当前文件全文比较，四个文件均完全一致：
+
+| 文件 | 合并后相对 main 的差异 | 本轮证据 |
+|---|---|---|
+| `ToolPanels.swift` | run/targets 改为 typed `@Environment`；AppModel 仍为 `@EnvironmentObject` | 无额外业务差异；编译日志第 12276 行有本文件 `SwiftCompile normal arm64` |
+| `HomeDrawer.swift` | 同上 | 无额外业务差异；编译日志第 12405 行 |
+| `ArchivedSessionsView.swift` | run 改为 typed `@Environment`；SessionActionCenter 保留 `@StateObject` | 无额外业务差异；编译日志第 12413 行 |
+| `RemoteRunStore.swift` | `Combine`/`ObservableObject`/`@Published` 改为 `Observation`/`@Observable`/普通属性，保留 `@MainActor` | 去除这些预期注解差异后与 main 全文相同，未丢失 main 的字段或业务方法；编译日志第 12310 行及 Catalog 运行 |
+
+编译日志有 20 条 warning、0 条 error，其中 `RemoteRunStore.swift:1147` 有捕获 `self` 的 Swift 6 并发兼容提示；当前 Swift 5 模式构建成功。本轮未做无关的警告清理，也未声称验证了 Swift 6 language mode。上述归一化是静态合并证据，不替代真实 UI 交互验收。
+
+### 范围与交付
+
+- 未发现编译失败或新增测试失败，因此**没有生产源码修复，也无需单独的修复提交**；本轮仅补充报告。
+- 按要求未使用真机或模拟器，未执行 XCTest UI 交互、未安装 App；`build-for-testing` 只证明编译。未补做 L2/L3、真实 Provider 或 A1/B2 重放，不复述为本轮通过。
+- 本次命令未改变依赖锁文件，未修改 `STATUS.md`、源码或测试。只提交本节并推送到 `perf/port-2026-10-23`，不合并 main、不向停用的旧 `perf/*` / `fix/*` 分支推送。
