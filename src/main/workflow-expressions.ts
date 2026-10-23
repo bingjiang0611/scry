@@ -1,6 +1,6 @@
 import {
   WORKFLOW_MAX_BATCH, WORKFLOW_MAX_EXPRESSION_DEPTH, WORKFLOW_MAX_EXPRESSION_NODES,
-  WORKFLOW_MAX_VALUE_BYTES, WORKFLOW_MAX_VALUE_DEPTH, type WorkflowEvaluation, type WorkflowExpression,
+  WORKFLOW_MAX_VALUE_BYTES, WORKFLOW_MAX_VALUE_DEPTH, type WorkflowCollectionField, type WorkflowEvaluation, type WorkflowExpression,
   type WorkflowScalar, type WorkflowValue, type WorkflowValueSchema
 } from '../shared/workflow'
 import { workflowCollectionCopy, workflowExpressionCopy as copy } from '../shared/constants/copy'
@@ -10,9 +10,16 @@ const scalar = (value: unknown): value is WorkflowScalar => value === null || ty
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
 const refs = (...values: WorkflowEvaluation[]): string[] => [...new Set(values.flatMap(value => value.derivedFrom))]
 const unknown = (reason: string, derivedFrom: string[] = []): WorkflowEvaluation => ({ state: 'unknown', reason: reason.slice(0, 4096), derivedFrom })
-const known = (value: WorkflowValue, derivedFrom: string[] = []): WorkflowEvaluation => {
+const known = (value: WorkflowValue, derivedFrom: string[] = [], collectionFields: WorkflowCollectionField[] = []): WorkflowEvaluation => {
   assertWorkflowValue(value)
-  return { state: 'known', value, derivedFrom }
+  if (collectionFields.length > WORKFLOW_MAX_BATCH) throw new Error(copy.valueLimit)
+  return { state: 'known', value, derivedFrom, ...(collectionFields.length ? { collectionFields } : {}) }
+}
+
+export function workflowCollectionFields(value: WorkflowEvaluation, prefix: string[]): WorkflowCollectionField[] {
+  if (value.state !== 'known') return []
+  return [...(value.collection ? [{ path: prefix, collection: value.collection }] : []),
+    ...(value.collectionFields ?? []).map(field => ({ path: [...prefix, ...field.path], collection: field.collection }))]
 }
 
 export function assertWorkflowValue(input: unknown): asserts input is WorkflowValue {
@@ -95,13 +102,29 @@ export function workflowValueKey(value: WorkflowValue): string {
   return JSON.stringify(value)
 }
 
-export function workflowField(value: WorkflowValue, path: readonly string[], derivedFrom: string[] = []): WorkflowEvaluation {
+export function workflowArrayAuthorities(value: Extract<WorkflowEvaluation, { state: 'known' }>): Map<string, WorkflowCollectionField[]> {
+  const byIndex = new Map<string, WorkflowCollectionField[]>()
+  for (const field of value.collectionFields ?? []) {
+    const fields = byIndex.get(field.path[0]) ?? []
+    fields.push(field); byIndex.set(field.path[0], fields)
+  }
+  return byIndex
+}
+function remapArrayCollections(value: Extract<WorkflowEvaluation, { state: 'known' }>, destinations: string[][]): WorkflowCollectionField[] {
+  return (value.collectionFields ?? []).map(field => ({ path: [...destinations[Number(field.path[0])], ...field.path.slice(1)], collection: field.collection }))
+}
+
+export function workflowField(value: WorkflowValue, path: readonly string[], derivedFrom: string[] = [], authority?: Pick<Extract<WorkflowEvaluation, { state: 'known' }>, 'collection' | 'collectionFields'>): WorkflowEvaluation {
   let current = value
   for (const part of path) {
     if (current === null || typeof current !== 'object' || (Array.isArray(current) && !/^(0|[1-9][0-9]*)$/.test(part)) || !Object.hasOwn(current, part)) return unknown(copy.missing(JSON.stringify(path)), derivedFrom)
     current = (current as Record<string, WorkflowValue>)[part]
   }
-  return known(current, derivedFrom)
+  const authorities = [...(authority?.collection ? [{ path: [], collection: authority.collection }] : []), ...(authority?.collectionFields ?? [])]
+  const selected = authorities.filter(field => path.every((part, index) => field.path[index] === part))
+  const fields = selected.filter(field => field.path.length > path.length).map(field => ({ ...field, path: field.path.slice(path.length) }))
+  const collection = selected.find(field => field.path.length === path.length)?.collection
+  return { ...known(current, derivedFrom, fields), ...(collection ? { collection } : {}) }
 }
 
 export function evaluateWorkflowExpression(expression: WorkflowExpression, bindings: ReadonlyMap<string, WorkflowEvaluation>): WorkflowEvaluation {
@@ -114,7 +137,7 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
       }
       case 'field': {
         const value = evaluate(item.source, scope)
-        return value.state === 'unknown' || !item.path.length ? value : workflowField(value.value, item.path, value.derivedFrom)
+        return value.state === 'unknown' || !item.path.length ? value : workflowField(value.value, item.path, value.derivedFrom, value)
       }
       case 'compare': {
         const left = evaluate(item.left, scope), right = evaluate(item.right, scope), sources = refs(left, right)
@@ -135,10 +158,15 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         const data = values.map(value => (value as Extract<WorkflowEvaluation, { state: 'known' }>).value)
         if (item.kind === 'concat') {
           if (data.every((value): value is string => typeof value === 'string')) return known(data.join(''), sources)
-          if (data.every(Array.isArray)) {
-            const joined = data.flat()
-            if (joined.length > WORKFLOW_MAX_BATCH) throw new Error(copy.valueLimit)
-            return known(joined, sources)
+          if (data.every((value): value is WorkflowValue[] => Array.isArray(value))) {
+            if (data.reduce((sum, array) => sum + array.length, 0) > WORKFLOW_MAX_BATCH) throw new Error(copy.valueLimit)
+            let offset = 0
+            const fields = values.flatMap((value, index) => {
+              const destinations = data[index].map((_, member) => [String(offset + member)])
+              offset += data[index].length
+              return remapArrayCollections(value as Extract<WorkflowEvaluation, { state: 'known' }>, destinations)
+            })
+            return known(data.flat(), sources, fields)
           }
         } else if (data.every((value): value is boolean => typeof value === 'boolean')) return known(item.kind === 'and' ? data.every(Boolean) : data.some(Boolean), sources)
         return unknown(copy.type(item.kind), sources)
@@ -167,7 +195,9 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
           group.derivedFrom.push(index)
           groups.set(stable, group)
         }
-        return known([...groups.values()], value.derivedFrom)
+        const grouped = [...groups.values()], destinations: string[][] = []
+        grouped.forEach((group, index) => group.derivedFrom.forEach((source, member) => { destinations[source] = [String(index), 'members', String(member)] }))
+        return known(grouped, value.derivedFrom, remapArrayCollections(value, destinations))
       }
       case 'filter': case 'partition': {
         const value = evaluate(item.items, scope)
@@ -177,16 +207,17 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         if (scope.has(item.item)) throw new Error(copy.binding(item.item))
         const sources = new Set(value.derivedFrom)
         const partitions: { matched: WorkflowValue[]; rejected: WorkflowValue[]; unknown: WorkflowValue[] } = { matched: [], rejected: [], unknown: [] }
-        const local = new Map(scope)
+        const local = new Map(scope), authorities = workflowArrayAuthorities(value), destinations: string[][] = []
         for (const [index, member] of value.value.entries()) {
-          local.set(item.item, { state: 'known', value: member, derivedFrom: value.derivedFrom })
+          local.set(item.item, workflowField(value.value, [String(index)], value.derivedFrom, { collectionFields: authorities.get(String(index)) }))
           const decision = evaluate(item.when, local)
           for (const source of decision.derivedFrom) if (source !== item.item) sources.add(source)
           const entry = { index, value: member, reason: decision.state === 'unknown' ? decision.reason : typeof decision.value !== 'boolean' ? copy.type(item.kind) : decision.value ? copy.trueReason : copy.falseReason }
-          if (decision.state === 'known' && typeof decision.value === 'boolean') partitions[decision.value ? 'matched' : 'rejected'].push(entry)
-          else partitions.unknown.push(entry)
+          const bucket = decision.state === 'known' && typeof decision.value === 'boolean' ? decision.value ? 'matched' : 'rejected' : 'unknown'
+          destinations[index] = [bucket, String(partitions[bucket].length), 'value']
+          partitions[bucket].push(entry)
         }
-        return known(partitions, [...sources])
+        return known(partitions, [...sources], remapArrayCollections(value, destinations))
       }
     }
   }

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionEntry, type WorkflowScalar, type WorkflowValue } from '../shared/workflow'
+import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionEntry, type WorkflowCollectionField, type WorkflowScalar, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference } from '../shared/workflow'
 import { workflowCollectionCopy, workflowValueCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
-import { evaluateWorkflowExpression, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
+import { evaluateWorkflowExpression, workflowArrayAuthorities, workflowCollectionFields, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowLoopExecution } from './workflow-loop-execution'
 import { matchesWorkflowValue } from './workflow-values'
@@ -110,7 +110,7 @@ export class WorkflowInterpreter {
           this.state.returnNode = current.ref.nodeId
           this.state.returnPath = current.ref.path
           const source = top.scope.bindings.get(current.ref.nodeId) ?? unavailable()
-          this.state.returnValue = source.state === 'known' && current.ref.path?.length ? workflowField(source.value, current.ref.path, source.derivedFrom) : source
+          this.state.returnValue = source.state === 'known' && current.ref.path?.length ? workflowField(source.value, current.ref.path, source.derivedFrom, source) : source
           if (this.control.framed && this.state.returnValue.state === 'unknown') top.scope.blockedReason = this.state.returnValue.reason
           stack.pop()
           returned = await this.finish(current, top.scope, frame, this.state.returnValue, top.scope.blockedReason ? 'blocked' : 'completed')
@@ -172,16 +172,17 @@ export class WorkflowInterpreter {
             returned = await this.finish(current, top.scope, frame, source, 'blocked')
           } else {
             const entries = await this.control.entries(source)
-            const values: WorkflowValue[] = []
+            const values: WorkflowValue[] = [], fields: WorkflowCollectionField[] = []
             let bytes = 2
             for (const entry of entries) {
               const value = await this.control.entryValue(entry)
               if (value.state !== 'known') throw new Error(workflowCollectionCopy.invalid)
               bytes += Buffer.byteLength(JSON.stringify(value.value)) + (values.length ? 1 : 0)
               if (bytes > WORKFLOW_MAX_VALUE_BYTES) throw new Error(workflowCollectionCopy.payloadLimit)
+              fields.push(...workflowCollectionFields(value, [String(values.length)]))
               values.push(value.value)
             }
-            returned = await this.finish(current, top.scope, frame, { state: 'known', value: values, derivedFrom: source.derivedFrom }, 'completed')
+            returned = await this.finish(current, top.scope, frame, { state: 'known', value: values, derivedFrom: source.derivedFrom, ...(fields.length ? { collectionFields: fields } : {}) }, 'completed')
           }
           stack.pop()
           break
@@ -228,11 +229,11 @@ export class WorkflowInterpreter {
     }
     frame = await this.control.freezeSource(frame, source)
     const entries: WorkflowCollectionEntry[] = keys.map((key, index) => ({ key, index, state: 'pending', settled: false }))
-    const outcomes: WorkflowAttemptOutcome[] = []
+    const outcomes: WorkflowAttemptOutcome[] = [], authorities = workflowArrayAuthorities(source)
     let partial = false, critical = false
     const run = async (index: number): Promise<Result> => {
       const child = this.control.child(scope, labels[index])
-      const input = collection ? await this.control.entryValue(collection[index]) : { state: 'known' as const, value: (source.value as WorkflowValue[])[index], derivedFrom: source.derivedFrom }
+      const input = collection ? await this.control.entryValue(collection[index]) : workflowField(source.value, [String(index)], source.derivedFrom, { collectionFields: authorities.get(String(index)) })
       this.control.bind(child, block.item, input)
       const result = await this.run(block.body, child)
       const phase = result.phase
@@ -287,9 +288,10 @@ export class WorkflowInterpreter {
     }
     this.control.join(scope, scopes)
     const values = block.blocks.map(child => scope.bindings.get(child.blockId) ?? unavailable())
+    const fields = values.flatMap((value, index) => workflowCollectionFields(value, [block.blocks[index].blockId]))
     const value: WorkflowEvaluation = values.every(item => item.state === 'known') ? {
       state: 'known', value: Object.fromEntries(block.blocks.map((child, index) => [child.blockId, (values[index] as Extract<WorkflowEvaluation, { state: 'known' }>).value])),
-      derivedFrom: [...new Set(values.flatMap(item => item.derivedFrom))]
+      derivedFrom: [...new Set(values.flatMap(item => item.derivedFrom))], ...(fields.length ? { collectionFields: fields } : {})
     } : unavailable()
     const base = this.phase(outcomes, scope)
     const phase = base === 'completed' ? terminal : base

@@ -87,6 +87,29 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   assert.equal((await invoke('publish', request(restoredAfterDelete))).state, 'published')
   assert.deepEqual(await invoke('delete', deletionRequest), deletion)
   assert.equal(await readFile(join(fixture.userData, 'workflows', 'templates', personalDraft.templateId + '.json'), 'utf8'), snapshot.source)
+  const nestedDefinition = { ...definition, name: 'Nested collection authority IPC', parameters: {}, body: { kind: 'sequence', blockId: 'nested_root', blocks: [
+    { kind: 'bind', blockId: 'input', value: { kind: 'literal', value: [{ id: 'group-a', rows: [{ id: 'a', flag: 0 }, { id: 'b', flag: false }] }] } },
+    { kind: 'map', blockId: 'groups', items: { kind: 'ref', name: 'input' }, item: 'group', key: ['id'], maxItems: 1, body:
+      { kind: 'map', blockId: 'rows', items: { kind: 'field', source: { kind: 'ref', name: 'group' }, path: ['rows'] }, item: 'row', key: ['id'], maxItems: 2,
+        body: { kind: 'bind', blockId: 'copy', value: { kind: 'ref', name: 'row' } } } },
+    { kind: 'collect', blockId: 'group_outcomes', items: { kind: 'ref', name: 'groups' } },
+    { kind: 'bind', blockId: 'selected', value: { kind: 'field', source: { kind: 'ref', name: 'group_outcomes' }, path: ['0', 'value'] } },
+    { kind: 'map', blockId: 'consume', items: { kind: 'ref', name: 'selected' }, item: 'member', key: ['key'], maxItems: 2,
+      body: { kind: 'bind', blockId: 'flag', value: { kind: 'field', source: { kind: 'ref', name: 'member' }, path: ['value', 'flag'] } } },
+    { kind: 'collect', blockId: 'flags', items: { kind: 'ref', name: 'consume' } },
+    { kind: 'return', blockId: 'nested_report', ref: { nodeId: 'flags' } }
+  ] } }
+  const nestedDraft = await invoke('saveDraft', { scope: personal, source: JSON.stringify(nestedDefinition) })
+  assert.equal(nestedDraft.validation.state, 'valid')
+  const nested = await workflow('instantiateTemplate', { ...instanceRequest, commandId: 'nested-collection-instance', parameters: {},
+    source: { kind: 'draft', draftId: nestedDraft.draftId, draftRevision: nestedDraft.draftRevision, candidateHash: nestedDraft.candidateHash } })
+  assert.equal(nested.state, 'ready')
+  const nestedApproval = { workflowId: nested.workflowId, programRevision: nested.programRevision, approvedAt: 1 }
+  await workflow('approve', nestedApproval)
+  const nestedResult = await workflow('start', nested.workflowId, nestedApproval, 'nested-collection-start')
+  assert.equal(nestedResult.state, 'completed')
+  assert.deepEqual(JSON.parse(nestedResult.finalReport).map(row => row.value), [0, false])
+  assert.equal(nestedResult.dispatchAttempts, 0)
   assert.deepEqual(await Promise.all(ledgers.map(ledger)), before, 'template publication must not invoke any Provider')
-  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
+  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, nestedCollectionProjection: true, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
 }

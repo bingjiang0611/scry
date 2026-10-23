@@ -87,9 +87,18 @@
 
 map也可读取受控集合：必须沿用`key:["key"]`；只为活跃fiber读取该项payload。需要重分组时先显式collect；collect展开超过4MiB则失败并保留原引用，不声称完整展开。更大的分组/投影需要后续流式引用操作，不能调大普通value上限绕过。
 
-当前限制仍明确保留：嵌套collection存入普通object字段后的typed metadata投影、streaming group/filter、完整依赖恢复尚未完成；不据此宣称全部map/循环/恢复合同通过。嵌套控制树可执行，不代表上述引用投影已经支持。
+当前限制仍明确保留：直接作用于host collection的streaming group/filter、完整依赖恢复尚未完成；不据此宣称全部map/循环/恢复合同通过。嵌套字段的host读取权投影现已支持，范围如下。
 
 本阶段14文件172项focused、Node/web types及build通过；关闭重复key预检后1项失败（已发出1次本应禁止的调用），按SHA256恢复后11项通过。首次fixture表参数、误删同内容hash的另一个artifact、回调/联合类型推断失败均保留于证据说明；未删除断言或放宽超时。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。这些是生产Runner/临时文件存储加Provider test double，不是完整App或真实账号验收。
+
+### 嵌套 collection 的读取权投影
+
+- known value 可携带 main 专用 `collectionFields: [{path, collection}]`，只保存普通 JSON 内各个受控集合的准确位置。根受控集合仍使用原 `collection` 字段；二者不混用，不从 literal、Agent JSON 或看似相同的 descriptor 推断读取权。
+- outcome 的 `value`、parallel 对象、collect 数组和 field 投影保留/重定位这些位置。普通数组的 concat、group/unique、filter/partition 也保留读取权，包括 predicate 中读取成员集合的 count；改变数组位置时按显式索引映射，不逐项扫描整个 authority 列表。
+- durable value 逐条校验同一 workflow、非空路径、唯一位置与准确 descriptor；最多4096条，深度64，metadata及整体持久文件仍受8MiB边界约束。冷读核对引用 manifest 的存在、hash、count及sealed状态，同一次读取去重相同引用。不存在的manifest不能仅凭缓存 descriptor 继续报告计数；子项实际输出仍按需要加载。
+- 已有普通JSON不补发读取权。旧版本若已保存了没有 sidecar 的嵌套 descriptor，它仍是普通数据；需要显式重建受控产出，不能凭当前磁盘内容猜测历史授权。
+- 限制：这不是host collection上的streaming group/filter实现；现有group/filter输入仍限普通数组。嵌套manifest校验有额外I/O；尚无相应collector，不宣称更快。若受控测量证明校验是热点，应增加绑定单次已验证读取快照的resolver，不能用跨读取缓存假定文件仍持久存在。
+- 当前源码：11文件/140项focused测试、Node/Web types、build和生产preload/main→Service→Runner→Interpreter场景通过；新增嵌套map/collect真实使用0与false、预算/Provider调用均为0。未修复bundle在相同生产场景明确报“map来源必须是已提交数组或受控集合引用”。这是离线生产接线证据，不是完整M3、真实SDK或断电验收。
 
 ## 有界 loop、显式 carry 与退出报告
 
@@ -111,7 +120,7 @@ loop仍属于同一WorkflowProgram。`WorkflowLoopExecution`只负责提交循�
 
 只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。全部Provider调用仍为test double，不能替代App、真实账号、独立质量检查或M6验收。
 
-当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、完整依赖重启、nested collection字段的通用typed投影和全指令。受限的跨进程继续已有下述证据，不能外推为每个崩溃边界均已验收。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
+当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、完整依赖重启、host collection上的streaming group/filter和全指令。受限的跨进程继续已有下述证据，不能外推为每个崩溃边界均已验收。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
 
 ## 控制状态持久化的当前范围
 

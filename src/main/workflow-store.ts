@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { withDirectoryLock } from '../core/turn-recorder/io'
 import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
-import { assertWorkflowValue } from './workflow-expressions'
+import { assertWorkflowValue, workflowField } from './workflow-expressions'
 import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
 import { collectionDescriptor, collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
-import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
+import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_VALUE_DEPTH, workflowProgressSnapshot } from '../shared/workflow'
 
 export interface WorkflowIntent {
   workflowId: string
@@ -91,7 +91,7 @@ function validateEvaluation(value: unknown, workflowId: string): asserts value i
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(workflowFrameCopy.invalid)
   const input = value as Record<string, unknown>
   if (!Array.isArray(input.derivedFrom) || !input.derivedFrom.every(item => typeof item === 'string' && item.length <= 512)) throw new Error(workflowFrameCopy.invalid)
-  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom', 'collection'] : ['state', 'reason', 'derivedFrom']
+  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom', 'collection', 'collectionFields'] : ['state', 'reason', 'derivedFrom']
   if (Object.keys(input).some(key => !allowed.includes(key)) || (input.state === 'known' ? !Object.hasOwn(input, 'value') : input.state !== 'unknown' || typeof input.reason !== 'string' || !input.reason || input.reason.length > 4096)) throw new Error(workflowFrameCopy.invalid)
   if (input.state === 'known') {
     assertWorkflowValue(input.value)
@@ -99,6 +99,37 @@ function validateEvaluation(value: unknown, workflowId: string): asserts value i
       validateCollectionReference(input.collection, workflowId)
       if (JSON.stringify(input.value) !== JSON.stringify(collectionDescriptor(input.collection))) throw new Error(workflowFrameCopy.invalid)
     }
+    if (input.collectionFields !== undefined) {
+      if (!Array.isArray(input.collectionFields) || !input.collectionFields.length || input.collectionFields.length > WORKFLOW_MAX_BATCH || input.collection) throw new Error(workflowFrameCopy.invalid)
+      const paths = new Set<string>()
+      let bytes = 0
+      for (const field of input.collectionFields) {
+        if (!field || typeof field !== 'object' || Object.keys(field).some(key => !['path', 'collection'].includes(key)) || !Array.isArray(field.path) || !field.path.length || field.path.length > WORKFLOW_MAX_VALUE_DEPTH || !field.path.every((part: unknown) => typeof part === 'string' && part.length <= 512)) throw new Error(workflowFrameCopy.invalid)
+        bytes += Buffer.byteLength(JSON.stringify(field))
+        if (bytes > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
+        const key = JSON.stringify(field.path)
+        if (paths.has(key)) throw new Error(workflowFrameCopy.invalid)
+        paths.add(key)
+        validateCollectionReference(field.collection, workflowId)
+        const selected = workflowField(input.value, field.path)
+        if (selected.state !== 'known' || JSON.stringify(selected.value) !== JSON.stringify(collectionDescriptor(field.collection))) throw new Error(workflowFrameCopy.invalid)
+      }
+    }
+  }
+}
+
+/** A descriptor's count is not evidence that its manifest is still durable.
+ * Verify nested manifests before exposing their authority; item payloads stay
+ * lazy. Deduplicate within this read, never cache absence checks across reads. */
+async function validateCollectionArtifacts(store: Pick<WorkflowStore, 'loadCollection'>, workflowId: string, value: WorkflowEvaluation): Promise<void> {
+  if (value.state !== 'known') return
+  const collections = [...(value.collection ? [value.collection] : []), ...(value.collectionFields ?? []).map(field => field.collection)]
+  const seen = new Set<string>()
+  for (const collection of collections) {
+    const key = JSON.stringify([collection.reference.key, collection.reference.hash, collection.count, collection.sealed])
+    if (seen.has(key)) continue
+    seen.add(key)
+    await store.loadCollection(workflowId, collection)
   }
 }
 
@@ -167,7 +198,7 @@ export class FileWorkflowStore implements WorkflowStore {
   }
   async loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
     const value = await this.readEvaluation(workflowId, reference)
-    if (value.state === 'known' && value.collection) await this.loadCollection(workflowId, value.collection)
+    await validateCollectionArtifacts(this, workflowId, value)
     return value
   }
   async saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference> {
@@ -349,6 +380,7 @@ export class MemoryWorkflowStore implements WorkflowStore {
     validateEvaluation(evaluation, workflowId)
     const text = JSON.stringify(evaluation)
     const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
+    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
     this.values.set(valueName(reference), JSON.parse(text) as WorkflowEvaluation)
     return reference
   }
@@ -356,7 +388,7 @@ export class MemoryWorkflowStore implements WorkflowStore {
     validateWorkflowValueReference(reference, workflowId)
     const value = this.values.get(valueName(reference))
     if (!value) throw new Error(workflowFrameCopy.missing)
-    if (value.state === 'known' && value.collection) await this.loadCollection(workflowId, value.collection)
+    await validateCollectionArtifacts(this, workflowId, value)
     return structuredClone(value)
   }
   async saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference> {

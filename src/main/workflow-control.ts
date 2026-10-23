@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowCollectionEntry, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference, WorkflowLoopCheckpoint, WorkflowPlanPreview, WorkflowValue, WorkflowValueReference, WorkflowValueSchema } from '../shared/workflow'
 import { workflowChildBlocks } from '../shared/workflow'
 import { workflowExpressionCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
-import { workflowExpressionReferences } from './workflow-expressions'
+import { workflowCollectionFields, workflowExpressionReferences } from './workflow-expressions'
 import { collectionDescriptor } from './workflow-collections'
 import { workflowLoopStateTypes } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
@@ -168,9 +168,10 @@ export class WorkflowControl {
   async entryValue(entry: WorkflowCollectionEntry): Promise<WorkflowEvaluation> {
     const value = entry.reference ? await this.readCommitted(entry.reference) : undefined
     const error = entry.error ?? (value?.state === 'unknown' ? value.reason : undefined)
+    const fields = value ? workflowCollectionFields(value, ['value']) : []
     return { state: 'known', value: { key: entry.key, index: entry.index, state: entry.state, settled: entry.settled,
       ...(value?.state === 'known' ? { value: value.value } : {}), ...(error ? { error } : {})
-    }, derivedFrom: entry.reference ? [`value:${entry.reference.resultRef.key}:${entry.reference.resultRef.hash}`] : [] }
+    }, ...(fields.length ? { collectionFields: fields } : {}), derivedFrom: entry.reference ? [`value:${entry.reference.resultRef.key}:${entry.reference.resultRef.hash}`] : [] }
   }
   async advanceSequence(frame: WorkflowControlFrame | undefined, cursor: number, child: WorkflowFrameReference | undefined): Promise<WorkflowControlFrame | undefined> {
     if (!frame) return undefined

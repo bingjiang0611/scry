@@ -120,7 +120,16 @@
 - 同一IR/解释器新增动态map与显式collect，完整输入/稳定key/批次上限先验，受共享slots和根预算控制；已证明item内流水与跨窗口补位，不设整页barrier。
 - 宿主mint typed集合引用，manifest保存每项状态/物理settled及不可变结果引用；失败/unknown/pending不删。cold读取核对hash/workflow/count/结构。collect保留失败摘要与0值，不把unknown当空或恢复成功。
 - Node24.18.0/macOS：14文件172项focused、Node/web types、build通过；关闭重复key预检后1失败/10通过（发生本应禁止的Native test-double调用），SHA256恢复后11通过。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。
-- 仍缺嵌套collection字段的typed metadata投影、超4MiB集合的streaming group/filter、普通M0统一持久化、loop/carry/最佳候选的跨进程/依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
+- 嵌套collection字段投影后续进展见下节；仍缺超4MiB集合的streaming group/filter、普通M0统一持久化、loop/carry/最佳候选的跨进程/依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
+
+### M3 嵌套受控集合投影（局部验收）
+
+- main 的 known value 增加位置明确的 `collectionFields`，经 outcome.value、parallel、collect、字段投影及普通数组变换保留受控集合读取权。不会从模型/literal descriptor 或旧记录补发读取权。每值最多4096位置，持久化仍限8MiB；冷读校验实际manifest及准确count，缺失/伪造/跨workflow/重复位置均拒绝。
+- 普通数组索引的authority一次分组，重排按索引映射，避免每个成员扫描所有位置。manifest同一次值读取去重，后续读取不缓存“仍存在”的假设；实际输出payload仍按项读取。暂无相应性能collector，不宣称提速。
+- 当前typecheck、11文件/140项focused回归、build与生产preload/main→Service→Runner→Interpreter通过；新增生产场景在冻结模板中执行嵌套map→collect→field→map，准确得到0/false，Agent预算及Provider调用均0。未修复bundle同场景明确失败，保留负控。
+- 证据 `~/.local/state/rotom/verification-evidence/workflow-m3-nested-collections.ygomyZ/`，原始 `nested-*.log` 与 `authority-first.log` 在 `/tmp/scry-workflow-template-editor.ZnkC6L/`。首个测试错误地用了局部return、首个缺失manifest用例路径错误，均保留，不冒充目标负控。
+- 当前必需性能测量仍exit 1/unavailable（providers.catalog无collector，负载约25/10 cores）。未重新完整打包、未安装、未push、未升版本；此前完整conversation/pack截止、CLI及七项延期失败仍开放。
+- 剩余：host collection的streaming group/filter、真正失败/修订恢复、可靠停滞/重启策略、main check/classifier和其余M1/M4–M6。该增量不闭合整体M3。
 
 ### M3 有界loop与逻辑退出进展（仍非M2/M3完成）
 

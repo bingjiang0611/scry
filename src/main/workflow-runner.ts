@@ -605,7 +605,7 @@ export class WorkflowRunner {
       const binding = scope.bindings.get(ref.nodeId)
       if (scope.path.length || ref.path !== undefined) {
         if (binding?.state !== 'known') { scope.blockedReason = binding?.reason ?? workflowFrameCopy.failedValue; return undefined }
-        const selected = ref.path ? workflowField(binding.value, ref.path, binding.derivedFrom) : binding
+        const selected = ref.path ? workflowField(binding.value, ref.path, binding.derivedFrom, binding) : binding
         if (selected.state === 'unknown') { scope.blockedReason = selected.reason; return undefined }
         inputs.push(`[committed binding ${ref.nodeId}]\n${typeof selected.value === 'string' ? selected.value : JSON.stringify(selected.value)}`)
         continue

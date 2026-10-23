@@ -79,8 +79,12 @@ export type WorkflowExpression =
   | { kind: 'filter'; items: WorkflowExpression; item: string; when: WorkflowExpression }
   | { kind: 'partition'; items: WorkflowExpression; item: string; when: WorkflowExpression }
 
+/** Host-only read authority for a controlled collection nested in ordinary JSON.
+ * Paths never originate from literal/model descriptors. Durable stores validate
+ * their workflow identity and exact descriptor at every declared position. */
+export type WorkflowCollectionField = { path: string[]; collection: WorkflowCollectionReference }
 export type WorkflowEvaluation =
-  | { state: 'known'; value: WorkflowValue; derivedFrom: string[]; collection?: WorkflowCollectionReference }
+  | { state: 'known'; value: WorkflowValue; derivedFrom: string[]; collection?: WorkflowCollectionReference; collectionFields?: WorkflowCollectionField[] }
   | { state: 'unknown'; reason: string; derivedFrom: string[] }
 
 export type WorkflowValueReference = {

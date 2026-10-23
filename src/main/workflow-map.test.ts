@@ -108,6 +108,47 @@ describe('dynamic map / controlled collections', () => {
     expect(JSON.parse(progress.finalReport!).map((entry: { key: string }) => entry.key)).toEqual(['a', 'b'])
   })
 
+  it('projects a nested host collection through a committed outcome value without losing read authority', async () => {
+    const execute = vi.fn(() => ({ result: Promise.resolve({ runId: 'must-not-run', status: 'failed' as const, settled: true }), stop: () => true }))
+    const source: WorkflowValue = [{ id: 'group-a', rows: [{ id: 'a', flag: 0 }, { id: 'b', flag: false }] }]
+    const nested: WorkflowBlock = { kind: 'map', blockId: 'inner', items: { kind: 'field', source: { kind: 'ref', name: 'entry' }, path: ['rows'] }, item: 'row', key: ['id'], maxItems: 2,
+      body: { kind: 'bind', blockId: 'copy_row', value: { kind: 'ref', name: 'row' } } }
+    const consume: WorkflowBlock = { kind: 'map', blockId: 'remapped', items: { kind: 'ref', name: 'mapped' }, item: 'group_entry', key: ['key'], maxItems: 1,
+      body: { kind: 'sequence', blockId: 'consume_group', blocks: [
+        { kind: 'map', blockId: 'read_inner', items: { kind: 'field', source: { kind: 'ref', name: 'group_entry' }, path: ['value'] }, item: 'row_entry', key: ['key'], maxItems: 2,
+          body: { kind: 'bind', blockId: 'copy_value', value: { kind: 'field', source: { kind: 'ref', name: 'row_entry' }, path: ['value'] } } },
+        { kind: 'collect', blockId: 'inner_rows', items: { kind: 'ref', name: 'read_inner' } }
+      ] } }
+    const f = await fixture([bind(source), map(nested, 1), consume, { ...collect, items: { kind: 'ref', name: 'remapped' } }, report('collected')], execute)
+    const progress = await f.run()
+    expect(progress.state).toBe('completed')
+    expect(execute).not.toHaveBeenCalled()
+    expect(JSON.parse(progress.finalReport!)[0].value.map((row: { value: WorkflowValue }) => row.value)).toEqual([{ id: 'a', flag: 0 }, { id: 'b', flag: false }])
+  })
+
+  it.each(['parallel', 'collect'] as const)('retains host authority through %s aggregation and a later map', async kind => {
+    const execute = vi.fn(() => ({ result: Promise.resolve({ runId: 'must-not-run', status: 'failed' as const, settled: true }), stop: () => true }))
+    const rows: WorkflowValue = [{ id: 'a', flag: 0 }, { id: 'b', flag: false }]
+    let source: WorkflowBlock[], path: string[]
+    const copy: WorkflowBlock = { kind: 'bind', blockId: 'copy_row', value: { kind: 'ref', name: 'row' } }
+    if (kind === 'parallel') {
+      source = [bind(rows), { kind: 'parallel', blockId: 'aggregated', blocks: [{ kind: 'map', blockId: 'inner', items: { kind: 'ref', name: 'input' }, item: 'row', key: ['id'], maxItems: 2, body: copy }] }]
+      path = ['inner']
+    } else {
+      source = [bind([{ id: 'group', rows }]), map({ kind: 'map', blockId: 'inner', items: { kind: 'field', source: { kind: 'ref', name: 'entry' }, path: ['rows'] }, item: 'row', key: ['id'], maxItems: 2, body: copy }, 1),
+        { kind: 'collect', blockId: 'aggregated', items: { kind: 'ref', name: 'mapped' } }]
+      path = ['0', 'value']
+    }
+    const f = await fixture([...source, { kind: 'bind', blockId: 'selected', value: { kind: 'field', source: { kind: 'ref', name: 'aggregated' }, path } },
+      { kind: 'map', blockId: 'consumed', items: { kind: 'ref', name: 'selected' }, item: 'member', key: ['key'], maxItems: 2,
+        body: { kind: 'bind', blockId: 'flag', value: { kind: 'field', source: { kind: 'ref', name: 'member' }, path: ['value', 'flag'] } } },
+      { kind: 'collect', blockId: 'reported', items: { kind: 'ref', name: 'consumed' } }, report('reported')], execute)
+    const progress = await f.run()
+    expect(progress.state).toBe('completed')
+    expect(execute).not.toHaveBeenCalled()
+    expect(JSON.parse(progress.finalReport!).map((entry: { value: WorkflowValue }) => entry.value)).toEqual([0, false])
+  })
+
   it('keeps an unknown result distinct from physical settlement, stops admission and leaves pending slots visible', async () => {
     const execute = vi.fn(() => ({ result: Promise.resolve({ runId: 'unknown-result', status: 'unknown' as const, settled: true }), stop: () => true }))
     const f = await fixture([bind([{ id: 'a' }, { id: 'b' }]), map(effect, 2), collect, report('collected')], execute, 1)
