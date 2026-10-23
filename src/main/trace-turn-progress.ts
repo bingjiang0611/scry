@@ -288,14 +288,14 @@ export async function recoverTraceTurnProgress(
       request.turn = { ...request.turn, done: true, status: 'interrupted',
         error: '主机退出前未记录运行终态；已恢复最后保存的内容，可能不完整。' }
     }
-    const existing = findTraceArchiveTurnMatches({
+    const existing = (await findTraceArchiveTurnMatches({
       cwd: request.cwd,
       sessionId: request.sessionId,
       providerId: request.providerId,
       userDataDir,
       runId: request.turn.runId,
       providerTurnId: request.turn.providerTurnId
-    }).byRunId
+    })).byRunId
     if (existing) {
       if (baseTurnFingerprint(existing) !== baseTurnFingerprint(request.turn)) {
         pending++

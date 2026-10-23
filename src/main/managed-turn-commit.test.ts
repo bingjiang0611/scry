@@ -1052,6 +1052,86 @@ describe('managed trace turn coordinator', () => {
     })?.turns[0].items).toEqual(expect.arrayContaining([expect.objectContaining({ stage: 'turn_diff' })]))
   })
 
+  const disabledCaptureConfig = (enabled: boolean, toolOutput: 'summary' | 'full') => JSON.stringify({
+    schemaVersion: 1,
+    enabled,
+    workspaceId: 'managed-main-fixture',
+    dataDir: '.scry',
+    repositories: { mode: 'workspace-only' },
+    capture: { prompt: true, assistant: true, toolOutput, diff: true, hooks: true }
+  })
+
+  it('disabled direct commit reuses the protection read and keeps a richer archive', async () => {
+    // summary capture leaves no pinned policy in progress, so protection reads the archive and
+    // the disabled branch decides dominance from that same read.
+    const { workspace, userDataDir } = await fixture()
+    const base = input(workspace, userDataDir)
+    const rich = withCapturedDiff(input(workspace, userDataDir))
+    await persistManagedTraceProgress(base)
+    expect(upsertTraceArchiveTurn({
+      cwd: rich.cwd,
+      sessionId: rich.sessionId,
+      providerId: rich.providerId,
+      runtimeProvider: rich.runtimeProvider,
+      userDataDir,
+      turn: rich.turn
+    })).toBe(true)
+    await writeFile(join(workspace, 'scry.config.json'), disabledCaptureConfig(false, 'summary'))
+
+    await expect(commitManagedTraceTurn(base)).resolves.toEqual({ recorder: 'disabled' })
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: rich.sessionId,
+      providerId: rich.providerId,
+      userDataDir
+    })?.turns[0].items).toEqual(expect.arrayContaining([expect.objectContaining({ stage: 'turn_diff' })]))
+  })
+
+  it('disabled direct commit still reads the archive when progress pins the policy', async () => {
+    // full capture pins the policy in progress, so protection skips the archive. The disabled
+    // branch must then read it itself and refuse to overwrite a conflicting committed turn.
+    const { workspace, userDataDir } = await fixture()
+    await writeFile(join(workspace, 'scry.config.json'), disabledCaptureConfig(true, 'full'))
+    const base = input(workspace, userDataDir)
+    await persistManagedTraceProgress(base)
+    const [progressFile] = await readdir(join(userDataDir, 'managed-turn-progress'))
+    const persisted = JSON.parse(await readFile(join(userDataDir, 'managed-turn-progress', progressFile!), 'utf8')) as { request: ManagedTraceTurnCommitInput }
+    expect(persisted.request.turn.toolContentPolicy).toBeTruthy()
+    expect(upsertTraceArchiveTurn({
+      cwd: base.cwd,
+      sessionId: base.sessionId,
+      providerId: base.providerId,
+      runtimeProvider: base.runtimeProvider,
+      userDataDir,
+      turn: { ...base.turn, userText: 'different prompt' }
+    })).toBe(true)
+    await writeFile(join(workspace, 'scry.config.json'), disabledCaptureConfig(false, 'full'))
+
+    await expect(commitManagedTraceTurn(base)).rejects.toThrow('conflicts with committed archive')
+    expect(readTraceArchive({
+      cwd: workspace,
+      sessionId: base.sessionId,
+      providerId: base.providerId,
+      userDataDir
+    })?.turns[0].userText).toBe('different prompt')
+  })
+
+  it('managed commit rejects an archived Provider turn with different content', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const request = input(workspace, userDataDir)
+    expect(upsertTraceArchiveTurn({
+      cwd: request.cwd,
+      sessionId: request.sessionId,
+      providerId: request.providerId,
+      runtimeProvider: request.runtimeProvider,
+      userDataDir,
+      turn: { ...request.turn, userText: 'different prompt' }
+    })).toBe(true)
+    await startManaged(workspace)
+
+    await expect(commitManagedTraceTurn(request)).rejects.toThrow('collision')
+  })
+
   it('progress recovery 按 provider 过滤', async () => {
     const { workspace, userDataDir } = await fixture()
     await handleRecorderHook({

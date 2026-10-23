@@ -392,8 +392,8 @@ function existingTurnDisposition(
   return 'conflict'
 }
 
-function matchingArchiveTurn(input: ManagedTraceTurnCommitInput): TraceArchiveTurn | undefined {
-  const matches = findTraceArchiveTurnMatches({
+async function matchingArchiveTurn(input: ManagedTraceTurnCommitInput): Promise<TraceArchiveTurn | undefined> {
+  const matches = await findTraceArchiveTurnMatches({
     cwd: input.cwd,
     sessionId: input.sessionId,
     providerId: input.providerId,
@@ -449,7 +449,14 @@ function assertProgressIdentity(
   }
 }
 
-async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<ManagedTraceTurnCommitInput> {
+type ProtectedManagedInput = {
+  input: ManagedTraceTurnCommitInput
+  // Present only when protection had to read the archive for a pinned policy. The read is
+  // outside the run lock, so it may be reused only by callers that also run outside the lock.
+  archiveMatch?: { turn: TraceArchiveTurn | undefined }
+}
+
+async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<ProtectedManagedInput> {
   const [progress, journal, location] = await Promise.all([
     readJson<ManagedTurnProgress>(progressPath(input.userDataDir, input.turn.runId)),
     readManagedJournal(input.userDataDir, input.turn.runId),
@@ -468,7 +475,12 @@ async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<
   )) : undefined
   const matchingOpen = open?.managedByScry && (open.managedRunId === input.turn.runId ||
     (!!input.providerTurnId && open.providerTurnId === input.providerTurnId)) ? open : undefined
-  const toolContentPolicy = journal?.request.turn.toolContentPolicy ?? progress?.request.turn.toolContentPolicy ?? matchingArchiveTurn(input)?.toolContentPolicy ?? matchingOpen?.toolContentPolicy ?? input.turn.toolContentPolicy
+  let archiveMatch: ProtectedManagedInput['archiveMatch']
+  let toolContentPolicy = journal?.request.turn.toolContentPolicy ?? progress?.request.turn.toolContentPolicy
+  if (!toolContentPolicy) {
+    archiveMatch = { turn: await matchingArchiveTurn(input) }
+    toolContentPolicy = archiveMatch.turn?.toolContentPolicy ?? matchingOpen?.toolContentPolicy ?? input.turn.toolContentPolicy
+  }
   let turn = { ...input.turn, ...(toolContentPolicy ? { toolContentPolicy } : {}) }
   if (toolContentPolicy && location.valid) {
     const tools = await persistToolEventContent(
@@ -484,12 +496,12 @@ async function protectManagedInput(input: ManagedTraceTurnCommitInput): Promise<
     )
     turn = { ...turn, items }
   }
-  return { ...input, turn: protectToolContent(turn, input.cwd) }
+  return { input: { ...input, turn: protectToolContent(turn, input.cwd) }, archiveMatch }
 }
 
 async function archiveJournal(journal: ManagedTurnJournal, userDataDir: string): Promise<void> {
   const request = journal.request
-  const existing = findTraceArchiveTurnMatches({
+  const existing = await findTraceArchiveTurnMatches({
     cwd: request.cwd,
     sessionId: request.sessionId,
     providerId: request.providerId,
@@ -679,13 +691,15 @@ export async function commitManagedTraceTurn(
     requireManaged?: boolean
   } = {}
 ): Promise<{ recorder: 'disabled' | 'committed'; recordId?: string }> {
-  input = await protectManagedInput(input)
+  const protectedInput = await protectManagedInput(input)
+  input = protectedInput.input
   const mode = await managedRecorderMode(input.cwd, options.commitHookEnv)
   if (mode.status === 'disabled') {
     if (options.requireManaged === true) {
       throw new Error(`managed recorder mode changed after turn start for ${input.turn.runId}`)
     }
-    const existing = matchingArchiveTurn(input)
+    // Both reads are outside the run lock; reuse the protection read instead of reading again.
+    const existing = protectedInput.archiveMatch ? protectedInput.archiveMatch.turn : await matchingArchiveTurn(input)
     if (existing) {
       const disposition = existingTurnDisposition(existing, input.turn)
       if (disposition === 'conflict') {
@@ -772,7 +786,7 @@ export async function commitManagedTraceTurn(
 export async function persistManagedTraceProgress(
   input: ManagedTraceTurnCommitInput
 ): Promise<void> {
-  input = await protectManagedInput(input)
+  input = (await protectManagedInput(input)).input
   assertManagedTraceInput(input)
   const path = progressPath(input.userDataDir, input.turn.runId)
   const existing = await readJson<ManagedTurnProgress>(path)
@@ -831,7 +845,7 @@ export async function recoverManagedTraceProgress(
       }
       const input = { ...progress.request, userDataDir }
       assertManagedTraceInput(input)
-      const existing = matchingArchiveTurn(input)
+      const existing = await matchingArchiveTurn(input)
       if (existing) {
         const disposition = existingTurnDisposition(existing, progress.request.turn)
         if (disposition === 'conflict') {

@@ -1335,17 +1335,6 @@ async function readValidTraceArchiveIndex(args: {
   }
 }
 
-function readArchiveFile(
-  userDataDir: string,
-  fp: string,
-  cwd: string,
-  sessionId: string,
-  expectedProvider?: ProviderId
-): TraceArchive | null {
-  const inspected = inspectArchiveFile(userDataDir, fp, cwd, sessionId, expectedProvider)
-  return inspected.status === 'valid' ? inspected.archive : null
-}
-
 type SegmentedArchiveInspection = {
   valid: TraceArchive[]
   invalid: Array<{ path: string; error: string }>
@@ -1943,19 +1932,14 @@ export async function readTraceArchiveTurnForHistory(args: {
   throw new Error('交接源归档不存在')
 }
 
-export function findTraceArchiveTurnMatches(args: {
+export async function findTraceArchiveTurnMatches(args: {
   cwd: string
   sessionId: string
   userDataDir: string
   providerId: ProviderId
   runId: string
   providerTurnId?: string
-}): { byRunId?: TraceArchiveTurn; byProviderTurnId?: TraceArchiveTurn } {
-  const archives: TraceArchive[] = []
-  for (const path of [traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)]) {
-    const archive = readArchiveFile(args.userDataDir, path, args.cwd, args.sessionId, args.providerId)
-    if (archive) archives.push(archive)
-  }
+}): Promise<{ byRunId?: TraceArchiveTurn; byProviderTurnId?: TraceArchiveTurn }> {
   const exactPath = traceArchiveTurnPath(
     args.userDataDir,
     args.cwd,
@@ -1963,8 +1947,13 @@ export function findTraceArchiveTurnMatches(args: {
     args.providerId,
     { runId: args.runId, providerTurnId: args.providerTurnId }
   )
-  const exact = readArchiveFile(args.userDataDir, exactPath, args.cwd, args.sessionId, args.providerId)
-  if (exact?.turns.length === 1) archives.push(exact)
+  const [legacy, exact] = await Promise.all([
+    inspectArchiveFileAsync(args.userDataDir, traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId), args.cwd, args.sessionId, args.providerId),
+    inspectArchiveFileAsync(args.userDataDir, exactPath, args.cwd, args.sessionId, args.providerId)
+  ])
+  const archives: TraceArchive[] = []
+  if (legacy.status === 'valid') archives.push(legacy.archive)
+  if (exact.status === 'valid' && exact.archive.turns.length === 1) archives.push(exact.archive)
   const turns = mergeArchives(archives)?.turns ?? []
   return {
     byRunId: turns.find((turn) => turn.runId === args.runId),
