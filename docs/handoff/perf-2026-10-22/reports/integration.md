@@ -165,3 +165,16 @@ ratchet 表中有 4 个 better、4 个 worse 和 3 个 CPU instruction missing�
 - 测试进程均已退出，没有残留的 fake CLI 或 `sleep` 进程。
 - `node_modules` 已恢复为 Node ABI 的 `better-sqlite3`。
 - 日志位于 `/tmp/scry-int/`；3 个重放现场目录保留在 `$TMPDIR` 中。
+
+## 核验意见（审查方，2026-10-23）
+
+结论：**已核验**。
+
+- 用 `git show --remerge-diff` 逐个检查 5 个合并提交：手工解决冲突只涉及 `STATUS.md` 和 `docs/performance-opportunities.md`，与预检一致，源码没有夹带改动。合并后的 `STATUS.md` 与 `perf/handoff` 完全相同，`apps/ios` 与 `perf/f-ios-observable` 完全相同。
+- 7 个 gate 第一次运行全部通过，`test:renderer:ui` 整条全绿。performance 计数与 main 相比没有退化；报告也说明了固定计数不能复核各批次自身的收益，口径正确。
+- **A1 重放**用的是生产 Claude adapter 加不连网的 fake CLI，比 smoke fixture 更接近真实：强制停止后，那个不会随父进程退出的孙进程也被结束，说明 SIGKILL 确实发给了经身份复核的进程树。身份不可用时的句柄回退只有单测覆盖，理由成立。
+- **B2 重放**直接看到了“首屏先出、约 1.2 s 后收到 `catalog_recovered`、缺失会话自动出现”，未知工作区的 3000 个归档没有被复活。
+
+**后续**
+- `perf/f2-ios-stream-layout` 已核验，只改 `apps/ios` 和文档；用 `merge-tree` 试算可无冲突合入本分支。
+- 重放 harness 留在执行方本机 `/tmp`。建议把 A1 的 fake Claude CLI 和 B2 的种子脚本整理进 `scripts/`，作为以后改停止/恢复逻辑时的回归；是否做由维护者决定。
