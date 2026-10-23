@@ -45,6 +45,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 ```bash
 nvm use 22
 npm ci
+npm run hooks:install
 
 # 如果 Electron 二进制没有完整下载
 node node_modules/electron/install.js
@@ -54,6 +55,17 @@ node node_modules/electron/install.js
 
 npm run dev
 ```
+
+### Git 提交文件大小检查
+
+`npm run hooks:install` 为当前仓库安装 pre-commit hook，不修改全局 Git 配置。每个新检出需执行一次；不会随 `npm ci` 自动安装。已有其他 hook 会通过符号链接保留；若已有 pre-commit，安装器拒绝覆盖，需先人工整合。
+
+- 只检查新增、修改、复制或重命名文件的**完整暂存版本**，不读取工作区版本；删除项不检查。
+- 超过 **20,000 字节**则拒绝提交，即按 `bytes / 4` 估算超过 5,000 tokens；这不是真实 tokenizer 计数。已有大文件修改后同样受限。
+- 排除锁文件（`package-lock.json`、`npm-shrinkwrap.json`、`yarn.lock`、`pnpm-lock.yaml`、`Package.resolved`）、PNG/ICNS 资源、符号链接及子模块。生成代码仅排除 `experiments/remote-g0/generated/wire.mjs`、同目录 `wire.ts` 和 `experiments/remote-g0/swift/Sources/RemoteTransport/Wire.swift`。新增生成物类型需审查并更新脚本中的明确列表，不按作者身份猜测，也不豁免整个 `generated/` 目录。
+- 报错会列出文件、字节数和估算 tokens。按职责提取组件、领域逻辑或测试套件，更新引用并验证后重新暂存；不要为凑大小机械切片或增加空包装层。
+
+可用 `npm run check:staged-file-size` 手动运行。hook 依赖 `PATH` 中的 Node.js；本地 Git hook 可被 `--no-verify` 跳过，不是安全边界或服务端门禁。安装时保留的其他 hook 列表不会自动发现上游新 hook；需要更新时，先恢复安装前的 `core.hooksPath`、删除 Git 目录内的 `scry-hooks`，再重新安装。
 
 - **修改后验证**：修改代码后需要验证 App 行为时，应启动基于当前代码、使用独立 `userData` 和临时工作区的 test 实例进行验证，不要求用户重启当前 App，也不停止或干扰用户正在使用的实例。
 

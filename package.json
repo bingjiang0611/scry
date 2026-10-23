@@ -26,6 +26,8 @@
     "pack:cli": "npm run build:cli && npm pack ./packages/turn-recorder-cli",
     "check:cli-release": "npm run typecheck && vitest run src/cli src/core/turn-recorder src/shared/turn-record.test.ts src/shared/credit-usage.test.ts src/shared/trace.test.ts src/shared/runtime.test.ts src/main/normalize.test.ts src/main/danger.test.ts src/main/claude-locate.test.ts src/main/managed-turn-commit.test.ts && npm run build:cli && npm run smoke:cli-package",
     "publish:cli": "npm publish ./packages/turn-recorder-cli",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "check:staged-file-size": "node scripts/check-staged-file-size.mjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
