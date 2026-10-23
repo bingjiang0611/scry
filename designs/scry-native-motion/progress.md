@@ -6,7 +6,7 @@
 
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
-| 01 基础 | 待核验 | `cf5642b`（实现）；验收记录见本提交 |
+| 01 基础 | 需修改 | `cf5642b`（实现）；核验见「01 · 核验」，修正以 `motion(01-fix)` 提交 |
 | 02 结构过渡 | 未开始 | — |
 | 03 弹窗与浮层 | 未开始 | — |
 | 04 列表 | 未开始 | — |
@@ -56,6 +56,32 @@
 - 与规格的偏差：无新增动效场景；按明示退路将独立标签指示条留 04。安装未完成，明确登记，不弱化校验。
 - 未验证：物理显示器上 120Hz 连续手感、真实 Provider 运行不在本步验收范围；合成 Provider 不等于真实 Provider 验收。安装产物尚不可宣称可运行。
 - 安装与现场：`/Applications/Scry.app` 未被本任务替换，用户无需为本次验收重启。隔离 App / fixture 进程已退出，临时用户数据按既有 harness 清理；仅本机临时日志、合成数据截图与未通过检查的 ignored `dist/mac-arm64/Scry.app` 留作排查。等待设计方核验，不执行 02。
+
+#### 核验（设计方，2026-10-22）
+
+- 结论：**需修改**（一处，范围小）。其余部分通过；修正后直接进入 02，不需要再等一轮核验，除非修正中发现新问题。
+- 核验方式与边界：读 `7cb816f..033d87d` 的全部 diff；在 Chromium（Playwright）里单独复现减弱动效规则的层叠行为。这次核验的云端环境连不上 npm 源，**没有重跑**单测、类型检查、构建与 UI fixture；这些以本节上方执行方的记录为准。
+- 通过的部分：
+  - `motion.css` / `motion.ts` 与 brief 完全一致；`styles.css` 不再定义 `--ease-out`；`main.tsx` 的导入位置正确；token 单测核对 CSS 与 TS 双向一致，并覆盖订阅与解除。
+  - 去悬停抬升与按下缩放：抽查 `codex-alignment.css`，只删位移与 `transform` 过渡，底色、描边、阴影的悬停反馈都保留。没有改颜色、尺寸、间距、圆角的取值。
+  - `SidebarActivity` 改用 `MOTION.durSlow` / `MOTION.easeStruct` 与 `subscribeReducedMotion`，原有「先读后写、可打断、按住不漂移」语义未变。
+  - 测量 / fixture 与实现分开提交；新增 `--motion-tokens-only` 纳入默认 UI 测试；`--dev-motion-only` 只加了一个分支，没有改动 `electron-security-smoke.mjs` 已有的安全检查；所有直接导入 `styles.css` 的 fixture 都补了 `motion.css`，避免假阳性。负对照做了两次并已撤销。
+  - 标签指示条按第 6 项退路留到 04：接受，已在 `steps/04-lists.md` 补上这一项。
+- **需修改：减弱动效的全局规则让原本没有过渡的元素也开始淡变。**
+  - 位置：`styles.css` 约 8046 行 `@media (prefers-reduced-motion: reduce) { *, *::before, *::after { … } }` 中的 `transition-duration: 120ms !important`。
+  - 现象：这条规则同时强制了 `transition-property` 与 `transition-duration`，所以减弱动效下**每个元素**的颜色、底色、描边变化都会淡入 120ms，包括没有声明过渡、或明确写了 `transition: none` 的元素。Chromium 实测：同一规则下，无过渡元素、`transition: none` 元素、`transition: background-color 100ms` 元素、`transition: transform 300ms, background-color 100ms` 元素，改底色后都出现一个 120ms 的 `background-color` 过渡。`sidebar-activity-ui-checks.mjs` 里被改掉的那条旧断言（`.sb-sesstext` 的 `transitionProperty` 从 `none` 变成四个属性）就是这个现象。
+  - 为什么要改：① 违背原则 1——会话行、导航项等的选中态在减弱动效下反而变慢，常规模式下却是即时的；执行方只给标签页加了例外，其他选中态没覆盖。② 选了「减弱动态效果」的用户看到的过渡比常规模式更多。③ 切主题时整棵 DOM（包括长转录）同时起颜色过渡，有不必要的开销。
+  - 要求的行为：减弱动效下，**没有声明过渡的元素保持即时**；已有过渡的元素只插值 `opacity / color / background-color / border-color`，线性，时长不超过它自己声明的时长。
+  - 建议改法（实测有效）：删掉通配规则里的 `transition-duration: 120ms !important`，保留 `transition-property`、`transition-timing-function: linear`、`transition-delay: 0ms` 的覆盖。这样 `transition: none` 与无过渡元素的时长仍为 0；有过渡的元素沿用自己的时长（01 之后都是 `--dur-micro` 或不超过 `--dur-slow`）。如果因此标签页例外规则变得多余，就一并删掉。
+  - 验收：
+    - `--motion-tokens-only` 增加一条：减弱动效下，给一个无过渡元素和一个会话行改底色，`getAnimations()` 都为空；给有 `--dur-micro` 过渡的元素改底色，只有一个 ≤100ms 的线性颜色过渡。
+    - 把 `sidebar-activity-ui-checks.mjs` 那条断言改成检查「改色后没有过渡动画」（`getAnimations()` 为空，或 `transitionDuration` 为 `0s`），不要检查 `transitionProperty` 字符串。
+    - 负对照：把 `120ms` 那行加回去，新断言须失败一次。
+    - 重跑 `npm run test:renderer:ui`。
+- 关于安装受阻（不阻塞后续步骤）：本步只改 CSS、一个 TS 常量文件与测试脚本，不可能影响私有 CLI 二进制，`SIGKILL` 大概率是环境问题（macOS 27.2 对签名或隔离属性的处理），不是动效改动引起的。请在 `main`（`531e88c`）上按同样流程打包一次，确认是否同样复现：复现就记成既有问题，列在「问题」里留给维护者，02 起照常推进，每步仍尝试安装并如实记录；不复现再停下来排查。无论哪种情况都不要绕过 `check:packaged-app`。
+- 规格补充（设计方已在本次提交中写入步骤文件，执行方按新版执行）：
+  - `steps/04-lists.md`：加入 01 留下的「标签指示条」。
+  - `steps/03-overlays.md`、`steps/04-lists.md`、`steps/05-loading.md`：01 的全局规则只把关键帧动画的时长压到 120ms，不会去掉关键帧里的 `transform`。所以新增的、带位移或缩放的 `@keyframes` 必须像 `surface-menu-in` 一样，在减弱动效下提供只含透明度的版本；05 的不定进度条在减弱动效下改为静态细条加文案，不能被压成一次 120ms 后就消失。
 
 <!--
 ### NN · <步骤名>

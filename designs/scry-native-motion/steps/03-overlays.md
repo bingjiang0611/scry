@@ -15,6 +15,10 @@
    - 父组件直接把弹窗状态置空（非用户关闭）时照常立即卸载，不强求出场。
 3. **菜单与悬停卡**：入场 160ms `--ease-out`，`transform-origin` 对准触发元素一侧（菜单在按钮下方就 `top right`/`top left`），`scale(0.97)` 起；出场 100ms 只淡出。`surface-menu-in` 改用 token。悬停卡保留现有的显示延迟逻辑，只加入场与出场。
 
+## 减弱动效的注意事项
+
+01 的全局规则只把关键帧动画时长压到 120ms，不会去掉关键帧里的 `transform`。本步新增的入场 / 出场 `@keyframes` 只要带缩放或位移，就必须在 `@media (prefers-reduced-motion: reduce)` 里提供只含透明度的同名版本（参照 `styles.css` 中 `surface-menu-in` 的写法）。
+
 ## 不要做
 
 - 不改弹窗内容、尺寸、`ModalCloseButton` 的合同（见 `DESIGN.md`「可复用实现」）。

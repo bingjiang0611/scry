@@ -76,7 +76,7 @@ JS 侧（WAAPI、View Transitions）读同一套值：新增 `src/renderer/motio
 | 9 | 列表首屏（分析表、技能 / MCP 列表、Meta Prompts、LLM 性能） | 前 10 行错开 16ms，淡入并上移 4px | 行上写 `--i`，CSS 计算 `animation-delay`；只在首次挂载时加入场类 | 04 |
 | 10 | 列表增删与重排（侧栏会话、提示队列、后台任务） | 新行从上方 4px 淡入；其余行 300ms 平移让位；删除的行直接移除，其余行平移收拢（为淡出保留已删除行的 DOM 不值得这份复杂度） | 从 `SidebarActivity.tsx` 抽出 `hooks/useFlipList.ts`（先读全部位置再统一写；支持打断；遵守减弱动效） | 04 |
 | 11 | 流式输出 | 运行中新出现的工具卡、Hook 行、轮次指标 180ms 淡入并上移 4px；打开历史会话时不播；正文逐字不加动画；贴底跟随保持即时，只有「回到底部」这类一次性跳转用平滑滚动 | 只对轮次运行中首次出现的 key 播入场；不改按帧合并路径 | 04 |
-| 12 | 标签页（侧栏 项目 / 动态、右侧 surface 标签） | 文字立刻变色；下划线 240ms 滑动（struct）；内容 160ms 淡入 | 指示条用 `transform`，不动 `left / width` | 01（CSS 部分）、04 |
+| 12 | 标签页（侧栏 项目 / 动态、右侧 surface 标签） | 文字立刻变色；下划线 220ms（`--dur-base`）滑动（struct）；内容 160ms 淡入 | 指示条用 `transform`，不动 `left / width` | 01（CSS 部分）、04 |
 | 13 | 悬停与按下 | 只换底色或描边，`--dur-micro` 线性；按下不缩放 | 删除抬升，统一 token | 01 |
 | 14 | 窗口材质（可选） | 侧栏使用 macOS vibrancy | `BrowserWindow` `vibrancy: 'sidebar'`，侧栏透明底；重新核对对比度 | 06 |
 

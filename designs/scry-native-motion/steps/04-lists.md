@@ -29,11 +29,22 @@
 - `<details class="thinking">`：用 `::details-content` + `interpolate-size: allow-keywords`（Chromium 已支持）做高度过渡，不改成自制折叠。
 - 长内容（例如超过 40 行的工具输出）不做高度动画，只做 160ms 淡入。
 
-### D. 流式新块
+### D. 标签指示条（01 留下）
+
+- 侧栏「项目 / 动态」(`.sb-view-tabs`) 与右侧 surface 标签：加一个独立指示条元素，选中项变化时用 `transform: translateX() scaleX()` 移到新标签下方，`var(--dur-base) var(--ease-struct)`；位置与宽度在 `useLayoutEffect` 里读取选中标签的 `offsetLeft / offsetWidth`（先读后写，不交替）。标签文字颜色无过渡。
+- surface 标签可增删、宽度不定：标签增删或容器尺寸变化（`ResizeObserver`）时重新定位指示条，不播动画；只有选中项变化才滑动。
+- 减弱动效：指示条直接跳到新位置。
+- 原有的底边框选中样式在指示条就位后删除，避免两套选中表达。
+
+### E. 流式新块
 
 - 运行中的轮次里**首次出现**的工具卡、Hook 行、轮次指标：180ms 淡入 + `translateY(4px)`。
 - 打开历史会话、从缓存恢复、切换会话时一律不播（需要一个「本轮是否在运行中且该项是在挂载后才加入」的判断，不能只看是否首次渲染）。
 - 正文逐字输出不加动画。贴底跟随保持即时；`chat-scroll.ts` 中只有用户触发的一次性跳转（例如「回到底部」）用 `behavior: 'smooth'`。
+
+## 减弱动效的注意事项
+
+01 的全局规则只把关键帧动画时长压到 120ms，不会去掉关键帧里的 `transform`。本步新增的 `row-in` 等带位移的 `@keyframes`，必须在 `@media (prefers-reduced-motion: reduce)` 里提供只含透明度的同名版本（参照 `styles.css` 中 `surface-menu-in` 的写法）。
 
 ## 不要做
 
@@ -44,7 +55,7 @@
 
 - [ ] `useFlipList` 单测（可用 jsdom 模拟 `getBoundingClientRect` 与 `animate`）：先读后写、打断续接、减弱动效无动画。
 - [ ] `sidebar-activity.test.ts`、`render.test.tsx`、`background-work.test.tsx`、`MetaPromptsView.test.tsx` 等受影响单测通过；`npm run typecheck:web`、`npm run build` 通过。
-- [ ] 隔离 Electron fixture 新增 `--lists-only`：① 打开分析页，前 10 行动画 delay 依次相差 16ms，第 11 行无 delay；② 触发一次数据刷新，没有任何行重播入场；③ 侧栏新增会话时，其余行有 300ms `transform` 动画；④ 打开含 50 个工具卡的历史会话，`document.getAnimations()` 中没有工具卡的入场动画；运行中追加 1 个工具卡，只有它有 180ms 入场；⑤ 折叠项目分组后，组内容在动画结束后从 DOM 移除；⑥ 减弱动效下以上都没有 `transform` 动画。
+- [ ] 隔离 Electron fixture 新增 `--lists-only`：① 打开分析页，前 10 行动画 delay 依次相差 16ms，第 11 行无 delay；② 触发一次数据刷新，没有任何行重播入场；③ 侧栏新增会话时，其余行有 300ms `transform` 动画；④ 打开含 50 个工具卡的历史会话，`document.getAnimations()` 中没有工具卡的入场动画；运行中追加 1 个工具卡，只有它有 180ms 入场；⑤ 折叠项目分组后，组内容在动画结束后从 DOM 移除；⑥ 切换侧栏「项目 / 动态」与 surface 标签时，指示条有一个 220ms 的 `transform` 动画，标签文字颜色同帧改变；增删 surface 标签时指示条重新定位但不播动画；⑦ 减弱动效下以上都没有 `transform` 动画。
 - [ ] `node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only` 仍通过；`npm run test:renderer:ui`、`npm run test:background-ui` 通过。
 - [ ] `npm run performance:measure -- --scenario history` 与 `--scenario stream`（场景名以 `scripts/performance-paths.json` 为准）；每个 `worse` 写明原因。
 - [ ] test 实例深浅主题各检查：侧栏展开 / 收起项目、新建会话、分析页首屏、技能 / MCP 弹窗列表、Meta Prompts、一次真实流式输出（用 fixture 或临时工作区，不在开发仓库驱动真实 Agent）。
