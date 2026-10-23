@@ -10,6 +10,7 @@ import { exerciseMotionTokens } from './motion-tokens-ui-checks.mjs'
 import { exerciseStructure } from './structure-ui-checks.mjs'
 import { exerciseOverlays } from './overlays-ui-checks.mjs'
 import { exerciseLists } from './lists-ui-checks.mjs'
+import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
@@ -1604,7 +1605,7 @@ try {
         if (${listsOnly}) {
           win.setSize(1400, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'lists.html'))})
-          result.lists = await (${exerciseLists.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LISTS_UI_SCREENSHOT ?? '')})
+          result.lists = await (${exerciseLists.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LISTS_UI_SCREENSHOT ?? '')}, ${JSON.stringify(nativeUiPointer.toString())}, process.argv.find(argument => argument.startsWith('--scry-lists-campaign=')).split('=')[1])
           finish(result); return
         }
         if (${overlaysOnly}) {
@@ -1769,10 +1770,13 @@ try {
       }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
-  await new Promise((resolve, reject) => {
+  // Preserve the 30s watchdog and every workload. Independent list campaigns
+  // get fresh isolated processes instead of extending timeouts for more cases.
+  const campaignResults = []
+  for (const campaign of listsOnly ? ['structure', 'history', 'live'] : ['all']) await new Promise((resolve, reject) => {
     // The fixture window is shown inactive and may sit behind the user's windows. Occluded windows stop
     // producing frames, which stalls requestAnimationFrame and frame-aligned mousemove; hide() still hides.
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows'], {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
@@ -1784,9 +1788,10 @@ try {
       clearTimeout(timer)
       const result = output.match(/^SCRY_UI_SMOKE_RESULT=(.+)$/m)?.[1]
       if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
-      else { console.log(result); resolve() }
+      else { if (listsOnly) campaignResults.push(JSON.parse(result).lists); else console.log(result); resolve() }
     })
   })
+  if (listsOnly) console.log(JSON.stringify({ lists: Object.assign({}, ...campaignResults) }))
 } finally {
   await rm(temp, { recursive: true, force: true })
 }

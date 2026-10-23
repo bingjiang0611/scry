@@ -93,7 +93,9 @@ function events(runId: string, count: number): TraceEvent[] {
   ]).flat()
 }
 function makeTurn(runId: string, count: number, done: boolean): Turn {
-  return { runId, providerId: 'claude', sessionId: 'lists', userText: copy.shortSkill, done, items: [{ id: `${runId}-thinking`, runId, ts: stamp, kind: 'model', stage: 'thinking', thinking: copy.description }, ...events(runId, count)] }
+  const items: TraceEvent[] = [{ id: `${runId}-thinking`, runId, ts: stamp, kind: 'model', stage: 'thinking', thinking: copy.description }, ...events(runId, count)]
+  if (done) items.push({ id: `${runId}-result`, runId, ts: stamp, kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 20, durationMs: 500 })
+  return { runId, providerId: 'claude', sessionId: 'lists', userText: copy.shortSkill, done, items }
 }
 function Fixture() {
   const [scene, setScene] = useState<'chat' | 'analytics' | 'meta' | 'tasks'>('chat')
@@ -104,6 +106,7 @@ function Fixture() {
   const [input, setInput] = useState('')
   const [cache, setCache] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [scope, setScope] = useState('lists-session')
   const [modal, setModal] = useState<'skills' | 'mcp' | 'llm' | null>(null)
   const [queued, setQueued] = useState<QueuedPrompt[]>([])
   const [tasks, setTasks] = useState<BackgroundWork['tasks']>([])
@@ -145,7 +148,8 @@ function Fixture() {
   }
   useEffect(() => {
     Object.assign(window, { listFixture: {
-      setCache, setLoading, setBusy, appendTool, appendHook,
+      setCache, setLoading, setBusy, appendTool, appendHook, loading,
+      switchScope: () => { setScope(previous => `${previous}:switch`); appendTool() },
       pinCount: (count: number) => setCatalog(previous => previous.map((session, index) => ({ ...session, pinnedAt: index < count ? index + 1 : undefined }))),
       removeFirstTask: () => setTasks(previous => previous.slice(1)),
       hookResponse: () => setTurns(previous => previous.map(turn => ({ ...turn, items: [...turn.items,
@@ -170,7 +174,7 @@ function Fixture() {
             : <ChatView turns={turns} selectedId={null} scrollRef={scroll} textareaRef={textarea} cwd="/fixture/lists"
               recent={[]} agents={[agent]} selectedAgentId="claude" hasSelectedSession runControls={{ permissionMode: 'default' }}
               runControlCatalog={{ models: [], permissions: [{ id: 'default', label: copy.provider, description: copy.description }] }}
-              input={input} composerScopeKey={turns[0]?.runId} busy={busy} sessionLoading={loading} sessionCacheVisible={cache}
+              input={input} composerScopeKey={scope} busy={busy} sessionLoading={loading} sessionCacheVisible={cache}
               draftAttachments={[]} queuedPrompts={queued} slashOpen={false} slashLoading={false} slashCmds={[]} slashSel={0}
               onSelect={noop} onInput={setInput} onChooseFolder={noop} onPickRecent={noop} onRemoveRecent={noop}
               onRetrySlash={noop} onPickSlash={noop} onSlashSel={noop} onHideSlash={noop} onSend={noop} onStop={noop}
