@@ -157,6 +157,16 @@ export async function exerciseOverlays(contents) {
   await wait(`!window.directHideNode.isConnected`)
   check(await read(`window.directHideNode.dataset.state === 'enter'`), 'Parent-driven removal was forced through exit')
 
+  await click(css('#probe-both'))
+  for (const selector of ['.probe-modal', '.sb-session-menu']) {
+    await wait(`${css(selector)} != null && ${css(selector)}.getAnimations().every(animation => animation.playState === 'finished')`)
+    const settled = await read(`(() => { const node = ${css(selector)}; return { transform: getComputedStyle(node).transform, finishedEntrances: node.getAnimations().filter(animation => animation.playState === 'finished' && ['modal-dialog-in', 'overlay-menu-in'].includes(animation.animationName)).length }; })()`)
+    check(settled.transform === 'none' && settled.finishedEntrances === 0,
+      `Entrance retained transform or finished animation on ${selector}: ${JSON.stringify(settled)}`)
+  }
+  key('Escape')
+  await wait(`${css('.probe-modal')} == null && ${css('.sb-session-menu')} == null`)
+
   contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
@@ -183,5 +193,6 @@ export async function exerciseOverlays(contents) {
   return { themes: ['light', 'dark'], dialogEntrance260: true, closeTimes, focusRestoredAtExitStart: true,
     threeClosePaths: true, firstNativeRowClickDuringExit: true, sameModalReopened: true, replacementImmediate: true,
     menuEnter160Exit100: true, placementDuringPageTransformAtMs: openedAt, placementMatchesStatic: true,
-    pendingAndNestedFocusPreserved: true, parentRemovalImmediate: true, reducedOpacityOnly: true }
+    pendingAndNestedFocusPreserved: true, parentRemovalImmediate: true, reducedOpacityOnly: true,
+    settledEntrancesReleaseTransformAndAnimations: true }
 }
