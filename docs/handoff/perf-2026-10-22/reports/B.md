@@ -87,3 +87,22 @@ npx vitest run src/main/trace-catalog-discovery.measurement.test.ts
 - 未驱动真实 Provider；未安装到 `/Applications/Scry.app`；日常 App 未被停止或替换。
 - `dist/` 中留有 packaged 测试产物（已 gitignore）。日志与 raw performance JSON 保留在上列 `/tmp/scry-*` 路径。没有后台进程。
 - B1/B2 状态为「待核验」。负责人：审查方，按 README 检查本报告与反例后标记。
+
+## 核验意见（审查方，2026-10-23）
+
+结论：**B1、B2 已核验**。审查方未在本会话重跑测试（网络策略拒绝 npm registry），依据是逐行读 `582c812`、`541d076`、`87fc287` 的 diff 和本报告的命令记录。rebase 后 `aa61d68` 是本分支祖先，A1 修正未被改动。
+
+**B1**
+- `protectManagedInput` 的策略取值顺序仍是 journal → progress → archive → open → input，只有前两者都没有时才读归档，与原 `??` 链的惰性求值一致。
+- disabled 分支复用锁外那次读取：原实现两次读取也都在锁外，复用不改变一致性；managed 路径在锁内单独再读一次，避免 TOCTOU，取舍正确。
+- `findTraceArchiveTurnMatches` 并行读 legacy 与精确文件，`mergeArchives` 及“精确文件无效不回退”的语义不变；同步孪生已删除。
+
+**B2**
+- 选方案 2（缩小到 Qoder 子树、移出首屏）合理，限制和升级条件写清楚了。
+- 限定 Provider 的索引只回答范围内的请求，全量请求不会误用它；反例测试覆盖了这一点。
+- 异步发布后，在同一同步步骤里复核写入代数，再决定删 dirty 标记还是删刚发布的索引；在发布期间发生并发写入时，下次会重扫，不会信任过期索引。
+- 后台恢复不会复活刚删除的会话：恢复开始时先取一份目录快照，已在目录里的会话会被跳过；只有目录里本来缺失的 Qoder 会话才会被补录。
+
+**非阻塞**
+- `parseTraceArchiveCatalogIndexAsync` 开头仍有一处 `existsSync`（原有代码），开销极小，可在以后顺手改掉。
+- `catalog_recovered` 的端到端刷新只有单测覆盖，整合时可在 Electron fixture 中补一次重放。
