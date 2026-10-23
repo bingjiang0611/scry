@@ -1,0 +1,278 @@
+{
+  "schema": 1,
+  "runs": [
+    {
+      "label": "baseline-v2-1",
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601,
+          "RootView": 601
+        },
+        "callbackGapsOver50Ms": 162,
+        "callbackIntervalMaxMs": 553.9220833452418,
+        "callbackIntervalP50Ms": 16.681958339177072,
+        "callbackIntervalP95Ms": 475.50358332227916,
+        "callbackSamples": 405,
+        "elapsedMs": 51988.25670834049,
+        "missedDisplayLinkCallbacks": 2710,
+        "nominalIntervalMs": 16.681125009199604,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "bf92d049539a375aeafbc4044beedd61fef4244c",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "instruments": {
+        "phaseMs": 51981.637709,
+        "appHitches": 326,
+        "appHitchTimeMs": 19018.198876,
+        "appHitchMsPerSecond": 365.8637879488592,
+        "weightedDisplayFpsEstimate": 26.62316305834004,
+        "fpsPhaseCoverage": 0.990647738385591
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 90.22,
+        "loadAfter": 63.58,
+        "highLoad": true
+      },
+      "exportSHA256": {
+        "hitches": "e45eec0da6ad65d3af5f107993752e1cd065cd487c277f9a4723de8c6d2a00f5",
+        "core-animation-fps-estimate": "afda6a868c5d8dd2e7ae9bec6a1121308b988a4674a29be5a50b4e57baaa58bf",
+        "os-signpost-interval": "96e937874481c54d8827769d24cf9bb54d35b68a81c57c136944088f20b11044"
+      }
+    },
+    {
+      "label": "candidate-v2-1",
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601
+        },
+        "callbackGapsOver50Ms": 164,
+        "callbackIntervalMaxMs": 573.0777916905936,
+        "callbackIntervalP50Ms": 16.679708322044462,
+        "callbackIntervalP95Ms": 494.14912500651553,
+        "callbackSamples": 410,
+        "elapsedMs": 53450.87637499091,
+        "missedDisplayLinkCallbacks": 2786,
+        "nominalIntervalMs": 16.678958316333592,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "de8501ab5989114949f04a99decee8484d48d4c4",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "instruments": {
+        "phaseMs": 53446.571125,
+        "appHitches": 304,
+        "appHitchTimeMs": 16767.676504,
+        "appHitchMsPerSecond": 313.72782483620927,
+        "weightedDisplayFpsEstimate": 26.571509398527386,
+        "fpsPhaseCoverage": 1.0
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 41.46,
+        "loadAfter": 39.02,
+        "highLoad": true
+      },
+      "exportSHA256": {
+        "hitches": "c783a898d0a401279d15548ed5861a6258352219da4e341b7b7209c2df33c0db",
+        "core-animation-fps-estimate": "93117c4aba6f37f7b070cb5122a4945d53be91caa74f585dd7f5ed21e663a767",
+        "os-signpost-interval": "9e66a828a2e7c6748cd1e843f96bab511224822a105a4248751e1929d63f0c15"
+      }
+    },
+    {
+      "label": "candidate-v2-2",
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601
+        },
+        "callbackGapsOver50Ms": 161,
+        "callbackIntervalMaxMs": 573.0590833118185,
+        "callbackIntervalP50Ms": 16.679125023074448,
+        "callbackIntervalP95Ms": 488.34262500167824,
+        "callbackSamples": 410,
+        "elapsedMs": 52855.03879166208,
+        "missedDisplayLinkCallbacks": 2751,
+        "nominalIntervalMs": 16.678916639648378,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "de8501ab5989114949f04a99decee8484d48d4c4",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "instruments": {
+        "phaseMs": 52851.097375,
+        "appHitches": 307,
+        "appHitchTimeMs": 18834.412336,
+        "appHitchMsPerSecond": 356.36747903950214,
+        "weightedDisplayFpsEstimate": 26.5776079936223,
+        "fpsPhaseCoverage": 0.9923178037890268
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 36.59,
+        "loadAfter": 26.03,
+        "highLoad": true
+      },
+      "exportSHA256": {
+        "hitches": "17b32bc6a8f33dff6b0c483fa5d8197b3081e32d84868e9a764d1b601237dee7",
+        "core-animation-fps-estimate": "c53eb86a71747bd30a61dd3a893ac2f70faaa7733f9c5a921e3b4106da04d043",
+        "os-signpost-interval": "1045e395e7765f39b860bb33d7d3f1ded6edc3c445b40d3382685b65a606be5f"
+      }
+    },
+    {
+      "label": "baseline-v2-2",
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601,
+          "RootView": 601
+        },
+        "callbackGapsOver50Ms": 162,
+        "callbackIntervalMaxMs": 601.6505833540577,
+        "callbackIntervalP50Ms": 16.680708329658955,
+        "callbackIntervalP95Ms": 524.7671249962877,
+        "callbackSamples": 412,
+        "elapsedMs": 56437.39920834196,
+        "missedDisplayLinkCallbacks": 2965,
+        "nominalIntervalMs": 16.68066668207757,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "bf92d049539a375aeafbc4044beedd61fef4244c",
+        "schema": 1,
+        "thermalEnd": 1,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "instruments": {
+        "phaseMs": 56434.329292,
+        "appHitches": 324,
+        "appHitchTimeMs": 19168.408667,
+        "appHitchMsPerSecond": 339.6586600297785,
+        "weightedDisplayFpsEstimate": 26.02921510546301,
+        "fpsPhaseCoverage": 1.0
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 22.05,
+        "loadAfter": 15.32,
+        "highLoad": true
+      },
+      "exportSHA256": {
+        "hitches": "6260ce30aa729d3e1cab86d40fd900e0e1816275aa56dc17c43ad79072184455",
+        "core-animation-fps-estimate": "6dd9bace14e01056d035df5742f4779f53048b5b0bcc14e6d204a5ecd9b55647",
+        "os-signpost-interval": "54426aab946bddf67e98070b992c7008353405dfb8b1ab722068bb05613000b4"
+      }
+    },
+    {
+      "label": "baseline-v2-3",
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601,
+          "RootView": 601
+        },
+        "callbackGapsOver50Ms": 163,
+        "callbackIntervalMaxMs": 564.8685833439231,
+        "callbackIntervalP50Ms": 16.6786250192672,
+        "callbackIntervalP95Ms": 487.10133333224803,
+        "callbackSamples": 411,
+        "elapsedMs": 52946.03804164217,
+        "missedDisplayLinkCallbacks": 2764,
+        "nominalIntervalMs": 16.677833336871117,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "bf92d049539a375aeafbc4044beedd61fef4244c",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "instruments": {
+        "phaseMs": 52935.974959,
+        "appHitches": 303,
+        "appHitchTimeMs": 18900.705054,
+        "appHitchMsPerSecond": 357.0483979682812,
+        "weightedDisplayFpsEstimate": 26.0841126135572,
+        "fpsPhaseCoverage": 1.0
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 6.04,
+        "loadAfter": 7.23,
+        "highLoad": false
+      },
+      "exportSHA256": {
+        "hitches": "d0de34edcc551187b6969c0d9926760fc1188ec0b4ef869667acd8989c8b3786",
+        "core-animation-fps-estimate": "2cb5b45a00594da95fba22bb8386862881991eb54f4431b311c20a9ca74a2691",
+        "os-signpost-interval": "d5dd338bf5277bfc6f0eb05d7e7924479c25d9af3ae37cc22b9bfb4edd332e60"
+      }
+    },
+    {
+      "label": "candidate-v2-3",
+      "stream": {
+        "actualLines": 600,
+        "bodies": {
+          "ChatView": 601,
+          "FocusedTurnView": 601
+        },
+        "callbackGapsOver50Ms": 162,
+        "callbackIntervalMaxMs": 570.7607083313633,
+        "callbackIntervalP50Ms": 16.678374988259748,
+        "callbackIntervalP95Ms": 503.5588333266787,
+        "callbackSamples": 417,
+        "elapsedMs": 54550.14908334124,
+        "missedDisplayLinkCallbacks": 2855,
+        "nominalIntervalMs": 16.677791689289734,
+        "outputRows": 1,
+        "outputSHA256": "2fe847c12d3295747ee52bff44914d2230f71a471f4237e2de5fbf2820e30ae4",
+        "requestedLines": 600,
+        "revision": "de8501ab5989114949f04a99decee8484d48d4c4",
+        "schema": 1,
+        "thermalEnd": 0,
+        "thermalStart": 0,
+        "workload": "stream600-paragraphs-30hz-tail500-v2"
+      },
+      "instruments": {
+        "phaseMs": 54540.67175,
+        "appHitches": 302,
+        "appHitchTimeMs": 17400.999714,
+        "appHitchMsPerSecond": 319.04630353218926,
+        "weightedDisplayFpsEstimate": 25.69807359404223,
+        "fpsPhaseCoverage": 1.0
+      },
+      "host": {
+        "cores": 10,
+        "loadBefore": 11.23,
+        "loadAfter": 7.28,
+        "highLoad": true
+      },
+      "exportSHA256": {
+        "hitches": "3c7e7ecfb2d1aae44de0941800b74dc22831b313889dddaf3c93cf766bc01aee",
+        "core-animation-fps-estimate": "9361861f19e27f95511338c794af4cebd9ffb437ca8624e40f1330f0cd42d0a9",
+        "os-signpost-interval": "872371a05a84cf070590473043e2ac88697d772396cf7f8834ceab695adf8fc6"
+      }
+    }
+  ]
+}
