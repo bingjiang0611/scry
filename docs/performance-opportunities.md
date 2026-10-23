@@ -164,6 +164,7 @@
 | [Pi只读probe关闭](performance-experiments/20261017-pi-probe-close.md) | EOF后有空闲handle：关闭grace到期1→0；4响应、1进程保持，五轮一致 | mac2 L2：总耗时1630.84→870.19ms；关闭761.07→2.26ms；L3未验证 | 成功只读探测立即TERM并仍确认退出，不把关闭移到返回后 |
 | [终态共享 after-tree](performance-experiments/20261017-terminal-shared-after.md) | 5000文件、不同脏基线：Git 24→17，写树2→1，五轮一致 | mac2 L2：整体777.59→540.32ms（30.5%）；首个turn结果约424ms不变；L3未验证 | 两个before锚点共用一个不可变终点；最后一个持有者负责清理，完整完成边界仍等待清理 |
 | [真实 Service.diff 双校验](performance-experiments/20261017-service-diff-revision.md) | 5001 tracked、4 dirty、1 remote：Git24→18，原生status2→2，remote查询6→0 | mac2有效L2：507.64→382.85ms（24.6%）；首组高负载作废，全部样本留存；L3未验证 | 只不做两个校验不需要的本机remote展示查询；不缓存、不删除revision材料 |
+| [桌面远程 trace 增量](performance-experiments/20261023-desktop-remote-trace-delta.md) | 1000 items：线上字节 55.9 MB→1.8 MB；安静轮询 10.6 MB→4.2 KB；提交次数 127→102。5000 items：基线 165 次超限、显示 2380/5001，候选 0 次错误、显示 5001/5001 | L2 受控 fixture（负载 4.9/3.7，非 highLoad）：1000 items 下提交 2002.7→941.0 ms，客户端 91.1→6.7 ms；L3 未验证 | 未变 items 不再序列化、传输、校验或提交；宿主仍做 O(n) hash；空闲时轮询从 1.5 s 退避到 5 s |
 
 前两个实验冻结collector `cafc418`、生产 `7ac7fcb`；第三个冻结测量 `1456e35`、生产 `afd8f03`。第三轮全量33个obs：1 better、30 unchanged、2 gating pass、3 macOS CPU指令candidate缺失，无worse。只收紧candidate平台基线，没有升级门禁或放宽。
 

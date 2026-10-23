@@ -176,6 +176,18 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - 关闭桌面监听会断开其通道，但不撤销手机设备或停止已有 Agent。监听存续期间，配对仍受短时邀请约束；不是只有邀请有效期内才监听。
 - 支持上述工作区协议的远端可编辑文件并运行宿主终端。远程工具正文引用和后台任务不能调用客户端的本地文件/Provider 接口；单个远程后台任务停止、附件上传及客户端本地文件写入不在此扩展范围。
 - Scry 不是沙箱。Provider 最终以执行端本机用户权限运行；仓库 MCP/Hook/plugin/recorder callback 仍按既有 fingerprint/trust 合同执行。
+- 运行中 trace 增量（`info.traceDelta: 1`，2026-10-23）的规则如下：
+  - 客户端只在宿主声明该能力后才带 `delta.after = {revision, count}`。
+  - 宿主返回下面两种响应之一：
+    - `reset` 全量快照；
+    - 仅包含元数据和变化 index 的 `trace_delta`。
+  - 宿主按 item hash 判断变化，因此能识别原位合并、替换和 `result_superseded`。
+  - 未知或已逐出的 revision、count 不符、base 不连续，或变化未覆盖新增 index 时，一律全量重取，不拼出缺事件的轮次。
+  - 授权检查与全量读取相同。
+  - 宿主只按 run 保存 hash 和 index，并在以下时机释放：run 结束、60 s 无读取，或 LRU 超过 8 个 run。
+  - 版本兼容：旧宿主不声明该能力，客户端继续读全量快照；旧客户端不带 `delta`，响应形状不变。
+  - 只有 delta 宿主报告“无变化”时，轮询才从 1.5 s 退避到 3 s、再到 5 s；有变化或用户操作时立即恢复 1.5 s。
+  - 限制：reset 仍是整包，live run 超过 4 MiB 时仍按上限拒绝，见 `docs/performance-experiments/20261023-desktop-remote-trace-delta.md`。
 - 生产包默认启用远程宿主组装；开发环境需 `SCRY_REMOTE_HOST=1`。设置 `SCRY_REMOTE_RELAY_ENABLED=0` 可只用 SSH、不拨公网 relay；不要用于仍需手机中继的进程。
 
 ## 明确上限
