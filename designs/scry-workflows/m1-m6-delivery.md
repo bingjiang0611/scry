@@ -1,5 +1,13 @@
 # M1–M6 实施与真实验收台账
 
+## main 诊断的数据流消费增量（M3/M4 子集；整体未完成）
+
+- check 的有界程序值新增 `diagnostics` envelope：available/derived/items 或 unavailable/reason。真实解析项包含 file/line/column/code/message，可通过原 field/map/collect/branch 消费；不建立第二个质量解释器，也不从 Agent 自述补诊断。诊断不可用时无 items，读取会阻止下游，不伪造空集合或零错误。
+- 新字段在 schema 中保持 optional，已经提交的旧结果不被修改、补造字段或重新执行；旧程序仍可消费原 passed 等事实，旧值没有诊断集合就没有这份证据。沿用每值 4 MiB、集合 4096 的限制；超限仍保留失败证据，不截断为通过。
+- Node/web types 与 17 文件 **230/230** 串行相关检查通过；冷 Service 在 check 已提交、父 cursor 失败后直接读取两条真实 TS 诊断进入 map/collect，native count 仍为1。unrecognized 输出没有 items，消费者 blocked；模拟既有六字段值仍能冷继续且不重跑。临时移除程序值的 diagnostics 后，两项关键断言均明确失败，未弱化断言。首轮 fixture 误把已冻结 authorization 与新 parser 一起提交，被正式 validator 拒绝；改用既有 sourceBody 提取再重新冻结，而非放宽校验。
+- build + 完整 production conversation IPC 通过：真实本地 Node 在登记副本返回 exit1，main 派生 TS2322/TS7006 两项；模板经同一 canonical map/collect 精确返回这两条完整诊断，Agent 尝试/Provider 增量0、native只有一次、源不变、同命令不重跑。原副本 Agent 与 Recorder/归档/冷权限拒绝场景仍通过。并非真实 tsc/仓库测试或真实 Provider/Jev 验收。
+- 剩余工作仍由主实施会话推进：检查前后输入/改动快照与验证归属、可信进展/回归比较、classifier、必需验证及完整质量流程，随后修订恢复、组合/应用/清理和管理/聊天入口。现有输入副本、诊断数据和离线 App 证据不能替代完整质量合同。历史性能 collector/1000-attempt/CLI/延期门禁不因此关闭；未安装、push、升版本、产生费用或应用业务 patch。日志：`/tmp/scry-workflow-template-editor.ZnkC6L/diagnostics-*`。
+
 ## 副本 Agent 的 App authority 与归档增量（M1/M3/M4 子集；整体未完成）
 
 - `call.replica` 是可选的有限表达式；省略时仍运行于已批准源工作区。表达式参与类型检查、总文本预算、控制帧 inputKey 与模板结构引用；只有同根 main 铸造的副本 sidecar 能执行，普通 JSON 描述不能授权。仍使用 canonical Runner → 原 App executor，不增加调度器或 renderer 任意目录接口。

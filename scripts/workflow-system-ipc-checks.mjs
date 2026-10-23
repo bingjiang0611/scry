@@ -50,7 +50,47 @@ export async function exerciseWorkflowSystemSteps(evaluate, fixture) {
     assert.equal(await readFile(join(receipt.directory, marker), 'utf8'), '1', 'receipt replay must not spawn the check again')
     results.push({ exitCode, observed: native.state, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true })
   }
-  return { test: 'main-owned SystemSteps production preload/main IPC', results }
+  const diagnosticConsumption = await exerciseWorkflowDiagnosticConsumption(evaluate, fixture)
+  return { test: 'main-owned SystemSteps production preload/main IPC', results, diagnosticConsumption }
+}
+
+async function exerciseWorkflowDiagnosticConsumption(evaluate, fixture) {
+  const templates = (method, ...args) => evaluate(`window.scry.workflow.templates.${method}(...${JSON.stringify(args)})`)
+  const workflow = (method, ...args) => evaluate(`window.scry.workflow.${method}(...${JSON.stringify(args)})`)
+  const script = 'scry-diagnostics-fixture.cjs', marker = 'scry-diagnostics-count'
+  const output = 'src/a.ts(2,3): error TS2322: wrong type\nsrc/b.ts(4,5): error TS7006: missing type'
+  await writeFile(join(fixture.templateWorkspace, script), `const fs = require('node:fs'); let n = 0; try { n = Number(fs.readFileSync(${JSON.stringify(marker)}, 'utf8')) } catch (e) { if(e.code !== 'ENOENT') throw e } fs.writeFileSync(${JSON.stringify(marker)}, String(n+1)); console.log(${JSON.stringify(output)}); process.exitCode = 1`)
+  const definition = { schemaVersion: 1, name: 'Diagnostic dataflow fixture', description: '', parameters: {}, roles: [], body: { kind: 'sequence', blockId: 'root', blocks: [
+    { kind: 'replica', blockId: 'copy' },
+    { kind: 'check', blockId: 'verify', replica: { kind: 'ref', name: 'copy' }, check: { argv: [process.execPath, script], cwd: '.', timeoutMs: 2000, parser: 'typescript' } },
+    { kind: 'map', blockId: 'diagnostics', items: { kind: 'field', source: { kind: 'ref', name: 'verify' }, path: ['diagnostics', 'items'] }, item: 'diagnostic', key: ['code'], maxItems: 4,
+      body: { kind: 'bind', blockId: 'entry', value: { kind: 'ref', name: 'diagnostic' } } },
+    { kind: 'collect', blockId: 'collected', items: { kind: 'ref', name: 'diagnostics' } },
+    { kind: 'return', blockId: 'report', ref: { nodeId: 'collected' } }
+  ] } }
+  const draft = await templates('saveDraft', { scope: { kind: 'personal' }, source: JSON.stringify(definition) })
+  assert.equal(draft.validation.state, 'valid', JSON.stringify(draft.validation))
+  const preview = await workflow('instantiateTemplate', { source: { kind: 'draft', draftId: draft.draftId, draftRevision: draft.draftRevision, candidateHash: draft.candidateHash }, commandId: 'diagnostic-instance',
+    cwd: fixture.templateWorkspace, userGoal: 'Consume actual local compiler diagnostics without an Agent', parameters: {}, orchestrator: { role: 'orchestrator', providerId: 'codex' }, roles: [] })
+  assert.equal(preview.state, 'ready', JSON.stringify(preview.unavailableReasons))
+  const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+  await workflow('approve', approval)
+  const progress = await workflow('start', preview.workflowId, approval, 'diagnostic-start')
+  assert.equal(progress.state, 'completed', JSON.stringify(progress))
+  assert.deepEqual(JSON.parse(progress.finalReport).map(row => row.value), [
+    { file: 'src/a.ts', line: 2, column: 3, code: 'TS2322', message: 'wrong type' },
+    { file: 'src/b.ts', line: 4, column: 5, code: 'TS7006', message: 'missing type' }
+  ])
+  assert.equal(progress.dispatchAttempts, 0)
+  const record = JSON.parse(await readFile(join(fixture.userData, 'workflows', preview.workflowId + '.json'), 'utf8'))
+  assert.equal(record.systemOutcomes[1].check.state, 'failed')
+  assert.equal(record.systemOutcomes[1].check.diagnostics.count, 2)
+  const reference = record.systemOutcomes[0].replica
+  const receipt = JSON.parse(await readFile(join(fixture.userData, 'workflow-replicas', preview.workflowId, reference.replicaId + '.replica.json'), 'utf8'))
+  await workflow('start', preview.workflowId, approval, 'diagnostic-start')
+  assert.equal(await readFile(join(receipt.directory, marker), 'utf8'), '1')
+  await assert.rejects(readFile(join(fixture.templateWorkspace, marker)), { code: 'ENOENT' })
+  return { actualCheckFailed: true, derivedDiagnosticsConsumed: 2, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true }
 }
 
 export async function exerciseWorkflowReplicaAgent(evaluate, fixture) {

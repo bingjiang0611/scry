@@ -8,6 +8,7 @@ import { WorkflowSystemHost, type WorkflowReplicaRun } from './workflow-system-h
 import type { WorkflowControlFrame } from '../shared/workflow'
 import { WorkflowSlots, type WorkflowProviderExecutionRequest } from './workflow-runner'
 import * as checks from './workflow-check'
+import { workflowSystemSourceBody } from './workflow-program'
 import { templateExtractionSource } from './workflow-template-extraction'
 import { validateWorkflowTemplate } from './workflow-template-definition'
 
@@ -39,9 +40,9 @@ async function fixture(code = 0, store: WorkflowStore = new CutParentStore(), ag
   const role = { role: 'orchestrator' as const, providerId: 'claude' as const }
   const execute = vi.fn<WorkflowServiceOptions['execute']>()
   const env = { HOME: root, PATH: '/usr/bin:/bin' }
-  const create = (currentStore = store) => {
+  const create = (currentStore = store, currentBody: unknown = body) => {
     const host = new WorkflowSystemHost(directory, currentStore, () => env), slots = new WorkflowSlots(1)
-    const service = new WorkflowService({ store: currentStore, slots, systems: host, execute, plan: async () => ({ output: JSON.stringify({ body }) }), providerRegistered: () => true,
+    const service = new WorkflowService({ store: currentStore, slots, systems: host, execute, plan: async () => ({ output: JSON.stringify({ body: currentBody }) }), providerRegistered: () => true,
       runControls: async () => ({ descriptor: { id: 'claude', label: 'fixture', runtimeProvider: 'claude_sdk', transport: 'fixture', available: true, capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } }, identity: 'fixture', model: true, stop: true, independentRun: true, terminalOutput: true }) })
     return { service, host, slots }
   }
@@ -52,6 +53,71 @@ async function fixture(code = 0, store: WorkflowStore = new CutParentStore(), ag
 }
 
 describe('SystemSteps under canonical Service/Runner/Interpreter', () => {
+  it.each([true, false])('feeds actual derived diagnostics into the canonical map; available=%s (unavailable is not [])', async available => {
+    const store = new CutParentStore(), f = await fixture(1, store)
+    const output = available ? 'src/a.ts(2,3): error TS2322: wrong type\nsrc/b.ts(4,5): error TS7006: missing type' : 'unrecognized compiler protocol'
+    const script = await readFile(join(f.source, 'check.cjs'), 'utf8')
+    await writeFile(join(f.source, 'check.cjs'), script.replace("console.log('observed')", `console.log(${JSON.stringify(output)})`))
+    const body = workflowSystemSourceBody(f.preview.program.body)
+    if (body.kind !== 'sequence' || body.blocks[1].kind !== 'check') throw new Error('fixture shape')
+    body.blocks[1].check.parser = 'typescript'
+    body.blocks.splice(2, 1,
+      { kind: 'map', blockId: 'diagnostics', items: { kind: 'field', source: { kind: 'ref', name: 'verify' }, path: ['diagnostics', 'items'] }, item: 'diagnostic', key: ['code'], maxItems: 4,
+        body: { kind: 'bind', blockId: 'entry', value: { kind: 'ref', name: 'diagnostic' } } },
+      { kind: 'collect', blockId: 'collected', items: { kind: 'ref', name: 'diagnostics' } },
+      { kind: 'return', blockId: 'report', ref: { nodeId: 'collected' } })
+    const { service } = f.create(store, body)
+    const preview = await service.planCommand({ command: '/scry-workflow run inspect diagnostics', workspace: f.source, orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await service.approve(approval)
+    if (available) {
+      store.cut = true
+      await expect(service.start(preview.workflowId, approval)).rejects.toThrow('system parent checkpoint')
+      store.cut = false
+      const cold = f.create().service
+      await cold.approve(approval)
+      const progress = (await cold.resume(preview.workflowId, approval, 'consume-recorded-diagnostics')).progress!
+      expect(progress.state).toBe('completed')
+      const values = JSON.parse(progress.finalReport!).map((row: { value: unknown }) => row.value)
+      expect(values).toEqual([{ file: 'src/a.ts', line: 2, column: 3, code: 'TS2322', message: 'wrong type' }, { file: 'src/b.ts', line: 4, column: 5, code: 'TS7006', message: 'missing type' }])
+    } else {
+      const progress = await service.start(preview.workflowId, approval)
+      expect(progress.state).toBe('blocked')
+      expect(progress.finalReport).toBeUndefined()
+    }
+    const record = (await store.load(preview.workflowId))!
+    expect(record.progress.dispatchAttempts).toBe(0)
+    expect(record.systemOutcomes![1].check!.diagnostics.state).toBe(available ? 'available' : 'unavailable')
+    const value = await store.loadValue(preview.workflowId, record.systemOutcomes![1].resultRef!)
+    expect(value).toMatchObject({ state: 'known', value: { diagnosticCount: available ? 2 : null, diagnostics: available ? { state: 'available', source: 'derived' } : { state: 'unavailable' } } })
+    const receipt = await f.host.replicas.resolve(record.systemOutcomes![0].replica!)
+    expect(await readFile(join(receipt.directory, 'native-count'), 'utf8')).toBe('1')
+    expect(f.execute).not.toHaveBeenCalled()
+  })
+  it('continues a frozen old check value without inventing diagnostics or rerunning it', async () => {
+    const store = new CutParentStore(), f = await fixture(0, store), execute = f.host.execute.bind(f.host)
+    vi.spyOn(f.host, 'execute').mockImplementation((...args) => {
+      const execution = execute(...args)
+      return { ...execution, result: execution.result.then(result => {
+        const prior = structuredClone(result)
+        if (prior.value.state === 'known' && prior.value.value && typeof prior.value.value === 'object' && !Array.isArray(prior.value.value)) delete prior.value.value.diagnostics
+        return prior
+      }) }
+    })
+    store.cut = true
+    await expect(f.service.start(f.preview.workflowId, f.approval)).rejects.toThrow('system parent checkpoint')
+    store.cut = false
+    const record = (await store.load(f.preview.workflowId))!, frozen = await store.loadValue(f.preview.workflowId, record.systemOutcomes![1].resultRef!)
+    expect(frozen).toMatchObject({ state: 'known', value: { passed: true } })
+    if (frozen.state !== 'known' || !frozen.value || typeof frozen.value !== 'object') throw new Error('fixture shape')
+    expect(Object.hasOwn(frozen.value, 'diagnostics')).toBe(false)
+    const cold = f.create().service
+    await cold.approve(f.approval)
+    expect((await cold.resume(f.preview.workflowId, f.approval, 'legacy-check-data')).progress).toMatchObject({ state: 'completed', finalReport: 'true' })
+    const receipt = await f.host.replicas.resolve(record.systemOutcomes![0].replica!)
+    expect(await readFile(join(receipt.directory, 'native-count'), 'utf8')).toBe('1')
+    expect(f.execute).not.toHaveBeenCalled()
+  })
   it('dispatches one Agent in the owned copy, links its intent, and expires its unforgeable main grant', async () => {
     const f = await fixture(0, new CutParentStore(), 'copy')
     let grant: WorkflowReplicaRun | undefined

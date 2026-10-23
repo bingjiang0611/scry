@@ -131,7 +131,7 @@ export class WorkflowSystemHost {
           : observed.diagnostics
         const { stdout: _stdout, stderr: _stderr, diagnostics: _diagnostics, ...metadata } = observed
         const check: WorkflowCheckSummary = { ...metadata, stdoutRef, stderrRef, diagnostics }
-        const value: WorkflowValue = { passed: observed.state === 'passed', state: observed.state, exitCode: observed.exitCode, settled: observed.settled, truncated: observed.truncated, diagnosticCount: diagnostics.state === 'available' ? diagnostics.count : null }
+        const value: WorkflowValue = { passed: observed.state === 'passed', state: observed.state, exitCode: observed.exitCode, settled: observed.settled, truncated: observed.truncated, diagnosticCount: diagnostics.state === 'available' ? diagnostics.count : null, diagnostics: observed.diagnostics }
         const phase = observed.state === 'unknown' ? 'unknown' : observed.state === 'rejected' ? 'blocked' : observed.state === 'cancelled' ? 'stopped' : 'completed'
         return { state: phase, settled: observed.settled, replica: reference, check, value: phase === 'unknown' || phase === 'blocked'
           ? { state: 'unknown', reason: observed.error ?? copy.unknown, derivedFrom: ['system:' + stepId] }
