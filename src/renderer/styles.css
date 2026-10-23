@@ -8054,7 +8054,6 @@ textarea:focus-visible,
     animation-iteration-count: 1 !important;
     /* Spatial changes commit immediately; only visual feedback can interpolate. */
     transition-property: opacity, color, background-color, border-color !important;
-    transition-duration: 120ms !important;
     transition-timing-function: linear !important;
     transition-delay: 0ms !important;
   }
@@ -8065,9 +8064,7 @@ textarea:focus-visible,
     animation: none !important;
   }
 
-  /* Selection text must update in the same frame, including reduced motion. */
-  .sb-view-tabs [role='tab'],
-  .sb-view-tabs [role='tab'] *,
+  /* Surface tabs already fade their background; keep their selection text immediate. */
   .surface-tab,
   .surface-tab * {
     transition-property: opacity, background-color, border-color !important;
