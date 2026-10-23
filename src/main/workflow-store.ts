@@ -11,6 +11,7 @@ import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectio
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_VALUE_DEPTH, workflowProgressSnapshot } from '../shared/workflow'
 import type { WorkflowRetryTarget } from '../shared/workflow-api'
 import type { WorkflowSystemIntent, WorkflowSystemOutcome } from '../shared/workflow-system'
+import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 import { validateWorkflowReplicaReference } from './workflow-replica'
 
 export interface WorkflowIntent {
@@ -20,6 +21,7 @@ export interface WorkflowIntent {
   attemptId: string
   previousAttemptId?: string
   retryCommandId?: string
+  replica?: WorkflowReplicaReference
   role: string
   providerId: string
   requestedModel?: string

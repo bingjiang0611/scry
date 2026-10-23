@@ -41,6 +41,7 @@ describe('workflow fresh-run admission (contract fixtures, no real Provider prob
     const context = { providerId: 'pi' as const, agentProfileId: 'pi:default', cwd: '/fixture' }
     const original = workflowCapabilityFingerprint(context, descriptor('pi'), catalog, execution)
     expect(workflowCapabilityFingerprint(context, descriptor('pi'), { ...catalog, models: [...catalog.models].reverse().map(option => ({ ...option, label: 'translated' })) }, execution)).toBe(original)
+    expect(workflowCapabilityFingerprint({ ...context, cwd: '/private-copy' }, descriptor('pi'), catalog, execution)).not.toBe(original)
     expect(workflowCapabilityFingerprint({ ...context, agentProfileId: 'pi:other' }, descriptor('pi'), catalog, execution)).not.toBe(original)
     expect(workflowCapabilityFingerprint(context, { ...descriptor('pi'), version: 'fixture-2' }, catalog, execution)).not.toBe(original)
     expect(workflowCapabilityFingerprint(context, descriptor('pi'), { ...catalog, models: catalog.models.slice(1) }, execution)).not.toBe(original)

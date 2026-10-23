@@ -133,9 +133,9 @@ import { createDesktopWorkbench } from './remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from './remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from './remote/remote-run-binding'
 import { FileWorkflowStore } from './workflow-store'
-import { WorkflowSystemHost } from './workflow-system-host'
+import { WorkflowSystemHost, type WorkflowReplicaRun } from './workflow-system-host'
 import { WorkflowService } from './workflow-service'
-import { workflowShutdownCopy, workflowTemplateCopy } from '../shared/constants/copy'
+import { workflowShutdownCopy, workflowTemplateCopy, workflowSystemCopy } from '../shared/constants/copy'
 import { workflowPlanningPrompt } from './workflow-program'
 import { registerWorkflowIpc } from './workflow-ipc'
 import { registerWorkflowTemplateIpc, registerWorkflowTemplateInstantiationIpc } from './workflow-template-ipc'
@@ -450,12 +450,12 @@ const rememberProject = (cwd: string): void => {
 const knownProjectDirectories = (): Set<string> => new Set([
   ...recentStore().load(),
   ...projectStore().load().filter((project) => !project.removedAt).map((project) => project.cwd),
-  ...appSessionStore().load().map((session) => session.cwd).filter(Boolean)
+  ...appSessionStore().load().filter(session => !session.workspaceScope).map((session) => session.cwd).filter(Boolean)
 ])
 const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirectory(cwd, knownProjectDirectories())
 const resolveTemplateProjectDirectory = async (cwd: string): Promise<string> => {
   const [recent, projects, sessions] = await Promise.all([recentStore().loadAsync(), projectStore().loadAsync(), appSessionStore().loadAsync()])
-  return knownProjectDirectoryAsync(cwd, new Set([...recent, ...projects.filter(project => !project.removedAt).map(project => project.cwd), ...sessions.map(session => session.cwd).filter(Boolean)]))
+  return knownProjectDirectoryAsync(cwd, new Set([...recent, ...projects.filter(project => !project.removedAt).map(project => project.cwd), ...sessions.filter(session => !session.workspaceScope).map(session => session.cwd).filter(Boolean)]))
 }
 const remoteProjectRoots = (): string[] => canonicalRemoteProjectRoots(knownProjectDirectories())
 const resolveRemoteProjectDirectory = (cwd: string): string => resolveRemoteDescendant(cwd, knownProjectDirectories())
@@ -466,6 +466,7 @@ const recoverTraceCatalogOnce = (): Promise<void> => {
     const store = appSessionStore()
     const catalog = store.load()
     const knownCwds = new Set(catalog.map((session) => session.cwd))
+    const scopedCwds = new Set(catalog.filter(session => session.workspaceScope).map(session => session.cwd))
     const known = new Set(catalog.flatMap((session) =>
       session.externalSessionId
         ? [`${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd}\0${session.externalSessionId}`]
@@ -483,7 +484,8 @@ const recoverTraceCatalogOnce = (): Promise<void> => {
         runId: summary.runId,
         externalSessionId: summary.sessionId,
         cwd: summary.cwd,
-        prompt: summary.prompt
+        prompt: summary.prompt,
+        workspaceScope: scopedCwds.has(summary.cwd) ? 'workflow_replica' : undefined
       })
       known.add(key)
     }
@@ -2809,6 +2811,7 @@ interface AppRunStartOptions {
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
   expectedWorkflowCapability?: string
+  workflowReplica?: WorkflowReplicaRun
   onProviderDispatchAttempt?: () => void
   onTerminal?: (result: WorkflowTerminalResult) => void | Promise<void>
 }
@@ -2834,7 +2837,9 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
   // Start one bounded acquisition for this explicit send. Discovery does not retry a
   // broken shell; the next send may recover without restarting Scry.
   const shellEnvReady = warmShellEnv({ retryFailed: true })
-  const cwd = request.cwd
+  const replica = options.workflowReplica ? await workflowSystems.assertRun(options.workflowReplica, request.cwd ?? '') : undefined
+  if (replica && (!isWorkflowRun || await resolveTemplateProjectDirectory(replica.sourceWorkspace) !== replica.sourceWorkspace)) throw new Error(workflowSystemCopy.authority)
+  const cwd = replica ? replica.workspace : request.cwd
     ? (isRemoteRun ? resolveRemoteProjectDirectory(request.cwd) : resolveKnownProjectDirectory(request.cwd))
     : currentCwd
   if (!isRemoteRun && !isWorkflowRun && request.cwd && currentCwd && cwd !== canonicalExistingDirectory(currentCwd)) {
@@ -3425,6 +3430,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         runtimeProvider,
         runId,
         externalSessionId: resume,
+        workspaceScope: replica ? 'workflow_replica' : undefined,
         cwd: catalogCwd,
         prompt: displayPrompt
       })
@@ -3432,6 +3438,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       // Ownership is durable before attachment bytes are created. A crash can no longer
       // leave a new-session attachment directory with no catalog runId to delete.
       appSessionStore().recordPending({
+        workspaceScope: replica ? 'workflow_replica' : undefined,
         providerId,
         agentProfileId,
         runtimeProvider,
@@ -3724,6 +3731,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
         runtimeProvider,
         runId,
         externalSessionId: sessionId,
+        workspaceScope: replica ? 'workflow_replica' : undefined,
         cwd: catalogCwd,
         prompt: displayPrompt
       })
@@ -3800,7 +3808,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     } else await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: resume })
     if (isWorkflowRun) {
       const controls = await workflowRunControls({ role: 'worker', providerId, agentProfileId,
-        requestedModel: request.model, permissionMode: options.permissionModeOverride ?? request.permissionMode }, catalogCwd)
+        requestedModel: request.model, permissionMode: options.permissionModeOverride ?? request.permissionMode }, catalogCwd, options.workflowReplica)
       if (!controls.model || !controls.stop || !controls.independentRun || !controls.terminalOutput || !options.expectedWorkflowCapability || controls.identity !== options.expectedWorkflowCapability) {
         throw new Error('工作流的 Provider 入口或模型/权限目录在启动准备期间变化，未发送；请重新规划并确认')
       }
@@ -4137,6 +4145,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
       try {
         appSessionStore().record({
           lastRunOutcome: completionStatus,
+          workspaceScope: replica ? 'workflow_replica' : undefined,
           providerId,
           agentProfileId,
           runtimeProvider,
@@ -4374,6 +4383,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
           externalSessionId: storageSessionId,
           cwd: catalogCwd,
           prompt: displayPrompt,
+          workspaceScope: replica ? 'workflow_replica' : undefined,
           lastRunOutcome: stopped ? 'interrupted' : 'failed'
         })
       } catch (catalogError) {
@@ -4604,7 +4614,7 @@ const workflowCatalogReads = new Map<string, Promise<{
   controls: Awaited<ReturnType<typeof providerRegistry.runControls>>
   descriptor: Awaited<ReturnType<typeof providerRegistry.describe>>[number]
 }>>()
-async function workflowRunControls(role: WorkflowRoleBinding, workspace: string) {
+async function workflowRunControls(role: WorkflowRoleBinding, workspace: string, replica?: WorkflowReplicaRun) {
   const adapter = providerRegistry.get(role.providerId)
   const context = { providerId: role.providerId, cwd: workspace, agentProfileId: role.agentProfileId }
   const key = providerContextKey(role.providerId, workspace, role.agentProfileId)
@@ -4619,16 +4629,23 @@ async function workflowRunControls(role: WorkflowRoleBinding, workspace: string)
     workflowCatalogReads.set(key, pending)
   }
   const { controls, descriptor: entry } = await pending
-  return workflowBindingControls(role, context, entry, controls, adapter.workflowExecution, !providerRegistry.isDisabled(role.providerId))
+  // Read actual copy-local capabilities. Only a live main grant can relocate
+  // their identity back to the approved source; all other fingerprint fields
+  // must still match. Native config/executable trust below remains copy-local.
+  const grant = replica ? await workflowSystems.assertRun(replica, workspace) : undefined
+  if (grant && await resolveTemplateProjectDirectory(grant.sourceWorkspace) !== grant.sourceWorkspace) throw new Error(workflowSystemCopy.authority)
+  const identityContext = grant ? { ...context, cwd: grant.sourceWorkspace } : context
+  return workflowBindingControls(role, identityContext, entry, controls, adapter.workflowExecution, !providerRegistry.isDisabled(role.providerId))
 }
 
 const workflowStore = new FileWorkflowStore(app.getPath('userData'))
 const workflowTemplates = new WorkflowTemplateStore(app.getPath('userData'), resolveTemplateProjectDirectory)
 const workflowSlots = new WorkflowSlots()
+const workflowSystems = new WorkflowSystemHost(join(app.getPath('userData'), 'workflow-replicas'), workflowStore)
 const workflowService = new WorkflowService({
   store: workflowStore,
   templates: workflowTemplates,
-  systems: new WorkflowSystemHost(join(app.getPath('userData'), 'workflow-replicas'), workflowStore),
+  systems: workflowSystems,
   slots: workflowSlots,
   loadConcurrency: () => workflowStore.readConcurrency(),
   providerRegistered: (providerId) => providerRegistry.isRegistered(providerId) && !providerRegistry.isDisabled(providerId),
@@ -4655,7 +4672,7 @@ const workflowService = new WorkflowService({
     } catch (error) { reject?.(dispatch.rejected(error)) }
     return completion
   },
-  execute: ({ attemptId, role, prompt, workspace, onObservation }) => {
+  execute: ({ attemptId, role, prompt, workspace, replicaRun, onObservation }) => {
     const runId = `workflow-${attemptId}`
     const dispatch = new WorkflowDispatch()
     let startedRunId: string | undefined
@@ -4666,6 +4683,7 @@ const workflowService = new WorkflowService({
     const result = new Promise<import('./workflow-runner').WorkflowProviderExecutionResult>((res, rej) => { resolve = res; reject = rej })
     void startAppRun(workflowStartRequest(role, prompt, workspace), {
       origin: 'workflow', runId, stopSignal: stopController.signal, expectedWorkflowCapability: role.runtimeIdentity,
+      workflowReplica: replicaRun,
       onWorkflowObservation: onObservation,
       onProviderDispatchAttempt: dispatch.onProviderDispatchAttempt,
       onTerminal: (terminal) => {

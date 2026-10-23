@@ -17,12 +17,12 @@ export function templateStructure(root: WorkflowBlock) {
   const stack = [{ block: root, depth: 0 }]
   while (stack.length) {
     const { block, depth } = stack.pop()!
-    const expressions: WorkflowExpression[] = block.kind === 'bind' ? [block.value] : block.kind === 'branch' ? [block.when]
+    const expressions: WorkflowExpression[] = block.kind === 'call' ? block.replica ? [block.replica] : [] : block.kind === 'bind' ? [block.value] : block.kind === 'branch' ? [block.when]
       : block.kind === 'check' ? [block.replica] : block.kind === 'replica' ? block.source ? [block.source] : []
       : block.kind === 'map' || block.kind === 'collect' ? [block.items]
       : block.kind === 'loop' ? [...Object.values(block.initial), ...Object.values(block.invariants), block.until, ...Object.values(block.carry), block.result,
         ...(block.progress === 'bounded_only' ? [] : [block.progress.baseline, block.progress.key, block.progress.improved])] : []
-    const inputs = block.kind === 'call' ? (block.inputRefs ?? []).map(ref => [ref.nodeId, ...(ref.path ?? [])].join('.'))
+    const inputs = block.kind === 'call' ? [...new Set([...(block.inputRefs ?? []).map(ref => [ref.nodeId, ...(ref.path ?? [])].join('.')), ...expressions.flatMap(workflowExpressionReferences)])]
       : block.kind === 'return' ? [[block.ref.nodeId, ...(block.ref.path ?? [])].join('.')] : [...new Set(expressions.flatMap(workflowExpressionReferences))]
     rows.push({ id: block.blockId, kind: block.kind, depth, inputs })
     stack.push(...workflowChildBlocks(block).map(child => ({ block: child, depth: depth + 1 })).reverse())

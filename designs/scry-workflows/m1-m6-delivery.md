@@ -1,5 +1,16 @@
 # M1–M6 实施与真实验收台账
 
+## 副本 Agent 的 App authority 与归档增量（M1/M3/M4 子集；整体未完成）
+
+- `call.replica` 是可选的有限表达式；省略时仍运行于已批准源工作区。表达式参与类型检查、总文本预算、控制帧 inputKey 与模板结构引用；只有同根 main 铸造的副本 sidecar 能执行，普通 JSON 描述不能授权。仍使用 canonical Runner → 原 App executor，不增加调度器或 renderer 任意目录接口。
+- effect 前持久 Agent intent/预算，并关联副本引用。main 取得串行租约，签发不可序列化、限本次执行的内存 grant；App 起跑和 dispatch 前重验副本目录身份及源项目权限。实际副本的 Provider/profile/model/permission/运行时目录仍重新读取；只有有效 grant 允许把 cwd 绑定回已批准源位置，其余 fingerprint 字段不能变化，原生仓库 executable/MCP/Hook trust gate 未绕过。
+- result producer 与原 physical scope 都收敛后才释放副本租约和内存 grant；stop ACK 不是释放证据。等待租约时可取消，未进入 executor 可明确记录 not_attempted；未证明作用域收敛的未知执行保留租约及原容量/预算，不回退到源目录。父 checkpoint 失败冷恢复复用已提交 Agent outcome，不再调用；intent 丢失副本关联会拒绝恢复。
+- App/Recorder/archive 使用实际副本 cwd。catalog 保留 `workspaceScope:workflow_replica` 的真实会话证据，但不投影为普通项目，也不从它生成全局项目权限；pending→native→terminal、重启和 Qoder catalog 补证保留来源。显式目录选择的原权限政策未改变。计划预览分页展示副本 Agent 目标及本机权限/非自动写回后果。
+- Node24.18.0/macOS：Node/web types 与 17 文件 **227/227** 串行相关检查通过。新增覆盖 grant 伪造/跨 host/错误 cwd/过期拒绝、一次副本写入且源不变、cold reuse/关联篡改拒绝、排队取消、stop ACK 和先物理收敛仍等待结果 producer、catalog 来源不丢失。禁用 main grant 成员检查后，描述符伪造回归确实失败；未扩大 deadline。
+- build + 完整 production conversation IPC 通过。既有 unified 21 个离线调用之外，本增量实际经过 preload/main → canonical Runner → App adapter 派发 **1** 个离线 Provider：只写副本，Agent 预算 1；真实 managed Recorder 生成 1 个 canonical turn，App trace archive 精确关联该 run/cwd。普通 start 私有目录在当前/冷 App 都拒绝且不进入 Provider；重复 start 当前/冷重交均不增加调用。第三次隔离 App 重启专用于这项验证，原 unified 两次身份重启验收保留。Native Chromium workflow fixture 验证分页、目标引用、授权文案和原焦点/审批流程；mechanical detector 无 findings。
+- 首败保留：租约测试把 acquire 的 allowIncomplete 参数误当 try-lock 而在 5000ms 超时，改为观察真实 release 边界并保持原 timeout；一次 TS2322 源于字段分隔符笔误。生产 fixture 首次在 calls ledger 创建前取样、一次漏声明 orchestrator、一次误按顶层 runId 查 archive；分别修正执行顺序、正式角色声明、按现有 turns envelope 查询，没有改业务 validator、计数断言或套空结果。最后一次串行包装器曾因其他 worktree 持有 timing lock 返回75；未删锁或干扰进程，确认原 PID 已退出后才继续。
+- **限制与下一步**：此证据是离线 adapter 的真实 App/Recorder 链，不是真实账号/SDK；副本当前不携带 .git，session diff 明确 unavailable/not_git，不能当作完整 Git baseline/diff/patch 质量证据。下一步由主实施会话补诊断程序消费和质量快照/验证合同，再接 classifier、修订恢复、组合/应用/清理和剩余 UI。providers.catalog collector 仍缺失；既有组合 1000-attempt 超时、CLI/七项延期问题未关闭。未安装、push、升版本、调用真实 Provider/Jev、产生费用或应用业务 patch。日志：`/tmp/scry-workflow-template-editor.ZnkC6L/replica-agent-*`。
+
 ## main 副本与检查增量（M3/M4 原语；整体仍未完成）
 
 - 新增 replica/check 数据节点，仍走 compiler → Service → canonical Runner → Interpreter → main effect host；没有第二套调度器或任意宿主函数 API。main 冻结命令/解释器/环境/入口文件指纹；同根真实副本使用 opaque authority、输入清单、目录 inode 与租约，不从 Agent JSON 或普通路径推断权限。副本包含当前 dirty/untracked/ignored 内容；边界和上限见 [程序合同](program-ir.md#main-工作副本与检查步骤已接入非完整质量模式)。
@@ -9,7 +20,7 @@
 - 负控有效：上一 App bundle 在同一生产新场景以“未实现 replica/check”拒绝，当前 bundle 通过；临时去掉槽位对 native scope 的等待后，“结果 artifact 写失败仍须保留容量”测试在 queued=0（应为1）处失败。模板测试首次使用非 UUID templateId 失败，已修正 fixture 为正式合同要求的 UUID，未修改 validator 或删断言。自审补齐 replica source 的 4 MiB 程序总文本计数，并在 main 冻结字段加入后重验整个程序；临时禁用计数后新增回归明确失败。单次准备中完全相同的 check 共用一次冻结/指纹读取，spy 验证实际一次，没有给出毫秒提速结论。
 - **组合检查未全绿**：26 文件 325 项中 324 通过；既有 1000-attempt 用例在原 5000ms deadline 超时。取父提交 Runner 的临时对照也在相同 deadline 超时；这不证明全部根因或所有共享依赖与本次无关。随后当前源码的单场景 CPU 采样运行通过（1 passed/11 未选择，约3738ms），主要采样落在 MemoryWorkflowStore.save/控制帧复制验证；不据 focused 通过关闭组合首败，也未增加 deadline、缩减工作量或重跑刷绿。后续仍由主实施会话定位并修复可证明的工作量问题。
 - `performance:measure -- --scenario providers.catalog` 仍因 `No counter collector matches providers.catalog` unavailable/exit1；登记来源不是 collector，不能宣称性能通过或提速。UI mechanical detector 返回空 findings；外部 warning-text 参考仅用于权限后果文案，不代表视觉/完整 App 已全部验收。日志保留在 `/tmp/scry-workflow-template-editor.ZnkC6L/system-*`。
-- 主实施会话继续接入：副本 Agent 的 App authority 与 Recorder/归档关系、诊断数据消费与 classifier、质量流程/必需验证、组合/应用/清理；再完成同根修订恢复、chat 路由和其余管理 UI。现有 Manager 原语不是这些流程已完成。真实 Provider/Jev、费用及业务 patch 仍保留明确授权边界；未安装、未 push、未升版本。
+- 副本 Agent 的 App authority 与 Recorder/归档关系后续进展见上节；主实施会话继续接入诊断数据消费与 classifier、质量流程/必需验证、组合/应用/清理；再完成同根修订恢复、chat 路由和其余管理 UI。现有 Manager 原语不是这些流程已完成。真实 Provider/Jev、费用及业务 patch 仍保留明确授权边界；未安装、未 push、未升版本。
 
 ## 显式失败重试增量（M3，严格子集；整体仍未完成）
 

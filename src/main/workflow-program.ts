@@ -172,15 +172,16 @@ function validateBlock(value: unknown, seen: Set<string>, depth: number, count: 
   count.value += 1
   if (count.value > MAX_BLOCKS) throw new Error(`程序块数量不能超过 ${MAX_BLOCKS}`)
   if (input.kind === 'call') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'role', 'prompt', 'inputRefs', 'outputSchema'])
+    rejectUnknownFields(input, ['kind', 'blockId', 'role', 'prompt', 'inputRefs', 'outputSchema', 'replica'])
     validateRole(input.role)
     assertText(input.prompt, 'Agent 调用提示', MAX_PROMPT_LENGTH)
     const outputSchema = input.outputSchema === undefined ? undefined : validateWorkflowValueSchema(input.outputSchema)
-    count.textBytes += Buffer.byteLength(input.prompt) + (outputSchema ? Buffer.byteLength(JSON.stringify(outputSchema)) : 0)
+    const replica = input.replica === undefined ? undefined : validateWorkflowExpression(input.replica)
+    count.textBytes += Buffer.byteLength(JSON.stringify(replica) ?? '') + Buffer.byteLength(input.prompt) + (outputSchema ? Buffer.byteLength(JSON.stringify(outputSchema)) : 0)
     if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
     const inputRefs = input.inputRefs === undefined ? undefined : validateRefs(input.inputRefs, '输入')
     return { kind: 'call', blockId: input.blockId, role: input.role, prompt: input.prompt,
-      ...(inputRefs ? { inputRefs } : {}), ...(outputSchema ? { outputSchema } : {}) }
+      ...(inputRefs ? { inputRefs } : {}), ...(replica ? { replica } : {}), ...(outputSchema ? { outputSchema } : {}) }
   }
   if (input.kind === 'replica' || input.kind === 'check') {
     rejectUnknownFields(input, input.kind === 'replica' ? ['kind', 'blockId', 'source'] : ['kind', 'blockId', 'replica', 'check', 'authorization'])
@@ -276,6 +277,7 @@ function validateReferenceDominance(body: WorkflowBlock, inputs: ReadonlyMap<str
   const visit = (block: WorkflowBlock, scope: Map<string, WorkflowValueSchema>): WorkflowValueSchema => {
     if (block.kind === 'call') {
       for (const ref of block.inputRefs ?? []) referenceType(ref, scope)
+      if (block.replica && !workflowSchemaAssignable(inferWorkflowExpression(block.replica, scope), workflowReplicaValueSchema)) throw new Error(workflowValueCopy.bindingContract)
       return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
     }
     if (block.kind === 'replica' || block.kind === 'check') {

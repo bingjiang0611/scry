@@ -224,6 +224,7 @@ export interface WorkflowCallBlock {
   role: WorkflowRole
   prompt: string
   inputRefs?: WorkflowOutputRef[]
+  replica?: WorkflowExpression
   outputSchema?: WorkflowValueSchema
 }
 

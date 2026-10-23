@@ -23,7 +23,8 @@
 - check 的数据值包含 passed/state/exitCode/settled/truncated/diagnosticCount。检查退出非零时，步骤可以成功记录一个 `passed:false` 的真实结果；Workflow 执行完成不等于目标通过，质量程序须据该结果分支。无解析器或无法完整识别时 diagnosticCount 为 null，不是 0。当前尚未提供完整诊断集合的程序内消费、Jev target 或必需验证清单的质量编译合同。
 - 根账本保留独立 systemIntents/systemOutcomes；intent 先于副本/进程 effect，结果与不可变值先于控制帧推进。父 checkpoint 失败可以复用已提交结果，不再次复制或启动检查；缺失 stdout/结果/副本收据拒绝复用，不转为重跑。未知组收敛、停止 ACK 或结果写入失败不能释放已启动范围的槽位；重启保留未知系统容量，退出治理也检查系统账本。settled 的当前证明范围是登记的进程组，不是全部逃逸后代或完整沙箱；finishedAt 是 main 收到结果的时间，不冒充物理范围退出时间。
 - 副本捕获实际已修改、未跟踪及 ignored 内容，排除根 .git/.scry；内部相对符号链接保留，外链、绝对/悬空链接、嵌套 .git/子模块和特殊文件拒绝。上限为 32,768 项、8 MiB 清单、2 GiB 文件内容；超限拒绝，升级需分页清单/流式归档，不截断输入。部分失败现场保留，不覆盖或自动补做。Manager 的登记与租约原语不等于完整清理 UI/流程。
-- **尚未接入**：Agent 使用副本的 canonical App 工作区 authority、质量比较/必需验证、组合/应用/完整清理、检查输出查看 API。同根修订恢复仍未实现。本节不代表 M4 或 M1–M6 已完成。
+- `call.replica?:expression`：用同根 main 副本值选择本次 Agent 的工作区；省略仍为原源项目。类型/控制帧依赖和持久 intent 都绑定引用。main 限时内存 grant 与租约经原 App executor 校验源项目授权及副本身份，实际副本运行时目录须保持已冻结 Provider/profile/model/permission/entry 指纹；普通路径/JSON 不能生成 grant。结果 producer 和原 physical scope 同时收敛才撤销 grant/释放租约，停止 ACK 不足。catalog 保留 scoped 来源而不产生全局项目权限，Recorder/trace archive 关联实际副本 cwd。生产离线 App 验证见交付台账；真实 SDK 未验收，副本无 .git 基线，不能外推完整 diff/patch 证据。
+- **尚未接入**：质量比较/必需验证、组合/应用/完整清理、检查输出查看 API。同根修订恢复仍未实现。本节不代表 M4 或 M1–M6 已完成。
 
 ## Agent 调用的结构化输出
 

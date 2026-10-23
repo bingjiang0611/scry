@@ -33,7 +33,7 @@ const api: WorkflowApi = {
         body: { kind: 'sequence', blockId: 'root', blocks: [
           ...Array.from({ length: 17 }, (_, index) => ({ kind: 'replica' as const, blockId: `copy_${index}` })),
           { kind: 'check', blockId: 'verify', replica: { kind: 'ref', name: 'copy_0' }, check: { argv: ['node', 'verify.cjs', 'a b', 'literal;$(not-a-shell)'], cwd: '.', timeoutMs: 1500, parser: 'exit_code' } },
-          { kind: 'call', blockId: 'report', role: 'worker', prompt: 'Inspect fixture' },
+          { kind: 'call', blockId: 'report', role: 'worker', prompt: 'Inspect fixture', replica: { kind: 'ref', name: 'copy_0' } },
           { kind: 'return', blockId: 'return', ref: { nodeId: 'report' } }
         ] } } }
     notify()

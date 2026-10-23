@@ -22,6 +22,8 @@ import { normalizeSessionTitle } from '../shared/session-title'
 import { appStorePersistenceCopy as copy } from '../shared/constants/copy'
 
 export interface AppSession {
+  /** Scoped execution evidence must not become a general project grant. */
+  workspaceScope?: 'workflow_replica'
   sessionId: string
   runId?: string
   lastRunOutcome?: AgentTurnRecord['status']
@@ -225,6 +227,7 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
       .some((id) => typeof id === 'string' && id.length > 0)
     return identities.every((id) => id == null || typeof id === 'string') && hasIdentity &&
       typeof session.cwd === 'string' &&
+      (session.workspaceScope === undefined || session.workspaceScope === 'workflow_replica') &&
       typeof session.preview === 'string' &&
       (session.title == null || typeof session.title === 'string') &&
       typeof session.ts === 'number' && Number.isFinite(session.ts) &&
@@ -406,6 +409,7 @@ export function createAppSessionStore(userDataDir: string) {
   }
 
   const recordPending = (args: {
+    workspaceScope?: 'workflow_replica'
     providerId: ProviderId
     agentProfileId?: string
     runtimeProvider: RuntimeProvider
@@ -423,10 +427,11 @@ export function createAppSessionStore(userDataDir: string) {
         session.agentProfileId === args.agentProfileId &&
         session.cwd === args.cwd
     )
-    if (ex) ex.ts = now
+    if (ex) { ex.ts = now; ex.workspaceScope = args.workspaceScope ?? ex.workspaceScope }
     else
       list.push({
         sessionId: args.runId,
+        ...(args.workspaceScope ? { workspaceScope: args.workspaceScope } : {}),
         runId: args.runId,
         providerId: args.providerId,
         agentProfileId: args.agentProfileId,
@@ -439,6 +444,7 @@ export function createAppSessionStore(userDataDir: string) {
   }
 
   const record = (args: {
+    workspaceScope?: 'workflow_replica'
     providerId: ProviderId
     agentProfileId?: string
     runtimeProvider: RuntimeProvider
@@ -468,6 +474,7 @@ export function createAppSessionStore(userDataDir: string) {
     const now = Date.now()
     if (ex) {
       ex.sessionId = args.externalSessionId
+      ex.workspaceScope = args.workspaceScope ?? ex.workspaceScope ?? runMatch?.workspaceScope
       ex.externalSessionId = args.externalSessionId
       // A newer run invalidates the previous result before its terminal event arrives.
       ex.lastRunOutcome = args.lastRunOutcome ?? (args.runId && args.runId !== ex.runId ? undefined : ex.lastRunOutcome)
@@ -480,6 +487,7 @@ export function createAppSessionStore(userDataDir: string) {
     else
       list.push({
         sessionId: args.externalSessionId,
+        ...(args.workspaceScope ? { workspaceScope: args.workspaceScope } : {}),
         ...(args.runId ? { runId: args.runId } : {}),
         ...(args.lastRunOutcome ? { lastRunOutcome: args.lastRunOutcome } : {}),
         externalSessionId: args.externalSessionId,
@@ -538,10 +546,10 @@ export function createAppSessionStore(userDataDir: string) {
   }
 
   // 已存档会话从侧边栏移出，只在设置的「已存档会话」里出现。
-  const listProjects = (): ProjectMeta[] => groupByCwd(load().filter((session) => !session.archivedAt), (session) => session.ts)
+  const listProjects = (): ProjectMeta[] => groupByCwd(load().filter((session) => !session.archivedAt && !session.workspaceScope), (session) => session.ts)
 
   const listArchivedProjects = (): ProjectMeta[] =>
-    groupByCwd(load().filter((session) => session.archivedAt), (session) => session.archivedAt ?? session.ts)
+    groupByCwd(load().filter((session) => session.archivedAt && !session.workspaceScope), (session) => session.archivedAt ?? session.ts)
 
   const matchesRef = (session: AppSession, ref: AppSessionRef): boolean =>
     session.providerId === ref.providerId &&

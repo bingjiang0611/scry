@@ -3,6 +3,7 @@ import type { WorkflowStoreRecord } from './workflow-store'
 import { WORKFLOW_MAX_ATTEMPTS, workflowChildBlocks, type WorkflowBlock } from '../shared/workflow'
 import { workflowRecoveryCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
+import { validateWorkflowReplicaReference } from './workflow-replica'
 import { assertWorkflowSystemsSettled } from './workflow-system-ledger'
 import { assertWorkflowRetryTarget, validateWorkflowAttemptChains, validateWorkflowRetryTarget } from './workflow-retry'
 
@@ -42,6 +43,7 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
     if (block.kind === 'call') calls.set(block.blockId, block)
     else pending.push(...workflowChildBlocks(block))
   }
+  const replicas = new Set((record.systemOutcomes ?? []).flatMap(outcome => outcome.replica ? [JSON.stringify(outcome.replica)] : []))
   for (const outcome of record.outcomes) {
     const call = calls.get(outcome.nodeId), role = program.roles.find(value => value.role === call?.role)
     const task = outcome.taskId.split(':')
@@ -51,6 +53,10 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
   for (const intent of record.intents) {
     const outcome = record.outcomes.find(value => value.attemptId === intent.attemptId)
     if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(copy.unknown)
+    if (intent.replica) {
+      validateWorkflowReplicaReference(intent.replica, program.workflowId)
+      if (!calls.get(outcome.nodeId)?.replica || !replicas.has(JSON.stringify(intent.replica))) throw new Error(copy.ledger)
+    }
     if (intent.workflowId !== program.workflowId || intent.programRevision !== programRevision || outcome.taskId !== intent.taskId || outcome.role !== intent.role || outcome.providerId !== intent.providerId) throw new Error(copy.ledger)
   }
   if (record.outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown')) throw new Error(copy.unknown)

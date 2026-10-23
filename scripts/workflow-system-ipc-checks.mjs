@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile, writeFile } from 'node:fs/promises'
+import { glob, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** Production trusted preload/main -> Service -> canonical Runner/Interpreter.
@@ -51,4 +51,69 @@ export async function exerciseWorkflowSystemSteps(evaluate, fixture) {
     results.push({ exitCode, observed: native.state, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true })
   }
   return { test: 'main-owned SystemSteps production preload/main IPC', results }
+}
+
+export async function exerciseWorkflowReplicaAgent(evaluate, fixture) {
+  const templates = (method, ...args) => evaluate(`window.scry.workflow.templates.${method}(...${JSON.stringify(args)})`)
+  const workflow = (method, ...args) => evaluate(`window.scry.workflow.${method}(...${JSON.stringify(args)})`)
+  const calls = async () => (await readFile(fixture.callsFile, 'utf8')).split('\n').filter(Boolean).map(JSON.parse).filter(row => row.operation === 'run')
+  const before = (await calls()).length
+  await writeFile(join(fixture.templateWorkspace, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, enabled: true, workspaceId: 'owned-agent-recorder-fixture' }))
+  const definition = { schemaVersion: 1, name: 'Copy Agent fixture', description: '', parameters: {}, roles: [{ role: 'orchestrator' }], body: { kind: 'sequence', blockId: 'root', blocks: [
+    { kind: 'replica', blockId: 'copy' },
+    { kind: 'call', blockId: 'work', role: 'orchestrator', prompt: 'desktop remote write one', replica: { kind: 'ref', name: 'copy' } },
+    { kind: 'return', blockId: 'report', ref: { nodeId: 'work' } }
+  ] } }
+  const draft = await templates('saveDraft', { scope: { kind: 'personal' }, source: JSON.stringify(definition) })
+  assert.equal(draft.validation.state, 'valid', JSON.stringify(draft.validation))
+  const preview = await workflow('instantiateTemplate', { source: { kind: 'draft', draftId: draft.draftId, draftRevision: draft.draftRevision, candidateHash: draft.candidateHash }, commandId: 'copy-agent-instance',
+    cwd: fixture.templateWorkspace, userGoal: 'Run the offline App adapter only in the registered copy', parameters: {}, orchestrator: { role: 'orchestrator', providerId: 'codex' }, roles: [] })
+  assert.equal(preview.state, 'ready', JSON.stringify(preview.unavailableReasons))
+  assert.equal(preview.plannedCalls, 1)
+  const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+  await workflow('approve', approval)
+  const progress = await workflow('start', preview.workflowId, approval, 'copy-agent-start')
+  assert.equal(progress.state, 'completed', JSON.stringify(progress))
+  assert.equal(progress.dispatchAttempts, 1)
+  const record = JSON.parse(await readFile(join(fixture.userData, 'workflows', preview.workflowId + '.json'), 'utf8'))
+  const reference = record.systemOutcomes[0].replica
+  assert.deepEqual(record.intents[0].replica, reference)
+  assert.equal(record.outcomes[0].settled, true)
+  assert.match(record.outcomes[0].archiveRef, /^run:.+:session:.+$/)
+  const receipt = JSON.parse(await readFile(join(fixture.userData, 'workflow-replicas', preview.workflowId, reference.replicaId + '.replica.json'), 'utf8'))
+  assert.equal(await readFile(join(receipt.directory, 'remote-first.txt'), 'utf8'), 'remote-first.txt\n')
+  await assert.rejects(readFile(join(fixture.templateWorkspace, 'remote-first.txt')), { code: 'ENOENT' })
+  const catalog = JSON.parse(await readFile(join(fixture.userData, 'app-sessions.json'), 'utf8'))
+  const session = catalog.find(row => row.runId === record.outcomes[0].runId)
+  assert.equal(session.cwd, receipt.directory)
+  assert.equal(session.workspaceScope, 'workflow_replica')
+  const turnFiles = []
+  for await (const path of glob('**/*.json', { cwd: join(receipt.directory, '.scry', 'records') })) turnFiles.push(path)
+  assert.equal(turnFiles.length, 1, 'managed recorder must produce one canonical copy turn')
+  const turn = JSON.parse(await readFile(join(receipt.directory, '.scry', 'records', turnFiles[0]), 'utf8'))
+  assert.equal(turn.status, 'completed')
+  const archived = []
+  for await (const path of glob('**/*.json', { cwd: join(fixture.userData, 'trace-archive-turns-v1') })) {
+    const value = JSON.parse(await readFile(join(fixture.userData, 'trace-archive-turns-v1', path), 'utf8'))
+    if (value.turns?.some(turn => turn.runId === record.outcomes[0].runId)) archived.push(value)
+  }
+  assert.equal(archived.length, 1, 'App archive must link the exact canonical attempt run')
+  assert.equal(archived[0].cwd, receipt.directory)
+  const denied = await evaluate(`window.scry.start(${JSON.stringify({ providerId: 'codex', cwd: receipt.directory, prompt: 'not an authorized project' })}).then(() => ({ rejected: false }), error => ({ rejected: true, message: String(error) }))`)
+  assert.equal(denied.rejected, true, 'catalog evidence must not authorize ordinary starts in a private copy')
+  await workflow('start', preview.workflowId, approval, 'copy-agent-start')
+  assert.equal((await calls()).length - before, 1, 'duplicate start and rejected unscoped start must never invoke another Provider')
+  return { test: 'owned-copy Agent production IPC/App executor/Recorder/archive', workflowId: preview.workflowId, approval, workspace: receipt.directory,
+    agentAttempts: 1, offlineProviderInvocations: 1, sourceUnchanged: true, privateCopyNotGlobalGrant: true, recorderTurns: 1, archiveTurns: 1 }
+}
+
+export async function verifyWorkflowReplicaAgentRestart(evaluate, fixture, result) {
+  const before = await readFile(fixture.callsFile, 'utf8')
+  const denied = await evaluate(`window.scry.start(${JSON.stringify({ providerId: 'codex', cwd: result.workspace, prompt: 'not an authorized project after restart' })}).then(() => false, () => true)`)
+  assert.equal(denied, true, 'cold catalog must preserve scoped provenance, not authorize the copy')
+  const progress = await evaluate(`window.scry.workflow.start(${JSON.stringify(result.workflowId)}, ${JSON.stringify(result.approval)}, 'copy-agent-start')`)
+  assert.equal(progress.state, 'completed')
+  assert.equal(progress.dispatchAttempts, 1)
+  assert.equal(await readFile(fixture.callsFile, 'utf8'), before, 'cold receipt replay and denied start cannot dispatch a Provider')
+  return { coldScopedAuthorityPreserved: true, duplicateStartNoDispatch: true }
 }

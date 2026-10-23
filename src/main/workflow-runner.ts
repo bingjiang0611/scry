@@ -25,7 +25,7 @@ import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workfl
 import { assertWorkflowRetryTarget, validateWorkflowRetryTarget, workflowRetryAdmission } from './workflow-retry'
 import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowSystemOutcome, type WorkflowSystemProgress } from '../shared/workflow-system'
 import { workflowSystemCopy } from '../shared/constants/copy'
-import type { WorkflowSystemHost } from './workflow-system-host'
+import type { WorkflowSystemHost, WorkflowReplicaRun } from './workflow-system-host'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
 
@@ -36,6 +36,7 @@ export interface WorkflowProviderExecutionRequest {
   role: WorkflowRoleBinding
   prompt: string
   cwd: string
+  replicaRun?: WorkflowReplicaRun
   permissionMode?: AgentPermissionMode
   onObservation?: (observation: WorkflowLiveObservation) => void
 }
@@ -379,7 +380,12 @@ export class WorkflowRunner {
       const control = new WorkflowControl(this.store, preview, { record, previous, generationId })
       const interpreter = new WorkflowInterpreter(control, controller, async (block, scope, frame) => {
         const recovered = control.recoveredOutcome(block, scope, frame)
-        const outcome = recovered ?? await this.dispatch(preview, block, record, controller, activeStops, scope)
+        if (recovered && block.replica) {
+          const input = await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped)
+          const intent = record.intents.find(value => value.attemptId === recovered.attemptId)
+          if (JSON.stringify(intent?.replica) !== JSON.stringify(input.state === 'known' ? input.replica : undefined)) throw new Error(workflowRecoveryCopy.frame)
+        }
+        const outcome = recovered ?? await this.dispatch(preview, block, record, controller, activeStops, scope, control)
         const output = recovered ? await this.store.loadOutput(preview.workflowId, outcome) : outcome.output
         let value: WorkflowEvaluation = { state: 'unknown', reason: outcome.error ?? workflowFrameCopy.failedValue, derivedFrom: ['attempt:' + outcome.attemptId] }
         if (outcome.state === 'completed' && outcome.settled && output !== undefined) {
@@ -577,7 +583,7 @@ export class WorkflowRunner {
     }
   }
 
-  private async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope): Promise<WorkflowAttemptOutcome> {
+  private async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope, control: WorkflowControl): Promise<WorkflowAttemptOutcome> {
     if (controller.stopped) return this.outcome(preview, block, 'stopped', { settled: true, error: '工作流已停止' })
     const role = preview.program.roles.find((candidate) => candidate.role === block.role)
     if (!role) throw new Error(`程序引用了未配置角色：${block.role}`)
@@ -602,8 +608,14 @@ export class WorkflowRunner {
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
+        const replicaInput = block.replica ? await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped) : undefined
+        if (block.replica && !this.systems) {
+          const outcome = this.outcome(preview, block, 'blocked', { attemptId, taskId, settled: true, error: workflowSystemCopy.unavailable })
+          await this.commitOutcome(record, outcome)
+          return { outcome }
+        }
         if (!controller.stopped) {
-          try { await this.reserveDispatch(preview, block, role, taskId, attemptId, record, controller) } catch (error) {
+          try { await this.reserveDispatch(preview, block, role, taskId, attemptId, record, controller, replicaInput) } catch (error) {
             // No executor has been called. Persist that fact before releasing capacity;
             // persistence failure still propagates and retains the uncertain reservation.
             const outcome = this.outcome(preview, block, 'failed', { attemptId, taskId, settled: true, error: String(error) })
@@ -634,7 +646,10 @@ export class WorkflowRunner {
           liveOwner.liveRevision++
           this.scheduleLivePublish(record)
         }
-        try { execution = this.execute({ workflowId: preview.workflowId, taskId, attemptId, role, prompt, cwd: preview.workspace, permissionMode: role.permissionMode, onObservation: observe }) } catch (error) {
+        try {
+          const request = { workflowId: preview.workflowId, taskId, attemptId, role, prompt, cwd: preview.workspace, permissionMode: role.permissionMode, onObservation: observe }
+          execution = block.replica ? this.systems!.executeAgent(preview, replicaInput, request, this.execute) : this.execute(request)
+        } catch (error) {
           releaseLive()
           const outcome = this.outcome(preview, block, 'unknown', { attemptId, taskId, settled: false, error: String(error) })
           await this.commitOutcome(record, outcome)
@@ -732,7 +747,7 @@ export class WorkflowRunner {
   }
 
   private async reserveDispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, role: WorkflowRoleBinding,
-    taskId: string, attemptId: string, record: WorkflowStoreRecord, controller: { stopped: boolean }): Promise<void> {
+    taskId: string, attemptId: string, record: WorkflowStoreRecord, controller: { stopped: boolean }, replicaInput?: WorkflowEvaluation): Promise<void> {
     let release!: () => void
     const previous = this.reservationTail
     this.reservationTail = new Promise<void>((resolve) => { release = resolve })
@@ -743,6 +758,7 @@ export class WorkflowRunner {
       const retry = workflowRetryAdmission(record, taskId)
       record.progress.dispatchAttempts += 1
       record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId, ...retry,
+        ...(replicaInput?.state === 'known' && replicaInput.replica ? { replica: replicaInput.replica } : {}),
         role: role.role, providerId: role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel.id } : {}), createdAt: this.now() })
       record.progress.attempts.push(this.outcome(preview, block, 'intent_persisted', { taskId, attemptId, settled: false }))
       await this.persist(record, record.progress)

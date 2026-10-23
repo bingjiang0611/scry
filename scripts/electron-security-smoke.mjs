@@ -12,6 +12,7 @@ import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseUnifiedConversation, verifyUnifiedConversationRestart } from './unified-conversation-smoke.mjs'
 import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
 import { exerciseMissingWorkflowHistory } from './workflow-recovery-ipc-checks.mjs'
+import { exerciseWorkflowReplicaAgent, verifyWorkflowReplicaAgentRestart } from './workflow-system-ipc-checks.mjs'
 import { exerciseWorkflowTemplatePublication } from './workflow-template-ipc-checks.mjs'
 import { exerciseWorkflowTemplateEditor } from './workflow-template-editor-ui-checks.mjs'
 
@@ -308,14 +309,22 @@ async function main() {
       await cdp.send('Runtime.enable')
       await verifyUnifiedConversationRestart(evaluate, fixture, result, changedIdentity)
     }
+    const replicaAgent = await exerciseWorkflowReplicaAgent(evaluate, fixture)
+    cdp.close()
+    await stopOwnedApp(child)
+    launchApp()
+    const copyRestarted = await waitForTarget(port)
+    cdp = connectCdp(copyRestarted.page.webSocketDebuggerUrl)
+    await cdp.send('Runtime.enable')
+    const replicaAgentRestart = await verifyWorkflowReplicaAgentRestart(evaluate, fixture, replicaAgent)
     cdp.close()
     const artifactPaths = ['out/main/index.js', 'out/preload/index.cjs', 'out/renderer/index.html',
       ...readdirSync(resolve('out/renderer/assets')).filter(name => /\.(js|css)$/.test(name)).map(name => `out/renderer/assets/${name}`)]
     const artifactHashes = Object.fromEntries(artifactPaths.map((path) =>
       [path, createHash('sha256').update(readFileSync(resolve(path))).digest('hex')]))
-    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, workflowRecovery, workflowTemplates, workflowTemplateEditor, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
+    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, workflowRecovery, workflowTemplates, workflowTemplateEditor, replicaAgent, replicaAgentRestart, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
     console.log(JSON.stringify({ test: result.test, conversationId: result.id, turns: result.runIds.length,
-      providerInvocations: result.receipts.length, workflowRecovery, workflowTemplates, workflowTemplateEditor, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
+      providerInvocations: result.receipts.length, workflowRecovery, workflowTemplates, workflowTemplateEditor, replicaAgent, replicaAgentRestart, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
     return
   }
   if (ownershipFixture) {

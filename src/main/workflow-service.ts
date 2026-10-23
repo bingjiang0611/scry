@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { workflowShutdownCopy, workflowRecoveryCopy, workflowTemplateCopy } from '../shared/constants/copy'
-import type { WorkflowSystemHost } from './workflow-system-host'
+import type { WorkflowSystemHost, WorkflowReplicaRun } from './workflow-system-host'
 import { workflowSystemCopy } from '../shared/constants/copy'
 import { validateWorkflowSystemLedger } from './workflow-system-ledger'
 import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
@@ -35,7 +35,7 @@ export interface WorkflowServiceOptions {
   providerRegistered: (providerId: ProviderId) => boolean
   runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
   plan: WorkflowPlanProvider
-  execute: (request: { workflowId: string; taskId: string; attemptId: string; role: WorkflowRoleBinding; prompt: string; workspace: string; onObservation?: (observation: WorkflowLiveObservation) => void }) => WorkflowProviderExecution
+  execute: (request: { workflowId: string; taskId: string; attemptId: string; role: WorkflowRoleBinding; prompt: string; workspace: string; replicaRun?: WorkflowReplicaRun; onObservation?: (observation: WorkflowLiveObservation) => void }) => WorkflowProviderExecution
   slots?: WorkflowSlots
   loadConcurrency?: () => Promise<number | undefined>
   onProgress?: (progress: WorkflowProgress) => void
@@ -86,7 +86,7 @@ export class WorkflowService {
   constructor(options: WorkflowServiceOptions) {
     this.options = { ...options, slots: options.slots ?? new WorkflowSlots() }
     this.runner = new WorkflowRunner({ store: options.store, slots: this.options.slots, systems: options.systems,
-      execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd, onObservation: request.onObservation }),
+      execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd, replicaRun: request.replicaRun, onObservation: request.onObservation }),
       onLifecycle: () => this.notifyLifecycle(),
       beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true) },
       onProgress: progress => options.onProgress?.(this.progressSnapshot(progress)) })

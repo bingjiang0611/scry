@@ -216,6 +216,22 @@ describe('app-store', () => {
     }
   })
 
+  it('保留副本执行的 catalog 证据，但不把它投影为普通项目或丢失作用域来源', () => {
+    const dir = tempDir()
+    try {
+      const store = createAppSessionStore(dir)
+      const request = { providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const, cwd: '/private-copy', runId: 'copy-run', prompt: 'copy only', workspaceScope: 'workflow_replica' as const }
+      store.recordPending(request)
+      store.record({ providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: request.cwd, runId: request.runId, externalSessionId: 'copy-native', prompt: 'terminal' })
+      const cold = createAppSessionStore(dir)
+      expect(cold.load()[0]).toMatchObject({ workspaceScope: 'workflow_replica', runId: 'copy-run', externalSessionId: 'copy-native' })
+      expect(cold.listSessions('/private-copy')).toHaveLength(1)
+      expect(cold.listProjects()).toEqual([])
+      cold.setArchived({ providerId: 'pi', cwd: '/private-copy', externalSessionId: 'copy-native' }, true)
+      expect(cold.listArchivedProjects()).toEqual([])
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('首轮标题在 pending 晋升、多轮续聊及重新加载后保持不变，仍更新 run 身份与活跃时间', () => {
     const dir = tempDir()
     try {

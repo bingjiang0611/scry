@@ -7,6 +7,16 @@ import { bindWorkflowCheck, executeWorkflowCheck, freezeWorkflowCheck, type Work
 import { WorkflowReplicas, validateWorkflowReplicaReference } from './workflow-replica'
 import { shellEnv } from './claude-locate'
 import { workflowSystemArtifactKey } from './workflow-system-ledger'
+import type { WorkflowReplicaReference } from '../shared/workflow-replica'
+import { WorkflowScopeError, type WorkflowProviderExecution, type WorkflowProviderExecutionRequest, type WorkflowProviderExecutor } from './workflow-runner'
+
+/** Main-only, short-lived authority. JSON with these fields is never a grant. */
+export interface WorkflowReplicaRun {
+  readonly workflowId: string
+  readonly workspace: string
+  readonly sourceWorkspace: string
+  readonly reference: WorkflowReplicaReference
+}
 
 type SystemBlock = Extract<WorkflowBlock, { kind: 'replica' | 'check' }>
 export type WorkflowSystemExecutionResult = Pick<WorkflowSystemOutcome, 'state' | 'settled' | 'replica' | 'check' | 'error'> & { value: WorkflowEvaluation }
@@ -16,6 +26,7 @@ export type WorkflowSystemExecution = { result: Promise<WorkflowSystemExecutionR
  * template scheduler or renderer command API. */
 export class WorkflowSystemHost {
   readonly replicas: WorkflowReplicas
+  private readonly runs = new WeakSet<WorkflowReplicaRun>()
   constructor(directory: string, private readonly store: WorkflowStore, private readonly environment = shellEnv) {
     this.replicas = new WorkflowReplicas(directory, async reference => {
       const record = await store.load(reference.workflowId)
@@ -38,6 +49,57 @@ export class WorkflowSystemHost {
       blocks.push(...workflowChildBlocks(block))
     }
     return result
+  }
+
+  async assertRun(run: WorkflowReplicaRun, workspace: string): Promise<WorkflowReplicaRun> {
+    if (!this.runs.has(run) || run.workspace !== workspace) throw new Error(copy.authority)
+    const receipt = await this.replicas.resolve(run.reference)
+    if (receipt.directory !== workspace || !this.runs.has(run)) throw new Error(copy.authority)
+    return run
+  }
+
+  executeAgent(preview: WorkflowPlanPreview, input: WorkflowEvaluation | undefined, request: WorkflowProviderExecutionRequest,
+    execute: WorkflowProviderExecutor): WorkflowProviderExecution {
+    const cancelled = new AbortController()
+    let native: WorkflowProviderExecution | undefined, invoked = false, resultDone = false, scopeClosed = false
+    let lease: Awaited<ReturnType<WorkflowReplicas['acquire']>> | undefined, grant: WorkflowReplicaRun | undefined
+    let close!: () => void
+    const settled = new Promise<void>(resolve => { close = resolve })
+    const release = (): void => {
+      if (!resultDone || !scopeClosed) return
+      if (grant) this.runs.delete(grant)
+      lease?.release(); lease = undefined
+      close()
+    }
+    const result = (async () => {
+      try {
+        const reference = this.target(input, preview.workflowId)
+        lease = await this.replicas.acquire(reference, false, cancelled.signal)
+        const receipt = await this.replicas.resolve(reference)
+        if (cancelled.signal.aborted) throw new Error(copy.stopped)
+        grant = Object.freeze({ workflowId: preview.workflowId, sourceWorkspace: preview.workspace,
+          workspace: receipt.directory, reference: Object.freeze({ ...reference }) })
+        this.runs.add(grant)
+        invoked = true
+        native = execute({ ...request, cwd: receipt.directory, replicaRun: grant })
+        if (cancelled.signal.aborted) native.stop()
+        if (native.settled) void native.settled.then(() => { scopeClosed = true; release() }, error => console.warn('[workflow] replica scope settlement unavailable', error))
+        const observed = await native.result
+        scopeClosed ||= observed.settled
+        return observed
+      } catch (error) {
+        if (!invoked) {
+          scopeClosed = true
+          throw new WorkflowScopeError(String(error), true, 'not_attempted')
+        }
+        if (error instanceof WorkflowScopeError && error.settled && error.providerDispatch === 'not_attempted') scopeClosed = true
+        throw error
+      } finally { resultDone = true; release() }
+    })()
+    return { runId: `workflow-${request.attemptId}`, result, settled, stop: () => {
+      cancelled.abort()
+      return native ? native.stop() : true
+    } }
   }
 
   execute(preview: WorkflowPlanPreview, block: SystemBlock, stepId: string, input?: WorkflowEvaluation): WorkflowSystemExecution {
