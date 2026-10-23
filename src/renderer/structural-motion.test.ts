@@ -1,5 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cancelStructuralMotion, runStructuralTransition } from './structural-motion'
+
+const flush = vi.hoisted(() => ({ active: false }))
+vi.mock('react-dom', () => ({ flushSync: vi.fn((commit: () => void) => {
+  flush.active = true
+  try { commit() } finally { flush.active = false }
+}) }))
 
 function fixture(reduced = false) {
   const frames: Keyframe[][] = []
@@ -15,25 +21,24 @@ function fixture(reduced = false) {
       return animation
     }
   }
+  vi.stubGlobal('Element', class { animate() {} })
   vi.stubGlobal('document', { hidden: false, querySelectorAll: () => [page] })
   vi.stubGlobal('window', { matchMedia: () => media })
   return { frames, timings, animations, media }
 }
 
-beforeEach(() => vi.stubEnv('MODE', 'production'))
-afterEach(() => { cancelStructuralMotion(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+afterEach(() => { cancelStructuralMotion(); vi.unstubAllGlobals() })
 
 describe('live structural motion', () => {
-  it('commits synchronously without a document, while hidden, and in test mode', () => {
-    const commit = vi.fn()
-    vi.stubGlobal('document', undefined)
+  it.each(['no document', 'hidden', 'no animate'])('commits inside flushSync with %s and does not animate', mode => {
+    const f = fixture()
+    if (mode === 'no document') vi.stubGlobal('document', undefined)
+    if (mode === 'hidden') vi.stubGlobal('document', { hidden: true })
+    if (mode === 'no animate') vi.stubGlobal('Element', class {})
+    const commit = vi.fn(() => { expect(flush.active).toBe(true) })
     runStructuralTransition('page', commit)
-    vi.stubGlobal('document', { hidden: true })
-    runStructuralTransition('page', commit)
-    vi.stubEnv('MODE', 'test')
-    vi.stubGlobal('document', { hidden: false })
-    runStructuralTransition('page', commit)
-    expect(commit).toHaveBeenCalledTimes(3)
+    expect(commit).toHaveBeenCalledOnce()
+    expect(f.animations).toHaveLength(0)
   })
   it('commits before animating live content and propagates the exact error synchronously', () => {
     const f = fixture()
@@ -41,7 +46,7 @@ describe('live structural motion', () => {
     expect(() => runStructuralTransition('page', () => { throw error })).toThrow(error)
     expect(f.animations).toHaveLength(0)
     let committed = false
-    runStructuralTransition('page', () => { committed = true })
+    runStructuralTransition('page', () => { expect(flush.active).toBe(true); committed = true })
     expect(committed).toBe(true)
     expect(f.timings[0].duration).toBe(240)
     expect(f.frames[0][0].transform).toBe('translateY(6px)')

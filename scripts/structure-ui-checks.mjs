@@ -21,7 +21,7 @@ export async function exerciseStructure(contents) {
   const entries = `document.getAnimations().filter(a => a.id === 'scry-structure')`
   const entry = `${entries}[0]`
   await wait(`document.querySelectorAll('button.sb-sess').length === 2`)
-  await read(`window.nativeCaptureCalls = 0; document.startViewTransition = () => { window.nativeCaptureCalls++; throw new Error('Native capture forbidden by approved live-DOM contract') }; undefined`)
+  await read(`window.nativeCaptureCalls = 0; document.startViewTransition = () => { window.nativeCaptureCalls++; throw new Error('Native capture forbidden by approved live-DOM contract') }; window.structureEntries = []; const animate = Element.prototype.animate; Element.prototype.animate = function(...args) { const animation = animate.apply(this, args); if (this.matches('.main-content')) window.structureEntries.push(animation); return animation; }; undefined`)
   await click(row('cache-a'))
   await pending('cache-a')
   await control('resolve-a')
@@ -56,6 +56,41 @@ export async function exerciseStructure(contents) {
   await control('resolve-b')
   await wait(`${entries}.length === 0 && ${body('cache-b')}`)
 
+  const entryCount = `window.structureEntries.filter(animation => animation.id === 'scry-structure').length`
+  await control('update-a')
+  await read(`window.structureEntries = []`)
+  await click(row('cache-a'))
+  await pending('cache-a')
+  check(await read(`document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a v1') && ${entryCount} === 1`), 'Stale cached A did not enter exactly once')
+  await control('resolve-a')
+  await wait(`document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a v2')`)
+  check(await read(`${entryCount} === 1`), 'Stale cache refresh replayed the session entrance')
+  await wait(`${entries}.length === 0`)
+  await read(`window.structureEntries = []`)
+  await click(row('cache-a'))
+  await pending('cache-a')
+  await control('resolve-a')
+  await wait(`${body('cache-a')} && !JSON.parse(document.getElementById('cache-state').textContent).pending.length`)
+  check(await read(`${entryCount} === 0`), 'Same-session refresh replayed entrance')
+  await control('focus-live-b')
+  await pending('cache-b')
+  await control('resolve-b')
+  await wait(`${entries}.length === 0`)
+  await read(`window.structureEntries = []`)
+  await control('focus-live-b')
+  await pending('cache-b')
+  await control('resolve-b')
+  await wait(`!JSON.parse(document.getElementById('cache-state').textContent).pending.length`)
+  check(await read(`${entryCount} === 0`), 'Focus on the presented session replayed entrance')
+  await click(`document.querySelector('.sb-new')`)
+  await wait(`${entries}.length === 0`)
+  await read(`window.structureEntries = []`)
+  await click(row('cache-b'))
+  await pending('cache-b')
+  await control('resolve-b')
+  await wait(`${body('cache-b')} && ${entries}.length === 0`)
+  check(await read(`${entryCount} === 1`), 'New conversation did not reset the presented session identity')
+
   contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
@@ -70,5 +105,6 @@ export async function exerciseStructure(contents) {
   }
   return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
     selectionFirstFrame: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
-    reduced120OpacityOnly: true, nativeCaptureCalls: 0 }
+    staleCacheOnlyOneEntrance: true, sameSessionRefreshNoEntrance: true, sameSessionFocusNoEntrance: true,
+    newConversationResetsIdentity: true, reduced120OpacityOnly: true, nativeCaptureCalls: 0 }
 }
