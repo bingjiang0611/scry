@@ -446,6 +446,20 @@ async function main() {
   assert.equal(unknownAgain.intent.runId, unknownRunId)
   await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: unknownRunId, expect: 'settled' })
 
+  // Explicit recovery reuses accepted evidence; an absent id instead gets a
+  // durable cancellation fence. Neither branch can replay the original prompt.
+  const recovered = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'resolveIntent', intentId: unknownIntentId })
+  assert.equal(recovered.intent.runId, unknownRunId)
+  assert.equal(recovered.intent.state, 'settled')
+  const absentIntentId = randomUUID()
+  const fenced = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'resolveIntent', intentId: absentIntentId })
+  assert.equal(fenced.intent.state, 'cancelled')
+  const fencedAgain = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'resolveIntent', intentId: absentIntentId })
+  assert.deepEqual(fencedAgain, fenced)
+  assert.deepEqual(await submit(absentIntentId, 'must never execute a delayed submission'), { error: 'intent_payload_conflict' })
+  const bridgeRejection = await evaluate(`window.scry.desktopRemote.resolveIntent('missing-connection', ${JSON.stringify(absentIntentId)}).then(() => 'unexpected success', error => error.message)`)
+  assert.match(bridgeRejection, /unknown_connection/, 'production preload/IPC recovery must reach main validation')
+
   // The fixture has a real question lifecycle. Stop while its question is open;
   // no synthetic answer is injected and the terminal status must be observed.
   const question = await submit(randomUUID(), 'dock badge question smoke')
@@ -536,7 +550,7 @@ async function main() {
     workbench: { realFileWrite: true, staleRevisionDenied: true, createRename: true, realGitStageCommit: true, realPtyCwdAndInput: true, cumulativeAckDuplicateSafe: true, detachedLargeOutputContinues: true, recordingCatchUp: true, staleWriterDenied: true },
     directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
     appPath, rendererUrl: page.url, hostId: invitation.hostId, pairPort: invitation.pairPort, runPort: invitation.runPort,
-    supportedScenarios: ['trusted-local invite/confirm', 'pinned TLS CSR pairing', 'canonical info', 'normal trace/archive', 'duplicate intent', 'unknown receipt intentStatus', 'question cancellation', 'independent same-workspace sessions', 'canonical failed run', 'revocation'],
+    supportedScenarios: ['trusted-local invite/confirm', 'pinned TLS CSR pairing', 'canonical info', 'normal trace/archive', 'duplicate intent', 'unknown receipt intentStatus', 'explicit recovery fences late submissions', 'production recovery IPC validation', 'question cancellation', 'independent same-workspace sessions', 'canonical failed run', 'revocation'],
     fixtureArgs: { provider: 'codex', normalPrompt: 'desktop remote write one', questionPrompt: 'dock badge question smoke', failurePrompt: 'remote provider failure smoke' },
     bounded: { traceItems: activeTrace.desktop.run.items.length, archiveTurns: history.desktop.history.turns.length, canonicalRecords: records.length, scryEntries: scryEntries.length }
   }))

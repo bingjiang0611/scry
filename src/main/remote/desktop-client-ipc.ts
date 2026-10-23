@@ -4,7 +4,7 @@ import type { DesktopRemoteAPI } from '../../shared/desktop-remote'
 // remote peer can choose a raw protocol op, URL, SSH option or shell command.
 const METHODS = [
   'list', 'pair', 'finishPairing', 'updateSsh', 'connect', 'disconnect', 'forget',
-  'catalog', 'providerControls', 'commands', 'sessionAction', 'forkSession', 'deleteSession', 'directories', 'selectDirectory', 'history', 'trace', 'intents', 'submit', 'intentStatus',
+  'catalog', 'providerControls', 'commands', 'sessionAction', 'forkSession', 'deleteSession', 'directories', 'selectDirectory', 'history', 'trace', 'intents', 'submit', 'intentStatus', 'resolveIntent',
   'runStatus', 'liveRun', 'stop', 'answer', 'files', 'file', 'workbench'
 ] as const satisfies readonly (keyof DesktopRemoteAPI)[]
 

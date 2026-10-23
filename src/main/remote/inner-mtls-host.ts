@@ -183,6 +183,10 @@ export class InnerMtlsHost {
         if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
         return { intent: controller.intentStatus(fingerprint, { intentId: request.intentId }) }
       }
+      if (request.op === 'resolveIntent') {
+        if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
+        return { intent: controller.resolveIntent(fingerprint, { intentId: request.intentId }) }
+      }
       if (request.op === 'poll') {
         if (!Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }
         return { poll: controller.poll(fingerprint, { cursor: request.cursor as number }) }

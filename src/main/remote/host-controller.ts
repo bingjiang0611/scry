@@ -498,6 +498,11 @@ export class HostController {
     return this.#gateway.intentStatus(peerCertSHA256, input)
   }
 
+  resolveIntent(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
+    // Do not pump a recovery fence through the submission path.
+    return this.#gateway.resolveIntent(peerCertSHA256, input)
+  }
+
   poll(peerCertSHA256: string, input: { cursor: number }): ReturnType<SessionLedger['since']> {
     return this.#gateway.poll(peerCertSHA256, input)
   }

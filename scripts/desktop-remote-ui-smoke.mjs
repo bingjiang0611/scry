@@ -21,6 +21,8 @@ const negativeSettingsControl = process.argv.includes('--negative-settings-contr
 const negativeSlashControl = process.argv.includes('--negative-slash-control')
 const negativeHistorySlashControl = process.argv.includes('--negative-history-slash-control')
 const negativeProviderRevisionControl = process.argv.includes('--negative-provider-revision-control')
+const unknownReceiptOnly = process.argv.includes('--unknown-receipt-only')
+const negativeUnknownReceiptControl = process.argv.includes('--negative-unknown-receipt-control')
 const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
@@ -54,7 +56,8 @@ const state = {
   providerControlsFailure: null, legacyProviderHost: false,
   fileLists: [], fileReads: [], localWorkspaceCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
-  intent: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
+  intent: ${unknownReceiptOnly ? `{ intentId: 'unknown-original-id', connectionId: 'fixture-connection', context: { cwd: '/fixture/project-b', providerId: 'qoder', externalSessionId: 'other-native' }, createdAt: 1, status: 'unknown', failure: 'transport receipt unavailable' }` : 'null'},
+  resolveIntentCalls: [], resolveFailure: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
   catalogFailure: false, sessionActive: false, sessionTs: 1700000000000, hostRunArchived: false, liveRunCalls: 0,
@@ -223,7 +226,16 @@ const api = {
     return structuredClone(state.intent)
   },
   async intentStatus() { return structuredClone(state.intent) },
+  async resolveIntent(id, intentId) {
+    state.resolveIntentCalls.push({ id, intentId })
+    if (intentId !== 'unknown-original-id') throw new Error('fixture recovery used a replacement id')
+    if (state.resolveFailure === 'generic') throw new Error('fixture recovery transport failed')
+    if (${negativeUnknownReceiptControl}) throw new Error('desktop_remote_unknown_op')
+    state.intent = { intentId, connectionId: connection.id, context: { cwd: '/fixture/project-b', providerId: 'qoder', externalSessionId: 'other-native' }, createdAt: 1, status: 'recorded', runId: 'received-active-run' }
+    return structuredClone(state.intent)
+  },
   async runStatus(_id, runId) {
+    if (runId === 'received-active-run') return { state: 'dispatched', detail: 'fixture received active task' }
     if (state.holdRunStatus) await new Promise(resolve => { window.releaseRunStatus = resolve })
     if (state.runStatusFailure) throw new Error('desktop_remote_output_capture_queue_full')
     if (state.answerFailure && runId === firstLedger) {
@@ -312,7 +324,7 @@ function Fixture() {
   const [fullApp, setFullApp] = useState(false)
   if (fullApp) return <App />
   return <><RemoteHostPanel />
-    <button data-app-fixture style={{ position: 'fixed', top: 2, right: 2, zIndex: 9999 }} onClick={() => { state.intent = null; setFullApp(true) }}>Full App</button>
+    <button data-app-fixture style={{ position: 'fixed', top: 2, right: 2, zIndex: 9999 }} onClick={() => { if (!${unknownReceiptOnly}) state.intent = null; setFullApp(true) }}>Full App</button>
   </>
 }
 createRoot(document.getElementById('root')).render(<Fixture />)
@@ -377,6 +389,41 @@ async function exercise(contents, pointer, capture, options) {
   const composerValue = 'document.querySelector(\'textarea[aria-label="描述任务"]\').value'
   await wait('document.querySelector(".sb-remote-proj") != null', 'connected remote project')
   check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation remains')
+
+  if (options.unknownReceiptOnly) {
+    await click('[data-remote-session="old-native"]')
+    await wait('document.querySelector(".composer-notice")?.textContent.includes("/fixture/project-b")', 'cross-project unknown receipt notice')
+    await click('[data-remote-session="other-native"]')
+    await wait('document.querySelector(".composer-notice")?.textContent.includes("/fixture/project-b")', 'unknown receipt notice survives session switch')
+    await click('textarea[aria-label="描述任务"]')
+    await insert('draft held by unknown receipt')
+    await pasteImage()
+    await wait('document.querySelector(".draft-attachments img")?.naturalWidth === 2', 'blocked draft image preview')
+    check(await read(sendDisabled), 'Unknown receipt enabled send')
+    check(await read(`${composerValue} === "draft held by unknown receipt"`), 'Unknown receipt discarded the draft')
+    await capture('unknown-receipt-blocked')
+    await read('window.desktopRemoteFixture.resolveFailure = "generic"')
+    await click('.composer-notice button', '核对并解除阻塞')
+    await wait('document.querySelector(".composer-notice")?.textContent.includes("解除未知提交失败")', 'failed recovery remains actionable')
+    check(await read(sendDisabled), 'Failed unknown recovery enabled send')
+    await read('window.desktopRemoteFixture.resolveFailure = null')
+    await click('.composer-notice button', '核对并解除阻塞')
+    if (options.negativeUnknownReceiptControl) {
+      await wait('document.querySelector(".composer-notice")?.textContent.includes("版本过旧")', 'old host recovery guidance')
+      check(await read(sendDisabled), 'Old host unknown recovery enabled send')
+      check(await read('window.desktopRemoteFixture.intent?.status === "unknown"'), 'Old host recovery discarded unknown evidence')
+    } else {
+      await wait('!document.querySelector(".composer-notice")?.textContent.includes("提交回执未知")', 'explicit recovery clears blocker')
+    }
+    const recovered = await fixture()
+    check(recovered.resolveIntentCalls.length === 2 && recovered.resolveIntentCalls.every(call => call.intentId === 'unknown-original-id'), 'Recovery did not use the original receipt id')
+    check(recovered.submitInputs.length === 0, 'Recovery replayed the prompt')
+    check(recovered.stopCalls.length === 0, 'Recovery stopped a received active task')
+    check(await read(`${composerValue} === "draft held by unknown receipt"`), 'Recovery discarded the draft')
+    check(await read('document.querySelector(".draft-attachments img")?.naturalWidth === 2'), 'Recovery discarded the draft image')
+    await capture(options.negativeUnknownReceiptControl ? 'unknown-receipt-old-host' : 'unknown-receipt-recovered')
+    return { unknownReceipt: { crossProjectNotice: true, draftAndImagePreserved: true, explicitOriginalIdRecovery: true, noReplayOrStop: true, failedRecoveryActionable: true, outcome: options.negativeUnknownReceiptControl ? 'old-host-unavailable' : 'received-active' }, nativeCoordinateInput: true }
+  }
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
   if (options.openingOnly || options.measureOpening) {
@@ -1295,7 +1342,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl} })
         // Native input and capture have finished. Release their debugger/window
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()

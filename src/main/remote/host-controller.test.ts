@@ -60,6 +60,22 @@ const routing = (over: Partial<RemoteIntentRouting> = {}): string =>
   JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
 describe('HostController (composition root)', () => {
+  it('never reaches the Provider when recovering a crash between fencing an intent and cancelling it', async () => {
+    const ledgerStore = new MemoryLedgerStore()
+    const runId = randomUUID()
+    const intentId = randomUUID()
+    // First half of explicit recovery was fsynced, but cancellation was not.
+    // This reserved id has no routing payload, including after a host restart.
+    ledgerStore.log = [{ seq: 1, at: 1, runId, intentId, kind: 'intent_recorded' }]
+    const runProvider = vi.fn(async () => {})
+    const { controller } = await grantedController(runProvider, undefined, { ledgerStore })
+    controller.recover()
+    await controller.idle()
+    expect(controller.runState(CERT, { runId })).toBe('failed')
+    expect(ledgerStore.log.at(-1)).toMatchObject({ kind: 'run_failed', runId, detail: 'invalid_target' })
+    expect(runProvider).not.toHaveBeenCalled()
+  })
+
   it('only grants an explicitly selected desktop directory to an authorized owner, without starting a run', async () => {
     const known = new Set([AUTHORIZED])
     const project = { path: '/new/project', label: 'project' }

@@ -204,6 +204,8 @@ export interface DesktopRemoteIntent {
   createdAt: number
   status: 'recorded' | 'unknown'
   runId?: string
+  // Bounded diagnostic from the original unconfirmed submit, never its payload.
+  failure?: string
   origin?: DesktopRemoteIntentOrigin
 }
 export interface DesktopRemoteRunStatus {
@@ -263,6 +265,9 @@ export interface DesktopRemoteAPI {
   intents(connectionId: string): Promise<DesktopRemoteIntent[]>
   submit(connectionId: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent>
   intentStatus(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
+  // Explicit recovery: find an accepted submit or fence its id on the host.
+  // Neither recovery nor reconnect resends the prompt or stops an accepted run.
+  resolveIntent(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
   runStatus(connectionId: string, runId: string): Promise<DesktopRemoteRunStatus>
   liveRun(connectionId: string, context: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null>
   stop(connectionId: string, runId: string): Promise<void>

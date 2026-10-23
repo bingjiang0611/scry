@@ -24,7 +24,7 @@ const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
+async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -59,6 +59,7 @@ async function setup(setupOptions: { submitResponse?: () => unknown; intentStatu
     }
     if ((request as { op?: string }).op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
     if ((request as { op?: string }).op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
+    if ((request as { op?: string }).op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
     if ((request as { op?: string }).op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
     return { error: 'unexpected_request' }
   })
@@ -68,6 +69,52 @@ async function setup(setupOptions: { submitResponse?: () => unknown; intentStatu
 }
 
 describe('DesktopRemoteClient', () => {
+  it('explicitly reconciles a connection-wide blocker without replay and preserves the original diagnostic across restart', async () => {
+    const runId = randomUUID()
+    const fixture = await setup({ unknownIntent: true, resolveIntentResponse: () => ({ intent: { runId, state: 'cancelled' } }) })
+    let restored: DesktopRemoteClient | undefined
+    try {
+      const paired = await fixture.client.pair({ label: 'remote', ssh, invitation: fixture.invitation })
+      const id = paired.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const receipt = await fixture.client.submit(id, { context: { cwd: '/project-a', providerId: 'pi' }, prompt: 'original task' })
+      expect(receipt).toMatchObject({ status: 'unknown', failure: 'network_down' })
+      await expect(fixture.client.submit(id, { context: { cwd: '/project-b', providerId: 'claude' }, prompt: 'new task' })).rejects.toThrow('unknown_receipts_pending')
+      await expect(fixture.client.intentStatus(id, receipt.intentId)).resolves.toEqual(receipt)
+      const resolved = await fixture.client.resolveIntent(id, receipt.intentId)
+      expect(resolved).toEqual({ ...receipt, status: 'recorded', runId })
+      await expect(fixture.client.resolveIntent(id, receipt.intentId)).resolves.toEqual(resolved)
+      const requests = fixture.tlsRequest.mock.calls.map(([call]) => call.request as { op?: string; intentId?: string })
+      expect(requests.filter(request => request.op === 'resolveIntent')).toEqual([{ op: 'resolveIntent', intentId: receipt.intentId }])
+      expect(requests.filter(request => request.op === 'submit')).toHaveLength(1)
+      expect(requests.some(request => request.op === 'stop')).toBe(false)
+      await fixture.client.dispose()
+      restored = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt })
+      await expect(restored.intents(id)).resolves.toEqual([resolved])
+    } finally { await restored?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it.each([
+    { response: () => ({ error: 'unknown_op' }), error: 'desktop_remote_unknown_op' },
+    { response: () => { throw new Error('reply_lost') }, error: 'reply_lost' },
+    { response: () => ({ intent: { runId: randomUUID(), state: 'invented' } }), error: 'invalid_intent_status_response' }
+  ])('keeps the blocker if recovery fails: $error', async ({ response, error }) => {
+    const fixture = await setup({ resolveIntentResponse: response })
+    try {
+      const paired = await fixture.client.pair({ label: 'remote', ssh, invitation: fixture.invitation })
+      const id = paired.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const receipt = await fixture.client.submit(id, { context: { cwd: '/project-a', providerId: 'pi' }, prompt: 'original' })
+      await expect(fixture.client.resolveIntent(id, receipt.intentId)).rejects.toThrow(error)
+      await expect(fixture.client.intents(id)).resolves.toEqual([receipt])
+      await expect(fixture.client.submit(id, { context: { cwd: '/project-b', providerId: 'claude' }, prompt: 'new' })).rejects.toThrow('unknown_receipts_pending')
+      const persisted = JSON.parse(decrypt(await readFile(join(fixture.directory, 'desktop-client.state'))))
+      expect(persisted.intents).toEqual([receipt])
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('persists before concurrent duplicates can dispatch and preserves uncertainty across repeated lost replies', async () => {
     const fixture = await setup({ submitResponse: () => { throw new Error('reply_lost') }, unknownIntent: true })
     let release!: () => void
@@ -811,6 +858,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
     let liveRun: ActiveRun | null = null
     let hostUiRuns: MacRunView[] = []
     let outputReads: MockInstance | undefined
+    let providerStarts = 0
     const binding = await createHostController({
       stateDirectory: directory,
       attachmentDirectory: join(directory, 'upload-staging'),
@@ -820,6 +868,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
       issue: identity.issue,
       authorizeWorkspace: (cwd) => cwd,
       startRun: async ({ progress, runId, output, routing }) => {
+        providerStarts += 1
         receivedImage = routing.attachments?.[0]?.dataBase64
         const attachments = prepareRunAttachments(directory, 'run-real-1', [{ kind: 'image', name: 'screenshot.png', mimeType: 'image/png', dataBase64: receivedImage! }])
         liveRun = { runId: 'run-real-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-real', userText: '', attachments, items: [], done: true }
@@ -863,8 +912,15 @@ describe('DesktopRemoteClient over real host TLS', () => {
     const runAddress = await innerHost.listen()
     const wire: unknown[] = []
     let dropSubmitResponse = true
+    let dropBeforeDelivery = false
+    let lateSubmit: Parameters<typeof tlsRequest>[0] | undefined
     const tlsRequest = async (options: { path: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal }): Promise<unknown> => {
       wire.push(options.request)
+      if (dropBeforeDelivery && (options.request as { op?: string }).op === 'submit') {
+        dropBeforeDelivery = false
+        lateSubmit = options
+        throw new Error('request_delivery_unknown')
+      }
       const address = options.path === `pair:${pairAddress.port}` ? pairAddress : runAddress
       const response = await desktopTlsRequest({ ...options, path: undefined, host: address.host, port: address.port })
       if (dropSubmitResponse && (options.request as { op?: string }).op === 'submit') { dropSubmitResponse = false; throw new Error('response_lost_after_delivery') }
@@ -930,7 +986,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
         { kind: 'image', name: 'screenshot.png', mimeType: 'image/png', size: imageBytes.length, dataBase64: imageBytes.toString('base64') }
       ] })
       expect(unknownIntent.status).toBe('unknown')
-      const intent = await client.intentStatus(pending.connection.id, unknownIntent.intentId)
+      const intent = await client.resolveIntent(pending.connection.id, unknownIntent.intentId)
       expect(intent.status).toBe('recorded')
       await binding.controller.idle()
       expect(Buffer.from(receivedImage ?? '', 'base64')).toEqual(imageBytes)
@@ -958,6 +1014,17 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(polls[0]?.cursor).toBe(0)
       expect(polls[1]?.cursor).toBeGreaterThan(0)
       const grant = binding.controller.authority.inspectLocal().grants[0]
+      expect(providerStarts).toBe(1)
+      dropBeforeDelivery = true
+      const absent = await client.submit(pending.connection.id, { context: { cwd: '/another-project', providerId: 'pi' }, prompt: 'must never execute' })
+      await expect(client.intentStatus(pending.connection.id, absent.intentId)).resolves.toMatchObject({ status: 'unknown' })
+      const fenced = await client.resolveIntent(pending.connection.id, absent.intentId)
+      expect(fenced.status).toBe('recorded')
+      expect(binding.controller.intentStatus(grant.certificateSHA256, { intentId: absent.intentId })).toEqual({ runId: fenced.runId, state: 'cancelled' })
+      await expect(tlsRequest(lateSubmit!)).resolves.toEqual({ error: 'intent_payload_conflict' })
+      await binding.controller.idle()
+      expect(providerStarts).toBe(1)
+      expect(wire.some(request => (request as { op?: string }).op === 'stop')).toBe(false)
       if (captureFailure) {
         const events = binding.controller.poll(grant.certificateSHA256, { cursor: 0 }).events
         expect(events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)

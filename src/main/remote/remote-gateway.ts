@@ -418,6 +418,21 @@ export class RemoteGateway {
     return { runId: found.runId, state: found.lifecycle }
   }
 
+  // An absent lookup alone cannot fence a delayed submit. Explicit recovery
+  // reserves that same peer-scoped id with no executable routing, then cancels
+  // it. A late original payload conflicts with the durable digest. Even a crash
+  // between the two writes leaves no valid routing for the production executor.
+  resolveIntent(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
+    this.#authorize(peerCertSHA256)
+    if (typeof input?.intentId !== 'string') throw new RemoteGatewayError('invalid_intent_id')
+    const intentId = scopedIntentId(peerCertSHA256, input.intentId)
+    const found = this.#ledger.intentRun(intentId)
+    if (found) return { runId: found.runId, state: found.lifecycle }
+    const receipt = this.#ledger.recordIntent({ intentId, runId: SessionLedger.newRunId() })
+    this.#ledger.markCancelled(receipt.event.runId)
+    return { runId: receipt.event.runId, state: 'cancelled' }
+  }
+
   // Read the durable event stream after the caller's cursor. The intent body
   // (prompt + base64 attachments, up to ~1 MB) is the host's dispatch input,
   // not device evidence: every watch would otherwise download it again.

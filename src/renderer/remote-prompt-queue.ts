@@ -86,6 +86,11 @@ export class RemotePromptQueueStore {
     const queue = this.get(key)
     if (queue.prompts.length && !queue.paused) this.set(key, { ...queue, paused: true })
   }
+  pauseConnection(connectionId: string): void {
+    for (const [key, queue] of this.queues) {
+      if (queue.connectionId === connectionId) this.pause(key)
+    }
+  }
   pauseDisconnected(connectedIds: ReadonlySet<string>): void {
     for (const [key, queue] of this.queues) {
       if (queue.connectionId && !connectedIds.has(queue.connectionId)) this.pause(key)

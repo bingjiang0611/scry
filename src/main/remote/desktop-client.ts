@@ -69,6 +69,9 @@ interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; at
 interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string }
 
 function fail(code: string): never { throw new Error(code) }
+function submitFailure(error: unknown): string {
+  return (error instanceof Error ? error.message : 'submit_result_unknown').replace(/\0/g, '').slice(0, 512) || 'submit_result_unknown'
+}
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
 function text(value: unknown, max = 4096): value is string { return typeof value === 'string' && value.length > 0 && value.length <= max && !value.includes('\0') }
 function pathText(value: unknown, max = 16_384): value is string { return typeof value === 'string' && value.length <= max && !value.includes('\0') }
@@ -137,7 +140,8 @@ function validateState(value: unknown): EncryptedState {
   const intents = value.intents.map((item): DesktopRemoteIntent => {
     if (!record(item) || !uuid(item.intentId) || !text(item.connectionId, 300) || !record(item.context) ||
         !text(item.context.cwd, 16_384) || !text(item.context.providerId, 256) || !Number.isSafeInteger(item.createdAt) ||
-        (item.status !== 'recorded' && item.status !== 'unknown') || (item.runId !== undefined && !uuid(item.runId))) fail('desktop_state_corrupt')
+        (item.status !== 'recorded' && item.status !== 'unknown') || (item.runId !== undefined && !uuid(item.runId)) ||
+        (item.failure !== undefined && !text(item.failure, 512))) fail('desktop_state_corrupt')
     if (item.origin !== undefined) {
       if (!record(item.origin) || !HASH.test(String(item.origin.phonePeerFingerprint)) || !uuid(item.origin.phoneIntentId) ||
           !HASH.test(String(item.origin.targetBinding)) || !HASH.test(String(item.origin.payloadHash))) fail('desktop_state_corrupt')
@@ -624,9 +628,15 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
         }
         // A repeated delivery may have executed on the earlier attempt. Do not
         // turn another lost reply (or new rejection) into proof of nonexecution.
+        intent.failure = submitFailure(error)
+        await this.#save(state)
         return { error: 'target_delivery_unknown' }
       }
-      if (!record(response) || !uuid(response.runId) || (response.status !== 'recorded' && response.status !== 'duplicate')) return { error: 'target_delivery_unknown' }
+      if (!record(response) || !uuid(response.runId) || (response.status !== 'recorded' && response.status !== 'duplicate')) {
+        intent.failure = 'invalid_submit_response'
+        await this.#save(state)
+        return { error: 'target_delivery_unknown' }
+      }
       intent.runId = response.runId
       intent.status = 'recorded'
       await this.#save(state)
@@ -689,7 +699,11 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     let response: unknown
     try { response = await this.#write(connectionIdValue, { op: 'submit', intentId: intent.intentId, detail }) }
     catch (error) {
-      if (!this.#isPreDispatchRejection(error)) { await this.#save(state); return structuredClone(intent) }
+      if (!this.#isPreDispatchRejection(error)) {
+        intent.failure = submitFailure(error)
+        await this.#save(state)
+        return structuredClone(intent)
+      }
       state.intents = state.intents.filter((receipt) => receipt.intentId !== intent.intentId)
       await this.#save(state)
       throw error
@@ -697,6 +711,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     if (!record(response) || !uuid(response.runId) || (response.status !== 'recorded' && response.status !== 'duplicate')) {
       // A malformed or untrusted acknowledgement is not proof that the host
       // rejected the write. Keep the stable intent id for reconciliation.
+      intent.failure = 'invalid_submit_response'
       await this.#save(state)
       return structuredClone(intent)
     }
@@ -711,6 +726,24 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     let response: Record<string, unknown>
     try { response = await this.#requestForConnection(connectionIdValue, { op: 'intentStatus', intentId }) }
     catch (error) { if (this.#isExplicitUnknownIntent(error)) return structuredClone(local); throw error }
+    return this.#confirmIntent(state, local, response)
+  }
+
+  async resolveIntent(connectionIdValue: string, intentId: string): Promise<DesktopRemoteIntent> {
+    return this.#serializeWrite(connectionIdValue, async () => {
+      const state = await this.#state(); this.#connection(state, connectionIdValue)
+      if (!uuid(intentId)) fail('invalid_intent_id')
+      const local = state.intents.find((item) => item.connectionId === connectionIdValue && item.intentId === intentId)
+      if (!local) fail('unknown_intent')
+      if (local.status === 'recorded') return structuredClone(local)
+      // Only an authenticated host receipt can lift the connection-wide fence.
+      // Old hosts, lost replies and invalid responses leave this receipt unknown.
+      const response = await this.#requestForConnection(connectionIdValue, { op: 'resolveIntent', intentId })
+      return this.#confirmIntent(state, local, response)
+    })
+  }
+
+  async #confirmIntent(state: EncryptedState, local: DesktopRemoteIntent, response: Record<string, unknown>): Promise<DesktopRemoteIntent> {
     if (!record(response.intent) || !uuid(response.intent.runId) || !['recorded', 'dispatched', 'settled', 'failed', 'cancelled'].includes(String(response.intent.state))) fail('invalid_intent_status_response')
     local.runId = response.intent.runId; local.status = 'recorded'; await this.#save(state); return structuredClone(local)
   }

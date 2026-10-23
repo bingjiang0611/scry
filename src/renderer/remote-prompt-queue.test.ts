@@ -7,6 +7,26 @@ const receipt: DesktopRemoteIntent = { intentId: 'next', connectionId: 'mac2', c
 const key = remoteQueueKey('mac2/project/session', 'pi')
 
 describe('remote prompt queue', () => {
+  it('keeps every queue on a blocked connection paused after receipt recovery without losing prompts or attachments', () => {
+    const store = new RemotePromptQueueStore()
+    const otherSession = remoteQueueKey('mac2/other/session', 'claude')
+    const otherHost = remoteQueueKey('mac3/project/session', 'pi')
+    const image = { kind: 'image' as const, name: 'queued.png', mimeType: 'image/png' as const, dataBase64: 'aQ==', size: 1 }
+    store.enqueue(key, 'mac2', { ...request, attachments: [image] }, 'unknown-intent')
+    store.enqueue(otherSession, 'mac2', { ...request, prompt: 'other session' })
+    store.enqueue(otherHost, 'mac3', request)
+    const original = structuredClone(store.get(key).prompts)
+    store.pauseConnection('mac2')
+    store.settle(key, 'unknown-intent')
+    expect(store.claim(key)).toBeUndefined()
+    expect(store.claim(otherSession)).toBeUndefined()
+    expect(store.get(key).prompts).toEqual(original)
+    expect(store.claim(otherHost)?.text).toBe(request.prompt)
+    store.resume(key)
+    expect(store.claim(key)?.submission.attachments).toEqual([image])
+    expect(store.claim(otherSession)).toBeUndefined()
+  })
+
   it('waits for the exact receipt to reach a confirmed terminal state, then submits once', () => {
     const store = new RemotePromptQueueStore()
     store.enqueue(key, 'mac2', request, 'running')

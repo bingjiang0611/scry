@@ -262,6 +262,12 @@ export const REMOTE_ACCESS_COPY = {
     const source = observedAt === undefined ? '主机快照；读取时间未知' : `主机读取于 ${new Date(observedAt).toLocaleString()}`
     return refreshing ? `重新读取中 · ${source}` : source
   },
+  unknownReceiptNotice: (sourcePath: string, detail?: string) => `提交回执未知。来源项目/路径：${sourcePath}。核对并解除阻塞只会放弃未收到的提交，不会停止已收到的任务，也不会重发；解除前不会发送新提示词或自动出队。${detail ? ` ${detail}` : ''}`,
+  unknownReceiptSendBlocked: '连接中仍有提交回执未知；请先核对并解除阻塞。草稿会保留，不会发送或自动出队。',
+  unknownReceiptResolve: '核对并解除阻塞',
+  unknownReceiptResolving: '正在核对并解除阻塞…',
+  unknownReceiptFailure: (detail: string) => `解除未知提交失败：${detail}`,
+  unknownReceiptUpgrade: (host: string) => `远端 ${host} 版本过旧，暂不支持解除未知提交。请更新并重启远端 Scry 后再试。`,
   noProjects: '没有项目。',
   newSession: '新建会话',
   removeHost: '移除主机',

@@ -67,6 +67,50 @@ const expectCode = (fn: () => unknown, code: string) => {
 }
 
 describe('RemoteGateway', () => {
+  it('fences an absent intent durably and rejects a late original submit after restart', async () => {
+    const { authority } = await grantedAuthority()
+    const store = new MemoryLedgerStore()
+    const ledger = new SessionLedger({ store })
+    const gw = new RemoteGateway({ authority, ledger })
+    const intentId = randomUUID()
+    const fenced = gw.resolveIntent(CERT, { intentId })
+    expect(fenced.state).toBe('cancelled')
+    expect(gw.resolveIntent(CERT, { intentId })).toEqual(fenced)
+    expect(ledger.recordedIntents()).toEqual([])
+    expect(store.log.map(event => event.kind)).toEqual(['intent_recorded', 'run_cancelled'])
+    const restored = new RemoteGateway({ authority, ledger: new SessionLedger({ store }) })
+    expect(restored.intentStatus(CERT, { intentId })).toEqual(fenced)
+    expect(() => restored.submitIntent(CERT, { intentId, detail: '{"cwd":"/workspace","prompt":"late task"}' })).toThrow('intent_payload_conflict')
+    expect(store.log).toHaveLength(2)
+  })
+
+  it.each(['recorded', 'dispatched', 'settled', 'failed', 'cancelled'] as const)('recovers an existing %s receipt without cancellation or redispatch', async (state) => {
+    const { authority } = await grantedAuthority()
+    const { gw, ledger } = gateway(authority)
+    const intentId = randomUUID()
+    const { runId } = gw.submitIntent(CERT, { intentId, detail: 'original' })
+    if (state !== 'recorded' && state !== 'cancelled') ledger.markDispatched(runId)
+    if (state === 'settled') ledger.markSettled(runId)
+    if (state === 'failed') ledger.markFailed(runId)
+    if (state === 'cancelled') ledger.markCancelled(runId)
+    const before = ledger.describe()
+    expect(gw.resolveIntent(CERT, { intentId })).toEqual({ runId, state })
+    expect(ledger.describe()).toEqual(before)
+  })
+
+  it('denies recovery to unauthorized and revoked peers without mutating the ledger', async () => {
+    const { authority, deviceId } = await grantedAuthority()
+    const { gw, ledger } = gateway(authority)
+    const intentId = randomUUID()
+    gw.submitIntent(CERT, { intentId, detail: 'original' })
+    const before = ledger.describe()
+    expectCode(() => gw.resolveIntent('f'.repeat(64), { intentId }), 'device_not_authorized')
+    expect(ledger.describe()).toEqual(before)
+    await authority.revoke(deviceId)
+    expectCode(() => gw.resolveIntent(CERT, { intentId }), 'device_not_authorized')
+    expect(ledger.describe()).toEqual(before)
+  })
+
   it('authenticates workspace reads before parsing/access and rechecks revocation', async () => {
     const { authority, deviceId } = await grantedAuthority()
     const read = vi.fn(async () => ({ action: 'list' as const, listing: { entries: [], truncated: false } }))

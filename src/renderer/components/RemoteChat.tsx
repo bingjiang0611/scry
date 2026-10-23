@@ -211,6 +211,8 @@ export function RemoteChat({
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [resolvingIntentId, setResolvingIntentId] = useState<string | null>(null)
+  const [unknownReceiptError, setUnknownReceiptError] = useState<string | null>(null)
   const generation = useRef(0)
   const openingLatest = useRef(true)
   const followLatest = useRef(true)
@@ -378,7 +380,7 @@ export function RemoteChat({
   }, [api, catalogReady, connectionId, connected, context, historyRevision, providerId, sessionId])
 
   useEffect(() => {
-    if (!connected || !catalogReady || !providerId) return
+    if (!connected || !catalogReady) return
     let cancelled = false
     const poll = async (): Promise<void> => {
       if (pollInFlight.current) return
@@ -389,6 +391,7 @@ export function RemoteChat({
         if (cancelled || sequence !== pollSequence.current) return
         const activeIntent = pending.filter((intent) => intentMatches(intent, context) && intent.runId).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
           (adoptedIntent.current ? pending.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
+        if (pending.some(intent => intent.status === 'unknown')) queueStore.pauseConnection(connectionId)
         setIntents(pending)
         if (!activeIntent?.runId) {
           setRunStatus(null)
@@ -529,6 +532,9 @@ export function RemoteChat({
 
   const currentIntent = intents.filter((intent) => intentMatches(intent, context)).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
     (adoptedIntent.current ? intents.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
+  // Unknown is scoped to the connection, not the opened project, Provider or session.
+  // A receipt from another context must still fence every composer on this host.
+  const unknownReceiptBlocked = intents.some((intent) => intent.status === 'unknown')
   // A previous turn's status is not evidence for the newly submitted receipt.
   const currentRunStatus = runStatus?.runId === currentIntent?.runId ? runStatus : null
   // Same gate as the host ledger: a listed run or an unknown receipt blocks another send.
@@ -544,7 +550,9 @@ export function RemoteChat({
     if (sessionArchived) queueStore.clearSession(draftKey)
   }, [sessionArchived, queueStore, draftKey])
 
-  const sendBlockedReason = !connection
+  const sendBlockedReason = unknownReceiptBlocked
+    ? copy.unknownReceiptSendBlocked
+    : !connection
     ? '这台主机已不在保存列表中；草稿已保留，不会改用本机执行'
     : !connected
       ? `${host} 未连接；草稿已保留，连接后再发送`
@@ -626,7 +634,7 @@ export function RemoteChat({
     const text = (draft?.input ?? '').trim()
     const submittedAttachments = draft?.attachments ?? []
     const attachments = inputAttachments(submittedAttachments)
-    if (!contextAvailable || (!text && attachments.length === 0) || submitting) return
+    if (!contextAvailable || unknownReceiptBlocked || (!text && attachments.length === 0) || submitting) return
     const limitError = attachmentError(attachments)
     if (limitError) { setError(limitError); return }
     const request = submission(text, attachments)
@@ -654,11 +662,11 @@ export function RemoteChat({
     await execute(request, false, submittedAttachments)
   }
   useEffect(() => {
-    if (!contextAvailable || runActive || submitting || pollError || submissionInFlight.current) return
+    if (!contextAvailable || unknownReceiptBlocked || runActive || submitting || pollError || submissionInFlight.current) return
     // 跳过正在编辑的那条：否则远端一空下来就会发出去改了一半的旧文本。
     const next = queueStore.claim(queueKey, editingMessageId ?? undefined)
     if (next) void execute(next.submission, true)
-  }, [queue, contextAvailable, runActive, submitting, pollError, queueKey, editingMessageId])
+  }, [queue, contextAvailable, unknownReceiptBlocked, runActive, submitting, pollError, queueKey, editingMessageId])
 
   // 队列条目离开队列（移除、被提交、归档）后编辑态必须跟着结束。
   useEffect(() => {
@@ -672,14 +680,24 @@ export function RemoteChat({
     const timer = window.setTimeout(() => setMovedMessageId(null), 2500)
     return () => window.clearTimeout(timer)
   }, [movedMessageId])
-  const checkUnknown = async (intent: DesktopRemoteIntent): Promise<void> => {
-    const checkedGeneration = contextGeneration.current
+  const resolveUnknown = async (intent: DesktopRemoteIntent): Promise<void> => {
+    if (resolvingIntentId) return
+    setResolvingIntentId(intent.intentId)
+    queueStore.pauseConnection(connectionId)
+    setUnknownReceiptError(null)
+    setError(null)
     try {
-      const checked = await api.intentStatus(connectionId, intent.intentId)
-      if (checkedGeneration !== contextGeneration.current) return
-      setIntents((current) => current.map((item) => item.intentId === checked.intentId ? checked : item))
+      // This is the only explicit recovery action. It uses the original receipt
+      // id and never submits a replacement prompt or stops a received run.
+      const resolved = await api.resolveIntent(connectionId, intent.intentId)
+      setIntents((current) => current.map((item) => item.intentId === resolved.intentId ? resolved : item))
       setStatus(null)
-    } catch (reason) { if (checkedGeneration === contextGeneration.current) setError(errorText(reason)) }
+    } catch (reason) {
+      const detail = errorText(reason)
+      setUnknownReceiptError(detail.includes('desktop_remote_unknown_op')
+        ? copy.unknownReceiptUpgrade(host)
+        : copy.unknownReceiptFailure(detail))
+    } finally { setResolvingIntentId(null) }
   }
   const stop = async (): Promise<void> => {
     const runId = controlRunId
@@ -727,7 +745,7 @@ export function RemoteChat({
   ]), [catalog, missingAgentId])
   const selectedAgentId = provider ? remoteAgentId(provider) : missingAgentId ?? ''
 
-  const unknownIntent = intents.find((intent) => intent.status === 'unknown' && intentMatches(intent, context))
+  const unknownIntent = intents.find((intent) => intent.status === 'unknown')
   const noticeError = error ?? pollError ?? historyError
   const notice = !connected
     ? {
@@ -743,10 +761,13 @@ export function RemoteChat({
           ? { action: { label: connecting ? '正在连接…' : '连接', onClick: () => void connect(), disabled: connecting } }
           : {})
       }
+    : unknownIntent
+      ? { tone: 'blocked' as const,
+          text: copy.unknownReceiptNotice(unknownIntent.context.cwd, unknownReceiptError ?? unknownIntent.failure),
+          action: { label: resolvingIntentId === unknownIntent.intentId ? copy.unknownReceiptResolving : copy.unknownReceiptResolve,
+            onClick: () => void resolveUnknown(unknownIntent), disabled: resolvingIntentId !== null } }
     : noticeError
       ? { tone: 'error' as const, text: noticeError }
-      : unknownIntent
-        ? { tone: 'blocked' as const, text: '提交结果未知；Scry 不会盲目重发同一提示词。', action: { label: '检查远端状态', onClick: () => void checkUnknown(unknownIntent) } }
       : queue.paused && queue.prompts.length > 0
         ? { tone: 'blocked' as const,
             text: queue.writeUnknown ? '上一条提交结果未知；不会自动重发。请核对远端记录后移除该条消息。' : '远程队列已暂停；重连不会自动发送。',
