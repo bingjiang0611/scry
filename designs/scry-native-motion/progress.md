@@ -6,9 +6,9 @@
 
 | 步骤 | 状态 | 最近提交 |
 | --- | --- | --- |
-| 01 基础 | 通过 | `22b0358`（修正实现）、`3abbfeb`（修正验收）；已落实 01 核验要求 |
-| 02 结构过渡 | 通过 | `e00dedc3`（实现）、`4440dcd2`（验收 / 测量）；核验见「02 · 核验」，修正以 `motion(02-fix)` 提交 |
-| 03 弹窗与浮层 | 未开始 | — |
+| 01 基础 | 通过 | `22b0358`（实现修正）、`3abbfeb`（验收修正）、`7fbbf106`（经用户批准隔离验收前置主题过渡） |
+| 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
+| 03 弹窗与浮层 | 待核验 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认 |
 | 04 列表 | 未开始 | — |
 | 05 加载防闪 | 未开始 | — |
 | 06 侧栏材质（可选） | 需用户确认 | — |
@@ -45,6 +45,11 @@
 - 用户选择「改用实时 DOM 动效（推荐）」：页面 / 会话只让新内容入场；主题即时切换；放弃旧快照退场与整窗主题交叉淡化。此前原生快照输入冲突不再通过延迟输入或伪造点击规避，生产已移除原生 capture。
 - 本轮 `npm run install:mac:dev` 在完整 unit 阶段失败，未进入打包、产物校验和安装。未绕过门禁；历史 SIGKILL 没有得到新的复现或修复证据。
 - 同环境未改动 HEAD `35bd6a8d` 的隔离源码对照也复现文件计数与真实本地 TLS 测试的 5s 超时，详见 02 记录。这是保留的门禁阻碍，不宣称整套验证通过。执行方待机器低负载时重新执行完整安装；本轮停止在 02，等待设计方核验，不进入 03。
+
+### 2026-10-23 · 03 执行中已获用户确认的两项取舍
+
+- 完整 UI 遇到 01 的既有前置条件竞态：`#motion-micro` 的主题 border/color 过渡尚未完成，断言将其计入后续单次 background-color 变化。不含 03 的 02 诊断归档也出现相同失败。已暂停询问，用户选择「修正前置条件并继续」：仅等待已有动画的 `finished`，不改生产样式、不加 sleep、不删断言、不放宽时间。`7fbbf106` 单独提交；临时恢复全局 120ms 规则仍被原断言拒绝。
+- 规格称弹窗全部共用共享壳，但实际 `WorkspacePanel` 有独立文件操作确认框，Picker 也有自己的弹出层。已暂停确认，用户选择「按点名范围交付」：03 覆盖共享 `ModalFrame` 消费者、4 类 `role="menu"` 和会话悬停卡；独立工作区确认框不迁移，保留其既有尺寸、焦点与 Esc 合同。未修改 brief 或步骤文件，也未把这些独立框宣称为已加入动效。
 
 ## 记录
 
@@ -190,6 +195,50 @@
 - 负对照 2：临时恢复两处退路直接 commit，**6 个断言失败 / 5 通过**；日志 `/tmp/scry-motion-02-fix-negative-flush-final.log`。首次负对照暴露 Element mock 不是可调用构造器，导致 Vitest 错误序列化失败，不能作为验收证据；改成真实 class 后才取得上述有效负对照。两个故意破坏均已撤回，正向重新通过。
 - `performance:measure -- --scenario history.page --compare HEAD` 相对 `5befaff4`：10020 bytes、1 message、1 stringify 均不变，无 worse，ratchet 通过；日志 `/tmp/scry-motion-02-fix-perf.log`。导航 collector 缺失沿用核验允许的 unavailable，不新增 collector。
 - 开始时 10 核负载 19.70 / 16.37 / 16.81，不能视为空闲；暂不重跑安装，03 完成后再检查。未触碰用户运行实例，未提前标注已安装。
+
+### 02-fix · 跨页缓存入场补充回归（2026-10-23）
+
+- 实现 `3305911d`；断言 `06defe55`，与生产分开提交。
+- 相邻路径发现：在分析页选择已有缓存的会话，缓存替换先 flush，动画会落在即将卸载的分析页上。仅把既有 `setView('chat')` 前移到缓存替换之前，让它参加同一次提交；不调整 selection / authority 顺序。
+- 归档负对照：`a1387de3` 的独立代码归档加新断言后，真实 Electron 失败于 `Cached navigation entrance targets detached old page`；前移该行后通过。日志 `/tmp/scry-motion-02-cache-nav-{probe,fixed}.log`；现场 `/private/tmp/scry-motion-02-cache-nav.XPNEEa`。没有在 main 或用户工作区复现。
+- 当前版本 `--structure-only` 通过，除原有断言外，切换前实际导航到分析页，且在解析新历史之前断言动画目标就是当前 `.main-content`。日志 `/tmp/scry-motion-02-fix-nav-final.log`；最终完整 UI 同样执行该检查。
+
+### 03 · 共享弹窗与浮层入场、出场（2026-10-23，待核验）
+
+- 提交：`b6f42801` motion(03): 为共享弹窗菜单与悬停卡加入可打断出场；`5e3e14ee` motion(03): 验证关闭焦点首击与转场内浮层定位。实现、fixture / 测量分开提交。另有经用户确认的既有验收前置修正 `7fbbf106`。
+- 参考：检索现有组件与个人组件库后复用 `ModalFrame` / `ModalCloseButton` / 既有悬停所有权，不引入第二套库；已查阅 W3C APG 原始 [Modal Dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) 的 Esc、嵌套焦点与返回触发点约定，本机摘录 `/tmp/scry-motion-03-dialog-reference.txt`。
+- 改动摘要：
+  - `hooks/usePresence.ts`：enter / exit、一次关闭、仅响应自身 animationend、`exitMs + 80ms` 兜底、reduce 为 120+80ms、卸载清理。重复关闭不改第一次的 reason；下一次原生指针 / 键盘事件先同步结束旧退出，不把重开的同一布尔弹窗留在关闭状态。
+  - 实际共享壳名为 `ModalFrame`。遮罩入场 180 / 出场 160ms；面板入场 260ms（0.97、6px）/ 出场 150ms（0.98）。按钮、Esc、遮罩均接入；出场先 inert / pointer-events none、退还焦点、退休焦点陷阱与初始 rAF。新弹窗不被旧出场阻挡；嵌套焦点只由顶层持有。body portal 避免页面 transform 改变 fixed 包含块。
+  - 关闭按钮显式调用共享关闭入口，未改 `ModalCloseButton` primitive 合同。保留各调用方原有 busy / saving 拒绝、Meta Prompts 未保存确认、删除取消的错误提示差异；保存成功等父状态直接关闭仍立即卸载。去掉远程目录框重复的外层 portal。
+  - 右侧 Surface、会话、项目、工作区 4 类菜单入场 160 / 出场 100ms；操作立即执行，退出期间不挡后续点击。固定菜单移到 body；悬停卡保留 350ms 显示 / 120ms 离开意图延迟，所有权换人立即移除旧卡，普通退出 100ms。reduce 同名关键帧只含透明度。
+- 验收（Node 22.22.1、Electron 42.10.1、App 0.2.219；均为隔离临时数据，无真实账号 / Provider 费用）：
+
+| 项目 | 结果 | 命令 / 证据 |
+| --- | --- | --- |
+| presence 与相关单测 | 10 文件 **320 项通过**，其中 presence 8 项；原 render 245 项、Settings copy 与 primitive 原断言保留 | `npm run test:unit -- src/renderer/structural-motion.test.ts src/renderer/pane-motion.test.ts src/renderer/hooks/usePresence.test.ts src/renderer/hooks/useResizablePane.test.ts src/renderer/hooks/useAgentSession.test.ts src/renderer/session-history-cache.test.ts src/renderer/session-selection.test.ts src/renderer/components/render.test.tsx src/renderer/components/SettingsModal.copy.test.tsx src/renderer/components/primitives/ModalCloseButton.test.tsx`；`/tmp/scry-motion-03-focused-final.log` |
+| 类型 / 构建 | 完整 node + web typecheck、build 通过 | `npm run typecheck`；`/tmp/scry-motion-03-typecheck-final.log`；最终完整 UI 内两次 `npm run build`，renderer 为 `index-BF23CW1f.js` |
+| overlays 专项 | 规格 6 条通过；最终 12 次关闭全部收到真实 CSS animationend，170.1–217.7ms，均 ≤250ms | `node scripts/session-capability-ui-smoke.mjs --overlays-only`，已纳入完整 UI 独立进程；最终数据见 `/tmp/scry-motion-03-ui-accepted.log` 的 overlays JSON |
+| 关闭与首击 | 按钮 / Esc / 遮罩、退出时即还焦点、退出中首次原生点击会话行生效、同一弹窗立即重开、替换、父忙碌不抢子焦点、直接父卸载、reduce 透明度均通过 | 原生 sendInputEvent / insertText、坐标 hit-test、真实 React；不等退出结束再测首击 |
+| 页面 transform 中定位 | 页面 240ms 入场仍有 transform 时，于第 0ms 打开主内容里的真实菜单与共享弹窗；与静止基准的 viewport / layout 坐标差 ≤1px | 专项记录 `placementDuringPageTransformAtMs: 0`，不是等转场结束后截图 |
+| 完整 UI | **通过**，含 Credits、remote settings 嵌套、source-control、conversation ownership / 三轮 IPC、Pi 原生历史 | `npm run test:renderer:ui`；`/tmp/scry-motion-03-ui-accepted.log` |
+| 当前构建真实 App | 独立 userData / HOME / 临时工作区，深浅各检查设置 / Skills / MCP / LLM 性能、右侧 +、悬停卡；原生发送、未发送草稿、面板及侧栏相邻路径通过 | `node scripts/electron-security-smoke.mjs --dev-structure-only`；`/tmp/scry-motion-03-app-final.log` |
+| 性能计数 | 对 `a1387de3`：history.page 10020 bytes / 1 message / 1 stringify 不变，无 worse，ratchet 通过 | `npm run performance:measure -- --scenario history.page --compare a1387de3 --out /tmp/scry-motion-03-perf-final`；候选 `5e3e14ee`，`/tmp/scry-motion-03-perf-final.log` |
+
+- 单测覆盖：自身 / 后代 animationend 区分、重复只关闭一次且保留首个 reason、缺少事件时 240ms 兜底、reduce 200ms 兜底、卸载清掉 timer / node 与 document listener、下一次输入同步结束退出、父卸载不再调用孩子的旧回调、菜单取消退出后可再关闭。
+- 负对照均已恢复：
+  - 去掉遮罩 mousedown 的 preventDefault，失败于 `backdrop did not restore focus at exit start`；`/tmp/scry-motion-03-negative-focus.log`。
+  - 把弹窗 portal 临时放回 `.main-content`，失败于 `dialog moved under the page transform`：遮罩从 `[0,0,1280,900]` 变为 `[238,58,1042,848]`；`/tmp/scry-motion-03-negative-portal.log`。
+  - 在已修正测试前置条件后临时恢复全局 `transition-duration:120ms !important`，仍失败于 `#motion-instant` 出现未声明的 120ms background-color 过渡；`/tmp/scry-motion-03-negative-micro-precondition.log`。原判定未弱化，生产 motion.css 无改动。
+- 首轮失败及修正（不以重跑抹去）：
+  - 新 fixture 自己的缓存控制条遮住关闭按钮；只在 overlays fixture 隐藏这条控制条。早期关闭计时包含取点与轮询开销，改为原生事件 capture 到 MutationObserver 移除时刻；保留 ≤250ms。重复声明诊断变量改为局部块；CSS fill:both 的 finished 动画仍在 getAnimations 中，等待条件改查 playState 而非数组为空。
+  - 原生遮罩 mousedown 会在归还焦点后清掉它，修复为防止该默认动作；负对照已证明。普通隐藏窗口的根合成动画一直 pending，依赖 240ms 兜底，其中一轮实际 331ms 超限。诊断排除了 inert 本身；仅对新 overlays fixture 启用隐藏 offscreen 绘制，真实 compositor 后最终 12/12 收到 animationend。没有显示窗口、抢 OS 焦点、加 sleep / retry 或扩大时限；其他 fixture / V/F workload 未变。日志 `/tmp/scry-motion-03-overlays-{first,second,third,fourth,fifth,timeline,timeline2,painted}.log`。
+  - 全量第一次失败在远程配对：旧断言要求 Esc 后嵌套框即刻消失。按 03 的退出保留合同，先增加「父设置仍在且子框 exit」断言，再等子框移除；未删父框 / 焦点保护。focused remote settings 通过；日志 `/tmp/scry-motion-03-ui.log`、`/tmp/scry-motion-03-remote-settings.log`。
+  - 后一次完整重跑暴露上述 01 前置主题颜色竞态，旧 02 归档也失败；用户批准后才改前置条件。日志 `/tmp/scry-motion-03-ui-verified.log`、`/tmp/scry-motion-03-motion-baseline.log`。之后当前代码完整 UI 通过；旧失败仍保留。
+- 视觉检查：已读当前构建深浅两张 6 场景 contact sheet，检查遮罩、尺寸、菜单锚点、悬停卡与长转录相邻布局；早一轮另读设置 / LLM 原图。当前截图 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-structure-app-wI2dH6/`；仅本机保留，不入库。未改 UI 文案 / 尺寸，无新增依赖 / IPC / 权限或安全边界。
+- 限制与规格偏差：按本轮用户确认的点名范围交付；独立工作区确认框、Picker 弹出层未迁移。隐藏真实 App 的 8 次关闭走允许的计时兜底，241.7–243.4ms；不能把它当成前台 animationend 或日常手感证据，真实 CSS 事件由 offscreen 专项另证。未做前台 OS 焦点、120Hz、真实账号 Provider 或真实远程宿主验收；未声称 L2/L3 更快。性能映射所列 `navigation.catalog / compose.drafts / send.codex-fixture / evidence.projection` 没有 counter collector，明确为 unavailable，未加假计数或修改 ratchet。
+- 安装：**本轮未重跑，不是已安装或安装成功**。用户要求仅空闲时顺带安装；收尾 10 核机器两次采样：06:38 load 18.15 / 11.58 / 9.34、内存 31G 使用 / 11G compressor；06:53 load 11.66 / 16.14 / 15.92，仍不满足空闲条件，未再启动完整 pack。未升版本、未更换 `/Applications/Scry.app`，未停止或要求重启用户实例；历史安装阻碍仍保留。
+- 已自审 source / test diff：补齐 footer 取消关闭接线、保留原有 busy 拒绝与错误提示、删除重复 portal 和未使用的第二套关闭入口；最终 `git diff --check` 通过。独立 test 实例已退出，临时日志 / 截图 / 诊断归档留作本机核验。03 标「待核验」，不进入 04。
 
 <!--
 ### NN · <步骤名>
