@@ -13,6 +13,13 @@
 - 证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-editor.LfTzPQ/`；原日志 `/tmp/scry-workflow-template-editor.ZnkC6L/`。保留 native select、select-all、异步文件断言、缺失 Browser domain 等 fixture 首次失败和修正过程；其中错误的“等待保留草稿按钮启用”负控没有触及目标断言，不作为回归证明。
 - 仍待同一实施链完成：Agent candidate authoring、完整输入/输出/验证提取合同、chat 路由与数据/成本授权、M3 失败/修订恢复与可信 check/classifier、M4 质量模式、M5 其余运行治理交互、M1/M6 授权真实矩阵。完整打包/CLI/七项延期失败及性能 collector 也仍开放；不把本增量当 M1–M6 完成。
 
+### 外链退出诊断增量（不关闭历史门禁）
+
+- 首败日志无法决定 marker 在原 30s deadline 前还是 cleanup 期间到达；`app.exit()` 也不是 production `before-quit` 路径，不能归因于 workflow shutdown。
+- `external-links-smoke.mjs` 现记录最多 32 条单调时钟事件：assertions、exit request、deadline、process exit、stdio/child close 与登记进程 cleanup。deadline 先固定当时输出/身份，再清理，不用 cleanup 期间晚到的 marker 证明按时通过。成功仍同时要求 marker + child close code 0，deadline 仍为 30s。
+- 当前正常 fixture 通过；另用临时副本故意在 assertions 后挂起退出：4.518s 收到 marker，30.004s 时 root 仍活且没有 exit request，30.573s 登记的 4 个进程已清理；即使 cleanup 后 child code 0，整项仍 exit 1。此负控证明未把 marker 或 cleanup 当正常完成。
+- 原 timeout 的具体原因仍未知。下次发生时凭新增 deadline 快照决定是执行耗时、native exit 还是 stdio/子进程问题；不加超时，不把诊断通过当历史 full gate 已关闭。日志为 `/tmp/scry-workflow-template-editor.ZnkC6L/external-links-{timeline,with-deadline-evidence,hold-exit}.log`。
+
 ## 交付合同
 
 目标是完成 M1–M6 并交付真实验收报告，不是再交付一个 M0、单个夹具或仅设计方案。规范以 [implementation-plan §9](implementation-plan.md#9-实施顺序与可证伪验收)、[执行语义](execution-semantics.md)、[运行管理](run-management.md)、[入口语义](chat-entry-semantics.md)、[模板生命周期](template-lifecycle.md)、[资源约束](runtime-limits.md) 为准。规范中旧的“尚未实现”文字不替代当前代码核查。

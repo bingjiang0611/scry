@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import electron from 'electron'
-import { stopOwnedApp } from './owned-app-processes.mjs'
+import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
 
 // Run after `npm run build`. Use the real main/preload/renderer with isolated data;
 // intercept only OS browser launch/dialogs so this test never visits a live service.
@@ -108,6 +108,7 @@ try {
       window.webContents.once('did-finish-load', async () => {
         try {
           await (${exercise.toString()})(window, shell, dialog)
+          console.log('SCRY_EXTERNAL_LINKS_EXIT_REQUESTED')
           app.exit(0)
         } catch (error) { console.error(error); app.exit(1) }
       })
@@ -119,18 +120,35 @@ try {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home'), SCRY_TEST_APP: '1' },
       stdio: ['ignore', 'pipe', 'pipe']
     })
-    let output = ''
+    let output = '', marker = false, exitRequested = false
     let cleanup
+    const began = performance.now(), events = []
+    const mark = (phase, detail = {}) => { if (events.length < 32) events.push({ phase, ms: Math.round(performance.now() - began), ...detail }) }
+    mark('spawn', { pid: child.pid })
+    child.on('exit', (code, signal) => mark('exit', { code, signal }))
+    for (const [name, stream] of [['stdout', child.stdout], ['stderr', child.stderr]]) {
+      stream.on('end', () => mark(name + ':end'))
+      stream.on('close', () => mark(name + ':close'))
+    }
     const timer = setTimeout(() => {
+      mark('deadline', { exitCode: child.exitCode, signalCode: child.signalCode })
+      // Snapshot before cleanup; output received while stopping cannot prove
+      // that the assertions or exit request happened before the deadline.
+      const deadline = { events: [...events], output: output.slice(-8000), owner: inspectOwnedApp(child) }
       cleanup = stopOwnedApp(child).then(
-        () => reject(new Error(`External links fixture timed out; retained at ${temp}:\n${output.slice(-8000)}`)),
-        error => reject(new Error(`External links fixture cleanup unknown; retained at ${temp}`, { cause: error }))
+        receipt => { mark('cleanup', receipt); reject(new Error(`External links fixture timed out; retained at ${temp}:\n${JSON.stringify({ deadline, afterCleanup: events })}`)) },
+        error => reject(new Error(`External links fixture cleanup unknown; retained at ${temp}:\n${JSON.stringify({ deadline, afterCleanup: events })}`, { cause: error }))
       )
     }, 30_000)
-    child.stdout.on('data', (chunk) => { output += chunk.toString() })
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString()
+      if (!marker && output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) { marker = true; mark('assertions') }
+      if (!exitRequested && output.includes('SCRY_EXTERNAL_LINKS_EXIT_REQUESTED')) { exitRequested = true; mark('exit-request') }
+    })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
     child.once('error', (error) => { clearTimeout(timer); reject(error) })
     child.once('close', (code, signal) => {
+      mark('close', { code, signal })
       clearTimeout(timer)
       if (cleanup) return
       if (code !== 0 || !output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) {
