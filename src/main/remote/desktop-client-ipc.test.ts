@@ -19,7 +19,7 @@ describe('desktop client IPC production trust wrapper', () => {
     registerDesktopClientIpc<IpcMainInvokeEvent>(
       (channel, listener) => registerTrustedIpcHandler(ipc, channel, () => window as unknown as BrowserWindow, origin, listener), client
     )
-    expect(listeners.size).toBe(28)
+    expect(listeners.size).toBe(29)
     expect(listeners.has('desktopRemote:liveRun')).toBe(true)
     expect(listeners.has('desktopRemote:traceDelta')).toBe(true)
     expect(listeners.has('desktopRemote:providerControls')).toBe(true)
