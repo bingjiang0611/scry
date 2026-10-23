@@ -87,6 +87,9 @@ export async function exerciseMotionTokens(contents) {
     })()`)
     check(reduced.reduced && reduced.group === 'working', `reduced-motion reorder did not commit: ${JSON.stringify(reduced)}`)
     check(reduced.layoutAnimations === 0, `reduced-motion reorder still animates transforms: ${JSON.stringify(reduced)}`)
+    // Isolate the next background-color change from the preceding theme switch.
+    // Keep the assertions below about newly created transitions unchanged.
+    await read(`Promise.all([...document.querySelectorAll('#motion-instant, #motion-none, #motion-sidebar .sb-sess-row, #motion-sidebar .sb-sesstext, #motion-micro')].flatMap(node => node.getAnimations().map(animation => animation.finished)))`)
     const colorChanges = await read(`(() => {
       const selectors = ['#motion-instant', '#motion-none', '#motion-sidebar .sb-sess-row', '#motion-sidebar .sb-sesstext', '#motion-micro']
       return selectors.map(selector => {
