@@ -95,8 +95,9 @@ async function main(webContents, ipcMain, createProfileHost, options) {
       })
     }
     // Idle tail after the terminal step: shows how far the interval backs off.
-    const idleIntervals = []
-    for (let index = 0; index < 4; index++) idleIntervals.push((await read('window.__profilePoll()')).pollIntervalMs)
+    const idle = []
+    for (let index = 0; index < 4; index++) idle.push(await read('window.__profilePoll()'))
+    const idleIntervals = idle.map((sample) => sample.pollIntervalMs)
     host.takeWire()
     const state = await read('window.__profileState()')
     const { attachments: _attachments, ...shown } = state.run ?? {}
@@ -114,7 +115,8 @@ async function main(webContents, ipcMain, createProfileHost, options) {
       pollIntervals: [...new Set(samples.map((sample) => sample.pollIntervalMs))],
       intervalAfterQuiet: [...new Set(quiet.map((sample) => sample.pollIntervalMs))], commitMs: metric('commitMs'), wallMs: metric('wallMs'),
       quiet: { wireBytes: metric('wireBytes', quiet), commits: metric('commits', quiet), commitMs: metric('commitMs', quiet) },
-      idleIntervals, consistent, shownItems: Array.isArray(shown.items) ? shown.items.length : null, pollError: state.pollError, unexpectedBridgeCalls: state.unexpected,
+      idleIntervals, idleCommits: sum(idle.map((sample) => sample.commits)), idleCommitMs: Number(sum(idle.map((sample) => sample.commitMs)).toFixed(3)),
+      consistent, shownItems: Array.isArray(shown.items) ? shown.items.length : null, pollError: state.pollError, unexpectedBridgeCalls: state.unexpected,
       samples
     })
     await host.dispose()
@@ -135,7 +137,7 @@ try {
     plugins: [
       instrument('src/renderer/hooks/useVisibilityPolling.ts', '  refreshRef.current = refresh\n', '  window.__visibilityPolls?.set(key, () => refreshRef.current())\n'),
       instrument('src/renderer/components/RemoteChat.tsx', '  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)\n', '  window.__profileActiveRun = activeRun\n'),
-      instrument('src/renderer/components/RemoteChat.tsx', '  const [pollIntervalMs, setPollIntervalMs] = useState(POLL_MS)\n', '  window.__profilePollInterval = pollIntervalMs\n', true)
+      instrument('src/renderer/components/RemoteChat.tsx', '    pollIntervalMs.current = intervalMs\n', '    window.__profilePollInterval = intervalMs\n', true)
     ],
     // Production React with the profiling renderer, so <Profiler> reports commit durations.
     resolve: { alias: [{ find: '@shared', replacement: join(root, 'src/shared') }, { find: /^react-dom$/, replacement: 'react-dom/profiling' }] },

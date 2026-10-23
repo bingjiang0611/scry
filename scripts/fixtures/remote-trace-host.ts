@@ -104,8 +104,9 @@ export async function createProfileHost(options: { items: number; perPoll: numbe
       wire = { ...wire, requests: wire.requests + 1, hostMs: wire.hostMs + performance.now() - hostStart }
       throw error
     }
-    const answer = result as { kind?: string; base?: string }
-    if (answer.kind === 'trace_delta' && options.corruptEvery && ++deltas % options.corruptEvery === 0) answer.base = 'injected-gap:0'
+    // Injected gap: an unknown base whose changes were lost. Patching it would drop events.
+    const answer = result as { kind?: string; base?: string; changes?: unknown[] }
+    if (answer.kind === 'trace_delta' && options.corruptEvery && ++deltas % options.corruptEvery === 0) { answer.base = 'injected-gap:0'; answer.changes = [] }
     const encodeStart = performance.now()
     const serialized = JSON.stringify({ desktop: result })
     const encodeEnd = performance.now()
