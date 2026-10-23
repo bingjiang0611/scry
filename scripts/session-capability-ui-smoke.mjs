@@ -9,6 +9,7 @@ import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
 import { exerciseMotionTokens } from './motion-tokens-ui-checks.mjs'
 import { exerciseStructure } from './structure-ui-checks.mjs'
 import { exerciseOverlays } from './overlays-ui-checks.mjs'
+import { exerciseLists } from './lists-ui-checks.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
@@ -19,6 +20,7 @@ const motionTokensOnly = process.argv.includes('--motion-tokens-only')
 const paneBenchOnly = process.argv.includes('--structure-pane-bench')
 const structureOnly = process.argv.includes('--structure-only')
 const overlaysOnly = process.argv.includes('--overlays-only')
+const listsOnly = process.argv.includes('--lists-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
@@ -31,9 +33,10 @@ const workspaceDiffOnly = process.argv.includes('--workspace-diff-only')
 const performanceOnly = process.argv.includes('--performance-only')
 // Opt-in only: this native hide/show check necessarily displays a window.
 const nativeVisibility = process.argv.includes('--native-visibility')
+const offscreen = overlaysOnly || listsOnly
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+const fixtures = listsOnly ? ['lists'] : overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
   : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
@@ -1577,7 +1580,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -1588,9 +1591,9 @@ try {
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${overlaysOnly} } })
+      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${offscreen} } })
       // Exit animationend must come from real compositor frames, not only a hidden timer.
-      if (${overlaysOnly}) win.webContents.on('paint', () => {})
+      if (${offscreen}) win.webContents.on('paint', () => {})
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
@@ -1598,6 +1601,12 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
+        if (${listsOnly}) {
+          win.setSize(1400, 900)
+          await win.loadFile(${JSON.stringify(join(temp, 'lists.html'))})
+          result.lists = await (${exerciseLists.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LISTS_UI_SCREENSHOT ?? '')})
+          finish(result); return
+        }
         if (${overlaysOnly}) {
           win.setSize(1280, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'overlays.html'))})
@@ -1616,9 +1625,17 @@ try {
           finish(result); return
         }
         if (${fixtures.includes('motion-tokens')}) {
-          win.setSize(1400, 1000)
-          await win.loadFile(${JSON.stringify(join(temp, 'motion-tokens.html'))})
-          result.motionTokens = await (${exerciseMotionTokens.toString()})(win.webContents)
+          // Micro-interaction checks start after a real disclosure paint. Keep
+          // legacy keyboard/performance fixtures on their existing window mode.
+          const motionWin = new BrowserWindow({ show: false, width: 1400, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } })
+          motionWin.webContents.on('paint', () => {})
+          motionWin.webContents.on('console-message', logRendererError)
+          motionWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+          diagnosticContents = motionWin.webContents
+          await motionWin.loadFile(${JSON.stringify(join(temp, 'motion-tokens.html'))})
+          result.motionTokens = await (${exerciseMotionTokens.toString()})(motionWin.webContents)
+          motionWin.destroy()
+          diagnosticContents = win.webContents
           if (${motionTokensOnly}) { finish(result); return }
         }
         if (${fixtures.includes('sidebar-activity')}) {

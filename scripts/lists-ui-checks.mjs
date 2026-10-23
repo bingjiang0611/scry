@@ -1,0 +1,266 @@
+// Production components, compositor frames and native input; no programmatic clicks.
+export async function exerciseLists(contents, win, screenshotPrefix = '') {
+  const read = expression => contents.executeJavaScript(expression)
+  const check = (value, message) => { if (!value) throw new Error(`Lists: ${message}`) }
+  const wait = async expression => {
+    const deadline = Date.now() + 5000
+    while (!await read(expression)) {
+      if (Date.now() >= deadline) throw new Error(`Lists condition timed out: ${expression}`)
+      await new Promise(resolve => setTimeout(resolve, 16))
+    }
+  }
+  const click = async selector => {
+    const point = await read(`(() => {
+      const selector = ${JSON.stringify(selector)}
+      const node = document.querySelector(selector)
+      if (!node) throw new Error('Missing native target: ' + selector)
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      const box = node.getBoundingClientRect()
+      const x = Math.round(box.x + box.width / 2), y = Math.round(box.y + box.height / 2)
+      const hit = document.elementFromPoint(x, y)
+      if (!node.contains(hit)) throw new Error('Native target obscured: ' + JSON.stringify({ selector, x, y, hit: hit?.className }))
+      return { x, y }
+    })()`)
+    contents.sendInputEvent({ type: 'mouseMove', ...point })
+    contents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+    contents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
+  }
+  const settle = async () => read(`Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations !== Infinity).map(a=>a.finished.catch(()=>{})))`)
+  const arm = async predicate => read(`(() => {
+    window.__listObserver?.disconnect(); window.__listCapture=null;
+    const sample=()=>{
+      const animations=document.getAnimations().filter(a=>{const node=a.effect?.target;return node instanceof Element && (${predicate})});
+      if(!animations.length)return;
+      window.__listCapture=animations.map(a=>({name:a.animationName??a.id,duration:a.effect.getTiming().duration,delay:a.effect.getTiming().delay,
+        key:a.effect.target.getAttribute('data-motion-key'),className:a.effect.target.className,
+        tag:a.effect.target.tagName,frames:a.effect.getKeyframes(),
+        toolCount:a.effect.target.matches('.tool-card')?1:a.effect.target.querySelectorAll('.tool-card').length,
+        added:a.effect.target.textContent.includes('added.ts')}));
+      window.__listObserver.disconnect();
+    };
+    window.__listSample=sample;
+    window.__listObserver=new MutationObserver(sample);
+    window.__listObserver.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','data-state','aria-selected','open']});
+  })()`)
+  const captured = async () => { await wait('(window.__listSample(), window.__listCapture !== null)'); return read('window.__listCapture') }
+  const screenshot = async name => {
+    if (!screenshotPrefix) return
+    const { writeFile } = require('node:fs/promises')
+    await writeFile(`${screenshotPrefix}-${name}.png`, (await contents.capturePage()).toPNG())
+  }
+  const opacityOnly = animations => animations.every(animation => animation.frames.every(frame => !('transform' in frame) && !('height' in frame) && !('gridTemplateRows' in frame)))
+  await wait("document.querySelector('#list-sidebar .sb-proj-head') && document.querySelector('.surface-tabs [role=tab]')")
+  const expandTools = async count => {
+    await wait("document.querySelector('.tool-group-row') || document.querySelector('.tool-card')")
+    for (let index=0; index<50 && await read("!!document.querySelector('.tool-group:not(.open) .tool-group-row')"); index++) {
+      const id = await read("document.querySelector('.tool-group:not(.open) .tool-group-row').getAttribute('aria-controls')")
+      const selector = `[aria-controls=${JSON.stringify(id)}]`
+      await click(selector)
+      await wait(`document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-expanded')==='true'`)
+      await settle()
+    }
+    await wait(`document.querySelectorAll('.tool-card').length===${count}`)
+  }
+  const reports = []
+  for (const theme of ['dark', 'light']) {
+    await read(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+    await click('#list-analytics')
+    await wait("document.querySelector('.usage-state')")
+    await arm("a.animationName==='row-in' && node.closest('.usage-breakdown')")
+    await click('#list-resolve')
+    const stagger = await captured()
+    check(stagger.length === 12, `${theme}: expected all 12 real analytics rows, got ${stagger.length}`)
+    check(stagger.every(row => row.duration === 220), `${theme}: row duration not 220ms`)
+    check(stagger.slice(0, 10).every((row, index) => Math.abs(row.delay - index * 16) < 1e-6), `${theme}: first ten stagger delays ${JSON.stringify(stagger.map(row=>row.delay))}`)
+    check(stagger[10].delay === 0 && stagger[11].delay === 0, `${theme}: row 11/12 must have no stagger delay`)
+    await wait("!document.querySelector('.usage-breakdown .motion-stagger')")
+    await click('#list-refresh')
+    await wait('window.listFixture.refreshes > 0')
+    check(await read("!document.getAnimations().some(a=>a.animationName==='row-in' && a.effect.target.closest('.usage-breakdown'))"), `${theme}: refresh replayed rows`)
+    await screenshot(`${theme}-analytics`)
+    for (const modal of ['skills', 'mcp', 'llm']) {
+      await click(`#list-${modal}`)
+      await wait("document.querySelector('.modal-overlay .motion-stagger')")
+      await settle()
+      await screenshot(`${theme}-${modal}`)
+      contents.sendInputEvent({ type: 'keyDown', keyCode: 'ESC' }); contents.sendInputEvent({ type: 'keyUp', keyCode: 'ESC' })
+      await wait("!document.querySelector('.modal-overlay')")
+    }
+    await click('#list-meta')
+    await wait("document.querySelectorAll('.mp-row').length===12")
+    await settle(); await screenshot(`${theme}-meta`)
+    await click('#list-chat')
+    await wait("document.querySelector('.chat-scroll') || document.querySelector('textarea')")
+    await arm("node.hasAttribute('data-motion-key') && node.closest('#list-sidebar')")
+    await click('#list-append')
+    const flip = await captured()
+    check(flip.some(animation => animation.duration === 300 && animation.frames.some(frame => 'transform' in frame)), `${theme}: existing sessions did not move for 300ms`)
+    check(flip.some(animation => animation.duration === 220 && animation.frames[0].opacity === '0'), `${theme}: newly added session did not enter for 220ms`)
+    await settle()
+    await click('#list-sidebar .sb-proj-head')
+    await wait("document.querySelector('#list-sidebar .sb-proj-head').getAttribute('aria-expanded')==='false'")
+    const retiring = await read("(() => {const n=document.querySelector('#list-sidebar .sb-sess-list');return {present:!!n,inert:!!n?.closest('[inert]'),hidden:!!n?.closest('[aria-hidden=true]')}})()")
+    check(retiring.present && retiring.inert && retiring.hidden, `${theme}: closing group was not retained inert/hidden: ${JSON.stringify(retiring)}`)
+    await wait("!document.querySelector('#list-sidebar .sb-sess-list')")
+    await click('#list-sidebar .sb-proj-head')
+    await wait("document.querySelector('#list-sidebar .sb-sess-list')")
+    await settle(); await screenshot(`${theme}-sidebar`)
+    reports.push({ theme, analyticsRows: stagger.length, firstTenDelays: stagger.slice(0,10).map(row=>row.delay), remainingDelay: stagger[10].delay,
+      flipDurations: flip.map(animation=>animation.duration), collapseRetiredAfterExit: true })
+  }
+  // Exercise the actual >40 policy without shrinking fixture data or DOM.
+  await click('#list-large')
+  await wait("document.querySelectorAll('#list-sidebar .sb-sess-row').length===45")
+  check(await read("!document.getAnimations().some(a=>a.effect.target.closest('#list-sidebar') && a.effect.target.hasAttribute('data-motion-key'))"), 'oversized list animated')
+  await click('#list-small')
+  await wait("document.querySelectorAll('#list-sidebar .sb-sess-row').length===3")
+  check(await read("!document.getAnimations().some(a=>a.effect.target.closest('#list-sidebar') && a.effect.target.hasAttribute('data-motion-key'))"), 'resuming budget fabricated arrivals')
+  await read('window.listFixture.pinCount(2)')
+  await wait("document.querySelectorAll('#list-sidebar .sb-pinned [data-motion-key]').length===2")
+  await settle()
+  await arm("node.closest('.sb-pinned') && ['scry-list-arrival','scry-list-reorder'].includes(a.id)")
+  await read('window.listFixture.pinCount(3)')
+  const pinnedMotion = await captured()
+  check(pinnedMotion.some(animation=>animation.duration===220) && pinnedMotion.filter(animation=>animation.duration===300).length===2, 'pinned list omitted arrival or survivor FLIP')
+  await click('#list-small')
+  await settle()
+  // Selection color changes in the same commit as aria-selected, not a color tween.
+  const switchTab = async (root, selector) => {
+    selector = `[id=${JSON.stringify(await read(`document.querySelector(${JSON.stringify(selector)}).id`))}]`
+    const colors = await read(`(() => {const root=document.querySelector(${JSON.stringify(root)}); return {active:getComputedStyle(root.querySelector('[role=tab][aria-selected=true]')).color,target:getComputedStyle(document.querySelector(${JSON.stringify(selector)})).color}})()`)
+    await arm(`a.effect.getTiming().duration===220 && !!node.closest(${JSON.stringify(root)}) && a.effect.getKeyframes().some(frame=>'transform' in frame)`)
+    await click(selector)
+    await wait(`document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-selected')==='true'`)
+    const animations = await captured()
+    check(animations.length === 1 && animations[0].duration === 220, `${root}: indicator was not one 220ms animation: ${JSON.stringify(animations)}`)
+    check(await read(`getComputedStyle(document.querySelector(${JSON.stringify(selector)})).color===${JSON.stringify(colors.active)}`), `${root}: selected text color was delayed`)
+    check(await read(`!document.querySelector(${JSON.stringify(selector)}).getAnimations().some(a=>a.effect.getKeyframes().some(frame=>'color' in frame))`), `${root}: text color interpolated`)
+    await settle()
+  }
+  await switchTab('.sb-view-tabs', '.sb-view-tabs [role=tab]:nth-of-type(2)')
+  await switchTab('.sb-view-tabs', '.sb-view-tabs [role=tab]:nth-of-type(1)')
+  await switchTab('.surface-tabs', '.surface-tabs [role=tab]:not([aria-selected=true])')
+  await click('#list-surface')
+  await wait("document.querySelectorAll('.surface-tabs [role=tab]').length===3")
+  check(await read("!document.getAnimations().some(a=>a.effect.target.closest('.surface-tabs') && a.effect.getKeyframes().some(frame=>'transform' in frame))"), 'adding surface animated indicator')
+  await click('.surface-tab.active .surface-tab-close')
+  await wait("document.querySelectorAll('.surface-tabs [role=tab]').length===2")
+  check(await read("!document.getAnimations().some(a=>a.effect.target.closest('.surface-tabs') && a.effect.getKeyframes().some(frame=>'transform' in frame))"), 'removing surface animated indicator')
+  const beforeResize = await read("document.querySelector('.surface-tabs').getBoundingClientRect().width")
+  await read("document.querySelector('#list-surfaces').style.width='390px';document.querySelector('#list-surfaces').style.minWidth='390px'")
+  await wait(`document.querySelector('.surface-tabs').getBoundingClientRect().width!==${beforeResize}`)
+  check(await read("!document.getAnimations().some(a=>a.effect.target.closest('.surface-tabs') && a.effect.getKeyframes().some(frame=>'transform' in frame))"), 'resize animated indicator')
+  await click('#list-queue'); await wait("document.querySelectorAll('.queue-item').length===1")
+  await click('#list-queue'); await wait("document.querySelectorAll('.queue-item').length===2")
+  await settle()
+  await arm("node.closest('.queue-list') && a.effect.getTiming().duration===300")
+  await click('.queue-remove')
+  check((await captured()).every(animation=>animation.duration===300), 'queue survivors did not close the gap')
+  await wait("document.querySelectorAll('.queue-item').length===1")
+  await click('#list-task'); await wait("document.querySelectorAll('.background-work-task').length===1")
+  await click('#list-task'); await wait("document.querySelectorAll('.background-work-task').length===2")
+  await settle()
+  await arm("node.closest('.background-work-panel') && a.effect.getTiming().duration===300")
+  await read('window.listFixture.removeFirstTask()')
+  check((await captured()).every(animation=>animation.duration===300), 'background task survivors did not close the gap')
+  await wait("document.querySelectorAll('.background-work-task').length===1")
+  await click('#list-history')
+  await wait("document.querySelector('.si-head') && document.querySelector('.thinking')")
+  await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.si-body')")
+  await click('.si-head')
+  check((await captured()).some(a=>a.duration===240 && a.frames.some(frame=>'gridTemplateRows' in frame)), 'short skill did not use the 240ms grid entrance')
+  await settle(); await click('.si-head'); await wait("!document.querySelector('.si-body')")
+  await click('.think-head'); await wait("!document.querySelector('.think-text')")
+  // Sample the native pseudo-box itself; do not assume UA content appears as
+  // an Element target in document.getAnimations().
+  await read(`(() => {
+    window.__detailsFrames = []
+    window.__detailsDone = false
+    const node = document.querySelector('.thinking')
+    const sample = time => {
+      const style = getComputedStyle(node, '::details-content')
+      window.__detailsFrames.push({ time, height: parseFloat(style.height), opacity: parseFloat(style.opacity), duration: style.transitionDuration })
+      if (node.open && style.opacity === '1') window.__detailsDone = true
+      else requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  })()`)
+  await click('.think-head')
+  await wait('window.__detailsDone')
+  const detailsFrames = await read('window.__detailsFrames')
+  check(detailsFrames.some(frame=>frame.opacity>0 && frame.opacity<1) && new Set(detailsFrames.map(frame=>frame.height)).size>=3, `native details did not interpolate height/opacity: ${JSON.stringify(detailsFrames)}`)
+  check(detailsFrames.at(-1).duration.split(',').every(value=>Math.abs(parseFloat(value)*1000-240)<1e-6), 'native details duration was not 240ms')
+  await settle()
+  // Native disclosure opening must not turn old cards into live arrivals.
+  await expandTools(50)
+  const longTool = `[aria-controls=${JSON.stringify(await read("[...document.querySelectorAll('.tool-card .tool-row')].at(-1).getAttribute('aria-controls')"))}]`
+  await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.tool-detail-region')")
+  await click(longTool)
+  const longMotion = await captured()
+  check(longMotion.every(a=>a.duration===160) && opacityOnly(longMotion), `long output animated height: ${JSON.stringify(longMotion)}`)
+  await settle(); await click(longTool); await wait("!document.querySelector('.tool-detail-region')")
+  check(await read("!document.getAnimations().some(a=>a.effect.getTiming().duration===180 && (a.effect.target.matches('.tool-card')||a.effect.target.querySelector('.tool-card')))"), 'history cards animated')
+  await click('#list-live')
+  await expandTools(2)
+  await settle()
+  await arm("a.effect.getTiming().duration===180 && (node.matches('.tool-card')||node.querySelector('.tool-card'))")
+  await click('#list-tool')
+  const arrival = await captured()
+  check(arrival.length===1 && arrival[0].duration===180 && arrival[0].toolCount===1 && arrival[0].added, `only appended tool may enter: ${JSON.stringify(arrival)}`)
+  await read("window.__toolEntrance=document.getAnimations().find(a=>a.effect.getTiming().duration===180 && a.effect.target.textContent.includes('added.ts'))")
+  await click('#list-text')
+  check(await read("document.getAnimations().includes(window.__toolEntrance)"), 'text update cut short or restarted the new tool entrance')
+  await settle()
+  for (let index=0;index<4;index++) await click('#list-text')
+  check(await read("!document.getAnimations().some(a=>a.effect.getTiming().duration===180 && a.effect.getKeyframes().some(frame=>'transform' in frame))"), 'text tokens replayed structural entry')
+  await arm("a.effect.getTiming().duration===180 && node.closest('.turn-hooks-summary')")
+  await click('#list-hook')
+  await wait("document.querySelector('.turn-hook-phase')")
+  if (await read("!document.querySelector('.turn-hooks-summary').open")) await click('.turn-hooks-summary>summary')
+  if (await read("!document.querySelector('.turn-hook-phase').open")) await click('.turn-hook-phase>summary')
+  const hookArrival = await captured()
+  check(hookArrival.every(animation=>animation.duration===180), 'new hook rows did not enter for 180ms')
+  await settle()
+  await read('window.listFixture.hookResponse()')
+  check(await read("!document.getAnimations().some(a=>a.effect.getTiming().duration===180 && a.effect.target.closest('.turn-hooks-summary'))"), 'hook lifecycle response replayed row')
+  await click('#list-complete')
+  await wait("document.querySelector('.turn-footer')")
+  await settle()
+  // Cache/loading boundaries retire live eligibility, even if the turn data grows.
+  await click('#list-live'); await expandTools(2)
+  await read('window.listFixture.setCache(true)')
+  await wait("document.querySelector('.session-loading') || document.querySelector('textarea')")
+  await read('window.listFixture.appendTool()')
+  await wait("document.querySelectorAll('.tool-card').length===3")
+  check(await read("!document.getAnimations().some(a=>a.effect.getTiming().duration===180 && (a.effect.target.matches('.tool-card')||a.effect.target.querySelector('.tool-card')))"), 'cached restore fabricated live arrival')
+  contents.debugger.attach('1.3')
+  try {
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
+    await wait("matchMedia('(prefers-reduced-motion: reduce)').matches")
+    await click('#list-analytics'); await wait("document.querySelector('.usage-state')")
+    await arm("node.classList.contains('motion-stagger')")
+    await click('#list-resolve')
+    const reduced = await captured()
+    check(reduced.length===1 && reduced[0].duration===120 && reduced[0].delay===0 && opacityOnly(reduced), `reduced whole-list fade invalid: ${JSON.stringify(reduced)}`)
+    await settle(); await click('#list-chat')
+    await click('#list-append')
+    await wait("document.querySelectorAll('#list-sidebar .sb-sess-row').length===4")
+    check(await read("!document.getAnimations().some(a=>a.effect.target.closest('#list-sidebar') && a.effect.target.hasAttribute('data-motion-key'))"), 'reduced FLIP animated')
+    await click('.sb-view-tabs [role=tab]:nth-of-type(2)')
+    await wait("document.querySelector('.sb-view-tabs [role=tab]:nth-of-type(2)').getAttribute('aria-selected')==='true'")
+    check(await read("!document.getAnimations().some(a=>a.effect.target.closest('.sb-view-tabs') && a.effect.getKeyframes().some(frame=>'transform' in frame))"), 'reduced tab strip animated')
+    await click('#list-live'); await expandTools(2)
+    await arm("a.effect.getTiming().duration===120 && (node.matches('.tool-card')||node.querySelector('.tool-card'))")
+    await click('#list-tool')
+    const reducedArrival = await captured()
+    check(opacityOnly(reducedArrival), 'reduced stream block retained transform')
+  } finally {
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]})
+    contents.debugger.detach()
+    await read('window.__listObserver?.disconnect()')
+  }
+  return { themes:reports, oversized45RetainedWithoutFlip:true, pinnedArrival220AndSurvivors300:true, selection220AndImmediateColor:true, dynamicTabsAndResizeJump:true,
+    history50NoEntry:true, shortGridAndNativeDetails240:true, longOutputOpacityOnly160:true,
+    appendedToolOnly180:true, hookRows180AndLifecycleDoesNotReplay:true,
+    queueAndTaskSurvivors300:true, tokensDoNotReplay:true, cacheNoEntry:true, reducedOpacityOnly:true }
+}

@@ -1193,6 +1193,13 @@ async function main() {
     const toggle = document.querySelector('button[title="右侧工作区"]')
     if (toggle?.getAttribute('aria-pressed') !== 'true') toggle?.click()
     await new Promise(resolve => requestAnimationFrame(resolve))
+    // Assert resting dock geometry, not the 300ms entry transform. Instant
+    // themes no longer provide the old incidental delay before this read.
+    const paneDeadline = Date.now() + 2000
+    while (document.querySelector('#right-surface-pane')?.getAnimations().some(animation => animation.id === 'scry-pane' && animation.playState !== 'finished')) {
+      if (Date.now() > paneDeadline) throw new Error('Pane motion did not settle before window chrome inspection')
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    }
     const inspect = (selector) => {
       const scoped = selector.startsWith('.surface') || selector === '.right-surface-panel'
       const node = document.querySelector(scoped ? '[data-session-surface-current="true"] ' + selector : selector)

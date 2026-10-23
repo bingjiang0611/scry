@@ -130,9 +130,9 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const first = await settled(evaluate, id, 1)
   assert.equal(first.turns[0].providerId, 'claude')
   assert.equal(first.summary.lastRunOutcome, 'completed', 'logical completion comes from the real settled receipt')
-  await click('.sb-view-tabs [role="tab"]:last-child')
+  await click('.sb-view-tabs [role="tab"][id$="-activity"]')
   await wait(() => evaluate(`document.querySelector('.sb-activity [data-conversation-id="${id}"]')?.closest('[data-activity-group]')?.dataset.activityGroup === 'completed'`), 'real logical result appears in completed')
-  await click('.sb-view-tabs [role="tab"]:first-child')
+  await click('.sb-view-tabs [role="tab"][id$="-projects"]')
   assert.equal(readFileSync(join(fixture.workspace, 'remote-first.txt'), 'utf8'), 'remote-first.txt\n')
 
   const bPreview = await preview(evaluate, id, 'codex')

@@ -33,6 +33,8 @@ export async function exerciseMotionTokens(contents) {
   contents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...toolGroup })
   contents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...toolGroup })
   await wait('document.querySelector(".tool-card") != null')
+  // This fixture measures hover, not Step04's newly mounted 240ms disclosure.
+  await read(`Promise.all(document.querySelector('#motion-tool').getAnimations({ subtree: true }).filter(animation => animation.effect.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))`)
   check(await read("getComputedStyle(document.documentElement).getPropertyValue('--dur-slow').trim() === '300ms'"), 'the slow token is not 300ms')
   check(await read("getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim() === 'cubic-bezier(0.23, 1, 0.32, 1)'"), 'the shared ease-out token is missing')
 

@@ -1807,7 +1807,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('class="think-head" aria-expanded="true"')
     expect(html).toContain('思考过程')
     expect(html).toContain('class="ico think-bulb"')
-    expect(html).toContain('class="ico think-chevron"')
+    expect(html).toContain('class="ico think-chevron motion-chevron"')
     expect(html).toContain('class="think-text md"><p><strong>先写文件再读回</strong></p>')
     expect(html).not.toContain('**先写文件再读回**')
     expect(html).not.toContain('class="think-mark"')
