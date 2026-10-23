@@ -24,14 +24,19 @@ const argument = (name, fallback) => {
 const scales = argument('--items', '1000,5000').split(',').map(Number)
 const perPoll = Number(argument('--per-poll', '20'))
 const quietEvery = Number(argument('--quiet-every', '5'))
+// Fault injection for the delta path: every Nth delta answer claims a base the
+// renderer never saw. 0 disables it; timing runs keep it at 0.
+const corruptEvery = Number(argument('--corrupt-every', '0'))
 const out = argument('--out', '')
 const temp = await mkdtemp(join(tmpdir(), 'scry-remote-trace-profile-'))
 
-function instrument(file, anchor, insertion) {
+// `optional` anchors exist only in some revisions (for example the poll backoff state).
+function instrument(file, anchor, insertion, optional = false) {
   return {
-    name: `instrument-${file}`, enforce: 'pre',
+    name: `instrument-${file}-${insertion.trim()}`, enforce: 'pre',
     transform(code, id) {
       if (id !== join(root, file)) return
+      if (optional && !code.includes(anchor)) return
       if (code.split(anchor).length !== 2) throw new Error(`Profile instrumentation anchor changed in ${file}: ${anchor}`)
       return code.replace(anchor, `${anchor}${insertion}`)
     }
@@ -50,9 +55,9 @@ async function main(webContents, ipcMain, createProfileHost, options) {
   const read = (expression) => webContents.executeJavaScript(expression)
   const results = []
   for (const items of options.scales) {
-    const host = await createProfileHost({ items, perPoll: options.perPoll, quietEvery: options.quietEvery })
+    const host = await createProfileHost({ items, perPoll: options.perPoll, quietEvery: options.quietEvery, corruptEvery: options.corruptEvery })
     let pollCalls = { clientTotalMs: 0, rendererBytes: 0 }
-    const allowed = new Set(['catalog', 'trace'])
+    const allowed = new Set(['catalog', 'trace', 'traceDelta'])
     ipcMain.removeHandler('profile:info')
     ipcMain.removeHandler('profile:call')
     ipcMain.handle('profile:info', () => ({ connectionId: host.connectionId, runId: 'run-profile-e1', cwd: '/fixture/remote-trace', session: 'remote-trace-native' }))
@@ -89,6 +94,10 @@ async function main(webContents, ipcMain, createProfileHost, options) {
         rendererBytes: pollCalls.rendererBytes, ...renderer
       })
     }
+    // Idle tail after the terminal step: shows how far the interval backs off.
+    const idleIntervals = []
+    for (let index = 0; index < 4; index++) idleIntervals.push((await read('window.__profilePoll()')).pollIntervalMs)
+    host.takeWire()
     const state = await read('window.__profileState()')
     const { attachments: _attachments, ...shown } = state.run ?? {}
     const hostView = JSON.parse(host.hostView())
@@ -100,9 +109,12 @@ async function main(webContents, ipcMain, createProfileHost, options) {
       traceRequests: sum(samples.map((sample) => sample.traceCalls)), traceErrors: sum(samples.map((sample) => sample.traceErrors)),
       firstErrorAtItems: samples.find((sample) => sample.traceErrors > 0)?.items ?? null,
       wireBytes: metric('wireBytes'), rendererBytes: metric('rendererBytes'), hostMs: metric('hostMs'), encodeMs: metric('encodeMs'), clientMs: metric('clientMs'),
-      traceIpcMs: metric('traceMs'), commits: metric('commits'), commitMs: metric('commitMs'), wallMs: metric('wallMs'),
+      traceIpcMs: metric('traceMs'), commits: metric('commits'),
+      // Interval RemoteChat requested after each poll (null when the revision has no backoff).
+      pollIntervals: [...new Set(samples.map((sample) => sample.pollIntervalMs))],
+      intervalAfterQuiet: [...new Set(quiet.map((sample) => sample.pollIntervalMs))], commitMs: metric('commitMs'), wallMs: metric('wallMs'),
       quiet: { wireBytes: metric('wireBytes', quiet), commits: metric('commits', quiet), commitMs: metric('commitMs', quiet) },
-      consistent, shownItems: Array.isArray(shown.items) ? shown.items.length : null, pollError: state.pollError, unexpectedBridgeCalls: state.unexpected,
+      idleIntervals, consistent, shownItems: Array.isArray(shown.items) ? shown.items.length : null, pollError: state.pollError, unexpectedBridgeCalls: state.unexpected,
       samples
     })
     await host.dispose()
@@ -122,7 +134,8 @@ try {
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     plugins: [
       instrument('src/renderer/hooks/useVisibilityPolling.ts', '  refreshRef.current = refresh\n', '  window.__visibilityPolls?.set(key, () => refreshRef.current())\n'),
-      instrument('src/renderer/components/RemoteChat.tsx', '  activeRunRef.current = activeRun\n', '  window.__profileActiveRun = activeRun\n')
+      instrument('src/renderer/components/RemoteChat.tsx', '  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)\n', '  window.__profileActiveRun = activeRun\n'),
+      instrument('src/renderer/components/RemoteChat.tsx', '  const [pollIntervalMs, setPollIntervalMs] = useState(POLL_MS)\n', '  window.__profilePollInterval = pollIntervalMs\n', true)
     ],
     // Production React with the profiling renderer, so <Profiler> reports commit durations.
     resolve: { alias: [{ find: '@shared', replacement: join(root, 'src/shared') }, { find: /^react-dom$/, replacement: 'react-dom/profiling' }] },
@@ -153,7 +166,7 @@ try {
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       win.webContents.on('console-message', (event) => { if (event.level === 'error' || event.level === 3) console.error(event.message) });
       try {
-        const result = await (${main.toString()})(win.webContents, ipcMain, createProfileHost, ${JSON.stringify({ scales, perPoll, quietEvery, index: join(temp, 'index.html') })});
+        const result = await (${main.toString()})(win.webContents, ipcMain, createProfileHost, ${JSON.stringify({ scales, perPoll, quietEvery, corruptEvery, index: join(temp, 'index.html') })});
         require('node:fs').writeFileSync(${JSON.stringify(join(temp, 'result.json'))}, JSON.stringify(result));
         app.exit(0);
       } catch (error) { console.error(error); app.exit(1); }
@@ -175,8 +188,8 @@ try {
     })
   })
   const results = JSON.parse(await readFile(join(temp, 'result.json'), 'utf8'))
-  if (out) await writeFile(out, JSON.stringify({ perPoll, quietEvery, results }, null, 2))
-  console.log(`SCRY_REMOTE_TRACE_PROFILE=${JSON.stringify({ perPoll, quietEvery, results: results.map(({ samples: _samples, ...summary }) => summary) })}`)
+  if (out) await writeFile(out, JSON.stringify({ perPoll, quietEvery, corruptEvery, results }, null, 2))
+  console.log(`SCRY_REMOTE_TRACE_PROFILE=${JSON.stringify({ perPoll, quietEvery, corruptEvery, results: results.map(({ samples: _samples, ...summary }) => summary) })}`)
 } finally {
   await rm(temp, { recursive: true, force: true })
 }

@@ -52,7 +52,8 @@ const desktopRemote: Record<string, unknown> = {
   intents: async () => [],
   liveRun: async () => ({ runId: info.runId, origin: 'mac', state: 'running', scryRunId: info.runId }),
   commands: async () => ({ commands: [] }),
-  trace: (_id: string, ...args: unknown[]) => call('trace', ...args)
+  trace: (_id: string, ...args: unknown[]) => call('trace', ...args),
+  traceDelta: (_id: string, ...args: unknown[]) => call('traceDelta', ...args)
 }
 const unexpected = (name: string) => async () => { counters.unexpected.push(name); throw new Error(`profile bridge does not implement ${name}`) }
 const scry = new Proxy({ desktopRemote: new Proxy(desktopRemote, { get: (target, name: string) => target[name] ?? unexpected(`desktopRemote.${name}`) }) } as Record<string, unknown>, {
@@ -75,7 +76,8 @@ const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() 
     commits: counters.commits - before.commits, commitMs: counters.commitMs - before.commitMs,
     traceCalls: counters.traceCalls - before.traceCalls, traceMs: counters.traceMs - before.traceMs,
     traceBytes: counters.traceBytes - before.traceBytes, traceErrors: counters.traceErrors - before.traceErrors,
-    wallMs: performance.now() - started
+    wallMs: performance.now() - started,
+    pollIntervalMs: (window as unknown as { __profilePollInterval?: number }).__profilePollInterval ?? null
   }
 }
 ;(window as unknown as { __profileState: () => unknown }).__profileState = () => ({

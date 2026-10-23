@@ -64,7 +64,7 @@ function* streamSteps(totalItems: number, perPoll: number, quietEvery: number): 
   yield { events: [...carry, event({ kind: 'harness', stage: 'result', text: 'done' })], quiet: false, done: true }
 }
 
-export async function createProfileHost(options: { items: number; perPoll: number; quietEvery: number }) {
+export async function createProfileHost(options: { items: number; perPoll: number; quietEvery: number; corruptEvery?: number }) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-remote-trace-host-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -77,6 +77,7 @@ export async function createProfileHost(options: { items: number; perPoll: numbe
     getRun: (runId) => runId === PROFILE_RUN_ID ? bounded() : null
   })
   let wire: WireSample = { requests: 0, wireBytes: 0, hostMs: 0, encodeMs: 0 }
+  let deltas = 0
   const catalogResponse = (op: string): unknown => {
     if (op === 'projects') return { projects: [{ path: PROFILE_CWD, label: 'Remote trace' }] }
     if (op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default', isDefault: true }] }] }
@@ -103,6 +104,8 @@ export async function createProfileHost(options: { items: number; perPoll: numbe
       wire = { ...wire, requests: wire.requests + 1, hostMs: wire.hostMs + performance.now() - hostStart }
       throw error
     }
+    const answer = result as { kind?: string; base?: string }
+    if (answer.kind === 'trace_delta' && options.corruptEvery && ++deltas % options.corruptEvery === 0) answer.base = 'injected-gap:0'
     const encodeStart = performance.now()
     const serialized = JSON.stringify({ desktop: result })
     const encodeEnd = performance.now()
