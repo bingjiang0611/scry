@@ -23,6 +23,9 @@ import { runAgent } from './agent-runner'
 
 const identity = { pid: 501, startedAt: 'Wed Oct 15 10:00:00 2026', command: 'claude' }
 type CapturedIdentity = { pid: number; startedAt?: string; command?: string }
+type FakeChild = EventEmitter & { pid: number; exitCode: number | null; signalCode: NodeJS.Signals | null; kill: ReturnType<typeof vi.fn> }
+const spawnedChild = (): FakeChild => childProcess.spawn.mock.results[0]?.value as FakeChild
+const flush = async (): Promise<void> => { for (let index = 0; index < 4; index++) await Promise.resolve() }
 
 function setupSpawn(identityPromise: Promise<CapturedIdentity | undefined>, signal = new AbortController().signal): ReturnType<typeof runAgent> {
   childProcess.spawn.mockReturnValue(Object.assign(new EventEmitter(), { pid: 501, exitCode: null, signalCode: null, kill: vi.fn() }))
@@ -42,6 +45,7 @@ describe('Claude production stop identity gate', () => {
     diagnostics.capture.mockReset()
     diagnostics.signal.mockReset()
     childProcess.spawn.mockReset()
+    diagnostics.signal.mockReturnValue({ status: 'signalled', signal: 'SIGKILL', identityKey: '501', scope: 'group', nodes: [] })
   })
 
   it('does not signal while identity capture is pending', async () => {
@@ -49,44 +53,88 @@ describe('Claude production stop identity gate', () => {
     const handle = setupSpawn(pending)
 
     handle.forceKill()
-    await Promise.resolve()
+    await flush()
 
     expect(diagnostics.signal).not.toHaveBeenCalled()
+    expect(spawnedChild().kill).not.toHaveBeenCalled()
   })
 
-  it('does not signal when identity capture rejects', async () => {
+  it('falls back to the unreaped child handle when identity capture rejects', async () => {
     const handle = setupSpawn(Promise.reject(new Error('ps failed')))
 
     handle.forceKill()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
 
     expect(diagnostics.signal).not.toHaveBeenCalled()
+    expect(spawnedChild().kill).toHaveBeenCalledWith('SIGKILL')
   })
 
-  it('does not kill the child handle when identity is unknown', async () => {
+  it('kills the unreaped child handle when identity is unknown', async () => {
     const handle = setupSpawn(Promise.resolve({ pid: 501 }))
 
     handle.forceKill()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
 
-    const child = childProcess.spawn.mock.results[0]?.value as { kill: ReturnType<typeof vi.fn> }
     expect(diagnostics.signal).not.toHaveBeenCalled()
-    expect(child.kill).not.toHaveBeenCalled()
+    expect(spawnedChild().kill).toHaveBeenCalledWith('SIGKILL')
   })
 
-  it.each(['pending', 'rejected', 'unknown'] as const)('does not bypass identity on native SDK abort (%s)', async (state) => {
+  it.each(['refused', 'already_gone'] as const)('falls back to the child handle when tree verification returns %s', async (status) => {
+    diagnostics.signal.mockReturnValue(status === 'refused' ? { status, reason: 'identity_changed', detail: 'PID reused' } : { status, reason: 'process_missing' })
+    const handle = setupSpawn(Promise.resolve(identity))
+
+    handle.forceKill()
+    await flush()
+
+    expect(diagnostics.signal).toHaveBeenCalledWith({ identity, signal: 'SIGKILL' })
+    expect(spawnedChild().kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('falls back to the child handle when tree verification throws', async () => {
+    diagnostics.signal.mockImplementation(() => { throw new Error('ps failed') })
+    const handle = setupSpawn(Promise.resolve(identity))
+
+    handle.forceKill()
+    await flush()
+
+    expect(spawnedChild().kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('does not signal a child that exited after verification refused', async () => {
+    diagnostics.signal.mockImplementation(() => {
+      spawnedChild().exitCode = 0
+      return { status: 'already_gone', reason: 'process_missing' }
+    })
+    const handle = setupSpawn(Promise.resolve(identity))
+
+    handle.forceKill()
+    await flush()
+
+    expect(spawnedChild().kill).not.toHaveBeenCalled()
+  })
+
+  it('does not signal while SDK abort waits for identity', async () => {
     const abort = new AbortController()
-    const pending: Promise<CapturedIdentity | undefined> = state === 'pending' ? new Promise(() => {})
-      : state === 'rejected' ? Promise.reject(new Error('ps unavailable')) : Promise.resolve({ pid: 501 })
-    setupSpawn(pending, abort.signal)
+    setupSpawn(new Promise(() => {}), abort.signal)
     expect(childProcess.spawn.mock.calls[0][2]).not.toHaveProperty('signal')
+
     abort.abort()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+
     expect(diagnostics.signal).not.toHaveBeenCalled()
-    expect(childProcess.spawn.mock.results[0].value.kill).not.toHaveBeenCalled()
+    expect(spawnedChild().kill).not.toHaveBeenCalled()
+  })
+
+  it.each(['rejected', 'unknown'] as const)('SIGTERMs the child handle on SDK abort when identity is %s', async (state) => {
+    const abort = new AbortController()
+    const captured: Promise<CapturedIdentity | undefined> = state === 'rejected' ? Promise.reject(new Error('ps unavailable')) : Promise.resolve({ pid: 501 })
+    setupSpawn(captured, abort.signal)
+
+    abort.abort()
+    await flush()
+
+    expect(diagnostics.signal).not.toHaveBeenCalled()
+    expect(spawnedChild().kill).toHaveBeenCalledWith('SIGTERM')
   })
 
   it('waits for capture before SDK abort signalling', async () => {
@@ -96,7 +144,7 @@ describe('Claude production stop identity gate', () => {
     abort.abort()
     expect(diagnostics.signal).not.toHaveBeenCalled()
     resolve(identity)
-    await Promise.resolve()
+    await flush()
     expect(diagnostics.signal).toHaveBeenCalledWith({ identity, signal: 'SIGTERM' })
     expect(childProcess.spawn.mock.results[0].value.kill).not.toHaveBeenCalled()
   })
@@ -109,17 +157,18 @@ describe('Claude production stop identity gate', () => {
     abort.abort()
     childProcess.spawn.mock.results[0].value.exitCode = 0
     resolve(identity)
-    await Promise.resolve()
+    await flush()
     expect(diagnostics.signal).not.toHaveBeenCalled()
+    expect(spawnedChild().kill).not.toHaveBeenCalled()
   })
 
   it('waits for and verifies a resolved identity before signalling', async () => {
     const handle = setupSpawn(Promise.resolve(identity))
 
     handle.forceKill()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
 
     expect(diagnostics.signal).toHaveBeenCalledWith({ identity, signal: 'SIGKILL' })
+    expect(spawnedChild().kill).not.toHaveBeenCalled()
   })
 })

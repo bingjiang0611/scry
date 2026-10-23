@@ -298,10 +298,18 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   const signalSpawnedChild = (child: ChildProcessWithoutNullStreams, identityPromise: Promise<ProcessIdentity | undefined>, signal: NodeJS.Signals): void => {
     void (async () => {
       let identity: ProcessIdentity | undefined
-      try { identity = await identityPromise } catch { return }
-      if (!identity?.startedAt || process.platform === 'win32' || child.exitCode !== null || child.signalCode !== null) return
-      try { signalProcessTreeWithIdentity({ identity, signal }) } catch {
-        // Failed verification must not fall back to an unchecked child/PID signal.
+      try { identity = await identityPromise } catch { /* identity unknown: handle fallback below */ }
+      if (child.exitCode !== null || child.signalCode !== null) return
+      // Only process-group/tree signals need identity: other PIDs in the group are not protected by Node's handle.
+      let outcome: ReturnType<typeof signalProcessTreeWithIdentity> | undefined
+      if (identity?.startedAt && process.platform !== 'win32') {
+        try { outcome = signalProcessTreeWithIdentity({ identity, signal }) } catch { /* fall back to the handle */ }
+      }
+      if (outcome?.status === 'signalled') return
+      // Node has not reaped this child before 'exit', so its PID cannot have been reused;
+      // signalling our own handle is safe even when identity is unknown or tree verification failed.
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill(signal) } catch { /* already gone */ }
       }
     })()
   }
@@ -319,11 +327,10 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       stdio: ['pipe', 'pipe', 'pipe']
     })
     spawnedChild = child
-    // 立刻异步采集身份；强杀前等待它完成，避免 PID/PGID 复用时误杀其他进程组。
+    // 立刻异步采集身份；树信号前等待它完成，避免 PID/PGID 复用时误杀其他进程组。
     const identityPromise = captureProcessIdentity(child.pid)
     spawnedIdentityPromise = identityPromise
-    // Node's native spawn(signal) kills the child without identity verification.
-    // Use the same fail-closed gate for SDK abort as for the force-kill control.
+    // Replaces Node's native spawn(signal): try the verified tree signal first, then the child handle.
     const abort = (): void => signalSpawnedChild(child, identityPromise, 'SIGTERM')
     spawnOptions.signal.addEventListener('abort', abort, { once: true })
     child.once('exit', () => spawnOptions.signal.removeEventListener('abort', abort))

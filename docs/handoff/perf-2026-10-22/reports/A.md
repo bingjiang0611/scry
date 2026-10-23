@@ -142,3 +142,18 @@ node scripts/electron-security-smoke.mjs --dev-pi-history-only
 ### 非阻塞建议
 
 - `captureProcessIdentity` 的超时 1 s 是固定值；高负载机器上可能偶尔超时。A1 恢复句柄回退后，超时只影响树信号，不再影响能否停止，可以保留。
+
+## A1 修正（执行方，2026-10-23）
+
+按上节「核验意见」第 1–5 点修改，单独提交（hash 见分支日志中 `fix: restore Claude child-handle stop fallback`，B 报告同步引用）。
+
+- **代码**：`src/main/agent-runner.ts` 的 `signalSpawnedChild` 先等待身份。身份可用且非 win32 时先调用 `signalProcessTreeWithIdentity`。结果不是 `signalled`、复核抛错、身份未知/采集失败或 win32 时，只要 `child.exitCode === null && child.signalCode === null`，就回退 `child.kill(signal)`。强制停止用 SIGKILL；SDK abort 用 SIGTERM，等价于原 Node `spawn({ signal })` 的句柄信号，但先尝试经复核的树信号。身份 pending 期间仍不提前发信号。Qoder 不变（只有裸 PID，原代码也没有句柄回退）。
+- **断言修改依据**：本报告「核验意见 › A1 需修改」。Node 在 `exit` 之前不会回收子进程，PID 不会被复用；只有进程组/树信号需要身份复核。原交接红线写错，已由审查方更正。
+  - `does not kill the child handle when identity is unknown` → `kills the unreaped child handle when identity is unknown`，期望 `child.kill('SIGKILL')`。
+  - `does not signal when identity capture rejects` → 期望回退 `child.kill('SIGKILL')`。
+  - SDK abort 的 rejected/unknown 两例 → 期望 `child.kill('SIGTERM')`；pending 例保留“不发信号”。
+  - 新增：树复核返回 `refused` / `already_gone` / 抛错 → 回退句柄；复核期间子进程已退出 → 不调用 `child.kill`。
+  - 保留：身份 pending 不提前发信号；已复核身份 → 只发树信号、不调用 `child.kill`（已补该断言）；capture 期间已退出 → 两者都不调用。
+- **负对照**：把 `agent-runner.ts` 换回修正前的 `5bdc225` 版本运行新测试，13 例中 7 例失败，全部是“应回退句柄却未调用 `child.kill`”；恢复修正后 13/13 通过。对 `bf92d04` 的第一轮负对照中“未知身份直接 child-handle SIGKILL”已在实验文档改记为预期行为，不再算失败项。
+- **测试**：focused 5 files / 160 tests 通过（agent-runner-process-identity、agent-runner-options、qoder、process-diagnostics、process-identity-measurement）；`npm run typecheck` 通过；全量 `npm run test:unit` 303 files 通过、4 skipped，3735 tests 通过、4 skipped（日志 `/tmp/scry-a1fix-unit.log`）。L1 计数不变（采集路径未改）。
+- 未验证：真实 Claude Provider 的停止流程未重放（不驱动真实 Agent）。
