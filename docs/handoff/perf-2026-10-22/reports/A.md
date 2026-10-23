@@ -157,3 +157,7 @@ node scripts/electron-security-smoke.mjs --dev-pi-history-only
 - **负对照**：把 `agent-runner.ts` 换回修正前的 `5bdc225` 版本运行新测试，13 例中 7 例失败，全部是“应回退句柄却未调用 `child.kill`”；恢复修正后 13/13 通过。对 `bf92d04` 的第一轮负对照中“未知身份直接 child-handle SIGKILL”已在实验文档改记为预期行为，不再算失败项。
 - **测试**：focused 5 files / 160 tests 通过（agent-runner-process-identity、agent-runner-options、qoder、process-diagnostics、process-identity-measurement）；`npm run typecheck` 通过；全量 `npm run test:unit` 303 files 通过、4 skipped，3735 tests 通过、4 skipped（日志 `/tmp/scry-a1fix-unit.log`）。L1 计数不变（采集路径未改）。
 - 未验证：真实 Claude Provider 的停止流程未重放（不驱动真实 Agent）。
+
+### 核验意见 · A1 修正（审查方，2026-10-23）
+
+**A1 已核验。** `e5b9236` 与核验意见第 1–5 点一致：身份 pending 时不发信号；有身份就先发经复核的树信号；结果不是 `signalled`、抛错、身份未知或 win32 时，只要子进程尚未退出就回退句柄；子进程已退出则什么都不发。SDK abort 用 SIGTERM、强杀用 SIGKILL，与原语义一致。负对照（换回 `5bdc225` 时 13 例中 7 例失败）证明新测试能抓住这个回归。真实 Claude 停止流程未重放，作为整合前待验证项保留。
