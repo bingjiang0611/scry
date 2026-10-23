@@ -96,8 +96,16 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
     { kind: 'bind', blockId: 'selected', value: { kind: 'field', source: { kind: 'ref', name: 'group_outcomes' }, path: ['0', 'value'] } },
     { kind: 'map', blockId: 'consume', items: { kind: 'ref', name: 'selected' }, item: 'member', key: ['key'], maxItems: 2,
       body: { kind: 'bind', blockId: 'flag', value: { kind: 'field', source: { kind: 'ref', name: 'member' }, path: ['value', 'flag'] } } },
-    { kind: 'collect', blockId: 'flags', items: { kind: 'ref', name: 'consume' } },
-    { kind: 'return', blockId: 'nested_report', ref: { nodeId: 'flags' } }
+    { kind: 'bind', blockId: 'regrouped', value: { kind: 'group', items: { kind: 'ref', name: 'consume' }, key: ['state'] } },
+    { kind: 'bind', blockId: 'partitioned', value: { kind: 'partition', items: { kind: 'ref', name: 'consume' }, item: 'candidate',
+      when: { kind: 'compare', operator: 'eq', left: { kind: 'field', source: { kind: 'ref', name: 'candidate' }, path: ['value'] }, right: { kind: 'literal', value: false } } } },
+    { kind: 'parallel', blockId: 'results', blocks: [
+      { kind: 'collect', blockId: 'flags', items: { kind: 'ref', name: 'consume' } },
+      { kind: 'bind', blockId: 'group_count', value: { kind: 'count', value: { kind: 'field', source: { kind: 'ref', name: 'regrouped' }, path: ['0', 'members'] } } },
+      ...['matched', 'rejected', 'unknown'].map(bucket => ({ kind: 'bind', blockId: bucket + '_count', value: { kind: 'count', value: { kind: 'field', source: { kind: 'ref', name: 'partitioned' }, path: [bucket] } } })),
+      { kind: 'collect', blockId: 'filtered', items: { kind: 'field', source: { kind: 'ref', name: 'partitioned' }, path: ['matched'] } }
+    ] },
+    { kind: 'return', blockId: 'nested_report', ref: { nodeId: 'results' } }
   ] } }
   const nestedDraft = await invoke('saveDraft', { scope: personal, source: JSON.stringify(nestedDefinition) })
   assert.equal(nestedDraft.validation.state, 'valid')
@@ -108,8 +116,11 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   await workflow('approve', nestedApproval)
   const nestedResult = await workflow('start', nested.workflowId, nestedApproval, 'nested-collection-start')
   assert.equal(nestedResult.state, 'completed')
-  assert.deepEqual(JSON.parse(nestedResult.finalReport).map(row => row.value), [0, false])
+  const nestedReport = JSON.parse(nestedResult.finalReport)
+  assert.deepEqual(nestedReport.flags.map(row => row.value), [0, false])
+  assert.deepEqual([nestedReport.group_count, nestedReport.matched_count, nestedReport.rejected_count, nestedReport.unknown_count], [2, 1, 1, 0])
+  assert.equal(nestedReport.filtered[0].value.value.value, false)
   assert.equal(nestedResult.dispatchAttempts, 0)
   assert.deepEqual(await Promise.all(ledgers.map(ledger)), before, 'template publication must not invoke any Provider')
-  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, nestedCollectionProjection: true, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
+  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, nestedCollectionProjection: true, streamingGroupAndPartition: true, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
 }

@@ -120,7 +120,7 @@
 - 同一IR/解释器新增动态map与显式collect，完整输入/稳定key/批次上限先验，受共享slots和根预算控制；已证明item内流水与跨窗口补位，不设整页barrier。
 - 宿主mint typed集合引用，manifest保存每项状态/物理settled及不可变结果引用；失败/unknown/pending不删。cold读取核对hash/workflow/count/结构。collect保留失败摘要与0值，不把unknown当空或恢复成功。
 - Node24.18.0/macOS：14文件172项focused、Node/web types、build通过；关闭重复key预检后1失败/10通过（发生本应禁止的Native test-double调用），SHA256恢复后11通过。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。
-- 嵌套collection字段投影后续进展见下节；仍缺超4MiB集合的streaming group/filter、普通M0统一持久化、loop/carry/最佳候选的跨进程/依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
+- 嵌套collection字段投影和超4MiB集合的按项group/filter后续进展见下节；仍缺普通M0统一持久化、完整loop/carry/最佳候选的依赖恢复。map本身不是M3恢复完成；Provider executors仍是test double，无App/账号验收。M1、M4–M6、性能collector缺口和延期门禁保持原状态。
 
 ### M3 嵌套受控集合投影（局部验收）
 
@@ -129,7 +129,18 @@
 - 当前typecheck、11文件/140项focused回归、build与生产preload/main→Service→Runner→Interpreter通过；新增生产场景在冻结模板中执行嵌套map→collect→field→map，准确得到0/false，Agent预算及Provider调用均0。未修复bundle同场景明确失败，保留负控。
 - 证据 `~/.local/state/rotom/verification-evidence/workflow-m3-nested-collections.ygomyZ/`，原始 `nested-*.log` 与 `authority-first.log` 在 `/tmp/scry-workflow-template-editor.ZnkC6L/`。首个测试错误地用了局部return、首个缺失manifest用例路径错误，均保留，不冒充目标负控。
 - 当前必需性能测量仍exit 1/unavailable（providers.catalog无collector，负载约25/10 cores）。未重新完整打包、未安装、未push、未升版本；此前完整conversation/pack截止、CLI及七项延期失败仍开放。
-- 剩余：host collection的streaming group/filter、真正失败/修订恢复、可靠停滞/重启策略、main check/classifier和其余M1/M4–M6。该增量不闭合整体M3。
+- 当时剩余的host collection按项group/filter已见下一增量；真正失败/修订恢复、可靠停滞/重启策略、main check/classifier和其余M1/M4–M6仍缺。该增量不闭合整体M3。
+
+### M3 按项group/filter与纯产物跨进程身份（局部验收）
+
+- 受控集合支持group/unique/filter/partition，不必先collect成4MiB JSON；一个payload读取完成后才读取下一项。manifest仍限8MiB/4096项，保留group keys与最终普通JSON仍有4MiB界限。不是无限流/无限批次。
+- 复用同一generator表达式实现和原Control/Runner，保留0、false、失败覆盖率、unknown分类/理由和嵌套读取权。派生valueRef只引用纯数据，不可冒充Agent效果证据。未sealed、停止、缺文件、跨workflow、双重reference和值/metadata边界均拒绝或明确unknown。
+- 自审发现generation参与纯产物key会错误失效已有消费者；新增真实独立进程负控在约2.3s明确因“恢复所需输入/控制帧不一致”失败（非timeout），修复后复用原partition/group准确引用、零Agent派发。不是一般失败重试或改修订恢复。
+- 当前typecheck、4文件/52项focused、workflow UI、build和完整production conversation IPC通过。完整conversation的21次调用均为离线fixture；模板/新集合场景调用增量为0。旧bundle在同一生产新语法候选校验阶段失败。
+- 组合回归首败保留：12文件/156项有4个原跨进程场景5000ms超时；修复generation后12文件/157项有156通过、原loop跨进程场景1项5000ms超时。原5项独立运行通过、冻结旧实现5项也通过，不能以单独通过关闭组合门禁或证明首败与改动无关。未提高deadline、未删断言/skip。当前/旧实现的串行phase诊断约2.1s，无原首败phase数据，原因仍未决定。
+- 必需性能测量exit1/unavailable：providers.catalog无collector，机器负载约30/10 cores。没有L1/L2/L3提速结论。
+- 证据：`~/.local/state/rotom/verification-evidence/workflow-m3-streaming-collections.x0Ge4c/`；原始日志`/tmp/scry-workflow-template-editor.ZnkC6L/streaming-*.log`。同时保留初始fixture根sequence错误、错误英文错误文案预期及schema双包outcome的首败，不作为目标负控。
+- 当前完整conversation gate通过，不擦除旧cutoff。完整pack/CLI、七项延期失败和组合process deadline仍开放；未push、未安装、未升版本。M3失败/修订恢复、停滞重启与M4质量执行仍待实施。
 
 ### M3 有界loop与逻辑退出进展（仍非M2/M3完成）
 

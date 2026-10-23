@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WorkflowBlock, WorkflowValue } from '../shared/workflow'
+import type { WorkflowBlock, WorkflowExpression, WorkflowValue } from '../shared/workflow'
 import { WorkflowRunner, WorkflowSlots, type WorkflowProviderExecution, type WorkflowProviderExecutionRequest, type WorkflowProviderExecutionResult } from './workflow-runner'
 import { FileWorkflowStore } from './workflow-store'
 import { makePlanPreview, validateWorkflowProgram, workflowRevision } from './workflow-program'
@@ -106,6 +106,59 @@ describe('dynamic map / controlled collections', () => {
     expect(execute).toHaveBeenCalledTimes(2)
     expect(execute.mock.calls.map(([request]) => request.prompt)).toEqual(expect.arrayContaining([expect.stringContaining('\na'), expect.stringContaining('\nb')]))
     expect(JSON.parse(progress.finalReport!).map((entry: { key: string }) => entry.key)).toEqual(['a', 'b'])
+  })
+
+  it('groups host outcomes without collect and maps each controlled member set', async () => {
+    const execute = vi.fn(() => { throw new Error('data-only program must not dispatch') })
+    const grouped: WorkflowBlock = { kind: 'bind', blockId: 'grouped', value: { kind: 'group', items: { kind: 'ref', name: 'mapped' }, key: ['value', 'category'] } }
+    const readGroups: WorkflowBlock = { kind: 'map', blockId: 'read_groups', items: { kind: 'ref', name: 'grouped' }, item: 'bucket', key: ['key'], maxItems: 2,
+      body: { kind: 'sequence', blockId: 'read_group', blocks: [
+        { kind: 'map', blockId: 'read_members', items: { kind: 'field', source: { kind: 'ref', name: 'bucket' }, path: ['members'] }, item: 'member', key: ['key'], maxItems: 3,
+          body: { kind: 'bind', blockId: 'flag', value: { kind: 'field', source: { kind: 'ref', name: 'member' }, path: ['value', 'flag'] } } },
+        { kind: 'collect', blockId: 'member_flags', items: { kind: 'ref', name: 'read_members' } }
+      ] } }
+    const f = await fixture([bind([{ id: 'a', category: 'same', flag: 0 }, { id: 'b', category: 'same', flag: false }, { id: 'c', category: 'other', flag: true }]),
+      map({ kind: 'bind', blockId: 'copy', value: { kind: 'ref', name: 'entry' } }, 3), grouped, readGroups,
+      { ...collect, items: { kind: 'ref', name: 'read_groups' } }, report('collected')], execute)
+    const result = await f.run()
+    expect(result.state).toBe('completed')
+    expect(JSON.parse(result.finalReport!).map((row: { value: Array<{ value: WorkflowValue }> }) => row.value.map(member => member.value))).toEqual([[0, false], [true]])
+    expect(result.dispatchAttempts).toBe(0)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('partitions host outcomes without dropping false, zero or rejected rows', async () => {
+    const execute = vi.fn(() => { throw new Error('data-only program must not dispatch') })
+    const partitioned: WorkflowBlock = { kind: 'bind', blockId: 'partitioned', value: { kind: 'partition', items: { kind: 'ref', name: 'mapped' }, item: 'candidate',
+      when: { kind: 'compare', operator: 'ne', left: { kind: 'field', source: { kind: 'ref', name: 'candidate' }, path: ['value', 'flag'] }, right: { kind: 'literal', value: true } } } }
+    const f = await fixture([bind([{ id: 'a', flag: 0 }, { id: 'b', flag: false }, { id: 'c', flag: true }]),
+      map({ kind: 'bind', blockId: 'copy', value: { kind: 'ref', name: 'entry' } }, 3), partitioned,
+      { kind: 'collect', blockId: 'accepted', items: { kind: 'field', source: { kind: 'ref', name: 'partitioned' }, path: ['matched'] } }, report('accepted')], execute)
+    const result = await f.run()
+    expect(result.state).toBe('completed')
+    expect(JSON.parse(result.finalReport!).map((row: { value: { value: { value: { flag: WorkflowValue } } } }) => row.value.value.value.flag)).toEqual([0, false])
+    const record = await f.store.loadFrame(f.preview.workflowId, workflowFrameId('partitioned', ['revision:' + f.preview.programRevision]))
+    const value = await new FileWorkflowStore(f.root).loadValue(f.preview.workflowId, record!.resultRef!)
+    expect(value.state === 'known' && value.collectionFields?.map(field => [field.path[0], field.collection.count])).toEqual([['matched', 2], ['rejected', 1], ['unknown', 0]])
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('resolves host operations in loop initial, carry, condition and result without a second evaluator', async () => {
+    const execute = vi.fn(() => { throw new Error('data-only program must not dispatch') })
+    const partitionCount: WorkflowExpression = { kind: 'count', value: { kind: 'field', source: { kind: 'partition', items: { kind: 'ref', name: 'frozen' }, item: 'candidate',
+      when: { kind: 'literal', value: true } }, path: ['matched'] } }
+    const groupCount: WorkflowExpression = { kind: 'count', value: { kind: 'field', source: { kind: 'group', items: { kind: 'ref', name: 'frozen' }, key: ['state'] }, path: ['0', 'members'] } }
+    const repeated: WorkflowBlock = { kind: 'loop', blockId: 'repeat', invariants: { frozen: { kind: 'ref', name: 'mapped' } }, initial: { kept: partitionCount }, stateSchema: { kept: { type: 'number' } },
+      maxIterations: 1, iteration: 'round', outcome: 'loop_status', progress: 'bounded_only',
+      body: { kind: 'bind', blockId: 'marker', value: { kind: 'literal', value: true } },
+      until: { kind: 'compare', operator: 'eq', left: partitionCount, right: { kind: 'literal', value: 2 } },
+      carry: { kept: groupCount }, result: groupCount, policy: { error: 'fail_closed', unknown: 'block', stop: 'cancel', logicalExit: 'report_partial' } }
+    const f = await fixture([bind([{ id: 'a', flag: 0 }, { id: 'b', flag: false }]), map({ kind: 'bind', blockId: 'copy', value: { kind: 'ref', name: 'entry' } }), repeated, report('repeat')], execute)
+    const result = await f.run()
+    expect(result.state).toBe('completed')
+    expect(result.finalReport).toBe('2')
+    expect(result.dispatchAttempts).toBe(0)
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it('projects a nested host collection through a committed outcome value without losing read authority', async () => {

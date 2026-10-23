@@ -106,6 +106,8 @@ export type WorkflowCollectionEntry = {
   state: 'pending' | 'completed' | 'failed' | 'blocked' | 'unknown' | 'stopped'
   settled: boolean
   reference?: WorkflowFrameReference
+  /** Immutable pure-transform row; never evidence of an Agent/SystemStep effect. */
+  valueRef?: WorkflowValueReference
   error?: string
 }
 

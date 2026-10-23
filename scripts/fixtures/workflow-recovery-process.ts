@@ -17,7 +17,7 @@ class Store extends FileWorkflowStore {
     if (mode === 'intent' && record.intents.length && !record.outcomes.length) process.exit(74)
   }
   override async saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, revision: number) {
-    if (frame.nodeId === 'root' && ((mode === 'crash' && frame.cursor === 1) || (mode === 'crash-two' && frame.cursor === 2))) process.exit(73)
+    if (frame.nodeId === 'root' && ((mode === 'crash' && frame.cursor === 1) || (mode === 'crash-two' && frame.cursor === 2) || (mode === 'crash-control' && frame.cursor === 4))) process.exit(73)
     if (mode === 'live' && frame.nodeId === 'root' && frame.cursor === 1) {
       process.send!({ type: 'checkpoint', pid: process.pid })
       await new Promise<void>(resolve => process.once('message', message => { if (message === 'continue') resolve() }))

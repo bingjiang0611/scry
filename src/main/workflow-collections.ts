@@ -16,13 +16,17 @@ export function validateCollectionReference(value: unknown, workflowId: string):
 export function collectionEntries(value: unknown, workflowId: string, count: number, sealed: boolean): WorkflowCollectionEntry[] {
   if (!object(value) || value.schemaVersion !== 1 || value.sealed !== sealed || !Array.isArray(value.entries) || value.entries.length !== count || count > WORKFLOW_MAX_BATCH) throw new Error(copy.invalid)
   for (const [index, entry] of value.entries.entries()) {
-    if (!object(entry) || !scalar(entry.key) || entry.index !== index || (typeof entry.state !== 'string' || !['pending', 'completed', 'failed', 'blocked', 'unknown', 'stopped'].includes(entry.state)) || typeof entry.settled !== 'boolean' || Object.keys(entry).some(key => !['key', 'index', 'state', 'settled', 'reference', 'error'].includes(key))) throw new Error(copy.invalid)
+    if (!object(entry) || !scalar(entry.key) || entry.index !== index || (typeof entry.state !== 'string' || !['pending', 'completed', 'failed', 'blocked', 'unknown', 'stopped'].includes(entry.state)) || typeof entry.settled !== 'boolean' || Object.keys(entry).some(key => !['key', 'index', 'state', 'settled', 'reference', 'valueRef', 'error'].includes(key))) throw new Error(copy.invalid)
     if (entry.error !== undefined && (typeof entry.error !== 'string' || entry.error.length > 4096)) throw new Error(copy.invalid)
     if (entry.reference !== undefined) {
       if (!object(entry.reference) || typeof entry.reference.frameId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(entry.reference.frameId) || !Number.isSafeInteger(entry.reference.revision) || (entry.reference.revision as number) < 1) throw new Error(copy.invalid)
       validateWorkflowValueReference(entry.reference.resultRef, workflowId)
     }
-    if (entry.state === 'completed' && (!entry.reference || !entry.settled)) throw new Error(copy.invalid)
+    if (entry.valueRef !== undefined) {
+      if (entry.reference !== undefined) throw new Error(copy.invalid)
+      validateWorkflowValueReference(entry.valueRef, workflowId)
+    }
+    if (entry.state === 'completed' && ((!entry.reference && !entry.valueRef) || !entry.settled)) throw new Error(copy.invalid)
     if (sealed && (entry.state === 'pending' || entry.state === 'unknown' || !entry.settled)) throw new Error(copy.unsealed)
   }
   if (new Set(value.entries.map(entry => JSON.stringify((entry as Record<string, WorkflowValue>).key))).size !== value.entries.length) throw new Error(copy.key)

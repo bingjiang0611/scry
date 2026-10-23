@@ -145,7 +145,8 @@ export const workflowCollectionCopy = {
   payloadLimit: '集合展开结果超过 4 MiB 上限；原始子结果引用已保留',
   budget: '工作流最坏调用预算超出整数范围，请降低已确认批次上限',
   source: '工作流 map 来源必须是已提交数组或受控集合引用',
-  collectionKey: '受控集合 map 必须沿用 key 字段；重分组前需显式 collect',
+  collectionKey: '受控集合 map 必须沿用 key 字段；请先使用 group 或显式 collect 重分组',
+  stopped: '受控集合计算已停止，未提交部分结果',
   pending: '子项尚未执行或没有完整结果'
 }
 

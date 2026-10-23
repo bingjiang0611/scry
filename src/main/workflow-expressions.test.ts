@@ -7,6 +7,13 @@ const field = (name: string, key: string): WorkflowExpression => ({ kind: 'field
 const run = (expression: WorkflowExpression, values: Array<[string, WorkflowEvaluation]> = []) => evaluateWorkflowExpression(validateWorkflowExpression(expression), new Map(values))
 
 describe('finite Workflow expressions', () => {
+  it('normalizes homogeneous collection alternatives without admitting descriptor literals', () => {
+    const variants: WorkflowValueSchema[] = [0, false].map(key => ({ type: 'collection', items: { type: 'object', properties: { key: { type: 'enum', values: [key] } }, required: ['key'] } }))
+    const scope = new Map<string, WorkflowValueSchema>([['source', { type: 'union', variants }]])
+    expect(inferWorkflowExpression({ kind: 'count', value: { kind: 'ref', name: 'source' } }, scope)).toEqual({ type: 'number' })
+    expect(inferWorkflowExpression({ kind: 'group', items: { kind: 'ref', name: 'source' }, key: ['key'] }, scope)).toMatchObject({ type: 'array', items: { properties: { members: { type: 'collection' } } } })
+    expect(() => inferWorkflowExpression({ kind: 'group', items: { kind: 'literal', value: { kind: 'workflow_collection' } }, key: ['key'] }, scope)).toThrow()
+  })
   it('keeps false/zero/null values distinct from missing bindings', () => {
     expect(run({ kind: 'ref', name: 'flag' }, [['flag', known(false)]])).toMatchObject({ state: 'known', value: false })
     expect(run({ kind: 'ref', name: 'zero' }, [['zero', known(0)]])).toMatchObject({ state: 'known', value: 0 })

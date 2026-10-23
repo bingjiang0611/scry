@@ -137,6 +137,28 @@ describe('production Runner across distinct controller processes (local CLI, no 
     expect(record.execution?.segments).toHaveLength(1)
   })
 
+  it('reuses exact pure partition/group references across controller generations', async () => {
+    const f = await setup([
+      { kind: 'bind', blockId: 'input', value: { kind: 'literal', value: [{ id: 'zero', flag: 0 }, { id: 'false', flag: false }] } },
+      { kind: 'map', blockId: 'mapped', items: ref('input'), item: 'item', key: ['id'], maxItems: 2,
+        body: { kind: 'bind', blockId: 'copy', value: ref('item') } },
+      { kind: 'bind', blockId: 'partitioned', value: { kind: 'partition', items: ref('mapped'), item: 'candidate', when: { kind: 'literal', value: true } } },
+      { kind: 'bind', blockId: 'grouped', value: { kind: 'group', items: field('partitioned', 'matched'), key: ['state'] } },
+      { kind: 'bind', blockId: 'counted', value: { kind: 'count', value: { kind: 'field', source: ref('grouped'), path: ['0', 'members'] } } },
+      { kind: 'return', blockId: 'report', ref: { nodeId: 'counted' } }
+    ])
+    await run(f.root, 'crash-control', 73)
+    const scope = ['revision:' + f.preview.programRevision]
+    const original = (await f.store.loadFrame(f.preview.workflowId, workflowFrameId('partitioned', scope)))!
+    const originalGroup = (await f.store.loadFrame(f.preview.workflowId, workflowFrameId('grouped', scope)))!
+    await run(f.root, 'resume', 0)
+    const record = (await f.store.load(f.preview.workflowId))!, generation = record.execution!.segments.at(-1)!.generationId
+    expect(record.progress).toMatchObject({ state: 'completed', dispatchAttempts: 0, finalReport: '2' })
+    expect((await f.store.loadFrame(f.preview.workflowId, workflowFrameId('partitioned', scope, generation)))!.resultRef).toEqual(original.resultRef)
+    expect((await f.store.loadFrame(f.preview.workflowId, workflowFrameId('grouped', scope, generation)))!.resultRef).toEqual(originalGroup.resultRef)
+    await expect(readFile(join(f.root, 'effects.jsonl'))).rejects.toHaveProperty('code', 'ENOENT')
+  })
+
   it('restores carry, initial/best, committed history and the no-progress counter before round two', async () => {
     const f = await setup([
       { kind: 'loop', blockId: 'improve', initial: { candidate: literal('seed') }, stateSchema: { candidate: { type: 'string' } }, invariants: { rubric: literal('frozen') }, best: 'candidate', outcome: 'qualityOutcome', maxIterations: 10,

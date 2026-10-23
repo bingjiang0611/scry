@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionEntry, type WorkflowCollectionField, type WorkflowScalar, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference } from '../shared/workflow'
 import { workflowCollectionCopy, workflowValueCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
-import { evaluateWorkflowExpression, workflowArrayAuthorities, workflowCollectionFields, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
+import { workflowArrayAuthorities, workflowCollectionFields, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowLoopExecution } from './workflow-loop-execution'
 import { matchesWorkflowValue } from './workflow-values'
@@ -117,7 +117,7 @@ export class WorkflowInterpreter {
           break
         }
         case 'bind': {
-          let value = evaluateWorkflowExpression(current.value, top.scope.bindings)
+          let value = await this.control.evaluate(current.value, top.scope, current.blockId, () => this.state.stopped)
           if (value.state === 'known' && current.schema && !matchesWorkflowValue(value.value, current.schema)) value = { state: 'unknown', reason: workflowValueCopy.bindingContract, derivedFrom: value.derivedFrom }
           if (value.state === 'unknown') top.scope.blockedReason = value.reason
           stack.pop()
@@ -134,7 +134,7 @@ export class WorkflowInterpreter {
           stack[stack.length - 1] = { stage: 'sequence', block: current, scope: top.scope, frame, cursor: 0, outcomes: [], value: unavailable(), partial: false, critical: false }
           break
         case 'branch': {
-          const decision = evaluateWorkflowExpression(current.when, top.scope.bindings)
+          const decision = await this.control.evaluate(current.when, top.scope, current.blockId, () => this.state.stopped)
           const arm = decision.state === 'known' && typeof decision.value === 'boolean' ? decision.value ? 'then' : 'else' : 'unknown'
           const selectedFrame = await this.control.select(frame, arm, decision)
           const label = (name: string) => current.blockId + ':' + name + ':' + selectedFrame.decisionRef!.hash
@@ -166,7 +166,7 @@ export class WorkflowInterpreter {
           break
         }
         case 'collect': {
-          const source = evaluateWorkflowExpression(current.items, top.scope.bindings)
+          const source = await this.control.evaluate(current.items, top.scope, current.blockId, () => this.state.stopped)
           if (source.state === 'unknown') {
             top.scope.blockedReason = source.reason
             returned = await this.finish(current, top.scope, frame, source, 'blocked')
@@ -205,7 +205,7 @@ export class WorkflowInterpreter {
   private async map(block: Extract<WorkflowBlock, { kind: 'map' }>, scope: WorkflowControlScope, frame: WorkflowControlFrame): Promise<Result> {
     const restored = await this.control.restoredCollection(frame)
     if (restored) return this.finish(block, scope, frame, restored.value, restored.phase, [], restored.reportPartial)
-    const source = evaluateWorkflowExpression(block.items, scope.bindings)
+    const source = await this.control.evaluate(block.items, scope, block.blockId, () => this.state.stopped)
     if (source.state === 'unknown') {
       scope.blockedReason = source.reason
       return this.finish(block, scope, frame, source, 'blocked')

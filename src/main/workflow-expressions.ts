@@ -1,9 +1,10 @@
 import {
   WORKFLOW_MAX_BATCH, WORKFLOW_MAX_EXPRESSION_DEPTH, WORKFLOW_MAX_EXPRESSION_NODES,
-  WORKFLOW_MAX_VALUE_BYTES, WORKFLOW_MAX_VALUE_DEPTH, type WorkflowCollectionField, type WorkflowEvaluation, type WorkflowExpression,
+  WORKFLOW_MAX_VALUE_BYTES, WORKFLOW_MAX_VALUE_DEPTH, type WorkflowCollectionField, type WorkflowCollectionReference, type WorkflowEvaluation, type WorkflowExpression,
   type WorkflowScalar, type WorkflowValue, type WorkflowValueSchema
 } from '../shared/workflow'
 import { workflowCollectionCopy, workflowExpressionCopy as copy } from '../shared/constants/copy'
+import { collectionItemSchema } from './workflow-collections'
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const scalar = (value: unknown): value is WorkflowScalar => value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))
@@ -127,8 +128,17 @@ export function workflowField(value: WorkflowValue, path: readonly string[], der
   return { ...known(current, derivedFrom, fields), ...(collection ? { collection } : {}) }
 }
 
-export function evaluateWorkflowExpression(expression: WorkflowExpression, bindings: ReadonlyMap<string, WorkflowEvaluation>): WorkflowEvaluation {
-  const evaluate = (item: WorkflowExpression, scope = bindings): WorkflowEvaluation => {
+export type WorkflowCollectionExpressionRequest = {
+  expression: Extract<WorkflowExpression, { kind: 'group' | 'unique' | 'filter' | 'partition' }>
+  source: Extract<WorkflowEvaluation, { state: 'known' }> & { collection: WorkflowCollectionReference }
+  bindings: ReadonlyMap<string, WorkflowEvaluation>
+}
+type ExpressionSteps = Generator<WorkflowCollectionExpressionRequest, WorkflowEvaluation, WorkflowEvaluation>
+
+/** One evaluator. Pure callers run it synchronously; the control owner resolves
+ * yielded host-collection reads without materializing an unbounded JSON value. */
+export function* workflowExpressionSteps(expression: WorkflowExpression, bindings: ReadonlyMap<string, WorkflowEvaluation>): ExpressionSteps {
+  const evaluate = function* (item: WorkflowExpression, scope = bindings): ExpressionSteps {
     switch (item.kind) {
       case 'literal': return known(item.value)
       case 'ref': {
@@ -136,11 +146,11 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         return value ? { ...value, derivedFrom: [...new Set([...value.derivedFrom, item.name])] } : unknown(copy.reference(item.name), [item.name])
       }
       case 'field': {
-        const value = evaluate(item.source, scope)
+        const value = yield* evaluate(item.source, scope)
         return value.state === 'unknown' || !item.path.length ? value : workflowField(value.value, item.path, value.derivedFrom, value)
       }
       case 'compare': {
-        const left = evaluate(item.left, scope), right = evaluate(item.right, scope), sources = refs(left, right)
+        const left = yield* evaluate(item.left, scope), right = yield* evaluate(item.right, scope), sources = refs(left, right)
         if (left.state === 'unknown') return unknown(left.reason, sources)
         if (right.state === 'unknown') return unknown(right.reason, sources)
         if (item.operator === 'eq' || item.operator === 'ne') {
@@ -152,7 +162,9 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         return known(item.operator === 'lt' ? a < b : item.operator === 'lte' ? a <= b : item.operator === 'gt' ? a > b : a >= b, sources)
       }
       case 'and': case 'or': case 'concat': {
-        const values = item.values.map(value => evaluate(value, scope)), sources = refs(...values)
+        const values: WorkflowEvaluation[] = []
+        for (const value of item.values) values.push(yield* evaluate(value, scope))
+        const sources = refs(...values)
         const missing = values.find(value => value.state === 'unknown')
         if (missing?.state === 'unknown') return unknown(missing.reason, sources)
         const data = values.map(value => (value as Extract<WorkflowEvaluation, { state: 'known' }>).value)
@@ -172,7 +184,7 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         return unknown(copy.type(item.kind), sources)
       }
       case 'not': case 'count': {
-        const value = evaluate(item.value, scope)
+        const value = yield* evaluate(item.value, scope)
         if (value.state === 'unknown') return value
         if (item.kind === 'not' && typeof value.value === 'boolean') return known(!value.value, value.derivedFrom)
         if (item.kind === 'count' && value.collection) return value.collection.sealed ? known(value.collection.count, value.derivedFrom) : unknown(workflowCollectionCopy.unsealed, value.derivedFrom)
@@ -180,8 +192,9 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         return unknown(copy.type(item.kind), value.derivedFrom)
       }
       case 'group': case 'unique': {
-        const value = evaluate(item.items, scope)
+        const value = yield* evaluate(item.items, scope)
         if (value.state === 'unknown') return value
+        if (value.collection) return yield { expression: item, source: { ...value, collection: value.collection }, bindings: scope }
         if (!Array.isArray(value.value)) return unknown(copy.type(item.kind), value.derivedFrom)
         if (value.value.length > WORKFLOW_MAX_BATCH) throw new Error(copy.valueLimit)
         const groups = new Map<string, { key: WorkflowScalar; members: WorkflowValue[]; derivedFrom: number[] }>()
@@ -200,8 +213,9 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         return known(grouped, value.derivedFrom, remapArrayCollections(value, destinations))
       }
       case 'filter': case 'partition': {
-        const value = evaluate(item.items, scope)
+        const value = yield* evaluate(item.items, scope)
         if (value.state === 'unknown') return value
+        if (value.collection) return yield { expression: item, source: { ...value, collection: value.collection }, bindings: scope }
         if (!Array.isArray(value.value)) return unknown(copy.type(item.kind), value.derivedFrom)
         if (value.value.length > WORKFLOW_MAX_BATCH) throw new Error(copy.valueLimit)
         if (scope.has(item.item)) throw new Error(copy.binding(item.item))
@@ -210,7 +224,7 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
         const local = new Map(scope), authorities = workflowArrayAuthorities(value), destinations: string[][] = []
         for (const [index, member] of value.value.entries()) {
           local.set(item.item, workflowField(value.value, [String(index)], value.derivedFrom, { collectionFields: authorities.get(String(index)) }))
-          const decision = evaluate(item.when, local)
+          const decision = yield* evaluate(item.when, local)
           for (const source of decision.derivedFrom) if (source !== item.item) sources.add(source)
           const entry = { index, value: member, reason: decision.state === 'unknown' ? decision.reason : typeof decision.value !== 'boolean' ? copy.type(item.kind) : decision.value ? copy.trueReason : copy.falseReason }
           const bucket = decision.state === 'known' && typeof decision.value === 'boolean' ? decision.value ? 'matched' : 'rejected' : 'unknown'
@@ -221,7 +235,14 @@ export function evaluateWorkflowExpression(expression: WorkflowExpression, bindi
       }
     }
   }
-  return evaluate(expression)
+  return yield* evaluate(expression)
+}
+
+export function evaluateWorkflowExpression(expression: WorkflowExpression, bindings: ReadonlyMap<string, WorkflowEvaluation>): WorkflowEvaluation {
+  const steps = workflowExpressionSteps(expression, bindings)
+  let step = steps.next()
+  while (!step.done) step = steps.next(unknown(copy.type(step.value.expression.kind), step.value.source.derivedFrom))
+  return step.value
 }
 
 export function workflowValueSchema(value: WorkflowValue): WorkflowValueSchema {
@@ -235,6 +256,9 @@ function union(schemas: WorkflowValueSchema[]): WorkflowValueSchema {
   if (unique.length === 1) return unique[0]
   if (unique.length && unique.every((schema): schema is Extract<WorkflowValueSchema, { type: 'array' }> => schema.type === 'array')) {
     return { type: 'array', items: union(unique.map(schema => schema.items)), maxItems: Math.max(...unique.map(schema => schema.maxItems)) }
+  }
+  if (unique.length && unique.every((schema): schema is Extract<WorkflowValueSchema, { type: 'collection' }> => schema.type === 'collection')) {
+    return { type: 'collection', items: union(unique.map(schema => schema.items)) }
   }
   return { type: 'union', variants: unique }
 }
@@ -271,7 +295,7 @@ export function inferWorkflowExpression(expression: WorkflowExpression, scope: R
     case 'ref': {
       const schema = scope.get(expression.name)
       if (!schema) throw new Error(copy.reference(expression.name))
-      return schema
+      return schema.type === 'union' ? union(schema.variants) : schema
     }
     case 'field': return fieldSchema(infer(expression.source), expression.path)
     case 'compare': {
@@ -300,20 +324,25 @@ export function inferWorkflowExpression(expression: WorkflowExpression, scope: R
       return { type: 'array', items: union(arrays.map(schema => schema.items)), maxItems: WORKFLOW_MAX_BATCH }
     }
     case 'group': case 'unique': {
-      const source = arraySchema(infer(expression.items), expression.kind)
+      const input = infer(expression.items)
+      const source = input.type === 'collection' ? input : arraySchema(input, expression.kind)
       const key = fieldSchema(source.items, expression.key)
-      if (source.maxItems !== 0 && scalarTypes(key) === undefined) throw new Error(copy.key)
+      if ((source.type === 'collection' || source.maxItems !== 0) && scalarTypes(key) === undefined) throw new Error(copy.key)
       return { type: 'array', maxItems: WORKFLOW_MAX_BATCH, items: { type: 'object', properties: {
         key, members: source, derivedFrom: { type: 'array', items: { type: 'number' }, maxItems: WORKFLOW_MAX_BATCH }
       }, required: ['key', 'members', 'derivedFrom'] } }
     }
     case 'filter': case 'partition': {
-      const source = arraySchema(infer(expression.items), expression.kind)
+      const input = infer(expression.items)
+      const source = input.type === 'collection' ? input : arraySchema(input, expression.kind)
+      const member = source.items
       if (scope.has(expression.item)) throw new Error(copy.binding(expression.item))
-      if (!boolean(inferWorkflowExpression(expression.when, new Map(scope).set(expression.item, source.items)))) throw new Error(copy.type(expression.kind))
-      const partition: WorkflowValueSchema = { type: 'array', maxItems: WORKFLOW_MAX_BATCH, items: { type: 'object', properties: {
-        index: { type: 'number' }, value: source.items, reason: { type: 'string' }
-      }, required: ['index', 'value', 'reason'] } }
+      if (!boolean(inferWorkflowExpression(expression.when, new Map(scope).set(expression.item, member)))) throw new Error(copy.type(expression.kind))
+      const row: WorkflowValueSchema = { type: 'object', properties: {
+        index: { type: 'number' }, value: member, reason: { type: 'string' }
+      }, required: ['index', 'value', 'reason'] }
+      const partition: WorkflowValueSchema = source.type === 'collection' ? { type: 'collection', items: collectionItemSchema(row) }
+        : { type: 'array', maxItems: WORKFLOW_MAX_BATCH, items: row }
       return { type: 'object', properties: { matched: partition, rejected: partition, unknown: partition }, required: ['matched', 'rejected', 'unknown'] }
     }
   }
