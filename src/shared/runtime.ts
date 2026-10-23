@@ -4,6 +4,8 @@ import { maskSecrets } from './trace.js'
 export type AgentDataUpdated =
   | { runId: string; kind?: 'turn_recorded' | 'session_deleted' }
   | { kind: 'conversation_changed'; conversationId: string }
+  // Background catalog recovery added sessions after the project list was already read.
+  | { kind: 'catalog_recovered' }
 
 export type RuntimeBackend = 'local' | 'api'
 export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc'

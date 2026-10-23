@@ -25,7 +25,6 @@ import { registerSourceControlIpc } from './source-control/ipc'
 import {
   deleteTranscriptCopies,
   cleanupTraceArchiveTemps,
-  discoverTraceArchiveSessionsAsync,
   mirrorTranscript,
   readTraceArchiveAsync,
   readTraceArchiveMetadataAsync,
@@ -82,6 +81,7 @@ import {
   isAgentPermissionMode,
   type AgentForkSessionResult,
   type AgentPermissionMode,
+  type AgentDataUpdated,
   type AgentInputAttachment,
   type AgentIntervention,
   type AgentQuestionRequest,
@@ -283,6 +283,7 @@ import {
   shouldUseManagedTerminalPersistence,
   traceProgressSessionRunIds
 } from './trace-turn-progress'
+import { recoverQoderCatalogSessions } from './trace-catalog-recovery'
 
 // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
 // AI_AGENT 等环境变量，会让 SDK 驱动的 claude 子进程认证错乱（误判为嵌套会话 → Not logged in）。
@@ -451,38 +452,22 @@ const resolveKnownProjectDirectory = (cwd: string): string => knownProjectDirect
 const remoteProjectRoots = (): string[] => canonicalRemoteProjectRoots(knownProjectDirectories())
 const resolveRemoteProjectDirectory = (cwd: string): string => resolveRemoteDescendant(cwd, knownProjectDirectories())
 let traceCatalogRecovery: Promise<void> | null = null
+// Runs in the background: the project list must not wait for an archive scan. The catalog is only a
+// recovery hint, so a failed recovery is logged and the next launch retries from the dirty index.
 const recoverTraceCatalogOnce = (): Promise<void> => {
   if (traceCatalogRecovery) return traceCatalogRecovery
-  traceCatalogRecovery = (async () => {
-    const store = appSessionStore()
-    const catalog = store.load()
-    const knownCwds = new Set(catalog.map((session) => session.cwd))
-    const known = new Set(catalog.flatMap((session) =>
-      session.externalSessionId
-        ? [`${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd}\0${session.externalSessionId}`]
-        : []
-    ))
-    for (const summary of await discoverTraceArchiveSessionsAsync(app.getPath('userData'))) {
-      // Recovery targets the Qoder catalog gap that loses otherwise healthy native sessions.
-      // Never resurrect archived regression evidence as new projects.
-      if (summary.providerId !== 'qoder' || !knownCwds.has(summary.cwd)) continue
-      const key = `${summary.providerId}\0\0${summary.cwd}\0${summary.sessionId}`
-      if (known.has(key)) continue
-      store.record({
-        providerId: summary.providerId,
-        runtimeProvider: summary.runtimeProvider,
-        runId: summary.runId,
-        externalSessionId: summary.sessionId,
-        cwd: summary.cwd,
-        prompt: summary.prompt
-      })
-      known.add(key)
-    }
-  })()
+  traceCatalogRecovery = recoverQoderCatalogSessions(app.getPath('userData'), appSessionStore())
+    .then((recovered) => {
+      // The renderer may already show a list read before recovery finished; ask it to reload.
+      if (recovered > 0) win?.webContents.send('agent:dataUpdated', { kind: 'catalog_recovered' } satisfies AgentDataUpdated)
+    })
+    .catch((error: unknown) => {
+      console.warn('[scry] trace catalog recovery failed:', error instanceof Error ? error.message : String(error))
+    })
   return traceCatalogRecovery
 }
 const listProjectCatalog = async (): Promise<ProjectMeta[]> => {
-  await recoverTraceCatalogOnce()
+  void recoverTraceCatalogOnce()
   const sessionProjects = appSessionStore().listProjects()
   const now = Date.now()
   const observed = new Map<string, number>()

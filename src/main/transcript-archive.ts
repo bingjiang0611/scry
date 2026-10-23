@@ -147,6 +147,8 @@ interface TraceArchiveCatalogIndexEntry {
 
 interface TraceArchiveCatalogIndex {
   version: 1
+  // Absent: the index covers every discoverable Provider. Present: only these Providers were scanned.
+  providers?: ProviderId[]
   entries: TraceArchiveCatalogIndexEntry[]
 }
 
@@ -202,6 +204,8 @@ function parseTraceArchiveCatalogIndex(userDataDir: string, allowDirty: boolean)
     if (!indexStat.isFile() || indexStat.isSymbolicLink() || indexStat.size <= 0 || indexStat.size > TRACE_INDEX_MAX_BYTES) return null
     const parsed = JSON.parse(readFileSync(indexPath, 'utf8')) as Partial<TraceArchiveCatalogIndex>
     if (parsed.version !== 1 || !Array.isArray(parsed.entries) || parsed.entries.length > TRACE_DISCOVERY_MAX_FILES) return null
+    // The synchronous caller needs every Provider; a Provider-scoped index cannot answer it.
+    if (parsed.providers !== undefined) return null
     const seen = new Set<string>()
     const entries: TraceArchiveCatalogIndexEntry[] = []
     const archiveRoot = join(userDataDir, 'trace-archive-turns-v1')
@@ -228,7 +232,10 @@ function parseTraceArchiveCatalogIndex(userDataDir: string, allowDirty: boolean)
   }
 }
 
-async function parseTraceArchiveCatalogIndexAsync(userDataDir: string): Promise<TraceArchiveCatalogIndexEntry[] | null> {
+async function parseTraceArchiveCatalogIndexAsync(
+  userDataDir: string,
+  providers?: readonly ProviderId[]
+): Promise<TraceArchiveCatalogIndexEntry[] | null> {
   const indexPath = traceArchiveCatalogIndexPath(userDataDir)
   try {
     if (existsSync(traceArchiveCatalogIndexDirtyPath(userDataDir))) return null
@@ -237,6 +244,12 @@ async function parseTraceArchiveCatalogIndexAsync(userDataDir: string): Promise<
     if (!indexStat.isFile() || indexStat.isSymbolicLink() || indexStat.size <= 0 || indexStat.size > TRACE_INDEX_MAX_BYTES) return null
     const parsed = JSON.parse(await readFile(indexPath, 'utf8')) as Partial<TraceArchiveCatalogIndex>
     if (parsed.version !== 1 || !Array.isArray(parsed.entries) || parsed.entries.length > TRACE_DISCOVERY_MAX_FILES) return null
+    const scope = parsed.providers
+    if (scope !== undefined) {
+      if (!Array.isArray(scope) || !scope.every((id) => DISCOVERABLE_PROVIDER_IDS.has(id))) return null
+      // A scoped index only answers requests inside its scope.
+      if (!providers || providers.some((id) => !scope.includes(id))) return null
+    }
     const seen = new Set<string>()
     const entries: TraceArchiveCatalogIndexEntry[] = []
     const archiveRoot = join(userDataDir, 'trace-archive-turns-v1')
@@ -250,11 +263,13 @@ async function parseTraceArchiveCatalogIndexAsync(userDataDir: string): Promise<
           !DISCOVERABLE_PROVIDER_IDS.has(entry.providerId as ProviderId) || typeof entry.runtimeProvider !== 'string' ||
           typeof entry.firstPrompt !== 'string' || typeof entry.firstTs !== 'number' || !Number.isFinite(entry.firstTs) ||
           typeof entry.latestRunId !== 'string' || !entry.latestRunId || typeof entry.latestTs !== 'number' || !Number.isFinite(entry.latestTs)) return null
+      if (scope && !scope.includes(entry.providerId as ProviderId)) return null
+      seen.add(entry.path)
+      if (providers && !providers.includes(entry.providerId as ProviderId)) continue
       const path = join(archiveRoot, entry.path)
       trustedOwnedParent(userDataDir, path, false)
       const stat = await lstat(path)
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== entry.size || stat.mtimeMs !== entry.mtimeMs) return null
-      seen.add(entry.path)
       entries.push(entry as TraceArchiveCatalogIndexEntry)
     }
     return entries
@@ -336,7 +351,8 @@ function scanTraceArchiveCatalogIndex(
 
 export async function scanTraceArchiveCatalogIndexAsync(
   userDataDir: string,
-  budget: TraceDiscoveryBudget = DEFAULT_TRACE_DISCOVERY_BUDGET
+  budget: TraceDiscoveryBudget = DEFAULT_TRACE_DISCOVERY_BUDGET,
+  providers?: readonly ProviderId[]
 ): Promise<{ entries: TraceArchiveCatalogIndexEntry[]; complete: boolean }> {
   const root = join(userDataDir, 'trace-archive-turns-v1')
   const entries: TraceArchiveCatalogIndexEntry[] = []
@@ -347,6 +363,7 @@ export async function scanTraceArchiveCatalogIndexAsync(
       if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink() ||
           !DISCOVERABLE_PROVIDER_IDS.has(providerEntry.name as ProviderId)) continue
       const providerId = providerEntry.name as ProviderId
+      if (providers && !providers.includes(providerId)) continue
       const providerDir = join(root, providerEntry.name)
       for (const cwdEntry of await readdir(providerDir, { withFileTypes: true })) {
         if (!cwdEntry.isDirectory() || cwdEntry.isSymbolicLink()) continue
@@ -451,19 +468,40 @@ export function discoverTraceArchiveSessions(userDataDir: string): TraceArchiveS
   return indexSummaries(parseTraceArchiveCatalogIndex(userDataDir, false) ?? rebuildTraceArchiveCatalogIndex(userDataDir))
 }
 
-/** Startup recovery variant: filesystem work yields between files instead of blocking Electron main. */
-export async function discoverTraceArchiveSessionsAsync(userDataDir: string): Promise<TraceArchiveSessionSummary[]> {
-  const indexed = await parseTraceArchiveCatalogIndexAsync(userDataDir)
+/**
+ * Startup recovery variant: filesystem work yields between files instead of blocking Electron main.
+ * `providers` limits the scan and the published index to those Providers.
+ */
+export async function discoverTraceArchiveSessionsAsync(
+  userDataDir: string,
+  providers?: readonly ProviderId[]
+): Promise<TraceArchiveSessionSummary[]> {
+  const indexed = await parseTraceArchiveCatalogIndexAsync(userDataDir, providers)
   if (indexed) return indexSummaries(indexed)
   const generation = traceArchiveCatalogWriteGeneration
-  const scanned = await scanTraceArchiveCatalogIndexAsync(userDataDir)
+  const scanned = await scanTraceArchiveCatalogIndexAsync(userDataDir, DEFAULT_TRACE_DISCOVERY_BUDGET, providers)
   // A write during the scan may belong to an already-enumerated directory. Keep its durable dirty
-  // marker, and publish/clear synchronously so a newer write cannot be lost between those steps.
+  // marker and do not publish.
   if (scanned.complete && generation === traceArchiveCatalogWriteGeneration) {
     try {
-      writeTraceArchiveCatalogIndex(userDataDir, scanned.entries)
-      try { unlinkSync(traceArchiveCatalogIndexDirtyPath(userDataDir)) } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const content = JSON.stringify({
+        version: 1,
+        ...(providers ? { providers: [...providers] } : {}),
+        entries: scanned.entries
+      } satisfies TraceArchiveCatalogIndex)
+      if (Buffer.byteLength(content) > TRACE_INDEX_MAX_BYTES) throw new Error('trace archive index capacity exceeded')
+      await writeOwnedFileAtomicallyAsync(userDataDir, traceArchiveCatalogIndexPath(userDataDir), content)
+      // Check the generation and clear the marker in one synchronous step. An async unlink could run
+      // after a newer write saw the existing marker and skipped writing its own.
+      if (generation === traceArchiveCatalogWriteGeneration) {
+        try { unlinkSync(traceArchiveCatalogIndexDirtyPath(userDataDir)) } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      } else {
+        // A write landed while the index was being published, so the index may miss it. If that
+        // write also failed to commit its marker, it removed the index before our rename. Remove
+        // our copy too so discovery rescans instead of trusting stale metadata.
+        try { unlinkSync(traceArchiveCatalogIndexPath(userDataDir)) } catch { /* discovery will scan */ }
       }
     } catch (error) {
       console.warn('[scry] async trace archive index rebuild failed:', (error as Error).message)

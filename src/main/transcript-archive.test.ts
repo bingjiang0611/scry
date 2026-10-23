@@ -173,6 +173,57 @@ describe('transcript archive mirror', () => {
     expect(existsSync(dirtyPath)).toBe(false)
   })
 
+  it('scopes startup discovery to requested Providers without letting a scoped index answer wider requests', async () => {
+    const userDataDir = tempRoot()
+    expect(upsertTraceArchiveTurn({ cwd: '/repo', sessionId: 'qoder-session', providerId: 'qoder', runtimeProvider: 'qoder_cli', userDataDir,
+      turn: { runId: 'qoder-run', userText: 'qoder', items: [], done: true } })).toBe(true)
+    expect(upsertTraceArchiveTurn({ cwd: '/repo', sessionId: 'codex-session', providerId: 'codex', runtimeProvider: 'codex_cli', userDataDir,
+      turn: { runId: 'codex-run', userText: 'codex', items: [], done: true } })).toBe(true)
+    const indexPath = join(userDataDir, 'trace-archive-index-v1.json')
+    const dirtyPath = join(userDataDir, 'trace-archive-index-v1.dirty')
+
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
+    expect(JSON.parse(readFileSync(indexPath, 'utf8'))).toMatchObject({ providers: ['qoder'], entries: [expect.objectContaining({ providerId: 'qoder' })] })
+    expect(existsSync(dirtyPath)).toBe(false)
+    // The scoped index answers the same scope from the index, but never a wider request.
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
+    expect(discoverTraceArchiveSessions(userDataDir).map((entry) => entry.sessionId).sort()).toEqual(['codex-session', 'qoder-session'])
+    expect(JSON.parse(readFileSync(indexPath, 'utf8')).providers).toBeUndefined()
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
+    writeFileSync(indexPath, JSON.stringify({ version: 1, providers: ['qoder'], entries: [] }))
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((entry) => entry.sessionId).sort()).toEqual(['codex-session', 'qoder-session'])
+  })
+
+  it('does not trust an index published while a new turn was written', async () => {
+    const userDataDir = tempRoot()
+    const args = { cwd: '/repo', providerId: 'qoder' as const, runtimeProvider: 'qoder_cli' as const, userDataDir }
+    expect(upsertTraceArchiveTurn({ ...args, sessionId: 'first-session',
+      turn: { runId: 'first-run', userText: 'first', items: [], done: true } })).toBe(true)
+    const stringify = JSON.stringify
+    let inserted = false
+    const spy = vi.spyOn(JSON, 'stringify').mockImplementation(function (this: unknown, ...values: Parameters<typeof JSON.stringify>) {
+      const [value] = values
+      // The scan finished unchanged; this write lands after that check and before the index is renamed.
+      if (!inserted && value && typeof value === 'object' && 'entries' in value && 'version' in value) {
+        inserted = true
+        expect(upsertTraceArchiveTurn({ ...args, sessionId: 'second-session',
+          turn: { runId: 'second-run', userText: 'second', items: [], done: true } })).toBe(true)
+      }
+      return stringify.apply(JSON, values)
+    })
+    try {
+      await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])
+    } finally {
+      spy.mockRestore()
+    }
+    expect(inserted).toBe(true)
+    expect(existsSync(join(userDataDir, 'trace-archive-index-v1.dirty'))).toBe(true)
+    expect(existsSync(join(userDataDir, 'trace-archive-index-v1.json'))).toBe(false)
+    expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId).sort())
+      .toEqual(['first-session', 'second-session'])
+    expect(existsSync(join(userDataDir, 'trace-archive-index-v1.dirty'))).toBe(false)
+  })
+
   it('原子增量索引损坏或 segment 身份变化时从 canonical 文件重建', () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
