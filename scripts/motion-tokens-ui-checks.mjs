@@ -87,12 +87,27 @@ export async function exerciseMotionTokens(contents) {
     })()`)
     check(reduced.reduced && reduced.group === 'working', `reduced-motion reorder did not commit: ${JSON.stringify(reduced)}`)
     check(reduced.layoutAnimations === 0, `reduced-motion reorder still animates transforms: ${JSON.stringify(reduced)}`)
-    check(
-      reduced.transitionProperty.split(',').map(value => value.trim()).some(value => ['color', 'background-color', 'border-color'].includes(value)) &&
-      reduced.transitionDuration.split(',').every(value => value.trim() === '0.12s') &&
-      reduced.transitionTimingFunction.split(',').some(value => value.trim() === 'linear'),
-      `reduced-motion colors are not 120ms linear: ${JSON.stringify(reduced)}`
-    )
+    const colorChanges = await read(`(() => {
+      const selectors = ['#motion-instant', '#motion-none', '#motion-sidebar .sb-sess-row', '#motion-sidebar .sb-sesstext', '#motion-micro']
+      return selectors.map(selector => {
+        const node = document.querySelector(selector)
+        getComputedStyle(node).backgroundColor
+        node.style.backgroundColor = 'rgb(20, 40, 60)'
+        getComputedStyle(node).backgroundColor
+        return { selector, animations: node.getAnimations().map(animation => ({
+          property: animation.transitionProperty,
+          duration: animation.effect.getTiming().duration,
+          easing: animation.effect.getTiming().easing
+        })) }
+      })
+    })()`)
+    for (const entry of colorChanges.slice(0, -1)) {
+      check(entry.animations.length === 0, `reduced motion added an undeclared color transition: ${JSON.stringify(entry)}`)
+    }
+    const micro = colorChanges.at(-1)
+    check(micro.animations.length === 1 && micro.animations[0].property === 'background-color' &&
+      micro.animations[0].duration > 0 && micro.animations[0].duration <= 100 && micro.animations[0].easing === 'linear',
+    `the declared micro color transition changed: ${JSON.stringify(micro)}`)
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] }).catch(() => {})
     contents.debugger.detach()
@@ -104,7 +119,8 @@ export async function exerciseMotionTokens(contents) {
     hoverStates: ['tool-card', 'composer-send', 'sidebar-activity', 'analysis'],
     focusStates: true,
     reducedMotionReorder: true,
-    reducedMotionColorTransition: '120ms linear',
+    reducedMotionColorTransition: 'declared duration, at most 100ms linear',
+    noUndeclaredColorTransitions: true,
     reducedMotionTransformAnimation: false
   }
 }

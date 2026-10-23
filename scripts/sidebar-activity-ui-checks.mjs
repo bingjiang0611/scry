@@ -171,9 +171,18 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     await wait(`matchMedia('(prefers-reduced-motion: reduce)').matches`)
     await read(`window.activityFixture.setPhase('working')`)
     await wait(`${group} === 'working'`)
-    const reducedState = await read(`({ reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, layout: ${layoutAnimations}.length, title: ${titleAnimations}.map(animation => ({ name: animation.animationName, property: animation.transitionProperty })), transition: getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).transitionProperty, fill: getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor })`)
-    // Reduced motion now preserves color/opacity feedback, but never spatial motion or the sweep.
-    check(reducedState.reduced && reducedState.layout === 0 && reducedState.title.length === 0 && reducedState.transition === 'opacity, color, background-color, border-color' && reducedState.fill !== 'rgba(0, 0, 0, 0)', `Reduced-motion still moves/hides the working title or loses visual feedback: ${JSON.stringify(reducedState)}`)
+    const reducedState = await read(`(() => {
+      const title = window.activityRow.querySelector('.sb-sesstext')
+      getComputedStyle(title).backgroundColor
+      title.style.backgroundColor = 'rgb(20, 40, 60)'
+      getComputedStyle(title).backgroundColor
+      const result = { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, layout: ${layoutAnimations}.length,
+        title: ${titleAnimations}.map(animation => ({ name: animation.animationName, property: animation.transitionProperty })),
+        colorAnimations: title.getAnimations().length, fill: getComputedStyle(title).webkitTextFillColor }
+      title.style.backgroundColor = ''
+      return result
+    })()`)
+    check(reducedState.reduced && reducedState.layout === 0 && reducedState.title.length === 0 && reducedState.colorAnimations === 0 && reducedState.fill !== 'rgba(0, 0, 0, 0)', `Reduced-motion moves/hides the title or adds an undeclared transition: ${JSON.stringify(reducedState)}`)
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'active' }] })
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     await wait(`matchMedia('(forced-colors: active)').matches`)

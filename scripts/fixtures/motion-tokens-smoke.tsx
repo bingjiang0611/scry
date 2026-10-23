@@ -54,6 +54,9 @@ function Fixture() {
       <OverviewPanel turns={turns} selected={null} usage={null} stats={null} onSelect={() => {}} />
     </section>
     <section id="motion-composer"><ComposerProjectFixture /></section>
+    <div id="motion-instant" />
+    <div id="motion-none" style={{ transition: 'none' }} />
+    <button id="motion-micro" className="btn" type="button" />
   </main>
 }
 
