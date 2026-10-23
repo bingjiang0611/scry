@@ -17,7 +17,7 @@
 | 8 | transcript 观察者 / App 重渲染 | D | `perf/d-renderer-transcript` | 已核验（D1）/ 放弃（D2，附证据） | [D](https://github.com/bingjiang0611/scry/blob/perf/d-renderer-transcript/docs/handoff/perf-2026-10-22/reports/D.md) | 1000 轮时 IO 1000→1、输入 30 字的检查 30000→120；App 拆分数据不支持 |
 | 6b | 远程 trace 增量协议 | E | `perf/e-remote-delta` | 可开始 | | 已从本分支 A3 之后切出 |
 | 7 | iOS store 观察粒度 | F | `perf/f-ios-observable` | 已核验 | [F](https://github.com/bingjiang0611/scry/blob/perf/f-ios-observable/docs/handoff/perf-2026-10-22/reports/F.md) | 真机 RootView body 601→0、输出完整；selfTest/UI 无新增失败；L2 提速未证实（不再要求） |
-| 7b | iOS 流式输出主线程跟不上 | F2 | 未建 | 未开始（待立项） | | 600 段按 33 ms 调度应约 20 s，真机实测 52–56 s，FPS≈26；推测单个变长 row 每次追加都全文重排版（O(n²)），需 Time Profiler 确认 |
+| 7b | iOS 流式输出主线程跟不上 | F2 | `perf/f2-ios-stream-layout` | 进行中 | | 600 段按 33 ms 调度应约 20 s，真机实测 52–56 s，FPS≈26；推测单个变长 row 每次追加都全文重排版（O(n²)），需 Time Profiler 确认 |
 
 ## 本轮发现的既有问题（不属于任何批次，需另行处理）
 
