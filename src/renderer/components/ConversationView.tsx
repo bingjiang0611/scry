@@ -6,6 +6,7 @@ import { CONVERSATION_COPY } from '../constants/copy'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
 import type { Turn } from '../format'
+import { runStructuralTransition } from '../structural-motion'
 import { SessionChatView } from './ChatView'
 import { ConversationDeleteDialog } from './ConversationDeleteDialog'
 import { SessionRenameDialog } from './SessionRename'
@@ -63,8 +64,9 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       ? (await window.scry.activeRuns()).find(candidate => candidate.runId === next.summary.activeRunId)
       : undefined
     if (!mounted.current || generation !== refreshGeneration.current) return
-    setPage(next)
-    setLive(run)
+    const commit = (): void => { setPage(next); setLive(run) }
+    if (!initialized.current && next.turns.some(turn => turn.history)) runStructuralTransition('session', commit)
+    else commit()
     if (lastRevision.current !== next.summary.revision) {
       lastRevision.current = next.summary.revision
       changedRef.current()

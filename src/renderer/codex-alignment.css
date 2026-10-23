@@ -1605,19 +1605,19 @@ select:focus-visible,
   position: relative;
 }
 
-.app.pinned-summary-persistent .main-area > .chat-body {
+.app.pinned-summary-persistent :is(.main-area, .main-content) > .chat-body {
   width: 100%;
   padding-right: 326px;
   background: transparent;
 }
 
-.app.pinned-summary-persistent .main-area > .runtime-composer {
+.app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer {
   width: 100%;
   max-width: none;
   padding-right: calc(326px + var(--evidence-gutter));
 }
 
-.app.pinned-summary-persistent .main-area > .runtime-composer > .composer-shell {
+.app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer > .composer-shell {
   width: 100%;
   max-width: var(--evidence-content);
   margin-inline: auto;
@@ -1842,11 +1842,11 @@ button.pinned-summary-detail-row:hover {
 }
 
 @container main-pane (max-width: 760px) {
-  .app.pinned-summary-persistent .main-area > .chat-body {
+  .app.pinned-summary-persistent :is(.main-area, .main-content) > .chat-body {
     padding-right: 310px;
   }
 
-  .app.pinned-summary-persistent .main-area > .runtime-composer {
+  .app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer {
     padding-right: calc(310px + var(--evidence-gutter));
   }
 

@@ -7,6 +7,7 @@ import { providerIdForAgentId, runtimeProviderForAgentId } from '@shared/runtime
 import type { AgentInputAttachment, AgentModelRef, AgentPermissionMode, AgentQuestionResponse, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import { createPortal } from 'react-dom'
+import { runStructuralTransition } from '../structural-motion'
 import { RightSurfacePanel } from './RightSurfacePanel'
 import { OverviewPanel } from './OverviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './WorkspacePanel'
@@ -217,6 +218,7 @@ export function RemoteChat({
   const provider = catalog?.providers.find((item) => desktopProviderKey(item) === providerSelection)
   const providerId = provider?.id ?? ''
   const context = useMemo<DesktopRemoteContext>(() => ({ cwd, providerId, ...(provider?.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}), ...(sessionId ? { externalSessionId: sessionId } : {}) }), [cwd, provider?.agentProfileId, providerId, sessionId])
+  const presentedHistoryContext = useRef<DesktopRemoteContext | null>(null)
   const controlContextKey = JSON.stringify([cwd, providerSelection])
   const contextKey = JSON.stringify([providerSelection, sessionId ?? ''])
   const catalogSession = sessionId ? catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
@@ -370,8 +372,14 @@ export function RemoteChat({
     setHistoryLoading(true)
     void api.history(connectionId, context).then((history) => {
       if (sequence !== generation.current) return
-      setTurns(historyTurns(history))
-      setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
+      const parsed = historyTurns(history)
+      const commit = (): void => {
+        setTurns(parsed)
+        setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
+        presentedHistoryContext.current = context
+      }
+      if (presentedHistoryContext.current !== context && parsed.length > 0) runStructuralTransition('session', commit)
+      else commit()
     }).catch((reason) => { if (sequence === generation.current) setHistoryError(errorText(reason)) })
       .finally(() => { if (sequence === generation.current) setHistoryLoading(false) })
     return () => { generation.current += 1 }

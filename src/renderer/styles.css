@@ -242,6 +242,38 @@ body {
   background: var(--main-surface);
 }
 
+/* Explicit shell slots stay put while an outgoing pane is a fixed decorative layer. */
+.app-shell > .sidebar { grid-column: 1; grid-row: 1; }
+.app-shell > .sidebar-resizer { grid-column: 2; grid-row: 1; }
+.app-shell > .main-area { grid-column: 3; grid-row: 1; }
+.app-shell > .panel-resizer { grid-column: 4; grid-row: 1; }
+.app-shell > .right-panel-slot { grid-column: 5; grid-row: 1; }
+.main-area.has-main-content {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.main-content {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.main-content > .body { grid-row: 1; }
+.main-content > .composer { grid-row: 2; }
+.main-content--single { grid-template-rows: minmax(0, 1fr); }
+/* Outgoing panes are decorative only; the motion helper also marks them inert. */
+[data-pane-leaving] {
+  display: flex !important;
+  position: fixed !important;
+  left: var(--leaving-left) !important;
+  top: var(--leaving-top) !important;
+  width: var(--leaving-width) !important;
+  height: var(--leaving-height) !important;
+  pointer-events: none !important;
+  overflow: hidden;
+  z-index: 20;
+}
+
 /* 左侧会话栏：brand+ver / 新建会话+kbd / search / 主导航 / 最近分组 */
 .sidebar {
   width: 100%;
@@ -11677,8 +11709,8 @@ button.turn-id.turn-call-open:focus-visible {
   -webkit-app-region: drag;
 }
 
-:root[data-platform='macos'] .main-area > .aux-view-topbar + .usage-page {
-  grid-row: 2;
+:root[data-platform='macos'] .main-area > .aux-view-topbar + .main-content > .usage-page {
+  grid-row: 1;
 }
 
 :root[data-platform='macos'] .topbar {

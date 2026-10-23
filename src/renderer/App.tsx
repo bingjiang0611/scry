@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentProps, CSSProperties, Dispatch, SetStateAction } from 'react'
-import { flushSync } from 'react-dom'
+import { runStructuralTransition } from './structural-motion'
+import { animatePaneChange, cancelPaneMotion } from './pane-motion'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
 import type { ActiveRun, SlashCmd, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import {
@@ -923,6 +924,12 @@ export function App() {
       loadProjects()
     }
   })
+  const replacePresentedSession = useCallback((...args: Parameters<typeof session.replaceWithParsedSession>): void => {
+    const [, parsed, options] = args
+    if (parsed.length > 0 || options?.activeRun?.items.length) {
+      runStructuralTransition('session', () => session.replaceWithParsedSession(...args))
+    } else session.replaceWithParsedSession(...args)
+  }, [session.replaceWithParsedSession])
   const steerEvidenceByMessageId = useMemo(
     () => latestSteerEvidenceForTurns(session.turns),
     [session.turns]
@@ -1010,8 +1017,12 @@ export function App() {
   const [remoteSurfaceTarget, setRemoteSurfaceTarget] = useState<HTMLDivElement | null>(null)
   const remotePanelVisible = view === 'remote' && remoteSurface.visible && !surfacePane.collapsed
   const dispatchRemoteSurface = (action: RightSurfaceAction): void => {
-    if (action.type === 'open' || action.type === 'show') surfacePane.restore()
-    remoteSurfaces.dispatch(action)
+    const commit = (): void => {
+      if (action.type === 'open' || action.type === 'show') surfacePane.restore()
+      remoteSurfaces.dispatch(action)
+    }
+    if (action.type === 'activate') commit()
+    else animatePaneChange(commit)
   }
   const desktopConnections = useDesktopConnections()
   useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error)
@@ -1180,7 +1191,7 @@ export function App() {
                 setView('chat')
               },
               loadSession: (context) => window.scry.loadSession(context),
-              replaceWithParsedSession: session.replaceWithParsedSession,
+              replaceWithParsedSession: replacePresentedSession,
               isCurrent
             }).catch((error) => {
               if (isCurrent()) setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
@@ -1293,7 +1304,7 @@ export function App() {
     markRunStarted,
     selectSessionId,
     session.prepareRunFocus,
-    session.replaceWithParsedSession,
+    replacePresentedSession,
     setCwd
   ])
 
@@ -1712,7 +1723,7 @@ export function App() {
     const pendingDraftKey = sessionComposerDraftKey({ ...draftContextRef.current, sessionId: null })
     // Reopen this workspace's unsent draft without discarding text or attachments.
     // Queued send intents are still reset below; restoring a draft never sends it.
-    flushSync(() => {
+    runStructuralTransition('session', () => {
       setSessionLoading(true)
       setSessionEvidenceGap(null)
       selectSessionId(null)
@@ -1806,7 +1817,7 @@ export function App() {
     setSessionLoading(switchingSession || session.turns.length === 0)
     setSessionCacheVisible(Boolean(cachedPage?.turns.length))
     if (switchingSession) {
-      if (cachedPage) session.replaceWithParsedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
+      if (cachedPage) replacePresentedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
       else session.clearTurns()
     }
     resetPromptQueueControl()
@@ -1837,7 +1848,7 @@ export function App() {
             prepareRunFocus: session.prepareRunFocus,
             adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
             loadSession: (context) => window.scry.loadSession(context),
-            replaceWithParsedSession: session.replaceWithParsedSession,
+            replaceWithParsedSession: replacePresentedSession,
             onHistoryLoaded: (page, activeRun) => {
               if (!isCurrent()) return
               setSessionCacheVisible(false)
@@ -1869,7 +1880,7 @@ export function App() {
       // Confirm only an unchanged display-only installation. A focus/start/clear
       // supersedes it and must use the normal authoritative replacement.
       const cacheConfirmed = page != null && page === cachedPage && session.confirmCachedSession(sessionId, page)
-      if (!cacheConfirmed) session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
+      if (!cacheConfirmed) replacePresentedSession(sessionId, page?.turns ?? [], {
         activeRun: null,
         page
       })
@@ -1989,9 +2000,12 @@ export function App() {
     if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => {})
   }
   const changeTheme = (nextTheme: AppTheme): void => {
-    setTheme(nextTheme)
-    applyTheme(nextTheme, document.documentElement)
-    persistTheme(nextTheme, browserThemeStorage())
+    cancelPaneMotion()
+    runStructuralTransition('theme', () => {
+      setTheme(nextTheme)
+      applyTheme(nextTheme, document.documentElement)
+      persistTheme(nextTheme, browserThemeStorage())
+    })
   }
 
   const appStyle: AppStyle = {
@@ -2028,17 +2042,20 @@ export function App() {
   )
   const toggleOverviewPanel = (): void => {
     if (view !== 'chat' && view !== 'conversation') return
-    if (!rightSurface.visible || surfacePane.collapsed) {
-      surfacePane.restore()
-      dispatchRightSurface({ type: 'show' })
-      return
-    }
-    dispatchRightSurface({ type: 'hide' })
+    animatePaneChange(() => {
+      if (!rightSurface.visible || surfacePane.collapsed) {
+        surfacePane.restore()
+        dispatchRightSurface({ type: 'show' })
+        return
+      }
+      dispatchRightSurface({ type: 'hide' })
+    })
   }
   const changeView = (next: AppView): boolean => {
     if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return false
     setRemoteWorkspaceDirty(false)
-    setView(next)
+    cancelPaneMotion()
+    runStructuralTransition('page', () => setView(next))
     if (next === 'analytics') integrations.loadAnalytics()
     return true
   }
@@ -2204,9 +2221,11 @@ export function App() {
   }
   const openTurnDiffReview = useCallback(
     (turn: { runId: string; userText: string }, _turnDiff: TurnDiffSnapshot, initialPath?: string): void => {
-      surfacePane.restore()
-      setTurnDiffSelection({ runId: turn.runId, ...(initialPath ? { initialPath } : {}) })
-      dispatchRightSurface({ type: 'open', kind: 'diff' })
+      animatePaneChange(() => {
+        surfacePane.restore()
+        setTurnDiffSelection({ runId: turn.runId, ...(initialPath ? { initialPath } : {}) })
+        dispatchRightSurface({ type: 'open', kind: 'diff' })
+      })
     },
     [surfacePane.restore, dispatchRightSurface, setTurnDiffSelection]
   )
@@ -2235,9 +2254,11 @@ export function App() {
       const turns = sessionTurnsRef.current
       const review = sessionNetDiffReview(turns, path) ?? resolveTurnDiffReview(turns, path)
       if (!review) return
-      surfacePane.restore()
-      setTurnDiffSelection({ session: true, ...(path ? { initialPath: path } : {}) })
-      dispatchRightSurface({ type: 'open', kind: 'diff' })
+      animatePaneChange(() => {
+        surfacePane.restore()
+        setTurnDiffSelection({ session: true, ...(path ? { initialPath: path } : {}) })
+        dispatchRightSurface({ type: 'open', kind: 'diff' })
+      })
     },
     [surfacePane.restore, dispatchRightSurface, setTurnDiffSelection]
   )
@@ -2246,8 +2267,12 @@ export function App() {
       if (!confirmWorkspaceTransition()) return
       setWorkspaceDirty(false)
     }
-    if (action.type === 'close' && action.kind === 'diff') setTurnDiffSelection(null)
-    dispatchRightSurface(action)
+    const commit = (): void => {
+      if (action.type === 'close' && action.kind === 'diff') setTurnDiffSelection(null)
+      dispatchRightSurface(action)
+    }
+    if (action.type === 'activate') commit()
+    else animatePaneChange(commit)
   }, [confirmWorkspaceTransition, dispatchRightSurface, setWorkspaceDirty, setTurnDiffSelection])
   useEffect(() => {
     if (!diffReview || rightSurface.activeId !== 'diff' || !panelVisible) return
@@ -2631,7 +2656,7 @@ export function App() {
           onPointerDown={sidebarPane.startResize}
           onKeyDown={sidebarPane.onKeyDown}
       />
-      <div className="main-area" id="main-pane">
+      <div className="main-area has-main-content" id="main-pane">
         <>
         {view !== 'chat' && view !== 'conversation' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
         {view === 'conversation' ? (
@@ -2639,7 +2664,9 @@ export function App() {
             {conversationError && <p role="alert">{conversationError}</p>}
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={pinnedSummary.toggle} onTogglePanel={toggleOverviewPanel} />
-              <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />
+              <div className="main-content main-content--single">
+                <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />
+              </div>
             </>
               : !conversationError && <p role="status">正在打开对话…</p>}
           </>
@@ -2672,9 +2699,10 @@ export function App() {
                 surface={{ target: remoteSurfaceTarget, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }}
               />
             </div>
-            {view === 'meta-prompts' && <MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} />}
+            {view === 'meta-prompts' && <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div>}
           </>
         ) : view === 'analytics' ? (
+          <div className="main-content main-content--single">
           <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView
               analytics={integrations.analytics}
@@ -2686,8 +2714,9 @@ export function App() {
               onBack={() => changeView('chat')}
             />
           </Suspense>
+          </div>
         ) : view === 'meta-prompts' ? (
-          <MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} />
+          <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div>
         ) : (
           <>
             <ViewChrome
@@ -2698,7 +2727,7 @@ export function App() {
               onTogglePanel={toggleOverviewPanel}
             />
 
-            <SessionChatView {...chatProps} />
+            <div className="main-content"><SessionChatView {...chatProps} /></div>
           </>
         )}
         <PinnedSummaryHost
@@ -2911,13 +2940,15 @@ function RemoteView({
           state: connection ? hostState(connection, connections.error) : 'unknown'
         }}
       />
-      <RemoteChat
-        key={target.generation}
-        connectionId={target.connectionId}
-        cwd={target.cwd}
-        session={target.session}
-        {...chat}
-      />
+      <div className="main-content">
+        <RemoteChat
+          key={target.generation}
+          connectionId={target.connectionId}
+          cwd={target.cwd}
+          session={target.session}
+          {...chat}
+        />
+      </div>
     </>
   )
 }
