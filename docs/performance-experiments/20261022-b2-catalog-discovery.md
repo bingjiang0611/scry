@@ -2,7 +2,7 @@
 
 - 路径：冷启动 → renderer 调 `agent:listProjects` → `listProjectCatalog` → `await recoverTraceCatalogOnce()` → `discoverTraceArchiveSessionsAsync`。
 - 来源：`docs/handoff/perf-2026-10-22/review.md` #3，静态审查，未测量。
-- 基线源码：`d0a4490`（B1 之后，B2 改动之前）。
+- 基线源码：`582c812`（B1 之后，B2 改动之前）。
 
 ## L1 采集器
 
@@ -12,7 +12,7 @@
 npx vitest run src/main/trace-catalog-discovery.measurement.test.ts
 ```
 
-### 基线（`d0a4490`）
+### 基线（`582c812`）
 
 | 指标 | 值 |
 |---|---|
@@ -41,4 +41,31 @@ npx vitest run src/main/trace-catalog-discovery.measurement.test.ts
 
 ### 最终自审：移除剩下的同步 catalog 实现
 
-`discoverTraceArchiveSessions` 已无生产调用方；仅 session 删除调用同步 rebuild。删除已先标 dirty，没有必要同步重建提示索引。因此删除不再 rebuild，只保留 dirty，下一次发现走唯一异步实现。同步 parse/scan/write/rebuild 与测试专用 export 一并删除（约 140 行）。原 catalog 损坏/身份变化测试改用生产异步 API，断言不变；删除测试新增断言：索引内容不变、dirty 保留、下一次发现不返回已删会话。此断言在 `fc51e3e` 上失败。
+`discoverTraceArchiveSessions` 已无生产调用方；仅 session 删除调用同步 rebuild。删除已先标 dirty，没有必要同步重建提示索引。因此删除不再 rebuild，只保留 dirty，下一次发现走唯一异步实现。同步 parse/scan/write/rebuild 与测试专用 export 一并删除（约 140 行）。原 catalog 损坏/身份变化测试改用生产异步 API，断言不变；删除测试新增断言：索引内容不变、dirty 保留、下一次发现不返回已删会话。此断言在 `541d076` 上失败。
+
+## 结果（L1）
+
+同一 fixture（200 个 per-turn 文件，Qoder 40 个，dirty 索引），采集器 `97aaf4d` 起含两个场景：
+
+| 指标 | 基线：启动调用（全 Provider，首屏前 await） | 优化后：启动调用（只 Qoder，后台） |
+|---|---|---|
+| per-turn 文件读取 | 200 | 40 |
+| 读取字节 | 91,320 | 18,200 |
+| `JSON.parse` | 200 | 40 |
+| 索引发布 | 同步 1 | 异步 1 |
+| 首次 `listProjects` 返回前 await 的发现工作 | 上述全部 | 0 |
+
+最后一行来自代码结构（`listProjectCatalog` 改为 `void recoverTraceCatalogOnce()`），不是计数器读数。未全 Provider 的 160 个文件不再读取；Qoder 的 40 个仍读取，但移到首屏之后。另外，session 删除不再同步重扫并重写全 Provider 索引（`87fc287`），工作推迟到下一次后台发现。
+
+没有 L2 毫秒数据：本次未构造大 userData 的冷启动计时，不宣称用户可感知的启动提速。
+
+## 回归
+
+- `scopes startup discovery to requested Providers without letting a scoped index answer wider requests`：限定索引只回答同一范围；全 Provider 请求不信任限定索引，会重扫。让未限定请求接受限定索引时此例失败。
+- `does not trust an index published while a new turn was written`：发布索引期间有新写入时保留 dirty、删除新索引，下次发现包含新会话。把发布后的 generation 复核改成恒真时此例失败。
+- `keeps the catalog dirty when a new session is written during async discovery`（既有）：扫描中并发写入不丢。
+- `session deletion leaves the catalog dirty for the next discovery instead of rebuilding it`：在 `541d076` 上失败（删除仍同步重建）。
+- `Qoder catalog recovery > adds only archived Qoder sessions of known workspaces, once`：未知 cwd 的归档与其他 Provider 不进入 catalog，重复恢复为 0。
+- renderer：`shouldReloadProjectsForDataUpdate({ kind: 'catalog_recovered' })` 为 true。
+
+B.md 列出的“增量损坏 → 回退全扫”针对方案 1；本批未实现增量文件，所以没有该回归。损坏索引回退全扫由既有 `原子增量索引损坏或 segment 身份变化时从 canonical 文件重建` 覆盖（已改为异步 API）。

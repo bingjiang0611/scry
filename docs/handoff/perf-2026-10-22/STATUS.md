@@ -11,8 +11,8 @@
 | 1 | 发送时同步全系统 `ps` | A1 | `perf/handoff` | 已核验 | [A](reports/A.md) | 单 PID 异步采集（720 行全表→1 行）；`e5b9236` 恢复未回收子进程的句柄回退，stop 在身份不可用时仍有效 |
 | 2 | store 同步读写/重复写 | A2 | `perf/handoff` | 已核验 | [A](reports/A.md) | 读次数 6→2，写/fsync 仅 exact no-op 时减少；fsync 与 `.bak` 保留 |
 | 6a | 后台不暂停的轮询 | A3 | `perf/handoff` | 已核验 | [A](reports/A.md) | 隐藏 60 s 四类轮询 0 次；恢复可见先撤回旧确认再刷新 |
-| 4 | 提交时同步重复读归档 | B1 | `perf/handoff` | 进行中 | | |
-| 3 | 启动全量归档扫描 | B2 | `perf/handoff` | 进行中 | | |
+| 4 | 提交时同步重复读归档 | B1 | `perf/handoff` | 待核验 | [B](reports/B.md) | 提交时同步 read+lstat 4→0；disabled 读 2→1；managed 锁内读取为避免 TOCTOU 保留；L1 |
+| 3 | 启动全量归档扫描 | B2 | `perf/handoff` | 待核验 | [B](reports/B.md) | 首屏前 await 的发现工作→0；后台只扫 Qoder（200→40 文件）；索引异步发布；删除不再同步重建；L1，无 L2 |
 | 5 | 工作区 diff 只读路径 | C | `perf/c-git-readonly` | 已核验 | [C](https://github.com/bingjiang0611/scry/blob/perf/c-git-readonly/docs/handoff/perf-2026-10-22/reports/C.md) | 对象写入 4→0，受控 p50 约 −20%；spawn 8→8 未减；无法等价的场景显式 unavailable；跟进 `5daa809` 加 O_NOFOLLOW，已核验 |
 | 8 | transcript 观察者 / App 重渲染 | D | `perf/d-renderer-transcript` | 已核验（D1）/ 放弃（D2，附证据） | [D](https://github.com/bingjiang0611/scry/blob/perf/d-renderer-transcript/docs/handoff/perf-2026-10-22/reports/D.md) | 1000 轮时 IO 1000→1、输入 30 字的检查 30000→120；App 拆分数据不支持 |
 | 6b | 远程 trace 增量协议 | E | `perf/e-remote-delta` | 可开始 | | 已从本分支 A3 之后切出 |
