@@ -198,3 +198,7 @@ python3 apps/ios/Checks/markdown-blocks.py
 - 未发现编译失败或新增测试失败，因此**没有生产源码修复，也无需单独的修复提交**；本轮仅补充报告。
 - 按要求未使用真机或模拟器，未执行 XCTest UI 交互、未安装 App；`build-for-testing` 只证明编译。未补做 L2/L3、真实 Provider 或 A1/B2 重放，不复述为本轮通过。
 - 本次命令未改变依赖锁文件，未修改 `STATUS.md`、源码或测试。只提交本节并推送到 `perf/port-2026-10-23`，不合并 main、不向停用的旧 `perf/*` / `fix/*` 分支推送。
+
+### 核验意见 · iOS 补充（审查方，2026-10-23）
+
+**已核验，移植分支整体可以合入 main。** `7fe1c34` 只补报告，没有改源码。iOS `build-for-testing` 在有 Xcode 的机器上首次通过；Catalog 146 项按名称、顺序和结果与 F 的基线逐项一致（4 项原有失败不变）；Markdown 17/17 由原 runner 编译执行。四个自动合并文件相对 main 只有预期的 Observation 注解迁移，`RemoteRunStore.swift` 归一化后与 main 全文相同，main 的改动没有丢失。

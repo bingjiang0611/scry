@@ -64,4 +64,5 @@ main 已在 10-23 重写历史（清除内部邮箱、内部引用和 designs/�
 ### 移植分支 gate（2026-10-23）
 
 - 桌面端 **已核验**：7 个 gate 通过；首次唯一失败是合并后 IPC 方法数断言过期（28→29），已在 `815c0e8` 单独修复。详见 [reports/port.md](reports/port.md)。
-- iOS **待完成**：C 会话所在机器没有 Xcode，`xcodebuild build-for-testing` 未运行；`catalog-refresh.py` 被本机执行策略 SIGKILL，无法与 142/146 基线比较。需在有 Xcode 的机器上补跑后再合入 main。
+- iOS **已核验**：在 Xcode 机器上 `build-for-testing` 通过；Catalog 146 项与基线逐项一致；Markdown 17/17（`7fe1c34`）。
+- **结论：`perf/port-2026-10-23` 可以合入 main**（main 是其祖先，可 fast-forward）。合入、删除旧分支、安装由维护者决定。
