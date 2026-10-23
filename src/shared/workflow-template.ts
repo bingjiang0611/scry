@@ -2,7 +2,7 @@ import type { WorkflowSequenceBlock, WorkflowRoleBinding, WorkflowValue, Workflo
 
 export const WORKFLOW_TEMPLATE_MAX_BYTES = 4 * 1024 * 1024
 
-export type WorkflowTemplateScope = { kind: 'personal' } | { kind: 'project'; workspace: string }
+export type WorkflowTemplateScope = { kind: 'builtin' } | { kind: 'personal' } | { kind: 'project'; workspace: string }
 export type WorkflowTemplateRef = {
   scope: WorkflowTemplateScope
   domainId: string
@@ -40,6 +40,15 @@ export interface WorkflowTemplateInstantiation {
   orchestrator: WorkflowRoleBinding
   roles: WorkflowRoleBinding[]
 }
+export interface WorkflowTemplateExtraction {
+  workflowId: string
+  programRevision: string
+  scope: Exclude<WorkflowTemplateScope, { kind: 'builtin' }>
+  name: string
+  description: string
+  /** Only explicit top-level literal binds can become parameters. */
+  parameters: Record<string, { schema: WorkflowValueSchema; default: 'include' | 'omit' }>
+}
 export type WorkflowTemplateSnapshot = {
   ref: WorkflowTemplateRef
   source: string
@@ -65,7 +74,14 @@ export type WorkflowTemplateDeletion =
   | { state: 'deleted'; ref: WorkflowTemplateRef; verification: 'unlink' | 'reconciled_absence' }
   | Exclude<WorkflowTemplatePublication, { state: 'published' }>
 
+export type WorkflowTemplateDraftSummary = Pick<WorkflowTemplateDraft, 'draftId' | 'draftRevision' | 'templateId' | 'scope' | 'candidateHash' | 'validation'> & { name?: string }
+export type WorkflowTemplateSummary = { ref: WorkflowTemplateRef } & (
+  | { state: 'valid'; name: string; description: string }
+  | { state: 'invalid'; error: string }
+)
 export interface WorkflowTemplateApi {
+  drafts(scope: WorkflowTemplateScope, cursor?: string): Promise<{ drafts: WorkflowTemplateDraftSummary[]; nextCursor?: string }>
+  catalog(scope: WorkflowTemplateScope, cursor?: string): Promise<{ templates: WorkflowTemplateSummary[]; nextCursor?: string }>
   /** Retained observations/candidates, not a claim that each revision was published. */
   history(scope: WorkflowTemplateScope, templateId: string, cursor?: string): Promise<{ revisions: WorkflowTemplateRef[]; nextCursor?: string }>
   revision(ref: WorkflowTemplateRef): Promise<WorkflowTemplateSnapshot | null>

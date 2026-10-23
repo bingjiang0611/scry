@@ -4,7 +4,8 @@ import type { WorkflowApi } from '../../src/shared/workflow-api'
  * mutations explicitly rather than adding an optional production preload path. */
 const unavailable = async (): Promise<never> => { throw new Error('Workflow execution is disabled in this fixture') }
 export const emptyWorkflowBridge: WorkflowApi = {
-  templates: { history: async () => ({ revisions: [] }), revision: async () => null, restoreDraft: unavailable, delete: unavailable, read: async () => null, list: async () => ({ templateIds: [] }), saveDraft: unavailable, draft: unavailable, publish: unavailable },
+  templates: { drafts: async () => ({ drafts: [] }), catalog: async () => ({ templates: [] }), history: async () => ({ revisions: [] }), revision: async () => null, restoreDraft: unavailable, delete: unavailable, read: async () => null, list: async () => ({ templateIds: [] }), saveDraft: unavailable, draft: unavailable, publish: unavailable },
+  extractTemplate: unavailable,
   instantiateTemplate: unavailable,
   plan: unavailable,
   preview: unavailable,

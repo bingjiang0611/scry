@@ -1,4 +1,4 @@
-import type { WorkflowTemplateApi, WorkflowTemplateInstantiation } from './workflow-template'
+import type { WorkflowTemplateApi, WorkflowTemplateInstantiation, WorkflowTemplateExtraction, WorkflowTemplateDraft } from './workflow-template'
 import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowProgressPage, WorkflowRoleBinding } from './workflow.js'
 
 export type WorkflowResumeResult =
@@ -7,6 +7,7 @@ export type WorkflowResumeResult =
 
 export interface WorkflowApi {
   templates: WorkflowTemplateApi
+  extractTemplate(request: WorkflowTemplateExtraction): Promise<WorkflowTemplateDraft>
   instantiateTemplate(request: WorkflowTemplateInstantiation): Promise<WorkflowPlanPreview>
   plan(request: { command: string; cwd: string; commandId?: string; orchestrator: WorkflowRoleBinding; roles: WorkflowRoleBinding[] }): Promise<WorkflowPlanPreview>
   preview(workflowId: string): Promise<WorkflowPlanPreview>

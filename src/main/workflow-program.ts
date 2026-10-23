@@ -86,29 +86,33 @@ function validateRole(value: unknown): asserts value is WorkflowRole {
   if (typeof value !== 'string' || !(ROLES as readonly string[]).includes(value)) throw new Error('工作流角色无效')
 }
 
-export function validateWorkflowRoleBinding(value: unknown, index = 0, frozen = false): WorkflowRoleBinding {
+export function validateWorkflowRolePreference(value: unknown, index = 0): Pick<WorkflowRoleBinding, 'role' | 'providerId' | 'requestedModel'> {
   if (!value || typeof value !== 'object') throw new Error(`角色 ${index + 1} 无效`)
   const input = value as Record<string, unknown>
-  rejectUnknownFields(input, ['role', 'providerId', 'agentProfileId', 'requestedModel', 'permissionMode', ...(frozen ? ['runtimeIdentity'] : [])])
-  if (input.runtimeIdentity !== undefined) assertText(input.runtimeIdentity, '运行身份', 256)
+  rejectUnknownFields(input, ['role', 'providerId', 'requestedModel'])
   validateRole(input.role)
-  if (typeof input.providerId !== 'string' || !(['claude', 'codex', 'qoder', 'opencode', 'pi'] as string[]).includes(input.providerId)) {
-    throw new Error(`角色 ${index + 1} Provider 无效`)
-  }
-  if (input.agentProfileId !== undefined) {
-    assertText(input.agentProfileId, `角色 ${index + 1} profile`, 240)
-    // Scry currently exposes independently configured CLI profiles only for Pi.
-    // Never label another Provider's default runtime as a requested fake profile.
-    if (input.providerId !== 'pi') throw new Error('此 Provider 尚未提供独立配置档，不能忽略请求的 profile')
-  }
+  if (typeof input.providerId !== 'string' || !(['claude', 'codex', 'qoder', 'opencode', 'pi'] as string[]).includes(input.providerId)) throw new Error(`角色 ${index + 1} Provider 无效`)
   if (input.requestedModel !== undefined) {
     if (!input.requestedModel || typeof input.requestedModel !== 'object') throw new Error(`角色 ${index + 1} 模型无效`)
     const model = input.requestedModel as Record<string, unknown>
     rejectUnknownFields(model, ['id', 'providerId'])
     assertText(model.id, `角色 ${index + 1} 模型`, 256)
-    if (model.providerId !== undefined) {
-      assertText(model.providerId, `角色 ${index + 1} 模型 Provider`, 240)
-    }
+    if (model.providerId !== undefined) assertText(model.providerId, `角色 ${index + 1} 模型 Provider`, 240)
+  }
+  return { role: input.role, providerId: input.providerId as ProviderId, ...(input.requestedModel ? { requestedModel: structuredClone(input.requestedModel) as WorkflowRoleBinding['requestedModel'] } : {}) }
+}
+
+export function validateWorkflowRoleBinding(value: unknown, index = 0, frozen = false): WorkflowRoleBinding {
+  if (!value || typeof value !== 'object') throw new Error(`角色 ${index + 1} 无效`)
+  const input = value as Record<string, unknown>
+  rejectUnknownFields(input, ['role', 'providerId', 'agentProfileId', 'requestedModel', 'permissionMode', ...(frozen ? ['runtimeIdentity'] : [])])
+  if (input.runtimeIdentity !== undefined) assertText(input.runtimeIdentity, '运行身份', 256)
+  const preference = validateWorkflowRolePreference({ role: input.role, providerId: input.providerId, ...(input.requestedModel === undefined ? {} : { requestedModel: input.requestedModel }) }, index)
+  if (input.agentProfileId !== undefined) {
+    assertText(input.agentProfileId, `角色 ${index + 1} profile`, 240)
+    // Scry currently exposes independently configured CLI profiles only for Pi.
+    // Never label another Provider's default runtime as a requested fake profile.
+    if (input.providerId !== 'pi') throw new Error('此 Provider 尚未提供独立配置档，不能忽略请求的 profile')
   }
   if (input.permissionMode !== undefined && !['default', 'auto_accept_edits', 'auto_review', 'full_access'].includes(String(input.permissionMode))) {
     throw new Error(`角色 ${index + 1} 权限模式无效`)
@@ -119,7 +123,7 @@ export function validateWorkflowRoleBinding(value: unknown, index = 0, frozen = 
     model: input.requestedModel as AgentStartRequest['model'], permissionMode: input.permissionMode as AgentStartRequest['permissionMode']
   })
   if (input.requestedModel && !normalized.model) throw new Error('工作流模型无效')
-  return { role: input.role, providerId: normalized.providerId,
+  return { role: preference.role, providerId: normalized.providerId,
     ...(normalized.agentProfileId ? { agentProfileId: normalized.agentProfileId } : {}),
     ...(normalized.model ? { requestedModel: normalized.model } : {}),
     permissionMode: normalized.permissionMode,

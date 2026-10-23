@@ -232,6 +232,25 @@ export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   }
 }
 
+export function workflowExpressionReferences(expression: WorkflowExpression): string[] {
+  const names = new Set<string>()
+  const visit = (value: WorkflowExpression, local: ReadonlySet<string>): void => {
+    switch (value.kind) {
+      case 'literal': return
+      case 'ref': if (!local.has(value.name)) names.add(value.name); return
+      case 'field': visit(value.source, local); return
+      case 'compare': visit(value.left, local); visit(value.right, local); return
+      case 'and': case 'or': case 'concat': value.values.forEach(item => visit(item, local)); return
+      case 'not': case 'count': visit(value.value, local); return
+      case 'group': case 'unique': visit(value.items, local); return
+      case 'filter': case 'partition': visit(value.items, local); visit(value.when, new Set(local).add(value.item)); return
+    }
+  }
+  visit(expression, new Set())
+  return [...names]
+}
+
+
 export interface WorkflowProgram {
   schemaVersion: typeof WORKFLOW_SCHEMA_VERSION
   workflowId: string

@@ -82,6 +82,13 @@ export const appStorePersistenceCopy = {
 } as const
 
 export const workflowTemplateCopy = {
+  readOnly: '内置模板只读，请另存为个人或项目模板',
+  candidateReview: {
+    name: '独立候选复核',
+    description: '生成候选并由独立会话复核。复核意见不是系统检查或应用授权。',
+    author: '根据给定目标和资料生成候选。明确来源、假设和未验证项；不要修改文件，不要声称系统检查已通过。',
+    reviewer: '独立复核给定候选及原始目标和资料。寻找反例，区分支持、反驳与无法验证的意见。保留异议与证据引用，不把模型意见当作系统检查或写入授权。'
+  },
   sourceChanged: '模板来源或修订已变化，请刷新并重新确认',
   instanceCommand: '模板实例化 commandId 已用于另一请求',
   historyMissing: '此修订没有保留的源码，无法恢复',

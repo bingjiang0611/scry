@@ -1,5 +1,18 @@
 # M1–M6 实施与真实验收台账
 
+## 模板工作台增量（M2/M5，整体仍未完成）
+
+- 已实现只读 builtin 分发源、16 项模板摘要与私有草稿分页、冻结定义提取、显式参数/默认值选择、独立草稿、源码/结构同源视图、完整源码及连续变化范围核对、发布/准确修订删除/历史恢复、绑定后进入显式审批的准备入口。全部仍使用原 compiler → Service → Runner → Interpreter，不执行另一套模板运行时。
+- Portable role preference 与真实 runtime binding 分开校验；提取不复制 workspace、profile、permission、runtime identity、attempt 或运行输出。提示词/固定值仍可能含敏感内容，不宣称自动去敏。
+- 当前真实隔离 Electron 生产 preload/main 交互已验证：内置只读、另存新身份、修改提示词及控制流、保留并重新打开无效草稿、保存前审阅、准确字节发布、仅准备不发送模型请求、删除后保留证据并审阅恢复。480px 桌面 renderer viewport 检查不是手机/真机验收；截图已保留。
+- 自审发现并修复“无效草稿借用有效基线结构”的问题。新增生产 UI 断言在未修复版本明确失败；修复后通过。不以旧基线证明当前候选有效。
+- 本增量验证：11 文件/149 项 focused 测试、原 workflow UI fixture、生产 conversation IPC + 新模板原生输入交互曾通过。最后一次完整 conversation 命令又遇 180s 工具截止/exit 137：build 和 ownership IPC 已通过，unified 只保留 21 条输入，没有完成收据，不能以旧通过覆盖。此后新增独立模板入口，当前源码 typecheck/build + `node scripts/electron-security-smoke.mjs --dev-workflow-template-editor-only` 通过，整个独立场景 Provider 调用为 0；不是账号/真实 Provider 验收。
+- 打包证据对应最后 loader UI 状态调整之前的源码，当前 App 包未重新完整验收。本地 `pack:artifact` 在 240s 工具期限被终止：build、CLI build、development signing、`check:packaged-app` 已通过，整个打包命令没有成功收据。后续独立 `smoke:electron` 在 external-links fixture 30s 超时，虽打印业务断言通过标记，仍未正常退出；保留首败与现场，不标全门禁通过。未安装、未 push、未升版本。
+- 必需性能测量已尝试，`providers.catalog` 没有 counter collector，返回 unavailable/exit 1；机器负载约 84–87/10 cores。新增 trace 与路径登记不等于性能测量通过。
+- 目录初始/来源切换时立即标为 loading，不把尚未完成的查询显示为空；最终独立模板交互覆盖该路径。独立场景首次草稿列表等待曾失败，增加诊断后通过，未证明首败原因，不把诊断重跑当首败已关闭。
+- 证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-editor.LfTzPQ/`；原日志 `/tmp/scry-workflow-template-editor.ZnkC6L/`。保留 native select、select-all、异步文件断言、缺失 Browser domain 等 fixture 首次失败和修正过程；其中错误的“等待保留草稿按钮启用”负控没有触及目标断言，不作为回归证明。
+- 仍待同一实施链完成：Agent candidate authoring、完整输入/输出/验证提取合同、chat 路由与数据/成本授权、M3 失败/修订恢复与可信 check/classifier、M4 质量模式、M5 其余运行治理交互、M1/M6 授权真实矩阵。完整打包/CLI/七项延期失败及性能 collector 也仍开放；不把本增量当 M1–M6 完成。
+
 ## 交付合同
 
 目标是完成 M1–M6 并交付真实验收报告，不是再交付一个 M0、单个夹具或仅设计方案。规范以 [implementation-plan §9](implementation-plan.md#9-实施顺序与可证伪验收)、[执行语义](execution-semantics.md)、[运行管理](run-management.md)、[入口语义](chat-entry-semantics.md)、[模板生命周期](template-lifecycle.md)、[资源约束](runtime-limits.md) 为准。规范中旧的“尚未实现”文字不替代当前代码核查。

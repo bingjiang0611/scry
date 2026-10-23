@@ -175,6 +175,40 @@ export const CONVERSATION_COPY = {
   handoffScope: '缺失文字按预算补齐，其余可检索。只发送当前图片，不重放历史图片。原生命令和 Steer 暂不支持。'
 } as const
 
+export const WORKFLOW_TEMPLATE_COPY = {
+  drafts: '保留的草稿', pageEmpty: '此页没有该来源的条目；如有下一页可继续查看', previous: '上一页', workspace: '模板工作区',
+  title: '工作流模板', browse: '模板库', source: 'JSON 源码', structure: '结构与引用', inputs: '输入引用',
+  scope: '来源', scopes: { builtin: '内置', personal: '个人', project: '当前项目' },
+  empty: '此来源没有模板', refresh: '刷新', more: '下一页', new: '新建模板', edit: '编辑草稿',
+  saveAs: '另存为草稿', destination: '另存目标', name: '名称', description: '说明',
+  newName: '新模板', starter: '根据给定输入完成任务，并明确证据与未验证项。',
+  saveDraft: '保留草稿', review: '预览保存差异', publish: '确认写入此修订', onlyRun: '仅本次使用',
+  before: '基线源码', after: '候选源码', fullSources: '完整源码对照', changedSpan: '变化范围（包含范围内未变化的行）',
+  difference: (removed: number, added: number) => `变化范围：原 ${removed} 行 → 候选 ${added} 行`,
+  sourceReview: '我已核对完整内容、参数、角色、提示词与控制流程',
+  projectReview: '此内容将写入当前项目；我已核对其中的敏感信息',
+  sensitive: '提示词和固定值可能包含敏感内容。此编辑器不会自动去敏。',
+  sourceValid: '定义有效；不代表执行可用或任务成功', sourceInvalid: '定义无效；可以保留草稿，不能发布或执行',
+  dirty: '编辑尚未保留；差异与执行只使用准确保存的候选', busy: '处理中…', close: '关闭',
+  leave: '当前编辑尚未保留', keepAndClose: '保留草稿并关闭', discardAndClose: '放弃本次编辑并关闭', stay: '继续编辑',
+  missing: '模板或历史源码不存在，请刷新', history: '保留的修订', restore: '恢复为草稿',
+  historical: '历史快照；不改变当前定义，也不代表该修订曾发布', deleted: '当前定义不存在；保留的源码仍可恢复',
+  delete: '删除当前定义', confirmDelete: '确认删除此准确修订', cancel: '取消',
+  published: '此修订已写入本地；未替你执行 Git 提交或分享', conflict: '磁盘基线已变化；草稿保留，请刷新核对或另存',
+  unknown: '操作结果未知；不会自动重写或重删。请刷新核对，重复请求沿用原命令。',
+  deleteRecorded: '删除收据已记录；下方显示重新读取的当前状态',
+  candidate: '候选修订', revision: '源码修订', draftRevision: '草稿修订',
+  bind: '绑定本次输入与角色', parameters: '参数值（JSON）', goal: '本次目标', prepare: '准备计划，不发送模型请求',
+  noAgent: '没有可绑定的 Provider', unready: '先完成实际角色和参数绑定',
+  extract: '保存为模板 / 仅修改本次', extractDefinition: '从冻结定义创建草稿',
+  extractParameters: '选择要参数化的顶层固定值；未选择的值仍是源码常量',
+  includeDefault: '保存当前值为默认值', schema: '参数类型合同（JSON）', noParameters: '没有可参数化的顶层固定值',
+  readOnly: '内置定义只读；另存后才能编辑',
+  nodesPage: (start: number, total: number, size = 128) => `节点 ${start + 1}–${Math.min(start + size, total)} / ${total}`,
+  node: (id: string, kind: string) => `${id} · ${kind}`,
+  sourceIdentity: (scope: string, id: string) => `${scope} · ${id}`
+} as const
+
 export const WORKFLOW_COPY = {
   commandHint: '/scry-workflow run <目标>',
   attachmentsUnsupported: 'M0 工作流暂不接收附件，请仅提交文字目标；未发送附件。',

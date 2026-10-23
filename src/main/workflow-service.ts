@@ -10,6 +10,7 @@ import { WorkflowRunner, WorkflowSlots, WorkflowScopeError, type WorkflowProvide
 import { SHUTDOWN_DEADLINE_MS } from './shutdown'
 import type { WorkflowPlanningIntent, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowTemplateStore } from './workflow-template-store'
+import { templateExtractionSource, validateTemplateExtraction } from './workflow-template-extraction'
 import { PerformanceTrace } from './performance-timing'
 import { frozenTemplateParameters, templateBody, templateRoles, validateTemplateInstantiation } from './workflow-template-instance'
 
@@ -231,6 +232,25 @@ export class WorkflowService {
     cache.set(commandId, entry)
     void entry.promise.then(() => { entry.settled = true }, () => { entry.settled = true })
     return entry.promise
+  }
+
+  async extractTemplate(input: unknown) {
+    const request = validateTemplateExtraction(input), generation = this.admissionGeneration
+    await this.ensureReady()
+    this.assertAdmissionGeneration(generation)
+    if (!this.options.templates) throw new Error(workflowTemplateCopy.instantiationUnavailable)
+    const trace = new PerformanceTrace('workflow.template.extract')
+    try {
+      const preview = await this.loadPreview(request.workflowId)
+      const source = templateExtractionSource(preview.program, request)
+      trace.mark('definition_extracted')
+      this.assertAdmissionGeneration(generation)
+      const draft = await this.options.templates.saveDraft({ scope: request.scope, source })
+      this.assertAdmissionGeneration(generation)
+      trace.mark('draft_persisted')
+      trace.finish(undefined, draft.validation.state === 'valid' ? 'completed' : 'unavailable')
+      return draft
+    } catch (error) { trace.finish(undefined, 'error'); throw error }
   }
 
   async instantiateTemplate(input: unknown): Promise<WorkflowPlanPreview> {

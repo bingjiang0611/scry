@@ -2,15 +2,23 @@ import type { WorkflowTemplateApi } from '../shared/workflow-template'
 import type { WorkflowService } from './workflow-service'
 import { templateObject } from './workflow-template-identity'
 import { templateInstantiationFields } from './workflow-template-instance'
+import { validateTemplateExtraction } from './workflow-template-extraction'
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
 
 /** register is the production sender/frame/origin wrapper. The store revalidates
  * every scope and payload before reading or mutating its fixed data locations. */
 export function registerWorkflowTemplateInstantiationIpc(
   register: (channel: string, listener: (...args: unknown[]) => unknown) => void,
-  service: Pick<WorkflowService, 'instantiateTemplate'>,
+  service: Pick<WorkflowService, 'instantiateTemplate' | 'extractTemplate' | 'preview'>,
   resolveWorkspace: (cwd: string) => Promise<string>
 ): void {
+  register('workflow:extractTemplate', async payload => {
+    const request = validateTemplateExtraction(payload)
+    const preview = await service.preview(request.workflowId)
+    if (preview.programRevision !== request.programRevision) throw new Error(copy.sourceChanged)
+    await resolveWorkspace(preview.workspace)
+    return service.extractTemplate(request)
+  })
   register('workflow:instantiateTemplate', async payload => {
     const request = templateObject(payload, templateInstantiationFields)
     if (typeof request.cwd !== 'string') throw new Error(copy.invalid)
@@ -19,6 +27,8 @@ export function registerWorkflowTemplateInstantiationIpc(
   })
 }
 export function registerWorkflowTemplateIpc(register: (channel: string, listener: (...args: unknown[]) => unknown) => void, store: WorkflowTemplateApi): void {
+  register('workflow:templates:drafts', (scope, cursor) => store.drafts(scope as Parameters<WorkflowTemplateApi['drafts']>[0], cursor as string | undefined))
+  register('workflow:templates:catalog', (scope, cursor) => store.catalog(scope as Parameters<WorkflowTemplateApi['catalog']>[0], cursor as string | undefined))
   register('workflow:templates:history', (scope, id, cursor) => store.history(scope as Parameters<WorkflowTemplateApi['history']>[0], id as string, cursor as string | undefined))
   register('workflow:templates:revision', ref => store.revision(ref as Parameters<WorkflowTemplateApi['revision']>[0]))
   register('workflow:templates:restoreDraft', request => store.restoreDraft(request as Parameters<WorkflowTemplateApi['restoreDraft']>[0]))

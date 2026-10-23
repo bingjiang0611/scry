@@ -1,7 +1,7 @@
 import type { WorkflowRole, WorkflowValue, WorkflowValueSchema } from '../shared/workflow'
 import { WORKFLOW_TEMPLATE_MAX_BYTES, type WorkflowTemplateDefinition } from '../shared/workflow-template'
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
-import { validateWorkflowBody, validateWorkflowRoleBinding, WORKFLOW_ROLES } from './workflow-program'
+import { validateWorkflowBody, validateWorkflowRolePreference, WORKFLOW_ROLES } from './workflow-program'
 import { matchesWorkflowValue, validateWorkflowValueSchema } from './workflow-values'
 
 import { templateIdPattern, templateObject } from './workflow-template-identity'
@@ -36,7 +36,7 @@ export function validateWorkflowTemplate(source: string, expectedId: string): Wo
       if (preference.requestedModel !== undefined) throw new Error(copy.invalid)
       return { role: preference.role as WorkflowRole }
     }
-    const binding = validateWorkflowRoleBinding(preference)
+    const binding = validateWorkflowRolePreference(preference)
     return { role: binding.role, providerId: binding.providerId, ...(binding.requestedModel ? { requestedModel: binding.requestedModel } : {}) }
   })
   const requiredRoles = new Set(roles.map(role => role.role))

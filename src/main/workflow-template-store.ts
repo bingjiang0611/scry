@@ -3,6 +3,7 @@ import { lstat, mkdir, open, opendir, realpath, rename, rm, unlink } from 'node:
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
+import { builtinTemplateDomain, builtinTemplateIds, builtinTemplateSource } from './workflow-template-builtins'
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
 import { WORKFLOW_TEMPLATE_MAX_BYTES, type WorkflowTemplateApi, type WorkflowTemplateDraft, type WorkflowTemplateDeletion, type WorkflowTemplatePublication, type WorkflowTemplateRef, type WorkflowTemplateScope, type WorkflowTemplateSnapshot } from '../shared/workflow-template'
 import { assertTemplateSource, validateWorkflowTemplate } from './workflow-template-definition'
@@ -117,12 +118,18 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
 
   private async normalize(scope: WorkflowTemplateScope): Promise<{ scope: WorkflowTemplateScope; base: string; domainId: string }> {
     const accepted = templateScope(scope)
+    if (accepted.kind === 'builtin') throw new Error(copy.readOnly)
     const base = accepted.kind === 'personal' ? await realpath(this.userData) : await this.authorizeProject(accepted.workspace)
     const normalized: WorkflowTemplateScope = accepted.kind === 'personal' ? accepted : { kind: 'project', workspace: base }
     return { scope: normalized, base, domainId: hash(JSON.stringify(normalized.kind === 'personal' ? ['personal', base] : ['project', base])) }
   }
   private async authorizeRef(input: WorkflowTemplateRef): Promise<WorkflowTemplateRef> {
-    const ref = templateReference(input), location = await this.normalize(ref.scope)
+    const ref = templateReference(input)
+    if (ref.scope.kind === 'builtin') {
+      if (ref.domainId !== builtinTemplateDomain) throw new Error(copy.ledger)
+      return ref
+    }
+    const location = await this.normalize(ref.scope)
     if (ref.domainId !== location.domainId || JSON.stringify(ref.scope) !== JSON.stringify(location.scope)) throw new Error(copy.ledger)
     return ref
   }
@@ -180,16 +187,53 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     }
   }
   async read(scope: WorkflowTemplateScope, templateId: string): Promise<WorkflowTemplateSnapshot | null> {
-    const target = await this.target(scope, templateId, false)
+    const accepted = templateScope(scope)
+    id(templateId)
+    if (accepted.kind === 'builtin') {
+      const source = builtinTemplateSource(templateId)
+      if (source === undefined) return null
+      const ref: WorkflowTemplateRef = { scope: accepted, domainId: builtinTemplateDomain, templateId, revisionHash: hash(source) }
+      await this.observe(ref, source)
+      return snapshot(ref, source)
+    }
+    const target = await this.target(accepted, templateId, false)
     const source = target.path ? await readText(target.path) : undefined
     if (source === undefined) return null
     const ref = { ...target.ref, revisionHash: hash(source) }
     await this.observe(ref, source)
     return snapshot(ref, source)
   }
+  async catalog(scope: WorkflowTemplateScope, cursor?: string): ReturnType<WorkflowTemplateApi['catalog']> {
+    if (cursor !== undefined) id(cursor)
+    const accepted = templateScope(scope)
+    const location = accepted.kind === 'builtin' ? { scope: accepted, domainId: builtinTemplateDomain } : await this.normalize(accepted)
+    const path = 'base' in location
+      ? await directory(location.base, location.scope.kind === 'personal' ? ['workflows', 'templates'] : ['.scry-workflows'], false)
+      : undefined
+    const page = accepted.kind === 'builtin'
+      ? { names: builtinTemplateIds.filter(name => cursor === undefined || name > cursor) }
+      : await namesPage(path, templateIdPattern, cursor)
+    const names = page.names.slice(0, 16), templates: Awaited<ReturnType<WorkflowTemplateApi['catalog']>>['templates'] = []
+    for (const templateId of names) {
+      const source = accepted.kind === 'builtin' ? builtinTemplateSource(templateId) : await readText(join(path!, templateId + '.json'))
+      // Atomic external deletion between listing and reading is not a template.
+      if (source === undefined) continue
+      const ref: WorkflowTemplateRef = { scope: location.scope, domainId: location.domainId, templateId, revisionHash: hash(source) }
+      await this.observe(ref, source)
+      const item = snapshot(ref, source)
+      templates.push(item.state === 'valid' ? { ref, state: 'valid', name: item.definition.name, description: item.definition.description } : { ref, state: 'invalid', error: item.error })
+    }
+    const nextCursor = page.names.length > 16 ? names[15] : 'nextCursor' in page ? page.nextCursor : undefined
+    return { templates, ...(typeof nextCursor === 'string' ? { nextCursor } : {}) }
+  }
   async list(scope: WorkflowTemplateScope, cursor?: string): Promise<{ templateIds: string[]; nextCursor?: string }> {
     if (cursor !== undefined) id(cursor)
-    const location = await this.normalize(scope)
+    const accepted = templateScope(scope)
+    if (accepted.kind === 'builtin') {
+      const ids = builtinTemplateIds.filter(id => cursor === undefined || id > cursor)
+      return { templateIds: ids.slice(0, 100), ...(ids.length > 100 ? { nextCursor: ids[99] } : {}) }
+    }
+    const location = await this.normalize(accepted)
     const path = await directory(location.base, location.scope.kind === 'personal' ? ['workflows', 'templates'] : ['.scry-workflows'], false)
     const page = await namesPage(path, templateIdPattern, cursor)
     return { templateIds: page.names, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) }
@@ -197,7 +241,9 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
   async history(scope: WorkflowTemplateScope, templateId: string, cursor?: string): ReturnType<WorkflowTemplateApi['history']> {
     id(templateId)
     if (cursor !== undefined) digest(cursor)
-    const location = await this.normalize(scope)
+    const accepted = templateScope(scope)
+    const location = accepted.kind === 'builtin' ? { scope: accepted, domainId: builtinTemplateDomain } : await this.normalize(accepted)
+    if (accepted.kind === 'builtin') await this.read(accepted, templateId)
     const path = await directory(await realpath(this.userData), ['workflows', 'template-data', 'history', location.domainId, templateId], false)
     const page = await namesPage(path, templateHashPattern, cursor)
     return { revisions: page.names.map(revisionHash => ({ scope: location.scope, domainId: location.domainId, templateId, revisionHash })),
@@ -212,7 +258,15 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     return this.source(ref.revisionHash)
   }
   async revision(input: WorkflowTemplateRef): Promise<WorkflowTemplateSnapshot | null> {
-    const ref = await this.authorizeRef(input), source = await this.historySource(ref)
+    const ref = await this.authorizeRef(input)
+    if (ref.scope.kind === 'builtin') {
+      const source = builtinTemplateSource(ref.templateId)
+      if (source !== undefined && hash(source) === ref.revisionHash) {
+        await this.observe(ref, source)
+        return snapshot(ref, source)
+      }
+    }
+    const source = await this.historySource(ref)
     return source === undefined ? null : snapshot(ref, source)
   }
   async restoreDraft(request: Parameters<WorkflowTemplateApi['restoreDraft']>[0]): Promise<WorkflowTemplateDraft> {
@@ -220,6 +274,7 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     const trace = new PerformanceTrace('workflow.template.restoreDraft')
     try {
       const ref = await this.authorizeRef(request.ref)
+      if (ref.scope.kind === 'builtin') throw new Error(copy.readOnly)
       const base = request.base === null ? null : templateReference(request.base)
       if (base && (base.domainId !== ref.domainId || base.templateId !== ref.templateId || JSON.stringify(base.scope) !== JSON.stringify(ref.scope))) throw new Error(copy.invalid)
       const source = await this.historySource(ref)
@@ -234,20 +289,47 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
       return draft
     } catch (error) { trace.finish(undefined, 'error'); throw error }
   }
-  private async record(draftId: string): Promise<DraftRecord> {
+  private async readDraftRecord(draftId: string): Promise<DraftRecord> {
     id(draftId)
-    const text = await readText(join(await this.own(['drafts']), `${draftId}.json`))
+    const path = await directory(await realpath(this.userData), ['workflows', 'template-data', 'drafts'], false)
+    const text = path ? await readText(join(path, `${draftId}.json`)) : undefined
     if (text === undefined) throw new Error(copy.missing)
     const value = templateObject(JSON.parse(text), ['draftId', 'draftRevision', 'domainId', 'templateId', 'scope', 'base', 'sourceHash'])
     if (value.draftId !== draftId || !Number.isSafeInteger(value.draftRevision) || Number(value.draftRevision) < 1) throw new Error(copy.ledger)
     id(value.templateId); digest(value.sourceHash); digest(value.domainId)
-    const location = await this.normalize(templateScope(value.scope))
-    if (location.domainId !== value.domainId) throw new Error(copy.ledger)
+    const scope = templateScope(value.scope)
+    if (scope.kind === 'builtin') throw new Error(copy.ledger)
     if (value.base !== null) {
       const base = templateReference(value.base)
-      if (base.domainId !== value.domainId || base.templateId !== value.templateId || JSON.stringify(base.scope) !== JSON.stringify(location.scope)) throw new Error(copy.ledger)
+      if (base.domainId !== value.domainId || base.templateId !== value.templateId || JSON.stringify(base.scope) !== JSON.stringify(scope)) throw new Error(copy.ledger)
     }
-    return value as DraftRecord
+    return { ...value, scope } as DraftRecord
+  }
+  private async record(draftId: string): Promise<DraftRecord> {
+    const record = await this.readDraftRecord(draftId), location = await this.normalize(record.scope)
+    if (record.domainId !== location.domainId || JSON.stringify(record.scope) !== JSON.stringify(location.scope)) throw new Error(copy.ledger)
+    return record
+  }
+  /** Pages at most16 globally ordered private IDs; a page may have no entries
+   * for this authorized domain. nextCursor must still be consumed. */
+  async drafts(scope: WorkflowTemplateScope, cursor?: string): ReturnType<WorkflowTemplateApi['drafts']> {
+    if (cursor !== undefined) id(cursor)
+    const accepted = templateScope(scope)
+    if (accepted.kind === 'builtin') return { drafts: [] }
+    const location = await this.normalize(accepted)
+    const path = await directory(await realpath(this.userData), ['workflows', 'template-data', 'drafts'], false)
+    const page = await namesPage(path, templateIdPattern, cursor), names = page.names.slice(0, 16)
+    const drafts: Awaited<ReturnType<WorkflowTemplateApi['drafts']>>['drafts'] = []
+    for (const draftId of names) {
+      const record = await this.readDraftRecord(draftId)
+      if (record.domainId !== location.domainId) continue
+      if (JSON.stringify(record.scope) !== JSON.stringify(location.scope)) throw new Error(copy.ledger)
+      const source = await this.source(record.sourceHash), item = snapshot({ scope: record.scope, domainId: record.domainId, templateId: record.templateId, revisionHash: record.sourceHash }, source)
+      drafts.push({ draftId, draftRevision: record.draftRevision, templateId: record.templateId, scope: record.scope, candidateHash: candidateHash(record),
+        ...(item.state === 'valid' ? { name: item.definition.name, validation: { state: 'valid' as const } } : { validation: { state: 'invalid' as const, error: item.error } }) })
+    }
+    const nextCursor = page.names.length > 16 ? names[15] : page.nextCursor
+    return { drafts, ...(nextCursor ? { nextCursor } : {}) }
   }
   /** Capture only the reviewed revision. No publication or Provider execution. */
   async freeze(input: WorkflowTemplateSource): Promise<{ ref: WorkflowTemplateRef; origin: WorkflowTemplateSource; definition: WorkflowTemplateDefinition }> {
@@ -359,6 +441,7 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
   async delete(input: Parameters<WorkflowTemplateApi['delete']>[0]): Promise<WorkflowTemplateDeletion> {
     templateObject(input, ['ref', 'commandId']); command(input.commandId)
     const ref = await this.authorizeRef(input.ref)
+    if (ref.scope.kind === 'builtin') throw new Error(copy.readOnly)
     const request = { ref, commandId: input.commandId }, fingerprint = hash(JSON.stringify(ref))
     const trace = new PerformanceTrace('workflow.template.delete')
     return this.lock<WorkflowTemplateDeletion>('delete-command:' + request.commandId, () => this.lockTarget(ref.scope, ref.domainId, ref.templateId, async () => {

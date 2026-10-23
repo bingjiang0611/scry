@@ -54,6 +54,35 @@ async function fixture(definition: unknown = rawDefinition()) {
 const approvalFor = (preview: { workflowId: string; programRevision: string }) => ({ workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 })
 
 describe('template lowering and frozen instances through the canonical Service/Runner', () => {
+  it('extracts only portable definition fields with explicit parameter/default choices without executing or changing a run', async () => {
+    const f = await fixture(), running = f.make(), preview = await running.service.instantiateTemplate(f.request())
+    const before = await f.store.load(preview.workflowId)
+    const extracted = await running.service.extractTemplate({ workflowId: preview.workflowId, programRevision: preview.programRevision, scope: { kind: 'personal' }, name: 'Portable extracted definition', description: '',
+      parameters: { count: { schema: { type: 'number' }, default: 'include' }, enabled: { schema: { type: 'boolean' }, default: 'include' }, message: { schema: { type: 'string' }, default: 'omit' } } })
+    expect(extracted.validation).toEqual({ state: 'valid' })
+    const definition = JSON.parse(extracted.source)
+    expect(definition.parameters).toEqual({ count: { schema: { type: 'number' }, default: 0 }, enabled: { schema: { type: 'boolean' }, default: false }, message: { schema: { type: 'string' } } })
+    expect(definition.roles[1]).toEqual({ role: 'worker', providerId: worker.providerId, requestedModel: worker.requestedModel })
+    expect(Object.keys(definition).sort()).toEqual(['body', 'description', 'name', 'parameters', 'roles', 'schemaVersion', 'templateId'])
+    expect(definition.body.blocks).toHaveLength(2)
+    expect(extracted.source).not.toContain(f.project); expect(extracted.source).not.toContain('fixture-runtime'); expect(extracted.source).not.toContain(worker.agentProfileId)
+    expect(await f.store.load(preview.workflowId)).toEqual(before)
+    expect(running.plan).not.toHaveBeenCalled(); expect(running.execute).not.toHaveBeenCalled()
+    await expect(readFile(join(f.userData, 'workflows', 'templates', extracted.templateId + '.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const source = { kind: 'draft' as const, draftId: extracted.draftId, draftRevision: extracted.draftRevision, candidateHash: extracted.candidateHash }
+    await expect(running.service.instantiateTemplate(f.request(source))).rejects.toThrow('message')
+    const rebound = await running.service.instantiateTemplate(f.request(source, { message: 'new binding' }))
+    expect(rebound.state).toBe('ready')
+  })
+  it('does not extract output/attempt data, nonliteral binds, stale programs or unknown source fields as parameter defaults', async () => {
+    const f = await fixture(), running = f.make(), preview = await running.service.instantiateTemplate(f.request())
+    const request = { workflowId: preview.workflowId, programRevision: preview.programRevision, scope: { kind: 'personal' }, name: 'Extracted', description: '', parameters: {} }
+    await expect(running.service.extractTemplate({ ...request, programRevision: 'a'.repeat(64) })).rejects.toThrow('修订已变化')
+    await expect(running.service.extractTemplate({ ...request, transcript: 'not portable' })).rejects.toThrow()
+    await expect(running.service.extractTemplate({ ...request, parameters: { work: { schema: { type: 'string' }, default: 'include' } } })).rejects.toThrow('work')
+    await expect(running.service.extractTemplate({ ...request, parameters: { message: { schema: { type: 'string' } } } })).rejects.toThrow()
+    expect(running.execute).not.toHaveBeenCalled(); expect(running.plan).not.toHaveBeenCalled()
+  })
   it('prepares typed parameters without a planner, slot, attempt, execution, or source publication', async () => {
     const f = await fixture(), running = f.make(), request = f.request(undefined, { message: 'literal input' })
     const preview = await running.service.instantiateTemplate(request)

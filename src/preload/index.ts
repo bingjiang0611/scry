@@ -357,8 +357,11 @@ const api = {
   // This is a refresh hint only (no active-run semantics), so the Mac session
   // list shows the phone's conversation live without corrupting local run state.
   workflow: {
+    extractTemplate: (request: Parameters<WorkflowApi['extractTemplate']>[0]): ReturnType<WorkflowApi['extractTemplate']> => ipcRenderer.invoke('workflow:extractTemplate', request),
     instantiateTemplate: (request: Parameters<WorkflowApi['instantiateTemplate']>[0]): ReturnType<WorkflowApi['instantiateTemplate']> => ipcRenderer.invoke('workflow:instantiateTemplate', request),
     templates: {
+      drafts: (...args: Parameters<WorkflowTemplateApi['drafts']>): ReturnType<WorkflowTemplateApi['drafts']> => ipcRenderer.invoke('workflow:templates:drafts', ...args),
+      catalog: (...args: Parameters<WorkflowTemplateApi['catalog']>): ReturnType<WorkflowTemplateApi['catalog']> => ipcRenderer.invoke('workflow:templates:catalog', ...args),
       history: (...args: Parameters<WorkflowTemplateApi['history']>): ReturnType<WorkflowTemplateApi['history']> => ipcRenderer.invoke('workflow:templates:history', ...args),
       revision: (ref: Parameters<WorkflowTemplateApi['revision']>[0]): ReturnType<WorkflowTemplateApi['revision']> => ipcRenderer.invoke('workflow:templates:revision', ref),
       restoreDraft: (request: Parameters<WorkflowTemplateApi['restoreDraft']>[0]): ReturnType<WorkflowTemplateApi['restoreDraft']> => ipcRenderer.invoke('workflow:templates:restoreDraft', request),

@@ -1,11 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { AgentRunControlCatalog } from '@shared/runtime'
-import type { CapabilityEnvelope, ProviderContext } from '@shared/provider'
-import { providerIdForAgentId } from '@shared/runtime'
+import { WorkflowRolePicker } from './WorkflowRolePicker'
 import type { WorkflowPlanPreview, WorkflowProgress, WorkflowRole, WorkflowRoleBinding } from '@shared/workflow'
 import { parseWorkflowRunCommand } from '@shared/workflow'
 import type { DetectedAgent } from '../env'
-import { WORKFLOW_COPY as copy } from '../constants/copy'
+import { WORKFLOW_COPY as copy, WORKFLOW_TEMPLATE_COPY as templateCopy } from '../constants/copy'
+import { WorkflowTemplateWorkbench } from './WorkflowTemplateWorkbench'
 import { ModalFrame } from './Modals'
 import './workflow.css'
 
@@ -17,23 +16,7 @@ export interface WorkflowLaunchRequest {
   preview?: WorkflowPlanPreview
 }
 const roles: WorkflowRole[] = ['orchestrator', 'worker', 'reviewer', 'summarizer']
-const modelKey = (model: { id: string; providerId?: string }) => JSON.stringify([model.providerId ?? '', model.id])
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-const catalogsInFlight = new Map<string, Promise<CapabilityEnvelope<AgentRunControlCatalog>>>()
-function readRoleControls(context: ProviderContext) {
-  const read = window.scry.runControls
-  if (!read) return Promise.reject(new Error(copy.configurationUnavailable))
-  const key = JSON.stringify(context)
-  const existing = catalogsInFlight.get(key)
-  if (existing) return existing
-  if (catalogsInFlight.size >= 128) return Promise.reject(new Error(copy.configurationUnavailable))
-  const result = read(context)
-  catalogsInFlight.set(key, result)
-  const clear = () => { if (catalogsInFlight.get(key) === result) catalogsInFlight.delete(key) }
-  void result.then(clear, clear)
-  return result
-}
-
 export function mergeWorkflowProgress(current: WorkflowProgress[], incoming: WorkflowProgress[]): WorkflowProgress[] {
   const combined = new Map(current.map(progress => [progress.workflowId, progress]))
   for (const progress of incoming) {
@@ -48,79 +31,14 @@ export function mergeWorkflowProgress(current: WorkflowProgress[], incoming: Wor
   return [...combined.values()]
 }
 
-function RolePicker({ binding, agents, cwd, disabled, onChange, onReady }: {
-  binding: WorkflowRoleBinding
-  agents: DetectedAgent[]
-  cwd: string
-  disabled: boolean
-  onChange: (binding: WorkflowRoleBinding) => void
-  onReady: (role: WorkflowRole, ready: boolean) => void
-}) {
-  const catalogKey = JSON.stringify([binding.providerId, binding.agentProfileId, cwd])
-  const [catalogState, setCatalog] = useState<{ key: string; data: AgentRunControlCatalog } | null>(null)
-  const catalog = catalogState?.key === catalogKey ? catalogState.data : null
-  const [error, setError] = useState<string | null>(null)
-  // Catalog reads are bounded by the four role rows; a stale reply never
-  // changes a newer Provider/profile selection.
-  const readyRef = useRef(onReady)
-  readyRef.current = onReady
-  useEffect(() => {
-    let current = true
-    setCatalog(null)
-    setError(null)
-    readyRef.current(binding.role, false)
-    void readRoleControls({ providerId: binding.providerId, agentProfileId: binding.agentProfileId, cwd }).then(result => {
-      if (!current) return
-      if (!result.data || result.state !== 'ready') throw new Error(result.reason ?? copy.configurationUnavailable)
-      setCatalog({ key: catalogKey, data: result.data })
-    }).catch(error => { if (current) setError(message(error)) })
-    return () => { current = false }
-  }, [binding.role, binding.providerId, binding.agentProfileId, cwd])
-  const selected = agents.find(agent => providerIdForAgentId(agent.id) === binding.providerId &&
-    (binding.providerId !== 'pi' || agent.id === binding.agentProfileId))?.id ?? ''
-  const modelAvailable = Boolean(catalog && (binding.requestedModel
-    ? catalog.models.some(option => modelKey(option.model) === modelKey(binding.requestedModel!)) : catalog.models.length > 0))
-  const permissionAvailable = Boolean(catalog?.permissions.some(option => option.id === (binding.permissionMode ?? 'default')))
-  const valid = Boolean(selected && modelAvailable && permissionAvailable)
-  useEffect(() => { readyRef.current(binding.role, valid) }, [binding.role, binding.providerId, binding.agentProfileId,
-    binding.requestedModel?.id, binding.requestedModel?.providerId, binding.permissionMode, valid])
-  return <fieldset className="workflow-role" data-workflow-role={binding.role} disabled={disabled}>
-    <legend>{copy.roles[binding.role]}</legend>
-    <label>{copy.provider}<select value={selected} onChange={event => {
-      const agent = agents.find(candidate => candidate.id === event.target.value)
-      const providerId = agent && providerIdForAgentId(agent.id)
-      if (!agent || !providerId) return
-      onChange({ role: binding.role, providerId, ...(providerId === 'pi' ? { agentProfileId: agent.id } : {}), permissionMode: 'default' })
-    }}>
-      {!selected && <option value="" disabled>{copy.emptyAgents}</option>}
-      {agents.map(agent => <option key={agent.id} value={agent.id} disabled={Boolean(agent.unavailableReason) || !providerIdForAgentId(agent.id)}>{agent.name}</option>)}
-    </select></label>
-    <label>{copy.model}<select disabled={!catalog} value={binding.requestedModel ? modelKey(binding.requestedModel) : ''} onChange={event => {
-      const model = catalog?.models.find(option => modelKey(option.model) === event.target.value)?.model
-      onChange({ ...binding, requestedModel: model })
-    }}>
-      {binding.requestedModel && !modelAvailable && <option value={modelKey(binding.requestedModel)} disabled>{copy.selectedModelUnavailable}</option>}
-      <option value="">{catalog ? copy.providerDefault : copy.loading}</option>
-      {catalog?.models.map(option => <option key={modelKey(option.model)} value={modelKey(option.model)}>{option.label}</option>)}
-    </select></label>
-    <label>{copy.permission}<select disabled={!catalog} value={binding.permissionMode ?? 'default'} onChange={event => {
-      const permissionMode = catalog?.permissions.find(option => option.id === event.target.value)?.id
-      if (permissionMode) onChange({ ...binding, permissionMode })
-    }}>
-      {!permissionAvailable && <option value={binding.permissionMode ?? 'default'} disabled>{catalog ? copy.selectedPermissionUnavailable : copy.loading}</option>}
-      {catalog?.permissions.map(option => <option key={option.id} value={option.id} title={option.description}>{option.label}</option>)}
-    </select></label>
-    {catalog && <p>{catalog.permissions.find(option => option.id === (binding.permissionMode ?? 'default'))?.description}</p>}
-    {error && <p role="alert">{error}</p>}
-  </fieldset>
-}
 
-function Launch({ request, agents, onDismiss, onStarted, onError }: {
+function Launch({ request, agents, onDismiss, onStarted, onError, onEdit }: {
   request: WorkflowLaunchRequest
   agents: DetectedAgent[]
   onDismiss: () => void
   onStarted: (progress: WorkflowProgress) => void
   onError: (error: string) => void
+  onEdit: (preview: WorkflowPlanPreview) => void
 }) {
   const labelId = useId()
   const [goal, setGoal] = useState(() => parseWorkflowRunCommand(request.command)?.goal ?? '')
@@ -180,7 +98,7 @@ function Launch({ request, agents, onDismiss, onStarted, onError }: {
     <p>{copy.workspace}: {request.cwd}</p>
     {!preview ? <>
       <p>{copy.planningNotice}</p>
-      {bindings.map(binding => <RolePicker key={binding.role} binding={binding} agents={agents} cwd={request.cwd} disabled={Boolean(busy)}
+      {bindings.map(binding => <WorkflowRolePicker key={binding.role} binding={binding} agents={agents} cwd={request.cwd} disabled={Boolean(busy)}
         onReady={(role, available) => setReady(current => ({ ...current, [role]: available }))}
         onChange={next => {
           planId.current = crypto.randomUUID()
@@ -207,6 +125,7 @@ function Launch({ request, agents, onDismiss, onStarted, onError }: {
     <div className="workflow-actions">
       {!busy && <button type="button" onClick={onDismiss}>{copy.cancel}</button>}
       {preview ? <>
+        <button type="button" disabled={Boolean(busy)} onClick={() => onEdit(preview)}>{templateCopy.extract}</button>
         <button type="button" disabled={Boolean(busy)} onClick={() => { setPreview(null); planId.current = crypto.randomUUID(); startId.current = crypto.randomUUID() }}>{copy.reconfigure}</button>
         <button type="button" data-workflow-action="approve" disabled={preview.state !== 'ready' || Boolean(busy)} onClick={() => void start()}>{copy.confirm}</button>
       </> : <button type="button" data-workflow-action="plan" disabled={Boolean(busy) || !goal.trim() || roles.some(role => !ready[role])} onClick={() => void generate()}>{busy ? copy.planning : copy.generate}</button>}
@@ -222,6 +141,8 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
   onNew?: () => void
 }) {
   const [restored, setRestored] = useState<WorkflowLaunchRequest | null>(null)
+  const [workbench, setWorkbench] = useState<{ id: string; cwd: string; preview?: WorkflowPlanPreview } | null>(null)
+  const launchPreview = (preview: WorkflowPlanPreview): WorkflowLaunchRequest => ({ id: crypto.randomUUID(), command: `/scry-workflow run ${preview.userGoal}`, cwd: preview.workspace, orchestrator: preview.orchestrator, preview })
   const previewEpoch = useRef(0)
   useEffect(() => { if (request) { previewEpoch.current++; setRestored(null) } }, [request?.id])
   const activeRequest = request ?? restored
@@ -262,9 +183,15 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
     else setError(copy.missingSnapshot)
   }).catch(error => setError(copy.snapshotError(message(error)))) }
   return <>
-    {cwd && onNew && <button className="workflow-entry" type="button" onClick={onNew} title={copy.commandHint}>{copy.title}</button>}
-    {activeRequest && <Launch key={activeRequest.id} request={activeRequest} agents={agents}
-      onDismiss={() => { previewEpoch.current++; setRestored(null); onDismiss() }} onStarted={observe} onError={setError} />}
+    {cwd && <div className="workflow-entry-actions">
+      <button className="workflow-entry" type="button" onClick={() => setWorkbench({ id: crypto.randomUUID(), cwd })}>{templateCopy.title}</button>
+      {onNew && <button className="workflow-entry" type="button" onClick={onNew} title={copy.commandHint}>{copy.title}</button>}
+    </div>}
+    {activeRequest && !workbench && <Launch key={activeRequest.id} request={activeRequest} agents={agents}
+      onDismiss={() => { previewEpoch.current++; setRestored(null); onDismiss() }} onStarted={observe} onError={setError}
+      onEdit={preview => { setRestored(launchPreview(preview)); onDismiss(); setWorkbench({ id: crypto.randomUUID(), cwd: preview.workspace, preview }) }} />}
+    {workbench && <WorkflowTemplateWorkbench key={workbench.id} cwd={workbench.cwd} agents={agents} orchestrator={workbench.preview?.orchestrator ?? activeRequest?.orchestrator} sourcePreview={workbench.preview}
+      onClose={() => setWorkbench(null)} onPrepared={preview => { onDismiss(); setRestored(launchPreview(preview)); setWorkbench(null) }} />}
     {(progresses.length > 0 || error || nextCursor || unresolvedPlanning > 0) && <section className="workflow-progress" aria-label={copy.title}>
       {error && <p role="alert">{error}</p>}
       {unresolvedPlanning > 0 && <p role="alert">{copy.unresolvedPlanning(unresolvedPlanning)}</p>}
@@ -272,6 +199,12 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
       {progresses.map(progress => <details key={progress.workflowId} data-workflow-id={progress.workflowId}>
         <summary>{progress.goal} · {progress.stopRequestedAt !== undefined && ['queued', 'running'].includes(progress.state) ? copy.stopPending : copy.status[progress.state]}</summary>
         <code>{progress.workflowId}</code>
+        <button type="button" onClick={() => {
+          const epoch = ++previewEpoch.current
+          void window.scry.workflow.preview(progress.workflowId).then(preview => {
+            if (epoch === previewEpoch.current) setWorkbench({ id: crypto.randomUUID(), cwd: preview.workspace, preview })
+          }).catch(error => setError(message(error)))
+        }}>{templateCopy.extract}</button>
         {progress.state === 'awaiting_approval' && <button type="button" onClick={() => {
           const epoch = ++previewEpoch.current
           void window.scry.workflow.preview(progress.workflowId).then(preview => {

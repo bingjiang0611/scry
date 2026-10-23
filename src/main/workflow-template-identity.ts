@@ -10,7 +10,7 @@ export function templateObject(value: unknown, fields: readonly string[]): Recor
 }
 export function templateScope(value: unknown): WorkflowTemplateScope {
   const scope = templateObject(value, ['kind', 'workspace'])
-  if (scope.kind === 'personal' && scope.workspace === undefined) return { kind: 'personal' }
+  if ((scope.kind === 'personal' || scope.kind === 'builtin') && scope.workspace === undefined) return { kind: scope.kind }
   if (scope.kind === 'project' && typeof scope.workspace === 'string' && scope.workspace.length > 0 && scope.workspace.length <= 4096) return { kind: 'project', workspace: scope.workspace }
   throw new Error(copy.invalid)
 }

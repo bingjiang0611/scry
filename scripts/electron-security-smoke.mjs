@@ -13,10 +13,12 @@ import { exerciseUnifiedConversation, verifyUnifiedConversationRestart } from '.
 import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
 import { exerciseMissingWorkflowHistory } from './workflow-recovery-ipc-checks.mjs'
 import { exerciseWorkflowTemplatePublication } from './workflow-template-ipc-checks.mjs'
+import { exerciseWorkflowTemplateEditor } from './workflow-template-editor-ui-checks.mjs'
 
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
-const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
+const templateEditorOnly = process.argv[2] === '--dev-workflow-template-editor-only'
+const unifiedConversationOnly = templateEditorOnly || process.argv[2] === '--dev-unified-conversation-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only'
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
@@ -286,7 +288,16 @@ async function main() {
     const fixture = { workspace: canonicalWorkspace, templateWorkspace: realpathSync(secondWorkspace), userData: userDataDir, inputsFile: conversationInputs, callsFile: conversationCalls }
     const workflowRecovery = await exerciseMissingWorkflowHistory(evaluate, fixture)
     const workflowTemplates = await exerciseWorkflowTemplatePublication(evaluate, fixture)
+    if (templateEditorOnly) {
+      const screenshots = mkdtempSync(join(tmpdir(), 'scry-workflow-template-editor-ui-'))
+      writeFileSync(conversationInputs, '')
+      const workflowTemplateEditor = await exerciseWorkflowTemplateEditor(cdp, evaluate, fixture, screenshots, true)
+      writeFileSync(join(screenshots, 'verification.json'), JSON.stringify({ workflowRecovery, workflowTemplates, workflowTemplateEditor }, null, 2))
+      console.log(JSON.stringify({ test: 'production template editor UI and IPC', workflowTemplateEditor, evidence: screenshots }))
+      return
+    }
     const result = await exerciseUnifiedConversation(cdp, evaluate, fixture)
+    const workflowTemplateEditor = await exerciseWorkflowTemplateEditor(cdp, evaluate, fixture, result.screenshots)
     for (const changedIdentity of [false, true]) {
       cdp.close()
       await stopOwnedApp(child)
@@ -302,9 +313,9 @@ async function main() {
       ...readdirSync(resolve('out/renderer/assets')).filter(name => /\.(js|css)$/.test(name)).map(name => `out/renderer/assets/${name}`)]
     const artifactHashes = Object.fromEntries(artifactPaths.map((path) =>
       [path, createHash('sha256').update(readFileSync(resolve(path))).digest('hex')]))
-    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, workflowRecovery, workflowTemplates, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
+    writeFileSync(join(result.screenshots, 'verification.json'), JSON.stringify({ ...result, workflowRecovery, workflowTemplates, workflowTemplateEditor, restarts: 2, identityChangeFresh: true, artifactHashes }, null, 2))
     console.log(JSON.stringify({ test: result.test, conversationId: result.id, turns: result.runIds.length,
-      providerInvocations: result.receipts.length, workflowRecovery, workflowTemplates, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
+      providerInvocations: result.receipts.length, workflowRecovery, workflowTemplates, workflowTemplateEditor, restarts: 2, identityChangeFresh: true, evidence: result.screenshots }))
     return
   }
   if (ownershipFixture) {
