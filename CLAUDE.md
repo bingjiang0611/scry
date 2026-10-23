@@ -126,6 +126,15 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 - **使用独立 test 实例验证**：修改代码后需要验证 App 行为时，启动基于当前代码、使用独立 `userData` 和临时工作区的 test 实例，不要求用户重启当前 App，也不停止或干扰用户正在使用的实例。安装后的日常实例仍由用户自行重启加载新版本，但不作为验收前置条件；不把安装成功或 test 实例验证通过当作用户当前运行版本已更新。构建或安装失败时如实报告，不宣称已安装。
 - 检查 diff，默认只提交本次相关改动，不 push；已有 WIP 不混入。报告改动与实际检查；仅在涉及产物或验收时补充构建、安装、待用户重启状态及未验证项。纯文档不要求重启 App，不用 L1/L2 冒充 L3。
 
+## 提交身份
+
+所有提交（author 与 committer）必须使用公开的 GitHub 身份：`bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>`。
+
+- 禁止用公司内部邮箱（域名见 `.claude/company-context.local.md`）提交：仓库历史已统一重写为该 noreply 地址，新提交不得把内部邮箱带回来。
+- 本仓库 `.git/config` 已固定该身份；在缺少该配置的检出或临时 worktree 里，用 `git -c user.name=bingjiang0611 -c user.email=307659028+bingjiang0611@users.noreply.github.com commit` 显式覆盖，不改全局 `user.email`（本机全局值是工作仓库需要的内部身份）。
+- 提交前自查 `git config user.email` 与 `git log -1 --format='%an <%ae>'`；rebase、amend、cherry-pick、merge 和 `--reset-author` 同样保持该身份。
+- 发现内部邮箱已经进入历史时先停下来报告并取得授权，再决定重写范围；不要自行改写已推送历史。
+
 ## 代码风格与品味
 
 - 使用 strict TypeScript、discriminated union、typed envelope 和明确 domain state；避免 `any` 与字符串猜测。
