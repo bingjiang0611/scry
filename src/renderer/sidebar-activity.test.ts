@@ -97,6 +97,17 @@ describe('sidebar activity projection', () => {
     }
   })
 
+  it('restores host-confirmed completed sessions to Activity after reconnect, but not failed/unknown history', () => {
+    const completed = { ...remoteProject.sessions[0], isActive: false, lastRunId: 'done', lastRunOutcome: 'completed' as const }
+    const project = { ...remoteProject, sessions: [completed] }
+    expect(sidebarActivity([], empty, empty, '', [{ ...project, state: 'disconnected' }])).toEqual([])
+    expect(sidebarActivity([], empty, empty, '', [project])[0]).toMatchObject({ kind: 'remote', group: 'completed' })
+    expect(sidebarActivity([], empty, empty, '', [{ ...project, sessions: [{ ...completed, isActive: true }] }])[0].group).toBe('working')
+    for (const lastRunOutcome of [undefined, 'failed', 'cancelled', 'interrupted'] as const) {
+      expect(sidebarActivity([], empty, empty, '', [{ ...project, sessions: [{ ...completed, lastRunOutcome }] }])).toEqual([])
+    }
+  })
+
   it('keeps remote keys stable across titles and pins, but distinct across hosts, profiles, providers and workspaces', () => {
     const session = remoteProject.sessions[0]
     const original = sidebarActivity([], empty, empty, '', [remoteProject])[0].key

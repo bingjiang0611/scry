@@ -257,11 +257,6 @@ export const REMOTE_ACCESS_COPY = {
   legacyProviderControls: '旧版主机能力快照；发送时由主机重验',
   providerControlsUnavailable: (host: string) => `${host} 未能读取所选 Provider 设置；暂时无法发送`,
   retryProviderControls: '重试读取 Provider 设置',
-  refreshProviderControls: '重新读取设置',
-  providerControlsObserved: (observedAt?: number, refreshing = false) => {
-    const source = observedAt === undefined ? '主机快照；读取时间未知' : `主机读取于 ${new Date(observedAt).toLocaleString()}`
-    return refreshing ? `重新读取中 · ${source}` : source
-  },
   unknownReceiptNotice: (sourcePath: string, detail?: string) => `提交回执未知。来源项目/路径：${sourcePath}。核对并解除阻塞只会放弃未收到的提交，不会停止已收到的任务，也不会重发；解除前不会发送新提示词或自动出队。${detail ? ` ${detail}` : ''}`,
   unknownReceiptSendBlocked: '连接中仍有提交回执未知；请先核对并解除阻塞。草稿会保留，不会发送或自动出队。',
   unknownReceiptResolve: '核对并解除阻塞',
@@ -339,6 +334,7 @@ export const ARCHIVED_SESSIONS_COPY = {
 } as const
 
 export const REMOTE_SESSION_COPY = {
+  unreadResult: '有新结果，未查看',
   archivedTitle: '远程已存档会话',
   archivedDescription: '恢复会话会将其放回远程项目。删除仅移除对应主机上的 Scry 副本。',
   restore: '取消存档',

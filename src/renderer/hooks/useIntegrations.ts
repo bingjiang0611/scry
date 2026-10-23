@@ -50,7 +50,7 @@ const boundedPreferenceValue = (value: unknown): string | undefined => {
   return trimmed && trimmed.length <= 240 ? trimmed : undefined
 }
 
-const parseStoredRunControls = (value: unknown): AgentRunControls | undefined => {
+export const parseStoredRunControls = (value: unknown): AgentRunControls | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const permissionMode: AgentPermissionMode =
@@ -318,7 +318,8 @@ export function resolveRunControlSelection(
     : undefined
   const permissionMode = catalog.permissions.some((option) => option.id === current.permissionMode)
     ? current.permissionMode
-    : catalog.permissions.find((option) => option.id === 'default')?.id ?? 'default'
+    : catalog.permissions.find((option) => option.id === 'default')?.id ??
+      (catalog.permissions.length === 1 ? catalog.permissions[0].id : 'default')
   return { model, effort, permissionMode }
 }
 

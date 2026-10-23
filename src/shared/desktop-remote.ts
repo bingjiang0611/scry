@@ -73,7 +73,14 @@ export interface RemoteSessionRef {
   pinnedAt?: number
   archivedAt?: number
   isActive?: boolean
+  /** Host-persisted terminal evidence. Absence is unknown, not success. */
+  lastRunId?: string
+  lastRunOutcome?: import('./turn-record').AgentTurnRecord['status']
 }
+export function isRemoteSessionOutcome(value: unknown): value is NonNullable<RemoteSessionRef['lastRunOutcome']> {
+  return value === 'completed' || value === 'failed' || value === 'cancelled' || value === 'interrupted'
+}
+
 export type DesktopRemoteSessionAction =
   | { kind: 'rename'; title: string }
   | { kind: 'pin'; pinned: boolean }

@@ -1,5 +1,6 @@
-import { useSyncExternalStore } from 'react'
-import type { DesktopRemoteCatalog, DesktopRemoteConnection } from '@shared/desktop-remote'
+import { useEffect, useSyncExternalStore } from 'react'
+import type { DesktopRemoteCatalog, DesktopRemoteConnection, RemoteSessionRef } from '@shared/desktop-remote'
+import { reconcileRemoteSessionAttention, remoteSessionAttentionKey } from '../remote-session-attention'
 import { useVisibilityPolling } from './useVisibilityPolling'
 
 // One host catalog per saved connection, shared by the sidebar, location picker,
@@ -11,6 +12,7 @@ export interface RemoteCatalogEntry {
   loading: boolean
   stale?: boolean
   error?: string
+  unreadSessionKeys?: ReadonlySet<string>
 }
 type Snapshot = ReadonlyMap<string, RemoteCatalogEntry>
 
@@ -18,6 +20,33 @@ let snapshot: Snapshot = new Map()
 const listeners = new Set<() => void>()
 const revisions = new Map<string, number>()
 const inFlight = new Map<string, { revision: number; promise: Promise<void> }>()
+let viewedSessionKey: string | null = null
+
+export function viewRemoteSession(key: string | null, focused: boolean): void {
+  viewedSessionKey = focused ? key : null
+  if (!viewedSessionKey) return
+  for (const [connectionId, entry] of snapshot) {
+    if (!entry.unreadSessionKeys?.has(viewedSessionKey)) continue
+    const unreadSessionKeys = new Set(entry.unreadSessionKeys)
+    unreadSessionKeys.delete(viewedSessionKey)
+    publish(connectionId, { ...entry, unreadSessionKeys })
+  }
+}
+
+export function useViewedRemoteSession(connectionId?: string, session?: RemoteSessionRef): void {
+  const key = connectionId && session?.externalSessionId ? remoteSessionAttentionKey(connectionId, session) : null
+  useEffect(() => {
+    const update = (): void => viewRemoteSession(key, document.hasFocus())
+    update()
+    window.addEventListener('focus', update)
+    window.addEventListener('blur', update)
+    return () => {
+      window.removeEventListener('focus', update)
+      window.removeEventListener('blur', update)
+      viewRemoteSession(null, false)
+    }
+  }, [key])
+}
 
 function publish(connectionId: string, entry: RemoteCatalogEntry): void {
   const next = new Map(snapshot)
@@ -40,10 +69,12 @@ export function refreshRemoteCatalog(connectionId: string): Promise<void> {
     try {
       const catalog = await window.scry.desktopRemote.catalog(connectionId)
       if (revisions.get(connectionId) !== revision) return
-      publish(connectionId, { catalog, loading: false, stale: false })
+      const unreadSessionKeys = reconcileRemoteSessionAttention(connectionId, previous?.catalog?.sessions,
+        catalog.sessions, snapshot.get(connectionId)?.unreadSessionKeys ?? new Set(), viewedSessionKey)
+      publish(connectionId, { catalog, loading: false, stale: false, unreadSessionKeys })
     } catch (error) {
       if (revisions.get(connectionId) !== revision) return
-      publish(connectionId, { catalog: previous?.catalog, loading: false, stale: previous?.stale,
+      publish(connectionId, { ...snapshot.get(connectionId), loading: false,
         error: error instanceof Error ? error.message : String(error) })
     }
   })().finally(() => { inFlight.delete(connectionId) })

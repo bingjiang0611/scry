@@ -55,6 +55,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const selectAgentRef = useRef(chatProps.onSelectAgent)
   selectAgentRef.current = chatProps.onSelectAgent
   const historyRef = chatProps.scrollRef
+  const navigation = chatProps.scrollNavigation
 
   const refresh = useCallback(async (): Promise<ConversationPage | undefined> => {
     const generation = ++refreshGeneration.current
@@ -111,22 +112,31 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   useEffect(() => {
     const history = historyRef.current
     if (!history) return
-    const scroll = (): void => { followLatest.current = chatBottomStickinessAfterScroll(history, openingLatest.current) }
+    const scroll = (): void => {
+      if (navigation?.active.current) return
+      followLatest.current = chatBottomStickinessAfterScroll(history, openingLatest.current)
+    }
     history.addEventListener('scroll', scroll, { passive: true })
-    const unobserve = observeChatBottomLayout(history, () => before === undefined && (openingLatest.current || followLatest.current))
+    const unobserve = observeChatBottomLayout(history, () => !navigation?.active.current && before === undefined && (openingLatest.current || followLatest.current))
     return () => { history.removeEventListener('scroll', scroll); unobserve?.() }
-  }, [before, historyRef])
+  }, [before, historyRef, navigation?.active])
   useLayoutEffect(() => {
+    if (navigation?.active.current) {
+      openingLatest.current = false
+      followLatest.current = false
+      return
+    }
     if (before !== undefined) return
     scrollChatToBottomIfNeeded(historyRef.current, openingLatest.current || followLatest.current)
     if (!page || !openingLatest.current) return
     const frame = requestAnimationFrame(() => {
+      if (!openingLatest.current || navigation?.active.current) return
       scrollChatToBottomIfNeeded(historyRef.current, true)
       openingLatest.current = false
       followLatest.current = true
     })
     return () => cancelAnimationFrame(frame)
-  }, [page, live, before, latestRequest, historyRef])
+  }, [page, live, before, latestRequest, historyRef, chatProps.focusedTurnRunId, navigation?.active])
 
   const turns = useMemo<Turn[]>(() => (page?.turns ?? []).flatMap(turn => {
     const history = live?.runId === turn.runId ? live : turn.history
@@ -136,6 +146,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId) }) }, [conversation.id, turns, activeRunId, onProjection])
 
   const showLatest = (): void => {
+    navigation?.cancel()
     openingLatest.current = true
     followLatest.current = true
     setLatestRequest(value => value + 1)

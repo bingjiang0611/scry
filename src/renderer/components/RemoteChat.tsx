@@ -46,6 +46,8 @@ import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
 import { mergeRemoteTrace, type RemoteTraceView } from '../remote-trace'
 import { ChatView } from './ChatView'
 import { bridge, defaultOption, desktopProviderKey, historyTurns, RemoteFiles, shouldQueryUnknownIntent } from './DesktopRemote'
+import { initialRemoteRunControls, readRemoteProviderKey, readRemoteRunControls, remoteRunControlsKey, writeRemoteProviderKey, writeRemoteRunControls } from '../remote-run-controls'
+import { useChatNavigation } from '../hooks/useChatNavigation'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import './desktop-remote.css'
 import './remote-location.css'
@@ -95,16 +97,6 @@ export function remoteRunControlCatalog(provider: RemoteProviderRef | undefined,
       efforts: model.efforts ?? provider.efforts ?? []
     })),
     permissions: (provider.permissions ?? []).map((option) => remotePermissionOption(option, host))
-  }
-}
-
-function initialControls(provider: RemoteProviderRef | undefined): AgentRunControls {
-  const model = provider?.models?.find((option) => option.id === provider.modelId) ??
-    provider?.models?.find((option) => option.isDefault) ?? provider?.models?.[0]
-  return {
-    ...(model ? { model: { id: model.id, ...(model.providerId ? { providerId: model.providerId } : {}) } } : {}),
-    effort: defaultOption(model?.efforts ?? provider?.efforts),
-    permissionMode: (defaultOption(provider?.permissions) ?? 'default') as AgentPermissionMode
   }
 }
 
@@ -177,7 +169,9 @@ export function RemoteChat({
   const catalogReady = catalog !== undefined && !catalogEntry?.stale && !catalogEntry?.error
   const [providerSelection, setProviderSelection] = useState(() => {
     if (session) return desktopProviderKey({ id: session.providerId, agentProfileId: session.agentProfileId })
-    const first = catalog?.providers.find((item) => item.available) ?? catalog?.providers[0]
+    const saved = readRemoteProviderKey(connectionId)
+    const first = catalog?.providers.find(item => item.available && desktopProviderKey(item) === saved) ??
+      catalog?.providers.find((item) => item.available) ?? catalog?.providers[0]
     return first ? desktopProviderKey(first) : ''
   })
   const [sessionId, setSessionId] = useState<string | undefined>(session?.externalSessionId)
@@ -311,13 +305,15 @@ export function RemoteChat({
     if (!connected && !connectionRefreshing) queueStore.pause(queueKey)
   }, [connected, connectionRefreshing, queueKey, queueStore])
 
-  // A new draft picks the host's first available Provider once the catalog arrives.
+  // A new draft restores this host's Provider/profile once its catalog arrives.
   // An existing session keeps its recorded Provider even when the host removed it.
   useEffect(() => {
     if (providerSelection || !catalog) return
-    const first = catalog.providers.find((item) => item.available) ?? catalog.providers[0]
+    const saved = readRemoteProviderKey(connectionId)
+    const first = catalog.providers.find(item => item.available && desktopProviderKey(item) === saved) ??
+      catalog.providers.find((item) => item.available) ?? catalog.providers[0]
     if (first) setProviderSelection(desktopProviderKey(first))
-  }, [catalog, providerSelection])
+  }, [catalog, connectionId, providerSelection])
 
   // Changing Provider/profile or session is a different execution context: clear
   // transcript, run state and controls. Session adoption keeps the run it adopted.
@@ -355,7 +351,7 @@ export function RemoteChat({
     }
     let cancelled = false
     // A same-context observation can refresh without removing known choices.
-    // Its timestamp stays visible; failure must discard it, never reuse it as current.
+    // Failure must discard the observation, never reuse it as current.
     if (selectedProviderContextKey !== controlContextKey) {
       setSelectedProvider(undefined)
       setSelectedProviderContextKey(undefined)
@@ -382,14 +378,18 @@ export function RemoteChat({
 
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
-  const controlsObserved = useMemo(() => copy.providerControlsObserved(controlProvider?.observedAt, providerControlsLoading), [controlProvider?.observedAt, providerControlsLoading])
   // Initialize once per execution context. Refresh validates rather than silently
   // replacing a user's selected model, effort, or permission with new defaults.
   useEffect(() => {
     if (!controlProvider?.available || initializedControlsContext.current === contextKey) return
     initializedControlsContext.current = contextKey
-    setControls(initialControls(controlProvider))
-  }, [controlProvider, contextKey])
+    setControls(initialRemoteRunControls(controlProvider, readRemoteRunControls(remoteRunControlsKey(connectionId, controlProvider))))
+  }, [connectionId, controlProvider, contextKey])
+
+  const updateControls = (next: AgentRunControls): void => {
+    setControls(next)
+    if (controlProvider) writeRemoteRunControls(remoteRunControlsKey(connectionId, controlProvider), next)
+  }
 
   useEffect(() => {
     if (!connected || !catalogReady || !providerId || !sessionId) {
@@ -567,6 +567,14 @@ export function RemoteChat({
     return [...turns.filter((turn) => turn.runId !== activeRun.runId), active]
   }, [activeRun, turns])
 
+  const chatNavigation = useChatNavigation(scrollRef, true, displayTurns.length, contextKey)
+  const openTurnInChat = (runId: string, event?: TraceEvent | null, target: 'turn' | 'event' = 'turn'): void => {
+    openingLatest.current = false
+    followLatest.current = false
+    if (event) setSelected(event)
+    chatNavigation.navigate(runId, target === 'event' ? event?.id : undefined)
+  }
+
   // This mounted remote context owns its scroll intent, independently of the
   // last local/remote session. Follow late Markdown/image layout until the
   // reader deliberately scrolls away from the latest message.
@@ -575,6 +583,7 @@ export function RemoteChat({
     if (!history) return
     let previousTop = history.scrollTop
     const onScroll = (): void => {
+      if (chatNavigation.active.current) return
       const nearLatest = chatBottomStickinessAfterScroll(history, openingLatest.current)
       // A queued programmatic scroll may arrive after content grew. Only an
       // upward move releases following; a larger scrollHeight alone does not.
@@ -591,6 +600,7 @@ export function RemoteChat({
     // History arrives asynchronously; retain the opening intent through the
     // first loaded layout and its clamped/queued scroll event.
     const frame = requestAnimationFrame(() => {
+      if (!openingLatest.current || chatNavigation.active.current) return
       scrollChatToBottomIfNeeded(scrollRef.current, true)
       openingLatest.current = false
       followLatest.current = true
@@ -660,6 +670,8 @@ export function RemoteChat({
     submissionInFlight.current = true
     const submittedGeneration = contextGeneration.current
     const submittedKey = draftKey
+    chatNavigation.cancel()
+    followLatest.current = true
     setSubmitting(true); setError(null); setStatus(null); setPollInterval(POLL_MS)
     let acknowledged = false
     try {
@@ -874,6 +886,7 @@ export function RemoteChat({
         turns={displayTurns}
         selectedId={selected?.id ?? null}
         scrollRef={scrollRef}
+        focusedTurnRunId={chatNavigation.focusedTurnRunId}
         textareaRef={textareaRef}
         cwd={cwd}
         workspaceRoots={[cwd]}
@@ -983,16 +996,20 @@ export function RemoteChat({
         }}
         onSelectAgent={(agentId) => {
           const next = catalog?.providers.find((item) => remoteAgentId(item) === agentId)
-          if (next?.available) setProviderSelection(desktopProviderKey(next))
+          if (next?.available) {
+            const key = desktopProviderKey(next)
+            setProviderSelection(key)
+            writeRemoteProviderKey(connectionId, key)
+          }
         }}
         unavailableAgentIds={unavailableAgentIds}
         agentScopeLabel={`${host} 上的 Agent`}
         onRunModel={(model: AgentModelRef | undefined) => {
           const option = controlProvider?.models?.find((item) => item.id === model?.id && (item.providerId ?? '') === (model?.providerId ?? ''))
-          setControls((current) => ({ ...current, model, effort: defaultOption(option?.efforts ?? controlProvider?.efforts) }))
+          updateControls({ ...controls, model, effort: defaultOption(option?.efforts ?? controlProvider?.efforts) })
         }}
-        onRunEffort={(effort) => setControls((current) => ({ ...current, effort }))}
-        onPermissionMode={(permissionMode) => setControls((current) => ({ ...current, permissionMode }))}
+        onRunEffort={(effort) => updateControls({ ...controls, effort })}
+        onPermissionMode={(permissionMode) => updateControls({ ...controls, permissionMode })}
         renderLocationPicker={renderLocationPicker}
         remoteHost={host}
         composerNotice={notice ?? (providerControlsError || (controlProvider && !controlProvider.available)
@@ -1003,9 +1020,7 @@ export function RemoteChat({
               ? { tone: 'blocked', text: copy.providerControlsChanged }
               : catalog?.providerDiscovery !== 2 && controlProvider
                 ? { tone: 'blocked', text: copy.legacyProviderControls }
-                : controlProvider && !runActive
-                  ? { tone: 'info', text: controlsObserved, action: { label: copy.refreshProviderControls, disabled: providerControlsLoading, onClick: () => setProviderControlsRevision(value => value + 1) } }
-                  : null)}
+                : null)}
       />
       {surface.target && createPortal(
         <RightSurfacePanel
@@ -1024,7 +1039,7 @@ export function RemoteChat({
               : <OverviewPanel
                   turns={displayTurns} sessionId={sessionId} selected={selected}
                   runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}
-                  busy={pollFresh && runActive} onSelect={setSelected}
+                  busy={pollFresh && runActive} onSelect={setSelected} onOpenTurn={openTurnInChat}
                 />,
             files: workspaceAvailable
               ? catalog?.workbench === 1

@@ -209,6 +209,25 @@ describe('DesktopRemoteClient', () => {
       ])
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
+  it('validates terminal session evidence instead of accepting invented outcomes', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Terminal catalog', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const session = { sessionId: 's1', externalSessionId: 'native', providerId: 'pi', cwd: '/repo', label: 'Done', ts: 20,
+        lastRunId: 'run-1', lastRunOutcome: 'completed' }
+      for (const lastRunOutcome of ['completed', 'invented']) {
+        fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2 } })
+          .mockResolvedValueOnce({ projects: [] }).mockResolvedValueOnce({ providers: [] })
+          .mockResolvedValueOnce({ sessionsPage: { sessions: [{ ...session, lastRunOutcome }], cursor: 1, total: 1, hasMore: false, snapshot: 'fixture' } })
+        if (lastRunOutcome === 'completed') expect((await fixture.client.catalog(id)).sessions).toEqual([session])
+        else await expect(fixture.client.catalog(id)).rejects.toThrow('invalid_catalog_response')
+      }
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('rejects selected controls from a legacy host without negotiated capability', async () => {
     const fixture = await setup({ providerDiscovery: false })
     try {

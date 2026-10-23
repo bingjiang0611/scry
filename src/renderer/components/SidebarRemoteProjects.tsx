@@ -9,6 +9,7 @@ import { providerIdForAgentId } from '@shared/runtime'
 import { basename, relTime } from '../format'
 import { useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
+import { remoteSessionAttentionKey } from '../remote-session-attention'
 import { hostState } from './LocationPicker'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
@@ -80,6 +81,7 @@ export function SidebarRemoteProjects({
   onArchiveSession?: (connectionId: string, session: RemoteSessionRef) => void
   onArchivedSession?: (connectionId: string, session: RemoteSessionRef) => void
 }) {
+  const catalogs = useRemoteCatalogs()
   const [menu, setMenu] = useState<{ group: RemoteProjectGroup; session: RemoteSessionRef; target: SessionMenuTarget } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -162,11 +164,12 @@ export function SidebarRemoteProjects({
                   const selected = active?.connectionId === group.connection.id && active.cwd === group.cwd && active.externalSessionId === session.externalSessionId
                   const provider = providerIdForAgentId(session.providerId)
                   const running = group.state === 'connected' && session.isActive === true
+                  const unread = catalogs.get(group.connection.id)?.unreadSessionKeys?.has(remoteSessionAttentionKey(group.connection.id, session))
                   return (
                     <div className="sb-sess-row" key={session.sessionId}>
                       <button
                         type="button"
-                        className={['sb-sess', selected && 'active', running && 'running'].filter(Boolean).join(' ')}
+                        className={['sb-sess', selected && 'active', running && 'running', unread && 'unread'].filter(Boolean).join(' ')}
                         data-provider={session.providerId}
                         data-remote-session={session.externalSessionId}
                         aria-current={selected ? 'true' : undefined}
@@ -185,6 +188,7 @@ export function SidebarRemoteProjects({
                           <span className="sb-sesstime">{relTime(session.ts)}</span>
                         </span>
                         {running && <span className="sb-running" role="status" aria-label="正在运行" title="正在运行" />}
+                        {unread && <span className="sb-unread" role="status" aria-label={copy.unreadResult} title={copy.unreadResult} />}
                       </button>
                       <span className="sb-sess-acts" title={!group.canManage ? copy.upgrade(group.connection.label) : undefined}>
                         <button type="button" className="sb-act" aria-haspopup="menu" disabled={!group.canManage || pending}

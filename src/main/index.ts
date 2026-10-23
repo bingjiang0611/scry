@@ -5178,7 +5178,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
       listSessions: () => {
         const roots = canonicalRemoteProjectRoots(knownProjectDirectories())
         const activeRuns = runs.activeStates()
-        const out: { sessionId: string; externalSessionId?: string; providerId: string; agentProfileId?: string; cwd: string; label: string; ts: number; pinnedAt?: number; archivedAt?: number; isActive?: boolean }[] = []
+        const out: import('../shared/desktop-remote').RemoteSessionRef[] = []
         for (const s of appSessionStore().load()) {
           if (!s.cwd) continue
           let canonical: string
@@ -5196,7 +5196,8 @@ async function startRemoteHostIfEnabled(): Promise<void> {
             ts: s.ts,
             ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {}),
             ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
-            ...(isActive ? { isActive: true } : {})
+            ...(isActive ? { isActive: true } : {}),
+            ...(s.lastRunOutcome ? { lastRunOutcome: s.lastRunOutcome, ...(s.runId ? { lastRunId: s.runId } : {}) } : {})
           })
         }
         out.sort((a, b) => b.ts - a.ts)

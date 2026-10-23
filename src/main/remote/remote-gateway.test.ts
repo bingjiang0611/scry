@@ -430,6 +430,15 @@ describe('RemoteGateway', () => {
     expect(gw.listSessionsPage(CERT, {}).sessions).toEqual(sessions)
   })
 
+  it('preserves host terminal outcome and run identity for completed Activity and unread detection', async () => {
+    const { authority } = await grantedAuthority()
+    const session = { sessionId: 's1', externalSessionId: 'native', providerId: 'pi', cwd: '/repo', label: 'done', ts: 20,
+      lastRunId: 'run-1', lastRunOutcome: 'completed' as const }
+    const { gw } = gateway(authority, undefined, undefined, undefined, { list: () => [session] })
+    expect(gw.listSessions(CERT)).toEqual([session])
+    expect(gw.listSessionsPage(CERT, {}).sessions).toEqual([session])
+  })
+
   it('pages the complete session catalog from its retained immutable snapshot', async () => {
     const { authority } = await grantedAuthority()
     let entries = Array.from({ length: 350 }, (_, index) => ({

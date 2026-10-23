@@ -20,6 +20,18 @@ ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -p 22 USER@HOST t
 
 TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化拒绝沿用连接。客户端私钥、证书和待核对回执由 Electron safeStorage 加密保存；加密不可用时不退回明文。
 
+## 轮次导航、选择记忆与远程完成状态（从本地 0.2.220 移植）
+
+- **main 移植**：仅移植原提交 `aa9349b5` 的修复，基于 `b81f08b1`，保留 main 的 0.2.221 版本、可见性轮询/退避/单请求合并、过期状态校验、未知回执处理与 Git diff 刷新状态。本次不安装或重启 App。
+- **移植验证**：macOS arm64、Node 24.18.0、Electron 42.10.1；typecheck/build 通过，`npm test` 为 3814 通过、4 项配置性跳过，完整 `test:renderer:ui` 通过。`--visibility-polling-check` 证实过期状态与单请求约束仍有效；导航负对照按预期无法对齐用户消息。`performance:measure` 的 43 项观测均有 5 次样本，计数门禁通过；没有以此宣称真实机器更快。
+
+- **反馈与保留**：按本轮用户截图，移除正常状态下「主机读取于 / 重新读取设置」提示条，保留加载、失败、旧主机能力及重试提示。沿用原有布局与本机未读红点，不新增视觉样式。
+- **轮次导航**：本机原生会话、统一对话与远程纵览共用定位逻辑。点击轮次 ID 对齐用户消息；工具事件居中。显式导航释放打开历史/追随末尾的旧意图，并在原有 2.2 秒高亮期间跟踪虚拟行高度变化。重复点击同一轮重新定位；读者滚动、切换上下文、发送或主动回到最新记录会释放导航，不永久锁定滚动。
+- **选择记忆**：客户端按主机保存最后的 Provider/profile，按主机 + Provider/profile 保存模型、effort 和权限；新会话与重启后从 localStorage 恢复，使用前按当前宿主目录校验。旧模型已移除时使用当前目录默认值。已打开会话中的目录刷新仍保留无效选择并阻止发送，不暗中切换模型。权限恢复有效选择；本机仅有一个受支持权限时也自动选中。此行为由用户本轮明确要求，包括 Pi 唯一的 `full_access`，不改变其本机用户权限或仓库 trust gate。
+- **完成与未读**：宿主 catalog 发布持久化 `lastRunOutcome` 与 `lastRunId`。连接恢复后，明确完成的远程会话进入「已完成」；不从 `!isActive` 推断成功。客户端进程内保留结果观察基线，后台新完成/失败结果标未读，聚焦并查看会话后清除，重复快照不重新标红。首次发现历史只建立基线，不把所有历史结果标未读。断连/读取失败不显示缓存活动；旧宿主缺少终态字段时不能补造完成或红点，需更新执行端。
+- **回归入口**：`remote-run-controls.test.ts`、`remote-session-attention.test.ts`、`sidebar-activity.test.ts` 及远程 client/gateway 合同测试；完整 `desktop-remote-ui-smoke.mjs` 覆盖远程模型/权限记忆、重连完成、红点及远程轮次按钮；`--conversation-navigation-only` 覆盖生产 App 统一对话的纵览定位。`session-performance-ui-smoke.mjs` 覆盖 120 轮变高历史、重复跳转、事件居中与滚动所有权交接；`--negative-navigation-control` 关闭持续定位并恢复旧同 ID 行为时必须失败。
+- **验收边界**：上述隔离 Electron/bridge 验证不等于真实 mac2/Provider 验收。执行端也必须包含终态 catalog 改动；不自动重启承载用户会话的实例。
+
 ## 2026-10-17：远程会话操作与输入路由
 
 此节替代下方历史记录中「远程没有置顶、重命名、Slash 或排队」的旧限制。

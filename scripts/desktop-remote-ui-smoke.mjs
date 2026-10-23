@@ -27,6 +27,7 @@ const settingsOnly = process.argv.includes('--remote-settings-only')
 const parityOnly = process.argv.includes('--session-parity-only')
 const composerHistoryOnly = process.argv.includes('--composer-history-only')
 const lifecycleOnly = process.argv.includes('--session-lifecycle-only')
+const conversationNavigationOnly = process.argv.includes('--conversation-navigation-only')
 const openingOnly = process.argv.includes('--session-opening-only')
 const measureOpening = process.argv.includes('--measure-session-opening')
 const visibilityPollingBaseline = process.argv.includes('--visibility-polling-baseline')
@@ -69,7 +70,7 @@ const state = {
   resolveIntentCalls: [], resolveFailure: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
-  catalogFailure: false, sessionActive: false, sessionTs: 1700000000000, hostRunArchived: false, liveRunCalls: 0,
+  catalogFailure: false, sessionActive: false, sessionTs: 1700000000000, sessionLastRunId: null, sessionLastRunOutcome: null, hostRunArchived: false, liveRunCalls: 0,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
   phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
@@ -84,7 +85,8 @@ const connection = {
 const alpha = {
   id: 'claude', label: 'Alpha', available: true, modelId: 'alpha-default', forkSession: true,
   models: [{ id: 'alpha-default', providerId: 'claude', label: 'Alpha Default', isDefault: true,
-    efforts: [{ id: 'alpha-effort', label: 'Alpha effort', isDefault: true }] }],
+    efforts: [{ id: 'alpha-effort', label: 'Alpha effort', isDefault: true }] },
+    { id: 'alpha-remembered', providerId: 'claude', label: 'Alpha Remembered', efforts: [{ id: 'alpha-effort', label: 'Alpha effort', isDefault: true }] }],
   permissions: [{ id: 'default', label: 'Default', isDefault: true }, { id: 'full_access', label: 'Full access' }]
 }
 const beta = {
@@ -151,7 +153,8 @@ const api = {
     if (state.catalogFailure) throw new Error('fixture catalog unavailable')
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
-      sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs } : session),
+      sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs,
+        ...(state.sessionLastRunId ? { lastRunId: state.sessionLastRunId, lastRunOutcome: state.sessionLastRunOutcome } : {}) } : session),
       providers: (state.hideProvider ? [beta] : catalog.providers).map(provider => state.legacyProviderHost ? provider
         : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.forkSession === true ? { forkSession: true } : {}), ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
       providerDiscovery: state.legacyProviderHost ? undefined : 2,
@@ -302,12 +305,13 @@ const api = {
   }
 }
 const noopSubscribe = () => () => {}
+const navigationConversation = { id: 'navigation-conversation', cwd: '/fixture/pinned', title: 'Conversation navigation', revision: 1, turnCount: 40, lastRunOutcome: 'completed' }
 window.scry = {
   // Same minimal full-App bridge contract as session-selection-smoke.tsx.
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   listProjects: async () => [
-    { cwd: '/fixture/pinned', name: 'Pinned local', pinnedAt: 1, mtime: 1, sessions: [] },
+    { cwd: '/fixture/pinned', name: 'Pinned local', pinnedAt: 1, mtime: 1, sessions: [], ...(${conversationNavigationOnly} ? { conversations: [navigationConversation] } : {}) },
     { cwd: '/fixture/recent', name: 'Recent local', mtime: 1700000001000, sessions: [] },
     { cwd: '/fixture/older', name: 'Older local', mtime: 1699999999000, sessions: [] }
   ],
@@ -318,6 +322,7 @@ window.scry = {
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
   listCommands: async () => ({ state: 'ready', data: [{ name: 'skill:local-only', description: 'Local skill must never appear remotely' }] }),
   usageStats: async () => null, stats: async () => null, focusRun: async () => true,
+  setCwd: async () => true,
   newSession: async () => { state.localNewSessions++; return true },
   start: async () => { state.localStarts++; throw new Error('Local execution must not be reached') },
   remoteStatus: async () => {
@@ -334,6 +339,14 @@ window.scry = {
   async remoteDesktopHostStatus() { return state.hostEnabled ? { enabled: true, pairPort: 10001, runPort: 10002 } : { enabled: false } },
   async remoteDesktopHostInvite() { state.hostInviteCalls++; state.hostEnabled = true; return 'scry-desktop1:fixture' },
   async remoteDesktopHostDisable() { state.hostDisableCalls++; state.hostEnabled = false }
+}
+if (${conversationNavigationOnly}) window.scry.conversations = {
+  read: async () => ({ summary: navigationConversation, bindings: [], turns: Array.from({ length: 40 }, (_, index) => ({
+    ordinal: index + 1, runId: 'conversation-run-' + index, bindingId: 'fixture', providerId: 'claude', delivery: { status: 'imported' },
+    history: { runId: 'conversation-run-' + index, userText: 'Conversation prompt ' + index, done: true, items: [
+      { id: 'conversation-answer-' + index, runId: 'conversation-run-' + index, ts: '', kind: 'model', stage: 'text', text: ('Variable answer ' + index + '. ').repeat(100 + index % 7 * 30) }
+    ] }
+  })) })
 }
 for (const method of ['workspaceList', 'workspaceRead', 'workspaceReadKnown', 'workspaceReadPage', 'workspaceReadPageKnown', 'workspaceOpenExternal', 'workspaceOpenKnownExternal', 'workspaceWrite', 'workspaceCreate', 'workspaceRename', 'workspaceMove', 'workspaceTrash']) {
   window.scry[method] = async () => { state.localWorkspaceCalls.push(method); throw new Error('Local workspace must not be reached: ' + method) }
@@ -474,6 +487,27 @@ async function exercise(contents, pointer, capture, options) {
 
   // Full production App: the remote session uses the same ChatView as local sessions.
   await click('[data-app-fixture]')
+  if (options.conversationNavigationOnly) {
+    await wait('document.querySelector("[data-conversation-id=navigation-conversation]") != null', 'logical conversation catalog')
+    await click('[data-conversation-id=navigation-conversation]')
+    await wait('document.querySelectorAll(".transcript-turn").length === 40', 'production ConversationView history')
+    await wait('document.querySelector(".chat-transcript").scrollHeight - document.querySelector(".chat-transcript").scrollTop - document.querySelector(".chat-transcript").clientHeight < 2', 'logical conversation opens at bottom')
+    if (!await read('document.querySelector("#right-surface-pane .turn-call-open")?.getBoundingClientRect().width > 0')) {
+      await click('button[aria-label="右侧工作区"]')
+    }
+    await wait('[...document.querySelectorAll("#right-surface-pane .turn-call-open")].some(button => button.textContent === "T05")', 'logical overview contains target turn')
+    await click('#right-surface-pane .turn-call-open', 'T05')
+    const aligned = `(() => { const prompt = document.querySelector('[data-run-id="conversation-run-4"] .turn-user'); return prompt && Math.abs(prompt.getBoundingClientRect().top - document.querySelector('.chat-transcript').getBoundingClientRect().top - 16) < 2; })()`
+    await wait(aligned, 'logical conversation overview navigates to prompt, not bottom')
+    await read('document.querySelector(".chat-transcript").scrollTop += 100')
+    await click('#right-surface-pane .turn-call-open', 'T05')
+    await wait(aligned, 'repeat logical conversation navigation')
+    await read('document.querySelector("[data-run-id=conversation-run-3]").style.minHeight = "1800px"')
+    await wait(aligned, 'logical conversation keeps target through layout changes')
+    await wait('!document.querySelector(".turn-jump-target")', 'logical navigation highlight expires')
+    await wait(aligned, 'logical conversation does not resume old bottom-follow intent')
+    return { conversationNavigation: { productionApp: true, overviewTurnId: true, virtualRows: true, repeatActivation: true, layoutAnchor: true, bottomFollowReleased: true }, nativeCoordinateInput: true }
+  }
   const remoteShown = 'document.querySelector(".execution-location.is-remote") != null'
   const sendDisabled = 'document.querySelector(".runtime-composer button.send").disabled'
   const composerValue = 'document.querySelector(\'textarea[aria-label="描述任务"]\').value'
@@ -549,21 +583,15 @@ async function exercise(contents, pointer, capture, options) {
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
   await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new-host controls restored')
   if (options.openingOnly) {
-  await wait('document.querySelector(".composer-notice")?.textContent.includes("主机读取于")', 'selected host observation time')
-  const readLabel = await read('document.querySelector(".composer-notice span").textContent')
+  check(!await read('document.querySelector(".composer-notice")'), 'Successful controls still show the host-read banner')
   const beforeMetadataRefresh = (await fixture()).providerControlsCalls.length
   await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeMetadataRefresh, 'same-context metadata invalidates selected controls')
-  await wait('document.querySelector(".composer-notice span")?.textContent !== ' + JSON.stringify(readLabel) + ' && !document.querySelector(".composer-notice button").disabled', 'selected observation time advances')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default" && !document.querySelector(".composer-notice")', 'selected controls refresh without the removed banner')
   check(await read('document.querySelector(".model-effort-model")?.textContent === "Beta Default"'), 'Refresh silently changed selected model')
-  const beforeManualRefresh = (await fixture()).providerControlsCalls.length
-  await click('.composer-notice button')
-  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeManualRefresh, 'successful controls remain explicitly refreshable')
-  await wait('document.querySelector(".composer-notice")?.textContent.includes("主机读取于") && !document.querySelector(".composer-notice button").disabled', 'manual refresh settles')
   await click('textarea[aria-label="描述任务"]'); await insert('same-context-observation')
   await wait('!document.querySelector(".runtime-composer button.send").disabled', 'known selected snapshot can send')
-  await read('window.desktopRemoteFixture.providerControlsFailure = "throw"')
-  await click('.composer-notice button')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "throw"; window.dispatchEvent(new Event("focus"))')
   await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'failed reread discards old successful catalog')
   check(await read(sendDisabled), 'Failed reread silently reused old controls')
   await read('window.desktopRemoteFixture.providerControlsFailure = null')
@@ -574,7 +602,7 @@ async function exercise(contents, pointer, capture, options) {
   check(await read('document.visibilityState === "visible"'), 'Focus control requires unchanged visible state')
   await read('window.dispatchEvent(new Event("focus"))')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeFocus, 'visible window focus rereads selected controls')
-  await wait('!document.querySelector(".composer-notice button").disabled', 'focused controls settle')
+  await wait('!document.querySelector(".composer-notice")', 'focused controls settle without the removed banner')
   const beforeHidden = (await fixture()).providerControlsCalls.length
   const catalogBeforeHidden = (await fixture()).catalogCalls
   await read('Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); window.desktopRemoteFixture.providerMetadataRevision += 1')
@@ -708,6 +736,16 @@ async function exercise(contents, pointer, capture, options) {
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
     await click('.sb-view-tabs [role=tab]', '动态')
     check(!await read('document.querySelector(".sb-activity [data-remote-session]")'), 'Idle remote history was guessed to be completed')
+    await click('.sb-navitem', '分析')
+    await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
+    await wait('!document.querySelector(".sb-activity [data-remote-session]")', 'disconnected activity is not live')
+    await read('window.desktopRemoteFixture.sessionLastRunId = "finished-offline"; window.desktopRemoteFixture.sessionLastRunOutcome = "completed"; window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+    await wait('document.querySelector("[data-activity-group=completed] [data-remote-session=old-native] .sb-unread") != null', 'reconnect restores completed remote session with unread result')
+    await click('[data-activity-group=completed] [data-remote-session=old-native]')
+    await wait(remoteShown, 'completed Activity opens remote session')
+    await wait('!document.querySelector("[data-remote-session=old-native] .sb-unread")', 'viewed focused remote result clears unread')
+    await read('window.refreshFixtureCatalog()')
+    check(!await read('document.querySelector("[data-remote-session=old-native] .sb-unread")'), 'Repeated catalog marked an already-read result')
     await click('.sb-view-tabs [role=tab]', '项目')
   }
   const projectAHead = '.sb-proj-head[aria-label="Project A · Fixture desktop · /fixture/project-a"]'
@@ -926,6 +964,8 @@ async function exercise(contents, pointer, capture, options) {
   await click('button[aria-label="右侧工作区"]')
   const remotePanel = '#remote-right-surface-pane'
   await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('纵览')`, 'remote uses normal overview tab')
+  await click(remotePanel + ' .turn-call-open')
+  await wait(`(() => { const prompt = document.querySelector('.turn-jump-target .turn-user'); if (!prompt) return false; const offset = prompt.getBoundingClientRect().top - document.querySelector('.chat-transcript').getBoundingClientRect().top; return offset >= 0 && offset < 64; })()`, 'remote overview turn ID navigates to its user prompt')
   const addSurface = async (label) => {
     await click(remotePanel + ' button[aria-label="添加 Surface"]')
     await click(remotePanel + ' [role=menuitem]', label)
@@ -1085,6 +1125,11 @@ async function exercise(contents, pointer, capture, options) {
   check(await read('document.querySelector(".permission-mode-option.is-danger").textContent.includes("Full access · Fixture desktop")'), 'Full access copy does not name the executing host')
   await click('.permission-mode-option.is-danger')
   await wait('document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'full_access permission selection')
+  await click('.model-effort-trigger')
+  await click('.model-effort-current')
+  await click('.model-effort-list [role=option]', 'Alpha Remembered')
+  await key('Escape')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "Alpha Remembered"', 'remote model selection')
   await click('textarea[aria-label="描述任务"]')
   await pasteImage()
   await wait('document.querySelector(".draft-attachments img")?.naturalWidth === 2', 'remote pasted image decoded preview')
@@ -1158,8 +1203,8 @@ async function exercise(contents, pointer, capture, options) {
   const beforeNewProject = await read('document.querySelector(".execution-location.is-remote").closest(".tb-thread").getAttribute("title")')
   check(beforeNewProject === '/fixture/project-a', 'Remote project changed before New conversation: ' + beforeNewProject)
   await click('.sb-new')
-  // Controls reset in an effect after remount; wait for the settled default so coordinates stay valid.
-  await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "Alpha Default"', 'new draft on same machine unlocks execution context')
+  // A new session restores this host/profile's model and permission, not defaults.
+  await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "Alpha Remembered" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'new draft restores remote model and permission')
   check(await read(remoteShown), 'New conversation left the remote machine')
   const newConversationLocation = await read('document.querySelector(".location-button").getAttribute("aria-label")')
   check(newConversationLocation === '执行位置：Fixture desktop / /fixture/project-a', 'New conversation changed the project: ' + newConversationLocation)
@@ -1181,6 +1226,8 @@ async function exercise(contents, pointer, capture, options) {
   check(!(await bodyText()).includes('添加 Pi Agent'), 'Remote Provider menu offered local Pi management')
   await click('.climenu [data-agent-id="qoder"]')
   await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Default · Fixture desktop"', 'provider control reset')
+  await click('.sb-new')
+  await wait('!document.querySelector(".clibtn").disabled && document.querySelector(".clibtn").textContent.includes("Beta") && document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new session remembers the remote Provider as well as its model')
   await wait(`window.desktopRemoteFixture.intentsCalls > ${afterNew.intentsCalls}`, 'next-context poll')
   check(!(await bodyText()).includes('second remote run'), 'A later poll restored the old transcript')
   await click('.clibtn')
@@ -1335,7 +1382,7 @@ async function exercise(contents, pointer, capture, options) {
     staleDispatchNoticeCleared: true,
     dispatchNoticeLifecycle: { unacknowledged: true, recorded: true, unknown: true, dispatchedBeforeTrace: true, resumedTurn: true, stopAcknowledgement: true, pollErrorRecovery: true, terminalHistoryRefresh: true, actionErrorPreserved: true },
     remoteWorkbench: { sharedTabsAndColumns: true, resize: true, maximizeRestore: true, sessionScopedTabs: true, treePagination: true, snapshotFilePagination: true, markdownPreview: true, unsupportedPreviewNeverLocal: true, unavailableTerminal: true },
-    remoteSidebarActivity: { activityTab: true, activitySelection: true, failedCatalogRemoved: true, idleNotCompleted: true, backgroundStartStop: true, sharedSpinner: true, recentProjectOrder: true, localPinsPreserved: true, staleReadNotLive: true, collapseSurvivesSearch: true },
+    remoteSidebarActivity: { activityTab: true, activitySelection: true, reconnectRestoresCompleted: true, unreadCompletion: true, focusedViewClearsUnread: true, repeatedCatalogDoesNotRemark: true, failedCatalogRemoved: true, idleNotCompleted: true, backgroundStartStop: true, sharedSpinner: true, recentProjectOrder: true, localPinsPreserved: true, staleReadNotLive: true, collapseSurvivesSearch: true },
     hostEnableInviteDisable: true,
     providerProfileIdentity: true,
     nativeCoordinateInput: true,
@@ -1345,7 +1392,7 @@ async function exercise(contents, pointer, capture, options) {
     ledgerUuidStopAndAnswer: true,
     failedAnswerNotSuccess: true,
     nativeSessionAdoption: true,
-    providerControlReset: true,
+    providerControlReset: true, remoteModelAndPermissionRemembered: true, remoteProviderRemembered: true, remoteOverviewTurnNavigation: true,
     fullAccessSelection: true,
     contextSwitchIsolation: true,
     remoteBackgroundCannotStopLocal: true,
@@ -1439,7 +1486,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline}, visibilityPollingCheck: ${visibilityPollingCheck} })
+        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, conversationNavigationOnly: ${conversationNavigationOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline}, visibilityPollingCheck: ${visibilityPollingCheck} })
         // Native input and capture have finished. Release their debugger/window
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()

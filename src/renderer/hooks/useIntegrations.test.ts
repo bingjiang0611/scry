@@ -310,7 +310,15 @@ describe('Agent 切换时的运行控制门禁', () => {
     }, false, { permissionMode: 'default' })).toBe('Qoder 控制接口不可用')
   })
 
-  it('Pi 只提供完全访问时不自动升级默认权限', () => {
+  it('恢复仍有效的权限，且多选项存在默认审批时不升级权限', () => {
+    const catalog: AgentRunControlCatalog = {
+      models: [], permissions: [{ id: 'default', label: 'Default', description: 'Native approvals' }, { id: 'full_access', label: 'Full access', description: 'Host user permissions' }]
+    }
+    expect(resolveRunControlSelection(catalog, { permissionMode: 'full_access' }).permissionMode).toBe('full_access')
+    expect(resolveRunControlSelection(catalog, { permissionMode: 'auto_review' }).permissionMode).toBe('default')
+  })
+
+  it('按唯一可用权限初始化 Pi，且不改写主机权限语义', () => {
     const catalog: AgentRunControlCatalog = {
       models: [{ model: { id: 'pi-model' }, label: 'Pi', efforts: [] }],
       permissions: [{ id: 'full_access', label: '本机完全访问', description: '继承本机用户权限' }]
@@ -320,10 +328,8 @@ describe('Agent 切换时的运行控制门禁', () => {
       providerId: 'pi', mode: 'read', state: 'ready', data: catalog
     }
 
-    expect(controls.permissionMode).toBe('default')
-    expect(runControlSendBlockedReason('pi', capability, false, controls)).toBe(
-      '当前 Provider 不支持所选模型、推理强度或权限，请重新选择'
-    )
+    expect(controls.permissionMode).toBe('full_access')
+    expect(runControlSendBlockedReason('pi', capability, false, controls)).toBeNull()
     expect(runControlSendBlockedReason('pi', capability, false, { permissionMode: 'full_access' })).toBeNull()
   })
 })

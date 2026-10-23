@@ -49,15 +49,17 @@ export function sidebarActivity(
     }
   }
   for (const project of remoteProjects) {
-    // Cached activity after a disconnect/read failure is not live evidence. The remote
-    // catalog has no terminal outcome or question evidence, so only claim working.
+    // Cached activity after a disconnect/read failure is not current evidence.
+    // Completion is host-persisted; never infer success from an inactive session.
     if (project.state !== 'connected') continue
     for (const session of project.sessions) {
-      if (!session.isActive || session.archivedAt || !session.externalSessionId) continue
+      if (session.archivedAt || !session.externalSessionId) continue
+      const status = session.isActive ? 'working' : session.lastRunOutcome === 'completed' ? 'completed' : undefined
+      if (!status) continue
       if (needle && !`${project.connection.label} ${project.name} ${project.cwd} ${session.label}`.toLocaleLowerCase().includes(needle)) continue
       entries.push({
         key: `remote:${JSON.stringify([project.connection.id, project.cwd, session.providerId, session.agentProfileId, session.externalSessionId])}`,
-        kind: 'remote', project, session, group: 'working'
+        kind: 'remote', project, session, group: status
       })
     }
   }

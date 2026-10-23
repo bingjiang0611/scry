@@ -195,12 +195,38 @@ async function exercise(webContents, pointer) {
   await wait(`document.querySelector('[data-run-id="turn-60"]:not([data-virtualized]) .turn-assistant') != null && Math.abs(document.querySelector('[data-run-id="turn-60"]').getBoundingClientRect().top - document.querySelector('.chat-transcript').getBoundingClientRect().top - ${anchorOffset}) < 2`)
   await click('[data-run-id="turn-60"] .tool-group-row')
   await wait(`document.querySelector('[data-run-id="turn-60"] .tool-group-row').getAttribute('aria-expanded') === 'true'`)
-  // Jump targets survive eviction. Selection mounts evidence before scrolling.
+  // Production navigation must take ownership from bottom-follow, materialize
+  // virtual neighbors, and keep the user's prompt (not a mid-answer row) aligned.
+  await click('#follow')
   await click('#jump')
+  const promptAligned = `Math.abs(document.querySelector('[data-run-id="turn-10"] .turn-user').getBoundingClientRect().top - document.querySelector('.chat-transcript').getBoundingClientRect().top - 16) < 2`
   await wait(`document.querySelector('[data-run-id="turn-10"]:not([data-virtualized]) .turn-assistant') != null`)
-  await wait(`document.querySelector('[data-run-id="turn-10"]').getBoundingClientRect().top < 200`)
+  await wait(promptAligned)
+  await read(`document.querySelector('.chat-transcript').scrollTop += 100`)
+  await click('#jump')
+  await wait(promptAligned)
+  // A late size change above the destination must not invalidate the endpoint.
+  await read(`document.querySelector('[data-run-id="turn-9"]').style.minHeight = '1800px'`)
+  await wait(promptAligned)
+  await wait(`!document.querySelector('.turn-jump-target')`)
+  await wait(promptAligned)
+  await click('#jump-event')
+  await wait(`(() => { const target = document.querySelector('[data-trace-event-id="tool-10"]'); if (!target) return false; const rect = target.getBoundingClientRect(); const chat = document.querySelector('.chat-transcript').getBoundingClientRect(); return Math.abs(rect.top - chat.top - Math.max(0, (chat.height - rect.height) / 2)) < 2; })()`)
+  if (await read(`document.querySelector('[data-run-id="turn-10"] .tool-group-row')?.getAttribute('aria-expanded') === 'true'`)) {
+    await click('[data-run-id="turn-10"] .tool-group-row')
+  }
+  await click('#jump')
+  await wait(promptAligned)
+  await click('#follow')
+  await wait(`!document.querySelector('.turn-jump-target') && document.querySelector('.chat-transcript').scrollHeight - document.querySelector('.chat-transcript').scrollTop - document.querySelector('.chat-transcript').clientHeight < 2`)
+  await click('#jump')
+  await wait(promptAligned)
   const measuredHeight = await read(`document.querySelector('[data-run-id="turn-10"]').getBoundingClientRect().height`)
-  // Move to the tail: selected evidence must stay mounted even offscreen.
+  // Native reader input releases the temporary navigation anchor. Selection
+  // must still retain the evidence when ordinary scrolling moves to the tail.
+  const navigationWheel = await read(`(() => { const r = document.querySelector('.chat-transcript').getBoundingClientRect(); return { x: Math.round(r.right - 30), y: Math.round(r.top + 200) }; })()`)
+  webContents.sendInputEvent({ type: 'mouseWheel', deltaY: -100, deltaX: 0, ...navigationWheel })
+  await wait(`!document.querySelector('.turn-jump-target')`)
   await read(`document.querySelector('[data-run-id="turn-119"]').scrollIntoView({ block: 'end' })`)
   await wait(`document.querySelector('[data-run-id="turn-119"]:not([data-virtualized]) .turn-assistant') != null`)
   if (!await read(`document.querySelector('[data-run-id="turn-10"]').dataset.virtualized !== 'true'`)) {
@@ -260,7 +286,7 @@ async function exercise(webContents, pointer) {
     rotatingTransform: true, reducedMotion: true, completedIndicatorsRemoved: true, neutralBackgroundWaiting: true,
     viewport, initialPageMounted, shortHeavyMounted, shortHeavyHistoryRecovered: true,
     historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
-    viewportAnchorPreserved: true, selectedEvidenceRetained: true, shellHeightPreserved: true,
+    viewportAnchorPreserved: true, selectedEvidenceRetained: true, promptNavigationAligned: true, repeatedTurnNavigation: true, eventNavigationCentered: true, explicitBottomFollowCancelsNavigation: true, shellHeightPreserved: true,
     keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }
 }
 
@@ -269,6 +295,12 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'count-session-row-executions', enforce: 'pre', transform(code, id) {
+      if (process.argv.includes('--negative-navigation-control') && id === join(root, 'src/renderer/hooks/useChatNavigation.ts')) {
+        // Recreate the old one-shot/same-ID behavior without changing source.
+        return code.replace('setRequest({ runId, eventId })', 'setRequest(current => current?.runId === runId ? current : { runId, eventId })')
+          .replace('new ResizeObserver(schedule)', 'new ResizeObserver(() => {})')
+          .replace('new MutationObserver(schedule)', 'new MutationObserver(() => {})')
+      }
       if (id !== join(root, 'src/renderer/components/Sidebar.tsx')) return
       const marker = '  const pinned = Boolean(session.pinnedAt)'
       if (code.split(marker).length !== 2) throw new Error('SessionRow instrumentation anchor changed')

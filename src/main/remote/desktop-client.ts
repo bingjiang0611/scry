@@ -4,7 +4,7 @@ import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, isRemoteProviderObservationTime } from '../../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, isRemoteProviderObservationTime, isRemoteSessionOutcome } from '../../shared/desktop-remote'
 import { attachmentSha256, DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, newAttachmentId, normalizeDesktopAttachment, type DesktopAttachmentCapability } from './desktop-attachments'
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
@@ -1137,7 +1137,9 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
         (value.agentProfileId !== undefined && !text(value.agentProfileId, 256)) ||
         (value.pinnedAt !== undefined && (!Number.isSafeInteger(value.pinnedAt) || Number(value.pinnedAt) <= 0)) ||
         (value.archivedAt !== undefined && (!Number.isSafeInteger(value.archivedAt) || Number(value.archivedAt) <= 0)) ||
-        (value.isActive !== undefined && typeof value.isActive !== 'boolean')) fail('invalid_catalog_response')
+        (value.isActive !== undefined && typeof value.isActive !== 'boolean') ||
+        (value.lastRunId !== undefined && !text(value.lastRunId, 128)) ||
+        (value.lastRunOutcome !== undefined && !isRemoteSessionOutcome(value.lastRunOutcome))) fail('invalid_catalog_response')
     return value as unknown as RemoteSessionRef
   }
 }

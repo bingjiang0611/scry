@@ -1,6 +1,6 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { createHash } from 'node:crypto'
-import { isRemoteProviderObservationTime } from '../../shared/desktop-remote'
+import { isRemoteProviderObservationTime, isRemoteSessionOutcome } from '../../shared/desktop-remote'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
 import { parseRemoteFileDownloadQuery, type RemoteFileDownloads, type RemoteFileDownloadResult } from './remote-file-download'
@@ -703,7 +703,9 @@ export class RemoteGateway {
         ts: Number.isFinite(entry.ts) ? entry.ts : 0,
         ...(typeof entry.pinnedAt === 'number' && Number.isFinite(entry.pinnedAt) && entry.pinnedAt > 0 ? { pinnedAt: entry.pinnedAt } : {}),
         ...(typeof entry.archivedAt === 'number' && Number.isFinite(entry.archivedAt) && entry.archivedAt > 0 ? { archivedAt: entry.archivedAt } : {}),
-        ...(entry.isActive === true ? { isActive: true } : {})
+        ...(entry.isActive === true ? { isActive: true } : {}),
+        ...(typeof entry.lastRunId === 'string' && entry.lastRunId.length > 0 && entry.lastRunId.length <= 128 ? { lastRunId: entry.lastRunId } : {}),
+        ...(isRemoteSessionOutcome(entry.lastRunOutcome) ? { lastRunOutcome: entry.lastRunOutcome } : {})
       })
       if (out.length >= limit) break
     }

@@ -1,8 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Sidebar } from '../../src/renderer/components/Sidebar'
 import { ChatTranscriptTurns } from '../../src/renderer/components/ChatView'
 import { useEventCallback } from '../../src/renderer/hooks/useEventCallback'
+import { useChatNavigation } from '../../src/renderer/hooks/useChatNavigation'
+import { observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../../src/renderer/chat-scroll'
 import type { Turn } from '../../src/renderer/format'
 import type { ProjectMeta } from '../../src/renderer/env'
 import '../../src/renderer/styles.css'
@@ -55,27 +57,29 @@ function Fixture() {
   const [running, setRunning] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState('session-0')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [focused, setFocused] = useState<string | undefined>()
-  const refs = useRef(new Map<string, HTMLDivElement>())
-  const onTurnRef = useEventCallback((id: string, element: HTMLDivElement | null) => {
-    if (element) refs.current.set(id, element)
-    else refs.current.delete(id)
-  })
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const followLatest = useRef(false)
+  const navigation = useChatNavigation(scrollRef, true, heavy ? heavyTurns.length : historyLimit)
+  const jump = (eventId?: string): void => {
+    followLatest.current = false
+    setSelectedId(eventId ?? 'answer-10')
+    navigation.navigate('turn-10', eventId)
+  }
   const onPick = useEventCallback((_cwd: string, sessionId: string) => {
     document.body.dataset.pickedTick = String(tick)
     setActiveSessionId(sessionId)
   })
   const runningRunIds = useMemo(() => new Set(running ? Array.from({ length: 8 }, (_, index) => `run-${index}`) : []), [running])
-  useLayoutEffect(() => {
-    if (focused) refs.current.get(focused)?.scrollIntoView({ block: 'start' })
-  }, [focused])
+  useEffect(() => observeChatBottomLayout(scrollRef.current!, () => followLatest.current), [])
   return <>
     <header style={{ height: 50, display: 'flex', gap: 12 }}>
       <button id="stream" onClick={() => setTick(value => value + 1)}>Stream {tick}</button>
       <button id="load-older" onClick={() => setHistoryLimit(value => Math.min(120, value + 40))}>Load older</button>
       <button id="running" onClick={() => setRunning(value => !value)}>Running</button>
-      <button id="jump" onClick={() => { setSelectedId('answer-10'); setFocused('turn-10') }}>Jump to evidence</button>
-      <button id="clear-selection" onClick={() => { setSelectedId(null); setFocused(undefined) }}>Clear selection</button>
+      <button id="jump" onClick={() => jump()}>Jump to prompt</button>
+      <button id="jump-event" onClick={() => jump('tool-10')}>Jump to event</button>
+      <button id="follow" onClick={() => { navigation.cancel(); followLatest.current = true; scrollChatToBottomIfNeeded(scrollRef.current, true) }}>Follow latest</button>
+      <button id="clear-selection" onClick={() => { setSelectedId(null); navigation.cancel() }}>Clear selection</button>
       <button id="short-heavy" onClick={() => setHeavy(true)}>Heavy 20</button>
       <button id="reset-history" onClick={() => { setHeavy(false); setHistoryLimit(40) }}>Reset history</button>
     </header>
@@ -86,9 +90,9 @@ function Fixture() {
           onNewChat={noop} onPick={onPick} onTogglePin={noop} onArchive={noop} onRenameSession={asyncNoop} />
       </div>
       <div className="body chat-body" style={{ height: 600, flex: 1, minWidth: 0 }}>
-        <div className="chat chat-transcript" style={{ height: 600, overflow: 'auto' }}>
-          <ChatTranscriptTurns turns={heavy ? heavyTurns : turns.slice(-historyLimit)} selectedId={selectedId} focusedTurnRunId={focused}
-            onTurnRef={onTurnRef} onSelect={setSelectedId} pendingQuestions={[]} />
+        <div ref={scrollRef} className="chat chat-transcript" style={{ height: 600, overflow: 'auto' }}>
+          <ChatTranscriptTurns turns={heavy ? heavyTurns : turns.slice(-historyLimit)} selectedId={selectedId} focusedTurnRunId={navigation.focusedTurnRunId}
+            onSelect={setSelectedId} pendingQuestions={[]} />
         </div>
       </div>
     </main>

@@ -15,7 +15,9 @@ import type { WorkspaceEntry } from '@shared/workspace'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView, type ConversationProjection } from './components/ConversationView'
 import { adoptConversationWithReadback, conversationTarget } from './conversation-handoff'
-import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded, type ChatScrollBox } from './chat-scroll'
+import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from './chat-scroll'
+import { useChatNavigation } from './hooks/useChatNavigation'
+export { scrollChatTargetIntoView } from './chat-scroll'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { PaneSplitter } from './components/PaneSplitter'
 import { SessionChatView } from './components/ChatView'
@@ -29,7 +31,7 @@ import { RemoteChat, remoteDraftKey } from './components/RemoteChat'
 import { RemotePromptQueueStore } from './remote-prompt-queue'
 import { LocationPicker, LOCAL_MACHINE, hostState, type ExecutionLocation } from './components/LocationPicker'
 import { useDesktopConnections } from './hooks/useDesktopConnections'
-import { useConnectedCatalogLoader } from './hooks/useRemoteCatalogs'
+import { useConnectedCatalogLoader, useViewedRemoteSession } from './hooks/useRemoteCatalogs'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { TurnDiffReviewPanel } from './components/TurnDiffReviewPanel'
 import { WorkspacePanel, workspaceReferenceToken, type WorkspaceOpenRequest } from './components/WorkspacePanel'
@@ -174,24 +176,6 @@ export function failedSlashCatalog<T, V>(
 ): { commands: T[]; reason: string } {
   cache.delete(key)
   return { commands: [], reason: error instanceof Error ? error.message : String(error) }
-}
-
-interface ChatScrollTarget {
-  getBoundingClientRect: () => { top: number; height?: number }
-}
-
-export function scrollChatTargetIntoView(
-  chat: Pick<ChatScrollBox, 'scrollTop' | 'scrollTo' | 'clientHeight'> & ChatScrollTarget,
-  target: ChatScrollTarget,
-  behavior: ScrollBehavior = 'auto',
-  align: 'start' | 'center' = 'start'
-): void {
-  const targetRect = target.getBoundingClientRect()
-  const offset = align === 'center'
-    ? Math.max(0, (chat.clientHeight - (targetRect.height ?? 0)) / 2)
-    : 16
-  const top = Math.max(0, chat.scrollTop + targetRect.top - chat.getBoundingClientRect().top - offset)
-  chat.scrollTo({ top, behavior })
 }
 
 export function appendWorkspaceReference(input: string, token: string): string {
@@ -1001,6 +985,7 @@ export function App() {
   const [remoteQueueStore] = useState(() => new RemotePromptQueueStore())
   // Native session id adopted after the first run; keeps sidebar and workbench ownership aligned.
   const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
+  useViewedRemoteSession(view === 'remote' ? remoteTarget?.connectionId : undefined, view === 'remote' ? remoteTarget?.session : undefined)
   const remoteSurfaceKey = remoteTarget
     ? remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, remoteAdoptedSession)
     : 'remote:none'
@@ -1021,14 +1006,17 @@ export function App() {
     remoteQueueStore.pauseDisconnected(connected)
   }, [desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing, remoteQueueStore])
   const scrollRef = useRef<HTMLDivElement>(null)
-  const turnRefs = useRef(new Map<string, HTMLDivElement>())
+  const chatNavigation = useChatNavigation(scrollRef, view === 'chat' || view === 'conversation', session.turns.length,
+    view === 'conversation' ? logicalConversation?.id : selectedProviderSessionId)
+  const { focusedTurnRunId } = chatNavigation
   const shouldStickToBottomRef = useRef(true)
   const openingSessionBottomRef = useRef(false)
   const requestChatBottom = useCallback((preserveDuringSessionOpen = false): void => {
+    chatNavigation.cancel()
     if (preserveDuringSessionOpen) openingSessionBottomRef.current = true
     shouldStickToBottomRef.current = true
     scrollChatToBottomIfNeeded(scrollRef.current, true)
-  }, [])
+  }, [chatNavigation.cancel])
   const queuedStartPendingRef = useRef(false)
   const queuedStartInFlightRef = useRef(false)
   const queuedDrainGenerationRef = useRef(0)
@@ -1069,8 +1057,6 @@ export function App() {
   const integrationContextKeyRef = useRef('')
   integrationContextKeyRef.current = providerContextCacheKey(integrations.providerContext)
   const taRef = useRef<HTMLTextAreaElement>(null)
-  const [focusedTurnRunId, setFocusedTurnRunId] = useState<string | null>(null)
-  const [pendingChatEvent, setPendingChatEvent] = useState<{ eventId: string; runId: string } | null>(null)
   // 斜杠命令面板：输入以 / 开头且无空白时弹出；命令清单由当前 Provider 原生能力提供。
   const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
   const [slashReason, setSlashReason] = useState<string | null>(null)
@@ -1316,6 +1302,7 @@ export function App() {
     const el = scrollRef.current
     if (!el) return
     const onScroll = (): void => {
+      if (chatNavigation.active.current) return
       shouldStickToBottomRef.current = chatBottomStickinessAfterScroll(
         el,
         openingSessionBottomRef.current
@@ -1345,6 +1332,7 @@ export function App() {
     // clamped against the empty transcript. Keep the opening intent through
     // that event, then re-apply it after the loaded transcript has laid out.
     const frame = requestAnimationFrame(() => {
+      if (!openingSessionBottomRef.current || chatNavigation.active.current) return
       scrollChatToBottomIfNeeded(scrollRef.current, true)
       openingSessionBottomRef.current = false
       shouldStickToBottomRef.current = true
@@ -1352,66 +1340,18 @@ export function App() {
     return () => cancelAnimationFrame(frame)
   }, [selectedProviderSessionId, session.turns, sessionLoading, view])
 
-  const setTurnRef = useCallback((runId: string, el: HTMLDivElement | null): void => {
-    if (el) {
-      turnRefs.current.set(runId, el)
-      return
-    }
-    turnRefs.current.delete(runId)
-  }, [])
-
   const openTurnInChat = useCallback(
     (runId: string, ev?: TraceEvent | null, target: 'turn' | 'event' = 'turn'): void => {
+      // Explicit navigation owns scrolling, including layout work already queued
+      // by history opening or virtual row materialization.
+      openingSessionBottomRef.current = false
+      shouldStickToBottomRef.current = false
       if (ev) session.setSelected(ev)
       if (viewRef.current !== 'conversation') setView('chat')
-      if (target === 'event' && ev) {
-        setFocusedTurnRunId(null)
-        setPendingChatEvent({ eventId: ev.id, runId })
-        return
-      }
-      setPendingChatEvent(null)
-      setFocusedTurnRunId(runId)
+      chatNavigation.navigate(runId, target === 'event' ? ev?.id : undefined)
     },
-    [session.setSelected]
+    [session.setSelected, chatNavigation.navigate]
   )
-
-  useEffect(() => {
-    if (!pendingChatEvent || (view !== 'chat' && view !== 'conversation')) return
-    const { eventId, runId } = pendingChatEvent
-    const frame = requestAnimationFrame(() => {
-      const eventTarget = [...document.querySelectorAll<HTMLElement>('[data-trace-event-id]')].find(
-        (el) => el.dataset.traceEventId === eventId
-      )
-      const turnTarget =
-        turnRefs.current.get(runId) ??
-        [...document.querySelectorAll<HTMLDivElement>('.turn[data-run-id]')].find((el) => el.dataset.runId === runId)
-      const target = eventTarget ?? turnTarget
-      const chat = scrollRef.current ?? target?.closest<HTMLDivElement>('.chat')
-      if (chat && target) scrollChatTargetIntoView(chat, target, 'smooth', 'center')
-      setPendingChatEvent((current) => current?.eventId === eventId ? null : current)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [pendingChatEvent, session.turns.length, view])
-
-  useEffect(() => {
-    if (!focusedTurnRunId || (view !== 'chat' && view !== 'conversation')) return
-    const runId = focusedTurnRunId
-    const frame = requestAnimationFrame(() => {
-      const target =
-        turnRefs.current.get(runId) ??
-        [...document.querySelectorAll<HTMLDivElement>('.turn[data-run-id]')].find((el) => el.dataset.runId === runId)
-      const chat = scrollRef.current ?? target?.closest<HTMLDivElement>('.chat')
-      if (!chat || !target) return
-      scrollChatTargetIntoView(chat, target, 'smooth')
-    })
-    const clear = window.setTimeout(() => {
-      setFocusedTurnRunId((current) => (current === runId ? null : current))
-    }, 2200)
-    return () => {
-      cancelAnimationFrame(frame)
-      window.clearTimeout(clear)
-    }
-  }, [focusedTurnRunId, view, session.turns.length])
 
   const currentRunRequest = useCallback(
     (): Omit<AgentStartRequest, 'prompt' | 'attachments'> => ({
@@ -1442,6 +1382,7 @@ export function App() {
       request = currentRunRequest(),
       sourceDraftKey = draftKey
     ): Promise<void> => {
+      chatNavigation.cancel()
       shouldStickToBottomRef.current = true
       const expectedSessionId = activeSessionIdRef.current
       // Capture the request before admission: native session capture may arrive
@@ -1484,7 +1425,7 @@ export function App() {
         }
       }
     },
-    [currentRunRequest, draftKey, integrations.rememberSessionModel, migrateRightSurface, selectSessionId, session.send]
+    [chatNavigation.cancel, currentRunRequest, draftKey, integrations.rememberSessionModel, migrateRightSurface, selectSessionId, session.send]
   )
 
   useEffect(() => {
@@ -2023,9 +1964,9 @@ export function App() {
     ? sessionEvidenceGap
     : null
   const showSessionOverview = hasSessionOverviewContext(
-    selectedProviderSessionId,
-    session.turns.length,
-    session.busy
+    view === 'conversation' ? logicalConversation?.id ?? null : selectedProviderSessionId,
+    displayedTurns.length,
+    displayedBusy
   )
   const toggleOverviewPanel = (): void => {
     if (view !== 'chat' && view !== 'conversation') return
@@ -2526,7 +2467,7 @@ export function App() {
     onLoadOlderTurns: () => { void loadOlderTurns() },
     traceHealth: session.traceHealth,
     focusedTurnRunId,
-    onTurnRef: setTurnRef,
+    scrollNavigation: chatNavigation,
     onSelect: session.setSelected,
     onOpenDiff: openTurnDiffReview,
     onForkTurn: forkConversationTurn,
@@ -2787,7 +2728,7 @@ export function App() {
                   runtimeProvider={panelRuntimeProvider}
                   gitDiff={integrations.gitDiff}
                   gitDiffRefreshing={integrations.gitDiffRefreshing}
-                  busy={session.busy}
+                  busy={displayedBusy}
                   onSelect={session.setSelected}
                   onOpenTurn={openTurnInChat}
                   onOpenSessionDiff={openSessionNetDiff}

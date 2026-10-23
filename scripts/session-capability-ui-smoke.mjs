@@ -1254,12 +1254,8 @@ async function exercisePiPermission(contents, scenario) {
   if (await read(`document.querySelector('textarea').value`) !== 'Pi permission regression') throw new Error('Blocked send lost draft')
   await click('#resolve-permissions')
   await wait(`${state}.pending === 0 && !document.querySelector('[aria-label="选择 Model 与 Effort"]').disabled`)
-  if (scenario === 'fresh') {
-    if (!await read(`document.querySelector('.send').disabled && document.querySelector('[aria-label="权限"]').textContent.includes('请选择权限')`)) throw new Error('Pi fresh catalog auto-granted full access')
-    await click('[aria-label="权限"]')
-    await wait(`document.querySelector('[role="option"]') != null`)
-    await click('[role="option"]')
-  }
+  // The user now requires the sole supported permission to be selected. Loading
+  // still blocks send; a fresh catalog is not treated as ready before it arrives.
   await wait(`!document.querySelector('.send').disabled && document.querySelector('[aria-label="权限"]').textContent.includes('本机完全访问')`)
   if (scenario === 'fresh') await click('.send')
   else { await click('textarea[aria-label="描述任务"]'); enter() }
@@ -1268,7 +1264,7 @@ async function exercisePiPermission(contents, scenario) {
   if (request.providerId !== 'pi' || request.agentProfileId !== 'pi:rotom' || request.permissionMode !== 'full_access' || request.prompt !== 'Pi permission regression') {
     throw new Error(`Pi ${scenario}: wrong start payload: ${JSON.stringify(request)}`)
   }
-  return { scenario, loadingBlocked: true, explicitPermission: request.permissionMode }
+  return { scenario, loadingBlocked: true, permissionSelection: scenario === 'fresh' ? 'sole-supported' : 'restored', submittedPermission: request.permissionMode }
 }
 
 async function exerciseLlmPerformance(contents, win, screenshot, nativeVisibility) {

@@ -83,6 +83,7 @@ interface ChatViewProps {
   onLoadOlderTurns?: () => void
   traceHealth?: TraceLiveHealth
   focusedTurnRunId?: string | null
+  scrollNavigation?: { active: RefObject<boolean>; cancel: () => void }
   onTurnRef?: (runId: string, el: HTMLDivElement | null) => void
   onSelect: (event: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void

@@ -1,5 +1,23 @@
 const CHAT_BOTTOM_STICKY_PX = 32
 
+interface ChatScrollTarget {
+  getBoundingClientRect: () => { top: number; height?: number }
+}
+
+export function scrollChatTargetIntoView(
+  chat: Pick<ChatScrollBox, 'scrollTop' | 'scrollTo' | 'clientHeight'> & ChatScrollTarget,
+  target: ChatScrollTarget,
+  behavior: ScrollBehavior = 'auto',
+  align: 'start' | 'center' = 'start'
+): void {
+  const targetRect = target.getBoundingClientRect()
+  const offset = align === 'center'
+    ? Math.max(0, (chat.clientHeight - (targetRect.height ?? 0)) / 2)
+    : 16
+  const top = Math.max(0, chat.scrollTop + targetRect.top - chat.getBoundingClientRect().top - offset)
+  chat.scrollTo({ top, behavior })
+}
+
 export interface ChatScrollBox {
   scrollHeight: number
   scrollTop: number
