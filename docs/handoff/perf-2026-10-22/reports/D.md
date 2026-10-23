@@ -82,6 +82,15 @@ npm run performance:measure -- --compare bf92d04 --out /tmp/scry-D-measure-all
 - 按用户本次明确要求，执行分支仅将 STATUS 的 D 行改为“待核验”，不代替审查方标“已核验”。
 - 审查方：下一步核验 `3256e68` 及两种规模 profile；workspace dirty 失败由原测试 owner 单独跟进。若要集成，集成 owner 在 main 合入后再构建/安装并采集 L3，无需本批扩大改动。
 
-## 核验意见
+## 核验意见（审查方，2026-10-22）
 
-待审查方填写。
+结论：**D1 已核验；D2 放弃有证据支持，接受**。审查方未能在本会话重跑测试（网络策略拒绝 npm registry），依据是逐行读 `3256e68` 的 diff 与本报告的命令记录。
+
+- 共享 IntersectionObserver 按元素分发，批内只取每个元素的最后状态，与原 `entries[entries.length - 1]` 语义一致；最后一个元素注销时断开。
+- `selectionchange` 只在列表层注册一次，只对已挂载正文执行检查；空壳不能持有选区或展开状态，跳过它们不改变行为。
+- 两个 effect 的声明顺序保证 `releaseOffscreen.current` 在选择 effect 读取前已赋值；`windowed` 变化时两者按序重跑。
+- `pinned`（聚焦、选中、未完成、待回答）与高度测量、滚动锚定逻辑未改；卸载后 IO/MO/RO 与监听均为 0。
+- D2：输入期间 App commit 1→1，流式 App body p50 0.2 ms。拆 store 的改动面大、收益未被证明，放弃是正确结论。
+- 收益口径如实：L1 扇出大幅下降；L2 只在选择事件分发上可见，输入/流式 round-trip 没有改善，报告没有夸大。
+
+无阻塞问题。
