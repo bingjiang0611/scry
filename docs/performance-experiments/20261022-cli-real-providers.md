@@ -4,7 +4,7 @@
 
 ## 结论与范围
 
-用户授权新建 rate-native worktree，调用真实 Pi、Codex、Qoder，执行独立 CLI 三轮验证。不是完整 rate-workflow，不包含 Workitem、业务上传、Scry App 或发布验收。
+用户授权新建 rate-native worktree，调用真实 Pi、Codex、Qoder，执行独立 CLI 三轮验证。不是完整 rate-workflow，不包含内部需求单系统、业务上传、Scry App 或发布验收。
 
 | Provider | 实际结果 | 边界 |
 | --- | --- | --- |
