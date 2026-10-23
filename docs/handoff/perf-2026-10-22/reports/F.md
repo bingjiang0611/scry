@@ -122,3 +122,22 @@ This device has reached the maximum number of installed apps using a free develo
 - **审查方**：review `82c5b33` 与上述 4 项既有失败；确认后按交接流程整合，不将计数冒充真实交互验收。
 - **设备所有者**：提供空闲开发签名槽位、另一台已授权 iCTRL 真机或可安装的签名条件。释放现有 App 涉及删除，不在本次自动执行范围内。
 - **F 执行方**：设备可用后继续上述真机回放、`-selfTest`、UI target 与串行 body/hitch 测量；如发现回归，再在 F 范围内修复。当前保持“待核验”。
+
+## 核验意见（审查方，2026-10-22）
+
+结论：**代码已核验；真机验收未完成，F 不能整体标为通过**。依据是逐行读 `82c5b33` 的 diff 与本报告的命令记录（审查方没有 Xcode/真机，未复跑）。
+
+- `RemoteRunStore` 除观察声明外未改，`private(set)` 与 `@MainActor` 保留；`AppModel` 保持 `ObservableObject` 的判断合理（它不转发流式更新）。
+- `ExecutionTargetCoordinator` 用 `withObservationTracking` 只跟踪 `catalog`，在下一个 MainActor turn 重新武装并重建；`authorityRevision` 与 store 身份校验防止旧授权/已移除的 store 继续订阅。原来对 `pendingQuestions/outbox/lifecycle` 的转发改由视图直接读取跟踪，报告中有嵌套 pending-work 回归覆盖。
+- `ReadOnlySessionTranscriptView` 从 `@StateObject` 改为 `@State`：`@State` 的初始值表达式在每次视图 init 时都会求值，会构造一个随即丢弃的 `RemoteRunStore`。已确认 `init(historyFor:)` 走 `historyOnly` 分支提前返回，代价很小，可以接受；日后若该 init 增加副作用，需要改回惰性创建。
+- L1 口径如实：报告明确这是依赖失效次数，不是 body 次数或帧率。
+
+**仍需完成**（设备可用后，由 F 执行方在本分支继续）：
+
+1. 真机安装隔离包，运行 `-selfTest` 与 XCTest UI target。
+2. 经 iCTRL 回放首页、持续流式输出、切换会话、后台→前台。
+3. 500+ 行流式输出的 hitch/掉帧串行测量（L2）。
+
+阻碍是免费开发者签名的安装槽位已满。腾出槽位需要删除设备上的 App，这一步由设备所有者决定。
+
+4 项 `catalog-refresh` 失败在基线上同样存在，已记入 `perf/handoff` 的 STATUS「既有问题」，不归入 F。
