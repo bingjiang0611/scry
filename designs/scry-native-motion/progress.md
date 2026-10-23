@@ -9,7 +9,7 @@
 | 01 基础 | 通过 | `22b0358`（实现修正）、`3abbfeb`（验收修正）、`7fbbf106`（经用户批准隔离验收前置主题过渡） |
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
-| 04 列表 | 未开始 | — |
+| 04 列表 | 进行中 | 第 0 项 `77e33c72` / `001eb687` 已验收；用户已确认收起 160ms、超 40 节点不播 FLIP |
 | 05 加载防闪 | 未开始 | — |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
@@ -50,6 +50,13 @@
 
 - 完整 UI 遇到 01 的既有前置条件竞态：`#motion-micro` 的主题 border/color 过渡尚未完成，断言将其计入后续单次 background-color 变化。不含 03 的 02 诊断归档也出现相同失败。已暂停询问，用户选择「修正前置条件并继续」：仅等待已有动画的 `finished`，不改生产样式、不加 sleep、不删断言、不放宽时间。`7fbbf106` 单独提交；临时恢复全局 120ms 规则仍被原断言拒绝。
 - 规格称弹窗全部共用共享壳，但实际 `WorkspacePanel` 有独立文件操作确认框，Picker 也有自己的弹出层。已暂停确认，用户选择「按点名范围交付」：03 覆盖共享 `ModalFrame` 消费者、4 类 `role="menu"` 和会话悬停卡；独立工作区确认框不迁移，保留其既有尺寸、焦点与 Esc 合同。未修改 brief 或步骤文件，也未把这些独立框宣称为已加入动效。
+
+### 2026-10-23 · 04 开始：立即安装结果与待确认规格
+
+- 用户已明确要求不等空闲，立即在刚拉取的 `db53ca71` 执行一次 `npm run install:mac:dev`。Node 22.22.1，未设置额外 worker 上限或绕过门禁。typecheck 通过；unit **3719 通过、1 失败、4 跳过**（301 文件通过、1 文件失败、4 文件跳过）。唯一失败为 `src/renderer/components/SessionRename.test.tsx` 的 `shows bounded session hover cards and renames via the real sidebar DOM with cancel, retry and pinned profiles`，内部断言 `context menu dismisses tooltip`；未进入 shell、打包与安装。日志 `/tmp/scry-motion-04-install-initial.log`，`INSTALL_EXIT=1`。起始 07:08 load 12.47 / 13.37 / 14.46，结束 07:13 load 18.92 / 19.21 / 17.21（10 核）；这是断言失败，不能据此认定原因是负载。
+- 该失败的源代码证据：公开的 `hover.dismiss()` 目前保留 100ms 出场，而原菜单接管断言要求立即退休 tooltip；普通离开与 owner 换人的实现已分开。执行方会保留原断言，按原有显式 dismiss 合同排查修正，不扩大 timeout、不改小 fixture workload。未把这次失败改写成安装通过。
+- **04 规格确认 1**：brief H2 将装饰退出限制为 ≤160ms，但 `04-lists.md` C 指定收起 180ms。执行方已完成第 0 项后暂停其余实现，提请用户选择按 H2 的 160ms 上限，或明确批准短折叠的 180ms 例外。
+- **04 规格确认 2**：现有活动列表是每组最多 40 行，三组加标题最多 123 个 keyed 节点；项目会话、提示队列、后台任务没有 renderer 本地 ≤40 上限。不能为动效截断业务数据。提请选择：总节点超过 40 的列表不播 FLIP（最小、有界），或另做视口内最多 40 节点的定位追踪。原数据、排序、分页与可访问交互均不改变。
 
 ## 记录
 
@@ -262,6 +269,14 @@
   - 要求：入场改用 `backwards` 填充（动画结束后不留样式），出场保留 `both` 或 `forwards`（需要停在透明状态直到卸载）。
   - 验收：`--overlays-only` 增加一条：入场结束后，`.modal` 与一个菜单的 `getComputedStyle(…).transform` 为 `none`，且 `getAnimations()` 中没有已完成的入场动画。负对照：改回 `both` 后该断言须失败一次。
 - 安装：01–03 的改动**都还没进到 `/Applications/Scry.app`**。执行方用「机器空闲」作为重跑安装的前提，但记录里机器一直处于中等负载（load 11–19）；最初失败时的负载是 38–91。是否在当前负载下直接重跑安装，由用户决定。
+
+### 03-fix · 入场结束释放变换与动画（2026-10-23）
+
+- 实现 `77e33c72`；断言 `001eb687`，分开提交。按「02-fix 与 03 · 核验」及 04 第 0 项，modal backdrop / dialog、共享 menu / ctxmenu / hover card 与 surface menu 的入场统一 `backwards`；所有出场仍保留 `both`。不改尺寸、事件或卸载合同。
+- `--overlays-only` 新增真实 `.probe-modal` 与 `.sb-session-menu` 入场结束断言：computed transform 为 `none`，且不留 finished 的入场 CSS animation。
+- 有效负对照两次：原实现 `both` 时 `.probe-modal` 保留单位矩阵及 1 个 finished 入场，新断言失败；仅将菜单改回 `both`，`.sb-session-menu` 也独立失败。日志 `/tmp/scry-motion-03-fix-fill-negative-{modal,menu}.log`。均已恢复。
+- 当前代码 `node scripts/session-capability-ui-smoke.mjs --overlays-only`、`npm run typecheck:web`、`npm run build` 通过。专项保留全部原关闭 / 焦点 / 首击 / 定位 / reduced 回归，12/12 关闭收到真实 animationend、178.1–210.2ms。日志 `/tmp/scry-motion-03-fix-fill-{final,type,build}.log`。未用等待卸载代替入场结束样式检查。
+- 第 0 项通过后可按核验授权进入 04；用户随后明确选择「保持 160ms 上限」与「超限列表不播 FLIP」。本步短内容展开 240ms / 收起 160ms，FLIP 只对总 keyed 节点 ≤40 的列表生效，超限只取消装饰动画，不删 DOM / 数据或缩减 workload。上文规格问题已获决定；brief 与步骤文件不改。安装初始失败保留，不把本次 build 当成已安装。
 
 <!--
 ### NN · <步骤名>
