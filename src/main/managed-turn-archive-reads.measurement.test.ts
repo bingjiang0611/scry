@@ -60,7 +60,7 @@ afterEach(async () => {
 
 const LEGACY_TURNS = 500
 
-async function fixture(enabled: boolean): Promise<{ workspace: string; userDataDir: string; legacy: string; exact: string; legacyBytes: number }> {
+async function fixture(enabled: boolean, toolOutput: 'summary' | 'full' = 'summary'): Promise<{ workspace: string; userDataDir: string; legacy: string; exact: string; legacyBytes: number }> {
   const workspace = await mkdtemp(join(tmpdir(), 'scry-b1-workspace-'))
   const userDataDir = await mkdtemp(join(tmpdir(), 'scry-b1-user-data-'))
   roots.push(workspace, userDataDir)
@@ -70,7 +70,7 @@ async function fixture(enabled: boolean): Promise<{ workspace: string; userDataD
     workspaceId: 'b1-fixture',
     dataDir: '.scry',
     repositories: { mode: 'workspace-only' },
-    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+    capture: { prompt: true, assistant: true, toolOutput, diff: true, hooks: true }
   }))
   const legacy = traceArchivePath(userDataDir, workspace, 'session-1', 'codex')
   await mkdir(dirname(legacy), { recursive: true })
@@ -164,6 +164,17 @@ describe('B1 archive reads per committed turn (L1 collector)', () => {
     probe.syncStats = 0
     await expect(commitManagedTraceTurn(request)).resolves.toMatchObject({ recorder: 'committed' })
     expect(summary('managed-with-progress', paths).legacyReads).toBeGreaterThan(0)
+  })
+
+  it('managed full-capture commit after mid-turn progress', async () => {
+    const paths = await fixture(true, 'full')
+    const request = input(paths.workspace, paths.userDataDir)
+    await startManaged(paths.workspace)
+    await persistManagedTraceProgress(request)
+    probe.reads.length = 0
+    probe.syncStats = 0
+    await expect(commitManagedTraceTurn(request)).resolves.toMatchObject({ recorder: 'committed' })
+    expect(summary('managed-full-capture-with-progress', paths).legacyReads).toBeGreaterThan(0)
   })
 
   it('managed commit without progress', async () => {

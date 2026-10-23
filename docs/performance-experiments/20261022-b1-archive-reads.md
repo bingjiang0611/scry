@@ -16,7 +16,8 @@ npx vitest run src/main/managed-turn-archive-reads.measurement.test.ts
 
 | 场景 | legacy 读次数 | legacy 读字节 | 同步读 | 同步 lstat |
 |---|---|---|---|---|
-| managed，轮中已有 progress | 2 | 335,480 | 2 | 2 |
+| managed，轮中已有 progress（capture summary） | 2 | 335,480 | 2 | 2 |
+| managed，轮中已有 progress（capture full） | 1 | 167,740 | 1 | 1 |
 | managed，无 progress | 2 | 335,480 | 2 | 2 |
 | recorder disabled | 2 | 335,480 | 2 | 2 |
 | 非 managed progress 恢复 | 1 | 167,740 | 1 | 1 |
@@ -25,5 +26,5 @@ npx vitest run src/main/managed-turn-archive-reads.measurement.test.ts
 
 两次读取的来源：
 
-1. `protectManagedInput`（锁外）在 journal/progress 都没有 `toolContentPolicy` 时调用 `matchingArchiveTurn`。本 fixture 的 turn 没有 `toolContentPolicy`，所以即使有 progress 也会读。
+1. `protectManagedInput`（锁外）在 journal/progress 都没有 `toolContentPolicy` 时调用 `matchingArchiveTurn`。只有 capture `toolOutput: full` 的工作区会把 policy 写进 progress；summary 工作区的 progress 没有 policy，所以每次提交都会读。
 2. managed 路径的 `archiveJournal`（锁内）或 disabled 路径的 `matchingArchiveTurn`。
