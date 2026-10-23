@@ -279,8 +279,8 @@ private struct ConversationBottom: PreferenceKey {
 
 // MARK: - Conversation content
 
-struct ConversationMarkdownTable: Sendable {
-  enum Alignment: Sendable {
+struct ConversationMarkdownTable: Equatable, Sendable {
+  enum Alignment: Equatable, Sendable {
     case left, center, right
   }
 
@@ -289,8 +289,8 @@ struct ConversationMarkdownTable: Sendable {
   let rows: [[String]]
 }
 
-struct ConversationMarkdownBlock: Identifiable, Sendable {
-  enum Kind: Sendable {
+struct ConversationMarkdownBlock: Identifiable, Equatable, Sendable {
+  enum Kind: Equatable, Sendable {
     case paragraph
     case heading(Int)
     case unordered
@@ -560,13 +560,20 @@ struct ConversationMarkdownText: View {
     // tail viewport empty even after the outer scroll reaches its bottom.
     VStack(alignment: .leading, spacing: muted ? 8 : 11) {
       ForEach(blocks) { block in
-        blockView(block)
+        ConversationMarkdownBlockView(block: block, muted: muted).equatable()
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
+}
 
-  @ViewBuilder private func blockView(_ block: ConversationMarkdownBlock) -> some View {
+// A growing source must not rebuild unchanged block subtrees on every append.
+// Compare the whole parsed value so an open tail or changed Markdown kind redraws.
+private struct ConversationMarkdownBlockView: View, Equatable {
+  let block: ConversationMarkdownBlock
+  let muted: Bool
+
+  @ViewBuilder var body: some View {
     switch block.kind {
     case .paragraph:
       ConversationMarkdownInline(source: block.text, muted: muted, size: muted ? 14 : 16)
