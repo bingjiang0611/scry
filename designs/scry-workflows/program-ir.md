@@ -9,7 +9,10 @@
 - 参数按名字排序，降低为根 sequence 最前面的普通 `bind`：`{kind:"bind",blockId:name,value:{kind:"literal",value},schema:declaredSchema}`。实际值仅存在这个可执行表示；没有字符串替换、模板全局变量或第二个解释器。未知参数、缺失且无 default、类型不匹配、名称冲突或降低后超过程序原有上限均拒绝。显式 `null/false/0` 不会被 default 覆盖。
 - `bind.schema?` 是可选有限数据合同。编译器检查表达式类型可赋值，再以声明 schema 推断后继类型；不能用它做不受检查的强制类型转换。解释器对 known 值重验，失败按 unknown 阻断。省略时保留原来的推断语义。
 - 实例创建使用既有根锁的 create-if-absent。重复或竞争 command 返回已冻结的赢家，不覆盖已审批/已执行根；同 command 的不同请求拒绝。Only This Run 使用准确草稿快照而不发布源码。实例在排队、执行及原程序恢复时不重新读取当前模板或草稿；修改、删除和 Git 切换不替换实例。
-- 继续原程序仍使用同一 Service/compiler/Interpreter/Runner、原审批、预算及不可变结果；改程序恢复仍未实现。builtin、历史管理、完整提取合同、Agent 编辑及模板编辑 UI 不因本节而成为已完成。
+- 继续原程序仍使用同一 Service/compiler/Interpreter/Runner、原审批、预算及不可变结果；改程序恢复仍未实现。builtin、完整提取合同、Agent 编辑及模板编辑 UI 不因本节而成为已完成。
+- 历史 API `templates.history/revision` 只返回本机实际持有的观察/候选快照，不把每个保留修订称为已发布。列表按字节修订哈希排序，每页至多100个引用；不存在的旧源码返回 null，不借当前文件或 Git 推测补齐。
+- `templates.restoreDraft({ref,base})` 只创建独立草稿，不改源码。base 必须是审阅的当前 ref，或当前不存在时显式 null；仍须审阅 candidateHash/draftRevision 后走既有 publish。删除后可以恢复同一 templateId；无效历史可恢复成无效可编辑草稿，不能直接发布。
+- `templates.delete({ref,commandId})` 只删除匹配准确修订的当前定义，保留历史、草稿和运行。与 publish 共用 canonical 目标锁，先保留准确基线和 intent 再 unlink/fsync。中断后不再次 unlink：有基线快照且观察到不存在时同步目录并以 reconciled_absence 收据确认该后置条件，不归因是谁删除；仍存在或已替换则 unknown。重复完成命令返回历史收据，不能删除后来恢复的定义。真实断电及不合作同用户进程的检查后抢写仍未证明。
 
 ## Agent 调用的结构化输出
 

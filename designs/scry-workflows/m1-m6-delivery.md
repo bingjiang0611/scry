@@ -66,6 +66,15 @@
 - 限制保留：首次26文件合并运行在180s工具期限后中止，只记录到首文件15项通过；拆分通过不证明合并/默认并行稳定。默认 CLI release 本次592通过、1个未修改的 Recorder 超长 prompt 用例在5000ms超时；同用例受控单进程诊断通过，不把它当整项 gate 通过。历史七项延期失败、恢复并行超时及无性能 collector 也未结案。原失败日志保留。
 - 证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-instance.zaLvJf/`。没有安装、push、版本升级、真实 Provider/Jev 发送或 patch apply。下一步由本任务继续输入/输出/验证提取、builtin、历史/恢复/删除与编辑入口，再推进其余 M1–M6；真实账号/费用/写入另需明确授权。
 
+### M2/M3 模板历史、恢复草稿与删除 API（不是模板 UI 或 M1–M6 完成）
+
+- 新增生产 trusted/preload `templates.history/revision/restoreDraft/delete`。只分页列实际保留的源码引用（至多100项），不把未发布候选当已发布版本；缺失/越权/损坏记录不补假数据，不扫描 Git。公共读取及重复收据仍重验项目 authority，运行的私有冻结读取保持独立。
+- 恢复生成准确旧内容的独立草稿，绑定明确的当前基线或 absent/null，不直接改文件；之后仍经既有候选审阅/CAS 发布。同 ID 删除后可恢复；无效历史只成为无效草稿。删除只移除确认修订的当前定义，不删除历史、其他同名来源或运行快照。
+- 删除与发布共享跨 userData 的项目目标锁；保留基线快照、先 durable intent 再 unlink/目录同步。中断后只核对后置条件并同步目录，不再次删除：存在/替换为 unknown，准确不存在且基线证据完整为 reconciled_absence；完成收据不因后来恢复而再次操作。不是对删除 actor 的归因或跨文件 exactly-once。
+- 当前定向覆盖历史准确字节/BOM、失效与缺失、页边界、恢复不写、删除 CAS、授权撤销、损坏/符号链接、重复收据及跨域锁。三个真实 Node 子进程在 intent 后或 unlink/同步后退出，冷控制器保留仍存文件或后来替换的 inode/mtime，缺失时不重建模板目录。故意采用最新修订、重删、恢复时直接写分别触发预期失败，源码已恢复。
+- 本阶段证据：`~/.local/state/rotom/verification-evidence/workflow-m2-template-history.xxjQbq/`。生产 IPC 将真实新 API 与原冻结实例串联，删除后旧实例仍走同一 Runner；模板步骤零新增测试 Provider 调用，整个 conversation 场景仍21次合成调用，不是真实账号/模型。最终检查与来源清单见该目录。
+- 未完成 builtin、完整输入/输出/验证提取、Agent authoring、source/diff/保存界面、修订程序恢复及其余 M1–M6；无性能 collector。前阶段默认 CLI release 的1项5000ms超时及旧七项延期/并行稳定性问题未被本阶段通过抹掉；未重跑该未改动失败集合，也未将其报告为全绿。没有安装、push、版本升级、真实 Provider/Jev 调用或 patch apply。下一步由本任务补 builtin/提取合同及编辑入口。
+
 ## M3：持久解释器与恢复
 
 | ID | 完成要求 |

@@ -359,6 +359,10 @@ const api = {
   workflow: {
     instantiateTemplate: (request: Parameters<WorkflowApi['instantiateTemplate']>[0]): ReturnType<WorkflowApi['instantiateTemplate']> => ipcRenderer.invoke('workflow:instantiateTemplate', request),
     templates: {
+      history: (...args: Parameters<WorkflowTemplateApi['history']>): ReturnType<WorkflowTemplateApi['history']> => ipcRenderer.invoke('workflow:templates:history', ...args),
+      revision: (ref: Parameters<WorkflowTemplateApi['revision']>[0]): ReturnType<WorkflowTemplateApi['revision']> => ipcRenderer.invoke('workflow:templates:revision', ref),
+      restoreDraft: (request: Parameters<WorkflowTemplateApi['restoreDraft']>[0]): ReturnType<WorkflowTemplateApi['restoreDraft']> => ipcRenderer.invoke('workflow:templates:restoreDraft', request),
+      delete: (request: Parameters<WorkflowTemplateApi['delete']>[0]): ReturnType<WorkflowTemplateApi['delete']> => ipcRenderer.invoke('workflow:templates:delete', request),
       read: (...args: Parameters<WorkflowTemplateApi['read']>): ReturnType<WorkflowTemplateApi['read']> => ipcRenderer.invoke('workflow:templates:read', ...args),
       list: (...args: Parameters<WorkflowTemplateApi['list']>): ReturnType<WorkflowTemplateApi['list']> => ipcRenderer.invoke('workflow:templates:list', ...args),
       saveDraft: (request: Parameters<WorkflowTemplateApi['saveDraft']>[0]): ReturnType<WorkflowTemplateApi['saveDraft']> => ipcRenderer.invoke('workflow:templates:saveDraft', request),

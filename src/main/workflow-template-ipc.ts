@@ -19,6 +19,10 @@ export function registerWorkflowTemplateInstantiationIpc(
   })
 }
 export function registerWorkflowTemplateIpc(register: (channel: string, listener: (...args: unknown[]) => unknown) => void, store: WorkflowTemplateApi): void {
+  register('workflow:templates:history', (scope, id, cursor) => store.history(scope as Parameters<WorkflowTemplateApi['history']>[0], id as string, cursor as string | undefined))
+  register('workflow:templates:revision', ref => store.revision(ref as Parameters<WorkflowTemplateApi['revision']>[0]))
+  register('workflow:templates:restoreDraft', request => store.restoreDraft(request as Parameters<WorkflowTemplateApi['restoreDraft']>[0]))
+  register('workflow:templates:delete', request => store.delete(request as Parameters<WorkflowTemplateApi['delete']>[0]))
   register('workflow:templates:read', (scope, id) => store.read(scope as Parameters<WorkflowTemplateApi['read']>[0], id as string))
   register('workflow:templates:list', (scope, cursor) => store.list(scope as Parameters<WorkflowTemplateApi['list']>[0], cursor as string | undefined))
   register('workflow:templates:saveDraft', request => store.saveDraft(request as Parameters<WorkflowTemplateApi['saveDraft']>[0]))

@@ -43,6 +43,10 @@
         "ipc.workflow:snapshot",
         "ipc.workflow:list",
         "ipc.workflow:cancelPlanning",
+        "ipc.workflow:templates:history",
+        "ipc.workflow:templates:revision",
+        "ipc.workflow:templates:restoreDraft",
+        "ipc.workflow:templates:delete",
         "ipc.workflow:templates:read",
         "ipc.workflow:templates:list",
         "ipc.workflow:templates:saveDraft",
@@ -50,7 +54,9 @@
         "ipc.workflow:templates:publish",
         "ipc.workflow:instantiateTemplate",
         "workflow.template.publish",
-        "workflow.template.instantiate"
+        "workflow.template.instantiate",
+        "workflow.template.restoreDraft",
+        "workflow.template.delete"
       ],
       "sources": [
         "src/main/index.ts",

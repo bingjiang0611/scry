@@ -84,6 +84,9 @@ export const appStorePersistenceCopy = {
 export const workflowTemplateCopy = {
   sourceChanged: '模板来源或修订已变化，请刷新并重新确认',
   instanceCommand: '模板实例化 commandId 已用于另一请求',
+  historyMissing: '此修订没有保留的源码，无法恢复',
+  deleteCommand: '删除 commandId 已用于另一请求',
+  deletePending: '删除收据未完成，当前内容不能证明结果；未自动重删',
   fixtureModel: '隔离工作流测试模型',
   workspace: '工作流工作区与当前授权目录不一致',
   frozen: '模板冻结快照缺失或与程序不一致，不能执行',
@@ -98,7 +101,7 @@ export const workflowTemplateCopy = {
   staleDraft: '草稿已变化，请重新读取并核对差异',
   invalidDraft: '草稿尚未通过定义校验，不能发布',
   command: '模板 commandId 已用于另一操作',
-  ledger: '模板快照或发布收据校验失败',
+  ledger: '模板快照或操作收据校验失败',
   pending: '发布收据未完成，当前内容不能证明结果；未自动重写',
   parameter: '模板参数缺失、类型不符或包含未声明参数'
 }

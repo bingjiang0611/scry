@@ -61,7 +61,17 @@ export type WorkflowTemplatePublication =
   | { state: 'conflict'; currentRevisionHash: string | null }
   | { state: 'unknown'; observedRevisionHash: string | null; reason: string }
 
+export type WorkflowTemplateDeletion =
+  | { state: 'deleted'; ref: WorkflowTemplateRef; verification: 'unlink' | 'reconciled_absence' }
+  | Exclude<WorkflowTemplatePublication, { state: 'published' }>
+
 export interface WorkflowTemplateApi {
+  /** Retained observations/candidates, not a claim that each revision was published. */
+  history(scope: WorkflowTemplateScope, templateId: string, cursor?: string): Promise<{ revisions: WorkflowTemplateRef[]; nextCursor?: string }>
+  revision(ref: WorkflowTemplateRef): Promise<WorkflowTemplateSnapshot | null>
+  /** Creates an independent draft; publication still needs reviewed candidate confirmation. */
+  restoreDraft(request: { ref: WorkflowTemplateRef; base: WorkflowTemplateRef | null }): Promise<WorkflowTemplateDraft>
+  delete(request: { ref: WorkflowTemplateRef; commandId: string }): Promise<WorkflowTemplateDeletion>
   read(scope: WorkflowTemplateScope, templateId: string): Promise<WorkflowTemplateSnapshot | null>
   list(scope: WorkflowTemplateScope, cursor?: string): Promise<{ templateIds: string[]; nextCursor?: string }>
   saveDraft(request: { source: string; scope: WorkflowTemplateScope; base?: WorkflowTemplateRef; draftId?: string; expectedDraftRevision?: number }): Promise<WorkflowTemplateDraft>

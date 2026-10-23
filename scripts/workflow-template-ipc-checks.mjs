@@ -52,6 +52,21 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   assert.equal((await invoke('publish', request(edited))).state, 'conflict')
   assert.equal((await invoke('read', personal, personalDraft.templateId)).source, external)
   assert.equal((await invoke('draft', edited.draftId)).source, edited.source)
+  const current = await invoke('read', personal, personalDraft.templateId)
+  const history = await invoke('history', personal, personalDraft.templateId)
+  assert.ok(history.revisions.some(ref => ref.revisionHash === snapshot.ref.revisionHash))
+  assert.equal((await invoke('revision', snapshot.ref)).source, snapshot.source)
+  const restoration = await invoke('restoreDraft', { ref: snapshot.ref, base: current.ref })
+  assert.equal(restoration.source, snapshot.source)
+  assert.equal(restoration.templateId, personalDraft.templateId)
+  assert.equal((await invoke('read', personal, personalDraft.templateId)).source, external)
+  assert.equal((await invoke('delete', { ref: snapshot.ref, commandId: 'stale-template-delete' })).state, 'conflict')
+  const deletionRequest = { ref: current.ref, commandId: 'confirmed-template-delete' }
+  const deletion = await invoke('delete', deletionRequest)
+  assert.equal(deletion.state, 'deleted')
+  assert.equal(await invoke('read', personal, personalDraft.templateId), null)
+  assert.equal((await invoke('revision', snapshot.ref)).source, snapshot.source)
+  assert.equal((await invoke('publish', request(restoration))).state, 'conflict')
   assert.deepEqual(await workflow('preview', instance.workflowId), instance)
   const approval = { workflowId: instance.workflowId, programRevision: instance.programRevision, approvedAt: 1 }
   assert.equal(await workflow('approve', approval), true)
@@ -66,7 +81,12 @@ export async function exerciseWorkflowTemplatePublication(evaluate, fixture) {
   const onlyApproval = { workflowId: onlyRun.workflowId, programRevision: onlyRun.programRevision, approvedAt: 1 }
   await workflow('approve', onlyApproval)
   assert.equal((await workflow('start', onlyRun.workflowId, onlyApproval, 'template-only-run-start')).finalReport, 'only this run')
-  assert.equal(await readFile(join(fixture.userData, 'workflows', 'templates', personalDraft.templateId + '.json'), 'utf8'), external)
+  assert.equal(await invoke('read', personal, personalDraft.templateId), null)
+  const restoredAfterDelete = await invoke('restoreDraft', { ref: snapshot.ref, base: null })
+  assert.equal(restoredAfterDelete.templateId, personalDraft.templateId)
+  assert.equal((await invoke('publish', request(restoredAfterDelete))).state, 'published')
+  assert.deepEqual(await invoke('delete', deletionRequest), deletion)
+  assert.equal(await readFile(join(fixture.userData, 'workflows', 'templates', personalDraft.templateId + '.json'), 'utf8'), snapshot.source)
   assert.deepEqual(await Promise.all(ledgers.map(ledger)), before, 'template publication must not invoke any Provider')
-  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, providerInvocations: 0 }
+  return { test: 'template publication production preload/main IPC', personalAndProject: true, saveAsNewIdentity: true, exactSource: true, duplicateReceipt: true, externalConflict: true, frozenInstantiation: true, onlyThisRun: true, canonicalRunner: true, retainedHistory: true, restorationDraft: true, deleteCAS: true, duplicateDeleteSafe: true, providerInvocations: 0 }
 }

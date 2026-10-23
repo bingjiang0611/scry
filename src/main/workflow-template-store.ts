@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, opendir, realpath, rename, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, opendir, realpath, rename, rm, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { syncDirectory, withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
 import { workflowTemplateCopy as copy } from '../shared/constants/copy'
-import { WORKFLOW_TEMPLATE_MAX_BYTES, type WorkflowTemplateApi, type WorkflowTemplateDraft, type WorkflowTemplatePublication, type WorkflowTemplateRef, type WorkflowTemplateScope, type WorkflowTemplateSnapshot } from '../shared/workflow-template'
+import { WORKFLOW_TEMPLATE_MAX_BYTES, type WorkflowTemplateApi, type WorkflowTemplateDraft, type WorkflowTemplateDeletion, type WorkflowTemplatePublication, type WorkflowTemplateRef, type WorkflowTemplateScope, type WorkflowTemplateSnapshot } from '../shared/workflow-template'
 import { assertTemplateSource, validateWorkflowTemplate } from './workflow-template-definition'
 import { templateHashPattern, templateIdPattern, templateObject, templateReference, templateScope, templateSource } from './workflow-template-identity'
 import type { WorkflowTemplateDefinition, WorkflowTemplateSource } from '../shared/workflow-template'
@@ -65,6 +65,31 @@ async function directory(base: string, parts: string[], create: boolean): Promis
   return current
 }
 
+async function namesPage(path: string | undefined, pattern: RegExp, cursor?: string): Promise<{ names: string[]; nextCursor?: string }> {
+  const names: string[] = []
+  if (path) for await (const entry of await opendir(path)) {
+    const name = entry.name.endsWith('.json') ? entry.name.slice(0, -5) : ''
+    if (!entry.isFile() || !pattern.test(name) || (cursor && name <= cursor)) continue
+    names.push(name)
+    if (names.length > 101) { names.sort(); names.pop() }
+  }
+  names.sort()
+  return { names: names.slice(0, 100), ...(names.length > 100 ? { nextCursor: names[99] } : {}) }
+}
+function snapshot(ref: WorkflowTemplateRef, source: string): WorkflowTemplateSnapshot {
+  try { return { ref, source, state: 'valid', definition: validateWorkflowTemplate(source, ref.templateId) } }
+  catch (error) { return { ref, source, state: 'invalid', error: message(error) } }
+}
+
+export type WorkflowTemplateDeletionRecord = {
+  version: 1
+  commandId: string
+  fingerprint: string
+  ref: WorkflowTemplateRef
+  phase: 'intent' | 'complete'
+  result?: WorkflowTemplateDeletion
+}
+
 type DraftRecord = Omit<WorkflowTemplateDraft, 'source' | 'validation' | 'candidateHash'> & { sourceHash: string }
 export type WorkflowTemplatePublicationRecord = {
   version: 1
@@ -95,6 +120,11 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     const base = accepted.kind === 'personal' ? await realpath(this.userData) : await this.authorizeProject(accepted.workspace)
     const normalized: WorkflowTemplateScope = accepted.kind === 'personal' ? accepted : { kind: 'project', workspace: base }
     return { scope: normalized, base, domainId: hash(JSON.stringify(normalized.kind === 'personal' ? ['personal', base] : ['project', base])) }
+  }
+  private async authorizeRef(input: WorkflowTemplateRef): Promise<WorkflowTemplateRef> {
+    const ref = templateReference(input), location = await this.normalize(ref.scope)
+    if (ref.domainId !== location.domainId || JSON.stringify(ref.scope) !== JSON.stringify(location.scope)) throw new Error(copy.ledger)
+    return ref
   }
   private async own(parts: string[]): Promise<string> {
     return (await directory(await realpath(this.userData), ['workflows', 'template-data', ...parts], true))!
@@ -155,23 +185,54 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
     if (source === undefined) return null
     const ref = { ...target.ref, revisionHash: hash(source) }
     await this.observe(ref, source)
-    try { return { ref, source, state: 'valid', definition: validateWorkflowTemplate(source, templateId) } }
-    catch (error) { return { ref, source, state: 'invalid', error: message(error) } }
+    return snapshot(ref, source)
   }
   async list(scope: WorkflowTemplateScope, cursor?: string): Promise<{ templateIds: string[]; nextCursor?: string }> {
     if (cursor !== undefined) id(cursor)
     const location = await this.normalize(scope)
     const path = await directory(location.base, location.scope.kind === 'personal' ? ['workflows', 'templates'] : ['.scry-workflows'], false)
-    if (!path) return { templateIds: [] }
-    const names: string[] = []
-    for await (const entry of await opendir(path)) {
-      const name = entry.name.endsWith('.json') ? entry.name.slice(0, -5) : ''
-      if (!templateIdPattern.test(name) || (cursor && name <= cursor)) continue
-      names.push(name)
-      if (names.length > 101) { names.sort(); names.pop() }
-    }
-    names.sort()
-    return { templateIds: names.slice(0, 100), ...(names.length > 100 ? { nextCursor: names[99] } : {}) }
+    const page = await namesPage(path, templateIdPattern, cursor)
+    return { templateIds: page.names, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) }
+  }
+  async history(scope: WorkflowTemplateScope, templateId: string, cursor?: string): ReturnType<WorkflowTemplateApi['history']> {
+    id(templateId)
+    if (cursor !== undefined) digest(cursor)
+    const location = await this.normalize(scope)
+    const path = await directory(await realpath(this.userData), ['workflows', 'template-data', 'history', location.domainId, templateId], false)
+    const page = await namesPage(path, templateHashPattern, cursor)
+    return { revisions: page.names.map(revisionHash => ({ scope: location.scope, domainId: location.domainId, templateId, revisionHash })),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) }
+  }
+  private async historySource(ref: WorkflowTemplateRef): Promise<string | undefined> {
+    const dir = await directory(await realpath(this.userData), ['workflows', 'template-data', 'history', ref.domainId, ref.templateId], false)
+    const text = dir ? await readText(join(dir, `${ref.revisionHash}.json`)) : undefined
+    if (text === undefined) return undefined
+    const record = templateObject(JSON.parse(text), ['ref', 'sourceHash'])
+    if (record.sourceHash !== ref.revisionHash || JSON.stringify(templateReference(record.ref)) !== JSON.stringify(ref)) throw new Error(copy.ledger)
+    return this.source(ref.revisionHash)
+  }
+  async revision(input: WorkflowTemplateRef): Promise<WorkflowTemplateSnapshot | null> {
+    const ref = await this.authorizeRef(input), source = await this.historySource(ref)
+    return source === undefined ? null : snapshot(ref, source)
+  }
+  async restoreDraft(request: Parameters<WorkflowTemplateApi['restoreDraft']>[0]): Promise<WorkflowTemplateDraft> {
+    templateObject(request, ['ref', 'base'])
+    const trace = new PerformanceTrace('workflow.template.restoreDraft')
+    try {
+      const ref = await this.authorizeRef(request.ref)
+      const base = request.base === null ? null : templateReference(request.base)
+      if (base && (base.domainId !== ref.domainId || base.templateId !== ref.templateId || JSON.stringify(base.scope) !== JSON.stringify(ref.scope))) throw new Error(copy.invalid)
+      const source = await this.historySource(ref)
+      if (source === undefined) throw new Error(copy.historyMissing)
+      const current = await this.read(ref.scope, ref.templateId)
+      if ((current?.ref.revisionHash ?? null) !== (base?.revisionHash ?? null)) throw new Error(copy.sourceChanged)
+      trace.mark('history_loaded')
+      const record: DraftRecord = { draftId: randomUUID(), draftRevision: 1, domainId: ref.domainId, templateId: ref.templateId, scope: ref.scope, base, sourceHash: ref.revisionHash }
+      await writeJsonAtomic(join(await this.own(['drafts']), `${record.draftId}.json`), record)
+      const draft = await this.expand(record)
+      trace.mark('draft_persisted'); trace.finish()
+      return draft
+    } catch (error) { trace.finish(undefined, 'error'); throw error }
   }
   private async record(draftId: string): Promise<DraftRecord> {
     id(draftId)
@@ -208,12 +269,9 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
    * The run's workspace and Provider authority are checked independently. */
   async frozen(input: WorkflowTemplateRef): Promise<WorkflowTemplateDefinition> {
     const ref = templateReference(input)
-    const path = join(await this.own(['history', ref.domainId, ref.templateId]), `${ref.revisionHash}.json`)
-    const text = await readText(path)
-    if (text === undefined) throw new Error(copy.frozen)
-    const record = templateObject(JSON.parse(text), ['ref', 'sourceHash'])
-    if (record.sourceHash !== ref.revisionHash || JSON.stringify(templateReference(record.ref)) !== JSON.stringify(ref)) throw new Error(copy.ledger)
-    return validateWorkflowTemplate(await this.source(ref.revisionHash), ref.templateId)
+    const source = await this.historySource(ref)
+    if (source === undefined) throw new Error(copy.frozen)
+    return validateWorkflowTemplate(source, ref.templateId)
   }
   private async expand(record: DraftRecord): Promise<WorkflowTemplateDraft> {
     const source = await this.source(record.sourceHash)
@@ -267,6 +325,99 @@ export class WorkflowTemplateStore implements WorkflowTemplateApi {
       await rename(temp, path)
       await syncDirectory(dirname(path))
     } finally { await rm(temp, { force: true }) }
+  }
+  protected async saveDeletion(commandId: string, record: WorkflowTemplateDeletionRecord): Promise<void> {
+    await writeJsonAtomic(join(await this.own(['deletions']), `${commandId}.json`), record)
+  }
+  protected async removeDefinition(path: string): Promise<void> {
+    await unlink(path)
+    await syncDirectory(dirname(path))
+  }
+  private deletionRecord(request: Parameters<WorkflowTemplateApi['delete']>[0], fingerprint: string, text: string): WorkflowTemplateDeletionRecord {
+    const record = templateObject(JSON.parse(text), ['version', 'commandId', 'fingerprint', 'ref', 'phase', 'result']) as WorkflowTemplateDeletionRecord
+    if (record.version !== 1) throw new Error(copy.ledger)
+    if (record.commandId !== request.commandId || record.fingerprint !== fingerprint || JSON.stringify(templateReference(record.ref)) !== JSON.stringify(request.ref)) throw new Error(copy.deleteCommand)
+    if (record.phase === 'intent') {
+      if (Object.hasOwn(record, 'result')) throw new Error(copy.ledger)
+      return record
+    }
+    if (record.phase !== 'complete' || !record.result) throw new Error(copy.ledger)
+    const result = record.result
+    if (result.state === 'deleted') {
+      templateObject(result, ['state', 'ref', 'verification'])
+      if (JSON.stringify(templateReference(result.ref)) !== JSON.stringify(record.ref) || !['unlink', 'reconciled_absence'].includes(result.verification)) throw new Error(copy.ledger)
+    } else if (result.state === 'conflict') {
+      templateObject(result, ['state', 'currentRevisionHash'])
+      if (result.currentRevisionHash !== null) digest(result.currentRevisionHash)
+    } else if (result.state === 'unknown') {
+      templateObject(result, ['state', 'observedRevisionHash', 'reason'])
+      if (result.observedRevisionHash !== null) digest(result.observedRevisionHash)
+      if (typeof result.reason !== 'string' || !result.reason) throw new Error(copy.ledger)
+    } else throw new Error(copy.ledger)
+    return record
+  }
+  async delete(input: Parameters<WorkflowTemplateApi['delete']>[0]): Promise<WorkflowTemplateDeletion> {
+    templateObject(input, ['ref', 'commandId']); command(input.commandId)
+    const ref = await this.authorizeRef(input.ref)
+    const request = { ref, commandId: input.commandId }, fingerprint = hash(JSON.stringify(ref))
+    const trace = new PerformanceTrace('workflow.template.delete')
+    return this.lock<WorkflowTemplateDeletion>('delete-command:' + request.commandId, () => this.lockTarget(ref.scope, ref.domainId, ref.templateId, async () => {
+      const target = await this.target(ref.scope, ref.templateId, false)
+      if (target.ref.domainId !== ref.domainId) throw new Error(copy.ledger)
+      const priorText = await readText(join(await this.own(['deletions']), `${request.commandId}.json`))
+      const prior = priorText === undefined ? undefined : this.deletionRecord(request, fingerprint, priorText)
+      if (prior?.phase === 'complete') return prior.result!
+      const current = target.path ? await readText(target.path) : undefined
+      const currentHash = current === undefined ? null : hash(current)
+      if (prior) {
+        if (await this.historySource(ref) === undefined) throw new Error(copy.ledger)
+        // An interrupted delete observes the postcondition and its durability
+        // barrier, never another unlink. Absence does not attribute the actor.
+        if (current === undefined) {
+          const parent = target.path ? dirname(target.path)
+            : ref.scope.kind === 'project' ? ref.scope.workspace : join(await realpath(this.userData), 'workflows')
+          await syncDirectory(parent)
+        }
+        const result: WorkflowTemplateDeletion = current === undefined
+          ? { state: 'deleted', ref, verification: 'reconciled_absence' }
+          : { state: 'unknown', observedRevisionHash: currentHash, reason: copy.deletePending }
+        await this.saveDeletion(request.commandId, { ...prior, phase: 'complete', result })
+        return result
+      }
+      const intent: WorkflowTemplateDeletionRecord = { version: 1, commandId: request.commandId, fingerprint, ref, phase: 'intent' }
+      if (currentHash !== ref.revisionHash) {
+        const result: WorkflowTemplateDeletion = { state: 'conflict', currentRevisionHash: currentHash }
+        await this.saveDeletion(request.commandId, { ...intent, phase: 'complete', result })
+        return result
+      }
+      await this.observe(ref, current!)
+      trace.mark('baseline_verified')
+      await this.saveDeletion(request.commandId, intent)
+      trace.mark('intent_persisted')
+      try {
+        const latest = await this.target(ref.scope, ref.templateId, false)
+        if (latest.ref.domainId !== ref.domainId) throw new Error(copy.ledger)
+        const source = latest.path ? await readText(latest.path) : undefined
+        const sourceHash = source === undefined ? null : hash(source)
+        if (sourceHash !== ref.revisionHash) {
+          const result: WorkflowTemplateDeletion = { state: 'conflict', currentRevisionHash: sourceHash }
+          await this.saveDeletion(request.commandId, { ...intent, phase: 'complete', result })
+          return result
+        }
+        await this.removeDefinition(latest.path!)
+        if (await readText(latest.path!) !== undefined) throw new Error(copy.ledger)
+        trace.mark('target_absent')
+        const result: WorkflowTemplateDeletion = { state: 'deleted', ref, verification: 'unlink' }
+        await this.saveDeletion(request.commandId, { ...intent, phase: 'complete', result })
+        return result
+      } catch (error) {
+        // Intent remains authoritative; an unknown acknowledgement cannot authorize a retry.
+        return { state: 'unknown', observedRevisionHash: null, reason: message(error) }
+      }
+    })).then(result => {
+      trace.finish(undefined, result.state === 'deleted' ? 'completed' : 'unavailable')
+      return result
+    }, error => { trace.finish(undefined, 'error'); throw error })
   }
   async publish(request: Parameters<WorkflowTemplateApi['publish']>[0]): Promise<WorkflowTemplatePublication> {
     templateObject(request, ['draftId', 'draftRevision', 'candidateHash', 'commandId'])
