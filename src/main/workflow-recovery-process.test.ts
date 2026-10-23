@@ -12,7 +12,21 @@ import { makePlanPreview, validateWorkflowProgram, workflowRevision } from './wo
 import { workflowFrameId } from './workflow-frames'
 import { WorkflowRunner } from './workflow-runner'
 
-const roots: string[] = [], children: Array<{ child: ChildProcess; closed: Promise<{ code: number | null; signal: string | null }> }> = []
+type ParentPhase = { event: string; ms: number; pid?: number; code?: number | null; signal?: string | null; exitCode?: number | null; signalCode?: string | null; streams?: string[] }
+type ProcessRun = { root: string; mode: string; started: number; child: ChildProcess; closed: Promise<{ code: number | null; signal: string | null }>; phases: ParentPhase[]; stderr: () => string }
+const roots: string[] = [], children: ProcessRun[] = []
+const diagnosticTextLimit = 16 * 1024
+const diagnosticPhaseLimit = 128
+function bounded(text: string) { return text.length > diagnosticTextLimit ? text.slice(0, diagnosticTextLimit) + '\n[truncated]' : text }
+function fixturePhases(stderr: string) {
+  return stderr.split('\n').flatMap(line => {
+    if (!line) return []
+    try {
+      const phase = JSON.parse(line) as { event?: unknown; ms?: unknown }
+      return typeof phase.event === 'string' && typeof phase.ms === 'number' ? [phase] : []
+    } catch { return [] }
+  }).slice(0, diagnosticPhaseLimit + 1)
+}
 let bundle: Promise<{ root: string; path: string }> | undefined
 function engine() {
   return bundle ??= (async () => {
@@ -22,13 +36,36 @@ function engine() {
   })()
 }
 afterEach(async context => {
-  for (const { child, closed } of children.splice(0)) {
-    if (child.connected) child.send('terminate')
-    await closed
+  const runs = children.splice(0), finishedRoots = roots.splice(0)
+  const failed = context.task.result?.state === 'fail'
+  for (const run of runs) run.phases.push({ event: failed ? 'failure_cleanup_start' : 'cleanup_start', ms: Math.round(performance.now() - run.started), exitCode: run.child.exitCode, signalCode: run.child.signalCode })
+  const saveDiagnostics = async (stage: 'before_cleanup' | 'closed') => {
+    await Promise.all(finishedRoots.map(async root => {
+      const diagnostic = {
+        version: 1,
+        snapshot: 'failure_cleanup_start',
+        stage,
+        clocks: { parent: 'elapsed_ms_since_spawn_request', fixture: 'elapsed_ms_since_controller_boot_after_imports' },
+        processes: runs.filter(run => run.root === root).map(run => ({ mode: run.mode, parentPhases: run.phases.slice(0, diagnosticPhaseLimit), fixturePhases: fixturePhases(run.stderr()), stderr: bounded(run.stderr()) }))
+      }
+      await writeFile(join(root, 'recovery-diagnostic.json'), JSON.stringify(diagnostic, null, 2))
+    }))
   }
-  const finishedRoots = roots.splice(0)
-  if (context.task.result?.state === 'fail') console.warn('Retained failed process fixture:', finishedRoots)
-  else await Promise.all(finishedRoots.map(root => rm(root, { recursive: true, force: true })))
+  // Persist the pre-signal snapshot even if cleanup itself subsequently stalls.
+  if (failed) await saveDiagnostics('before_cleanup')
+  for (const run of runs) {
+    if (run.child.connected) {
+      run.phases.push({ event: 'parent_terminate_request', ms: Math.round(performance.now() - run.started) })
+      run.child.send('terminate')
+    }
+    await run.closed
+    run.phases.push({ event: 'parent_cleanup_close', ms: Math.round(performance.now() - run.started), exitCode: run.child.exitCode, signalCode: run.child.signalCode })
+  }
+  if (failed) {
+    await saveDiagnostics('closed')
+    console.warn('Retained failed process fixture:', finishedRoots)
+    for (const run of runs) console.warn(`[${run.mode}] recovery phases:`, run.phases.map(phase => `${phase.event}@${phase.ms}ms`).join(' -> '))
+  } else await Promise.all(finishedRoots.map(root => rm(root, { recursive: true, force: true })))
 })
 afterAll(async () => { if (bundle) await rm((await bundle).root, { recursive: true, force: true }) })
 const literal = (value: string): WorkflowExpression => ({ kind: 'literal', value })
@@ -53,11 +90,19 @@ async function launch(root: string, mode: string) {
   const { path } = await engine()
   const sandbox = process.platform === 'darwin'
   if (sandbox) await access('/usr/bin/sandbox-exec')
-  const child = spawn(sandbox ? '/usr/bin/sandbox-exec' : process.execPath, sandbox ? ['-p', '(version 1)(allow default)(deny network*)', process.execPath, path, root, mode] : [path, root, mode], { env: { HOME: root, TMPDIR: root, PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+  const started = performance.now(), phases: ParentPhase[] = [], phase = (event: string, detail: Omit<ParentPhase, 'event' | 'ms'> = {}) => phases.push({ event, ms: Math.round(performance.now() - started), ...detail })
+  const child = spawn(sandbox ? '/usr/bin/sandbox-exec' : process.execPath, sandbox ? ['-p', '(version 1)(allow default)(deny network*)', process.execPath, path, root, mode] : [path, root, mode], { env: { HOME: root, TMPDIR: root, PATH: '/usr/bin:/bin', SCRY_WORKFLOW_RECOVERY_TRACE: '1' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+  phase('parent_spawn_returned', { pid: child.pid })
+  child.once('spawn', () => phase('parent_spawned', { pid: child.pid }))
   let stderr = ''
   child.stderr!.setEncoding('utf8').on('data', text => { stderr += text })
-  const closed = new Promise<{ code: number | null; signal: string | null }>((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal })) })
-  children.push({ child, closed })
+  phase('parent_stdio_registered', { streams: ['stdout', 'stderr', 'ipc'] })
+  child.stdout!.once('end', () => phase('parent_stdout_end'))
+  child.stderr!.once('end', () => phase('parent_stderr_end'))
+  child.once('disconnect', () => phase('parent_ipc_disconnect'))
+  child.once('exit', (code, signal) => phase('parent_exit', { code, signal, exitCode: child.exitCode, signalCode: child.signalCode }))
+  const closed = new Promise<{ code: number | null; signal: string | null }>((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => { phase('parent_close', { code, signal, exitCode: child.exitCode, signalCode: child.signalCode }); resolve({ code, signal }) }) })
+  children.push({ root, mode, started, child, closed, phases, stderr: () => stderr })
   const checkpoint = mode === 'live' ? new Promise<void>((resolve, reject) => {
     child.once('message', message => (message as { type?: string }).type === 'checkpoint' ? resolve() : reject(new Error('unexpected checkpoint')))
     child.once('exit', code => reject(new Error('early exit: ' + code + ': ' + stderr)))
