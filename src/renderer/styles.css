@@ -581,14 +581,14 @@ body.pane-resizing * {
   z-index: 100;
 }
 .modal-overlay[data-state='enter'] {
-  animation: modal-backdrop-in 180ms linear both;
+  animation: modal-backdrop-in 180ms linear backwards;
 }
 .modal-overlay[data-state='exit'] {
   pointer-events: none;
   animation: modal-backdrop-out 160ms var(--ease-exit) both;
 }
 .modal-overlay[data-state='enter'] > .modal {
-  animation: modal-dialog-in 260ms var(--ease-struct) both;
+  animation: modal-dialog-in 260ms var(--ease-struct) backwards;
 }
 .modal-overlay[data-state='exit'] > .modal {
   pointer-events: none;
@@ -616,7 +616,7 @@ body.pane-resizing * {
 .menu[data-state='enter'],
 .ctxmenu[data-state='enter'],
 .session-hover-card[data-state='enter'] {
-  animation: overlay-menu-in 160ms var(--ease-out) both;
+  animation: overlay-menu-in 160ms var(--ease-out) backwards;
 }
 .menu[data-state='exit'],
 .ctxmenu[data-state='exit'],
@@ -11094,7 +11094,7 @@ button.turn-id.turn-call-open:focus-visible {
   background: color-mix(in srgb, var(--panel2) 97%, transparent);
   box-shadow: var(--shadow-pop);
   transform-origin: top right;
-  animation: surface-menu-in var(--dur-fast) var(--ease-out);
+  animation: surface-menu-in var(--dur-fast) var(--ease-out) backwards;
 }
 .surface-menu[data-state='exit'] {
   pointer-events: none;
