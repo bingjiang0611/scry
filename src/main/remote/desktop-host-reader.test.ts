@@ -120,6 +120,37 @@ describe('desktop authenticated evidence source', () => {
     await expect(f.read({ kind: 'history', context: f.context, before: first.history.before, snapshot: first.history.snapshot })).rejects.toThrow('history_snapshot_changed')
   })
 
+  it('serves trace deltas only on request and keeps the legacy snapshot shape for older clients', async () => {
+    const f = fixture()
+    expect(await f.read({ kind: 'info' })).toMatchObject({ kind: 'info', traceDelta: 1 })
+    const runId = 'run-delta-1'
+    const item = (index: number) => ({ id: `event-${index}`, runId, ts: '2026-10-23T00:00:00Z', kind: 'model' as const, stage: 'text', text: `t${index}` })
+    const run: ActiveRun = { runId, cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId, userText: 'task', items: [item(0), item(1)], done: false }
+    f.setRun(run)
+    // An older client never sends `delta`: exactly the previous response, no revision.
+    const legacy = await f.read({ kind: 'trace', context: f.context, runId, images: true })
+    expect(Object.keys(legacy).sort()).toEqual(['imageCount', 'kind', 'run'])
+    const reset = await f.read(parseDesktopHostRead({ kind: 'trace', context: f.context, runId, images: true, delta: {} }))
+    if (reset.kind !== 'trace' || !reset.revision) throw new Error('expected a reset snapshot')
+    expect(reset).toMatchObject({ reset: true, imageCount: 0, run: { items: [item(0), item(1)] } })
+    run.items[1] = { ...item(1), text: 'edited in place' }
+    run.items.push(item(2))
+    run.done = true
+    const delta = await f.read(parseDesktopHostRead({ kind: 'trace', context: f.context, runId, images: true, delta: { after: { revision: reset.revision, count: 2 } } }))
+    expect(delta).toMatchObject({ kind: 'trace_delta', base: reset.revision, count: 3, imageCount: 0, run: { runId, done: true },
+      changes: [{ index: 1, item: { text: 'edited in place' } }, { index: 2, item: item(2) }] })
+    expect(delta.kind === 'trace_delta' && 'items' in delta.run).toBe(false)
+    // A stale count is never patched: the host answers a full reset.
+    expect(await f.read({ kind: 'trace', context: f.context, runId, delta: { after: { revision: reset.revision, count: 5 } } })).toMatchObject({ kind: 'trace', reset: true })
+    // Authorization runs before any delta work.
+    await expect(f.read({ kind: 'trace', context: { ...f.context, providerId: 'claude' }, runId, delta: { after: { revision: reset.revision, count: 2 } } })).rejects.toThrow('run_context_mismatch')
+    f.revoke()
+    await expect(f.read({ kind: 'trace', context: f.context, runId, delta: {} })).rejects.toThrow('workspace_not_authorized')
+    for (const delta of [null, { after: null }, { after: { revision: '', count: 0 } }, { after: { revision: 'r', count: -1 } }, { after: { revision: 'r', count: 1.5 } }]) {
+      expect(() => parseDesktopHostRead({ kind: 'trace', context: f.context, runId, delta })).toThrow('invalid_request')
+    }
+  })
+
   it('does not invent an empty available history and rejects workspace/profile mismatches', async () => {
     const f = fixture()
     expect(await f.read({ kind: 'history', context: f.context })).toMatchObject({ history: { status: 'unavailable', reason: 'trace_archive_unavailable' } })

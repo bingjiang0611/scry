@@ -2,7 +2,7 @@ import type { DesktopWorkbenchRequest, DesktopWorkbenchResult } from './desktop-
 import type { AgentInputAttachment } from './runtime'
 import type { AgentForkSessionRequest, AgentPermissionMode, AgentQuestionResponse } from './runtime'
 import type { DeleteSessionResult } from './provider'
-import type { ActiveRun } from './trace'
+import type { ActiveRun, TraceEvent } from './trace'
 import type { LoadedSessionTurn } from './session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from './workspace'
 
@@ -139,6 +139,8 @@ export interface DesktopRemoteCatalog {
   // Fork and delete are independent because an older host may implement only one.
   sessionFork?: true
   sessionDelete?: true
+  // Absent on older hosts: the client keeps reading full trace snapshots.
+  traceDelta?: 1
 }
 export interface DesktopRemoteHistory {
   historyScope?: 'session'
@@ -159,14 +161,30 @@ export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
 export type DesktopHostRead =
   | { kind: 'info' }
   | { kind: 'history'; context: DesktopRemoteContext; historyScope?: 'session'; before?: number; snapshot?: string; byteChunks?: true; images?: true; chunk?: { id: string; offset: number } }
-  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true }
+  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor } }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
-  | { kind: 'trace'; run: ActiveRun | null; imageCount?: number }
+  // `revision` is present only when the query asked for `delta`; with it the
+  // snapshot is a reset that replaces everything the client held.
+  | { kind: 'trace'; run: ActiveRun | null; imageCount?: number; revision?: string; reset?: true }
+  | { kind: 'trace_delta'; run: DesktopTraceRunMeta; imageCount?: number; base: string; revision: string; count: number; changes: DesktopTraceChange[] }
   | { kind: 'image_chunk'; id: string; offset: number; totalBytes: number; data: string; name: string; mimeType: AgentInputAttachment['mimeType']; historyScope?: 'session' }
+
+// Trace delta (`traceDelta: 1`). A revision names one host-side item list of
+// a live run; `count` is that list's length. A delta lists every index whose
+// item differs from the `base` revision plus every appended index, so applying
+// it to exactly `base`/`count` reproduces the host list. Any other base is a
+// gap: the client discards its copy and reads a full snapshot instead.
+export interface DesktopTraceCursor { revision: string; count: number }
+export interface DesktopTraceChange { index: number; item: TraceEvent }
+export type DesktopTraceRunMeta = Omit<ActiveRun, 'items'>
+export type DesktopRemoteTraceRead =
+  // `cursor` is absent when the host cannot serve deltas (older host).
+  | { kind: 'snapshot'; run: ActiveRun | null; cursor?: DesktopTraceCursor }
+  | { kind: 'delta'; run: DesktopTraceRunMeta; base: string; cursor: DesktopTraceCursor; changes: DesktopTraceChange[] }
 
 export type DesktopRemoteForkSessionRequest = AgentForkSessionRequest
 export interface DesktopRemoteDeleteSessionRequest {
@@ -262,6 +280,7 @@ export interface DesktopRemoteAPI {
   selectDirectory(connectionId: string, path: string): Promise<RemoteProjectRef>
   history(connectionId: string, context: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory>
   trace(connectionId: string, context: DesktopRemoteContext, runId: string, knownAttachmentCount?: number): Promise<ActiveRun | null>
+  traceDelta(connectionId: string, context: DesktopRemoteContext, runId: string, after?: DesktopTraceCursor, knownAttachmentCount?: number): Promise<DesktopRemoteTraceRead>
   intents(connectionId: string): Promise<DesktopRemoteIntent[]>
   submit(connectionId: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent>
   intentStatus(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>

@@ -9,7 +9,7 @@ import { attachmentSha256, DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MA
 import type {
   DesktopDirectoryPage, DesktopHostInvitation, DesktopHostRead, DesktopPairingResult, DesktopRemoteAPI,
   DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent,
-  DesktopRemoteRunStatus, DesktopRemoteLiveRun, DesktopRemoteSubmit, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProviderQuery, RemoteProjectRef, RemoteSessionRef
+  DesktopRemoteRunStatus, DesktopRemoteLiveRun, DesktopRemoteSubmit, DesktopRemoteTraceRead, DesktopTraceChange, DesktopTraceCursor, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, DesktopSshTarget, RemoteCommandCatalog, RemoteProviderRef, RemoteProviderQuery, RemoteProjectRef, RemoteSessionRef
 } from '../../shared/desktop-remote'
 import { isAgentPermissionMode, isSupportedImageMimeType, type AgentInputAttachment, type AgentQuestionResponse } from '../../shared/runtime'
 import type { DeleteSessionResult } from '../../shared/provider'
@@ -65,7 +65,7 @@ interface StoredConnection {
   autoConnect?: boolean
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
-interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability }
+interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1 }
 interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string }
 
 function fail(code: string): never { throw new Error(code) }
@@ -173,7 +173,7 @@ function validateDeleteSessionResult(value: unknown): DeleteSessionResult {
   return value as unknown as DeleteSessionResult
 }
 
-function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; attachments?: DesktopAttachmentCapability } {
+function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopAttachmentCapability } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
       response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
       (response.desktop.providerDiscovery !== undefined && response.desktop.providerDiscovery !== 2) ||
@@ -181,7 +181,8 @@ function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 
       (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
       (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true) ||
       (response.desktop.sessionFork !== undefined && response.desktop.sessionFork !== true) ||
-      (response.desktop.sessionDelete !== undefined && response.desktop.sessionDelete !== true)) fail('desktop_capability_unavailable')
+      (response.desktop.sessionDelete !== undefined && response.desktop.sessionDelete !== true) ||
+      (response.desktop.traceDelta !== undefined && response.desktop.traceDelta !== 1)) fail('desktop_capability_unavailable')
   const attachmentInfo = response.desktop.attachments
   if (attachmentInfo !== undefined && (!record(attachmentInfo) || attachmentInfo.transport !== 'chunked' || attachmentInfo.maxBytes !== DESKTOP_ATTACHMENT_MAX_BYTES || attachmentInfo.maxTotalBytes !== DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES || attachmentInfo.maxCount !== DESKTOP_ATTACHMENT_MAX_COUNT || attachmentInfo.chunkBytes !== DESKTOP_ATTACHMENT_CHUNK_BYTES)) fail('desktop_capability_unavailable')
   return {
@@ -191,6 +192,7 @@ function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 
     ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {}),
     ...(response.desktop.sessionFork === true ? { sessionFork: true as const } : {}),
     ...(response.desktop.sessionDelete === true ? { sessionDelete: true as const } : {}),
+    ...(response.desktop.traceDelta === 1 ? { traceDelta: 1 as const } : {}),
     ...(attachmentInfo ? { attachments: attachmentInfo as unknown as DesktopAttachmentCapability } : {})
   }
 }
@@ -332,7 +334,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
       const capabilities = validateInfo(response, item.hostId)
       if (this.#disposed) fail('desktop_client_disposed')
       await this.#save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
-      this.#active.set(item.id, { tunnel, serial: Promise.resolve(), ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}) })
+      this.#active.set(item.id, { tunnel, serial: Promise.resolve(), ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}), ...(capabilities.traceDelta ? { traceDelta: capabilities.traceDelta } : {}) })
       await this.#reconcileUnknown(state, item.id)
     } catch (error) { await tunnel.close(); throw error }
   }
@@ -526,13 +528,55 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
     if (!validRunId(runId)) fail('invalid_run_id')
     if (knownAttachmentCount !== undefined && (!Number.isSafeInteger(knownAttachmentCount) || knownAttachmentCount < 0 || knownAttachmentCount > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_request')
     const result = await this.#desktop(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true })
-    if (result.kind !== 'trace' || (result.run !== null && !record(result.run))) fail('invalid_trace_response')
+    if (result.kind !== 'trace') fail('invalid_trace_response')
+    return this.#traceSnapshot(connectionIdValue, value, runId, result, knownAttachmentCount)
+  }
+
+  // Delta reads only after the connected host declared `traceDelta: 1`. Older
+  // hosts, and a host that ignores the `delta` field, answer with the full
+  // snapshot shape; that is returned without a cursor so the caller keeps
+  // reading snapshots instead of failing or showing an empty run.
+  async traceDelta(connectionIdValue: string, value: DesktopRemoteContext, runId: string, after?: DesktopTraceCursor, knownAttachmentCount?: number): Promise<DesktopRemoteTraceRead> {
+    if (!validRunId(runId)) fail('invalid_run_id')
+    if (knownAttachmentCount !== undefined && (!Number.isSafeInteger(knownAttachmentCount) || knownAttachmentCount < 0 || knownAttachmentCount > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_request')
+    if (after !== undefined && (!record(after) || !text(after.revision, 128) || !Number.isSafeInteger(after.count) || after.count < 0 || after.count > MAX_ITEMS)) fail('invalid_request')
+    const delta = this.#active.get(connectionIdValue)?.traceDelta === 1
+    const result = await this.#desktop(connectionIdValue, { kind: 'trace', context: context(value), runId, images: true,
+      ...(delta ? { delta: after ? { after: { revision: after.revision, count: after.count } } : {} } : {}) })
+    if (result.kind === 'trace') {
+      const run = await this.#traceSnapshot(connectionIdValue, value, runId, result, knownAttachmentCount)
+      if (result.revision === undefined || run === null) return { kind: 'snapshot', run }
+      if (!delta || !text(result.revision, 128) || result.reset !== true) fail('invalid_trace_response')
+      return { kind: 'snapshot', run, cursor: { revision: result.revision, count: run.items.length } }
+    }
+    if (result.kind !== 'trace_delta' || !after || !record(result.run) || result.run.items !== undefined || !this.#traceRunMeta(result.run) ||
+        !text(result.base, 128) || !text(result.revision, 128) || !Number.isSafeInteger(result.count) || Number(result.count) < 0 || Number(result.count) > MAX_ITEMS ||
+        !Array.isArray(result.changes) || result.changes.length > Number(result.count)) fail('invalid_trace_response')
+    const count = result.count as number
+    const changes = result.changes.map((change): DesktopTraceChange => {
+      if (!record(change) || !Number.isSafeInteger(change.index) || Number(change.index) < 0 || Number(change.index) >= count) fail('invalid_trace_response')
+      return { index: change.index as number, item: this.#traceEvent(change.item) }
+    })
+    const attachments = await this.#traceAttachments(connectionIdValue, value, runId, result.imageCount, knownAttachmentCount)
+    return { kind: 'delta', run: { ...result.run, ...(attachments ? { attachments } : {}) } as unknown as Omit<ActiveRun, 'items'>, base: result.base, cursor: { revision: result.revision, count }, changes }
+  }
+
+  async #traceSnapshot(connectionIdValue: string, value: DesktopRemoteContext, runId: string, result: Record<string, unknown>, knownAttachmentCount?: number): Promise<ActiveRun | null> {
+    if (result.run !== null && !record(result.run)) fail('invalid_trace_response')
     if (result.run === null) return null
     const run = result.run
-    if (!text(run.runId, 128) || (typeof run.userText !== 'string' || run.userText.length > 128_000) || typeof run.done !== 'boolean' || !Array.isArray(run.items) || run.items.length > MAX_ITEMS) fail('invalid_trace_response')
-    const attachments = result.imageCount !== undefined && (result.imageCount !== knownAttachmentCount || result.imageCount === 0)
-      ? await this.#readImages(connectionIdValue, value, runId, result.imageCount) : undefined
+    if (!this.#traceRunMeta(run) || !Array.isArray(run.items) || run.items.length > MAX_ITEMS) fail('invalid_trace_response')
+    const attachments = await this.#traceAttachments(connectionIdValue, value, runId, result.imageCount, knownAttachmentCount)
     return { ...run, ...(attachments ? { attachments } : {}), runId: run.runId, userText: run.userText, done: run.done, items: run.items.map((item) => this.#traceEvent(item)) } as unknown as ActiveRun
+  }
+  #traceRunMeta(run: Record<string, unknown>): boolean {
+    return text(run.runId, 128) && typeof run.userText === 'string' && run.userText.length <= 128_000 && typeof run.done === 'boolean'
+  }
+  // Images are re-read only when the host count differs from what the caller
+  // already shows (or is zero); undefined means "keep the attachments you have".
+  #traceAttachments(connectionIdValue: string, value: DesktopRemoteContext, runId: string, imageCount: unknown, knownAttachmentCount?: number): Promise<AgentInputAttachment[] | undefined> {
+    return imageCount !== undefined && (imageCount !== knownAttachmentCount || imageCount === 0)
+      ? this.#readImages(connectionIdValue, value, runId, imageCount) : Promise.resolve(undefined)
   }
 
   async #readImages(id: string, value: DesktopRemoteContext, runId: string, count: unknown, providerTurnId?: string, historyScope?: 'session'): Promise<AgentInputAttachment[]> {
@@ -953,7 +997,7 @@ export class DesktopRemoteClient implements DesktopRemoteAPI {
   async #requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> { const state = await this.#state(); const item = this.#connection(state, id); const active = this.#active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.#request(active.tunnel.runPath, item, request, authorizePeer) as Record<string, unknown> }
   async #desktop(id: string, query: DesktopHostRead): Promise<Record<string, unknown>> {
     const response = await this.#requestForConnection(id, { op: 'desktop', query })
-    if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
+    if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace', 'trace_delta', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
     return response.desktop
   }
   async #catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.#requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }

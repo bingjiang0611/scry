@@ -43,6 +43,7 @@ import type { SlashCmd } from '@shared/trace'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
+import { mergeRemoteTrace, type RemoteTraceView } from '../remote-trace'
 import { ChatView } from './ChatView'
 import { bridge, defaultOption, desktopProviderKey, historyTurns, RemoteFiles, shouldQueryUnknownIntent } from './DesktopRemote'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
@@ -51,6 +52,15 @@ import './remote-location.css'
 
 const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 const EMPTY_DRAFT_ATTACHMENTS: ComposerDraftAttachment[] = []
+// Delta-capable hosts report "no new trace events"; only then does the poll
+// back off (1.5 s → 3 s → 5 s). Any change, status change or user action resumes 1.5 s.
+const POLL_MS = 1500
+const QUIET_POLL_MAX_MS = 5000
+// Poll answers are freshly decoded objects. Keeping the shown value when the
+// content is equal lets React skip a whole-transcript render on quiet polls.
+function keepIfEqual<T>(next: T): (current: T) => T {
+  return (current) => current === next || JSON.stringify(current) === JSON.stringify(next) ? current : next
+}
 
 export function remoteDraftKey(connectionId: string, cwd: string, externalSessionId?: string): string {
   return JSON.stringify(['remote', connectionId, cwd, externalSessionId ?? 'new'])
@@ -199,8 +209,21 @@ export function RemoteChat({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
-  const activeRunRef = useRef(activeRun)
-  activeRunRef.current = activeRun
+  // The shown run and the host revision it came from; updated synchronously so
+  // the next poll continues from exactly what is displayed.
+  const traceViewRef = useRef<RemoteTraceView | null>(null)
+  const showTrace = useCallback((view: RemoteTraceView | null): void => {
+    traceViewRef.current = view
+    setActiveRun(view?.run ?? null)
+  }, [])
+  // Backoff lives outside React state: an interval step must not re-render the transcript.
+  const pollIntervalMs = useRef(POLL_MS)
+  const applyPollInterval = useRef<(intervalMs: number) => void>(() => {})
+  const setPollInterval = useCallback((intervalMs: number): void => {
+    pollIntervalMs.current = intervalMs
+    applyPollInterval.current(intervalMs)
+  }, [])
+  const lastPollKey = useRef<string | undefined>(undefined)
   const [runStatus, setRunStatus] = useState<(DesktopRemoteRunStatus & { runId: string }) | null>(null)
   // A host run on this session that this client did not submit.
   const [foreignRun, setForeignRun] = useState<DesktopRemoteLiveRun | null>(null)
@@ -227,6 +250,7 @@ export function RemoteChat({
   const catalogSession = sessionId ? catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
     item.providerId === providerId && (item.agentProfileId ?? '') === (provider?.agentProfileId ?? '')) : undefined
   const sessionActive = catalogSession?.isActive === true
+  const traceDelta = catalog?.traceDelta === 1
   const previousContextKey = useRef<string | undefined>()
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
@@ -305,10 +329,12 @@ export function RemoteChat({
     contextGeneration.current += 1
     const preserveAdoptedRun = adoptingSession.current
     adoptingSession.current = false
-    if (!preserveAdoptedRun) { adoptedIntent.current = undefined; setActiveRun(null); setRunStatus(null) }
+    if (!preserveAdoptedRun) { adoptedIntent.current = undefined; showTrace(null); setRunStatus(null) }
+    lastPollKey.current = undefined
+    setPollInterval(POLL_MS)
     setForeignRun(null)
     setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
-  }, [contextKey])
+  }, [contextKey, setPollInterval, showTrace])
   // Controls are a separate selected-context read. A late response may only
   // publish for the exact Provider/profile/cwd that requested it.
   useEffect(() => {
@@ -386,6 +412,33 @@ export function RemoteChat({
   useEffect(() => {
     if (!connected || !catalogReady) return
     let cancelled = false
+    // Returns whether the shown run changed, or undefined when this poll went stale.
+    const followTrace = async (runId: string, sequence: number): Promise<boolean | undefined> => {
+      const previous = traceViewRef.current?.run.runId === runId ? traceViewRef.current : null
+      const knownCount = previous?.run.attachments?.length
+      const stale = (): boolean => cancelled || sequence !== pollSequence.current
+      if (!traceDelta) {
+        const run = await api.trace(connectionId, context, runId, knownCount)
+        if (stale()) return undefined
+        const merged = mergeRemoteTrace(previous, { kind: 'snapshot', run })
+        if (merged.kind === 'applied') showTrace(merged.view)
+        return true
+      }
+      let merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, context, runId, previous?.cursor, knownCount))
+      if (stale()) return undefined
+      // A gap, reset or revision discontinuity never patches the shown run: read it whole.
+      if (merged.kind === 'gap') merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, context, runId, undefined, knownCount))
+      if (stale()) return undefined
+      if (merged.kind === 'gap') throw new Error('remote_trace_gap')
+      if (merged.changed) showTrace(merged.view)
+      else traceViewRef.current = merged.view
+      return merged.changed
+    }
+    const settlePoll = (key: string, traceChanged: boolean | undefined): void => {
+      const quiet = traceChanged === false && key === lastPollKey.current
+      lastPollKey.current = key
+      setPollInterval(quiet ? Math.min(QUIET_POLL_MAX_MS, pollIntervalMs.current * 2) : POLL_MS)
+    }
     const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
       try {
@@ -394,7 +447,7 @@ export function RemoteChat({
         const activeIntent = pending.filter((intent) => intentMatches(intent, context) && intent.runId).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
           (adoptedIntent.current ? pending.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
         if (pending.some(intent => intent.status === 'unknown')) queueStore.pauseConnection(connectionId)
-        setIntents(pending)
+        setIntents(keepIfEqual(pending))
         if (!activeIntent?.runId) {
           setRunStatus(null)
           // Runs started on the host UI, a phone or another desktop leave no
@@ -403,20 +456,18 @@ export function RemoteChat({
           const followed = foreignRunRef.current
           const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context) : null
           if (cancelled || sequence !== pollSequence.current) return
-          setForeignRun(live)
+          setForeignRun(keepIfEqual(live))
           if (followed && live?.runId !== followed.runId) {
             // The followed run left the host's live set; its turn is now history.
             setHistoryRevision((revision) => revision + 1)
             void refreshRemoteCatalog(connectionId)
           }
+          let traceChanged: boolean | undefined
           if (live?.scryRunId) {
-            const previous = activeRunRef.current
-            const knownCount = previous?.runId === live.scryRunId ? previous.attachments?.length : undefined
-            const run = await api.trace(connectionId, context, live.scryRunId, knownCount)
-            if (cancelled || sequence !== pollSequence.current) return
-            setActiveRun(run && previous?.runId === run.runId && run.attachments === undefined
-              ? { ...run, attachments: previous.attachments } : run)
-          } else setActiveRun(null)
+            traceChanged = await followTrace(live.scryRunId, sequence)
+            if (traceChanged === undefined) return
+          } else showTrace(null)
+          settlePoll(JSON.stringify([pending, live]), traceChanged)
           setPollError(null)
           setPollFresh(true)
           return
@@ -432,7 +483,7 @@ export function RemoteChat({
         }
         if (nextStatus.state === 'settled' || nextStatus.state === 'failed') queueStore.settle(boundQueueKey, activeIntent.intentId)
         if (cancelled || sequence !== pollSequence.current) return
-        setRunStatus({ ...nextStatus, runId: activeIntent.runId })
+        setRunStatus(keepIfEqual<(DesktopRemoteRunStatus & { runId: string }) | null>({ ...nextStatus, runId: activeIntent.runId }))
         if (nextStatus.externalSessionId && !context.externalSessionId && !activeIntent.context.externalSessionId) {
           adoptedIntent.current = activeIntent
           adoptingSession.current = true
@@ -463,14 +514,12 @@ export function RemoteChat({
           setHistoryRevision((revision) => revision + 1)
           void refreshRemoteCatalog(connectionId)
         }
+        let traceChanged: boolean | undefined
         if (nextStatus.scryRunId) {
-          const previous = activeRunRef.current
-          const knownCount = previous?.runId === nextStatus.scryRunId ? previous.attachments?.length : undefined
-          const run = await api.trace(connectionId, context, nextStatus.scryRunId, knownCount)
-          if (cancelled || sequence !== pollSequence.current) return
-          setActiveRun(run && previous?.runId === run.runId && run.attachments === undefined
-            ? { ...run, attachments: previous.attachments } : run)
-        } else setActiveRun(null)
+          traceChanged = await followTrace(nextStatus.scryRunId, sequence)
+          if (traceChanged === undefined) return
+        } else showTrace(null)
+        settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)
         setPollError(null)
         setPollFresh(true)
       } catch (reason) {
@@ -489,8 +538,8 @@ export function RemoteChat({
       pollSequence.current += 1
       if (pollRef.current === poll) pollRef.current = undefined
     }
-  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive])
-  useVisibilityPolling(JSON.stringify([connectionId, context, connected, catalogReady, sessionActive]), () => pollRef.current?.(), 1500, () => {
+  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive, setPollInterval, showTrace, traceDelta])
+  applyPollInterval.current = useVisibilityPolling(JSON.stringify([connectionId, context, connected, catalogReady, sessionActive]), () => pollRef.current?.(), POLL_MS, () => {
     pollSequence.current += 1
     setPollFresh(false)
   })
@@ -611,7 +660,7 @@ export function RemoteChat({
     submissionInFlight.current = true
     const submittedGeneration = contextGeneration.current
     const submittedKey = draftKey
-    setSubmitting(true); setError(null); setStatus(null)
+    setSubmitting(true); setError(null); setStatus(null); setPollInterval(POLL_MS)
     let acknowledged = false
     try {
       const intent = await api.submit(connectionId, request)
@@ -727,11 +776,13 @@ export function RemoteChat({
   const stop = async (): Promise<void> => {
     const runId = controlRunId
     if (!runId) { setError('当前没有可停止的远端运行。'); return }
+    setPollInterval(POLL_MS)
     try { await api.stop(connectionId, runId); setStatus('已请求停止，等待远端确认。') } catch (reason) { setError(errorText(reason)) }
   }
   const answer = async (response: AgentQuestionResponse): Promise<void> => {
     const runId = controlRunId
     if (!connected || !runId) { const reason = new Error('远端未连接或问题所属运行已不可用。'); setError(reason.message); throw reason }
+    setPollInterval(POLL_MS)
     try { await api.answer(connectionId, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
   const loadOlderHistory = async (): Promise<void> => {

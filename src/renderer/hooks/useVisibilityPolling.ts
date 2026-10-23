@@ -81,12 +81,14 @@ export function createVisibilityPollingController(
 
 // Per-mounted-owner controller: no registry of session keys or retained closures.
 // Shared stores subscribe once at their own boundary instead of sharing React effects.
+// Returns the controller's interval setter so an owner can back off from poll
+// results without a React state change (and therefore without a re-render).
 export function useVisibilityPolling(
   key: string,
   refresh: () => Promise<void> | void,
   intervalMs: number,
   invalidate: () => void = () => {}
-): void {
+): (intervalMs: number) => void {
   const refreshRef = useRef(refresh)
   const invalidateRef = useRef(invalidate)
   refreshRef.current = refresh
@@ -99,4 +101,5 @@ export function useVisibilityPolling(
     controller.start()
     return () => controller.stop()
   }, [controller, intervalMs, key])
+  return controller.setIntervalMs
 }

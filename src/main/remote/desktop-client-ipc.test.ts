@@ -21,6 +21,7 @@ describe('desktop client IPC production trust wrapper', () => {
     )
     expect(listeners.size).toBe(28)
     expect(listeners.has('desktopRemote:liveRun')).toBe(true)
+    expect(listeners.has('desktopRemote:traceDelta')).toBe(true)
     expect(listeners.has('desktopRemote:providerControls')).toBe(true)
     expect(listeners.has('desktopRemote:workbench')).toBe(true)
     expect(listeners.has('desktopRemote:raw')).toBe(false)

@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { readStoredAttachmentBytes } from '../attachment-store'
 import { DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT } from './desktop-attachments'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, type DesktopHostRead, type DesktopHostReadResult, type DesktopRemoteContext } from '../../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, type DesktopHostRead, type DesktopHostReadResult, type DesktopRemoteContext, type DesktopTraceCursor } from '../../shared/desktop-remote'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { mergeSessionTurns } from '../session-history'
 import { readTraceArchivePageAsync, readTraceArchiveVersionAsync, readTraceArchiveTurnForHistory } from '../transcript-archive'
+import { createTraceRevisions } from './desktop-trace-delta'
 
 // Leave room for the desktop transport's outer response envelope.
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024 - 1024
@@ -40,7 +41,19 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   if (query.images !== undefined && query.images !== true) throw new Error('invalid_request')
   if (query.historyScope !== undefined && (query.historyScope !== 'session' || query.kind === 'trace')) throw new Error('invalid_request')
   const scope = query.historyScope === 'session' ? { historyScope: 'session' as const } : {}
-  if (query.kind === 'trace') return { kind: 'trace', context, runId: text(query.runId, 128), ...(query.images ? { images: true } : {}) }
+  if (query.kind === 'trace') {
+    let delta: { after?: DesktopTraceCursor } | undefined
+    if (query.delta !== undefined) {
+      const value = object(query.delta)
+      if (value.after === undefined) delta = {}
+      else {
+        const after = object(value.after)
+        if (!Number.isSafeInteger(after.count) || Number(after.count) < 0) throw new Error('invalid_request')
+        delta = { after: { revision: text(after.revision, 128), count: after.count as number } }
+      }
+    }
+    return { kind: 'trace', context, runId: text(query.runId, 128), ...(query.images ? { images: true } : {}), ...(delta ? { delta } : {}) }
+  }
   if (query.kind === 'image') {
     if (!Number.isSafeInteger(query.index) || Number(query.index) < 0 || Number(query.index) >= DESKTOP_ATTACHMENT_MAX_COUNT) throw new Error('invalid_request')
     let chunk: { id: string; offset: number } | undefined
@@ -90,6 +103,7 @@ export function createDesktopHostReader(deps: {
   // on access. Expired/evicted cursors fail explicitly, never as empty history.
   // Pages beyond 32 MiB require archive/event-level paging, not larger wire frames.
   const pages = new Map<string, { key: string; bytes: Buffer; touched: number; image?: Pick<AgentInputAttachment, 'name' | 'mimeType'> }>()
+  const traceRevisions = createTraceRevisions()
   function chunkResult(id: string, bytes: Buffer, offset: number): DesktopHostReadResult {
     return { kind: 'history_chunk', id, offset, totalBytes: bytes.length, data: bytes.subarray(offset, offset + DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
   }
@@ -107,7 +121,8 @@ export function createDesktopHostReader(deps: {
   return async (query) => {
     const now = Date.now()
     for (const [id, page] of pages) if (now - page.touched >= CHUNK_IDLE_MS) pages.delete(id)
-    if (query.kind === 'info') return { kind: 'info', protocol: 1, hostId: deps.hostId(), execution: 'canonical' }
+    traceRevisions.sweep(now, CHUNK_IDLE_MS)
+    if (query.kind === 'info') return { kind: 'info', protocol: 1, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1 }
     const cwd = deps.authorizeWorkspace(query.context.cwd)
     const context = { ...query.context, cwd }
     const sessionScope = query.kind !== 'trace' && query.historyScope === 'session'
@@ -151,9 +166,19 @@ export function createDesktopHostReader(deps: {
           (context.externalSessionId !== undefined && run.externalSessionId !== context.externalSessionId))) {
         throw new Error('run_context_mismatch')
       }
-      result = query.images && run
-        ? { kind: 'trace', run: { ...run, attachments: undefined }, imageCount: run.attachments?.length ?? 0 }
-        : { kind: 'trace', run }
+      if (!run) traceRevisions.forget(query.runId)
+      const images = query.images && run ? { imageCount: run.attachments?.length ?? 0 } : {}
+      const shown = query.images && run ? { ...run, attachments: undefined } : run
+      if (!query.delta || !shown) result = { kind: 'trace', run: shown, ...images }
+      else {
+        // Same authorization as a full read above; only the response shape differs.
+        const answer = traceRevisions.observe(query.runId, shown.items, query.delta.after, now)
+        const { items, ...meta } = shown
+        result = answer.reset
+          ? { kind: 'trace', run: shown, ...images, revision: answer.revision, reset: true }
+          : { kind: 'trace_delta', run: meta, ...images, base: query.delta.after!.revision, revision: answer.revision, count: answer.count,
+              changes: answer.changes.map((index) => ({ index, item: items[index] })) }
+      }
     } else {
       const args = {
         cwd, providerId: context.providerId as ProviderId,

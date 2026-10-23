@@ -398,6 +398,7 @@ const api = {
     selectDirectory: (id, path) => ipcRenderer.invoke('desktopRemote:selectDirectory', id, path),
     history: (id, context, before, snapshot) => ipcRenderer.invoke('desktopRemote:history', id, context, before, snapshot),
     trace: (id, context, runId, knownAttachmentCount?: number) => ipcRenderer.invoke('desktopRemote:trace', id, context, runId, knownAttachmentCount),
+    traceDelta: (id, context, runId, after, knownAttachmentCount?: number) => ipcRenderer.invoke('desktopRemote:traceDelta', id, context, runId, after, knownAttachmentCount),
     intents: (id) => ipcRenderer.invoke('desktopRemote:intents', id),
     submit: (id, input) => ipcRenderer.invoke('desktopRemote:submit', id, input),
     intentStatus: (id, intentId) => ipcRenderer.invoke('desktopRemote:intentStatus', id, intentId),

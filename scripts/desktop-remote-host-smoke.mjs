@@ -273,7 +273,7 @@ async function main() {
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
   assert.deepEqual(info.desktop, {
     kind: 'info', protocol: 1, hostId: invitation.hostId, execution: 'canonical',
-    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2,
+    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2, traceDelta: 1,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
   // Explicit history scope is an authority claim, not permission to convert
@@ -479,6 +479,26 @@ async function main() {
   assert.equal(activeTrace.desktop.run.done, false)
   assert.equal(activeTrace.desktop.run.runId, questionScryRunId)
   assert.ok(activeTrace.desktop.run.pendingQuestions.length > 0)
+  // Delta reads on the production live run: a cursor-less read is a reset
+  // snapshot; continuing from it returns only metadata and changed indices;
+  // a foreign context is still rejected on the delta path.
+  const activeQuery = { kind: 'trace', context: { ...context, externalSessionId: questionSession }, runId: questionScryRunId }
+  const deltaReset = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { ...activeQuery, delta: {} } })
+  assert.equal(deltaReset.desktop.kind, 'trace')
+  assert.equal(deltaReset.desktop.reset, true)
+  assert.deepEqual(deltaReset.desktop.run.items, activeTrace.desktop.run.items)
+  const after = { revision: deltaReset.desktop.revision, count: deltaReset.desktop.run.items.length }
+  const deltaNext = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { ...activeQuery, delta: { after } } })
+  assert.equal(deltaNext.desktop.kind, 'trace_delta')
+  assert.equal(deltaNext.desktop.base, after.revision)
+  assert.equal('items' in deltaNext.desktop.run, false)
+  assert.ok(deltaNext.desktop.changes.every((change) => change.index < deltaNext.desktop.count))
+  // Same run id under another Agent profile: the full read and the delta read share one authorization result.
+  const foreignQuery = { ...activeQuery, context: { ...activeQuery.context, agentProfileId: 'another-profile' } }
+  const foreignFull = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: foreignQuery })
+  const foreignDelta = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { ...foreignQuery, delta: { after } } })
+  assert.equal(foreignFull.error, 'run_context_mismatch')
+  assert.equal(foreignDelta.error, 'run_context_mismatch')
   const adopted = await evaluate(`window.scry.adoptActiveRun(${JSON.stringify(questionScryRunId)})`)
   assert.equal(adopted.runId, questionScryRunId)
   // A different fresh session must settle while the first is still awaiting
