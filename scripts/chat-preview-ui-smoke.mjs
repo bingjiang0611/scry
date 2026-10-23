@@ -250,6 +250,15 @@ async function exerciseNativeWorkspace(contents, screenshotPath) {
   const toggle = '#workspace-fixture [aria-expanded]'
   const source = '#workspace-fixture textarea'
   const save = '#workspace-fixture .workspace-editorbar .primary'
+  const replaceSource = async (text) => {
+    await click(source)
+    // sendInputEvent queues native focus/selection work. insertText requires the
+    // textarea to actually own both before it can replace the current draft.
+    await wait(`document.activeElement === document.querySelector('${source}')`)
+    contents.selectAll()
+    await wait(`document.querySelector('${source}').selectionStart === 0 && document.querySelector('${source}').selectionEnd === document.querySelector('${source}').value.length`)
+    await contents.insertText(text)
+  }
   await read(`document.querySelector('#workspace-fixture').hidden = false`)
   await wait(`document.querySelector('#workspace-fixture h1')?.textContent === 'Preview first'`)
   await check(`!document.querySelector('${source}') && !document.querySelector('${save}')`, 'Markdown must default to preview only')
@@ -300,11 +309,7 @@ async function exerciseNativeWorkspace(contents, screenshotPath) {
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
   await wait(`document.activeElement === document.querySelector('#workspace-fixture .workspace-reload')`)
-  await click(source)
-  await wait(`document.activeElement === document.querySelector('${source}')`)
-  contents.selectAll()
-  await wait(`document.querySelector('${source}').selectionStart === 0 && document.querySelector('${source}').selectionEnd === document.querySelector('${source}').value.length`)
-  await contents.insertText('# Edited preview')
+  await replaceSource('# Edited preview')
   await wait(`document.querySelector('#workspace-fixture h1')?.textContent === 'Edited preview' && document.querySelector('#workspace-fixture').dataset.dirty === 'true'`)
   await click(toggle)
   await wait(`!document.querySelector('${source}')`)
@@ -321,10 +326,9 @@ async function exerciseNativeWorkspace(contents, screenshotPath) {
   await wait(`document.querySelector('#workspace-fixture').dataset.dirty === 'false' && !document.querySelector('${save}')`)
   await click(toggle)
   await wait(`document.querySelector('${source}')`)
-  await click(source)
-  contents.selectAll()
-  await contents.insertText('# Unsaved reload draft')
+  await replaceSource('# Unsaved reload draft')
   await wait(`document.querySelector('#workspace-fixture').dataset.dirty === 'true'`)
+  await check(`document.querySelector('${source}').value === '# Unsaved reload draft' && document.querySelector('#workspace-fixture h1')?.textContent === 'Unsaved reload draft'`, 'Native replacement did not update both the draft and preview')
   await read(`globalThis.workspaceOriginalConfirm = window.confirm; window.confirm = () => false; true`)
   await click('#workspace-fixture .workspace-reload')
   await check(`document.querySelector('${source}').value === '# Unsaved reload draft' && document.querySelector('#workspace-fixture').dataset.dirty === 'true'`, 'Cancelled reload discarded the draft')
@@ -350,7 +354,7 @@ async function exerciseNativeWorkspace(contents, screenshotPath) {
   await wait(`document.querySelector('${source}')?.value === '# Paged source'`)
   await check(`document.querySelector('${source}').readOnly && !document.querySelector('${toggle}')`, 'Paged read-only view regressed')
   await read(`document.querySelector('#workspace-fixture').hidden = true`)
-  return { previewDefault: true, fullSize: true, borderlessPreview: true, compactLeftActions: true, themes: ['dark', 'light'], keyboardReloadFocus: true, reloadDiscardProtection: true, nativeToggleAndEdit: true, draftRetained: true, saveWhileCollapsed: true, fileReset: true, plainText: true, readOnly: true, paged: true }
+  return { previewDefault: true, fullSize: true, borderlessPreview: true, compactLeftActions: true, themes: ['dark', 'light'], keyboardReloadFocus: true, reloadDiscardProtection: true, reloadDraftApplied: true, nativeToggleAndEdit: true, draftRetained: true, saveWhileCollapsed: true, fileReset: true, plainText: true, readOnly: true, paged: true }
 }
 
 try {
