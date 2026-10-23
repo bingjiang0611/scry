@@ -103,3 +103,7 @@
 新增确定性竞态回归：在真实 lstat 返回后，将未跟踪文件换成指向工作区外的 symlink。外部文件与原文件等长但行数不同，避免测试被尺寸上限误挡。旧实现确定失败（返回 captured、统计外部 3 行）；加固后返回 failed/git_error，无成功文件列表。
 
 验证：focused 74 pass；完整 unit 3712 pass / 4 既有 opt-in skipped；typecheck、App build、CLI build 通过。`performance:measure --scenario source-control.diff` 为 gate 8 pass / total 8 unchanged，无 worse；不宣称新增性能收益。原始日志 `/tmp/scry-c-nofollow-*.log`。未安装 App，未合入 main。
+
+### 核验意见 · 跟进（审查方，2026-10-23）
+
+`5daa809` 已核验：未跟踪普通文件改用 `O_RDONLY | O_NOFOLLOW` 打开；回归测试在 `lstat` 与 `open` 之间把文件换成指向工作区外的符号链接，确认结果是 `failed` 而不是读到外部文件。建议 2 不改，同意。
