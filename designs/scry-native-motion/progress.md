@@ -9,7 +9,7 @@
 | 01 基础 | 通过 | `22b0358`（实现修正）、`3abbfeb`（验收修正）、`7fbbf106`（经用户批准隔离验收前置主题过渡） |
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
-| 04 列表 | 进行中 | 第 0 项 `77e33c72` / `001eb687` 已验收；用户已确认收起 160ms、超 40 节点不播 FLIP |
+| 04 列表 | 待核验 | `5f3484c1`（实现）、`6ffa5eed` / `72abd3e3`（回归）；安装被基线同样失败的终端录制 gate 阻挡，详见本步记录 |
 | 05 加载防闪 | 未开始 | — |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
@@ -57,6 +57,12 @@
 - 该失败的源代码证据：公开的 `hover.dismiss()` 目前保留 100ms 出场，而原菜单接管断言要求立即退休 tooltip；普通离开与 owner 换人的实现已分开。执行方会保留原断言，按原有显式 dismiss 合同排查修正，不扩大 timeout、不改小 fixture workload。未把这次失败改写成安装通过。
 - **04 规格确认 1**：brief H2 将装饰退出限制为 ≤160ms，但 `04-lists.md` C 指定收起 180ms。执行方已完成第 0 项后暂停其余实现，提请用户选择按 H2 的 160ms 上限，或明确批准短折叠的 180ms 例外。
 - **04 规格确认 2**：现有活动列表是每组最多 40 行，三组加标题最多 123 个 keyed 节点；项目会话、提示队列、后台任务没有 renderer 本地 ≤40 上限。不能为动效截断业务数据。提请选择：总节点超过 40 的列表不播 FLIP（最小、有界），或另做视口内最多 40 节点的定位追踪。原数据、排序、分页与可访问交互均不改变。
+
+### 2026-10-23 · 04 交付：安装仍受终端录制门禁阻挡
+
+- 最后一次完整 `npm run install:mac:dev` 已立即执行，不等机器空闲。typecheck、3725 个 unit、shell、构建、签名打包及 packaged resource 检查通过；随后 packaged security smoke 的终端录制回放检查失败：`terminal recording UI condition timed out`（测试表达式第 61 行，仍显示「没有打开的终端」）。安装脚本未执行，`/Applications/Scry.app` 未更新；用户正在使用的实例未停止。
+- 在独立 detached worktree 的未改生产基线 `db53ca71`，使用相同测试脚本（含等待面板动画结束的前置条件）构建后执行 `node scripts/electron-security-smoke.mjs --dev`，复现相同第 61 行超时。当前 packaged 失败与基线 dev 对照的分发形式不同；它们共同证明旧源码也会失败，不证明全部根因已经确定。原始日志 `/tmp/scry-motion-04-install-head.log`、`/tmp/scry-motion-04-baseline-security.log`。未删断言、跳过安全门禁或扩展本步去修终端业务。
+- 本步实现和下列专项验证交付核验；不进入 05。由维护者决定是否另开终端录制 gate 排查，修复后重新执行完整安装。高负载下的计算耗时不能作为可靠 L2 性能结论；若需要此级别结论，由维护者安排低负载复测。
 
 ## 记录
 
@@ -277,6 +283,53 @@
 - 有效负对照两次：原实现 `both` 时 `.probe-modal` 保留单位矩阵及 1 个 finished 入场，新断言失败；仅将菜单改回 `both`，`.sb-session-menu` 也独立失败。日志 `/tmp/scry-motion-03-fix-fill-negative-{modal,menu}.log`。均已恢复。
 - 当前代码 `node scripts/session-capability-ui-smoke.mjs --overlays-only`、`npm run typecheck:web`、`npm run build` 通过。专项保留全部原关闭 / 焦点 / 首击 / 定位 / reduced 回归，12/12 关闭收到真实 animationend、178.1–210.2ms。日志 `/tmp/scry-motion-03-fix-fill-{final,type,build}.log`。未用等待卸载代替入场结束样式检查。
 - 第 0 项通过后可按核验授权进入 04；用户随后明确选择「保持 160ms 上限」与「超限列表不播 FLIP」。本步短内容展开 240ms / 收起 160ms，FLIP 只对总 keyed 节点 ≤40 的列表生效，超限只取消装饰动画，不删 DOM / 数据或缩减 workload。上文规格问题已获决定；brief 与步骤文件不改。安装初始失败保留，不把本次 build 当成已安装。
+
+### 04 · 列表、折叠、标签与真实流式新块（2026-10-23，待核验）
+
+- 提交：`5f3484c1` 实现；`6ffa5eed` 原生 fixture / 单测与既有检查的静止布局前置条件；`72abd3e3` 补齐运行 authority、真实指标及历史打开全过程回归。实现与测量 / 断言分开提交。03 第 0 项见上节；`458742bf` 保留原 SessionRename 断言，修正菜单接管时公开 tooltip dismiss 的立即退休合同，普通离开仍走装饰退出。
+- FLIP：抽出 `useFlipList`，保留先全部读再统一写及打断续接；新行 220ms、存活行移动 300ms。接入活动、项目及置顶会话、队列、后台任务。总 keyed 节点 >40 时不读几何、不播 FLIP，恢复预算内只重建基线；45 行 DOM 全保留。活动原有每组 40 行、提升规则、溢出提示和按住指针冻结逻辑不改。
+- 首屏：`useFirstReadyList` 从真实数据就绪开始，前十项 0–144ms / 16ms 错开，第十一项起无 delay，刷新不重播；接入分析、技能、MCP、LLM 性能列表及 Meta Prompts。减弱动效为整组一次 120ms opacity。
+- 折叠：共享 `Disclosure` 懒挂载、退出后卸载，关闭当帧 inert / aria-hidden；初始已展开内容静态呈现，不用启动高度动画阻挡已有操作。项目、技能、工具与子代理短内容展开 240ms / 收起 160ms，>40 行内容只做 160ms opacity。Thinking 保留原生 details，以 `::details-content` / `interpolate-size` 过渡，不改为自制折叠。
+- 标签：侧栏及 surface 独立指示条只做 220ms transform；文字颜色同步改变，列表增删和 resize 直接定位，减弱动效不移动；保留键盘选择、关闭焦点及指示条未就位时的选中表达。
+- 流式：按运行 owner、加载 / 缓存 / 会话身份及挂载基线识别新增工具、稳定 Hook phase/script 行及真实轮次指标，180ms 入场。历史、恢复与切换不入场；token 更新不重播，Hook 生命周期不冒充新行。结构投影沿用已有稳定引用，不新增逐 token 结构扫描；未修改贴底滚动与用户主动跳转语义。
+
+#### 验收与有效负对照
+
+| 项目 | 实际检查与结果 | 证据 |
+| --- | --- | --- |
+| 类型、unit、构建 | Node 22.22.1：`npm run typecheck`、`npm run test:unit`、`npm run build` 通过；303 文件 / 3725 测试通过，4 个既有条件检查跳过（性能相关性及三个真实探针） | `/tmp/scry-motion-04-final-{type,unit,build}.log` |
+| FLIP 单测 | 5/5，覆盖先读后写、打断续接、减弱、超限与恢复；临时放宽 40→400 后，预期 0 次读几何实际 41 次，新断言失败；恢复后通过 | `/tmp/scry-motion-04-budget-negative.log`，`src/renderer/hooks/useFlipList.test.ts` |
+| 深浅主题列表 | `node scripts/session-capability-ui-smoke.mjs --lists-only` 通过：12 行分析 delay、刷新不重播、45 行超限保留、项目关闭退休、置顶 220/300ms、侧栏 / surface 220ms、动态标签 / resize 无移动、队列 / 任务存活行 300ms | `/tmp/scry-motion-04-lists-complete-authority.log` |
+| 原生折叠与流式 | 同专项通过短技能 grid 240ms、原生 Thinking 的真实中间高度帧 240ms、55 行工具输出仅 160ms opacity；50 个历史工具与已知指标在逐个展开的连续 rAF 观测期间始终无入场；真实新增工具 / Hook / 指标各 180ms；token 与生命周期不重播；cache、loading、会话身份切换均重新建立基线；减弱动效仅 opacity | 同上；UA details 插值未暴露为可读 Animation / transitionend，使用 computed pseudo 的连续实际帧证明，不仅检查 CSS 源码 |
+| 首屏 / 置顶 / 历史负对照 | 暂将 delay 归零，新断言拒绝全零；去掉置顶列表 revision，新存活行检查失败；强制所有工具卡 / 指标挂入场动画，历史连续观测明确失败。全部已恢复，再跑正例通过 | `/tmp/scry-motion-04-{stagger,pinned,history}-negative.log` |
+| 完整 renderer 与后台 | `npm run test:renderer:ui` 全套通过，含原 `--sidebar-activity-only`、Credits、`test:background-ui`、真实 IPC 及 Pi 43 轮历史；最终加强版在 Node 24.18.0 / Electron 42.10.1 通过，上一完整版本在 Node 22.22.1 也通过 | `/tmp/scry-motion-04-ui-delivery.log`、`/tmp/scry-motion-04-ui-complete-final.log` |
+| 独立实际 App | `node scripts/electron-security-smoke.mjs --dev-structure-only` 通过深浅主题临时 App：侧栏、分析、技能 / MCP / LLM、Meta、pane、草稿焦点与 fixture Provider 原生发送。隐藏隔离 userData / workspace，不激活用户窗口，不用真实 Provider 或个人数据 | `/tmp/scry-motion-04-final-app.log`；截图只留临时目录，抽看实际 App light chat / dark skills 和列表 light analytics / dark MCP 四张，不宣称逐张审阅全部截图 |
+
+- `--lists-only` 扩充到真实指标、独立会话身份及连续历史观测后，复用既有 `native-ui-pointer.mjs` 的绘制就绪、坐标命中与原生输入。单次工作量超过原 30s 子进程 watchdog，按 structure / history / live 拆为三个全新隔离 campaign；每个仍是原 30s，所有 45/50 行及原断言不减少，合并为一个结果。其他 fixture 的执行方式未改。
+- 实际 App 的 modal 关闭仍记录 fallback 241.8–243.7ms / `nativeAnimationEnd: false`，不将它当成 CSS animationend 证据；03 独立原生浮层 fixture 的 12/12 真实 animationend 证据见上节。
+
+#### 首轮失败与修正
+
+- 立即安装的原 tooltip 断言首败完整保留；以 `458742bf` 修公开 dismiss 合同，未延长原断言 timeout。首次长工具输出回归实际检测到 grid 240ms，随后改为长内容的 opacity-only 路径，不改测试预期。
+- 初始已展开 Disclosure 的入场高度曾使既有 cache 点击目标尚未稳定：改成初始静态展示，后续用户开合仍动画。测试侧旧 `first/last-child` 因独立指示条失效，改为既有 activity/projects 语义 ID，不减断言。
+- motion token 检查曾采入正在进行的 240ms 工具组动画，增加等待该有限动画结束的前置条件；仅该 fixture 使用 offscreen。曾全局 offscreen 导致 LLM 焦点测试失败，已撤回；旧键盘和性能 fixture 不变。packaged dock 几何检查曾在 300ms pane 入场、约 520px 位移中取点，现等待已有 scry-pane 完成（原静止布局断言不变），不是降低几何标准。
+- Thinking 的 UA pseudo 动画未由动画枚举 / transitionend 暴露，改用真实帧插值证明。加强版 attachLive 的旧 DOM 曾满足就绪条件，改为等新 run 的实际 DOM；删除无必要的 flushSync 实验，没有生产防御分支。
+- 一次既有 workspace `dirty=false` UI 首败，focused 及后续完整套件通过；根因未确认，不声称已经修复。一次将类型 / unit / 全 UI 串在一个 600s 工具调用中，工具在后段超时；检查部分日志与进程收敛后，单独运行全 UI 通过，未扩大任何测试 timeout。
+
+#### 性能与偏差
+
+- 与 `db53ca71` 对比，在 `6ffa5eed` 测量，随后仅强化 fixture / 断言。使用实际 collector ID：`npm run performance:measure -- --compare db53ca71 --scenario history.page --out /tmp/scry-motion-04-head-history-page`，以及 `--scenario trace.delivery --out /tmp/scry-motion-04-head-trace-delivery`，两者 ratchet 通过。history 为 10020 bytes / 1 message / 1 stringify，trace 为 165996 bytes / 2 messages，均未变化（L1）。规格的逻辑名 history / stream 不等于 CLI collector ID；首次误用 history、renderer.batch 被拒绝的日志保留，不当作测量成功。
+- 另按现有固定 17 场景 `npm run performance:bench`，同 Node 22 / harness，使用 `timing-run.mjs` 串行锁对比基线与当前。history.page 的计算 batchMeanP95 0.108→0.121ms（+12.9%）、trace.delivery 1.317→2.807ms（+113.0%）、remote.loopback 1.162→1.268ms（+9.1%）；均在该 comparator 门限内，但不能据此否认回归。基线 load 15.27→14.27，当前 17.03→16.64（10 核），两次 `highLoad: true`；相关计算路径未改，高负载混杂，原因无法从这次测量判定，不作为可靠 L2 结论。renderer.batch 0.223→0.212ms 也不宣称更快。
+- 该全场景 comparator **exit 1**：唯一失败为未变化的 `persistence.archive` bytes 10577→10577，超过既有 10555 ceiling。未修改 collector、workload、ratchet、计数归属或预算。证据 `/tmp/scry-motion-04-head-comparison.md`、`/tmp/scry-motion-04-compute-{baseline,head}.json`；这不是浏览器绘制或真实 Provider 延迟，也没有 L3 日常样本。
+- 用户已批准的规格取舍仍仅为短收起 160ms，以及总 keyed 节点 >40 不播 FLIP且不截断业务数据；真实 LLM 列表位于 `LlmPerformancePanel.tsx`，不为匹配文件名搬到 Modals。brief 与步骤文件未改。
+- 提交途中共享 pre-commit 新启用 20KB 硬上限，而旧分支没有该脚本；独立运行 main 的同一检查，现有 harness 143464 bytes、列表检查 22488 bytes 被拒绝，原进度文档也已有 59187 bytes。用户明确选择「仅本次豁免大小检查」：仅本次旧分支交付使用命令级 hook 路径豁免，不修改共享配置，不跳过测试、安全或安装门禁。未为大小规则擅自重写协议要求保留的旧记录。
+
+#### 安装与未验证
+
+- 完整 `npm run install:mac:dev` 最后执行于 `6ffa5eed`，2026-10-23 10:16:19→10:22:46 PDT，exit 1。Node 22.22.1，10 核 load 9.01 / 9.34 / 11.25→17.18 / 11.08 / 11.08。typecheck、3725 unit（4 跳过）、shell、build / CLI build、签名打包与 packaged check 通过（App 0.2.219、私有 CLI 0.2.51），external link / crash smoke 通过；随后上述终端录制安全 gate 阻挡，后续 gate 和安装未执行。日志 `/tmp/scry-motion-04-install-head{,-load}.log`。不能把成功产物构建说成安装成功；后续提交只加强测试与记录，没有改 App 产物源码。
+- 先前 09:32→09:38:59 的完整安装在 pane 静止几何检查失败，load 8.25 / 13.05 / 14.46→9.85 / 11.48 / 13.27；日志 `/tmp/scry-motion-04-install-final.log`。修正等待实际动画完成的前置条件后，最后一次通过该项，才暴露基线也失败的终端 gate。最初 07:08 的 tooltip 安装首败见「问题」，不覆盖任何第一次失败。
+- 未验证真实付费 Provider、真实远程手机、120Hz 设备与低负载 L2 / 发布后 L3；本步使用真实 Electron 输入和本地 fixture Provider，不以虚构数据假冒这些场景。基线临时 worktree 已移除，截图 / 日志留本机临时目录、不提交。用户当前 App 未更新、未要求用户重启作为验收前置条件。
+- 下一步由设计方核验 04；维护者另行决定终端录制 gate 排查与低负载复测。本执行方推送后停下，不进入 05、不更改无关终端业务。
 
 <!--
 ### NN · <步骤名>
