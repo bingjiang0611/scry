@@ -10,7 +10,7 @@
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
 | 04 列表 | 通过 | `5f3484c1`（实现）；`b8537f5e` / `5aa66684`（04-fix）；完整安装通过，见「04-fix · 核验」 |
-| 05 加载防闪 | 未开始 | — |
+| 05 加载防闪 | 待核验 | `7861d4be` / `b74c6726`（实现与文案）；`a9cdc143` / `b1380cc9`（断言）；完整安装通过，见下方 05 记录 |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
 状态取值：待开始 / 进行中 / 待核验 / 需修改 / 通过。
@@ -423,6 +423,52 @@
 - 完整安装通过，installed 与 dist 的 app.asar 哈希一致。用户需自行重启 Scry 才会加载。
 - 性能：L1 计数不变。高负载（load 16–20）下的计算对比出现多项上升，但集中在 `source-control.diff`、`persistence.archive`、`workspace.files` 等本分支从未改动的主进程路径，且基线与当前负载不同，不归因于本分支。**合入 main 前**请在低负载下重跑一次 `performance:bench` 对比，确认这些上升是噪声。
 - 箭头静止方向由「向下」改为「向右」的视觉变化仍待用户在 App 里看一眼确认，不阻塞 05。
+
+### 05 · 加载防闪（2026-10-24，待核验）
+
+- 已拉取 `ec3193df`，读完「04-fix · 核验」，未修改 brief / 步骤文件，也未进入 06。实现 `7861d4be`，文案集中管理补充 `b74c6726`；断言与 fixture `a9cdc143`、严格 MutationObserver / 原生输入回执补充 `b1380cc9`，实现与验证代码分开提交。
+- `useDelayedFlag(flag, delayMs = 150)` 只延迟装饰。结束当帧返回 false，卸载 / 输入变化取消计时器；新周期在 render 内退休上周期 visible，避免 passive effect 尚未刷新的 false→true 周期复用旧提示。没有修改请求触发、超时、取消或缓存策略。
+- 会话：150ms 前保留上一个 scope 的同一批真实转录 DOM，立即 inert / aria-hidden；超过阈值以 WAAPI opacity-only 120ms 淡出，完成后不保留 Animation。提示为 2px 不定细条 + 一行原文案，160ms 淡入，窄处允许换行；在时间线外的同一 body 顶层绝对定位，不推移旧内容，且 role=status 位于时间线的 aria-busy 区域之外。新内容仍走既有实时 DOM 180ms session 入场，无快照。
+- 发送、分叉、aria-busy 和 live-arrival authority 全部继续使用原始 sessionLoading，第一帧即限制。缓存仍立即展示当前所选会话的缓存页、保留原文案与核对前限制；同 scope 的缓存被撤销时立即移除，不把它误留成「上一个会话」。失败 / unavailable 仍即时使用原说明，不延迟为加载态。减弱动效为静态细条 + 原文案、120ms opacity 淡入，不依赖压缩后的循环动画。
+- 本次涉及的新增 / 调整文案统一引用 `constants/copy.ts`；没有依赖、主进程 IPC、Provider 调用或权限边界改动。参考原始资料：[MDN aria-busy](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-busy)，正文保留 `/tmp/scry-motion-05-aria-busy.txt`。
+
+#### 其他加载态逐项登记
+
+| 位置 | 本次处理 | 未改变的语义 |
+| --- | --- | --- |
+| `AnalyticsView.tsx` | 首次读取块、刷新装饰用同一延迟；有数据时保留已观测数据 | raw loading 仍立即 busy / 禁用刷新；error / unavailable 不作加载 |
+| `LocationPicker.tsx` 的 `RemoteProjects`（规格中 RemoteLocation 对应的实际路径） | 远端项目初读提示使用 `DelayedLoadingStatus` | 连接失败 / 缺失主机立即说明，不回落本机、不显示假空项目 |
+| `RemoteDirectoryPicker.tsx` | 首次与切目录的提示延迟；未读取时不提前显示 0 / 空目录 | 目录浏览 / 选择 raw busy、连接与授权校验不延迟；已确认页计数保留 |
+| `SkillsModal` / `McpModal` | 首次清单、全局读取装饰延迟；未知 / pending 时不显示 0 个结果、0 配置或空结果 | 已知清单 / 运行态、每 server 证据与认证限制不变 |
+| 实际 App 的 `CapabilitiesModal` | Skills / MCP 初读与刷新装饰同样延迟；null 证据在请求 effect 启动前也不能冒充空清单；工具明细 testing 的装饰提示复用组件 | 非 null 的失败 / unavailable 说明、认证与 Provider 运行态证据即时呈现；未改请求与能力差异 |
+
+#### 验收与负对照
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| hook / 受影响单测 | hook 6/6：短请求、完整延迟、不被 rerender 重启、false 当帧、卸载清理、自定延迟，以及 passive effects 未刷新的新周期；原 SSR 首帧断言改验 busy / 禁用 / 不伪造空证据，时间行为交给原生 fixture | `src/renderer/hooks/useDelayedFlag.test.ts`、`/tmp/scry-motion-05-copy-focused.log` |
+| 类型与构建 | Node 22.22.1：完整 typecheck、build 通过（包含要求的 typecheck:web） | `/tmp/scry-motion-05-copy-type.log`、最后安装日志 |
+| 原生加载专项 | `--loading-only`：60ms 请求的 MutationObserver 全程无加载元素（包括同一回调前已移除的 addedNodes）；400ms 在 151.2ms 出现，满足 150±40ms，role / 原文案 / 2px 存在。非空草稿的发送与分叉全程受限；旧 DOM 保持身份和位置、120ms 实时淡出；失败无残留；减弱期间细条 / 文字持续可见且无 transform 动画。分析、实际 Skills / MCP、远端项目与真实目录组件的子目录切换通过 | `/tmp/scry-motion-05-loading-strict.log`：timing-run 串行锁，10 核 load 5.71→5.97、highLoad=false；最终全套中同专项 150.9ms，见下行日志 |
+| 完整 renderer / 后台 | `npm run test:renderer:ui` 最终完整通过，含 strict observer、可信 pointerup 回执 / textarea 焦点检查、原缓存 13 次读取、Credits、后台、source-control、真实 IPC 与 Pi 43 轮历史 | `/tmp/scry-motion-05-ui-copy-final.log`；之前通过版本 `/tmp/scry-motion-05-ui-final.log`、`/tmp/scry-motion-05-ui-receipts.log` |
+| 完整 unit / shell | 最后安装中 305 文件 / 3734 测试通过，4 个条件检查跳过（性能相关性及三个真实探针）；shell 通过 | `/tmp/scry-motion-05-install-copy-final.log` |
+| 独立实际 App | 当前构建 `node scripts/electron-security-smoke.mjs --dev-structure-only` 通过深浅主题、原生发送、草稿、pane / modal 相邻操作；隐藏独立 userData / workspace，没有激活用户实例。modal close 本次仍是 242.3–244.1ms fallback，不声称 native animationend | `/tmp/scry-motion-05-app-final.log`，截图目录 `scry-structure-app-E1IaaE` 留本机临时目录 |
+| 有效负对照 | 当前 hook 暂改为直接返回 raw flag：6 项中 5 项失败，原生 60ms 请求在约 12.6ms 挂出加载，关键断言拒绝。静态替代暂改回循环：原生 reducedStatic=false 并失败。全部恢复，hook 与原生正例通过 | `/tmp/scry-motion-05-head-delay-negative-{unit,ui}.log`、`/tmp/scry-motion-05-reduced-negative.log`、`/tmp/scry-motion-05-head-delay-restored-{unit,ui}.log` |
+
+#### 首轮失败与修正
+
+- 初版 hook 只在 passive effect 清除 visible。新增「effects 未刷新即 false→true」回归先在旧实现失败（1 failed / 5 passed），再按本周期 state 修正；未放宽阈值。全套期间也曾出现 warm B 提示 wait / read 不一致；其唯一因果未单独确定，不将一次成功重跑当成根因证明。日志 `/tmp/scry-motion-05-cycle-before-fix.log`、`/tmp/scry-motion-05-ui-complete.log`。
+- 第一轮原生 fixture 用了错误 title 选择器；改用已有 pointer helper 的真实会话文本目标。减弱检查随后发现原空态的 justify-items:center 将空细条压成零宽，修正加载样式的宽度、最小高度和对齐；没有把检查改成「存在即成功」。实际 App 首次 Skills effect 启动前还会闪出空结果，已区分 null 未观测证据与成功空结果，且没有提前启动请求。分别保留 `/tmp/scry-motion-05-loading-{first,second,third}.log`。
+- 原缓存检查把提示限定在时间线内部，现按新的 status 层查询并保留 raw busy 断言。旧「完全没有转录」检查在跨 scope 切换时改为只能保留 inert / aria-hidden 的旧呈现；同 scope 缓存撤销仍保留严格的 DOM 数量 0 断言，晚到响应 / live focus 检查仍要求 raw busy 且 A 只能是 inert 旧呈现，trace / 草稿 / 无 Provider 与无 fork 的检查保留。`/tmp/scry-motion-05-scope-cache.log`、`/tmp/scry-motion-05-cache-final.log` 保留首次结果。
+- 加强 observer 后完整 UI 曾在填充 fixture 草稿时失败：原 helper 仅发 input，没等已注册的原生 pointerup 回执与 textarea 焦点。现检查可信回执、命中与真实焦点后才输入，再以 value 证明效果，不加 sleep、重试或 timeout。首次失败 `/tmp/scry-motion-05-ui-strict.log`，修正后完整通过 `/tmp/scry-motion-05-ui-receipts.log`，最后文案集中管理后再次完整通过。
+- 首次 focused 的 5 个失败保留于 `/tmp/scry-motion-05-focused-initial.log`。其中 4 项 SSR 期待首帧可见加载词，新 150ms 合同使该预期不再正确；改验同步 busy / 发送禁用 / 无假 0 / 无假空结果，可见文案与时序由原生真实 DOM 检查。另一项「新会话加载不能显示旧转录」的原断言正确，已修实现并原样保留，不把它改成新的预期。
+
+#### 性能、安装与交付限制
+
+- 在最终 `b74c6726` 执行 `npm run performance:measure -- --compare ec3193df --scenario history.page --out /tmp/scry-motion-05-history-final`。实际 collector ID 是 history.page（步骤的 history 是逻辑名），ratchet 通过；10020 bytes / 1 message / 1 stringify，全部与基线相同，无 worse。未改 collector、workload、ratchet 或预算。这是 L1，未以它宣称 L2 整体更快或 L3 日常改善。
+- 最后 `npm run install:mac:dev` 于 2026-10-23 21:37:31→21:44:24 PDT，exit 0，10 核 load 7.07 / 7.45 / 7.87→11.57 / 9.59 / 8.73。typecheck、完整 unit / shell、App / CLI build、签名打包、资源与大小检查、external-links / crash / 完整 security / files / desktop-remote-host gate 全部按默认范围通过，然后安装到 `/Applications/Scry.app`，备份 `/Applications/.Scry.app.backup`。App 0.2.219，私有 CLI 0.2.51；安装与 dist 的 app.asar SHA-256 均为 `edfa1005139e369f1ce0b2ec9fa69735305bde6579b3b9f075216f757a229a66`。日志 `/tmp/scry-motion-05-install-copy-final{,-load}.log`。第一次完整安装也通过（21:04:16→21:11:03 PDT），之后只集中管理已有文案，故按当前源码重新完整安装，不把旧产物当最终产物。
+- 普通提交先被共享 pre-commit 调用本分支不存在的 `scripts/check-staged-file-size.mjs` 阻挡（MODULE_NOT_FOUND）。用户本轮明确选择「本轮也豁免大小 hook」，仅命令级 hook 路径豁免；共享配置未修改，目录仅含该 pre-commit 链接，运行 / 测试 / 安全 / 安装门禁没有跳过。
+- 已抽看普通加载、减弱加载、远端子目录三个当前生产组件截图；截图与日志仅留本机临时目录（`/tmp` 与系统 temp），未提交个人数据。60 / 400ms 是真实生产 App renderer 的可控 read 桩，不是假 UI；它们不代表真实大归档 I/O、真实远端网络或付费 Provider 的耗时。工具明细的装饰分支未另做独立原生时间案例，不把其代码接入说成单独端到端验收。
+- 用户日常实例未停止或重启；已安装不等于正在运行的实例已加载新版本。当前实现 / 验证 / 记录推送后停在 05，等待设计方核验，不进入 06。
 
 <!--
 ### NN · <步骤名>
