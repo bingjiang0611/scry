@@ -9,7 +9,7 @@
 | 01 基础 | 通过 | `22b0358`（实现修正）、`3abbfeb`（验收修正）、`7fbbf106`（经用户批准隔离验收前置主题过渡） |
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
-| 04 列表 | 需修改 | `5f3484c1`（实现）、`6ffa5eed` / `72abd3e3`（回归）；两处修正见「03-fix 与 04 · 核验」，其中安装阻挡源自 03 的弹窗挂载位置，不是既有问题 |
+| 04 列表 | 待核验 | `b8537f5e` / `5aa66684` 完成 04-fix；dev 安全检查及完整安装通过，详见本步补充记录 |
 | 05 加载防闪 | 未开始 | — |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
@@ -63,6 +63,11 @@
 - 最后一次完整 `npm run install:mac:dev` 已立即执行，不等机器空闲。typecheck、3725 个 unit、shell、构建、签名打包及 packaged resource 检查通过；随后 packaged security smoke 的终端录制回放检查失败：`terminal recording UI condition timed out`（测试表达式第 61 行，仍显示「没有打开的终端」）。安装脚本未执行，`/Applications/Scry.app` 未更新；用户正在使用的实例未停止。
 - 在独立 detached worktree 的未改生产基线 `db53ca71`，使用相同测试脚本（含等待面板动画结束的前置条件）构建后执行 `node scripts/electron-security-smoke.mjs --dev`，复现相同第 61 行超时。当前 packaged 失败与基线 dev 对照的分发形式不同；它们共同证明旧源码也会失败，不证明全部根因已经确定。原始日志 `/tmp/scry-motion-04-install-head.log`、`/tmp/scry-motion-04-baseline-security.log`。未删断言、跳过安全门禁或扩展本步去修终端业务。
 - 本步实现和下列专项验证交付核验；不进入 05。由维护者决定是否另开终端录制 gate 排查，修复后重新执行完整安装。高负载下的计算耗时不能作为可靠 L2 性能结论；若需要此级别结论，由维护者安排低负载复测。
+
+### 2026-10-24 · 04-fix：修正终端历史查询；安装阻挡解除
+
+- 撤回上一轮「安装受既有终端问题阻挡」的归因：`db53ca71` 已包含 03 的 ModalFrame portal，所以该基线复现不能证明问题早已存在。根因是安全测试仍在当前 session surface 内查询已 portal 到 body 的录制历史弹窗，不是终端业务故障。
+- 修正查询后，`--dev` 在 portal / 临时不 portal / 恢复 portal 三种状态均通过；完整 `npm run install:mac:dev` 也已通过并安装。旧失败记录保留为历史，本条与下方 04-fix 记录覆盖旧的待处理结论。未修改终端业务、surface 内控制查询、原断言或 timeout。
 
 ## 记录
 
@@ -367,6 +372,45 @@
 - 减弱动效下长内容折叠仍是 160ms（`[data-long][data-state='enter']` 的优先级高于减弱动效里的 120ms 规则），可补一条覆盖。
 - 工具卡、Thinking 的箭头静止方向由「向下」改为「向右」（展开后转为向下），符合 macOS 展开三角惯例，请在截图里给用户确认一眼。
 - 性能：`trace.delivery` 计算耗时 +113% 在高负载下测得，执行方已注明不作结论。修正 1 后重跑安装时，如负载低于 10，请顺带重跑这一项。
+
+### 04-fix · 动态视图预算与 portal 弹窗检查（2026-10-24，待核验）
+
+- 提交：`b8537f5e` 实现；`5aa66684` 安全测试查询修正、断言与 fixture。只处理两项必须修正及前两项「不阻塞」；不进入 05，不改 brief / 步骤文件、依赖、业务列表上限、权限或性能门限。
+- `useFlipList(root, revision, budget = 40)` 将预算加入 effect 依赖。动态视图传入 `GROUP_LIMIT * activityGroups.length + activityGroups.length`（123，含标题），其余列表仍为 40；不改各组 40 行、溢出、提升、顺序和冻结点击合同。新增单测确认 123 节点可播、124 节点停止测量并取消活动动画，保留默认超 40 的全部原断言。
+- 安全 smoke 只将录制历史按钮查询改成 `document.querySelector('.modal-overlay [data-recording-id="…"] button')`，其余 terminal controls 仍在当前 surface 内找。检索 smoke / fixture 中全部 `data-session-surface-current` 及 surface/query 包装调用：其余命中为编辑器、标签 / pane、菜单触发器或实例保留检查，未发现第二处经 surface 查询弹窗内容的调用。
+- 标签 hook 接收调用方的渲染顺序键；layout effect 仅在 selected / 顺序字符串变化时定位，ResizeObserver 仅在集合变化时重建；resize 直接定位，选择仍为 220ms transform。无关 Sidebar / RightSurfacePanel 渲染不测量。
+- 减弱动效增加长折叠局部 120ms 覆盖。准确说明：完整 App 的 `styles.css` 已有全局 `animation-duration: 120ms !important`，所以单独撤回新增局部规则不会使完整 App 变回 160ms。本次让 motion.css 的局部优先级也自洽，不宣称修复了当前组合样式下已复现的 160ms 用户问题。
+
+#### 验证与对照
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| hooks focused | 2 文件 / 8 测试通过，含自定义预算、无关渲染不读布局 / 不重建 observer | `/tmp/scry-motion-04-fix-hooks-final.log` |
+| 动态视图 | `--sidebar-activity-only`：40 行已完成 + 1 行进行中的基线中，既有已完成行移到进行中，DOM 身份保留且存活行有 300ms transform（读取实际 keyframe 的 DOMMatrix m42 非零）；保留键盘、按住目标、搜索、归档及减弱原断言 | `/tmp/scry-motion-04-fix-activity-matrix-positive.log` 及完整 UI 中同一用例 |
+| 动态预算负对照 | 临时把预算改回 40，新原生断言失败：`Large activity survivor did not retain its 300ms transform`；恢复 123 后完整 UI 通过 | `/tmp/scry-motion-04-fix-activity-matrix-negative.log` |
+| 标签与长内容 | `--lists-only` 及完整 UI：无关 rerender 的真实 offsetLeft / offsetWidth 读取、标签根 observer 重建均为 0；选择 220ms、增删 / resize jump；真正新增的 55 行输出有 long 标记，入场 / 出场各 120ms 且只有 opacity | `/tmp/scry-motion-04-fix-lists-ready.log`、`/tmp/scry-motion-04-fix-ui-matrix-final.log` |
+| 补充破坏对照 | 临时让 effect 每次 render 都执行，新单测 2/2 失败；强制长入场 160ms `!important`，原生断言读到 160ms 并失败。均已恢复；不把撤回局部 CSS 后仍通过的尝试冒充有效负对照 | `/tmp/scry-motion-04-fix-tabs-negative.log`、`/tmp/scry-motion-04-fix-reduced-forced-negative.log` |
+| dev 安全 | `node scripts/electron-security-smoke.mjs --dev` 通过，recording 的 captured / replayed / readonly / noSpawn / deleted 均 true；原恢复、跨工作区拒绝及其余安全断言通过 | `/tmp/scry-motion-04-fix-security-dev-{first,final}.log` |
+| 不 portal 对照 | 临时将生产 ModalFrame 改为直接返回 content，重新 build 后，同一完整 `--dev` 仍通过；恢复原 portal、重新 build 再通过。ModalFrame 最终无 diff，证明查询不依赖恰好 portal 才成立 | `/tmp/scry-motion-04-fix-no-portal-{build,security}.log` |
+| 完整 UI | `npm run test:renderer:ui` 通过，含 Credits、后台、source-control、真实 IPC、Pi 43 轮历史及全部列表 / overlay 回归；隔离 fixture / userData，无真实付费 Provider，不激活用户窗口 | `/tmp/scry-motion-04-fix-ui-matrix-final.log` |
+| 类型与安装 gates | 最终 `npm run typecheck` 通过；完整安装中的 unit 为 304 文件 / 3728 测试通过、4 个既有条件检查跳过；shell、build、CLI build、签名打包、packaged check、全部 Electron 安全及 remote-host smoke 均通过 | `/tmp/scry-motion-04-fix-type-delivery.log`、`/tmp/scry-motion-04-fix-install.log` |
+
+- 首轮 typecheck 发现新增单测写 readonly RefObject.current，改在 mock ref 宿主中完成绑定，未改变生产类型合同。
+- 完整 UI 首轮在 Hook 生命周期检查失败。原检查没有等待原生 phase 展开的 DOM open，也未等 response dispatch 的 React 提交；现增加这两项就绪检查，并单独断言原入场已经结束，保留原不重播断言。专项与完整 UI 通过，未修改生产 Hook、加 sleep 或扩大 timeout。首败 `/tmp/scry-motion-04-fix-ui-full.log` 保留，不把它说成已确认的生产 Hook 回归，也不直接重跑抹掉失败。
+- 提交被共享 pre-commit 引用本分支不存在的 `scripts/check-staged-file-size.mjs` 阻挡。用户本轮再次明确批准仅豁免大小 hook，使用命令级 hook 路径覆盖完成本步提交；不修改共享配置，不跳过测试、安全或安装 gate。
+
+#### 性能：L1 保持；高负载计算测量不作 L2 结论
+
+- `npm run performance:measure -- --compare ee5cb859 --scenario history.page --out /tmp/scry-motion-04-fix-history` 及 `--scenario trace.delivery --out /tmp/scry-motion-04-fix-trace` 均通过 ratchet：history 10020 bytes / 1 message / 1 stringify，trace 165996 bytes / 2 messages，与基线相同。候选标记 `ee5cb859-dirty`，对应随后提交的同一实现；未改 collector、workload、ratchet 或 budget。
+- 安装开始的 1 分钟 load 为 6.94，按核验备注补跑包含 trace.delivery 的原固定 17 场景计算 bench。基线为独立 detached `ee5cb859`，当前使用相同 harness / lockfile / Node 22，均通过原 2 个 harness 正确性测试。两次经 `timing-run.mjs` 串行锁执行；基线 load 19.78→16.29，当前 16.29→20.05（10 核），均 `highLoad: true`。没有等机器空闲或绕过锁。
+- 计算 batchMeanP95 上升项（ms）：startup.recovery 3.264→4.051；providers.catalog 0.494→0.606；history.page 0.101→0.144；compose.drafts 0.567→1.657；persistence.archive 14.379→36.172；evidence.projection 0.116→0.243；analytics.stats 0.563→1.181；workspace.files 23.300→40.369；source-control.diff 460.711→805.112；terminal.delivery 0.337→0.390；trace.delivery 1.315→1.453（+10.5%）。这些固定计算路径未加载本次修改的 hook / CSS；每项上升都保留，不归因为本次新增必要工作，也不能在不同高负载下断言是真实回归或不存在回归。renderer.batch 0.273→0.201 同样不宣称更快。
+- comparator **exit 1**：persistence.archive、workspace.files、source-control.diff 的上述耗时超过比较门限；另有旧的 persistence.archive bytes 10577→10577 超过 10555 ceiling。不是全场景性能 gate 通过，未放宽。原始 JSON / 报告 `/tmp/scry-motion-04-fix-compute-{baseline,current}.json`、`/tmp/scry-motion-04-fix-comparison.md`。L2 仍未验证；若需要此结论，由维护者安排低负载同条件测量，无 L3 结论。基线临时 worktree 已移除。
+
+#### 安装与最终状态
+
+- `npm run install:mac:dev` 完整通过（exit 0），本机 2026-10-23 19:43:46→19:50:56 PDT。Node 22.22.1 / Electron 42.10.1 / App 0.2.219 / 私有 CLI 0.2.51；10 核 load 6.94 / 10.78 / 10.96→23.13 / 14.97 / 12.54。日志 `/tmp/scry-motion-04-fix-install{,-load}.log`。安装开始前 `--dev` 已通过；全部原安全门禁执行后才安装。
+- 已安装到 `/Applications/Scry.app`，installer 保留 `/Applications/.Scry.app.backup`。installed / dist 的 app.asar SHA-256 同为 `385a88a5206cb22e83f7ce75306d53f3153d568dacc9368557a3521eb698d5e7`。安装于提交前的受测工作树，随后仅测试就绪 / 测量 / 记录变化，App 生产源码未再修改。未停止或重启用户日常实例；用户自行重启后才加载新安装版本，不把安装成功当作当前运行实例已更新。
+- 真实付费 Provider、120Hz 与低负载 L2 未验证；只完成本轮要求的前两项非阻塞调整，未额外改箭头视觉或进入 05。日志留本机临时目录，不提交个人数据。推送后停下，交设计方核验 04-fix。
 
 <!--
 ### NN · <步骤名>
