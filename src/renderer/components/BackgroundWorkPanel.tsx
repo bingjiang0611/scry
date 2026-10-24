@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { BackgroundTaskStopResult, BackgroundWork } from '@shared/background-work'
 import { BACKGROUND_WORK_COPY as copy } from '../constants/copy'
+import { useFlipList } from '../hooks/useFlipList'
 import { Icon } from './primitives/Icon'
 import './background-work.css'
 
@@ -19,6 +20,8 @@ export function BackgroundWorkPanel({ runId, work, stopTask = (taskId) => window
 }) {
   const [now, setNow] = useState(Date.now)
   const [results, setResults] = useState<Record<string, BackgroundTaskStopResult | { status: 'sending'; message: string }>>({})
+  const taskListRef = useRef<HTMLElement>(null)
+  useFlipList(taskListRef, work.tasks)
   useEffect(() => {
     if (work.phase === 'inactive' || work.tasks.length === 0) return
     const timer = window.setInterval(() => setNow(Date.now()), 10_000)
@@ -32,7 +35,7 @@ export function BackgroundWorkPanel({ runId, work, stopTask = (taskId) => window
   }
   if (work.phase === 'inactive') return null
   const observedNow = Math.max(now, Date.now())
-  return <section className="background-work-panel" aria-label={copy.regionLabel} data-quiet={work.quiet || undefined}>
+  return <section ref={taskListRef} className="background-work-panel" aria-label={copy.regionLabel} data-quiet={work.quiet || undefined}>
     {work.tasks.map((task) => {
       const result = results[task.taskId]
       const age = backgroundTaskAge(task.observedAt, observedNow)
@@ -46,7 +49,7 @@ export function BackgroundWorkPanel({ runId, work, stopTask = (taskId) => window
               : unknown ? copy.unknown : copy.waiting
       const canStop = work.taskStop === 'available' && !requested
       const uncertain = unknown || task.stopState === 'unconfirmed' || result?.status === 'unknown' || result?.status === 'rejected'
-      return <article className="background-work-task" data-status={uncertain ? 'unknown' : 'waiting'} key={task.taskId}>
+      return <article className="background-work-task" data-motion-key={task.taskId} data-status={uncertain ? 'unknown' : 'waiting'} key={task.taskId}>
         <header className="background-work-head">
           <Icon name="agents" />
           <span className="background-work-identity">

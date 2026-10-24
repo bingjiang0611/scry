@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '@shared/session-title'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { ConversationAdoptionDialog } from './ConversationAdoptionDialog'
 import type { SessionMeta } from '../env'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
+import { usePresence } from '../hooks/usePresence'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
@@ -24,13 +26,14 @@ export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
 }) {
   const [editing, setEditing] = useState<'rename' | 'adopt'>()
   const provider = target.session.providerId
+  const presence = usePresence({ onClose, exitMs: 100, onExitStart: () => target.trigger.focus() })
   const canAdopt = Boolean(onAdopted && !target.session.agentProfileId && (provider === 'claude' || provider === 'codex'))
-  const menuRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (editing) return
+    if (editing || presence.state === 'exit') return
     menuRef.current?.querySelector('button')?.focus()
     const pointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) onClose()
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) presence.requestClose('pointer')
     }
     const key = (event: KeyboardEvent): void => {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -41,7 +44,7 @@ export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
       }
       if (event.key === 'Escape' || event.key === 'Tab') {
         event.preventDefault()
-        onClose()
+        presence.requestClose('escape')
       }
     }
     document.addEventListener('pointerdown', pointer, true)
@@ -50,21 +53,22 @@ export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
       document.removeEventListener('pointerdown', pointer, true)
       document.removeEventListener('keydown', key)
     }
-  }, [editing, onClose])
+  }, [editing, presence.state, presence.requestClose])
   if (editing === 'adopt' && onAdopted && (provider === 'claude' || provider === 'codex')) return <ConversationAdoptionDialog
     source={{ providerId: provider, cwd: target.cwd, externalSessionId: target.session.externalSessionId ?? target.session.sessionId }}
     onAdopted={onAdopted} onClose={onClose} />
   if (editing === 'rename') return <SessionRenameDialog title={target.session.preview}
     onSave={(title) => onRename(target.cwd, target.session, title)} onClose={onClose} />
-  return (
-    <div ref={menuRef} role="menu" aria-label="会话操作" className="menu sb-session-menu"
-      style={{ left: target.left, top: Math.min(target.top, window.innerHeight - (canAdopt ? 96 : 48)) }}>
-      <button type="button" role="menuitem" className="mitem" onClick={() => setEditing('rename')}>
+  const menu = (
+    <div ref={(node) => { menuRef.current = node; presence.ref(node) }} role="menu" aria-label="会话操作" className="menu sb-session-menu" data-state={presence.state}
+      style={{ left: target.left, top: Math.min(target.top, (typeof window === 'undefined' ? target.top : window.innerHeight) - (canAdopt ? 96 : 48)), transformOrigin: 'top left' }}>
+      <button type="button" role="menuitem" className="mitem" onClick={() => { target.trigger.focus(); setEditing('rename') }}>
         <Icon name="edit" /> 重命名
       </button>
-      {canAdopt && <button type="button" role="menuitem" className="mitem" disabled={target.session.pending} onClick={() => setEditing('adopt')}>迁入已捕获历史…</button>}
+      {canAdopt && <button type="button" role="menuitem" className="mitem" disabled={target.session.pending} onClick={() => { target.trigger.focus(); setEditing('adopt') }}>迁入已捕获历史…</button>}
     </div>
   )
+  return typeof document === 'undefined' ? menu : createPortal(menu, document.body)
 }
 
 export function SessionRenameDialog({ title, onSave, onClose }: {
@@ -97,10 +101,10 @@ export function SessionRenameDialog({ title, onSave, onClose }: {
     }
   }
   return (
-    <ModalFrame labelledBy={id} initialFocusRef={inputRef} className="project-dialog session-rename-dialog" onClose={close}>
+    <ModalFrame labelledBy={id} initialFocusRef={inputRef} className="project-dialog session-rename-dialog" closeDisabled={saving} onClose={close}>
       <div className="modal-head">
         <b id={id}>重命名会话</b>
-        <ModalCloseButton aria-label={MODAL_COPY.closeRename} disabled={saving} onClick={close}>×</ModalCloseButton>
+        <ModalCloseButton aria-label={MODAL_COPY.closeRename} disabled={saving} onClick={() => requestModalClose()}>×</ModalCloseButton>
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void save() }} aria-busy={saving}>
         <div className="project-dialog-body">
@@ -115,7 +119,7 @@ export function SessionRenameDialog({ title, onSave, onClose }: {
           {error && <p id={`${id}-error`} role="alert" className="session-rename-error">{error}</p>}
         </div>
         <div className="project-dialog-actions">
-          <button type="button" className="btn" disabled={saving} onClick={close}>取消</button>
+          <button type="button" className="btn" disabled={saving} onClick={() => requestModalClose()}>取消</button>
           <button type="submit" className="btn primary" disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</button>
         </div>
       </form>

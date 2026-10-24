@@ -4,7 +4,12 @@ import { AssistantTurn, UserMessage } from '../ChatTurn'
 import type { ChatViewProps } from './types'
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & { remote?: boolean }
+  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & {
+  remote?: boolean
+  liveRunId?: string | null
+  completedLiveRunId?: string | null
+  liveArrivalResetKey?: unknown
+}
 
 const TRANSCRIPT_WINDOW_THRESHOLD = 20
 const TRANSCRIPT_INITIAL_VISIBLE_TURNS = 4
@@ -67,7 +72,8 @@ export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, fo
 
 const TranscriptTurn = memo(function TranscriptTurn({
   turn, index, total, windowed, initiallyVisible, focused, observeVisibility, observeSelection,
-  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false
+  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false,
+  liveRunId, completedLiveRunId, liveArrivalResetKey
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
   observeVisibility: (element: HTMLElement, callback: (intersecting: boolean) => void) => () => void
@@ -167,7 +173,9 @@ const TranscriptTurn = memo(function TranscriptTurn({
     {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
       <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
-        onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote} />
+        onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+        liveArrivalEligible={turn.runId === liveRunId}
+        footerArrivalEligible={turn.runId === liveRunId || turn.runId === completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
     </>}
   </div>
 })

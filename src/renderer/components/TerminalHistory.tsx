@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { TerminalRecordingListPage, TerminalRecordingSummary } from '@shared/terminal'
 import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { Icon } from './primitives/Icon'
 
 export function terminalRecordingLabel(item: TerminalRecordingSummary): string {
@@ -41,7 +41,7 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedAp
     <ModalFrame labelledBy={titleId} onClose={onClose}>
       <header className="modal-head">
         <h2 id={titleId}>终端录制历史</h2>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭录制历史"><Icon name="x" /></button>
+        <button type="button" className="icon-btn" onClick={() => requestModalClose()} aria-label="关闭录制历史"><Icon name="x" /></button>
       </header>
       <div className="modal-body">
         <p title={cwd ?? '用户主目录'}>当前工作区：{cwd ?? '用户主目录'} · 原文可能含密钥</p>

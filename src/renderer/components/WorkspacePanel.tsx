@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { canOpenWorkspaceFileExternally, WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type WorkspaceEntryKind, type WorkspaceFilePage, type WorkspaceFileSnapshot } from '@shared/workspace'
 import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } from '../workbench-api'
@@ -5,6 +6,7 @@ import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
+import { usePresence } from '../hooks/usePresence'
 
 export function workspaceReferenceToken(entry: Pick<WorkspaceEntry, 'kind' | 'path'>): string {
   const path = entry.kind === 'directory' ? `${entry.path}/` : entry.path
@@ -405,89 +407,17 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         </div>
       )}
 
-      {context && (
-        <div
-          className="ctx-overlay"
-          onClick={() => setContext(null)}
-          onContextMenu={(event) => {
-            event.preventDefault()
-            setContext(null)
-          }}
-        >
-          <div className="ctxmenu workspace-context" role="menu" style={{ left: context.x, top: context.y }}>
-            {context.entry?.kind === 'file' && (
-              <button type="button" className="ctxitem" role="menuitem" onClick={() => openFile(context.entry!)}>
-                <Icon name="file" /> 打开
-              </button>
-            )}
-            {context.entry && (
-              <button
-                type="button"
-                className="ctxitem"
-                role="menuitem"
-                onClick={() => {
-                  onAddReference(context.entry!)
-                  setContext(null)
-                }}
-              >
-                <Icon name="message" /> 添加到对话
-              </button>
-            )}
-            {(!context.entry || context.entry.kind === 'directory') && (
-              <>
-                <button type="button" className="ctxitem" role="menuitem" onClick={() => startCreate('file', context.entry?.path)}>
-                  <Icon name="file" /> 新建文件
-                </button>
-                <button type="button" className="ctxitem" role="menuitem" onClick={() => startCreate('directory', context.entry?.path)}>
-                  <Icon name="folder" /> 新建文件夹
-                </button>
-              </>
-            )}
-            {context.entry && (
-              <>
-                <button
-                  type="button"
-                  className="ctxitem"
-                  role="menuitem"
-                  onClick={() => {
-                    setItemDialog({ kind: 'move', entry: context.entry!, value: '.' })
-                    setContext(null)
-                  }}
-                >
-                  <Icon name="folder" /> 移动到…
-                </button>
-                <button
-                  type="button"
-                  className="ctxitem"
-                  role="menuitem"
-                  onClick={() => {
-                    setItemDialog({ kind: 'rename', entry: context.entry!, value: context.entry!.name })
-                    setContext(null)
-                  }}
-                >
-                  <Icon name="file" /> 重命名
-                </button>
-                <button
-                  type="button"
-                  className="ctxitem del"
-                  role="menuitem"
-                  onClick={() => {
-                    setDeleteTarget(context.entry!)
-                    setContext(null)
-                  }}
-                >
-                  <Icon name="x" /> 移入废纸篓
-                </button>
-              </>
-            )}
-            {!context.entry && (
-              <button type="button" className="ctxitem" role="menuitem" onClick={refresh}>
-                <Icon name="refresh" /> 刷新
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {context && <WorkspaceContextMenu
+        context={context}
+        onClose={() => setContext(null)}
+        onOpenFile={openFile}
+        onAddReference={onAddReference}
+        onStartCreate={startCreate}
+        onMove={(entry) => setItemDialog({ kind: 'move', entry, value: '.' })}
+        onRename={(entry) => setItemDialog({ kind: 'rename', entry, value: entry.name })}
+        onDelete={setDeleteTarget}
+        onRefresh={refresh}
+      />}
 
       {itemDialog && (
         <WorkspaceDialog
@@ -526,6 +456,66 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       )}
     </section>
   )
+}
+
+function WorkspaceContextMenu({
+  context,
+  onClose,
+  onOpenFile,
+  onAddReference,
+  onStartCreate,
+  onMove,
+  onRename,
+  onDelete,
+  onRefresh
+}: {
+  context: { x: number; y: number; entry?: WorkspaceEntry }
+  onClose: () => void
+  onOpenFile: (entry: WorkspaceEntry) => void
+  onAddReference: (entry: WorkspaceEntry) => void
+  onStartCreate: (kind: WorkspaceEntryKind, parent?: string) => void
+  onMove: (entry: WorkspaceEntry) => void
+  onRename: (entry: WorkspaceEntry) => void
+  onDelete: (entry: WorkspaceEntry) => void
+  onRefresh: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const presence = usePresence({ onClose, exitMs: 100 })
+  const close = (): void => presence.requestClose('pointer')
+  useEffect(() => {
+    if (presence.state === 'exit') return
+    const dismissPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) close()
+    }
+    const dismissEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') { event.preventDefault(); close() }
+    }
+    document.addEventListener('pointerdown', dismissPointer, true)
+    document.addEventListener('keydown', dismissEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissPointer, true)
+      document.removeEventListener('keydown', dismissEscape)
+    }
+  }, [presence.state, presence.requestClose])
+  const content = (
+    <div className="ctx-overlay" data-state={presence.state} onClick={(event) => { if (event.target === event.currentTarget) close() }} onContextMenu={(event) => { event.preventDefault(); close() }}>
+      <div ref={(node) => { menuRef.current = node; presence.ref(node) }} className="ctxmenu workspace-context" data-state={presence.state} role="menu" style={{ left: context.x, top: context.y, transformOrigin: 'top left' }}>
+        {context.entry?.kind === 'file' && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onOpenFile(context.entry!); close() }}><Icon name="file" /> 打开</button>}
+        {context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onAddReference(context.entry!); close() }}><Icon name="message" /> 添加到对话</button>}
+        {(!context.entry || context.entry.kind === 'directory') && <>
+          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onStartCreate('file', context.entry?.path); close() }}><Icon name="file" /> 新建文件</button>
+          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onStartCreate('directory', context.entry?.path); close() }}><Icon name="folder" /> 新建文件夹</button>
+        </>}
+        {context.entry && <>
+          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onMove(context.entry!); close() }}><Icon name="folder" /> 移动到…</button>
+          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRename(context.entry!); close() }}><Icon name="file" /> 重命名</button>
+          <button type="button" className="ctxitem del" role="menuitem" onClick={() => { onDelete(context.entry!); close() }}><Icon name="x" /> 移入废纸篓</button>
+        </>}
+        {!context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRefresh(); close() }}><Icon name="refresh" /> 刷新</button>}
+      </div>
+    </div>
+  )
+  return typeof document === 'undefined' ? content : createPortal(content, document.body)
 }
 
 function WorkspaceDialog({

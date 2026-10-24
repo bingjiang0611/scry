@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ScDiff, ScMutation, ScOperation, ScRead, ScRepository } from '@shared/source-control'
 import { basename } from '../format'
 import { commitFiles, isStaged, nextGitAction, type ScDelivery } from '../source-control-workflow'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { Patch } from './SourceControlPatch'
 import { GithubPullRequestPanel } from './GithubPullRequestPanel'
 import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api'
@@ -309,7 +309,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <h2 id={dialogId}>仓库详情</h2><div className="sc-identity"><small title={repo.root}>{repo.root}</small><code>HEAD {repo.head ?? '尚无提交'}</code><p>分支：{repo.branch ?? 'Detached HEAD'} · 上游：{repo.upstream ?? '未设置'}</p>
           <p>跟踪引用：↑{repo.ahead ?? '未知'} ↓{repo.behind ?? '未知'}，不代表实时远端状态。</p><p>读取时间：{new Date(repo.observedAt).toLocaleString()}</p></div>
         <p className="sc-muted">真实 Git 状态不等于 Agent 文件足迹。刷新会清除候选文件选择，不修改实际暂存区。</p>
-        <button onClick={() => setDetailsOpen(false)}>关闭</button>
+        <button onClick={() => requestModalClose()}>关闭</button>
       </ModalFrame>}
       {repo && actionsOpen && <ModalFrame labelledBy={dialogId} onClose={() => setActionsOpen(false)}>
         <h2 id={dialogId}>其他 Git 操作</h2><div className="sc-other-actions">
@@ -318,7 +318,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           <button onClick={() => { setActionsOpen(false); setTransport('fetch') }}>获取远端（Fetch）…</button>
           <button onClick={() => { setActionsOpen(false); setTab('pr') }}>查看 / 创建 Pull Request</button>
           <button onClick={() => { setActionsOpen(false); setTab('operations') }}>操作记录与核查</button>
-        </div><button onClick={() => setActionsOpen(false)}>关闭</button>
+        </div><button onClick={() => requestModalClose()}>关闭</button>
       </ModalFrame>}
       {repo && expected && transport && <ModalFrame labelledBy={dialogId} onClose={() => setTransport(null)}>
         <h2 id={dialogId}>{transport === 'push' ? '确认推送' : '确认获取远端'}</h2>
@@ -327,7 +327,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <p>{transport === 'push' ? `将 ${repo.head?.slice(0, 10) ?? '无提交'} 推送到 refs/heads/${repo.branch ?? '无分支'}。直接更新此分支，包括它是默认分支的情况；不强推，不自动提交或创建分支/PR。` : '更新远端跟踪引用；不改工作区，不 prune。'}</p>
         {transportBlocker && <p className="sc-notice" role="alert">{transportBlocker}</p>}
         {!repo.remotes.length && <p className="sc-notice">尚未配置远端，请先在终端添加 remote。</p>}
-        <div className="sc-actions"><button onClick={() => setTransport(null)}>取消</button><button className="sc-primary"
+        <div className="sc-actions"><button onClick={() => requestModalClose()}>取消</button><button className="sc-primary"
           disabled={disabled || !!transportBlocker || !remote || (transport === 'push' && (!repo.branch || !repo.head))}
           onClick={() => { const action = transport; setTransport(null); void execute({ ...expected, action, remote }).catch(report) }}>
           {transport === 'push' ? `确认推送到 ${repo.branch ?? '无分支'}` : '确认 Fetch'}
@@ -336,7 +336,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
       {confirmation && <ModalFrame labelledBy={dialogId} onClose={() => setConfirmation(null)}>
         <h2 id={dialogId}>{confirmation.title}</h2><pre className="sc-confirm-detail">{confirmation.detail}</pre>
         {confirmation.blocker && <p className="sc-notice" role="alert">{confirmation.blocker}</p>}
-        <div className="sc-actions"><button onClick={() => setConfirmation(null)}>取消</button>
+        <div className="sc-actions"><button onClick={() => requestModalClose()}>取消</button>
           <button className="sc-primary" disabled={!!confirmation.blocker || busy} onClick={() => {
             const action = confirmation.run
             setConfirmation(null)

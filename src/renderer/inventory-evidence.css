@@ -130,14 +130,6 @@
   background: var(--surface-hover);
 }
 
-.inventory-modal__head-actions .modal-refresh:active,
-.inventory-modal__head-actions .modal-x:active,
-.inventory-search button:active,
-.inventory-empty button:active,
-.mcp-tools-toggle:active {
-  transform: scale(0.97);
-}
-
 .inventory-capability-note {
   flex: none;
   margin: 10px 22px 0;
@@ -235,7 +227,7 @@
   background: transparent;
   color: var(--dim2);
   font: 620 12.5px/1 var(--font-ui);
-  transition: color 140ms ease-out, transform 140ms var(--ease-out);
+  transition: color var(--dur-micro) linear;
 }
 
 .skill-scope-tabs button::after {
@@ -259,10 +251,6 @@
 .skill-scope-tabs button:focus-visible {
   outline: 2px solid var(--selected);
   outline-offset: -4px;
-}
-
-.skill-scope-tabs button:active {
-  transform: scale(0.98);
 }
 
 .skill-scope-tabs button span {
@@ -339,7 +327,7 @@
   background: var(--panel2);
   color: var(--accent);
   font: 600 12px/1 var(--font-ui);
-  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, transform 140ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .inventory-toolbar__count {
@@ -442,7 +430,7 @@
   border: 1px solid var(--border2);
   border-radius: var(--r-pill);
   background: var(--panel3);
-  transition: background-color 140ms ease-out, border-color 140ms ease-out;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 .inventory-switch__track > span {
@@ -453,7 +441,7 @@
   height: 10px;
   border-radius: 50%;
   background: var(--dim);
-  transition: background-color 140ms ease-out, transform 160ms var(--ease-out);
+  transition: background-color var(--dur-micro) linear, transform var(--dur-fast) var(--ease-struct);
 }
 
 .inventory-switch input:checked + .inventory-switch__track {
@@ -489,7 +477,7 @@
   gap: 18px;
   padding: 11px 22px;
   border-bottom: 1px solid var(--border3);
-  transition: background-color 140ms ease-out;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .skill-ledger__main {
@@ -666,7 +654,7 @@
   height: 80px;
   padding: 10px;
   border-bottom: 1px solid var(--border3);
-  transition: background-color 140ms ease-out;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .mcp-fleet__row > th {
@@ -750,7 +738,7 @@
   background: transparent;
   color: var(--accent);
   font: 620 11px/1 var(--font-mono);
-  transition: color 140ms ease-out, transform 140ms var(--ease-out);
+  transition: color var(--dur-micro) linear;
 }
 
 .mcp-tools-toggle > span {
@@ -1036,25 +1024,12 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .inventory-switch__track,
-  .inventory-switch__track > span,
-  .skill-scope-tabs button,
-  .inventory-modal__head-actions .modal-refresh,
-  .inventory-modal__head-actions .modal-x,
-  .inventory-search button,
-  .inventory-empty button,
-  .mcp-tools-toggle {
-    transition-duration: 0ms;
-  }
-}
-
 .modal.capabilities-modal {
   width: min(940px, calc(100vw - 48px));
   min-height: 0;
   max-height: calc(100vh - 48px);
   border-radius: 16px;
-  transition: width 240ms var(--ease-out);
+  transition: width var(--dur-slow) var(--ease-struct);
 }
 
 .modal.capabilities-modal--skills {
@@ -1090,7 +1065,7 @@
   color: var(--dim2);
   font: 650 13px/1 var(--font-ui);
   cursor: pointer;
-  transition: background-color 140ms ease-out, color 140ms ease-out, box-shadow 140ms ease-out;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
 }
 
 .capability-kind-tabs button.active {
@@ -1147,7 +1122,7 @@
   color: var(--dim2);
   font: 650 12.5px/1 var(--font-ui);
   cursor: pointer;
-  transition: color 140ms ease-out, border-color 140ms ease-out;
+  transition: color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
 .capability-source-tabs button.active {
@@ -1181,7 +1156,7 @@
   gap: 5px;
   padding: 8px 18px;
   border-bottom: 1px solid var(--border3);
-  transition: background-color 140ms ease-out;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .capability-skill > strong {
@@ -1204,7 +1179,7 @@
 
 .capability-mcp-row {
   border-bottom: 1px solid var(--border3);
-  transition: background-color 140ms ease-out;
+  transition: background-color var(--dur-micro) linear;
 }
 
 .capability-mcp-row__summary {
@@ -1320,7 +1295,7 @@
   display: grid;
   grid-template-rows: 0fr;
   background: var(--panel2);
-  transition: grid-template-rows 180ms var(--ease-out);
+  transition: grid-template-rows var(--dur-base) var(--ease-struct);
 }
 
 .capability-tools.open { grid-template-rows: 1fr; }
@@ -1361,6 +1336,7 @@
   text-align: center;
 }
 
+.capabilities-empty > .capabilities-refresh { justify-self: center; }
 .capabilities-empty > strong { color: var(--fg); font-size: 14px; }
 .capabilities-empty > span { font-size: 12.5px; }
 
@@ -1394,9 +1370,4 @@
   .capability-mcp-row__summary { grid-template-columns: minmax(0, 1fr); gap: 9px; padding-right: 14px; padding-left: 14px; }
   .capability-mcp-runtime { padding-left: 19px; }
   .capability-tools__list { grid-template-columns: minmax(0, 1fr); padding-right: 14px; padding-left: 33px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .modal.capabilities-modal,
-  .capability-tools { transition: none; }
 }

@@ -418,3 +418,36 @@ export const QUEUE_COPY = {
   editMissing: '这条消息已不在队列，已作为新消息排到队尾',
   editedMoved: '编辑后已移到队尾'
 } as const
+
+export const LOADING_COPY = {
+  skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
+  mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
+  session: '正在加载会话历史',
+  cache: '正在更新最近会话缓存',
+  cacheDetail: '先展示上次读取的最近一页；核对完成前不能发送或分叉。',
+  localArchive: '正在读取本机归档，请稍候。',
+  remoteArchive: (host: string) => `正在读取 ${host} 的归档，请稍候。`,
+  skills: '正在读取 Skill…',
+  skillsSourceEmpty: '当前来源没有 Skill',
+  skillsEmpty: (scope: string) => `未发现${scope}`,
+  skillsNoMatch: (scope: string) => `${scope}中没有匹配结果`,
+  mcp: '正在读取 MCP 配置…',
+  mcpSourceEmpty: '当前来源没有 MCP',
+  mcpEmpty: '未发现 MCP 配置',
+  refresh: '刷新',
+  detecting: '检测中…',
+  reading: '读取中…',
+  readingConfig: '读取配置中…',
+  piSnapshot: '正在刷新 Pi MCP 快照…',
+  detectingMcp: '正在检测全部 MCP…',
+  refreshing: '刷新中…',
+  tools: '正在读取工具明细…',
+  remoteProjects: (host: string) => `正在读取 ${host} 的项目…`,
+  directoryCount: (shown: number, total: number) => `${shown} / ${total} 个文件夹`,
+  directoryUnread: '尚未读取目录',
+  skillScope: { project: '项目 Skill', user: '用户 Skill', provider: 'Provider Skill' },
+  skillsResults: (count: number) => `${count} 个结果`,
+  skillsVisible: (shown: number, total: number) => `显示 ${shown} / ${total}`,
+  mcpNoConfigEvidence: '没有配置证据不等于运行正常，也不等于连接失败。',
+  mcpSummary: (configured: number, connected: number, runtime: number, tests: number) => `${configured} 配置 · ${runtime > 0 ? connected + ' 已连接 / ' + runtime + ' 运行态' : '运行态未返回'} · ${tests} 测试证据`
+} as const

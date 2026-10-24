@@ -10,7 +10,7 @@ import {
   type ScRepository,
   type ScReviewDraft
 } from '@shared/source-control'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api'
 import { Patch } from './SourceControlPatch'
 
@@ -538,7 +538,7 @@ export function GithubPullRequestPanel({
           <h2 id={dialogId}>{confirmation.title}</h2>
           <pre className="sc-confirm-detail">{confirmation.detail}</pre>
           <div className="sc-actions">
-            <button onClick={() => setConfirmation(null)}>取消</button>
+            <button onClick={() => requestModalClose()}>取消</button>
             <button
               className="sc-primary"
               onClick={() => {

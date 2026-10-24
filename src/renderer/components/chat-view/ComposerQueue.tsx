@@ -1,4 +1,6 @@
+import { useRef } from 'react'
 import type { ChatViewProps } from './types'
+import { useFlipList } from '../../hooks/useFlipList'
 import { Icon } from '../primitives/Icon'
 import { steerStateForMessage } from '../../steer'
 import { QUEUE_COPY } from '../../constants/copy'
@@ -37,6 +39,8 @@ export function ComposerQueue({
   nextQueuedMessageId,
   busy
 }: ComposerQueueProps) {
+  const queueListRef = useRef<HTMLDivElement>(null)
+  useFlipList(queueListRef, queuedPrompts)
   return <>
         {queuedPrompts.length > 0 && (
           <div className="prompt-queue" aria-label={QUEUE_COPY.listLabel(queuedPrompts.length)}>
@@ -48,7 +52,7 @@ export function ComposerQueue({
               </span>
               <span className="queue-hint">{QUEUE_COPY.hint}</span>
             </div>
-            <div className="queue-list" role="list">
+            <div className="queue-list" role="list" ref={queueListRef}>
               {queuedPrompts.map((prompt, index) => {
                 const evidence = steerEvidenceByMessageId.get(prompt.messageId)
                 const steerState = steerStateForMessage(prompt.steer, evidence)
@@ -93,6 +97,7 @@ export function ComposerQueue({
                   <div
                     className={`queue-item${next ? ' is-next' : ''}${editing ? ' is-editing' : ''}${pending ? ' is-steer-pending' : ''}${unknown ? ' is-steer-unknown' : ''}${rejected ? ' is-steer-rejected' : ''}`}
                     role="listitem"
+                    data-motion-key={prompt.messageId}
                     key={prompt.messageId}
                   >
                     <span className="queue-index" aria-hidden="true">{index + 1}</span>
