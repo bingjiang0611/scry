@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import { WORKFLOW_MAX_BATCH, workflowChildBlocks, type WorkflowBlock } from '../shared/workflow'
-import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowInputSnapshot } from '../shared/workflow-system'
+import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowInputSnapshot, type WorkflowInputMaterialization, type WorkflowMaterializedInput } from '../shared/workflow-system'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowValueReference } from './workflow-frames'
 import { WORKFLOW_REPLICA_MAX_CONTENT, WORKFLOW_REPLICA_MAX_ENTRIES, WORKFLOW_REPLICA_MAX_MANIFEST, validateWorkflowReplicaReference } from './workflow-replica'
 import type { WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 
 export const workflowSystemArtifactKey = (stepId: string, label: string): string => createHash('sha256').update(JSON.stringify([stepId, label])).digest('hex')
 
@@ -19,14 +20,23 @@ export function validateWorkflowInputSnapshot(snapshot: WorkflowInputSnapshot, w
 
 /** Structure is valid during active dispatch too; unresolved intent is checked
  * separately at recovery, never normalized into a safe-to-repeat operation. */
-export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): void {
+export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): ReadonlyMap<string, WorkflowMaterializedInput> {
   const intents = record.systemIntents ?? [], outcomes = record.systemOutcomes ?? []
-  if (!intents.length && !outcomes.length) return
+  if (!intents.length && !outcomes.length) return new Map()
   if (intents.length > WORKFLOW_MAX_SYSTEM_STEPS || outcomes.length > WORKFLOW_MAX_SYSTEM_STEPS ||
     new Set(intents.map(value => value.stepId)).size !== intents.length || new Set(intents.map(value => value.taskId)).size !== intents.length || new Set(outcomes.map(value => value.stepId)).size !== outcomes.length) throw new Error(copy.intent)
   const nodes = new Map<string, WorkflowBlock>(), pending = [record.preview.program.body]
   while (pending.length) { const block = pending.pop()!; nodes.set(block.blockId, block); pending.push(...workflowChildBlocks(block)) }
   const admitted = new Map(intents.map(intent => [intent.stepId, intent]))
+  // One origin index, not a scan per check. Only committed main-produced pairs
+  // establish materialization; Agent JSON cannot supply a candidate association.
+  const prepared = new Map<string, WorkflowMaterializedInput>()
+  for (const outcome of outcomes) {
+    const intent = admitted.get(outcome.stepId)
+    if (intent?.kind === 'prepare_replica' && outcome.state === 'completed' && outcome.settled && outcome.replica && outcome.resultRef) prepared.set(JSON.stringify(outcome.replica), {
+      source: 'main_ledger', preparationStepId: intent.stepId, materialized: outcome.replica, ...(intent.replica ? { candidate: intent.replica } : {})
+    })
+  }
   for (const intent of intents) {
     const node = nodes.get(intent.nodeId), task = intent.taskId.split(':')
     if (!/^[A-Za-z0-9_-]{1,96}$/.test(intent.stepId) || !Number.isSafeInteger(intent.createdAt) || task.length !== 3 || task[0] !== record.preview.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== intent.nodeId ||
@@ -36,6 +46,8 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): void 
       if (intent.kind !== 'check' || !intent.replica) throw new Error(copy.intent)
       validateWorkflowInputSnapshot(intent.inputSnapshot, record.preview.workflowId, intent.stepId, 'before')
     }
+    if (intent.inputMaterialization !== undefined && (!intent.inputSnapshot || !intent.replica ||
+      JSON.stringify(intent.inputMaterialization) !== JSON.stringify(workflowInputMaterialization(prepared, intent.replica, intent.inputSnapshot)))) throw new Error(copy.intent)
   }
   for (const outcome of outcomes) {
     const intent = admitted.get(outcome.stepId)
@@ -50,12 +62,15 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): void 
       if (intent.kind === 'prepare_replica' ? outcome.replica.replicaId !== intent.stepId : JSON.stringify(intent.replica) !== JSON.stringify(outcome.replica)) throw new Error(copy.intent)
     }
     if (outcome.state === 'completed' && (!outcome.replica || (intent.kind === 'check' && !outcome.check))) throw new Error(copy.intent)
+    const node = nodes.get(intent.nodeId)
+    if (outcome.state === 'completed' && node?.kind === 'replica' && ((node.source !== undefined) !== Boolean(intent.replica) ||
+      (intent.replica && (intent.replica.replicaId === outcome.replica!.replicaId || !prepared.has(JSON.stringify(intent.replica)))))) throw new Error(copy.intent)
     if (outcome.check) {
       if (intent.kind !== 'check') throw new Error(copy.intent)
       const inputs = outcome.check.inputs
       if (Boolean(inputs) !== Boolean(intent.inputSnapshot)) throw new Error(copy.intent)
       if (inputs) {
-        if (JSON.stringify(inputs.before) !== JSON.stringify(intent.inputSnapshot)) throw new Error(copy.intent)
+        if (JSON.stringify(inputs.before) !== JSON.stringify(intent.inputSnapshot) || JSON.stringify(inputs.materialization) !== JSON.stringify(intent.inputMaterialization)) throw new Error(copy.intent)
         if (inputs.changes.after) validateWorkflowInputSnapshot(inputs.changes.after, record.preview.workflowId, intent.stepId, 'after')
         if (inputs.changes.state === 'available') {
           if (inputs.changes.source !== 'snapshot_comparison' || !Number.isSafeInteger(inputs.changes.count) || inputs.changes.count < 0 || inputs.changes.count > WORKFLOW_MAX_BATCH || !inputs.changes.after) throw new Error(copy.intent)
@@ -70,6 +85,16 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): void 
       }
     }
   }
+  return prepared
+}
+
+/** Availability proves only that pre-input matches a committed materialization,
+ * not check success, a required suite, or the candidate's current contents. */
+export function workflowInputMaterialization(prepared: ReadonlyMap<string, WorkflowMaterializedInput>, replica: WorkflowReplicaReference, before: WorkflowInputSnapshot): WorkflowInputMaterialization {
+  const origin = prepared.get(JSON.stringify(replica))
+  if (!origin) throw new Error(copy.intent)
+  return replica.inputHash === before.inputHash ? { ...origin, state: 'available' }
+    : { ...origin, state: 'unavailable', reason: copy.materializationChanged }
 }
 
 export function assertWorkflowSystemsSettled(record: WorkflowStoreRecord): void {

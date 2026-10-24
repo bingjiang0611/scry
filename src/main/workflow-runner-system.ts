@@ -7,7 +7,7 @@ import type { WorkflowInterpreterState } from './workflow-interpreter'
 import type { WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowRunnerEffects } from './workflow-runner-effects'
 import { workflowFrameId } from './workflow-frames'
-import { verifyWorkflowCheckInputs } from './workflow-input-snapshot'
+import { verifyWorkflowCheckInputs, verifyWorkflowInputMaterialization } from './workflow-input-snapshot'
 
 export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'replica' | 'check' }>, scope: WorkflowControlScope,
     frame: WorkflowControlFrame | undefined, control: WorkflowControl, record: WorkflowStoreRecord, controller: WorkflowInterpreterState, activeStops: Set<() => boolean>): Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }> {
@@ -15,10 +15,13 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
     if (recovered) {
       if (recovered.replica) {
         if (!effects.options.systems) throw new Error(workflowSystemCopy.unavailable)
-        await effects.options.systems.replicas.resolve(recovered.replica)
+        const receipt = await effects.options.systems.replicas.resolve(recovered.replica)
+        const candidate = recovered.check?.inputs?.materialization?.candidate
+        if (candidate) effects.options.systems.replicas.assertSource(receipt, candidate)
       }
       const intent = record.systemIntents!.find(value => value.stepId === recovered.stepId)!
       await verifyWorkflowCheckInputs(effects.options.store, preview.workflowId, recovered.stepId, intent.inputSnapshot, recovered.check?.inputs)
+      await verifyWorkflowInputMaterialization(effects.options.store, record, intent.inputMaterialization)
       if (recovered.check) for (const reference of [recovered.check.stdoutRef, recovered.check.stderrRef,
         ...(recovered.check.diagnostics.state === 'available' ? [recovered.check.diagnostics.reference] : [])]) await effects.options.store.loadValue(preview.workflowId, reference)
       return { value: await effects.options.store.loadValue(preview.workflowId, recovered.resultRef!), phase: recovered.state }
@@ -48,8 +51,8 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
           return true
         })
         if (!admitted) return unavailable(workflowSystemCopy.stopped, 'stopped')
-        const execution = host.execute(preview, block, stepId, input, async inputSnapshot => {
-          record.systemIntents!.find(intent => intent.stepId === stepId)!.inputSnapshot = inputSnapshot
+        const execution = host.execute(preview, block, stepId, input, async (inputSnapshot, inputMaterialization) => {
+          Object.assign(record.systemIntents!.find(intent => intent.stepId === stepId)!, { inputSnapshot, inputMaterialization })
           await effects.options.persist(record, record.progress)
         })
         activeStops.add(execution.stop)

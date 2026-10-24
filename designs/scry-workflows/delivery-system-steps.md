@@ -2,6 +2,16 @@
 
 本页从 [m1-m6-delivery.md](m1-m6-delivery.md) 按职责拆分；原阶段证据与未完成项保持不变。
 
+## 检查输入与候选物化版本关联（M3/M4 子集；整体未完成）
+
+- 沿既有 replica/source → Runner → main check 路径，复用原 prepare intent/outcome，而非新增调度器、外部执行或生成代码。main 为每个新 check 派生 inputs.materialization：同根已提交物化 step、目标引用和可选来源候选引用；不可变 prepare 结果必须仍可读且精确匹配。before/hash 与关联先写原 check intent，再启动 native；失败不派发、不清账。
+- materialized.inputHash 是来源 lease 内捕获并在副本校验过的那个候选版本；candidate.inputHash 是来源副本最初创建的 hash，两者可不同。关联还与实际 receipt.sourceRoot 比对，不能凭另一份相同内容或模型 JSON 换归属。完整 ledger 单次构建 origin index，不为每个历史 check 再扫描全部结果。
+- before 精确匹配物化 hash 才 available；检查前副本被改则 unavailable，但保留其实际 pass/fail。检查自身的写缓存/产物记录在 after，不把它当候选的新版本。available 只证明本次预输入关联，不是质量成功、必需检查完整、当前候选仍相同、独占因果或原子快照。旧无关联结果可以继续，不回填；新关联缺失、改写、跨根、丢 origin/outcome 或缺不可变结果拒绝复用，不重跑补证据。
+- focused 覆盖：Agent 真写候选后 fork；持久关联先于 native；检查副本再次被改仍实际通过但不能归给原版本；关联 checkpoint 失败没有 native；父 checkpoint 失败后候选继续变化仍只复用旧物化结果；七种损坏来源及缺 origin value 均拒绝。全用临时目录与离线 executor。负控把 hash 比较恒改 true 时，unavailable 回归明确失败；未删断言或延长 deadline。
+- 生产模板/审批/preload/main 链增量：root copy → 验证 fork → Node check；native 自己读磁盘 intent、origin intent/outcome/value、全部 manifest parts，并核对 candidate/target/hash 已先持久；程序 field 真消费候选关系，原 map/collect/concat 仍返回两项 TS 诊断和一项期间变化。这个场景仍 native1/Agent0/Provider增量0、源不变、重复 start 不重跑，不是真实 tsc 或质量/SDK验收。
+- 最终 Node/web types、25文件288/288、含build的完整 production conversation IPC 通过；Vitest77.68s，10核load12.60→12.01/highLoad=true，不宣称提速。performance measure仍因providers.catalog无collector失败；历史延期门禁未关闭。首轮测试类型错用request.runId已按真实attemptId合同修正。
+- 日志：`/tmp/scry-workflow-template-editor.ZnkC6L/input-binding-*`。必需检查集合/冻结身份、规范化诊断/回归比较、Jev/独立复核、组合/应用/完整清理仍待实现；此增量不能把 M4 或 M1–M6 关单。
+
 ## 20 KB 门禁下的职责拆分（本轮附加；非新执行链）
 
 - 原提交被共享 hook 拦截：当前 worktree 缺其 checker，四个旧文件也超过完整暂存版本20,000字节上限。维护者明确批准拆分后，补入与主线 `fdb511d7` 完全同 blob 的 checker；不跳过 hook、不放宽上限、不改共享 Git 配置。

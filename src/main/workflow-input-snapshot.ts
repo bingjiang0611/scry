@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowValue, type WorkflowValueReference } from '../shared/workflow'
-import type { WorkflowCheckInputs, WorkflowInputChange, WorkflowInputSnapshot } from '../shared/workflow-system'
+import type { WorkflowCheckInputs, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization } from '../shared/workflow-system'
 import type { WorkflowReplicaManifestEntry } from '../shared/workflow-replica'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
-import type { WorkflowStore } from './workflow-store'
+import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { snapshotWorkflowInputManifest, WORKFLOW_REPLICA_MAX_MANIFEST } from './workflow-replica'
 import { validateWorkflowValueReference } from './workflow-frames'
 import { validateWorkflowInputSnapshot, workflowSystemArtifactKey } from './workflow-system-ledger'
@@ -95,9 +95,18 @@ export async function verifyWorkflowCheckInputs(store: WorkflowStore, workflowId
   }
 }
 
+export async function verifyWorkflowInputMaterialization(store: WorkflowStore, record: WorkflowStoreRecord, materialization: WorkflowInputMaterialization | undefined): Promise<void> {
+  if (!materialization) return // Historical checks have no binding; do not mint one.
+  const origin = record.systemOutcomes?.find(outcome => outcome.stepId === materialization.preparationStepId)
+  if (!origin?.resultRef) throw new Error(copy.intent)
+  const value = await store.loadValue(record.preview.workflowId, origin.resultRef)
+  if (value.state !== 'known' || JSON.stringify(value.replica) !== JSON.stringify(materialization.materialized) ||
+    JSON.stringify(value.value) !== JSON.stringify(materialization.materialized)) throw new Error(copy.intent)
+}
+
 export function workflowCheckInputValue(inputs: WorkflowCheckInputs, items: WorkflowInputChange[]): WorkflowValue {
   const after = inputs.changes.after
-  return { before: workflowInputSnapshotInfo(inputs.before), ...(after ? { after: workflowInputSnapshotInfo(after) } : {}),
+  return { before: workflowInputSnapshotInfo(inputs.before), ...(after ? { after: workflowInputSnapshotInfo(after) } : {}), ...(inputs.materialization ? { materialization: inputs.materialization } : {}),
     changes: inputs.changes.state === 'available' ? { state: 'available', source: 'snapshot_comparison', items }
       : { state: 'unavailable', reason: inputs.changes.reason } }
 }

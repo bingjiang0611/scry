@@ -174,6 +174,13 @@ export class WorkflowReplicas {
     return receipt
   }
 
+  /** Compare the saved origin without reopening a mutable (or removed) parent.
+   * Child bytes and its creation hash were already verified by materialize. */
+  assertSource(receipt: WorkflowReplicaReceipt, candidate: WorkflowReplicaReference): void {
+    validateWorkflowReplicaReference(candidate, receipt.workflowId)
+    if (candidate.replicaId === receipt.replicaId || receipt.sourceRoot !== this.paths(candidate).directory) throw new Error(copy.identity)
+  }
+
   /** Caller releases only after authoritative scope convergence, never when a
    * business result/stop ACK resolves. Unknown effects keep this lease. */
   async acquire(reference: WorkflowReplicaReference, allowIncomplete = false, signal?: AbortSignal): Promise<{ directory: string; release: () => void }> {

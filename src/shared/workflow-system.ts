@@ -22,6 +22,10 @@ export const workflowCheckValueSchema: WorkflowValueSchema = { type: 'object', p
   }, required: ['state'] },
   inputs: { type: 'object', properties: {
     before: inputSnapshotSchema, after: inputSnapshotSchema,
+    materialization: { type: 'object', properties: {
+      state: { type: 'enum', values: ['available', 'unavailable'] }, source: { type: 'enum', values: ['main_ledger'] }, reason: { type: 'string' },
+      preparationStepId: { type: 'string' }, materialized: workflowReplicaValueSchema, candidate: workflowReplicaValueSchema
+    }, required: ['state', 'source', 'preparationStepId', 'materialized'] },
     changes: { type: 'object', properties: {
       state: { type: 'enum', values: ['available', 'unavailable'] }, source: { type: 'enum', values: ['snapshot_comparison'] }, reason: { type: 'string' },
       items: { type: 'array', maxItems: WORKFLOW_MAX_BATCH, items: { type: 'object', properties: {
@@ -44,8 +48,20 @@ export type WorkflowInputSnapshot = {
   reference: WorkflowValueReference
 }
 export type WorkflowInputChange = { path: string; kind: 'added' | 'modified' | 'removed' }
+/** The materialized reference hashes the state captured at preparation, not the
+ * current mutable candidate, nor the candidate reference's original creation. */
+export type WorkflowMaterializedInput = {
+  source: 'main_ledger'
+  preparationStepId: string
+  materialized: WorkflowReplicaReference
+  candidate?: WorkflowReplicaReference
+}
+export type WorkflowInputMaterialization = WorkflowMaterializedInput & (
+  { state: 'available' } | { state: 'unavailable'; reason: string }
+)
 export type WorkflowCheckInputs = {
   before: WorkflowInputSnapshot
+  materialization?: WorkflowInputMaterialization
   changes: { state: 'available'; source: 'snapshot_comparison'; after: WorkflowInputSnapshot; count: number; reference: WorkflowValueReference }
     | { state: 'unavailable'; reason: string; after?: WorkflowInputSnapshot }
 }
@@ -64,6 +80,7 @@ export type WorkflowSystemIntent = {
   kind: WorkflowSystemKind
   createdAt: number
   inputSnapshot?: WorkflowInputSnapshot
+  inputMaterialization?: WorkflowInputMaterialization
   replica?: WorkflowReplicaReference
 }
 export type WorkflowSystemOutcome = {

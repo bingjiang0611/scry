@@ -114,6 +114,7 @@ export const workflowTemplateCopy = {
 }
 
 export const workflowSystemCopy = {
+  materializationChanged: '检查前输入已不同于物化时的候选，不能将本次检查归给该候选版本',
   snapshotUnsettled: '登记的检查作用域尚未关闭，检查后输入与期间差异不可用',
   snapshotLimit: '期间差异超过 4096 项或 2 MiB；完整输入清单已保留，不能将截断清单用于比较',
   unavailable: '此宿主没有可用的工作副本或主进程检查执行器',

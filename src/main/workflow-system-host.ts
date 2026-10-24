@@ -1,13 +1,13 @@
 import { workflowChildBlocks, type WorkflowBlock, type WorkflowEvaluation, type WorkflowPlanPreview, type WorkflowProgram, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowFrozenCheck } from '../shared/workflow-check'
-import type { WorkflowCheckInputs, WorkflowCheckSummary, WorkflowInputChange, WorkflowInputSnapshot, WorkflowSystemOutcome } from '../shared/workflow-system'
+import type { WorkflowCheckInputs, WorkflowCheckSummary, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization, WorkflowSystemOutcome } from '../shared/workflow-system'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import type { WorkflowStore } from './workflow-store'
 import { bindWorkflowCheck, executeWorkflowCheck, freezeWorkflowCheck, type WorkflowCheckExecution } from './workflow-check'
 import { WorkflowReplicas, validateWorkflowReplicaReference } from './workflow-replica'
 import { shellEnv } from './claude-locate'
-import { workflowSystemArtifactKey } from './workflow-system-ledger'
-import { captureWorkflowInputs, compareWorkflowInputs, saveWorkflowInputChanges, saveWorkflowInputSnapshot, workflowCheckInputValue, type WorkflowCapturedInputs } from './workflow-input-snapshot'
+import { validateWorkflowSystemLedger, workflowInputMaterialization, workflowSystemArtifactKey } from './workflow-system-ledger'
+import { captureWorkflowInputs, compareWorkflowInputs, saveWorkflowInputChanges, saveWorkflowInputSnapshot, verifyWorkflowInputMaterialization, workflowCheckInputValue, type WorkflowCapturedInputs } from './workflow-input-snapshot'
 import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 import { WorkflowScopeError, type WorkflowProviderExecution, type WorkflowProviderExecutionRequest, type WorkflowProviderExecutor } from './workflow-runner'
 
@@ -104,7 +104,7 @@ export class WorkflowSystemHost {
   }
 
   execute(preview: WorkflowPlanPreview, block: SystemBlock, stepId: string, input: WorkflowEvaluation | undefined,
-    beforeCheck: (snapshot: WorkflowInputSnapshot) => Promise<void>): WorkflowSystemExecution {
+    beforeCheck: (snapshot: WorkflowInputSnapshot, materialization: WorkflowInputMaterialization) => Promise<void>): WorkflowSystemExecution {
     const abort = new AbortController()
     let native: WorkflowCheckExecution | undefined, lease: Awaited<ReturnType<WorkflowReplicas['acquire']>> | undefined
     let close!: () => void
@@ -125,8 +125,14 @@ export class WorkflowSystemHost {
         const binding = bindWorkflowCheck(block.authorization, receipt, this.environment())
         const captured = await captureWorkflowInputs(receipt.directory, () => abort.signal.aborted)
         const before = await saveWorkflowInputSnapshot(this.store, preview.workflowId, stepId, 'before', captured)
-        // No native process may start until this fact joins the canonical intent.
-        await beforeCheck(before)
+        const record = await this.store.load(preview.workflowId)
+        if (!record) throw new Error(copy.intent)
+        const materialization = workflowInputMaterialization(validateWorkflowSystemLedger(record), reference, before)
+        await verifyWorkflowInputMaterialization(this.store, record, materialization)
+        if (materialization.candidate) this.replicas.assertSource(receipt, materialization.candidate)
+        // Hash and committed origin join the intent before native dispatch;
+        // recovery rederives the relationship without rechecking.
+        await beforeCheck(before, materialization)
         if (abort.signal.aborted) throw new Error(copy.stopped)
         native = executeWorkflowCheck(binding.check, binding.environment)
         if (abort.signal.aborted) native.stop()
@@ -147,7 +153,7 @@ export class WorkflowSystemHost {
             changes = await saveWorkflowInputChanges(this.store, preview.workflowId, stepId, snapshot, items)
           }
         }
-        const inputs: WorkflowCheckInputs = { before, changes }
+        const inputs: WorkflowCheckInputs = { before, materialization, changes }
         const save = (label: string, value: WorkflowValue) => this.store.saveValue(preview.workflowId, workflowSystemArtifactKey(stepId, label), { state: 'known', value, derivedFrom: ['system:' + stepId] })
         const stdoutRef = await save('stdout', observed.stdout), stderrRef = await save('stderr', observed.stderr)
         const diagnostics: WorkflowCheckSummary['diagnostics'] = observed.diagnostics.state === 'available'

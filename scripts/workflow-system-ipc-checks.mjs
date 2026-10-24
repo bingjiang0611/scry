@@ -70,12 +70,23 @@ const load = ref => {
   assert.equal(value.state, 'known')
   return value.value
 }
-let intent
+let intent, origin
 for (const name of fs.readdirSync(directory)) {
   if (!/^workflow-[a-f0-9]{64}\\.json$/.test(name)) continue
   const record = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'))
   intent = record.systemIntents?.find(item => item.nodeId === 'verify_inputs' && !record.systemOutcomes?.some(outcome => outcome.stepId === item.stepId))
-  if (intent) break
+  if (intent) {
+    const binding = intent.inputMaterialization
+    assert.equal(binding?.state, 'available', 'native invocation preceded its materialization checkpoint')
+    const producer = record.systemOutcomes.find(item => item.stepId === binding.preparationStepId)
+    origin = record.systemIntents.find(item => item.stepId === producer.stepId)
+    assert.equal(origin.kind, 'prepare_replica')
+    assert.deepEqual(origin.replica, binding.candidate)
+    assert.deepEqual(producer.replica, binding.materialized)
+    assert.deepEqual(load(producer.resultRef), binding.materialized)
+    assert.equal(binding.materialized.inputHash, intent.inputSnapshot.inputHash)
+    break
+  }
 }
 assert.ok(intent?.inputSnapshot, 'native invocation preceded its input-intent checkpoint')
 const header = load(intent.inputSnapshot.reference)
@@ -88,7 +99,9 @@ process.exitCode = 1
 `)
   const definition = { schemaVersion: 1, name: 'Diagnostic dataflow fixture', description: '', parameters: {}, roles: [], body: { kind: 'sequence', blockId: 'root', blocks: [
     { kind: 'replica', blockId: 'copy' },
-    { kind: 'check', blockId: 'verify_inputs', replica: { kind: 'ref', name: 'copy' }, check: { argv: [process.execPath, script], cwd: '.', timeoutMs: 2000, parser: 'typescript' } },
+    { kind: 'replica', blockId: 'verification', source: { kind: 'ref', name: 'copy' } },
+    { kind: 'check', blockId: 'verify_inputs', replica: { kind: 'ref', name: 'verification' }, check: { argv: [process.execPath, script], cwd: '.', timeoutMs: 2000, parser: 'typescript' } },
+    { kind: 'bind', blockId: 'bound_candidate', value: { kind: 'field', source: { kind: 'ref', name: 'verify_inputs' }, path: ['inputs', 'materialization', 'candidate'] } },
     { kind: 'map', blockId: 'diagnostics', items: { kind: 'field', source: { kind: 'ref', name: 'verify_inputs' }, path: ['diagnostics', 'items'] }, item: 'diagnostic', key: ['code'], maxItems: 4,
       body: { kind: 'bind', blockId: 'entry', value: { kind: 'ref', name: 'diagnostic' } } },
     { kind: 'collect', blockId: 'collected', items: { kind: 'ref', name: 'diagnostics' } },
@@ -114,18 +127,24 @@ process.exitCode = 1
   ])
   assert.equal(progress.dispatchAttempts, 0)
   const record = JSON.parse(await readFile(join(fixture.userData, 'workflows', preview.workflowId + '.json'), 'utf8'))
-  assert.equal(record.systemOutcomes[1].check.state, 'failed')
-  assert.equal(record.systemOutcomes[1].check.diagnostics.count, 2)
+  const check = record.systemOutcomes[2].check, binding = record.systemIntents[2].inputMaterialization
+  assert.equal(check.state, 'failed')
+  assert.equal(check.diagnostics.count, 2)
   assert.deepEqual(report.slice(2), [{ path: marker, kind: 'added' }])
-  assert.notEqual(record.systemOutcomes[1].check.inputs.before.inputHash, record.systemOutcomes[1].check.inputs.changes.after.inputHash)
-  assert.deepEqual(record.systemIntents[1].inputSnapshot, record.systemOutcomes[1].check.inputs.before)
-  assert.equal(record.systemOutcomes[1].check.inputs.changes.source, 'snapshot_comparison')
-  const reference = record.systemOutcomes[0].replica
+  assert.notEqual(check.inputs.before.inputHash, check.inputs.changes.after.inputHash)
+  assert.deepEqual(record.systemIntents[2].inputSnapshot, check.inputs.before)
+  assert.deepEqual(check.inputs.materialization, binding)
+  assert.equal(binding.state, 'available')
+  assert.deepEqual(binding.candidate, record.systemOutcomes[0].replica)
+  assert.deepEqual(binding.materialized, record.systemOutcomes[1].replica)
+  assert.equal(binding.preparationStepId, record.systemIntents[1].stepId)
+  assert.equal(check.inputs.changes.source, 'snapshot_comparison')
+  const reference = binding.materialized
   const receipt = JSON.parse(await readFile(join(fixture.userData, 'workflow-replicas', preview.workflowId, reference.replicaId + '.replica.json'), 'utf8'))
   await workflow('start', preview.workflowId, approval, 'diagnostic-start')
   assert.equal(await readFile(join(receipt.directory, marker), 'utf8'), '1')
   await assert.rejects(readFile(join(fixture.templateWorkspace, marker)), { code: 'ENOENT' })
-  return { actualCheckFailed: true, derivedDiagnosticsConsumed: 2, inputIntentReadByNative: true, observedChangesConsumed: 1, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true }
+  return { actualCheckFailed: true, derivedDiagnosticsConsumed: 2, inputIntentReadByNative: true, materializationReadByNative: true, candidateReadByProgram: true, observedChangesConsumed: 1, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true }
 }
 
 export async function exerciseWorkflowReplicaAgent(evaluate, fixture) {
