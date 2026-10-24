@@ -51,7 +51,8 @@ export async function exerciseSessionCache(contents) {
   }
   const stateOf = () => read(`JSON.parse(document.getElementById('cache-state').textContent)`)
   const noTurns = async () => {
-    const condition = `document.querySelectorAll('.transcript-turn').length === 0`
+    // Step05 retains previous DOM, but never as actionable selected-session evidence.
+    const condition = `[...document.querySelectorAll('.transcript-turn')].every(turn => { const previous = turn.closest('[data-loading-previous="true"]'); return previous?.inert && previous.getAttribute('aria-hidden')==='true' })`
     await wait(condition)
     return read(condition)
   }
@@ -127,7 +128,7 @@ export async function exerciseSessionCache(contents) {
   // Native input dispatch does not await React's commit. Observe the existing
   // uncached-loading state and require the visible cache to clear while the
   // authority request is still pending; keep the no-turns and stale-response checks.
-  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]')?.textContent.includes('正在加载会话历史')`)
+  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && document.querySelector('.chat-session-evidence-gap[data-status="loading"]')?.textContent.includes('正在加载会话历史')`)
   await wait(`document.querySelectorAll('.transcript-turn').length === 0`)
   check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
   await control('resolve-b'); await ready('cache-b')
@@ -143,7 +144,7 @@ export async function exerciseSessionCache(contents) {
   check(await read(`!document.querySelector('.chat-evidence-source') && !document.querySelector('.chat-session-evidence-gap')?.textContent.includes('最近会话缓存')`), 'Authoritative live focus retained the cache source label')
   await control('resolve-a')
   await wait(`!JSON.parse(document.getElementById('cache-state').textContent).pending.includes('cache-a')`)
-  check(await read(`document.querySelector('.chat-transcript[aria-busy="true"]') != null && !document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a')`), 'Late cache authority replaced the newer live focus')
+  check(await read(`document.querySelector('.chat-transcript[aria-busy="true"]') != null && [...document.querySelectorAll('.transcript-turn')].every(turn => { if (!turn.textContent.includes('Authoritative cache-a')) return true; const previous = turn.closest('[data-loading-previous="true"]'); return previous?.inert && previous.getAttribute('aria-hidden')==='true' })`), 'Late cache authority replaced the newer live focus outside its inert previous presentation')
   await control('resolve-b')
   await wait(`document.querySelector('.chat-transcript[aria-busy="false"]') && document.querySelector('.chat-transcript').textContent.includes('AUTHORITATIVE LIVE B')`)
   check(await read(`document.querySelector('.transcript-turn[data-run-id="live-b"]') != null`), 'Focused live run was lost during its own history restoration')

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/session-evidence.css'
 import '../../src/renderer/inventory-evidence.css'
 import '../../src/renderer/analytics-evidence.css'

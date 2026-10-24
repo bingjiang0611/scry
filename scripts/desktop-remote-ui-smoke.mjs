@@ -29,6 +29,7 @@ const composerHistoryOnly = process.argv.includes('--composer-history-only')
 const lifecycleOnly = process.argv.includes('--session-lifecycle-only')
 const conversationNavigationOnly = process.argv.includes('--conversation-navigation-only')
 const openingOnly = process.argv.includes('--session-opening-only')
+const structureOnly = process.argv.includes('--structure-only')
 const measureOpening = process.argv.includes('--measure-session-opening')
 const visibilityPollingBaseline = process.argv.includes('--visibility-polling-baseline')
 const visibilityPollingCheck = process.argv.includes('--visibility-polling-check')
@@ -53,6 +54,7 @@ import { createComposerDraftStore } from ${JSON.stringify(join(root, 'src/render
 import { RemotePromptQueueStore } from ${JSON.stringify(join(root, 'src/renderer/remote-prompt-queue.ts'))}
 import { createRightSurfaceState } from ${JSON.stringify(join(root, 'src/renderer/right-surface.ts'))}
 import ${JSON.stringify(join(root, 'src/renderer/styles.css'))}
+import ${JSON.stringify(join(root, 'src/renderer/motion.css'))}
 import ${JSON.stringify(join(root, 'src/renderer/codex-alignment.css'))}
 
 const firstLedger = '11111111-1111-4111-8111-111111111111'
@@ -64,7 +66,7 @@ const state = {
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [],
   listCalls: 0, catalogCalls: 0, remoteStatusCalls: 0, runStatusCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
   providerControlsFailure: null, legacyProviderHost: false,
-  fileLists: [], fileReads: [], localWorkspaceCalls: [],
+  fileLists: [], fileReads: [], localWorkspaceCalls: [], workbenchCalls: [],
   uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
   intent: ${unknownReceiptOnly ? `{ intentId: 'unknown-original-id', connectionId: 'fixture-connection', context: { cwd: '/fixture/project-b', providerId: 'qoder', externalSessionId: 'other-native' }, createdAt: 1, status: 'unknown', failure: 'transport receipt unavailable' }` : 'null'},
   resolveIntentCalls: [], resolveFailure: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
@@ -105,6 +107,7 @@ const catalog = {
     { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
   ],
   providerEvidence: 'host_snapshot', directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
+  workbench: ${structureOnly ? '1' : 'undefined'},
   attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 }
 }
 const contextFor = (input) => ({ ...input.context })
@@ -162,6 +165,13 @@ const api = {
       directorySelection: state.oldDirectoryHost ? undefined : true
     })
   },
+  async workbench(id, request) {
+    state.workbenchCalls.push({ id, request })
+    if (id !== 'fixture-connection' || request.cwd !== '/fixture/project-a' || request.surface !== 'workspace') throw new Error('Wrong remote workspace authority')
+    if (request.method === 'workspaceList') return { entries: [{ name: 'notes.txt', path: 'notes.txt', kind: 'file', mtimeMs: 1 }], truncated: false }
+    if (request.method === 'workspaceRead') return { name: 'notes.txt', path: 'notes.txt', content: 'original remote file', size: 20, mtimeMs: 1, revision: 'structure-rev', language: 'plaintext' }
+    throw new Error('Unexpected remote workspace operation: ' + request.method)
+  },
   async providerControls(id, context) {
     state.providerControlsCalls.push({ id, context: contextFor({ context }) })
     if (state.holdProviderControls) await new Promise(resolve => state.providerControlWaiters.push(resolve))
@@ -216,7 +226,7 @@ const api = {
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
     if (state.holdHistory) await new Promise(resolve => { window.releaseHistory = resolve })
-    if (${openingOnly || measureOpening}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
+    if (${openingOnly || measureOpening || structureOnly}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
       { id: 'opening-answer', runId: 'opening-history', ts: '2026-10-19T12:00:00.000Z', kind: 'model', stage: 'text', text: Array.from({ length: 80 }, (_, i) => 'Remote history paragraph ' + i).join('\\n\\n') }
     ] }], hasOlder: false, source: 'trace_archive', status: 'available' }
     // A run typed on the host's own UI becomes history once it leaves the live set.
@@ -550,6 +560,52 @@ async function exercise(contents, pointer, capture, options) {
   }
   await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.textContent === "Fixture desktop"', 'remote project tagged with host in sidebar')
   await wait('document.querySelector(".location-button") != null', 'machine + project picker in composer')
+  if (options.structureOnly) {
+    const remotePanel = '#remote-right-surface-pane'
+    let accept = false
+    const dialogs = []
+    const dialogHandler = (_event, method, params) => {
+      if (method !== 'Page.javascriptDialogOpening') return
+      dialogs.push(params)
+      void send('Page.handleJavaScriptDialog', { accept })
+    }
+    await send('Page.enable')
+    contents.debugger.on('message', dialogHandler)
+    try {
+      await read('window.structureEntries = []; window.structureNativeCalls = 0; const animate = Element.prototype.animate; Element.prototype.animate = function(frames, options) { if (this.matches(".main-content")) window.structureEntries.push(options.duration); return animate.call(this, frames, options) }; document.startViewTransition = () => { window.structureNativeCalls++; throw new Error("Native capture forbidden") }; undefined')
+      for (const theme of ['light', 'dark']) {
+        await read('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
+        await click('[data-remote-session="old-native"]')
+        await wait(remoteShown, 'remote context selected')
+        await wait('document.querySelector(".chat")?.textContent.includes("Remote history paragraph 79")', 'remote history loaded')
+        if (await read('document.querySelector(".panel-pill:not(.summary-pill)").getAttribute("aria-pressed") !== "true"')) await click('.panel-pill:not(.summary-pill)')
+        await wait('document.querySelector("#remote-right-surface-pane").getBoundingClientRect().width > 0', 'remote pane visible')
+        await click(remotePanel + ' button[aria-label="添加 Surface"]')
+        await click(remotePanel + ' [role=menuitem]', '文件')
+        await wait(`document.querySelector('${remotePanel} [data-workspace-path="notes.txt"]') != null`, 'editable host file tree')
+        await click(remotePanel + ' [data-workspace-path="notes.txt"]')
+        await wait('document.querySelector("#remote-right-surface-pane textarea")?.value === "original remote file"', 'host file content')
+        await click(remotePanel + ' textarea'); await insert(' unsaved remote edit')
+        await wait('document.querySelector("#remote-right-surface-pane .workspace-editorbar .primary")?.disabled === false', 'dirty remote file')
+        await read('Promise.allSettled(document.getAnimations().filter(a => a.id === "scry-structure" || a.id === "scry-pane").map(a => a.finished)).then(() => true)')
+        const before = await read('window.structureEntries.length')
+        const count = dialogs.length
+        accept = false
+        await click('.sb-nav .sb-navitem:first-child')
+        check(dialogs.length === count + 1 && dialogs.at(-1).message.includes('远程文件'), 'Native confirmation did not precede remote navigation')
+        check(await read('window.structureEntries.length') === before, 'Cancelled remote navigation started an entrance')
+        check(await read(remoteShown + ' && document.querySelector("#remote-right-surface-pane textarea").value.includes("unsaved remote edit")'), 'Cancel discarded remote selection or edit')
+        await capture('structure-remote-' + theme + '-cancelled')
+        accept = true
+        await click('.sb-nav .sb-navitem:first-child')
+        await wait('document.querySelector(".usage-page") != null', 'confirmed remote navigation')
+        check(await read('window.structureEntries.length') > before, 'Confirmation positive control has no page entrance')
+        await capture('structure-remote-' + theme)
+      }
+      check(await read('window.structureNativeCalls === 0 && window.desktopRemoteFixture.localWorkspaceCalls.length === 0 && window.desktopRemoteFixture.workbenchCalls.every(call => call.request.method !== "workspaceWrite")'), 'Remote structure used native capture, local fallback or a write')
+      return { remoteStructure: { themes: ['light', 'dark'], realDialogConfirmBeforeEntry: true, cancelNoTransition: true, cancelKeepsEdit: true, acceptNavigates: true, hostScopedFileTransport: true, noWriteOrLocalFallback: true } }
+    } finally { contents.debugger.removeListener('message', dialogHandler) }
+  }
   if (options.openingOnly || options.measureOpening) {
   // Selected controls are demand-loaded. A delayed response for a previous
   // session Provider must not publish after the user switches context.
@@ -562,7 +618,7 @@ async function exercise(contents, pointer, capture, options) {
   await wait('window.desktopRemoteFixture.providerControlsCalls.at(-1)?.context.providerId === "claude"', 'selected Alpha context after switch')
   check(!await read('document.querySelector(".chat")?.textContent.includes("Beta Default")'), 'Stale Provider controls were published')
   await read('window.desktopRemoteFixture.holdProviderControls = false; window.desktopRemoteFixture.providerControlWaiters.splice(0).forEach(resolve => resolve())')
-  await wait('document.querySelector(".model-effort-model")?.textContent === "Alpha Default"', 'selected controls settle after stale switch')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "claude / Alpha Default"', 'selected controls settle after stale switch')
   await read('window.desktopRemoteFixture.providerControlsFailure = "unavailable"')
   await click('[data-remote-session="other-native"]')
   await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'unavailable controls are visible')
@@ -581,14 +637,14 @@ async function exercise(contents, pointer, capture, options) {
   await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
   await read('window.desktopRemoteFixture.legacyProviderHost = false')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
-  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new-host controls restored')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"', 'new-host controls restored')
   if (options.openingOnly) {
   check(!await read('document.querySelector(".composer-notice")'), 'Successful controls still show the host-read banner')
   const beforeMetadataRefresh = (await fixture()).providerControlsCalls.length
   await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeMetadataRefresh, 'same-context metadata invalidates selected controls')
-  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default" && !document.querySelector(".composer-notice")', 'selected controls refresh without the removed banner')
-  check(await read('document.querySelector(".model-effort-model")?.textContent === "Beta Default"'), 'Refresh silently changed selected model')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && !document.querySelector(".composer-notice")', 'selected controls refresh without the removed banner')
+  check(await read('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"'), 'Refresh silently changed selected model')
   await click('textarea[aria-label="描述任务"]'); await insert('same-context-observation')
   await wait('!document.querySelector(".runtime-composer button.send").disabled', 'known selected snapshot can send')
   await read('window.desktopRemoteFixture.providerControlsFailure = "throw"; window.dispatchEvent(new Event("focus"))')
@@ -682,7 +738,8 @@ async function exercise(contents, pointer, capture, options) {
     await wait('document.querySelector(".remote-pairing__qr canvas") != null', 'phone code opens a nested dialog')
     check(await read('document.querySelector(".hosts-add-modal").textContent.includes("2 分钟内有效") && document.querySelector(".hosts-add-modal").textContent.includes("核对连接设备上的公钥指纹")'), 'Phone pairing lost expiry or fingerprint guidance')
     await key('Escape')
-    check(await read('document.querySelector(".settings-modal") != null && !document.querySelector(".hosts-add-modal")'), 'Closing phone code closed settings too')
+    check(await read('document.querySelector(".settings-modal") != null && document.querySelector(".hosts-add-modal")?.closest(".modal-overlay").dataset.state === "exit"'), 'Closing phone code retired the parent or skipped its exit')
+    await wait('document.querySelector(".settings-modal") != null && !document.querySelector(".hosts-add-modal")', 'Closing phone code removes only the nested dialog after exit')
     await read('window.desktopRemoteFixture.phoneStatusFailure = true')
     await wait('document.querySelector(".remote-access-inbound").textContent.includes("状态未知") && document.querySelector(".remote-access-inbound").textContent.includes("fixture phone status unavailable")', 'unread phone status stays unknown')
     check(!(await read('document.querySelector(".remote-device-section")')), 'Failed phone read claimed no devices or kept current grants')
@@ -1129,7 +1186,7 @@ async function exercise(contents, pointer, capture, options) {
   await click('.model-effort-current')
   await click('.model-effort-list [role=option]', 'Alpha Remembered')
   await key('Escape')
-  await wait('document.querySelector(".model-effort-model")?.textContent === "Alpha Remembered"', 'remote model selection')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "claude / Alpha Remembered"', 'remote model selection')
   await click('textarea[aria-label="描述任务"]')
   await pasteImage()
   await wait('document.querySelector(".draft-attachments img")?.naturalWidth === 2', 'remote pasted image decoded preview')
@@ -1204,7 +1261,7 @@ async function exercise(contents, pointer, capture, options) {
   check(beforeNewProject === '/fixture/project-a', 'Remote project changed before New conversation: ' + beforeNewProject)
   await click('.sb-new')
   // A new session restores this host/profile's model and permission, not defaults.
-  await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "Alpha Remembered" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'new draft restores remote model and permission')
+  await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "claude / Alpha Remembered" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'new draft restores remote model and permission')
   check(await read(remoteShown), 'New conversation left the remote machine')
   const newConversationLocation = await read('document.querySelector(".location-button").getAttribute("aria-label")')
   check(newConversationLocation === '执行位置：Fixture desktop / /fixture/project-a', 'New conversation changed the project: ' + newConversationLocation)
@@ -1225,9 +1282,9 @@ async function exercise(contents, pointer, capture, options) {
   await wait('document.querySelector(\'.climenu [data-agent-id="qoder"]\') != null', 'remote Provider menu')
   check(!(await bodyText()).includes('添加 Pi Agent'), 'Remote Provider menu offered local Pi management')
   await click('.climenu [data-agent-id="qoder"]')
-  await wait('document.querySelector(".model-effort-model")?.textContent === "Beta Default" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Default · Fixture desktop"', 'provider control reset')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Default · Fixture desktop"', 'provider control reset')
   await click('.sb-new')
-  await wait('!document.querySelector(".clibtn").disabled && document.querySelector(".clibtn").textContent.includes("Beta") && document.querySelector(".model-effort-model")?.textContent === "Beta Default"', 'new session remembers the remote Provider as well as its model')
+  await wait('!document.querySelector(".clibtn").disabled && document.querySelector(".clibtn").textContent.includes("Beta") && document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"', 'new session remembers the remote Provider as well as its model')
   await wait(`window.desktopRemoteFixture.intentsCalls > ${afterNew.intentsCalls}`, 'next-context poll')
   check(!(await bodyText()).includes('second remote run'), 'A later poll restored the old transcript')
   await click('.clibtn')
@@ -1486,7 +1543,7 @@ try {
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, async name => {
           await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
           require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
-        }, { parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, conversationNavigationOnly: ${conversationNavigationOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline}, visibilityPollingCheck: ${visibilityPollingCheck} })
+        }, { structureOnly: ${structureOnly}, parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, conversationNavigationOnly: ${conversationNavigationOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline}, visibilityPollingCheck: ${visibilityPollingCheck} })
         // Native input and capture have finished. Release their debugger/window
         // before exit instead of leaving the successful fixture alive on macOS.
         win.webContents.debugger.detach()

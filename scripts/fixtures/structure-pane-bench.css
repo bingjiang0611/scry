@@ -1,0 +1,21 @@
+/* Rejected native V candidate only. Production uses live DOM and pane F. */
+html[data-vt='pane'] { view-transition-name: none; }
+html[data-vt='pane'] #sidebar-pane { view-transition-name: sidebar; }
+html[data-vt='pane'] #right-surface-pane { view-transition-name: surface; }
+html[data-vt='pane']::view-transition-group(*) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease-struct);
+}
+html[data-vt='pane']::view-transition-old(*) { display: none; }
+html[data-vt='pane']::view-transition-new(*) {
+  animation: none;
+  height: 100%;
+  width: auto;
+  object-fit: none;
+  object-position: left top;
+}
+html[data-vt='pane']::view-transition-new(surface):only-child { animation: bench-slide-in var(--dur-slow) var(--ease-struct) both; }
+@keyframes bench-slide-in { from { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes bench-slide-in { from { opacity: 0; } }
+}

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Sidebar } from '../../src/renderer/components/Sidebar'
 import type { SessionMeta } from '../../src/renderer/env'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 function Fixture() {

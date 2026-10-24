@@ -396,11 +396,13 @@ describe('ChatView 隐藏常驻来源说明', () => {
     expect(html).not.toContain('未捕获字段保持未知')
   })
 
-  it('仍明确显示缓存待核对状态和操作限制', () => {
-    const html = renderWelcome({ turns, sessionLoading: true, sessionCacheVisible: true, hasSelectedSession: true })
-    expect(html).toContain('正在更新最近会话缓存')
-    expect(html).toContain('核对完成前不能发送或分叉')
-    expect(html).toContain('data-status="loading"')
+  it('缓存首帧保留内容且立即锁定操作，加载文案由原生计时检查覆盖', () => {
+    const html = renderWelcome({ turns, input: '缓存待核对的草稿', sessionLoading: true, sessionCacheVisible: true, hasSelectedSession: true })
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toMatch(/class="send"[^>]*disabled=""/)
+    expect(html).toContain('transcript-turn')
+    expect(html).not.toContain('data-status="loading"')
+    expect(html).not.toContain('data-loading-previous="true"')
   })
 })
 
@@ -771,7 +773,7 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     expect(html).not.toContain('新会话 · 本机证据')
   })
 
-  it('正在加载选中的历史时显示进度，而不是空归档或上一次错误', () => {
+  it('正在加载选中的历史时立即标 busy，延迟提示且不展示空归档或上一次错误', () => {
     const html = renderWelcome({
       cwd: '/tmp/project',
       hasSelectedSession: true,
@@ -780,8 +782,8 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     })
 
     expect(html).toContain('aria-busy="true"')
-    expect(html).toContain('data-status="loading"')
-    expect(html).toContain('正在加载会话历史')
+    expect(html).not.toContain('data-status="loading"')
+    expect(html).not.toContain('正在加载会话历史')
     expect(html).not.toContain('这条会话暂时没有可显示的轮次')
     expect(html).not.toContain('previous failure')
     expect(html).not.toContain('welcome-hero-icon')
@@ -1808,7 +1810,7 @@ describe('AssistantTurn 渲染：trace 树 / footer / 文件足迹', () => {
     expect(html).toContain('class="think-head" aria-expanded="true"')
     expect(html).toContain('思考过程')
     expect(html).toContain('class="ico think-bulb"')
-    expect(html).toContain('class="ico think-chevron"')
+    expect(html).toContain('class="ico think-chevron motion-chevron"')
     expect(html).toContain('class="think-text md"><p><strong>先写文件再读回</strong></p>')
     expect(html).not.toContain('**先写文件再读回**')
     expect(html).not.toContain('class="think-mark"')
@@ -5111,7 +5113,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).toContain('存档时间未知')
   })
 
-  it('Skill 与 MCP 首次后台读取时立即展示诚实加载态', () => {
+  it('Skill 与 MCP 首次读取立即 busy 和禁用，但首帧不显示加载、0 或空证据', () => {
     const skillHtml = renderToStaticMarkup(
       <SkillsModal
         skills={[]}
@@ -5121,8 +5123,11 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         onClose={() => {}}
       />
     )
-    expect(skillHtml).toContain('读取中…')
-    expect(skillHtml).toContain('正在读取 Skill…')
+    expect(skillHtml).toContain('aria-busy="true"')
+    expect(skillHtml).not.toContain('读取中…')
+    expect(skillHtml).not.toContain('正在读取 Skill…')
+    expect(skillHtml).not.toContain('未发现')
+    expect(skillHtml).not.toContain('0 个结果')
     expect(skillHtml).toContain('class="modal-refresh" disabled=""')
 
     const mcpHtml = renderToStaticMarkup(
@@ -5138,8 +5143,11 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         onClose={() => {}}
       />
     )
-    expect(mcpHtml).toContain('读取配置中…')
-    expect(mcpHtml).toContain('正在读取 MCP 配置…')
+    expect(mcpHtml).toContain('aria-busy="true"')
+    expect(mcpHtml).not.toContain('读取配置中…')
+    expect(mcpHtml).not.toContain('正在读取 MCP 配置…')
+    expect(mcpHtml).not.toContain('未发现 MCP')
+    expect(mcpHtml).not.toContain('0 配置')
     expect(mcpHtml).toContain('class="modal-refresh" disabled=""')
   })
 
@@ -5275,8 +5283,9 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
         onClose={() => {}}
       />
     )
-    expect(refreshingHtml).toContain('正在检测全部 MCP…')
-    expect(refreshingHtml).toContain('检测中…')
+    expect(refreshingHtml).toContain('aria-busy="true"')
+    expect(refreshingHtml).not.toContain('正在检测全部 MCP…')
+    expect(refreshingHtml).not.toContain('检测中…')
     expect(refreshingHtml).toMatch(/class="modal-refresh mcp-refresh-all"[^>]*disabled=""/)
     expect(refreshingHtml).toContain('aria-label="检测全部 MCP 运行状态"')
 
@@ -5436,6 +5445,7 @@ describe('CapabilitiesModal 精简能力页', () => {
     view: 'skills',
     onViewChange: () => {},
     skills: [],
+    onRefreshSkills: () => {},
     skillCapability: { providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] },
     mcps: [],
     status: {},
