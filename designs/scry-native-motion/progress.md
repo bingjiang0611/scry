@@ -542,6 +542,19 @@
 - 用户明确同意执行第 06 步（侧栏材质）。顺序：先完成「05-fix · 核验」里的旧转录引用小修，并在低负载（1 分钟 load < 10）下重跑 `performance:bench` 对比，以 `motion(wrap)` 提交、记录；之后直接开始 `steps/06-vibrancy.md`。
 - 06 完成后与前面各步一起合入 main，由设计方核验后开 PR。
 
+### wrap · 旧转录引用收尾与低负载性能复测（2026-10-24）
+
+- 提交：`ea911aab` 实现；`9d10073d` 原生断言 / fixture。按「05-fix · 核验」让保留旧转录的 `onTurnRef` 为 undefined：React 退休此前登记，保留期不登记旧 DOM；新会话就绪后正常登记。未更改转录数据、scope、惯性滚动、inert / aria-hidden 或原始加载 authority。
+- `node scripts/session-capability-ui-smoke.mjs --turn-refs-only`：真实生产 ChatView 初始登记 → 切到共享 runId 的 fork、旧 DOM 仍连接且 inert，但 map 清空 → 延迟条 / 淡出期间不重登 → fork 就绪、同 runId 正确登记当前节点，全部通过。临时恢复旧 prop，负对照在 `retained transcript remained registered for turn navigation` 精确失败；恢复后通过。日志 `/tmp/scry-motion-wrap-refs-{positive,negative,restored}.log`。新 refs campaign 纳入原 `--lists-only`，不减少原三个 campaign / 数据 / 断言，不扩大 30s watchdog。
+- `npm run typecheck` 通过；`npm run test:unit -- src/renderer/components/render.test.tsx src/renderer/hooks/useDelayedFlag.test.ts` 251/251 通过。日志 `/tmp/scry-motion-wrap-{type,focused}.log`。完整 UI / 安装随紧接的 06 执行，不把本节写成已安装。
+- 低负载复测沿用之前 04-fix 的基线 `ee5cb859`，候选 `9d10073d`。17 场景的 benchmark、runner、budgets 与基线完全相同，Node 22.22.1 / 同一 node_modules，基线为独立 detached worktree，均经 `timing-run.mjs` 宿主锁串行执行 `npm run performance:bench -- <output.json>`，不改 collector、workload、门限或测量方法。
+- 首次基线虽在 load 7.88 启动，但结束 14.53，`highLoad:true`；候选启动 guard exit 78，未运行。这组不作低负载证据，日志 `/tmp/scry-motion-wrap-baseline.log`。之后只等待用户指定的启动条件（连续两次 30s 采样 <10），不重试失败断言、不在 workload 内加 sleep。等待日志 `/tmp/scry-motion-wrap-load-gate.log`。有效基线 load **7.03→6.30**，候选 **6.30→6.79**，10 核，两组 `highLoad:false`、各 2 个 harness 正确性测试通过，耗时 23.475s / 22.552s。原始数据 `/tmp/scry-motion-wrap-{baseline,current}-low.json`，日志同名 `.log`。
+- `node scripts/performance-compare.mjs /tmp/scry-motion-wrap-baseline-low.json /tmp/scry-motion-wrap-current-low.json scripts/performance-budgets.json /tmp/scry-motion-wrap-comparison.md`：全部 **17 项毫秒门限通过**。前次异常的 persistence.archive 17.593→14.696ms、workspace.files 21.611→20.046ms、source-control.diff 389.541→347.732ms 均未再超门限，支持之前结果受机器负载混杂，不将这些下降归因于本分支。这里是固定临时工作量的计算 / 磁盘 / 子进程测量，不是原生绘制、真实 Provider 或网络延迟，也不声称整体变快。
+- 本轮仍有计时上升：terminal.delivery 0.288→0.597ms（+107.3%）、controls.stop-lifecycle 41.135→47.734ms（+16.0%）、resources-shell.process 47.538→50.007ms（+5.2%）、trace.delivery 1.884→2.804ms（+48.8%）、renderer.batch 0.319→0.392ms（+23.0%），均在原门限内；这些 harness 路径不加载本轮 ChatView 引用改动，未改相关实现，不据单组样本证明因果或无回归。history.page 0.161→0.160ms 基本不变。
+- 整个 comparator 仍 **exit 1**，唯一失败是已知未变化的 persistence.archive bytes 10577→10577，超过既有 10555 ceiling；不把它写成全门禁绿，也不放宽预算。报告 `/tmp/scry-motion-wrap-comparison.md{,.json}`。临时 worktree 首次因自建 node_modules symlink 未被忽略而拒绝删除；确认仅该链接未跟踪、源文件无改动后 unlink，再正常移除，未删除其他 worktree。
+- 正常提交仍因共享 pre-commit 引用旧分支缺失的大小检查脚本失败。用户明确批准本次 wrap 与 06 命令级豁免该 hook；共享配置不改，其他验证 / 安全 / 安装门禁照常。用户也明确批准 06 本次可见原生 test 窗口 / 焦点 / 采集，只操作独立 test 实例与受控背景，不改壁纸、不操作日常 Scry。
+- 收尾完成，按已登记用户决定继续 06。该决定不授权合入 main、开 PR 或 force push；仍只推送 design/native-motion，最终由设计方核验。
+
 <!--
 ### NN · <步骤名>
 
