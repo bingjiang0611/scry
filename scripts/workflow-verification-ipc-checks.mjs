@@ -40,8 +40,8 @@ else if(after) { console.log('tests/a.ts(1,1): error TS300: test failed'); proce
   const required = prefix => Object.fromEntries(['types', 'tests'].map(key => [key, { check: prefix + key, result: ref(prefix + key) }]))
   const definition = { schemaVersion: 1, name: 'Required check comparison fixture', description: '', parameters: {}, roles: [], body: { kind: 'sequence', blockId: 'required_root', blocks: [
     { kind: 'replica', blockId: 'required_candidate' }, ...checks('required_before'),
-    { kind: 'verification', blockId: 'required_baseline', required: required('required_before') }, ...checks('required_after'),
-    { kind: 'verification', blockId: 'required_current', required: required('required_after'), baseline: ref('required_baseline') },
+    { kind: 'verification', blockId: 'required_baseline', required: required('required_before'), protectedPaths: [script] }, ...checks('required_after'),
+    { kind: 'verification', blockId: 'required_current', required: required('required_after'), baseline: ref('required_baseline'), protectedPaths: [script] },
     { kind: 'return', blockId: 'required_report', ref: { nodeId: 'required_current' } }
   ] } }
   const draft = await templates('saveDraft', { scope: { kind: 'personal' }, source: JSON.stringify(definition) })
@@ -58,6 +58,11 @@ else if(after) { console.log('tests/a.ts(1,1): error TS300: test failed'); proce
   const value = JSON.parse(progress.finalReport)
   assert.equal(value.state, 'available')
   assert.equal(value.passed, false)
+  assert.equal(value.protectedSurface.state, 'available')
+  assert.equal(value.protectedSurface.source, 'main_manifest')
+  assert.deepEqual(value.protectedSurface.protectedPaths, [script])
+  assert.equal(value.protectedSurface.entryCount, 1)
+  assert.equal(value.protectedSurface.observations, 8)
   assert.equal(value.comparison.state, 'available')
   assert.deepEqual(value.comparison.regressedChecks, ['tests'])
   assert.deepEqual(value.comparison.recoveredChecks, [])
@@ -67,6 +72,10 @@ else if(after) { console.log('tests/a.ts(1,1): error TS300: test failed'); proce
   assert.equal(value.comparison.progress.state, 'unavailable', 'fixture deltas are not certified code progress')
   const record = JSON.parse(await readFile(join(fixture.userData, 'workflows', preview.workflowId + '.json'), 'utf8'))
   assert.equal(record.systemIntents.length, 11)
+  const baselineCheck = record.systemIntents.find(item => item.stepId === value.protectedSurface.referenceStepId)
+  assert.equal(baselineCheck.nodeId, 'required_beforetests')
+  assert.equal(value.protectedSurface.referenceInputHash, baselineCheck.inputSnapshot.inputHash)
+  assert.deepEqual(record.preview.program.body.blocks.find(item => item.blockId === 'required_current').protectedPaths, [script])
   assert.equal(record.systemIntents.filter(item => item.kind === 'verification').length, 2)
   assert.ok(record.systemOutcomes.every(item => item.settled))
   const own = record.systemIntents.find(item => item.nodeId === 'required_current')
@@ -80,5 +89,5 @@ else if(after) { console.log('tests/a.ts(1,1): error TS300: test failed'); proce
   await assert.rejects(readFile(join(fixture.templateWorkspace, marker)), { code: 'ENOENT' })
   assert.equal((await workflow('start', preview.workflowId, approval, 'required-comparison-start')).finalReport, progress.finalReport)
   assert.equal(await calls(), before)
-  return { requiredChecks: 2, verificationSteps: 2, nativeExecutions: 4, agentAttempts: 0, providerDelta: 0, retainedAfterLineShift: 'TS100', addedDiagnostics: ['TS300', 'TS200'], regressedChecks: ['tests'], trustedProgress: 'unavailable', sourceUnchanged: true, repeatedStartReplayed: false }
+  return { requiredChecks: 2, verificationSteps: 2, nativeExecutions: 4, agentAttempts: 0, providerDelta: 0, retainedAfterLineShift: 'TS100', addedDiagnostics: ['TS300', 'TS200'], regressedChecks: ['tests'], protectedSurface: 'available', protectedObservations: 8, protectedPolicyFrozen: true, trustedProgress: 'unavailable', sourceUnchanged: true, repeatedStartReplayed: false }
 }

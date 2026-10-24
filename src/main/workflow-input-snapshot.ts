@@ -41,13 +41,15 @@ export async function saveWorkflowInputSnapshot(store: WorkflowStore, workflowId
   return { ...captured.info, reference }
 }
 
-export async function verifyWorkflowInputSnapshot(store: WorkflowStore, workflowId: string, stepId: string, phase: 'before' | 'after', snapshot: WorkflowInputSnapshot): Promise<void> {
+export type WorkflowInputSnapshotObserver = (stepId: string, phase: 'before' | 'after', snapshot: WorkflowInputSnapshot, chunks: readonly string[]) => void
+
+export async function verifyWorkflowInputSnapshot(store: WorkflowStore, workflowId: string, stepId: string, phase: 'before' | 'after', snapshot: WorkflowInputSnapshot, observe?: WorkflowInputSnapshotObserver): Promise<void> {
   validateWorkflowInputSnapshot(snapshot, workflowId, stepId, phase)
   const header = await store.loadValue(workflowId, snapshot.reference)
   if (header.state !== 'known' || !header.value || typeof header.value !== 'object' || Array.isArray(header.value)) throw new Error(copy.intent)
   const { parts, ...info } = header.value
   if (!Array.isArray(parts) || !parts.length || parts.length > MAX_PARTS || JSON.stringify(info) !== JSON.stringify(workflowInputSnapshotInfo(snapshot))) throw new Error(copy.intent)
-  const hash = createHash('sha256')
+  const hash = createHash('sha256'), chunks = observe ? [] as string[] : undefined
   let bytes = 0
   for (const [index, part] of parts.entries()) {
     validateWorkflowValueReference(part, workflowId)
@@ -57,8 +59,10 @@ export async function verifyWorkflowInputSnapshot(store: WorkflowStore, workflow
     bytes += Buffer.byteLength(value.value)
     if (bytes > WORKFLOW_REPLICA_MAX_MANIFEST) throw new Error(copy.intent)
     hash.update(value.value)
+    chunks?.push(value.value)
   }
   if (bytes !== snapshot.manifestBytes || hash.digest('hex') !== snapshot.inputHash) throw new Error(copy.intent)
+  if (observe && chunks) observe(stepId, phase, snapshot, chunks)
 }
 
 /** Differences over the observation interval, not an attribution to a process.
@@ -85,10 +89,10 @@ export async function saveWorkflowInputChanges(store: WorkflowStore, workflowId:
   return { state: 'available', source: 'snapshot_comparison', after, count: items.length, reference }
 }
 
-export async function verifyWorkflowCheckInputs(store: WorkflowStore, workflowId: string, stepId: string, before: WorkflowInputSnapshot | undefined, inputs: WorkflowCheckInputs | undefined): Promise<void> {
-  if (before) await verifyWorkflowInputSnapshot(store, workflowId, stepId, 'before', before)
+export async function verifyWorkflowCheckInputs(store: WorkflowStore, workflowId: string, stepId: string, before: WorkflowInputSnapshot | undefined, inputs: WorkflowCheckInputs | undefined, observe?: WorkflowInputSnapshotObserver): Promise<void> {
+  if (before) await verifyWorkflowInputSnapshot(store, workflowId, stepId, 'before', before, observe)
   if (!inputs) return
-  if (inputs.changes.after) await verifyWorkflowInputSnapshot(store, workflowId, stepId, 'after', inputs.changes.after)
+  if (inputs.changes.after) await verifyWorkflowInputSnapshot(store, workflowId, stepId, 'after', inputs.changes.after, observe)
   if (inputs.changes.state === 'available') {
     const changes = await store.loadValue(workflowId, inputs.changes.reference)
     if (changes.state !== 'known' || !Array.isArray(changes.value) || changes.value.length !== inputs.changes.count) throw new Error(copy.intent)

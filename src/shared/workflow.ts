@@ -250,6 +250,7 @@ export interface WorkflowVerificationBlock {
   kind: 'verification'
   blockId: string
   required: Record<string, { check: string; result: WorkflowExpression }>
+  protectedPaths?: string[]
   baseline?: WorkflowExpression
 }
 

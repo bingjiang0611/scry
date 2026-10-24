@@ -114,6 +114,12 @@ export const workflowTemplateCopy = {
 }
 
 export const workflowVerificationCopy = {
+  protectedPaths: '保护路径必须是 1–256 个不重叠的项目相对路径，不允许根路径、控制目录或通配符',
+  surfaceBaseline: '没有相同冻结保护范围的完整参考检查，不能证明保护输入未变',
+  surfaceMissing: '声明的保护路径不在参考输入清单中，不能证明保护输入未变',
+  surfaceChanged: '声明的保护输入在候选或检查观察区间内已变化',
+  surfaceSymlink: '保护路径包含符号链接，尚无链接目标的完整保护证明',
+  surfaceLimit: '保护输入证明超过 16 MiB 不同清单预算，未截断为成功',
   missing: '必需检查的原结果缺失或尚未关闭，不能认证验证集合',
   binding: '必需检查没有绑定同一个完整的候选输入版本',
   diagnostics: '诊断证据不可用、超限或路径无法归一到验证副本',

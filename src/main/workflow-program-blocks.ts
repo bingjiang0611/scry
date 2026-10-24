@@ -1,3 +1,4 @@
+import { validateWorkflowProtectedPaths } from './workflow-verification-surface'
 import { WORKFLOW_MAX_REQUIRED_CHECKS } from '../shared/workflow-verification'
 import { WORKFLOW_MAX_BATCH, type WorkflowBlock, type WorkflowOutputRef } from '../shared/workflow'
 import { workflowCollectionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
@@ -43,7 +44,7 @@ export function validateBlock(value: unknown, seen: Set<string>, depth: number, 
       ...(inputRefs ? { inputRefs } : {}), ...(replica ? { replica } : {}), ...(outputSchema ? { outputSchema } : {}) }
   }
   if (input.kind === 'verification') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'required', 'baseline'])
+    rejectUnknownFields(input, ['kind', 'blockId', 'required', 'baseline', 'protectedPaths'])
     if (!input.required || typeof input.required !== 'object' || Array.isArray(input.required)) throw new Error(workflowValueCopy.bindingContract)
     const entries = Object.entries(input.required)
     if (!entries.length || entries.length > WORKFLOW_MAX_REQUIRED_CHECKS) throw new Error(workflowValueCopy.bindingContract)
@@ -56,9 +57,10 @@ export function validateBlock(value: unknown, seen: Set<string>, depth: number, 
       return [key, { check: entry.check, result: validateWorkflowExpression(entry.result) }]
     }))
     const baseline = input.baseline === undefined ? undefined : validateWorkflowExpression(input.baseline)
-    count.textBytes += Buffer.byteLength(JSON.stringify({ required, baseline }))
+    const protectedPaths = input.protectedPaths === undefined ? undefined : validateWorkflowProtectedPaths(input.protectedPaths)
+    count.textBytes += Buffer.byteLength(JSON.stringify({ required, baseline, protectedPaths }))
     if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    return { kind: 'verification', blockId: input.blockId, required, ...(baseline ? { baseline } : {}) }
+    return { kind: 'verification', blockId: input.blockId, required, ...(baseline ? { baseline } : {}), ...(protectedPaths ? { protectedPaths } : {}) }
   }
   if (input.kind === 'replica' || input.kind === 'check') {
     rejectUnknownFields(input, input.kind === 'replica' ? ['kind', 'blockId', 'source'] : ['kind', 'blockId', 'replica', 'check', 'authorization'])

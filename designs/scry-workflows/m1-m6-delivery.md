@@ -3,7 +3,7 @@
 ## 按领域查看交付证据
 
 - [工作副本、Agent/check、诊断与输入观察](delivery-system-steps.md)
-- [必需检查集合、诊断归一与回归比较子集](verification.md)
+- [必需检查集合、诊断比较与声明保护端点子集](verification.md)
 - [模板、编辑、发布与冻结实例](delivery-templates.md)
 - [解释器、集合、loop、继续与显式重试](delivery-recovery.md)
 

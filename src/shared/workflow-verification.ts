@@ -3,6 +3,11 @@ import { workflowReplicaValueSchema } from './workflow-system'
 import { WORKFLOW_MAX_BATCH, type WorkflowValueSchema } from './workflow'
 
 export const WORKFLOW_MAX_REQUIRED_CHECKS = 64
+export const WORKFLOW_MAX_PROTECTED_PATHS = 256
+
+export type WorkflowProtectedSurface =
+  | { state: 'unavailable'; source: 'main_manifest'; reason: string }
+  | { state: 'available'; source: 'main_manifest'; protectedPaths: string[]; referenceStepId: string; referenceInputHash: string; entryCount: number; observations: number }
 
 export type WorkflowVerificationInputs = { checks: Record<string, string | null>; baseline?: string | null }
 export type WorkflowNormalizedDiagnostic = { check: string; file: string; code: string; message: string; count: number }
@@ -17,6 +22,7 @@ export type WorkflowVerificationValue = {
   inputHash?: string
   candidate?: WorkflowReplicaReference
   checks?: WorkflowVerifiedCheck[]
+  protectedSurface?: WorkflowProtectedSurface
   diagnostics?: { state: 'available' | 'unavailable'; source: 'derived'; reason?: string; items?: WorkflowNormalizedDiagnostic[] }
   comparison?: {
     state: 'available' | 'unavailable'
@@ -39,6 +45,10 @@ export const workflowVerificationValueSchema: WorkflowValueSchema = { type: 'obj
   checks: { type: 'array', maxItems: WORKFLOW_MAX_REQUIRED_CHECKS, items: { type: 'object', properties: {
     key: string, nodeId: string, stepId: string, contractHash: string, passed: { type: 'boolean' }
   }, required: ['key', 'nodeId', 'stepId', 'contractHash', 'passed'] } },
+  protectedSurface: { type: 'object', properties: { state, source: { type: 'enum', values: ['main_manifest'] }, reason: string,
+    protectedPaths: { type: 'array', items: string, maxItems: WORKFLOW_MAX_PROTECTED_PATHS }, referenceStepId: string, referenceInputHash: string,
+    entryCount: { type: 'number' }, observations: { type: 'number' }
+  }, required: ['state', 'source'] },
   diagnostics: { type: 'object', properties: { state, source: { type: 'enum', values: ['derived'] }, reason: string, items: diagnostics }, required: ['state', 'source'] },
   comparison: { type: 'object', properties: { state, reason: string, regressedChecks: strings, recoveredChecks: strings,
     diagnostics: { type: 'object', properties: { state, source: { type: 'enum', values: ['derived'] }, reason: string, added: diagnostics, removed: diagnostics }, required: ['state', 'source'] },

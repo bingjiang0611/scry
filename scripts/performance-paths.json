@@ -91,6 +91,7 @@
         "src/main/workflow-program-blocks.ts",
         "src/main/workflow-program-types.ts",
         "src/main/workflow-verification.ts",
+        "src/main/workflow-verification-surface.ts",
         "src/main/workflow-verification-inputs.ts",
         "src/main/workflow-verification-diagnostics.ts",
         "src/main/workflow-interpreter.ts",

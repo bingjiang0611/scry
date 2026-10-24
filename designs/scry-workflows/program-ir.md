@@ -33,7 +33,8 @@
 - 根账本保留独立 systemIntents/systemOutcomes；intent 先于副本/进程 effect，结果与不可变值先于控制帧推进。父 checkpoint 失败可以复用已提交结果，不再次复制或启动检查；缺失 stdout/结果/副本收据拒绝复用，不转为重跑。未知组收敛、停止 ACK 或结果写入失败不能释放已启动范围的槽位；重启保留未知系统容量，退出治理也检查系统账本。settled 的当前证明范围是登记的进程组，不是全部逃逸后代或完整沙箱；finishedAt 是 main 收到结果的时间，不冒充物理范围退出时间。
 - 副本捕获实际已修改、未跟踪及 ignored 内容，排除根 .git/.scry；内部相对符号链接保留，外链、绝对/悬空链接、嵌套 .git/子模块和特殊文件拒绝。上限为 32,768 项、8 MiB 清单、2 GiB 文件内容；超限拒绝，升级需分页清单/流式归档，不截断输入。部分失败现场保留，不覆盖或自动补做。Manager 的登记与租约原语不等于完整清理 UI/流程。
 - `call.replica?:expression`：用同根 main 副本值选择本次 Agent 的工作区；省略仍为原源项目。类型/控制帧依赖和持久 intent 都绑定引用。main 限时内存 grant 与租约经原 App executor 校验源项目授权及副本身份，实际副本运行时目录须保持已冻结 Provider/profile/model/permission/entry 指纹；普通路径/JSON 不能生成 grant。结果 producer 和原 physical scope 同时收敛才撤销 grant/释放租约，停止 ACK 不足。catalog 保留 scoped 来源而不产生全局项目权限，Recorder/trace archive 关联实际副本 cwd。生产离线 App 验证见交付台账；真实 SDK 未验收，副本无 .git 基线，不能外推完整 diff/patch 证据。
-- **尚未接入**：完整质量模式、可信进展/验证范围证明、组合/应用/完整清理、检查输出查看 API。同根修订恢复仍未实现。本节不代表 M4 或 M1–M6 已完成。
+- verification 可选冻结 `protectedPaths`，由 main 在同次完整清单校验中证明声明路径的 before/after 端点保持；基线范围变化、缺项、symlink 或超限不放行。这不是测试发现/执行覆盖或全程只读证明，progress 仍 unavailable。完整字段、16 MiB 不同清单预算和验收见 [验证合同](verification.md#声明保护范围与端点证明)。
+- **尚未接入**：完整质量模式、可信进展/验证范围完整性证明、组合/应用/完整清理、检查输出查看 API。同根修订恢复仍未实现。本节不代表 M4 或 M1–M6 已完成。
 
 ## Agent 调用的结构化输出
 
@@ -113,4 +114,4 @@ loop仍属于同一WorkflowProgram。`WorkflowLoopExecution`只负责提交循�
 
 只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。全部Provider调用仍为test double，不能替代App、真实账号、独立质量检查或M6验收。
 
-当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、完整依赖重启和全指令。受限的跨进程继续已有下述证据，不能外推为每个崩溃边界均已验收。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
+当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、完整依赖重启和全指令。受限的跨进程继续已有下述证据，不能外推为每个崩溃边界均已验收。main check及有限汇总已有本节证据；默认质量模板的三轮与可信评价来源仍需M4完整实现；不能由generic until布尔自行认证。
