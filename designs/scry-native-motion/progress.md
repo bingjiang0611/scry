@@ -11,7 +11,7 @@
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
 | 04 列表 | 通过 | `5f3484c1`（实现）；`b8537f5e` / `5aa66684`（04-fix）；完整安装通过，见「04-fix · 核验」 |
 | 05 加载防闪 | 通过 | `7861d4be` / `b74c6726`（实现）；`e935f2e8`（05-fix）；完整安装通过，见「05-fix · 核验」 |
-| 06 侧栏材质（可选） | 待开始 | 用户 2026-10-24 已同意：先完成 05 后的收尾，再做 06 |
+| 06 侧栏材质（可选） | 待核验 | `fe1e60ca`（实现 / DESIGN）、`047acbfb`（断言 / 原生采集）；wrap 已完成，完整安装通过 |
 
 状态取值：待开始 / 进行中 / 待核验 / 需修改 / 通过。
 
@@ -554,6 +554,47 @@
 - 整个 comparator 仍 **exit 1**，唯一失败是已知未变化的 persistence.archive bytes 10577→10577，超过既有 10555 ceiling；不把它写成全门禁绿，也不放宽预算。报告 `/tmp/scry-motion-wrap-comparison.md{,.json}`。临时 worktree 首次因自建 node_modules symlink 未被忽略而拒绝删除；确认仅该链接未跟踪、源文件无改动后 unlink，再正常移除，未删除其他 worktree。
 - 正常提交仍因共享 pre-commit 引用旧分支缺失的大小检查脚本失败。用户明确批准本次 wrap 与 06 命令级豁免该 hook；共享配置不改，其他验证 / 安全 / 安装门禁照常。用户也明确批准 06 本次可见原生 test 窗口 / 焦点 / 采集，只操作独立 test 实例与受控背景，不改壁纸、不操作日常 Scry。
 - 收尾完成，按已登记用户决定继续 06。该决定不授权合入 main、开 PR 或 force push；仍只推送 design/native-motion，最终由设计方核验。
+
+### 06 · macOS 侧栏原生材质（2026-10-24，待核验）
+
+- 提交：`fe1e60ca` 实现 / DESIGN；`047acbfb` 断言与原生采集。开始前已拉到 `c8049f86`，读完「05-fix · 核验」「用户决定：收尾后继续 06」，先完成上节三个 `motion(wrap)` 提交，再做本步。未改 brief、步骤说明、依赖、版本、Provider、权限或 IPC 合同；不合入 main、不开 PR、不进入后续步骤。
+- `window-chrome.ts` 仅 macOS 增加 `vibrancy: 'sidebar'` / `visualEffectState: 'followWindow'`。创建窗口仍用原深浅不透明启动色；现有受信任 `app:rendererReady` 到达后、show 之前才清 native window background，后续主题切换保持透明。非 macOS 仍返回原值。`index.ts` 的 ready 状态仅控制这一视觉生命周期，不放宽现有 sender / URL 检查。
+- renderer 复用已有 `data-platform="macos"`：只有 macOS 的 html / body 清底，侧栏深色 `rgba(21,21,21,.98)`、浅色 `rgba(247,247,245,.996)`；主内容和右侧仍走原不透明背景。只改侧栏颜色而不清 html 和已就绪的 native background，会把原生材质完全挡住；这是测量后找到的共同根因，不能只靠配置存在就声称 vibrancy 生效。
+- `prefers-reduced-transparency: reduce` 将 html / body 与侧栏恢复原不透明 token，含浅色的正确 specificity；非 macOS 不变。`DESIGN.md`「Elevation & Depth」记录原生材质、启动清底时机和高不透明度。最终效果刻意很轻，不宣称明显毛玻璃；未压暗文本 token 来换对比度。
+
+#### 验收与有效负对照
+
+| 项目 | 实际检查与结果 | 证据 |
+| --- | --- | --- |
+| 窗口合同 | `npm run test:unit -- src/main/window-chrome.test.ts` 3/3：macOS 参数、Windows / Linux 不变，以及未就绪仍不透明 / macOS 就绪才透明。临时只把 followWindow 改为 active，unit 1 失败 / 2 通过，恢复后通过 | `/tmp/scry-motion-06-chrome-unit.log`、`/tmp/scry-motion-06-follow-negative-unit.log`；最终完整 unit 再验证恢复源码 |
+| 原生背景 / 焦点矩阵 | `node scripts/vibrancy-ui-smoke.mjs --foreground --photo /tmp/scry-motion-06-photo.jpg` 通过全部 12 组：深浅 × 纯黑 / 纯白 / 高饱和照片 × 聚焦 / 失焦。使用真实 NSVisualEffectView、真实生产 Sidebar / CSS，测正文 `.pname` / `.sb-sesstext`、实际时间标签与同背景的 dim2 token；不是仅用 DOM 配置或 CSS 颜色公式推断桌面合成 | `/tmp/scry-motion-06-native-restored-final.log`；最终截图目录 `scry-vibrancy-G6mSIC` 位于本机系统 temp |
+| 真实 followWindow 负对照 | 仅把 visualEffectState 改成 active，原生检查在 `Native material did not follow focus` 失败；不是只读配置值。恢复 followWindow 后全部 12 组通过 | `/tmp/scry-motion-06-follow-negative-native.log`、上行最终正例；dark 原生空白背景聚焦 RGB 23 / 失焦 22，证实 native 变化，浅色量化下变化极轻 |
+| CSS 平台 / 降低透明度 | `node scripts/session-capability-ui-smoke.mjs --material-only` 通过：非 macOS 原不透明底、macOS root / body 透明与侧栏实际半透明、reduce 后深浅均精确恢复原不透明底。material campaign 已纳入原 lists 全套，各 campaign 原 30s watchdog 不变 | `/tmp/scry-motion-06-material-css-final.log` |
+| 真实系统降低透明度 | 用户明确批准后，系统实际开启：NSWorkspace、nativeTheme 和 renderer matchMedia 同时为 true，原生窗口深浅的 root / body / sidebar 全回到原不透明 RGB；随后实际恢复关闭，并回到系统设置原「软件更新」页面，没有安装系统更新 | `/tmp/scry-motion-06-system-reduced.log`；最终 AppKit 回读 `reduceTransparency=false`。该次系统验证后仅普通浅色 alpha .999→.996，受测 reduce 分支未变；最终版 reduce 分支另经上行检查，不冒充最终 App 二进制的系统开关复测 |
+| 类型 / 构建 / 完整 UI | Node 22.22.1 / Electron 42.10.1；`npm run typecheck`、`npm run build`、`npm run test:renderer:ui` 通过。完整 UI 含本步 material、wrap 共享 runId 引用生命周期、其余列表 / Credits / 后台 / source-control / 真实 IPC / Pi 43 轮历史 | `/tmp/scry-motion-06-{type,build,ui-full}.log` |
+| 独立实际 App | 当前生产构建的 `node scripts/electron-security-smoke.mjs --dev-structure-only --foreground` 通过深浅主题、pane、Skills / MCP / LLM、原生 fixture Provider 发送、草稿保留；新增断言主内容与右侧 canonical slot 的 computed background 均不透明 | `/tmp/scry-motion-06-app-foreground-diagnostic.log`；独立 userData / workspace，非日常实例 |
+| 完整安装 | `npm run install:mac:dev` exit 0，305 文件 / 3735 unit 通过、4 个既有条件检查跳过；所有默认 type / shell / build / CLI / 签名 / packaged resource 和 external-links / crash / 完整 security / files / desktop-remote-host gate 执行并通过，最后安装 | `/tmp/scry-motion-06-install.log`、`/tmp/scry-motion-06-install-load.log` |
+
+- 原生 12 组实际合成的最低正文对比度：深色 **8.7838:1**、浅色 **5.7110:1**，均 ≥4.5。dim2 最低深色 **5.4223:1**、浅色 **3.4597:1**，不低于同场景原不透明基线；失焦深色 dim2 为 5.4717:1。原时间小字使用 dim3，最低深色 3.2338:1、浅色 2.1982:1，同样不降低现状，但不声称它们本来就达到正文 AA。
+- 用户明确批准本次独立可见 test / 焦点 / 采集；三个背景是测试自建窗口，不改桌面壁纸。公共照片来自 NASA `https://images-assets.nasa.gov/image/carina_nebula/carina_nebula~medium.jpg`，仅下载到 `/tmp`。ScreenCaptureKit 只选两个自建窗口、裁剪测试窗口区域，PNG / JSON 只留本机临时目录；不上传、不提交截图或个人数据。Swift helper 是手动 macOS 14+ 验收工具，不进入 App 产物，也没有新增依赖。
+- helper 使用非激活的持久进程；每次采集前后确认 native focus，隐藏字色采真实背景，再恢复原不透明底采 baseline。遮字只影响测量截图、不改几何 / 颜色 token。截图前 invalidate + 实际 compositor paint，避免把上一帧文字错作背景；必须收齐 12 组和最终完成标记，不能以单独 exit 0 冒充完成。原生焦点切换只在自建窗口之间发生。实际抽看最终深色照片聚焦、浅色白底失焦两张整窗图，不宣称逐张审阅全部测量图。
+- 系统开关最初结构化 defaults 写入因系统权限被拒绝，回读仍关闭；未 sudo 或绕过权限。按用户另行批准，通过系统设置原生可访问性控件开启 / 关闭。两次动作回执均 unknown，分别用 AppKit / defaults 实际状态确认执行，不重复派发。原先键不存在，系统现在持久化 0；有效状态恢复关闭，不声称偏好文件逐字节未变。
+
+#### 首轮失败与测量边界
+
+- 原生测试原型先后遇到 Swift buffer 排他访问编译失败、Electron builtin require 用错路径、AppKit 未初始化、每次新起采集进程干扰焦点、失焦 rAF 被节流、JSON point 合同不匹配。分别修正工具自身的 buffer、builtin import、非激活 AppKit / 持久 server、仅 fixture 的 backgroundThrottling、明确坐标数据。一次 require 错误导致 180s 工具超时：检查原日志与同范围进程确认收敛后才修工具，不当作 App 冒烟成功。
+- 早期 window-all-closed 自动退出曾只产生部分结果却 exit 0，已明确拒绝这种输出并加完整矩阵标记。一次遮字截图仍含旧帧文字，算出约 1:1：读图确认采样帧错误后加真实 paint fence，没有放宽对比度。原始日志 `/tmp/scry-motion-06-native-{first,server,complete,painted,composite}.log` 等保留，只有完整最终矩阵作为验收证据。
+- `.72` 起步在清除遮挡后真实对比度不合格；浅色 `.99` 也低于原 dim2 / 时间小字基线，按规格提高不透明度。`.999` 虽能过对比度，却被 Chromium 量化为不透明 computed rgb，新 hidden CSS 断言正确拒绝它，因此最终用 `.996`，未削弱「实际半透明」断言。日志 `/tmp/scry-motion-06-native-{clear-probe,opacity}.log`、`/tmp/scry-motion-06-material-css-diagnostic.log`。
+- 一次手动 fixture 把 main wrapper 写成不存在的 `#list-body`，在矩阵前失败；读真实 fixture 后改为 `#list-main` 加生产 main-area 类，最终 12 组通过，未改生产 DOM。实际 App 前台专项首次停在 skills modal 的动画结束等待；增加只在失败时输出动画状态的诊断，不改条件 / timeout，再次完整通过，但未复现、根因未确认，不将后一次通过抹掉首次失败（`/tmp/scry-motion-06-app.log`）。modal close 本次仍为 242.1–243.2ms fallback / `nativeAnimationEnd:false`，不据此声称 CSS animationend。
+- 非 macOS 只通过 helper 单测和隔离 CSS 平台分支检查，未运行真实 Windows / Linux App；未验证多显示器 / 120Hz、真实付费 Provider、实际远端手机和屏幕阅读器。可见原生测量仅这台 macOS 的受控背景；高不透明度换取不降对比度，材质视觉很轻。这些限制不以静态 screenshot 或计数伪装成全平台证据。
+
+#### 性能、安装与交付
+
+- 在本次最终生产源码执行 `npm run performance:measure -- --compare c8049f86 --out /tmp/scry-motion-06-counters`，全部 collector 完成、ratchet 通过。43 项均 measured；42 项与本轮基线完全相同，唯一变化 files.fixed-operations/io.read.bytes 1227418→1227438（+20，约 0.0016%），两组 5 次运行范围重叠（baseline 1227394–1227418，candidate 1227394–1227438），调用次数不变。这不是必要新增 I/O；聚合数据无法精确归因这 20 字节，不宣称已证明无回归或更快，若需归因应另做逐路径诊断，不改本次 frozen collector。
+- ratchet 中四个 `worse` 相对更早台账而非本次基线：files 的 read 336→417、readdir 18→20、read.bytes 1183197→1227438，persistence.archive/ipc.bytes 10536→10558。对应本次 c8049f86 / candidate 的 read 均 417、readdir 均 20、archive ipc.bytes 均 10558；read.bytes 的 +20 见上项。前三条计数路径及 archive 实现未改，不将既有台账偏差归于本步，也不把 ratchet 通过写成没有 worse。三条 CPU instructions 为 unavailable / missing，不记 0；未改 collector、workload、ratchet 或预算。报告 `/tmp/scry-motion-06-counters/measure.json`。低负载 17 场景毫秒对比及旧 archive byte ceiling 唯一失败已在 wrap 记录，本步不以 L1 宣称 L2 / L3 变快。
+- 完整安装对应 `047acbfb`，2026-10-24 **00:33:43→00:41:07 PDT**，10 核 load 6.27 / 7.73 / 8.77→7.98 / 8.52 / 8.84，Node 22.22.1，exit 0。App 0.2.219、私有 CLI 0.2.51；安装到 `/Applications/Scry.app`，备份 `/Applications/.Scry.app.backup`。安装与 dist 的 app.asar SHA-256 均为 `8acfbe0bd6098d5e9d5c801d41b3ed1163dbffa0db7076773c509ca8a692137f`。4 个既有条件跳过为性能相关性与三个真实探针；签名成功，开发流程未配置 notarize，未把开发安装称为正式公证发布。
+- 本次 wrap 与 06 的大小 hook 命令级豁免已有用户明确批准，正常提交流程先验证其仍因缺失脚本 MODULE_NOT_FOUND 阻挡；仅使用命令级路径豁免，不改共享配置，不跳过任何运行 / 测试 / 安全 / 安装门禁。用户日常实例未停止或重启，已安装不等于其已加载新版本，需用户自行重启。日志 / 测量 / 截图只留本机临时目录；自建窗口与 helper 已随测试退出，基线临时 worktree 已正常移除。
+- 本记录提交并仅推送 `design/native-motion` 后停下，交由设计方核验 wrap 与 06，不进入其他步骤；不将已有 archive byte 门限失败、首轮未复现的 modal 等待或未验证范围隐去。需要继续处理这些诊断项时，由维护者另行确定范围。
 
 <!--
 ### NN · <步骤名>
