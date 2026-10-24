@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
@@ -20,6 +20,30 @@ async function gitWorkspace(): Promise<string> {
 }
 
 describe('scry init', () => {
+  it.each(['cli_path_missing', 'node_bin_dir_missing', 'cli_not_executable', 'managed_cli_invalid', 'cli_failed', 'managed_cli_failed'])(
+    'hook-skip %s is observable while the Provider still receives exit 0', async (reason) => {
+      const root = await gitWorkspace()
+      const cli = join(root, 'failing-cli')
+      await writeFile(cli, '#!/bin/sh\nexit 17\n')
+      await chmod(cli, 0o700)
+      await initWorkspace({ workspace: root, providers: 'codex', cliPath: cli })
+      if (reason === 'cli_path_missing') await rm(join(root, '.scry/cli-path'))
+      if (reason === 'node_bin_dir_missing') await rm(join(root, '.scry/node-bin-dir'))
+      if (reason === 'cli_not_executable') await writeFile(join(root, '.scry/cli-path'), `${root}/absent\n`)
+      const result = spawnSync('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'codex', 'Stop'], {
+        input: '{"secret":"DO_NOT_LOG_PAYLOAD"}', encoding: 'utf8',
+        env: { ...process.env, SCRY_RECORDER_TRANSPORT: 'direct',
+          SCRY_RECORDER_MANAGED: reason.startsWith('managed_') ? '1' : '0',
+          SCRY_CLI_PATH: reason === 'managed_cli_invalid' ? join(root, 'absent') : cli }
+      })
+      expect(result.status).toBe(0)
+      const log = await readFile(join(root, '.scry/logs/hook-skip.log'), 'utf8')
+      expect(log).toMatch(new RegExp(`^\\d{4}-.*\\tcodex\\tStop\\t${reason}\\t`))
+      expect(log).not.toContain('DO_NOT_LOG_PAYLOAD')
+      if (reason.endsWith('_failed')) expect(log.trim().split('\t').at(-1)).toBe('17')
+    }
+  )
+
   it('幂等合并三种 JSON Hook 并安装 OpenCode 插件', async () => {
     const root = await gitWorkspace()
     await mkdir(join(root, '.claude'), { recursive: true })

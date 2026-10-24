@@ -9,6 +9,7 @@ import { readRecorderContent } from '../core/turn-recorder/content-store'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
 import { parseArgs, runScryCli } from './scry'
 import { initWorkspace, integrationsRepair } from './workspace-init'
+import { collectSupportBundle } from './support-bundle'
 
 const recordReads = vi.hoisted(() => new Map<string, number>())
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -83,6 +84,39 @@ describe('Scry CLI arguments', () => {
 })
 
 describe('Scry CLI health and lookup contracts', () => {
+  it.each(['status', 'doctor', 'bundle'])('hook-skip %s reports retained counts and the latest timestamp', async (command) => {
+    const root = await workspace()
+    await mkdir(join(root, '.scry/logs'), { recursive: true })
+    await writeFile(join(root, '.scry/logs/hook-skip.log'),
+      '2026-10-24T12:00:00Z\tcodex\tStop\tcli_not_executable\t0\n2026-10-24T12:00:01Z\tqoder\tStop\tcli_failed\t17\n')
+    const stdout = captureStdout()
+    let report: unknown
+    if (command === 'bundle') report = await collectSupportBundle(root)
+    else {
+      const args = command === 'doctor' ? ['doctor'] : ['recorder', 'status']
+      expect(await runScryCli([...args, '--workspace', root])).toBe(command === 'doctor' ? 5 : 0)
+      report = JSON.parse(stdout.text())
+    }
+    expect(report).toMatchObject({ hookSkips: { count: 2, lastAt: '2026-10-24T12:00:01Z', scope: 'retained_log_window' } })
+    if (command === 'doctor') expect(report).toMatchObject({ status: 'error', healthy: false,
+      checks: expect.arrayContaining([expect.objectContaining({ id: 'hook.skips', status: 'fail' })]) })
+  })
+
+  it('hook-skip invalid_config leaves diagnostics but explicit disablement stays quiet', async () => {
+    const root = await workspace()
+    await writeFile(join(root, 'scry.config.json'), '{invalid')
+    await expect(handleRecorderHook({ provider: 'codex', event: 'Stop', workspace: root,
+      payload: { session_id: 'bad-config' }, env: {} })).resolves.toMatchObject({ status: 'disabled', reason: 'invalid_config' })
+    expect(await readFile(join(root, '.scry/logs/hook-skip.log'), 'utf8')).toContain('\tcodex\tStop\tinvalid_config\t')
+    const stdout = captureStdout()
+    expect(await runScryCli(['doctor', '--workspace', root])).toBe(3)
+    expect(JSON.parse(stdout.text())).toMatchObject({ status: 'error', hookSkips: { count: 1 } })
+    const before = await readFile(join(root, '.scry/logs/hook-skip.log'), 'utf8')
+    await handleRecorderHook({ provider: 'codex', event: 'Stop', workspace: root,
+      payload: { session_id: 'disabled' }, env: { SCRY_RECORDER_ENABLED: '0' } })
+    expect(await readFile(join(root, '.scry/logs/hook-skip.log'), 'utf8')).toBe(before)
+  })
+
   it('历史累计错误不让当前 doctor 永久 degraded', async () => {
     const root = await workspace()
     await mkdir(join(root, '.scry'), { recursive: true })
