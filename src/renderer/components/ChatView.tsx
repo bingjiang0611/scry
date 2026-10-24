@@ -717,7 +717,7 @@ export function ChatView({
           <div ref={transcriptContent} className="chat-transcript-content" data-loading-previous={retainPrevious || undefined} aria-hidden={retainPrevious || undefined}>
           <ChatTranscriptTurns
             turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId}
-            onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff}
+            onTurnRef={retainPrevious ? undefined : onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff}
             forkableRunIds={forkableRunIds}
             onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined}
             pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
