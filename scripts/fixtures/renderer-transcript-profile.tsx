@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { unavailableWorkspaceSelection } from './workspace-selection-unavailable'
 import { SessionChatView } from '../../src/renderer/components/ChatView'
 import { createComposerDraftStore, updateComposerDraft } from '../../src/renderer/composer-drafts'
 import { applyTraceBatch, type Turn } from '../../src/renderer/format'
@@ -54,6 +55,7 @@ if (new URLSearchParams(location.search).has('app')) {
   const listeners = new Set<(events: TraceEvent[]) => void>()
   const noopSubscribe = () => noop
   Object.defineProperty(window, 'scry', { value: {
+    workspaceSelection: unavailableWorkspaceSelection,
     activeRun: async () => null, activeRuns: async () => [],
     onTrace: (listener: (events: TraceEvent[]) => void) => { listeners.add(listener); return () => listeners.delete(listener) },
     onTurnDone: noopSubscribe, onError: noopSubscribe,
