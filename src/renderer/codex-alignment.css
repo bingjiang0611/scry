@@ -121,33 +121,6 @@ select:focus-visible,
   background: var(--sidebar-surface);
 }
 
-/* Only macOS exposes native material. High base opacity preserves existing dim2 contrast;
-   99.9% rounds to opaque in Chromium, so light uses the highest tested translucent alpha. */
-:root[data-platform='macos'],
-:root[data-platform='macos'] body {
-  background: transparent;
-}
-
-:root[data-platform='macos'] .sidebar {
-  background: rgb(21 21 21 / 98%);
-}
-
-:root[data-platform='macos'][data-theme='light'] .sidebar {
-  background: rgb(247 247 245 / 99.6%);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  :root[data-platform='macos'],
-  :root[data-platform='macos'] body {
-    background: var(--bg);
-  }
-
-  :root[data-platform='macos'] .sidebar,
-  :root[data-platform='macos'][data-theme='light'] .sidebar {
-    background: var(--sidebar-surface);
-  }
-}
-
 .sidebar-resizer {
   background: var(--main-surface);
 }
