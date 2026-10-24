@@ -6,6 +6,7 @@ import { ModalCloseButton } from '../../src/renderer/components/primitives/Modal
 import { MODAL_COPY } from '../../src/renderer/constants/copy'
 import { appendMetaPrompt } from '../../src/renderer/meta-prompts'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window)

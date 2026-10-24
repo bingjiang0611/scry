@@ -8,6 +8,7 @@ import { observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../../src/r
 import type { Turn } from '../../src/renderer/format'
 import type { ProjectMeta } from '../../src/renderer/env'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 import '../../src/renderer/session-evidence.css'
 import '../../src/renderer/components/background-work.css'

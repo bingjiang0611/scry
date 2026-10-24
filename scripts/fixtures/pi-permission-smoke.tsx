@@ -3,6 +3,7 @@ import { App } from '../../src/renderer/App'
 import type { AgentStartRequest, AgentRunControlCatalog } from '../../src/shared/runtime'
 import type { CapabilityEnvelope, ProviderContext } from '../../src/shared/provider'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Production App, isolated bridge. The catalog stays pending until native input releases it.

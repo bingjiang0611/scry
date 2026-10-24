@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { activityGroups, type ActivityEntry } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as copy } from '../constants/copy'
+import { useFlipList } from '../hooks/useFlipList'
 import { Icon } from './primitives/Icon'
 import './sidebar-activity.css'
 
-// Bound layout reads and DOM size even when the local catalog contains years of history.
 const GROUP_LIMIT = 40
 
 export function SidebarActivity({ entries, renderEntry }: {
@@ -12,8 +12,6 @@ export function SidebarActivity({ entries, renderEntry }: {
   renderEntry: (entry: ActivityEntry) => ReactNode
 }) {
   const root = useRef<HTMLDivElement>(null)
-  const positions = useRef(new Map<string, number>())
-  const animations = useRef(new Map<string, Animation>())
   const [heldEntries, setHeldEntries] = useState<ActivityEntry[] | null>(null)
   const [arrivals, setArrivals] = useState({ source: entries, keys: [] as string[] })
   // Promote observed state changes, not guessed timestamps or conversation revisions.
@@ -49,44 +47,7 @@ export function SidebarActivity({ entries, renderEntry }: {
     }
   }, [heldEntries])
 
-  useLayoutEffect(() => {
-    const nodes = Array.from(root.current!.querySelectorAll<HTMLElement>('[data-motion-key]'))
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    // Read the entire bounded list before any animation writes. offsetTop ignores the
-    // previous transform; its current translation preserves continuity on interruption.
-    const measurements = nodes.map((node) => {
-      const key = node.dataset.motionKey!
-      const previous = positions.current.get(key)
-      const transform = animations.current.has(key) ? getComputedStyle(node).transform : 'none'
-      const translation = transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42
-      const entering = previous === undefined && positions.current.size > 0
-      return { node, key, entering, top: node.offsetTop, delta: previous === undefined ? entering ? 8 : 0 : previous + translation - node.offsetTop }
-    })
-    for (const animation of animations.current.values()) animation.cancel()
-    animations.current.clear()
-    positions.current = new Map(measurements.map(({ key, top }) => [key, top]))
-    if (reduceMotion) return
-    for (const { node, key, delta, entering } of measurements) {
-      if (Math.abs(delta) < 1 && !entering) continue
-      const animation = node.animate([
-        { transform: `translateY(${delta}px)`, opacity: entering ? 0 : 1 },
-        { transform: 'translateY(0)', opacity: 1 }
-      ], { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
-      animations.current.set(key, animation)
-      animation.onfinish = () => animations.current.delete(key)
-    }
-  }, [displayed])
-
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const cancel = (): void => {
-      for (const animation of animations.current.values()) animation.cancel()
-      animations.current.clear()
-    }
-    const onChange = (): void => { if (media.matches) cancel() }
-    media.addEventListener('change', onChange)
-    return () => { media.removeEventListener('change', onChange); cancel() }
-  }, [])
+  useFlipList(root, displayed, GROUP_LIMIT * activityGroups.length + activityGroups.length)
 
   const children: ReactNode[] = []
   for (const group of activityGroups) {

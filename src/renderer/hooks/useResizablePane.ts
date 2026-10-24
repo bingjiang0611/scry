@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { animatePaneChange } from '../pane-motion'
 
 export type ResizablePaneSide = 'left' | 'right'
 
@@ -145,7 +146,7 @@ export function useResizablePane({
     (event: KeyboardEvent<HTMLElement>) => {
       if (event.key === 'Enter') {
         event.preventDefault()
-        collapsed ? restore() : collapse()
+        animatePaneChange(() => { collapsed ? restore() : collapse() })
         return
       }
       if (event.key === 'Home') {

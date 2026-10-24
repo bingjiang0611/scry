@@ -6,12 +6,26 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
 import { exerciseMetaPrompts } from './meta-prompts-ui-checks.mjs'
+import { exerciseMotionTokens } from './motion-tokens-ui-checks.mjs'
+import { exerciseStructure } from './structure-ui-checks.mjs'
+import { exerciseOverlays } from './overlays-ui-checks.mjs'
+import { exerciseLists } from './lists-ui-checks.mjs'
+import { exerciseListStructure } from './lists-structure-ui-checks.mjs'
+import { exerciseLoading } from './loading-ui-checks.mjs'
+import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const cacheOnly = process.argv.includes('--cache-only')
+const motionTokensOnly = process.argv.includes('--motion-tokens-only')
+const paneBenchOnly = process.argv.includes('--structure-pane-bench')
+const structureOnly = process.argv.includes('--structure-only')
+const overlaysOnly = process.argv.includes('--overlays-only')
+const turnRefsOnly = process.argv.includes('--turn-refs-only')
+const listsOnly = turnRefsOnly || process.argv.includes('--lists-only')
+const loadingOnly = process.argv.includes('--loading-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
@@ -24,10 +38,11 @@ const workspaceDiffOnly = process.argv.includes('--workspace-diff-only')
 const performanceOnly = process.argv.includes('--performance-only')
 // Opt-in only: this native hide/show check necessarily displays a window.
 const nativeVisibility = process.argv.includes('--native-visibility')
+const offscreen = overlaysOnly || listsOnly || loadingOnly
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
-  : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
+const fixtures = loadingOnly ? ['loading'] : listsOnly ? ['lists'] : overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+  : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 
@@ -77,10 +92,14 @@ async function exercise() {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const waitFor = (predicate) => new Promise((resolve, reject) => {
     if (predicate()) return resolve()
-    const observer = new MutationObserver(() => {
-      if (predicate()) { clearTimeout(timer); observer.disconnect(); resolve() }
-    })
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    const changed = () => {
+      if (!predicate()) return
+      clearTimeout(timer); observer.disconnect(); document.removeEventListener('focusin', changed, true); resolve()
+    }
+    // Search autofocus does not necessarily mutate the DOM.
+    const observer = new MutationObserver(changed)
+    const timer = setTimeout(() => { observer.disconnect(); document.removeEventListener('focusin', changed, true); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    document.addEventListener('focusin', changed, true)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
   const button = (scope, fragment) => {
@@ -153,9 +172,12 @@ async function exercise() {
   currentModelButton.click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="选择 Model"]') != null)
   const modelList = document.querySelector('#model-effort [aria-label="选择 Model"]')
-  check(getComputedStyle(modelList).scrollbarWidth === 'none', 'Model list scrollbar is still visible')
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  check(document.activeElement?.getAttribute('aria-selected') === 'true', 'Selected Model did not receive focus after drill-in')
+  check(getComputedStyle(modelList).scrollbarWidth === 'thin', 'Grouped Model list lost its scroll affordance')
+  await waitFor(() => document.activeElement === document.querySelector('#model-effort .model-effort-search'))
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  check(document.activeElement?.textContent.includes('自动模型'), 'Search ArrowDown did not enter the Model list')
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  check(document.activeElement?.getAttribute('aria-selected') === 'true', 'Keyboard navigation lost the selected Model')
   document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
   await new Promise((resolve) => requestAnimationFrame(() => resolve()))
   check(document.activeElement?.textContent.includes('Performance'), 'ArrowDown did not move focus to the next Model')
@@ -163,8 +185,9 @@ async function exercise() {
   await waitFor(() => modelEffortTrigger.textContent.includes('Performance') && modelEffortTrigger.textContent.includes('默认'))
   document.querySelector('#model-effort .model-effort-current').click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="选择 Model"]') != null)
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  check(document.activeElement?.textContent.includes('Performance'), 'Current Model did not receive focus on repeated drill-in')
+  await waitFor(() => document.activeElement === document.querySelector('#model-effort .model-effort-search'))
+  document.querySelector('#model-effort [aria-label="选择 Model"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+  check(document.activeElement?.textContent.includes('Performance') && document.activeElement?.getAttribute('aria-selected') === 'true', 'Repeated drill-in lost keyboard access to the current Model')
   document.activeElement.click()
   await waitFor(() => modelEffortTrigger.textContent.includes('Performance') && modelEffortTrigger.textContent.includes('默认'))
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -607,6 +630,7 @@ async function exerciseSessionSelection(contents, scenario) {
       await click(input)
       await wait(`document.activeElement === document.querySelector(${JSON.stringify(input)})`)
       contents.selectAll()
+      await wait(`(() => { const editor = document.querySelector(${JSON.stringify(input)}); return editor.selectionStart === 0 && editor.selectionEnd === editor.value.length })()`)
       if (value) await contents.insertText(value)
       else {
         contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
@@ -728,6 +752,9 @@ async function exerciseSessionTerminals(contents, scenario) {
   }
   const click = async (selector) => {
     await wait(`[...document.querySelectorAll(${JSON.stringify(selector)})].some(node => node.getBoundingClientRect().width > 0)`)
+    // This ownership test needs a stationary native target. Animation-time input is
+    // checked separately by --structure-only, without waiting for its entrance.
+    await read(`Promise.allSettled(document.getAnimations().filter(animation => animation.id === 'scry-pane').map(animation => animation.finished)).then(() => true)`)
     const point = await read(`(() => {
       const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node => node.getBoundingClientRect().width > 0);
       if (!node) throw new Error('Missing terminal control ' + ${JSON.stringify(selector)});
@@ -1563,7 +1590,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${fixture === 'sidebar-activity' ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists', 'loading'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -1574,7 +1601,9 @@ try {
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility} } })
+      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${offscreen} } })
+      // Exit animationend must come from real compositor frames, not only a hidden timer.
+      if (${offscreen}) win.webContents.on('paint', () => {})
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
@@ -1582,6 +1611,49 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
+        if (${loadingOnly}) {
+          win.setSize(1400, 900)
+          await win.loadFile(${JSON.stringify(join(temp, 'loading.html'))})
+          result.loading = await (${exerciseLoading.toString()})(win.webContents, win, ${JSON.stringify(nativeUiPointer.toString())}, ${JSON.stringify(process.env.SCRY_LOADING_UI_SCREENSHOT ?? '')})
+          finish(result); return
+        }
+        if (${listsOnly}) {
+          win.setSize(1400, 900)
+          await win.loadFile(${JSON.stringify(join(temp, 'lists.html'))})
+          result.lists = await (${exerciseLists.toString()})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LISTS_UI_SCREENSHOT ?? '')}, ${JSON.stringify(nativeUiPointer.toString())}, process.argv.find(argument => argument.startsWith('--scry-lists-campaign=')).split('=')[1], ${exerciseListStructure.toString()})
+          finish(result); return
+        }
+        if (${overlaysOnly}) {
+          win.setSize(1280, 900)
+          await win.loadFile(${JSON.stringify(join(temp, 'overlays.html'))})
+          result.overlays = await (${exerciseOverlays.toString()})(win.webContents)
+          finish(result); return
+        }
+        if (${paneBenchOnly}) {
+          win.setContentSize(1280, 800)
+          await win.loadFile(${JSON.stringify(join(temp, 'structure-pane-bench.html'))})
+          result.paneBenchmark = await win.webContents.executeJavaScript(` + "`" + `(async () => {
+            const deadline = Date.now() + 5000
+            while (!window.paneExperiment && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 16))
+            if (!window.paneExperiment) throw new Error('Pane benchmark did not mount')
+            return [await window.paneExperiment('V'), await window.paneExperiment('F')]
+          })()` + "`" + `)
+          finish(result); return
+        }
+        if (${fixtures.includes('motion-tokens')}) {
+          // Micro-interaction checks start after a real disclosure paint. Keep
+          // legacy keyboard/performance fixtures on their existing window mode.
+          const motionWin = new BrowserWindow({ show: false, width: 1400, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } })
+          motionWin.webContents.on('paint', () => {})
+          motionWin.webContents.on('console-message', logRendererError)
+          motionWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+          diagnosticContents = motionWin.webContents
+          await motionWin.loadFile(${JSON.stringify(join(temp, 'motion-tokens.html'))})
+          result.motionTokens = await (${exerciseMotionTokens.toString()})(motionWin.webContents)
+          motionWin.destroy()
+          diagnosticContents = win.webContents
+          if (${motionTokensOnly}) { finish(result); return }
+        }
         if (${fixtures.includes('sidebar-activity')}) {
           win.setSize(1100, 760)
           await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
@@ -1591,6 +1663,10 @@ try {
         if (${fixtures.includes('session-cache')}) {
           win.setSize(1200, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'session-cache.html'))})
+          if (${structureOnly}) {
+            result.structure = await (${exerciseStructure.toString()})(win.webContents)
+            finish(result); return
+          }
           result.sessionCache = await (${exerciseSessionCache.toString()})(win.webContents)
           if (${cacheOnly}) { finish(result); return }
         }
@@ -1709,10 +1785,13 @@ try {
       }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
-  await new Promise((resolve, reject) => {
+  // Preserve the 30s watchdog and every workload. Independent list campaigns
+  // get fresh isolated processes instead of extending timeouts for more cases.
+  const campaignResults = []
+  for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
     // The fixture window is shown inactive and may sit behind the user's windows. Occluded windows stop
     // producing frames, which stalls requestAnimationFrame and frame-aligned mousemove; hide() still hides.
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows'], {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
@@ -1724,9 +1803,10 @@ try {
       clearTimeout(timer)
       const result = output.match(/^SCRY_UI_SMOKE_RESULT=(.+)$/m)?.[1]
       if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
-      else { console.log(result); resolve() }
+      else { if (listsOnly) campaignResults.push(JSON.parse(result).lists); else console.log(result); resolve() }
     })
   })
+  if (listsOnly) console.log(JSON.stringify({ lists: Object.assign({}, ...campaignResults) }))
 } finally {
   await rm(temp, { recursive: true, force: true })
 }

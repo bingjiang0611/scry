@@ -9,13 +9,18 @@ import {
   type ReactNode,
   type RefObject
 } from 'react'
+import { createPortal } from 'react-dom'
+import { flushPresenceExits, usePresence, type PresenceCloseReason } from '../hooks/usePresence'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta, ProjectMeta, SessionMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, DeleteArchivedSessionsResult, McpSnapshot } from '@shared/provider'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { MODAL_COPY } from '../constants/copy'
+import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { DelayedLoadingStatus } from './LoadingStatus'
 import { ArchivedRemoteChatsPanel } from './ArchivedRemoteChatsPanel'
 import { useRemoteProjectGroups } from './SidebarRemoteProjects'
 import './archived-sessions.css'
@@ -23,57 +28,111 @@ import { RemotePairing } from './RemotePairing'
 import { ARCHIVED_SESSIONS_COPY as archivedCopy, REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
 import type { AppTheme } from '../theme'
 
+type ModalEntry = { element: HTMLElement; active: boolean; requestClose: (reason: PresenceCloseReason) => void }
+const activeModals: ModalEntry[] = []
+function topModal(): ModalEntry | undefined {
+  for (let index = activeModals.length - 1; index >= 0; index--) {
+    if (activeModals[index].active) return activeModals[index]
+  }
+  return undefined
+}
+
+/** Explicit close-button routing; the primitive keeps its ordinary click contract. */
+export function requestModalClose(reason: PresenceCloseReason = 'button'): void {
+  topModal()?.requestClose(reason)
+}
+
 export function ModalFrame({
   labelledBy,
   initialFocusRef,
   className,
   onClose,
+  closeDisabled = false,
+  canClose,
   children
 }: {
   labelledBy: string
   initialFocusRef?: RefObject<HTMLElement>
   className?: string
-  onClose: () => void
+  onClose: (reason: PresenceCloseReason) => void
+  closeDisabled?: boolean
+  canClose?: (reason: PresenceCloseReason) => boolean
   children: ReactNode
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
+  const restoreRef = useRef<(() => void) | null>(null)
+  const entryRef = useRef<ModalEntry | null>(null)
+  const frameRef = useRef<number>()
+  const disabledRef = useRef(closeDisabled)
+  const canCloseRef = useRef(canClose)
+  disabledRef.current = closeDisabled
+  canCloseRef.current = canClose
+  const presence = usePresence({
+    onClose,
+    exitMs: 160,
+    onExitStart: () => {
+      if (entryRef.current) entryRef.current.active = false
+      if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
+      restoreRef.current?.()
+    }
+  })
+  const requestClose = useCallback((reason: PresenceCloseReason): void => {
+    if (!disabledRef.current && canCloseRef.current?.(reason) !== false) presence.requestClose(reason)
+  }, [presence.requestClose])
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    flushPresenceExits()
+    const entry: ModalEntry = { element: dialog, active: true, requestClose }
+    entryRef.current = entry
+    activeModals.push(entry)
+    return () => {
+      const index = activeModals.indexOf(entry)
+      if (index >= 0) activeModals.splice(index, 1)
+      entryRef.current = null
+    }
+  }, [requestClose])
+
   useEffect(() => {
     const restore = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    let restored = false
     const focusable = (): HTMLElement[] => [...(dialogRef.current?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     ) ?? [])]
     let initialTarget: HTMLElement | null = null
+    const isTop = (): boolean => topModal() === entryRef.current
     const focusInitial = (): void => {
+      if (!isTop()) return
       const requested = initialFocusRef?.current
       const target = requested && !requested.matches(':disabled') ? requested : focusable()[0] ?? dialogRef.current
       if (!initialTarget) initialTarget = target ?? null
       target?.focus({ preventScroll: true })
     }
-    // effect 执行时 DOM 已提交，先同步聚焦；rAF 只用于覆盖随后完成的布局/控件挂载。
-    // If the user selected another control inside the modal before that frame, keep that
-    // selection. External focus is still redirected by the focus trap below.
+    const restoreFocus = (): void => {
+      if (restored) return
+      restored = true
+      if (restore?.isConnected) restore.focus({ preventScroll: true })
+    }
+    restoreRef.current = restoreFocus
     focusInitial()
-    const frame = window.requestAnimationFrame(() => {
+    frameRef.current = window.requestAnimationFrame(() => {
       const active = document.activeElement
       if (dialogRef.current?.contains(active) && active !== initialTarget) return
       focusInitial()
     })
     const onFocusIn = (): void => {
+      if (!isTop()) return
       if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) focusInitial()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      // Only the innermost dialog owns Escape and Tab. Removing the last
-      // archive row can leave focus on body; the remaining dialog still owns keys.
-      const focusedDialog = document.activeElement instanceof Element ? document.activeElement.closest('[role="dialog"][aria-modal="true"]') : null
-      if ((focusedDialog && focusedDialog !== dialogRef.current) || dialogRef.current?.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (!isTop() || !dialogRef.current) return
       if (event.key === 'Escape') {
         event.preventDefault()
-        onCloseRef.current()
+        requestClose('escape')
         return
       }
-      if (event.key !== 'Tab' || !dialogRef.current) return
+      if (event.key !== 'Tab') return
       const controls = focusable()
       if (controls.length === 0) {
         event.preventDefault()
@@ -96,17 +155,25 @@ export function ModalFrame({
     document.addEventListener('focusin', onFocusIn)
     document.addEventListener('keydown', onKeyDown)
     return () => {
-      window.cancelAnimationFrame(frame)
+      if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
       document.removeEventListener('focusin', onFocusIn)
       document.removeEventListener('keydown', onKeyDown)
-      if (restore?.isConnected) restore.focus()
+      restoreRef.current = null
+      if (!restored && restore?.isConnected) restore.focus({ preventScroll: true })
     }
-  }, [initialFocusRef])
-  return (
+  }, [initialFocusRef, requestClose])
+
+  const content = (
     <div
+      ref={presence.ref}
       className="modal-overlay"
+      data-state={presence.state}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget) {
+          // The backdrop's native mousedown must not clear the focus restored below.
+          event.preventDefault()
+          requestClose('backdrop')
+        }
       }}
     >
       <div ref={dialogRef} className={`modal${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}>
@@ -114,6 +181,7 @@ export function ModalFrame({
       </div>
     </div>
   )
+  return typeof document === 'undefined' ? content : createPortal(content, document.body)
 }
 
 export type SettingsTab = 'appearance' | 'archived' | 'remote'
@@ -155,7 +223,7 @@ export function SettingsModal({
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>设置</b>
-        <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeSettings} />
+        <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSettings} />
       </div>
       <div className="settings-shell">
         <nav className="settings-rail" aria-label="设置分区">
@@ -564,6 +632,12 @@ function InventoryContext({
   )
 }
 
+function useReadStarted(refreshing: boolean): boolean {
+  const [started, setStarted] = useState(refreshing)
+  if (refreshing && !started) setStarted(true)
+  return started || refreshing
+}
+
 export function SkillsModal({
   skills,
   capability,
@@ -591,10 +665,16 @@ export function SkillsModal({
   const [query, setQuery] = useState('')
   const scopeSkills = filterSkillsForScope(skills, scope)
   const filtered = filterSkillsForScope(skills, scope, query)
+  // Null evidence is not an empty result, even before the read effect starts.
+  const initialSkillsLoading = (refreshing || capability === null) && skills.length === 0
+  const readStarted = useReadStarted(refreshing)
+  const skillsUnavailable = capability === null && !refreshing && readStarted
+  const showSkillsLoading = useDelayedFlag(refreshing)
+  const listMotion = useFirstReadyList(filtered.length > 0)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
   const providerCount = skills.length - projectCount - userCount
-  const scopeLabel = scope === 'project' ? '项目 Skill' : scope === 'user' ? '用户 Skill' : 'Provider Skill'
+  const scopeLabel = LOADING_COPY.skillScope[scope]
   const visibleScopes: SkillScopeFilter[] = providerCount > 0
     ? ['project', 'user', 'provider']
     : ['project', 'user']
@@ -638,18 +718,18 @@ export function SkillsModal({
           <p>查看当前 Provider 在这个工作目录里实际发现了哪些 Skill。</p>
         </div>
         <div className="inventory-modal__head-actions">
-          {refreshing && <EvidenceState value={{ state: 'pending', label: '读取中…', role: 'status' }} quiet />}
+          {showSkillsLoading && <EvidenceState value={{ state: 'pending', label: LOADING_COPY.reading, role: 'status' }} quiet />}
           <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
             <Icon name="refresh" />
           </button>
-          <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeSkills} />
+          <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSkills} />
         </div>
       </div>
 
       <InventoryContext
         capability={capability}
         kind="Skills"
-        summary={`${filtered.length} 个结果`}
+        summary={initialSkillsLoading ? '' : LOADING_COPY.skillsResults(filtered.length)}
       />
 
       {capability && capability.state !== 'ready' && (
@@ -670,7 +750,7 @@ export function SkillsModal({
           onClick={() => chooseScope('project')}
           onKeyDown={onScopeKeyDown}
         >
-          项目 Skill <span>{projectCount}</span>
+          {LOADING_COPY.skillScope.project} {!initialSkillsLoading && <span>{projectCount}</span>}
         </button>
         <button
           type="button"
@@ -683,7 +763,7 @@ export function SkillsModal({
           onClick={() => chooseScope('user')}
           onKeyDown={onScopeKeyDown}
         >
-          用户 Skill <span>{userCount}</span>
+          {LOADING_COPY.skillScope.user} {!initialSkillsLoading && <span>{userCount}</span>}
         </button>
         {providerCount > 0 && (
           <button
@@ -697,7 +777,7 @@ export function SkillsModal({
             onClick={() => chooseScope('provider')}
             onKeyDown={onScopeKeyDown}
           >
-            Provider Skill <span>{providerCount}</span>
+            {LOADING_COPY.skillScope.provider} <span>{providerCount}</span>
           </button>
         )}
       </div>
@@ -716,7 +796,7 @@ export function SkillsModal({
           />
           {query && <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">清除</button>}
         </label>
-        <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {scopeSkills.length}</span>
+        {!initialSkillsLoading && <span className="inventory-toolbar__count" aria-live="polite">{LOADING_COPY.skillsVisible(filtered.length, scopeSkills.length)}</span>}
       </div>
 
       <div
@@ -724,19 +804,22 @@ export function SkillsModal({
         id={titleId + '-skills-panel'}
         role="tabpanel"
         aria-labelledby={titleId + '-' + scope + '-tab'}
+        aria-busy={refreshing}
       >
-        {filtered.length === 0 && (
+        {skillsUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.skillsUnavailable}</div>
+          : initialSkillsLoading && <DelayedLoadingStatus loading={refreshing} title={LOADING_COPY.skills} />}
+        {filtered.length === 0 && !initialSkillsLoading && (
           <div className="inventory-empty" role="status">
-            <strong>{refreshing && skills.length === 0 ? '正在读取 Skill…' : scopeSkills.length === 0 ? `未发现${scopeLabel}` : `${scopeLabel}中没有匹配结果`}</strong>
+            <strong>{scopeSkills.length === 0 ? LOADING_COPY.skillsEmpty(scopeLabel) : LOADING_COPY.skillsNoMatch(scopeLabel)}</strong>
             <p>{scopeSkills.length === 0 ? `当前 Provider 没有返回${scopeLabel}。` : '换一个关键词，或清空搜索查看全部条目。'}</p>
             {query && <button type="button" onClick={() => setQuery('')}>清空搜索</button>}
           </div>
         )}
 
         {filtered.length > 0 && (
-          <div className="skill-ledger">
-            {filtered.map((skill) => (
-              <article className="skill-ledger__row" key={skill.scope + ':' + skill.name}>
+          <div className={`skill-ledger ${listMotion.className}`}>
+            {filtered.map((skill, index) => (
+              <article className="skill-ledger__row motion-stagger-item" style={listMotion.itemStyle(index)} key={skill.scope + ':' + skill.name}>
                 <div className="skill-ledger__main">
                   <div className="skill-ledger__name-line">
                     <strong>{skill.name}</strong>
@@ -863,8 +946,12 @@ export function McpModal({
   const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
   const loading = loadingConfig || refreshing
+  const readStarted = useReadStarted(configRefreshing)
+  const mcpUnavailable = capability === null && !loading && readStarted
+  const showMcpLoading = useDelayedFlag(loading)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const mcpMotion = useFirstReadyList(mcps.length > 0)
   const liveByName = new Map(live.map((item) => [item.name, item]))
   const connectedCount = live.filter((item) => item.status === 'connected').length
   const testEvidenceCount = Object.values(status).filter((item) => item.ok != null || item.testing).length
@@ -880,7 +967,7 @@ export function McpModal({
           </div>
         </div>
         <div className="inventory-modal__head-actions">
-          {loading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? '读取配置中…' : readsPiSnapshot ? '正在刷新 Pi MCP 快照…' : '正在检测全部 MCP…', role: 'status' }} quiet />}
+          {showMcpLoading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? LOADING_COPY.readingConfig : readsPiSnapshot ? LOADING_COPY.piSnapshot : LOADING_COPY.detectingMcp, role: 'status' }} quiet />}
           <button
             className={'modal-refresh' + (readsRuntime ? ' mcp-refresh-all' : '')}
             onClick={onRefresh}
@@ -892,17 +979,17 @@ export function McpModal({
                 : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
             aria-label={readsPiSnapshot ? '刷新 Pi MCP 快照' : readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
-            {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
-            {readsRuntime && <span>{refreshing ? (readsPiSnapshot ? '刷新中…' : '检测中…') : refreshLabel}</span>}
+            {showMcpLoading && refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
+            {readsRuntime && <span>{showMcpLoading && refreshing ? (readsPiSnapshot ? LOADING_COPY.refreshing : LOADING_COPY.detecting) : refreshLabel}</span>}
           </button>
-          <ModalCloseButton ref={closeRef} onClick={onClose} aria-label={MODAL_COPY.closeMcp} />
+          <ModalCloseButton ref={closeRef} onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeMcp} />
         </div>
       </div>
 
       <InventoryContext
         capability={capability}
         kind="MCP"
-        summary={`${mcps.length} 配置 · ${live.length > 0 ? connectedCount + ' 已连接 / ' + live.length + ' 运行态' : '运行态未返回'} · ${testEvidenceCount} 测试证据`}
+        summary={loadingConfig || capability === null ? '' : LOADING_COPY.mcpSummary(mcps.length, connectedCount, live.length, testEvidenceCount)}
       />
 
       {capability && capability.state !== 'ready' && (
@@ -917,15 +1004,16 @@ export function McpModal({
         <EvidenceState value={{ state: 'unsupported', label: '不支持：能力不存在' }} quiet />
       </div>
 
-      <div className="modal-body inventory-modal__body inventory-modal__body--mcp">
-        {mcps.length === 0 ? (
+      <div className="modal-body inventory-modal__body inventory-modal__body--mcp" aria-busy={loading}>
+        {mcps.length === 0 && mcpUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.mcpUnavailable}</div>
+          : mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loading} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
           <div className="inventory-empty" role="status">
-            <strong>{loadingConfig ? '正在读取 MCP 配置…' : '未发现 MCP 配置'}</strong>
-            <p>{loadingConfig ? '等待当前 Provider 返回配置清单。' : '没有配置证据不等于运行正常，也不等于连接失败。'}</p>
+            <strong>{LOADING_COPY.mcpEmpty}</strong>
+            <p>{LOADING_COPY.mcpNoConfigEvidence}</p>
           </div>
         ) : (
           <div className="mcp-fleet-wrap">
-            <table className="mcp-fleet">
+            <table className={`mcp-fleet ${mcpMotion.className}`}>
               <caption className="inventory-sr-only">MCP Fleet：Provider 运行态与认证独立展示</caption>
               <thead>
                 <tr>
@@ -993,7 +1081,7 @@ export function McpModal({
 
                 return (
                   <tbody key={mcp.scope + ':' + targetId}>
-                    <tr className={'mcp-fleet__row mcp-fleet__row--' + runtimeValue.state}>
+                    <tr className={'mcp-fleet__row mcp-fleet__row--' + runtimeValue.state + ' motion-stagger-item'} style={mcpMotion.itemStyle(index)}>
                       <th scope="row">
                         <div className="mcp-server-cell">
                           <div className="mcp-server-cell__name">
@@ -1124,6 +1212,7 @@ export function CapabilitiesModal({
   skills,
   skillCapability,
   skillsRefreshing = false,
+  onRefreshSkills,
   mcps,
   status,
   live,
@@ -1140,6 +1229,7 @@ export function CapabilitiesModal({
   skills: SkillMeta[]
   skillCapability?: CapabilityEnvelope<SkillMeta[]> | null
   skillsRefreshing?: boolean
+  onRefreshSkills: () => void
   mcps: McpMeta[]
   status: Record<string, McpStatus>
   live: McpLiveStatus[]
@@ -1158,12 +1248,18 @@ export function CapabilitiesModal({
   const activeCapability = view === 'skills' ? skillCapability : mcpCapability
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
+  const skillsReadStarted = useReadStarted(skillsRefreshing)
+  const mcpReadStarted = useReadStarted(mcpConfigRefreshing)
+  const skillsUnavailable = skillCapability === null && !skillsRefreshing && skillsReadStarted
+  const mcpUnavailable = mcpCapability === null && !loadingMcp && mcpReadStarted
+  const showMcpLoading = useDelayedFlag(loadingMcp)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const liveByName = new Map(live.map((item) => [item.name, item]))
   const visibleSkills = source === 'all' ? skills : skills.filter((skill) => skill.scope === source)
   const visibleMcps = source === 'all'
     ? mcps
     : mcps.filter((mcp) => (mcp.scope === 'user' ? 'user' : 'project') === source)
+  const capabilityMotion = useFirstReadyList((view === 'skills' ? visibleSkills : visibleMcps).length > 0)
 
   const chooseView = (nextView: CapabilityView): void => {
     setSource('all')
@@ -1193,11 +1289,11 @@ export function CapabilitiesModal({
             disabled={loadingMcp || authenticationInProgress}
             aria-label="刷新 MCP 运行状态"
           >
-            {mcpRefreshing ? <span className="spinner" /> : <Icon name="refresh" />}
-            <span>{mcpRefreshing ? '检测中…' : '刷新'}</span>
+            {showMcpLoading && mcpRefreshing ? <span className="spinner" /> : <Icon name="refresh" />}
+            <span>{showMcpLoading && mcpRefreshing ? LOADING_COPY.detecting : LOADING_COPY.refresh}</span>
           </button>
         )}
-        <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={onClose} aria-label={MODAL_COPY.closeCapabilities} />
+        <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeCapabilities} />
       </div>
 
       <div className="capabilities-source-bar">
@@ -1218,21 +1314,26 @@ export function CapabilitiesModal({
       )}
 
       {view === 'skills' ? (
-        <div className="capabilities-body capabilities-skills" role="tabpanel">
-          {visibleSkills.length > 0 ? visibleSkills.map((skill) => (
-            <article className="capability-skill" key={skill.scope + ':' + skill.name}>
+        <div className={`capabilities-body capabilities-skills ${capabilityMotion.className}`} role="tabpanel" aria-busy={skillsRefreshing}>
+          {visibleSkills.length > 0 ? visibleSkills.map((skill, index) => (
+            <article className="capability-skill motion-stagger-item" style={capabilityMotion.itemStyle(index)} key={skill.scope + ':' + skill.name}>
               <strong>{skill.name}</strong>
               <p title={skill.description}>{skill.description}</p>
             </article>
-          )) : (
+          )) : skillsUnavailable ? (
             <div className="capabilities-empty" role="status">
-              <strong>{skillsRefreshing && skills.length === 0 ? '正在读取 Skill…' : '当前来源没有 Skill'}</strong>
+              <strong>{LOADING_COPY.skillsUnavailable}</strong>
+              <button type="button" className="capabilities-refresh" onClick={onRefreshSkills}>{LOADING_COPY.refresh}</button>
+            </div>
+          ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedLoadingStatus loading={skillsRefreshing} title={LOADING_COPY.skills} /> : (
+            <div className="capabilities-empty" role="status">
+              <strong>{LOADING_COPY.skillsSourceEmpty}</strong>
             </div>
           )}
         </div>
       ) : (
-        <div className="capabilities-body capability-mcp-list" role="tabpanel">
-          {visibleMcps.length > 0 ? visibleMcps.map((mcp) => {
+        <div className={`capabilities-body capability-mcp-list ${capabilityMotion.className}`} role="tabpanel" aria-busy={loadingMcp}>
+          {visibleMcps.length > 0 ? visibleMcps.map((mcp, index) => {
             const targetId = mcp.targetId ?? mcp.name
             const runtime = liveByName.get(mcp.name)
             const currentStatus = status[targetId]
@@ -1260,7 +1361,7 @@ export function CapabilitiesModal({
             }
 
             return (
-              <article className={`capability-mcp-row capability-mcp-row--${runtimeValue.state}`} key={mcp.scope + ':' + targetId}>
+              <article className={`capability-mcp-row capability-mcp-row--${runtimeValue.state} motion-stagger-item`} style={capabilityMotion.itemStyle(index)} key={mcp.scope + ':' + targetId}>
                 <div className="capability-mcp-row__summary">
                   <div className="capability-mcp-server">
                     <div className="capability-mcp-server__name">
@@ -1298,7 +1399,7 @@ export function CapabilitiesModal({
                   <div className={`capability-tools ${open ? 'open' : ''}`}>
                     <div className="capability-tools__inner">
                       {currentStatus?.testing ? (
-                        <span className="capability-tools__message">正在读取工具明细…</span>
+                        <DelayedLoadingStatus loading title={LOADING_COPY.tools} className="capability-tools__message" />
                       ) : toolNames?.length ? (
                         <div className="capability-tools__list">{toolNames.map((tool) => <code key={tool}>{tool}</code>)}</div>
                       ) : currentStatus?.ok === false ? (
@@ -1311,9 +1412,10 @@ export function CapabilitiesModal({
                 )}
               </article>
             )
-          }) : (
+          }) : mcpUnavailable ? <div className="capabilities-empty" role="status"><strong>{LOADING_COPY.mcpUnavailable}</strong></div>
+            : loadingMcpConfig || mcpCapability === null ? <DelayedLoadingStatus loading={loadingMcp} title={LOADING_COPY.mcp} /> : (
             <div className="capabilities-empty" role="status">
-              <strong>{loadingMcpConfig ? '正在读取 MCP 配置…' : '当前来源没有 MCP'}</strong>
+              <strong>{LOADING_COPY.mcpSourceEmpty}</strong>
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
@@ -12,7 +12,12 @@ import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
+import { createPortal } from 'react-dom'
+import { usePresence } from '../hooks/usePresence'
+import { Disclosure } from './Disclosure'
+import { useFlipList } from '../hooks/useFlipList'
+import { useTabIndicator } from '../hooks/useTabIndicator'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
@@ -27,6 +32,12 @@ import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocatio
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
+
+function SessionMotionList({ revision, children, className = 'sb-sess-list' }: { revision: unknown; children: ReactNode; className?: string }) {
+  const root = useRef<HTMLDivElement>(null)
+  useFlipList(root, revision)
+  return <div className={className} ref={root}>{children}</div>
+}
 
 // 会话行的 Provider 身份用真实品牌字形呈现（见 codex-alignment.css 的 .sb-provider mask）；
 // 这里保留可访问名，legacy_unknown 无品牌，仍用「历史?」文字。
@@ -136,6 +147,9 @@ export const Sidebar = memo(function Sidebar({
   }, [])
   const [q, setQ] = useState('')
   const [view, setView] = useState<'projects' | 'activity'>('projects')
+  const viewTabRefs = useRef(new Map<string, HTMLElement | null>())
+  const viewTabsRef = useRef<HTMLDivElement>(null)
+  const { indicatorRef: viewIndicatorRef } = useTabIndicator(viewTabsRef, view, viewTabRefs.current, ['projects', 'activity'])
   const remoteGroups = useRemoteProjectGroups(q)
   const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const activity = useMemo(() => view === 'activity'
@@ -145,28 +159,12 @@ export const Sidebar = memo(function Sidebar({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
   const [projectDialog, setProjectDialog] = useState<{ mode: 'rename' | 'remove'; project: ProjectMeta } | null>(null)
-  const projectMenuRef = useRef<HTMLDivElement>(null)
   const toggle = (key: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
-  useEffect(() => {
-    if (!projectMenu) return
-    const dismissPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !projectMenuRef.current?.contains(event.target)) setProjectMenu(null)
-    }
-    const dismissEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setProjectMenu(null)
-    }
-    document.addEventListener('pointerdown', dismissPointer, true)
-    document.addEventListener('keydown', dismissEscape)
-    return () => {
-      document.removeEventListener('pointerdown', dismissPointer, true)
-      document.removeEventListener('keydown', dismissEscape)
-    }
-  }, [projectMenu])
   const ql = q.trim().toLowerCase()
   const { pinned, filtered } = useMemo(() => {
     const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
@@ -218,7 +216,7 @@ export const Sidebar = memo(function Sidebar({
       top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 292))
     })
   }
-  const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" key={conversation.id}>
+  const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" data-motion-key={view === 'projects' ? `conversation:${conversation.id}` : undefined} key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
       <span className="sb-session-main">
         <Icon name={conversation.pinnedAt ? 'pin' : 'message'} />
@@ -289,18 +287,19 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <div className="sb-view-tabs" role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
+      <div className="sb-view-tabs" ref={viewTabsRef} role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
         const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
         setView(next)
         document.getElementById(`${tabId}-${next}`)?.focus()
       }}>
-        {(['projects', 'activity'] as const).map((tab) => <button key={tab} type="button" role="tab"
+        {(['projects', 'activity'] as const).map((tab) => <button key={tab} ref={(node) => { viewTabRefs.current.set(tab, node) }} type="button" role="tab"
           id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
           tabIndex={view === tab ? 0 : -1} title={tab === 'activity' ? activityCopy.scope : undefined} onClick={() => setView(tab)}>
           {activityCopy[tab]}
         </button>)}
+        <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
       </div>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealth && catalogHealth.status !== 'ready' && (
@@ -333,7 +332,7 @@ export const Sidebar = memo(function Sidebar({
         {pinned.length > 0 && (
           <>
             <div className="sb-section">置顶</div>
-            <div className="sb-pinned">
+            <SessionMotionList className="sb-pinned" revision={pinned}>
               {pinned.map(row => {
                 if (row.kind === 'conversation') return renderConversation(row.conversation)
                 const { session, cwd, name } = row
@@ -345,6 +344,7 @@ export const Sidebar = memo(function Sidebar({
                   cwd={cwd}
                   projectName={name}
                   showProjectName
+                  motionKey={sessionKey(cwd, session)}
                   active={isActive(cwd, session)}
                   running={Boolean(session.runId && runningRunIds.has(session.runId))}
                   waitingForAnswer={Boolean(session.runId && waitingQuestionRunIds.has(session.runId))}
@@ -361,7 +361,7 @@ export const Sidebar = memo(function Sidebar({
                   onMenu={onRenameSession ? openSessionMenu : undefined}
                 />
               })}
-            </div>
+            </SessionMotionList>
             <div className="sb-divider" />
           </>
         )}
@@ -400,6 +400,7 @@ export const Sidebar = memo(function Sidebar({
                   data-project-path={p.cwd}
                   onClick={() => toggle(p.cwd)}
                 >
+                  <Icon name="chevronRight" className={`sb-project-chevron motion-chevron ${open ? 'is-open' : ''}`} />
                   <Icon name="folder" className="sb-project-folder" />
                   <span className="pname">{p.name}</span>
                   {p.pinnedAt && <Icon name="pin" className="sb-project-pin" />}
@@ -427,12 +428,13 @@ export const Sidebar = memo(function Sidebar({
                   </span>
                 )}
               </div>
-              {open && (
-                <div className="sb-sess-list">
+              <Disclosure open={open}>{() => (
+                <SessionMotionList revision={`${p.cwd}:${p.conversations.map(conversation => conversation.id).join(',')}:${p.sessions.map(session => sessionKey(p.cwd, session)).join(',')}`}>
                   {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
                   {p.sessions.map((s) => (
                     <SessionRow
                       key={sessionKey(p.cwd, s)}
+                      motionKey={sessionKey(p.cwd, s)}
                       session={s}
                       relativeTime={relTime(s.mtime)}
                       draftStore={draftStore}
@@ -457,8 +459,8 @@ export const Sidebar = memo(function Sidebar({
                   {p.sessions.length === 0 && p.conversations.length === 0 && (
                     <div className="sb-project-empty">{emptyLabel}</div>
                   )}
-                </div>
-              )}
+                </SessionMotionList>
+              )}</Disclosure>
             </div>
           )
         })}
@@ -470,53 +472,19 @@ export const Sidebar = memo(function Sidebar({
           onPickConversation(conversation)
           setSessionMenu(null)
           window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`[data-conversation-id="${conversation.id}"] textarea`)?.focus())
-        } : undefined} onClose={() => {
-          const trigger = sessionMenu.trigger
-          setSessionMenu(null)
-          window.requestAnimationFrame(() => { if (trigger.isConnected) trigger.focus() })
-        }} />
+        } : undefined} onClose={() => setSessionMenu(null)} />
       )}
 
       {projectMenu && (
-        <div
-          ref={projectMenuRef}
-          className="menu sb-project-menu"
-          role="menu"
-          aria-label={`管理项目 ${projectMenu.project.name}`}
-          style={{ left: projectMenu.left, top: projectMenu.top }}
-        >
-          <div className="sb-project-menu-head">
-            <b>{projectMenu.project.name}</b>
-            <code>{projectMenu.project.cwd}</code>
-          </div>
-          {onNewProjectChat && (
-            <button type="button" className="mitem on" onClick={() => { setProjectMenu(null); onNewProjectChat(projectMenu.project.cwd) }}>
-              <Icon name="plus" /> 在此项目新建会话
-            </button>
-          )}
-          <div className="mdiv" />
-          {onToggleProjectPin && (
-            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onToggleProjectPin(projectMenu.project) }}>
-              <Icon name="pin" /> {projectMenu.project.pinnedAt ? '取消置顶项目' : '置顶项目'}
-            </button>
-          )}
-          {onRevealProject && (
-            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onRevealProject(projectMenu.project) }}>
-              <Icon name="folder" /> 在 Finder 中显示
-            </button>
-          )}
-          {onRenameProject && (
-            <button type="button" className="mitem" onClick={() => { setProjectDialog({ mode: 'rename', project: projectMenu.project }); setProjectMenu(null) }}>
-              <Icon name="settings" /> 编辑项目名称
-            </button>
-          )}
-          <div className="mdiv" />
-          {onRemoveProject && (
-            <button type="button" className="mitem sb-project-remove" onClick={() => { setProjectDialog({ mode: 'remove', project: projectMenu.project }); setProjectMenu(null) }}>
-              <Icon name="x" /> 从 Scry 移除项目
-            </button>
-          )}
-        </div>
+        <ProjectMenu
+          menu={projectMenu}
+          onClose={() => setProjectMenu(null)}
+          onNewProjectChat={onNewProjectChat}
+          onToggleProjectPin={onToggleProjectPin}
+          onRevealProject={onRevealProject}
+          onRenameProject={(project) => { setProjectDialog({ mode: 'rename', project }); setProjectMenu(null) }}
+          onRemoveProject={(project) => { setProjectDialog({ mode: 'remove', project }); setProjectMenu(null) }}
+        />
       )}
 
       {projectDialog && (
@@ -556,6 +524,56 @@ export const Sidebar = memo(function Sidebar({
   )
 })
 
+function ProjectMenu({
+  menu,
+  onClose,
+  onNewProjectChat,
+  onToggleProjectPin,
+  onRevealProject,
+  onRenameProject,
+  onRemoveProject
+}: {
+  menu: { project: ProjectMeta; left: number; top: number }
+  onClose: () => void
+  onNewProjectChat?: (cwd: string) => void
+  onToggleProjectPin?: (project: ProjectMeta) => void
+  onRevealProject?: (project: ProjectMeta) => void
+  onRenameProject?: (project: ProjectMeta) => void
+  onRemoveProject?: (project: ProjectMeta) => void
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const presence = usePresence({ onClose, exitMs: 100 })
+  useEffect(() => {
+    if (presence.state === 'exit') return
+    const dismissPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) presence.requestClose('pointer')
+    }
+    const dismissEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') { event.preventDefault(); presence.requestClose('escape') }
+    }
+    document.addEventListener('pointerdown', dismissPointer, true)
+    document.addEventListener('keydown', dismissEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissPointer, true)
+      document.removeEventListener('keydown', dismissEscape)
+    }
+  }, [presence.state, presence.requestClose])
+  const content = (
+    <div ref={(node) => { menuRef.current = node; presence.ref(node) }} className="menu sb-project-menu" data-state={presence.state}
+      role="menu" aria-label={`管理项目 ${menu.project.name}`} style={{ left: menu.left, top: menu.top, transformOrigin: 'top left' }}>
+      <div className="sb-project-menu-head"><b>{menu.project.name}</b><code>{menu.project.cwd}</code></div>
+      {onNewProjectChat && <button type="button" className="mitem on" onClick={() => { onNewProjectChat(menu.project.cwd); presence.requestClose('button') }}><Icon name="plus" /> 在此项目新建会话</button>}
+      <div className="mdiv" />
+      {onToggleProjectPin && <button type="button" className="mitem" onClick={() => { onToggleProjectPin(menu.project); presence.requestClose('button') }}><Icon name="pin" /> {menu.project.pinnedAt ? '取消置顶项目' : '置顶项目'}</button>}
+      {onRevealProject && <button type="button" className="mitem" onClick={() => { onRevealProject(menu.project); presence.requestClose('button') }}><Icon name="folder" /> 在 Finder 中显示</button>}
+      {onRenameProject && <button type="button" className="mitem" onClick={() => onRenameProject(menu.project)}><Icon name="settings" /> 编辑项目名称</button>}
+      <div className="mdiv" />
+      {onRemoveProject && <button type="button" className="mitem sb-project-remove" onClick={() => onRemoveProject(menu.project)}><Icon name="x" /> 从 Scry 移除项目</button>}
+    </div>
+  )
+  return typeof document === 'undefined' ? content : createPortal(content, document.body)
+}
+
 function ProjectDialog({
   mode,
   project,
@@ -576,7 +594,7 @@ function ProjectDialog({
     <ModalFrame labelledBy={titleId} initialFocusRef={mode === 'rename' ? inputRef : undefined} className="project-dialog" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>{mode === 'rename' ? '编辑项目名称' : `移除“${project.name}”？`}</b>
-        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={onClose}>×</ModalCloseButton>
+        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={() => requestModalClose()}>×</ModalCloseButton>
       </div>
       {mode === 'rename' ? (
         <form
@@ -594,7 +612,7 @@ function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="button" className="btn" onClick={() => requestModalClose()}>取消</button>
             <button type="submit" className="btn primary" disabled={!name.trim()}>保存</button>
           </div>
         </form>
@@ -605,7 +623,7 @@ function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
+            <button type="button" className="btn" onClick={() => requestModalClose()}>取消</button>
             <button type="button" className="btn project-remove-confirm" onClick={() => void onRemove()}>移除项目</button>
           </div>
         </>
@@ -620,6 +638,7 @@ const SessionRow = memo(function SessionRow({
   cwd,
   projectName,
   showProjectName = false,
+  motionKey,
   active,
   running,
   waitingForAnswer,
@@ -637,6 +656,7 @@ const SessionRow = memo(function SessionRow({
   cwd: string
   projectName?: string
   showProjectName?: boolean
+  motionKey?: string
   active: boolean
   running: boolean
   waitingForAnswer: boolean
@@ -652,7 +672,7 @@ const SessionRow = memo(function SessionRow({
   const status = running ? backgroundWorkStatus(backgroundWork) : undefined
   const hover = useSessionHoverCard(session, cwd, projectName, running, status?.label)
   return (
-    <div className="sb-sess-row">
+    <div className="sb-sess-row" data-motion-key={motionKey}>
       <button
         type="button"
         className={['sb-sess', active && 'active', running && 'running', waitingForAnswer && 'waiting-answer', unread && 'unread'].filter(Boolean).join(' ')}

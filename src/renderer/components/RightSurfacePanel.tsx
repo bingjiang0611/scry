@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { RIGHT_SURFACE_DEFINITIONS, type RightSurfaceKind } from '../right-surface'
 import { Icon } from './primitives/Icon'
+import { usePresence } from '../hooks/usePresence'
+import { useTabIndicator } from '../hooks/useTabIndicator'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
 
@@ -49,25 +51,37 @@ export function RightSurfacePanel({
   const rootId = useId().replaceAll(':', '')
   const menuId = `${rootId}-surface-menu`
   const addButtonRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const menuInitialFocusRef = useRef<'first' | 'last'>('first')
+  const restoreMenuFocusRef = useRef(false)
+  const menuPresence = usePresence({
+    onClose: () => setMenuOpen(false),
+    exitMs: 100,
+    onExitStart: () => {
+      if (restoreMenuFocusRef.current) addButtonRef.current?.focus()
+      restoreMenuFocusRef.current = false
+    }
+  })
   const tabRefs = useRef<Partial<Record<RightSurfaceKind, HTMLButtonElement | null>>>({})
+  const tabItemRefs = useRef(new Map<string, HTMLElement | null>())
+  const surfaceTabsRef = useRef<HTMLDivElement>(null)
   const pendingCloseFocusRef = useRef<{
     closingKind: RightSurfaceKind
     targetKind: RightSurfaceKind | null
   } | null>(null)
   const activeKind = activeId && openIds.includes(activeId) ? activeId : openIds[0] ?? null
+  const { indicatorRef: surfaceIndicatorRef } = useTabIndicator(surfaceTabsRef, activeKind, tabItemRefs.current, openIds)
   const mountedKinds: readonly RightSurfaceKind[] = retainTerminal && !openIds.includes('terminal')
     ? [...openIds, 'terminal'] : openIds
 
   const closeMenu = (restoreFocus: boolean): void => {
-    setMenuOpen(false)
-    if (restoreFocus) addButtonRef.current?.focus()
+    restoreMenuFocusRef.current = restoreFocus
+    menuPresence.requestClose('pointer')
   }
 
   useEffect(() => {
-    if (!menuOpen) return
+    if (!menuOpen || menuPresence.state === 'exit') return
     const initialIndex = menuInitialFocusRef.current === 'last' ? RIGHT_SURFACE_DEFINITIONS.length - 1 : 0
     menuItemRefs.current[initialIndex]?.focus()
 
@@ -75,7 +89,7 @@ export function RightSurfacePanel({
       const target = event.target
       if (!(target instanceof Node)) return
       if (!menuRef.current?.contains(target) && !addButtonRef.current?.contains(target)) {
-        setMenuOpen(false)
+        closeMenu(false)
       }
     }
     const onEscape = (event: globalThis.KeyboardEvent): void => {
@@ -91,7 +105,7 @@ export function RightSurfacePanel({
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onEscape)
     }
-  }, [menuOpen])
+  }, [menuOpen, menuPresence.state, menuPresence.requestClose])
 
   useEffect(() => {
     const pending = pendingCloseFocusRef.current
@@ -147,7 +161,7 @@ export function RightSurfacePanel({
     if (event.key === 'Home') nextIndex = 0
     if (event.key === 'End') nextIndex = items.length - 1
     if (event.key === 'Tab') {
-      setMenuOpen(false)
+      closeMenu(false)
       return
     }
     if (nextIndex == null) return
@@ -166,14 +180,14 @@ export function RightSurfacePanel({
     >
       <div className="surface-topbar">
         {workbenchPicker}
-        <div className="surface-tabs" role="tablist" aria-label="已打开的 Surface">
+        <div className="surface-tabs" ref={surfaceTabsRef} role="tablist" aria-label="已打开的 Surface">
           {openIds.map((kind) => {
             const definition = RIGHT_SURFACE_DEFINITIONS.find((item) => item.kind === kind)!
             const selected = activeKind === kind
             const tabId = `${rootId}-${kind}-tab`
             const panelId = `${rootId}-${kind}-panel`
             return (
-              <div className={`surface-tab${selected ? ' active' : ''}`} role="presentation" key={kind}>
+              <div ref={(node) => { tabItemRefs.current.set(kind, node) }} className={`surface-tab${selected ? ' active' : ''}`} role="presentation" key={kind}>
                 <button
                   ref={(node) => { tabRefs.current[kind] = node }}
                   id={tabId}
@@ -201,6 +215,7 @@ export function RightSurfacePanel({
               </div>
             )
           })}
+          <span ref={surfaceIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
         </div>
 
         <div className="surface-actions">
@@ -214,14 +229,17 @@ export function RightSurfacePanel({
               aria-expanded={menuOpen}
               aria-controls={menuOpen ? menuId : undefined}
               title="添加 Surface"
-              onClick={() => setMenuOpen((open) => {
-                if (!open) menuInitialFocusRef.current = 'first'
-                return !open
-              })}
+              onClick={() => {
+                if (menuOpen) { closeMenu(true); return }
+                menuInitialFocusRef.current = 'first'
+                menuPresence.reset()
+                setMenuOpen(true)
+              }}
               onKeyDown={(event) => {
                 if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
                 event.preventDefault()
                 menuInitialFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
+                menuPresence.reset()
                 setMenuOpen(true)
               }}
             >
@@ -229,9 +247,10 @@ export function RightSurfacePanel({
             </button>
             {menuOpen && (
               <div
-                ref={menuRef}
+                ref={(node) => { menuRef.current = node; menuPresence.ref(node) }}
                 id={menuId}
                 className="surface-menu"
+                data-state={menuPresence.state}
                 role="menu"
                 aria-label="可用的 Surface"
                 onKeyDown={onMenuKeyDown}

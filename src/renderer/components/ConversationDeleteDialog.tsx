@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 
 export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   id: string
@@ -41,7 +41,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       onChanged()
     } finally { pending.current = false; setWorking(false) }
   }
-  return <ModalFrame className="unified-preview unified-delete" labelledBy="conversation-delete-title" initialFocusRef={cancel} onClose={close}>
+  return <ModalFrame className="unified-preview unified-delete" labelledBy="conversation-delete-title" initialFocusRef={cancel} closeDisabled={working} onClose={close}>
     <h2 id="conversation-delete-title">{preview?.reclaim ? '重新核对并回收保留副本' : '删除统一对话的 Scry 副本'}</h2>
     <p>清理独占的归档、附件、用量、数据库记录及冻结的交接正文。已开始的删除不能恢复；部分失败保留入口供重新预览和继续清理。</p>
     <p>保留工作区文件和 .scry、Provider 原生历史、未发送草稿及最小归属记录。不会调用 Provider；只要存在共享引用，本次保留整组原生副本，不做逐轮回收。</p>
@@ -58,7 +58,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       {result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
     </section>}
     <div className="unified-actions">
-      <button ref={cancel} className="btn" disabled={working} onClick={close}>{result ? '关闭' : '取消'}</button>
+      <button ref={cancel} className="btn" disabled={working} onClick={() => requestModalClose()}>{result ? '关闭' : '取消'}</button>
       {!result && <button className="btn danger" disabled={working || !preview || Boolean(error)} onClick={() => { void confirm() }}>{working ? '正在清理…' : preview?.reclaim ? '确认回收已无引用的副本' : '确认删除 Scry 副本'}</button>}
     </div>
   </ModalFrame>
