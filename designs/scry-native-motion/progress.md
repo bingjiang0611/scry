@@ -637,6 +637,22 @@
 - 与要求无额外偏差：本次未重新开启 06、未更改系统透明度设置、未运行付费 Provider 或真实手机操作。真实 Windows / Linux、120Hz、屏幕阅读器及日常运行实例未验收；modal close 仍为 242.0–243.9ms fallback / nativeAnimationEnd false，不冒充 CSS animationend 证据。旧 06 记录中的材质验收是历史评估，不代表本次安装仍含材质。
 - 用户日常实例未停止或重启，需自行重启才加载已安装的回退版。截图 / 测量 / 日志只留本机临时目录，不提交个人数据；测量临时 worktree 由原流程正常清理。仅推送 `design/native-motion` 后停下等待设计方核验，不开 PR、不合入 main；首轮未稳定复现的输入测试问题如需继续排查，由维护者另行确定范围。
 
+### 06-revert · 核验与合入方案（2026-10-24，设计方）
+
+- 06-revert 通过：除记录文件外，代码树与 wrap 完成时（`adc84e6`）完全一致。
+- **不能直接开 PR**：main 已于 2026-10-23 整体重写历史（本分支起点 `531e88c` 在 main 上对应 `b8730b6d`，内容相同但哈希不同），两者没有共同祖先；main 之后又有 94 个提交，包括把 `ChatView.tsx` 拆进 `components/chat-view/`；main 新增 20,000 字节单文件提交上限；`designs/` 已被 main 的 `.gitignore` 排除。
+- **用户决定（2026-10-24）**：本次合入跳过大小检查。
+
+#### 移植要求（执行方）
+
+1. 从最新 `origin/main` 新建分支 `motion/native-motion-main`。不要改写 `design/native-motion`，它保留为规格与记录的归档。
+2. 要移植的内容是 `git diff 531e88c caef2d2 -- . ':!designs'`（01–05、各 fix、wrap；06 已回退，净差为零）。可用 `git diff … | git apply -3` 起步，冲突按 main 当前结构落到对应位置（例如 ChatView 的逻辑可能已在 `chat-view/transcript.tsx`、`ComposerQueue.tsx` 等文件）。行为与断言以本分支为准，不顺带改动 main 的重构。
+3. 不提交任何 `designs/` 文件。代码注释里如引用了 `designs/scry-native-motion/…` 路径，改为不依赖该路径的说明。
+4. 按步骤分成若干提交（`motion: 01 基础`、`motion: 02 结构过渡` … `motion: wrap`，或合并为更少但边界清楚的提交），提交说明写明来源步骤。
+5. 大小检查：用户只批准本次合入跳过，仅用命令级方式跳过该 hook，不改 `.githooks` 或检查脚本。新增的动效代码尽量放在新的小文件里（如 `motion.css`、各 hook），不顺带拆分旧的大文件。新文件本身应 ≤ 20,000 字节；`scripts/lists-ui-checks.mjs` 等超限的新测试文件按职责拆分。
+6. 验证：`npm run typecheck`、`npm run test:unit`、`npm run build`、`npm run test:renderer:ui`（含 `--lists-only`、`--overlays-only`、`--loading-only`、`--turn-refs-only`、`--sidebar-activity-only` 等本系列专项）、`node scripts/electron-security-smoke.mjs --dev`，最后完整 `npm run install:mac:dev`。`performance:measure` 对 `origin/main` 做 L1 对比，每个 worse 说明原因。
+7. 只推送 `motion/native-motion-main`，不开 PR、不合入 main、不 force push。把移植记录（冲突点及处理、验证结果）追加到本文件（在 `design/native-motion` 分支上），然后停下等待核验；设计方核验后开 PR。
+
 <!--
 ### NN · <步骤名>
 
