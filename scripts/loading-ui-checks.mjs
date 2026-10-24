@@ -18,7 +18,10 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   }
   const settle = () => read(`Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))`)
   const screenshot = async name => {
-    if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-${name}.png`, (await contents.capturePage()).toPNG())
+    if (!screenshotPrefix) return
+    contents.invalidate()
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    require('node:fs').writeFileSync(`${screenshotPrefix}-${name}.png`, (await contents.capturePage()).toPNG())
   }
   await wait("window.loadingFixture && document.querySelectorAll('button.sb-sess').length===2")
   const select = id => click('button.sb-sess', id)
